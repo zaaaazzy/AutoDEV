@@ -314,7 +314,7 @@ export async function runWorkItem(
   let interrupted = false;
   const ordered = agents
     .filter((agent) => item.agentId ? agent.id === item.agentId
-      : !(agent.role === 'author' && item.ideationId) && !(agent.role === 'bug_reviewer' && item.risks?.trim()))
+      : !(agent.role === 'troubleshooter') && !(agent.role === 'author' && item.ideationId) && !(agent.role === 'bug_reviewer' && item.risks?.trim()))
     .sort((left, right) =>
       PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never)
       || left.position - right.position);

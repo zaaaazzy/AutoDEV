@@ -7,6 +7,7 @@ import { beginShutdown, killOrphan } from './shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from './database.js';
 import { beatHeartbeat, readMaxAgents } from './worker.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
+import { analyzeBlocked } from './troubleshoot.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -64,6 +65,7 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
       WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`);
   await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
   await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
+  await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
   await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
   await pool.query(`UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`);
   await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
@@ -117,6 +119,7 @@ async function main(): Promise<void> {
         if (target.problem || chatActive.has(slug) || stopping) continue;
         chatActive.add(slug);
         void processChat(pool, target.options)
+          .then(() => analyzeBlocked(pool, target.options))
           .catch((error: unknown) => console.error(`[${slug}] Chat fehlgeschlagen:`, error instanceof Error ? error.message : error))
           .finally(() => chatActive.delete(slug));
       }

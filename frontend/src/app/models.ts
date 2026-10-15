@@ -61,6 +61,9 @@ export interface DevelopmentItem extends Estimate {
   testRunId?: string | null;
   completedAt?: string | null;
   risks?: string;
+  retryCount?: number;
+  analysisStatus?: 'requested' | 'running' | 'done' | 'failed' | null;
+  analysis?: string;
   projectContext?: string;
 }
 

@@ -4,7 +4,7 @@ import {
   buildUpdate, isRecord, isUuid, parseBoolean, parseCommand, parseFields, parseLongText, parseOption, parseProjectSlug, parseTitle,
 } from './validation.js';
 
-const ROLES = new Set(['author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'custom']);
+const ROLES = new Set(['author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'troubleshooter', 'custom']);
 const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
 const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command`;
 const AGENT_FIELDS = {
@@ -45,6 +45,10 @@ export const DEFAULT_AGENTS = [
     name: 'Benutzerhandbuch-Autor', role: 'user_manual_writer', phase: 'after_task',
     instructions: 'Pflegt das Benutzerhandbuch für Anwender: Bedienung Schritt für Schritt, ohne Technik-Jargon. Gibt das vollständige, aktualisierte Benutzerhandbuch in Markdown aus.',
   },
+  {
+    name: 'Problemlöser', role: 'troubleshooter', phase: 'after_task',
+    instructions: 'Analysiert blockierte Aufträge: Ursache, Lösungsvorschlag und woran man den Fehler erkennt. Läuft nicht im normalen Ablauf, sondern nur auf Anforderung. Die Erkenntnisse werden als Bug gespeichert.',
+  },
 ] as const;
 
 /** Adds agents that were introduced after a project was first seeded (matched by role). */
@@ -53,7 +57,7 @@ export async function ensureMissingDefaultRoles(pool: Pool, slug: string): Promi
     `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
      SELECT $1, d.name, d.role, d.phase, d.ord - 1, d.instructions
        FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS d(name, role, phase, instructions, ord)
-      WHERE d.role IN ('bug_reviewer', 'manual_writer')
+      WHERE d.role IN ('bug_reviewer', 'manual_writer', 'user_manual_writer', 'troubleshooter')
         AND EXISTS (SELECT 1 FROM projects WHERE slug = $1 AND roles_seeded = FALSE)
         AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.project_slug = $1 AND a.role = d.role)`,
     [slug, DEFAULT_AGENTS.map((agent) => agent.name), DEFAULT_AGENTS.map((agent) => agent.role),

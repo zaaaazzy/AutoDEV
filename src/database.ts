@@ -211,7 +211,11 @@ const SCHEMA = `
 
   ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_role_check;
   ALTER TABLE agents ADD CONSTRAINT agents_role_check CHECK (role IN
-    ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'custom'));
+    ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'troubleshooter', 'custom'));
+
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS analysis_status TEXT CHECK (analysis_status IN ('requested', 'running', 'done', 'failed'));
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS analysis TEXT NOT NULL DEFAULT '';
 
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS risks TEXT NOT NULL DEFAULT '';
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS project_context TEXT NOT NULL DEFAULT '';

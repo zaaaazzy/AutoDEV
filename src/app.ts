@@ -202,7 +202,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
     title, description, status, priority, created_at AS "createdAt",
     effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-    kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext"`;
+    kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
+    retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis`;
   const IDEA_FIELDS = {
     title: { column: 'title', parse: parseTitle(180) },
     description: { column: 'description', parse: parseLongText },
@@ -382,6 +383,44 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       return;
     }
     response.status(201).json({ item: result.rows[0] });
+  });
+
+  // Blockierten Auftrag erneut versuchen: wieder einplanen (ohne Sprint im aktiven Sprint des Projekts).
+  app.post('/api/development/:id/retry', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Development item not found.' });
+      return;
+    }
+    const result = await pool.query(
+      `UPDATE development_items d SET status = 'planned', retry_count = retry_count + 1, analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
+              sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
+              updated_at = NOW()
+        WHERE d.id = $1 AND d.status = 'blocked' RETURNING ${DEV_COLUMNS}`,
+      [request.params.id],
+    );
+    if (!result.rows[0]) {
+      response.status(409).json({ message: 'Nur blockierte Aufträge können erneut versucht werden.' });
+      return;
+    }
+    response.json({ item: result.rows[0] });
+  });
+
+  // Blockierten Auftrag vom Problemlöser analysieren lassen; die Erkenntnisse landen als Bug.
+  app.post('/api/development/:id/analyze', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Development item not found.' });
+      return;
+    }
+    const result = await pool.query(
+      `UPDATE development_items SET analysis_status = 'requested', updated_at = NOW()
+        WHERE id = $1 AND status = 'blocked' AND COALESCE(analysis_status, 'done') NOT IN ('requested', 'running') RETURNING ${DEV_COLUMNS}`,
+      [request.params.id],
+    );
+    if (!result.rows[0]) {
+      response.status(409).json({ message: 'Der Auftrag ist nicht blockiert oder wird bereits analysiert.' });
+      return;
+    }
+    response.json({ item: result.rows[0] });
   });
 
   app.patch('/api/development/:id', async (request, response) => {

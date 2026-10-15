@@ -94,6 +94,7 @@ export class AppComponent implements OnInit, OnDestroy {
     { value: 'bug_reviewer', label: 'Bug-Wächter' },
     { value: 'manual_writer', label: 'Handbuch-Autor' },
     { value: 'user_manual_writer', label: 'Benutzerhandbuch-Autor' },
+    { value: 'troubleshooter', label: 'Problemlöser' },
     { value: 'custom', label: 'Eigene Rolle' },
   ];
   readonly phases: { id: AgentPhase; label: string; hint: string }[] = [
@@ -431,6 +432,14 @@ export class AppComponent implements OnInit, OnDestroy {
       ...this.estimateValues(values),
     }), 'Auftrag gespeichert.');
     this.orderEditing.set(null);
+  }
+
+  async retryOrder(item: DevelopmentItem): Promise<void> {
+    await this.perform(() => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`), 'Auftrag wird erneut versucht.');
+  }
+
+  async analyzeOrder(item: DevelopmentItem): Promise<void> {
+    await this.perform(() => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`), 'Der Problemlöser analysiert den Auftrag.');
   }
 
   async updateDevelopment(id: string, values: Partial<DevelopmentItem>): Promise<void> {
