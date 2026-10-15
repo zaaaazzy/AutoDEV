@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { isValidGitRemote, sprintTag, syncSprintToGit } from './git-sync.js';
+import { isValidGitRemote, pushRemote, sprintTag, syncSprintToGit } from './git-sync.js';
 
 function fakePool(remote: string | null): { pool: Pool; updates: { sql: string; values: unknown[] }[] } {
   const updates: { sql: string; values: unknown[] }[] = [];
@@ -57,4 +57,10 @@ test('push failures are recorded instead of thrown', async () => {
   }), 0);
   assert.match(updates.at(-1)?.sql ?? '', /git_sync = 'failed'/);
   assert.match(String(updates.at(-1)?.values[1]), /auth failed/);
+});
+
+test('pushes GitHub HTTPS remotes over SSH', () => {
+  assert.equal(pushRemote('https://github.com/zaaaazzy/testobject'), 'git@github.com:zaaaazzy/testobject.git');
+  assert.equal(pushRemote('https://github.com/a/b.git'), 'git@github.com:a/b.git');
+  assert.equal(pushRemote('git@github.com:a/b.git'), 'git@github.com:a/b.git');
 });

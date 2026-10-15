@@ -10,6 +10,12 @@ export function isValidGitRemote(value: string): boolean {
   return value.length <= 300 && REMOTE_PATTERN.test(value);
 }
 
+/** Der Worker läuft ohne Terminal und Zugangsdaten-Dialog: GitHub-HTTPS-Adressen werden über SSH (Schlüssel) gepusht. */
+export function pushRemote(remote: string): string {
+  const match = remote.match(/^https:\/\/github\.com\/([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/);
+  return match ? `git@github.com:${match[1]}.git` : remote;
+}
+
 export function sprintTag(name: string, id: string): string {
   const slug = name.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
   return `sprint-${slug || 'ohne-name'}-${id.slice(0, 6)}`;
@@ -43,7 +49,7 @@ export async function syncSprintToGit(
   if (!sprint) {
     return 0;
   }
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' };
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' };
   const git = async (...args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
     return { ...result, output: redactOutput(result.output, process.env).trim() };
@@ -67,9 +73,10 @@ export async function syncSprintToGit(
     }
     if (sprint.remote) {
       const current = await git('remote', 'get-url', 'origin');
+      const target = pushRemote(sprint.remote);
       await must(...(current.exitCode === 0
-        ? ['remote', 'set-url', 'origin', sprint.remote]
-        : ['remote', 'add', 'origin', sprint.remote]));
+        ? ['remote', 'set-url', 'origin', target]
+        : ['remote', 'add', 'origin', target]));
     }
     await must('add', '-A');
     if (await must('status', '--porcelain')) {
