@@ -1,0 +1,399 @@
+import { resolve } from 'node:path';
+import type { Pool } from 'pg';
+import { type KnownBug, loadKnownBugs, reportAgentBug } from './bugs.js';
+import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
+import { readManual, saveOrderDoc, syncRepoDocs, upsertDoc } from './docs.js';
+import { syncSprintToGit } from './git-sync.js';
+import { draftRequirements } from './requirements.js';
+import { runOllamaAgent } from './ollama-agent.js';
+import { generateSprintReport } from './reports.js';
+import { runTestAgent } from './test-agent.js';
+
+export const PHASE_ORDER = ['pre_task', 'while_task', 'after_task'] as const;
+const PROMPT_PLACEHOLDER = '{prompt}';
+const PREVIOUS_OUTPUT_CHARS = 1_500;
+const MANUAL_TITLE = 'Anwendungshandbuch';
+const MANUAL_PROMPT_CHARS = 12_000;
+const MIN_MANUAL_CHARS = 200;
+
+export interface WorkItem {
+  id: string;
+  projectSlug: string;
+  title: string;
+  description: string;
+  kind?: string;
+  bugId?: string | null;
+  sprintId?: string | null;
+  ideationId?: string | null;
+}
+
+export interface PromptExtras {
+  bugs?: KnownBug[];
+  manual?: string;
+}
+
+/** Runs an agent that has no command of its own (built-in tester or local model). */
+export type BuiltinAgent = (
+  context: { pool: Pool; item: WorkItem; agent: WorkflowAgent; prompt: string; cwd: string; timeoutMs: number },
+) => Promise<CommandResult>;
+
+export interface WorkflowAgent {
+  id: string;
+  name: string;
+  role: string;
+  phase: string;
+  position: number;
+  instructions: string;
+  command: string[] | null;
+}
+
+export interface StepSummary {
+  agentName: string;
+  phase: string;
+  status: string;
+  output: string;
+}
+
+export interface RunnerOptions {
+  project: string;
+  cwd: string;
+  itemId?: string;
+  limit: number;
+  timeoutMs: number;
+  watch: boolean;
+  intervalMs: number;
+  all?: boolean;
+}
+
+export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ?? process.cwd()): RunnerOptions {
+  const values = new Map<string, string>();
+  let watch = false;
+  let all = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const key = args[index];
+    if (key === '--watch') {
+      watch = true;
+      continue;
+    }
+    if (key === '--all') {
+      all = true;
+      continue;
+    }
+    const value = args[index + 1];
+    if (!['--project', '--cwd', '--item', '--limit', '--timeout-minutes', '--interval-seconds'].includes(key ?? '')) {
+      throw new Error(`Unknown runner option: ${key}`);
+    }
+    if (!value || value.startsWith('--')) {
+      throw new Error(`Missing value for ${key}.`);
+    }
+    values.set(key as string, value);
+    index += 1;
+  }
+  const project = all ? '*' : values.get('--project');
+  if (!project || (!all && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(project))) {
+    throw new Error('--project must be a lowercase project slug (or use --all).');
+  }
+  const itemId = values.get('--item');
+  if (itemId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(itemId)) {
+    throw new Error('--item must be a UUID.');
+  }
+  const limit = Number(values.get('--limit') ?? 1);
+  const minutes = Number(values.get('--timeout-minutes') ?? 30);
+  const seconds = Number(values.get('--interval-seconds') ?? 30);
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new Error('--limit must be an integer between 1 and 50.');
+  }
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 240) {
+    throw new Error('--timeout-minutes must be between 1 and 240.');
+  }
+  if (!Number.isFinite(seconds) || seconds < 5 || seconds > 3600) {
+    throw new Error('--interval-seconds must be between 5 and 3600.');
+  }
+  return {
+    project, cwd: resolve(cwd, values.get('--cwd') ?? '.'), itemId, limit, timeoutMs: minutes * 60_000,
+    watch, intervalMs: seconds * 1000, all,
+  };
+}
+
+export function buildPrompt(
+  agent: WorkflowAgent,
+  item: WorkItem,
+  previous: StepSummary[],
+  extras: PromptExtras = {},
+): string {
+  const history = previous.map((step) =>
+    `### ${step.agentName} (${step.phase}, ${step.status})\n${step.output.trim().slice(-PREVIOUS_OUTPUT_CHARS)}`);
+  const bugs = (extras.bugs ?? []).map((bug) =>
+    `- [${bug.status === 'fixed' ? 'behoben' : 'offen'} / ${bug.severity}] ${bug.title}`
+    + `${bug.description ? ` – ${bug.description.slice(0, 200)}` : ''}`
+    + `${bug.fixNotes ? ` | Lösung: ${bug.fixNotes.slice(0, 300)}` : ''}`);
+  return [
+    `Du bist der Agent "${agent.name}" (Rolle: ${agent.role}) in der Phase ${agent.phase}.`,
+    `## Anweisung\n${agent.instructions || 'Keine zusätzliche Anweisung.'}`,
+    `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
+    bugs.length
+      ? `## Bekannte Bugs – offene und behobene. Wiederhole diese Fehler nicht.\n${bugs.join('\n')}`
+      : '',
+    extras.manual !== undefined
+      ? `## Bisheriges Handbuch (${MANUAL_TITLE})\n${extras.manual.slice(0, MANUAL_PROMPT_CHARS) || '(noch leer – erstelle es vollständig)'}`
+      : '',
+    history.length ? `## Ergebnisse vorheriger Agents\n${history.join('\n\n')}` : '',
+  ].filter(Boolean).join('\n\n');
+}
+
+/** Replaces the {prompt} placeholder, or appends the prompt as the last argument. */
+export function buildInvocation(command: string[], prompt: string): string[] {
+  return command.includes(PROMPT_PLACEHOLDER)
+    ? command.map((part) => (part === PROMPT_PLACEHOLDER ? prompt : part))
+    : [...command, prompt];
+}
+
+export function agentEnvironment(): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_')));
+}
+
+export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<WorkflowAgent[]> {
+  const result = await pool.query<WorkflowAgent>(
+    `SELECT id, name, role, phase, position, instructions, command
+       FROM agents
+      WHERE project_slug = $1 AND enabled
+      ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,
+    [projectSlug],
+  );
+  return result.rows;
+}
+
+/** Items of the active sprint that are planned, most important first. */
+export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId"`;
+  if (options.itemId) {
+    const result = await pool.query<WorkItem>(
+      `SELECT ${columns} FROM development_items d WHERE d.id = $1 AND d.project_slug = $2`,
+      [options.itemId, options.project],
+    );
+    return result.rows;
+  }
+  const result = await pool.query<WorkItem>(
+    `SELECT ${columns}
+       FROM development_items d
+       JOIN sprints s ON s.id = d.sprint_id AND s.status = 'active'
+      WHERE d.project_slug = $1 AND d.status = 'planned'
+      ORDER BY CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
+      LIMIT $2`,
+    [options.project, options.limit],
+  );
+  return result.rows;
+}
+
+export function defaultAgentCommand(environment: NodeJS.ProcessEnv = process.env): string[] | null {
+  const raw = environment.DEV_LOG_AGENT_COMMAND?.trim();
+  if (!raw) {
+    return null;
+  }
+  if (raw.startsWith('[')) {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every((part) => typeof part === 'string') && parsed.length ? parsed as string[] : null;
+  }
+  return raw.split(/\s+/);
+}
+
+export function parseTestCommands(parsed: unknown): string[][] | null {
+  return Array.isArray(parsed) && parsed.length && parsed.every((command) =>
+    Array.isArray(command) && command.length && command.every((part) => typeof part === 'string'))
+    ? parsed as string[][]
+    : null;
+}
+
+async function testCommands(pool: Pool, project: string, environment: NodeJS.ProcessEnv = process.env): Promise<string[][]> {
+  const stored = (await pool.query<{ commands: unknown }>(
+    'SELECT test_commands AS commands FROM projects WHERE slug = $1', [project],
+  )).rows[0]?.commands;
+  const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
+  return parseTestCommands(stored) ?? (raw ? parseTestCommands(JSON.parse(raw)) : null) ?? [['npm', 'run', 'build'], ['npm', 'test']];
+}
+
+/** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
+export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt, cwd, timeoutMs }) => {
+  if (agent.role === 'tester') {
+    const startedAt = Date.now();
+    const runId = await runTestAgent({ project: item.projectSlug, cwd, commands: await testCommands(pool, item.projectSlug) }, pool);
+    const steps = await pool.query<{ command: string; status: string; output: string }>(
+      'SELECT command, status, output FROM test_run_steps WHERE run_id = $1 ORDER BY position', [runId],
+    );
+    const failed = steps.rows.some((step) => step.status !== 'passed');
+    const output = steps.rows.map((step) =>
+      `$ ${step.command} → ${step.status}\n${step.status === 'passed' ? step.output.slice(-400) : step.output.slice(-3000)}`).join('\n\n');
+    return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
+  }
+  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs });
+};
+
+export interface WorkItemOptions {
+  cwd: string;
+  timeoutMs: number;
+  execute?: CommandExecutor;
+  builtin?: BuiltinAgent;
+}
+
+async function afterStep(
+  pool: Pool,
+  item: WorkItem,
+  agent: WorkflowAgent,
+  output: string,
+): Promise<void> {
+  if (agent.role === 'documenter' && output.trim()) {
+    await saveOrderDoc(pool, { projectSlug: item.projectSlug, developmentId: item.id, title: item.title, content: output });
+  } else if (agent.role === 'manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {
+    await upsertDoc(pool, { projectSlug: item.projectSlug, kind: 'manual', title: MANUAL_TITLE, content: output });
+  } else if (agent.role === 'developer' && item.bugId) {
+    await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [item.bugId, output.trim().slice(-1500)]);
+  }
+}
+
+async function recordFailure(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
+  const detail = output.trim().slice(-1500);
+  if (item.bugId) {
+    await pool.query(
+      'UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1',
+      [item.bugId, `Letzter Behebungsversuch scheiterte bei „${agent.name}“: ${detail}`],
+    );
+    return;
+  }
+  await reportAgentBug(pool, {
+    projectSlug: item.projectSlug,
+    title: `Agent „${agent.name}“ scheiterte bei „${item.title}“`,
+    description: detail,
+  });
+}
+
+export async function runWorkItem(
+  pool: Pool,
+  item: WorkItem,
+  agents: WorkflowAgent[],
+  options: WorkItemOptions,
+): Promise<'passed' | 'failed' | 'skipped'> {
+  const execute = options.execute ?? runCommand;
+  const builtin = options.builtin ?? runBuiltinAgent;
+  await pool.query(
+    `UPDATE agent_runs SET status = 'failed', completed_at = NOW()
+      WHERE development_id = $1 AND status = 'running' AND started_at < NOW() - INTERVAL '3 hours'`,
+    [item.id],
+  );
+  const claim = await pool.query<{ id: string }>(
+    `INSERT INTO agent_runs (project_slug, development_id, status)
+     VALUES ($1, $2, 'running')
+     ON CONFLICT (development_id) WHERE status = 'running' DO NOTHING
+     RETURNING id`,
+    [item.projectSlug, item.id],
+  );
+  const runId = claim.rows[0]?.id;
+  if (!runId) {
+    console.info(`Skipping ${item.id}: a run is already in progress.`);
+    return 'skipped';
+  }
+  await pool.query(`UPDATE development_items SET status = 'in_progress', updated_at = NOW() WHERE id = $1`, [item.id]);
+
+  const done: StepSummary[] = [];
+  let passed = true;
+  const ordered = agents
+    .filter((agent) => !(agent.role === 'author' && item.ideationId))
+    .sort((left, right) =>
+      PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never)
+      || left.position - right.position);
+  try {
+    const bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
+    const fallbackCommand = defaultAgentCommand();
+    for (const [position, agent] of ordered.entries()) {
+      const step = { agentName: agent.name, phase: agent.phase };
+      console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
+      const stepRow = await pool.query<{ id: string }>(
+        `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status)
+         VALUES ($1, $2, $3, $4, $5, 'running') RETURNING id`,
+        [runId, position, agent.id, agent.name, agent.phase],
+      );
+      const manual = agent.role === 'manual_writer'
+        ? await readManual(pool, item.projectSlug, MANUAL_TITLE).catch(() => '') : undefined;
+      const prompt = buildPrompt(agent, item, done, { bugs, manual });
+      const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
+      let result: CommandResult;
+      try {
+        result = command
+          ? await execute(buildInvocation(command, prompt), options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment() })
+          : await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs });
+      } catch (error) {
+        result = { exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) };
+      }
+      const output = redactOutput(result.output, process.env);
+      const stepPassed = result.exitCode === 0;
+      await pool.query(
+        `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
+        [stepRow.rows[0]?.id, stepPassed ? 'passed' : 'failed', result.exitCode, result.durationMs, output],
+      );
+      done.push({ ...step, status: stepPassed ? 'passed' : 'failed', output });
+      if (!stepPassed) {
+        passed = false;
+        await recordFailure(pool, item, agent, output).catch((error) => console.error('Bug report failed:', error));
+        break;
+      }
+      await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
+    }
+  } catch (error) {
+    passed = false;
+    console.error(`Run ${runId} aborted:`, error);
+  } finally {
+    await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`,
+      [runId, passed ? 'passed' : 'failed']);
+    await pool.query(`UPDATE development_items SET status = $2, updated_at = NOW() WHERE id = $1`,
+      [item.id, passed ? 'done' : 'blocked']);
+  }
+  return passed ? 'passed' : 'failed';
+}
+
+/** Completes a finished sprint with its documentation. Sprints are only ever started manually. */
+export async function advanceSprints(pool: Pool, projectSlug: string): Promise<void> {
+  const completed = await pool.query<{ id: string }>(
+    `UPDATE sprints s SET status = 'completed', updated_at = NOW()
+      WHERE s.project_slug = $1 AND s.status = 'active'
+        AND EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id)
+        AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status <> 'done')
+      RETURNING s.id`,
+    [projectSlug],
+  );
+  for (const sprint of completed.rows) {
+    await generateSprintReport(pool, sprint.id);
+    console.info(`Sprint ${sprint.id} abgeschlossen und dokumentiert.`);
+  }
+}
+
+export async function runWorkflow(
+  pool: Pool,
+  options: RunnerOptions,
+  execute?: CommandExecutor,
+  builtin?: BuiltinAgent,
+): Promise<{ itemId: string; result: string }[]> {
+  await advanceSprints(pool, options.project);
+  await draftRequirements(pool, options, execute);
+  await syncSprintToGit(pool, options.project, options.cwd, execute);
+  const items = await selectItems(pool, options);
+  const results: { itemId: string; result: string }[] = [];
+  if (!items.length) {
+    return results;
+  }
+  const agents = await loadWorkflow(pool, options.project);
+  if (!agents.length) {
+    throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
+  }
+  for (const item of items) {
+    results.push({ itemId: item.id, result: await runWorkItem(pool, item, agents, { ...options, execute, builtin }) });
+  }
+  await syncRepoDocs(pool, options.project, options.cwd);
+  const active = await pool.query<{ id: string }>(
+    `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`, [options.project],
+  );
+  if (active.rows[0]) {
+    await generateSprintReport(pool, active.rows[0].id);
+  }
+  await advanceSprints(pool, options.project);
+  await syncSprintToGit(pool, options.project, options.cwd, execute);
+  return results;
+}

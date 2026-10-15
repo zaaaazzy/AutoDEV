@@ -1,0 +1,26 @@
+{
+  "name": "dev-log",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test-agent": "tsx src/test-agent.ts",
+    "runner": "tsx src/runner-cli.ts",
+    "worker": "tsx src/runner-cli.ts --all --watch"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.15.30",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3"
+  }
+}

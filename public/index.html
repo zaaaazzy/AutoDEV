@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Dev Log | Mainty</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="side-rail">
+      <a class="brand" href="/" aria-label="Dev Log Startseite">
+        <span class="brand-mark">m</span><span>mainty</span><span class="brand-divider">/</span><small>dev log</small>
+      </a>
+      <div class="rail-label">Arbeitsbereich</div>
+      <nav aria-label="Dev-Log-Navigation">
+        <a class="rail-link active" href="#dashboard" data-section="dashboard"><span class="rail-symbol">◩</span><span>Dashboard</span><span class="rail-count" id="nav-count-dashboard">0</span></a>
+        <a class="rail-link" href="#development" data-section="development"><span class="rail-symbol">◫</span><span>Entwicklung</span><span class="rail-count" id="nav-count-development">0</span></a>
+        <a class="rail-link" href="#sprints" data-section="sprints"><span class="rail-symbol">⟳</span><span>Sprints</span><span class="rail-count" id="nav-count-sprints">0</span></a>
+        <a class="rail-link" href="#ideation" data-section="ideation"><span class="rail-symbol">✳</span><span>Ideation</span><span class="rail-count" id="nav-count-ideation">0</span></a>
+        <a class="rail-link" href="#bugs" data-section="bugs"><span class="rail-symbol">⚠</span><span>Bugs</span><span class="rail-count" id="nav-count-bugs">0</span></a>
+        <a class="rail-link" href="#docs" data-section="docs"><span class="rail-symbol">☰</span><span>Dokumentation</span><span class="rail-count" id="nav-count-docs">0</span></a>
+        <a class="rail-link" href="#agents" data-section="agents"><span class="rail-symbol">⚙</span><span>Agents</span><span class="rail-count" id="nav-count-agents">0</span></a>
+        <a class="rail-link" href="#runs" data-section="runs"><span class="rail-symbol">▤</span><span>Testläufe</span><span class="rail-count" id="nav-count-runs">0</span></a>
+      </nav>
+      <div class="rail-bottom"><span class="rail-dot"></span><span>Projekt- und Testtracking</span></div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Arbeitsbereich</span><span class="breadcrumb-divider">/</span><strong>Dev Log</strong></div>
+        <label class="project-picker">Projekt
+          <select id="project-select" aria-label="Projekt auswählen"></select>
+        </label>
+        <div id="worker-status" class="worker-status worker-unknown" role="status" aria-live="polite"><span class="worker-dot"></span><span id="worker-text">Worker …</span></div>
+        <button class="btn btn-outline" id="new-project-toggle" type="button">+ Projekt</button>
+      </header>
+
+      <div class="page-content">
+        <section class="page-heading">
+          <div>
+            <div class="eyebrow"><span class="eyebrow-dot"></span> Entwicklungsübersicht</div>
+            <h1>Dev Log</h1>
+            <p>Dashboard, Bugs, Doku, Sprints, Agents und Testläufe im Blick.</p>
+          </div>
+          <button class="btn btn-outline" id="refresh-button" type="button"><span aria-hidden="true">↻</span> Aktualisieren</button>
+        </section>
+
+        <form id="new-project-form" class="form-panel hidden" aria-labelledby="new-project-title">
+          <h2 id="new-project-title">Projekt verbinden</h2>
+          <div class="form-grid">
+            <label>Projektname<input name="name" maxlength="120" required></label>
+            <label>Projekt-ID (Slug)<input name="slug" pattern="[a-z0-9][a-z0-9-]{0,62}" maxlength="63" required></label>
+            <label class="span-two">Repository oder Projektpfad<input name="repository" maxlength="500" required></label>
+            <label class="span-two">GitHub-Repository (optional, für die Sprint-Sicherung)<input name="gitRemote" maxlength="300" placeholder="https://github.com/user/repo.git"></label>
+          </div>
+          <button class="btn btn-primary" type="submit">Projekt speichern</button>
+        </form>
+
+        <details class="form-panel project-settings">
+          <summary>Projekteinstellungen (Ordner, Tests, GitHub)</summary>
+          <form id="git-remote-form" class="project-settings-form">
+            <label>Projektordner (absoluter Pfad – hier arbeiten die Agents)<input name="repository" maxlength="500" placeholder="/Users/name/projekte/mein-projekt" required></label>
+            <label>Testbefehle (ein Befehl pro Zeile, leer = <code>npm run build</code> und <code>npm test</code>)<textarea name="testCommands" rows="3" placeholder="npm run build&#10;npm test"></textarea></label>
+            <label>GitHub-Repository (optional)<input name="gitRemote" maxlength="300" placeholder="git@github.com:user/repo.git" aria-label="GitHub-Repository"></label>
+            <button class="btn btn-primary" type="submit">Speichern</button>
+            <span class="result-count">Nach jedem abgeschlossenen Sprint wird committet (Sprintname), getaggt und gepusht. Zugang über SSH-Key/Keychain, nie in der URL.</span>
+          </form>
+        </details>
+
+        <div id="notice" class="notice hidden" role="status"></div>
+        <div id="loading" class="state-message" role="status"><span class="loading-mark"></span> Dev Log wird geladen …</div>
+        <div id="workspace" class="hidden">
+          <section class="summary-strip" aria-label="Projektkennzahlen">
+            <div class="summary-item"><span id="run-count" class="summary-number">0</span><span class="summary-label">Testläufe</span></div>
+            <div class="summary-item"><span id="idea-count" class="summary-number">0</span><span class="summary-label">Ideen offen</span></div>
+            <div class="summary-item"><span id="development-count" class="summary-number">0</span><span class="summary-label">Offene Aufträge</span></div>
+            <div class="summary-item"><span id="sprint-count" class="summary-number">0</span><span class="summary-label">Aktiver Sprint</span></div>
+            <div class="summary-item"><span id="agent-count" class="summary-number">0</span><span class="summary-label">Agents</span></div>
+            <div class="summary-note"><span class="summary-note-mark"></span><span id="project-repository">Projekt wählen</span></div>
+          </section>
+
+          <section id="dashboard" class="data-section view" aria-labelledby="dashboard-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="dashboard-title">Dashboard</h2><span class="result-count">Sprint-Fortschritt, Qualität und Ideenlage</span></div>
+            </div>
+            <div id="dashboard-content"></div>
+          </section>
+
+          <section id="development" class="data-section view hidden" aria-labelledby="development-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="development-title">Entwicklung</h2><span class="result-count">Entwicklungsaufträge und Fortschritt</span></div>
+            </div>
+            <form id="development-form" class="card-form compact">
+              <input name="title" placeholder="Neuer Entwicklungsauftrag …" maxlength="180" required aria-label="Titel des Auftrags">
+              <select name="priority" aria-label="Priorität"><option value="medium">Mittel</option><option value="high">Hoch</option><option value="low">Niedrig</option></select>
+              <button class="btn btn-primary" type="submit">Auftrag hinzufügen</button>
+            </form>
+            <div id="development-list" class="issue-list"></div>
+          </section>
+
+          <section id="sprints" class="data-section view hidden" aria-labelledby="sprints-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="sprints-title">Sprints</h2><span class="result-count">Aufträge in Iterationen planen</span></div>
+            </div>
+            <form id="sprint-form" class="card-form compact sprint-form">
+              <input name="name" placeholder="Sprint-Name, z. B. Sprint 1" maxlength="120" required aria-label="Sprint-Name">
+              <label>Start<input name="startDate" type="date"></label>
+              <label>Ende<input name="endDate" type="date"></label>
+              <input class="span-all" name="goal" placeholder="Sprint-Ziel (optional)" maxlength="1000" aria-label="Sprint-Ziel">
+              <button class="btn btn-primary" type="submit">Sprint anlegen</button>
+            </form>
+            <div id="sprints-list" class="sprint-list"></div>
+          </section>
+
+          <section id="ideation" class="data-section view hidden" aria-labelledby="ideation-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="ideation-title">Ideationboard</h2><span class="result-count">Neue Ideen werden automatisch vom Agenten zu Aufträgen ausformuliert</span></div>
+            </div>
+            <form id="idea-form" class="card-form">
+              <input name="title" placeholder="Neue Idee oder Verbesserung …" maxlength="180" required aria-label="Titel der Idee">
+              <select name="priority" aria-label="Priorität"><option value="medium">Mittel</option><option value="high">Hoch</option><option value="low">Niedrig</option></select>
+              <textarea name="description" maxlength="10000" placeholder="Beschreibung oder Kontext (optional)" aria-label="Beschreibung"></textarea>
+              <div class="estimate-grid">
+                <label>Aufwand (Std.)<input name="effortHours" type="number" min="0" max="100000" step="0.5"></label>
+                <label>Token-Schätzung<input name="tokenEstimate" type="number" min="0" max="1000000000" step="1000"></label>
+                <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" step="1"></label>
+                <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" step="1"></label>
+              </div>
+              <button class="btn btn-primary" type="submit">Idee hinzufügen</button>
+            </form>
+            <div id="ideas-list" class="issue-list"></div>
+          </section>
+
+          <section id="bugs" class="data-section view hidden" aria-labelledby="bugs-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="bugs-title">Bugs</h2><span class="result-count">Fehler melden, priorisieren und einem Sprint zuordnen</span></div>
+            </div>
+            <form id="bug-form" class="card-form bug-form">
+              <input name="title" placeholder="Bug-Titel …" maxlength="180" required aria-label="Bug-Titel">
+              <select name="severity" aria-label="Schweregrad"><option value="medium">Mittel</option><option value="high">Hoch</option><option value="critical">Kritisch</option><option value="low">Niedrig</option></select>
+              <select name="sprintId" aria-label="Sprint"><option value="">Kein Sprint</option></select>
+              <textarea name="description" maxlength="10000" placeholder="Beschreibung (optional)" aria-label="Beschreibung"></textarea>
+              <button class="btn btn-primary" type="submit">Bug melden</button>
+            </form>
+            <div class="toolbar-row">
+              <label class="filter-field">Statusfilter
+                <select id="bug-filter-status" aria-label="Bug-Status filtern">
+                  <option value="all">Alle Status</option>
+                  <option value="open">Offen</option>
+                  <option value="in_progress">In Arbeit</option>
+                  <option value="fixed">Behoben</option>
+                  <option value="wontfix">Kein Fix</option>
+                </select>
+              </label>
+              <p class="hint">Beim Zuordnen zu einem Sprint wird automatisch ein Bug-Auftrag im Sprint angelegt.</p>
+            </div>
+            <div id="bugs-list" class="issue-list"></div>
+          </section>
+
+          <section id="docs" class="data-section view hidden" aria-labelledby="docs-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="docs-title">Dokumentation</h2><span class="result-count">Handbücher, Sprintberichte und Auftragswissen</span></div>
+            </div>
+            <div id="docs-content"></div>
+          </section>
+
+          <section id="agents" class="data-section view hidden" aria-labelledby="agents-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="agents-title">Agents &amp; Workflow</h2><span class="result-count">Automatisierte Rollen für Sprint-Aufträge</span></div>
+              <button class="btn btn-outline" id="default-agents-button" type="button">Standard-Workflow anlegen</button>
+            </div>
+            <form id="agent-form" class="card-form compact agent-form">
+              <input name="name" placeholder="Agent-Name, z. B. Entwickler" maxlength="80" required aria-label="Agent-Name">
+              <select name="role" aria-label="Rolle">
+                <option value="author">Auftragsautor</option><option value="developer">Entwickler</option>
+                <option value="tester">Tester</option><option value="reviewer">Reviewer</option>
+                <option value="documenter">Dokumentierer</option><option value="bug_reviewer">Bug-Wächter</option>
+                <option value="manual_writer">Handbuch-Autor</option><option value="custom">Eigene Rolle</option>
+              </select>
+              <select name="phase" aria-label="Workflow-Phase">
+                <option value="pre_task">Pre Task</option><option value="while_task">While Task</option><option value="after_task">After Task</option>
+              </select>
+              <input class="span-all" name="command" placeholder="Befehl, z. B. claude -p   (Prompt wird angehängt; oder {prompt} als Platzhalter)" maxlength="1000" aria-label="Befehl" autocomplete="off">
+              <textarea name="instructions" maxlength="10000" placeholder="Anweisung / Prompt des Agents" aria-label="Anweisung"></textarea>
+              <button class="btn btn-primary" type="submit">Agent anlegen</button>
+            </form>
+            <p class="hint">Der Runner <code>npm run dev-log:runner -- --project &lt;slug&gt; --watch</code> arbeitet automatisch geplante Aufträge des aktiven Sprints ab, führt Agents in der Reihenfolge Pre → While → After aus, liest bekannte Bugs zuerst und dokumentiert Ergebnisse in der Ansicht <strong>Dokumentation</strong>.</p>
+            <div id="agents-board" class="workflow"></div>
+            <h3 class="subhead">Letzte Agent-Läufe</h3>
+            <div id="agent-runs" class="run-list"></div>
+          </section>
+
+          <section id="runs" class="data-section view hidden" aria-labelledby="runs-title">
+            <div class="section-heading">
+              <div class="section-title-wrap"><h2 id="runs-title">Testläufe</h2><span id="run-total" class="result-count"></span></div>
+            </div>
+            <div id="runs-list" class="run-list"></div>
+          </section>
+        </div>
+        <footer class="page-footer"><span>MAINTY <span class="footer-divider">/</span> DEV LOG</span><span>Dashboard · Bugs · Doku · Sprints · Agents</span></footer>
+      </div>
+    </main>
+  </div>
+  <script src="app.js" defer></script>
+</body>
+</html>
