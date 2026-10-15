@@ -19,6 +19,24 @@ const MAX_TOOL_OUTPUT = 8_000;
 const MAX_FILE_BYTES = 400_000;
 const WRITE_ROLES = new Set(['developer']);
 const COMMAND_PATTERN = /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
+const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
+const INSTALL_FLAGS = new Set(['--save', '--save-dev', '-D', '--save-exact', '-E', '--legacy-peer-deps', '--no-audit', '--no-fund', '--ignore-scripts']);
+const SAFE_COMMANDS = [
+  /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev))*$/,
+  /^npm (?:ci|install|i)(?: (?:--[a-z-]+|-[DE]))*$/,
+  /^node (?:--version|--check [\w./-]+)$/,
+  /^npx --no-install (?:tsc --noEmit|eslint [\w./*-]+|prettier --check [\w./*-]+|jest|vitest run)$/,
+];
+
+/** Erlaubt feste, ungefährliche Befehle; `npm install <paket>` nur mit geprüften Paketnamen und Schaltern (kein -g, keine URLs). */
+export function isAllowedCommand(command: string): boolean {
+  if (COMMAND_PATTERN.test(command)) return true;
+  const parts = command.split(/\s+/);
+  if (parts[0] === 'npm' && ['install', 'i', 'uninstall'].includes(parts[1] ?? '') && parts.length > 2) {
+    return parts.slice(2).every((part) => part.startsWith('-') ? INSTALL_FLAGS.has(part) : PACKAGE_SPEC.test(part));
+  }
+  return SAFE_COMMANDS.some((pattern) => pattern.test(command));
+}
 
 export interface OllamaAgentOptions {
   prompt: string;
@@ -81,7 +99,7 @@ function toolDefinitions(canWrite: boolean): unknown[] {
         required: ['path', 'old_text', 'new_text'],
       },
       {
-        name: 'run_command', description: 'Führt npm test, npm run <script> oder git status/diff/log aus.',
+        name: 'run_command', description: 'Führt npm install/ci <paket>, npm test, npm run <script>, npm ls/outdated/audit, node --check, npx --no-install tsc/eslint/prettier/jest/vitest oder git status/diff/log aus.',
         properties: { command: parameter('z. B. "npm run build" oder "npm test"') }, required: ['command'],
       },
     );
@@ -101,7 +119,7 @@ function systemPrompt(role: string, canWrite: boolean): string {
     `Du bist ein autonomer Software-Agent mit der Rolle "${role}" und arbeitest im Projektverzeichnis.`,
     'Erkunde das Projekt zuerst mit den Werkzeugen, bevor du Aussagen machst oder Code schreibst. Erfinde keine Dateien oder Ergebnisse.',
     canWrite
-      ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
+      ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und installiere fehlende Abhängigkeiten mit run_command ("npm install"), prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
       : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
     'Antworte auf Deutsch.',
   ].join('\n');
@@ -251,8 +269,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return 'Befehle sind für diese Rolle nicht erlaubt.';
         }
         const command = typeof args.command === 'string' ? args.command.trim() : '';
-        if (!COMMAND_PATTERN.test(command)) {
-          return 'Befehl nicht erlaubt. Erlaubt: npm test, npm run <script>, git status|diff|log.';
+        if (!isAllowedCommand(command)) {
+          return 'Befehl nicht erlaubt. Erlaubt: npm install/ci/uninstall <paket>, npm test|run <script>|ls|outdated|audit, node --check <datei>, npx --no-install tsc|eslint|prettier|jest|vitest, git status|diff|log.';
         }
         const result = await context.execute(command.split(/\s+/), context.cwd, {
           timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),

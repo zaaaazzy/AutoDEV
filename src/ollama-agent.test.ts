@@ -52,8 +52,11 @@ test('the developer may write with backup, but only run allowed commands', async
   assert.match(await executeTool(dev, call('replace_in_file', { path: 'a.txt', old_text: 'neu', new_text: 'neuer' })), /Ersetzt/);
   assert.match(await executeTool(dev, call('replace_in_file', { path: 'a.txt', old_text: 'fehlt', new_text: 'x' })), /0-mal/);
   assert.match(await executeTool(dev, call('run_command', { command: 'npm run build' })), /ran npm run build/);
-  for (const command of ['rm -rf /', 'npm test; rm -rf /', 'git diff --output=x', 'curl http://x']) {
+  for (const command of ['rm -rf /', 'npm test; rm -rf /', 'git diff --output=x', 'curl http://x', 'npm install -g foo', 'npm install git+https://x/y.git', 'npm install foo; ls', 'npx evil', 'npm install --prefix /tmp x']) {
     assert.match(await executeTool(dev, call('run_command', { command })), /nicht erlaubt/);
+  }
+  for (const command of ['npm install', 'npm install express pug@^3.0.0 --save', 'npm install -D @types/node', 'npm ls --depth=0', 'node --check server.js', 'npx --no-install tsc --noEmit']) {
+    assert.match(await executeTool(dev, call('run_command', { command })), /Exit-Code/);
   }
   assert.deepEqual([...dev.changed], ['a.txt']);
   await mkdir(join(cwd, 'sub'));
