@@ -2,7 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import { processChat } from './chat.js';
+import { processChat, rejectChat } from './chat.js';
 import { beginShutdown, killOrphan } from './shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from './database.js';
 import { beatHeartbeat, readMaxAgents } from './worker.js';
@@ -116,7 +116,11 @@ async function main(): Promise<void> {
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
-        if (target.problem || chatActive.has(slug) || stopping) continue;
+        if (chatActive.has(slug) || stopping) continue;
+        if (target.problem) {
+          void rejectChat(pool, slug, target.problem).catch(() => undefined);
+          continue;
+        }
         chatActive.add(slug);
         void processChat(pool, target.options)
           .then(() => analyzeBlocked(pool, target.options))

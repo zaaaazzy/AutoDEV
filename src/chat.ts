@@ -112,3 +112,13 @@ export async function processChat(
   }
   return true;
 }
+
+/** Beantwortet wartende Chat-Nachrichten mit dem Grund, wenn das Projekt nicht arbeitsfähig ist. */
+export async function rejectChat(pool: Pool, project: string, reason: string): Promise<void> {
+  const pending = await pool.query<{ id: string }>(
+    `UPDATE chat_messages SET status = 'failed', updated_at = clock_timestamp()
+      WHERE project_slug = $1 AND role = 'user' AND status = 'pending' RETURNING id`, [project]);
+  if (!pending.rowCount) return;
+  await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`,
+    [project, `Der Assistent kann nicht arbeiten: ${reason}`]);
+}
