@@ -405,3 +405,6 @@ h3 .link-button { color: var(--ink); }
 .agent-row .agent-line { flex: 1; min-width: 0; }
 .agent-cancel { border: 1px solid #e4b4ae; background: #fff; color: #b3382c; border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
 .agent-cancel:hover { background: #fdeceb; }
+.live-progress { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 7px 12px; border-radius: 8px; background: #eef6f0; color: #2a6b45; font-size: 13.5px; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #328455; animation: live-pulse 1.2s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: .25; } }

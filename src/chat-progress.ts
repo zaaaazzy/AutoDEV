@@ -7,7 +7,7 @@ export async function startProgress(
   pool: Pool,
   project: string,
   stages: string[],
-  link: { developmentId?: string; agentName?: string } = {},
+  link: { developmentId?: string; agentName?: string; stepId?: string; silent?: boolean } = {},
 ): Promise<() => Promise<void>> {
   const started = Date.now();
   const text = (): string => {
@@ -15,6 +15,14 @@ export async function startProgress(
     const stage = stages[Math.min(stages.length - 1, Math.floor(seconds / 15))] ?? 'Arbeite …';
     return `${stage} (${seconds} s)`;
   };
+  const writeStep = (value: string | null): Promise<unknown> => link.stepId
+    ? pool.query('UPDATE agent_run_steps SET progress = $2 WHERE id = $1', [link.stepId, value]).catch(() => undefined)
+    : Promise.resolve();
+  void writeStep(text());
+  if (link.silent) {
+    const ticker = setInterval(() => void writeStep(text()), INTERVAL_MS);
+    return async () => { clearInterval(ticker); await writeStep(null); };
+  }
   const id = (await pool.query<{ id: string }>(
     `INSERT INTO chat_messages (project_slug, role, content, status, development_id, agent_name)
      VALUES ($1, 'assistant', $2, 'processing', $3, $4) RETURNING id`,
@@ -23,9 +31,11 @@ export async function startProgress(
   if (!id) return async () => undefined;
   const timer = setInterval(() => {
     void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
+    void writeStep(text());
   }, INTERVAL_MS);
   return async () => {
     clearInterval(timer);
+    await writeStep(null);
     await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]).catch(() => undefined);
   };
 }

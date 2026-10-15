@@ -362,10 +362,9 @@ export async function runWorkItem(
         void pool.query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3',
           [stepRow.rows[0]?.id, redactOutput(partial, process.env), 'running']).catch(() => undefined);
       };
-      const stopProgress = item.fromChat
-        ? await startProgress(pool, item.projectSlug, [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
-          { developmentId: item.id, agentName: agent.name })
-        : async (): Promise<void> => undefined;
+      const stopProgress = await startProgress(pool, item.projectSlug,
+        [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
+        { developmentId: item.id, agentName: agent.name, stepId: stepRow.rows[0]?.id, silent: !item.fromChat });
       const work = (async (): Promise<void> => { try {
         if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
           // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.

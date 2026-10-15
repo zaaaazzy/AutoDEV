@@ -635,6 +635,7 @@
                                 @if (openSprintItems().has(run.id + step.position) || step.status === 'running') { 
                                   @if (step.output) { <article class="markdown task-body" [innerHTML]="step.output | markdown"></article> }
                                   @else { <p class="muted task-body">{{ step.status === 'running' ? 'Agent arbeitet … Ausgabe erscheint live.' : 'Keine Ausgabe.' }}</p> }
+                                  @if (step.progress) { <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p> }
                                 }
                               </li>
                             } @empty { <li class="muted">Noch keine Agent-Schritte.</li> }
@@ -776,7 +777,10 @@
                     <p class="muted">{{ statusLabel(entry.sprintStatus ?? '') }} · {{ entry.sprintStart || 'Kein Start' }} – {{ entry.sprintEnd || 'Kein Ende' }}</p>
                   } @else { <p class="muted">Der Auftrag gehört zu keinem Sprint.</p> }
                 </details>
-                <details class="run-step"><summary>Ausgabe</summary><pre>{{ entry.output || 'Keine Konsolenausgabe.' }}</pre></details>
+                @if (entry.progress) { <p class="live-progress"><span class="live-dot"></span>{{ entry.progress }}</p> }
+                <details class="run-step" open><summary>Live-Ausgabe</summary>
+                  @if (entry.output) { <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article> } @else { <p class="muted">Noch keine Ausgabe – der Agent arbeitet …</p> }
+                </details>
               </article>
             } @empty { @if (!agentActivityLoading()) { <p class="muted">Gerade keine aktive Aufgabe.</p> } }
             <details class="task-group" open>
@@ -811,7 +815,9 @@
                     <p class="muted">{{ statusLabel(entry.sprintStatus ?? '') }} · {{ entry.sprintStart || 'Kein Start' }} – {{ entry.sprintEnd || 'Kein Ende' }}</p>
                   } @else { <p class="muted">Der Auftrag gehört zu keinem Sprint.</p> }
                 </details>
-                <details class="run-step"><summary>Ausgabe</summary><pre>{{ entry.output || 'Keine Konsolenausgabe.' }}</pre></details>
+                <details class="run-step"><summary>Ausgabe</summary>
+                  @if (entry.output) { <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article> } @else { <p class="muted">Keine Ausgabe.</p> }
+                </details>
               </article>
               } @empty { @if (!agentActivityLoading()) { <p class="muted">Noch keine Aufgaben ausgeführt.</p> } }
             </details>
@@ -873,7 +879,7 @@
             <h3 class="subheading">Letzte Agent-Läufe</h3>
             @for (run of data().agentRuns; track run.id) {
               <article class="run-card"><div class="list-row"><strong>{{ run.title }}</strong><span class="status" [ngClass]="statusClass(run.status)">{{ statusLabel(run.status) }}</span><span>{{ dateTime(run.startedAt) }}</span></div>
-                @for (step of run.steps; track step.position) { <details class="run-step"><summary>{{ step.agentName || step.command }} · {{ statusLabel(step.status) }}</summary><pre>{{ step.output || 'Keine Konsolenausgabe.' }}</pre></details> }
+                @for (step of run.steps; track step.position) { <details class="run-step"><summary>{{ step.agentName || step.command }} · {{ statusLabel(step.status) }}</summary>@if (step.progress) { <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p> }@if (step.output) { <article class="markdown task-body" [innerHTML]="step.output | markdown"></article> } @else { <p class="muted">Keine Ausgabe.</p> }</details> }
               </article>
             } @empty { <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p> }
           </section>

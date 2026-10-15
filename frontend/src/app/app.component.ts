@@ -248,6 +248,11 @@ export class AppComponent implements OnInit, OnDestroy {
   private async refreshLiveRuns(): Promise<void> {
     const slug = this.activeProject();
     if (!slug || !this.data().agentRuns.some((run) => run.steps.some((step) => step.status === 'running'))) return;
+    const agentId = this.openAgent();
+    if (agentId) {
+      this.api.get<{ activity: AgentActivity[] }>(`${this.api.projectPath(slug)}/agents/${encodeURIComponent(agentId)}/activity`)
+        .then((result) => { if (this.openAgent() === agentId) this.agentActivity.set(result.activity); }).catch(() => undefined);
+    }
     try {
       const { runs } = await this.api.get<{ runs?: ProjectData['agentRuns'] }>(`${this.api.projectPath(slug)}/agent-runs`);
       if (slug === this.activeProject()) this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));

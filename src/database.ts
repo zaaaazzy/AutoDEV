@@ -191,6 +191,7 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS chat_messages_project_idx ON chat_messages (project_slug, created_at);
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS pid INTEGER;
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS pid_started_at TIMESTAMPTZ;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS progress TEXT;
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS estimated_at TIMESTAMPTZ DEFAULT NOW();
   ALTER TABLE ideation_items ALTER COLUMN estimated_at DROP DEFAULT;

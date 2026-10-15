@@ -122,6 +122,7 @@ export interface RunStep {
   exitCode?: number | null;
   durationMs?: number | null;
   output: string;
+  progress?: string | null;
 }
 
 export interface AgentRun {
@@ -203,6 +204,7 @@ export interface AgentActivity {
   stepStatus: string;
   durationMs: number | null;
   output: string;
+  progress?: string | null;
   startedAt: string;
   orderId: string;
   orderTitle: string;

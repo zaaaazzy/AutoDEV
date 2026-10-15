@@ -79,7 +79,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
         return;
       }
       const rows = (await pool.query(
-        `SELECT st.id, st.status AS "stepStatus", st.duration_ms AS "durationMs", st.output, r.started_at AS "startedAt",
+        `SELECT st.id, st.status AS "stepStatus", st.duration_ms AS "durationMs", st.output, st.progress, r.started_at AS "startedAt",
                 d.id AS "orderId", d.title AS "orderTitle", d.description AS "orderDescription",
                 d.status AS "orderStatus", d.priority AS "orderPriority",
                 s.id AS "sprintId", s.name AS "sprintName", s.goal AS "sprintGoal", s.status AS "sprintStatus",
