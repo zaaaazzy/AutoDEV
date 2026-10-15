@@ -428,6 +428,7 @@ export class AppComponent implements OnInit, OnDestroy {
       priority: values['priority'],
       ...this.estimateValues(values),
     }), 'Auftrag gespeichert.');
+    this.orderEditing.set(null);
   }
 
   async updateDevelopment(id: string, values: Partial<DevelopmentItem>): Promise<void> {
@@ -546,6 +547,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly devValues = signal<Partial<Record<'status' | 'priority' | 'sprint' | 'effortHours', string[]>>>({});
   readonly devSort = signal<{ key: DevKey; dir: 'asc' | 'desc' }>({ key: 'priority', dir: 'desc' });
   readonly openOrder = signal<string | null>(null);
+  readonly orderEditing = signal<string | null>(null);
   readonly openSteps = signal<ReadonlySet<string>>(new Set());
   toggleStep(id: string): void {
     this.openSteps.update((set) => { const next = new Set(set); if (!next.delete(id)) next.add(id); return next; });
