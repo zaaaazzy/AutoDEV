@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from './api.service.js';
 import { MarkdownPipe } from './markdown.pipe.js';
 import {
+  AgentRun,
   type Agent,
   type AgentPhase,
   type Attachment,
@@ -950,6 +951,25 @@ export class AppComponent implements OnInit, OnDestroy {
 
   reportFor(sprintId: string): SprintReport | undefined {
     return this.data().reports.find((report) => report.sprintId === sprintId);
+  }
+
+  readonly openSprintItems = signal<ReadonlySet<string>>(new Set());
+  toggleSprintItem(id: string): void {
+    this.openSprintItems.update((set) => { const next = new Set(set); if (!next.delete(id)) next.add(id); return next; });
+  }
+
+  sprintRun(itemId: string): AgentRun | undefined {
+    return this.data().agentRuns.find((run) => run.developmentId === itemId);
+  }
+
+  githubBase(): string | null {
+    const remote = this.currentProject()?.gitRemote?.trim();
+    const match = remote?.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+\/[^\s]+?)(?:\.git)?\/?$/);
+    return match ? `https://github.com/${match[1]}` : null;
+  }
+
+  sprintItems(sprintId: string): DevelopmentItem[] {
+    return this.data().development.filter((item) => item.sprintId === sprintId);
   }
 
   sprintProgress(sprintId: string): string {

@@ -455,7 +455,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     }
     const runs = await pool.query(
       `SELECT id, development_id AS "developmentId", status, started_at AS "startedAt", completed_at AS "completedAt"
-         FROM agent_runs WHERE project_slug = $1 ORDER BY started_at DESC LIMIT 30`,
+         FROM agent_runs WHERE project_slug = $1 ORDER BY started_at DESC LIMIT 150`,
       [slug],
     );
     const steps = await pool.query(

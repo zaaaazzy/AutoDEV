@@ -18,6 +18,7 @@ const SCHEMA = `
     ADD COLUMN IF NOT EXISTS git_sync TEXT CHECK (git_sync IN ('pending', 'running', 'done', 'failed')),
     ADD COLUMN IF NOT EXISTS git_message TEXT,
     ADD COLUMN IF NOT EXISTS git_commit TEXT,
+    ADD COLUMN IF NOT EXISTS git_branch TEXT,
     ADD COLUMN IF NOT EXISTS git_synced_at TIMESTAMPTZ;
   CREATE OR REPLACE FUNCTION sprints_queue_git_sync() RETURNS trigger AS $fn$
   BEGIN

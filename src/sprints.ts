@@ -9,7 +9,7 @@ const SPRINT_STATUSES = new Set(['planned', 'active', 'completed']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(end_date, 'YYYY-MM-DD') AS "endDate",
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
-  git_commit AS "gitCommit", git_synced_at AS "gitSyncedAt"`;
+  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt"`;
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },
@@ -105,11 +105,11 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `UPDATE sprints SET git_sync = 'pending', git_message = NULL
-        WHERE id = $1 AND status = 'completed' AND git_sync IN ('done', 'failed') RETURNING ${SPRINT_COLUMNS}`,
+        WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed')) RETURNING ${SPRINT_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {
-      response.status(409).json({ message: 'Nur abgeschlossene Sprints ohne laufende Sicherung können erneut gesichert werden.' });
+      response.status(409).json({ message: 'Die Git-Sicherung dieses Sprints läuft bereits.' });
       return;
     }
     response.json({ sprint: result.rows[0] });

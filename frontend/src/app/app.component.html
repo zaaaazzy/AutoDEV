@@ -546,15 +546,26 @@
             @for (sprint of data().sprints; track sprint.id) {
               <article class="sprint-card">
                 <div class="section-heading">
-                  <div><h3>{{ sprint.name }}</h3><span class="status" [ngClass]="statusClass(sprint.status)">{{ statusLabel(sprint.status) }}</span></div>
+                  <div class="sprint-title">
+                    <h3>{{ sprint.name }}</h3><span class="status" [ngClass]="statusClass(sprint.status)">{{ statusLabel(sprint.status) }}</span>
+                    @if (githubBase(); as repo) {
+                      <a class="gh-link" [href]="repo + '/tree/' + (sprint.gitBranch || 'main')" target="_blank" rel="noopener" title="Branch auf GitHub">
+                        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" /></svg>
+                        {{ sprint.gitBranch || 'main' }}</a>
+                      @if (sprint.gitCommit) { <a class="gh-link" [href]="repo + '/commit/' + sprint.gitCommit" target="_blank" rel="noopener" title="Commit auf GitHub"><code>{{ sprint.gitCommit }}</code></a> }
+                    }
+                  </div>
                   <div class="actions">
+                    <button class="button secondary" type="button" (click)="retryGitSync(sprint.id)" [disabled]="busy() || sprint.gitSync === 'pending' || sprint.gitSync === 'running'" title="Stand committen und nach GitHub pushen">
+                      {{ sprint.gitSync === 'pending' || sprint.gitSync === 'running' ? 'Git läuft …' : 'Git sichern' }}</button>
                     @if (sprint.status === 'planned') { <button class="button primary" (click)="updateSprint(sprint.id, { status: 'active' })">Sprint starten</button> }
                     @if (sprint.status === 'active') { <button class="button secondary" (click)="updateSprint(sprint.id, { status: 'completed' })">Abschließen</button> }
                     @if (sprint.status === 'completed') { <button class="button secondary" (click)="updateSprint(sprint.id, { status: 'active' })">Wieder in Bearbeitung setzen</button> }
-                    @if (sprint.status === 'completed' && (sprint.gitSync === 'failed' || sprint.gitSync === 'done')) { <button class="button secondary" (click)="retryGitSync(sprint.id)">Git-Sicherung erneut starten</button> }
                     <button class="button danger" (click)="deleteSprint(sprint.id)">Löschen</button>
                   </div>
                 </div>
+                <div class="sprint-layout">
+                <div class="sprint-main">
                 <p>{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
                 <details class="report">
                   <summary>Bearbeiten</summary>
@@ -585,6 +596,44 @@
                     </details>
                   }
                 }
+                <h4 class="order-section sprint-tasks-title">Aufgaben</h4>
+                @for (item of sprintItems(sprint.id); track item.id) {
+                  <div class="sprint-task">
+                    <button type="button" class="sprint-task-head" (click)="toggleSprintItem(item.id)" [attr.aria-expanded]="openSprintItems().has(item.id)">
+                      <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true">▾</span>
+                      <strong>{{ item.title }}</strong>
+                      <span class="status" [ngClass]="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
+                    </button>
+                    @if (openSprintItems().has(item.id)) {
+                      <div class="sprint-task-body">
+                        @if (sprintRun(item.id); as run) {
+                          <ol class="agent-steps">
+                            @for (step of run.steps; track step.position) {
+                              <li>
+                                <button type="button" class="sprint-task-head" (click)="toggleSprintItem(run.id + step.position)">
+                                  <span class="task-chevron" [class.open]="openSprintItems().has(run.id + step.position)" aria-hidden="true">▾</span>
+                                  {{ step.agentName || 'Agent' }} <span class="status" [ngClass]="statusClass(step.status)">{{ statusLabel(step.status) }}</span>
+                                </button>
+                                @if (openSprintItems().has(run.id + step.position)) { <pre class="task-body">{{ step.output || 'Keine Ausgabe.' }}</pre> }
+                              </li>
+                            } @empty { <li class="muted">Noch keine Agent-Schritte.</li> }
+                          </ol>
+                        } @else { <p class="muted">Noch kein Agent-Lauf für diese Aufgabe.</p> }
+                      </div>
+                    }
+                  </div>
+                } @empty { <p class="muted">Keine Aufgaben in diesem Sprint.</p> }
+                </div>
+              <aside class="info-block git-tree sprint-git" aria-label="Git-Verlauf">
+                <h4>Git-Verlauf</h4>
+                <ol>
+                  <li><span class="dot branch"></span>Branch <em>{{ sprint.gitBranch || 'main' }}</em></li>
+                  @for (item of sprintItems(sprint.id); track item.id) { <li><span class="dot"></span><em>{{ item.title }}</em></li> }
+                  @if (sprint.gitCommit) { <li><span class="dot commit"></span><code>{{ sprint.gitCommit }}</code> <em>{{ sprint.gitMessage }}</em></li> }
+                  @else { <li class="muted"><span class="dot"></span>Noch kein Commit</li> }
+                </ol>
+              </aside>
+                </div>
               </article>
             } @empty { <p class="empty-state">Noch keine Sprints angelegt.</p> }
           </section>

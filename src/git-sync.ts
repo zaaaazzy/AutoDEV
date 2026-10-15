@@ -34,7 +34,7 @@ export async function syncSprintToGit(
   );
   const claimed = await pool.query<PendingSprint>(
     `UPDATE sprints s SET git_sync = 'running'
-      WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'completed' AND git_sync = 'pending'
+      WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING s.id, s.name, (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
@@ -81,6 +81,7 @@ export async function syncSprintToGit(
     const tag = sprintTag(sprint.name, sprint.id);
     await must('tag', '-f', tag);
     const commit = await must('rev-parse', '--short', 'HEAD');
+    const branch = await must('rev-parse', '--abbrev-ref', 'HEAD');
     if (sprint.remote) {
       await must('push', '-u', 'origin', 'HEAD');
       await must('push', '--force', 'origin', `refs/tags/${tag}`);
@@ -89,8 +90,8 @@ export async function syncSprintToGit(
       log.push('Kein GitHub-Repository am Projekt hinterlegt – nur lokal gesichert.');
     }
     await pool.query(
-      `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_synced_at = NOW() WHERE id = $1`,
-      [sprint.id, log.join(' '), commit],
+      `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
+      [sprint.id, log.join(' '), commit, branch],
     );
     return 1;
   } catch (error) {

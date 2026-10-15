@@ -74,6 +74,7 @@ export interface Sprint {
   gitSync?: string | null;
   gitMessage?: string | null;
   gitCommit?: string | null;
+  gitBranch?: string | null;
   gitSyncedAt?: string | null;
 }
 
@@ -122,6 +123,7 @@ export interface RunStep {
 
 export interface AgentRun {
   id: string;
+  developmentId?: string | null;
   title: string;
   status: string;
   startedAt: string;
