@@ -12,6 +12,7 @@ export interface Project {
   testCommands?: string[][];
   description?: string;
   guidelines?: string;
+  autoBugfix?: boolean;
 }
 
 export interface Estimate {
@@ -62,6 +63,9 @@ export interface DevelopmentItem extends Estimate {
   completedAt?: string | null;
   risks?: string;
   retryCount?: number;
+  failure?: string | null;
+  failureBugId?: string | null;
+  fixStatus?: string | null;
   analysisStatus?: 'requested' | 'running' | 'done' | 'failed' | null;
   analysis?: string;
   projectContext?: string;

@@ -308,6 +308,18 @@
                               @if (item.status === 'blocked') {
                                 <div class="blocked-box">
                                   <strong>Blockiert</strong>
+                                  @if (item.failure) { <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article> }
+                                  @if (item.failureBugId) {
+                                    <p class="bug-link">🐞 <a href="#bugs" (click)="navigate('bugs')">Bug-Bericht ansehen</a> ·
+                                      @switch (item.fixStatus) {
+                                        @case ('planned') { Behebung ist eingeplant und startet automatisch. }
+                                        @case ('in_progress') { Behebung läuft gerade … }
+                                        @case ('blocked') { Die automatische Behebung ist gescheitert – bitte Problem analysieren. }
+                                        @case ('done') { Bug behoben, der Auftrag wird erneut gestartet. }
+                                        @default { Keine automatische Behebung (in den Einstellungen aktivierbar). }
+                                      }
+                                    </p>
+                                  }
                                   <div class="actions">
                                     <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">↻ Erneut versuchen @if (item.retryCount) { ({{ item.retryCount }}) }</button>
                                     <button class="button secondary" type="button" [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'" (click)="analyzeOrder(item)">
@@ -894,6 +906,7 @@
               <label class="wide">Projektbeschreibung<textarea name="description" [(ngModel)]="settings.description" rows="4" maxlength="10000" placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"></textarea></label>
               <label class="wide">Regeln für Agents (Do's and Don'ts)<textarea name="guidelines" [(ngModel)]="settings.guidelines" rows="6" maxlength="10000" placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"></textarea></label>
               <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
+              <label class="wide check"><input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix"> Automatisches Bugfixing: Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label>
               <label class="wide">GitHub-Repository<input name="gitRemote" [(ngModel)]="settings.gitRemote" maxlength="300" placeholder="git@github.com:user/repo.git"></label>
               <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
             </form>

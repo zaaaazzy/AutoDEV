@@ -1,7 +1,8 @@
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { materializeAttachments } from './attachments.js';
-import { type KnownBug, loadKnownBugs, reportAgentBug } from './bugs.js';
+import { type KnownBug, loadKnownBugs } from './bugs.js';
+import { backfillFailures, registerFailure, resumeBlockedByBug } from './autofix.js';
 import { startProgress } from './chat-progress.js';
 import { loadProjectContext, withProjectContext } from './project-context.js';
 import { isShuttingDown, killGroup } from './shutdown.js';
@@ -191,7 +192,7 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
     `SELECT ${columns}
        FROM development_items d
        LEFT JOIN sprints s ON s.id = d.sprint_id
-      WHERE d.project_slug = $1 AND d.status = 'planned' AND (s.status = 'active' OR d.agent_id IS NOT NULL)
+      WHERE d.project_slug = $1 AND d.status = 'planned' AND (s.status = 'active' OR d.agent_id IS NOT NULL OR d.auto_run)
       ORDER BY CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
       LIMIT $2`,
     [options.project, options.limit],
@@ -264,22 +265,6 @@ async function afterStep(
   } else if (agent.role === 'developer' && item.bugId) {
     await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [item.bugId, output.trim().slice(-1500)]);
   }
-}
-
-async function recordFailure(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
-  const detail = output.trim().slice(-1500);
-  if (item.bugId) {
-    await pool.query(
-      'UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1',
-      [item.bugId, `Letzter Behebungsversuch scheiterte bei „${agent.name}“: ${detail}`],
-    );
-    return;
-  }
-  await reportAgentBug(pool, {
-    projectSlug: item.projectSlug,
-    title: `Agent „${agent.name}“ scheiterte bei „${item.title}“`,
-    description: detail,
-  });
 }
 
 export async function runWorkItem(
@@ -407,7 +392,7 @@ export async function runWorkItem(
       if (!stepPassed) {
         passed = false;
         await postStepToChat(pool, item, agent.name, output, false).catch(() => undefined);
-        if (!cancelled) await recordFailure(pool, item, agent, output).catch((error) => console.error('Bug report failed:', error));
+        if (!cancelled) await registerFailure(pool, item, agent.name, output).catch((error) => console.error('Bug report failed:', error));
         break;
       }
       await postStepToChat(pool, item, agent.name, output).catch(() => undefined);
@@ -432,6 +417,7 @@ export async function runWorkItem(
       await pool.query(`UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
         [item.id, passed ? 'done' : 'blocked']);
     }
+    if (passed && item.bugId && !item.agentId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
   }
   return passed ? 'passed' : 'failed';
 }
@@ -459,6 +445,7 @@ export async function runWorkflow(
     `UPDATE development_items SET status = 'planned', updated_at = NOW()
       WHERE project_slug = $1 AND status = 'backlog' AND sprint_id IN (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active')`,
     [options.project]);
+  await backfillFailures(pool, options.project).catch((error) => console.error('Fehler-Nachtrag fehlgeschlagen:', error));
   const items = await selectItems(pool, options);
   const results: { itemId: string; result: string }[] = [];
   if (!items.length) {

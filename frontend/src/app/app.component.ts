@@ -229,7 +229,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly activeSprint = computed(() => this.data().sprints.find((sprint) => sprint.status === 'active') ?? null);
 
   projectForm = { name: '', slug: '', repository: '', gitRemote: '' };
-  settings = { repository: '', testCommands: '', gitRemote: '', description: '', guidelines: '' };
+  settings = { repository: '', testCommands: '', gitRemote: '', description: '', guidelines: '', autoBugfix: true };
   developmentForm: { title: string; priority: Priority } = { title: '', priority: 'medium' };
   pendingImages: File[] = [];
   ideaForm = { title: '', description: '', priority: 'medium' as Priority };
@@ -337,6 +337,7 @@ export class AppComponent implements OnInit, OnDestroy {
       gitRemote: project?.gitRemote ?? '',
       description: project?.description ?? '',
       guidelines: project?.guidelines ?? '',
+      autoBugfix: project?.autoBugfix ?? true,
       testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
     };
     if (!slug) {
@@ -425,6 +426,7 @@ export class AppComponent implements OnInit, OnDestroy {
         testCommands: this.settings.testCommands,
         description: this.settings.description,
         guidelines: this.settings.guidelines,
+        autoBugfix: this.settings.autoBugfix,
       });
       this.projects.update((projects) => projects.map((project) => project.slug === slug
         ? { ...project, ...result.project }

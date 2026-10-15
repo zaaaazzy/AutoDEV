@@ -49,15 +49,20 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
 export async function reportAgentBug(
   pool: Pool,
   bug: { projectSlug: string; title: string; description: string; sprintId?: string | null },
-): Promise<void> {
-  await pool.query(
+): Promise<string> {
+  const title = bug.title.slice(0, 180);
+  const created = await pool.query<{ id: string }>(
     `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id)
      SELECT $1, $2, $3, 'high', 'agent', NULL
       WHERE NOT EXISTS (
         SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('open', 'in_progress')
-      )`,
-    [bug.projectSlug, bug.title.slice(0, 180), bug.description.slice(0, 10_000)],
+      ) RETURNING id`,
+    [bug.projectSlug, title, bug.description.slice(0, 10_000)],
   );
+  if (created.rows[0]) return created.rows[0].id;
+  return (await pool.query<{ id: string }>(
+    `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('open', 'in_progress') ORDER BY created_at LIMIT 1`,
+    [bug.projectSlug, title])).rows[0]!.id;
 }
 
 export interface KnownBug {

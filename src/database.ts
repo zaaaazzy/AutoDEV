@@ -9,6 +9,7 @@ const SCHEMA = `
     repository TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS auto_bugfix BOOLEAN NOT NULL DEFAULT TRUE;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS agents_seeded BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_remote TEXT;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_commands JSONB;
@@ -243,6 +244,10 @@ const SCHEMA = `
     ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'feature' CHECK (kind IN ('feature', 'bug')),
     ADD COLUMN IF NOT EXISTS bug_id UUID REFERENCES bugs(id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+  ALTER TABLE development_items
+    ADD COLUMN IF NOT EXISTS failure TEXT,
+    ADD COLUMN IF NOT EXISTS failure_bug_id UUID REFERENCES bugs(id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS auto_run BOOLEAN NOT NULL DEFAULT FALSE;
   CREATE UNIQUE INDEX IF NOT EXISTS development_items_bug_idx ON development_items (bug_id) WHERE bug_id IS NOT NULL;
   UPDATE development_items SET completed_at = updated_at WHERE status = 'done' AND completed_at IS NULL;
 

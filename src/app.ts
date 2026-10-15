@@ -75,7 +75,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
 
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines, created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix", created_at AS "createdAt"
          FROM projects
         ORDER BY name`,
     );
@@ -129,11 +129,16 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       values.push(body[key].trim());
       sets.push(`${key} = $${values.length}`);
     }
+    if (body.autoBugfix !== undefined) {
+      if (typeof body.autoBugfix !== 'boolean') return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
+      values.push(body.autoBugfix);
+      sets.push(`auto_bugfix = $${values.length}`);
+    }
     if (!sets.length) {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix"`,
       values,
     );
     if (!result.rows[0]) {
@@ -203,7 +208,9 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     title, description, status, priority, created_at AS "createdAt",
     effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
     kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
-    retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis`;
+    retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
+    failure, failure_bug_id AS "failureBugId",
+    (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id) AS "fixStatus"`;
   const IDEA_FIELDS = {
     title: { column: 'title', parse: parseTitle(180) },
     description: { column: 'description', parse: parseLongText },
@@ -392,7 +399,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       return;
     }
     const result = await pool.query(
-      `UPDATE development_items d SET status = 'planned', retry_count = retry_count + 1, analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
+      `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, retry_count = retry_count + 1, analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
               updated_at = NOW()
         WHERE d.id = $1 AND d.status = 'blocked' RETURNING ${DEV_COLUMNS}`,

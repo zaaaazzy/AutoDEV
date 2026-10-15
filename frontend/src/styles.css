@@ -408,3 +408,7 @@ h3 .link-button { color: var(--ink); }
 .live-progress { display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 7px 12px; border-radius: 8px; background: #eef6f0; color: #2a6b45; font-size: 13.5px; }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: #328455; animation: live-pulse 1.2s ease-in-out infinite; }
 @keyframes live-pulse { 50% { opacity: .25; } }
+.failure-text { margin: 8px 0; padding: 8px 12px; background: #fff; border-radius: 8px; max-height: 260px; overflow-y: auto; }
+.bug-link { margin: 6px 0; font-size: 13.5px; }
+.check { flex-direction: row; align-items: center; gap: 8px; }
+.check input { width: auto; }
