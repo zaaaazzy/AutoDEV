@@ -337,6 +337,13 @@ export async function runWorkItem(
       const prompt = withProjectContext(projectContext, buildPrompt(agent, item, done, { bugs, manual, images }));
       const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
       let result: CommandResult;
+      let lastLiveWrite = 0;
+      const onOutput = (partial: string): void => {
+        if (Date.now() - lastLiveWrite < 1500) return;
+        lastLiveWrite = Date.now();
+        void pool.query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3',
+          [stepRow.rows[0]?.id, redactOutput(partial, process.env), 'running']).catch(() => undefined);
+      };
       const stopProgress = item.fromChat
         ? await startProgress(pool, item.projectSlug, [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
           { developmentId: item.id, agentName: agent.name })
@@ -345,13 +352,14 @@ export async function runWorkItem(
         if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
           // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.
           const written = await execute(buildInvocation(fallbackCommand, `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`),
-            options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment() }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
+            options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
           const run = await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs });
           result = { ...run, durationMs: run.durationMs + written.durationMs, output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}` };
         } else result = command
           ? await execute(buildInvocation(command, prompt), options.cwd, {
             timeoutMs: options.timeoutMs,
             env: agentEnvironment(),
+            onOutput,
             onSpawn: (pid) => void pool.query(
               `UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1`, [stepRow.rows[0]?.id, pid],
             ).catch(() => undefined),

@@ -629,7 +629,10 @@
                                   <span class="task-chevron" [class.open]="openSprintItems().has(run.id + step.position)" aria-hidden="true">▾</span>
                                   {{ step.agentName || 'Agent' }} <span class="status" [ngClass]="statusClass(step.status)">{{ statusLabel(step.status) }}</span>
                                 </button>
-                                @if (openSprintItems().has(run.id + step.position)) { <pre class="task-body">{{ step.output || 'Keine Ausgabe.' }}</pre> }
+                                @if (openSprintItems().has(run.id + step.position) || step.status === 'running') { 
+                                  @if (step.output) { <article class="markdown task-body" [innerHTML]="step.output | markdown"></article> }
+                                  @else { <p class="muted task-body">{{ step.status === 'running' ? 'Agent arbeitet … Ausgabe erscheint live.' : 'Keine Ausgabe.' }}</p> }
+                                }
                               </li>
                             } @empty { <li class="muted">Noch keine Agent-Schritte.</li> }
                           </ol>

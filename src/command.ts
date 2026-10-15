@@ -12,7 +12,7 @@ export interface CommandResult {
 export type CommandExecutor = (
   command: string[],
   cwd: string,
-  options?: { timeoutMs?: number; env?: NodeJS.ProcessEnv; onSpawn?: (pid: number) => void },
+  options?: { timeoutMs?: number; env?: NodeJS.ProcessEnv; onSpawn?: (pid: number) => void; onOutput?: (output: string) => void },
 ) => Promise<CommandResult>;
 
 export function redactOutput(output: string, environment: NodeJS.ProcessEnv): string {
@@ -45,6 +45,7 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     const appendOutput = (chunk: Buffer): void => {
       if (output.length < MAX_CAPTURED_OUTPUT + 1_000) {
         output += chunk.toString('utf8').slice(0, MAX_CAPTURED_OUTPUT + 1_000 - output.length);
+        options.onOutput?.(output);
       }
     };
     child.stdout.on('data', appendOutput);

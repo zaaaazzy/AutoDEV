@@ -60,6 +60,7 @@ export class AppComponent implements OnInit, OnDestroy {
   private readonly api: ApiService;
   private requestVersion = 0;
   private refreshTimer = 0;
+  private liveTimer = 0;
 
   constructor(api: ApiService) {
     this.api = api;
@@ -241,11 +242,22 @@ export class AppComponent implements OnInit, OnDestroy {
     void this.loadProjects();
     this.refreshTimer = globalThis.setInterval(() => void this.refreshWorker(), 10_000);
     void this.refreshAgentStatus(true);
+    this.liveTimer = globalThis.setInterval(() => void this.refreshLiveRuns(), 3_000);
+  }
+
+  private async refreshLiveRuns(): Promise<void> {
+    const slug = this.activeProject();
+    if (!slug || !this.data().agentRuns.some((run) => run.steps.some((step) => step.status === 'running'))) return;
+    try {
+      const { runs } = await this.api.get<{ runs?: ProjectData['agentRuns'] }>(`${this.api.projectPath(slug)}/agent-runs`);
+      if (slug === this.activeProject()) this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));
+    } catch { /* nächster Versuch in 3 s */ }
   }
 
   ngOnDestroy(): void {
     this.chatStream?.close();
     globalThis.clearInterval(this.refreshTimer);
+    globalThis.clearInterval(this.liveTimer);
   }
 
   @HostListener('document:click', ['$event'])
