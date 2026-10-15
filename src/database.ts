@@ -12,6 +12,8 @@ const SCHEMA = `
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS agents_seeded BOOLEAN NOT NULL DEFAULT FALSE;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS git_remote TEXT;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS test_commands JSONB;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS guidelines TEXT NOT NULL DEFAULT '';
   ALTER TABLE sprints
     ADD COLUMN IF NOT EXISTS git_sync TEXT CHECK (git_sync IN ('pending', 'running', 'done', 'failed')),
     ADD COLUMN IF NOT EXISTS git_message TEXT,
@@ -108,14 +110,21 @@ const SCHEMA = `
   );
   ALTER TABLE agents ADD COLUMN IF NOT EXISTS command TEXT[];
 
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS worker_heartbeats (
     project_slug TEXT PRIMARY KEY,
     last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     pid INTEGER,
     interval_seconds INTEGER NOT NULL DEFAULT 30,
-    last_error TEXT
+    last_error TEXT,
+    cpu_percent REAL
   );
+  ALTER TABLE worker_heartbeats ADD COLUMN IF NOT EXISTS cpu_percent REAL;
 
   CREATE TABLE IF NOT EXISTS agent_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -166,6 +175,34 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS test_runs_project_started_idx
     ON test_runs (project_slug, started_at DESC);
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'done' CHECK (status IN ('pending', 'processing', 'done', 'failed')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+  );
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS development_id UUID REFERENCES development_items(id) ON DELETE SET NULL;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS agent_name TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS from_chat BOOLEAN NOT NULL DEFAULT FALSE;
+  CREATE INDEX IF NOT EXISTS chat_messages_project_idx ON chat_messages (project_slug, created_at);
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS pid INTEGER;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS pid_started_at TIMESTAMPTZ;
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS estimated_at TIMESTAMPTZ DEFAULT NOW();
+  ALTER TABLE ideation_items ALTER COLUMN estimated_at DROP DEFAULT;
+  CREATE TABLE IF NOT EXISTS ideation_comments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ideation_id UUID NOT NULL REFERENCES ideation_items(id) ON DELETE CASCADE,
+    author TEXT NOT NULL,
+    body TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS ideation_comments_idea_idx ON ideation_comments (ideation_id, created_at);
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS return_status TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES agents(id) ON DELETE SET NULL;
+
   CREATE INDEX IF NOT EXISTS ideation_items_project_status_idx
     ON ideation_items (project_slug, status, created_at DESC);
   CREATE INDEX IF NOT EXISTS development_items_project_status_idx
@@ -243,6 +280,17 @@ const SCHEMA = `
     notes TEXT NOT NULL DEFAULT '',
     generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  CREATE TABLE IF NOT EXISTS ideation_attachments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ideation_id UUID NOT NULL REFERENCES ideation_items(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    mime TEXT NOT NULL CHECK (mime IN ('image/png', 'image/jpeg', 'image/webp', 'image/gif')),
+    size INTEGER NOT NULL CHECK (size BETWEEN 1 AND 5242880),
+    data BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS ideation_attachments_idea_idx ON ideation_attachments (ideation_id);
 
   CREATE TABLE IF NOT EXISTS docs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

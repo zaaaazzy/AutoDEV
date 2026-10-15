@@ -1,12 +1,20 @@
 # Dev Log
 
-Eigenständiges Projekt: Sprints, Ideen, Aufträge, Bugs, Dokumentation, Statistik und automatisch arbeitende Agents. Unabhängig von Frontend und Backend der Anwendungen, die es betreut (z. B. Mainty).
+Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Sprints, Ideen, Aufträge, Bugs, Dokumentation, Statistik und automatisch arbeitende Agents. Unabhängig von den Anwendungen, die es betreut (z. B. Mainty).
 
 ## Starten
 
 1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche `http://localhost:3101` (Datenbank `127.0.0.1:5433`, eigenes Volume).
 2. Worker (arbeitet alle Projekte automatisch ab, Autostart per launchd): `./scripts/install-worker.sh`. Log: `~/Library/Logs/dev-log-worker.log`. Ohne Autostart: `npm run worker`.
 3. Lokales Modell: Ollama (`DEV_LOG_OLLAMA_MODEL`, Standard `qwen3.5:9b`).
+
+## Entwicklung
+
+- Node.js 22.12 oder neuer (Projektversion: `.nvmrc`, Docker: `22.22.3`).
+- `npm run dev` startet die API auf Port 3100.
+- `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` an die API weiter.
+- `npm run build` baut die Angular-Oberfläche und kompiliert anschließend das Backend.
+- `npm test` baut die Oberfläche und führt die Backend-Tests aus.
 
 ## Projekt anlegen
 

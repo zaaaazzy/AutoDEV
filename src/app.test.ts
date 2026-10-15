@@ -39,7 +39,7 @@ test('protects the Dev Log UI and API with HTTP basic authentication', async () 
   });
 });
 
-test('serves the standalone ideation and development interface', async () => {
+test('serves the Angular application shell', async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/`, {
@@ -47,9 +47,9 @@ test('serves the standalone ideation and development interface', async () => {
     });
     const html = await response.text();
     assert.equal(response.status, 200);
-    assert.match(html, /Ideationboard/);
-    assert.match(html, /Entwicklung/);
-    assert.match(html, /id="project-select"/);
+    assert.match(html, /<app-root><\/app-root>/);
+    assert.match(html, /<base href="\.\/">/);
+    assert.match(html, /main-[\w-]+\.js/);
   });
 });
 
@@ -132,25 +132,39 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
   });
 });
 
-test('promotes an idea to a development order inside a sprint and rejects duplicates', async () => {
+test('promotes an idea to a backlog order and rejects duplicates', async () => {
   const { pool, queries } = recordingPool([{ id: 'order' }]);
   await withServer(pool, async (baseUrl) => {
     const promoted = await fetch(`${baseUrl}/api/ideation/${ID}/promote`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ sprintId: SPRINT_ID }),
+      method: 'POST', headers: jsonHeaders(),
     });
     assert.equal(promoted.status, 201);
-    assert.deepEqual(queries[0]?.values, [ID, SPRINT_ID]);
+    assert.deepEqual(queries[0]?.values, [ID]);
     assert.match(queries[1]?.sql ?? '', /status = 'accepted'/);
 
-    const invalid = await fetch(`${baseUrl}/api/ideation/${ID}/promote`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ sprintId: 'nope' }),
-    });
+    const invalid = await fetch(`${baseUrl}/api/ideation/nope/promote`, { method: 'POST', headers: jsonHeaders() });
     assert.equal(invalid.status, 400);
   });
   const empty = recordingPool([]);
   await withServer(empty.pool, async (baseUrl) => {
     const conflict = await fetch(`${baseUrl}/api/ideation/${ID}/promote`, { method: 'POST', headers: jsonHeaders() });
     assert.equal(conflict.status, 409);
+  });
+});
+
+test('stores image attachments for ideas and rejects other file types', async () => {
+  const { pool, queries } = recordingPool([{ id: ID, filename: 'shot.png' }]);
+  await withServer(pool, async (baseUrl) => {
+    const stored = await fetch(`${baseUrl}/api/ideation/${ID}/attachments?name=${encodeURIComponent('../shot.png')}`, {
+      method: 'POST', headers: { ...jsonHeaders(), 'Content-Type': 'image/png' }, body: new Uint8Array([137, 80, 78, 71]),
+    });
+    assert.equal(stored.status, 201);
+    assert.deepEqual(queries[0]?.values.slice(0, 4), [ID, 'shot.png', 'image/png', 4]);
+
+    const svg = await fetch(`${baseUrl}/api/ideation/${ID}/attachments`, {
+      method: 'POST', headers: { ...jsonHeaders(), 'Content-Type': 'image/svg+xml' }, body: '<svg/>',
+    });
+    assert.equal(svg.status, 415);
   });
 });
 
@@ -232,13 +246,15 @@ test('defines agents per workflow phase and persists their order', async () => {
   });
 });
 
-test('serves sprint and agent views in the interface', async () => {
+test('serves the Angular bundle from the application shell', async () => {
   await withServer(recordingPool().pool, async (baseUrl) => {
     const html = await (await fetch(`${baseUrl}/`, { headers: { Authorization: basicAuth() } })).text();
-    assert.match(html, /data-section="sprints"/);
-    assert.match(html, /data-section="agents"/);
-    assert.match(html, /Pre Task/);
-    assert.match(html, /name="benefit"/);
+    assert.match(html, /<app-root><\/app-root>/);
+    const scriptPath = html.match(/src="([^"]*main-[^"]+\.js)"/)?.[1];
+    assert.ok(scriptPath);
+    const script = await fetch(new URL(scriptPath, baseUrl), { headers: { Authorization: basicAuth() } });
+    assert.equal(script.status, 200);
+    assert.match(script.headers.get('content-type') ?? '', /javascript/);
   });
 });
 
@@ -270,5 +286,25 @@ test('stores an agent command as an argument array and rejects strings', async (
       method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify({ command: 'rm -rf /' }),
     });
     assert.equal(invalid.status, 400);
+  });
+});
+
+test('stores the number of concurrent agents within its limits', async () => {
+  const stored: string[] = [];
+  const pool = {
+    query: async (sql: string, values?: string[]) => {
+      if (/INSERT INTO app_settings/.test(sql)) stored.push(values![0]!);
+      return { rows: stored.length ? [{ value: stored.at(-1) }] : [] };
+    },
+  } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const headers = { Authorization: basicAuth(), 'Content-Type': 'application/json' };
+    const defaults = await fetch(`${baseUrl}/api/settings`, { headers });
+    assert.equal((await defaults.json() as { maxConcurrentAgents: number }).maxConcurrentAgents, 2);
+    const invalid = await fetch(`${baseUrl}/api/settings`, { method: 'PUT', headers, body: JSON.stringify({ maxConcurrentAgents: 9 }) });
+    assert.equal(invalid.status, 400);
+    const saved = await fetch(`${baseUrl}/api/settings`, { method: 'PUT', headers, body: JSON.stringify({ maxConcurrentAgents: 3 }) });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(stored, ['3']);
   });
 });

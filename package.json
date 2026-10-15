@@ -4,10 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "npm run build:ui && tsc -p tsconfig.json",
+    "build:ui": "ng build --configuration production",
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "dev:ui": "ng serve --proxy-config frontend/proxy.conf.json",
+    "test": "npm run build:ui && tsx --test \"src/**/*.test.ts\"",
     "test-agent": "tsx src/test-agent.ts",
     "runner": "tsx src/runner-cli.ts",
     "worker": "tsx src/runner-cli.ts --all --watch"
@@ -17,10 +19,20 @@
     "pg": "^8.16.3"
   },
   "devDependencies": {
+    "@angular-devkit/build-angular": "^20.3.40",
+    "@angular/cli": "^20.3.40",
+    "@angular/common": "^20.3.34",
+    "@angular/compiler": "^20.3.34",
+    "@angular/compiler-cli": "^20.3.34",
+    "@angular/core": "^20.3.34",
+    "@angular/forms": "^20.3.34",
+    "@angular/platform-browser": "^20.3.34",
     "@types/express": "^5.0.3",
     "@types/node": "^22.15.30",
     "@types/pg": "^8.15.5",
+    "rxjs": "^7.8.2",
     "tsx": "^4.20.6",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "zone.js": "^0.15.1"
   }
 }

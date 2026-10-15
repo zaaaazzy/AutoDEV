@@ -72,6 +72,13 @@ test('agent loop executes tool calls and returns the final answer with changed f
   assert.equal((bodies[1] as { messages: { role: string }[] }).messages.at(-1)?.role, 'tool');
 });
 
+test('accepts a developer answer that proves the order is already implemented', async () => {
+  const cwd = await project();
+  const done = scriptedFetch([{ role: 'assistant', content: 'KEINE ÄNDERUNG NÖTIG: src/a.ts erfüllt alle Kriterien.' }]);
+  const result = await runOllamaAgent({ prompt: 'x', role: 'developer', cwd, timeoutMs: 5000, fetchImpl: done.fetchImpl });
+  assert.equal(result.exitCode, 0);
+});
+
 test('fails honestly: no changes by developer, unreachable model, empty answer', async () => {
   const cwd = await project();
   const idle = scriptedFetch([{ role: 'assistant', content: 'Fertig.' }]);

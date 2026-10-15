@@ -2,8 +2,10 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
+import { processChat } from './chat.js';
+import { beginShutdown, killOrphan } from './shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from './database.js';
-import { beatHeartbeat } from './worker.js';
+import { beatHeartbeat, readMaxAgents } from './worker.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -50,12 +52,31 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
   });
 }
 
+// Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
+async function recoverInterruptedRuns(pool: Pool): Promise<void> {
+  const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
+    `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`);
+  for (const orphan of orphans.rows) {
+    if (killOrphan(orphan.pid, orphan.spawnedAt)) console.info(`Verwaisten Agent-Prozess ${orphan.pid} beendet.`);
+  }
+  const requeued = await pool.query(
+    `UPDATE development_items SET status = 'planned', updated_at = NOW()
+      WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`);
+  await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
+  await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
+  await pool.query(`UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`);
+  await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
+  if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
+}
+
 async function main(): Promise<void> {
   const options = parseRunnerOptions(process.argv.slice(2));
   const pool = await connect(options.watch);
   let stopping = false;
   const stop = (): void => {
+    if (stopping) process.exit(1);
     stopping = true;
+    beginShutdown();
   };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
@@ -73,6 +94,7 @@ async function main(): Promise<void> {
       process.exitCode = failed ? 1 : 0;
       return;
     }
+    await recoverInterruptedRuns(pool);
     const intervalSeconds = Math.round(options.intervalMs / 1000);
     console.info(`Worker gestartet (${options.all ? 'alle Projekte' : options.project}, Intervall ${intervalSeconds} s).`);
     const errors = new Map<string, string | null>();
@@ -85,25 +107,54 @@ async function main(): Promise<void> {
       if (known.length) startup = false;
     };
     const heartbeat = setInterval(beat, 15_000);
+    // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
+    let chatTargets: Target[] = [];
+    const chatActive = new Set<string>();
+    const chatTimer = setInterval(() => {
+      for (const target of chatTargets) {
+        const slug = target.options.project;
+        if (target.problem || chatActive.has(slug) || stopping) continue;
+        chatActive.add(slug);
+        void processChat(pool, target.options)
+          .catch((error: unknown) => console.error(`[${slug}] Chat fehlgeschlagen:`, error instanceof Error ? error.message : error))
+          .finally(() => chatActive.delete(slug));
+      }
+    }, 1500);
+    // Each project runs in its own task; at most "maxConcurrentAgents" tasks run at the same time.
+    const active = new Map<string, Promise<void>>();
+    const lastStart = new Map<string, number>();
+    const runTarget = async (target: Target): Promise<void> => {
+      const slug = target.options.project;
+      try {
+        await runOnce(pool, target.options);
+        errors.set(slug, null);
+      } catch (error) {
+        errors.set(slug, error instanceof Error ? error.message : String(error));
+        console.error(`[${slug}] Runner-Zyklus fehlgeschlagen:`, errors.get(slug));
+      }
+    };
     try {
       while (!stopping) {
         try {
           const targets = await resolveTargets(pool, options);
           known = targets.map((target) => target.options.project);
+          chatTargets = targets;
           beat();
+          const limit = await readMaxAgents(pool);
+          // The project that waited longest goes first, so no project starves when slots are scarce.
+          targets.sort((a, b) => (lastStart.get(a.options.project) ?? 0) - (lastStart.get(b.options.project) ?? 0));
           for (const target of targets) {
             const slug = target.options.project;
             if (target.problem) {
               errors.set(slug, target.problem);
               continue;
             }
-            try {
-              await runOnce(pool, target.options);
-              errors.set(slug, null);
-            } catch (error) {
-              errors.set(slug, error instanceof Error ? error.message : String(error));
-              console.error(`[${slug}] Runner-Zyklus fehlgeschlagen:`, errors.get(slug));
+            if (active.has(slug) || active.size >= limit) {
+              continue;
             }
+            lastStart.set(slug, Date.now());
+            const task = runTarget(target).finally(() => active.delete(slug));
+            active.set(slug, task);
           }
         } catch (error) {
           console.error('Worker-Zyklus fehlgeschlagen:', error instanceof Error ? error.message : error);
@@ -113,8 +164,11 @@ async function main(): Promise<void> {
           await sleep(1000);
         }
       }
+      await Promise.all(active.values());
+      while (chatActive.size) await sleep(200);
     } finally {
       clearInterval(heartbeat);
+      clearInterval(chatTimer);
     }
   } finally {
     await pool.end();

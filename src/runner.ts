@@ -1,9 +1,13 @@
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
+import { materializeAttachments } from './attachments.js';
 import { type KnownBug, loadKnownBugs, reportAgentBug } from './bugs.js';
+import { loadProjectContext, withProjectContext } from './project-context.js';
+import { isShuttingDown } from './shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 import { readManual, saveOrderDoc, syncRepoDocs, upsertDoc } from './docs.js';
 import { syncSprintToGit } from './git-sync.js';
+import { estimateIdeas } from './estimation.js';
 import { draftRequirements } from './requirements.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { generateSprintReport } from './reports.js';
@@ -25,11 +29,13 @@ export interface WorkItem {
   bugId?: string | null;
   sprintId?: string | null;
   ideationId?: string | null;
+  agentId?: string | null;
 }
 
 export interface PromptExtras {
   bugs?: KnownBug[];
   manual?: string;
+  images?: string[];
 }
 
 /** Runs an agent that has no command of its own (built-in tester or local model). */
@@ -131,6 +137,9 @@ export function buildPrompt(
     `Du bist der Agent "${agent.name}" (Rolle: ${agent.role}) in der Phase ${agent.phase}.`,
     `## Anweisung\n${agent.instructions || 'Keine zusätzliche Anweisung.'}`,
     `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
+    extras.images?.length
+      ? `## Angehängte Bilder (Referenzen aus dem Ideationboard, relativ zum Projektordner)\n${extras.images.map((path) => `- ${path}`).join('\n')}`
+      : '',
     bugs.length
       ? `## Bekannte Bugs – offene und behobene. Wiederhole diese Fehler nicht.\n${bugs.join('\n')}`
       : '',
@@ -163,9 +172,9 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
   return result.rows;
 }
 
-/** Items of the active sprint that are planned, most important first. */
+/** Planned items of the active sprint or assigned directly to an agent, most important first. */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d WHERE d.id = $1 AND d.project_slug = $2`,
@@ -176,8 +185,8 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
   const result = await pool.query<WorkItem>(
     `SELECT ${columns}
        FROM development_items d
-       JOIN sprints s ON s.id = d.sprint_id AND s.status = 'active'
-      WHERE d.project_slug = $1 AND d.status = 'planned'
+       LEFT JOIN sprints s ON s.id = d.sprint_id
+      WHERE d.project_slug = $1 AND d.status = 'planned' AND (s.status = 'active' OR d.agent_id IS NOT NULL)
       ORDER BY CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
       LIMIT $2`,
     [options.project, options.limit],
@@ -295,14 +304,18 @@ export async function runWorkItem(
 
   const done: StepSummary[] = [];
   let passed = true;
+  let interrupted = false;
   const ordered = agents
-    .filter((agent) => !(agent.role === 'author' && item.ideationId))
+    .filter((agent) => item.agentId ? agent.id === item.agentId : !(agent.role === 'author' && item.ideationId))
     .sort((left, right) =>
       PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never)
       || left.position - right.position);
   try {
+    if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
     const bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
+    const images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(() => []);
     const fallbackCommand = defaultAgentCommand();
+    const projectContext = await loadProjectContext(pool, item.projectSlug);
     for (const [position, agent] of ordered.entries()) {
       const step = { agentName: agent.name, phase: agent.phase };
       console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
@@ -313,17 +326,32 @@ export async function runWorkItem(
       );
       const manual = agent.role === 'manual_writer'
         ? await readManual(pool, item.projectSlug, MANUAL_TITLE).catch(() => '') : undefined;
-      const prompt = buildPrompt(agent, item, done, { bugs, manual });
+      const prompt = withProjectContext(projectContext, buildPrompt(agent, item, done, { bugs, manual, images }));
       const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
       let result: CommandResult;
       try {
         result = command
-          ? await execute(buildInvocation(command, prompt), options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment() })
+          ? await execute(buildInvocation(command, prompt), options.cwd, {
+            timeoutMs: options.timeoutMs,
+            env: agentEnvironment(),
+            onSpawn: (pid) => void pool.query(
+              `UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1`, [stepRow.rows[0]?.id, pid],
+            ).catch(() => undefined),
+          })
           : await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs });
       } catch (error) {
         result = { exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) };
       }
       const output = redactOutput(result.output, process.env);
+      if (isShuttingDown()) {
+        interrupted = true;
+        passed = false;
+        await pool.query(
+          `UPDATE agent_run_steps SET status = 'failed', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
+          [stepRow.rows[0]?.id, result.exitCode, result.durationMs, `${output}\nUnterbrochen: Der Worker wurde beendet.`],
+        );
+        break;
+      }
       const stepPassed = result.exitCode === 0;
       await pool.query(
         `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
@@ -332,9 +360,11 @@ export async function runWorkItem(
       done.push({ ...step, status: stepPassed ? 'passed' : 'failed', output });
       if (!stepPassed) {
         passed = false;
+        await postStepToChat(pool, item, agent.name, output, false).catch(() => undefined);
         await recordFailure(pool, item, agent, output).catch((error) => console.error('Bug report failed:', error));
         break;
       }
+      await postStepToChat(pool, item, agent.name, output).catch(() => undefined);
       await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
     }
   } catch (error) {
@@ -343,26 +373,30 @@ export async function runWorkItem(
   } finally {
     await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`,
       [runId, passed ? 'passed' : 'failed']);
-    await pool.query(`UPDATE development_items SET status = $2, updated_at = NOW() WHERE id = $1`,
-      [item.id, passed ? 'done' : 'blocked']);
+    // Unterbrochene Aufträge gehen zurück auf „Geplant“ (Agent-Zuweisung bleibt), damit sie beim Neustart weiterlaufen.
+    if (interrupted) {
+      await pool.query(`UPDATE development_items SET status = 'planned', updated_at = NOW() WHERE id = $1`, [item.id]);
+    } else if (item.agentId) {
+      // Einzelner Agent (Play): stellt den früheren Status wieder her; ein blockierter Auftrag läuft nach Erfolg regulär weiter.
+      await pool.query(
+        `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
+                status = CASE WHEN NOT $2 THEN 'blocked' WHEN return_status IS NULL OR return_status = 'blocked' THEN 'planned' ELSE return_status END
+          WHERE id = $1`, [item.id, passed]);
+    } else {
+      await pool.query(`UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
+        [item.id, passed ? 'done' : 'blocked']);
+    }
   }
   return passed ? 'passed' : 'failed';
 }
 
-/** Completes a finished sprint with its documentation. Sprints are only ever started manually. */
-export async function advanceSprints(pool: Pool, projectSlug: string): Promise<void> {
-  const completed = await pool.query<{ id: string }>(
-    `UPDATE sprints s SET status = 'completed', updated_at = NOW()
-      WHERE s.project_slug = $1 AND s.status = 'active'
-        AND EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id)
-        AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status <> 'done')
-      RETURNING s.id`,
-    [projectSlug],
-  );
-  for (const sprint of completed.rows) {
-    await generateSprintReport(pool, sprint.id);
-    console.info(`Sprint ${sprint.id} abgeschlossen und dokumentiert.`);
-  }
+/** Gibt bei Aufträgen aus dem Chat die Antwort jedes Agents im Chat wieder. */
+async function postStepToChat(pool: Pool, item: WorkItem, agentName: string, output: string, ok = true): Promise<void> {
+  const text = output.trim().length > 3000 ? `${output.trim().slice(0, 3000)} …` : output.trim();
+  await pool.query(
+    `INSERT INTO chat_messages (project_slug, role, content, development_id, agent_name, status)
+     SELECT project_slug, 'assistant', $2, id, $3, $4 FROM development_items WHERE id = $1 AND from_chat`,
+    [item.id, text || (ok ? 'Fertig (keine Ausgabe).' : 'Fehlgeschlagen.'), agentName, ok ? 'done' : 'failed']);
 }
 
 export async function runWorkflow(
@@ -371,9 +405,14 @@ export async function runWorkflow(
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
-  await advanceSprints(pool, options.project);
+  await estimateIdeas(pool, options, execute);
   await draftRequirements(pool, options, execute);
   await syncSprintToGit(pool, options.project, options.cwd, execute);
+  // Aufträge im aktiven Sprint laufen automatisch, auch wenn sie noch im Backlog-Status stehen.
+  await pool.query(
+    `UPDATE development_items SET status = 'planned', updated_at = NOW()
+      WHERE project_slug = $1 AND status = 'backlog' AND sprint_id IN (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active')`,
+    [options.project]);
   const items = await selectItems(pool, options);
   const results: { itemId: string; result: string }[] = [];
   if (!items.length) {
@@ -393,7 +432,6 @@ export async function runWorkflow(
   if (active.rows[0]) {
     await generateSprintReport(pool, active.rows[0].id);
   }
-  await advanceSprints(pool, options.project);
   await syncSprintToGit(pool, options.project, options.cwd, execute);
   return results;
 }

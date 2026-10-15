@@ -1,10 +1,11 @@
 import { timingSafeEqual } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express, { type Express, type RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents, registerAgentRoutes } from './agents.js';
+import { registerAttachmentRoutes } from './attachments.js';
 import { registerBugRoutes } from './bugs.js';
+import { registerChatRoutes } from './chat-routes.js';
 import { registerDocRoutes } from './docs.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
@@ -16,8 +17,9 @@ import {
   parseNullableUuid, parseOption, parseProjectSlug, parseTitle, validStatus, validText,
 } from './validation.js';
 
-const PUBLIC_DIRECTORY = join(import.meta.dirname, '..', 'public');
-const IDEATION_STATUSES = new Set(['idea', 'considering', 'requested', 'drafting', 'accepted', 'rejected']);
+const UI_DIRECTORY = join(import.meta.dirname, '..', 'dist', 'ui', 'browser');
+// Manuell setzbar; „requested“, „drafting“ und „accepted“ ergeben sich aus dem Ablauf („Auftrag erstellen“).
+const IDEATION_STATUSES = new Set(['idea', 'considering']);
 const DEVELOPMENT_STATUSES = new Set(['backlog', 'planned', 'in_progress', 'blocked', 'done']);
 
 export interface DevLogAuth {
@@ -66,15 +68,14 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   if (auth) {
     app.use(requireCredentials(auth));
   }
+  app.use(express.static(UI_DIRECTORY, { index: false }));
   app.get('/', async (_request, response) => {
-    response.type('html').send(await readFile(join(PUBLIC_DIRECTORY, 'index.html'), 'utf8'));
+    response.sendFile(join(UI_DIRECTORY, 'index.html'));
   });
-  app.get('/styles.css', (_request, response) => response.sendFile(join(PUBLIC_DIRECTORY, 'styles.css')));
-  app.get('/app.js', (_request, response) => response.sendFile(join(PUBLIC_DIRECTORY, 'app.js')));
 
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines, created_at AS "createdAt"
          FROM projects
         ORDER BY name`,
     );
@@ -120,11 +121,19 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       values.push(commands ? JSON.stringify(commands) : null);
       sets.push(`test_commands = $${values.length}::jsonb`);
     }
+    for (const key of ['description', 'guidelines'] as const) {
+      if (body[key] === undefined) continue;
+      if (typeof body[key] !== 'string' || body[key].length > 10_000) {
+        return fail('Projektbeschreibung und Regeln dürfen höchstens 10000 Zeichen lang sein.');
+      }
+      values.push(body[key].trim());
+      sets.push(`${key} = $${values.length}`);
+    }
     if (!sets.length) {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines`,
       values,
     );
     if (!result.rows[0]) {
@@ -193,7 +202,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
     title, description, status, priority, created_at AS "createdAt",
     effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-    kind, bug_id AS "bugId", completed_at AS "completedAt"`;
+    kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId"`;
   const IDEA_FIELDS = {
     title: { column: 'title', parse: parseTitle(180) },
     description: { column: 'description', parse: parseLongText },
@@ -205,6 +214,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     ...IDEA_FIELDS,
     status: { column: 'status', parse: parseOption(DEVELOPMENT_STATUSES) },
     sprintId: { column: 'sprint_id', parse: parseNullableUuid },
+    agentId: { column: 'agent_id', parse: parseNullableUuid },
   };
 
   app.get('/api/projects/:slug/board', async (request, response) => {
@@ -213,7 +223,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       response.status(400).json({ message: 'Invalid project slug.' });
       return;
     }
-    const [ideas, development] = await Promise.all([
+    const [ideas, development, comments] = await Promise.all([
       pool.query(
         `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1
           ORDER BY created_at DESC LIMIT 200`,
@@ -224,8 +234,14 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
           ORDER BY created_at DESC LIMIT 200`,
         [slug],
       ),
+      pool.query(
+        `SELECT c.id, c.ideation_id AS "ideationId", c.author, c.body, c.created_at AS "createdAt"
+           FROM ideation_comments c JOIN ideation_items i ON i.id = c.ideation_id
+          WHERE i.project_slug = $1 ORDER BY c.created_at`,
+        [slug],
+      ),
     ]);
-    response.json({ ideas: ideas.rows, development: development.rows });
+    response.json({ ideas: ideas.rows, development: development.rows, comments: comments.rows });
   });
 
   app.post('/api/projects/:slug/ideation', async (request, response) => {
@@ -240,7 +256,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     const result = await pool.query(
       `INSERT INTO ideation_items (project_slug, title, description, status, priority,
                                    effort_hours, token_estimate, benefit, cost)
-       VALUES ($1, $2, $3, COALESCE($4, 'requested'), COALESCE($5, 'medium'), $6, $7, $8, $9)
+       VALUES ($1, $2, $3, COALESCE($4, 'idea'), COALESCE($5, 'medium'), $6, $7, $8, $9)
        RETURNING ${IDEA_COLUMNS}`,
       [slug, values.get('title'), values.get('description') ?? '', values.get('status') ?? null,
         values.get('priority') ?? null, values.get('effort_hours') ?? null, values.get('token_estimate') ?? null,
@@ -269,51 +285,64 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     response.json({ item: result.rows[0] });
   });
 
-  // Asks the author agent to rewrite the requirement of an idea according to a change request.
-  app.post('/api/ideation/:id/revise', async (request, response) => {
-    const prompt = isRecord(request.body) && typeof request.body.prompt === 'string' ? request.body.prompt.trim() : '';
-    if (!isUuid(request.params.id) || !prompt || prompt.length > 4000) {
-      response.status(400).json({ message: 'Bitte beschreibe, was geändert werden soll (max. 4000 Zeichen).' });
+  // „Auftrag erstellen“: Der Auftragsautor formuliert den Auftrag aus. Nur aus „Idee“ oder „In Abklärung“ möglich.
+  app.post('/api/ideation/:id/define', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Not found.' });
       return;
     }
     const result = await pool.query(
-      `UPDATE ideation_items SET revision_prompt = $2, status = 'requested', agent_note = NULL, updated_at = NOW()
-        WHERE id = $1 AND status <> 'drafting' RETURNING ${IDEA_COLUMNS}`,
-      [request.params.id, prompt],
+      `UPDATE ideation_items SET status = 'requested', agent_note = NULL, updated_at = NOW()
+        WHERE id = $1 AND status IN ('idea', 'considering') RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
+      [request.params.id],
     );
     if (!result.rows[0]) {
-      response.status(409).json({ message: 'Idee nicht gefunden oder der Agent arbeitet gerade daran.' });
+      response.status(409).json({ message: 'Die Idee ist nicht mehr in Bearbeitung durch Menschen.' });
       return;
     }
     response.json({ item: result.rows[0] });
   });
 
-  // Turns an idea into a development order, optionally assigned to a sprint of the same project.
+  app.post('/api/ideation/:id/comments', async (request, response) => {
+    const text = isRecord(request.body) && typeof request.body.body === 'string' ? request.body.body.trim() : '';
+    if (!isUuid(request.params.id) || !text || text.length > 4000) {
+      response.status(400).json({ message: 'Bitte einen Kommentar eingeben (max. 4000 Zeichen).' });
+      return;
+    }
+    const encoded = /^Basic (.+)$/.exec(request.headers.authorization ?? '')?.[1] ?? '';
+    const author = Buffer.from(encoded, 'base64').toString().split(':')[0]?.slice(0, 60) || 'Nutzer';
+    const result = await pool.query(
+      `INSERT INTO ideation_comments (ideation_id, author, body)
+       SELECT id, $2, $3 FROM ideation_items WHERE id = $1
+       RETURNING id, ideation_id AS "ideationId", author, body, created_at AS "createdAt"`,
+      [request.params.id, author, text],
+    );
+    if (!result.rows[0]) {
+      response.status(404).json({ message: 'Idee nicht gefunden.' });
+      return;
+    }
+    response.status(201).json({ item: result.rows[0] });
+  });
+
+  // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
   app.post('/api/ideation/:id/promote', async (request, response) => {
-    const body = request.body as unknown;
-    const sprintId = isRecord(body) && body.sprintId !== undefined ? body.sprintId : null;
-    if (!isUuid(request.params.id) || (sprintId !== null && !isUuid(sprintId))) {
-      response.status(400).json({ message: 'Invalid idea or sprint.' });
+    if (!isUuid(request.params.id)) {
+      response.status(400).json({ message: 'Invalid idea.' });
       return;
     }
     const result = await pool.query(
-      `INSERT INTO development_items (project_slug, ideation_id, sprint_id, title, description, status, priority,
+      `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
                                       effort_hours, token_estimate, benefit, cost)
-       SELECT i.project_slug, i.id, s.id, i.title, i.description,
-              CASE WHEN s.id IS NULL THEN 'backlog' ELSE 'planned' END, i.priority,
+       SELECT i.project_slug, i.id, i.title, i.description, 'backlog', i.priority,
               i.effort_hours, i.token_estimate, i.benefit, i.cost
          FROM ideation_items i
-         LEFT JOIN sprints s ON s.id = $2 AND s.project_slug = i.project_slug
         WHERE i.id = $1
-          AND ($2::uuid IS NULL OR s.id IS NOT NULL)
           AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)
        RETURNING ${DEV_COLUMNS}`,
-      [request.params.id, sprintId],
+      [request.params.id],
     );
     if (!result.rows[0]) {
-      response.status(409).json({
-        message: 'Idee nicht gefunden, bereits als Auftrag übernommen oder Sprint gehört zu einem anderen Projekt.',
-      });
+      response.status(409).json({ message: 'Idee nicht gefunden oder bereits als Auftrag übernommen.' });
       return;
     }
     await pool.query(
@@ -377,14 +406,34 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
         return;
       }
     }
+    const agentId = fields.find((field) => field.column === 'agent_id')?.value;
+    if (typeof agentId === 'string') {
+      const sameProject = await pool.query(
+        `SELECT 1 FROM agents a JOIN development_items d ON d.project_slug = a.project_slug
+          WHERE a.id = $1 AND d.id = $2`,
+        [agentId, request.params.id],
+      );
+      if (!sameProject.rows[0]) {
+        response.status(400).json({ message: 'Agent does not belong to the project of this item.' });
+        return;
+      }
+    }
     const sprintField = fields.find((field) => field.column === 'sprint_id');
+    const agentField = fields.find((field) => field.column === 'agent_id');
     const update = buildUpdate('development_items', request.params.id, fields,
       `${DEV_COLUMNS}, project_slug AS "projectSlug"`);
-    if (sprintField && !fields.some((field) => field.column === 'status')) {
-      // Assigning a backlog order to a sprint plans it; removing it returns it to the backlog.
+    const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
+    if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
+      // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
+      const assigned = (sprintField ?? agentField)?.value !== null;
       update.sql = update.sql.replace(', updated_at = NOW()',
-        `, status = CASE WHEN status IN ('backlog', 'planned') THEN $${update.values.length + 1} ELSE status END, updated_at = NOW()`);
-      update.values.push(sprintField.value === null ? 'backlog' : 'planned');
+        `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`);
+    }
+    if (manualStart) {
+      // Manueller Start eines einzelnen Agents (auch bei erledigten oder blockierten Aufträgen): Der vorherige Status wird nach dem Lauf wiederhergestellt.
+      update.sql = update.sql.replace(', updated_at = NOW()',
+        `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,
+          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`);
     }
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
@@ -419,9 +468,11 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerSprintRoutes(app, pool);
   registerAgentRoutes(app, pool);
   registerBugRoutes(app, pool);
+  registerAttachmentRoutes(app, pool);
   registerDocRoutes(app, pool);
   registerReportRoutes(app, pool);
   registerStatsRoutes(app, pool);
+  registerChatRoutes(app, pool);
   registerWorkerRoutes(app, pool);
 
   app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));

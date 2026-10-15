@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { trackChild } from './shutdown.js';
 
 export const MAX_CAPTURED_OUTPUT = 120_000;
 
@@ -11,7 +12,7 @@ export interface CommandResult {
 export type CommandExecutor = (
   command: string[],
   cwd: string,
-  options?: { timeoutMs?: number; env?: NodeJS.ProcessEnv },
+  options?: { timeoutMs?: number; env?: NodeJS.ProcessEnv; onSpawn?: (pid: number) => void },
 ) => Promise<CommandResult>;
 
 export function redactOutput(output: string, environment: NodeJS.ProcessEnv): string {
@@ -33,10 +34,13 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
       cwd,
       env: options.env ?? process.env,
       shell: false,
+      detached: true,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: options.timeoutMs,
     });
+    const untrack = child.pid ? trackChild(child.pid) : () => undefined;
+    if (child.pid) options.onSpawn?.(child.pid);
     let output = '';
     const appendOutput = (chunk: Buffer): void => {
       if (output.length < MAX_CAPTURED_OUTPUT + 1_000) {
@@ -47,6 +51,7 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     child.stderr.on('data', appendOutput);
     child.once('error', (error) => appendOutput(Buffer.from(`\n${error.message}\n`)));
     child.once('close', (code, signal) => {
+      untrack();
       if (signal) {
         appendOutput(Buffer.from(`\nProcess ended by ${signal} (timeout or kill).\n`));
       }

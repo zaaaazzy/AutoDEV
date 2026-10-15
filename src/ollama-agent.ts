@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
+import { shutdownSignal } from './shutdown.js';
 import { type CommandExecutor, type CommandResult, runCommand } from './command.js';
 
 export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -7,6 +8,7 @@ export const DEFAULT_OLLAMA_MODEL = 'qwen3.5:9b';
 export const BACKUP_DIRECTORY = '.dev-log-backups';
 
 const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.angular', BACKUP_DIRECTORY, '.cache', 'coverage']);
+const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
 const MAX_TOOL_OUTPUT = 8_000;
 const MAX_FILE_BYTES = 400_000;
 const WRITE_ROLES = new Set(['developer']);
@@ -92,7 +94,7 @@ function systemPrompt(role: string, canWrite: boolean): string {
     `Du bist ein autonomer Software-Agent mit der Rolle "${role}" und arbeitest im Projektverzeichnis.`,
     'Erkunde das Projekt zuerst mit den Werkzeugen, bevor du Aussagen machst oder Code schreibst. Erfinde keine Dateien oder Ergebnisse.',
     canWrite
-      ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen.'
+      ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
       : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
     'Antworte auf Deutsch.',
   ].join('\n');
@@ -286,6 +288,8 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   ];
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  const abortOnShutdown = (): void => controller.abort();
+  shutdownSignal.addEventListener('abort', abortOnShutdown, { once: true });
   try {
     for (let turn = 0; turn < maxTurns; turn += 1) {
       const lastTurn = turn === maxTurns - 1;
@@ -317,7 +321,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         if (!text) {
           return finish(1, 'Das Modell lieferte keine Antwort.');
         }
-        if (canWrite && context.changed.size === 0) {
+        if (canWrite && context.changed.size === 0 && !NO_CHANGE_NEEDED.test(text)) {
           return finish(1, `${text}\n\nDer Entwickler-Agent hat keine Dateien geändert.`);
         }
         return finish(0, text);
@@ -335,5 +339,6 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     return finish(1, reason);
   } finally {
     clearTimeout(timer);
+    shutdownSignal.removeEventListener('abort', abortOnShutdown);
   }
 }
