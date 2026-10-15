@@ -58,6 +58,12 @@ test('the developer may write with backup, but only run allowed commands', async
   for (const command of ['npm install', 'npm install express pug@^3.0.0 --save', 'npm install -D @types/node', 'npm ls --depth=0', 'node --check server.js', 'npx --no-install tsc --noEmit']) {
     assert.match(await executeTool(dev, call('run_command', { command })), /Exit-Code/);
   }
+  const assistant = { ...context(cwd, false), canRead: true };
+  assert.match(await executeTool(assistant, call('run_command', { command: 'git log --oneline -20' })), /Exit-Code/);
+  assert.match(await executeTool(assistant, call('run_command', { command: 'git status' })), /Exit-Code/);
+  for (const command of ['npm install express', 'git log --output=x', 'git push', 'rm -rf /']) {
+    assert.match(await executeTool(assistant, call('run_command', { command })), /nicht erlaubt/);
+  }
   assert.deepEqual([...dev.changed], ['a.txt']);
   await mkdir(join(cwd, 'sub'));
 });

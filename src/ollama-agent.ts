@@ -18,6 +18,8 @@ const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
 const MAX_TOOL_OUTPUT = 8_000;
 const MAX_FILE_BYTES = 400_000;
 const WRITE_ROLES = new Set(['developer']);
+// Der Chat-Assistent darf lesen und nur Anzeige-Befehle ausführen (z. B. git log).
+const COMMAND_ROLES = new Set(['developer', 'assistant']);
 const COMMAND_PATTERN = /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
 const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
 const INSTALL_FLAGS = new Set(['--save', '--save-dev', '-D', '--save-exact', '-E', '--legacy-peer-deps', '--no-audit', '--no-fund', '--ignore-scripts']);
@@ -28,9 +30,16 @@ const SAFE_COMMANDS = [
   /^npx --no-install (?:tsc --noEmit|eslint [\w./*-]+|prettier --check [\w./*-]+|jest|vitest run)$/,
 ];
 
+const READ_COMMAND = /^(?:git (?:status|log|diff|show|branch|remote -v|ls-files)(?: (?:--oneline|--stat|--graph|--decorate|--name-only|--name-status|--short|--all|-\d+|--max-count=\d+|[\w@:./~^][\w@:./=~^-]*))*|npm (?:ls|list|outdated)(?: --(?:depth=\d|json))*|node --version)$/;
+
+/** Reine Anzeige-Befehle für Rollen ohne Schreibrecht. */
+export function isReadOnlyCommand(command: string): boolean {
+  return READ_COMMAND.test(command);
+}
+
 /** Erlaubt feste, ungefährliche Befehle; `npm install <paket>` nur mit geprüften Paketnamen und Schaltern (kein -g, keine URLs). */
 export function isAllowedCommand(command: string): boolean {
-  if (COMMAND_PATTERN.test(command)) return true;
+  if (COMMAND_PATTERN.test(command) || READ_COMMAND.test(command)) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'npm' && ['install', 'i', 'uninstall'].includes(parts[1] ?? '') && parts.length > 2) {
     return parts.slice(2).every((part) => part.startsWith('-') ? INSTALL_FLAGS.has(part) : PACKAGE_SPEC.test(part));
@@ -67,7 +76,7 @@ const clip = (text: string, max = MAX_TOOL_OUTPUT): string =>
 
 const parameter = (description: string, type = 'string'): { type: string; description: string } => ({ type, description });
 
-function toolDefinitions(canWrite: boolean): unknown[] {
+function toolDefinitions(canWrite: boolean, canRead = false): unknown[] {
   const tools: { name: string; description: string; properties: Record<string, unknown>; required: string[] }[] = [
     {
       name: 'list_files', description: 'Listet Dateien und Ordner eines Verzeichnisses (Ordner enden mit /).',
@@ -83,6 +92,12 @@ function toolDefinitions(canWrite: boolean): unknown[] {
       properties: { query: parameter('Suchtext'), path: parameter('Relativer Startpfad, Standard ".".') }, required: ['query'],
     },
   ];
+  if (canRead && !canWrite) {
+    tools.push({
+      name: 'run_command', description: 'Zeigt Informationen an: git log/status/diff/show/branch (z. B. "git log --oneline -20"), npm ls, npm outdated.',
+      properties: { command: parameter('z. B. "git log --oneline -20"') }, required: ['command'],
+    });
+  }
   if (canWrite) {
     tools.push(
       {
@@ -120,7 +135,9 @@ function systemPrompt(role: string, canWrite: boolean): string {
     'Erkunde das Projekt zuerst mit den Werkzeugen, bevor du Aussagen machst oder Code schreibst. Erfinde keine Dateien oder Ergebnisse.',
     canWrite
       ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und installiere fehlende Abhängigkeiten mit run_command ("npm install"), prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
-      : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
+      : role === 'assistant'
+        ? 'Du darfst selbst nichts verändern, aber lesen und Anzeige-Befehle nutzen (run_command: git log, git status, git diff, npm ls). Beantworte Fragen direkt mit diesen Werkzeugen, statt auf Einschränkungen zu verweisen. Alles, was Änderungen, Installationen oder Tests erfordert, übergibst du mit einer @@TASK-Zeile an einen passenden Agent.'
+        : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
     'Antworte auf Deutsch.',
   ].join('\n');
 }
@@ -188,6 +205,7 @@ async function walkText(directory: string, root: string, query: string, matches:
 export interface ToolContext {
   cwd: string;
   canWrite: boolean;
+  canRead?: boolean;
   changed: Set<string>;
   backupRoot: string;
   execute: CommandExecutor;
@@ -265,11 +283,11 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         return 'Ersetzt.';
       }
       case 'run_command': {
-        if (!context.canWrite) {
+        const command = typeof args.command === 'string' ? args.command.trim() : '';
+        if (!context.canWrite && !context.canRead) {
           return 'Befehle sind für diese Rolle nicht erlaubt.';
         }
-        const command = typeof args.command === 'string' ? args.command.trim() : '';
-        if (!isAllowedCommand(command)) {
+        if (context.canWrite ? !isAllowedCommand(command) : !isReadOnlyCommand(command)) {
           return 'Befehl nicht erlaubt. Erlaubt: npm install/ci/uninstall <paket>, npm test|run <script>|ls|outdated|audit, node --check <datei>, npx --no-install tsc|eslint|prettier|jest|vitest, git status|diff|log.';
         }
         const result = await context.execute(command.split(/\s+/), context.cwd, {
@@ -292,11 +310,13 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl ?? patientFetch;
   const canWrite = WRITE_ROLES.has(options.role);
+  const canRead = COMMAND_ROLES.has(options.role);
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns = options.maxTurns ?? (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
   const context: ToolContext = {
     cwd: options.cwd,
     canWrite,
+    canRead,
     changed: new Set(),
     backupRoot: join(options.cwd, BACKUP_DIRECTORY, new Date().toISOString().replace(/[:.]/g, '-')),
     execute: options.execute ?? runCommand,
@@ -329,7 +349,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite), stream: false, think: false,
+          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, canRead), stream: false, think: false,
           options: { num_ctx: 32_768, temperature: 0.2 },
         }),
       });

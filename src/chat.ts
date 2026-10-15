@@ -43,7 +43,9 @@ export function parseChatReply(output: string): { text: string; tasks: ChatTask[
 function buildChatPrompt(history: { role: string; content: string }[], agents: { name: string; role: string }[]): string {
   return [
     'Du bist der allgemeine Assistent dieses Projekts im Dev Log. Beantworte Fragen knapp und auf Deutsch.',
-    'Ändere selbst keine Dateien. Wenn eine Aufgabe umgesetzt werden soll, delegiere sie, indem du je Aufgabe genau eine eigene Zeile ausgibst:',
+    'Du bist der Einstiegspunkt für alle Anfragen. Sage NIE „das darf ich nicht“, „dafür habe ich kein Tool“ oder „mach das selbst“.',
+    'Fragen zum Projekt beantwortest du selbst: lies Dateien, nutze run_command für git log/status/diff und npm ls. Zeige das Ergebnis direkt an (z. B. den Git-Verlauf als kurze Liste).',
+    'Alles, was etwas verändert, installiert, testet, dokumentiert oder entwickelt, delegierst du sofort an den passenden Agent (Entwickler: Code, Installation, Fehlerbehebung; Tester: Tests; Dokumentierer/Handbuch-Autor: Doku; Problemlöser: Fehleranalyse). Gib dazu je Aufgabe genau eine eigene Zeile aus:',
     `${TASK_MARKER} {"title": "Kurztitel", "description": "Was zu tun ist", "agent": "Agentname oder null"}`,
     'Mit "agent" startet nur dieser Agent die Aufgabe. Ohne Agent (null) landet sie im Backlog und läuft später im Sprint mit allen Agents.',
     `Verfügbare Agents:\n${agents.map((agent) => `- ${agent.name} (${agent.role})`).join('\n') || '- keine'}`,
@@ -76,7 +78,7 @@ export async function processChat(
   ]);
   const stopProgress = await startProgress(pool, options.project,
     ['Lese die Anfrage und den Projektkontext …', 'Analysiere und formuliere die Antwort …', 'Prüfe Details im Projekt …', 'Fasse die Ergebnisse zusammen …']);
-  const { exitCode, output } = await runAuthorAgent(pool, options, () => buildChatPrompt(history.rows, agents.rows), execute)
+  const { exitCode, output } = await runAuthorAgent(pool, options, () => buildChatPrompt(history.rows, agents.rows), execute, 'assistant')
     .finally(stopProgress);
   if (isShuttingDown()) {
     await pool.query(`UPDATE chat_messages SET status = 'pending', updated_at = clock_timestamp() WHERE id = $1`, [claimed.id]);
