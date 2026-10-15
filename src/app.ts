@@ -408,6 +408,10 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     }
     const agentId = fields.find((field) => field.column === 'agent_id')?.value;
     if (typeof agentId === 'string') {
+      if (!(await pool.query(`SELECT 1 FROM development_items WHERE id = $1`, [request.params.id])).rows[0]) {
+        response.status(404).json({ message: 'Development item not found.' });
+        return;
+      }
       const sameProject = await pool.query(
         `SELECT 1 FROM agents a JOIN development_items d ON d.project_slug = a.project_slug
           WHERE a.id = $1 AND d.id = $2`,

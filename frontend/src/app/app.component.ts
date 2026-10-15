@@ -47,6 +47,8 @@ const SECTION_LABELS: Record<Section, string> = {
   settings: 'Einstellungen',
 };
 
+type DevKey = 'title' | 'description' | 'status' | 'priority' | 'sprint' | 'effortHours';
+
 @Component({
   selector: 'app-root',
   standalone: true,
@@ -534,6 +536,92 @@ export class AppComponent implements OnInit, OnDestroy {
 
   sprintOf(item: DevelopmentItem | null): Sprint | null {
     return item?.sprintId ? this.data().sprints.find((sprint) => sprint.id === item.sprintId) ?? null : null;
+  }
+
+  readonly devColumns: { key: DevKey; label: string }[] = [
+    { key: 'title', label: 'Titel' }, { key: 'description', label: 'Kurzfassung' }, { key: 'status', label: 'Status' },
+    { key: 'priority', label: 'Priorität' }, { key: 'sprint', label: 'Sprint' }, { key: 'effortHours', label: 'Aufwand' },
+  ];
+  readonly devText = signal<Partial<Record<'title' | 'description', string>>>({});
+  readonly devValues = signal<Partial<Record<'status' | 'priority' | 'sprint' | 'effortHours', string[]>>>({});
+  readonly devSort = signal<{ key: DevKey; dir: 'asc' | 'desc' }>({ key: 'priority', dir: 'desc' });
+  readonly openOrder = signal<string | null>(null);
+  readonly showDoneOrders = signal(false);
+  readonly doneOrders = computed(() => this.data().development.filter((item) => item.status === 'done'));
+  readonly openOrders = computed(() => {
+    const text = this.devText();
+    const values = this.devValues();
+    const { key, dir } = this.devSort();
+    const rank = (item: DevelopmentItem): string | number | null => {
+      switch (key) {
+        case 'priority': return ['low', 'medium', 'high'].indexOf(item.priority);
+        case 'effortHours': return item.effortHours ?? null;
+        case 'status': return this.developmentStatuses.indexOf(item.status);
+        case 'sprint': return this.devCell(item, 'sprint').toLowerCase();
+        default: return (item[key] ?? '').toString().toLowerCase();
+      }
+    };
+    const factor = dir === 'asc' ? 1 : -1;
+    return this.data().development
+      .filter((item) => item.status !== 'done')
+      .filter((item) => (['title', 'description'] as const).every((field) => !text[field] || (item[field] ?? '').toLowerCase().includes(text[field]!.toLowerCase()))
+        && (Object.keys(values) as (keyof typeof values)[]).every((field) => !values[field]?.length || values[field]!.includes(this.devCell(item, field))))
+      .sort((a, b) => {
+        const x = rank(a), y = rank(b);
+        if (x === y) return 0;
+        if (x === null) return 1;
+        if (y === null) return -1;
+        return (x < y ? -1 : 1) * factor;
+      });
+  });
+
+  devCell(item: DevelopmentItem, key: 'status' | 'priority' | 'sprint' | 'effortHours'): string {
+    switch (key) {
+      case 'status': return this.statusLabel(item.status);
+      case 'priority': return this.priorityLabel(item.priority);
+      case 'sprint': return this.sprintOf(item)?.name ?? 'Kein Sprint';
+      default: return this.hours(item.effortHours);
+    }
+  }
+
+  devOptions(key: 'status' | 'priority' | 'sprint' | 'effortHours'): string[] {
+    return [...new Set(this.data().development.filter((item) => item.status !== 'done').map((item) => this.devCell(item, key)))].sort();
+  }
+
+  isDevText(key: DevKey): key is 'title' | 'description' {
+    return key === 'title' || key === 'description';
+  }
+
+  devFilterActive(key: DevKey): boolean {
+    return this.isDevText(key) ? !!this.devText()[key] : !!this.devValues()[key]?.length;
+  }
+
+  hasDevFilters(): boolean {
+    return this.devColumns.some((col) => this.devFilterActive(col.key));
+  }
+
+  clearDevFilters(): void {
+    this.devText.set({});
+    this.devValues.set({});
+  }
+
+  setDevText(key: 'title' | 'description', value: string): void {
+    this.devText.update((filter) => ({ ...filter, [key]: value }));
+  }
+
+  toggleDevValue(key: 'status' | 'priority' | 'sprint' | 'effortHours', value: string, checked: boolean): void {
+    this.devValues.update((filter) => {
+      const current = filter[key] ?? [];
+      return { ...filter, [key]: checked ? [...current, value] : current.filter((entry) => entry !== value) };
+    });
+  }
+
+  sortDevBy(key: DevKey): void {
+    this.devSort.update((sort) => ({ key, dir: sort.key === key && sort.dir === 'asc' ? 'desc' : 'asc' }));
+  }
+
+  ideaOf(item: DevelopmentItem): Idea | null {
+    return item.ideationId ? this.data().ideas.find((idea) => idea.id === item.ideationId) ?? null : null;
   }
 
   sortIdeasBy(key: IdeaSortKey): void {

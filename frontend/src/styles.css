@@ -358,3 +358,13 @@ h3 .link-button { color: var(--ink); }
 .task-link { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; color: #1f4d36; text-decoration: none; }
 .task-link:hover { text-decoration: underline; }
 .task-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; max-height: 240px; overflow-y: auto; }
+.order-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); gap: 16px; align-items: start; }
+.order-detail .item-content p { max-height: 220px; overflow-y: auto; white-space: pre-wrap; }
+.order-detail .item-controls { min-width: 0; }
+.order-detail .item-controls select, .order-detail .item-controls .inline-form { max-width: 100%; min-width: 0; }
+.order-detail .item-controls .inline-form select { flex: 1; }
+@media (max-width: 720px) { .order-detail { grid-template-columns: 1fr; } }
+.closed-detail td[colspan] { max-width: 0; }
+.order-detail .item-controls label { min-width: 0; }
+.order-detail .item-controls .inline-form { display: flex; gap: 8px; }
+.order-detail .item-controls .inline-form .button { flex: 0 0 auto; width: auto; padding-inline: 16px; }
