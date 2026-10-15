@@ -401,3 +401,7 @@ h3 .link-button { color: var(--ink); }
 .blocked-box { margin: 12px 0; padding: 12px 14px; border: 1px solid #e6b8b3; border-left: 4px solid #c0392b; border-radius: 8px; background: #fdf1ef; }
 .blocked-box .actions { margin: 8px 0; display: flex; gap: 8px; flex-wrap: wrap; }
 .blocked-box p { margin: 0; font-size: 13px; }
+.agent-row { display: flex; align-items: center; gap: 8px; }
+.agent-row .agent-line { flex: 1; min-width: 0; }
+.agent-cancel { border: 1px solid #e4b4ae; background: #fff; color: #b3382c; border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.agent-cancel:hover { background: #fdeceb; }

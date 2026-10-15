@@ -30,6 +30,7 @@ export interface OllamaAgentOptions {
   maxTurns?: number;
   fetchImpl?: typeof fetch;
   execute?: CommandExecutor;
+  signal?: AbortSignal;
 }
 
 interface ToolCall {
@@ -296,6 +297,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   const abortOnShutdown = (): void => controller.abort();
   shutdownSignal.addEventListener('abort', abortOnShutdown, { once: true });
+  options.signal?.addEventListener('abort', abortOnShutdown, { once: true });
   try {
     for (let turn = 0; turn < maxTurns; turn += 1) {
       const lastTurn = turn === maxTurns - 1;
@@ -351,6 +353,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   } finally {
     clearTimeout(timer);
     shutdownSignal.removeEventListener('abort', abortOnShutdown);
+    options.signal?.removeEventListener('abort', abortOnShutdown);
   }
 }
 

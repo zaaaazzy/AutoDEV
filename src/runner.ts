@@ -4,7 +4,7 @@ import { materializeAttachments } from './attachments.js';
 import { type KnownBug, loadKnownBugs, reportAgentBug } from './bugs.js';
 import { startProgress } from './chat-progress.js';
 import { loadProjectContext, withProjectContext } from './project-context.js';
-import { isShuttingDown } from './shutdown.js';
+import { isShuttingDown, killGroup } from './shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 import { readManual, saveOrderDoc, syncRepoDocs, upsertDoc } from './docs.js';
 import { syncSprintToGit } from './git-sync.js';
@@ -44,7 +44,7 @@ export interface PromptExtras {
 
 /** Runs an agent that has no command of its own (built-in tester or local model). */
 export type BuiltinAgent = (
-  context: { pool: Pool; item: WorkItem; agent: WorkflowAgent; prompt: string; cwd: string; timeoutMs: number },
+  context: { pool: Pool; item: WorkItem; agent: WorkflowAgent; prompt: string; cwd: string; timeoutMs: number; signal?: AbortSignal },
 ) => Promise<CommandResult>;
 
 export interface WorkflowAgent {
@@ -227,7 +227,7 @@ async function testCommands(pool: Pool, project: string, environment: NodeJS.Pro
 }
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
-export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt, cwd, timeoutMs }) => {
+export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt, cwd, timeoutMs, signal }) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
     const runId = await runTestAgent({ project: item.projectSlug, cwd, commands: await testCommands(pool, item.projectSlug) }, pool);
@@ -239,7 +239,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt,
       `$ ${step.command} → ${step.status}\n${step.status === 'passed' ? step.output.slice(-400) : step.output.slice(-3000)}`).join('\n\n');
     return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
   }
-  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs });
+  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal });
 };
 
 export interface WorkItemOptions {
@@ -336,7 +336,25 @@ export async function runWorkItem(
         ? await readManual(pool, item.projectSlug, agent.role === 'manual_writer' ? MANUAL_TITLE : USER_MANUAL_TITLE).catch(() => '') : undefined;
       const prompt = withProjectContext(projectContext, buildPrompt(agent, item, done, { bugs, manual, images }));
       const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
-      let result: CommandResult;
+      let result: CommandResult = { exitCode: 1, durationMs: 0, output: '' };
+      const stepAbort = new AbortController();
+      let stepPid = 0;
+      let cancelled = false;
+      let stopWatching = (): void => undefined;
+      // Ein „Abbrechen“ aus der Oberfläche beendet den Schritt sofort, auch wenn der Agent selbst nicht reagiert.
+      const cancelRequested = new Promise<CommandResult>((resolveCancel) => {
+        const watcher = setInterval(() => {
+          void pool.query<{ cancel_requested: boolean }>('SELECT cancel_requested FROM agent_run_steps WHERE id = $1', [stepRow.rows[0]?.id])
+            .then(({ rows }) => {
+              if (!rows[0]?.cancel_requested || cancelled) return;
+              cancelled = true;
+              stepAbort.abort();
+              if (stepPid) killGroup(stepPid);
+              resolveCancel({ exitCode: 130, durationMs: 0, output: 'Vom Benutzer abgebrochen.' });
+            }).catch(() => undefined);
+        }, 1500);
+        stopWatching = () => clearInterval(watcher);
+      });
       let lastLiveWrite = 0;
       const onOutput = (partial: string): void => {
         if (Date.now() - lastLiveWrite < 1500) return;
@@ -348,26 +366,28 @@ export async function runWorkItem(
         ? await startProgress(pool, item.projectSlug, [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
           { developmentId: item.id, agentName: agent.name })
         : async (): Promise<void> => undefined;
-      try {
+      const work = (async (): Promise<void> => { try {
         if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
           // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.
           const written = await execute(buildInvocation(fallbackCommand, `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`),
             options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
-          const run = await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs });
+          const run = await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs, signal: stepAbort.signal });
           result = { ...run, durationMs: run.durationMs + written.durationMs, output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}` };
         } else result = command
           ? await execute(buildInvocation(command, prompt), options.cwd, {
             timeoutMs: options.timeoutMs,
             env: agentEnvironment(),
             onOutput,
-            onSpawn: (pid) => void pool.query(
+            onSpawn: (pid) => void (stepPid = pid, pool.query(
               `UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1`, [stepRow.rows[0]?.id, pid],
-            ).catch(() => undefined),
+            ).catch(() => undefined)),
           })
-          : await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs });
+          : await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs, signal: stepAbort.signal });
       } catch (error) {
         result = { exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) };
-      }
+      } })();
+      result = await Promise.race([work.then(() => result), cancelRequested]);
+      stopWatching();
       await stopProgress();
       const output = redactOutput(result.output, process.env);
       if (isShuttingDown()) {
@@ -379,7 +399,7 @@ export async function runWorkItem(
         );
         break;
       }
-      const stepPassed = result.exitCode === 0;
+      const stepPassed = result.exitCode === 0 && !cancelled;
       await pool.query(
         `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
         [stepRow.rows[0]?.id, stepPassed ? 'passed' : 'failed', result.exitCode, result.durationMs, output],
@@ -388,7 +408,7 @@ export async function runWorkItem(
       if (!stepPassed) {
         passed = false;
         await postStepToChat(pool, item, agent.name, output, false).catch(() => undefined);
-        await recordFailure(pool, item, agent, output).catch((error) => console.error('Bug report failed:', error));
+        if (!cancelled) await recordFailure(pool, item, agent, output).catch((error) => console.error('Bug report failed:', error));
         break;
       }
       await postStepToChat(pool, item, agent.name, output).catch(() => undefined);

@@ -1072,6 +1072,12 @@ export class AppComponent implements OnInit, OnDestroy {
     }
   }
 
+  async cancelAgent(id: string, name: string): Promise<void> {
+    if (!globalThis.confirm(`„${name}“ abbrechen? Der Auftrag wird danach als blockiert markiert und lässt sich erneut starten.`)) return;
+    await this.perform(() => this.api.post(`${this.api.projectPath(this.activeProject())}/agents/${encodeURIComponent(id)}/cancel`), `„${name}“ wird abgebrochen.`, false);
+    globalThis.setTimeout(() => void this.refreshWorker(), 2500);
+  }
+
   private async refreshWorker(): Promise<void> {
     void this.refreshAgentStatus();
     const slug = this.activeProject();

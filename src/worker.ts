@@ -107,6 +107,28 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     }
   });
 
+  app.post('/api/projects/:slug/agents/:id/cancel', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug);
+      if (!slug) {
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
+        return;
+      }
+      const result = await pool.query(
+        `UPDATE agent_run_steps st SET cancel_requested = TRUE
+           FROM agent_runs r, agents a
+          WHERE r.id = st.run_id AND a.id = st.agent_id AND a.project_slug = $1 AND a.id::text = $2
+            AND st.status = 'running' AND r.status = 'running'`, [slug, request.params.id]);
+      if (!result.rowCount) {
+        response.status(404).json({ message: 'Dieser Agent läuft gerade nicht.' });
+        return;
+      }
+      response.status(202).json({ cancelling: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/projects/:slug/worker', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug);

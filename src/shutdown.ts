@@ -11,7 +11,7 @@ export function trackChild(pid: number): () => void {
   return () => children.delete(pid);
 }
 
-function killGroup(pid: number): void {
+export function killGroup(pid: number): void {
   try {
     process.kill(-pid, 'SIGKILL');
   } catch {
