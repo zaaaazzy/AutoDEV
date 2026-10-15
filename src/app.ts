@@ -210,7 +210,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
     retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
     failure, failure_bug_id AS "failureBugId",
-    (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id) AS "fixStatus"`;
+    (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus"`;
   const IDEA_FIELDS = {
     title: { column: 'title', parse: parseTitle(180) },
     description: { column: 'description', parse: parseLongText },
