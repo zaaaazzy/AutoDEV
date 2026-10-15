@@ -302,6 +302,15 @@
                                 </div>
                                 @if (item.description) { <article class="markdown" [innerHTML]="item.description | markdown"></article> } @else { <p class="muted">Keine Beschreibung.</p> }
                               }
+                              @if (item.risks) {
+                                <h4 class="order-section">⚠ Risiken</h4>
+                                <article class="markdown" [innerHTML]="item.risks | markdown"></article>
+                              }
+                              @if (item.projectContext) {
+                                <details class="order-context"><summary>Projektbeschreibung &amp; Leitlinien</summary>
+                                  <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
+                                </details>
+                              }
                   <ng-container *ngTemplateOutlet="gallery; context: { $implicit: item.ideationId }" />
                   @if (orderEditing() === item.id) {
                     <form class="form-grid" (ngSubmit)="saveDevelopment(item, developmentEdit.value)" #developmentEdit="ngForm">
@@ -760,9 +769,23 @@
                 <h3>{{ phase.label }} <small>{{ phase.hint }}</small></h3>
                 @for (agent of agentsOfPhase(phase.id); track agent.id; let index = $index) {
                   <article class="item-card">
-                    <div class="item-content"><h4><button type="button" class="link-button" (click)="showAgent(agent.id)">{{ agent.name }}</button> <span class="tag">{{ roleLabel(agent.role) }}</span></h4>
-                      <p>{{ agent.instructions || 'Keine Anweisung hinterlegt.' }}</p>
-                      <p class="muted">{{ agent.command?.join(' ') || 'Eingebauter Agent' }}</p>
+                    <div class="item-content">
+                      @if (agentEditing() === agent.id) {
+                        <form class="form-grid" (ngSubmit)="saveAgentEdit(agent)">
+                          <label class="wide">Name<input name="name" [(ngModel)]="agentEdit.name" maxlength="80" required></label>
+                          <label class="wide">Verhalten (Anweisung)<textarea name="instructions" [(ngModel)]="agentEdit.instructions" rows="6" maxlength="10000"></textarea></label>
+                          <label class="wide">Befehl (leer = eingebauter Agent)<input name="command" [(ngModel)]="agentEdit.command" maxlength="1000" placeholder="claude -p"></label>
+                          <div class="actions">
+                            <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+                            <button class="button secondary" type="button" (click)="agentEditing.set(null)">Abbrechen</button>
+                          </div>
+                        </form>
+                      } @else {
+                        <h4><button type="button" class="link-button" (click)="showAgent(agent.id)">{{ agent.name }}</button> <span class="tag">{{ roleLabel(agent.role) }}</span>
+                          <button class="button secondary" type="button" (click)="startAgentEdit(agent)" aria-label="Agent bearbeiten" title="Bearbeiten">✎</button></h4>
+                        <p>{{ agent.instructions || 'Keine Anweisung hinterlegt.' }}</p>
+                        <p class="muted">{{ agent.command?.join(' ') || 'Eingebauter Agent' }}</p>
+                      }
                     </div>
                     <div class="actions">
                       <button class="button secondary" (click)="moveAgent(agent, -1)" [disabled]="index === 0">↑</button>

@@ -60,6 +60,8 @@ export interface DevelopmentItem extends Estimate {
   ideationId?: string | null;
   testRunId?: string | null;
   completedAt?: string | null;
+  risks?: string;
+  projectContext?: string;
 }
 
 export interface Sprint {

@@ -4,7 +4,7 @@ import {
   buildUpdate, isRecord, isUuid, parseBoolean, parseCommand, parseFields, parseLongText, parseOption, parseProjectSlug, parseTitle,
 } from './validation.js';
 
-const ROLES = new Set(['author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'custom']);
+const ROLES = new Set(['author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'custom']);
 const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
 const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command`;
 const AGENT_FIELDS = {
@@ -18,20 +18,20 @@ const AGENT_FIELDS = {
 
 export const DEFAULT_AGENTS = [
   {
-    name: 'Bug-Wächter', role: 'bug_reviewer', phase: 'pre_task',
-    instructions: 'Liest alle offenen und behobenen Bugs und fasst in wenigen Stichpunkten zusammen, welche Fehler bei diesem Auftrag nicht wiederholt werden dürfen.',
+    name: 'Auftragsautor', role: 'author', phase: 'pre_task',
+    instructions: 'Beschreibt den Auftrag aus der Idee: Ziel, Anforderungen, Akzeptanzkriterien, betroffene Dateien. Diagramme (Mermaid) und ein ERM sind erwünscht, wenn sie das Verständnis verbessern.',
   },
   {
-    name: 'Auftragsautor', role: 'author', phase: 'pre_task',
-    instructions: 'Formuliert aus der Idee einen Entwicklungsauftrag mit Akzeptanzkriterien und nennt die betroffenen Dateien.',
+    name: 'Bug-Wächter', role: 'bug_reviewer', phase: 'pre_task',
+    instructions: 'Prüft alle bisherigen Bugs, nennt die im selben Kontext wie der Auftrag und beschreibt, was dabei nicht wiederholt werden darf. Das Ergebnis erscheint beim Auftrag unter Risiken.',
   },
   {
     name: 'Entwickler', role: 'developer', phase: 'while_task',
-    instructions: 'Setzt den Entwicklungsauftrag um und schreibt die zugehörigen Tests. Beachte die bekannten Bugs.',
+    instructions: 'Setzt den Auftrag um. Nutzt Projektbeschreibung, Leitlinien, Risiken und alle Vorarbeiten. Hält die Leitlinien ein und dokumentiert, was geändert wurde.',
   },
   {
     name: 'Tester', role: 'tester', phase: 'after_task',
-    instructions: 'Führt Build und alle Tests aus und meldet das Ergebnis im Dev Log.',
+    instructions: 'Entwickelt anhand der Angaben des Entwicklers die Tests, führt Build und Tests aus und meldet Fehler als Bug.',
   },
   {
     name: 'Dokumentierer', role: 'documenter', phase: 'after_task',
@@ -39,7 +39,11 @@ export const DEFAULT_AGENTS = [
   },
   {
     name: 'Handbuch-Autor', role: 'manual_writer', phase: 'after_task',
-    instructions: 'Pflegt das Anwendungshandbuch von A bis Z: Zweck, Bedienung, Architektur, Konfiguration, Betrieb. Gibt das vollständige, aktualisierte Handbuch in Markdown aus.',
+    instructions: 'Pflegt das technische Handbuch von A bis Z: Zweck, Architektur, Konfiguration, Betrieb. Gibt das vollständige, aktualisierte Handbuch in Markdown aus.',
+  },
+  {
+    name: 'Benutzerhandbuch-Autor', role: 'user_manual_writer', phase: 'after_task',
+    instructions: 'Pflegt das Benutzerhandbuch für Anwender: Bedienung Schritt für Schritt, ohne Technik-Jargon. Gibt das vollständige, aktualisierte Benutzerhandbuch in Markdown aus.',
   },
 ] as const;
 

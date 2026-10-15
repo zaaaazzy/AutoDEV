@@ -18,6 +18,7 @@ export const PHASE_ORDER = ['pre_task', 'while_task', 'after_task'] as const;
 const PROMPT_PLACEHOLDER = '{prompt}';
 const PREVIOUS_OUTPUT_CHARS = 1_500;
 const MANUAL_TITLE = 'Anwendungshandbuch';
+const USER_MANUAL_TITLE = 'Benutzerhandbuch';
 const MANUAL_PROMPT_CHARS = 12_000;
 const MIN_MANUAL_CHARS = 200;
 
@@ -32,6 +33,7 @@ export interface WorkItem {
   ideationId?: string | null;
   agentId?: string | null;
   fromChat?: boolean;
+  risks?: string;
 }
 
 export interface PromptExtras {
@@ -139,6 +141,7 @@ export function buildPrompt(
     `Du bist der Agent "${agent.name}" (Rolle: ${agent.role}) in der Phase ${agent.phase}.`,
     `## Anweisung\n${agent.instructions || 'Keine zusätzliche Anweisung.'}`,
     `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
+    item.risks?.trim() ? `## Risiken (vom Bug-Wächter geprüft)\n${item.risks.trim()}` : '',
     extras.images?.length
       ? `## Angehängte Bilder (Referenzen aus dem Ideationboard, relativ zum Projektordner)\n${extras.images.map((path) => `- ${path}`).join('\n')}`
       : '',
@@ -146,7 +149,7 @@ export function buildPrompt(
       ? `## Bekannte Bugs – offene und behobene. Wiederhole diese Fehler nicht.\n${bugs.join('\n')}`
       : '',
     extras.manual !== undefined
-      ? `## Bisheriges Handbuch (${MANUAL_TITLE})\n${extras.manual.slice(0, MANUAL_PROMPT_CHARS) || '(noch leer – erstelle es vollständig)'}`
+      ? `## Bisheriges Handbuch (${agent.role === 'user_manual_writer' ? USER_MANUAL_TITLE : MANUAL_TITLE})\n${extras.manual.slice(0, MANUAL_PROMPT_CHARS) || '(noch leer – erstelle es vollständig)'}`
       : '',
     history.length ? `## Ergebnisse vorheriger Agents\n${history.join('\n\n')}` : '',
   ].filter(Boolean).join('\n\n');
@@ -176,7 +179,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
 
 /** Planned items of the active sprint or assigned directly to an agent, most important first. */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.from_chat AS "fromChat"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.from_chat AS "fromChat", d.risks`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d WHERE d.id = $1 AND d.project_slug = $2`,
@@ -256,6 +259,8 @@ async function afterStep(
     await saveOrderDoc(pool, { projectSlug: item.projectSlug, developmentId: item.id, title: item.title, content: output });
   } else if (agent.role === 'manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {
     await upsertDoc(pool, { projectSlug: item.projectSlug, kind: 'manual', title: MANUAL_TITLE, content: output });
+  } else if (agent.role === 'user_manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {
+    await upsertDoc(pool, { projectSlug: item.projectSlug, kind: 'manual', title: USER_MANUAL_TITLE, content: output });
   } else if (agent.role === 'developer' && item.bugId) {
     await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [item.bugId, output.trim().slice(-1500)]);
   }
@@ -308,7 +313,8 @@ export async function runWorkItem(
   let passed = true;
   let interrupted = false;
   const ordered = agents
-    .filter((agent) => item.agentId ? agent.id === item.agentId : !(agent.role === 'author' && item.ideationId))
+    .filter((agent) => item.agentId ? agent.id === item.agentId
+      : !(agent.role === 'author' && item.ideationId) && !(agent.role === 'bug_reviewer' && item.risks?.trim()))
     .sort((left, right) =>
       PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never)
       || left.position - right.position);
@@ -326,8 +332,8 @@ export async function runWorkItem(
          VALUES ($1, $2, $3, $4, $5, 'running') RETURNING id`,
         [runId, position, agent.id, agent.name, agent.phase],
       );
-      const manual = agent.role === 'manual_writer'
-        ? await readManual(pool, item.projectSlug, MANUAL_TITLE).catch(() => '') : undefined;
+      const manual = agent.role === 'manual_writer' || agent.role === 'user_manual_writer'
+        ? await readManual(pool, item.projectSlug, agent.role === 'manual_writer' ? MANUAL_TITLE : USER_MANUAL_TITLE).catch(() => '') : undefined;
       const prompt = withProjectContext(projectContext, buildPrompt(agent, item, done, { bugs, manual, images }));
       const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
       let result: CommandResult;
@@ -336,7 +342,13 @@ export async function runWorkItem(
           { developmentId: item.id, agentName: agent.name })
         : async (): Promise<void> => undefined;
       try {
-        result = command
+        if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
+          // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.
+          const written = await execute(buildInvocation(fallbackCommand, `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`),
+            options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment() }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
+          const run = await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs });
+          result = { ...run, durationMs: run.durationMs + written.durationMs, output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}` };
+        } else result = command
           ? await execute(buildInvocation(command, prompt), options.cwd, {
             timeoutMs: options.timeoutMs,
             env: agentEnvironment(),

@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { loadProjectContext, withProjectContext } from './project-context.js';
 import { isShuttingDown } from './shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from './command.js';
+import { loadKnownBugs } from './bugs.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from './runner.js';
 
@@ -20,7 +21,7 @@ interface Idea {
 const FORMAT = [
   'Schreibe die Anforderung als Markdown mit genau diesen Abschnitten:',
   '## Ziel', '## Anforderungen (Liste)', '## Akzeptanzkriterien (Liste, prüfbar)',
-  '## Technische Hinweise (betroffene Dateien/Module nach Prüfung des Projekts)', '## Risiken & Abgrenzung',
+  '## Technische Hinweise (betroffene Dateien/Module nach Prüfung des Projekts)', '## Diagramme (Mermaid-Codeblock, z. B. Ablauf oder ER-Diagramm, wenn hilfreich)', '## Abgrenzung',
   'Erfinde keine Dateien. Beschreibe nur, was umgesetzt werden soll – ändere selbst nichts.',
 ].join('\n');
 
@@ -35,28 +36,51 @@ export function buildRequirementPrompt(instructions: string, idea: Idea, current
   ].join('\n\n');
 }
 
-/** Runs the project's author agent (own command, default command or local model) and returns its redacted output. */
+/** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */
 export async function runAuthorAgent(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
   buildPrompt: (instructions: string) => string,
   execute: CommandExecutor = runCommand,
+  role = 'author',
 ): Promise<{ exitCode: number; output: string }> {
   const author = (await pool.query<{ instructions: string; command: string[] | null }>(
     `SELECT instructions, command FROM agents
-      WHERE project_slug = $1 AND role = 'author' AND enabled ORDER BY position LIMIT 1`,
-    [options.project],
+      WHERE project_slug = $1 AND role = $2 AND enabled ORDER BY position LIMIT 1`,
+    [options.project, role],
   )).rows[0];
   const prompt = withProjectContext(await loadProjectContext(pool, options.project), buildPrompt(author?.instructions ?? ''));
   const command = author?.command?.length ? author.command : defaultAgentCommand();
   try {
     const result = command
       ? await execute(buildInvocation(command, prompt), options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment() })
-      : await runOllamaAgent({ prompt, role: 'author', cwd: options.cwd, timeoutMs: options.timeoutMs });
+      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs });
     return { exitCode: result.exitCode, output: redactOutput(result.output, process.env).trim() };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };
   }
+}
+
+
+/** Der Bug-Wächter prüft alle bisherigen Bugs auf Bezug zum Auftrag; ohne Antwort bleibt eine mechanische Liste. */
+async function assessRisks(
+  pool: Pool,
+  options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
+  title: string,
+  description: string,
+  execute: CommandExecutor,
+): Promise<string> {
+  const bugs = await loadKnownBugs(pool, options.project, 60).catch(() => []);
+  if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
+  const list = bugs.map((bug) => `- [${bug.status === 'fixed' ? 'behoben' : 'offen'} / ${bug.severity}] ${bug.title}${bug.description ? ` – ${bug.description.slice(0, 200)}` : ''}${bug.fixNotes ? ` | Lösung: ${bug.fixNotes.slice(0, 300)}` : ''}`);
+  const { exitCode, output } = await runAuthorAgent(pool, options, (instructions) => [
+    'Du bist der Agent "Bug-Wächter". Prüfe, welche der bisherigen Bugs zum Kontext des Auftrags passen.',
+    `## Anweisung\n${instructions}`,
+    `## Auftrag\nTitel: ${title}\n${description}`,
+    `## Alle bisherigen Bugs\n${list.join('\n')}`,
+    'Antworte als Markdown-Liste nur mit den passenden Bugs: Bug, warum relevant, was nicht wiederholt werden darf. Passt keiner, schreibe "Keine relevanten Bugs." Ändere nichts.',
+  ].join('\n\n'), execute, 'bug_reviewer');
+  return exitCode === 0 && output ? output.slice(0, 6000) : `Bekannte Bugs (nicht gefiltert):\n${list.slice(0, 15).join('\n')}`;
 }
 
 /** Turns one requested idea into a backlog order. Sprint assignment stays a manual decision. */
@@ -102,6 +126,12 @@ export async function draftRequirements(
     );
     return 0;
   }
+  const risks = await assessRisks(pool, options, idea.title, output, execute);
+  const projectContext = await loadProjectContext(pool, options.project);
+  if (isShuttingDown()) {
+    await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE id = $1`, [idea.id]);
+    return 0;
+  }
   if (existing) {
     if (!['backlog', 'planned', 'blocked'].includes(existing.status)) {
       await pool.query(
@@ -111,14 +141,15 @@ export async function draftRequirements(
       );
       return 0;
     }
-    await pool.query(`UPDATE development_items SET description = $2, updated_at = NOW() WHERE id = $1`, [existing.id, output.slice(0, 10_000)]);
+    await pool.query(`UPDATE development_items SET description = $2, risks = $3, project_context = $4, updated_at = NOW() WHERE id = $1`,
+      [existing.id, output.slice(0, 10_000), risks, projectContext]);
   } else await pool.query(
     `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
-                                    effort_hours, token_estimate, benefit, cost)
-     SELECT i.project_slug, i.id, i.title, $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost
+                                    effort_hours, token_estimate, benefit, cost, risks, project_context)
+     SELECT i.project_slug, i.id, i.title, $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4
        FROM ideation_items i
       WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)`,
-    [idea.id, output.slice(0, 10_000)],
+    [idea.id, output.slice(0, 10_000), risks, projectContext],
   );
   await pool.query(
     `UPDATE ideation_items SET status = 'accepted',

@@ -210,7 +210,10 @@ const SCHEMA = `
 
   ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_role_check;
   ALTER TABLE agents ADD CONSTRAINT agents_role_check CHECK (role IN
-    ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'custom'));
+    ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'custom'));
+
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS risks TEXT NOT NULL DEFAULT '';
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS project_context TEXT NOT NULL DEFAULT '';
 
   CREATE TABLE IF NOT EXISTS bugs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

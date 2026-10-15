@@ -202,7 +202,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
     title, description, status, priority, created_at AS "createdAt",
     effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-    kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId"`;
+    kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext"`;
   const IDEA_FIELDS = {
     title: { column: 'title', parse: parseTitle(180) },
     description: { column: 'description', parse: parseLongText },

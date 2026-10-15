@@ -378,3 +378,7 @@ h3 .link-button { color: var(--ink); }
 .order-detail .markdown { max-height: none; background: #fff; }
 .order-detail .markdown h2 { font-size: 16px; margin-top: 14px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
 .order-detail .markdown h2:first-child { margin-top: 0; }
+.order-section { margin: 16px 0 6px; font-size: 14px; color: #8a5a00; }
+.order-context { margin-top: 12px; }
+.order-context summary { cursor: pointer; font-weight: 600; color: #2f6f4f; }
+.item-content h4 .button { margin-left: 8px; padding: 2px 8px; font-size: 13px; }

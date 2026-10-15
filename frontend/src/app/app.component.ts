@@ -92,6 +92,7 @@ export class AppComponent implements OnInit, OnDestroy {
     { value: 'documenter', label: 'Dokumentierer' },
     { value: 'bug_reviewer', label: 'Bug-Wächter' },
     { value: 'manual_writer', label: 'Handbuch-Autor' },
+    { value: 'user_manual_writer', label: 'Benutzerhandbuch-Autor' },
     { value: 'custom', label: 'Eigene Rolle' },
   ];
   readonly phases: { id: AgentPhase; label: string; hint: string }[] = [
@@ -792,6 +793,26 @@ export class AppComponent implements OnInit, OnDestroy {
 
   async updateAgent(id: string, values: Partial<Agent>): Promise<void> {
     await this.perform(() => this.api.patch(`/api/agents/${encodeURIComponent(id)}`, values), 'Agent aktualisiert.');
+  }
+
+  readonly agentEditing = signal<string | null>(null);
+  agentEdit = { name: '', instructions: '', command: '' };
+
+  startAgentEdit(agent: Agent): void {
+    this.agentEdit = { name: agent.name, instructions: agent.instructions, command: agent.command?.join(' ') ?? '' };
+    this.agentEditing.set(agent.id);
+  }
+
+  async saveAgentEdit(agent: Agent): Promise<void> {
+    let command: string[] | null;
+    try {
+      command = this.parseCommand(this.agentEdit.command);
+    } catch (error) {
+      this.notice.set(this.errorMessage(error, 'Der Agent-Befehl ist ungültig.'));
+      return;
+    }
+    await this.updateAgent(agent.id, { name: this.agentEdit.name, instructions: this.agentEdit.instructions, command });
+    this.agentEditing.set(null);
   }
 
   async deleteAgent(id: string): Promise<void> {
