@@ -62,6 +62,7 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   const requeued = await pool.query(
     `UPDATE development_items SET status = 'planned', updated_at = NOW()
       WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`);
+  await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
   await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
   await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
   await pool.query(`UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`);

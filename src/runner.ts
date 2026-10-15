@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { materializeAttachments } from './attachments.js';
 import { type KnownBug, loadKnownBugs, reportAgentBug } from './bugs.js';
+import { startProgress } from './chat-progress.js';
 import { loadProjectContext, withProjectContext } from './project-context.js';
 import { isShuttingDown } from './shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
@@ -30,6 +31,7 @@ export interface WorkItem {
   sprintId?: string | null;
   ideationId?: string | null;
   agentId?: string | null;
+  fromChat?: boolean;
 }
 
 export interface PromptExtras {
@@ -174,7 +176,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
 
 /** Planned items of the active sprint or assigned directly to an agent, most important first. */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.from_chat AS "fromChat"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d WHERE d.id = $1 AND d.project_slug = $2`,
@@ -329,6 +331,10 @@ export async function runWorkItem(
       const prompt = withProjectContext(projectContext, buildPrompt(agent, item, done, { bugs, manual, images }));
       const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
       let result: CommandResult;
+      const stopProgress = item.fromChat
+        ? await startProgress(pool, item.projectSlug, [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
+          { developmentId: item.id, agentName: agent.name })
+        : async (): Promise<void> => undefined;
       try {
         result = command
           ? await execute(buildInvocation(command, prompt), options.cwd, {
@@ -342,6 +348,7 @@ export async function runWorkItem(
       } catch (error) {
         result = { exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) };
       }
+      await stopProgress();
       const output = redactOutput(result.output, process.env);
       if (isShuttingDown()) {
         interrupted = true;

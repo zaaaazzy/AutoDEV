@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from './command.js';
 import { isShuttingDown } from './shutdown.js';
+import { startProgress } from './chat-progress.js';
 import { runAuthorAgent } from './requirements.js';
 import type { RunnerOptions } from './runner.js';
 
@@ -68,12 +69,15 @@ export async function processChat(
   const [history, agents] = await Promise.all([
     pool.query<{ role: string; content: string }>(
       `SELECT role, content FROM (SELECT role, content, created_at FROM chat_messages
-        WHERE project_slug = $1 AND status <> 'failed' ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
+        WHERE project_slug = $1 AND status <> 'failed' AND NOT (role = 'assistant' AND status = 'processing') ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
       [options.project, HISTORY_LIMIT]),
     pool.query<{ name: string; role: string }>(
       `SELECT name, role FROM agents WHERE project_slug = $1 AND enabled ORDER BY position`, [options.project]),
   ]);
-  const { exitCode, output } = await runAuthorAgent(pool, options, () => buildChatPrompt(history.rows, agents.rows), execute);
+  const stopProgress = await startProgress(pool, options.project,
+    ['Lese die Anfrage und den Projektkontext …', 'Analysiere und formuliere die Antwort …', 'Prüfe Details im Projekt …', 'Fasse die Ergebnisse zusammen …']);
+  const { exitCode, output } = await runAuthorAgent(pool, options, () => buildChatPrompt(history.rows, agents.rows), execute)
+    .finally(stopProgress);
   if (isShuttingDown()) {
     await pool.query(`UPDATE chat_messages SET status = 'pending', updated_at = clock_timestamp() WHERE id = $1`, [claimed.id]);
     return true;

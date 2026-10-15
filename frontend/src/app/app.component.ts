@@ -108,6 +108,7 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly activeProject = signal('');
   readonly chat = signal<ChatMessage[]>([]);
   readonly chatWaiting = computed(() => this.chat().some((message) => message.role === 'user' && ['pending', 'processing'].includes(message.status)));
+  readonly chatProgressShown = computed(() => this.chat().some((message) => message.role === 'assistant' && message.status === 'processing'));
   chatInput = '';
   private chatStream: EventSource | null = null;
   private readonly chatEffect = effect((onCleanup) => {
