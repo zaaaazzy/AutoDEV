@@ -136,14 +136,18 @@
               @for (message of chat(); track message.id) {
                 @if (message.developmentId) {
                   <div class="chat-msg task-card" [class.failed]="message.status === 'failed'" [class.typing]="message.status === 'processing'">
-                    <div class="task-head">
+                    <div class="task-head" (click)="toggleStep(message.id)" role="button" tabindex="0" (keydown.enter)="toggleStep(message.id)">
                       <span class="task-badge">{{ message.agentName || 'Auftrag' }}</span>
-                      <a class="task-link" href="#development" (click)="navigate('development')" title="Zum Auftrag">
+                      <a class="task-link" href="#development" (click)="$event.stopPropagation(); navigate('development')" title="Zum Auftrag">
                         📋 {{ message.developmentTitle || 'Auftrag' }}
                         @if (message.developmentStatus) { <span class="status" [ngClass]="statusClass(message.developmentStatus)">{{ statusLabel(message.developmentStatus) }}</span> }
                       </a>
+                      <span class="task-chevron" [class.open]="openSteps().has(message.id)" aria-hidden="true">▾</span>
                     </div>
-                    <div class="task-body">{{ message.content }}</div>
+                    <ul class="task-summary">
+                      @for (line of stepSummary(message.content); track $index) { <li [class.bad]="line.bad">{{ line.text }}</li> }
+                    </ul>
+                    @if (openSteps().has(message.id)) { <pre class="task-body">{{ message.content }}</pre> }
                   </div>
                 } @else {
                   <div class="chat-msg" [class.mine]="message.role === 'user'" [class.failed]="message.status === 'failed'" [class.typing]="message.role === 'assistant' && message.status === 'processing'">{{ message.content }}</div>

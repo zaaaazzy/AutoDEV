@@ -546,6 +546,17 @@ export class AppComponent implements OnInit, OnDestroy {
   readonly devValues = signal<Partial<Record<'status' | 'priority' | 'sprint' | 'effortHours', string[]>>>({});
   readonly devSort = signal<{ key: DevKey; dir: 'asc' | 'desc' }>({ key: 'priority', dir: 'desc' });
   readonly openOrder = signal<string | null>(null);
+  readonly openSteps = signal<ReadonlySet<string>>(new Set());
+  toggleStep(id: string): void {
+    this.openSteps.update((set) => { const next = new Set(set); if (!next.delete(id)) next.add(id); return next; });
+  }
+  stepSummary(content: string): { text: string; bad: boolean }[] {
+    const lines = content.split('\n').map((line) => line.trim()).filter(Boolean);
+    const results = lines.filter((line) => /^\$ .*→/.test(line)).map((line) => ({ text: line.replace(/^\$ /, ''), bad: /failed/i.test(line) }));
+    if (results.length) return results.slice(0, 6);
+    const text = lines.slice(0, 2).join(' ');
+    return [{ text: text.length > 220 ? `${text.slice(0, 220)} …` : text, bad: false }];
+  }
   readonly showDoneOrders = signal(false);
   readonly doneOrders = computed(() => this.data().development.filter((item) => item.status === 'done'));
   readonly openOrders = computed(() => {
