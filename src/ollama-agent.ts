@@ -2,6 +2,12 @@ import { copyFile, mkdir, readdir, readFile, realpath, stat, writeFile } from 'n
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { shutdownSignal } from './shutdown.js';
 import { type CommandExecutor, type CommandResult, runCommand } from './command.js';
+import { Agent, fetch as undiciFetch } from 'undici';
+
+// Lokale Modelle brauchen oft Minuten pro Antwort; Node-Standardlimits (5 min) würden sonst „fetch failed“ liefern.
+const patientDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 30_000 });
+const patientFetch = ((url: string, init?: RequestInit) =>
+  undiciFetch(url, { ...init, dispatcher: patientDispatcher } as never)) as unknown as typeof fetch;
 
 export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
 export const DEFAULT_OLLAMA_MODEL = 'qwen3.5:9b';
@@ -265,7 +271,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const startedAt = Date.now();
   const model = options.model ?? process.env.DEV_LOG_OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const fetchImpl = options.fetchImpl ?? patientFetch;
   const canWrite = WRITE_ROLES.has(options.role);
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns = options.maxTurns ?? (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
@@ -298,7 +304,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
       } else if (turn === maxTurns - 4 && canWrite) {
         messages.push({ role: 'user', content: 'Hinweis: Nur noch wenige Schritte übrig. Schließe die Änderung jetzt ab, prüfe sie kurz und fasse zusammen.' });
       }
-      const response = await fetchImpl(`${baseUrl}/api/chat`, {
+      const request = (): Promise<Response> => fetchImpl(`${baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
@@ -306,6 +312,11 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
           model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite), stream: false, think: false,
           options: { num_ctx: 32_768, temperature: 0.2 },
         }),
+      });
+      // Kurze Verbindungsabbrüche (z. B. Modellwechsel in Ollama) werden einmal wiederholt.
+      const response = await request().catch(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        return request();
       });
       if (!response.ok) {
         return finish(1, `Ollama antwortete mit ${response.status}: ${(await response.text()).slice(0, 500)}`);
@@ -335,10 +346,16 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   } catch (error) {
     const reason = controller.signal.aborted
       ? 'Zeitlimit erreicht'
-      : `Ollama nicht erreichbar unter ${baseUrl} (${error instanceof Error ? error.message : String(error)})`;
+      : `Ollama nicht erreichbar unter ${baseUrl} (${describeError(error)})`;
     return finish(1, reason);
   } finally {
     clearTimeout(timer);
     shutdownSignal.removeEventListener('abort', abortOnShutdown);
   }
+}
+
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const cause = (error as Error & { cause?: { code?: string; message?: string } }).cause;
+  return cause ? `${error.message}: ${cause.code ?? cause.message}` : error.message;
 }
