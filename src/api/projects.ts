@@ -1,13 +1,14 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
+import { targetsDevLogDatabase } from '../agent/tool-sql.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
 import { isRecord, PROJECT_SLUG, parseProjectSlug, projectFolderError, validText } from '../core/validation.js';
 
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix", created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix", created_at AS "createdAt"
          FROM projects
         ORDER BY name`,
     );
@@ -34,6 +35,17 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       }
       values.push(remote || null);
       sets.push(`git_remote = $${values.length}`);
+    }
+    if (body.databaseUrl !== undefined) {
+      const url = typeof body.databaseUrl === 'string' ? body.databaseUrl.trim() : null;
+      if (url === null || (url !== '' && (!/^postgres(?:ql)?:\/\/\S+$/.test(url) || url.length > 500))) {
+        return fail('Ungültiger Datenbank-Zugang. Erlaubt: postgresql://user:passwort@host:port/datenbank');
+      }
+      if (url && targetsDevLogDatabase(url)) {
+        return fail('Der Zugang darf nicht auf die Dev-Log-Datenbank zeigen.');
+      }
+      values.push(url || null);
+      sets.push(`database_url = $${values.length}`);
     }
     if (body.repository !== undefined) {
       const folder = typeof body.repository === 'string' ? body.repository.trim() : '';
@@ -76,7 +88,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix"`,
       values,
     );
     if (!result.rows[0]) {

@@ -50,6 +50,8 @@ Der Assistent ist **kein** Workflow-Agent, sondern bedient den Chat und die Prob
 Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 - **Lesen/Schreiben:** `read_file`, `list_files`, `search`, `write_file`, `replace_in_file` – nur innerhalb des Projektordners (Backups in `.dev-log-backups/`).
+- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Eine Transaktion, 15 s Limit, max. 50 Zeilen; `UPDATE`/`DELETE` nur mit `WHERE`; gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, GRANT/REVOKE, COPY, Rollenwechsel, Server-Funktionen. Die Dev-Log-Datenbank selbst wird abgelehnt.
+- **Schleifenschutz:** Wiederholt ein Modell denselben Absatz (3×) oder denselben Werkzeugaufruf (4× in Folge), bricht der Lauf ab.
 - **Git:** `status`, `diff`, `log`, `show`, `branch`, `remote -v`, `ls-files`, `pull --ff-only`, `fetch`, `checkout <branch>`, `clone <https/ssh-URL> [Unterordner|.]`.
 - **npm/node:** `npm test`, `npm run <skript>`, `npm install|ci [Pakete]`, `npm ls|outdated|audit`, `node --version`, tsc/eslint/prettier/jest/vitest.
 - **Docker Compose** (im Projektordner): `ps`, `config --services`, `logs`, `up -d [--build|--wait|--force-recreate] [Dienste]`, `stop`, `start`, `restart`, `down [--remove-orphans]`, `build`, `pull`.

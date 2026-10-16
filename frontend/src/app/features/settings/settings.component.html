@@ -49,6 +49,30 @@
           placeholder="git@github.com:user/repo.git"
         />
       </label>
+      <label class="wide"
+        >Datenbank-Zugang für Entwickler (optional)<input
+          name="databaseUrl"
+          type="password"
+          autocomplete="off"
+          [(ngModel)]="settings.databaseUrl"
+          maxlength="500"
+          [placeholder]="
+            store.currentProject()?.databaseConfigured
+              ? 'Hinterlegt – leer lassen, um beizubehalten'
+              : 'postgresql://user:passwort@host:5432/datenbank'
+          "
+        />
+      </label>
+      @if (store.currentProject()?.databaseConfigured) {
+        <label class="wide check">
+          <input type="checkbox" name="clearDatabase" [(ngModel)]="settings.clearDatabase" /> Datenbank-Zugang
+          entfernen</label
+        >
+      }
+      <p class="muted wide">
+        Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
+        Dev-Log-Datenbank).
+      </p>
       <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
     </form>
   </section>

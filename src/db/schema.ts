@@ -6,6 +6,7 @@ export const SCHEMA = `
     description TEXT NOT NULL DEFAULT '',
     guidelines TEXT NOT NULL DEFAULT '',
     git_remote TEXT,
+    database_url TEXT,
     test_commands JSONB,
     auto_bugfix BOOLEAN NOT NULL DEFAULT TRUE,
     agents_seeded BOOLEAN NOT NULL DEFAULT FALSE,

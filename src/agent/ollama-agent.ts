@@ -4,6 +4,7 @@ import { type CommandExecutor, type CommandResult, runCommand } from '../core/co
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat } from './ollama-client.js';
 import { resolveContext, resolveModel } from './ollama-client.js';
 import { systemPrompt, toolDefinitions } from './ollama-prompts.js';
+import { LoopGuard } from './loop-guard.js';
 import { BACKUP_DIRECTORY, executeTool, type ToolContext } from './ollama-tools.js';
 import type { ChatMessage, ToolCall } from './ollama-types.js';
 
@@ -24,6 +25,8 @@ export interface OllamaAgentOptions {
   execute?: CommandExecutor;
   signal?: AbortSignal;
   onProgress?: (message: string) => void;
+  /** Datenbank-Zugang des Projekts; aktiviert das Werkzeug run_sql für schreibende Rollen. */
+  databaseUrl?: string | null;
 }
 
 const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
@@ -47,6 +50,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     cwd: options.cwd,
     canWrite,
     canManageServices: options.role === 'assistant',
+    databaseUrl: canWrite ? options.databaseUrl : null,
     changed: new Set(),
     backupRoot: join(options.cwd, BACKUP_DIRECTORY, new Date().toISOString().replace(/[:.]/g, '-')),
     execute: options.execute ?? runCommand,
@@ -59,8 +63,9 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     return { exitCode, durationMs: Date.now() - startedAt, output: `${text}${files}` };
   };
 
+  const loopGuard = new LoopGuard();
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(options.role, canWrite) },
+    { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl)) },
     { role: 'user', content: options.prompt },
   ];
   const controller = new AbortController();
@@ -93,7 +98,10 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
           {
             model,
             messages,
-            tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, context.canManageServices),
+            tools:
+              lastTurn && !canWrite
+                ? undefined
+                : toolDefinitions(canWrite, context.canManageServices, Boolean(context.databaseUrl)),
             stream: false,
             think: false,
             keep_alive: keepAlive,
@@ -120,6 +128,10 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
       if (!message) {
         return finish(1, 'Ollama lieferte keine Nachricht.');
       }
+      const repeated = loopGuard.repeatedText(message.content ?? '');
+      if (repeated) {
+        return finish(1, `Abbruch: Das Modell wiederholt sich („${repeated}…“). Schleife erkannt.`);
+      }
       messages.push({ role: 'assistant', content: message.content ?? '', tool_calls: message.tool_calls });
       if (!message.tool_calls?.length) {
         const text = (message.content ?? '').trim();
@@ -132,6 +144,9 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         return finish(0, text);
       }
       for (const call of message.tool_calls) {
+        if (loopGuard.repeatedCall(call.function.name, call.function.arguments)) {
+          return finish(1, `Abbruch: Das Modell ruft „${call.function.name}“ wiederholt mit denselben Argumenten auf.`);
+        }
         options.onProgress?.(describeToolCall(call));
         const result = await executeTool(context, call);
         messages.push({ role: 'tool', tool_name: call.function.name, content: result });

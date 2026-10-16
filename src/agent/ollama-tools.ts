@@ -9,6 +9,7 @@ import {
   COMPOSE_STARTING,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
+import { runProjectSql, type SqlClientFactory } from './tool-sql.js';
 import type { ToolCall } from './ollama-types.js';
 import { MAX_FILE_BYTES, SECRET_NAME, SKIPPED_DIRECTORIES, resolveInside, walkText } from './tool-paths.js';
 
@@ -22,6 +23,8 @@ export interface ToolContext {
   cwd: string;
   canWrite: boolean;
   canManageServices?: boolean;
+  databaseUrl?: string | null;
+  sqlClient?: SqlClientFactory;
   changed: Set<string>;
   backupRoot: string;
   execute: CommandExecutor;
@@ -141,6 +144,15 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
             `Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`,
           );
         });
+      }
+      case 'run_sql': {
+        if (!context.canWrite || !context.databaseUrl) {
+          return 'Für dieses Projekt ist kein Datenbank-Zugang hinterlegt.';
+        }
+        if (typeof args.sql !== 'string' || !args.sql.trim() || args.sql.length > 20_000) {
+          return 'sql muss ein nicht leerer Text sein.';
+        }
+        return clip(await runProjectSql(context.databaseUrl, args.sql, context.sqlClient));
       }
       default:
         return `Unbekanntes Werkzeug: ${name}`;

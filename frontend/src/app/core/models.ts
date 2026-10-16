@@ -13,6 +13,7 @@ export interface Project {
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;
+  databaseConfigured?: boolean;
 }
 
 export interface Estimate {

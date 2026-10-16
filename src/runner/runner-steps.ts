@@ -65,7 +65,12 @@ export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt,
       .join('\n\n');
     return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
   }
-  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal });
+  const databaseUrl = (
+    await pool.query<{ url: string | null }>('SELECT database_url AS url FROM projects WHERE slug = $1', [
+      item.projectSlug,
+    ])
+  ).rows[0]?.url;
+  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl });
 };
 
 async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {

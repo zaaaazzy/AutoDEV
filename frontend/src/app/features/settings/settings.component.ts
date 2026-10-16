@@ -22,6 +22,8 @@ export class SettingsComponent {
     description: '',
     guidelines: '',
     autoBugfix: true,
+    databaseUrl: '',
+    clearDatabase: false,
   };
   protected maxAgents = 2;
 
@@ -44,6 +46,11 @@ export class SettingsComponent {
           description: this.settings.description,
           guidelines: this.settings.guidelines,
           autoBugfix: this.settings.autoBugfix,
+          ...(this.settings.clearDatabase
+            ? { databaseUrl: '' }
+            : this.settings.databaseUrl.trim()
+              ? { databaseUrl: this.settings.databaseUrl.trim() }
+              : {}),
         });
         this.store.projects.update((projects) =>
           projects.map((project) => (project.slug === slug ? { ...project, ...result.project } : project)),
@@ -74,6 +81,8 @@ export class SettingsComponent {
       description: project?.description ?? '',
       guidelines: project?.guidelines ?? '',
       autoBugfix: project?.autoBugfix ?? true,
+      databaseUrl: '',
+      clearDatabase: false,
       testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
     };
   }

@@ -3,7 +3,7 @@ const parameter = (description: string, type = 'string'): { type: string; descri
   description,
 });
 
-export function toolDefinitions(canWrite: boolean, canManageServices = false): unknown[] {
+export function toolDefinitions(canWrite: boolean, canManageServices = false, hasDatabase = false): unknown[] {
   const tools: { name: string; description: string; properties: Record<string, unknown>; required: string[] }[] = [
     {
       name: 'list_files',
@@ -52,6 +52,16 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false): u
         required: ['command'],
       },
     );
+    if (hasDatabase) {
+      tools.push({
+        name: 'run_sql',
+        description:
+          'Führt SQL in der Datenbank dieses Projekts aus (lesen und schreiben, eine Transaktion, max. 50 ' +
+          'Ergebniszeilen). Schema vorher mit information_schema prüfen. Keine Zugangsdaten raten oder erfinden.',
+        properties: { sql: parameter('SQL-Anweisung(en); UPDATE/DELETE nur mit WHERE') },
+        required: ['sql'],
+      });
+    }
   }
   return tools.map((tool) => ({
     type: 'function',
@@ -63,7 +73,7 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false): u
   }));
 }
 
-export function systemPrompt(role: string, canWrite: boolean): string {
+export function systemPrompt(role: string, canWrite: boolean, hasDatabase = false): string {
   return [
     role === 'assistant'
       ? 'Du bist der Dashboard-Assistent und Problemlöser. Du darfst Probleme im Projekt selbst untersuchen ' +
@@ -91,6 +101,14 @@ export function systemPrompt(role: string, canWrite: boolean): string {
         : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als ' +
           'letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich ' +
           'relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
+    hasDatabase
+      ? 'Du hast mit run_sql Zugriff auf die Datenbank dieses Projekts. Prüfe zuerst per SELECT, ob Daten vorhanden ' +
+        'sind, ändere nur gezielt und überschreibe keine Daten, die du nicht kennst. Erfinde keine Passwörter, ' +
+        'Benutzer oder Endpunkte.'
+      : '',
+    'Wiederhole dich nicht: Hast du etwas bereits festgestellt, handle oder beende mit einer Antwort.',
     'Antworte auf Deutsch.',
-  ].join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
