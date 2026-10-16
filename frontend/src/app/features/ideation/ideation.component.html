@@ -164,49 +164,89 @@
                       <td colspan="3">
                         @let order = closedIdeaOrder(idea);
                         @let sprint = store.sprintOf(order);
-                        <div class="closed-info">
-                          <div class="info-block">
-                            <h4>Auftrag</h4>
-                            @if (order) {
-                              <p>
-                                <strong>{{ order.title }}</strong>
-                              </p>
-                              <p>
-                                <span class="status" [ngClass]="order.status | statusClass">{{
-                                  order.status | statusLabel
-                                }}</span>
-                                · Priorität {{ order.priority | priorityLabel }} · Aufwand
-                                {{ order.effortHours | hours }}
-                              </p>
-                              @if (order.completedAt) {
+                        @if (group.progress) {
+                          <div class="progress-info">
+                            <div class="info-block">
+                              <h4>Auftrag</h4>
+                              @if (order) {
+                                <p>
+                                  <strong>{{ order.title }}</strong>
+                                  <span class="status" [ngClass]="order.status | statusClass">{{
+                                    order.status | statusLabel
+                                  }}</span>
+                                </p>
                                 <p class="muted">
-                                  Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
+                                  Priorität {{ order.priority | priorityLabel }} · Aufwand
+                                  {{ order.effortHours | hours }}
+                                </p>
+                                <p class="detail-text">{{ order.description }}</p>
+                              } @else {
+                                <p class="muted">Kein Auftrag gefunden.</p>
+                              }
+                            </div>
+                            <div class="info-block">
+                              <h4>Agents</h4>
+                              @if (order) {
+                                <ul class="agent-status-list">
+                                  @for (row of workflowOf(order); track row.key) {
+                                    <li>
+                                      <span>{{ row.name }}</span>
+                                      <span class="status" [ngClass]="row.step?.status ?? 'waiting' | statusClass">{{
+                                        row.step?.status ?? 'waiting' | statusLabel
+                                      }}</span>
+                                    </li>
+                                  } @empty {
+                                    <li class="muted">Keine Agents im Workflow.</li>
+                                  }
+                                </ul>
+                              }
+                            </div>
+                          </div>
+                        } @else {
+                          <div class="closed-info">
+                            <div class="info-block">
+                              <h4>Auftrag</h4>
+                              @if (order) {
+                                <p>
+                                  <strong>{{ order.title }}</strong>
+                                </p>
+                                <p>
+                                  <span class="status" [ngClass]="order.status | statusClass">{{
+                                    order.status | statusLabel
+                                  }}</span>
+                                  · Priorität {{ order.priority | priorityLabel }} · Aufwand
+                                  {{ order.effortHours | hours }}
+                                </p>
+                                @if (order.completedAt) {
+                                  <p class="muted">
+                                    Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
+                                  </p>
+                                }
+                              } @else {
+                                <p class="muted">
+                                  {{
+                                    idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.'
+                                  }}
                                 </p>
                               }
-                            } @else {
-                              <p class="muted">
-                                {{
-                                  idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.'
-                                }}
-                              </p>
-                            }
-                          </div>
-                          <div class="info-block">
-                            <h4>Sprint</h4>
-                            @if (sprint) {
-                              <p>
-                                <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
-                              </p>
-                              @if (sprint.goal) {
-                                <p class="muted">{{ sprint.goal }}</p>
+                            </div>
+                            <div class="info-block">
+                              <h4>Sprint</h4>
+                              @if (sprint) {
+                                <p>
+                                  <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
+                                </p>
+                                @if (sprint.goal) {
+                                  <p class="muted">{{ sprint.goal }}</p>
+                                }
+                                <p class="muted">{{ sprint.startDate ?? '–' }} – {{ sprint.endDate ?? '–' }}</p>
+                              } @else {
+                                <p class="muted">Keinem Sprint zugewiesen.</p>
                               }
-                              <p class="muted">{{ sprint.startDate ?? '–' }} – {{ sprint.endDate ?? '–' }}</p>
-                            } @else {
-                              <p class="muted">Keinem Sprint zugewiesen.</p>
-                            }
+                            </div>
+                            <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
                           </div>
-                          <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
-                        </div>
+                        }
                       </td>
                     </tr>
                   }
@@ -228,6 +268,7 @@
           title: 'In Bearbeitung',
           ideas: inProgressIdeas(),
           open: showInProgressIdeas,
+          progress: true,
           empty: 'Keine Ideen in Bearbeitung.',
         },
       }

@@ -10,6 +10,7 @@ import { formatHours, formatIsoDate } from '../../shared/format.js';
 import { priorityLabel, statusLabel } from '../../shared/labels.js';
 import { HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { compareRanks, includesText, toggleListValue, toggleSort, type SortState } from '../../shared/table.js';
+import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
 import { IDEA_STATUSES } from './idea-options.js';
 
@@ -180,6 +181,10 @@ export class IdeationComponent {
       ...(order ? [{ kind: 'step', label: 'Auftrag', text: order.title } satisfies GitNode] : []),
       ...(sprint ? [branchNode(sprint), commitNode(sprint)] : []),
     ];
+  }
+
+  protected workflowOf(order: DevelopmentItem) {
+    return buildWorkflow(this.data(), order);
   }
 
   protected closedIdeaOrder(idea: Idea) {

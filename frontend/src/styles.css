@@ -455,3 +455,10 @@ h3 .link-button { color: var(--ink); }
 .idea-detail .promote { margin: 4px 0 8px; }
 .idea-detail .estimate { padding: 12px 16px; border-radius: 9px; background: #f7f8f5; }
 .idea-detail .form-grid label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; color: var(--muted); }
+
+.progress-info { display: grid; gap: 12px; padding: 6px 0; }
+.progress-info .info-block { padding: 14px 18px; }
+.progress-info .detail-text { margin: 8px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.agent-status-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.agent-status-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid #e8ebe4; }
+.agent-status-list li:last-child { border-bottom: 0; }
