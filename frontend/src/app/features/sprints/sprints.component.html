@@ -149,16 +149,16 @@
                     <div class="sprint-task-body">
                       @if (sprintRun(item.id); as run) {
                         <ol class="agent-steps">
-                          @for (step of run.steps; track step.position) {
+                          @for (step of run.steps; track step.runId + step.position) {
                             <li>
                               <button
                                 type="button"
                                 class="sprint-task-head"
-                                (click)="toggleSprintItem(run.id + step.position)"
+                                (click)="toggleSprintItem(step.runId + step.position)"
                               >
                                 <span
                                   class="task-chevron"
-                                  [class.open]="openSprintItems().has(run.id + step.position)"
+                                  [class.open]="openSprintItems().has(step.runId + step.position)"
                                   aria-hidden="true"
                                   >▾</span
                                 >
@@ -167,7 +167,7 @@
                                   step.status | statusLabel
                                 }}</span>
                               </button>
-                              @if (openSprintItems().has(run.id + step.position) || step.status === 'running') {
+                              @if (openSprintItems().has(step.runId + step.position) || step.status === 'running') {
                                 <app-step-result
                                   [events]="step.events"
                                   [output]="step.output"

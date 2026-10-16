@@ -2,7 +2,7 @@ import { NgClass } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { AgentRun, DevelopmentItem, RunStep, Sprint, SprintReport } from '../../core/models.js';
+import type { AgentRun, DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
@@ -54,17 +54,13 @@ export class SprintsComponent {
     return this.data().reports.find((report) => report.sprintId === sprintId);
   }
 
-  /** Pro Position zählt der neueste Lauf; frühere erfolgreiche Schritte bleiben nach einer Wiederholung sichtbar. */
+  /** Alle Schritte in der Reihenfolge, in der sie liefen; eine Wiederholung erscheint als eigener Eintrag. */
   protected sprintRun(itemId: string): AgentRun | undefined {
-    const runs = this.data().agentRuns.filter((run) => run.developmentId === itemId);
+    const runs = this.data()
+      .agentRuns.filter((run) => run.developmentId === itemId)
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
     if (!runs.length) return undefined;
-    const byPosition = new Map<number, { step: RunStep; run: AgentRun }>();
-    for (const run of [...runs].reverse()) {
-      for (const step of run.steps) byPosition.set(step.position, { step, run });
-    }
-    const steps = [...byPosition.values()]
-      .sort((left, right) => left.step.position - right.step.position)
-      .map(({ step }) => step);
+    const steps = runs.flatMap((run) => [...run.steps].sort((left, right) => left.position - right.position));
     return { ...runs[0]!, steps };
   }
 
