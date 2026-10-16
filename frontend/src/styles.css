@@ -336,12 +336,25 @@ h3 .link-button { color: var(--ink); }
 .info-block { padding: 10px 14px; border: 1px solid #dfe3da; border-radius: 10px; background: #fafbf8; }
 .info-block h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b756f; }
 .info-block p { margin: 3px 0; }
-.git-tree ol { list-style: none; margin: 0; padding: 0 0 0 4px; border-left: 2px solid #c9d1c6; }
-.git-tree li { position: relative; padding: 3px 0 3px 16px; overflow-wrap: anywhere; }
-.git-tree .dot { position: absolute; left: -6px; top: 10px; width: 10px; height: 10px; border-radius: 50%; background: #8aa291; }
-.git-tree .dot.branch { background: #2f6f4f; }
-.git-tree .dot.commit { background: #d98a2b; }
-.git-tree em { color: #6b756f; font-style: normal; }
+/* Git-Verlauf: gemeinsame Zeitleiste für Sprints und Ideen */
+.git-tree { padding: 12px 14px; border: 1px solid #dfe3da; border-radius: 10px; background: #fafbf8; font-size: 13px; }
+.git-tree h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b756f; }
+.git-tree ol { list-style: none; margin: 0; padding: 0; }
+.git-node { position: relative; display: flex; flex-direction: column; gap: 1px; padding: 0 0 12px 22px; overflow-wrap: anywhere; }
+.git-node::before { content: ''; position: absolute; left: 4px; top: 12px; bottom: -2px; width: 2px; background: #c9d1c6; }
+.git-node:last-child { padding-bottom: 0; }
+.git-node:last-child::before { display: none; }
+.git-dot { position: absolute; left: 0; top: 4px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fafbf8; background: #8aa291; box-sizing: content-box; }
+.git-node.branch .git-dot { background: #2f6f4f; }
+.git-node.commit .git-dot { background: #d98a2b; }
+.git-node.empty .git-dot { background: #fafbf8; border-color: #c9d1c6; }
+.git-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6b756f; }
+.git-text { font-weight: 600; color: var(--ink); }
+.git-node.empty .git-text { font-weight: 400; color: #6b756f; }
+.git-detail { color: #6b756f; }
+.git-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e3e7df; }
+.git-actions .button { justify-content: flex-start; gap: 8px; }
+.icon-button { width: 32px; min-height: 32px; padding: 0; border-radius: 999px; }
 
 .chat-clear { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #d5dbd0; border-radius: 999px; background: #fff; color: #4a554d; font-size: 13px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
 .chat-clear:hover:not(:disabled) { background: #fbeceb; color: #b3372b; border-color: #e6b8b3; }
@@ -374,11 +387,12 @@ h3 .link-button { color: var(--ink); }
 .item-content h4 .button { margin-left: 8px; padding: 2px 8px; font-size: 13px; }
 .sprint-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .sprint-title h3 { margin: 0; }
+.sprint-links { display: inline-flex; align-items: center; gap: 6px; }
 .gh-link { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 999px; color: #24292f; text-decoration: none; font-size: 13px; background: #fff; }
 .gh-link:hover { border-color: #2f6f4f; }
 .sprint-layout { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start; }
 .sprint-main { min-width: 0; }
-.sprint-git { font-size: 13px; position: sticky; top: 12px; }
+.sprint-side { position: sticky; top: 12px; }
 .sprint-tasks-title { margin-top: 16px; }
 .sprint-task { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; background: #fff; }
 .sprint-task-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }

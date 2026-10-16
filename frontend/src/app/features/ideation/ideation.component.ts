@@ -2,9 +2,10 @@ import { NgClass } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { Idea, Priority } from '../../core/models.js';
+import type { DevelopmentItem, Idea, Priority, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ColumnHeaderComponent } from '../../shared/column-header.component.js';
+import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { formatHours, formatIsoDate } from '../../shared/format.js';
 import { priorityLabel, statusLabel } from '../../shared/labels.js';
 import { HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
@@ -26,6 +27,7 @@ type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
     NgClass,
     FormsModule,
     ColumnHeaderComponent,
+    GitTreeComponent,
     IdeaDetailComponent,
     HoursPipe,
     PriorityLabelPipe,
@@ -167,6 +169,14 @@ export class IdeationComponent {
 
   protected sortIdeasBy(key: IdeaKey): void {
     this.ideaSort.update((sort) => toggleSort(sort, key));
+  }
+
+  protected gitNodes(idea: Idea, order: DevelopmentItem | null, sprint: Sprint | null): GitNode[] {
+    return [
+      { kind: 'step', label: 'Idee', text: idea.title },
+      ...(order ? [{ kind: 'step', label: 'Auftrag', text: order.title } satisfies GitNode] : []),
+      ...(sprint ? [branchNode(sprint), commitNode(sprint)] : []),
+    ];
   }
 
   protected closedIdeaOrder(idea: Idea) {

@@ -7,7 +7,10 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import { isValidGitRemote, pushRemote, sprintTag, syncSprintToGit } from './git-sync.js';
 
-function fakePool(remote: string | null): { pool: Pool; updates: { sql: string; values: unknown[] }[] } {
+function fakePool(
+  remote: string | null,
+  action: 'push' | 'pull' = 'push',
+): { pool: Pool; updates: { sql: string; values: unknown[] }[] } {
   const updates: { sql: string; values: unknown[] }[] = [];
   let claimed = false;
   const pool = {
@@ -15,7 +18,7 @@ function fakePool(remote: string | null): { pool: Pool; updates: { sql: string; 
       updates.push({ sql, values });
       if (sql.includes("SET git_sync = 'running'") && !claimed) {
         claimed = true;
-        return { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', remote }] };
+        return { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', action, remote }] };
       }
       return { rows: [] };
     },
@@ -62,6 +65,32 @@ test('push failures are recorded instead of thrown', async () => {
   );
   assert.match(updates.at(-1)?.sql ?? '', /git_sync = 'failed'/);
   assert.match(String(updates.at(-1)?.values[1]), /auth failed/);
+});
+
+test('a pull request fast-forwards the project to the remote state', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'git-pull-'));
+  const remote = join(base, 'remote.git');
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '--bare', '-b', 'main', remote]);
+  const other = join(base, 'other');
+  execFileSync('git', ['clone', remote, other], { stdio: 'pipe' });
+  git(other, 'config', 'user.email', 'a@b.c');
+  git(other, 'config', 'user.name', 'a');
+  await writeFile(join(other, 'one.txt'), '1');
+  git(other, 'add', '-A');
+  git(other, 'commit', '-m', 'one');
+  git(other, 'branch', '-M', 'main');
+  git(other, 'push', '-u', 'origin', 'main');
+  const local = join(base, 'local');
+  execFileSync('git', ['clone', remote, local], { stdio: 'pipe' });
+  await writeFile(join(other, 'two.txt'), '2');
+  git(other, 'add', '-A');
+  git(other, 'commit', '-m', 'two');
+  git(other, 'push');
+  const { pool, updates } = fakePool(remote, 'pull');
+  assert.equal(await syncSprintToGit(pool, 'p', local), 1);
+  assert.equal(git(local, 'log', '-1', '--format=%s'), 'two');
+  assert.match(String(updates.at(-1)?.values[1]), /Stand von GitHub geladen/);
 });
 
 test('pushes GitHub HTTPS remotes over SSH', () => {

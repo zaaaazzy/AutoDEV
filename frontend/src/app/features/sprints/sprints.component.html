@@ -48,33 +48,26 @@
                 </a>
               }
             }
-          </div>
-          <div class="actions">
             <button
-              class="button secondary"
+              class="button icon-button"
               type="button"
-              (click)="retryGitSync(sprint.id)"
-              [disabled]="busy() || sprint.gitSync === 'pending' || sprint.gitSync === 'running'"
-              title="Stand committen und nach GitHub pushen"
+              (click)="syncGit(sprint.id, 'push')"
+              [disabled]="busy() || gitBusy(sprint)"
+              title="Git Push: Stand committen und nach GitHub pushen"
+              aria-label="Git Push"
             >
-              {{ sprint.gitSync === 'pending' || sprint.gitSync === 'running' ? 'Git läuft …' : 'Git sichern' }}
+              <app-nav-icon name="push" />
             </button>
-            @if (sprint.status === 'planned') {
-              <button class="button primary" (click)="updateSprint(sprint.id, { status: 'active' })">
-                Sprint starten
-              </button>
-            }
-            @if (sprint.status === 'active') {
-              <button class="button secondary" (click)="updateSprint(sprint.id, { status: 'completed' })">
-                Abschließen
-              </button>
-            }
-            @if (sprint.status === 'completed') {
-              <button class="button secondary" (click)="updateSprint(sprint.id, { status: 'active' })">
-                Wieder in Bearbeitung setzen
-              </button>
-            }
-            <button class="button danger" (click)="deleteSprint(sprint.id)">Löschen</button>
+            <button
+              class="button icon-button"
+              type="button"
+              (click)="syncGit(sprint.id, 'pull')"
+              [disabled]="busy() || gitBusy(sprint) || !store.currentProject()?.gitRemote"
+              title="Git Download: Stand von GitHub laden"
+              aria-label="Git Download"
+            >
+              <app-nav-icon name="pull" />
+            </button>
           </div>
         </div>
         <div class="sprint-layout">
@@ -227,28 +220,38 @@
               <p class="muted">Keine Aufgaben in diesem Sprint.</p>
             }
           </div>
-          <aside class="info-block git-tree sprint-git" aria-label="Git-Verlauf">
-            <h4>Git-Verlauf</h4>
-            <ol>
-              <li>
-                <span class="dot branch"></span>Branch <em>{{ sprint.gitBranch || 'main' }}</em>
-              </li>
-              @for (item of sprintItems(sprint.id); track item.id) {
-                <li>
-                  <span class="dot"></span>
-                  <em>{{ item.title }}</em>
-                </li>
-              }
-              @if (sprint.gitCommit) {
-                <li>
-                  <span class="dot commit"></span>
-                  <code>{{ sprint.gitCommit }}</code> <em>{{ sprint.gitMessage }}</em>
-                </li>
-              } @else {
-                <li class="muted"><span class="dot"></span>Noch kein Commit</li>
-              }
-            </ol>
-          </aside>
+          <div class="sprint-side">
+            <app-git-tree [nodes]="gitNodes(sprint)">
+              <div class="git-actions">
+                @if (sprint.status === 'planned') {
+                  <button class="button primary" type="button" (click)="updateSprint(sprint.id, { status: 'active' })">
+                    <app-nav-icon name="play" />Sprint starten
+                  </button>
+                }
+                @if (sprint.status === 'active') {
+                  <button
+                    class="button secondary"
+                    type="button"
+                    (click)="updateSprint(sprint.id, { status: 'completed' })"
+                  >
+                    <app-nav-icon name="check" />Abschließen
+                  </button>
+                }
+                @if (sprint.status === 'completed') {
+                  <button
+                    class="button secondary"
+                    type="button"
+                    (click)="updateSprint(sprint.id, { status: 'active' })"
+                  >
+                    <app-nav-icon name="undo" />Wieder öffnen
+                  </button>
+                }
+                <button class="button danger" type="button" (click)="deleteSprint(sprint.id)">
+                  <app-nav-icon name="trash" />Löschen
+                </button>
+              </div>
+            </app-git-tree>
+          </div>
         </div>
       </article>
     } @empty {

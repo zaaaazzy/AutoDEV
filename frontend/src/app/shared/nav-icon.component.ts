@@ -1,6 +1,6 @@
 import { Component, input } from '@angular/core';
 
-/** Navigations-Symbole der Bereiche. */
+/** Symbole für Navigation und Aktionen. */
 @Component({
   selector: 'app-nav-icon',
   standalone: true,

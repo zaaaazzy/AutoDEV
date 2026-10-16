@@ -132,10 +132,61 @@ export async function commitTaskToGit(
 interface PendingSprint {
   id: string;
   name: string;
+  action: 'push' | 'pull' | null;
   remote: string | null;
 }
 
+async function configureOrigin(git: GitHelpers['git'], must: GitHelpers['must'], remote: string): Promise<void> {
+  const current = await git('remote', 'get-url', 'origin');
+  const target = pushRemote(remote);
+  await must(
+    ...(current.exitCode === 0 ? ['remote', 'set-url', 'origin', target] : ['remote', 'add', 'origin', target]),
+  );
+}
+
+interface SyncResult {
+  commit: string;
+  branch: string;
+  log: string[];
+}
+
 /** Commits the working tree with the sprint name, tags it, and pushes when the project has a repository URL. */
+async function pushSprint(helpers: GitHelpers, sprint: PendingSprint, log: string[]): Promise<SyncResult> {
+  const { must } = helpers;
+  await must('add', '-A');
+  if (await must('status', '--porcelain')) {
+    await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Mainty Dev Log.');
+    log.push('Commit erstellt.');
+  } else {
+    log.push('Keine Änderungen seit dem letzten Commit.');
+  }
+  const tag = sprintTag(sprint.name, sprint.id);
+  await must('tag', '-f', tag);
+  const commit = await must('rev-parse', '--short', 'HEAD');
+  const branch = await must('rev-parse', '--abbrev-ref', 'HEAD');
+  if (sprint.remote) {
+    await must('push', '-u', 'origin', 'HEAD');
+    await must('push', '--force', 'origin', `refs/tags/${tag}`);
+    log.push(`Nach GitHub gepusht (${tag}).`);
+  } else {
+    log.push('Kein GitHub-Repository am Projekt hinterlegt – nur lokal gesichert.');
+  }
+  return { commit, branch, log };
+}
+
+/** Holt den Stand von GitHub per Fast-Forward; lokale Änderungen oder abweichende Historie brechen mit Fehlermeldung ab. */
+async function pullSprint(helpers: GitHelpers, sprint: PendingSprint, log: string[]): Promise<SyncResult> {
+  const { must } = helpers;
+  if (!sprint.remote) {
+    throw new Error('Kein GitHub-Repository am Projekt hinterlegt.');
+  }
+  const branch = await must('rev-parse', '--abbrev-ref', 'HEAD');
+  await must('pull', '--ff-only', 'origin', branch);
+  log.push('Stand von GitHub geladen.');
+  return { commit: await must('rev-parse', '--short', 'HEAD'), branch, log };
+}
+
+/** Works through the next queued Git request (push or pull) of the project's sprints. */
 export async function syncSprintToGit(
   pool: Pool,
   project: string,
@@ -153,47 +204,27 @@ export async function syncSprintToGit(
     `UPDATE sprints s SET git_sync = 'running'
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING s.id, s.name, (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
+      RETURNING s.id, s.name, s.git_action AS action,
+                (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
   );
   const sprint = claimed.rows[0];
   if (!sprint) {
     return 0;
   }
-  const { git, must } = gitHelpers(execute, cwd);
+  const helpers = gitHelpers(execute, cwd);
   const log: string[] = [];
   try {
-    if (await ensureRepository(git, must, cwd)) {
+    if (await ensureRepository(helpers.git, helpers.must, cwd)) {
       log.push('Repository initialisiert.');
     }
     if (sprint.remote) {
-      const current = await git('remote', 'get-url', 'origin');
-      const target = pushRemote(sprint.remote);
-      await must(
-        ...(current.exitCode === 0 ? ['remote', 'set-url', 'origin', target] : ['remote', 'add', 'origin', target]),
-      );
+      await configureOrigin(helpers.git, helpers.must, sprint.remote);
     }
-    await must('add', '-A');
-    if (await must('status', '--porcelain')) {
-      await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Mainty Dev Log.');
-      log.push('Commit erstellt.');
-    } else {
-      log.push('Keine Änderungen seit dem letzten Commit.');
-    }
-    const tag = sprintTag(sprint.name, sprint.id);
-    await must('tag', '-f', tag);
-    const commit = await must('rev-parse', '--short', 'HEAD');
-    const branch = await must('rev-parse', '--abbrev-ref', 'HEAD');
-    if (sprint.remote) {
-      await must('push', '-u', 'origin', 'HEAD');
-      await must('push', '--force', 'origin', `refs/tags/${tag}`);
-      log.push(`Nach GitHub gepusht (${tag}).`);
-    } else {
-      log.push('Kein GitHub-Repository am Projekt hinterlegt – nur lokal gesichert.');
-    }
+    const result = await (sprint.action === 'pull' ? pullSprint : pushSprint)(helpers, sprint, log);
     await pool.query(
       `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
-      [sprint.id, log.join(' '), commit, branch],
+      [sprint.id, result.log.join(' '), result.commit, result.branch],
     );
     return 1;
   } catch (error) {

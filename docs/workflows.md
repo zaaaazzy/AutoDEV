@@ -56,7 +56,8 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 | Zeitpunkt | Aktion |
 |---|---|
 | Auftrag im Sprint **erfolgreich** | Lokaler Commit im Projektordner, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit. |
-| Sprint abgeschlossen oder „Git sichern“ | Sammel-Commit (`Sprint: <Name>`) mit restlichen Änderungen, Tag `sprint-<name>-<id>`, Push (Branch + Tag), falls ein Repository am Projekt hinterlegt ist. |
+| Sprint abgeschlossen oder Git Push (Pfeil-hoch neben dem GitHub-Symbol) | Sammel-Commit (`Sprint: <Name>`) mit restlichen Änderungen, Tag `sprint-<name>-<id>`, Push (Branch + Tag), falls ein Repository am Projekt hinterlegt ist. |
+| Git Download (Pfeil-runter) | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab. |
 
 Ausgeschlossen bleiben `.env`, `.dev-log/` und `.dev-log-backups/` (per `.git/info/exclude`). Alle Git-Aktionen laufen unter der Projektsperre, damit sie sich nicht mit Agent-Befehlen überschneiden.
 

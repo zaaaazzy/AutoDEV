@@ -4,13 +4,15 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { AgentRun, DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 
 @Component({
   selector: 'app-sprints',
   standalone: true,
-  imports: [NgClass, FormsModule, MarkdownPipe, StatusClassPipe, StatusLabelPipe],
+  imports: [NgClass, FormsModule, GitTreeComponent, MarkdownPipe, NavIconComponent, StatusClassPipe, StatusLabelPipe],
   templateUrl: './sprints.component.html',
   host: { style: 'display: contents' },
 })
@@ -82,10 +84,19 @@ export class SprintsComponent {
     await this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.');
   }
 
-  protected async retryGitSync(id: string): Promise<void> {
+  protected gitBusy(sprint: Sprint): boolean {
+    return sprint.gitSync === 'pending' || sprint.gitSync === 'running';
+  }
+
+  protected gitNodes(sprint: Sprint): GitNode[] {
+    const orders = this.sprintItems(sprint.id).map((item): GitNode => ({ kind: 'step', text: item.title }));
+    return [branchNode(sprint), ...orders, commitNode(sprint)];
+  }
+
+  protected async syncGit(id: string, action: 'push' | 'pull'): Promise<void> {
     await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`),
-      'Git-Sicherung wird erneut ausgeführt.',
+      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`, { action }),
+      action === 'push' ? 'Git Push wird ausgeführt.' : 'Git Download wird ausgeführt.',
     );
   }
 

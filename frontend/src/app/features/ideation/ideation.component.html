@@ -201,34 +201,7 @@
                             <p class="muted">Keinem Sprint zugewiesen.</p>
                           }
                         </div>
-                        <div class="info-block git-tree" aria-label="Versionskontrolle">
-                          <h4>Versionskontrolle</h4>
-                          <ol>
-                            <li>
-                              <span class="dot"></span>Idee <em>{{ idea.title }}</em>
-                            </li>
-                            @if (order) {
-                              <li>
-                                <span class="dot"></span>Auftrag <em>{{ order.title }}</em>
-                              </li>
-                            }
-                            @if (sprint) {
-                              <li>
-                                <span class="dot branch"></span>Branch/Sprint <em>{{ sprint.name }}</em>
-                              </li>
-                            }
-                            @if (sprint) {
-                              @if (sprint.gitCommit) {
-                                <li>
-                                  <span class="dot commit"></span>
-                                  <code>{{ sprint.gitCommit }}</code> <em>{{ sprint.gitMessage }}</em>
-                                </li>
-                              } @else {
-                                <li class="muted"><span class="dot"></span>Noch kein Commit</li>
-                              }
-                            }
-                          </ol>
-                        </div>
+                        <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
                       </div>
                     </td>
                   </tr>

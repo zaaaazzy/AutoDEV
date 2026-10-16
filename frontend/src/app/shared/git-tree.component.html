@@ -1,0 +1,22 @@
+<aside class="git-tree" aria-label="Git-Verlauf">
+  <h4>Git-Verlauf</h4>
+  <ol>
+    @for (node of nodes(); track $index) {
+      <li [class]="'git-node ' + node.kind">
+        <span class="git-dot"></span>
+        @if (node.label) {
+          <span class="git-label">{{ node.label }}</span>
+        }
+        @if (node.kind === 'commit') {
+          <code>{{ node.text }}</code>
+        } @else {
+          <span class="git-text">{{ node.text }}</span>
+        }
+        @if (node.detail) {
+          <span class="git-detail">{{ node.detail }}</span>
+        }
+      </li>
+    }
+  </ol>
+  <ng-content />
+</aside>

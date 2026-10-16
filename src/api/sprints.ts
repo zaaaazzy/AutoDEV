@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { generateSprintReport } from './reports.js';
 import {
   buildUpdate,
+  isRecord,
   isUuid,
   parseFields,
   parseLongText,
@@ -118,10 +119,11 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
       response.status(404).json({ message: 'Not found.' });
       return;
     }
+    const action = isRecord(request.body) && request.body.action === 'pull' ? 'pull' : 'push';
     const result = await pool.query(
-      `UPDATE sprints SET git_sync = 'pending', git_message = NULL
+      `UPDATE sprints SET git_sync = 'pending', git_action = $2, git_message = NULL
         WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed')) RETURNING ${SPRINT_COLUMNS}`,
-      [request.params.id],
+      [request.params.id, action],
     );
     if (!result.rows[0]) {
       response.status(409).json({ message: 'Die Git-Sicherung dieses Sprints läuft bereits.' });

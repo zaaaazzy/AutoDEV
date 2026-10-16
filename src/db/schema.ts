@@ -100,6 +100,7 @@ export const SCHEMA = `
     start_date DATE,
     end_date DATE,
     git_sync TEXT CHECK (git_sync IN ('pending', 'running', 'done', 'failed')),
+    git_action TEXT NOT NULL DEFAULT 'push' CHECK (git_action IN ('push', 'pull')),
     git_message TEXT,
     git_commit TEXT,
     git_branch TEXT,
@@ -114,6 +115,7 @@ export const SCHEMA = `
   BEGIN
     IF NEW.status = 'completed' AND OLD.status <> 'completed' THEN
       NEW.git_sync := 'pending';
+      NEW.git_action := 'push';
       NEW.git_message := NULL;
     END IF;
     RETURN NEW;
