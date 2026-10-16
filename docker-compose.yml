@@ -19,7 +19,7 @@ services:
   dev-log:
     build: .
     ports:
-      - "127.0.0.1:3100:3100"
+      - "${DEV_LOG_BIND:-127.0.0.1}:3100:3100"
     restart: unless-stopped
     environment:
       PORT: 3100
