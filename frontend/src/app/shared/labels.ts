@@ -7,6 +7,7 @@ const STATUS_LABELS: Record<string, string> = {
   passed: 'Bestanden',
   failed: 'Fehlgeschlagen',
   skipped: 'Übersprungen',
+  waiting: 'Ausstehend',
   idea: 'Idee',
   considering: 'In Abklärung',
   requested: 'Wird ausformuliert',

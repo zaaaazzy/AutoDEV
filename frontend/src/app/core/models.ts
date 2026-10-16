@@ -126,6 +126,7 @@ export interface StepEvent {
 
 export interface RunStep {
   runId: string;
+  agentId?: string | null;
   position: number;
   agentName?: string;
   command: string;

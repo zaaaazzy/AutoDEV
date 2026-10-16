@@ -147,27 +147,33 @@
                   }
                   @if (openSprintItems().has(item.id)) {
                     <div class="sprint-task-body">
-                      @if (sprintRun(item.id); as run) {
-                        <ol class="agent-steps">
-                          @for (step of run.steps; track step.runId + step.position) {
-                            <li>
-                              <button
-                                type="button"
-                                class="sprint-task-head"
-                                (click)="toggleSprintItem(step.runId + step.position)"
+                      @let rows = workflow(item);
+                      <p class="workflow-status">
+                        <strong>{{ item.status | statusLabel }}</strong> · {{ workflowSummary(item, rows) }}
+                      </p>
+                      <h5 class="workflow-title">Workflow</h5>
+                      <ol class="agent-steps">
+                        @for (row of rows; track row.key) {
+                          <li>
+                            <button
+                              type="button"
+                              class="sprint-task-head"
+                              [disabled]="!row.step"
+                              (click)="toggleSprintItem(item.id + row.key)"
+                            >
+                              <span
+                                class="task-chevron"
+                                [class.open]="openSprintItems().has(item.id + row.key)"
+                                aria-hidden="true"
+                                >▾</span
                               >
-                                <span
-                                  class="task-chevron"
-                                  [class.open]="openSprintItems().has(step.runId + step.position)"
-                                  aria-hidden="true"
-                                  >▾</span
-                                >
-                                {{ step.agentName || 'Agent' }}
-                                <span class="status" [ngClass]="step.status | statusClass">{{
-                                  step.status | statusLabel
-                                }}</span>
-                              </button>
-                              @if (openSprintItems().has(step.runId + step.position) || step.status === 'running') {
+                              {{ row.name }}
+                              <span class="status" [ngClass]="row.step?.status ?? 'waiting' | statusClass">{{
+                                row.step?.status ?? 'waiting' | statusLabel
+                              }}</span>
+                            </button>
+                            @if (row.step; as step) {
+                              @if (openSprintItems().has(item.id + row.key) || step.status === 'running') {
                                 <app-step-result
                                   [events]="step.events"
                                   [output]="step.output"
@@ -175,14 +181,12 @@
                                   [running]="step.status === 'running'"
                                 />
                               }
-                            </li>
-                          } @empty {
-                            <li class="muted">Noch keine Agent-Schritte.</li>
-                          }
-                        </ol>
-                      } @else {
-                        <p class="muted">Noch kein Agent-Lauf für diese Aufgabe.</p>
-                      }
+                            }
+                          </li>
+                        } @empty {
+                          <li class="muted">Keine Agents im Workflow.</li>
+                        }
+                      </ol>
                     </div>
                   }
                 </div>

@@ -439,3 +439,8 @@ h3 .link-button { color: var(--ink); }
 .timeline li::after { content: ''; position: absolute; left: 0; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: #2f6f4f; }
 .timeline time { flex: none; min-width: 62px; color: #6b756f; font-variant-numeric: tabular-nums; font-size: 12px; }
 .timeline span { overflow-wrap: anywhere; }
+
+.workflow-status { margin: 4px 0 10px; font-size: 13px; color: #4a554d; }
+.workflow-title { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b756f; }
+.sprint-task-head:disabled { cursor: default; }
+.sprint-task-head:disabled .task-chevron { visibility: hidden; }

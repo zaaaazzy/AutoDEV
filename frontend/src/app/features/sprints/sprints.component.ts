@@ -2,7 +2,7 @@ import { NgClass } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { AgentRun, DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
+import type { Agent, DevelopmentItem, RunStep, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
@@ -18,6 +18,12 @@ import {
   TokensPipe,
   UsdPipe,
 } from '../../shared/pipes.js';
+
+export interface WorkflowRow {
+  key: string;
+  name: string;
+  step: RunStep | undefined;
+}
 
 @Component({
   selector: 'app-sprints',
@@ -66,14 +72,48 @@ export class SprintsComponent {
     return this.data().reports.find((report) => report.sprintId === sprintId);
   }
 
-  /** Alle Schritte in der Reihenfolge, in der sie liefen; eine Wiederholung erscheint als eigener Eintrag. */
-  protected sprintRun(itemId: string): AgentRun | undefined {
-    const runs = this.data()
-      .agentRuns.filter((run) => run.developmentId === itemId)
-      .sort((left, right) => left.startedAt.localeCompare(right.startedAt));
-    if (!runs.length) return undefined;
-    const steps = runs.flatMap((run) => [...run.steps].sort((left, right) => left.position - right.position));
-    return { ...runs[0]!, steps };
+  /** Workflow einer Aufgabe: alle Agents in Laufreihenfolge, jeweils mit dem neuesten Schritt (oder „Ausstehend“). */
+  protected workflow(item: DevelopmentItem): WorkflowRow[] {
+    const steps = this.data()
+      .agentRuns.filter((run) => run.developmentId === item.id)
+      .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
+      .flatMap((run) => run.steps);
+    const latest = (agent: Agent): RunStep | undefined => steps.filter((step) => step.agentId === agent.id).at(-1);
+    const phases = ['pre_task', 'while_task', 'after_task'];
+    const agents = this.data()
+      .agents.filter(
+        (agent) =>
+          agent.enabled &&
+          !(agent.role === 'author' && item.ideationId) &&
+          !(agent.role === 'bug_reviewer' && item.risks?.trim()),
+      )
+      .sort(
+        (left, right) => phases.indexOf(left.phase) - phases.indexOf(right.phase) || left.position - right.position,
+      );
+    const known = new Set(agents.map((agent) => agent.id));
+    const rows: WorkflowRow[] = agents.map((agent) => ({
+      key: agent.id,
+      name: agent.name,
+      step: latest(agent),
+    }));
+    for (const step of steps) {
+      if (step.agentId && known.has(step.agentId)) continue;
+      rows.push({ key: `${step.runId}-${step.position}`, name: step.agentName || 'Agent', step });
+    }
+    return rows;
+  }
+
+  /** Statuszeile der Aufgabe: aktueller Status und der laufende bzw. zuletzt gescheiterte Agent. */
+  protected workflowSummary(item: DevelopmentItem, rows: WorkflowRow[]): string {
+    const running = rows.find((row) => row.step?.status === 'running');
+    const failed = rows.find((row) => row.step?.status === 'failed');
+    const done = rows.filter((row) => row.step?.status === 'passed').length;
+    const progress = `${done} von ${rows.length} Agents abgeschlossen`;
+    if (running) return `Läuft: ${running.name} · ${progress}`;
+    if (item.status === 'blocked' && failed) return `Blockiert bei: ${failed.name} · ${progress}`;
+    if (item.status === 'done') return `Alle Agents abgeschlossen`;
+    if (item.status === 'planned') return `Wartet auf den Worker · ${progress}`;
+    return progress;
   }
 
   protected sprintItems(sprintId: string): DevelopmentItem[] {
