@@ -2223,3 +2223,9 @@ h3 .link-button {
   color: var(--text, #222);
   font-weight: 400;
 }
+
+.model-icon { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; margin-left: 8px; border-radius: 8px; background: #f0f2ec; color: #5b655f; vertical-align: middle; }
+.model-icon.claude { background: #fbeee6; color: #c15f3c; }
+.model-icon.copilot { background: #ecebf8; color: #5b4fc4; }
+.model-icon.gemini { background: #e8f0fd; color: #3b6fd8; }
+.model-icon.ollama { background: #f0f2ec; color: #2b3a33; }

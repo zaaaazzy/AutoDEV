@@ -101,7 +101,7 @@
                     <button type="button" class="link-button" (click)="activity.show(agent.id)">
                       {{ agent.name }}
                     </button>
-                    <span class="tag">{{ roleLabel(agent.role) }}</span>
+                    <app-model-icon [command]="agent.command" />
                     <button
                       class="button secondary"
                       type="button"

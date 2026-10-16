@@ -6,6 +6,7 @@ import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { ModelIconComponent } from '../../shared/model-icon.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { DateTimePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import {
@@ -22,7 +23,16 @@ import { AgentDetailComponent } from './agent-detail.component.js';
 @Component({
   selector: 'app-agents',
   standalone: true,
-  imports: [NgClass, FormsModule, AgentDetailComponent, MarkdownPipe, DateTimePipe, StatusClassPipe, StatusLabelPipe],
+  imports: [
+    NgClass,
+    FormsModule,
+    AgentDetailComponent,
+    ModelIconComponent,
+    MarkdownPipe,
+    DateTimePipe,
+    StatusClassPipe,
+    StatusLabelPipe,
+  ],
   templateUrl: './agents.component.html',
   host: { style: 'display: contents' },
 })
