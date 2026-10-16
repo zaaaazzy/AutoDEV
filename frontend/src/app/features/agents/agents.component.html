@@ -28,6 +28,18 @@
             </select>
           </label>
           <label class="wide"
+            >Modell<select
+              name="preset"
+              [ngModel]="presetOf(agentForm.command)"
+              (ngModelChange)="applyPreset(agentForm, $event)"
+            >
+              @for (preset of presets; track preset.id) {
+                <option [value]="preset.id">{{ presetLabel(preset) }}</option>
+              }
+              <option value="custom">Eigener Befehl …</option>
+            </select>
+          </label>
+          <label class="wide"
             >Befehl<input name="command" [(ngModel)]="agentForm.command" maxlength="1000" placeholder="claude -p" />
           </label>
           <label class="wide"
@@ -56,6 +68,18 @@
                         rows="6"
                         maxlength="10000"
                       ></textarea>
+                    </label>
+                    <label class="wide"
+                      >Modell<select
+                        name="preset"
+                        [ngModel]="presetOf(agentEdit.command)"
+                        (ngModelChange)="applyPreset(agentEdit, $event)"
+                      >
+                        @for (preset of presets; track preset.id) {
+                          <option [value]="preset.id">{{ presetLabel(preset) }}</option>
+                        }
+                        <option value="custom">Eigener Befehl …</option>
+                      </select>
                     </label>
                     <label class="wide"
                       >Befehl (leer = eingebauter Agent)<input

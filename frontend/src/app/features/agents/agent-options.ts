@@ -33,3 +33,61 @@ export function parseCommand(text: string): string[] | null {
   }
   return trimmed.split(/\s+/);
 }
+
+export interface ModelPreset {
+  id: string;
+  label: string;
+  /** 0 = kostenlos, 1–3 = $ bis $$$ (grobe Richtwerte, Abrechnung beim jeweiligen Anbieter). */
+  tier: 0 | 1 | 2 | 3;
+  command: string;
+}
+
+export const MODEL_PRESETS: ModelPreset[] = (
+  [
+    { id: 'local', label: 'Lokal (Ollama qwen3.5:9b)', tier: 0, command: '' },
+    {
+      id: 'gemini-flash',
+      label: 'Gemini 2.5 Flash (Gemini CLI)',
+      tier: 1,
+      command: 'gemini -m gemini-2.5-flash -p {prompt}',
+    },
+    {
+      id: 'claude-haiku',
+      label: 'Claude Haiku (Claude Code)',
+      tier: 1,
+      command: 'claude --model haiku --permission-mode acceptEdits -p {prompt}',
+    },
+    {
+      id: 'copilot',
+      label: 'GitHub Copilot CLI (Standardmodell)',
+      tier: 2,
+      command: 'copilot --allow-all-tools -p {prompt}',
+    },
+    {
+      id: 'gemini-pro',
+      label: 'Gemini 2.5 Pro (Gemini CLI)',
+      tier: 2,
+      command: 'gemini -m gemini-2.5-pro -p {prompt}',
+    },
+    {
+      id: 'claude-sonnet',
+      label: 'Claude Sonnet (Claude Code)',
+      tier: 2,
+      command: 'claude --model sonnet --permission-mode acceptEdits -p {prompt}',
+    },
+    {
+      id: 'claude-opus',
+      label: 'Claude Opus (Claude Code)',
+      tier: 3,
+      command: 'claude --model opus --permission-mode acceptEdits -p {prompt}',
+    },
+  ] satisfies ModelPreset[]
+).sort((a, b) => a.tier - b.tier || a.label.localeCompare(b.label));
+
+export function presetLabel(preset: ModelPreset): string {
+  return `${preset.label} · ${preset.tier === 0 ? 'Kostenlos' : '$'.repeat(preset.tier)}`;
+}
+
+export function presetOf(command: string): string {
+  return MODEL_PRESETS.find((preset) => preset.command === command.trim())?.id ?? 'custom';
+}

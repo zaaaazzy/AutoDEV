@@ -8,7 +8,15 @@ import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { DateTimePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
-import { AGENT_PHASES, AGENT_ROLES, parseCommand, roleLabel } from './agent-options.js';
+import {
+  AGENT_PHASES,
+  AGENT_ROLES,
+  MODEL_PRESETS,
+  parseCommand,
+  presetLabel,
+  presetOf,
+  roleLabel,
+} from './agent-options.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
 
 @Component({
@@ -27,6 +35,14 @@ export class AgentsComponent {
   protected readonly agentRoles = AGENT_ROLES;
   protected readonly phases = AGENT_PHASES;
   protected readonly roleLabel = roleLabel;
+  protected readonly presets = MODEL_PRESETS;
+  protected readonly presetLabel = presetLabel;
+  protected readonly presetOf = presetOf;
+
+  protected applyPreset(target: { command: string }, id: string): void {
+    const preset = MODEL_PRESETS.find((item) => item.id === id);
+    if (preset) target.command = preset.command;
+  }
   protected readonly agentEditing = signal<string | null>(null);
   protected agentEdit = { name: '', instructions: '', command: '' };
   protected agentForm = {
