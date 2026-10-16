@@ -11,5 +11,5 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `sprint_reports` (Sprint, implemented, missing, problems, notes) – 1:1 je Sprint.
 - `docs` (Projekt, kind manual/sprint/order/repo, Titel, Inhalt).
 - `development_items`: zusätzlich `kind`, `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
-- `agents.role`: zusätzlich `bug_reviewer`, `manual_writer`; `projects.roles_seeded`.
+- `agents.role`: author, developer, tester, reviewer, documenter, bug_reviewer, manual_writer, user_manual_writer, custom.
 - Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `sprints.git_sync` (pending/running/done/failed), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird.

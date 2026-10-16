@@ -47,26 +47,11 @@ export const DEFAULT_AGENTS = [
   },
 ] as const;
 
-/** Adds agents that were introduced after a project was first seeded (matched by role). */
-export async function ensureMissingDefaultRoles(pool: Pool, slug: string): Promise<void> {
-  await pool.query(
-    `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
-     SELECT $1, d.name, d.role, d.phase, d.ord - 1, d.instructions
-       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS d(name, role, phase, instructions, ord)
-      WHERE d.role IN ('bug_reviewer', 'manual_writer', 'user_manual_writer')
-        AND EXISTS (SELECT 1 FROM projects WHERE slug = $1 AND roles_seeded = FALSE)
-        AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.project_slug = $1 AND a.role = d.role)`,
-    [slug, DEFAULT_AGENTS.map((agent) => agent.name), DEFAULT_AGENTS.map((agent) => agent.role),
-      DEFAULT_AGENTS.map((agent) => agent.phase), DEFAULT_AGENTS.map((agent) => agent.instructions)],
-  );
-  await pool.query('UPDATE projects SET roles_seeded = TRUE WHERE slug = $1', [slug]);
-}
-
 /** Seeds the default workflow once per project; later deletions are respected. */
 export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<void> {
   await pool.query(
     `WITH claim AS (
-       UPDATE projects SET agents_seeded = TRUE, roles_seeded = TRUE WHERE slug = $1 AND NOT agents_seeded RETURNING slug
+       UPDATE projects SET agents_seeded = TRUE WHERE slug = $1 AND NOT agents_seeded RETURNING slug
      )
      INSERT INTO agents (project_slug, name, role, phase, position, instructions)
      SELECT claim.slug, d.name, d.role, d.phase, d.ord, d.instructions

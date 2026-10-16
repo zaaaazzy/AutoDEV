@@ -259,8 +259,4 @@ export interface ChatMessage {
   content: string;
   status: 'pending' | 'processing' | 'done' | 'failed';
   createdAt: string;
-  developmentId?: string | null;
-  developmentTitle?: string | null;
-  developmentStatus?: string | null;
-  agentName?: string | null;
 }

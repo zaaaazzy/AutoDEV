@@ -3,11 +3,11 @@ import type { Pool } from 'pg';
 import { isRecord, parseProjectSlug } from './validation.js';
 
 const MAX_MESSAGE_CHARS = 4000;
-const COLUMNS = `m.id, m.role, m.content, m.status, m.created_at AS "createdAt", m.development_id AS "developmentId", m.agent_name AS "agentName", d.title AS "developmentTitle", d.status AS "developmentStatus"`;
+const COLUMNS = `m.id, m.role, m.content, m.status, m.created_at AS "createdAt"`;
 
 async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
   return (await pool.query(
-    `SELECT * FROM (SELECT ${COLUMNS} FROM chat_messages m LEFT JOIN development_items d ON d.id = m.development_id WHERE m.project_slug = $1 ORDER BY m.created_at DESC LIMIT 100) x ORDER BY "createdAt"`,
+    `SELECT * FROM (SELECT ${COLUMNS} FROM chat_messages m WHERE m.project_slug = $1 ORDER BY m.created_at DESC LIMIT 100) x ORDER BY "createdAt"`,
     [slug],
   )).rows;
 }
