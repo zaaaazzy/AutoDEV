@@ -42,47 +42,43 @@ export interface ModelPreset {
   command: string;
 }
 
+const PROVIDER_ORDER = ['local', 'claude', 'copilot', 'gemini'];
+
 export const MODEL_PRESETS: ModelPreset[] = (
   [
     { id: 'local', label: 'Lokal (Ollama qwen3.5:9b)', tier: 0, command: '' },
     {
-      id: 'gemini-flash',
-      label: 'Gemini 2.5 Flash (Gemini CLI)',
-      tier: 1,
-      command: 'gemini -m gemini-2.5-flash -p {prompt}',
-    },
-    {
       id: 'claude-haiku',
-      label: 'Claude Haiku (Claude Code)',
+      label: 'Claude Haiku',
       tier: 1,
       command: 'claude --model haiku --permission-mode acceptEdits -p {prompt}',
     },
     {
-      id: 'copilot',
-      label: 'GitHub Copilot CLI (Standardmodell)',
-      tier: 2,
-      command: 'copilot --allow-all-tools -p {prompt}',
-    },
-    {
-      id: 'gemini-pro',
-      label: 'Gemini 2.5 Pro (Gemini CLI)',
-      tier: 2,
-      command: 'gemini -m gemini-2.5-pro -p {prompt}',
-    },
-    {
       id: 'claude-sonnet',
-      label: 'Claude Sonnet (Claude Code)',
+      label: 'Claude Sonnet',
       tier: 2,
       command: 'claude --model sonnet --permission-mode acceptEdits -p {prompt}',
     },
     {
       id: 'claude-opus',
-      label: 'Claude Opus (Claude Code)',
+      label: 'Claude Opus',
       tier: 3,
       command: 'claude --model opus --permission-mode acceptEdits -p {prompt}',
     },
+    {
+      id: 'copilot',
+      label: 'GitHub Copilot (Standardmodell)',
+      tier: 2,
+      command: 'copilot --allow-all-tools -p {prompt}',
+    },
+    { id: 'gemini-flash', label: 'Gemini 2.5 Flash', tier: 1, command: 'gemini -m gemini-2.5-flash -p {prompt}' },
+    { id: 'gemini-pro', label: 'Gemini 2.5 Pro', tier: 2, command: 'gemini -m gemini-2.5-pro -p {prompt}' },
   ] satisfies ModelPreset[]
-).sort((a, b) => a.tier - b.tier || a.label.localeCompare(b.label));
+).sort(
+  (a, b) =>
+    PROVIDER_ORDER.indexOf(a.id.split('-')[0] ?? '') - PROVIDER_ORDER.indexOf(b.id.split('-')[0] ?? '') ||
+    a.tier - b.tier,
+);
 
 export function presetLabel(preset: ModelPreset): string {
   return `${preset.label} · ${preset.tier === 0 ? 'Kostenlos' : '$'.repeat(preset.tier)}`;

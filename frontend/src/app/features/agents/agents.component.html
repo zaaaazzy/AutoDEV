@@ -27,7 +27,7 @@
               }
             </select>
           </label>
-          <label class="wide"
+          <label
             >Modell<select
               name="preset"
               [ngModel]="presetOf(agentForm.command)"
@@ -39,13 +39,15 @@
               <option value="custom">Eigener Befehl …</option>
             </select>
           </label>
-          <label class="wide"
+          <label
             >Befehl<input name="command" [(ngModel)]="agentForm.command" maxlength="1000" placeholder="claude -p" />
           </label>
           <label class="wide"
             >Anweisung<textarea name="instructions" [(ngModel)]="agentForm.instructions" maxlength="10000"></textarea>
           </label>
-          <button class="button primary" type="submit">Agent anlegen</button>
+          <div class="actions wide form-actions">
+            <button class="button primary" type="submit">Agent anlegen</button>
+          </div>
         </form>
       }
       @for (phase of phases; track phase.id) {
@@ -69,7 +71,7 @@
                         maxlength="10000"
                       ></textarea>
                     </label>
-                    <label class="wide"
+                    <label
                       >Modell<select
                         name="preset"
                         [ngModel]="presetOf(agentEdit.command)"
@@ -81,7 +83,7 @@
                         <option value="custom">Eigener Befehl …</option>
                       </select>
                     </label>
-                    <label class="wide"
+                    <label
                       >Befehl (leer = eingebauter Agent)<input
                         name="command"
                         [(ngModel)]="agentEdit.command"
@@ -89,7 +91,7 @@
                         placeholder="claude -p"
                       />
                     </label>
-                    <div class="actions">
+                    <div class="actions wide form-actions">
                       <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
                       <button class="button secondary" type="button" (click)="agentEditing.set(null)">Abbrechen</button>
                     </div>
