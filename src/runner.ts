@@ -418,7 +418,7 @@ export async function runWorkItem(
       await pool.query(`UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
         [item.id, passed ? 'done' : 'blocked']);
     }
-    if (passed && !interrupted && item.sprintId) {
+    if (passed && !interrupted && !item.agentId && item.sprintId) {
       const sprint = await pool.query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId]).catch(() => null);
       if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
     }

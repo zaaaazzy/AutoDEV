@@ -45,3 +45,5 @@ Datenmodell: [docs/erm.md](docs/erm.md).
 ## Git im Sprint
 
 Nach jedem erfolgreich erledigten Sprint-Auftrag erstellt der Worker einen lokalen Commit im Projektordner (Conventional Commits, z. B. `feat(Sprint 1): Titel`, Bugs als `fix`). Beim Abschluss des Sprints folgt ein Sammel-Commit mit Tag und – falls ein Repository hinterlegt ist – der Push. `.env`, `.dev-log/` und Agent-Sicherungen bleiben ausgeschlossen; Commits ohne Änderungen werden übersprungen.
+
+Dokumentation: [Agents und Rechte](docs/agents-und-rechte.md), [Workflows](docs/workflows.md).
