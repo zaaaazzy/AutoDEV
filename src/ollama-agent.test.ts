@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { BACKUP_DIRECTORY, composeViolation, executeTool, runOllamaAgent, type ToolContext } from './ollama-agent.js';
+import { BACKUP_DIRECTORY, composeViolation, executeTool, resolveContext, resolveModel, runOllamaAgent, type ToolContext } from './ollama-agent.js';
 
 async function project(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ollama-agent-'));
@@ -134,7 +134,9 @@ test('fails honestly: no changes by developer, unreachable model, empty answer',
   assert.equal((await runOllamaAgent({ prompt: 'x', role: 'author', cwd, timeoutMs: 5000, fetchImpl: empty.fetchImpl })).exitCode, 1);
 
   const broken = (async () => { throw new Error('ECONNREFUSED'); }) as unknown as typeof fetch;
+  process.env.DEV_LOG_OLLAMA_RETRY_MS = '0';
   const down = await runOllamaAgent({ prompt: 'x', role: 'author', cwd, timeoutMs: 5000, fetchImpl: broken });
+  delete process.env.DEV_LOG_OLLAMA_RETRY_MS;
   assert.equal(down.exitCode, 1);
   assert.match(down.output, /nicht erreichbar/);
 
@@ -165,4 +167,14 @@ test('docker compose start is refused when the configuration escapes the project
     execute: async (command: string[]) => { ran.push(command.join(' ')); return { exitCode: 0, durationMs: 1, output: command[2] === 'config' ? bad : 'ok' }; } };
   assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /abgelehnt/);
   assert.deepEqual(ran, ['docker compose config --format json']);
+});
+
+test('model and context are resolved per role', () => {
+  assert.equal(resolveModel('developer', {}), 'qwen3.5:9b');
+  assert.equal(resolveModel('developer', { DEV_LOG_OLLAMA_MODEL: 'a', DEV_LOG_OLLAMA_MODEL_DEVELOPER: 'b' }), 'b');
+  assert.equal(resolveModel('assistant', { DEV_LOG_OLLAMA_MODEL: 'a', DEV_LOG_OLLAMA_MODEL_DEVELOPER: 'b' }), 'a');
+  assert.equal(resolveContext('developer', {}), 32_768);
+  assert.equal(resolveContext('assistant', {}), 16_384);
+  assert.equal(resolveContext('assistant', { DEV_LOG_OLLAMA_CTX: '8192' }), 8192);
+  assert.equal(resolveContext('assistant', { DEV_LOG_OLLAMA_CTX: '5' }), 16_384);
 });

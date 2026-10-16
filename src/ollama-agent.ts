@@ -98,6 +98,25 @@ export function composeViolation(configJson: string, root: string): string | nul
   return null;
 }
 
+const DEFAULT_CONTEXT = 16_384;
+const DEVELOPER_CONTEXT = 32_768;
+const RETRY_DELAYS_MS = [3_000, 9_000];
+const retryDelays = (): number[] => process.env.DEV_LOG_OLLAMA_RETRY_MS === '0' ? [] : RETRY_DELAYS_MS;
+
+/** Modell pro Rolle: DEV_LOG_OLLAMA_MODEL_<ROLLE> (z. B. _DEVELOPER) vor DEV_LOG_OLLAMA_MODEL vor Standard. */
+export function resolveModel(role: string, environment: NodeJS.ProcessEnv = process.env): string {
+  const roleKey = `DEV_LOG_OLLAMA_MODEL_${role.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  return environment[roleKey]?.trim() || environment.DEV_LOG_OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
+}
+
+/** Kontextgröße: DEV_LOG_OLLAMA_CTX_<ROLLE> vor DEV_LOG_OLLAMA_CTX vor Rollen-Standard (Entwickler 32k, sonst 16k). */
+export function resolveContext(role: string, environment: NodeJS.ProcessEnv = process.env): number {
+  const roleKey = `DEV_LOG_OLLAMA_CTX_${role.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  const configured = Number(environment[roleKey] ?? environment.DEV_LOG_OLLAMA_CTX);
+  if (Number.isInteger(configured) && configured >= 2_048 && configured <= 131_072) return configured;
+  return role === 'developer' ? DEVELOPER_CONTEXT : DEFAULT_CONTEXT;
+}
+
 export interface OllamaAgentOptions {
   prompt: string;
   role: string;
@@ -370,7 +389,9 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
 /** Runs a local Ollama model as a tool-using agent. Without a CLI configured this makes agents work out of the box. */
 export async function runOllamaAgent(options: OllamaAgentOptions): Promise<CommandResult> {
   const startedAt = Date.now();
-  const model = options.model ?? process.env.DEV_LOG_OLLAMA_MODEL ?? DEFAULT_OLLAMA_MODEL;
+  const model = options.model ?? resolveModel(options.role);
+  const contextSize = resolveContext(options.role);
+  const keepAlive = process.env.DEV_LOG_OLLAMA_KEEP_ALIVE?.trim() || '30m';
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl ?? patientFetch;
   const canWrite = WRITE_ROLES.has(options.role);
@@ -412,15 +433,21 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, context.canManageServices), stream: false, think: false,
-          options: { num_ctx: 32_768, temperature: 0.2 },
+          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, context.canManageServices), stream: false, think: false, keep_alive: keepAlive,
+          options: { num_ctx: contextSize, temperature: 0.2 },
         }),
       });
-      // Kurze Verbindungsabbrüche (z. B. Modellwechsel in Ollama) werden einmal wiederholt.
-      const response = await request().catch(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-        return request();
-      });
+      // Kurze Verbindungsabbrüche (z. B. Modellwechsel oder Laden in Ollama) werden mit wachsender Wartezeit wiederholt.
+      let response: Response | undefined;
+      for (let attempt = 0; response === undefined; attempt += 1) {
+        try {
+          response = await request();
+        } catch (error) {
+          const delay = retryDelays()[attempt];
+          if (delay === undefined || controller.signal.aborted) throw error;
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
       if (!response.ok) {
         return finish(1, `Ollama antwortete mit ${response.status}: ${(await response.text()).slice(0, 500)}`);
       }
