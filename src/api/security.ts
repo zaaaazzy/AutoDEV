@@ -13,8 +13,11 @@ export const securityHeaders: RequestHandler = helmet({
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
       frameAncestors: ["'none'"],
+      upgradeInsecureRequests: null,
     },
   },
+  // Der Dienst läuft im lokalen Netz über HTTP; HSTS würde Browser auf nicht vorhandenes HTTPS zwingen.
+  strictTransportSecurity: false,
 });
 
 // Basic-Auth wird vom Browser automatisch mitgesendet; schreibende Anfragen
