@@ -1,19 +1,19 @@
-import { isUuid } from './validation.js';
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
-import { materializeAttachments } from './attachments.js';
-import { type KnownBug, loadKnownBugs } from './bugs.js';
+import { materializeAttachments } from '../api/attachments.js';
+import { type KnownBug, loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures, registerFailure, resumeBlockedByBug } from './autofix.js';
-import { startProgress } from './chat-progress.js';
-import { loadProjectContext, withProjectContext } from './project-context.js';
-import { isShuttingDown, killGroup } from './shutdown.js';
-import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
-import { readManual, saveOrderDoc, syncRepoDocs, upsertDoc } from './docs.js';
+import { startProgress } from '../agent/chat-progress.js';
+import { loadProjectContext, withProjectContext } from '../core/project-context.js';
+import { isUuid } from '../core/validation.js';
+import { isShuttingDown, killGroup } from '../core/shutdown.js';
+import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from '../core/command.js';
+import { readManual, saveOrderDoc, syncRepoDocs, upsertDoc } from '../api/docs.js';
 import { commitTaskToGit, syncSprintToGit } from './git-sync.js';
-import { estimateIdeas } from './estimation.js';
-import { draftRequirements } from './requirements.js';
-import { runOllamaAgent } from './ollama-agent.js';
-import { generateSprintReport } from './reports.js';
+import { estimateIdeas } from '../agent/estimation.js';
+import { draftRequirements } from '../agent/requirements.js';
+import { runOllamaAgent } from '../agent/ollama-agent.js';
+import { generateSprintReport } from '../api/reports.js';
 import { runTestAgent } from './test-agent.js';
 
 export const PHASE_ORDER = ['pre_task', 'while_task', 'after_task'] as const;
@@ -270,17 +270,34 @@ async function afterStep(
   }
 }
 
-export async function runWorkItem(
-  pool: Pool,
-  item: WorkItem,
-  agents: WorkflowAgent[],
-  options: WorkItemOptions,
-): Promise<'passed' | 'failed' | 'skipped'> {
-  const execute = options.execute ?? runCommand;
-  const builtin = options.builtin ?? runBuiltinAgent;
+const RUN_TIMEOUT_HOURS = 3;
+const CANCEL_POLL_MS = 1500;
+const LIVE_OUTPUT_INTERVAL_MS = 1500;
+
+interface RunContext {
+  pool: Pool;
+  item: WorkItem;
+  runId: string;
+  options: WorkItemOptions;
+  execute: CommandExecutor;
+  builtin: BuiltinAgent;
+  done: StepSummary[];
+  bugs: KnownBug[];
+  images: string[];
+  fallbackCommand: string[] | null;
+  projectContext: string;
+}
+
+interface StepOutcome {
+  passed: boolean;
+  interrupted: boolean;
+}
+
+/** Legt den Lauf an; ein bereits laufender Lauf desselben Auftrags blockiert (Läufe älter als 3 h gelten als abgebrochen). */
+async function claimRun(pool: Pool, item: WorkItem): Promise<string | null> {
   await pool.query(
     `UPDATE agent_runs SET status = 'failed', completed_at = NOW()
-      WHERE development_id = $1 AND status = 'running' AND started_at < NOW() - INTERVAL '3 hours'`,
+      WHERE development_id = $1 AND status = 'running' AND started_at < NOW() - INTERVAL '${RUN_TIMEOUT_HOURS} hours'`,
     [item.id],
   );
   const claim = await pool.query<{ id: string }>(
@@ -290,139 +307,196 @@ export async function runWorkItem(
      RETURNING id`,
     [item.projectSlug, item.id],
   );
-  const runId = claim.rows[0]?.id;
+  return claim.rows[0]?.id ?? null;
+}
+
+/** Wählt die Agents des Auftrags in Phasen- und Positionsreihenfolge; bei festem Agent nur diesen. */
+function selectWorkflowAgents(agents: WorkflowAgent[], item: WorkItem): WorkflowAgent[] {
+  return agents
+    .filter((agent) => item.agentId ? agent.id === item.agentId
+      : !(agent.role === 'author' && item.ideationId) && !(agent.role === 'bug_reviewer' && item.risks?.trim()))
+    .sort((left, right) =>
+      PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never)
+      || left.position - right.position);
+}
+
+interface StepHooks {
+  signal: AbortSignal;
+  onOutput: (partial: string) => void;
+  onSpawn: (pid: number) => void;
+}
+
+/** Führt einen Agent aus: eigener Befehl, Tester (Tests entwickeln, dann Testlauf) oder eingebautes Modell. */
+async function invokeAgent(
+  ctx: RunContext,
+  agent: WorkflowAgent,
+  prompt: string,
+  hooks: StepHooks,
+): Promise<CommandResult> {
+  const { pool, item, options, execute, builtin, fallbackCommand } = ctx;
+  const builtinRun = (): Promise<CommandResult> =>
+    builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs, signal: hooks.signal });
+  const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
+  if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
+    // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.
+    const written = await execute(buildInvocation(fallbackCommand, `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`),
+      options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput: hooks.onOutput })
+      .catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
+    const run = await builtinRun();
+    return { ...run, durationMs: run.durationMs + written.durationMs, output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}` };
+  }
+  if (!command) return builtinRun();
+  return execute(buildInvocation(command, prompt), options.cwd, {
+    timeoutMs: options.timeoutMs,
+    env: agentEnvironment(),
+    onOutput: hooks.onOutput,
+    onSpawn: hooks.onSpawn,
+  });
+}
+
+/** Führt einen Schritt des Laufs aus und hält Fortschritt, Abbruch und Ergebnis in der Datenbank fest. */
+async function runStep(ctx: RunContext, agent: WorkflowAgent, position: number, total: number): Promise<StepOutcome> {
+  const { pool, item, runId, done } = ctx;
+  console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
+  const stepId = (await pool.query<{ id: string }>(
+    `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status)
+     VALUES ($1, $2, $3, $4, $5, 'running') RETURNING id`,
+    [runId, position, agent.id, agent.name, agent.phase],
+  )).rows[0]?.id;
+  const manual = agent.role === 'manual_writer' || agent.role === 'user_manual_writer'
+    ? await readManual(pool, item.projectSlug, agent.role === 'manual_writer' ? MANUAL_TITLE : USER_MANUAL_TITLE).catch(() => '') : undefined;
+  const prompt = withProjectContext(ctx.projectContext, buildPrompt(agent, item, done, { bugs: ctx.bugs, manual, images: ctx.images }));
+
+  const stepAbort = new AbortController();
+  let stepPid = 0;
+  let cancelled = false;
+  let stopWatching = (): void => undefined;
+  // Ein „Abbrechen“ aus der Oberfläche beendet den Schritt sofort, auch wenn der Agent selbst nicht reagiert.
+  const cancelRequested = new Promise<CommandResult>((resolveCancel) => {
+    const watcher = setInterval(() => {
+      void pool.query<{ cancel_requested: boolean }>('SELECT cancel_requested FROM agent_run_steps WHERE id = $1', [stepId])
+        .then(({ rows }) => {
+          if (!rows[0]?.cancel_requested || cancelled) return;
+          cancelled = true;
+          stepAbort.abort();
+          if (stepPid) killGroup(stepPid);
+          resolveCancel({ exitCode: 130, durationMs: 0, output: 'Vom Benutzer abgebrochen.' });
+        }).catch(() => undefined);
+    }, CANCEL_POLL_MS);
+    stopWatching = () => clearInterval(watcher);
+  });
+  let lastLiveWrite = 0;
+  const hooks: StepHooks = {
+    signal: stepAbort.signal,
+    onOutput: (partial) => {
+      if (Date.now() - lastLiveWrite < LIVE_OUTPUT_INTERVAL_MS) return;
+      lastLiveWrite = Date.now();
+      void pool.query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3',
+        [stepId, redactOutput(partial, process.env), 'running']).catch(() => undefined);
+    },
+    onSpawn: (pid) => {
+      stepPid = pid;
+      void pool.query('UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1', [stepId, pid]).catch(() => undefined);
+    },
+  };
+  const progress = await startProgress(pool, item.projectSlug,
+    [`${agent.name} beginnt (Schritt ${position + 1}/${total}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
+    { stepId, silent: true });
+  const work = invokeAgent(ctx, agent, prompt, hooks)
+    .catch((error: unknown): CommandResult => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
+  const result = await Promise.race([work, cancelRequested]);
+  stopWatching();
+  await progress.stop();
+
+  const output = redactOutput(result.output, process.env);
+  if (isShuttingDown()) {
+    await pool.query(
+      `UPDATE agent_run_steps SET status = 'failed', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
+      [stepId, result.exitCode, result.durationMs, `${output}\nUnterbrochen: Der Worker wurde beendet.`],
+    );
+    return { passed: false, interrupted: true };
+  }
+  const passed = result.exitCode === 0 && !cancelled;
+  await pool.query(
+    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
+    [stepId, passed ? 'passed' : 'failed', result.exitCode, result.durationMs, output],
+  );
+  done.push({ agentName: agent.name, phase: agent.phase, status: passed ? 'passed' : 'failed', output });
+  if (!passed) {
+    if (!cancelled) await registerFailure(pool, item, agent.name, output).catch((error) => console.error('Bug report failed:', error));
+  } else {
+    await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
+  }
+  return { passed, interrupted: false };
+}
+
+/** Setzt den Auftragsstatus nach dem Lauf und stößt Folgeaktionen (Commit, Wiederaufnahme nach Bugfix) an. */
+async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
+  const { pool, item, options, execute } = ctx;
+  if (interrupted) {
+    // Unterbrochene Aufträge gehen zurück auf „Geplant“ (Agent-Zuweisung bleibt), damit sie beim Neustart weiterlaufen.
+    await pool.query(`UPDATE development_items SET status = 'planned', updated_at = NOW() WHERE id = $1`, [item.id]);
+    return;
+  }
+  if (item.agentId) {
+    // Einzelner Agent (Play): stellt den früheren Status wieder her; ein blockierter Auftrag läuft nach Erfolg regulär weiter.
+    await pool.query(
+      `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
+              status = CASE WHEN NOT $2 THEN 'blocked' WHEN return_status IS NULL OR return_status = 'blocked' THEN 'planned' ELSE return_status END
+        WHERE id = $1`, [item.id, passed]);
+    return;
+  }
+  await pool.query(`UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
+    [item.id, passed ? 'done' : 'blocked']);
+  if (!passed) return;
+  if (item.sprintId) {
+    const sprint = await pool.query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId]).catch(() => null);
+    if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
+  }
+  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
+}
+
+export async function runWorkItem(
+  pool: Pool,
+  item: WorkItem,
+  agents: WorkflowAgent[],
+  options: WorkItemOptions,
+): Promise<'passed' | 'failed' | 'skipped'> {
+  const runId = await claimRun(pool, item);
   if (!runId) {
     console.info(`Skipping ${item.id}: a run is already in progress.`);
     return 'skipped';
   }
   await pool.query(`UPDATE development_items SET status = 'in_progress', updated_at = NOW() WHERE id = $1`, [item.id]);
 
-  const done: StepSummary[] = [];
+  const ordered = selectWorkflowAgents(agents, item);
+  const ctx: RunContext = {
+    pool, item, runId, options,
+    execute: options.execute ?? runCommand,
+    builtin: options.builtin ?? runBuiltinAgent,
+    done: [], bugs: [], images: [], fallbackCommand: defaultAgentCommand(), projectContext: '',
+  };
   let passed = true;
   let interrupted = false;
-  const ordered = agents
-    .filter((agent) => item.agentId ? agent.id === item.agentId
-      : !(agent.role === 'author' && item.ideationId) && !(agent.role === 'bug_reviewer' && item.risks?.trim()))
-    .sort((left, right) =>
-      PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never)
-      || left.position - right.position);
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
-    const bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
-    const images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(() => []);
-    const fallbackCommand = defaultAgentCommand();
-    const projectContext = await loadProjectContext(pool, item.projectSlug);
+    ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
+    ctx.images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(() => []);
+    ctx.projectContext = await loadProjectContext(pool, item.projectSlug);
     for (const [position, agent] of ordered.entries()) {
-      const step = { agentName: agent.name, phase: agent.phase };
-      console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
-      const stepRow = await pool.query<{ id: string }>(
-        `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status)
-         VALUES ($1, $2, $3, $4, $5, 'running') RETURNING id`,
-        [runId, position, agent.id, agent.name, agent.phase],
-      );
-      const manual = agent.role === 'manual_writer' || agent.role === 'user_manual_writer'
-        ? await readManual(pool, item.projectSlug, agent.role === 'manual_writer' ? MANUAL_TITLE : USER_MANUAL_TITLE).catch(() => '') : undefined;
-      const prompt = withProjectContext(projectContext, buildPrompt(agent, item, done, { bugs, manual, images }));
-      const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
-      let result: CommandResult = { exitCode: 1, durationMs: 0, output: '' };
-      const stepAbort = new AbortController();
-      let stepPid = 0;
-      let cancelled = false;
-      let stopWatching = (): void => undefined;
-      // Ein „Abbrechen“ aus der Oberfläche beendet den Schritt sofort, auch wenn der Agent selbst nicht reagiert.
-      const cancelRequested = new Promise<CommandResult>((resolveCancel) => {
-        const watcher = setInterval(() => {
-          void pool.query<{ cancel_requested: boolean }>('SELECT cancel_requested FROM agent_run_steps WHERE id = $1', [stepRow.rows[0]?.id])
-            .then(({ rows }) => {
-              if (!rows[0]?.cancel_requested || cancelled) return;
-              cancelled = true;
-              stepAbort.abort();
-              if (stepPid) killGroup(stepPid);
-              resolveCancel({ exitCode: 130, durationMs: 0, output: 'Vom Benutzer abgebrochen.' });
-            }).catch(() => undefined);
-        }, 1500);
-        stopWatching = () => clearInterval(watcher);
-      });
-      let lastLiveWrite = 0;
-      const onOutput = (partial: string): void => {
-        if (Date.now() - lastLiveWrite < 1500) return;
-        lastLiveWrite = Date.now();
-        void pool.query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3',
-          [stepRow.rows[0]?.id, redactOutput(partial, process.env), 'running']).catch(() => undefined);
-      };
-      const progress = await startProgress(pool, item.projectSlug,
-        [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
-        { stepId: stepRow.rows[0]?.id, silent: true });
-      const work = (async (): Promise<void> => { try {
-        if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
-          // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.
-          const written = await execute(buildInvocation(fallbackCommand, `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`),
-            options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) }));
-          const run = await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs, signal: stepAbort.signal });
-          result = { ...run, durationMs: run.durationMs + written.durationMs, output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}` };
-        } else result = command
-          ? await execute(buildInvocation(command, prompt), options.cwd, {
-            timeoutMs: options.timeoutMs,
-            env: agentEnvironment(),
-            onOutput,
-            onSpawn: (pid) => void (stepPid = pid, pool.query(
-              `UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1`, [stepRow.rows[0]?.id, pid],
-            ).catch(() => undefined)),
-          })
-          : await builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs, signal: stepAbort.signal });
-      } catch (error) {
-        result = { exitCode: 1, durationMs: 0, output: error instanceof Error ? error.message : String(error) };
-      } })();
-      result = await Promise.race([work.then(() => result), cancelRequested]);
-      stopWatching();
-      await progress.stop();
-      const output = redactOutput(result.output, process.env);
-      if (isShuttingDown()) {
-        interrupted = true;
+      const outcome = await runStep(ctx, agent, position, ordered.length);
+      if (outcome.interrupted) interrupted = true;
+      if (!outcome.passed) {
         passed = false;
-        await pool.query(
-          `UPDATE agent_run_steps SET status = 'failed', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-          [stepRow.rows[0]?.id, result.exitCode, result.durationMs, `${output}\nUnterbrochen: Der Worker wurde beendet.`],
-        );
         break;
       }
-      const stepPassed = result.exitCode === 0 && !cancelled;
-      await pool.query(
-        `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
-        [stepRow.rows[0]?.id, stepPassed ? 'passed' : 'failed', result.exitCode, result.durationMs, output],
-      );
-      done.push({ ...step, status: stepPassed ? 'passed' : 'failed', output });
-      if (!stepPassed) {
-        passed = false;
-        if (!cancelled) await registerFailure(pool, item, agent.name, output).catch((error) => console.error('Bug report failed:', error));
-        break;
-      }
-      await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
     }
   } catch (error) {
     passed = false;
     console.error(`Run ${runId} aborted:`, error);
   } finally {
-    await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`,
-      [runId, passed ? 'passed' : 'failed']);
-    // Unterbrochene Aufträge gehen zurück auf „Geplant“ (Agent-Zuweisung bleibt), damit sie beim Neustart weiterlaufen.
-    if (interrupted) {
-      await pool.query(`UPDATE development_items SET status = 'planned', updated_at = NOW() WHERE id = $1`, [item.id]);
-    } else if (item.agentId) {
-      // Einzelner Agent (Play): stellt den früheren Status wieder her; ein blockierter Auftrag läuft nach Erfolg regulär weiter.
-      await pool.query(
-        `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-                status = CASE WHEN NOT $2 THEN 'blocked' WHEN return_status IS NULL OR return_status = 'blocked' THEN 'planned' ELSE return_status END
-          WHERE id = $1`, [item.id, passed]);
-    } else {
-      await pool.query(`UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
-        [item.id, passed ? 'done' : 'blocked']);
-    }
-    if (passed && !interrupted && !item.agentId && item.sprintId) {
-      const sprint = await pool.query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId]).catch(() => null);
-      if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
-    }
-    if (passed && item.bugId && !item.agentId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
+    await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [runId, passed ? 'passed' : 'failed']);
+    await settleItem(ctx, passed, interrupted);
   }
   return passed ? 'passed' : 'failed';
 }

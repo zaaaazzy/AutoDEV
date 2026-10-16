@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
   buildUpdate, isRecord, isUuid, parseBoolean, parseCommand, parseFields, parseLongText, parseOption, parseProjectSlug, parseTitle,
-} from './validation.js';
+} from '../core/validation.js';
 
 const ROLES = new Set(['author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'custom']);
 const PHASES = new Set(['pre_task', 'while_task', 'after_task']);

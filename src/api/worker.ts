@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
-import { isUuid, parseProjectSlug } from './validation.js';
+import { isUuid, parseProjectSlug } from '../core/validation.js';
 
 export async function beatHeartbeat(
   pool: Pool, project: string, intervalSeconds: number, lastError: string | null = null, startup = false,

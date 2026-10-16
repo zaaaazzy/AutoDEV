@@ -11,10 +11,10 @@ import {
   finishTestRunStep,
   readDatabaseConfig,
   registerProject,
-} from './database.js';
+} from '../db/database.js';
 import type { Pool } from 'pg';
-import { redactOutput, runCommand } from './command.js';
-import { killGroup } from './shutdown.js';
+import { redactOutput, runCommand } from '../core/command.js';
+import { killGroup } from '../core/shutdown.js';
 
 const execFile = promisify(nodeExecFile);
 

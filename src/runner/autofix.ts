@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { reportAgentBug } from './bugs.js';
+import { reportAgentBug } from '../api/bugs.js';
 
 const MAX_AUTO_RETRIES = 2;
 

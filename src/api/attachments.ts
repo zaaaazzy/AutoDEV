@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express, { type Express } from 'express';
 import type { Pool } from 'pg';
-import { isUuid, parseProjectSlug } from './validation.js';
+import { isUuid, parseProjectSlug } from '../core/validation.js';
 
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_IDEA = 10;

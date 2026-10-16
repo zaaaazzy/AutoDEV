@@ -52,7 +52,7 @@ test('push failures are recorded instead of thrown', async () => {
   await writeFile(join(cwd, 'a.txt'), 'x');
   const { pool, updates } = fakePool(`file://${cwd}/nope`.replace('file://', 'https://invalid.invalid'));
   assert.equal(await syncSprintToGit(pool, 'p', cwd, async (command, dir, options) => {
-    const { runCommand } = await import('./command.js');
+    const { runCommand } = await import('../core/command.js');
     return command[1] === 'push' ? { exitCode: 1, durationMs: 1, output: 'auth failed' } : runCommand(command, dir, options);
   }), 0);
   assert.match(updates.at(-1)?.sql ?? '', /git_sync = 'failed'/);

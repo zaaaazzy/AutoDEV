@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
   buildUpdate, isUuid, parseFields, parseLongText, parseNullableUuid, parseOption, parseProjectSlug, parseTitle,
-} from './validation.js';
+} from '../core/validation.js';
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_STATUSES = new Set(['open', 'in_progress', 'fixed', 'wontfix']);

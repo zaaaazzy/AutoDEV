@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { upsertDoc } from './docs.js';
-import { isUuid, isRecord, parseProjectSlug } from './validation.js';
+import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
 
 interface OrderRow {
   id: string;

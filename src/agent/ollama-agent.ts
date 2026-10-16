@@ -1,8 +1,8 @@
 import { copyFile, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { shutdownSignal } from './shutdown.js';
-import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
-import { withProjectLock } from './project-lock.js';
+import { shutdownSignal } from '../core/shutdown.js';
+import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from '../core/command.js';
+import { withProjectLock } from '../core/project-lock.js';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 // Lokale Modelle brauchen oft Minuten pro Antwort; Node-Standardlimits (5 min) würden sonst „fetch failed“ liefern.
@@ -52,11 +52,6 @@ const SAFE_COMMANDS = [
 ];
 
 const READ_COMMAND = /^(?:git (?:status|log|diff|show|branch|remote -v|ls-files)(?: (?:--oneline|--stat|--graph|--decorate|--name-only|--name-status|--short|--all|-\d+|--max-count=\d+|[\w@:./~^][\w@:./=~^-]*))*|npm (?:ls|list|outdated)(?: --(?:depth=\d|json))*|node --version)$/;
-
-/** Reine Anzeige-Befehle für Rollen ohne Schreibrecht. */
-function isReadOnlyCommand(command: string): boolean {
-  return READ_COMMAND.test(command);
-}
 
 /** Erlaubt feste, ungefährliche Befehle; `npm install <paket>` nur mit geprüften Paketnamen und Schaltern (kein -g, keine URLs). */
 export function isAllowedCommand(command: string): boolean {

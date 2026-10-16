@@ -1,9 +1,9 @@
 import type { Pool } from 'pg';
-import { type CommandExecutor, runCommand } from './command.js';
-import { isShuttingDown } from './shutdown.js';
+import { type CommandExecutor, runCommand } from '../core/command.js';
+import { isShuttingDown } from '../core/shutdown.js';
 import { startProgress } from './chat-progress.js';
 import { runAuthorAgent } from './requirements.js';
-import type { RunnerOptions } from './runner.js';
+import type { RunnerOptions } from '../runner/runner.js';
 
 const HISTORY_LIMIT = 20;
 function buildChatPrompt(history: { role: string; content: string }[]): string {

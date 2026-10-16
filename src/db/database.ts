@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
-import { ensureDefaultAgents } from './agents.js';
+import { ensureDefaultAgents } from '../api/agents.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS projects (

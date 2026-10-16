@@ -1,10 +1,10 @@
 import type { Pool } from 'pg';
-import { loadProjectContext, withProjectContext } from './project-context.js';
-import { isShuttingDown } from './shutdown.js';
-import { type CommandExecutor, redactOutput, runCommand } from './command.js';
-import { loadKnownBugs } from './bugs.js';
+import { loadProjectContext, withProjectContext } from '../core/project-context.js';
+import { isShuttingDown } from '../core/shutdown.js';
+import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
+import { loadKnownBugs } from '../api/bugs.js';
 import { runOllamaAgent } from './ollama-agent.js';
-import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from './runner.js';
+import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
 const STALE_DRAFT_MINUTES = 45;

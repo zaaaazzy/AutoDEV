@@ -1,8 +1,8 @@
 import type { Pool } from 'pg';
-import type { CommandExecutor } from './command.js';
-import { isShuttingDown } from './shutdown.js';
+import type { CommandExecutor } from '../core/command.js';
+import { isShuttingDown } from '../core/shutdown.js';
 import { runAuthorAgent } from './requirements.js';
-import type { RunnerOptions } from './runner.js';
+import type { RunnerOptions } from '../runner/runner.js';
 
 interface Estimate {
   effortHours: number | null;

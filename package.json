@@ -10,9 +10,9 @@
     "dev": "tsx watch src/server.ts",
     "dev:ui": "ng serve --proxy-config frontend/proxy.conf.json",
     "test": "npm run build:ui && tsx --test \"src/**/*.test.ts\"",
-    "test-agent": "tsx src/test-agent.ts",
-    "runner": "tsx src/runner-cli.ts",
-    "worker": "tsx src/runner-cli.ts --all --watch"
+    "test-agent": "tsx src/runner/test-agent.ts",
+    "runner": "tsx src/runner/runner-cli.ts",
+    "worker": "tsx src/runner/runner-cli.ts --all --watch"
   },
   "dependencies": {
     "express": "^5.1.0",

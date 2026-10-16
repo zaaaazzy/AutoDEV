@@ -1,5 +1,5 @@
-import { createDevLogApp } from './app.js';
-import { createDatabasePool, readDatabaseConfig } from './database.js';
+import { createDevLogApp } from './api/app.js';
+import { createDatabasePool, readDatabaseConfig } from './db/database.js';
 
 async function start(): Promise<void> {
   const username = process.env.DEV_LOG_USERNAME?.trim();

@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
-import { isRecord, parseProjectSlug } from './validation.js';
+import { isRecord, parseProjectSlug } from '../core/validation.js';
 
 const MAX_MESSAGE_CHARS = 4000;
 const COLUMNS = `m.id, m.role, m.content, m.status, m.created_at AS "createdAt"`;

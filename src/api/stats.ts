@@ -1,6 +1,6 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
-import { parseProjectSlug } from './validation.js';
+import { parseProjectSlug } from '../core/validation.js';
 
 type CountRow = { key: string; count: string };
 const counts = (rows: CountRow[]): Record<string, number> =>

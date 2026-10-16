@@ -1,9 +1,9 @@
 import type { Pool } from 'pg';
-import { loadKnownBugs } from './bugs.js';
-import type { CommandExecutor } from './command.js';
+import { loadKnownBugs } from '../api/bugs.js';
+import type { CommandExecutor } from '../core/command.js';
 import { runAuthorAgent } from './requirements.js';
-import type { RunnerOptions } from './runner.js';
-import { isShuttingDown } from './shutdown.js';
+import type { RunnerOptions } from '../runner/runner.js';
+import { isShuttingDown } from '../core/shutdown.js';
 
 const MIN_ANALYSIS_CHARS = 60;
 

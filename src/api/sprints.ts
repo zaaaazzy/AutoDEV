@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { generateSprintReport } from './reports.js';
 import {
   buildUpdate, isUuid, parseFields, parseLongText, parseNullableDate, parseOption, parseProjectSlug, parseTitle,
-} from './validation.js';
+} from '../core/validation.js';
 
 const SPRINT_STATUSES = new Set(['planned', 'active', 'completed']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,

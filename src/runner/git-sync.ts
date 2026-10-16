@@ -2,8 +2,8 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
-import { withProjectLock } from './project-lock.js';
-import { type CommandExecutor, redactOutput, runCommand } from './command.js';
+import { withProjectLock } from '../core/project-lock.js';
+import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 
 const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;

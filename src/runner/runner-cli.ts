@@ -2,12 +2,12 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import { processChat, rejectChat } from './chat.js';
-import { beginShutdown, killOrphan } from './shutdown.js';
-import { createDatabasePool, readDatabaseConfig } from './database.js';
-import { beatHeartbeat, readMaxAgents } from './worker.js';
+import { processChat, rejectChat } from '../agent/chat.js';
+import { beginShutdown, killOrphan } from '../core/shutdown.js';
+import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
+import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
-import { analyzeBlocked } from './troubleshoot.js';
+import { analyzeBlocked } from '../agent/troubleshoot.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 

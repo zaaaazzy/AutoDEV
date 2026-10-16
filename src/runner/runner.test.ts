@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import type { CommandExecutor } from './command.js';
+import type { CommandExecutor } from '../core/command.js';
 import { type BuiltinAgent, buildInvocation, buildPrompt, parseRunnerOptions, runWorkItem, type WorkflowAgent } from './runner.js';
 
 const item = { id: 'item-1', projectSlug: 'mainty', title: 'Sprints', description: 'Bauen' };

@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
-import { INVALID, buildUpdate, isUuid, parseFields, parseProjectSlug, parseTitle } from './validation.js';
+import { INVALID, buildUpdate, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
 
 const MAX_API_CONTENT = 30_000;
 const MAX_STORED_CONTENT = 200_000;
