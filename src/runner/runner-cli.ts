@@ -6,6 +6,7 @@ import { processChat, rejectChat } from '../agent/chat.js';
 import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
+import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 
@@ -144,6 +145,7 @@ async function main(): Promise<void> {
     let chatTargets: Target[] = [];
     const chatActive = new Set<string>();
     const analysisActive = new Set<string>();
+    const estimateActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -151,6 +153,14 @@ async function main(): Promise<void> {
         if (target.problem) {
           void rejectChat(pool, slug, target.problem).catch(() => undefined);
           continue;
+        }
+        if (!estimateActive.has(slug)) {
+          estimateActive.add(slug);
+          void estimateNewIdeas(pool, slug)
+            .catch((error: unknown) =>
+              logOnce(`estimate:${slug}`, `[${slug}] Schätzung fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => estimateActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)

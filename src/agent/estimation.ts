@@ -1,3 +1,7 @@
+import type { Pool } from 'pg';
+import { loadProjectContext } from '../core/project-context.js';
+import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
+
 export interface Estimate {
   effortHours: number | null;
   tokenEstimate: number | null;
@@ -31,4 +35,73 @@ export function splitEstimate(output: string): { requirement: string; estimate: 
   } catch {
     return { requirement, estimate: null };
   }
+}
+
+/** Reads a bare JSON object (the quick estimation answer has no "Schätzung" heading). */
+export function parseEstimate(output: string): Estimate | null {
+  const json = /\{[\s\S]*\}/.exec(output);
+  return json ? splitEstimate(`\n## Schätzung\n${json[0]}`).estimate : null;
+}
+
+const ESTIMATE_TIMEOUT_MS = 90_000;
+
+/** One tool-free model call: far faster than a full agent run, so new ideas get their estimate within seconds. */
+export async function quickEstimate(prompt: string, fetchImpl: typeof fetch = patientFetch): Promise<Estimate | null> {
+  const baseUrl = (process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
+  const response = await requestOllamaChat(
+    fetchImpl,
+    baseUrl,
+    {
+      model: resolveModel('author'),
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+      think: false,
+      format: 'json',
+      keep_alive: process.env.DEV_LOG_OLLAMA_KEEP_ALIVE?.trim() || '30m',
+      options: { num_ctx: 4096, num_predict: 120, temperature: 0.1 },
+    },
+    AbortSignal.timeout(ESTIMATE_TIMEOUT_MS),
+  );
+  if (!response.ok) return null;
+  const body = (await response.json()) as { message?: { content?: string } };
+  return parseEstimate(body.message?.content ?? '');
+}
+
+/** Estimates ideas that have no values yet; values entered by users are kept. Failures are noted once, not retried. */
+export async function estimateNewIdeas(pool: Pool, project: string, estimate = quickEstimate): Promise<number> {
+  const ideas = (
+    await pool.query<{ id: string; title: string; description: string }>(
+      `SELECT id, title, description FROM ideation_items
+        WHERE project_slug = $1 AND status IN ('idea', 'considering', 'requested') AND agent_note IS NULL
+          AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
+        ORDER BY created_at LIMIT 5`,
+      [project],
+    )
+  ).rows;
+  if (!ideas.length) return 0;
+  const context = (await loadProjectContext(pool, project)).slice(0, 600);
+  for (const idea of ideas) {
+    const prompt = [
+      'Schätze Aufwand eines Entwicklungsauftrags. Antworte nur mit einem JSON-Objekt:',
+      '{"effortHours": Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',
+      context ? `Projekt: ${context}` : '',
+      `Titel: ${idea.title}\n${idea.description.slice(0, 1500)}`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const result = await estimate(prompt).catch(() => null);
+    if (!result) {
+      await pool.query(
+        `UPDATE ideation_items SET agent_note = 'Aufwand konnte nicht geschätzt werden – bitte manuell ergänzen.' WHERE id = $1 AND agent_note IS NULL`,
+        [idea.id],
+      );
+      continue;
+    }
+    await pool.query(
+      `UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
+              benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5) WHERE id = $1`,
+      [idea.id, result.effortHours, result.tokenEstimate, result.benefit, result.cost],
+    );
+  }
+  return ideas.length;
 }
