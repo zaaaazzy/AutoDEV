@@ -354,7 +354,6 @@ h3 .link-button { color: var(--ink); }
 .git-detail { color: #6b756f; }
 .git-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e3e7df; }
 .git-actions .button { justify-content: flex-start; gap: 8px; }
-.icon-button { width: 32px; min-height: 32px; padding: 0; border-radius: 999px; }
 
 .chat-clear { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #d5dbd0; border-radius: 999px; background: #fff; color: #4a554d; font-size: 13px; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
 .chat-clear:hover:not(:disabled) { background: #fbeceb; color: #b3372b; border-color: #e6b8b3; }
@@ -392,7 +391,15 @@ h3 .link-button { color: var(--ink); }
 .gh-link:hover { border-color: #2f6f4f; }
 .sprint-layout { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 20px; align-items: start; }
 .sprint-main { min-width: 0; }
-.sprint-side { position: sticky; top: 12px; }
+.sprint-side { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
+.detail-list { display: grid; gap: 8px; margin: 0; }
+.detail-list div { display: flex; justify-content: space-between; gap: 12px; }
+.detail-list dt { color: #6b756f; }
+.detail-list dd { margin: 0; font-weight: 600; text-align: right; }
+.sprint-edit { display: grid; gap: 8px; }
+.sprint-edit label { display: grid; gap: 3px; font-size: 12px; color: #6b756f; }
+.git-sync-buttons { display: inline-flex; gap: 6px; margin-left: 4px; }
+.git-button { gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 999px; }
 .sprint-tasks-title { margin-top: 16px; }
 .sprint-task { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; background: #fff; }
 .sprint-task-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }

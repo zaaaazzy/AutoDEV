@@ -7,12 +7,23 @@ import { ProjectStore } from '../../core/project-store.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
-import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { DurationPipe, HoursPipe, IsoDatePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 
 @Component({
   selector: 'app-sprints',
   standalone: true,
-  imports: [NgClass, FormsModule, GitTreeComponent, MarkdownPipe, NavIconComponent, StatusClassPipe, StatusLabelPipe],
+  imports: [
+    NgClass,
+    FormsModule,
+    DurationPipe,
+    GitTreeComponent,
+    HoursPipe,
+    IsoDatePipe,
+    MarkdownPipe,
+    NavIconComponent,
+    StatusClassPipe,
+    StatusLabelPipe,
+  ],
   templateUrl: './sprints.component.html',
   host: { style: 'display: contents' },
 })
@@ -22,6 +33,7 @@ export class SprintsComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
+  protected readonly editingId = signal<string | null>(null);
   protected readonly openSprintItems = signal<ReadonlySet<string>>(new Set());
 
   protected toggleSprintItem(id: string): void {
@@ -48,6 +60,27 @@ export class SprintsComponent {
     const orders = this.sprintItems(sprintId);
     const done = orders.filter((item) => item.status === 'done').length;
     return `${done} / ${orders.length} Aufträge erledigt`;
+  }
+
+  protected sprintEstimate(sprintId: string): number | null {
+    const efforts = this.sprintItems(sprintId).flatMap((item) =>
+      typeof item.effortHours === 'number' ? [item.effortHours] : [],
+    );
+    return efforts.length ? efforts.reduce((sum, hours) => sum + hours, 0) : null;
+  }
+
+  protected sprintSpent(sprintId: string): number | null {
+    const ids = new Set(this.sprintItems(sprintId).map((item) => item.id));
+    const total = this.data()
+      .agentRuns.filter((run) => run.developmentId && ids.has(run.developmentId))
+      .flatMap((run) => run.steps)
+      .reduce((sum, step) => sum + (step.durationMs ?? 0), 0);
+    return total || null;
+  }
+
+  protected async saveSprint(id: string, values: Partial<Sprint>): Promise<void> {
+    await this.updateSprint(id, values);
+    this.editingId.set(null);
   }
 
   protected githubBase(): string | null {
