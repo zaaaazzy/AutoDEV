@@ -45,7 +45,7 @@ test('serves the Angular application shell', async () => {
     const html = await response.text();
     assert.equal(response.status, 200);
     assert.match(html, /<app-root><\/app-root>/);
-    assert.match(html, /<base href="\.\/">/);
+    assert.match(html, /<base href="\.\/"\s*\/?>/);
     assert.match(html, /main-[\w-]+\.js/);
   });
 });
