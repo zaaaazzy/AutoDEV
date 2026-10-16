@@ -1,7 +1,8 @@
 import { copyFile, mkdir, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { shutdownSignal } from './shutdown.js';
-import { type CommandExecutor, type CommandResult, runCommand } from './command.js';
+import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
+import { withProjectLock } from './project-lock.js';
 import { Agent, fetch as undiciFetch } from 'undici';
 
 // Lokale Modelle brauchen oft Minuten pro Antwort; Node-Standardlimits (5 min) würden sonst „fetch failed“ liefern.
@@ -17,15 +18,35 @@ const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.angular',
 const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
 const MAX_TOOL_OUTPUT = 8_000;
 const MAX_FILE_BYTES = 400_000;
-const WRITE_ROLES = new Set(['developer']);
-// Der Chat-Assistent darf lesen und nur Anzeige-Befehle ausführen (z. B. git log).
-const COMMAND_ROLES = new Set(['developer', 'assistant']);
+const WRITE_ROLES = new Set(['developer', 'assistant']);
 const COMMAND_PATTERN = /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
+const SERVICE_NAME = '[a-zA-Z0-9][\\w.-]*';
+const ASSISTANT_SERVICE_PATTERNS = [
+  new RegExp(`^docker compose (?:ps|config --services)$`),
+  new RegExp(`^docker compose logs(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
+  new RegExp(`^docker compose up -d(?: --build| --wait| --force-recreate)*(?: ${SERVICE_NAME})*$`),
+  new RegExp(`^docker compose (?:stop|start|restart|down|build|pull)(?: ${SERVICE_NAME})*$`),
+  /^docker compose down --remove-orphans$/,
+];
+const GIT_URL = /^(?:https:\/\/[\w.-]+\/[\w./~-]+|git@[\w.-]+:[\w./~-]+)$/;
+const RELATIVE_DIRECTORY = /^(?!.*\.\.)(?:\.|[\w][\w.-]*(?:\/[\w][\w.-]*)*)$/;
+
+/** Dienste starten/stoppen und Umgebung aufsetzen (Repo klonen) – nur für den Assistenten, immer im Projektordner. */
+export function isAssistantServiceCommand(command: string): boolean {
+  if (ASSISTANT_SERVICE_PATTERNS.some((pattern) => pattern.test(command))) return true;
+  const parts = command.split(/\s+/);
+  if (parts[0] === 'git' && parts[1] === 'clone' && parts.length >= 3 && parts.length <= 4) {
+    return GIT_URL.test(parts[2]) && (parts[3] === undefined || RELATIVE_DIRECTORY.test(parts[3]));
+  }
+  return /^git (?:pull --ff-only|fetch|checkout [\w][\w./-]*)$/.test(command);
+}
+const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)/i;
+const SECRET_IN_COMMAND = /\.env|\.pem\b|\.key\b|id_(?:rsa|ed25519|ecdsa)/i;
 const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
 const INSTALL_FLAGS = new Set(['--save', '--save-dev', '-D', '--save-exact', '-E', '--legacy-peer-deps', '--no-audit', '--no-fund', '--ignore-scripts']);
 const SAFE_COMMANDS = [
   /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev))*$/,
-  /^npm (?:ci|install|i)(?: (?:--[a-z-]+|-[DE]))*$/,
+  /^npm (?:ci|install|i)(?: (?:--(?:legacy-peer-deps|no-audit|no-fund|ignore-scripts|omit=dev|production)|-[DE]))*$/,
   /^node (?:--version|--check [\w./-]+)$/,
   /^npx --no-install (?:tsc --noEmit|eslint [\w./*-]+|prettier --check [\w./*-]+|jest|vitest run)$/,
 ];
@@ -33,7 +54,7 @@ const SAFE_COMMANDS = [
 const READ_COMMAND = /^(?:git (?:status|log|diff|show|branch|remote -v|ls-files)(?: (?:--oneline|--stat|--graph|--decorate|--name-only|--name-status|--short|--all|-\d+|--max-count=\d+|[\w@:./~^][\w@:./=~^-]*))*|npm (?:ls|list|outdated)(?: --(?:depth=\d|json))*|node --version)$/;
 
 /** Reine Anzeige-Befehle für Rollen ohne Schreibrecht. */
-export function isReadOnlyCommand(command: string): boolean {
+function isReadOnlyCommand(command: string): boolean {
   return READ_COMMAND.test(command);
 }
 
@@ -47,6 +68,36 @@ export function isAllowedCommand(command: string): boolean {
   return SAFE_COMMANDS.some((pattern) => pattern.test(command));
 }
 
+const COMPOSE_STARTING = /^docker compose (?:up|start|restart|build)\b/;
+
+/** Prüft die aufgelöste Compose-Konfiguration auf Ausbrüche aus dem Projektordner; liefert den Grund oder null. */
+export function composeViolation(configJson: string, root: string): string | null {
+  let config: { services?: Record<string, Record<string, unknown>> };
+  try {
+    config = JSON.parse(configJson.slice(configJson.indexOf('{'))) as typeof config;
+  } catch {
+    return 'Die Compose-Konfiguration konnte nicht geprüft werden (docker compose config liefert kein gültiges JSON).';
+  }
+  const inside = (path: unknown): boolean => typeof path === 'string' && (path === root || path.startsWith(root + sep));
+  for (const [name, service] of Object.entries(config.services ?? {})) {
+    if (service.privileged === true) return `Dienst "${name}" ist privilegiert.`;
+    if (['host'].includes(String(service.network_mode)) || service.pid === 'host' || service.ipc === 'host' || service.userns_mode === 'host') {
+      return `Dienst "${name}" nutzt den Host-Namensraum.`;
+    }
+    if (Array.isArray(service.cap_add) && service.cap_add.length) return `Dienst "${name}" fordert zusätzliche Capabilities an.`;
+    if (Array.isArray(service.devices) && service.devices.length) return `Dienst "${name}" bindet Geräte ein.`;
+    const build = service.build;
+    const context = typeof build === 'string' ? build : (build as { context?: unknown } | undefined)?.context;
+    if (context !== undefined && !inside(context)) return `Build-Kontext von "${name}" liegt außerhalb des Projektordners.`;
+    for (const volume of Array.isArray(service.volumes) ? service.volumes as { type?: string; source?: unknown }[] : []) {
+      if (volume.type === 'bind' && !inside(volume.source)) {
+        return `Dienst "${name}" bindet ${String(volume.source)} außerhalb des Projektordners ein.`;
+      }
+    }
+  }
+  return null;
+}
+
 export interface OllamaAgentOptions {
   prompt: string;
   role: string;
@@ -58,6 +109,7 @@ export interface OllamaAgentOptions {
   fetchImpl?: typeof fetch;
   execute?: CommandExecutor;
   signal?: AbortSignal;
+  onProgress?: (message: string) => void;
 }
 
 interface ToolCall {
@@ -76,7 +128,7 @@ const clip = (text: string, max = MAX_TOOL_OUTPUT): string =>
 
 const parameter = (description: string, type = 'string'): { type: string; description: string } => ({ type, description });
 
-function toolDefinitions(canWrite: boolean, canRead = false): unknown[] {
+function toolDefinitions(canWrite: boolean, canManageServices = false): unknown[] {
   const tools: { name: string; description: string; properties: Record<string, unknown>; required: string[] }[] = [
     {
       name: 'list_files', description: 'Listet Dateien und Ordner eines Verzeichnisses (Ordner enden mit /).',
@@ -92,12 +144,6 @@ function toolDefinitions(canWrite: boolean, canRead = false): unknown[] {
       properties: { query: parameter('Suchtext'), path: parameter('Relativer Startpfad, Standard ".".') }, required: ['query'],
     },
   ];
-  if (canRead && !canWrite) {
-    tools.push({
-      name: 'run_command', description: 'Zeigt Informationen an: git log/status/diff/show/branch (z. B. "git log --oneline -20"), npm ls, npm outdated.',
-      properties: { command: parameter('z. B. "git log --oneline -20"') }, required: ['command'],
-    });
-  }
   if (canWrite) {
     tools.push(
       {
@@ -114,8 +160,9 @@ function toolDefinitions(canWrite: boolean, canRead = false): unknown[] {
         required: ['path', 'old_text', 'new_text'],
       },
       {
-        name: 'run_command', description: 'Führt npm install/ci <paket>, npm test, npm run <script>, npm ls/outdated/audit, node --check, npx --no-install tsc/eslint/prettier/jest/vitest oder git status/diff/log aus.',
-        properties: { command: parameter('z. B. "npm run build" oder "npm test"') }, required: ['command'],
+        name: 'run_command',
+        description: `Führt erlaubte Projektbefehle aus (npm test/run/ls, git status/diff/log${canManageServices ? ', docker compose ps/logs/up -d/stop/down/restart/build, git clone/pull, npm install' : ''}).`,
+        properties: { command: parameter('z. B. "npm run build", "npm test" oder "docker compose ps"') }, required: ['command'],
       },
     );
   }
@@ -131,13 +178,15 @@ function toolDefinitions(canWrite: boolean, canRead = false): unknown[] {
 
 function systemPrompt(role: string, canWrite: boolean): string {
   return [
-    `Du bist ein autonomer Software-Agent mit der Rolle "${role}" und arbeitest im Projektverzeichnis.`,
+    role === 'assistant'
+      ? 'Du bist der Dashboard-Assistent und Problemlöser. Du darfst Probleme im Projekt selbst untersuchen und gezielt beheben.'
+      : `Du bist ein autonomer Software-Agent mit der Rolle "${role}" und arbeitest im Projektverzeichnis.`,
     'Erkunde das Projekt zuerst mit den Werkzeugen, bevor du Aussagen machst oder Code schreibst. Erfinde keine Dateien oder Ergebnisse.',
-    canWrite
+    role === 'assistant'
+      ? 'Du darfst Dateien mit write_file/replace_in_file ändern und sichere Projektbefehle ausführen. Alle Dateioperationen bleiben auf das Projektverzeichnis begrenzt; .env, Schlüssel, node_modules und .git sind gesperrt. Führe bei Problemen zuerst Diagnose und dann eine gezielte, nachvollziehbare Behebung samt passenden Tests aus. Du darfst Dienste per docker compose (ps, logs, up -d [--build], stop, start, restart, down, build) verwalten und Umgebungen aufsetzen: Repository mit "git clone <https-URL> <Unterordner oder .>" ins Projektverzeichnis holen, Abhängigkeiten mit npm install installieren, Konfiguration (z. B. docker-compose.yml, README-Vorgaben) prüfen und anlegen, Dienste starten und per docker compose ps/logs verifizieren. Befolge die Vorgaben des Nutzers Schritt für Schritt und melde jeden Schritt. Beantworte alle Anfragen direkt und delegiere nicht. Erstelle niemals Aufträge oder @@TASK-Zeilen.'
+      : canWrite
       ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und installiere fehlende Abhängigkeiten mit run_command ("npm install"), prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
-      : role === 'assistant'
-        ? 'Du darfst selbst nichts verändern, aber lesen und Anzeige-Befehle nutzen (run_command: git log, git status, git diff, npm ls). Beantworte Fragen direkt mit diesen Werkzeugen, statt auf Einschränkungen zu verweisen. Alles, was Änderungen, Installationen oder Tests erfordert, übergibst du mit einer @@TASK-Zeile an einen passenden Agent.'
-        : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
+      : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
     'Antworte auf Deutsch.',
   ].join('\n');
 }
@@ -156,7 +205,8 @@ async function resolveInside(cwd: string, requested: unknown, forWrite = false):
   }
   const parts = rel.split(sep).filter(Boolean);
   if (parts.some((part) => part === '.git' || part === 'node_modules' || part === BACKUP_DIRECTORY
-    || /^\.env/.test(part) || /\.(pem|key)$/.test(part))) {
+    || part.toLowerCase() === '.git' || part.toLowerCase() === BACKUP_DIRECTORY || part.toLowerCase() === 'node_modules'
+    || SECRET_NAME.test(part))) {
     throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
   }
   // Resolve symlinks of the nearest existing ancestor so they cannot point outside the project.
@@ -191,7 +241,7 @@ async function walkText(directory: string, root: string, query: string, matches:
       if (!SKIPPED_DIRECTORIES.has(entry.name)) {
         await walkText(path, root, query, matches);
       }
-    } else if (entry.isFile() && !/^\.env/.test(entry.name) && (await stat(path)).size < MAX_FILE_BYTES) {
+    } else if (entry.isFile() && !SECRET_NAME.test(entry.name) && (await stat(path)).size < MAX_FILE_BYTES) {
       const lines = (await readFile(path, 'utf8')).split('\n');
       lines.forEach((line, index) => {
         if (matches.length < 50 && line.includes(query)) {
@@ -205,7 +255,7 @@ async function walkText(directory: string, root: string, query: string, matches:
 export interface ToolContext {
   cwd: string;
   canWrite: boolean;
-  canRead?: boolean;
+  canManageServices?: boolean;
   changed: Set<string>;
   backupRoot: string;
   execute: CommandExecutor;
@@ -227,7 +277,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       case 'list_files': {
         const directory = await resolveInside(context.cwd, args.path ?? '.');
         const entries = (await readdir(directory, { withFileTypes: true }))
-          .filter((entry) => !SKIPPED_DIRECTORIES.has(entry.name) && !/^\.env/.test(entry.name))
+          .filter((entry) => !SKIPPED_DIRECTORIES.has(entry.name) && !SECRET_NAME.test(entry.name))
           .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name)).sort();
         return clip(entries.join('\n') || '(leer)');
       }
@@ -284,16 +334,30 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       }
       case 'run_command': {
         const command = typeof args.command === 'string' ? args.command.trim() : '';
-        if (!context.canWrite && !context.canRead) {
+        if (!context.canWrite) {
           return 'Befehle sind für diese Rolle nicht erlaubt.';
         }
-        if (context.canWrite ? !isAllowedCommand(command) : !isReadOnlyCommand(command)) {
-          return 'Befehl nicht erlaubt. Erlaubt: npm install/ci/uninstall <paket>, npm test|run <script>|ls|outdated|audit, node --check <datei>, npx --no-install tsc|eslint|prettier|jest|vitest, git status|diff|log.';
+        if (SECRET_IN_COMMAND.test(command)) {
+          return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind nicht erlaubt.';
         }
-        const result = await context.execute(command.split(/\s+/), context.cwd, {
-          timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
+        if (!isAllowedCommand(command) && !(context.canManageServices && isAssistantServiceCommand(command))) {
+          return 'Befehl nicht erlaubt. Für den Assistenten sind git status/diff/log/show/branch, npm ls/outdated, docker compose ps/logs/up -d/stop/start/restart/down/build, git clone (https/ssh)/pull/fetch/checkout und npm install erlaubt.';
+        }
+        const root = await realpath(context.cwd);
+        return withProjectLock(root, async () => {
+          if (COMPOSE_STARTING.test(command)) {
+            const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, { timeoutMs: 60_000 });
+            const reason = check.exitCode === 0
+              ? composeViolation(check.output, await realpath(context.cwd))
+              : `docker compose config schlug fehl: ${check.output.slice(-300)}`;
+            if (reason) return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
+          }
+          const result = await context.execute(command.split(/\s+/), context.cwd, {
+            timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
+            env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_'))),
+          });
+          return clip(`Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`);
         });
-        return clip(`Exit-Code ${result.exitCode}\n${result.output.slice(-MAX_TOOL_OUTPUT)}`);
       }
       default:
         return `Unbekanntes Werkzeug: ${name}`;
@@ -310,13 +374,12 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl ?? patientFetch;
   const canWrite = WRITE_ROLES.has(options.role);
-  const canRead = COMMAND_ROLES.has(options.role);
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns = options.maxTurns ?? (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
   const context: ToolContext = {
     cwd: options.cwd,
     canWrite,
-    canRead,
+    canManageServices: options.role === 'assistant',
     changed: new Set(),
     backupRoot: join(options.cwd, BACKUP_DIRECTORY, new Date().toISOString().replace(/[:.]/g, '-')),
     execute: options.execute ?? runCommand,
@@ -349,7 +412,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
         body: JSON.stringify({
-          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, canRead), stream: false, think: false,
+          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, context.canManageServices), stream: false, think: false,
           options: { num_ctx: 32_768, temperature: 0.2 },
         }),
       });
@@ -372,12 +435,13 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         if (!text) {
           return finish(1, 'Das Modell lieferte keine Antwort.');
         }
-        if (canWrite && context.changed.size === 0 && !NO_CHANGE_NEEDED.test(text)) {
+        if (options.role === 'developer' && context.changed.size === 0 && !NO_CHANGE_NEEDED.test(text)) {
           return finish(1, `${text}\n\nDer Entwickler-Agent hat keine Dateien geändert.`);
         }
         return finish(0, text);
       }
       for (const call of message.tool_calls) {
+        options.onProgress?.(describeToolCall(call));
         const result = await executeTool(context, call);
         messages.push({ role: 'tool', tool_name: call.function.name, content: result });
       }
@@ -392,6 +456,20 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     clearTimeout(timer);
     shutdownSignal.removeEventListener('abort', abortOnShutdown);
     options.signal?.removeEventListener('abort', abortOnShutdown);
+  }
+}
+
+function describeToolCall(call: ToolCall): string {
+  const { name, arguments: args } = call.function;
+  const path = typeof args.path === 'string' ? args.path : '.';
+  switch (name) {
+    case 'list_files': return `Lese Ordner: ${path}`;
+    case 'read_file': return `Lese Datei: ${path}`;
+    case 'search_text': return `Suche im Projekt: ${(typeof args.query === 'string' ? args.query : '').slice(0, 80)}`;
+    case 'write_file':
+    case 'replace_in_file': return `Ändere Datei: ${path}`;
+    case 'run_command': return `Führe aus: ${(typeof args.command === 'string' ? args.command : '').slice(0, 100)}`;
+    default: return 'Untersuche das Projekt …';
   }
 }
 

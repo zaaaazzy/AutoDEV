@@ -8,6 +8,9 @@ async function start(): Promise<void> {
   if (!authDisabled && (!username || !password || password.length < 16)) {
     throw new Error('Set DEV_LOG_USERNAME and a DEV_LOG_PASSWORD of at least 16 characters, or DEV_LOG_AUTH=off.');
   }
+  if (authDisabled) {
+    console.warn('WARNUNG: DEV_LOG_AUTH=off – die API ist ohne Login erreichbar und steuert Agents mit Datei- und Befehlsrechten. Nur in vertrauenswürdigen Netzen betreiben; Projektordner lassen sich mit DEV_LOG_PROJECT_ROOTS begrenzen.');
+  }
   const pool = await createDatabasePool(readDatabaseConfig());
   const port = Number(process.env.PORT ?? 3100);
   const server = createDevLogApp(pool, authDisabled ? null : { username: username!, password: password! }).listen(port, '0.0.0.0', () => {

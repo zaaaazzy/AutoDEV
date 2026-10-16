@@ -14,7 +14,7 @@ export function buildTroubleshootPrompt(
   bugs: string[],
 ): string {
   return [
-    'Du bist der Agent "Problemlöser". Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Ändere selbst nichts.',
+    'Du bist der Problemanalyst im Dev Log (nur lesender Zugriff). Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Diese angeforderte Analyse dokumentiert den Befund, ohne den Auftrag ungefragt umzusetzen.',
     `## Anweisung\n${instructions || 'Analysiere gründlich und nenne konkrete Schritte.'}`,
     `## Auftrag\nTitel: ${item.title}\n${item.description.slice(0, 3000)}`,
     `## Fehlgeschlagene Schritte (neueste zuerst)\n${failures.join('\n\n') || 'Keine Fehlerausgabe vorhanden.'}`,
@@ -31,7 +31,7 @@ export function parseAnalysis(output: string, fallbackTitle: string): { title: s
   return { title: title.slice(0, 160), body: output.replace(/^\s*TITEL:.*$/im, '').trim() };
 }
 
-/** Analysiert einen blockierten Auftrag mit dem Problemlöser und speichert die Erkenntnisse als Bug (für den Bug-Wächter). */
+/** Analysiert einen blockierten Auftrag mit dem Dashboard-Assistenten und speichert die Erkenntnisse als Bug (für den Bug-Wächter). */
 export async function analyzeBlocked(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
@@ -56,7 +56,7 @@ export async function analyzeBlocked(
     .map((bug) => `- [${bug.status}] ${bug.title}`);
   console.info(`[${item.id}] Problemanalyse`);
   const { exitCode, output } = await runAuthorAgent(
-    pool, options, (instructions) => buildTroubleshootPrompt(instructions, item, failures, known), execute, 'troubleshooter',
+    pool, options, (instructions) => buildTroubleshootPrompt(instructions, item, failures, known), execute, 'analyst',
   );
   if (isShuttingDown()) {
     await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE id = $1`, [item.id]);

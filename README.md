@@ -31,13 +31,13 @@ Der Worker bedient jedes registrierte Projekt in dessen Ordner. Fehlt der Ordner
 - Neue **Ideen** formuliert der Auftragsautor automatisch zu Aufträgen im Backlog aus; per „Erneut anfragen“ mit Änderungswunsch überarbeitbar.
 - **Sprints** werden manuell zugewiesen und gestartet. Nur Aufträge aktiver Sprints werden bearbeitet.
 - **Workflow** je Auftrag: Pre-Task → While-Task → After-Task (Bug-Wächter, Entwickler, Tester, Dokumentierer, Handbuch-Autor). Erfolg → `done`, Fehlschlag → `blocked` plus automatischer Bug.
-- Nur der Entwickler darf Dateien schreiben (Backups in `.dev-log-backups/` im Projektordner) und nur `npm test|run`, `git status|diff|log` ausführen.
+- Der Dashboard-Assistent übernimmt auch die Problemlösung: Er darf Fehler im Projektordner untersuchen und gezielt beheben; Dateien außerhalb des Projektordners, `.env`, Schlüssel, `node_modules` und `.git` bleiben gesperrt. Er darf Dienste per `docker compose` (ps, logs, up -d [--build], stop, start, restart, down, build) verwalten und Umgebungen aufsetzen (`git clone` per https/ssh in einen Unterordner des Projektordners, `git pull`, `npm install`); `down -v`, `docker run` und Pfade außerhalb des Projekts sind nicht erlaubt. Der Entwickler-Agent schreibt weiterhin mit Backups in `.dev-log-backups/`.
 - Beim Abschluss eines Sprints: Bericht (umgesetzt / fehlt / Probleme) und Git-Sicherung (Commit `Sprint: <Name>`, Tag, Push).
 - Eigene Agent-Befehle (z. B. `claude -p`) pro Agent oder global über `DEV_LOG_AGENT_COMMAND`; sonst der eingebaute Ollama-Agent.
 - Manuelle Läufe: `npm run runner -- --project <slug> --cwd <Pfad>` bzw. `npm run test-agent -- --project <slug>`.
 
 ## Konfiguration
 
-`DEV_LOG_DATABASE_URL`, `DEV_LOG_ADMIN_DATABASE_URL`, `DEV_LOG_AUTH` (`off` = kein Login), `DEV_LOG_USERNAME` / `DEV_LOG_PASSWORD`, `DEV_LOG_AGENT_COMMAND`, `DEV_LOG_MAX_TURNS`, `DEV_LOG_TEST_COMMANDS` (Fallback, JSON), `DEV_LOG_OLLAMA_URL`.
+`DEV_LOG_DATABASE_URL`, `DEV_LOG_ADMIN_DATABASE_URL`, `DEV_LOG_AUTH` (`off` = kein Login, nur in vertrauenswürdigen Netzen), `DEV_LOG_PROJECT_ROOTS` (Doppelpunkt-getrennte Ordner, unter denen Projektordner liegen müssen), `DEV_LOG_USERNAME` / `DEV_LOG_PASSWORD`, `DEV_LOG_AGENT_COMMAND`, `DEV_LOG_MAX_TURNS`, `DEV_LOG_TEST_COMMANDS` (Fallback, JSON), `DEV_LOG_OLLAMA_URL`.
 
 Datenmodell: [docs/erm.md](docs/erm.md).

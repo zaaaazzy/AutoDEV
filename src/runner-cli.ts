@@ -113,6 +113,7 @@ async function main(): Promise<void> {
     // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
     let chatTargets: Target[] = [];
     const chatActive = new Set<string>();
+    const analysisActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -123,9 +124,14 @@ async function main(): Promise<void> {
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
-          .then(() => analyzeBlocked(pool, target.options))
           .catch((error: unknown) => console.error(`[${slug}] Chat fehlgeschlagen:`, error instanceof Error ? error.message : error))
           .finally(() => chatActive.delete(slug));
+        // Lange Problemanalysen blockieren so keine neuen Chat-Nachrichten.
+        if (analysisActive.has(slug)) continue;
+        analysisActive.add(slug);
+        void analyzeBlocked(pool, target.options)
+          .catch((error: unknown) => console.error(`[${slug}] Analyse fehlgeschlagen:`, error instanceof Error ? error.message : error))
+          .finally(() => analysisActive.delete(slug));
       }
     }, 1500);
     // Each project runs in its own task; at most "maxConcurrentAgents" tasks run at the same time.
@@ -173,7 +179,7 @@ async function main(): Promise<void> {
         }
       }
       await Promise.all(active.values());
-      while (chatActive.size) await sleep(200);
+      while (chatActive.size || analysisActive.size) await sleep(200);
     } finally {
       clearInterval(heartbeat);
       clearInterval(chatTimer);

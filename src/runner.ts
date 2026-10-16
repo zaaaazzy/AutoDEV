@@ -1,3 +1,4 @@
+import { isUuid } from './validation.js';
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { materializeAttachments } from './attachments.js';
@@ -33,7 +34,6 @@ export interface WorkItem {
   sprintId?: string | null;
   ideationId?: string | null;
   agentId?: string | null;
-  fromChat?: boolean;
   risks?: string;
 }
 
@@ -105,7 +105,7 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
     throw new Error('--project must be a lowercase project slug (or use --all).');
   }
   const itemId = values.get('--item');
-  if (itemId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(itemId)) {
+  if (itemId !== undefined && !isUuid(itemId)) {
     throw new Error('--item must be a UUID.');
   }
   const limit = Number(values.get('--limit') ?? 1);
@@ -231,7 +231,10 @@ async function testCommands(pool: Pool, project: string, environment: NodeJS.Pro
 export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt, cwd, timeoutMs, signal }) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
-    const runId = await runTestAgent({ project: item.projectSlug, cwd, commands: await testCommands(pool, item.projectSlug) }, pool);
+    const runId = await runTestAgent({
+      project: item.projectSlug, cwd, commands: await testCommands(pool, item.projectSlug),
+      existingProject: true, timeoutMs, signal, env: agentEnvironment(),
+    }, pool);
     const steps = await pool.query<{ command: string; status: string; output: string }>(
       'SELECT command, status, output FROM test_run_steps WHERE run_id = $1 ORDER BY position', [runId],
     );
@@ -347,9 +350,9 @@ export async function runWorkItem(
         void pool.query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3',
           [stepRow.rows[0]?.id, redactOutput(partial, process.env), 'running']).catch(() => undefined);
       };
-      const stopProgress = await startProgress(pool, item.projectSlug,
+      const progress = await startProgress(pool, item.projectSlug,
         [`${agent.name} beginnt (Schritt ${position + 1}/${ordered.length}) …`, `${agent.name} arbeitet an „${item.title}“ …`, `${agent.name} ist noch dabei …`],
-        { developmentId: item.id, agentName: agent.name, stepId: stepRow.rows[0]?.id, silent: !item.fromChat });
+        { stepId: stepRow.rows[0]?.id, silent: true });
       const work = (async (): Promise<void> => { try {
         if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
           // Der Tester entwickelt zuerst Tests anhand der Angaben des Entwicklers und lässt danach Build und Tests laufen.
@@ -372,7 +375,7 @@ export async function runWorkItem(
       } })();
       result = await Promise.race([work.then(() => result), cancelRequested]);
       stopWatching();
-      await stopProgress();
+      await progress.stop();
       const output = redactOutput(result.output, process.env);
       if (isShuttingDown()) {
         interrupted = true;
@@ -391,11 +394,9 @@ export async function runWorkItem(
       done.push({ ...step, status: stepPassed ? 'passed' : 'failed', output });
       if (!stepPassed) {
         passed = false;
-        await postStepToChat(pool, item, agent.name, output, false).catch(() => undefined);
         if (!cancelled) await registerFailure(pool, item, agent.name, output).catch((error) => console.error('Bug report failed:', error));
         break;
       }
-      await postStepToChat(pool, item, agent.name, output).catch(() => undefined);
       await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
     }
   } catch (error) {
@@ -420,15 +421,6 @@ export async function runWorkItem(
     if (passed && item.bugId && !item.agentId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
   }
   return passed ? 'passed' : 'failed';
-}
-
-/** Gibt bei Aufträgen aus dem Chat die Antwort jedes Agents im Chat wieder. */
-async function postStepToChat(pool: Pool, item: WorkItem, agentName: string, output: string, ok = true): Promise<void> {
-  const text = output.trim().length > 3000 ? `${output.trim().slice(0, 3000)} …` : output.trim();
-  await pool.query(
-    `INSERT INTO chat_messages (project_slug, role, content, development_id, agent_name, status)
-     SELECT project_slug, 'assistant', $2, id, $3, $4 FROM development_items WHERE id = $1 AND from_chat`,
-    [item.id, text || (ok ? 'Fertig (keine Ausgabe).' : 'Fehlgeschlagen.'), agentName, ok ? 'done' : 'failed']);
 }
 
 export async function runWorkflow(

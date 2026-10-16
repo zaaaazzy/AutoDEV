@@ -3,6 +3,30 @@ export const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+const BLOCKED_FOLDERS = ['/', '/Users', '/home', '/Volumes', '/etc', '/var', '/usr', '/bin', '/sbin', '/opt', '/root', '/System', '/Library', '/private', '/tmp', '/dev', '/proc'];
+
+/** Projektordner müssen absolut, normalisiert und unterhalb eines Benutzer-/Datenträgerordners liegen (optional per DEV_LOG_PROJECT_ROOTS begrenzt). */
+export function projectFolderError(value: unknown, environment: NodeJS.ProcessEnv = process.env): string | null {
+  const folder = typeof value === 'string' ? value.trim() : '';
+  if (!folder.startsWith('/') || folder.length > 500 || folder.includes('\0')) {
+    return 'Projektordner muss ein absoluter Pfad sein, z. B. /Users/name/projekte/mein-projekt.';
+  }
+  const parts = folder.split('/').filter(Boolean);
+  if (parts.some((part) => part === '..' || part === '.') || folder.includes('//')) {
+    return 'Projektordner darf keine "." oder ".." enthalten.';
+  }
+  const normalized = `/${parts.join('/')}`;
+  if (BLOCKED_FOLDERS.includes(normalized) || /^\/(?:Users|home)\/[^/]+$/.test(normalized) || /^\/Volumes\/[^/]+$/.test(normalized)
+    || /^\/(?:etc|usr|bin|sbin|System|Library|private|dev|proc|root)(?:\/|$)/.test(normalized)) {
+    return 'Dieser Ordner ist als Projektordner nicht erlaubt (zu breit oder Systemordner). Wähle den Projektunterordner.';
+  }
+  const roots = (environment.DEV_LOG_PROJECT_ROOTS ?? '').split(':').map((root) => root.trim().replace(/\/+$/, '')).filter(Boolean);
+  if (roots.length && !roots.some((root) => normalized === root || normalized.startsWith(`${root}/`))) {
+    return `Projektordner muss unterhalb von ${roots.join(' oder ')} liegen (DEV_LOG_PROJECT_ROOTS).`;
+  }
+  return null;
+}
+
 export const INVALID = Symbol('invalid');
 export type Parser = (value: unknown) => unknown;
 

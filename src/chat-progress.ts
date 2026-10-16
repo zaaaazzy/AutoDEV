@@ -7,12 +7,13 @@ export async function startProgress(
   pool: Pool,
   project: string,
   stages: string[],
-  link: { developmentId?: string; agentName?: string; stepId?: string; silent?: boolean } = {},
-): Promise<() => Promise<void>> {
+  link: { stepId?: string; silent?: boolean } = {},
+): Promise<{ update: (message: string) => void; stop: () => Promise<void> }> {
   const started = Date.now();
+  let override = '';
   const text = (): string => {
     const seconds = Math.round((Date.now() - started) / 1000);
-    const stage = stages[Math.min(stages.length - 1, Math.floor(seconds / 15))] ?? 'Arbeite …';
+    const stage = override || stages[Math.min(stages.length - 1, Math.floor(seconds / 15))] || 'Arbeite …';
     return `${stage} (${seconds} s)`;
   };
   const writeStep = (value: string | null): Promise<unknown> => link.stepId
@@ -21,21 +22,31 @@ export async function startProgress(
   void writeStep(text());
   if (link.silent) {
     const ticker = setInterval(() => void writeStep(text()), INTERVAL_MS);
-    return async () => { clearInterval(ticker); await writeStep(null); };
+    return {
+      update: (message) => { override = message; void writeStep(text()); },
+      stop: async () => { clearInterval(ticker); await writeStep(null); },
+    };
   }
   const id = (await pool.query<{ id: string }>(
-    `INSERT INTO chat_messages (project_slug, role, content, status, development_id, agent_name)
-     VALUES ($1, 'assistant', $2, 'processing', $3, $4) RETURNING id`,
-    [project, text(), link.developmentId ?? null, link.agentName ?? null],
+    `INSERT INTO chat_messages (project_slug, role, content, status)
+     VALUES ($1, 'assistant', $2, 'processing') RETURNING id`,
+    [project, text()],
   ).catch(() => ({ rows: [] }))).rows[0]?.id;
-  if (!id) return async () => undefined;
+  if (!id) return { update: () => undefined, stop: async () => undefined };
   const timer = setInterval(() => {
     void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
     void writeStep(text());
   }, INTERVAL_MS);
-  return async () => {
-    clearInterval(timer);
-    await writeStep(null);
-    await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]).catch(() => undefined);
+  return {
+    update: (message) => {
+      override = message;
+      void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
+      void writeStep(text());
+    },
+    stop: async () => {
+      clearInterval(timer);
+      await writeStep(null);
+      await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]).catch(() => undefined);
+    },
   };
 }

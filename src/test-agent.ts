@@ -14,6 +14,7 @@ import {
 } from './database.js';
 import type { Pool } from 'pg';
 import { redactOutput, runCommand } from './command.js';
+import { killGroup } from './shutdown.js';
 
 const execFile = promisify(nodeExecFile);
 
@@ -21,6 +22,11 @@ export interface TestAgentOptions {
   project: string;
   cwd: string;
   commands: string[][];
+  /** Vom Worker aufgerufen: Projekt nicht neu registrieren (sonst würde der gespeicherte Projektordner überschrieben). */
+  existingProject?: boolean;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  env?: NodeJS.ProcessEnv;
 }
 
 export function parseTestAgentOptions(args: string[], cwd = process.env.INIT_CWD ?? process.cwd()): TestAgentOptions {
@@ -97,7 +103,9 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
   const repository = process.env.DEV_LOG_REPOSITORY
     ?? process.env.GITHUB_REPOSITORY
     ?? options.cwd;
-  await registerProject(pool, { slug: options.project, name: projectName, repository });
+  if (!options.existingProject) {
+    await registerProject(pool, { slug: options.project, name: projectName, repository });
+  }
   const runId = await createTestRun(pool, {
     projectSlug: options.project,
     trigger: process.env.GITHUB_ACTIONS === 'true' ? 'ci' : 'manual',
@@ -115,7 +123,13 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       command: label,
       output: '',
     });
-    const result = await runCommand(command, options.cwd);
+    let pid = 0;
+    const abort = (): void => { if (pid) killGroup(pid); };
+    options.signal?.addEventListener('abort', abort, { once: true });
+    const result = options.signal?.aborted
+      ? { exitCode: 130, durationMs: 0, output: 'Abgebrochen.' }
+      : await runCommand(command, options.cwd, { timeoutMs: options.timeoutMs, env: options.env, onSpawn: (value) => { pid = value; } });
+    options.signal?.removeEventListener('abort', abort);
     const safeOutput = redactOutput(result.output, process.env);
     const passed = result.exitCode === 0;
     await finishTestRunStep(pool, {

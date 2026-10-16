@@ -269,7 +269,7 @@ test('seeds the default agent workflow when a project is created', async () => {
     const seed = queries.at(-1);
     assert.match(seed?.sql ?? '', /INSERT INTO agents/);
     assert.equal(seed?.values[0], 'mainty');
-    assert.deepEqual(seed?.values[3], ['pre_task', 'pre_task', 'while_task', 'after_task', 'after_task', 'after_task', 'after_task', 'after_task']);
+    assert.deepEqual(seed?.values[3], ['pre_task', 'pre_task', 'while_task', 'after_task', 'after_task', 'after_task', 'after_task']);
   });
 });
 

@@ -1,6 +1,8 @@
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
+import { withProjectLock } from './project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from './command.js';
 
 const GIT_TIMEOUT_MS = 120_000;
@@ -21,6 +23,22 @@ export function sprintTag(name: string, id: string): string {
   return `sprint-${slug || 'ohne-name'}-${id.slice(0, 6)}`;
 }
 
+const INTERNAL_EXCLUDES = ['.dev-log-backups/', '.dev-log/', '.env', '.env.*'];
+
+/** Hält Agent-Sicherungen, Anhänge und .env-Dateien aus dem automatischen Commit heraus (lokal, ohne .gitignore zu ändern). */
+async function excludeInternalFolders(cwd: string): Promise<void> {
+  const file = join(cwd, '.git', 'info', 'exclude');
+  try {
+    const current = await readFile(file, 'utf8').catch(() => '');
+    const missing = INTERNAL_EXCLUDES.filter((entry) => !current.split(/\r?\n/).includes(entry));
+    if (!missing.length) return;
+    await mkdir(dirname(file), { recursive: true });
+    await appendFile(file, `${current && !current.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+  } catch {
+    // Ohne Schreibzugriff bleibt das Verhalten wie bisher.
+  }
+}
+
 interface PendingSprint {
   id: string;
   name: string;
@@ -32,8 +50,9 @@ export async function syncSprintToGit(
   pool: Pool,
   project: string,
   cwd: string,
-  execute: CommandExecutor = runCommand,
+  rawExecute: CommandExecutor = runCommand,
 ): Promise<number> {
+  const execute: CommandExecutor = (command, directory, options) => withProjectLock(cwd, () => rawExecute(command, directory, options));
   await pool.query(
     `UPDATE sprints SET git_sync = 'pending' WHERE project_slug = $1 AND git_sync = 'running'
         AND updated_at < NOW() - INTERVAL '30 minutes'`, [project],
@@ -78,6 +97,7 @@ export async function syncSprintToGit(
         ? ['remote', 'set-url', 'origin', target]
         : ['remote', 'add', 'origin', target]));
     }
+    await excludeInternalFolders(cwd);
     await must('add', '-A');
     if (await must('status', '--porcelain')) {
       await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Mainty Dev Log.');

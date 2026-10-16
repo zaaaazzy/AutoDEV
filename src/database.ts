@@ -169,7 +169,6 @@ const SCHEMA = `
     ADD COLUMN IF NOT EXISTS cost SMALLINT CHECK (cost BETWEEN 0 AND 10);
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS agent_note TEXT;
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS revision_prompt TEXT;
-  UPDATE ideation_items SET status = 'requested' WHERE status = 'idea';
   ALTER TABLE ideation_items DROP CONSTRAINT IF EXISTS ideation_items_status_check;
   ALTER TABLE ideation_items ADD CONSTRAINT ideation_items_status_check
     CHECK (status IN ('idea', 'considering', 'requested', 'drafting', 'accepted', 'rejected'));
@@ -215,6 +214,10 @@ const SCHEMA = `
   ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_role_check;
   ALTER TABLE agents ADD CONSTRAINT agents_role_check CHECK (role IN
     ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'troubleshooter', 'custom'));
+  DELETE FROM agents
+   WHERE role = 'troubleshooter' AND name = 'Problemlöser' AND phase = 'after_task'
+     AND command IS NULL
+     AND instructions = 'Analysiert blockierte Aufträge: Ursache, Lösungsvorschlag und woran man den Fehler erkennt. Läuft nicht im normalen Ablauf, sondern nur auf Anforderung. Die Erkenntnisse werden als Bug gespeichert.';
 
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS analysis_status TEXT CHECK (analysis_status IN ('requested', 'running', 'done', 'failed'));
@@ -361,6 +364,8 @@ export async function ensureDatabase(config: DatabaseConfig): Promise<void> {
 export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> {
   await ensureDatabase(config);
   const pool = new Pool({ connectionString: config.databaseUrl });
+  // Verbindungsabbrüche im Leerlauf (z. B. Postgres-Neustart) dürfen den Prozess nicht beenden.
+  pool.on('error', (error) => console.error('Datenbankverbindung getrennt:', error.message));
   try {
     // Serialises schema changes when the server and the runner start at the same time.
     const client = await pool.connect();

@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
-import { parseProjectSlug } from './validation.js';
+import { isUuid, parseProjectSlug } from './validation.js';
 
 export async function beatHeartbeat(
   pool: Pool, project: string, intervalSeconds: number, lastError: string | null = null, startup = false,
@@ -74,7 +74,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     try {
       const slug = parseProjectSlug(request.params.slug);
       const id = String(request.params.id);
-      if (!slug || !/^[0-9a-f-]{36}$/i.test(id)) {
+      if (!slug || !isUuid(id)) {
         response.status(400).json({ message: 'Ungültige Anfrage.' });
         return;
       }

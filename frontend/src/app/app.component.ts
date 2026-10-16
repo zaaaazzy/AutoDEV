@@ -95,7 +95,6 @@ export class AppComponent implements OnInit, OnDestroy {
     { value: 'bug_reviewer', label: 'Bug-Wächter' },
     { value: 'manual_writer', label: 'Handbuch-Autor' },
     { value: 'user_manual_writer', label: 'Benutzerhandbuch-Autor' },
-    { value: 'troubleshooter', label: 'Problemlöser' },
     { value: 'custom', label: 'Eigene Rolle' },
   ];
   readonly phases: { id: AgentPhase; label: string; hint: string }[] = [
@@ -274,7 +273,15 @@ export class AppComponent implements OnInit, OnDestroy {
 
   @HostListener('window:hashchange')
   onHashChange(): void {
-    this.section.set(this.sectionFromHash());
+    const section = this.sectionFromHash();
+    if (section === this.section()) return;
+    this.section.set(section);
+    this.refreshActiveProject();
+  }
+
+  @HostListener('document:visibilitychange')
+  onVisibilityChange(): void {
+    if (!document.hidden) this.refreshActiveProject();
   }
 
   async sendChat(): Promise<void> {
@@ -299,6 +306,7 @@ export class AppComponent implements OnInit, OnDestroy {
     this.showCreate.set(false);
     this.openAgent.set(null);
     globalThis.history.replaceState(null, '', `#${section}`);
+    this.refreshActiveProject();
   }
 
   async loadProjects(selectedSlug = this.activeProject()): Promise<void> {
@@ -325,21 +333,24 @@ export class AppComponent implements OnInit, OnDestroy {
     await this.loadProject(slug);
   }
 
-  async loadProject(slug: string): Promise<void> {
+  /** `background` lädt nur die Daten nach und lässt offene Formulare, Meldungen und Eingaben unangetastet. */
+  async loadProject(slug: string, background = false): Promise<void> {
     const version = ++this.requestVersion;
     this.activeProject.set(slug);
-    this.openAgent.set(null);
-    this.loading.set(true);
-    this.notice.set('');
-    const project = this.projects().find((entry) => entry.slug === slug);
-    this.settings = {
-      repository: project?.repository ?? '',
-      gitRemote: project?.gitRemote ?? '',
-      description: project?.description ?? '',
-      guidelines: project?.guidelines ?? '',
-      autoBugfix: project?.autoBugfix ?? true,
-      testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
-    };
+    if (!background) {
+      this.openAgent.set(null);
+      this.loading.set(true);
+      this.notice.set('');
+      const project = this.projects().find((entry) => entry.slug === slug);
+      this.settings = {
+        repository: project?.repository ?? '',
+        gitRemote: project?.gitRemote ?? '',
+        description: project?.description ?? '',
+        guidelines: project?.guidelines ?? '',
+        autoBugfix: project?.autoBugfix ?? true,
+        testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
+      };
+    }
     if (!slug) {
       this.data.set(emptyProjectData());
       this.loading.set(false);
@@ -393,10 +404,15 @@ export class AppComponent implements OnInit, OnDestroy {
       this.selectedDoc.set(next.docs[0] ?? null);
     }
     this.loading.set(false);
-    if (Object.keys(errors).length) {
+    if (!background && Object.keys(errors).length) {
       this.notice.set(`Einige Bereiche konnten nicht geladen werden: ${Object.keys(errors).join(', ')}.`);
     }
     void this.refreshWorker();
+  }
+
+  private refreshActiveProject(): void {
+    const slug = this.activeProject();
+    if (slug && !this.loading()) void this.loadProject(slug, true);
   }
 
   async createProject(): Promise<void> {
@@ -458,7 +474,7 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   async analyzeOrder(item: DevelopmentItem): Promise<void> {
-    await this.perform(() => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`), 'Der Problemlöser analysiert den Auftrag.');
+    await this.perform(() => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`), 'Der Assistent analysiert den Auftrag.');
   }
 
   async updateDevelopment(id: string, values: Partial<DevelopmentItem>): Promise<void> {

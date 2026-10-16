@@ -323,13 +323,13 @@
                                   <div class="actions">
                                     <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">↻ Erneut versuchen @if (item.retryCount) { ({{ item.retryCount }}) }</button>
                                     <button class="button secondary" type="button" [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'" (click)="analyzeOrder(item)">
-                                      {{ item.analysisStatus === 'requested' || item.analysisStatus === 'running' ? 'Problemlöser analysiert …' : '🔎 Problem analysieren' }}</button>
+                                      {{ item.analysisStatus === 'requested' || item.analysisStatus === 'running' ? 'Assistent analysiert …' : '🔎 Problem analysieren' }}</button>
                                   </div>
-                                  <p class="muted">Hilft ein weiterer Versuch nicht, analysiert der Problemlöser den Fehler. Die Erkenntnisse landen unter Bugs und erscheinen künftig bei den Risiken.</p>
+                                  <p class="muted">Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und erscheinen künftig bei den Risiken.</p>
                                 </div>
                               }
                               @if (item.analysis) {
-                                <h4 class="order-section">🔎 Analyse des Problemlösers</h4>
+                                <h4 class="order-section">🔎 Analyse des Assistenten</h4>
                                 <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
                               }
                               @if (item.risks) {

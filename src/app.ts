@@ -14,7 +14,7 @@ import { registerStatsRoutes } from './stats.js';
 import { registerWorkerRoutes } from './worker.js';
 import {
   buildUpdate, ESTIMATE_FIELDS, isRecord, isUuid, PRIORITIES, PROJECT_SLUG, parseFields, parseLongText,
-  parseNullableUuid, parseOption, parseProjectSlug, parseTitle, validStatus, validText,
+  parseNullableUuid, parseOption, parseProjectSlug, parseTitle, projectFolderError, validStatus, validText,
 } from './validation.js';
 
 const UI_DIRECTORY = join(import.meta.dirname, '..', 'dist', 'ui', 'browser');
@@ -103,8 +103,9 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     }
     if (body.repository !== undefined) {
       const folder = typeof body.repository === 'string' ? body.repository.trim() : '';
-      if (!folder.startsWith('/') || folder.length > 500) {
-        return fail('Projektordner muss ein absoluter Pfad sein, z. B. /Users/name/projekte/mein-projekt.');
+      const folderError = projectFolderError(folder);
+      if (folderError) {
+        return fail(folderError);
       }
       values.push(folder);
       sets.push(`repository = $${values.length}`);
@@ -154,6 +155,11 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       || !validText(body.name, 120)
       || !validText(body.repository, 500)) {
       response.status(400).json({ message: 'Project slug, name, and repository are required.' });
+      return;
+    }
+    const folderError = projectFolderError(body.repository);
+    if (folderError) {
+      response.status(400).json({ message: folderError });
       return;
     }
     const result = await pool.query(

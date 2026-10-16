@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { BACKUP_DIRECTORY, executeTool, runOllamaAgent, type ToolContext } from './ollama-agent.js';
+import { BACKUP_DIRECTORY, composeViolation, executeTool, runOllamaAgent, type ToolContext } from './ollama-agent.js';
 
 async function project(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ollama-agent-'));
@@ -58,11 +58,29 @@ test('the developer may write with backup, but only run allowed commands', async
   for (const command of ['npm install', 'npm install express pug@^3.0.0 --save', 'npm install -D @types/node', 'npm ls --depth=0', 'node --check server.js', 'npx --no-install tsc --noEmit']) {
     assert.match(await executeTool(dev, call('run_command', { command })), /Exit-Code/);
   }
-  const assistant = { ...context(cwd, false), canRead: true };
+  const assistant = { ...context(cwd, true), canManageServices: true,
+    execute: async (command: string[]) => ({ exitCode: 0, durationMs: 1, output: command[2] === 'config' ? '{"services":{}}' : `ran ${command.join(' ')}` }) };
+  assert.match(await executeTool(assistant, call('write_file', { path: 'assistant.txt', content: 'innerhalb' })), /geschrieben/);
+  assert.match(await executeTool(assistant, call('write_file', { path: '../outside.txt', content: 'außerhalb' })), /außerhalb/);
   assert.match(await executeTool(assistant, call('run_command', { command: 'git log --oneline -20' })), /Exit-Code/);
   assert.match(await executeTool(assistant, call('run_command', { command: 'git status' })), /Exit-Code/);
-  for (const command of ['npm install express', 'git log --output=x', 'git push', 'rm -rf /']) {
+  assert.match(await executeTool(assistant, call('run_command', { command: 'npm test' })), /Exit-Code/);
+  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose ps' })), /Exit-Code/);
+  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /Exit-Code/);
+  for (const command of ['docker compose down', 'docker compose stop backend', 'docker compose restart', 'docker compose up -d --build', 'docker compose logs --tail=50 backend', 'git clone https://github.com/a/b.git', 'git clone git@github.com:a/b.git app/src']) {
+    assert.match(await executeTool(assistant, call('run_command', { command })), /Exit-Code/);
+  }
+  assert.match(await executeTool(assistant, call('write_file', { path: '.env', content: 'SECRET=2' })), /nicht erlaubt/);
+  assert.match(await executeTool(assistant, call('write_file', { path: '.ENV', content: 'x' })), /nicht erlaubt/);
+  assert.match(await executeTool(assistant, call('write_file', { path: '.Git/config', content: 'x' })), /nicht erlaubt/);
+  for (const command of ['npm ci --global', 'npm install --prefix /tmp', 'git show HEAD:.env', 'git log -p -- .env']) {
     assert.match(await executeTool(assistant, call('run_command', { command })), /nicht erlaubt/);
+  }
+  for (const command of ['git log --output=x', 'git push', 'rm -rf /', 'docker compose down -v', 'docker compose up -d; rm x', 'docker run busybox', 'git clone file:///etc/x', 'git clone https://github.com/a/b ..', 'git clone https://github.com/a/b /tmp/x', 'git clone --upload-pack=x https://github.com/a/b']) {
+    assert.match(await executeTool(assistant, call('run_command', { command })), /nicht erlaubt/);
+  }
+  for (const command of ['npm install express', 'npm run build', 'npm test']) {
+    assert.match(await executeTool(assistant, call('run_command', { command })), /Exit-Code/);
   }
   assert.deepEqual([...dev.changed], ['a.txt']);
   await mkdir(join(cwd, 'sub'));
@@ -88,6 +106,20 @@ test('accepts a developer answer that proves the order is already implemented', 
   assert.equal(result.exitCode, 0);
 });
 
+test('dashboard assistant can make a scoped fix and answer without changes', async () => {
+  const cwd = await project();
+  const { fetchImpl } = scriptedFetch([
+    { role: 'assistant', content: '', tool_calls: [call('write_file', { path: 'fix.txt', content: 'behoben' })] },
+    { role: 'assistant', content: 'Der Fehler ist behoben.' },
+  ]);
+  const fixed = await runOllamaAgent({ prompt: 'Behebe den Fehler', role: 'assistant', cwd, timeoutMs: 5000, fetchImpl });
+  assert.equal(fixed.exitCode, 0);
+  assert.equal(await readFile(join(cwd, 'fix.txt'), 'utf8'), 'behoben');
+
+  const answer = scriptedFetch([{ role: 'assistant', content: 'Die Anwendung läuft.' }]);
+  assert.equal((await runOllamaAgent({ prompt: 'Läuft sie?', role: 'assistant', cwd, timeoutMs: 5000, fetchImpl: answer.fetchImpl })).exitCode, 0);
+});
+
 test('fails honestly: no changes by developer, unreachable model, empty answer', async () => {
   const cwd = await project();
   const idle = scriptedFetch([{ role: 'assistant', content: 'Fertig.' }]);
@@ -109,4 +141,28 @@ test('fails honestly: no changes by developer, unreachable model, empty answer',
   const loop = scriptedFetch(Array.from({ length: 3 }, () => ({ role: 'assistant', content: '', tool_calls: [call('list_files', { path: '.' })] })));
   const capped = await runOllamaAgent({ prompt: 'x', role: 'author', cwd, timeoutMs: 5000, fetchImpl: loop.fetchImpl, maxTurns: 2 });
   assert.match(capped.output, /Maximale Anzahl/);
+});
+
+test('compose configuration may not escape the project folder', () => {
+  const config = (service: object): string => JSON.stringify({ services: { app: service } });
+  assert.equal(composeViolation(config({ image: 'x', volumes: [{ type: 'bind', source: '/proj/data' }, { type: 'volume', source: 'db' }] }), '/proj'), null);
+  assert.equal(composeViolation(`warn\n${config({ build: { context: '/proj/app' } })}`, '/proj'), null);
+  for (const service of [
+    { privileged: true }, { network_mode: 'host' }, { pid: 'host' }, { cap_add: ['SYS_ADMIN'] }, { devices: ['/dev/sda'] },
+    { build: { context: '/other' } }, { volumes: [{ type: 'bind', source: '/var/run/docker.sock' }] },
+    { volumes: [{ type: 'bind', source: '/proj-evil' }] },
+  ]) {
+    assert.ok(composeViolation(config(service), '/proj'), JSON.stringify(service));
+  }
+  assert.ok(composeViolation('kein json', '/proj'));
+});
+
+test('docker compose start is refused when the configuration escapes the project', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'devlog-compose-'));
+  const ran: string[] = [];
+  const bad = JSON.stringify({ services: { app: { privileged: true } } });
+  const assistant = { ...context(cwd, true), canManageServices: true,
+    execute: async (command: string[]) => { ran.push(command.join(' ')); return { exitCode: 0, durationMs: 1, output: command[2] === 'config' ? bad : 'ok' }; } };
+  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /abgelehnt/);
+  assert.deepEqual(ran, ['docker compose config --format json']);
 });

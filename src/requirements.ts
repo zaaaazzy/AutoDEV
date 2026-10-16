@@ -43,6 +43,7 @@ export async function runAuthorAgent(
   buildPrompt: (instructions: string) => string,
   execute: CommandExecutor = runCommand,
   role = 'author',
+  onProgress?: (message: string) => void,
 ): Promise<{ exitCode: number; output: string }> {
   const author = (await pool.query<{ instructions: string; command: string[] | null }>(
     `SELECT instructions, command FROM agents
@@ -54,7 +55,7 @@ export async function runAuthorAgent(
   try {
     const result = command
       ? await execute(buildInvocation(command, prompt), options.cwd, { timeoutMs: options.timeoutMs, env: agentEnvironment() })
-      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs });
+      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress });
     return { exitCode: result.exitCode, output: redactOutput(result.output, process.env).trim() };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };
