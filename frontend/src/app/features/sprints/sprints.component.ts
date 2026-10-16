@@ -2,11 +2,11 @@ import { NgClass } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { AgentRun, DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
+import type { AgentRun, DevelopmentItem, RunStep, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
-import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { StepResultComponent } from '../../shared/step-result.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { DurationPipe, HoursPipe, IsoDatePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 
@@ -20,10 +20,10 @@ import { DurationPipe, HoursPipe, IsoDatePipe, StatusClassPipe, StatusLabelPipe 
     GitTreeComponent,
     HoursPipe,
     IsoDatePipe,
-    MarkdownPipe,
     NavIconComponent,
     StatusClassPipe,
     StatusLabelPipe,
+    StepResultComponent,
   ],
   templateUrl: './sprints.component.html',
   host: { style: 'display: contents' },
@@ -54,8 +54,18 @@ export class SprintsComponent {
     return this.data().reports.find((report) => report.sprintId === sprintId);
   }
 
+  /** Pro Position zählt der neueste Lauf; frühere erfolgreiche Schritte bleiben nach einer Wiederholung sichtbar. */
   protected sprintRun(itemId: string): AgentRun | undefined {
-    return this.data().agentRuns.find((run) => run.developmentId === itemId);
+    const runs = this.data().agentRuns.filter((run) => run.developmentId === itemId);
+    if (!runs.length) return undefined;
+    const byPosition = new Map<number, { step: RunStep; run: AgentRun }>();
+    for (const run of [...runs].reverse()) {
+      for (const step of run.steps) byPosition.set(step.position, { step, run });
+    }
+    const steps = [...byPosition.values()]
+      .sort((left, right) => left.step.position - right.step.position)
+      .map(({ step }) => step);
+    return { ...runs[0]!, steps };
   }
 
   protected sprintItems(sprintId: string): DevelopmentItem[] {

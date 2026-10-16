@@ -1,0 +1,28 @@
+@if (progress()) {
+  <p class="live-progress"><span class="live-dot"></span>{{ progress() }}</p>
+}
+<details class="run-step" [open]="running() || eventsOpen()">
+  <summary>Verlauf</summary>
+  @if (events()?.length) {
+    <ol class="timeline">
+      @for (event of events(); track $index) {
+        <li>
+          <time>{{ event.at | date: 'HH:mm:ss' }}</time>
+          <span>{{ event.text }}</span>
+        </li>
+      }
+    </ol>
+  } @else {
+    <p class="muted">
+      {{ running() ? 'Noch keine Ereignisse – der Agent arbeitet …' : 'Keine Ereignisse aufgezeichnet.' }}
+    </p>
+  }
+</details>
+<details class="run-step" [open]="running() || !!output()">
+  <summary>Ausgabe</summary>
+  @if (output()) {
+    <article class="markdown task-body" [innerHTML]="output() | markdown"></article>
+  } @else {
+    <p class="muted">{{ running() ? 'Ausgabe erscheint, sobald der Agent fertig ist.' : 'Keine Ausgabe.' }}</p>
+  }
+</details>

@@ -168,20 +168,12 @@
                                 }}</span>
                               </button>
                               @if (openSprintItems().has(run.id + step.position) || step.status === 'running') {
-                                @if (step.output) {
-                                  <article class="markdown task-body" [innerHTML]="step.output | markdown"></article>
-                                } @else {
-                                  <p class="muted task-body">
-                                    {{
-                                      step.status === 'running'
-                                        ? 'Agent arbeitet … Ausgabe erscheint live.'
-                                        : 'Keine Ausgabe.'
-                                    }}
-                                  </p>
-                                }
-                                @if (step.progress) {
-                                  <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p>
-                                }
+                                <app-step-result
+                                  [events]="step.events"
+                                  [output]="step.output"
+                                  [progress]="step.progress"
+                                  [running]="step.status === 'running'"
+                                />
                               }
                             </li>
                           } @empty {

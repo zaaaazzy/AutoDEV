@@ -44,27 +44,7 @@
           <p class="muted">Der Auftrag gehört zu keinem Sprint.</p>
         }
       </details>
-      @if (entry.progress) {
-        <p class="live-progress"><span class="live-dot"></span>{{ entry.progress }}</p>
-      }
-      <details class="run-step" [open]="true">
-        <summary>Verlauf</summary>
-        @if (entry.events?.length) {
-          <ol class="timeline">
-            @for (event of entry.events; track $index) {
-              <li>
-                <time>{{ event.at | date: 'HH:mm:ss' }}</time>
-                <span>{{ event.text }}</span>
-              </li>
-            }
-          </ol>
-        } @else {
-          <p class="muted">Noch keine Ereignisse – der Agent arbeitet …</p>
-        }
-        @if (entry.output) {
-          <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article>
-        }
-      </details>
+      <app-step-result [events]="entry.events" [output]="entry.output" [progress]="entry.progress" [running]="true" />
     </article>
   } @empty {
     @if (!agentActivityLoading()) {
@@ -117,24 +97,7 @@
             <p class="muted">Der Auftrag gehört zu keinem Sprint.</p>
           }
         </details>
-        <details class="run-step" [open]="false">
-          <summary>Verlauf</summary>
-          @if (entry.events?.length) {
-            <ol class="timeline">
-              @for (event of entry.events; track $index) {
-                <li>
-                  <time>{{ event.at | date: 'HH:mm:ss' }}</time>
-                  <span>{{ event.text }}</span>
-                </li>
-              }
-            </ol>
-          } @else {
-            <p class="muted">Keine Ereignisse aufgezeichnet.</p>
-          }
-          @if (entry.output) {
-            <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article>
-          }
-        </details>
+        <app-step-result [events]="entry.events" [output]="entry.output" />
       </article>
     } @empty {
       @if (!agentActivityLoading()) {
