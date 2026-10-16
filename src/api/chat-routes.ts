@@ -6,10 +6,12 @@ const MAX_MESSAGE_CHARS = 4000;
 const COLUMNS = `m.id, m.role, m.content, m.status, m.created_at AS "createdAt"`;
 
 async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
-  return (await pool.query(
-    `SELECT * FROM (SELECT ${COLUMNS} FROM chat_messages m WHERE m.project_slug = $1 ORDER BY m.created_at DESC LIMIT 100) x ORDER BY "createdAt"`,
-    [slug],
-  )).rows;
+  return (
+    await pool.query(
+      `SELECT * FROM (SELECT ${COLUMNS} FROM chat_messages m WHERE m.project_slug = $1 ORDER BY m.created_at DESC LIMIT 100) x ORDER BY "createdAt"`,
+      [slug],
+    )
+  ).rows;
 }
 
 export function registerChatRoutes(app: Express, pool: Pool): void {
@@ -27,7 +29,12 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects/:slug/chat/stream', (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
-    response.set({ 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
+    response.set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
     response.flushHeaders();
     let last = '';
     let busy = false;
@@ -57,9 +64,12 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
   app.post('/api/projects/:slug/chat', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
-      const content = isRecord(request.body) && typeof request.body.content === 'string' ? request.body.content.trim() : '';
+      const content =
+        isRecord(request.body) && typeof request.body.content === 'string' ? request.body.content.trim() : '';
       if (!slug || !content || content.length > MAX_MESSAGE_CHARS) {
-        return void response.status(400).json({ message: `Nachricht erforderlich (max. ${MAX_MESSAGE_CHARS} Zeichen).` });
+        return void response
+          .status(400)
+          .json({ message: `Nachricht erforderlich (max. ${MAX_MESSAGE_CHARS} Zeichen).` });
       }
       const result = await pool.query(
         `INSERT INTO chat_messages (project_slug, role, content, status)

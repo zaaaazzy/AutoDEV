@@ -5,14 +5,20 @@ import { parseTestAgentOptions, runTestAgent } from './test-agent.js';
 
 test('parses project, working directory, and explicit argument-array commands', () => {
   const options = parseTestAgentOptions([
-    '--project', 'demo-project',
-    '--cwd', '/tmp/demo-project',
-    '--commands', '[["npm","run","lint"],["npm","test"]]',
+    '--project',
+    'demo-project',
+    '--cwd',
+    '/tmp/demo-project',
+    '--commands',
+    '[["npm","run","lint"],["npm","test"]]',
   ]);
   assert.deepEqual(options, {
     project: 'demo-project',
     cwd: '/tmp/demo-project',
-    commands: [['npm', 'run', 'lint'], ['npm', 'test']],
+    commands: [
+      ['npm', 'run', 'lint'],
+      ['npm', 'test'],
+    ],
   });
 });
 
@@ -39,11 +45,14 @@ test('runs a command and persists a sanitized test run and result', async () => 
   } as unknown as Pool;
 
   try {
-    const recordedRunId = await runTestAgent({
-      project: 'test-project',
-      cwd: process.cwd(),
-      commands: [[process.execPath, '-e', 'console.log(process.env.DEV_LOG_TEST_SECRET)']],
-    }, pool);
+    const recordedRunId = await runTestAgent(
+      {
+        project: 'test-project',
+        cwd: process.cwd(),
+        commands: [[process.execPath, '-e', 'console.log(process.env.DEV_LOG_TEST_SECRET)']],
+      },
+      pool,
+    );
 
     assert.equal(recordedRunId, runId);
     const stepWrite = writes.find(({ sql }) => sql.includes('UPDATE test_run_steps'));
@@ -51,7 +60,7 @@ test('runs a command and persists a sanitized test run and result', async () => 
     assert.equal(stepWrite.values[0], runId);
     assert.equal(String(stepWrite.values[5]).includes('do-not-log-this-secret'), false);
     assert.match(String(stepWrite.values[5]), /\[REDACTED\]/);
-    assert.ok(writes.some(({ sql }) => sql.includes("SET status = $2, completed_at = NOW()")));
+    assert.ok(writes.some(({ sql }) => sql.includes('SET status = $2, completed_at = NOW()')));
   } finally {
     if (previousSecret === undefined) {
       delete process.env.DEV_LOG_TEST_SECRET;

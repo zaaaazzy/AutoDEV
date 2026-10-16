@@ -42,13 +42,17 @@ export class BugsComponent {
   }
 
   protected async saveBug(bug: Bug, values: FormValues): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/bugs/${encodeURIComponent(bug.id)}`, {
-      title: String(values['title'] ?? ''),
-      description: String(values['description'] ?? ''),
-      severity: values['severity'],
-      sprintId: values['sprintId'] || null,
-      fixNotes: String(values['fixNotes'] ?? ''),
-    }), 'Bug wurde gespeichert.');
+    await this.store.perform(
+      () =>
+        this.api.patch(`/api/bugs/${encodeURIComponent(bug.id)}`, {
+          title: String(values['title'] ?? ''),
+          description: String(values['description'] ?? ''),
+          severity: values['severity'],
+          sprintId: values['sprintId'] || null,
+          fixNotes: String(values['fixNotes'] ?? ''),
+        }),
+      'Bug wurde gespeichert.',
+    );
   }
 
   protected async updateBug(id: string, values: Partial<Bug>): Promise<void> {

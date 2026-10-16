@@ -12,7 +12,12 @@ export interface CommandResult {
 export type CommandExecutor = (
   command: string[],
   cwd: string,
-  options?: { timeoutMs?: number; env?: NodeJS.ProcessEnv; onSpawn?: (pid: number) => void; onOutput?: (output: string) => void },
+  options?: {
+    timeoutMs?: number;
+    env?: NodeJS.ProcessEnv;
+    onSpawn?: (pid: number) => void;
+    onOutput?: (output: string) => void;
+  },
 ) => Promise<CommandResult>;
 
 export function redactOutput(output: string, environment: NodeJS.ProcessEnv): string {

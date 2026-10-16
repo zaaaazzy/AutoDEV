@@ -23,8 +23,15 @@ type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
   selector: 'app-ideation',
   standalone: true,
   imports: [
-    NgClass, FormsModule, ColumnHeaderComponent, IdeaDetailComponent,
-    HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe,
+    NgClass,
+    FormsModule,
+    ColumnHeaderComponent,
+    IdeaDetailComponent,
+    HoursPipe,
+    PriorityLabelPipe,
+    ShortTextPipe,
+    StatusClassPipe,
+    StatusLabelPipe,
   ],
   templateUrl: './ideation.component.html',
   host: { style: 'display: contents' },
@@ -35,53 +42,84 @@ export class IdeationComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly ideaColumns: { key: IdeaKey; label: string }[] = [
-    { key: 'title', label: 'Titel' }, { key: 'description', label: 'Kurzfassung' }, { key: 'status', label: 'Status' },
-    { key: 'priority', label: 'Priorität' }, { key: 'effortHours', label: 'Aufwand' }, { key: 'createdAt', label: 'Erstellt' },
+    { key: 'title', label: 'Titel' },
+    { key: 'description', label: 'Kurzfassung' },
+    { key: 'status', label: 'Status' },
+    { key: 'priority', label: 'Priorität' },
+    { key: 'effortHours', label: 'Aufwand' },
+    { key: 'createdAt', label: 'Erstellt' },
   ];
 
-  protected ideaForm: { title: string; description: string; priority: Priority } = { title: '', description: '', priority: 'medium' };
+  protected ideaForm: { title: string; description: string; priority: Priority } = {
+    title: '',
+    description: '',
+    priority: 'medium',
+  };
   protected pendingImages: File[] = [];
   protected readonly openIdea = signal<string | null>(null);
   protected readonly ideaEditing = signal(false);
   protected readonly ideaTextFilter = signal<Partial<Record<IdeaTextKey, string>>>({});
-  protected readonly ideaValueFilter = signal<Partial<Record<IdeaValueKey, string[]>>>({ status: [...DEFAULT_STATUS_FILTER] });
+  protected readonly ideaValueFilter = signal<Partial<Record<IdeaValueKey, string[]>>>({
+    status: [...DEFAULT_STATUS_FILTER],
+  });
   protected readonly ideaSort = signal<SortState<IdeaKey>>({ key: 'createdAt', dir: 'desc' });
   protected readonly showClosedIdeas = signal(false);
   protected readonly openClosedIdea = signal<string | null>(null);
 
   protected readonly closedIdeas = computed(() => this.data().ideas.filter((idea) => this.isClosedIdea(idea)));
-  protected readonly selectedIdea = computed(() => this.data().ideas.find((idea) => idea.id === this.openIdea()) ?? null);
+  protected readonly selectedIdea = computed(
+    () => this.data().ideas.find((idea) => idea.id === this.openIdea()) ?? null,
+  );
   protected readonly sortedIdeas = computed(() => {
     const text = this.ideaTextFilter();
     const values = this.ideaValueFilter();
     const { key, dir } = this.ideaSort();
     const rank = (idea: Idea): string | number | null => {
       switch (key) {
-        case 'status': return IDEA_STATUSES.indexOf(idea.status);
-        case 'priority': return ['low', 'medium', 'high'].indexOf(idea.priority);
-        case 'effortHours': return idea.effortHours ?? null;
-        default: return (idea[key] ?? '').toString().toLowerCase();
+        case 'status':
+          return IDEA_STATUSES.indexOf(idea.status);
+        case 'priority':
+          return ['low', 'medium', 'high'].indexOf(idea.priority);
+        case 'effortHours':
+          return idea.effortHours ?? null;
+        default:
+          return (idea[key] ?? '').toString().toLowerCase();
       }
     };
-    return this.data().ideas
-      .filter((idea) => !this.isClosedIdea(idea))
-      .filter((idea) => (['title', 'description'] as const).every((field) => includesText(idea[field], text[field]))
-        && (Object.keys(values) as IdeaValueKey[]).every((field) => !values[field]?.length || values[field]!.includes(this.ideaCellValue(idea, field))))
+    return this.data()
+      .ideas.filter((idea) => !this.isClosedIdea(idea))
+      .filter(
+        (idea) =>
+          (['title', 'description'] as const).every((field) => includesText(idea[field], text[field])) &&
+          (Object.keys(values) as IdeaValueKey[]).every(
+            (field) => !values[field]?.length || values[field]!.includes(this.ideaCellValue(idea, field)),
+          ),
+      )
       .sort((a, b) => compareRanks(rank(a), rank(b), dir));
   });
 
   protected ideaCellValue(idea: Idea, key: IdeaValueKey): string {
     switch (key) {
-      case 'status': return statusLabel(idea.status);
-      case 'priority': return priorityLabel(idea.priority);
-      case 'effortHours': return formatHours(idea.effortHours);
-      default: return formatIsoDate(idea.createdAt);
+      case 'status':
+        return statusLabel(idea.status);
+      case 'priority':
+        return priorityLabel(idea.priority);
+      case 'effortHours':
+        return formatHours(idea.effortHours);
+      default:
+        return formatIsoDate(idea.createdAt);
     }
   }
 
   protected ideaOptions(key: IdeaKey): string[] {
     if (this.isTextColumn(key)) return [];
-    return [...new Set(this.data().ideas.filter((idea) => !this.isClosedIdea(idea)).map((idea) => this.ideaCellValue(idea, key)))].sort();
+    return [
+      ...new Set(
+        this.data()
+          .ideas.filter((idea) => !this.isClosedIdea(idea))
+          .map((idea) => this.ideaCellValue(idea, key)),
+      ),
+    ].sort();
   }
 
   protected isTextColumn(key: IdeaKey): key is IdeaTextKey {
@@ -104,9 +142,11 @@ export class IdeationComponent {
     const text = Object.values(this.ideaTextFilter()).some(Boolean);
     const values = this.ideaValueFilter();
     const keys = (Object.keys(values) as IdeaValueKey[]).filter((key) => values[key]?.length);
-    const sameAsDefault = keys.length === 1 && keys[0] === 'status'
-      && values.status!.length === DEFAULT_STATUS_FILTER.length
-      && DEFAULT_STATUS_FILTER.every((label) => values.status!.includes(label));
+    const sameAsDefault =
+      keys.length === 1 &&
+      keys[0] === 'status' &&
+      values.status!.length === DEFAULT_STATUS_FILTER.length &&
+      DEFAULT_STATUS_FILTER.every((label) => values.status!.includes(label));
     return text || (keys.length > 0 && !sameAsDefault);
   }
 
@@ -156,9 +196,14 @@ export class IdeationComponent {
     const { title, description, priority } = this.ideaForm;
     const files = this.pendingImages;
     await this.store.perform(async () => {
-      const created = await this.api.post<{ item: Idea }>(`${this.api.projectPath(this.store.activeProject())}/ideation`, {
-        title, description, priority,
-      });
+      const created = await this.api.post<{ item: Idea }>(
+        `${this.api.projectPath(this.store.activeProject())}/ideation`,
+        {
+          title,
+          description,
+          priority,
+        },
+      );
       this.pendingImages = [];
       await this.uploadImages(created.item.id, files);
       this.ideaForm = { title: '', description: '', priority: 'medium' };

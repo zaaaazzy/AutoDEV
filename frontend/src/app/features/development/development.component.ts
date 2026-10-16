@@ -21,8 +21,15 @@ type DevValueKey = 'status' | 'priority' | 'sprint' | 'effortHours';
   selector: 'app-development',
   standalone: true,
   imports: [
-    NgClass, FormsModule, ColumnHeaderComponent, OrderDetailComponent,
-    HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe,
+    NgClass,
+    FormsModule,
+    ColumnHeaderComponent,
+    OrderDetailComponent,
+    HoursPipe,
+    PriorityLabelPipe,
+    ShortTextPipe,
+    StatusClassPipe,
+    StatusLabelPipe,
   ],
   templateUrl: './development.component.html',
   host: { style: 'display: contents' },
@@ -35,8 +42,12 @@ export class DevelopmentComponent {
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
   protected readonly devColumns: { key: DevKey; label: string }[] = [
-    { key: 'title', label: 'Titel' }, { key: 'description', label: 'Kurzfassung' }, { key: 'status', label: 'Status' },
-    { key: 'priority', label: 'Priorität' }, { key: 'sprint', label: 'Sprint' }, { key: 'effortHours', label: 'Aufwand' },
+    { key: 'title', label: 'Titel' },
+    { key: 'description', label: 'Kurzfassung' },
+    { key: 'status', label: 'Status' },
+    { key: 'priority', label: 'Priorität' },
+    { key: 'sprint', label: 'Sprint' },
+    { key: 'effortHours', label: 'Aufwand' },
   ];
 
   protected developmentForm: { title: string; priority: Priority } = { title: '', priority: 'medium' };
@@ -54,32 +65,52 @@ export class DevelopmentComponent {
     const { key, dir } = this.devSort();
     const rank = (item: DevelopmentItem): string | number | null => {
       switch (key) {
-        case 'priority': return ['low', 'medium', 'high'].indexOf(item.priority);
-        case 'effortHours': return item.effortHours ?? null;
-        case 'status': return DEVELOPMENT_STATUSES.indexOf(item.status);
-        case 'sprint': return this.devCell(item, 'sprint').toLowerCase();
-        default: return (item[key] ?? '').toString().toLowerCase();
+        case 'priority':
+          return ['low', 'medium', 'high'].indexOf(item.priority);
+        case 'effortHours':
+          return item.effortHours ?? null;
+        case 'status':
+          return DEVELOPMENT_STATUSES.indexOf(item.status);
+        case 'sprint':
+          return this.devCell(item, 'sprint').toLowerCase();
+        default:
+          return (item[key] ?? '').toString().toLowerCase();
       }
     };
-    return this.data().development
-      .filter((item) => item.status !== 'done')
-      .filter((item) => (['title', 'description'] as const).every((field) => includesText(item[field], text[field]))
-        && (Object.keys(values) as DevValueKey[]).every((field) => !values[field]?.length || values[field]!.includes(this.devCell(item, field))))
+    return this.data()
+      .development.filter((item) => item.status !== 'done')
+      .filter(
+        (item) =>
+          (['title', 'description'] as const).every((field) => includesText(item[field], text[field])) &&
+          (Object.keys(values) as DevValueKey[]).every(
+            (field) => !values[field]?.length || values[field]!.includes(this.devCell(item, field)),
+          ),
+      )
       .sort((a, b) => compareRanks(rank(a), rank(b), dir));
   });
 
   protected devCell(item: DevelopmentItem, key: DevValueKey): string {
     switch (key) {
-      case 'status': return statusLabel(item.status);
-      case 'priority': return priorityLabel(item.priority);
-      case 'sprint': return this.store.sprintOf(item)?.name ?? 'Kein Sprint';
-      default: return formatHours(item.effortHours);
+      case 'status':
+        return statusLabel(item.status);
+      case 'priority':
+        return priorityLabel(item.priority);
+      case 'sprint':
+        return this.store.sprintOf(item)?.name ?? 'Kein Sprint';
+      default:
+        return formatHours(item.effortHours);
     }
   }
 
   protected devOptions(key: DevKey): string[] {
     if (this.isDevText(key)) return [];
-    return [...new Set(this.data().development.filter((item) => item.status !== 'done').map((item) => this.devCell(item, key)))].sort();
+    return [
+      ...new Set(
+        this.data()
+          .development.filter((item) => item.status !== 'done')
+          .map((item) => this.devCell(item, key)),
+      ),
+    ].sort();
   }
 
   protected isDevText(key: DevKey): key is DevTextKey {
@@ -131,7 +162,7 @@ export class DevelopmentComponent {
   }
 
   protected ideaOf(item: DevelopmentItem): Idea | null {
-    return item.ideationId ? this.data().ideas.find((idea) => idea.id === item.ideationId) ?? null : null;
+    return item.ideationId ? (this.data().ideas.find((idea) => idea.id === item.ideationId) ?? null) : null;
   }
 
   protected updateDevelopment(id: string, values: Partial<DevelopmentItem>): Promise<void> {

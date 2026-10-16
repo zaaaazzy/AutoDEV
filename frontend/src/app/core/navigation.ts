@@ -1,4 +1,5 @@
-export type Section = 'dashboard' | 'development' | 'sprints' | 'ideation' | 'bugs' | 'docs' | 'agents' | 'runs' | 'settings';
+export type Section =
+  'dashboard' | 'development' | 'sprints' | 'ideation' | 'bugs' | 'docs' | 'agents' | 'runs' | 'settings';
 
 export const NAVIGATION: { id: Section; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },

@@ -19,7 +19,13 @@ export function pushRemote(remote: string): string {
 }
 
 export function sprintTag(name: string, id: string): string {
-  const slug = name.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  const slug = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
   return `sprint-${slug || 'ohne-name'}-${id.slice(0, 6)}`;
 }
 
@@ -40,7 +46,12 @@ async function excludeInternalFolders(cwd: string): Promise<void> {
 }
 
 function gitHelpers(execute: CommandExecutor, cwd: string) {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' };
+  const env = {
+    ...process.env,
+    GIT_TERMINAL_PROMPT: '0',
+    GCM_INTERACTIVE: 'never',
+    GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+  };
   const git = async (...args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
     return { ...result, output: redactOutput(result.output, process.env).trim() };
@@ -73,11 +84,24 @@ async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must']
 }
 
 /** Conventional-Commits-Betreff: Typ aus der Auftragsart, Sprint als Scope, Titel auf eine Zeile gekürzt. */
-export function taskCommitMessage(kind: string | undefined, sprintName: string, title: string, itemId: string): [string, string] {
+export function taskCommitMessage(
+  kind: string | undefined,
+  sprintName: string,
+  title: string,
+  itemId: string,
+): [string, string] {
   const type = kind === 'bug' ? 'fix' : 'feat';
-  const scope = sprintName.replace(/[()\r\n:]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || 'sprint';
+  const scope =
+    sprintName
+      .replace(/[()\r\n:]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 40) || 'sprint';
   const subject = title.replace(/\s+/g, ' ').trim().slice(0, 72) || 'Auftrag';
-  return [`${type}(${scope}): ${subject}`, `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`];
+  return [
+    `${type}(${scope}): ${subject}`,
+    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`,
+  ];
 }
 
 /** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */
@@ -87,7 +111,8 @@ export async function commitTaskToGit(
   sprintName: string,
   rawExecute: CommandExecutor = runCommand,
 ): Promise<string | null> {
-  const execute: CommandExecutor = (command, directory, options) => withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
   try {
     await ensureRepository(git, must, cwd);
@@ -97,7 +122,9 @@ export async function commitTaskToGit(
     await must('commit', '-m', subject, '-m', body);
     return await must('rev-parse', '--short', 'HEAD');
   } catch (error) {
-    console.error(`Auftrags-Commit für ${item.id} fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(
+      `Auftrags-Commit für ${item.id} fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return null;
   }
 }
@@ -115,10 +142,12 @@ export async function syncSprintToGit(
   cwd: string,
   rawExecute: CommandExecutor = runCommand,
 ): Promise<number> {
-  const execute: CommandExecutor = (command, directory, options) => withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
   await pool.query(
     `UPDATE sprints SET git_sync = 'pending' WHERE project_slug = $1 AND git_sync = 'running'
-        AND updated_at < NOW() - INTERVAL '30 minutes'`, [project],
+        AND updated_at < NOW() - INTERVAL '30 minutes'`,
+    [project],
   );
   const claimed = await pool.query<PendingSprint>(
     `UPDATE sprints s SET git_sync = 'running'
@@ -140,9 +169,9 @@ export async function syncSprintToGit(
     if (sprint.remote) {
       const current = await git('remote', 'get-url', 'origin');
       const target = pushRemote(sprint.remote);
-      await must(...(current.exitCode === 0
-        ? ['remote', 'set-url', 'origin', target]
-        : ['remote', 'add', 'origin', target]));
+      await must(
+        ...(current.exitCode === 0 ? ['remote', 'set-url', 'origin', target] : ['remote', 'add', 'origin', target]),
+      );
     }
     await must('add', '-A');
     if (await must('status', '--porcelain')) {
@@ -169,10 +198,10 @@ export async function syncSprintToGit(
     return 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await pool.query(
-      `UPDATE sprints SET git_sync = 'failed', git_message = $2, git_synced_at = NOW() WHERE id = $1`,
-      [sprint.id, [...log, message].join(' ').slice(0, 1500)],
-    );
+    await pool.query(`UPDATE sprints SET git_sync = 'failed', git_message = $2, git_synced_at = NOW() WHERE id = $1`, [
+      sprint.id,
+      [...log, message].join(' ').slice(0, 1500),
+    ]);
     console.error(`Git-Sicherung für Sprint ${sprint.id} fehlgeschlagen: ${message}`);
     return 0;
   }

@@ -16,22 +16,35 @@ export async function startProgress(
     const stage = override || stages[Math.min(stages.length - 1, Math.floor(seconds / 15))] || 'Arbeite …';
     return `${stage} (${seconds} s)`;
   };
-  const writeStep = (value: string | null): Promise<unknown> => link.stepId
-    ? pool.query('UPDATE agent_run_steps SET progress = $2 WHERE id = $1', [link.stepId, value]).catch(() => undefined)
-    : Promise.resolve();
+  const writeStep = (value: string | null): Promise<unknown> =>
+    link.stepId
+      ? pool
+          .query('UPDATE agent_run_steps SET progress = $2 WHERE id = $1', [link.stepId, value])
+          .catch(() => undefined)
+      : Promise.resolve();
   void writeStep(text());
   if (link.silent) {
     const ticker = setInterval(() => void writeStep(text()), INTERVAL_MS);
     return {
-      update: (message) => { override = message; void writeStep(text()); },
-      stop: async () => { clearInterval(ticker); await writeStep(null); },
+      update: (message) => {
+        override = message;
+        void writeStep(text());
+      },
+      stop: async () => {
+        clearInterval(ticker);
+        await writeStep(null);
+      },
     };
   }
-  const id = (await pool.query<{ id: string }>(
-    `INSERT INTO chat_messages (project_slug, role, content, status)
+  const id = (
+    await pool
+      .query<{ id: string }>(
+        `INSERT INTO chat_messages (project_slug, role, content, status)
      VALUES ($1, 'assistant', $2, 'processing') RETURNING id`,
-    [project, text()],
-  ).catch(() => ({ rows: [] }))).rows[0]?.id;
+        [project, text()],
+      )
+      .catch(() => ({ rows: [] }))
+  ).rows[0]?.id;
   if (!id) return { update: () => undefined, stop: async () => undefined };
   const timer = setInterval(() => {
     void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);

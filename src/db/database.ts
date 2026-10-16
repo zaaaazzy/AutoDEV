@@ -413,8 +413,7 @@ export async function finishTestRunStep(
     `UPDATE test_run_steps
         SET status = $3, exit_code = $4, duration_ms = $5, output = $6
       WHERE run_id = $1 AND position = $2`,
-    [step.runId, step.position, step.exitCode === 0 ? 'passed' : 'failed',
-      step.exitCode, step.durationMs, step.output],
+    [step.runId, step.position, step.exitCode === 0 ? 'passed' : 'failed', step.exitCode, step.durationMs, step.output],
   );
 }
 

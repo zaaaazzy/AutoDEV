@@ -2,7 +2,16 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { IDEA_FIELDS } from './ideation.js';
 import {
-  buildUpdate, isRecord, isUuid, PRIORITIES, parseFields, parseNullableUuid, parseOption, parseProjectSlug, validStatus, validText,
+  buildUpdate,
+  isRecord,
+  isUuid,
+  PRIORITIES,
+  parseFields,
+  parseNullableUuid,
+  parseOption,
+  parseProjectSlug,
+  validStatus,
+  validText,
 } from '../core/validation.js';
 
 const DEVELOPMENT_STATUSES = new Set(['backlog', 'planned', 'in_progress', 'blocked', 'done']);
@@ -44,22 +53,25 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       response.status(409).json({ message: 'Idee nicht gefunden oder bereits als Auftrag übernommen.' });
       return;
     }
-    await pool.query(
-      `UPDATE ideation_items SET status = 'accepted', updated_at = NOW() WHERE id = $1`,
-      [request.params.id],
-    );
+    await pool.query(`UPDATE ideation_items SET status = 'accepted', updated_at = NOW() WHERE id = $1`, [
+      request.params.id,
+    ]);
     response.status(201).json({ item: result.rows[0] });
   });
 
   app.post('/api/projects/:slug/development', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
-    if (!slug || !isRecord(body) || !validText(body.title, 180)
-      || (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000))
-      || (body.status !== undefined && !validStatus(body.status, DEVELOPMENT_STATUSES))
-      || (body.priority !== undefined && !validStatus(body.priority, PRIORITIES))
-      || (body.ideationId !== undefined && !isUuid(body.ideationId))
-      || (body.testRunId !== undefined && !isUuid(body.testRunId))) {
+    if (
+      !slug ||
+      !isRecord(body) ||
+      !validText(body.title, 180) ||
+      (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000)) ||
+      (body.status !== undefined && !validStatus(body.status, DEVELOPMENT_STATUSES)) ||
+      (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
+      (body.ideationId !== undefined && !isUuid(body.ideationId)) ||
+      (body.testRunId !== undefined && !isUuid(body.testRunId))
+    ) {
       response.status(400).json({ message: 'Invalid development item.' });
       return;
     }
@@ -72,9 +84,15 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
         WHERE ($2::uuid IS NULL OR i.id IS NOT NULL)
           AND ($3::uuid IS NULL OR tr.id IS NOT NULL)
        RETURNING ${DEV_COLUMNS}`,
-      [slug, body.ideationId ?? null, body.testRunId ?? null, body.title.trim(),
+      [
+        slug,
+        body.ideationId ?? null,
+        body.testRunId ?? null,
+        body.title.trim(),
         typeof body.description === 'string' ? body.description.trim() : '',
-        body.status ?? null, body.priority ?? null],
+        body.status ?? null,
+        body.priority ?? null,
+      ],
     );
     if (!result.rows[0]) {
       response.status(400).json({ message: 'Linked ideation or test run does not belong to this project.' });
@@ -161,20 +179,28 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     }
     const sprintField = fields.find((field) => field.column === 'sprint_id');
     const agentField = fields.find((field) => field.column === 'agent_id');
-    const update = buildUpdate('development_items', request.params.id, fields,
-      `${DEV_COLUMNS}, project_slug AS "projectSlug"`);
+    const update = buildUpdate(
+      'development_items',
+      request.params.id,
+      fields,
+      `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
+    );
     const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
     if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
       // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
       const assigned = (sprintField ?? agentField)?.value !== null;
-      update.sql = update.sql.replace(', updated_at = NOW()',
-        `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`);
+      update.sql = update.sql.replace(
+        ', updated_at = NOW()',
+        `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`,
+      );
     }
     if (manualStart) {
       // Manueller Start eines einzelnen Agents (auch bei erledigten oder blockierten Aufträgen): Der vorherige Status wird nach dem Lauf wiederhergestellt.
-      update.sql = update.sql.replace(', updated_at = NOW()',
+      update.sql = update.sql.replace(
+        ', updated_at = NOW()',
         `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,
-          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`);
+          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`,
+      );
     }
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {

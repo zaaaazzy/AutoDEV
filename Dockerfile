@@ -10,5 +10,6 @@ COPY frontend ./frontend
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 ENV NODE_ENV=production
+USER node
 EXPOSE 3100
 CMD ["npm", "start"]

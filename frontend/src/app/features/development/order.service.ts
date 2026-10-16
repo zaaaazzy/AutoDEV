@@ -20,24 +20,37 @@ export class OrderService {
   private readonly store = inject(ProjectStore);
 
   async update(id: string, values: Partial<DevelopmentItem>): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/development/${encodeURIComponent(id)}`, values), 'Auftrag aktualisiert.');
+    await this.store.perform(
+      () => this.api.patch(`/api/development/${encodeURIComponent(id)}`, values),
+      'Auftrag aktualisiert.',
+    );
   }
 
   async save(item: DevelopmentItem, values: FormValues): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, {
-      title: String(values['title'] ?? ''),
-      description: String(values['description'] ?? ''),
-      priority: values['priority'],
-      ...estimateValues(values),
-    }), 'Auftrag gespeichert.');
+    await this.store.perform(
+      () =>
+        this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, {
+          title: String(values['title'] ?? ''),
+          description: String(values['description'] ?? ''),
+          priority: values['priority'],
+          ...estimateValues(values),
+        }),
+      'Auftrag gespeichert.',
+    );
   }
 
   async retry(item: DevelopmentItem): Promise<void> {
-    await this.store.perform(() => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`), 'Auftrag wird erneut versucht.');
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`),
+      'Auftrag wird erneut versucht.',
+    );
   }
 
   async analyze(item: DevelopmentItem): Promise<void> {
-    await this.store.perform(() => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`), 'Der Assistent analysiert den Auftrag.');
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`),
+      'Der Assistent analysiert den Auftrag.',
+    );
   }
 
   async startWithAgent(item: DevelopmentItem, agentId: string): Promise<void> {

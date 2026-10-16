@@ -18,14 +18,23 @@ interface FailedItem {
  */
 export async function registerFailure(pool: Pool, item: FailedItem, agentName: string, output: string): Promise<void> {
   const detail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
-  const auto = (await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [item.projectSlug])).rows[0]?.auto ?? true;
+  const auto =
+    (
+      await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [
+        item.projectSlug,
+      ])
+    ).rows[0]?.auto ?? true;
   if (item.bugId) {
-    await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1',
-      [item.bugId, `Letzter Behebungsversuch scheiterte bei „${agentName}“: ${detail.slice(-1500)}`]);
+    await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [
+      item.bugId,
+      `Letzter Behebungsversuch scheiterte bei „${agentName}“: ${detail.slice(-1500)}`,
+    ]);
     await pool.query(
       `UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE,
               analysis_status = CASE WHEN $4 AND analysis_status IS NULL THEN 'requested' ELSE analysis_status END
-        WHERE id = $1`, [item.id, `Agent „${agentName}“ scheiterte:\n\n${detail}`, item.bugId, auto]);
+        WHERE id = $1`,
+      [item.id, `Agent „${agentName}“ scheiterte:\n\n${detail}`, item.bugId, auto],
+    );
     return;
   }
   const bugId = await reportAgentBug(pool, {
@@ -33,8 +42,11 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     title: `Agent „${agentName}“ scheiterte bei „${item.title}“`,
     description: detail,
   });
-  await pool.query('UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE WHERE id = $1',
-    [item.id, `Agent „${agentName}“ scheiterte:\n\n${detail}`, bugId]);
+  await pool.query('UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE WHERE id = $1', [
+    item.id,
+    `Agent „${agentName}“ scheiterte:\n\n${detail}`,
+    bugId,
+  ]);
   if (auto) await queueBugFix(pool, item, bugId);
 }
 
@@ -47,7 +59,8 @@ export async function queueBugFix(pool: Pool, item: FailedItem, bugId: string): 
             'planned', 'high', 'bug', b.id, TRUE
        FROM bugs b WHERE b.id = $1
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO NOTHING`,
-    [bugId, item.sprintId ?? null, item.title]);
+    [bugId, item.sprintId ?? null, item.title],
+  );
 }
 
 /** Nach erfolgreicher Behebung: den blockierten Ursprungsauftrag erneut einplanen (begrenzte Versuche). */
@@ -56,7 +69,8 @@ export async function resumeBlockedByBug(pool: Pool, bugId: string): Promise<voi
     `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, retry_count = retry_count + 1, updated_at = NOW()
       WHERE d.failure_bug_id = $1 AND d.status = 'blocked' AND d.kind <> 'bug' AND d.retry_count < $2
         AND (SELECT auto_bugfix FROM projects WHERE slug = d.project_slug)`,
-    [bugId, MAX_AUTO_RETRIES]);
+    [bugId, MAX_AUTO_RETRIES],
+  );
 }
 
 /** Holt bei blockierten Aufträgen ohne Bug-Bericht (ältere Fehler) den Bericht und die Behebung nach. */
@@ -69,7 +83,9 @@ export async function backfillFailures(pool: Pool, project: string): Promise<voi
          SELECT st.agent_name, st.output FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
           WHERE r.development_id = d.id AND st.status = 'failed' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
        ) last ON TRUE
-      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL`, [project]);
+      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL`,
+    [project],
+  );
   for (const item of blocked.rows) {
     await registerFailure(pool, item, item.agentName ?? 'Agent', item.output ?? '');
   }

@@ -20,7 +20,11 @@ export interface SprintReport {
 }
 
 const STATUS_DE: Record<string, string> = {
-  backlog: 'Backlog', planned: 'Geplant', in_progress: 'In Arbeit', blocked: 'Blockiert', done: 'Erledigt',
+  backlog: 'Backlog',
+  planned: 'Geplant',
+  in_progress: 'In Arbeit',
+  blocked: 'Blockiert',
+  done: 'Erledigt',
 };
 
 function toMarkdown(name: string, goal: string, report: SprintReport): string {
@@ -30,18 +34,32 @@ function toMarkdown(name: string, goal: string, report: SprintReport): string {
     goal ? `**Sprintziel:** ${goal}` : '',
     report.summary,
     '## Umgesetzt (Featureliste)',
-    list(report.implemented.map((item) => `- ${item.kind === 'bug' ? '🐞 ' : ''}${item.title}`), '_Nichts umgesetzt._'),
+    list(
+      report.implemented.map((item) => `- ${item.kind === 'bug' ? '🐞 ' : ''}${item.title}`),
+      '_Nichts umgesetzt._',
+    ),
     '## Offen / nicht umgesetzt',
-    list(report.missing.map((item) => `- ${item.title} (${STATUS_DE[item.status] ?? item.status})`), '_Alles umgesetzt._'),
+    list(
+      report.missing.map((item) => `- ${item.title} (${STATUS_DE[item.status] ?? item.status})`),
+      '_Alles umgesetzt._',
+    ),
     '## Probleme',
-    list(report.problems.map((item) => `- **${item.title}** – ${item.detail}`), '_Keine Probleme aufgetreten._'),
-  ].filter(Boolean).join('\n\n');
+    list(
+      report.problems.map((item) => `- **${item.title}** – ${item.detail}`),
+      '_Keine Probleme aufgetreten._',
+    ),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** Builds the sprint documentation from the real state of orders, agent runs, bugs and test runs. */
 export async function generateSprintReport(pool: Pool, sprintId: string): Promise<SprintReport | null> {
   const sprint = await pool.query<{
-    projectSlug: string; name: string; goal: string; startedAt: Date;
+    projectSlug: string;
+    name: string;
+    goal: string;
+    startedAt: Date;
   }>(
     `SELECT project_slug AS "projectSlug", name, goal, COALESCE(start_date::timestamptz, created_at) AS "startedAt"
        FROM sprints WHERE id = $1`,
@@ -92,7 +110,9 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
   const failedTests = Number(tests.rows[0]?.failed ?? 0);
   if (failedTests > 0) {
     problems.push({
-      type: 'tests', title: 'Fehlgeschlagene Testläufe', detail: `${failedTests} von ${tests.rows[0]?.total} Testläufen im Sprint sind fehlgeschlagen.`,
+      type: 'tests',
+      title: 'Fehlgeschlagene Testläufe',
+      detail: `${failedTests} von ${tests.rows[0]?.total} Testläufen im Sprint sind fehlgeschlagen.`,
     });
   }
   const percent = orders.rows.length ? Math.round((done.length / orders.rows.length) * 100) : 0;
@@ -109,8 +129,14 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
      ON CONFLICT (sprint_id) DO UPDATE
        SET summary = EXCLUDED.summary, implemented = EXCLUDED.implemented, missing = EXCLUDED.missing,
            problems = EXCLUDED.problems, generated_at = NOW()`,
-    [sprintId, info.projectSlug, report.summary, JSON.stringify(report.implemented),
-      JSON.stringify(report.missing), JSON.stringify(report.problems)],
+    [
+      sprintId,
+      info.projectSlug,
+      report.summary,
+      JSON.stringify(report.implemented),
+      JSON.stringify(report.missing),
+      JSON.stringify(report.problems),
+    ],
   );
   await upsertDoc(pool, {
     projectSlug: info.projectSlug,
@@ -158,10 +184,10 @@ export function registerReportRoutes(app: Express, pool: Pool): void {
       response.status(400).json({ message: 'Invalid report notes.' });
       return;
     }
-    const result = await pool.query(
-      'UPDATE sprint_reports SET notes = $2 WHERE sprint_id = $1 RETURNING sprint_id',
-      [request.params.id, body.notes.trim()],
-    );
+    const result = await pool.query('UPDATE sprint_reports SET notes = $2 WHERE sprint_id = $1 RETURNING sprint_id', [
+      request.params.id,
+      body.notes.trim(),
+    ]);
     if (!result.rows[0]) {
       response.status(404).json({ message: 'Kein Sprintbericht vorhanden.' });
       return;

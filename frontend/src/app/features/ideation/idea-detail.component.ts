@@ -40,23 +40,33 @@ export class IdeaDetailComponent {
   }
 
   protected async saveIdea(idea: Idea, values: FormValues): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/ideation/${encodeURIComponent(idea.id)}`, {
-      title: String(values['title'] ?? ''),
-      description: String(values['description'] ?? ''),
-      ...(IDEA_SELECTABLE_STATUSES.includes(idea.status) ? { status: values['status'] } : {}),
-      priority: values['priority'],
-    }), 'Idee gespeichert.');
+    await this.store.perform(
+      () =>
+        this.api.patch(`/api/ideation/${encodeURIComponent(idea.id)}`, {
+          title: String(values['title'] ?? ''),
+          description: String(values['description'] ?? ''),
+          ...(IDEA_SELECTABLE_STATUSES.includes(idea.status) ? { status: values['status'] } : {}),
+          priority: values['priority'],
+        }),
+      'Idee gespeichert.',
+    );
     this.editing.set(false);
   }
 
   protected async promoteIdea(idea: Idea): Promise<void> {
-    await this.store.perform(() => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/define`), 'Der Agent formuliert den Auftrag aus.');
+    await this.store.perform(
+      () => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/define`),
+      'Der Agent formuliert den Auftrag aus.',
+    );
   }
 
   protected async addComment(ideationId: string, input: HTMLInputElement): Promise<void> {
     const body = input.value.trim();
     if (!body) return;
-    await this.store.perform(() => this.api.post(`/api/ideation/${encodeURIComponent(ideationId)}/comments`, { body }), 'Kommentar gespeichert.');
+    await this.store.perform(
+      () => this.api.post(`/api/ideation/${encodeURIComponent(ideationId)}/comments`, { body }),
+      'Kommentar gespeichert.',
+    );
     input.value = '';
   }
 }

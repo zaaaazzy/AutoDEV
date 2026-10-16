@@ -6,17 +6,14 @@ import { createDevLogApp } from './app.js';
 
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
 
-async function withServer(
-  pool: Pool,
-  action: (baseUrl: string) => Promise<void>,
-): Promise<void> {
+async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {
   const server = createDevLogApp(pool, auth).listen(0, '127.0.0.1');
   try {
     await new Promise<void>((resolve) => server.once('listening', resolve));
     const address = server.address() as AddressInfo;
     await action(`http://127.0.0.1:${address.port}`);
   } finally {
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 }
 
@@ -118,12 +115,16 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
 
     for (const invalid of [{ benefit: 11 }, { cost: -1 }, { benefit: 2.5 }, { tokenEstimate: 'x' }]) {
       const response = await fetch(`${baseUrl}/api/ideation/${ID}`, {
-        method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(invalid),
+        method: 'PATCH',
+        headers: jsonHeaders(),
+        body: JSON.stringify(invalid),
       });
       assert.equal(response.status, 400);
     }
     const patched = await fetch(`${baseUrl}/api/ideation/${ID}`, {
-      method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify({ benefit: null, cost: 4 }),
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ benefit: null, cost: 4 }),
     });
     assert.equal(patched.status, 200);
     const update = queries.at(-1);
@@ -136,7 +137,8 @@ test('promotes an idea to a backlog order and rejects duplicates', async () => {
   const { pool, queries } = recordingPool([{ id: 'order' }]);
   await withServer(pool, async (baseUrl) => {
     const promoted = await fetch(`${baseUrl}/api/ideation/${ID}/promote`, {
-      method: 'POST', headers: jsonHeaders(),
+      method: 'POST',
+      headers: jsonHeaders(),
     });
     assert.equal(promoted.status, 201);
     assert.deepEqual(queries[0]?.values, [ID]);
@@ -156,13 +158,17 @@ test('stores image attachments for ideas and rejects other file types', async ()
   const { pool, queries } = recordingPool([{ id: ID, filename: 'shot.png' }]);
   await withServer(pool, async (baseUrl) => {
     const stored = await fetch(`${baseUrl}/api/ideation/${ID}/attachments?name=${encodeURIComponent('../shot.png')}`, {
-      method: 'POST', headers: { ...jsonHeaders(), 'Content-Type': 'image/png' }, body: new Uint8Array([137, 80, 78, 71]),
+      method: 'POST',
+      headers: { ...jsonHeaders(), 'Content-Type': 'image/png' },
+      body: new Uint8Array([137, 80, 78, 71]),
     });
     assert.equal(stored.status, 201);
     assert.deepEqual(queries[0]?.values.slice(0, 4), [ID, 'shot.png', 'image/png', 4]);
 
     const svg = await fetch(`${baseUrl}/api/ideation/${ID}/attachments`, {
-      method: 'POST', headers: { ...jsonHeaders(), 'Content-Type': 'image/svg+xml' }, body: '<svg/>',
+      method: 'POST',
+      headers: { ...jsonHeaders(), 'Content-Type': 'image/svg+xml' },
+      body: '<svg/>',
     });
     assert.equal(svg.status, 415);
   });
@@ -172,27 +178,36 @@ test('manages sprints with validation and a single active sprint', async () => {
   const { pool, queries } = recordingPool([{ id: SPRINT_ID, name: 'Sprint 1' }]);
   await withServer(pool, async (baseUrl) => {
     const created = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
-      method: 'POST', headers: jsonHeaders(),
+      method: 'POST',
+      headers: jsonHeaders(),
       body: JSON.stringify({ name: 'Sprint 1', startDate: '2026-10-19', endDate: '2026-11-01' }),
     });
     assert.equal(created.status, 201);
     assert.equal(queries[0]?.values[4], '2026-10-19');
 
     const badDate = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ name: 'S', startDate: '19.10.2026' }),
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'S', startDate: '19.10.2026' }),
     });
     assert.equal(badDate.status, 400);
     const directActive = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ name: 'S', status: 'active' }),
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'S', status: 'active' }),
     });
     assert.equal(directActive.status, 400);
   });
   const conflictPool = {
-    query: async () => { throw Object.assign(new Error('duplicate'), { code: '23505' }); },
+    query: async () => {
+      throw Object.assign(new Error('duplicate'), { code: '23505' });
+    },
   } as unknown as Pool;
   await withServer(conflictPool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, {
-      method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify({ status: 'active' }),
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ status: 'active' }),
     });
     assert.equal(response.status, 409);
   });
@@ -202,7 +217,9 @@ test('assigns development orders to sprints only within the same project', async
   const { pool, queries } = recordingPool([]);
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/development/${ID}`, {
-      method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify({ sprintId: SPRINT_ID }),
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ sprintId: SPRINT_ID }),
     });
     assert.equal(response.status, 400);
     assert.equal(queries.length, 1);
@@ -214,29 +231,38 @@ test('defines agents per workflow phase and persists their order', async () => {
   const { pool, queries } = recordingPool([{ id: ID }]);
   await withServer(pool, async (baseUrl) => {
     const created = await fetch(`${baseUrl}/api/projects/mainty/agents`, {
-      method: 'POST', headers: jsonHeaders(),
+      method: 'POST',
+      headers: jsonHeaders(),
       body: JSON.stringify({ name: 'Entwickler', role: 'developer', phase: 'while_task', instructions: 'Setzt um' }),
     });
     assert.equal(created.status, 201);
     assert.equal(queries[0]?.values[3], 'while_task');
 
     const missingPhase = await fetch(`${baseUrl}/api/projects/mainty/agents`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ name: 'X' }),
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'X' }),
     });
     assert.equal(missingPhase.status, 400);
     const badPhase = await fetch(`${baseUrl}/api/projects/mainty/agents`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ name: 'X', phase: 'during' }),
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'X', phase: 'during' }),
     });
     assert.equal(badPhase.status, 400);
 
     const ordered = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ phase: 'pre_task', ids: [ID, SPRINT_ID] }),
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ phase: 'pre_task', ids: [ID, SPRINT_ID] }),
     });
     assert.equal(ordered.status, 204);
     assert.deepEqual(queries.at(-1)?.values, ['mainty', 'pre_task', [ID, SPRINT_ID]]);
 
     const badOrder = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
-      method: 'POST', headers: jsonHeaders(), body: JSON.stringify({ phase: 'pre_task', ids: ['x'] }),
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ phase: 'pre_task', ids: ['x'] }),
     });
     assert.equal(badOrder.status, 400);
 
@@ -262,14 +288,23 @@ test('seeds the default agent workflow when a project is created', async () => {
   const { pool, queries } = recordingPool([{ slug: 'mainty' }]);
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/projects`, {
-      method: 'POST', headers: jsonHeaders(),
+      method: 'POST',
+      headers: jsonHeaders(),
       body: JSON.stringify({ slug: 'mainty', name: 'Mainty', repository: '/repo' }),
     });
     assert.equal(response.status, 201);
     const seed = queries.at(-1);
     assert.match(seed?.sql ?? '', /INSERT INTO agents/);
     assert.equal(seed?.values[0], 'mainty');
-    assert.deepEqual(seed?.values[3], ['pre_task', 'pre_task', 'while_task', 'after_task', 'after_task', 'after_task', 'after_task']);
+    assert.deepEqual(seed?.values[3], [
+      'pre_task',
+      'pre_task',
+      'while_task',
+      'after_task',
+      'after_task',
+      'after_task',
+      'after_task',
+    ]);
   });
 });
 
@@ -277,13 +312,16 @@ test('stores an agent command as an argument array and rejects strings', async (
   const { pool, queries } = recordingPool([{ id: ID }]);
   await withServer(pool, async (baseUrl) => {
     const created = await fetch(`${baseUrl}/api/projects/mainty/agents`, {
-      method: 'POST', headers: jsonHeaders(),
+      method: 'POST',
+      headers: jsonHeaders(),
       body: JSON.stringify({ name: 'Dev', phase: 'while_task', command: ['claude', '-p'] }),
     });
     assert.equal(created.status, 201);
     assert.deepEqual(queries.at(-1)?.values[6], ['claude', '-p']);
     const invalid = await fetch(`${baseUrl}/api/agents/${ID}`, {
-      method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify({ command: 'rm -rf /' }),
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ command: 'rm -rf /' }),
     });
     assert.equal(invalid.status, 400);
   });
@@ -300,10 +338,18 @@ test('stores the number of concurrent agents within its limits', async () => {
   await withServer(pool, async (baseUrl) => {
     const headers = { Authorization: basicAuth(), 'Content-Type': 'application/json' };
     const defaults = await fetch(`${baseUrl}/api/settings`, { headers });
-    assert.equal((await defaults.json() as { maxConcurrentAgents: number }).maxConcurrentAgents, 2);
-    const invalid = await fetch(`${baseUrl}/api/settings`, { method: 'PUT', headers, body: JSON.stringify({ maxConcurrentAgents: 9 }) });
+    assert.equal(((await defaults.json()) as { maxConcurrentAgents: number }).maxConcurrentAgents, 2);
+    const invalid = await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ maxConcurrentAgents: 9 }),
+    });
     assert.equal(invalid.status, 400);
-    const saved = await fetch(`${baseUrl}/api/settings`, { method: 'PUT', headers, body: JSON.stringify({ maxConcurrentAgents: 3 }) });
+    const saved = await fetch(`${baseUrl}/api/settings`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ maxConcurrentAgents: 3 }),
+    });
     assert.equal(saved.status, 200);
     assert.deepEqual(stored, ['3']);
   });

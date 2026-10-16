@@ -1,5 +1,7 @@
 export function formatHours(value: number | null | undefined): string {
-  return value === null || value === undefined ? '–' : `${Number(value).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h`;
+  return value === null || value === undefined
+    ? '–'
+    : `${Number(value).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h`;
 }
 
 export function formatNumber(value: number | null | undefined): string {

@@ -15,7 +15,14 @@ export class SettingsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
   protected readonly busy = this.store.busy;
-  protected settings = { repository: '', testCommands: '', gitRemote: '', description: '', guidelines: '', autoBugfix: true };
+  protected settings = {
+    repository: '',
+    testCommands: '',
+    gitRemote: '',
+    description: '',
+    guidelines: '',
+    autoBugfix: true,
+  };
   protected maxAgents = 2;
 
   constructor() {
@@ -28,27 +35,35 @@ export class SettingsComponent {
 
   protected async saveSettings(): Promise<void> {
     const slug = this.store.activeProject();
-    await this.store.perform(async () => {
-      const result = await this.api.patch<{ project: Project }>(`/api/projects/${encodeURIComponent(slug)}`, {
-        repository: this.settings.repository.trim(),
-        gitRemote: this.settings.gitRemote.trim(),
-        testCommands: this.settings.testCommands,
-        description: this.settings.description,
-        guidelines: this.settings.guidelines,
-        autoBugfix: this.settings.autoBugfix,
-      });
-      this.store.projects.update((projects) => projects.map((project) => project.slug === slug
-        ? { ...project, ...result.project }
-        : project));
-      await this.store.loadProject(slug);
-    }, 'Projekteinstellungen gespeichert.', false);
+    await this.store.perform(
+      async () => {
+        const result = await this.api.patch<{ project: Project }>(`/api/projects/${encodeURIComponent(slug)}`, {
+          repository: this.settings.repository.trim(),
+          gitRemote: this.settings.gitRemote.trim(),
+          testCommands: this.settings.testCommands,
+          description: this.settings.description,
+          guidelines: this.settings.guidelines,
+          autoBugfix: this.settings.autoBugfix,
+        });
+        this.store.projects.update((projects) =>
+          projects.map((project) => (project.slug === slug ? { ...project, ...result.project } : project)),
+        );
+        await this.store.loadProject(slug);
+      },
+      'Projekteinstellungen gespeichert.',
+      false,
+    );
   }
 
   protected async saveMaxAgents(): Promise<void> {
-    await this.store.perform(async () => {
-      await this.api.put('/api/settings', { maxConcurrentAgents: Number(this.maxAgents) });
-      await this.loadMaxAgents();
-    }, 'Anzahl gleichzeitiger Agents gespeichert.', false);
+    await this.store.perform(
+      async () => {
+        await this.api.put('/api/settings', { maxConcurrentAgents: Number(this.maxAgents) });
+        await this.loadMaxAgents();
+      },
+      'Anzahl gleichzeitiger Agents gespeichert.',
+      false,
+    );
   }
 
   private fillSettings(): void {

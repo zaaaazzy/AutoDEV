@@ -29,9 +29,20 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   selector: 'app-root',
   standalone: true,
   imports: [
-    FormsModule, NavIconComponent, AgentListComponent, ProjectFormComponent, HelpDialogComponent,
-    DashboardComponent, DevelopmentComponent, SprintsComponent, IdeationComponent, BugsComponent,
-    DocsComponent, AgentsComponent, RunsComponent, SettingsComponent,
+    FormsModule,
+    NavIconComponent,
+    AgentListComponent,
+    ProjectFormComponent,
+    HelpDialogComponent,
+    DashboardComponent,
+    DevelopmentComponent,
+    SprintsComponent,
+    IdeationComponent,
+    BugsComponent,
+    DocsComponent,
+    AgentsComponent,
+    RunsComponent,
+    SettingsComponent,
   ],
   templateUrl: './app.component.html',
 })
@@ -50,9 +61,12 @@ export class AppComponent {
   protected readonly showProjectForm = signal(false);
   protected readonly showHelp = signal(false);
 
-  protected readonly activeSectionLabel = computed(() => this.navigation.find((item) => item.id === this.section())?.label);
+  protected readonly activeSectionLabel = computed(
+    () => this.navigation.find((item) => item.id === this.section())?.label,
+  );
   protected readonly resourceErrors = computed(() =>
-    Object.entries(this.store.errors()).map(([resource, message]) => `${resource}: ${message}`));
+    Object.entries(this.store.errors()).map(([resource, message]) => `${resource}: ${message}`),
+  );
   protected readonly createLabel = computed(() => {
     if (this.section() === 'agents') return this.store.selectedAgent() ? '' : 'Neuer Agent';
     return CREATE_LABELS[this.section()] ?? '';
@@ -68,14 +82,22 @@ export class AppComponent {
   protected navCount(section: Section): number {
     const data = this.store.data();
     switch (section) {
-      case 'development': return this.store.openDevelopmentCount();
-      case 'sprints': return data.sprints.length;
-      case 'ideation': return data.ideas.filter((idea) => idea.status !== 'rejected').length;
-      case 'bugs': return this.store.openBugCount();
-      case 'docs': return data.docs.length;
-      case 'agents': return data.agents.length;
-      case 'runs': return data.runs.length;
-      default: return 0;
+      case 'development':
+        return this.store.openDevelopmentCount();
+      case 'sprints':
+        return data.sprints.length;
+      case 'ideation':
+        return data.ideas.filter((idea) => idea.status !== 'rejected').length;
+      case 'bugs':
+        return this.store.openBugCount();
+      case 'docs':
+        return data.docs.length;
+      case 'agents':
+        return data.agents.length;
+      case 'runs':
+        return data.runs.length;
+      default:
+        return 0;
     }
   }
 }

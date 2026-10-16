@@ -16,8 +16,12 @@ export class ChatComponent {
   private readonly store = inject(ProjectStore);
 
   protected readonly chat = signal<ChatMessage[]>([]);
-  protected readonly chatWaiting = computed(() => this.chat().some((message) => message.role === 'user' && ['pending', 'processing'].includes(message.status)));
-  protected readonly chatProgressShown = computed(() => this.chat().some((message) => message.role === 'assistant' && message.status === 'processing'));
+  protected readonly chatWaiting = computed(() =>
+    this.chat().some((message) => message.role === 'user' && ['pending', 'processing'].includes(message.status)),
+  );
+  protected readonly chatProgressShown = computed(() =>
+    this.chat().some((message) => message.role === 'assistant' && message.status === 'processing'),
+  );
   protected chatInput = '';
 
   constructor() {
@@ -32,7 +36,10 @@ export class ChatComponent {
           if (log) log.scrollTop = log.scrollHeight;
         });
       };
-      onCleanup(() => { stream.close(); this.chat.set([]); });
+      onCleanup(() => {
+        stream.close();
+        this.chat.set([]);
+      });
     });
   }
 

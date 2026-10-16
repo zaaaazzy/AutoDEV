@@ -29,7 +29,13 @@ export class AgentsComponent {
   protected readonly roleLabel = roleLabel;
   protected readonly agentEditing = signal<string | null>(null);
   protected agentEdit = { name: '', instructions: '', command: '' };
-  protected agentForm = { name: '', role: 'developer', phase: 'while_task' as AgentPhase, command: '', instructions: '' };
+  protected agentForm = {
+    name: '',
+    role: 'developer',
+    phase: 'while_task' as AgentPhase,
+    command: '',
+    instructions: '',
+  };
 
   protected agentsOfPhase(phase: AgentPhase): Agent[] {
     return this.data().agents.filter((agent) => agent.phase === phase);
@@ -59,11 +65,17 @@ export class AgentsComponent {
   }
 
   protected async createDefaultAgents(): Promise<void> {
-    await this.store.perform(() => this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/defaults`), 'Standard-Workflow angelegt.');
+    await this.store.perform(
+      () => this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/defaults`),
+      'Standard-Workflow angelegt.',
+    );
   }
 
   protected async updateAgent(id: string, values: Partial<Agent>): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/agents/${encodeURIComponent(id)}`, values), 'Agent aktualisiert.');
+    await this.store.perform(
+      () => this.api.patch(`/api/agents/${encodeURIComponent(id)}`, values),
+      'Agent aktualisiert.',
+    );
   }
 
   protected async saveAgentEdit(agent: Agent): Promise<void> {
@@ -84,14 +96,20 @@ export class AgentsComponent {
   }
 
   protected async moveAgent(agent: Agent, direction: -1 | 1): Promise<void> {
-    const ids = this.data().agents.filter((item) => item.phase === agent.phase).map((item) => item.id);
+    const ids = this.data()
+      .agents.filter((item) => item.phase === agent.phase)
+      .map((item) => item.id);
     const index = ids.indexOf(agent.id);
     const nextIndex = index + direction;
     if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return;
     [ids[index], ids[nextIndex]] = [ids[nextIndex]!, ids[index]!];
-    await this.store.perform(() => this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/order`, {
-      phase: agent.phase,
-      ids,
-    }), 'Reihenfolge gespeichert.');
+    await this.store.perform(
+      () =>
+        this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/order`, {
+          phase: agent.phase,
+          ids,
+        }),
+      'Reihenfolge gespeichert.',
+    );
   }
 }

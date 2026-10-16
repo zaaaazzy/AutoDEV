@@ -46,8 +46,11 @@ export class AgentActivityService {
     const agentId = this.store.openAgent();
     const running = this.store.data().agentRuns.some((run) => run.steps.some((step) => step.status === 'running'));
     if (!agentId || !this.store.activeProject() || !running) return;
-    this.api.get<{ activity: AgentActivity[] }>(this.activityPath(agentId))
-      .then((result) => { if (this.store.openAgent() === agentId) this.activity.set(result.activity); })
+    this.api
+      .get<{ activity: AgentActivity[] }>(this.activityPath(agentId))
+      .then((result) => {
+        if (this.store.openAgent() === agentId) this.activity.set(result.activity);
+      })
       .catch(() => undefined);
   }
 

@@ -19,7 +19,10 @@ async function connect(watch: boolean): Promise<Pool> {
       if (!watch) {
         throw error;
       }
-      console.error('Datenbank nicht erreichbar, neuer Versuch in 15 s:', error instanceof Error ? error.message : error);
+      console.error(
+        'Datenbank nicht erreichbar, neuer Versuch in 15 s:',
+        error instanceof Error ? error.message : error,
+      );
       await sleep(15_000);
     }
   }
@@ -59,12 +62,17 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
   if (!options.all) {
     return [{ options, problem: null }];
   }
-  const projects = await pool.query<{ slug: string; repository: string }>('SELECT slug, repository FROM projects ORDER BY slug');
+  const projects = await pool.query<{ slug: string; repository: string }>(
+    'SELECT slug, repository FROM projects ORDER BY slug',
+  );
   return projects.rows.map(({ slug, repository }) => {
-    const folder = isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory() ? repository : null;
+    const folder =
+      isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory() ? repository : null;
     return {
       options: { ...options, project: slug, cwd: folder ?? options.cwd },
-      problem: folder ? null : `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`,
+      problem: folder
+        ? null
+        : `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`,
     };
   });
 }
@@ -72,18 +80,22 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
 async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
-    `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`);
+    `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`,
+  );
   for (const orphan of orphans.rows) {
     if (killOrphan(orphan.pid, orphan.spawnedAt)) console.info(`Verwaisten Agent-Prozess ${orphan.pid} beendet.`);
   }
   const requeued = await pool.query(
     `UPDATE development_items SET status = 'planned', updated_at = NOW()
-      WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`);
+      WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`,
+  );
   await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
   await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
   await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
   await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
-  await pool.query(`UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`);
+  await pool.query(
+    `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
+  );
   await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
   if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
 }
@@ -115,7 +127,9 @@ async function main(): Promise<void> {
     }
     await recoverInterruptedRuns(pool);
     const intervalSeconds = Math.round(options.intervalMs / 1000);
-    console.info(`Worker gestartet (${options.all ? 'alle Projekte' : options.project}, Intervall ${intervalSeconds} s).`);
+    console.info(
+      `Worker gestartet (${options.all ? 'alle Projekte' : options.project}, Intervall ${intervalSeconds} s).`,
+    );
     const errors = new Map<string, string | null>();
     let known: string[] = options.all ? [] : [options.project];
     let startup = true;
@@ -148,7 +162,9 @@ async function main(): Promise<void> {
         analysisActive.add(slug);
         void analyzeBlocked(pool, target.options)
           .then(() => loggedErrors.delete(`analysis:${slug}`))
-          .catch((error: unknown) => logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`))
+          .catch((error: unknown) =>
+            logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`),
+          )
           .finally(() => analysisActive.delete(slug));
       }
     }, 1500);

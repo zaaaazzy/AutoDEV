@@ -1,7 +1,16 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
-  buildUpdate, ESTIMATE_FIELDS, isRecord, isUuid, PRIORITIES, parseFields, parseLongText, parseOption, parseProjectSlug, parseTitle,
+  buildUpdate,
+  ESTIMATE_FIELDS,
+  isRecord,
+  isUuid,
+  PRIORITIES,
+  parseFields,
+  parseLongText,
+  parseOption,
+  parseProjectSlug,
+  parseTitle,
 } from '../core/validation.js';
 
 // Manuell setzbar; „requested“, „drafting“ und „accepted“ ergeben sich aus dem Ablauf („Auftrag erstellen“).
@@ -34,9 +43,17 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
                                    effort_hours, token_estimate, benefit, cost)
        VALUES ($1, $2, $3, COALESCE($4, 'idea'), COALESCE($5, 'medium'), $6, $7, $8, $9)
        RETURNING ${IDEA_COLUMNS}`,
-      [slug, values.get('title'), values.get('description') ?? '', values.get('status') ?? null,
-        values.get('priority') ?? null, values.get('effort_hours') ?? null, values.get('token_estimate') ?? null,
-        values.get('benefit') ?? null, values.get('cost') ?? null],
+      [
+        slug,
+        values.get('title'),
+        values.get('description') ?? '',
+        values.get('status') ?? null,
+        values.get('priority') ?? null,
+        values.get('effort_hours') ?? null,
+        values.get('token_estimate') ?? null,
+        values.get('benefit') ?? null,
+        values.get('cost') ?? null,
+      ],
     );
     response.status(201).json({ item: result.rows[0] });
   });
@@ -51,8 +68,12 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
       response.status(400).json({ message: 'Invalid ideation update.' });
       return;
     }
-    const update = buildUpdate('ideation_items', request.params.id, fields,
-      `${IDEA_COLUMNS}, project_slug AS "projectSlug"`);
+    const update = buildUpdate(
+      'ideation_items',
+      request.params.id,
+      fields,
+      `${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
+    );
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
       response.status(404).json({ message: 'Ideation item not found.' });

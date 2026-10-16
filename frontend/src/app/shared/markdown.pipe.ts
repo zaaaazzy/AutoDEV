@@ -15,12 +15,14 @@ export class MarkdownPipe implements PipeTransform {
       paragraph = [];
     };
     const flushList = (): void => {
-      if (listItems.length) blocks.push(`<${listType}>${listItems.map((item) => `<li>${this.inline(item)}</li>`).join('')}</${listType}>`);
+      if (listItems.length)
+        blocks.push(`<${listType}>${listItems.map((item) => `<li>${this.inline(item)}</li>`).join('')}</${listType}>`);
       listItems = [];
       listType = '';
     };
     const flushCode = (): void => {
-      if (codeLines.length) blocks.push(`<pre><code>${codeLines.map((line) => this.escape(line)).join('\n')}</code></pre>`);
+      if (codeLines.length)
+        blocks.push(`<pre><code>${codeLines.map((line) => this.escape(line)).join('\n')}</code></pre>`);
       codeLines = [];
     };
 
@@ -78,12 +80,16 @@ export class MarkdownPipe implements PipeTransform {
   }
 
   private escape(value: string): string {
-    return value.replace(/[&<>"']/g, (character) => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;',
-    })[character] ?? character);
+    return value.replace(
+      /[&<>"']/g,
+      (character) =>
+        ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        })[character] ?? character,
+    );
   }
 }

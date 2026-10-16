@@ -12,7 +12,7 @@ const DOC_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   content: {
     column: 'content',
-    parse: (value: unknown) => typeof value === 'string' && value.length <= MAX_API_CONTENT ? value : INVALID,
+    parse: (value: unknown) => (typeof value === 'string' && value.length <= MAX_API_CONTENT ? value : INVALID),
   },
 };
 
@@ -20,7 +20,13 @@ const clip = (content: string): string => content.slice(0, MAX_STORED_CONTENT);
 
 export async function upsertDoc(
   pool: Pool,
-  doc: { projectSlug: string; kind: 'manual' | 'sprint' | 'repo'; title: string; content: string; sprintId?: string | null },
+  doc: {
+    projectSlug: string;
+    kind: 'manual' | 'sprint' | 'repo';
+    title: string;
+    content: string;
+    sprintId?: string | null;
+  },
 ): Promise<void> {
   await pool.query(
     `INSERT INTO docs (project_slug, kind, title, content, sprint_id) VALUES ($1, $2, $3, $4, $5)
@@ -104,7 +110,10 @@ export function registerDocRoutes(app: Express, pool: Pool): void {
       return;
     }
     await upsertDoc(pool, {
-      projectSlug: slug, kind: 'manual', title: values.get('title') as string, content: (values.get('content') as string) ?? '',
+      projectSlug: slug,
+      kind: 'manual',
+      title: values.get('title') as string,
+      content: (values.get('content') as string) ?? '',
     });
     const result = await pool.query(
       `SELECT ${DOC_COLUMNS} FROM docs WHERE project_slug = $1 AND kind = 'manual' AND title = $2`,

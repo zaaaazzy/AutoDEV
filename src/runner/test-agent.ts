@@ -55,7 +55,10 @@ export function parseTestAgentOptions(args: string[], cwd = process.env.INIT_CWD
     throw new Error('Project must be a lowercase slug containing letters, numbers, and hyphens.');
   }
 
-  let commands: string[][] = [['npm', 'run', 'build'], ['npm', 'test']];
+  let commands: string[][] = [
+    ['npm', 'run', 'build'],
+    ['npm', 'test'],
+  ];
   const commandJson = options.get('--commands');
   if (commandJson) {
     let parsed: unknown;
@@ -64,12 +67,20 @@ export function parseTestAgentOptions(args: string[], cwd = process.env.INIT_CWD
     } catch {
       throw new Error('--commands must be a JSON array of argument arrays.');
     }
-    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 20
-      || parsed.some((command) => !Array.isArray(command)
-        || command.length < 1
-        || command.length > 40
-        || command.some((argument) => typeof argument !== 'string' || argument.length > 500)
-        || typeof command[0] !== 'string' || !command[0])) {
+    if (
+      !Array.isArray(parsed) ||
+      parsed.length < 1 ||
+      parsed.length > 20 ||
+      parsed.some(
+        (command) =>
+          !Array.isArray(command) ||
+          command.length < 1 ||
+          command.length > 40 ||
+          command.some((argument) => typeof argument !== 'string' || argument.length > 500) ||
+          typeof command[0] !== 'string' ||
+          !command[0],
+      )
+    ) {
       throw new Error('--commands must contain 1 to 20 non-empty arrays of command arguments.');
     }
     commands = parsed as string[][];
@@ -100,9 +111,7 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
   const branch = await getGitValue(options.cwd, '--abbrev-ref=HEAD');
   const commitSha = await getGitValue(options.cwd, 'HEAD');
   const projectName = await getProjectName(options.cwd);
-  const repository = process.env.DEV_LOG_REPOSITORY
-    ?? process.env.GITHUB_REPOSITORY
-    ?? options.cwd;
+  const repository = process.env.DEV_LOG_REPOSITORY ?? process.env.GITHUB_REPOSITORY ?? options.cwd;
   if (!options.existingProject) {
     await registerProject(pool, { slug: options.project, name: projectName, repository });
   }
@@ -124,11 +133,19 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       output: '',
     });
     let pid = 0;
-    const abort = (): void => { if (pid) killGroup(pid); };
+    const abort = (): void => {
+      if (pid) killGroup(pid);
+    };
     options.signal?.addEventListener('abort', abort, { once: true });
     const result = options.signal?.aborted
       ? { exitCode: 130, durationMs: 0, output: 'Abgebrochen.' }
-      : await runCommand(command, options.cwd, { timeoutMs: options.timeoutMs, env: options.env, onSpawn: (value) => { pid = value; } });
+      : await runCommand(command, options.cwd, {
+          timeoutMs: options.timeoutMs,
+          env: options.env,
+          onSpawn: (value) => {
+            pid = value;
+          },
+        });
     options.signal?.removeEventListener('abort', abort);
     const safeOutput = redactOutput(result.output, process.env);
     const passed = result.exitCode === 0;

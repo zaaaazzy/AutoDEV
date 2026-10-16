@@ -5,6 +5,8 @@ export function withProjectLock<T>(key: string, task: () => Promise<T>): Promise
   const run = (tails.get(key) ?? Promise.resolve()).catch(() => undefined).then(task);
   const tail = run.catch(() => undefined);
   tails.set(key, tail);
-  void tail.then(() => { if (tails.get(key) === tail) tails.delete(key); });
+  void tail.then(() => {
+    if (tails.get(key) === tail) tails.delete(key);
+  });
   return run;
 }

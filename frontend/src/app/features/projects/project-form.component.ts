@@ -21,20 +21,24 @@ export class ProjectFormComponent {
   readonly saved = output<void>();
 
   protected async createProject(): Promise<void> {
-    await this.store.perform(async () => {
-      const result = await this.api.post<{ project: Project }>('/api/projects', {
-        slug: this.projectForm.slug.trim(),
-        name: this.projectForm.name.trim(),
-        repository: this.projectForm.repository.trim(),
-      });
-      if (this.projectForm.gitRemote.trim()) {
-        await this.api.patch(`/api/projects/${encodeURIComponent(result.project.slug)}`, {
-          gitRemote: this.projectForm.gitRemote.trim(),
+    await this.store.perform(
+      async () => {
+        const result = await this.api.post<{ project: Project }>('/api/projects', {
+          slug: this.projectForm.slug.trim(),
+          name: this.projectForm.name.trim(),
+          repository: this.projectForm.repository.trim(),
         });
-      }
-      this.projectForm = { name: '', slug: '', repository: '', gitRemote: '' };
-      this.saved.emit();
-      await this.store.loadProjects(result.project.slug);
-    }, 'Projekt wurde gespeichert.', false);
+        if (this.projectForm.gitRemote.trim()) {
+          await this.api.patch(`/api/projects/${encodeURIComponent(result.project.slug)}`, {
+            gitRemote: this.projectForm.gitRemote.trim(),
+          });
+        }
+        this.projectForm = { name: '', slug: '', repository: '', gitRemote: '' };
+        this.saved.emit();
+        await this.store.loadProjects(result.project.slug);
+      },
+      'Projekt wurde gespeichert.',
+      false,
+    );
   }
 }

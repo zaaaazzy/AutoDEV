@@ -23,39 +23,59 @@ export async function processChat(
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
   execute: CommandExecutor = runCommand,
 ): Promise<boolean> {
-  const claimed = (await pool.query<{ id: string }>(
-    `UPDATE chat_messages SET status = 'processing', updated_at = clock_timestamp()
+  const claimed = (
+    await pool.query<{ id: string }>(
+      `UPDATE chat_messages SET status = 'processing', updated_at = clock_timestamp()
       WHERE id = (SELECT id FROM chat_messages WHERE project_slug = $1 AND role = 'user' AND status = 'pending'
                    ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING id`,
-    [options.project],
-  )).rows[0];
+      [options.project],
+    )
+  ).rows[0];
   if (!claimed) return false;
   const history = await pool.query<{ role: string; content: string }>(
     `SELECT role, content FROM (SELECT role, content, created_at FROM chat_messages
       WHERE project_slug = $1 AND status <> 'failed' AND NOT (role = 'assistant' AND status = 'processing') ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
-    [options.project, HISTORY_LIMIT]);
-  const progress = await startProgress(pool, options.project,
-    ['Lese die Anfrage und den Projektkontext …', 'Analysiere die Anfrage …', 'Prüfe die Ergebnisse …', 'Fasse die Ergebnisse zusammen …']);
+    [options.project, HISTORY_LIMIT],
+  );
+  const progress = await startProgress(pool, options.project, [
+    'Lese die Anfrage und den Projektkontext …',
+    'Analysiere die Anfrage …',
+    'Prüfe die Ergebnisse …',
+    'Fasse die Ergebnisse zusammen …',
+  ]);
   const { exitCode, output } = await runAuthorAgent(
-    pool, options, () => buildChatPrompt(history.rows), execute, 'assistant', progress.update,
+    pool,
+    options,
+    () => buildChatPrompt(history.rows),
+    execute,
+    'assistant',
+    progress.update,
   ).finally(progress.stop);
   if (isShuttingDown()) {
-    await pool.query(`UPDATE chat_messages SET status = 'pending', updated_at = clock_timestamp() WHERE id = $1`, [claimed.id]);
+    await pool.query(`UPDATE chat_messages SET status = 'pending', updated_at = clock_timestamp() WHERE id = $1`, [
+      claimed.id,
+    ]);
     return true;
   }
   if (exitCode !== 0 || !output) {
-    await pool.query(`UPDATE chat_messages SET status = 'failed', updated_at = clock_timestamp() WHERE id = $1`, [claimed.id]);
-    await pool.query(
-      `INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`,
-      [options.project, `Die Anfrage konnte nicht bearbeitet werden.${output ? `\n${output.slice(0, 500)}` : ''}`]);
+    await pool.query(`UPDATE chat_messages SET status = 'failed', updated_at = clock_timestamp() WHERE id = $1`, [
+      claimed.id,
+    ]);
+    await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`, [
+      options.project,
+      `Die Anfrage konnte nicht bearbeitet werden.${output ? `\n${output.slice(0, 500)}` : ''}`,
+    ]);
     return true;
   }
   const text = output.replace(/^@@TASK\b.*$/gm, '').trim() || 'Erledigt.';
-  await pool.query(`UPDATE chat_messages SET status = 'done', updated_at = clock_timestamp() WHERE id = $1`, [claimed.id]);
-  await pool.query(
-    `INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`,
-    [options.project, text]);
+  await pool.query(`UPDATE chat_messages SET status = 'done', updated_at = clock_timestamp() WHERE id = $1`, [
+    claimed.id,
+  ]);
+  await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`, [
+    options.project,
+    text,
+  ]);
   return true;
 }
 
@@ -63,8 +83,12 @@ export async function processChat(
 export async function rejectChat(pool: Pool, project: string, reason: string): Promise<void> {
   const pending = await pool.query<{ id: string }>(
     `UPDATE chat_messages SET status = 'failed', updated_at = clock_timestamp()
-      WHERE project_slug = $1 AND role = 'user' AND status = 'pending' RETURNING id`, [project]);
+      WHERE project_slug = $1 AND role = 'user' AND status = 'pending' RETURNING id`,
+    [project],
+  );
   if (!pending.rowCount) return;
-  await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`,
-    [project, `Der Assistent kann nicht arbeiten: ${reason}`]);
+  await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`, [
+    project,
+    `Der Assistent kann nicht arbeiten: ${reason}`,
+  ]);
 }

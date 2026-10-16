@@ -2,7 +2,14 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { generateSprintReport } from './reports.js';
 import {
-  buildUpdate, isUuid, parseFields, parseLongText, parseNullableDate, parseOption, parseProjectSlug, parseTitle,
+  buildUpdate,
+  isUuid,
+  parseFields,
+  parseLongText,
+  parseNullableDate,
+  parseOption,
+  parseProjectSlug,
+  parseTitle,
 } from '../core/validation.js';
 
 const SPRINT_STATUSES = new Set(['planned', 'active', 'completed']);
@@ -19,7 +26,9 @@ const SPRINT_FIELDS = {
 };
 
 function databaseCode(error: unknown): string | undefined {
-  return typeof error === 'object' && error !== null && 'code' in error ? String((error as { code: unknown }).code) : undefined;
+  return typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : undefined;
 }
 
 export function registerSprintRoutes(app: Express, pool: Pool): void {
@@ -50,8 +59,14 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
         `INSERT INTO sprints (project_slug, name, goal, status, start_date, end_date)
          VALUES ($1, $2, $3, COALESCE($4, 'planned'), $5, $6)
          RETURNING ${SPRINT_COLUMNS}`,
-        [slug, values.get('name'), values.get('goal') ?? '', values.get('status') ?? null,
-          values.get('start_date') ?? null, values.get('end_date') ?? null],
+        [
+          slug,
+          values.get('name'),
+          values.get('goal') ?? '',
+          values.get('status') ?? null,
+          values.get('start_date') ?? null,
+          values.get('end_date') ?? null,
+        ],
       );
       response.status(201).json({ sprint: result.rows[0] });
     } catch (error) {

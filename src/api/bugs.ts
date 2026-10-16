@@ -1,7 +1,14 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
-  buildUpdate, isUuid, parseFields, parseLongText, parseNullableUuid, parseOption, parseProjectSlug, parseTitle,
+  buildUpdate,
+  isUuid,
+  parseFields,
+  parseLongText,
+  parseNullableUuid,
+  parseOption,
+  parseProjectSlug,
+  parseTitle,
 } from '../core/validation.js';
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -60,9 +67,12 @@ export async function reportAgentBug(
     [bug.projectSlug, title, bug.description.slice(0, 10_000)],
   );
   if (created.rows[0]) return created.rows[0].id;
-  return (await pool.query<{ id: string }>(
-    `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('open', 'in_progress') ORDER BY created_at LIMIT 1`,
-    [bug.projectSlug, title])).rows[0]!.id;
+  return (
+    await pool.query<{ id: string }>(
+      `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('open', 'in_progress') ORDER BY created_at LIMIT 1`,
+      [bug.projectSlug, title],
+    )
+  ).rows[0]!.id;
 }
 
 export interface KnownBug {
@@ -146,7 +156,13 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
       }
     }
     const withFixDate = fields.some((field) => field.column === 'status')
-      ? [...fields, { column: 'fixed_at', value: fields.find((field) => field.column === 'status')?.value === 'fixed' ? new Date() : null }]
+      ? [
+          ...fields,
+          {
+            column: 'fixed_at',
+            value: fields.find((field) => field.column === 'status')?.value === 'fixed' ? new Date() : null,
+          },
+        ]
       : fields;
     const update = buildUpdate('bugs', request.params.id, withFixDate, BUG_COLUMNS);
     const result = await pool.query(update.sql, update.values);

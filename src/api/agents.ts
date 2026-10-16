@@ -1,10 +1,29 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
-  buildUpdate, isRecord, isUuid, parseBoolean, parseCommand, parseFields, parseLongText, parseOption, parseProjectSlug, parseTitle,
+  buildUpdate,
+  isRecord,
+  isUuid,
+  parseBoolean,
+  parseCommand,
+  parseFields,
+  parseLongText,
+  parseOption,
+  parseProjectSlug,
+  parseTitle,
 } from '../core/validation.js';
 
-const ROLES = new Set(['author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer', 'custom']);
+const ROLES = new Set([
+  'author',
+  'developer',
+  'tester',
+  'reviewer',
+  'documenter',
+  'bug_reviewer',
+  'manual_writer',
+  'user_manual_writer',
+  'custom',
+]);
 const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
 const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command`;
 const AGENT_FIELDS = {
@@ -18,32 +37,53 @@ const AGENT_FIELDS = {
 
 export const DEFAULT_AGENTS = [
   {
-    name: 'Auftragsautor', role: 'author', phase: 'pre_task',
-    instructions: 'Beschreibt den Auftrag aus der Idee: Ziel, Anforderungen, Akzeptanzkriterien, betroffene Dateien. Diagramme (Mermaid) und ein ERM sind erwünscht, wenn sie das Verständnis verbessern.',
+    name: 'Auftragsautor',
+    role: 'author',
+    phase: 'pre_task',
+    instructions:
+      'Beschreibt den Auftrag aus der Idee: Ziel, Anforderungen, Akzeptanzkriterien, betroffene Dateien. Diagramme (Mermaid) und ein ERM sind erwünscht, wenn sie das Verständnis verbessern.',
   },
   {
-    name: 'Bug-Wächter', role: 'bug_reviewer', phase: 'pre_task',
-    instructions: 'Prüft alle bisherigen Bugs, nennt die im selben Kontext wie der Auftrag und beschreibt, was dabei nicht wiederholt werden darf. Das Ergebnis erscheint beim Auftrag unter Risiken.',
+    name: 'Bug-Wächter',
+    role: 'bug_reviewer',
+    phase: 'pre_task',
+    instructions:
+      'Prüft alle bisherigen Bugs, nennt die im selben Kontext wie der Auftrag und beschreibt, was dabei nicht wiederholt werden darf. Das Ergebnis erscheint beim Auftrag unter Risiken.',
   },
   {
-    name: 'Entwickler', role: 'developer', phase: 'while_task',
-    instructions: 'Setzt den Auftrag um. Nutzt Projektbeschreibung, Leitlinien, Risiken und alle Vorarbeiten. Hält die Leitlinien ein und dokumentiert, was geändert wurde.',
+    name: 'Entwickler',
+    role: 'developer',
+    phase: 'while_task',
+    instructions:
+      'Setzt den Auftrag um. Nutzt Projektbeschreibung, Leitlinien, Risiken und alle Vorarbeiten. Hält die Leitlinien ein und dokumentiert, was geändert wurde.',
   },
   {
-    name: 'Tester', role: 'tester', phase: 'after_task',
-    instructions: 'Entwickelt anhand der Angaben des Entwicklers die Tests, führt Build und Tests aus und meldet Fehler als Bug.',
+    name: 'Tester',
+    role: 'tester',
+    phase: 'after_task',
+    instructions:
+      'Entwickelt anhand der Angaben des Entwicklers die Tests, führt Build und Tests aus und meldet Fehler als Bug.',
   },
   {
-    name: 'Dokumentierer', role: 'documenter', phase: 'after_task',
-    instructions: 'Dokumentiert das Ergebnis des Auftrags: Was wurde umgesetzt, welche Dateien wurden geändert, worauf ist zu achten.',
+    name: 'Dokumentierer',
+    role: 'documenter',
+    phase: 'after_task',
+    instructions:
+      'Dokumentiert das Ergebnis des Auftrags: Was wurde umgesetzt, welche Dateien wurden geändert, worauf ist zu achten.',
   },
   {
-    name: 'Handbuch-Autor', role: 'manual_writer', phase: 'after_task',
-    instructions: 'Pflegt das technische Handbuch von A bis Z: Zweck, Architektur, Konfiguration, Betrieb. Gibt das vollständige, aktualisierte Handbuch in Markdown aus.',
+    name: 'Handbuch-Autor',
+    role: 'manual_writer',
+    phase: 'after_task',
+    instructions:
+      'Pflegt das technische Handbuch von A bis Z: Zweck, Architektur, Konfiguration, Betrieb. Gibt das vollständige, aktualisierte Handbuch in Markdown aus.',
   },
   {
-    name: 'Benutzerhandbuch-Autor', role: 'user_manual_writer', phase: 'after_task',
-    instructions: 'Pflegt das Benutzerhandbuch für Anwender: Bedienung Schritt für Schritt, ohne Technik-Jargon. Gibt das vollständige, aktualisierte Benutzerhandbuch in Markdown aus.',
+    name: 'Benutzerhandbuch-Autor',
+    role: 'user_manual_writer',
+    phase: 'after_task',
+    instructions:
+      'Pflegt das Benutzerhandbuch für Anwender: Bedienung Schritt für Schritt, ohne Technik-Jargon. Gibt das vollständige, aktualisierte Benutzerhandbuch in Markdown aus.',
   },
 ] as const;
 
@@ -58,8 +98,13 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
        FROM claim,
             unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS d(name, role, phase, instructions, ord)
       WHERE NOT EXISTS (SELECT 1 FROM agents WHERE project_slug = claim.slug)`,
-    [slug, DEFAULT_AGENTS.map((agent) => agent.name), DEFAULT_AGENTS.map((agent) => agent.role),
-      DEFAULT_AGENTS.map((agent) => agent.phase), DEFAULT_AGENTS.map((agent) => agent.instructions)],
+    [
+      slug,
+      DEFAULT_AGENTS.map((agent) => agent.name),
+      DEFAULT_AGENTS.map((agent) => agent.role),
+      DEFAULT_AGENTS.map((agent) => agent.phase),
+      DEFAULT_AGENTS.map((agent) => agent.instructions),
+    ],
   );
 }
 
@@ -92,8 +137,15 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
        SELECT $1, $2, COALESCE($3, 'custom'), $4, COALESCE(MAX(position), 0) + 1, $5, COALESCE($6, TRUE), $7
          FROM agents WHERE project_slug = $1 AND phase = $4
        RETURNING ${AGENT_COLUMNS}`,
-      [slug, values.get('name'), values.get('role') ?? null, values.get('phase'),
-        values.get('instructions') ?? '', values.get('enabled') ?? null, values.get('command') ?? null],
+      [
+        slug,
+        values.get('name'),
+        values.get('role') ?? null,
+        values.get('phase'),
+        values.get('instructions') ?? '',
+        values.get('enabled') ?? null,
+        values.get('command') ?? null,
+      ],
     );
     response.status(201).json({ agent: result.rows[0] });
   });
@@ -110,8 +162,13 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
          FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS d(name, role, phase, instructions, ord)
         WHERE NOT EXISTS (SELECT 1 FROM agents WHERE project_slug = $1)
        RETURNING ${AGENT_COLUMNS}`,
-      [slug, DEFAULT_AGENTS.map((agent) => agent.name), DEFAULT_AGENTS.map((agent) => agent.role),
-        DEFAULT_AGENTS.map((agent) => agent.phase), DEFAULT_AGENTS.map((agent) => agent.instructions)],
+      [
+        slug,
+        DEFAULT_AGENTS.map((agent) => agent.name),
+        DEFAULT_AGENTS.map((agent) => agent.role),
+        DEFAULT_AGENTS.map((agent) => agent.phase),
+        DEFAULT_AGENTS.map((agent) => agent.instructions),
+      ],
     );
     response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
   });
@@ -119,8 +176,15 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
   app.post('/api/projects/:slug/agents/order', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
-    if (!slug || !isRecord(body) || typeof body.phase !== 'string' || !PHASES.has(body.phase)
-      || !Array.isArray(body.ids) || body.ids.length > 100 || !body.ids.every(isUuid)) {
+    if (
+      !slug ||
+      !isRecord(body) ||
+      typeof body.phase !== 'string' ||
+      !PHASES.has(body.phase) ||
+      !Array.isArray(body.ids) ||
+      body.ids.length > 100 ||
+      !body.ids.every(isUuid)
+    ) {
       response.status(400).json({ message: 'Invalid agent order.' });
       return;
     }

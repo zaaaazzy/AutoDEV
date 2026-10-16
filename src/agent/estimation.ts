@@ -14,7 +14,7 @@ interface Estimate {
 const number = (value: unknown, min: number, max: number): number | null =>
   typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max ? value : null;
 
-const round = (value: number | null): number | null => value === null ? null : Math.round(value);
+const round = (value: number | null): number | null => (value === null ? null : Math.round(value));
 
 /** Reads the first JSON object of an agent answer; invalid values become null. */
 export function parseEstimate(output: string): Estimate | null {
@@ -40,22 +40,33 @@ export async function estimateIdeas(
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
   execute?: CommandExecutor,
 ): Promise<number> {
-  const ideas = (await pool.query<{ id: string; title: string; description: string }>(
-    `UPDATE ideation_items SET estimated_at = NOW()
+  const ideas = (
+    await pool.query<{ id: string; title: string; description: string }>(
+      `UPDATE ideation_items SET estimated_at = NOW()
       WHERE id IN (SELECT id FROM ideation_items WHERE project_slug = $1 AND estimated_at IS NULL
                     ORDER BY created_at LIMIT 5 FOR UPDATE SKIP LOCKED)
       RETURNING id, title, description`,
-    [options.project],
-  )).rows;
+      [options.project],
+    )
+  ).rows;
   for (const idea of ideas) {
     console.info(`[idea ${idea.id}] Aufwand schätzen`);
-    const { exitCode, output } = await runAuthorAgent(pool, options, () => [
-      'Schätze Aufwand und Kosten der folgenden Idee. Ändere nichts am Projekt.',
-      `Titel: ${idea.title}\n${idea.description}`,
-      'Antworte ausschließlich mit einem JSON-Objekt: {"effortHours": Stunden, "tokenEstimate": Tokens, "benefit": 0-10, "cost": 0-10}.',
-    ].join('\n\n'), execute);
+    const { exitCode, output } = await runAuthorAgent(
+      pool,
+      options,
+      () =>
+        [
+          'Schätze Aufwand und Kosten der folgenden Idee. Ändere nichts am Projekt.',
+          `Titel: ${idea.title}\n${idea.description}`,
+          'Antworte ausschließlich mit einem JSON-Objekt: {"effortHours": Stunden, "tokenEstimate": Tokens, "benefit": 0-10, "cost": 0-10}.',
+        ].join('\n\n'),
+      execute,
+    );
     if (isShuttingDown()) {
-      await pool.query(`UPDATE ideation_items SET estimated_at = NULL WHERE id = ANY($1::uuid[]) AND effort_hours IS NULL`, [ideas.map((item) => item.id)]);
+      await pool.query(
+        `UPDATE ideation_items SET estimated_at = NULL WHERE id = ANY($1::uuid[]) AND effort_hours IS NULL`,
+        [ideas.map((item) => item.id)],
+      );
       break;
     }
     const estimate = exitCode === 0 ? parseEstimate(output) : null;

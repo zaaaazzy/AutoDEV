@@ -14,12 +14,21 @@ export const DEFAULT_OLLAMA_URL = 'http://127.0.0.1:11434';
 export const DEFAULT_OLLAMA_MODEL = 'qwen3.5:9b';
 export const BACKUP_DIRECTORY = '.dev-log-backups';
 
-const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', 'dist', '.angular', BACKUP_DIRECTORY, '.cache', 'coverage']);
+const SKIPPED_DIRECTORIES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  '.angular',
+  BACKUP_DIRECTORY,
+  '.cache',
+  'coverage',
+]);
 const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
 const MAX_TOOL_OUTPUT = 8_000;
 const MAX_FILE_BYTES = 400_000;
 const WRITE_ROLES = new Set(['developer', 'assistant']);
-const COMMAND_PATTERN = /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
+const COMMAND_PATTERN =
+  /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
 const SERVICE_NAME = '[a-zA-Z0-9][\\w.-]*';
 const ASSISTANT_SERVICE_PATTERNS = [
   new RegExp(`^docker compose (?:ps|config --services)$`),
@@ -43,7 +52,17 @@ export function isAssistantServiceCommand(command: string): boolean {
 const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)/i;
 const SECRET_IN_COMMAND = /\.env|\.pem\b|\.key\b|id_(?:rsa|ed25519|ecdsa)/i;
 const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
-const INSTALL_FLAGS = new Set(['--save', '--save-dev', '-D', '--save-exact', '-E', '--legacy-peer-deps', '--no-audit', '--no-fund', '--ignore-scripts']);
+const INSTALL_FLAGS = new Set([
+  '--save',
+  '--save-dev',
+  '-D',
+  '--save-exact',
+  '-E',
+  '--legacy-peer-deps',
+  '--no-audit',
+  '--no-fund',
+  '--ignore-scripts',
+]);
 const SAFE_COMMANDS = [
   /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev))*$/,
   /^npm (?:ci|install|i)(?: (?:--(?:legacy-peer-deps|no-audit|no-fund|ignore-scripts|omit=dev|production)|-[DE]))*$/,
@@ -51,14 +70,15 @@ const SAFE_COMMANDS = [
   /^npx --no-install (?:tsc --noEmit|eslint [\w./*-]+|prettier --check [\w./*-]+|jest|vitest run)$/,
 ];
 
-const READ_COMMAND = /^(?:git (?:status|log|diff|show|branch|remote -v|ls-files)(?: (?:--oneline|--stat|--graph|--decorate|--name-only|--name-status|--short|--all|-\d+|--max-count=\d+|[\w@:./~^][\w@:./=~^-]*))*|npm (?:ls|list|outdated)(?: --(?:depth=\d|json))*|node --version)$/;
+const READ_COMMAND =
+  /^(?:git (?:status|log|diff|show|branch|remote -v|ls-files)(?: (?:--oneline|--stat|--graph|--decorate|--name-only|--name-status|--short|--all|-\d+|--max-count=\d+|[\w@:./~^][\w@:./=~^-]*))*|npm (?:ls|list|outdated)(?: --(?:depth=\d|json))*|node --version)$/;
 
 /** Erlaubt feste, ungefährliche Befehle; `npm install <paket>` nur mit geprüften Paketnamen und Schaltern (kein -g, keine URLs). */
 export function isAllowedCommand(command: string): boolean {
   if (COMMAND_PATTERN.test(command) || READ_COMMAND.test(command)) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'npm' && ['install', 'i', 'uninstall'].includes(parts[1] ?? '') && parts.length > 2) {
-    return parts.slice(2).every((part) => part.startsWith('-') ? INSTALL_FLAGS.has(part) : PACKAGE_SPEC.test(part));
+    return parts.slice(2).every((part) => (part.startsWith('-') ? INSTALL_FLAGS.has(part) : PACKAGE_SPEC.test(part)));
   }
   return SAFE_COMMANDS.some((pattern) => pattern.test(command));
 }
@@ -76,15 +96,24 @@ export function composeViolation(configJson: string, root: string): string | nul
   const inside = (path: unknown): boolean => typeof path === 'string' && (path === root || path.startsWith(root + sep));
   for (const [name, service] of Object.entries(config.services ?? {})) {
     if (service.privileged === true) return `Dienst "${name}" ist privilegiert.`;
-    if (['host'].includes(String(service.network_mode)) || service.pid === 'host' || service.ipc === 'host' || service.userns_mode === 'host') {
+    if (
+      ['host'].includes(String(service.network_mode)) ||
+      service.pid === 'host' ||
+      service.ipc === 'host' ||
+      service.userns_mode === 'host'
+    ) {
       return `Dienst "${name}" nutzt den Host-Namensraum.`;
     }
-    if (Array.isArray(service.cap_add) && service.cap_add.length) return `Dienst "${name}" fordert zusätzliche Capabilities an.`;
+    if (Array.isArray(service.cap_add) && service.cap_add.length)
+      return `Dienst "${name}" fordert zusätzliche Capabilities an.`;
     if (Array.isArray(service.devices) && service.devices.length) return `Dienst "${name}" bindet Geräte ein.`;
     const build = service.build;
     const context = typeof build === 'string' ? build : (build as { context?: unknown } | undefined)?.context;
-    if (context !== undefined && !inside(context)) return `Build-Kontext von "${name}" liegt außerhalb des Projektordners.`;
-    for (const volume of Array.isArray(service.volumes) ? service.volumes as { type?: string; source?: unknown }[] : []) {
+    if (context !== undefined && !inside(context))
+      return `Build-Kontext von "${name}" liegt außerhalb des Projektordners.`;
+    for (const volume of Array.isArray(service.volumes)
+      ? (service.volumes as { type?: string; source?: unknown }[])
+      : []) {
       if (volume.type === 'bind' && !inside(volume.source)) {
         return `Dienst "${name}" bindet ${String(volume.source)} außerhalb des Projektordners ein.`;
       }
@@ -96,7 +125,7 @@ export function composeViolation(configJson: string, root: string): string | nul
 const DEFAULT_CONTEXT = 16_384;
 const DEVELOPER_CONTEXT = 32_768;
 const RETRY_DELAYS_MS = [3_000, 9_000];
-const retryDelays = (): number[] => process.env.DEV_LOG_OLLAMA_RETRY_MS === '0' ? [] : RETRY_DELAYS_MS;
+const retryDelays = (): number[] => (process.env.DEV_LOG_OLLAMA_RETRY_MS === '0' ? [] : RETRY_DELAYS_MS);
 
 /** Modell pro Rolle: DEV_LOG_OLLAMA_MODEL_<ROLLE> (z. B. _DEVELOPER) vor DEV_LOG_OLLAMA_MODEL vor Standard. */
 export function resolveModel(role: string, environment: NodeJS.ProcessEnv = process.env): string {
@@ -140,35 +169,49 @@ interface ChatMessage {
 const clip = (text: string, max = MAX_TOOL_OUTPUT): string =>
   text.length > max ? `${text.slice(0, max)}\n[gekürzt, ${text.length - max} Zeichen]` : text;
 
-const parameter = (description: string, type = 'string'): { type: string; description: string } => ({ type, description });
+const parameter = (description: string, type = 'string'): { type: string; description: string } => ({
+  type,
+  description,
+});
 
 function toolDefinitions(canWrite: boolean, canManageServices = false): unknown[] {
   const tools: { name: string; description: string; properties: Record<string, unknown>; required: string[] }[] = [
     {
-      name: 'list_files', description: 'Listet Dateien und Ordner eines Verzeichnisses (Ordner enden mit /).',
-      properties: { path: parameter('Relativer Pfad, "." für das Projektverzeichnis') }, required: ['path'],
-    },
-    {
-      name: 'read_file', description: 'Liest eine Textdatei (optional ab Zeile start_line, max. 300 Zeilen).',
-      properties: { path: parameter('Relativer Dateipfad'), start_line: parameter('Erste Zeile (1-basiert)', 'integer') },
+      name: 'list_files',
+      description: 'Listet Dateien und Ordner eines Verzeichnisses (Ordner enden mit /).',
+      properties: { path: parameter('Relativer Pfad, "." für das Projektverzeichnis') },
       required: ['path'],
     },
     {
-      name: 'search_text', description: 'Sucht einen Text (ohne Regex) in allen Textdateien unterhalb eines Pfads.',
-      properties: { query: parameter('Suchtext'), path: parameter('Relativer Startpfad, Standard ".".') }, required: ['query'],
+      name: 'read_file',
+      description: 'Liest eine Textdatei (optional ab Zeile start_line, max. 300 Zeilen).',
+      properties: {
+        path: parameter('Relativer Dateipfad'),
+        start_line: parameter('Erste Zeile (1-basiert)', 'integer'),
+      },
+      required: ['path'],
+    },
+    {
+      name: 'search_text',
+      description: 'Sucht einen Text (ohne Regex) in allen Textdateien unterhalb eines Pfads.',
+      properties: { query: parameter('Suchtext'), path: parameter('Relativer Startpfad, Standard ".".') },
+      required: ['query'],
     },
   ];
   if (canWrite) {
     tools.push(
       {
-        name: 'write_file', description: 'Schreibt eine Datei vollständig (legt fehlende Ordner an, sichert das Original).',
+        name: 'write_file',
+        description: 'Schreibt eine Datei vollständig (legt fehlende Ordner an, sichert das Original).',
         properties: { path: parameter('Relativer Dateipfad'), content: parameter('Vollständiger neuer Inhalt') },
         required: ['path', 'content'],
       },
       {
-        name: 'replace_in_file', description: 'Ersetzt genau eine Textstelle in einer Datei.',
+        name: 'replace_in_file',
+        description: 'Ersetzt genau eine Textstelle in einer Datei.',
         properties: {
-          path: parameter('Relativer Dateipfad'), old_text: parameter('Exakter bisheriger Text (muss genau einmal vorkommen)'),
+          path: parameter('Relativer Dateipfad'),
+          old_text: parameter('Exakter bisheriger Text (muss genau einmal vorkommen)'),
           new_text: parameter('Neuer Text'),
         },
         required: ['path', 'old_text', 'new_text'],
@@ -176,7 +219,8 @@ function toolDefinitions(canWrite: boolean, canManageServices = false): unknown[
       {
         name: 'run_command',
         description: `Führt erlaubte Projektbefehle aus (npm test/run/ls, git status/diff/log${canManageServices ? ', docker compose ps/logs/up -d/stop/down/restart/build, git clone/pull, npm install' : ''}).`,
-        properties: { command: parameter('z. B. "npm run build", "npm test" oder "docker compose ps"') }, required: ['command'],
+        properties: { command: parameter('z. B. "npm run build", "npm test" oder "docker compose ps"') },
+        required: ['command'],
       },
     );
   }
@@ -199,8 +243,8 @@ function systemPrompt(role: string, canWrite: boolean): string {
     role === 'assistant'
       ? 'Du darfst Dateien mit write_file/replace_in_file ändern und sichere Projektbefehle ausführen. Alle Dateioperationen bleiben auf das Projektverzeichnis begrenzt; .env, Schlüssel, node_modules und .git sind gesperrt. Führe bei Problemen zuerst Diagnose und dann eine gezielte, nachvollziehbare Behebung samt passenden Tests aus. Du darfst Dienste per docker compose (ps, logs, up -d [--build], stop, start, restart, down, build) verwalten und Umgebungen aufsetzen: Repository mit "git clone <https-URL> <Unterordner oder .>" ins Projektverzeichnis holen, Abhängigkeiten mit npm install installieren, Konfiguration (z. B. docker-compose.yml, README-Vorgaben) prüfen und anlegen, Dienste starten und per docker compose ps/logs verifizieren. Befolge die Vorgaben des Nutzers Schritt für Schritt und melde jeden Schritt. Beantworte alle Anfragen direkt und delegiere nicht. Erstelle niemals Aufträge oder @@TASK-Zeilen.'
       : canWrite
-      ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und installiere fehlende Abhängigkeiten mit run_command ("npm install"), prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
-      : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
+        ? 'Du darfst Dateien mit write_file/replace_in_file ändern. Halte Änderungen klein, passe vorhandenen Stil an, schreibe Tests und installiere fehlende Abhängigkeiten mit run_command ("npm install"), prüfe mit run_command ("npm run build", "npm test"). Beende die Arbeit mit einer kurzen Zusammenfassung der Änderungen. Ist der Auftrag nachweislich bereits vollständig umgesetzt, beginne die Antwort mit "KEINE ÄNDERUNG NÖTIG:" und nenne die geprüften Dateien als Beleg.'
+        : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
     'Antworte auf Deutsch.',
   ].join('\n');
 }
@@ -218,9 +262,18 @@ async function resolveInside(cwd: string, requested: unknown, forWrite = false):
     throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
   }
   const parts = rel.split(sep).filter(Boolean);
-  if (parts.some((part) => part === '.git' || part === 'node_modules' || part === BACKUP_DIRECTORY
-    || part.toLowerCase() === '.git' || part.toLowerCase() === BACKUP_DIRECTORY || part.toLowerCase() === 'node_modules'
-    || SECRET_NAME.test(part))) {
+  if (
+    parts.some(
+      (part) =>
+        part === '.git' ||
+        part === 'node_modules' ||
+        part === BACKUP_DIRECTORY ||
+        part.toLowerCase() === '.git' ||
+        part.toLowerCase() === BACKUP_DIRECTORY ||
+        part.toLowerCase() === 'node_modules' ||
+        SECRET_NAME.test(part),
+    )
+  ) {
     throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
   }
   // Resolve symlinks of the nearest existing ancestor so they cannot point outside the project.
@@ -292,7 +345,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         const directory = await resolveInside(context.cwd, args.path ?? '.');
         const entries = (await readdir(directory, { withFileTypes: true }))
           .filter((entry) => !SKIPPED_DIRECTORIES.has(entry.name) && !SECRET_NAME.test(entry.name))
-          .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name)).sort();
+          .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+          .sort();
         return clip(entries.join('\n') || '(leer)');
       }
       case 'read_file': {
@@ -303,7 +357,9 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         const start = Math.max(1, Number(args.start_line ?? 1) || 1);
         const lines = (await readFile(file, 'utf8')).split('\n');
         const slice = lines.slice(start - 1, start - 1 + 300);
-        return clip(`${slice.join('\n')}${start - 1 + 300 < lines.length ? `\n[weitere Zeilen ab ${start + 300}]` : ''}`);
+        return clip(
+          `${slice.join('\n')}${start - 1 + 300 < lines.length ? `\n[weitere Zeilen ab ${start + 300}]` : ''}`,
+        );
       }
       case 'search_text': {
         if (typeof args.query !== 'string' || args.query.length < 2) {
@@ -342,7 +398,11 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return `old_text kommt ${occurrences}-mal vor, erwartet genau 1.`;
         }
         await backup(context, target);
-        await writeFile(target, content.replace(args.old_text, () => args.new_text as string), 'utf8');
+        await writeFile(
+          target,
+          content.replace(args.old_text, () => args.new_text as string),
+          'utf8',
+        );
         context.changed.add(relative(await realpath(context.cwd), target));
         return 'Ersetzt.';
       }
@@ -360,17 +420,23 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         const root = await realpath(context.cwd);
         return withProjectLock(root, async () => {
           if (COMPOSE_STARTING.test(command)) {
-            const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, { timeoutMs: 60_000 });
-            const reason = check.exitCode === 0
-              ? composeViolation(check.output, await realpath(context.cwd))
-              : `docker compose config schlug fehl: ${check.output.slice(-300)}`;
-            if (reason) return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
+            const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, {
+              timeoutMs: 60_000,
+            });
+            const reason =
+              check.exitCode === 0
+                ? composeViolation(check.output, await realpath(context.cwd))
+                : `docker compose config schlug fehl: ${check.output.slice(-300)}`;
+            if (reason)
+              return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
           }
           const result = await context.execute(command.split(/\s+/), context.cwd, {
             timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
             env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_'))),
           });
-          return clip(`Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`);
+          return clip(
+            `Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`,
+          );
         });
       }
       default:
@@ -391,7 +457,9 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const fetchImpl = options.fetchImpl ?? patientFetch;
   const canWrite = WRITE_ROLES.has(options.role);
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
-  const maxTurns = options.maxTurns ?? (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
+  const maxTurns =
+    options.maxTurns ??
+    (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
   const context: ToolContext = {
     cwd: options.cwd,
     canWrite,
@@ -402,7 +470,9 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     timeoutMs: options.timeoutMs,
   };
   const finish = (exitCode: number, text: string): CommandResult => {
-    const files = context.changed.size ? `\n\nGeänderte Dateien:\n${[...context.changed].map((file) => `- ${file}`).join('\n')}` : '';
+    const files = context.changed.size
+      ? `\n\nGeänderte Dateien:\n${[...context.changed].map((file) => `- ${file}`).join('\n')}`
+      : '';
     return { exitCode, durationMs: Date.now() - startedAt, output: `${text}${files}` };
   };
 
@@ -419,19 +489,33 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     for (let turn = 0; turn < maxTurns; turn += 1) {
       const lastTurn = turn === maxTurns - 1;
       if (lastTurn && !canWrite) {
-        messages.push({ role: 'user', content: 'Das Schrittbudget ist aufgebraucht. Antworte jetzt ohne weitere Werkzeuge mit deinem Ergebnis auf Basis des bisher Gelesenen.' });
+        messages.push({
+          role: 'user',
+          content:
+            'Das Schrittbudget ist aufgebraucht. Antworte jetzt ohne weitere Werkzeuge mit deinem Ergebnis auf Basis des bisher Gelesenen.',
+        });
       } else if (turn === maxTurns - 4 && canWrite) {
-        messages.push({ role: 'user', content: 'Hinweis: Nur noch wenige Schritte übrig. Schließe die Änderung jetzt ab, prüfe sie kurz und fasse zusammen.' });
+        messages.push({
+          role: 'user',
+          content:
+            'Hinweis: Nur noch wenige Schritte übrig. Schließe die Änderung jetzt ab, prüfe sie kurz und fasse zusammen.',
+        });
       }
-      const request = (): Promise<Response> => fetchImpl(`${baseUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model, messages, tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, context.canManageServices), stream: false, think: false, keep_alive: keepAlive,
-          options: { num_ctx: contextSize, temperature: 0.2 },
-        }),
-      });
+      const request = (): Promise<Response> =>
+        fetchImpl(`${baseUrl}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            model,
+            messages,
+            tools: lastTurn && !canWrite ? undefined : toolDefinitions(canWrite, context.canManageServices),
+            stream: false,
+            think: false,
+            keep_alive: keepAlive,
+            options: { num_ctx: contextSize, temperature: 0.2 },
+          }),
+        });
       // Kurze Verbindungsabbrüche (z. B. Modellwechsel oder Laden in Ollama) werden mit wachsender Wartezeit wiederholt.
       let response: Response | undefined;
       for (let attempt = 0; response === undefined; attempt += 1) {
@@ -446,7 +530,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
       if (!response.ok) {
         return finish(1, `Ollama antwortete mit ${response.status}: ${(await response.text()).slice(0, 500)}`);
       }
-      const body = await response.json() as { message?: ChatMessage };
+      const body = (await response.json()) as { message?: ChatMessage };
       const message = body.message;
       if (!message) {
         return finish(1, 'Ollama lieferte keine Nachricht.');
@@ -485,13 +569,19 @@ function describeToolCall(call: ToolCall): string {
   const { name, arguments: args } = call.function;
   const path = typeof args.path === 'string' ? args.path : '.';
   switch (name) {
-    case 'list_files': return `Lese Ordner: ${path}`;
-    case 'read_file': return `Lese Datei: ${path}`;
-    case 'search_text': return `Suche im Projekt: ${(typeof args.query === 'string' ? args.query : '').slice(0, 80)}`;
+    case 'list_files':
+      return `Lese Ordner: ${path}`;
+    case 'read_file':
+      return `Lese Datei: ${path}`;
+    case 'search_text':
+      return `Suche im Projekt: ${(typeof args.query === 'string' ? args.query : '').slice(0, 80)}`;
     case 'write_file':
-    case 'replace_in_file': return `Ändere Datei: ${path}`;
-    case 'run_command': return `Führe aus: ${(typeof args.command === 'string' ? args.command : '').slice(0, 100)}`;
-    default: return 'Untersuche das Projekt …';
+    case 'replace_in_file':
+      return `Ändere Datei: ${path}`;
+    case 'run_command':
+      return `Führe aus: ${(typeof args.command === 'string' ? args.command : '').slice(0, 100)}`;
+    default:
+      return 'Untersuche das Projekt …';
   }
 }
 

@@ -54,10 +54,14 @@ export class DocsComponent {
   }
 
   protected async saveDocument(doc: DocumentEntry, values: FormValues): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/docs/${encodeURIComponent(doc.id)}`, {
-      title: String(values['title'] ?? ''),
-      content: String(values['content'] ?? ''),
-    }), 'Dokument gespeichert.');
+    await this.store.perform(
+      () =>
+        this.api.patch(`/api/docs/${encodeURIComponent(doc.id)}`, {
+          title: String(values['title'] ?? ''),
+          content: String(values['content'] ?? ''),
+        }),
+      'Dokument gespeichert.',
+    );
   }
 
   protected async deleteDocument(id: string): Promise<void> {

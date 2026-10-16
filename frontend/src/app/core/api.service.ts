@@ -50,12 +50,15 @@ export class ApiService {
       return await firstValueFrom(this.http.request<T>(method, `${this.basePath}${path}`, { body }));
     } catch (error) {
       if (error instanceof HttpErrorResponse) {
-        const message = typeof error.error === 'object' && error.error !== null
-          && 'message' in error.error && typeof error.error.message === 'string'
-          ? error.error.message
-          : error.status === 0
-            ? 'Dev Log ist nicht erreichbar. Prüfe, ob der Server läuft, und lade die Seite neu.'
-            : `Anfrage fehlgeschlagen (${error.status}).`;
+        const message =
+          typeof error.error === 'object' &&
+          error.error !== null &&
+          'message' in error.error &&
+          typeof error.error.message === 'string'
+            ? error.error.message
+            : error.status === 0
+              ? 'Dev Log ist nicht erreichbar. Prüfe, ob der Server läuft, und lade die Seite neu.'
+              : `Anfrage fehlgeschlagen (${error.status}).`;
         throw new Error(message, { cause: error });
       }
       throw error;

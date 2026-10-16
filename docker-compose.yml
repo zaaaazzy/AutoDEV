@@ -19,13 +19,14 @@ services:
   dev-log:
     build: .
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     restart: unless-stopped
     environment:
       PORT: 3100
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/dev_log
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
-      DEV_LOG_AUTH: ${DEV_LOG_AUTH:-off}
+      DEV_LOG_AUTH: ${DEV_LOG_AUTH:-on}
+      DEV_LOG_HOST: 0.0.0.0
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
     depends_on:

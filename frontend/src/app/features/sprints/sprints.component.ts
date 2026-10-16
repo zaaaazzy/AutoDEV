@@ -50,7 +50,9 @@ export class SprintsComponent {
 
   protected githubBase(): string | null {
     const remote = this.store.currentProject()?.gitRemote?.trim();
-    const match = remote?.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+\/[^\s]+?)(?:\.git)?\/?$/);
+    const match = remote?.match(
+      /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+\/[^\s]+?)(?:\.git)?\/?$/,
+    );
     return match ? `https://github.com/${match[1]}` : null;
   }
 
@@ -69,7 +71,10 @@ export class SprintsComponent {
   }
 
   protected async updateSprint(id: string, values: Partial<Sprint>): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/sprints/${encodeURIComponent(id)}`, values), 'Sprint aktualisiert.');
+    await this.store.perform(
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}`, values),
+      'Sprint aktualisiert.',
+    );
   }
 
   protected async deleteSprint(id: string): Promise<void> {
@@ -78,14 +83,23 @@ export class SprintsComponent {
   }
 
   protected async retryGitSync(id: string): Promise<void> {
-    await this.store.perform(() => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`), 'Git-Sicherung wird erneut ausgeführt.');
+    await this.store.perform(
+      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`),
+      'Git-Sicherung wird erneut ausgeführt.',
+    );
   }
 
   protected async refreshReport(id: string): Promise<void> {
-    await this.store.perform(() => this.api.post(`/api/sprints/${encodeURIComponent(id)}/report`), 'Sprintbericht aktualisiert.');
+    await this.store.perform(
+      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/report`),
+      'Sprintbericht aktualisiert.',
+    );
   }
 
   protected async saveReportNotes(id: string, notes: string): Promise<void> {
-    await this.store.perform(() => this.api.patch(`/api/sprints/${encodeURIComponent(id)}/report`, { notes }), 'Sprintbericht-Notizen gespeichert.');
+    await this.store.perform(
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}/report`, { notes }),
+      'Sprintbericht-Notizen gespeichert.',
+    );
   }
 }

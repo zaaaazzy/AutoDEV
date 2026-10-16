@@ -7,12 +7,14 @@ const counts = (rows: CountRow[]): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
 
 async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unknown> | null> {
-  const active = (await pool.query<{ id: string; name: string; startDate: string; endDate: string | null }>(
-    `SELECT id, name, to_char(COALESCE(start_date, created_at::date), 'YYYY-MM-DD') AS "startDate",
+  const active = (
+    await pool.query<{ id: string; name: string; startDate: string; endDate: string | null }>(
+      `SELECT id, name, to_char(COALESCE(start_date, created_at::date), 'YYYY-MM-DD') AS "startDate",
             to_char(end_date, 'YYYY-MM-DD') AS "endDate"
        FROM sprints WHERE project_slug = $1 AND status = 'active'`,
-    [slug],
-  )).rows[0];
+      [slug],
+    )
+  ).rows[0];
   if (!active) {
     return null;
   }
@@ -28,10 +30,12 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
        FROM days, totals ORDER BY days.day`,
     [active.id, active.startDate, active.endDate],
   );
-  const progress = (await pool.query<{ total: string; done: string }>(
-    `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'done') AS done FROM development_items WHERE sprint_id = $1`,
-    [active.id],
-  )).rows[0];
+  const progress = (
+    await pool.query<{ total: string; done: string }>(
+      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'done') AS done FROM development_items WHERE sprint_id = $1`,
+      [active.id],
+    )
+  ).rows[0];
   const total = Number(progress?.total ?? 0);
   const done = Number(progress?.done ?? 0);
   return {
@@ -45,10 +49,21 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
 
 export async function collectStats(pool: Pool, slug: string): Promise<Record<string, unknown>> {
   const [orders, kinds, ideas, bugs, severities, effort, tests, agentSteps, sprint, velocity] = await Promise.all([
-    pool.query<CountRow>('SELECT status AS key, COUNT(*) AS count FROM development_items WHERE project_slug = $1 GROUP BY status', [slug]),
-    pool.query<CountRow>('SELECT kind AS key, COUNT(*) AS count FROM development_items WHERE project_slug = $1 GROUP BY kind', [slug]),
-    pool.query<CountRow>('SELECT status AS key, COUNT(*) AS count FROM ideation_items WHERE project_slug = $1 GROUP BY status', [slug]),
-    pool.query<CountRow>('SELECT status AS key, COUNT(*) AS count FROM bugs WHERE project_slug = $1 GROUP BY status', [slug]),
+    pool.query<CountRow>(
+      'SELECT status AS key, COUNT(*) AS count FROM development_items WHERE project_slug = $1 GROUP BY status',
+      [slug],
+    ),
+    pool.query<CountRow>(
+      'SELECT kind AS key, COUNT(*) AS count FROM development_items WHERE project_slug = $1 GROUP BY kind',
+      [slug],
+    ),
+    pool.query<CountRow>(
+      'SELECT status AS key, COUNT(*) AS count FROM ideation_items WHERE project_slug = $1 GROUP BY status',
+      [slug],
+    ),
+    pool.query<CountRow>('SELECT status AS key, COUNT(*) AS count FROM bugs WHERE project_slug = $1 GROUP BY status', [
+      slug,
+    ]),
     pool.query<CountRow>(
       `SELECT severity AS key, COUNT(*) AS count FROM bugs
         WHERE project_slug = $1 AND status IN ('open', 'in_progress') GROUP BY severity`,
@@ -104,11 +119,18 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         : null,
     },
     agents: agentSteps.rows.map((row) => ({
-      agent: row.agent, passed: Number(row.passed), failed: Number(row.failed), skipped: Number(row.skipped),
+      agent: row.agent,
+      passed: Number(row.passed),
+      failed: Number(row.failed),
+      skipped: Number(row.skipped),
     })),
     sprint,
     velocity: [...velocity.rows].reverse().map((row) => ({
-      name: row.name, status: row.status, total: Number(row.total), done: Number(row.done), hours: Number(row.hours),
+      name: row.name,
+      status: row.status,
+      total: Number(row.total),
+      done: Number(row.done),
+      hours: Number(row.hours),
     })),
   };
 }

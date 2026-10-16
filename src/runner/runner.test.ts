@@ -2,11 +2,24 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
-import { type BuiltinAgent, buildInvocation, buildPrompt, parseRunnerOptions, runWorkItem, type WorkflowAgent } from './runner.js';
+import {
+  type BuiltinAgent,
+  buildInvocation,
+  buildPrompt,
+  parseRunnerOptions,
+  runWorkItem,
+  type WorkflowAgent,
+} from './runner.js';
 
 const item = { id: 'item-1', projectSlug: 'mainty', title: 'Sprints', description: 'Bauen' };
 const agent = (name: string, phase: string, position: number, command: string[] | null): WorkflowAgent => ({
-  id: `${name}-id`, name, role: 'custom', phase, position, instructions: `${name} macht etwas`, command,
+  id: `${name}-id`,
+  name,
+  role: 'custom',
+  phase,
+  position,
+  instructions: `${name} macht etwas`,
+  command,
 });
 
 function fakePool(claimed = true) {
@@ -39,8 +52,9 @@ test('appends the prompt or fills the {prompt} placeholder without a shell', () 
 });
 
 test('builds a prompt with instruction, order and previous results', () => {
-  const prompt = buildPrompt(agent('Dev', 'while_task', 1, ['x']), item,
-    [{ agentName: 'Autor', phase: 'pre_task', status: 'passed', output: 'Spezifikation fertig' }]);
+  const prompt = buildPrompt(agent('Dev', 'while_task', 1, ['x']), item, [
+    { agentName: 'Autor', phase: 'pre_task', status: 'passed', output: 'Spezifikation fertig' },
+  ]);
   assert.match(prompt, /Dev macht etwas/);
   assert.match(prompt, /Titel: Sprints/);
   assert.match(prompt, /Autor \(pre_task, passed\)\nSpezifikation fertig/);
@@ -61,7 +75,10 @@ test('runs agents phase by phase in position order and marks the order done', as
   ];
   const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
   assert.equal(result, 'passed');
-  assert.deepEqual(calls.map((call) => call[0]), ['a', 'b1', 'b2', 'c']);
+  assert.deepEqual(
+    calls.map((call) => call[0]),
+    ['a', 'b1', 'b2', 'c'],
+  );
   assert.match(calls[1]?.at(-1) ?? '', /ok a/);
   const itemUpdates = queries.filter((query) => query.sql.includes('UPDATE development_items'));
   assert.equal(itemUpdates[0]?.sql.includes("'in_progress'"), true);
@@ -75,11 +92,18 @@ test('stops at the first failing agent and blocks the order', async () => {
     calls.push(command[0] ?? '');
     return { exitCode: command[0] === 'b' ? 2 : 0, durationMs: 1, output: '' };
   };
-  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b']), agent('c', 'after_task', 1, ['c'])];
+  const agents = [
+    agent('a', 'pre_task', 1, ['a']),
+    agent('b', 'while_task', 1, ['b']),
+    agent('c', 'after_task', 1, ['c']),
+  ];
   const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
   assert.equal(result, 'failed');
   assert.deepEqual(calls, ['a', 'b']);
-  assert.deepEqual(queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1)?.values, ['item-1', 'blocked']);
+  assert.deepEqual(queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1)?.values, [
+    'item-1',
+    'blocked',
+  ]);
 });
 
 test('uses the built-in agent for agents without command, hides DEV_LOG secrets and never double-runs an item', async () => {
@@ -95,15 +119,30 @@ test('uses the built-in agent for agents without command, hides DEV_LOG secrets 
     builtinRoles.push(current.name);
     return { exitCode: 0, durationMs: 1, output: 'built-in' };
   };
-  const result = await runWorkItem(pool, item,
-    [agent('manual', 'pre_task', 1, null), agent('dev', 'while_task', 1, ['x'])], { cwd: '/r', timeoutMs: 1, execute, builtin });
+  const result = await runWorkItem(
+    pool,
+    item,
+    [agent('manual', 'pre_task', 1, null), agent('dev', 'while_task', 1, ['x'])],
+    { cwd: '/r', timeoutMs: 1, execute, builtin },
+  );
   assert.equal(result, 'passed');
   assert.deepEqual(builtinRoles, ['manual']);
   assert.equal(environment?.DEV_LOG_PASSWORD, undefined);
 
   const busy = fakePool(false);
-  assert.equal(await runWorkItem(busy.pool, item, [agent('dev', 'while_task', 1, ['x'])], { cwd: '/r', timeoutMs: 1, execute, builtin }), 'skipped');
-  assert.equal(busy.queries.some((query) => query.sql.includes('UPDATE development_items')), false);
+  assert.equal(
+    await runWorkItem(busy.pool, item, [agent('dev', 'while_task', 1, ['x'])], {
+      cwd: '/r',
+      timeoutMs: 1,
+      execute,
+      builtin,
+    }),
+    'skipped',
+  );
+  assert.equal(
+    busy.queries.some((query) => query.sql.includes('UPDATE development_items')),
+    false,
+  );
   delete process.env.DEV_LOG_PASSWORD;
   assert.ok(queries.length > 0);
 });
@@ -111,7 +150,13 @@ test('uses the built-in agent for agents without command, hides DEV_LOG secrets 
 test('puts known bugs into the prompt so mistakes are not repeated', () => {
   const prompt = buildPrompt(agent('Dev', 'while_task', 1, ['x']), item, [], {
     bugs: [
-      { title: 'Login bricht ab', description: 'Null-Zeiger', severity: 'high', status: 'fixed', fixNotes: 'Prüfung ergänzt' },
+      {
+        title: 'Login bricht ab',
+        description: 'Null-Zeiger',
+        severity: 'high',
+        status: 'fixed',
+        fixNotes: 'Prüfung ergänzt',
+      },
       { title: 'Export leer', description: '', severity: 'low', status: 'open', fixNotes: '' },
     ],
   });
@@ -123,19 +168,43 @@ test('puts known bugs into the prompt so mistakes are not repeated', () => {
 test('stores documenter output, the handbook and reports a bug when an agent fails', async () => {
   const { pool, queries } = fakePool();
   const execute: CommandExecutor = async (command) => ({
-    exitCode: command[0] === 'bad' ? 1 : 0, durationMs: 1, output: command[0] === 'manual' ? 'H'.repeat(300) : 'Doku fertig',
+    exitCode: command[0] === 'bad' ? 1 : 0,
+    durationMs: 1,
+    output: command[0] === 'manual' ? 'H'.repeat(300) : 'Doku fertig',
   });
-  const roleAgent = (name: string, role: string, phase: string, position: number, command: string[]): WorkflowAgent => ({
-    ...agent(name, phase, position, command), role,
+  const roleAgent = (
+    name: string,
+    role: string,
+    phase: string,
+    position: number,
+    command: string[],
+  ): WorkflowAgent => ({
+    ...agent(name, phase, position, command),
+    role,
   });
-  await runWorkItem(pool, item, [
-    roleAgent('Doku', 'documenter', 'after_task', 1, ['doc']),
-    roleAgent('Handbuch', 'manual_writer', 'after_task', 2, ['manual']),
-  ], { cwd: '/r', timeoutMs: 1, execute });
+  await runWorkItem(
+    pool,
+    item,
+    [
+      roleAgent('Doku', 'documenter', 'after_task', 1, ['doc']),
+      roleAgent('Handbuch', 'manual_writer', 'after_task', 2, ['manual']),
+    ],
+    { cwd: '/r', timeoutMs: 1, execute },
+  );
   assert.ok(queries.some((query) => query.sql.includes("'order'")));
-  assert.ok(queries.some((query) => query.sql.includes("'manual', 'sprint', 'repo'") && query.values.includes('Anwendungshandbuch')));
+  assert.ok(
+    queries.some(
+      (query) => query.sql.includes("'manual', 'sprint', 'repo'") && query.values.includes('Anwendungshandbuch'),
+    ),
+  );
 
   const failing = fakePool();
-  await runWorkItem(failing.pool, item, [roleAgent('Dev', 'developer', 'while_task', 1, ['bad'])], { cwd: '/r', timeoutMs: 1, execute });
-  assert.ok(failing.queries.some((query) => query.sql.includes("INSERT INTO bugs") && String(query.values[1]).includes('Dev')));
+  await runWorkItem(failing.pool, item, [roleAgent('Dev', 'developer', 'while_task', 1, ['bad'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.ok(
+    failing.queries.some((query) => query.sql.includes('INSERT INTO bugs') && String(query.values[1]).includes('Dev')),
+  );
 });

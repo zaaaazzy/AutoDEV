@@ -3,7 +3,25 @@ export const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
-const BLOCKED_FOLDERS = ['/', '/Users', '/home', '/Volumes', '/etc', '/var', '/usr', '/bin', '/sbin', '/opt', '/root', '/System', '/Library', '/private', '/tmp', '/dev', '/proc'];
+const BLOCKED_FOLDERS = [
+  '/',
+  '/Users',
+  '/home',
+  '/Volumes',
+  '/etc',
+  '/var',
+  '/usr',
+  '/bin',
+  '/sbin',
+  '/opt',
+  '/root',
+  '/System',
+  '/Library',
+  '/private',
+  '/tmp',
+  '/dev',
+  '/proc',
+];
 
 /** Projektordner müssen absolut, normalisiert und unterhalb eines Benutzer-/Datenträgerordners liegen (optional per DEV_LOG_PROJECT_ROOTS begrenzt). */
 export function projectFolderError(value: unknown, environment: NodeJS.ProcessEnv = process.env): string | null {
@@ -16,11 +34,18 @@ export function projectFolderError(value: unknown, environment: NodeJS.ProcessEn
     return 'Projektordner darf keine "." oder ".." enthalten.';
   }
   const normalized = `/${parts.join('/')}`;
-  if (BLOCKED_FOLDERS.includes(normalized) || /^\/(?:Users|home)\/[^/]+$/.test(normalized) || /^\/Volumes\/[^/]+$/.test(normalized)
-    || /^\/(?:etc|usr|bin|sbin|System|Library|private|dev|proc|root)(?:\/|$)/.test(normalized)) {
+  if (
+    BLOCKED_FOLDERS.includes(normalized) ||
+    /^\/(?:Users|home)\/[^/]+$/.test(normalized) ||
+    /^\/Volumes\/[^/]+$/.test(normalized) ||
+    /^\/(?:etc|usr|bin|sbin|System|Library|private|dev|proc|root)(?:\/|$)/.test(normalized)
+  ) {
     return 'Dieser Ordner ist als Projektordner nicht erlaubt (zu breit oder Systemordner). Wähle den Projektunterordner.';
   }
-  const roots = (environment.DEV_LOG_PROJECT_ROOTS ?? '').split(':').map((root) => root.trim().replace(/\/+$/, '')).filter(Boolean);
+  const roots = (environment.DEV_LOG_PROJECT_ROOTS ?? '')
+    .split(':')
+    .map((root) => root.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
   if (roots.length && !roots.some((root) => normalized === root || normalized.startsWith(`${root}/`))) {
     return `Projektordner muss unterhalb von ${roots.join(' oder ')} liegen (DEV_LOG_PROJECT_ROOTS).`;
   }
@@ -50,12 +75,17 @@ export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID_PATTERN.test(value);
 }
 
-export const parseTitle = (max: number): Parser => (value) => validText(value, max) ? value.trim() : INVALID;
+export const parseTitle =
+  (max: number): Parser =>
+  (value) =>
+    validText(value, max) ? value.trim() : INVALID;
 export const parseLongText: Parser = (value) =>
   typeof value === 'string' && value.length <= 10_000 ? value.trim() : INVALID;
-export const parseOption = (options: Set<string>): Parser => (value) =>
-  validStatus(value, options) ? value : INVALID;
-export const parseNullableUuid: Parser = (value) => value === null || isUuid(value) ? value : INVALID;
+export const parseOption =
+  (options: Set<string>): Parser =>
+  (value) =>
+    validStatus(value, options) ? value : INVALID;
+export const parseNullableUuid: Parser = (value) => (value === null || isUuid(value) ? value : INVALID);
 export const parseNullableDate: Parser = (value) => {
   if (value === null || value === '') {
     return null;
@@ -66,18 +96,28 @@ export const parseCommand: Parser = (value) => {
   if (value === null) {
     return null;
   }
-  return Array.isArray(value) && value.length >= 1 && value.length <= 40
-    && value.every((part) => typeof part === 'string' && part.length > 0 && part.length <= 500)
-    ? value : INVALID;
+  return Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= 40 &&
+    value.every((part) => typeof part === 'string' && part.length > 0 && part.length <= 500)
+    ? value
+    : INVALID;
 };
-export const parseBoolean: Parser = (value) => typeof value === 'boolean' ? value : INVALID;
-const nullableNumber = (min: number, max: number, integer: boolean): Parser => (value) => {
-  if (value === null) {
-    return null;
-  }
-  return typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
-    && (!integer || Number.isInteger(value)) ? value : INVALID;
-};
+export const parseBoolean: Parser = (value) => (typeof value === 'boolean' ? value : INVALID);
+const nullableNumber =
+  (min: number, max: number, integer: boolean): Parser =>
+  (value) => {
+    if (value === null) {
+      return null;
+    }
+    return typeof value === 'number' &&
+      Number.isFinite(value) &&
+      value >= min &&
+      value <= max &&
+      (!integer || Number.isInteger(value))
+      ? value
+      : INVALID;
+  };
 
 export const ESTIMATE_FIELDS: Record<string, { column: string; parse: Parser }> = {
   effortHours: { column: 'effort_hours', parse: nullableNumber(0, 100_000, false) },

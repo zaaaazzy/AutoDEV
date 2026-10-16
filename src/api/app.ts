@@ -13,6 +13,7 @@ import { registerIdeationRoutes } from './ideation.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
+import { sameOriginWrites, securityHeaders } from './security.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerTestRunRoutes } from './test-runs.js';
 import { registerWorkerRoutes } from './worker.js';
@@ -25,6 +26,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   const app = express();
   app.disable('x-powered-by');
   app.get('/health', (_request, response) => response.json({ status: 'ok' }));
+  app.use(securityHeaders);
+  app.use(sameOriginWrites);
   app.use(express.json({ limit: '32kb' }));
   if (auth) {
     app.use(requireCredentials(auth));

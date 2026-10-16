@@ -1,7 +1,14 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { ApiService } from './api.service.js';
 import { errorMessage } from './errors.js';
-import { emptyProjectData, type DevelopmentItem, type Project, type ProjectData, type Sprint, type WorkerStatus } from './models.js';
+import {
+  emptyProjectData,
+  type DevelopmentItem,
+  type Project,
+  type ProjectData,
+  type Sprint,
+  type WorkerStatus,
+} from './models.js';
 import { isSection, sectionFromHash, type Section } from './navigation.js';
 import { fetchProjectData } from './project-loader.js';
 
@@ -30,11 +37,17 @@ export class ProjectStore {
   readonly foregroundLoads = signal(0);
 
   readonly ready = computed(() => !this.loading() && this.projects().length > 0);
-  readonly currentProject = computed(() => this.projects().find((project) => project.slug === this.activeProject()) ?? null);
+  readonly currentProject = computed(
+    () => this.projects().find((project) => project.slug === this.activeProject()) ?? null,
+  );
   readonly selectedAgent = computed(() => this.data().agents.find((agent) => agent.id === this.openAgent()) ?? null);
   readonly activeAgentCount = computed(() => this.worker().agents.filter((agent) => agent.active).length);
-  readonly openDevelopmentCount = computed(() => this.data().development.filter((item) => item.status !== 'done').length);
-  readonly openBugCount = computed(() => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length);
+  readonly openDevelopmentCount = computed(
+    () => this.data().development.filter((item) => item.status !== 'done').length,
+  );
+  readonly openBugCount = computed(
+    () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
+  );
 
   constructor() {
     const onHashChange = (): void => this.onHashChange();
@@ -55,7 +68,7 @@ export class ProjectStore {
   }
 
   sprintOf(item: DevelopmentItem | null): Sprint | null {
-    return item?.sprintId ? this.data().sprints.find((sprint) => sprint.id === item.sprintId) ?? null : null;
+    return item?.sprintId ? (this.data().sprints.find((sprint) => sprint.id === item.sprintId) ?? null) : null;
   }
 
   navigate(section: string): void {
@@ -161,8 +174,12 @@ export class ProjectStore {
     const slug = this.activeProject();
     if (!slug || !this.data().agentRuns.some((run) => run.steps.some((step) => step.status === 'running'))) return;
     try {
-      const { runs } = await this.api.get<{ runs?: ProjectData['agentRuns'] }>(`${this.api.projectPath(slug)}/agent-runs`);
+      const { runs } = await this.api.get<{ runs?: ProjectData['agentRuns'] }>(
+        `${this.api.projectPath(slug)}/agent-runs`,
+      );
       if (slug === this.activeProject()) this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));
-    } catch { /* nächster Versuch in 3 s */ }
+    } catch {
+      /* nächster Versuch in 3 s */
+    }
   }
 }

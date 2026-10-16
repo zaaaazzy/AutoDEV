@@ -10,7 +10,12 @@ test('parses the bug title from the troubleshooter answer', () => {
 });
 
 test('includes failures and the answer format in the prompt', () => {
-  const prompt = buildTroubleshootPrompt('', { title: 'A', description: 'B' }, ['### Tester\njest: command not found'], []);
+  const prompt = buildTroubleshootPrompt(
+    '',
+    { title: 'A', description: 'B' },
+    ['### Tester\njest: command not found'],
+    [],
+  );
   assert.match(prompt, /jest: command not found/);
   assert.match(prompt, /TITEL:/);
 });

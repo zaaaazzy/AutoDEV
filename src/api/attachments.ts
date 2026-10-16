@@ -11,8 +11,11 @@ const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const ATTACHMENT_DIRECTORY = join('.dev-log', 'attachments');
 
 export function safeFilename(name: unknown): string {
-  const base = typeof name === 'string' ? name.split(/[\\/]/).pop() ?? '' : '';
-  const cleaned = base.replace(/[^\p{L}\p{N}._ -]/gu, '_').trim().slice(0, 120);
+  const base = typeof name === 'string' ? (name.split(/[\\/]/).pop() ?? '') : '';
+  const cleaned = base
+    .replace(/[^\p{L}\p{N}._ -]/gu, '_')
+    .trim()
+    .slice(0, 120);
   return cleaned && !cleaned.startsWith('.') ? cleaned : 'bild';
 }
 
@@ -52,7 +55,15 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
           AND i.created_at > NOW() - make_interval(secs => $7)
           AND (SELECT count(*) FROM ideation_attachments WHERE ideation_id = i.id) < $6
        RETURNING id, ideation_id AS "ideationId", filename, mime, size`,
-      [request.params.id, safeFilename(request.query.name), mime, data.length, data, MAX_ATTACHMENTS_PER_IDEA, UPLOAD_WINDOW_SECONDS],
+      [
+        request.params.id,
+        safeFilename(request.query.name),
+        mime,
+        data.length,
+        data,
+        MAX_ATTACHMENTS_PER_IDEA,
+        UPLOAD_WINDOW_SECONDS,
+      ],
     );
     if (!result.rows[0]) {
       response.status(409).json({

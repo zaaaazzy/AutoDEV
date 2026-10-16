@@ -17,9 +17,15 @@ export class AgentListComponent {
   protected readonly worker = this.store.worker;
 
   protected async cancel(id: string, name: string): Promise<void> {
-    if (!globalThis.confirm(`„${name}“ abbrechen? Der Auftrag wird danach als blockiert markiert und lässt sich erneut starten.`)) return;
+    if (
+      !globalThis.confirm(
+        `„${name}“ abbrechen? Der Auftrag wird danach als blockiert markiert und lässt sich erneut starten.`,
+      )
+    )
+      return;
     await this.store.perform(
-      () => this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/${encodeURIComponent(id)}/cancel`),
+      () =>
+        this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/${encodeURIComponent(id)}/cancel`),
       `„${name}“ wird abgebrochen.`,
       false,
     );

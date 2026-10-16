@@ -28,7 +28,9 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     if (body.gitRemote !== undefined) {
       const remote = typeof body.gitRemote === 'string' ? body.gitRemote.trim() : null;
       if (remote === null || (remote !== '' && !isValidGitRemote(remote))) {
-        return fail('Ungültige Repository-URL. Erlaubt: https://github.com/<user>/<repo>.git oder git@github.com:<user>/<repo>.git – ohne Zugangsdaten in der URL.');
+        return fail(
+          'Ungültige Repository-URL. Erlaubt: https://github.com/<user>/<repo>.git oder git@github.com:<user>/<repo>.git – ohne Zugangsdaten in der URL.',
+        );
       }
       values.push(remote || null);
       sets.push(`git_remote = $${values.length}`);
@@ -45,10 +47,12 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     if (body.testCommands !== undefined) {
       let commands: string[][] | null = null;
       if (typeof body.testCommands === 'string' && body.testCommands.trim()) {
-        commands = body.testCommands.trim().split('\n').filter((line) => line.trim()).map((line) => line.trim().split(/\s+/));
-      } else if (body.testCommands === null || body.testCommands === '') {
-        commands = null;
-      } else {
+        commands = body.testCommands
+          .trim()
+          .split('\n')
+          .filter((line) => line.trim())
+          .map((line) => line.trim().split(/\s+/));
+      } else if (body.testCommands !== null && body.testCommands !== '') {
         return fail('Testbefehle: ein Befehl pro Zeile, z. B. „npm test“.');
       }
       values.push(commands ? JSON.stringify(commands) : null);
@@ -63,7 +67,8 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       sets.push(`${key} = $${values.length}`);
     }
     if (body.autoBugfix !== undefined) {
-      if (typeof body.autoBugfix !== 'boolean') return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
+      if (typeof body.autoBugfix !== 'boolean')
+        return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
       values.push(body.autoBugfix);
       sets.push(`auto_bugfix = $${values.length}`);
     }
@@ -83,9 +88,13 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
 
   app.post('/api/projects', async (request, response) => {
     const body = request.body as unknown;
-    if (!isRecord(body) || typeof body.slug !== 'string' || !PROJECT_SLUG.test(body.slug)
-      || !validText(body.name, 120)
-      || !validText(body.repository, 500)) {
+    if (
+      !isRecord(body) ||
+      typeof body.slug !== 'string' ||
+      !PROJECT_SLUG.test(body.slug) ||
+      !validText(body.name, 120) ||
+      !validText(body.repository, 500)
+    ) {
       response.status(400).json({ message: 'Project slug, name, and repository are required.' });
       return;
     }
