@@ -30,3 +30,20 @@ export function shortText(text: string | null | undefined, limit = 200): string 
   const value = (text ?? '').trim();
   return value.length > limit ? `${value.slice(0, limit).trimEnd()}...` : value;
 }
+
+/** Referenzpreis für die Kostenschätzung (USD je 1 Mio. Tokens); lokale Modelle verursachen real keine Kosten. */
+export const USD_PER_MILLION_TOKENS = 5;
+
+export function tokenCostUsd(tokens: number | null | undefined): number | null {
+  return tokens === null || tokens === undefined ? null : (tokens / 1_000_000) * USD_PER_MILLION_TOKENS;
+}
+
+export function formatTokens(value: number | null | undefined): string {
+  return value === null || value === undefined ? '–' : `${Number(value).toLocaleString('de-DE')} Tokens`;
+}
+
+export function formatUsd(value: number | null | undefined): string {
+  return value === null || value === undefined
+    ? '–'
+    : `≈ ${value.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+}

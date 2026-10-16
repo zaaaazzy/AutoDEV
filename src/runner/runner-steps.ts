@@ -335,8 +335,15 @@ export async function runStep(
     cancelled ? 'Abgebrochen' : passed ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit-Code ${result.exitCode})`,
   );
   await pool.query(
-    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
-    [stepId, passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed, result.exitCode, result.durationMs, output],
+    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6 WHERE id = $1`,
+    [
+      stepId,
+      passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
+      result.exitCode,
+      result.durationMs,
+      output,
+      result.tokens ?? 0,
+    ],
   );
   done.push({
     agentName: agent.name,

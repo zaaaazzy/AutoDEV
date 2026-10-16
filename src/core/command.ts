@@ -7,6 +7,8 @@ export interface CommandResult {
   exitCode: number;
   durationMs: number;
   output: string;
+  /** Vom Modell gemeldete Tokens (Prompt + Antwort), falls bekannt. */
+  tokens?: number;
 }
 
 export type CommandExecutor = (

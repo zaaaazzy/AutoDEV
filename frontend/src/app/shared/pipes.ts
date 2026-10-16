@@ -1,5 +1,15 @@
 import { Pipe, type PipeTransform } from '@angular/core';
-import { formatDateTime, formatDuration, formatHours, formatIsoDate, formatNumber, shortText } from './format.js';
+import {
+  formatDateTime,
+  formatDuration,
+  formatHours,
+  formatIsoDate,
+  formatNumber,
+  formatTokens,
+  formatUsd,
+  shortText,
+  tokenCostUsd,
+} from './format.js';
 import { priorityLabel, severityLabel, statusClass, statusLabel } from './labels.js';
 
 @Pipe({ name: 'statusLabel', standalone: true })
@@ -69,5 +79,19 @@ export class IsoDatePipe implements PipeTransform {
 export class ShortTextPipe implements PipeTransform {
   transform(text: string | null | undefined, limit = 200): string {
     return shortText(text, limit);
+  }
+}
+
+@Pipe({ name: 'tokens', standalone: true })
+export class TokensPipe implements PipeTransform {
+  transform(value: number | null | undefined): string {
+    return formatTokens(value);
+  }
+}
+
+@Pipe({ name: 'usd', standalone: true })
+export class UsdPipe implements PipeTransform {
+  transform(tokens: number | null | undefined): string {
+    return formatUsd(tokenCostUsd(tokens));
   }
 }

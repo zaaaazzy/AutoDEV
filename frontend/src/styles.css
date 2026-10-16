@@ -397,6 +397,8 @@ h3 .link-button { color: var(--ink); }
 .sprint-side { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
 .detail-list { display: grid; gap: 8px; margin: 0; }
 .detail-list div { display: flex; justify-content: space-between; gap: 12px; }
+.detail-list .sub { padding-left: 10px; font-size: 12px; }
+.detail-list .sub dt, .detail-list .sub dd { font-weight: 400; color: #6b756f; }
 .detail-list dt { color: #6b756f; }
 .detail-list dd { margin: 0; font-weight: 600; text-align: right; }
 .sprint-edit { display: grid; gap: 8px; }

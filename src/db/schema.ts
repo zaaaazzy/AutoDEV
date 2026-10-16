@@ -265,6 +265,7 @@ export const SCHEMA = `
     pid_started_at TIMESTAMPTZ,
     progress TEXT,
     events JSONB NOT NULL DEFAULT '[]'::jsonb,
+    tokens BIGINT NOT NULL DEFAULT 0,
     cancel_requested BOOLEAN NOT NULL DEFAULT FALSE,
     UNIQUE (run_id, position)
   );

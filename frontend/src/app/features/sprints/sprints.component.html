@@ -237,9 +237,29 @@
                     <dt>Geschätzt</dt>
                     <dd>{{ sprintEstimate(sprint.id) | hours }}</dd>
                   </div>
+                  <div class="sub">
+                    <dt>Tokens</dt>
+                    <dd>{{ sprintTokensEstimate(sprint.id) | tokens }}</dd>
+                  </div>
+                  <div class="sub">
+                    <dt>Kosten</dt>
+                    <dd [title]="'Referenzpreis ' + usdRate + ' $ je 1 Mio. Tokens'">
+                      {{ sprintTokensEstimate(sprint.id) | usd }}
+                    </dd>
+                  </div>
                   <div>
                     <dt>Aufgewendet</dt>
                     <dd>{{ sprintSpent(sprint.id) === null ? '–' : (sprintSpent(sprint.id) | duration) }}</dd>
+                  </div>
+                  <div class="sub">
+                    <dt>Tokens</dt>
+                    <dd>{{ sprintTokensSpent(sprint.id) | tokens }}</dd>
+                  </div>
+                  <div class="sub">
+                    <dt>Kosten</dt>
+                    <dd [title]="'Referenzpreis ' + usdRate + ' $ je 1 Mio. Tokens'">
+                      {{ sprintTokensSpent(sprint.id) | usd }}
+                    </dd>
                   </div>
                 </dl>
               }

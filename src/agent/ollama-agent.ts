@@ -56,11 +56,12 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     execute: options.execute ?? runCommand,
     timeoutMs: options.timeoutMs,
   };
+  let tokens = 0;
   const finish = (exitCode: number, text: string): CommandResult => {
     const files = context.changed.size
       ? `\n\nGeänderte Dateien:\n${[...context.changed].map((file) => `- ${file}`).join('\n')}`
       : '';
-    return { exitCode, durationMs: Date.now() - startedAt, output: `${text}${files}` };
+    return { exitCode, durationMs: Date.now() - startedAt, output: `${text}${files}`, tokens };
   };
 
   const loopGuard = new LoopGuard();
@@ -123,7 +124,12 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
       if (!response.ok) {
         return finish(1, `Ollama antwortete mit ${response.status}: ${(await response.text()).slice(0, 500)}`);
       }
-      const body = (await response.json()) as { message?: ChatMessage };
+      const body = (await response.json()) as {
+        message?: ChatMessage;
+        prompt_eval_count?: number;
+        eval_count?: number;
+      };
+      tokens += (body.prompt_eval_count ?? 0) + (body.eval_count ?? 0);
       const message = body.message;
       if (!message) {
         return finish(1, 'Ollama lieferte keine Nachricht.');

@@ -8,7 +8,16 @@ import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
-import { DurationPipe, HoursPipe, IsoDatePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
+import {
+  DurationPipe,
+  HoursPipe,
+  IsoDatePipe,
+  StatusClassPipe,
+  StatusLabelPipe,
+  TokensPipe,
+  UsdPipe,
+} from '../../shared/pipes.js';
 
 @Component({
   selector: 'app-sprints',
@@ -24,6 +33,8 @@ import { DurationPipe, HoursPipe, IsoDatePipe, StatusClassPipe, StatusLabelPipe 
     StatusClassPipe,
     StatusLabelPipe,
     StepResultComponent,
+    TokensPipe,
+    UsdPipe,
   ],
   templateUrl: './sprints.component.html',
   host: { style: 'display: contents' },
@@ -34,6 +45,7 @@ export class SprintsComponent {
   private readonly orders = inject(OrderService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
+  protected readonly usdRate = USD_PER_MILLION_TOKENS;
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
   protected readonly editingId = signal<string | null>(null);
   protected readonly openSprintItems = signal<ReadonlySet<string>>(new Set());
@@ -79,6 +91,22 @@ export class SprintsComponent {
       typeof item.effortHours === 'number' ? [item.effortHours] : [],
     );
     return efforts.length ? efforts.reduce((sum, hours) => sum + hours, 0) : null;
+  }
+
+  protected sprintTokensEstimate(sprintId: string): number | null {
+    const tokens = this.sprintItems(sprintId).flatMap((item) =>
+      item.tokenEstimate === null || item.tokenEstimate === undefined ? [] : [Number(item.tokenEstimate)],
+    );
+    return tokens.length ? tokens.reduce((sum, value) => sum + value, 0) : null;
+  }
+
+  protected sprintTokensSpent(sprintId: string): number | null {
+    const ids = new Set(this.sprintItems(sprintId).map((item) => item.id));
+    const total = this.data()
+      .agentRuns.filter((run) => run.developmentId && ids.has(run.developmentId))
+      .flatMap((run) => run.steps)
+      .reduce((sum, step) => sum + Number(step.tokens ?? 0), 0);
+    return total || null;
   }
 
   protected sprintSpent(sprintId: string): number | null {
