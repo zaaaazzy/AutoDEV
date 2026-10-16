@@ -64,3 +64,14 @@ test('pushes GitHub HTTPS remotes over SSH', () => {
   assert.equal(pushRemote('https://github.com/a/b.git'), 'git@github.com:a/b.git');
   assert.equal(pushRemote('git@github.com:a/b.git'), 'git@github.com:a/b.git');
 });
+
+import { taskCommitMessage } from './git-sync.js';
+import test2 from 'node:test';
+import assert2 from 'node:assert/strict';
+
+test2('taskCommitMessage nutzt Conventional Commits', () => {
+  const [subject, body] = taskCommitMessage('bug', 'Sprint (1): Init', 'Login   kaputt\nsofort', 'abc');
+  assert2.equal(subject, 'fix(Sprint 1 Init): Login kaputt sofort');
+  assert2.match(body, /Auftrag: abc/);
+  assert2.equal(taskCommitMessage('feature', '', 'X', 'i')[0], 'feat(sprint): X');
+});

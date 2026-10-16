@@ -9,7 +9,7 @@ import { loadProjectContext, withProjectContext } from './project-context.js';
 import { isShuttingDown, killGroup } from './shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 import { readManual, saveOrderDoc, syncRepoDocs, upsertDoc } from './docs.js';
-import { syncSprintToGit } from './git-sync.js';
+import { commitTaskToGit, syncSprintToGit } from './git-sync.js';
 import { estimateIdeas } from './estimation.js';
 import { draftRequirements } from './requirements.js';
 import { runOllamaAgent } from './ollama-agent.js';
@@ -417,6 +417,10 @@ export async function runWorkItem(
     } else {
       await pool.query(`UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
         [item.id, passed ? 'done' : 'blocked']);
+    }
+    if (passed && !interrupted && item.sprintId) {
+      const sprint = await pool.query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId]).catch(() => null);
+      if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
     }
     if (passed && item.bugId && !item.agentId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
   }

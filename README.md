@@ -41,3 +41,7 @@ Der Worker bedient jedes registrierte Projekt in dessen Ordner. Fehlt der Ordner
 `DEV_LOG_DATABASE_URL`, `DEV_LOG_ADMIN_DATABASE_URL`, `DEV_LOG_AUTH` (`off` = kein Login, nur in vertrauenswürdigen Netzen), `DEV_LOG_PROJECT_ROOTS` (Doppelpunkt-getrennte Ordner, unter denen Projektordner liegen müssen), `DEV_LOG_USERNAME` / `DEV_LOG_PASSWORD`, `DEV_LOG_AGENT_COMMAND`, `DEV_LOG_MAX_TURNS`, `DEV_LOG_TEST_COMMANDS` (Fallback, JSON), `DEV_LOG_OLLAMA_URL`.
 
 Datenmodell: [docs/erm.md](docs/erm.md).
+
+## Git im Sprint
+
+Nach jedem erfolgreich erledigten Sprint-Auftrag erstellt der Worker einen lokalen Commit im Projektordner (Conventional Commits, z. B. `feat(Sprint 1): Titel`, Bugs als `fix`). Beim Abschluss des Sprints folgt ein Sammel-Commit mit Tag und – falls ein Repository hinterlegt ist – der Push. `.env`, `.dev-log/` und Agent-Sicherungen bleiben ausgeschlossen; Commits ohne Änderungen werden übersprungen.

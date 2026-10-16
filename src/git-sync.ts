@@ -39,6 +39,69 @@ async function excludeInternalFolders(cwd: string): Promise<void> {
   }
 }
 
+function gitHelpers(execute: CommandExecutor, cwd: string) {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' };
+  const git = async (...args: string[]) => {
+    const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
+    return { ...result, output: redactOutput(result.output, process.env).trim() };
+  };
+  const must = async (...args: string[]): Promise<string> => {
+    const result = await git(...args);
+    if (result.exitCode !== 0) {
+      throw new Error(`git ${args[0]} fehlgeschlagen: ${result.output.slice(-500)}`);
+    }
+    return result.output;
+  };
+  return { git, must };
+}
+
+type GitHelpers = ReturnType<typeof gitHelpers>;
+
+/** Initialisiert das Repository bei Bedarf, setzt eine Commit-Identität und schließt interne Ordner aus. Gibt zurück, ob neu initialisiert wurde. */
+async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must'], cwd: string): Promise<boolean> {
+  let initialized = false;
+  if (!existsSync(join(cwd, '.git'))) {
+    await must('init', '-b', 'main');
+    initialized = true;
+  }
+  if (!(await git('config', 'user.email')).output) {
+    await must('config', 'user.name', 'Mainty Dev Log');
+    await must('config', 'user.email', 'dev-log@mainty.local');
+  }
+  await excludeInternalFolders(cwd);
+  return initialized;
+}
+
+/** Conventional-Commits-Betreff: Typ aus der Auftragsart, Sprint als Scope, Titel auf eine Zeile gekürzt. */
+export function taskCommitMessage(kind: string | undefined, sprintName: string, title: string, itemId: string): [string, string] {
+  const type = kind === 'bug' ? 'fix' : 'feat';
+  const scope = sprintName.replace(/[()\r\n:]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 40) || 'sprint';
+  const subject = title.replace(/\s+/g, ' ').trim().slice(0, 72) || 'Auftrag';
+  return [`${type}(${scope}): ${subject}`, `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`];
+}
+
+/** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */
+export async function commitTaskToGit(
+  cwd: string,
+  item: { id: string; title: string; kind?: string },
+  sprintName: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  const execute: CommandExecutor = (command, directory, options) => withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  try {
+    await ensureRepository(git, must, cwd);
+    await must('add', '-A');
+    if (!(await must('status', '--porcelain'))) return null;
+    const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
+    await must('commit', '-m', subject, '-m', body);
+    return await must('rev-parse', '--short', 'HEAD');
+  } catch (error) {
+    console.error(`Auftrags-Commit für ${item.id} fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 interface PendingSprint {
   id: string;
   name: string;
@@ -68,27 +131,11 @@ export async function syncSprintToGit(
   if (!sprint) {
     return 0;
   }
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new' };
-  const git = async (...args: string[]) => {
-    const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
-    return { ...result, output: redactOutput(result.output, process.env).trim() };
-  };
+  const { git, must } = gitHelpers(execute, cwd);
   const log: string[] = [];
-  const must = async (...args: string[]): Promise<string> => {
-    const result = await git(...args);
-    if (result.exitCode !== 0) {
-      throw new Error(`git ${args[0]} fehlgeschlagen: ${result.output.slice(-500)}`);
-    }
-    return result.output;
-  };
   try {
-    if (!existsSync(join(cwd, '.git'))) {
-      await must('init', '-b', 'main');
+    if (await ensureRepository(git, must, cwd)) {
       log.push('Repository initialisiert.');
-    }
-    if (!(await git('config', 'user.email')).output) {
-      await must('config', 'user.name', 'Mainty Dev Log');
-      await must('config', 'user.email', 'dev-log@mainty.local');
     }
     if (sprint.remote) {
       const current = await git('remote', 'get-url', 'origin');
@@ -97,7 +144,6 @@ export async function syncSprintToGit(
         ? ['remote', 'set-url', 'origin', target]
         : ['remote', 'add', 'origin', target]));
     }
-    await excludeInternalFolders(cwd);
     await must('add', '-A');
     if (await must('status', '--porcelain')) {
       await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Mainty Dev Log.');
