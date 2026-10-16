@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { AgentRun, DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
@@ -30,11 +31,16 @@ import { DurationPipe, HoursPipe, IsoDatePipe, StatusClassPipe, StatusLabelPipe 
 export class SprintsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
+  private readonly orders = inject(OrderService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
   protected readonly editingId = signal<string | null>(null);
   protected readonly openSprintItems = signal<ReadonlySet<string>>(new Set());
+
+  protected retry(item: DevelopmentItem): Promise<void> {
+    return this.orders.retry(item);
+  }
 
   protected toggleSprintItem(id: string): void {
     this.openSprintItems.update((set) => {

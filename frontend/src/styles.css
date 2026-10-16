@@ -400,7 +400,9 @@ h3 .link-button { color: var(--ink); }
 .sprint-edit label { display: grid; gap: 3px; font-size: 12px; color: #6b756f; }
 .git-sync-buttons { display: inline-flex; gap: 6px; margin-left: 4px; }
 .git-button { gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 999px; }
-.sprint-tasks-title { margin-top: 16px; }
+.sprint-goal { margin: 14px 0 18px; }
+.sprint-tasks .sprint-task:last-child { margin-bottom: 0; }
+.sprint-task-retry { display: flex; align-items: center; gap: 10px; padding: 0 10px 8px 28px; font-size: 12.5px; }
 .sprint-task { border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; background: #fff; }
 .sprint-task-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }
 .sprint-task-head .task-chevron { margin-left: 0; }

@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { AGENT_RUN_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
+import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
@@ -30,6 +30,8 @@ export {
   parseTestCommands,
 } from './runner-selection.js';
 export { runBuiltinAgent } from './runner-steps.js';
+import type { StepSummary as ResumedStep } from './runner-types.js';
+
 export type {
   BuiltinAgent,
   PromptExtras,
@@ -39,6 +41,45 @@ export type {
   WorkflowAgent,
   WorkItemOptions,
 } from './runner-types.js';
+
+/**
+ * After a failed run only the failed agent and the ones after it run again: leading agents that already passed in the
+ * previous run are skipped and their output is handed on to the following agents.
+ */
+async function resumePosition(
+  pool: Pool,
+  itemId: string,
+  currentRunId: string,
+  ordered: WorkflowAgent[],
+  done: ResumedStep[],
+): Promise<number> {
+  const previous = (
+    await pool.query<{ id: string; status: string }>(
+      `SELECT id, status FROM agent_runs WHERE development_id = $1 AND id <> $2 ORDER BY started_at DESC LIMIT 1`,
+      [itemId, currentRunId],
+    )
+  ).rows[0];
+  if (previous?.status !== AGENT_RUN_STATUS.failed) return 0;
+  const steps = (
+    await pool.query<{ agent_id: string; agent_name: string; phase: string; status: string; output: string }>(
+      `SELECT agent_id, agent_name, phase, status, output FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
+      [previous.id],
+    )
+  ).rows;
+  let position = 0;
+  while (position < ordered.length && steps[position]?.agent_id === ordered[position]?.id) {
+    const step = steps[position]!;
+    if (step.status !== AGENT_STEP_STATUS.passed) break;
+    done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
+    position += 1;
+  }
+  // If everything passed already, repeat at least the last agent.
+  if (position === ordered.length && position > 0) {
+    done.pop();
+    position -= 1;
+  }
+  return position;
+}
 
 export async function runWorkItem(
   pool: Pool,
@@ -77,7 +118,9 @@ export async function runWorkItem(
     ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
     ctx.images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(() => []);
     ctx.projectContext = await loadProjectContext(pool, item.projectSlug);
+    const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
     for (const [position, agent] of ordered.entries()) {
+      if (position < resumeFrom) continue;
       const outcome = await runStep(ctx, agent, position, ordered.length);
       if (outcome.interrupted) interrupted = true;
       if (!outcome.passed) {

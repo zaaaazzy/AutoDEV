@@ -1,11 +1,5 @@
 @if (store.ready()) {
   <section class="panel">
-    <div class="section-heading">
-      <div>
-        <h2>Sprints</h2>
-        <p class="muted">Iterationen planen, starten und abschließen</p>
-      </div>
-    </div>
     @if (store.showCreate()) {
       <form class="form-grid create-form" (ngSubmit)="createSprint()">
         <label>Name<input name="name" [(ngModel)]="sprintForm.name" maxlength="120" required /> </label>
@@ -17,62 +11,62 @@
     }
     @for (sprint of data().sprints; track sprint.id) {
       <article class="sprint-card">
-        <div class="section-heading">
-          <div class="sprint-title">
-            <h3>{{ sprint.name }}</h3>
-            <span class="status" [ngClass]="sprint.status | statusClass">{{ sprint.status | statusLabel }}</span>
-            @if (githubBase(); as repo) {
-              <a
-                class="gh-link"
-                [href]="repo + '/tree/' + (sprint.gitBranch || 'main')"
-                target="_blank"
-                rel="noopener"
-                title="Branch auf GitHub"
-              >
-                <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
-                  <path
-                    d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
-                  />
-                </svg>
-                {{ sprint.gitBranch || 'main' }}</a
-              >
-              @if (sprint.gitCommit) {
-                <a
-                  class="gh-link"
-                  [href]="repo + '/commit/' + sprint.gitCommit"
-                  target="_blank"
-                  rel="noopener"
-                  title="Commit auf GitHub"
-                >
-                  <code>{{ sprint.gitCommit }}</code>
-                </a>
-              }
-            }
-            <span class="git-sync-buttons">
-              <button
-                class="button git-button"
-                type="button"
-                (click)="syncGit(sprint.id, 'push')"
-                [disabled]="busy() || gitBusy(sprint)"
-                title="Git Push: Stand committen und nach GitHub pushen"
-              >
-                <app-nav-icon name="git-push" />Push
-              </button>
-              <button
-                class="button git-button"
-                type="button"
-                (click)="syncGit(sprint.id, 'pull')"
-                [disabled]="busy() || gitBusy(sprint) || !store.currentProject()?.gitRemote"
-                title="Git Pull: Stand von GitHub laden"
-              >
-                <app-nav-icon name="git-pull" />Pull
-              </button>
-            </span>
-          </div>
-        </div>
         <div class="sprint-layout">
           <div class="sprint-main">
-            <p>{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
+            <div class="section-heading">
+              <div class="sprint-title">
+                <h3>{{ sprint.name }}</h3>
+                <span class="status" [ngClass]="sprint.status | statusClass">{{ sprint.status | statusLabel }}</span>
+                @if (githubBase(); as repo) {
+                  <a
+                    class="gh-link"
+                    [href]="repo + '/tree/' + (sprint.gitBranch || 'main')"
+                    target="_blank"
+                    rel="noopener"
+                    title="Branch auf GitHub"
+                  >
+                    <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+                      <path
+                        d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+                      />
+                    </svg>
+                    {{ sprint.gitBranch || 'main' }}</a
+                  >
+                  @if (sprint.gitCommit) {
+                    <a
+                      class="gh-link"
+                      [href]="repo + '/commit/' + sprint.gitCommit"
+                      target="_blank"
+                      rel="noopener"
+                      title="Commit auf GitHub"
+                    >
+                      <code>{{ sprint.gitCommit }}</code>
+                    </a>
+                  }
+                }
+                <span class="git-sync-buttons">
+                  <button
+                    class="button git-button"
+                    type="button"
+                    (click)="syncGit(sprint.id, 'push')"
+                    [disabled]="busy() || gitBusy(sprint)"
+                    title="Git Push: Stand committen und nach GitHub pushen"
+                  >
+                    <app-nav-icon name="git-push" />Push
+                  </button>
+                  <button
+                    class="button git-button"
+                    type="button"
+                    (click)="syncGit(sprint.id, 'pull')"
+                    [disabled]="busy() || gitBusy(sprint) || !store.currentProject()?.gitRemote"
+                    title="Git Pull: Stand von GitHub laden"
+                  >
+                    <app-nav-icon name="git-pull" />Pull
+                  </button>
+                </span>
+              </div>
+            </div>
+            <p class="sprint-goal">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
             @if (sprint.gitMessage) {
               <p class="notice">{{ sprint.gitMessage }}</p>
             }
@@ -126,71 +120,84 @@
                 </details>
               }
             }
-            <h4 class="order-section sprint-tasks-title">Aufgaben</h4>
-            @for (item of sprintItems(sprint.id); track item.id) {
-              <div class="sprint-task">
-                <button
-                  type="button"
-                  class="sprint-task-head"
-                  (click)="toggleSprintItem(item.id)"
-                  [attr.aria-expanded]="openSprintItems().has(item.id)"
-                >
-                  <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true">▾</span>
-                  <strong>{{ item.title }}</strong>
-                  <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
-                </button>
-                @if (openSprintItems().has(item.id)) {
-                  <div class="sprint-task-body">
-                    @if (sprintRun(item.id); as run) {
-                      <ol class="agent-steps">
-                        @for (step of run.steps; track step.position) {
-                          <li>
-                            <button
-                              type="button"
-                              class="sprint-task-head"
-                              (click)="toggleSprintItem(run.id + step.position)"
-                            >
-                              <span
-                                class="task-chevron"
-                                [class.open]="openSprintItems().has(run.id + step.position)"
-                                aria-hidden="true"
-                                >▾</span
-                              >
-                              {{ step.agentName || 'Agent' }}
-                              <span class="status" [ngClass]="step.status | statusClass">{{
-                                step.status | statusLabel
-                              }}</span>
-                            </button>
-                            @if (openSprintItems().has(run.id + step.position) || step.status === 'running') {
-                              @if (step.output) {
-                                <article class="markdown task-body" [innerHTML]="step.output | markdown"></article>
-                              } @else {
-                                <p class="muted task-body">
-                                  {{
-                                    step.status === 'running'
-                                      ? 'Agent arbeitet … Ausgabe erscheint live.'
-                                      : 'Keine Ausgabe.'
-                                  }}
-                                </p>
-                              }
-                              @if (step.progress) {
-                                <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p>
-                              }
-                            }
-                          </li>
-                        } @empty {
-                          <li class="muted">Noch keine Agent-Schritte.</li>
+            <section class="git-tree sprint-tasks" aria-label="Aufgaben">
+              <h4>Aufgaben</h4>
+              @for (item of sprintItems(sprint.id); track item.id) {
+                <div class="sprint-task">
+                  <button
+                    type="button"
+                    class="sprint-task-head"
+                    (click)="toggleSprintItem(item.id)"
+                    [attr.aria-expanded]="openSprintItems().has(item.id)"
+                  >
+                    <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true">▾</span>
+                    <strong>{{ item.title }}</strong>
+                    <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+                  </button>
+                  @if (item.status === 'blocked') {
+                    <div class="sprint-task-retry">
+                      <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
+                        <app-nav-icon name="undo" />Erneut versuchen
+                        @if (item.retryCount) {
+                          ({{ item.retryCount }})
                         }
-                      </ol>
-                    } @else {
-                      <p class="muted">Noch kein Agent-Lauf für diese Aufgabe.</p>
-                    }
-                  </div>
-                }
-              </div>
-            } @empty {
-              <p class="muted">Keine Aufgaben in diesem Sprint.</p>
-            }
+                      </button>
+                      <span class="muted">Es startet nur der fehlgeschlagene Agent.</span>
+                    </div>
+                  }
+                  @if (openSprintItems().has(item.id)) {
+                    <div class="sprint-task-body">
+                      @if (sprintRun(item.id); as run) {
+                        <ol class="agent-steps">
+                          @for (step of run.steps; track step.position) {
+                            <li>
+                              <button
+                                type="button"
+                                class="sprint-task-head"
+                                (click)="toggleSprintItem(run.id + step.position)"
+                              >
+                                <span
+                                  class="task-chevron"
+                                  [class.open]="openSprintItems().has(run.id + step.position)"
+                                  aria-hidden="true"
+                                  >▾</span
+                                >
+                                {{ step.agentName || 'Agent' }}
+                                <span class="status" [ngClass]="step.status | statusClass">{{
+                                  step.status | statusLabel
+                                }}</span>
+                              </button>
+                              @if (openSprintItems().has(run.id + step.position) || step.status === 'running') {
+                                @if (step.output) {
+                                  <article class="markdown task-body" [innerHTML]="step.output | markdown"></article>
+                                } @else {
+                                  <p class="muted task-body">
+                                    {{
+                                      step.status === 'running'
+                                        ? 'Agent arbeitet … Ausgabe erscheint live.'
+                                        : 'Keine Ausgabe.'
+                                    }}
+                                  </p>
+                                }
+                                @if (step.progress) {
+                                  <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p>
+                                }
+                              }
+                            </li>
+                          } @empty {
+                            <li class="muted">Noch keine Agent-Schritte.</li>
+                          }
+                        </ol>
+                      } @else {
+                        <p class="muted">Noch kein Agent-Lauf für diese Aufgabe.</p>
+                      }
+                    </div>
+                  }
+                </div>
+              } @empty {
+                <p class="muted">Keine Aufgaben in diesem Sprint.</p>
+              }
+            </section>
           </div>
           <div class="sprint-side">
             <section class="git-tree sprint-details" aria-label="Details">

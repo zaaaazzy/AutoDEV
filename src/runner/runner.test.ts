@@ -208,3 +208,35 @@ test('stores documenter output, the handbook and reports a bug when an agent fai
     failing.queries.some((query) => query.sql.includes('INSERT INTO bugs') && String(query.values[1]).includes('Dev')),
   );
 });
+
+test('after a failed run only the failed agent and the following ones run again', async () => {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-2' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [{ id: 'run-1', status: 'failed' }] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) {
+        return {
+          rows: [
+            { agent_id: 'pre-id', agent_name: 'pre', phase: 'pre_task', status: 'passed', output: 'fertig A' },
+            { agent_id: 'while-id', agent_name: 'while', phase: 'while_task', status: 'failed', output: 'kaputt' },
+          ],
+        };
+      }
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const agents = [agent('pre', 'pre_task', 1, ['a']), agent('while', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'passed');
+  assert.deepEqual(
+    calls.map((call) => call[0]),
+    ['b'],
+  );
+  assert.match(calls[0]?.at(-1) ?? '', /fertig A/);
+});
