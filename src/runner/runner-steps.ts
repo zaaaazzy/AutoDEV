@@ -105,7 +105,6 @@ async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, outpu
 const RUN_TIMEOUT_HOURS = 3;
 const CANCEL_POLL_MS = 1500;
 const LIVE_OUTPUT_INTERVAL_MS = 1500;
-const LIVE_ACTIONS = 40;
 
 export interface RunContext {
   pool: Pool;
@@ -215,6 +214,16 @@ async function invokeAgent(
   });
 }
 
+/** Appends a timestamped entry to the step's history (shown as "Verlauf"). */
+function logEvent(pool: Pool, stepId: string | undefined, text: string): Promise<unknown> {
+  return pool
+    .query(`UPDATE agent_run_steps SET events = events || $2::jsonb WHERE id = $1`, [
+      stepId,
+      JSON.stringify([{ at: new Date().toISOString(), text: redactOutput(text, process.env) }]),
+    ])
+    .catch(() => undefined);
+}
+
 /** Execute a workflow step and persist its progress, cancellation state, and result. */
 export async function runStep(
   ctx: RunContext,
@@ -231,6 +240,7 @@ export async function runStep(
       [runId, position, agent.id, agent.name, agent.phase],
     )
   ).rows[0]?.id;
+  await logEvent(pool, stepId, 'Schritt gestartet');
   const manual =
     agent.role === 'manual_writer' || agent.role === 'user_manual_writer'
       ? await readManual(
@@ -265,7 +275,6 @@ export async function runStep(
     stopWatching = () => clearInterval(watcher);
   });
   let lastLiveWrite = 0;
-  const actions: string[] = [];
   const live: { update?: (message: string) => void } = {};
   const hooks: StepHooks = {
     signal: stepAbort.signal,
@@ -281,14 +290,7 @@ export async function runStep(
         .catch(() => undefined);
     },
     onAction: (message) => {
-      actions.push(message);
-      void pool
-        .query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3', [
-          stepId,
-          redactOutput(actions.slice(-LIVE_ACTIONS).join('\n'), process.env),
-          AGENT_STEP_STATUS.running,
-        ])
-        .catch(() => undefined);
+      void logEvent(pool, stepId, message);
       live.update?.(message);
     },
     onSpawn: (pid) => {
@@ -327,6 +329,11 @@ export async function runStep(
     return { passed: false, interrupted: true };
   }
   const passed = result.exitCode === 0 && !cancelled;
+  await logEvent(
+    pool,
+    stepId,
+    cancelled ? 'Abgebrochen' : passed ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit-Code ${result.exitCode})`,
+  );
   await pool.query(
     `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5 WHERE id = $1`,
     [stepId, passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed, result.exitCode, result.durationMs, output],

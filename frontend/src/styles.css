@@ -428,3 +428,9 @@ h3 .link-button { color: var(--ink); }
 .bug-link { margin: 6px 0; font-size: 13.5px; }
 .check { flex-direction: row; align-items: center; gap: 8px; }
 .check input { width: auto; }
+
+.timeline { list-style: none; margin: 4px 0 8px; padding: 0 0 0 14px; border-left: 2px solid #dfe3da; display: grid; gap: 6px; }
+.timeline li { position: relative; display: flex; gap: 12px; align-items: baseline; font-size: 13px; }
+.timeline li::before { content: ''; position: absolute; left: -20px; top: 6px; width: 8px; height: 8px; border-radius: 50%; background: #2f6f4f; }
+.timeline time { flex: none; min-width: 62px; color: #6b756f; font-variant-numeric: tabular-nums; font-size: 12px; }
+.timeline span { overflow-wrap: anywhere; }

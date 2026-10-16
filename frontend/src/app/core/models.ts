@@ -119,6 +119,11 @@ export interface Agent {
   command: string[] | null;
 }
 
+export interface StepEvent {
+  at: string;
+  text: string;
+}
+
 export interface RunStep {
   position: number;
   agentName?: string;
@@ -128,6 +133,7 @@ export interface RunStep {
   durationMs?: number | null;
   output: string;
   progress?: string | null;
+  events?: StepEvent[];
 }
 
 export interface AgentRun {
@@ -210,6 +216,7 @@ export interface AgentActivity {
   durationMs: number | null;
   output: string;
   progress?: string | null;
+  events?: StepEvent[];
   startedAt: string;
   orderId: string;
   orderTitle: string;

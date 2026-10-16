@@ -45,7 +45,7 @@ export function registerBoardRoutes(app: Express, pool: Pool): void {
     );
     const steps = await pool.query(
       `SELECT run_id AS "runId", position, agent_name AS "agentName", phase, status,
-              exit_code AS "exitCode", duration_ms AS "durationMs", output, progress
+              exit_code AS "exitCode", duration_ms AS "durationMs", output, progress, events
          FROM agent_run_steps WHERE run_id = ANY($1::uuid[]) ORDER BY run_id, position`,
       [runs.rows.map((run) => run.id)],
     );

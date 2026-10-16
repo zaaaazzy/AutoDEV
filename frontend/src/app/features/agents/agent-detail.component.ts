@@ -1,4 +1,4 @@
-import { NgClass } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
 import { Component, inject, input } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import type { Agent } from '../../core/models.js';
@@ -10,7 +10,7 @@ import { roleLabel } from './agent-options.js';
 @Component({
   selector: 'app-agent-detail',
   standalone: true,
-  imports: [NgClass, MarkdownPipe, DateTimePipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe],
+  imports: [NgClass, DatePipe, MarkdownPipe, DateTimePipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe],
   templateUrl: './agent-detail.component.html',
   host: { style: 'display: contents' },
 })
