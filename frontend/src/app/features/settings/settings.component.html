@@ -1,0 +1,81 @@
+@if (store.ready()) {
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>Projekteinstellungen</h2>
+        <p class="muted">{{ store.currentProject()?.name }}</p>
+      </div>
+    </div>
+    <form class="form-grid" (ngSubmit)="saveSettings()">
+      <label class="wide"
+        >Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
+      </label>
+      <label class="wide"
+        >Testbefehle (ein Befehl pro Zeile)<textarea
+          name="testCommands"
+          [(ngModel)]="settings.testCommands"
+          rows="3"
+          placeholder="npm run build&#10;npm test"
+        ></textarea>
+      </label>
+      <label class="wide"
+        >Projektbeschreibung<textarea
+          name="description"
+          [(ngModel)]="settings.description"
+          rows="4"
+          maxlength="10000"
+          placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"
+        ></textarea>
+      </label>
+      <label class="wide"
+        >Regeln für Agents (Do's and Don'ts)<textarea
+          name="guidelines"
+          [(ngModel)]="settings.guidelines"
+          rows="6"
+          maxlength="10000"
+          placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"
+        ></textarea>
+      </label>
+      <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
+      <label class="wide check">
+        <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" /> Automatisches Bugfixing: Scheitert
+        ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label
+      >
+      <label class="wide"
+        >GitHub-Repository<input
+          name="gitRemote"
+          [(ngModel)]="settings.gitRemote"
+          maxlength="300"
+          placeholder="git@github.com:user/repo.git"
+        />
+      </label>
+      <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
+    </form>
+  </section>
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>Agents</h2>
+        <p class="muted">Gilt für alle Projekte</p>
+      </div>
+    </div>
+    <form class="form-grid" (ngSubmit)="saveMaxAgents()">
+      <label
+        >Gleichzeitige Agents (1–8)<input
+          name="maxAgents"
+          type="number"
+          min="1"
+          max="8"
+          step="1"
+          [(ngModel)]="maxAgents"
+          required
+        />
+      </label>
+      <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+      <p class="muted wide">
+        Jedes Projekt arbeitet seine Aufträge nacheinander ab; mehrere Projekte laufen parallel. Der Worker übernimmt
+        die Änderung im nächsten Durchlauf.
+      </p>
+    </form>
+  </section>
+}

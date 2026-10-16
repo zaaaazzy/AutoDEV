@@ -1,0 +1,11 @@
+@if (images().length) {
+  <div class="gallery">
+    @for (image of images(); track image.id) {
+      <figure>
+        <a [href]="imageUrl(image)" target="_blank" rel="noopener">
+          <img [src]="imageUrl(image)" [alt]="image.filename" loading="lazy">
+        </a>
+      </figure>
+    }
+  </div>
+}

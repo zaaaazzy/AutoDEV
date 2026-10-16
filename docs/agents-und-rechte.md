@@ -2,7 +2,7 @@
 
 ## 1. Der Worker-Prozess
 
-Es gibt **einen** Worker (`npm run worker` = `tsx src/runner-cli.ts --all --watch`). Er läuft auf dem Host, nicht im Docker-Container `dev-log`, und wird per launchd (`com.devlog.worker`, `./scripts/install-worker.sh`) gestartet und bei Absturz neu gestartet. Log: `~/Library/Logs/dev-log-worker.log`.
+Es gibt **einen** Worker (`npm run worker` = `tsx src/runner/runner-cli.ts --all --watch`). Er läuft auf dem Host, nicht im Docker-Container `dev-log`, und wird per launchd (`com.devlog.worker`, `./scripts/install-worker.sh`) gestartet und bei Absturz neu gestartet. Log: `~/Library/Logs/dev-log-worker.log`.
 
 - Er bedient **alle registrierten Projekte**, jeweils mit dem Projektordner (`projects.repository`) als Arbeitsverzeichnis. Fehlt der Ordner, zeigt das Worker-Badge den Fehler und Chat-Nachrichten werden mit dem Grund beantwortet.
 - Er lädt Code nur beim Start. **Nach jeder Code-Änderung muss er neu gestartet werden:**

@@ -1,0 +1,33 @@
+@if (store.ready()) {
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>Testläufe</h2>
+        <p class="muted">Die letzten {{ data().runs.length }} Testläufe</p>
+      </div>
+    </div>
+    @for (run of data().runs; track run.id) {
+      <article class="run-card">
+        <div class="section-heading">
+          <strong>{{ run.id }}</strong>
+          <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+        </div>
+        <p class="meta">
+          {{ run.startedAt | dateTime }} · {{ run.trigger === 'ci' ? 'CI' : 'Manuell' }} ·
+          {{ run.branch || 'ohne Branch' }} · {{ run.commitSha?.slice(0, 8) || 'ohne Commit' }}
+        </p>
+        @for (step of run.steps; track step.position) {
+          <details class="run-step">
+            <summary>
+              <span class="status" [ngClass]="step.status | statusClass">{{ step.status | statusLabel }}</span>
+              {{ step.command }} · {{ step.durationMs | duration }}
+            </summary>
+            <pre>{{ step.output || 'Keine Konsolenausgabe.' }}</pre>
+          </details>
+        }
+      </article>
+    } @empty {
+      <p class="empty-state">Für dieses Projekt gibt es noch keine Testläufe.</p>
+    }
+  </section>
+}

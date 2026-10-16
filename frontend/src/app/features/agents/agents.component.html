@@ -1,0 +1,150 @@
+@if (store.ready()) {
+  @if (store.selectedAgent(); as agent) {
+    <app-agent-detail [selected]="agent" />
+  } @else {
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Agents &amp; Workflow</h2>
+          <p class="muted">Agent-Rollen nach Workflow-Phase verwalten</p>
+        </div>
+        <button class="button secondary" (click)="createDefaultAgents()">Standard-Workflow anlegen</button>
+      </div>
+      @if (store.showCreate()) {
+        <form class="form-grid create-form" (ngSubmit)="createAgent()">
+          <label>Name<input name="name" [(ngModel)]="agentForm.name" maxlength="80" required /> </label>
+          <label
+            >Rolle<select name="role" [(ngModel)]="agentForm.role">
+              @for (role of agentRoles; track role.value) {
+                <option [value]="role.value">{{ role.label }}</option>
+              }
+            </select>
+          </label>
+          <label
+            >Phase<select name="phase" [(ngModel)]="agentForm.phase">
+              @for (phase of phases; track phase.id) {
+                <option [value]="phase.id">{{ phase.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="wide"
+            >Befehl<input name="command" [(ngModel)]="agentForm.command" maxlength="1000" placeholder="claude -p" />
+          </label>
+          <label class="wide"
+            >Anweisung<textarea name="instructions" [(ngModel)]="agentForm.instructions" maxlength="10000"></textarea>
+          </label>
+          <button class="button primary" type="submit">Agent anlegen</button>
+        </form>
+      }
+      @for (phase of phases; track phase.id) {
+        <section class="phase">
+          <h3>
+            {{ phase.label }} <small>{{ phase.hint }}</small>
+          </h3>
+          @for (agent of agentsOfPhase(phase.id); track agent.id; let index = $index) {
+            <article class="item-card">
+              <div class="item-content">
+                @if (agentEditing() === agent.id) {
+                  <form class="form-grid" (ngSubmit)="saveAgentEdit(agent)">
+                    <label class="wide"
+                      >Name<input name="name" [(ngModel)]="agentEdit.name" maxlength="80" required />
+                    </label>
+                    <label class="wide"
+                      >Verhalten (Anweisung)<textarea
+                        name="instructions"
+                        [(ngModel)]="agentEdit.instructions"
+                        rows="6"
+                        maxlength="10000"
+                      ></textarea>
+                    </label>
+                    <label class="wide"
+                      >Befehl (leer = eingebauter Agent)<input
+                        name="command"
+                        [(ngModel)]="agentEdit.command"
+                        maxlength="1000"
+                        placeholder="claude -p"
+                      />
+                    </label>
+                    <div class="actions">
+                      <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+                      <button class="button secondary" type="button" (click)="agentEditing.set(null)">Abbrechen</button>
+                    </div>
+                  </form>
+                } @else {
+                  <h4>
+                    <button type="button" class="link-button" (click)="activity.show(agent.id)">
+                      {{ agent.name }}
+                    </button>
+                    <span class="tag">{{ roleLabel(agent.role) }}</span>
+                    <button
+                      class="button secondary"
+                      type="button"
+                      (click)="startAgentEdit(agent)"
+                      aria-label="Agent bearbeiten"
+                      title="Bearbeiten"
+                    >
+                      ✎
+                    </button>
+                  </h4>
+                  <p>{{ agent.instructions || 'Keine Anweisung hinterlegt.' }}</p>
+                  <p class="muted">{{ agent.command?.join(' ') || 'Eingebauter Agent' }}</p>
+                }
+              </div>
+              <div class="actions">
+                <button class="button secondary" (click)="moveAgent(agent, -1)" [disabled]="index === 0">↑</button>
+                <button
+                  class="button secondary"
+                  (click)="moveAgent(agent, 1)"
+                  [disabled]="index === agentsOfPhase(phase.id).length - 1"
+                >
+                  ↓
+                </button>
+                <select
+                  [ngModel]="agent.phase"
+                  (ngModelChange)="updateAgent(agent.id, { phase: $event })"
+                  [name]="'agent-phase-' + agent.id"
+                  aria-label="Workflow-Phase"
+                >
+                  @for (entry of phases; track entry.id) {
+                    <option [value]="entry.id">{{ entry.label }}</option>
+                  }
+                </select>
+                <button class="button secondary" (click)="updateAgent(agent.id, { enabled: !agent.enabled })">
+                  {{ agent.enabled ? 'Deaktivieren' : 'Aktivieren' }}
+                </button>
+                <button class="button danger" (click)="deleteAgent(agent.id)">Löschen</button>
+              </div>
+            </article>
+          } @empty {
+            <p class="empty-state">Keine Agents in dieser Phase.</p>
+          }
+        </section>
+      }
+      <h3 class="subheading">Letzte Agent-Läufe</h3>
+      @for (run of data().agentRuns; track run.id) {
+        <article class="run-card">
+          <div class="list-row">
+            <strong>{{ run.title }}</strong>
+            <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+            <span>{{ run.startedAt | dateTime }}</span>
+          </div>
+          @for (step of run.steps; track step.position) {
+            <details class="run-step">
+              <summary>{{ step.agentName || step.command }} · {{ step.status | statusLabel }}</summary>
+              @if (step.progress) {
+                <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p>
+              }
+              @if (step.output) {
+                <article class="markdown task-body" [innerHTML]="step.output | markdown"></article>
+              } @else {
+                <p class="muted">Keine Ausgabe.</p>
+              }
+            </details>
+          }
+        </article>
+      } @empty {
+        <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p>
+      }
+    </section>
+  }
+}

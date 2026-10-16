@@ -1,0 +1,69 @@
+@if (store.ready()) {
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>Dokumentation</h2>
+        <p class="muted">Handbücher, Sprintberichte und Projektdokumente</p>
+      </div>
+    </div>
+    <div class="docs-layout">
+      <aside>
+        @if (store.showCreate()) {
+          <form class="form-grid" (ngSubmit)="createDocument()">
+            <h3>Neues Handbuch</h3>
+            <label class="wide"
+              >Titel<input name="title" [(ngModel)]="docForm.title" maxlength="180" required />
+            </label>
+            <label class="wide"
+              >Inhalt<textarea
+                name="content"
+                [(ngModel)]="docForm.content"
+                maxlength="30000"
+                rows="6"
+                required
+              ></textarea>
+            </label>
+            <button class="button primary" type="submit">Dokument speichern</button>
+          </form>
+        }
+        @for (group of documentGroups; track group.kind) {
+          <h3 class="group-title">{{ group.label }}</h3>
+          @for (doc of docsOfKind(group.kind); track doc.id) {
+            <button class="doc-link" [class.selected]="selectedDoc()?.id === doc.id" (click)="selectedDoc.set(doc)">
+              {{ doc.title }}
+            </button>
+          } @empty {
+            <p class="muted small">Keine Einträge</p>
+          }
+        }
+      </aside>
+      <div class="doc-reader">
+        @if (selectedDoc(); as doc) {
+          <div class="meta">
+            <span class="tag">{{ documentKindLabel(doc.kind) }}</span>
+            <span>Aktualisiert {{ doc.updatedAt | dateTime }}</span>
+          </div>
+          @if (doc.kind === 'manual') {
+            <form class="form-grid" (ngSubmit)="saveDocument(doc, docEditor.value)" #docEditor="ngForm">
+              <label class="wide">Titel<input name="title" [ngModel]="doc.title" maxlength="180" required /> </label>
+              <label class="wide"
+                >Inhalt<textarea name="content" [ngModel]="doc.content" maxlength="30000" rows="14" required></textarea>
+              </label>
+              <div class="actions">
+                <button class="button primary" type="submit">Speichern</button>
+                <button class="button danger" type="button" (click)="deleteDocument(doc.id)">Löschen</button>
+              </div>
+            </form>
+            <article class="markdown" [innerHTML]="doc.content | markdown"></article>
+          } @else {
+            <h3>{{ doc.title }}</h3>
+            <article class="markdown" [innerHTML]="doc.content | markdown"></article>
+            <p class="muted">Automatisch erzeugte Dokumentation ist schreibgeschützt.</p>
+          }
+        } @else {
+          <p class="empty-state">Noch keine Dokumente vorhanden.</p>
+        }
+      </div>
+    </div>
+  </section>
+}

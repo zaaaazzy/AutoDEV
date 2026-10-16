@@ -1,0 +1,63 @@
+<section class="panel chat" aria-label="Assistent">
+  <div class="section-heading">
+    <h2>Assistent</h2>
+    <button type="button" class="chat-clear" (click)="clear()" [disabled]="!chat().length" title="Verlauf leeren">
+      <svg
+        viewBox="0 0 24 24"
+        width="15"
+        height="15"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+      </svg>
+      Verlauf leeren
+    </button>
+  </div>
+  <div class="chat-log">
+    @for (message of chat(); track message.id) {
+      <div
+        class="chat-msg"
+        [class.mine]="message.role === 'user'"
+        [class.failed]="message.status === 'failed'"
+        [class.typing]="message.role === 'assistant' && message.status === 'processing'"
+      >
+        {{ message.content }}
+      </div>
+    } @empty {
+      <p class="muted">Stelle eine Frage oder gib eine Aufgabe – der Assistent führt sie selbst aus.</p>
+    }
+    @if (chatWaiting() && !chatProgressShown()) {
+      <div class="chat-msg typing">Assistent arbeitet …</div>
+    }
+  </div>
+  <form class="chat-form" (ngSubmit)="send()">
+    <input
+      name="chatInput"
+      [(ngModel)]="chatInput"
+      placeholder="Nachricht an den Assistenten …"
+      autocomplete="off"
+      maxlength="4000"
+    />
+    <button type="submit" class="chat-send" [disabled]="!chatInput.trim()">
+      Senden
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
+      </svg>
+    </button>
+  </form>
+</section>

@@ -1,0 +1,227 @@
+@if (store.ready()) {
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>Aufträge</h2>
+        <p class="muted">Backlog, Sprint-Zuordnung und Fortschritt</p>
+      </div>
+    </div>
+    @if (store.showCreate()) {
+      <form class="inline-form" (ngSubmit)="createDevelopment()">
+        <input
+          name="title"
+          [(ngModel)]="developmentForm.title"
+          placeholder="Neuer Entwicklungsauftrag …"
+          maxlength="180"
+          required
+        />
+        <select name="priority" [(ngModel)]="developmentForm.priority" aria-label="Priorität">
+          <option value="medium">Mittel</option>
+          <option value="high">Hoch</option>
+          <option value="low">Niedrig</option>
+        </select>
+        <button class="button primary" type="submit" [disabled]="busy()">Auftrag hinzufügen</button>
+      </form>
+    }
+    @if (data().development.length) {
+      <div class="section-heading">
+        <p class="muted">
+          {{ openOrders().length }} offene Aufträge · Spaltenkopf sortiert, ⏷ filtert (Mehrfachauswahl)
+        </p>
+        @if (hasDevFilters()) {
+          <button type="button" class="button secondary" (click)="clearDevFilters()">Filter zurücksetzen</button>
+        }
+      </div>
+      <div class="table-wrap">
+        <table class="idea-table">
+          <thead>
+            <tr>
+              <th></th>
+              @for (col of devColumns; track col.key) {
+                <th
+                  appColumnHeader
+                  [label]="col.label"
+                  [sortDir]="devSort().key === col.key ? devSort().dir : null"
+                  [filterActive]="devFilterActive(col.key)"
+                  [textFilter]="isDevText(col.key)"
+                  [textValue]="textValue(col.key)"
+                  [options]="devOptions(col.key)"
+                  [selected]="selectedValues(col.key)"
+                  (sortRequested)="sortDevBy(col.key)"
+                  (textChange)="setDevText(col.key, $event)"
+                  (valueToggle)="toggleDevValue(col.key, $event.option, $event.checked)"
+                ></th>
+              }
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of openOrders(); track item.id) {
+              <tr>
+                <td>
+                  <button
+                    type="button"
+                    class="button secondary icon-button"
+                    [attr.aria-expanded]="openOrder() === item.id"
+                    (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
+                    title="Details"
+                  >
+                    {{ openOrder() === item.id ? '▾' : '▸' }}
+                  </button>
+                </td>
+                <td class="title-cell">
+                  <button
+                    type="button"
+                    class="link-button clamp"
+                    (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
+                  >
+                    {{ item.title }}
+                  </button>
+                </td>
+                <td class="summary-cell">
+                  <div class="clamp">{{ item.description | shortText }}</div>
+                </td>
+                <td>
+                  <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+                </td>
+                <td>{{ item.priority | priorityLabel }}</td>
+                <td>{{ devCell(item, 'sprint') }}</td>
+                <td>{{ item.effortHours | hours }}</td>
+              </tr>
+              @if (openOrder() === item.id) {
+                <tr class="closed-detail">
+                  <td></td>
+                  <td colspan="6">
+                    <app-order-detail
+                      [order]="item"
+                      [editing]="orderEditing() === item.id"
+                      (editStarted)="orderEditing.set(item.id)"
+                      (editCancelled)="orderEditing.set(null)"
+                      (saved)="saveOrder(item, $event)"
+                    />
+                  </td>
+                </tr>
+              }
+            } @empty {
+              <tr>
+                <td colspan="7" class="empty-state">Keine offenen Aufträge für diese Filter.</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty-state">Noch keine Entwicklungsaufträge vorhanden.</p>
+    }
+  </section>
+  <section class="panel">
+    <div class="section-heading">
+      <button
+        type="button"
+        class="collapse-toggle"
+        [attr.aria-expanded]="showDoneOrders()"
+        (click)="showDoneOrders.set(!showDoneOrders())"
+      >
+        <span class="chev" [class.open]="showDoneOrders()">▸</span> Erledigte Aufträge
+        <span class="muted">({{ doneOrders().length }})</span>
+      </button>
+    </div>
+    @if (showDoneOrders()) {
+      @if (doneOrders().length) {
+        <div class="table-wrap">
+          <table class="idea-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Titel</th>
+                <th>Kurzfassung</th>
+                <th>Erledigt</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (item of doneOrders(); track item.id) {
+                <tr>
+                  <td>
+                    <button
+                      type="button"
+                      class="button secondary icon-button"
+                      [attr.aria-expanded]="openOrder() === item.id"
+                      (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
+                      title="Idee und Sprint anzeigen"
+                    >
+                      {{ openOrder() === item.id ? '▾' : '▸' }}
+                    </button>
+                  </td>
+                  <td class="title-cell">
+                    <button
+                      type="button"
+                      class="link-button clamp"
+                      (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
+                    >
+                      {{ item.title }}
+                    </button>
+                  </td>
+                  <td class="summary-cell">
+                    <div class="clamp">{{ item.description | shortText }}</div>
+                  </td>
+                  <td>{{ item.completedAt ? item.completedAt.slice(0, 10).split('-').reverse().join('.') : '–' }}</td>
+                </tr>
+                @if (openOrder() === item.id) {
+                  <tr class="closed-detail">
+                    <td></td>
+                    <td colspan="3">
+                      @let sprint = store.sprintOf(item);
+                      @let idea = ideaOf(item);
+                      <div class="closed-info">
+                        <div class="info-block">
+                          <h4>Idee</h4>
+                          @if (idea) {
+                            <p>
+                              <strong>{{ idea.title }}</strong>
+                            </p>
+                            <p class="muted">{{ idea.description | shortText: 160 }}</p>
+                          } @else {
+                            <p class="muted">Nicht aus einer Idee entstanden.</p>
+                          }
+                        </div>
+                        <div class="info-block">
+                          <h4>Sprint</h4>
+                          @if (sprint) {
+                            <p>
+                              <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
+                            </p>
+                            @if (sprint.goal) {
+                              <p class="muted">{{ sprint.goal }}</p>
+                            }
+                          } @else {
+                            <p class="muted">Keinem Sprint zugewiesen.</p>
+                          }
+                        </div>
+                        <div class="info-block">
+                          <h4>Auftrag</h4>
+                          <p>Priorität {{ item.priority | priorityLabel }} · Aufwand {{ item.effortHours | hours }}</p>
+                          <label
+                            >Status<select
+                              [ngModel]="item.status"
+                              (ngModelChange)="updateDevelopment(item.id, { status: $event })"
+                              [name]="'done-status-' + item.id"
+                            >
+                              @for (status of developmentStatuses; track status) {
+                                <option [value]="status">{{ status | statusLabel }}</option>
+                              }
+                            </select>
+                          </label>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="empty-state">Keine erledigten Aufträge.</p>
+      }
+    }
+  </section>
+}

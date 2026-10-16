@@ -1,46 +1,27 @@
-<ng-template #agentList>
-  @for (agent of worker().agents; track agent.id) {
-    <div class="agent-row">
-      <button type="button" class="agent-line" [class.active]="agent.active" [class.down]="!agent.active && !worker().online" (click)="showAgent(agent.id)">
-        <span class="agent-dot"></span>
-        <span class="agent-text">
-          <strong>{{ agent.name }}</strong>
-          <small>{{ agent.active ? (agent.sprintName ? agent.sprintName + ' - ' : '') + agent.orderTitle : (worker().online ? 'Inaktiv' : 'Worker offline') }}</small>
-        </span>
-      </button>
-      @if (agent.active) { <button type="button" class="agent-cancel" (click)="cancelAgent(agent.id, agent.name)" title="Agent abbrechen">■ Abbrechen</button> }
-    </div>
-  } @empty { <p class="muted">Keine Agents für dieses Projekt.</p> }
-</ng-template>
-
-<ng-template #icon let-name>
-  <svg class="nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    @switch (name) {
-      @case ('dashboard') { <rect x="3" y="3" width="7" height="9" /><rect x="14" y="3" width="7" height="5" /><rect x="14" y="12" width="7" height="9" /><rect x="3" y="16" width="7" height="5" /> }
-      @case ('docs') { <path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2z" /><path d="M22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z" /> }
-      @case ('ideation') { <path d="M9 18h6M10 22h4" /><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2z" /> }
-      @case ('development') { <rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2M9 12h6M9 16h6" /> }
-      @case ('sprints') { <path d="M4 22V4" /><path d="M4 4h14l-3 5 3 5H4" /> }
-      @case ('bugs') { <path d="M8 6a4 4 0 0 1 8 0" /><rect x="7" y="6" width="10" height="14" rx="5" /><path d="M12 10v10M3 11h4M17 11h4M3 19l4-2M21 19l-4-2M4 5l3 3M20 5l-3 3" /> }
-      @case ('runs') { <path d="M9 2h6M10 2v6L4 19a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-6-11V2M7 15h10" /> }
-      @case ('agents') { <rect x="4" y="8" width="16" height="12" rx="2" /><path d="M12 8V5" /><circle cx="12" cy="4" r="1" /><circle cx="9" cy="14" r="1" /><circle cx="15" cy="14" r="1" /><path d="M2 14h2M20 14h2" /> }
-      @case ('settings') { <path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="8" cy="12" r="2" /><circle cx="18" cy="18" r="2" /> }
-    }
-  </svg>
-</ng-template>
-
 <div class="app-shell">
   <aside class="sidebar" [class.closed]="menuClosed()" (mouseleave)="menuClosed.set(false)">
-    <a class="brand" href="#dashboard" (click)="navigate('dashboard')">
-      <span class="brand-mark">m</span><span>mainty</span><span class="brand-divider">/</span><small>dev log</small>
+    <a class="brand" href="#dashboard" (click)="store.navigate('dashboard')">
+      <span class="brand-mark">m</span>
+      <span>mainty</span>
+      <span class="brand-divider">/</span>
+      <small>dev log</small>
     </a>
     <p class="nav-label">Arbeitsbereich</p>
     <nav aria-label="Dev-Log-Navigation">
       @for (item of navigation; track item.id) {
-        <a class="nav-link" [class.active]="section() === item.id" [href]="'#' + item.id"
-           (click)="navigate(item.id); menuClosed.set(true)">
-          <span class="nav-title"><ng-container *ngTemplateOutlet="icon; context: { $implicit: item.id }" /><span class="nav-text">{{ item.label }}</span></span>
-          @if (navCount(item.id) > 0) { <span class="nav-count">{{ navCount(item.id) }}</span> }
+        <a
+          class="nav-link"
+          [class.active]="section() === item.id"
+          [href]="'#' + item.id"
+          (click)="store.navigate(item.id); menuClosed.set(true)"
+        >
+          <span class="nav-title">
+            <app-nav-icon [name]="item.id" />
+            <span class="nav-text">{{ item.label }}</span>
+          </span>
+          @if (navCount(item.id) > 0) {
+            <span class="nav-count">{{ navCount(item.id) }}</span>
+          }
         </a>
       }
     </nav>
@@ -51,24 +32,46 @@
     <header class="topbar">
       <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>Dev Log</strong></div>
       <div class="agent-indicator">
-        <a class="worker-status" [class.online]="worker().online" [class.offline]="!worker().online" href="#agents" (click)="navigate('agents')" role="status" [attr.aria-label]="'Agent-Status: ' + workerText() + ' – zu den Agents'">
-          <ng-container *ngTemplateOutlet="icon; context: { $implicit: 'agents' }" /><span class="worker-count">{{ activeAgentCount() }}/{{ worker().agents.length }}</span>
+        <a
+          class="worker-status"
+          [class.online]="worker().online"
+          [class.offline]="!worker().online"
+          href="#agents"
+          (click)="store.navigate('agents')"
+          role="status"
+          [attr.aria-label]="'Agent-Status: ' + workerText() + ' – zu den Agents'"
+        >
+          <app-nav-icon name="agents" />
+          <span class="worker-count">{{ store.activeAgentCount() }}/{{ worker().agents.length }}</span>
         </a>
         <div class="agent-popover" role="tooltip">
-          <p class="popover-title">Agents · {{ currentProject()?.name }}</p>
-          <ng-container *ngTemplateOutlet="agentList" />
+          <p class="popover-title">Agents · {{ store.currentProject()?.name }}</p>
+          <app-agent-list />
         </div>
       </div>
-      <label class="project-picker">Projekt
-        <select [ngModel]="activeProject()" (ngModelChange)="selectProject($event)" aria-label="Projekt auswählen">
+      <label class="project-picker"
+        >Projekt
+        <select [ngModel]="activeProject()" (ngModelChange)="store.loadProject($event)" aria-label="Projekt auswählen">
           @for (project of projects(); track project.slug) {
             <option [value]="project.slug">{{ project.name }}</option>
           }
-          @if (!projects().length) { <option value="">Noch kein Projekt</option> }
+          @if (!projects().length) {
+            <option value="">Noch kein Projekt</option>
+          }
         </select>
       </label>
-      <button class="button secondary help-button" type="button" aria-label="Hilfe" title="So funktioniert Dev Log" (click)="showHelp.set(true)">?</button>
-      <button class="button secondary" type="button" (click)="showProjectForm.set(!showProjectForm())">+ Projekt</button>
+      <button
+        class="button secondary help-button"
+        type="button"
+        aria-label="Hilfe"
+        title="So funktioniert Dev Log"
+        (click)="showHelp.set(true)"
+      >
+        ?
+      </button>
+      <button class="button secondary" type="button" (click)="showProjectForm.set(!showProjectForm())">
+        + Projekt
+      </button>
     </header>
 
     <div class="content">
@@ -80,32 +83,32 @@
         </div>
         <div class="actions">
           @if (createLabel(); as label) {
-            <button class="button primary" type="button" (click)="showCreate.set(!showCreate())">{{ showCreate() ? 'Schließen' : '+ ' + label }}</button>
+            <button class="button primary" type="button" (click)="showCreate.set(!showCreate())">
+              {{ showCreate() ? 'Schließen' : '+ ' + label }}
+            </button>
           }
-          <button class="button secondary" type="button" (click)="loadProjects(activeProject())" [disabled]="busy()">
+          <button
+            class="button secondary"
+            type="button"
+            (click)="store.loadProjects(activeProject())"
+            [disabled]="busy()"
+          >
             Aktualisieren
           </button>
         </div>
       </section>
-
       @if (showProjectForm()) {
-        <form class="panel form-grid project-form" (ngSubmit)="createProject()">
-          <h2>Projekt verbinden</h2>
-          <label>Projektname<input name="name" [(ngModel)]="projectForm.name" maxlength="120" required></label>
-          <label>Projekt-ID<input name="slug" [(ngModel)]="projectForm.slug" pattern="[a-z0-9][a-z0-9-]{0,62}" maxlength="63" required></label>
-          <label class="wide">Projektordner<input name="repository" [(ngModel)]="projectForm.repository" maxlength="500" required placeholder="/Users/name/projekte/mein-projekt"></label>
-          <label class="wide">GitHub-Repository (optional)<input name="gitRemote" [(ngModel)]="projectForm.gitRemote" maxlength="300" placeholder="git@github.com:user/repo.git"></label>
-          <button class="button primary" type="submit" [disabled]="busy()">Projekt speichern</button>
-        </form>
+        <app-project-form (saved)="showProjectForm.set(false)" />
       }
-
       @if (notice()) {
         <p class="notice" role="status">{{ notice() }}</p>
       }
       @if (resourceErrors().length) {
         <div class="notice error" role="alert">
           <strong>Einige Bereiche sind nicht verfügbar:</strong>
-          @for (error of resourceErrors(); track error) { <p>{{ error }}</p> }
+          @for (error of resourceErrors(); track error) {
+            <p>{{ error }}</p>
+          }
         </div>
       }
       @if (loading()) {
@@ -116,908 +119,40 @@
           <p>Verbinde ein Projekt oder starte den Test-Agenten, um ein Projekt automatisch zu registrieren.</p>
           <button class="button primary" type="button" (click)="showProjectForm.set(true)">Projekt verbinden</button>
         </section>
-      } @else {
-        @if (section() === 'dashboard') {
-          <section class="summary-grid" aria-label="Projektkennzahlen">
-            <a class="summary-card" href="#development" (click)="navigate('development')"><strong>{{ openDevelopmentCount() }}</strong><span>Offene Aufträge</span></a>
-            <a class="summary-card" href="#ideation" (click)="navigate('ideation')"><strong>{{ openIdeasCount() }}</strong><span>Offene Ideen</span></a>
-            <a class="summary-card" href="#bugs" (click)="navigate('bugs')"><strong>{{ openBugCount() }}</strong><span>Offene Bugs</span></a>
-            <a class="summary-card" href="#runs" (click)="navigate('runs')"><strong>{{ data().runs.length }}</strong><span>Testläufe</span></a>
-          </section>
+      }
+      @switch (section()) {
+        @case ('dashboard') {
+          <app-dashboard />
         }
-
-        @if (section() === 'dashboard') {
-          <section class="panel chat" aria-label="Assistent">
-            <div class="section-heading">
-              <h2>Assistent</h2>
-              <button type="button" class="chat-clear" (click)="clearChat()" [disabled]="!chat().length" title="Verlauf leeren">
-                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" /></svg>
-                Verlauf leeren
-              </button>
-            </div>
-            <div class="chat-log">
-              @for (message of chat(); track message.id) {
-                <div class="chat-msg" [class.mine]="message.role === 'user'" [class.failed]="message.status === 'failed'" [class.typing]="message.role === 'assistant' && message.status === 'processing'">{{ message.content }}</div>
-              } @empty {
-                <p class="muted">Stelle eine Frage oder gib eine Aufgabe – der Assistent führt sie selbst aus.</p>
-              }
-              @if (chatWaiting() && !chatProgressShown()) { <div class="chat-msg typing">Assistent arbeitet …</div> }
-            </div>
-            <form class="chat-form" (ngSubmit)="sendChat()">
-              <input name="chatInput" [(ngModel)]="chatInput" placeholder="Nachricht an den Assistenten …" autocomplete="off" maxlength="4000" />
-              <button type="submit" class="chat-send" [disabled]="!chatInput.trim()">Senden
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" /></svg>
-              </button>
-            </form>
-          </section>
+        @case ('development') {
+          <app-development />
         }
-
-        @if (section() === 'dashboard') {
-          <section class="view-grid">
-            <article class="panel">
-              <div class="section-heading"><h2>Projektübersicht</h2><span class="muted">{{ currentProject()?.repository }}</span></div>
-              <div class="metric-grid">
-                <div><span>Aufträge erledigt</span><strong>{{ data().stats?.orders?.['done'] ?? 0 }}</strong></div>
-                <div><span>Test-Passrate</span><strong>{{ data().stats?.testRuns?.passRate === null || data().stats?.testRuns?.passRate === undefined ? '–' : data().stats?.testRuns?.passRate + '%' }}</strong></div>
-                <div><span>Aufwand erledigt / geplant</span><strong>{{ hours(data().stats?.effort?.doneHours) }} / {{ hours(data().stats?.effort?.plannedHours) }}</strong></div>
-                <div><span>Geschätzte Tokens</span><strong>{{ number(data().stats?.effort?.tokens) }}</strong></div>
-              </div>
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Agent-Status</h2><span class="muted">{{ activeAgentCount() }} von {{ worker().agents.length }} aktiv@if (worker().worker?.cpuPercent !== null && worker().worker?.cpuPercent !== undefined) { · CPU {{ worker().worker?.cpuPercent }}%}</span></div>
-              <ng-container *ngTemplateOutlet="agentList" />
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Aktiver Sprint</h2><a href="#sprints" (click)="navigate('sprints')">Alle Sprints</a></div>
-              @if (activeSprint(); as sprint) {
-                <h3>{{ sprint.name }}</h3>
-                <p class="muted">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
-                <div class="progress"><span [style.width.%]="data().stats?.sprint?.percent ?? 0"></span></div>
-                <p>{{ data().stats?.sprint?.done ?? 0 }} / {{ data().stats?.sprint?.total ?? 0 }} erledigt · {{ data().stats?.sprint?.percent ?? 0 }}%</p>
-                <details>
-                  <summary>Burndown-Verlauf</summary>
-                  @for (point of data().stats?.sprint?.burndown ?? []; track point.day) {
-                    <div class="bar-row"><span>{{ dateLabel(point.day) }}</span><div class="bar-track"><span [style.width.%]="barWidth(point.remaining, data().stats?.sprint?.total ?? 0)"></span></div><strong>{{ point.remaining }}</strong></div>
-                  } @empty { <p class="muted">Noch keine Burndown-Daten vorhanden.</p> }
-                </details>
-              } @else {
-                <p class="empty-state">Aktuell ist kein Sprint aktiv.</p>
-              }
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Letzte Testläufe</h2><a href="#runs" (click)="navigate('runs')">Alle Testläufe</a></div>
-              @for (run of data().runs.slice(0, 5); track run.id) {
-              <div class="list-row"><span class="status" [ngClass]="statusClass(run.status)">{{ statusLabel(run.status) }}</span><span>{{ dateTime(run.startedAt) }}</span><span>{{ run.branch || 'ohne Branch' }}</span></div>
-              } @empty { <p class="empty-state">Noch keine Testläufe vorhanden.</p> }
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Aufträge nach Status</h2></div>
-              <div class="status-list">
-                @for (status of developmentStatuses; track status) {
-                  <div class="list-row"><span>{{ statusLabel(status) }}</span><strong>{{ data().stats?.orders?.[status] ?? 0 }}</strong></div>
-                }
-              </div>
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Offene Bugs nach Schweregrad</h2></div>
-              @for (severity of severityLevels; track severity) {
-                <div class="bar-row"><span>{{ severityLabel(severity) }}</span><div class="bar-track"><span [style.width.%]="barWidth(data().stats?.openBugsBySeverity?.[severity] ?? 0, maxSeverityCount())"></span></div><strong>{{ data().stats?.openBugsBySeverity?.[severity] ?? 0 }}</strong></div>
-              }
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Sprint-Velocity</h2></div>
-              @for (sprint of data().stats?.velocity ?? []; track sprint.name) {
-                <div class="bar-row"><span>{{ sprint.name }}</span><div class="bar-track"><span [style.width.%]="barWidth(sprint.done, maxVelocity())"></span></div><strong>{{ sprint.done }}/{{ sprint.total }}</strong></div>
-              } @empty { <p class="empty-state">Noch keine abgeschlossenen Sprints vorhanden.</p> }
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Agent-Erfolg</h2></div>
-              @for (agent of data().stats?.agents ?? []; track agent.agent) {
-                <div class="bar-row"><span>{{ agent.agent }}</span><div class="bar-track"><span [style.width.%]="barWidth(agent.passed, maxAgentRuns())"></span></div><strong>{{ agent.passed }}/{{ agent.passed + agent.failed + agent.skipped }}</strong></div>
-              } @empty { <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p> }
-            </article>
-            <article class="panel">
-              <div class="section-heading"><h2>Ideen nach Nutzen und Kosten</h2></div>
-              @for (idea of ratedIdeas(); track idea.id) {
-                <div class="list-row"><strong>{{ idea.title }}</strong><span>Nutzen {{ idea.benefit }}/10 · Kosten {{ idea.cost }}/10</span></div>
-              } @empty { <p class="empty-state">Noch keine bewerteten Ideen vorhanden.</p> }
-            </article>
-          </section>
+        @case ('sprints') {
+          <app-sprints />
         }
-
-        @if (section() === 'development') {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Aufträge</h2><p class="muted">Backlog, Sprint-Zuordnung und Fortschritt</p></div></div>
-            @if (showCreate()) {
-            <form class="inline-form" (ngSubmit)="createDevelopment()">
-              <input name="title" [(ngModel)]="developmentForm.title" placeholder="Neuer Entwicklungsauftrag …" maxlength="180" required>
-              <select name="priority" [(ngModel)]="developmentForm.priority" aria-label="Priorität">
-                <option value="medium">Mittel</option><option value="high">Hoch</option><option value="low">Niedrig</option>
-              </select>
-              <button class="button primary" type="submit" [disabled]="busy()">Auftrag hinzufügen</button>
-            </form>
-            }
-            @if (data().development.length) {
-              <div class="section-heading">
-                <p class="muted">{{ openOrders().length }} offene Aufträge · Spaltenkopf sortiert, ⏷ filtert (Mehrfachauswahl)</p>
-                @if (hasDevFilters()) { <button type="button" class="button secondary" (click)="clearDevFilters()">Filter zurücksetzen</button> }
-              </div>
-              <div class="table-wrap">
-                <table class="idea-table">
-                  <thead><tr>
-                    <th></th>
-                    @for (col of devColumns; track col.key) {
-                      <th [attr.aria-sort]="devSort().key === col.key ? (devSort().dir === 'asc' ? 'ascending' : 'descending') : 'none'">
-                        <div class="th-inner">
-                          <button type="button" class="link-button" (click)="sortDevBy(col.key)">{{ col.label }}{{ devSort().key === col.key ? (devSort().dir === 'asc' ? ' ▲' : ' ▼') : '' }}</button>
-                          <details class="col-filter" [class.active]="devFilterActive(col.key)">
-                            <summary aria-label="Filter {{ col.label }}" title="Filtern">⏷</summary>
-                            <div class="filter-menu">
-                              @if (isDevText(col.key)) {
-                                <input type="search" placeholder="Enthält …" [ngModel]="devText()[col.key]" (ngModelChange)="setDevText(col.key, $event)" [name]="'dev-filter-' + col.key">
-                              } @else {
-                                @for (option of devOptions(col.key); track option) {
-                                  <label class="check"><input type="checkbox" [checked]="devValues()[col.key]?.includes(option)" (change)="toggleDevValue(col.key, option, $any($event.target).checked)"> {{ option }}</label>
-                                }
-                              }
-                            </div>
-                          </details>
-                        </div>
-                      </th>
-                    }
-                  </tr></thead>
-                  <tbody>
-                    @for (item of openOrders(); track item.id) {
-                      <tr>
-                        <td><button type="button" class="button secondary icon-button" [attr.aria-expanded]="openOrder() === item.id" (click)="openOrder.set(openOrder() === item.id ? null : item.id)" title="Details">{{ openOrder() === item.id ? '▾' : '▸' }}</button></td>
-                        <td class="title-cell"><button type="button" class="link-button clamp" (click)="openOrder.set(openOrder() === item.id ? null : item.id)">{{ item.title }}</button></td>
-                        <td class="summary-cell"><div class="clamp">{{ shortText(item.description) }}</div></td>
-                        <td><span class="status" [ngClass]="statusClass(item.status)">{{ statusLabel(item.status) }}</span></td>
-                        <td>{{ priorityLabel(item.priority) }}</td>
-                        <td>{{ devCell(item, 'sprint') }}</td>
-                        <td>{{ hours(item.effortHours) }}</td>
-                      </tr>
-                      @if (openOrder() === item.id) {
-                        <tr class="closed-detail"><td></td><td colspan="6">
-                          <div class="item-card order-detail">
-                            <div class="item-content">
-                              @if (orderEditing() !== item.id) {
-                                <div class="order-title-row">
-                                  <h3>{{ item.title }}</h3>
-                                  <button class="button secondary" type="button" (click)="orderEditing.set(item.id)" aria-label="Bearbeiten" title="Bearbeiten">✎</button>
-                                </div>
-                                @if (item.description) { <article class="markdown" [innerHTML]="item.description | markdown"></article> } @else { <p class="muted">Keine Beschreibung.</p> }
-                              }
-                              @if (item.status === 'blocked') {
-                                <div class="blocked-box">
-                                  <strong>Blockiert</strong>
-                                  @if (item.failure) { <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article> }
-                                  @if (item.failureBugId) {
-                                    <p class="bug-link">🐞 <a href="#bugs" (click)="navigate('bugs')">Bug-Bericht ansehen</a> ·
-                                      @switch (item.fixStatus) {
-                                        @case ('planned') { Behebung ist eingeplant und startet automatisch. }
-                                        @case ('in_progress') { Behebung läuft gerade … }
-                                        @case ('blocked') { Die automatische Behebung ist gescheitert – bitte Problem analysieren. }
-                                        @case ('done') { Bug behoben, der Auftrag wird erneut gestartet. }
-                                        @default { Keine automatische Behebung (in den Einstellungen aktivierbar). }
-                                      }
-                                    </p>
-                                  }
-                                  <div class="actions">
-                                    <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">↻ Erneut versuchen @if (item.retryCount) { ({{ item.retryCount }}) }</button>
-                                    <button class="button secondary" type="button" [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'" (click)="analyzeOrder(item)">
-                                      {{ item.analysisStatus === 'requested' || item.analysisStatus === 'running' ? 'Assistent analysiert …' : '🔎 Problem analysieren' }}</button>
-                                  </div>
-                                  <p class="muted">Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und erscheinen künftig bei den Risiken.</p>
-                                </div>
-                              }
-                              @if (item.analysis) {
-                                <h4 class="order-section">🔎 Analyse des Assistenten</h4>
-                                <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
-                              }
-                              @if (item.risks) {
-                                <h4 class="order-section">⚠ Risiken</h4>
-                                <article class="markdown" [innerHTML]="item.risks | markdown"></article>
-                              }
-                              @if (item.projectContext) {
-                                <details class="order-context"><summary>Projektbeschreibung &amp; Leitlinien</summary>
-                                  <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
-                                </details>
-                              }
-                  <ng-container *ngTemplateOutlet="gallery; context: { $implicit: item.ideationId }" />
-                  @if (orderEditing() === item.id) {
-                    <form class="form-grid" (ngSubmit)="saveDevelopment(item, developmentEdit.value)" #developmentEdit="ngForm">
-                      <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180"></label>
-                      <label class="wide">Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea></label>
-                      <label>Priorität<select name="priority" [ngModel]="item.priority"><option value="low">Niedrig</option><option value="medium">Mittel</option><option value="high">Hoch</option></select></label>
-                      <label>Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours"></label>
-                      <label>Token-Schätzung<input name="tokenEstimate" type="number" min="0" step="1000" [ngModel]="item.tokenEstimate"></label>
-                      <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" [ngModel]="item.benefit"></label>
-                      <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" [ngModel]="item.cost"></label>
-                      <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-                      <button class="button secondary" type="button" (click)="orderEditing.set(null)">Abbrechen</button>
-                    </form>
-                }
-                            </div>
-                <div class="item-controls">
-                  <label>Status<select [ngModel]="item.status" (ngModelChange)="updateDevelopment(item.id, { status: $event })" [name]="'status-' + item.id">
-                    @for (status of developmentStatuses; track status) { <option [value]="status">{{ statusLabel(status) }}</option> }
-                  </select></label>
-                  <label>Sprint<select [ngModel]="item.sprintId" (ngModelChange)="updateDevelopment(item.id, { sprintId: $event || null })" [name]="'sprint-' + item.id">
-                    <option [ngValue]="null">Kein Sprint</option>@for (sprint of data().sprints; track sprint.id) { <option [value]="sprint.id">{{ sprint.name }}</option> }
-                  </select></label>
-                  <label>Einzelner Agent
-                    <span class="inline-form">
-                      <select [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''" (ngModelChange)="manualAgent[item.id] = $event" [name]="'agent-' + item.id">
-                        <option value="">Agent wählen …</option>@for (agent of data().agents; track agent.id) { <option [value]="agent.id">{{ agent.name }}</option> }
-                      </select>
-                      <button class="button primary" type="button" title="Mit gewähltem Agent starten" aria-label="Agent starten" [disabled]="busy() || !(manualAgent[item.id] || item.agentId)" (click)="startWithAgent(item)">▶</button>
-                    </span>
-                  </label>
-                </div>
-                          </div>
-                        </td></tr>
-                      }
-                    } @empty { <tr><td colspan="7" class="empty-state">Keine offenen Aufträge für diese Filter.</td></tr> }
-                  </tbody>
-                </table>
-              </div>
-            } @else { <p class="empty-state">Noch keine Entwicklungsaufträge vorhanden.</p> }
-          </section>
-          <section class="panel">
-            <div class="section-heading">
-              <button type="button" class="collapse-toggle" [attr.aria-expanded]="showDoneOrders()" (click)="showDoneOrders.set(!showDoneOrders())">
-                <span class="chev" [class.open]="showDoneOrders()">▸</span> Erledigte Aufträge <span class="muted">({{ doneOrders().length }})</span>
-              </button>
-            </div>
-            @if (showDoneOrders()) {
-              @if (doneOrders().length) {
-                <div class="table-wrap">
-                  <table class="idea-table">
-                    <thead><tr><th></th><th>Titel</th><th>Kurzfassung</th><th>Erledigt</th></tr></thead>
-                    <tbody>
-                      @for (item of doneOrders(); track item.id) {
-                        <tr>
-                          <td><button type="button" class="button secondary icon-button" [attr.aria-expanded]="openOrder() === item.id" (click)="openOrder.set(openOrder() === item.id ? null : item.id)" title="Idee und Sprint anzeigen">{{ openOrder() === item.id ? '▾' : '▸' }}</button></td>
-                          <td class="title-cell"><button type="button" class="link-button clamp" (click)="openOrder.set(openOrder() === item.id ? null : item.id)">{{ item.title }}</button></td>
-                          <td class="summary-cell"><div class="clamp">{{ shortText(item.description) }}</div></td>
-                          <td>{{ item.completedAt ? item.completedAt.slice(0, 10).split('-').reverse().join('.') : '–' }}</td>
-                        </tr>
-                        @if (openOrder() === item.id) {
-                          <tr class="closed-detail"><td></td><td colspan="3">
-                            @let sprint = sprintOf(item);
-                            @let idea = ideaOf(item);
-                            <div class="closed-info">
-                              <div class="info-block">
-                                <h4>Idee</h4>
-                                @if (idea) { <p><strong>{{ idea.title }}</strong></p><p class="muted">{{ shortText(idea.description, 160) }}</p> } @else { <p class="muted">Nicht aus einer Idee entstanden.</p> }
-                              </div>
-                              <div class="info-block">
-                                <h4>Sprint</h4>
-                                @if (sprint) {
-                                  <p><strong>{{ sprint.name }}</strong> · {{ statusLabel(sprint.status) }}</p>
-                                  @if (sprint.goal) { <p class="muted">{{ sprint.goal }}</p> }
-                                } @else { <p class="muted">Keinem Sprint zugewiesen.</p> }
-                              </div>
-                              <div class="info-block">
-                                <h4>Auftrag</h4>
-                                <p>Priorität {{ priorityLabel(item.priority) }} · Aufwand {{ hours(item.effortHours) }}</p>
-                                <label>Status<select [ngModel]="item.status" (ngModelChange)="updateDevelopment(item.id, { status: $event })" [name]="'done-status-' + item.id">
-                                  @for (status of developmentStatuses; track status) { <option [value]="status">{{ statusLabel(status) }}</option> }
-                                </select></label>
-                              </div>
-                            </div>
-                          </td></tr>
-                        }
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              } @else { <p class="empty-state">Keine erledigten Aufträge.</p> }
-            }
-          </section>
+        @case ('ideation') {
+          <app-ideation />
         }
-
-        @if (section() === 'ideation') {
-          @if (showCreate()) {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Neue Idee</h2></div></div>
-            <form class="form-grid create-form"  (ngSubmit)="createIdea()">
-              <label class="wide">Titel<input name="title" [(ngModel)]="ideaForm.title" maxlength="180" required></label>
-              <label>Priorität<select name="priority" [(ngModel)]="ideaForm.priority"><option value="medium">Mittel</option><option value="high">Hoch</option><option value="low">Niedrig</option></select></label>
-              <label class="wide">Beschreibung<textarea name="description" [(ngModel)]="ideaForm.description" maxlength="10000"></textarea></label>
-              <label class="wide">Bilder (PNG, JPEG, WebP, GIF · max. 5 MB)
-                <input type="file" name="images" accept="image/png,image/jpeg,image/webp,image/gif" multiple #pendingInput (change)="selectPendingImages(pendingInput)">
-              </label>
-              @if (pendingImages.length) { <p class="muted wide">{{ pendingImages.length }} Bild(er) ausgewählt: {{ pendingImageNames() }}</p> }
-              <button class="button primary" type="submit" [disabled]="busy()">Idee hinzufügen</button>
-            </form>
-         </section>
-          }
-          <section class="panel">
-            <div class="section-heading"><div><h2>Alle Ideen</h2><p class="muted">{{ sortedIdeas().length }} von {{ data().ideas.length }} Einträgen · Spaltenkopf sortiert, ⏷ filtert (Mehrfachauswahl)</p></div>
-              @if (hasIdeaFilters()) { <button type="button" class="button secondary" (click)="clearIdeaFilters()">Filter zurücksetzen</button> }
-            </div>
-            @if (data().ideas.length) {
-              <div class="table-wrap">
-                <table class="idea-table">
-                  <thead><tr>
-                    @for (col of ideaColumns; track col.key) {
-                      <th [attr.aria-sort]="ideaSort().key === col.key ? (ideaSort().dir === 'asc' ? 'ascending' : 'descending') : 'none'">
-                        <div class="th-inner">
-                          <button type="button" class="link-button" (click)="sortIdeasBy(col.key)">{{ col.label }}{{ ideaSort().key === col.key ? (ideaSort().dir === 'asc' ? ' ▲' : ' ▼') : '' }}</button>
-                          <details class="col-filter" [class.active]="ideaFilterActive(col.key)">
-                            <summary aria-label="Filter {{ col.label }}" title="Filtern">⏷</summary>
-                            <div class="filter-menu">
-                              @if (isTextColumn(col.key)) {
-                                <input type="search" placeholder="Enthält …" [ngModel]="ideaTextFilter()[col.key]" (ngModelChange)="setIdeaText(col.key, $event)" [name]="'filter-' + col.key">
-                              } @else {
-                                @for (option of ideaOptions(col.key); track option) {
-                                  <label class="check"><input type="checkbox" [checked]="ideaValueFilter()[col.key]?.includes(option)" (change)="toggleIdeaValue(col.key, option, $any($event.target).checked)"> {{ option }}</label>
-                                }
-                              }
-                            </div>
-                          </details>
-                        </div>
-                      </th>
-                    }
-                    <th></th>
-                  </tr></thead>
-                  <tbody>
-                    @for (idea of sortedIdeas(); track idea.id) {
-                      <tr>
-                        <td class="title-cell"><button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">{{ idea.title }}</button></td>
-                        <td class="summary-cell"><div class="clamp">{{ shortText(idea.description) }}</div></td>
-                        <td><span class="status" [ngClass]="statusClass(idea.status)">{{ statusLabel(idea.status) }}</span></td>
-                        <td>{{ priorityLabel(idea.priority) }}</td>
-                        <td>{{ hours(idea.effortHours) }}</td>
-                        <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
-                        <td><button type="button" class="button secondary icon-button" (click)="editIdea(idea.id)" [attr.aria-label]="'Idee bearbeiten: ' + idea.title" title="Bearbeiten">✎</button></td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
-            } @else { <p class="empty-state">Noch keine Ideen vorhanden.</p> }
-          </section>
-          <section class="panel">
-            <div class="section-heading">
-              <button type="button" class="collapse-toggle" [attr.aria-expanded]="showClosedIdeas()" (click)="showClosedIdeas.set(!showClosedIdeas())">
-                <span class="chev" [class.open]="showClosedIdeas()">▸</span> Abgeschlossene Ideen <span class="muted">({{ closedIdeas().length }})</span>
-              </button>
-            </div>
-            @if (showClosedIdeas()) {
-              @if (closedIdeas().length) {
-                <div class="table-wrap">
-                  <table class="idea-table">
-                    <thead><tr><th></th><th>Titel</th><th>Kurzfassung</th><th>Erstellt</th></tr></thead>
-                    <tbody>
-                      @for (idea of closedIdeas(); track idea.id) {
-                        <tr>
-                          <td><button type="button" class="button secondary icon-button" [attr.aria-expanded]="openClosedIdea() === idea.id" (click)="openClosedIdea.set(openClosedIdea() === idea.id ? null : idea.id)" title="Auftrag und Sprint anzeigen">{{ openClosedIdea() === idea.id ? '▾' : '▸' }}</button></td>
-                          <td class="title-cell"><button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">{{ idea.title }}</button></td>
-                          <td class="summary-cell"><div class="clamp">{{ shortText(idea.description) }}</div></td>
-                          <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
-                        </tr>
-                        @if (openClosedIdea() === idea.id) {
-                          <tr class="closed-detail"><td></td><td colspan="3">
-                            @let order = closedIdeaOrder(idea);
-                            @let sprint = sprintOf(order);
-                            <div class="closed-info">
-                              <div class="info-block">
-                                <h4>Auftrag</h4>
-                                @if (order) {
-                                  <p><strong>{{ order.title }}</strong></p>
-                                  <p><span class="status" [ngClass]="statusClass(order.status)">{{ statusLabel(order.status) }}</span> · Priorität {{ priorityLabel(order.priority) }} · Aufwand {{ hours(order.effortHours) }}</p>
-                                  @if (order.completedAt) { <p class="muted">Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}</p> }
-                                } @else { <p class="muted">{{ idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.' }}</p> }
-                              </div>
-                              <div class="info-block">
-                                <h4>Sprint</h4>
-                                @if (sprint) {
-                                  <p><strong>{{ sprint.name }}</strong> · {{ statusLabel(sprint.status) }}</p>
-                                  @if (sprint.goal) { <p class="muted">{{ sprint.goal }}</p> }
-                                  <p class="muted">{{ sprint.startDate ?? '–' }} – {{ sprint.endDate ?? '–' }}</p>
-                                } @else { <p class="muted">Keinem Sprint zugewiesen.</p> }
-                              </div>
-                              <div class="info-block git-tree" aria-label="Versionskontrolle">
-                                <h4>Versionskontrolle</h4>
-                                <ol>
-                                  <li><span class="dot"></span>Idee <em>{{ idea.title }}</em></li>
-                                  @if (order) { <li><span class="dot"></span>Auftrag <em>{{ order.title }}</em></li> }
-                                  @if (sprint) { <li><span class="dot branch"></span>Branch/Sprint <em>{{ sprint.name }}</em></li> }
-                                  @if (sprint) {
-                                    @if (sprint.gitCommit) { <li><span class="dot commit"></span><code>{{ sprint.gitCommit }}</code> <em>{{ sprint.gitMessage }}</em></li> }
-                                    @else { <li class="muted"><span class="dot"></span>Noch kein Commit</li> }
-                                  }
-                                </ol>
-                              </div>
-                            </div>
-                          </td></tr>
-                        }
-                      }
-                    </tbody>
-                  </table>
-                </div>
-              } @else { <p class="empty-state">Keine abgeschlossenen Ideen.</p> }
-            }
-          </section>
+        @case ('bugs') {
+          <app-bugs />
         }
-
-        @if (section() === 'sprints') {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Sprints</h2><p class="muted">Iterationen planen, starten und abschließen</p></div></div>
-            @if (showCreate()) {
-            <form class="form-grid create-form" (ngSubmit)="createSprint()">
-              <label>Name<input name="name" [(ngModel)]="sprintForm.name" maxlength="120" required></label>
-              <label>Startdatum<input name="startDate" type="date" [(ngModel)]="sprintForm.startDate"></label>
-              <label>Enddatum<input name="endDate" type="date" [(ngModel)]="sprintForm.endDate"></label>
-              <label class="wide">Sprint-Ziel<input name="goal" [(ngModel)]="sprintForm.goal" maxlength="1000"></label>
-              <button class="button primary" type="submit" [disabled]="busy()">Sprint anlegen</button>
-            </form>
-            }
-            @for (sprint of data().sprints; track sprint.id) {
-              <article class="sprint-card">
-                <div class="section-heading">
-                  <div class="sprint-title">
-                    <h3>{{ sprint.name }}</h3><span class="status" [ngClass]="statusClass(sprint.status)">{{ statusLabel(sprint.status) }}</span>
-                    @if (githubBase(); as repo) {
-                      <a class="gh-link" [href]="repo + '/tree/' + (sprint.gitBranch || 'main')" target="_blank" rel="noopener" title="Branch auf GitHub">
-                        <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" /></svg>
-                        {{ sprint.gitBranch || 'main' }}</a>
-                      @if (sprint.gitCommit) { <a class="gh-link" [href]="repo + '/commit/' + sprint.gitCommit" target="_blank" rel="noopener" title="Commit auf GitHub"><code>{{ sprint.gitCommit }}</code></a> }
-                    }
-                  </div>
-                  <div class="actions">
-                    <button class="button secondary" type="button" (click)="retryGitSync(sprint.id)" [disabled]="busy() || sprint.gitSync === 'pending' || sprint.gitSync === 'running'" title="Stand committen und nach GitHub pushen">
-                      {{ sprint.gitSync === 'pending' || sprint.gitSync === 'running' ? 'Git läuft …' : 'Git sichern' }}</button>
-                    @if (sprint.status === 'planned') { <button class="button primary" (click)="updateSprint(sprint.id, { status: 'active' })">Sprint starten</button> }
-                    @if (sprint.status === 'active') { <button class="button secondary" (click)="updateSprint(sprint.id, { status: 'completed' })">Abschließen</button> }
-                    @if (sprint.status === 'completed') { <button class="button secondary" (click)="updateSprint(sprint.id, { status: 'active' })">Wieder in Bearbeitung setzen</button> }
-                    <button class="button danger" (click)="deleteSprint(sprint.id)">Löschen</button>
-                  </div>
-                </div>
-                <div class="sprint-layout">
-                <div class="sprint-main">
-                <p>{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
-                <details class="report">
-                  <summary>Bearbeiten</summary>
-                  <div class="form-grid">
-                    <label>Name<input [value]="sprint.name" maxlength="120" #sn></label>
-                    <label class="wide">Ziel<input [value]="sprint.goal" maxlength="1000" #sg></label>
-                    <label>Start<input type="date" [value]="sprint.startDate ?? ''" #ss></label>
-                    <label>Ende<input type="date" [value]="sprint.endDate ?? ''" #se></label>
-                    <button class="button primary" type="button" [disabled]="busy()" (click)="updateSprint(sprint.id, { name: sn.value, goal: sg.value, startDate: ss.value || null, endDate: se.value || null })">Speichern</button>
-                  </div>
-                </details>
-                <p class="muted">{{ sprint.startDate || 'Kein Startdatum' }} – {{ sprint.endDate || 'Kein Enddatum' }} · {{ sprintProgress(sprint.id) }}</p>
-                @if (sprint.gitMessage) { <p class="notice">{{ sprint.gitMessage }}</p> }
-                @if (sprint.status === 'completed') {
-                  <div class="actions"><button class="button secondary" (click)="refreshReport(sprint.id)">Sprintbericht aktualisieren</button></div>
-                  @if (reportFor(sprint.id); as report) {
-                    <details class="report" open>
-                      <summary>{{ report.summary }}</summary>
-                      <div class="report-columns">
-                        <div><h4>Umgesetzt</h4>@for (item of report.implemented; track item.id) { <p>{{ item.title }}</p> } @empty { <p class="muted">Nichts umgesetzt.</p> }</div>
-                        <div><h4>Offen</h4>@for (item of report.missing; track item.id) { <p>{{ item.title }} · {{ statusLabel(item.status) }}</p> } @empty { <p class="muted">Alles umgesetzt.</p> }</div>
-                        <div><h4>Probleme</h4>@for (item of report.problems; track item.title) { <p><strong>{{ item.title }}</strong> – {{ item.detail }}</p> } @empty { <p class="muted">Keine Probleme.</p> }</div>
-                      </div>
-                      <form (ngSubmit)="saveReportNotes(sprint.id, reportNotes.value)" #reportForm="ngForm">
-                        <label>Notizen<textarea name="notes" [ngModel]="report.notes" maxlength="10000" #reportNotes required></textarea></label>
-                        <button class="button secondary" type="submit">Notizen speichern</button>
-                      </form>
-                    </details>
-                  }
-                }
-                <h4 class="order-section sprint-tasks-title">Aufgaben</h4>
-                @for (item of sprintItems(sprint.id); track item.id) {
-                  <div class="sprint-task">
-                    <button type="button" class="sprint-task-head" (click)="toggleSprintItem(item.id)" [attr.aria-expanded]="openSprintItems().has(item.id)">
-                      <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true">▾</span>
-                      <strong>{{ item.title }}</strong>
-                      <span class="status" [ngClass]="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
-                    </button>
-                    @if (openSprintItems().has(item.id)) {
-                      <div class="sprint-task-body">
-                        @if (sprintRun(item.id); as run) {
-                          <ol class="agent-steps">
-                            @for (step of run.steps; track step.position) {
-                              <li>
-                                <button type="button" class="sprint-task-head" (click)="toggleSprintItem(run.id + step.position)">
-                                  <span class="task-chevron" [class.open]="openSprintItems().has(run.id + step.position)" aria-hidden="true">▾</span>
-                                  {{ step.agentName || 'Agent' }} <span class="status" [ngClass]="statusClass(step.status)">{{ statusLabel(step.status) }}</span>
-                                </button>
-                                @if (openSprintItems().has(run.id + step.position) || step.status === 'running') { 
-                                  @if (step.output) { <article class="markdown task-body" [innerHTML]="step.output | markdown"></article> }
-                                  @else { <p class="muted task-body">{{ step.status === 'running' ? 'Agent arbeitet … Ausgabe erscheint live.' : 'Keine Ausgabe.' }}</p> }
-                                  @if (step.progress) { <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p> }
-                                }
-                              </li>
-                            } @empty { <li class="muted">Noch keine Agent-Schritte.</li> }
-                          </ol>
-                        } @else { <p class="muted">Noch kein Agent-Lauf für diese Aufgabe.</p> }
-                      </div>
-                    }
-                  </div>
-                } @empty { <p class="muted">Keine Aufgaben in diesem Sprint.</p> }
-                </div>
-              <aside class="info-block git-tree sprint-git" aria-label="Git-Verlauf">
-                <h4>Git-Verlauf</h4>
-                <ol>
-                  <li><span class="dot branch"></span>Branch <em>{{ sprint.gitBranch || 'main' }}</em></li>
-                  @for (item of sprintItems(sprint.id); track item.id) { <li><span class="dot"></span><em>{{ item.title }}</em></li> }
-                  @if (sprint.gitCommit) { <li><span class="dot commit"></span><code>{{ sprint.gitCommit }}</code> <em>{{ sprint.gitMessage }}</em></li> }
-                  @else { <li class="muted"><span class="dot"></span>Noch kein Commit</li> }
-                </ol>
-              </aside>
-                </div>
-              </article>
-            } @empty { <p class="empty-state">Noch keine Sprints angelegt.</p> }
-          </section>
+        @case ('docs') {
+          <app-docs />
         }
-
-        @if (section() === 'bugs') {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Bugs</h2><p class="muted">Fehler erfassen und priorisieren</p></div></div>
-            @if (showCreate()) {
-            <form class="form-grid create-form" (ngSubmit)="createBug()">
-              <label class="wide">Titel<input name="title" [(ngModel)]="bugForm.title" maxlength="180" required></label>
-              <label>Schweregrad<select name="severity" [(ngModel)]="bugForm.severity"><option value="medium">Mittel</option><option value="high">Hoch</option><option value="critical">Kritisch</option><option value="low">Niedrig</option></select></label>
-              <label>Sprint<select name="sprintId" [(ngModel)]="bugForm.sprintId"><option value="">Kein Sprint</option>@for (sprint of availableSprints(); track sprint.id) { <option [value]="sprint.id">{{ sprint.name }}</option> }</select></label>
-              <label class="wide">Beschreibung<textarea name="description" [(ngModel)]="bugForm.description" maxlength="10000"></textarea></label>
-              <button class="button primary" type="submit" [disabled]="busy()">Bug melden</button>
-            </form>
-            }
-            <label class="filter">Status filtern<select [(ngModel)]="bugFilter" name="bugFilter">
-              <option value="all">Alle Status</option><option value="open">Offen</option><option value="in_progress">In Arbeit</option><option value="fixed">Behoben</option><option value="wontfix">Kein Fix</option>
-            </select></label>
-            @for (bug of visibleBugs(); track bug.id) {
-              <article class="item-card">
-                <div class="item-content">
-                  <h3>{{ bug.title }}</h3><p>{{ bug.description || 'Keine Beschreibung' }}</p>
-                  <div class="meta"><span class="status" [ngClass]="statusClass(bug.status)">{{ statusLabel(bug.status) }}</span><span class="tag">{{ severityLabel(bug.severity) }}</span><span>{{ bug.source === 'agent' ? 'Agent' : 'Manuell' }}</span><span>{{ dateTime(bug.createdAt) }}</span></div>
-                  @if (bug.fixNotes) { <p><strong>Fix-Notizen:</strong> {{ bug.fixNotes }}</p> }
-                  <details><summary>Bug bearbeiten</summary>
-                    <form class="form-grid" (ngSubmit)="saveBug(bug, bugEdit.value)" #bugEdit="ngForm">
-                      <label class="wide">Titel<input name="title" [ngModel]="bug.title" maxlength="180" required></label>
-                      <label class="wide">Beschreibung<textarea name="description" [ngModel]="bug.description" maxlength="10000"></textarea></label>
-                      <label>Schweregrad<select name="severity" [ngModel]="bug.severity"><option value="low">Niedrig</option><option value="medium">Mittel</option><option value="high">Hoch</option><option value="critical">Kritisch</option></select></label>
-                      <label>Sprint<select name="sprintId" [ngModel]="bug.sprintId"><option value="">Kein Sprint</option>@for (sprint of data().sprints; track sprint.id) { <option [value]="sprint.id">{{ sprint.name }}</option> }</select></label>
-                      <label class="wide">Fix-Notizen<textarea name="fixNotes" [ngModel]="bug.fixNotes" maxlength="10000"></textarea></label>
-                      <button class="button secondary" type="submit">Änderungen speichern</button>
-                    </form>
-                  </details>
-                </div>
-                <div class="item-controls">
-                  <label>Status<select [ngModel]="bug.status" (ngModelChange)="updateBug(bug.id, { status: $event })" [name]="'bug-status-' + bug.id">
-                    @for (status of bugStatuses; track status) { <option [value]="status">{{ statusLabel(status) }}</option> }
-                  </select></label>
-                  <label>Sprint<select [ngModel]="bug.sprintId" (ngModelChange)="updateBug(bug.id, { sprintId: $event || null })" [name]="'bug-sprint-' + bug.id">
-                    <option [ngValue]="null">Kein Sprint</option>@for (sprint of data().sprints; track sprint.id) { <option [value]="sprint.id">{{ sprint.name }}</option> }
-                  </select></label>
-                  <button class="button danger" (click)="deleteBug(bug.id)">Löschen</button>
-                </div>
-              </article>
-            } @empty { <p class="empty-state">Keine Bugs für diesen Filter.</p> }
-          </section>
+        @case ('agents') {
+          <app-agents />
         }
-
-        @if (section() === 'docs') {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Dokumentation</h2><p class="muted">Handbücher, Sprintberichte und Projektdokumente</p></div></div>
-            <div class="docs-layout">
-              <aside>
-                @if (showCreate()) {
-                <form class="form-grid" (ngSubmit)="createDocument()">
-                  <h3>Neues Handbuch</h3>
-                  <label class="wide">Titel<input name="title" [(ngModel)]="docForm.title" maxlength="180" required></label>
-                  <label class="wide">Inhalt<textarea name="content" [(ngModel)]="docForm.content" maxlength="30000" rows="6" required></textarea></label>
-                  <button class="button primary" type="submit">Dokument speichern</button>
-                </form>
-                }
-                @for (group of documentGroups; track group.kind) {
-                  <h3 class="group-title">{{ group.label }}</h3>
-                  @for (doc of docsOfKind(group.kind); track doc.id) {
-                    <button class="doc-link" [class.selected]="selectedDoc()?.id === doc.id" (click)="selectedDoc.set(doc)">{{ doc.title }}</button>
-                  } @empty { <p class="muted small">Keine Einträge</p> }
-                }
-              </aside>
-              <div class="doc-reader">
-                @if (selectedDoc(); as doc) {
-                  <div class="meta"><span class="tag">{{ documentKindLabel(doc.kind) }}</span><span>Aktualisiert {{ dateTime(doc.updatedAt) }}</span></div>
-                  @if (doc.kind === 'manual') {
-                    <form class="form-grid" (ngSubmit)="saveDocument(doc, docEditor.value)" #docEditor="ngForm">
-                      <label class="wide">Titel<input name="title" [ngModel]="doc.title" maxlength="180" required></label>
-                      <label class="wide">Inhalt<textarea name="content" [ngModel]="doc.content" maxlength="30000" rows="14" required></textarea></label>
-                      <div class="actions"><button class="button primary" type="submit">Speichern</button><button class="button danger" type="button" (click)="deleteDocument(doc.id)">Löschen</button></div>
-                    </form>
-                    <article class="markdown" [innerHTML]="doc.content | markdown"></article>
-                  } @else {
-                    <h3>{{ doc.title }}</h3><article class="markdown" [innerHTML]="doc.content | markdown"></article>
-                    <p class="muted">Automatisch erzeugte Dokumentation ist schreibgeschützt.</p>
-                  }
-                } @else {
-                  <p class="empty-state">Noch keine Dokumente vorhanden.</p>
-                }
-              </div>
-            </div>
-          </section>
+        @case ('runs') {
+          <app-runs />
         }
-
-        @if (section() === 'agents' && selectedAgent(); as agent) {
-          <section class="panel agent-detail">
-            <button type="button" class="link-button" (click)="closeAgent()">← Alle Agents</button>
-            <div class="section-heading">
-              <div><h2>{{ agent.name }}</h2><p class="muted">{{ roleLabel(agent.role) }} · {{ agent.command?.join(' ') || 'Eingebauter Agent' }}</p></div>
-              <span class="status" [ngClass]="agent.enabled ? 'status-done' : 'status-blocked'">{{ agent.enabled ? 'Aktiv' : 'Deaktiviert' }}</span>
-            </div>
-            @if (agent.instructions) { <p>{{ agent.instructions }}</p> }
-            @if (agentActivityLoading()) { <p class="loading">Wird geladen …</p> }
-            <h3 class="subheading">Aktive Aufgaben ({{ agentActive().length }})</h3>
-            @for (entry of agentActive(); track entry.id) {
-              <article class="run-card">
-                <div class="list-row">
-                  <strong>{{ entry.orderTitle }}</strong>
-                  <span class="muted">Auftrag:</span><span class="status" [ngClass]="statusClass(entry.orderStatus)">{{ statusLabel(entry.orderStatus) }}</span>
-                  <span class="muted">Lauf:</span><span class="status" [ngClass]="statusClass(entry.stepStatus)">{{ statusLabel(entry.stepStatus) }}</span>
-                  <span class="muted">{{ dateTime(entry.startedAt) }}</span>
-                </div>
-                <details class="run-step"><summary>Auftrag</summary>
-                  <p>{{ entry.orderDescription || 'Keine Beschreibung.' }}</p>
-                  <p class="muted">Priorität: {{ priorityLabel(entry.orderPriority) }}</p>
-                </details>
-                <details class="run-step"><summary>Sprint{{ entry.sprintName ? ': ' + entry.sprintName : '' }}</summary>
-                  @if (entry.sprintName) {
-                    <p>{{ entry.sprintGoal || 'Kein Sprint-Ziel' }}</p>
-                    <p class="muted">{{ statusLabel(entry.sprintStatus ?? '') }} · {{ entry.sprintStart || 'Kein Start' }} – {{ entry.sprintEnd || 'Kein Ende' }}</p>
-                  } @else { <p class="muted">Der Auftrag gehört zu keinem Sprint.</p> }
-                </details>
-                @if (entry.progress) { <p class="live-progress"><span class="live-dot"></span>{{ entry.progress }}</p> }
-                <details class="run-step" open><summary>Live-Ausgabe</summary>
-                  @if (entry.output) { <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article> } @else { <p class="muted">Noch keine Ausgabe – der Agent arbeitet …</p> }
-                </details>
-              </article>
-            } @empty { @if (!agentActivityLoading()) { <p class="muted">Gerade keine aktive Aufgabe.</p> } }
-            <details class="task-group" open>
-              <summary>Anstehende Aufgaben ({{ agentUpcoming().length }})</summary>
-              @for (task of agentUpcoming(); track task.id) {
-                <article class="run-card">
-                  <div class="list-row">
-                    <strong>{{ task.title }}</strong>
-                    <span class="status" [ngClass]="statusClass(task.status)">{{ statusLabel(task.status) }}</span>
-                    <span class="muted">{{ task.sprintName ? 'Sprint ' + task.sprintName : 'Manuell gestartet' }} · Priorität {{ priorityLabel(task.priority) }}</span>
-                  </div>
-                </article>
-              } @empty { <p class="muted">Keine anstehenden Aufgaben.</p> }
-            </details>
-            <details class="task-group">
-              <summary>Durchgeführte Aufgaben ({{ agentDone().length }})</summary>
-              @for (entry of agentDone(); track entry.id) {
-                <article class="run-card">
-                <div class="list-row">
-                  <strong>{{ entry.orderTitle }}</strong>
-                  <span class="muted">Auftrag:</span><span class="status" [ngClass]="statusClass(entry.orderStatus)">{{ statusLabel(entry.orderStatus) }}</span>
-                  <span class="muted">Lauf:</span><span class="status" [ngClass]="statusClass(entry.stepStatus)">{{ statusLabel(entry.stepStatus) }}</span>
-                  <span class="muted">{{ dateTime(entry.startedAt) }}</span>
-                </div>
-                <details class="run-step"><summary>Auftrag</summary>
-                  <p>{{ entry.orderDescription || 'Keine Beschreibung.' }}</p>
-                  <p class="muted">Priorität: {{ priorityLabel(entry.orderPriority) }}</p>
-                </details>
-                <details class="run-step"><summary>Sprint{{ entry.sprintName ? ': ' + entry.sprintName : '' }}</summary>
-                  @if (entry.sprintName) {
-                    <p>{{ entry.sprintGoal || 'Kein Sprint-Ziel' }}</p>
-                    <p class="muted">{{ statusLabel(entry.sprintStatus ?? '') }} · {{ entry.sprintStart || 'Kein Start' }} – {{ entry.sprintEnd || 'Kein Ende' }}</p>
-                  } @else { <p class="muted">Der Auftrag gehört zu keinem Sprint.</p> }
-                </details>
-                <details class="run-step"><summary>Ausgabe</summary>
-                  @if (entry.output) { <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article> } @else { <p class="muted">Keine Ausgabe.</p> }
-                </details>
-              </article>
-              } @empty { @if (!agentActivityLoading()) { <p class="muted">Noch keine Aufgaben ausgeführt.</p> } }
-            </details>
-          </section>
-        } @else if (section() === 'agents') {
-          <section class="panel">
-            <div class="section-heading">
-              <div><h2>Agents &amp; Workflow</h2><p class="muted">Agent-Rollen nach Workflow-Phase verwalten</p></div>
-              <button class="button secondary" (click)="createDefaultAgents()">Standard-Workflow anlegen</button>
-            </div>
-            @if (showCreate()) {
-            <form class="form-grid create-form" (ngSubmit)="createAgent()">
-              <label>Name<input name="name" [(ngModel)]="agentForm.name" maxlength="80" required></label>
-              <label>Rolle<select name="role" [(ngModel)]="agentForm.role">
-                @for (role of agentRoles; track role.value) { <option [value]="role.value">{{ role.label }}</option> }
-              </select></label>
-              <label>Phase<select name="phase" [(ngModel)]="agentForm.phase">@for (phase of phases; track phase.id) { <option [value]="phase.id">{{ phase.label }}</option> }</select></label>
-              <label class="wide">Befehl<input name="command" [(ngModel)]="agentForm.command" maxlength="1000" placeholder="claude -p"></label>
-              <label class="wide">Anweisung<textarea name="instructions" [(ngModel)]="agentForm.instructions" maxlength="10000"></textarea></label>
-              <button class="button primary" type="submit">Agent anlegen</button>
-            </form>
-            }
-            @for (phase of phases; track phase.id) {
-              <section class="phase">
-                <h3>{{ phase.label }} <small>{{ phase.hint }}</small></h3>
-                @for (agent of agentsOfPhase(phase.id); track agent.id; let index = $index) {
-                  <article class="item-card">
-                    <div class="item-content">
-                      @if (agentEditing() === agent.id) {
-                        <form class="form-grid" (ngSubmit)="saveAgentEdit(agent)">
-                          <label class="wide">Name<input name="name" [(ngModel)]="agentEdit.name" maxlength="80" required></label>
-                          <label class="wide">Verhalten (Anweisung)<textarea name="instructions" [(ngModel)]="agentEdit.instructions" rows="6" maxlength="10000"></textarea></label>
-                          <label class="wide">Befehl (leer = eingebauter Agent)<input name="command" [(ngModel)]="agentEdit.command" maxlength="1000" placeholder="claude -p"></label>
-                          <div class="actions">
-                            <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-                            <button class="button secondary" type="button" (click)="agentEditing.set(null)">Abbrechen</button>
-                          </div>
-                        </form>
-                      } @else {
-                        <h4><button type="button" class="link-button" (click)="showAgent(agent.id)">{{ agent.name }}</button> <span class="tag">{{ roleLabel(agent.role) }}</span>
-                          <button class="button secondary" type="button" (click)="startAgentEdit(agent)" aria-label="Agent bearbeiten" title="Bearbeiten">✎</button></h4>
-                        <p>{{ agent.instructions || 'Keine Anweisung hinterlegt.' }}</p>
-                        <p class="muted">{{ agent.command?.join(' ') || 'Eingebauter Agent' }}</p>
-                      }
-                    </div>
-                    <div class="actions">
-                      <button class="button secondary" (click)="moveAgent(agent, -1)" [disabled]="index === 0">↑</button>
-                      <button class="button secondary" (click)="moveAgent(agent, 1)" [disabled]="index === agentsOfPhase(phase.id).length - 1">↓</button>
-                      <select [ngModel]="agent.phase" (ngModelChange)="updateAgent(agent.id, { phase: $event })" [name]="'agent-phase-' + agent.id" aria-label="Workflow-Phase">
-                        @for (entry of phases; track entry.id) { <option [value]="entry.id">{{ entry.label }}</option> }
-                      </select>
-                      <button class="button secondary" (click)="updateAgent(agent.id, { enabled: !agent.enabled })">{{ agent.enabled ? 'Deaktivieren' : 'Aktivieren' }}</button>
-                      <button class="button danger" (click)="deleteAgent(agent.id)">Löschen</button>
-                    </div>
-                  </article>
-                } @empty { <p class="empty-state">Keine Agents in dieser Phase.</p> }
-              </section>
-            }
-            <h3 class="subheading">Letzte Agent-Läufe</h3>
-            @for (run of data().agentRuns; track run.id) {
-              <article class="run-card"><div class="list-row"><strong>{{ run.title }}</strong><span class="status" [ngClass]="statusClass(run.status)">{{ statusLabel(run.status) }}</span><span>{{ dateTime(run.startedAt) }}</span></div>
-                @for (step of run.steps; track step.position) { <details class="run-step"><summary>{{ step.agentName || step.command }} · {{ statusLabel(step.status) }}</summary>@if (step.progress) { <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p> }@if (step.output) { <article class="markdown task-body" [innerHTML]="step.output | markdown"></article> } @else { <p class="muted">Keine Ausgabe.</p> }</details> }
-              </article>
-            } @empty { <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p> }
-          </section>
-        }
-
-        @if (section() === 'settings') {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Projekteinstellungen</h2><p class="muted">{{ currentProject()?.name }}</p></div></div>
-            <form class="form-grid" (ngSubmit)="saveSettings()">
-              <label class="wide">Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required></label>
-              <label class="wide">Testbefehle (ein Befehl pro Zeile)<textarea name="testCommands" [(ngModel)]="settings.testCommands" rows="3" placeholder="npm run build&#10;npm test"></textarea></label>
-              <label class="wide">Projektbeschreibung<textarea name="description" [(ngModel)]="settings.description" rows="4" maxlength="10000" placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"></textarea></label>
-              <label class="wide">Regeln für Agents (Do's and Don'ts)<textarea name="guidelines" [(ngModel)]="settings.guidelines" rows="6" maxlength="10000" placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"></textarea></label>
-              <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
-              <label class="wide check"><input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix"> Automatisches Bugfixing: Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label>
-              <label class="wide">GitHub-Repository<input name="gitRemote" [(ngModel)]="settings.gitRemote" maxlength="300" placeholder="git@github.com:user/repo.git"></label>
-              <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
-            </form>
-          </section>
-          <section class="panel">
-            <div class="section-heading"><div><h2>Agents</h2><p class="muted">Gilt für alle Projekte</p></div></div>
-            <form class="form-grid" (ngSubmit)="saveMaxAgents()">
-              <label>Gleichzeitige Agents (1–8)<input name="maxAgents" type="number" min="1" max="8" step="1" [(ngModel)]="maxAgents" required></label>
-              <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-              <p class="muted wide">Jedes Projekt arbeitet seine Aufträge nacheinander ab; mehrere Projekte laufen parallel. Der Worker übernimmt die Änderung im nächsten Durchlauf.</p>
-            </form>
-          </section>
-        }
-
-        @if (section() === 'runs') {
-          <section class="panel">
-            <div class="section-heading"><div><h2>Testläufe</h2><p class="muted">Die letzten {{ data().runs.length }} Testläufe</p></div></div>
-            @for (run of data().runs; track run.id) {
-              <article class="run-card">
-                <div class="section-heading"><strong>{{ run.id }}</strong><span class="status" [ngClass]="statusClass(run.status)">{{ statusLabel(run.status) }}</span></div>
-                <p class="meta">{{ dateTime(run.startedAt) }} · {{ run.trigger === 'ci' ? 'CI' : 'Manuell' }} · {{ run.branch || 'ohne Branch' }} · {{ run.commitSha?.slice(0, 8) || 'ohne Commit' }}</p>
-                @for (step of run.steps; track step.position) {
-                  <details class="run-step"><summary><span class="status" [ngClass]="statusClass(step.status)">{{ statusLabel(step.status) }}</span> {{ step.command }} · {{ duration(step.durationMs) }}</summary><pre>{{ step.output || 'Keine Konsolenausgabe.' }}</pre></details>
-                }
-              </article>
-            } @empty { <p class="empty-state">Für dieses Projekt gibt es noch keine Testläufe.</p> }
-          </section>
+        @case ('settings') {
+          <app-settings />
         }
       }
       <footer class="footer">MAINTY <span>/</span> DEV LOG</footer>
     </div>
   </main>
 </div>
-<ng-template #gallery let-ideationId>
-  @if (imagesOf(ideationId); as images) {
-    @if (images.length) {
-      <div class="gallery">
-        @for (image of images; track image.id) {
-          <figure>
-            <a [href]="imageUrl(image)" target="_blank" rel="noopener"><img [src]="imageUrl(image)" [alt]="image.filename" loading="lazy"></a>
-          </figure>
-        }
-      </div>
-    }
-  }
-</ng-template>
-
-@if (selectedIdea(); as idea) {
-  <div class="modal-backdrop" (click)="closeIdea()">
-    <section class="help-dialog idea-detail" role="dialog" aria-modal="true" aria-labelledby="idea-title" (click)="$event.stopPropagation()">
-      <div class="section-heading">
-        <div><p class="eyebrow">Idee</p>@if (!ideaEditing()) { <h2 id="idea-title">{{ idea.title }}</h2> }</div>
-        <div class="actions">
-          @if (!ideaEditing()) { <button class="button secondary" type="button" (click)="ideaEditing.set(true)" aria-label="Bearbeiten" title="Bearbeiten">✎</button> }
-          <button class="button secondary" type="button" (click)="closeIdea()" aria-label="Schließen">✕</button>
-        </div>
-      </div>
-      @if (ideaEditing()) {
-        <form class="form-grid" (ngSubmit)="saveIdea(idea, ideaEdit.value)" #ideaEdit="ngForm">
-          <label class="wide">Titel<input name="title" [ngModel]="idea.title" maxlength="180" required></label>
-          <label class="wide">Beschreibung<textarea name="description" [ngModel]="idea.description" maxlength="10000"></textarea></label>
-          <label>Status<select name="status" [ngModel]="idea.status">@for (status of statusOptions(idea); track status) { <option [value]="status">{{ statusLabel(status) }}</option> }</select></label>
-          <label>Priorität<select name="priority" [ngModel]="idea.priority"><option value="low">Niedrig</option><option value="medium">Mittel</option><option value="high">Hoch</option></select></label>
-          <div class="actions">
-            <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-            <button class="button secondary" type="button" (click)="ideaEditing.set(false)">Abbrechen</button>
-          </div>
-        </form>
-      } @else {
-        <p class="detail-text">{{ idea.description || 'Keine Beschreibung' }}</p>
-        <p><span class="status">Priorität: {{ priorityLabel(idea.priority) }}</span></p>
-        <dl class="estimate">
-          <div><dt>Aufwand</dt><dd>{{ idea.effortHours != null ? idea.effortHours + ' Std.' : 'Wird geschätzt …' }}</dd></div>
-          <div><dt>Token</dt><dd>{{ idea.tokenEstimate ?? '–' }}</dd></div>
-          <div><dt>Nutzen</dt><dd>{{ idea.benefit != null ? idea.benefit + ' / 10' : '–' }}</dd></div>
-          <div><dt>Kosten</dt><dd>{{ idea.cost != null ? idea.cost + ' / 10' : '–' }}</dd></div>
-        </dl>
-      }
-      <ng-container *ngTemplateOutlet="gallery; context: { $implicit: idea.id }" />
-      @if (!linkedOrder(idea.id) && (idea.status === 'idea' || idea.status === 'considering')) {
-        <div class="actions"><button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">Auftrag erstellen</button></div>
-      }
-      <h3 class="subheading">Kommentare</h3>
-      @for (comment of commentsOf(idea.id); track comment.id) {
-        <article class="comment"><div class="meta"><strong>{{ comment.author }}</strong><span>{{ comment.createdAt | date: 'dd.MM.yyyy HH:mm' }}</span></div><p>{{ comment.body }}</p></article>
-      } @empty { <p class="muted">Noch keine Kommentare.</p> }
-      <form class="inline-form" (ngSubmit)="addComment(idea.id, commentText)">
-        <input #commentText name="comment" maxlength="4000" placeholder="Kommentar schreiben …" required>
-        <button class="button secondary" type="submit" [disabled]="busy()">Kommentieren</button>
-      </form>
-    </section>
-  </div>
-}
-
 @if (showHelp()) {
-  <div class="modal-backdrop" (click)="showHelp.set(false)" (keydown.escape)="showHelp.set(false)">
-    <section class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" (click)="$event.stopPropagation()">
-      <div class="section-heading">
-        <div><p class="eyebrow">Ablauf</p><h2 id="help-title">So funktioniert Dev Log</h2></div>
-        <button class="button secondary" type="button" (click)="showHelp.set(false)" aria-label="Schließen">✕</button>
-      </div>
-      <ol class="flow">
-        @for (step of flow; track step.title; let i = $index) {
-          <li class="flow-step">
-            <span class="flow-icon">{{ step.icon }}</span>
-            <strong>{{ i + 1 }}. {{ step.title }}</strong>
-            <span>{{ step.text }}</span>
-          </li>
-        }
-      </ol>
-      <details class="workflow">
-        <summary>Workflow nach Status</summary>
-        @for (lane of workflow; track lane.object) {
-          <div class="wf-lane">
-            <div class="wf-title"><span class="flow-icon">{{ lane.icon }}</span>{{ lane.object }}</div>
-            <div class="wf-steps">
-              @for (step of lane.steps; track step.status) {
-                <div class="wf-step">
-                  <strong>{{ step.status }}</strong>
-                  <span class="wf-agent" [class.none]="!step.agent">🤖 {{ step.agent ?? 'Nutzer' }}</span>
-                  <span class="wf-rule">{{ step.rule }}</span>
-                </div>
-              }
-            </div>
-          </div>
-        }
-      </details>
-      <p class="muted">Sprints starten und beenden Sie manuell – Agents ändern den Sprint-Status nicht.</p>
-    </section>
-  </div>
+  <app-help-dialog (closed)="showHelp.set(false)" />
 }

@@ -1,0 +1,186 @@
+@if (store.ready()) {
+  <section class="summary-grid" aria-label="Projektkennzahlen">
+    <a class="summary-card" href="#development" (click)="store.navigate('development')">
+      <strong>{{ store.openDevelopmentCount() }}</strong>
+      <span>Offene Aufträge</span>
+    </a>
+    <a class="summary-card" href="#ideation" (click)="store.navigate('ideation')">
+      <strong>{{ openIdeasCount() }}</strong>
+      <span>Offene Ideen</span>
+    </a>
+    <a class="summary-card" href="#bugs" (click)="store.navigate('bugs')">
+      <strong>{{ store.openBugCount() }}</strong>
+      <span>Offene Bugs</span>
+    </a>
+    <a class="summary-card" href="#runs" (click)="store.navigate('runs')">
+      <strong>{{ data().runs.length }}</strong>
+      <span>Testläufe</span>
+    </a>
+  </section>
+  <app-chat />
+  <section class="view-grid">
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Projektübersicht</h2>
+        <span class="muted">{{ store.currentProject()?.repository }}</span>
+      </div>
+      <div class="metric-grid">
+        <div>
+          <span>Aufträge erledigt</span>
+          <strong>{{ data().stats?.orders?.['done'] ?? 0 }}</strong>
+        </div>
+        <div>
+          <span>Test-Passrate</span>
+          <strong>{{
+            data().stats?.testRuns?.passRate === null || data().stats?.testRuns?.passRate === undefined
+              ? '–'
+              : data().stats?.testRuns?.passRate + '%'
+          }}</strong>
+        </div>
+        <div>
+          <span>Aufwand erledigt / geplant</span>
+          <strong
+            >{{ data().stats?.effort?.doneHours | hours }} / {{ data().stats?.effort?.plannedHours | hours }}</strong
+          >
+        </div>
+        <div>
+          <span>Geschätzte Tokens</span>
+          <strong>{{ data().stats?.effort?.tokens | localeNumber }}</strong>
+        </div>
+      </div>
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Agent-Status</h2>
+        <span class="muted"
+          >{{ store.activeAgentCount() }} von {{ worker().agents.length }} aktiv
+          @if (worker().worker?.cpuPercent !== null && worker().worker?.cpuPercent !== undefined) {
+            · CPU {{ worker().worker?.cpuPercent }}%
+          }
+        </span>
+      </div>
+      <app-agent-list />
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Aktiver Sprint</h2>
+        <a href="#sprints" (click)="store.navigate('sprints')">Alle Sprints</a>
+      </div>
+      @if (activeSprint(); as sprint) {
+        <h3>{{ sprint.name }}</h3>
+        <p class="muted">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
+        <div class="progress">
+          <span [style.width.%]="data().stats?.sprint?.percent ?? 0"> </span>
+        </div>
+        <p>
+          {{ data().stats?.sprint?.done ?? 0 }} / {{ data().stats?.sprint?.total ?? 0 }} erledigt ·
+          {{ data().stats?.sprint?.percent ?? 0 }}%
+        </p>
+        <details>
+          <summary>Burndown-Verlauf</summary>
+          @for (point of data().stats?.sprint?.burndown ?? []; track point.day) {
+            <div class="bar-row">
+              <span>{{ dateLabel(point.day) }}</span>
+              <div class="bar-track">
+                <span [style.width.%]="barWidth(point.remaining, data().stats?.sprint?.total ?? 0)"> </span>
+              </div>
+              <strong>{{ point.remaining }}</strong>
+            </div>
+          } @empty {
+            <p class="muted">Noch keine Burndown-Daten vorhanden.</p>
+          }
+        </details>
+      } @else {
+        <p class="empty-state">Aktuell ist kein Sprint aktiv.</p>
+      }
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Letzte Testläufe</h2>
+        <a href="#runs" (click)="store.navigate('runs')">Alle Testläufe</a>
+      </div>
+      @for (run of data().runs.slice(0, 5); track run.id) {
+        <div class="list-row">
+          <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+          <span>{{ run.startedAt | dateTime }}</span>
+          <span>{{ run.branch || 'ohne Branch' }}</span>
+        </div>
+      } @empty {
+        <p class="empty-state">Noch keine Testläufe vorhanden.</p>
+      }
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Aufträge nach Status</h2>
+      </div>
+      <div class="status-list">
+        @for (status of developmentStatuses; track status) {
+          <div class="list-row">
+            <span>{{ status | statusLabel }}</span>
+            <strong>{{ data().stats?.orders?.[status] ?? 0 }}</strong>
+          </div>
+        }
+      </div>
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Offene Bugs nach Schweregrad</h2>
+      </div>
+      @for (severity of severityLevels; track severity) {
+        <div class="bar-row">
+          <span>{{ severity | severityLabel }}</span>
+          <div class="bar-track">
+            <span [style.width.%]="barWidth(data().stats?.openBugsBySeverity?.[severity] ?? 0, maxSeverityCount())">
+            </span>
+          </div>
+          <strong>{{ data().stats?.openBugsBySeverity?.[severity] ?? 0 }}</strong>
+        </div>
+      }
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Sprint-Velocity</h2>
+      </div>
+      @for (sprint of data().stats?.velocity ?? []; track sprint.name) {
+        <div class="bar-row">
+          <span>{{ sprint.name }}</span>
+          <div class="bar-track">
+            <span [style.width.%]="barWidth(sprint.done, maxVelocity())"> </span>
+          </div>
+          <strong>{{ sprint.done }}/{{ sprint.total }}</strong>
+        </div>
+      } @empty {
+        <p class="empty-state">Noch keine abgeschlossenen Sprints vorhanden.</p>
+      }
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Agent-Erfolg</h2>
+      </div>
+      @for (agent of data().stats?.agents ?? []; track agent.agent) {
+        <div class="bar-row">
+          <span>{{ agent.agent }}</span>
+          <div class="bar-track">
+            <span [style.width.%]="barWidth(agent.passed, maxAgentRuns())"> </span>
+          </div>
+          <strong>{{ agent.passed }}/{{ agent.passed + agent.failed + agent.skipped }}</strong>
+        </div>
+      } @empty {
+        <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p>
+      }
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Ideen nach Nutzen und Kosten</h2>
+      </div>
+      @for (idea of ratedIdeas(); track idea.id) {
+        <div class="list-row">
+          <strong>{{ idea.title }}</strong>
+          <span>Nutzen {{ idea.benefit }}/10 · Kosten {{ idea.cost }}/10</span>
+        </div>
+      } @empty {
+        <p class="empty-state">Noch keine bewerteten Ideen vorhanden.</p>
+      }
+    </article>
+  </section>
+}

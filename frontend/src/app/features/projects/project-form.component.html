@@ -1,0 +1,31 @@
+<form class="panel form-grid project-form" (ngSubmit)="createProject()">
+  <h2>Projekt verbinden</h2>
+  <label>Projektname<input name="name" [(ngModel)]="projectForm.name" maxlength="120" required /> </label>
+  <label
+    >Projekt-ID<input
+      name="slug"
+      [(ngModel)]="projectForm.slug"
+      pattern="[a-z0-9][a-z0-9-]{0,62}"
+      maxlength="63"
+      required
+    />
+  </label>
+  <label class="wide"
+    >Projektordner<input
+      name="repository"
+      [(ngModel)]="projectForm.repository"
+      maxlength="500"
+      required
+      placeholder="/Users/name/projekte/mein-projekt"
+    />
+  </label>
+  <label class="wide"
+    >GitHub-Repository (optional)<input
+      name="gitRemote"
+      [(ngModel)]="projectForm.gitRemote"
+      maxlength="300"
+      placeholder="git@github.com:user/repo.git"
+    />
+  </label>
+  <button class="button primary" type="submit" [disabled]="busy()">Projekt speichern</button>
+</form>

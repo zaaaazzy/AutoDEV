@@ -1,0 +1,106 @@
+@let idea = selected();
+<div class="modal-backdrop" (click)="closed.emit()">
+  <section
+    class="help-dialog idea-detail"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="idea-title"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="section-heading">
+      <div>
+        <p class="eyebrow">Idee</p>
+        @if (!editing()) {
+          <h2 id="idea-title">{{ idea.title }}</h2>
+        }
+      </div>
+      <div class="actions">
+        @if (!editing()) {
+          <button
+            class="button secondary"
+            type="button"
+            (click)="editing.set(true)"
+            aria-label="Bearbeiten"
+            title="Bearbeiten"
+          >
+            ✎
+          </button>
+        }
+        <button class="button secondary" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
+      </div>
+    </div>
+    @if (editing()) {
+      <form class="form-grid" (ngSubmit)="saveIdea(idea, ideaEdit.value)" #ideaEdit="ngForm">
+        <label class="wide">Titel<input name="title" [ngModel]="idea.title" maxlength="180" required /> </label>
+        <label class="wide"
+          >Beschreibung<textarea name="description" [ngModel]="idea.description" maxlength="10000"></textarea>
+        </label>
+        <label
+          >Status<select name="status" [ngModel]="idea.status">
+            @for (status of statusOptions(idea); track status) {
+              <option [value]="status">{{ status | statusLabel }}</option>
+            }
+          </select>
+        </label>
+        <label
+          >Priorität<select name="priority" [ngModel]="idea.priority">
+            <option value="low">Niedrig</option>
+            <option value="medium">Mittel</option>
+            <option value="high">Hoch</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+          <button class="button secondary" type="button" (click)="editing.set(false)">Abbrechen</button>
+        </div>
+      </form>
+    } @else {
+      <p class="detail-text">{{ idea.description || 'Keine Beschreibung' }}</p>
+      <p>
+        <span class="status">Priorität: {{ idea.priority | priorityLabel }}</span>
+      </p>
+      <dl class="estimate">
+        <div>
+          <dt>Aufwand</dt>
+          <dd>{{ idea.effortHours != null ? idea.effortHours + ' Std.' : 'Wird geschätzt …' }}</dd>
+        </div>
+        <div>
+          <dt>Token</dt>
+          <dd>{{ idea.tokenEstimate ?? '–' }}</dd>
+        </div>
+        <div>
+          <dt>Nutzen</dt>
+          <dd>{{ idea.benefit != null ? idea.benefit + ' / 10' : '–' }}</dd>
+        </div>
+        <div>
+          <dt>Kosten</dt>
+          <dd>{{ idea.cost != null ? idea.cost + ' / 10' : '–' }}</dd>
+        </div>
+      </dl>
+    }
+    <app-gallery [ideationId]="idea.id" />
+    @if (!linkedOrder(idea.id) && (idea.status === 'idea' || idea.status === 'considering')) {
+      <div class="actions">
+        <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
+          Auftrag erstellen
+        </button>
+      </div>
+    }
+    <h3 class="subheading">Kommentare</h3>
+    @for (comment of commentsOf(idea.id); track comment.id) {
+      <article class="comment">
+        <div class="meta">
+          <strong>{{ comment.author }}</strong>
+          <span>{{ comment.createdAt | date: 'dd.MM.yyyy HH:mm' }}</span>
+        </div>
+        <p>{{ comment.body }}</p>
+      </article>
+    } @empty {
+      <p class="muted">Noch keine Kommentare.</p>
+    }
+    <form class="inline-form" (ngSubmit)="addComment(idea.id, commentText)">
+      <input #commentText name="comment" maxlength="4000" placeholder="Kommentar schreiben …" required />
+      <button class="button secondary" type="submit" [disabled]="busy()">Kommentieren</button>
+    </form>
+  </section>
+</div>

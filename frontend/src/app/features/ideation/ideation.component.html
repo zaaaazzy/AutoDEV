@@ -1,0 +1,248 @@
+@if (store.ready()) {
+  @if (store.showCreate()) {
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Neue Idee</h2>
+        </div>
+      </div>
+      <form class="form-grid create-form" (ngSubmit)="createIdea()">
+        <label class="wide">Titel<input name="title" [(ngModel)]="ideaForm.title" maxlength="180" required /> </label>
+        <label
+          >Priorität<select name="priority" [(ngModel)]="ideaForm.priority">
+            <option value="medium">Mittel</option>
+            <option value="high">Hoch</option>
+            <option value="low">Niedrig</option>
+          </select>
+        </label>
+        <label class="wide"
+          >Beschreibung<textarea name="description" [(ngModel)]="ideaForm.description" maxlength="10000"></textarea>
+        </label>
+        <label class="wide"
+          >Bilder (PNG, JPEG, WebP, GIF · max. 5 MB)
+          <input
+            type="file"
+            name="images"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            #pendingInput
+            (change)="selectPendingImages(pendingInput)"
+          />
+        </label>
+        @if (pendingImages.length) {
+          <p class="muted wide">{{ pendingImages.length }} Bild(er) ausgewählt: {{ pendingImageNames() }}</p>
+        }
+        <button class="button primary" type="submit" [disabled]="busy()">Idee hinzufügen</button>
+      </form>
+    </section>
+  }
+  <section class="panel">
+    <div class="section-heading">
+      <div>
+        <h2>Alle Ideen</h2>
+        <p class="muted">
+          {{ sortedIdeas().length }} von {{ data().ideas.length }} Einträgen · Spaltenkopf sortiert, ⏷ filtert
+          (Mehrfachauswahl)
+        </p>
+      </div>
+      @if (hasIdeaFilters()) {
+        <button type="button" class="button secondary" (click)="clearIdeaFilters()">Filter zurücksetzen</button>
+      }
+    </div>
+    @if (data().ideas.length) {
+      <div class="table-wrap">
+        <table class="idea-table">
+          <thead>
+            <tr>
+              @for (col of ideaColumns; track col.key) {
+                <th
+                  appColumnHeader
+                  [label]="col.label"
+                  [sortDir]="ideaSort().key === col.key ? ideaSort().dir : null"
+                  [filterActive]="ideaFilterActive(col.key)"
+                  [textFilter]="isTextColumn(col.key)"
+                  [textValue]="textValue(col.key)"
+                  [options]="ideaOptions(col.key)"
+                  [selected]="selectedValues(col.key)"
+                  (sortRequested)="sortIdeasBy(col.key)"
+                  (textChange)="setIdeaText(col.key, $event)"
+                  (valueToggle)="toggleIdeaValue(col.key, $event.option, $event.checked)"
+                ></th>
+              }
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (idea of sortedIdeas(); track idea.id) {
+              <tr>
+                <td class="title-cell">
+                  <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">
+                    {{ idea.title }}
+                  </button>
+                </td>
+                <td class="summary-cell">
+                  <div class="clamp">{{ idea.description | shortText }}</div>
+                </td>
+                <td>
+                  <span class="status" [ngClass]="idea.status | statusClass">{{ idea.status | statusLabel }}</span>
+                </td>
+                <td>{{ idea.priority | priorityLabel }}</td>
+                <td>{{ idea.effortHours | hours }}</td>
+                <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
+                <td>
+                  <button
+                    type="button"
+                    class="button secondary icon-button"
+                    (click)="editIdea(idea.id)"
+                    [attr.aria-label]="'Idee bearbeiten: ' + idea.title"
+                    title="Bearbeiten"
+                  >
+                    ✎
+                  </button>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    } @else {
+      <p class="empty-state">Noch keine Ideen vorhanden.</p>
+    }
+  </section>
+  <section class="panel">
+    <div class="section-heading">
+      <button
+        type="button"
+        class="collapse-toggle"
+        [attr.aria-expanded]="showClosedIdeas()"
+        (click)="showClosedIdeas.set(!showClosedIdeas())"
+      >
+        <span class="chev" [class.open]="showClosedIdeas()">▸</span> Abgeschlossene Ideen
+        <span class="muted">({{ closedIdeas().length }})</span>
+      </button>
+    </div>
+    @if (showClosedIdeas()) {
+      @if (closedIdeas().length) {
+        <div class="table-wrap">
+          <table class="idea-table">
+            <thead>
+              <tr>
+                <th></th>
+                <th>Titel</th>
+                <th>Kurzfassung</th>
+                <th>Erstellt</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (idea of closedIdeas(); track idea.id) {
+                <tr>
+                  <td>
+                    <button
+                      type="button"
+                      class="button secondary icon-button"
+                      [attr.aria-expanded]="openClosedIdea() === idea.id"
+                      (click)="openClosedIdea.set(openClosedIdea() === idea.id ? null : idea.id)"
+                      title="Auftrag und Sprint anzeigen"
+                    >
+                      {{ openClosedIdea() === idea.id ? '▾' : '▸' }}
+                    </button>
+                  </td>
+                  <td class="title-cell">
+                    <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">
+                      {{ idea.title }}
+                    </button>
+                  </td>
+                  <td class="summary-cell">
+                    <div class="clamp">{{ idea.description | shortText }}</div>
+                  </td>
+                  <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
+                </tr>
+                @if (openClosedIdea() === idea.id) {
+                  <tr class="closed-detail">
+                    <td></td>
+                    <td colspan="3">
+                      @let order = closedIdeaOrder(idea);
+                      @let sprint = store.sprintOf(order);
+                      <div class="closed-info">
+                        <div class="info-block">
+                          <h4>Auftrag</h4>
+                          @if (order) {
+                            <p>
+                              <strong>{{ order.title }}</strong>
+                            </p>
+                            <p>
+                              <span class="status" [ngClass]="order.status | statusClass">{{
+                                order.status | statusLabel
+                              }}</span>
+                              · Priorität {{ order.priority | priorityLabel }} · Aufwand {{ order.effortHours | hours }}
+                            </p>
+                            @if (order.completedAt) {
+                              <p class="muted">
+                                Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
+                              </p>
+                            }
+                          } @else {
+                            <p class="muted">
+                              {{ idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.' }}
+                            </p>
+                          }
+                        </div>
+                        <div class="info-block">
+                          <h4>Sprint</h4>
+                          @if (sprint) {
+                            <p>
+                              <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
+                            </p>
+                            @if (sprint.goal) {
+                              <p class="muted">{{ sprint.goal }}</p>
+                            }
+                            <p class="muted">{{ sprint.startDate ?? '–' }} – {{ sprint.endDate ?? '–' }}</p>
+                          } @else {
+                            <p class="muted">Keinem Sprint zugewiesen.</p>
+                          }
+                        </div>
+                        <div class="info-block git-tree" aria-label="Versionskontrolle">
+                          <h4>Versionskontrolle</h4>
+                          <ol>
+                            <li>
+                              <span class="dot"></span>Idee <em>{{ idea.title }}</em>
+                            </li>
+                            @if (order) {
+                              <li>
+                                <span class="dot"></span>Auftrag <em>{{ order.title }}</em>
+                              </li>
+                            }
+                            @if (sprint) {
+                              <li>
+                                <span class="dot branch"></span>Branch/Sprint <em>{{ sprint.name }}</em>
+                              </li>
+                            }
+                            @if (sprint) {
+                              @if (sprint.gitCommit) {
+                                <li>
+                                  <span class="dot commit"></span>
+                                  <code>{{ sprint.gitCommit }}</code> <em>{{ sprint.gitMessage }}</em>
+                                </li>
+                              } @else {
+                                <li class="muted"><span class="dot"></span>Noch kein Commit</li>
+                              }
+                            }
+                          </ol>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                }
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else {
+        <p class="empty-state">Keine abgeschlossenen Ideen.</p>
+      }
+    }
+  </section>
+}
+@if (selectedIdea(); as idea) {
+  <app-idea-detail [selected]="idea" [(editing)]="ideaEditing" (closed)="closeIdea()" />
+}

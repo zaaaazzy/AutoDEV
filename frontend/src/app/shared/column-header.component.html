@@ -1,0 +1,17 @@
+<div class="th-inner">
+  <button type="button" class="link-button" (click)="sortRequested.emit()">{{ label() }}{{ sortMark() }}</button>
+  <details class="col-filter" [class.active]="filterActive()">
+    <summary aria-label="Filter {{ label() }}" title="Filtern">⏷</summary>
+    <div class="filter-menu">
+      @if (textFilter()) {
+        <input type="search" placeholder="Enthält …" [ngModel]="textValue()" (ngModelChange)="textChange.emit($event)">
+      } @else {
+        @for (option of options(); track option) {
+          <label class="check">
+            <input type="checkbox" [checked]="selected()?.includes(option)" (change)="toggle(option, $event)"> {{ option }}
+          </label>
+        }
+      }
+    </div>
+  </details>
+</div>

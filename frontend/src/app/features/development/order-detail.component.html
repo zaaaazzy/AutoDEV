@@ -1,0 +1,174 @@
+@let item = order();
+<div class="item-card order-detail">
+  <div class="item-content">
+    @if (!editing()) {
+      <div class="order-title-row">
+        <h3>{{ item.title }}</h3>
+        <button
+          class="button secondary"
+          type="button"
+          (click)="editStarted.emit()"
+          aria-label="Bearbeiten"
+          title="Bearbeiten"
+        >
+          ✎
+        </button>
+      </div>
+      @if (item.description) {
+        <article class="markdown" [innerHTML]="item.description | markdown"></article>
+      } @else {
+        <p class="muted">Keine Beschreibung.</p>
+      }
+    }
+    @if (item.status === 'blocked') {
+      <div class="blocked-box">
+        <strong>Blockiert</strong>
+        @if (item.failure) {
+          <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article>
+        }
+        @if (item.failureBugId) {
+          <p class="bug-link">
+            🐞 <a href="#bugs" (click)="store.navigate('bugs')">Bug-Bericht ansehen</a> ·
+            @switch (item.fixStatus) {
+              @case ('planned') {
+                Behebung ist eingeplant und startet automatisch.
+              }
+              @case ('in_progress') {
+                Behebung läuft gerade …
+              }
+              @case ('blocked') {
+                Die automatische Behebung ist gescheitert – bitte Problem analysieren.
+              }
+              @case ('done') {
+                Bug behoben, der Auftrag wird erneut gestartet.
+              }
+              @default {
+                Keine automatische Behebung (in den Einstellungen aktivierbar).
+              }
+            }
+          </p>
+        }
+        <div class="actions">
+          <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
+            ↻ Erneut versuchen
+            @if (item.retryCount) {
+              ({{ item.retryCount }})
+            }
+          </button>
+          <button
+            class="button secondary"
+            type="button"
+            [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
+            (click)="analyze(item)"
+          >
+            {{
+              item.analysisStatus === 'requested' || item.analysisStatus === 'running'
+                ? 'Assistent analysiert …'
+                : '🔎 Problem analysieren'
+            }}
+          </button>
+        </div>
+        <p class="muted">
+          Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und
+          erscheinen künftig bei den Risiken.
+        </p>
+      </div>
+    }
+    @if (item.analysis) {
+      <h4 class="order-section">🔎 Analyse des Assistenten</h4>
+      <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
+    }
+    @if (item.risks) {
+      <h4 class="order-section">⚠ Risiken</h4>
+      <article class="markdown" [innerHTML]="item.risks | markdown"></article>
+    }
+    @if (item.projectContext) {
+      <details class="order-context">
+        <summary>Projektbeschreibung &amp; Leitlinien</summary>
+        <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
+      </details>
+    }
+    <app-gallery [ideationId]="item.ideationId" />
+    @if (editing()) {
+      <form class="form-grid" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
+        <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
+        <label class="wide"
+          >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
+        </label>
+        <label
+          >Priorität<select name="priority" [ngModel]="item.priority">
+            <option value="low">Niedrig</option>
+            <option value="medium">Mittel</option>
+            <option value="high">Hoch</option>
+          </select>
+        </label>
+        <label
+          >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
+        </label>
+        <label
+          >Token-Schätzung<input
+            name="tokenEstimate"
+            type="number"
+            min="0"
+            step="1000"
+            [ngModel]="item.tokenEstimate"
+          />
+        </label>
+        <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" [ngModel]="item.benefit" /> </label>
+        <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" [ngModel]="item.cost" /> </label>
+        <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+        <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
+      </form>
+    }
+  </div>
+  <div class="item-controls">
+    <label
+      >Status<select
+        [ngModel]="item.status"
+        (ngModelChange)="update(item.id, { status: $event })"
+        [name]="'status-' + item.id"
+      >
+        @for (status of developmentStatuses; track status) {
+          <option [value]="status">{{ status | statusLabel }}</option>
+        }
+      </select>
+    </label>
+    <label
+      >Sprint<select
+        [ngModel]="item.sprintId"
+        (ngModelChange)="update(item.id, { sprintId: $event || null })"
+        [name]="'sprint-' + item.id"
+      >
+        <option [ngValue]="null">Kein Sprint</option>
+        @for (sprint of data().sprints; track sprint.id) {
+          <option [value]="sprint.id">{{ sprint.name }}</option>
+        }
+      </select>
+    </label>
+    <label
+      >Einzelner Agent
+      <span class="inline-form">
+        <select
+          [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+          (ngModelChange)="manualAgent[item.id] = $event"
+          [name]="'agent-' + item.id"
+        >
+          <option value="">Agent wählen …</option>
+          @for (agent of data().agents; track agent.id) {
+            <option [value]="agent.id">{{ agent.name }}</option>
+          }
+        </select>
+        <button
+          class="button primary"
+          type="button"
+          title="Mit gewähltem Agent starten"
+          aria-label="Agent starten"
+          [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+          (click)="startWithAgent(item)"
+        >
+          ▶
+        </button>
+      </span>
+    </label>
+  </div>
+</div>

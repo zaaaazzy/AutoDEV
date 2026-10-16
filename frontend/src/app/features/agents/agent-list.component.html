@@ -1,0 +1,30 @@
+@for (agent of worker().agents; track agent.id) {
+  <div class="agent-row">
+    <button
+      type="button"
+      class="agent-line"
+      [class.active]="agent.active"
+      [class.down]="!agent.active && !worker().online"
+      (click)="activity.show(agent.id)"
+    >
+      <span class="agent-dot"></span>
+      <span class="agent-text">
+        <strong>{{ agent.name }}</strong>
+        <small>{{
+          agent.active
+            ? (agent.sprintName ? agent.sprintName + ' - ' : '') + agent.orderTitle
+            : worker().online
+              ? 'Inaktiv'
+              : 'Worker offline'
+        }}</small>
+      </span>
+    </button>
+    @if (agent.active) {
+      <button type="button" class="agent-cancel" (click)="cancel(agent.id, agent.name)" title="Agent abbrechen">
+        ■ Abbrechen
+      </button>
+    }
+  </div>
+} @empty {
+  <p class="muted">Keine Agents für dieses Projekt.</p>
+}

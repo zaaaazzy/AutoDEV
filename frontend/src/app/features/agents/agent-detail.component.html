@@ -1,0 +1,125 @@
+@let agent = selected();
+<section class="panel agent-detail">
+  <button type="button" class="link-button" (click)="closeAgent()">← Alle Agents</button>
+  <div class="section-heading">
+    <div>
+      <h2>{{ agent.name }}</h2>
+      <p class="muted">{{ roleLabel(agent.role) }} · {{ agent.command?.join(' ') || 'Eingebauter Agent' }}</p>
+    </div>
+    <span class="status" [ngClass]="agent.enabled ? 'status-done' : 'status-blocked'">{{
+      agent.enabled ? 'Aktiv' : 'Deaktiviert'
+    }}</span>
+  </div>
+  @if (agent.instructions) {
+    <p>{{ agent.instructions }}</p>
+  }
+  @if (agentActivityLoading()) {
+    <p class="loading">Wird geladen …</p>
+  }
+  <h3 class="subheading">Aktive Aufgaben ({{ agentActive().length }})</h3>
+  @for (entry of agentActive(); track entry.id) {
+    <article class="run-card">
+      <div class="list-row">
+        <strong>{{ entry.orderTitle }}</strong>
+        <span class="muted">Auftrag:</span>
+        <span class="status" [ngClass]="entry.orderStatus | statusClass">{{ entry.orderStatus | statusLabel }}</span>
+        <span class="muted">Lauf:</span>
+        <span class="status" [ngClass]="entry.stepStatus | statusClass">{{ entry.stepStatus | statusLabel }}</span>
+        <span class="muted">{{ entry.startedAt | dateTime }}</span>
+      </div>
+      <details class="run-step">
+        <summary>Auftrag</summary>
+        <p>{{ entry.orderDescription || 'Keine Beschreibung.' }}</p>
+        <p class="muted">Priorität: {{ entry.orderPriority | priorityLabel }}</p>
+      </details>
+      <details class="run-step">
+        <summary>Sprint{{ entry.sprintName ? ': ' + entry.sprintName : '' }}</summary>
+        @if (entry.sprintName) {
+          <p>{{ entry.sprintGoal || 'Kein Sprint-Ziel' }}</p>
+          <p class="muted">
+            {{ entry.sprintStatus ?? '' | statusLabel }} · {{ entry.sprintStart || 'Kein Start' }} –
+            {{ entry.sprintEnd || 'Kein Ende' }}
+          </p>
+        } @else {
+          <p class="muted">Der Auftrag gehört zu keinem Sprint.</p>
+        }
+      </details>
+      @if (entry.progress) {
+        <p class="live-progress"><span class="live-dot"></span>{{ entry.progress }}</p>
+      }
+      <details class="run-step" open>
+        <summary>Live-Ausgabe</summary>
+        @if (entry.output) {
+          <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article>
+        } @else {
+          <p class="muted">Noch keine Ausgabe – der Agent arbeitet …</p>
+        }
+      </details>
+    </article>
+  } @empty {
+    @if (!agentActivityLoading()) {
+      <p class="muted">Gerade keine aktive Aufgabe.</p>
+    }
+  }
+  <details class="task-group" open>
+    <summary>Anstehende Aufgaben ({{ agentUpcoming().length }})</summary>
+    @for (task of agentUpcoming(); track task.id) {
+      <article class="run-card">
+        <div class="list-row">
+          <strong>{{ task.title }}</strong>
+          <span class="status" [ngClass]="task.status | statusClass">{{ task.status | statusLabel }}</span>
+          <span class="muted"
+            >{{ task.sprintName ? 'Sprint ' + task.sprintName : 'Manuell gestartet' }} · Priorität
+            {{ task.priority | priorityLabel }}</span
+          >
+        </div>
+      </article>
+    } @empty {
+      <p class="muted">Keine anstehenden Aufgaben.</p>
+    }
+  </details>
+  <details class="task-group">
+    <summary>Durchgeführte Aufgaben ({{ agentDone().length }})</summary>
+    @for (entry of agentDone(); track entry.id) {
+      <article class="run-card">
+        <div class="list-row">
+          <strong>{{ entry.orderTitle }}</strong>
+          <span class="muted">Auftrag:</span>
+          <span class="status" [ngClass]="entry.orderStatus | statusClass">{{ entry.orderStatus | statusLabel }}</span>
+          <span class="muted">Lauf:</span>
+          <span class="status" [ngClass]="entry.stepStatus | statusClass">{{ entry.stepStatus | statusLabel }}</span>
+          <span class="muted">{{ entry.startedAt | dateTime }}</span>
+        </div>
+        <details class="run-step">
+          <summary>Auftrag</summary>
+          <p>{{ entry.orderDescription || 'Keine Beschreibung.' }}</p>
+          <p class="muted">Priorität: {{ entry.orderPriority | priorityLabel }}</p>
+        </details>
+        <details class="run-step">
+          <summary>Sprint{{ entry.sprintName ? ': ' + entry.sprintName : '' }}</summary>
+          @if (entry.sprintName) {
+            <p>{{ entry.sprintGoal || 'Kein Sprint-Ziel' }}</p>
+            <p class="muted">
+              {{ entry.sprintStatus ?? '' | statusLabel }} · {{ entry.sprintStart || 'Kein Start' }} –
+              {{ entry.sprintEnd || 'Kein Ende' }}
+            </p>
+          } @else {
+            <p class="muted">Der Auftrag gehört zu keinem Sprint.</p>
+          }
+        </details>
+        <details class="run-step">
+          <summary>Ausgabe</summary>
+          @if (entry.output) {
+            <article class="markdown task-body" [innerHTML]="entry.output | markdown"></article>
+          } @else {
+            <p class="muted">Keine Ausgabe.</p>
+          }
+        </details>
+      </article>
+    } @empty {
+      @if (!agentActivityLoading()) {
+        <p class="muted">Noch keine Aufgaben ausgeführt.</p>
+      }
+    }
+  </details>
+</section>
