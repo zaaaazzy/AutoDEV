@@ -109,112 +109,143 @@
       <p class="empty-state">Noch keine Ideen vorhanden.</p>
     }
   </section>
-  <section class="panel">
-    <div class="section-heading">
-      <button
-        type="button"
-        class="collapse-toggle"
-        [attr.aria-expanded]="showClosedIdeas()"
-        (click)="showClosedIdeas.set(!showClosedIdeas())"
-      >
-        <span class="chev" [class.open]="showClosedIdeas()">▸</span> Abgeschlossene Ideen
-        <span class="muted">({{ closedIdeas().length }})</span>
-      </button>
-    </div>
-    @if (showClosedIdeas()) {
-      @if (closedIdeas().length) {
-        <div class="table-wrap">
-          <table class="idea-table">
-            <thead>
-              <tr>
-                <th></th>
-                <th>Titel</th>
-                <th>Kurzfassung</th>
-                <th>Erstellt</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (idea of closedIdeas(); track idea.id) {
+  <ng-template #ideaGroup let-group>
+    <section class="panel">
+      <div class="section-heading">
+        <button
+          type="button"
+          class="collapse-toggle"
+          [attr.aria-expanded]="group.open()"
+          (click)="group.open.set(!group.open())"
+        >
+          <span class="chev" [class.open]="group.open()">▸</span> {{ group.title }}
+          <span class="muted">({{ group.ideas.length }})</span>
+        </button>
+      </div>
+      @if (group.open()) {
+        @if (group.ideas.length) {
+          <div class="table-wrap">
+            <table class="idea-table">
+              <thead>
                 <tr>
-                  <td>
-                    <button
-                      type="button"
-                      class="button secondary icon-button"
-                      [attr.aria-expanded]="openClosedIdea() === idea.id"
-                      (click)="openClosedIdea.set(openClosedIdea() === idea.id ? null : idea.id)"
-                      title="Auftrag und Sprint anzeigen"
-                    >
-                      {{ openClosedIdea() === idea.id ? '▾' : '▸' }}
-                    </button>
-                  </td>
-                  <td class="title-cell">
-                    <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">
-                      {{ idea.title }}
-                    </button>
-                  </td>
-                  <td class="summary-cell">
-                    <div class="clamp">{{ idea.description | shortText }}</div>
-                  </td>
-                  <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
+                  <th></th>
+                  <th>Titel</th>
+                  <th>Kurzfassung</th>
+                  <th>Erstellt</th>
                 </tr>
-                @if (openClosedIdea() === idea.id) {
-                  <tr class="closed-detail">
-                    <td></td>
-                    <td colspan="3">
-                      @let order = closedIdeaOrder(idea);
-                      @let sprint = store.sprintOf(order);
-                      <div class="closed-info">
-                        <div class="info-block">
-                          <h4>Auftrag</h4>
-                          @if (order) {
-                            <p>
-                              <strong>{{ order.title }}</strong>
-                            </p>
-                            <p>
-                              <span class="status" [ngClass]="order.status | statusClass">{{
-                                order.status | statusLabel
-                              }}</span>
-                              · Priorität {{ order.priority | priorityLabel }} · Aufwand {{ order.effortHours | hours }}
-                            </p>
-                            @if (order.completedAt) {
+              </thead>
+              <tbody>
+                @for (idea of group.ideas; track idea.id) {
+                  <tr>
+                    <td>
+                      <button
+                        type="button"
+                        class="button secondary icon-button"
+                        [attr.aria-expanded]="openClosedIdea() === idea.id"
+                        (click)="openClosedIdea.set(openClosedIdea() === idea.id ? null : idea.id)"
+                        title="Auftrag und Sprint anzeigen"
+                      >
+                        {{ openClosedIdea() === idea.id ? '▾' : '▸' }}
+                      </button>
+                    </td>
+                    <td class="title-cell">
+                      <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">
+                        {{ idea.title }}
+                      </button>
+                    </td>
+                    <td class="summary-cell">
+                      <div class="clamp">{{ idea.description | shortText }}</div>
+                    </td>
+                    <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
+                  </tr>
+                  @if (openClosedIdea() === idea.id) {
+                    <tr class="closed-detail">
+                      <td></td>
+                      <td colspan="3">
+                        @let order = closedIdeaOrder(idea);
+                        @let sprint = store.sprintOf(order);
+                        <div class="closed-info">
+                          <div class="info-block">
+                            <h4>Auftrag</h4>
+                            @if (order) {
+                              <p>
+                                <strong>{{ order.title }}</strong>
+                              </p>
+                              <p>
+                                <span class="status" [ngClass]="order.status | statusClass">{{
+                                  order.status | statusLabel
+                                }}</span>
+                                · Priorität {{ order.priority | priorityLabel }} · Aufwand
+                                {{ order.effortHours | hours }}
+                              </p>
+                              @if (order.completedAt) {
+                                <p class="muted">
+                                  Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
+                                </p>
+                              }
+                            } @else {
                               <p class="muted">
-                                Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
+                                {{
+                                  idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.'
+                                }}
                               </p>
                             }
-                          } @else {
-                            <p class="muted">
-                              {{ idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.' }}
-                            </p>
-                          }
-                        </div>
-                        <div class="info-block">
-                          <h4>Sprint</h4>
-                          @if (sprint) {
-                            <p>
-                              <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
-                            </p>
-                            @if (sprint.goal) {
-                              <p class="muted">{{ sprint.goal }}</p>
+                          </div>
+                          <div class="info-block">
+                            <h4>Sprint</h4>
+                            @if (sprint) {
+                              <p>
+                                <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
+                              </p>
+                              @if (sprint.goal) {
+                                <p class="muted">{{ sprint.goal }}</p>
+                              }
+                              <p class="muted">{{ sprint.startDate ?? '–' }} – {{ sprint.endDate ?? '–' }}</p>
+                            } @else {
+                              <p class="muted">Keinem Sprint zugewiesen.</p>
                             }
-                            <p class="muted">{{ sprint.startDate ?? '–' }} – {{ sprint.endDate ?? '–' }}</p>
-                          } @else {
-                            <p class="muted">Keinem Sprint zugewiesen.</p>
-                          }
+                          </div>
+                          <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
                         </div>
-                        <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
-                      </div>
-                    </td>
-                  </tr>
+                      </td>
+                    </tr>
+                  }
                 }
-              }
-            </tbody>
-          </table>
-        </div>
-      } @else {
-        <p class="empty-state">Keine abgeschlossenen Ideen.</p>
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="empty-state">{{ group.empty }}</p>
+        }
       }
-    }
-  </section>
+    </section>
+  </ng-template>
+  <ng-container
+    *ngTemplateOutlet="
+      ideaGroup;
+      context: {
+        $implicit: {
+          title: 'In Bearbeitung',
+          ideas: inProgressIdeas(),
+          open: showInProgressIdeas,
+          empty: 'Keine Ideen in Bearbeitung.',
+        },
+      }
+    "
+  />
+  <ng-container
+    *ngTemplateOutlet="
+      ideaGroup;
+      context: {
+        $implicit: {
+          title: 'Abgeschlossene Ideen',
+          ideas: closedIdeas(),
+          open: showClosedIdeas,
+          empty: 'Keine abgeschlossenen Ideen.',
+        },
+      }
+    "
+  />
 }
 @if (selectedIdea(); as idea) {
   <app-idea-detail [selected]="idea" [(editing)]="ideaEditing" (closed)="closeIdea()" />

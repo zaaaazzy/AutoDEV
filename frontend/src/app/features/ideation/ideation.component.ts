@@ -1,4 +1,4 @@
-import { NgClass } from '@angular/common';
+import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
@@ -25,6 +25,7 @@ type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
   standalone: true,
   imports: [
     NgClass,
+    NgTemplateOutlet,
     FormsModule,
     ColumnHeaderComponent,
     GitTreeComponent,
@@ -66,8 +67,10 @@ export class IdeationComponent {
   });
   protected readonly ideaSort = signal<SortState<IdeaKey>>({ key: 'createdAt', dir: 'desc' });
   protected readonly showClosedIdeas = signal(false);
+  protected readonly showInProgressIdeas = signal(true);
   protected readonly openClosedIdea = signal<string | null>(null);
 
+  protected readonly inProgressIdeas = computed(() => this.data().ideas.filter((idea) => this.isInProgress(idea)));
   protected readonly closedIdeas = computed(() => this.data().ideas.filter((idea) => this.isClosedIdea(idea)));
   protected readonly selectedIdea = computed(
     () => this.data().ideas.find((idea) => idea.id === this.openIdea()) ?? null,
@@ -89,7 +92,7 @@ export class IdeationComponent {
       }
     };
     return this.data()
-      .ideas.filter((idea) => !this.isClosedIdea(idea))
+      .ideas.filter((idea) => !this.isClosedIdea(idea) && !this.isInProgress(idea))
       .filter(
         (idea) =>
           (['title', 'description'] as const).every((field) => includesText(idea[field], text[field])) &&
@@ -118,7 +121,7 @@ export class IdeationComponent {
     return [
       ...new Set(
         this.data()
-          .ideas.filter((idea) => !this.isClosedIdea(idea))
+          .ideas.filter((idea) => !this.isClosedIdea(idea) && !this.isInProgress(idea))
           .map((idea) => this.ideaCellValue(idea, key)),
       ),
     ].sort();
@@ -221,8 +224,12 @@ export class IdeationComponent {
     }, 'Idee wurde hinzugefügt.');
   }
 
+  private isInProgress(idea: Idea): boolean {
+    return idea.status === 'accepted' && this.closedIdeaOrder(idea)?.status !== 'done';
+  }
+
   private isClosedIdea(idea: Idea): boolean {
-    return idea.status === 'accepted' || idea.status === 'rejected';
+    return idea.status === 'rejected' || (idea.status === 'accepted' && !this.isInProgress(idea));
   }
 
   private async uploadImages(ideationId: string, files: File[]): Promise<void> {
