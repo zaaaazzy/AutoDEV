@@ -44,6 +44,20 @@
           <app-nav-icon name="agents" />
           <span class="worker-count">{{ store.activeAgentCount() }}/{{ worker().agents.length }}</span>
         </a>
+        @if (notice() || resourceErrors().length) {
+          <div
+            class="speech-bubble"
+            [class.error]="resourceErrors().length"
+            [attr.role]="resourceErrors().length ? 'alert' : 'status'"
+          >
+            @if (notice()) {
+              <p>{{ notice() }}</p>
+            }
+            @for (error of resourceErrors(); track error) {
+              <p>{{ error }}</p>
+            }
+          </div>
+        }
         <div class="agent-popover" role="tooltip">
           <p class="popover-title">Agents · {{ store.currentProject()?.name }}</p>
           <app-agent-list />
@@ -99,17 +113,6 @@
       </section>
       @if (showProjectForm()) {
         <app-project-form (saved)="showProjectForm.set(false)" />
-      }
-      @if (notice()) {
-        <p class="notice" role="status">{{ notice() }}</p>
-      }
-      @if (resourceErrors().length) {
-        <div class="notice error" role="alert">
-          <strong>Einige Bereiche sind nicht verfügbar:</strong>
-          @for (error of resourceErrors(); track error) {
-            <p>{{ error }}</p>
-          }
-        </div>
       }
       @if (loading()) {
         <p class="loading" role="status">Dev Log wird geladen …</p>
