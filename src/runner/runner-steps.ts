@@ -37,7 +37,16 @@ async function testCommands(
 }
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
-export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt, cwd, timeoutMs, signal }) => {
+export const runBuiltinAgent: BuiltinAgent = async ({
+  pool,
+  item,
+  agent,
+  prompt,
+  cwd,
+  timeoutMs,
+  signal,
+  onProgress,
+}) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
     const runId = await runTestAgent(
@@ -70,7 +79,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({ pool, item, agent, prompt,
       item.projectSlug,
     ])
   ).rows[0]?.url;
-  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl });
+  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl, onProgress });
 };
 
 async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
@@ -96,6 +105,7 @@ async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, outpu
 const RUN_TIMEOUT_HOURS = 3;
 const CANCEL_POLL_MS = 1500;
 const LIVE_OUTPUT_INTERVAL_MS = 1500;
+const LIVE_ACTIONS = 40;
 
 export interface RunContext {
   pool: Pool;
@@ -152,6 +162,7 @@ interface StepHooks {
   signal: AbortSignal;
   onOutput: (partial: string) => void;
   onSpawn: (pid: number) => void;
+  onAction: (message: string) => void;
 }
 
 /** Run an agent command, the tester workflow, or the built-in local model. */
@@ -163,7 +174,16 @@ async function invokeAgent(
 ): Promise<CommandResult> {
   const { pool, item, options, execute, builtin, fallbackCommand } = ctx;
   const builtinRun = (): Promise<CommandResult> =>
-    builtin({ pool, item, agent, prompt, cwd: options.cwd, timeoutMs: options.timeoutMs, signal: hooks.signal });
+    builtin({
+      pool,
+      item,
+      agent,
+      prompt,
+      cwd: options.cwd,
+      timeoutMs: options.timeoutMs,
+      signal: hooks.signal,
+      onProgress: hooks.onAction,
+    });
   const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
@@ -245,6 +265,8 @@ export async function runStep(
     stopWatching = () => clearInterval(watcher);
   });
   let lastLiveWrite = 0;
+  const actions: string[] = [];
+  let progress: Awaited<ReturnType<typeof startProgress>> | undefined;
   const hooks: StepHooks = {
     signal: stepAbort.signal,
     onOutput: (partial) => {
@@ -258,6 +280,17 @@ export async function runStep(
         ])
         .catch(() => undefined);
     },
+    onAction: (message) => {
+      actions.push(message);
+      void pool
+        .query('UPDATE agent_run_steps SET output = $2 WHERE id = $1 AND status = $3', [
+          stepId,
+          redactOutput(actions.slice(-LIVE_ACTIONS).join('\n'), process.env),
+          AGENT_STEP_STATUS.running,
+        ])
+        .catch(() => undefined);
+      progress?.update(message);
+    },
     onSpawn: (pid) => {
       stepPid = pid;
       void pool
@@ -265,7 +298,7 @@ export async function runStep(
         .catch(() => undefined);
     },
   };
-  const progress = await startProgress(
+  progress = await startProgress(
     pool,
     item.projectSlug,
     [

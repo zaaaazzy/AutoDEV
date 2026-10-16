@@ -31,6 +31,8 @@ export type BuiltinAgent = (context: {
   cwd: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  /** Meldet jede Aktion des Agents (z. B. Dateizugriff) für die Live-Ausgabe. */
+  onProgress?: (message: string) => void;
 }) => Promise<CommandResult>;
 
 export interface WorkflowAgent {
