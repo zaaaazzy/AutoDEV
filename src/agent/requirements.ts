@@ -3,6 +3,7 @@ import { loadProjectContext, withProjectContext } from '../core/project-context.
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../api/bugs.js';
+import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
@@ -26,6 +27,10 @@ const FORMAT = [
   '## Technische Hinweise (betroffene Dateien/Module nach Prüfung des Projekts)',
   '## Diagramme (Mermaid-Codeblock, z. B. Ablauf oder ER-Diagramm, wenn hilfreich)',
   '## Abgrenzung',
+  '## Schätzung (zuletzt, nur ein JSON-Objekt)',
+  '{"effortHours": Stunden, "tokenEstimate": Tokens, "benefit": 0-10, "cost": 0-10}',
+  'tokenEstimate: erwarteter Tokenverbrauch aller Agent-Läufe des Auftrags (Entwickler, Tester, Dokumentation), ' +
+    'grob aus Anzahl und Größe der betroffenen Dateien berechnet; cost: Aufwand relativ 0 (gering) bis 10 (hoch).',
   'Erfinde keine Dateien. Beschreibe nur, was umgesetzt werden soll – ändere selbst nichts.',
 ].join('\n');
 
@@ -151,7 +156,7 @@ export async function draftRequirements(
     )
   ).rows[0];
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
-  const { exitCode, output } = await runAuthorAgent(
+  const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,
     options,
     (instructions) => buildRequirementPrompt(instructions, idea, existing?.description),
@@ -161,12 +166,21 @@ export async function draftRequirements(
     await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE id = $1`, [idea.id]);
     return 0;
   }
+  const { requirement: output, estimate } = splitEstimate(rawOutput);
   if (exitCode !== 0 || output.length < MIN_REQUIREMENT_CHARS) {
     await pool.query(
       `UPDATE ideation_items SET status = 'considering', agent_note = $2, updated_at = NOW() WHERE id = $1`,
       [idea.id, `Anforderung konnte nicht erstellt werden: ${output.slice(-600) || 'leere Antwort'}`],
     );
     return 0;
+  }
+  if (estimate) {
+    // Values entered by the user stay untouched.
+    await pool.query(
+      `UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
+              benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5) WHERE id = $1`,
+      [idea.id, estimate.effortHours, estimate.tokenEstimate, estimate.benefit, estimate.cost],
+    );
   }
   const risks = await assessRisks(pool, options, idea.title, output, execute);
   const projectContext = await loadProjectContext(pool, options.project);
@@ -184,7 +198,10 @@ export async function draftRequirements(
       return 0;
     }
     await pool.query(
-      `UPDATE development_items SET description = $2, risks = $3, project_context = $4, updated_at = NOW() WHERE id = $1`,
+      `UPDATE development_items d SET description = $2, risks = $3, project_context = $4,
+              effort_hours = COALESCE(d.effort_hours, i.effort_hours), token_estimate = COALESCE(d.token_estimate, i.token_estimate),
+              benefit = COALESCE(d.benefit, i.benefit), cost = COALESCE(d.cost, i.cost), updated_at = NOW()
+         FROM ideation_items i WHERE d.id = $1 AND i.id = d.ideation_id`,
       [existing.id, output.slice(0, 10_000), risks, projectContext],
     );
   } else

@@ -64,7 +64,6 @@ export const SCHEMA = `
     token_estimate BIGINT CHECK (token_estimate >= 0),
     benefit SMALLINT CHECK (benefit BETWEEN 0 AND 10),
     cost SMALLINT CHECK (cost BETWEEN 0 AND 10),
-    estimated_at TIMESTAMPTZ,
     agent_note TEXT,
     revision_prompt TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

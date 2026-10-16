@@ -22,18 +22,18 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 
 ## 2. Ideen → Aufträge
 
-1. **Schätzung** (`estimateIdeas`): Ideen ohne Schätzung erhalten Aufwand, Tokens, Nutzen und Kosten.
-2. **Auftragsautor** (`draftRequirements`): Idee mit Status `requested` → der Autor erhält Projektbeschreibung und Regeln (Einstellungen) und erzeugt die Anforderung als Backlog-Auftrag (Ziel, Akzeptanzkriterien, betroffene Dateien, Diagramme).
+1. **Idee anlegen:** Aufwand, Tokens, Nutzen und Kosten sind optional und lassen sich manuell eintragen.
+2. **Auftragsautor** (`draftRequirements`): Idee mit Status `requested` → der Autor erhält Projektbeschreibung und Regeln (Einstellungen) und erzeugt in **einem Lauf** die Anforderung (Ziel, Akzeptanzkriterien, betroffene Dateien, Diagramme) und die Schätzung (Stunden, Tokens, Nutzen, Kosten). Manuell eingetragene Werte bleiben erhalten; die Schätzung wird in den Backlog-Auftrag übernommen.
 3. **Bug-Wächter** (`assessRisks`): übernimmt die Anforderung des Autors, prüft sie gegen alle bisherigen Bugs (offene und behobene samt Lösung) und speichert die Risiken am Auftrag („was nicht wiederholt werden darf“). Beide Schritte laufen beim Ausarbeiten und werden bei der Abarbeitung nicht wiederholt.
 4. Die Sprint-Zuordnung bleibt manuell. Hängende `drafting`-Ideen werden nach einer Frist zurückgesetzt.
 
 ## 3. Sprint-Lebenszyklus
 
-| Status | Bedeutung |
-|---|---|
-| Geplant | Sprint angelegt, Aufträge zuordenbar; der Worker arbeitet nichts ab. |
-| Aktiv | Maximal **ein** aktiver Sprint pro Projekt (DB-Constraint). Backlog-Aufträge des Sprints werden automatisch auf „Geplant“ gesetzt und abgearbeitet. |
-| Abgeschlossen | Sprint-Bericht wird erzeugt; die Git-Sicherung wird automatisch eingereiht (DB-Trigger). |
+| Status        | Bedeutung                                                                                                                                           |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Geplant       | Sprint angelegt, Aufträge zuordenbar; der Worker arbeitet nichts ab.                                                                                |
+| Aktiv         | Maximal **ein** aktiver Sprint pro Projekt (DB-Constraint). Backlog-Aufträge des Sprints werden automatisch auf „Geplant“ gesetzt und abgearbeitet. |
+| Abgeschlossen | Sprint-Bericht wird erzeugt; die Git-Sicherung wird automatisch eingereiht (DB-Trigger).                                                            |
 
 ## 4. Abarbeitung eines Auftrags (`runWorkItem`)
 
@@ -60,11 +60,11 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 
 ## 6. Git im Sprint
 
-| Zeitpunkt | Aktion |
-|---|---|
-| Auftrag im Sprint **erfolgreich** | Lokaler Commit im Projektordner, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit. |
+| Zeitpunkt                                                               | Aktion                                                                                                                                                     |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auftrag im Sprint **erfolgreich**                                       | Lokaler Commit im Projektordner, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit.         |
 | Sprint abgeschlossen oder Git Push (Pfeil-hoch neben dem GitHub-Symbol) | Sammel-Commit (`Sprint: <Name>`) mit restlichen Änderungen, Tag `sprint-<name>-<id>`, Push (Branch + Tag), falls ein Repository am Projekt hinterlegt ist. |
-| Git Download (Pfeil-runter) | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab. |
+| Git Download (Pfeil-runter)                                             | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab.                       |
 
 Ausgeschlossen bleiben `.env`, `.dev-log/` und `.dev-log-backups/` (per `.git/info/exclude`). Alle Git-Aktionen laufen unter der Projektsperre, damit sie sich nicht mit Agent-Befehlen überschneiden.
 
@@ -79,6 +79,7 @@ Repo-Dokumentation spiegeln (`syncRepoDocs`), Sprint-Bericht für den aktiven Sp
 **Konsistent:** keine Doppelläufe, keine Endlosschleifen beim Auto-Bugfix, Unterbrechungen sind wiederaufnehmbar, Sprint-Abschluss löst die Sicherung zuverlässig aus.
 
 **Bewusste Grenzen:**
+
 - Aufträge laufen sequenziell pro Projekt; mehrere Projekte parallel (`maxConcurrentAgents`).
 - Nach erfolgreichem Play-Lauf eines Bug-Auftrags wird der Ursprungsauftrag nicht automatisch fortgesetzt.
 - Auftrags-Commits werden nicht gepusht; erst die Sprint-Sicherung pusht.

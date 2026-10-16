@@ -12,17 +12,17 @@ Es gibt **einen** Worker (`npm run worker` = `tsx src/runner/runner-cli.ts --all
 
 ## 2. Automatische Trigger
 
-| Trigger | Takt | Was passiert |
-|---|---|---|
-| Chat-Nachricht im Dashboard | alle 1,5 s, unabhängig von Aufträgen | Assistent beantwortet die älteste offene Nachricht (`processChat`); danach wird eine angeforderte Problemanalyse bearbeitet (`analyzeBlocked`). |
-| Arbeitszyklus pro Projekt | alle 30 s (`--interval`) | `runWorkflow`: Ideen schätzen → Ideen zu Aufträgen ausarbeiten → Sprint mit Git synchronisieren → Aufträge abarbeiten → Repo-Doku spiegeln → Sprint-Bericht → Git-Sync. |
-| Auftrag ausführbar | im Arbeitszyklus | Status `planned` und (Sprint aktiv **oder** fester Agent gesetzt **oder** `auto_run`). Backlog-Aufträge im aktiven Sprint werden automatisch auf `planned` gesetzt. Reihenfolge: Priorität hoch → niedrig, dann Alter. |
-| Idee mit Status `requested` | im Arbeitszyklus | Auftragsautor schreibt daraus einen Backlog-Auftrag (Sprint-Zuordnung bleibt manuell). Hängende `drafting`-Ideen werden nach einer Frist zurückgesetzt. |
-| Ideen ohne Schätzung | im Arbeitszyklus | Aufwand, Tokens, Nutzen, Kosten werden geschätzt. |
-| Analyse blockierter Aufträge | über den Chat-Takt | Wenn `analysis_status = requested`, analysiert der Assistent Fehlerausgaben und bekannte Bugs. |
-| Start des Workers | einmalig | Unterbrochene Läufe werden wiederhergestellt; Läufe, die älter als 3 h im Status `running` sind, werden als fehlgeschlagen markiert. |
-| Herunterfahren | Signal | Laufende Chat-Anfragen gehen zurück auf `pending`. |
-| Dashboard-Seite öffnen / Tab wieder sichtbar | Browser | Daten laden automatisch; zusätzlich Polling (Worker 10 s, laufende Runs 3 s). |
+| Trigger                                      | Takt                                 | Was passiert                                                                                                                                                                                                           |
+| -------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat-Nachricht im Dashboard                  | alle 1,5 s, unabhängig von Aufträgen | Assistent beantwortet die älteste offene Nachricht (`processChat`); danach wird eine angeforderte Problemanalyse bearbeitet (`analyzeBlocked`).                                                                        |
+| Arbeitszyklus pro Projekt                    | alle 30 s (`--interval`)             | `runWorkflow`: Ideen schätzen → Ideen zu Aufträgen ausarbeiten → Sprint mit Git synchronisieren → Aufträge abarbeiten → Repo-Doku spiegeln → Sprint-Bericht → Git-Sync.                                                |
+| Auftrag ausführbar                           | im Arbeitszyklus                     | Status `planned` und (Sprint aktiv **oder** fester Agent gesetzt **oder** `auto_run`). Backlog-Aufträge im aktiven Sprint werden automatisch auf `planned` gesetzt. Reihenfolge: Priorität hoch → niedrig, dann Alter. |
+| Idee mit Status `requested`                  | im Arbeitszyklus                     | Auftragsautor schreibt daraus einen Backlog-Auftrag (Sprint-Zuordnung bleibt manuell). Hängende `drafting`-Ideen werden nach einer Frist zurückgesetzt.                                                                |
+| Ideen ohne Schätzung                         | im Arbeitszyklus                     | Aufwand, Tokens, Nutzen, Kosten werden geschätzt.                                                                                                                                                                      |
+| Analyse blockierter Aufträge                 | über den Chat-Takt                   | Wenn `analysis_status = requested`, analysiert der Assistent Fehlerausgaben und bekannte Bugs.                                                                                                                         |
+| Start des Workers                            | einmalig                             | Unterbrochene Läufe werden wiederhergestellt; Läufe, die älter als 3 h im Status `running` sind, werden als fehlgeschlagen markiert.                                                                                   |
+| Herunterfahren                               | Signal                               | Laufende Chat-Anfragen gehen zurück auf `pending`.                                                                                                                                                                     |
+| Dashboard-Seite öffnen / Tab wieder sichtbar | Browser                              | Daten laden automatisch; zusätzlich Polling (Worker 10 s, laufende Runs 3 s).                                                                                                                                          |
 
 Pro Auftrag läuft immer nur **ein** Lauf (`agent_runs` mit Status `running` ist eindeutig).
 
@@ -30,16 +30,16 @@ Pro Auftrag läuft immer nur **ein** Lauf (`agent_runs` mit Status `running` ist
 
 Ein Auftrag durchläuft die aktivierten Agents nach Phase und Position: `pre_task` → `while_task` → `after_task`. Jeder Agent kann einen eigenen Befehl (`command`) haben; sonst gilt `DEV_LOG_AGENT_COMMAND`, sonst das lokale Ollama-Modell (`qwen3.5:9b`).
 
-| Agent | Rolle | Phase | Aufgabe | Dateien ändern | Befehle |
-|---|---|---|---|---|---|
-| Auftragsautor | `author` | pre_task | Auftrag beschreiben (Ziel, Kriterien, Dateien, Diagramme). Wird übersprungen, wenn der Auftrag aus einer Idee stammt. | nein | nein |
-| Bug-Wächter | `bug_reviewer` | pre_task | Bekannte Bugs prüfen → Risiken beim Auftrag. Übersprungen, wenn schon Risiken vorhanden. | nein | nein |
-| Entwickler | `developer` | while_task | Auftrag umsetzen. Bei Bug-Aufträgen wird die Ausgabe als Fix-Notiz am Bug gespeichert. | **ja**, mit Backup in `.dev-log-backups/` | npm test/run/install, git status/diff/log |
-| Tester | `tester` | after_task | Tests entwickeln, Build/Tests ausführen, Fehler als Bug melden. | nein | nein (Testbefehle führt der Runner aus) |
-| Dokumentierer | `documenter` | after_task | Ergebnis dokumentieren → Auftragsdoku. | nein | nein |
-| Handbuch-Autor | `manual_writer` | after_task | Technisches Handbuch pflegen. | nein | nein |
-| Benutzerhandbuch-Autor | `user_manual_writer` | after_task | Benutzerhandbuch pflegen. | nein | nein |
-| eigene | `custom` | frei | Beliebige Zusatzrolle. | nein | nein |
+| Agent                  | Rolle                | Phase      | Aufgabe                                                                                                               | Dateien ändern                            | Befehle                                   |
+| ---------------------- | -------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+| Auftragsautor          | `author`             | pre_task   | Auftrag beschreiben (Ziel, Kriterien, Dateien, Diagramme). Wird übersprungen, wenn der Auftrag aus einer Idee stammt. | nein                                      | nein                                      |
+| Bug-Wächter            | `bug_reviewer`       | pre_task   | Bekannte Bugs prüfen → Risiken beim Auftrag. Übersprungen, wenn schon Risiken vorhanden.                              | nein                                      | nein                                      |
+| Entwickler             | `developer`          | while_task | Auftrag umsetzen. Bei Bug-Aufträgen wird die Ausgabe als Fix-Notiz am Bug gespeichert.                                | **ja**, mit Backup in `.dev-log-backups/` | npm test/run/install, git status/diff/log |
+| Tester                 | `tester`             | after_task | Tests entwickeln, Build/Tests ausführen, Fehler als Bug melden.                                                       | nein                                      | nein (Testbefehle führt der Runner aus)   |
+| Dokumentierer          | `documenter`         | after_task | Ergebnis dokumentieren → Auftragsdoku.                                                                                | nein                                      | nein                                      |
+| Handbuch-Autor         | `manual_writer`      | after_task | Technisches Handbuch pflegen.                                                                                         | nein                                      | nein                                      |
+| Benutzerhandbuch-Autor | `user_manual_writer` | after_task | Benutzerhandbuch pflegen.                                                                                             | nein                                      | nein                                      |
+| eigene                 | `custom`             | frei       | Beliebige Zusatzrolle.                                                                                                | nein                                      | nein                                      |
 
 Ohne Schreibrecht erhalten Agents nur Lese-Werkzeuge (Verzeichnis, Datei lesen, Suche) mit etwa 25 Werkzeugschritten; der Entwickler hat bis zu 80 Schritte.
 

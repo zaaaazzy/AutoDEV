@@ -6,7 +6,6 @@ import { loadProjectContext } from '../core/project-context.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { syncSprintToGit } from './git-sync.js';
-import { estimateIdeas } from '../agent/estimation.js';
 import { draftRequirements } from '../agent/requirements.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
@@ -147,7 +146,6 @@ export async function runWorkflow(
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
-  await estimateIdeas(pool, options, execute);
   await draftRequirements(pool, options, execute);
   await syncSprintToGit(pool, options.project, options.cwd, execute);
   // Orders in the active sprint run automatically, even when they are still in the backlog.
