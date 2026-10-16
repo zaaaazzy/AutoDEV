@@ -266,7 +266,7 @@ export async function runStep(
   });
   let lastLiveWrite = 0;
   const actions: string[] = [];
-  let progress: Awaited<ReturnType<typeof startProgress>> | undefined;
+  const live: { update?: (message: string) => void } = {};
   const hooks: StepHooks = {
     signal: stepAbort.signal,
     onOutput: (partial) => {
@@ -289,7 +289,7 @@ export async function runStep(
           AGENT_STEP_STATUS.running,
         ])
         .catch(() => undefined);
-      progress?.update(message);
+      live.update?.(message);
     },
     onSpawn: (pid) => {
       stepPid = pid;
@@ -298,7 +298,7 @@ export async function runStep(
         .catch(() => undefined);
     },
   };
-  progress = await startProgress(
+  const progress = await startProgress(
     pool,
     item.projectSlug,
     [
@@ -308,6 +308,7 @@ export async function runStep(
     ],
     { stepId, silent: true },
   );
+  live.update = progress.update;
   const work = invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
     exitCode: 1,
     durationMs: 0,
