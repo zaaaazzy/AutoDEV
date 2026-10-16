@@ -354,3 +354,32 @@ test('stores the number of concurrent agents within its limits', async () => {
     assert.deepEqual(stored, ['3']);
   });
 });
+
+test('sets security headers and rejects cross-origin writes', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const headers = { Authorization: basicAuth() };
+    const page = await fetch(`${baseUrl}/api/projects`, { headers });
+    assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'self'/);
+    assert.equal(page.headers.get('x-content-type-options'), 'nosniff');
+
+    const foreign = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: { ...headers, Origin: 'https://evil.example', 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    assert.equal(foreign.status, 403);
+  });
+});
+
+test('blocks a client after repeated failed logins', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const wrong = { Authorization: `Basic ${Buffer.from('dev-log-user:wrong-password').toString('base64')}` };
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: wrong })).status, 401);
+    }
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: wrong })).status, 429);
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Authorization: basicAuth() } })).status, 429);
+  });
+});
