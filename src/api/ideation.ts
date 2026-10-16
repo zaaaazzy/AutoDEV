@@ -1,5 +1,6 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
+import { EDITABLE_IDEATION_STATUSES, IDEATION_STATUS } from '../core/status.js';
 import {
   buildUpdate,
   ESTIMATE_FIELDS,
@@ -13,8 +14,7 @@ import {
   parseTitle,
 } from '../core/validation.js';
 
-// Manuell setzbar; „requested“, „drafting“ und „accepted“ ergeben sich aus dem Ablauf („Auftrag erstellen“).
-const IDEATION_STATUSES = new Set(['idea', 'considering']);
+// Only these statuses can be set manually; the workflow sets requested, drafting, and accepted.
 
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
@@ -23,7 +23,7 @@ export const IDEA_COLUMNS = `id, title, description, status, priority, created_a
 export const IDEA_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },
-  status: { column: 'status', parse: parseOption(IDEATION_STATUSES) },
+  status: { column: 'status', parse: parseOption(EDITABLE_IDEATION_STATUSES) },
   priority: { column: 'priority', parse: parseOption(PRIORITIES) },
   ...ESTIMATE_FIELDS,
 };
@@ -82,15 +82,15 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  // „Auftrag erstellen“: Der Auftragsautor formuliert den Auftrag aus. Nur aus „Idee“ oder „In Abklärung“ möglich.
+  // The author agent defines the idea; this is only possible from idea or considering.
   app.post('/api/ideation/:id/define', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
     }
     const result = await pool.query(
-      `UPDATE ideation_items SET status = 'requested', agent_note = NULL, updated_at = NOW()
-        WHERE id = $1 AND status IN ('idea', 'considering') RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', agent_note = NULL, updated_at = NOW()
+        WHERE id = $1 AND status IN ('${IDEATION_STATUS.idea}', '${IDEATION_STATUS.considering}') RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
       [request.params.id],
     );
     if (!result.rows[0]) {

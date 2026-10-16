@@ -3,15 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import {
-  createDatabasePool,
-  createTestRun,
-  createTestRunStep,
-  finishTestRun,
-  finishTestRunStep,
-  readDatabaseConfig,
-  registerProject,
-} from '../db/database.js';
+import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
+import { registerProject } from '../db/project.js';
+import { createTestRun, createTestRunStep, finishTestRun, finishTestRunStep } from '../db/test-runs.js';
 import type { Pool } from 'pg';
 import { redactOutput, runCommand } from '../core/command.js';
 import { killGroup } from '../core/shutdown.js';

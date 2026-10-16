@@ -1,5 +1,7 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
+import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
+import { relatedResourceBelongsToProject } from './resource.js';
 import { IDEA_FIELDS } from './ideation.js';
 import {
   buildUpdate,
@@ -13,8 +15,6 @@ import {
   validStatus,
   validText,
 } from '../core/validation.js';
-
-const DEVELOPMENT_STATUSES = new Set(['backlog', 'planned', 'in_progress', 'blocked', 'done']);
 
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
   title, description, status, priority, created_at AS "createdAt",
@@ -41,7 +41,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     const result = await pool.query(
       `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
                                       effort_hours, token_estimate, benefit, cost)
-       SELECT i.project_slug, i.id, i.title, i.description, 'backlog', i.priority,
+       SELECT i.project_slug, i.id, i.title, i.description, '${DEVELOPMENT_STATUS.backlog}', i.priority,
               i.effort_hours, i.token_estimate, i.benefit, i.cost
          FROM ideation_items i
         WHERE i.id = $1
@@ -53,9 +53,10 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       response.status(409).json({ message: 'Idee nicht gefunden oder bereits als Auftrag übernommen.' });
       return;
     }
-    await pool.query(`UPDATE ideation_items SET status = 'accepted', updated_at = NOW() WHERE id = $1`, [
-      request.params.id,
-    ]);
+    await pool.query(
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.accepted}', updated_at = NOW() WHERE id = $1`,
+      [request.params.id],
+    );
     response.status(201).json({ item: result.rows[0] });
   });
 
@@ -77,7 +78,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `INSERT INTO development_items (project_slug, ideation_id, test_run_id, title, description, status, priority)
-       SELECT $1, i.id, tr.id, $4, $5, COALESCE($6, 'backlog'), COALESCE($7, 'medium')
+       SELECT $1, i.id, tr.id, $4, $5, COALESCE($6, '${DEVELOPMENT_STATUS.backlog}'), COALESCE($7, 'medium')
          FROM (SELECT 1) seed
          LEFT JOIN ideation_items i ON i.id = $2 AND i.project_slug = $1
          LEFT JOIN test_runs tr ON tr.id = $3 AND tr.project_slug = $1
@@ -101,17 +102,17 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  // Blockierten Auftrag erneut versuchen: wieder einplanen (ohne Sprint im aktiven Sprint des Projekts).
+  // Retry a blocked order by planning it, using the project's active sprint when no sprint is assigned.
   app.post('/api/development/:id/retry', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
     }
     const result = await pool.query(
-      `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, retry_count = retry_count + 1, analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, retry_count = retry_count + 1, analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
               updated_at = NOW()
-        WHERE d.id = $1 AND d.status = 'blocked' RETURNING ${DEV_COLUMNS}`,
+        WHERE d.id = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}' RETURNING ${DEV_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {
@@ -121,7 +122,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  // Blockierten Auftrag vom Problemlöser analysieren lassen; die Erkenntnisse landen als Bug.
+  // Ask the troubleshooter to analyze a blocked order and record the findings as a bug.
   app.post('/api/development/:id/analyze', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
@@ -129,7 +130,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `UPDATE development_items SET analysis_status = 'requested', updated_at = NOW()
-        WHERE id = $1 AND status = 'blocked' AND COALESCE(analysis_status, 'done') NOT IN ('requested', 'running') RETURNING ${DEV_COLUMNS}`,
+        WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND COALESCE(analysis_status, 'done') NOT IN ('requested', 'running') RETURNING ${DEV_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {
@@ -151,12 +152,8 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     }
     const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
     if (typeof sprintId === 'string') {
-      const sameProject = await pool.query(
-        `SELECT 1 FROM sprints s JOIN development_items d ON d.project_slug = s.project_slug
-          WHERE s.id = $1 AND d.id = $2`,
-        [sprintId, request.params.id],
-      );
-      if (!sameProject.rows[0]) {
+      const sameProject = await relatedResourceBelongsToProject(pool, 'development_items', sprintId, request.params.id);
+      if (!sameProject) {
         response.status(400).json({ message: 'Sprint does not belong to the project of this item.' });
         return;
       }
@@ -195,7 +192,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       );
     }
     if (manualStart) {
-      // Manueller Start eines einzelnen Agents (auch bei erledigten oder blockierten Aufträgen): Der vorherige Status wird nach dem Lauf wiederhergestellt.
+      // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
       update.sql = update.sql.replace(
         ', updated_at = NOW()',
         `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,

@@ -1,5 +1,7 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
+import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
+import { relatedResourceBelongsToProject } from './resource.js';
 import {
   buildUpdate,
   isUuid,
@@ -12,7 +14,6 @@ import {
 } from '../core/validation.js';
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
-const BUG_STATUSES = new Set(['open', 'in_progress', 'fixed', 'wontfix']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
   sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt"`;
 const BUG_FIELDS = {
@@ -32,7 +33,7 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
             CASE b.severity WHEN 'critical' THEN 'high' WHEN 'high' THEN 'high' WHEN 'medium' THEN 'medium' ELSE 'low' END,
             'bug', b.id
        FROM bugs b
-      WHERE b.id = $1 AND b.sprint_id IS NOT NULL AND b.status IN ('open', 'in_progress')
+      WHERE b.id = $1 AND b.sprint_id IS NOT NULL AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO UPDATE
        SET sprint_id = EXCLUDED.sprint_id,
            status = CASE WHEN development_items.status IN ('backlog', 'done') THEN 'planned' ELSE development_items.status END,
@@ -47,7 +48,7 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
   );
   await pool.query(
     `DELETE FROM development_items d USING bugs b
-      WHERE d.bug_id = b.id AND b.id = $1 AND b.status IN ('fixed', 'wontfix') AND d.status IN ('planned', 'backlog')`,
+      WHERE d.bug_id = b.id AND b.id = $1 AND b.status IN ('${BUG_STATUS.fixed}', '${BUG_STATUS.wontfix}') AND d.status IN ('planned', 'backlog')`,
     [bugId],
   );
 }
@@ -62,24 +63,26 @@ export async function reportAgentBug(
     `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id)
      SELECT $1, $2, $3, 'high', 'agent', NULL
       WHERE NOT EXISTS (
-        SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('open', 'in_progress')
+        SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
       ) RETURNING id`,
     [bug.projectSlug, title, bug.description.slice(0, 10_000)],
   );
   if (created.rows[0]) return created.rows[0].id;
-  return (
+  const existing = (
     await pool.query<{ id: string }>(
-      `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('open', 'in_progress') ORDER BY created_at LIMIT 1`,
+      `SELECT id FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') ORDER BY created_at LIMIT 1`,
       [bug.projectSlug, title],
     )
-  ).rows[0]!.id;
+  ).rows[0];
+  if (!existing) throw new Error('Bug report could not be found after insertion.');
+  return existing.id;
 }
 
 export interface KnownBug {
   title: string;
   description: string;
   severity: string;
-  status: string;
+  status: BugStatus;
   fixNotes: string;
 }
 
@@ -88,7 +91,7 @@ export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40)
     `SELECT title, description, severity, status, fix_notes AS "fixNotes"
        FROM bugs
       WHERE project_slug = $1 AND status <> 'wontfix'
-      ORDER BY CASE status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 0 ELSE 1 END, updated_at DESC
+      ORDER BY CASE status WHEN '${BUG_STATUS.open}' THEN 0 WHEN '${BUG_STATUS.inProgress}' THEN 0 ELSE 1 END, updated_at DESC
       LIMIT $2`,
     [projectSlug, limit],
   );
@@ -146,11 +149,8 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     }
     const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
     if (typeof sprintId === 'string') {
-      const sameProject = await pool.query(
-        `SELECT 1 FROM sprints s JOIN bugs b ON b.project_slug = s.project_slug WHERE s.id = $1 AND b.id = $2`,
-        [sprintId, request.params.id],
-      );
-      if (!sameProject.rows[0]) {
+      const sameProject = await relatedResourceBelongsToProject(pool, 'bugs', sprintId, request.params.id);
+      if (!sameProject) {
         response.status(400).json({ message: 'Sprint gehört zu einem anderen Projekt.' });
         return;
       }
@@ -160,7 +160,7 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
           ...fields,
           {
             column: 'fixed_at',
-            value: fields.find((field) => field.column === 'status')?.value === 'fixed' ? new Date() : null,
+            value: fields.find((field) => field.column === 'status')?.value === BUG_STATUS.fixed ? new Date() : null,
           },
         ]
       : fields;
