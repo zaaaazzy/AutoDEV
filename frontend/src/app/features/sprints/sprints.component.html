@@ -1,5 +1,5 @@
 @if (store.ready()) {
-  <section class="panel">
+  <section class="sprints">
     @if (store.showCreate()) {
       <form class="form-grid create-form" (ngSubmit)="createSprint()">
         <label>Name<input name="name" [(ngModel)]="sprintForm.name" maxlength="120" required /> </label>

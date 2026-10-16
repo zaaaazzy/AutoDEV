@@ -185,6 +185,9 @@ details > summary { color: var(--green); font-size: 12px; font-weight: 650; }
 .run-step pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
 .notice { margin: 14px 0; padding: 12px 14px; border: 1px solid #e5c8b9; border-radius: 8px; background: #fff8f4; color: #854938; font-size: 12px; }
 .notice p { margin: 5px 0 0; }
+.notice[role='status'] { animation: notice-fade 5s ease-in forwards; }
+@keyframes notice-fade { 0%, 60% { opacity: 1; } 100% { opacity: 0; } }
+.sprints { margin-bottom: 18px; }
 .notice.error { border-color: #f0c7bb; }
 .loading, .empty-state { padding: 20px 12px; color: var(--muted); text-align: center; }
 .empty-state h2 { color: var(--ink); }

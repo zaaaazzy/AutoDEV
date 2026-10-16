@@ -16,6 +16,8 @@ const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
 
 /** Gemeinsamer Zustand: Projekte, geladene Projektdaten, Navigation, Hintergrund-Aktualisierung. */
+const NOTICE_MS = 5000;
+
 @Injectable({ providedIn: 'root' })
 export class ProjectStore {
   private readonly api = inject(ApiService);
@@ -134,6 +136,9 @@ export class ProjectStore {
       await action();
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject());
       this.notice.set(success);
+      setTimeout(() => {
+        if (this.notice() === success) this.notice.set('');
+      }, NOTICE_MS);
     } catch (error) {
       this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
     } finally {
