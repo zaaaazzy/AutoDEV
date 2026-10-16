@@ -25,6 +25,22 @@ async function connect(watch: boolean): Promise<Pool> {
   }
 }
 
+const loggedErrors = new Map<string, string>();
+
+/** pg liefert bei ausgefallener Datenbank AggregateErrors ohne Text; der Code (z. B. ECONNREFUSED) ist dann die einzige Information. */
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const code = (error as { code?: string }).code;
+  return error.message || code || error.name;
+}
+
+/** Gleiche Fehlermeldungen pro Schlüssel nur einmal ausgeben, bis sie sich ändern oder der Fehler verschwindet. */
+function logOnce(key: string, message: string): void {
+  if (loggedErrors.get(key) === message) return;
+  loggedErrors.set(key, message);
+  console.error(message);
+}
+
 async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
   const results = await runWorkflow(pool, options);
   for (const { itemId, result } of results) {
@@ -124,13 +140,15 @@ async function main(): Promise<void> {
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
-          .catch((error: unknown) => console.error(`[${slug}] Chat fehlgeschlagen:`, error instanceof Error ? error.message : error))
+          .then(() => loggedErrors.delete(`chat:${slug}`))
+          .catch((error: unknown) => logOnce(`chat:${slug}`, `[${slug}] Chat fehlgeschlagen: ${describeError(error)}`))
           .finally(() => chatActive.delete(slug));
         // Lange Problemanalysen blockieren so keine neuen Chat-Nachrichten.
         if (analysisActive.has(slug)) continue;
         analysisActive.add(slug);
         void analyzeBlocked(pool, target.options)
-          .catch((error: unknown) => console.error(`[${slug}] Analyse fehlgeschlagen:`, error instanceof Error ? error.message : error))
+          .then(() => loggedErrors.delete(`analysis:${slug}`))
+          .catch((error: unknown) => logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`))
           .finally(() => analysisActive.delete(slug));
       }
     }, 1500);
