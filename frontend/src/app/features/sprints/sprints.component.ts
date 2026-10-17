@@ -7,7 +7,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { buildWorkflow, type WorkflowRow } from '../../shared/workflow.js';
-import { StepResultComponent } from '../../shared/step-result.component.js';
+import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
 import {
@@ -33,7 +33,7 @@ import {
     NavIconComponent,
     StatusClassPipe,
     StatusLabelPipe,
-    StepResultComponent,
+    AgentWorkflowComponent,
     TokensPipe,
     UsdPipe,
   ],

@@ -19,6 +19,8 @@
       } @else {
         <p class="muted">Keine Beschreibung.</p>
       }
+      <h4 class="workflow-title">Agents</h4>
+      <app-agent-workflow [order]="item" />
     }
     @if (item.status === 'blocked') {
       <div class="blocked-box">

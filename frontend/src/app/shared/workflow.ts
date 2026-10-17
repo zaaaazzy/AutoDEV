@@ -4,6 +4,7 @@ import type { ProjectStore } from '../core/project-store.js';
 export interface WorkflowRow {
   key: string;
   name: string;
+  role?: string;
   step: RunStep | undefined;
 }
 
@@ -26,7 +27,12 @@ export function buildWorkflow(data: BoardData, item: DevelopmentItem): WorkflowR
     )
     .sort((left, right) => phases.indexOf(left.phase) - phases.indexOf(right.phase) || left.position - right.position);
   const known = new Set(agents.map((agent) => agent.id));
-  const rows: WorkflowRow[] = agents.map((agent) => ({ key: agent.id, name: agent.name, step: latest(agent) }));
+  const rows: WorkflowRow[] = agents.map((agent) => ({
+    key: agent.id,
+    name: agent.name,
+    role: agent.role,
+    step: latest(agent),
+  }));
   for (const step of steps) {
     if (step.agentId && known.has(step.agentId)) continue;
     rows.push({ key: `${step.runId}-${step.position}`, name: step.agentName || 'Agent', step });

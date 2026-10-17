@@ -2449,3 +2449,94 @@ h3 .link-button {
 .tool-result { color: var(--muted); font-size: 11.5px; }
 
 .system-model { display: grid; gap: 4px; max-width: 420px; margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+
+/* Listen: Titel mit Kurzfassung als Hover-Hinweis, Aufklapp-Pfeil ganz rechts */
+.title-with-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.summary-hint {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin-top: 2px;
+  place-items: center;
+  border: 1px solid #c9d1c6;
+  border-radius: 50%;
+  color: #6b756f;
+  font-size: 11px;
+  font-style: italic;
+  font-weight: 700;
+  cursor: help;
+}
+.summary-hint:hover::after,
+.summary-hint:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 50%;
+  width: max-content;
+  max-width: min(360px, 80vw);
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #26312a;
+  color: #fff;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 18%);
+  transform: translateX(-50%);
+}
+.idea-table .expand-cell {
+  width: 1%;
+  text-align: right;
+}
+.idea-table tr.row-open > td {
+  border-bottom: 0;
+}
+.idea-table .closed-detail > td {
+  padding-top: 0;
+}
+.progress-info .detail-text.markdown {
+  white-space: normal;
+}
+
+/* Agent-Workflow: jeder Agent klappt Ergebnis, Verlauf und Ausgabe auf */
+.agent-workflow {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.agent-workflow > li > details {
+  border: 1px solid #dfe3da;
+  border-radius: 9px;
+  background: #fff;
+}
+.agent-workflow > li > details > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.agent-workflow > li > details > summary .agent-name {
+  font-weight: 650;
+}
+.agent-workflow > li > details > summary .status {
+  margin-left: auto;
+}
+.agent-workflow > li > details[open] {
+  padding-bottom: 8px;
+}
+.agent-workflow > li > details > :not(summary) {
+  margin-inline: 12px;
+}

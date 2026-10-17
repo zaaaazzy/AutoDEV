@@ -1,0 +1,34 @@
+<ol class="agent-workflow">
+  @for (row of rows(); track row.key) {
+    @let attached = attachment(row);
+    <li>
+      <details>
+        <summary>
+          <span class="agent-name">{{ row.name }}</span>
+          @if (attached) {
+            <span class="tag">{{ attached.label }}</span>
+          }
+          <span class="status" [ngClass]="row.step?.status ?? 'waiting' | statusClass">{{
+            row.step?.status ?? 'waiting' | statusLabel
+          }}</span>
+        </summary>
+        @if (row.step?.status === 'running' && row.step?.progress) {
+          <p class="live-progress"><span class="live-dot"></span>{{ row.step?.progress }}</p>
+        }
+        @if (attached) {
+          <details class="run-step" open>
+            <summary>{{ attached.label }}</summary>
+            <article class="step-output" [innerHTML]="attached.content | markdown"></article>
+          </details>
+        }
+        @if (row.step; as step) {
+          <app-step-result [events]="step.events" [output]="step.output" [running]="step.status === 'running'" />
+        } @else {
+          <p class="muted">Noch nicht gelaufen.</p>
+        }
+      </details>
+    </li>
+  } @empty {
+    <li class="muted">Keine Agents im Workflow.</li>
+  }
+</ol>

@@ -12,6 +12,8 @@ import { HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLab
 import { compareRanks, includesText, toggleListValue, toggleSort, type SortState } from '../../shared/table.js';
 import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
+import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
+import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
 const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
@@ -30,6 +32,8 @@ type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
     ColumnHeaderComponent,
     GitTreeComponent,
     IdeaDetailComponent,
+    AgentWorkflowComponent,
+    MarkdownPipe,
     HoursPipe,
     PriorityLabelPipe,
     ShortTextPipe,
@@ -46,7 +50,6 @@ export class IdeationComponent {
   protected readonly busy = this.store.busy;
   protected readonly ideaColumns: { key: IdeaKey; label: string }[] = [
     { key: 'title', label: 'Titel' },
-    { key: 'description', label: 'Kurzfassung' },
     { key: 'status', label: 'Status' },
     { key: 'priority', label: 'Priorität' },
     { key: 'effortHours', label: 'Aufwand' },

@@ -1,3 +1,4 @@
+import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { DevelopmentItem } from '../../core/models.js';
@@ -13,7 +14,7 @@ import { OrderService } from './order.service.js';
 @Component({
   selector: 'app-order-detail',
   standalone: true,
-  imports: [FormsModule, GalleryComponent, MarkdownPipe, StatusLabelPipe],
+  imports: [AgentWorkflowComponent, FormsModule, GalleryComponent, MarkdownPipe, StatusLabelPipe],
   templateUrl: './order-detail.component.html',
   host: { style: 'display: contents' },
 })

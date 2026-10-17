@@ -43,7 +43,6 @@ export class DevelopmentComponent {
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
   protected readonly devColumns: { key: DevKey; label: string }[] = [
     { key: 'title', label: 'Titel' },
-    { key: 'description', label: 'Kurzfassung' },
     { key: 'status', label: 'Status' },
     { key: 'priority', label: 'Priorität' },
     { key: 'sprint', label: 'Sprint' },

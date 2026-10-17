@@ -158,41 +158,7 @@
                         <strong>{{ item.status | statusLabel }}</strong> · {{ workflowSummary(item, rows) }}
                       </p>
                       <h5 class="workflow-title">Workflow</h5>
-                      <ol class="agent-steps">
-                        @for (row of rows; track row.key) {
-                          <li>
-                            <button
-                              type="button"
-                              class="sprint-task-head"
-                              [disabled]="!row.step"
-                              (click)="toggleSprintItem(item.id + row.key)"
-                            >
-                              <span
-                                class="task-chevron"
-                                [class.open]="openSprintItems().has(item.id + row.key)"
-                                aria-hidden="true"
-                                >▾</span
-                              >
-                              {{ row.name }}
-                              <span class="status" [ngClass]="row.step?.status ?? 'waiting' | statusClass">{{
-                                row.step?.status ?? 'waiting' | statusLabel
-                              }}</span>
-                            </button>
-                            @if (row.step; as step) {
-                              @if (openSprintItems().has(item.id + row.key) || step.status === 'running') {
-                                <app-step-result
-                                  [events]="step.events"
-                                  [output]="step.output"
-                                  [progress]="step.progress"
-                                  [running]="step.status === 'running'"
-                                />
-                              }
-                            }
-                          </li>
-                        } @empty {
-                          <li class="muted">Keine Agents im Workflow.</li>
-                        }
-                      </ol>
+                      <app-agent-workflow [order]="item" />
                     </div>
                   }
                 </div>

@@ -36,7 +36,6 @@
         <table class="idea-table">
           <thead>
             <tr>
-              <th></th>
               @for (col of devColumns; track col.key) {
                 <th
                   appColumnHeader
@@ -52,12 +51,39 @@
                   (valueToggle)="toggleDevValue(col.key, $event.option, $event.checked)"
                 ></th>
               }
+              <th></th>
             </tr>
           </thead>
           <tbody>
             @for (item of openOrders(); track item.id) {
-              <tr>
+              <tr [class.row-open]="openOrder() === item.id">
+                <td class="title-cell">
+                  <div class="title-with-hint">
+                    <button
+                      type="button"
+                      class="link-button clamp"
+                      (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
+                    >
+                      {{ item.title }}
+                    </button>
+                    @if (item.description) {
+                      <span
+                        class="summary-hint"
+                        tabindex="0"
+                        [attr.data-tip]="item.description | shortText: 400"
+                        [attr.aria-label]="'Kurzfassung: ' + (item.description | shortText: 400)"
+                        >i</span
+                      >
+                    }
+                  </div>
+                </td>
                 <td>
+                  <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+                </td>
+                <td>{{ item.priority | priorityLabel }}</td>
+                <td>{{ devCell(item, 'sprint') }}</td>
+                <td>{{ item.effortHours | hours }}</td>
+                <td class="expand-cell">
                   <button
                     type="button"
                     class="button secondary icon-button"
@@ -68,28 +94,9 @@
                     {{ openOrder() === item.id ? '▾' : '▸' }}
                   </button>
                 </td>
-                <td class="title-cell">
-                  <button
-                    type="button"
-                    class="link-button clamp"
-                    (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
-                  >
-                    {{ item.title }}
-                  </button>
-                </td>
-                <td class="summary-cell">
-                  <div class="clamp">{{ item.description | shortText }}</div>
-                </td>
-                <td>
-                  <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
-                </td>
-                <td>{{ item.priority | priorityLabel }}</td>
-                <td>{{ devCell(item, 'sprint') }}</td>
-                <td>{{ item.effortHours | hours }}</td>
               </tr>
               @if (openOrder() === item.id) {
                 <tr class="closed-detail">
-                  <td></td>
                   <td colspan="6">
                     <app-order-detail
                       [order]="item"
@@ -103,7 +110,7 @@
               }
             } @empty {
               <tr>
-                <td colspan="7" class="empty-state">Keine offenen Aufträge für diese Filter.</td>
+                <td colspan="6" class="empty-state">Keine offenen Aufträge für diese Filter.</td>
               </tr>
             }
           </tbody>
@@ -131,16 +138,36 @@
           <table class="idea-table">
             <thead>
               <tr>
-                <th></th>
                 <th>Titel</th>
-                <th>Kurzfassung</th>
                 <th>Erledigt</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               @for (item of doneOrders(); track item.id) {
-                <tr>
-                  <td>
+                <tr [class.row-open]="openOrder() === item.id">
+                  <td class="title-cell">
+                    <div class="title-with-hint">
+                      <button
+                        type="button"
+                        class="link-button clamp"
+                        (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
+                      >
+                        {{ item.title }}
+                      </button>
+                      @if (item.description) {
+                        <span
+                          class="summary-hint"
+                          tabindex="0"
+                          [attr.data-tip]="item.description | shortText: 400"
+                          [attr.aria-label]="'Kurzfassung: ' + (item.description | shortText: 400)"
+                          >i</span
+                        >
+                      }
+                    </div>
+                  </td>
+                  <td>{{ item.completedAt ? item.completedAt.slice(0, 10).split('-').reverse().join('.') : '–' }}</td>
+                  <td class="expand-cell">
                     <button
                       type="button"
                       class="button secondary icon-button"
@@ -151,23 +178,9 @@
                       {{ openOrder() === item.id ? '▾' : '▸' }}
                     </button>
                   </td>
-                  <td class="title-cell">
-                    <button
-                      type="button"
-                      class="link-button clamp"
-                      (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
-                    >
-                      {{ item.title }}
-                    </button>
-                  </td>
-                  <td class="summary-cell">
-                    <div class="clamp">{{ item.description | shortText }}</div>
-                  </td>
-                  <td>{{ item.completedAt ? item.completedAt.slice(0, 10).split('-').reverse().join('.') : '–' }}</td>
                 </tr>
                 @if (openOrder() === item.id) {
                   <tr class="closed-detail">
-                    <td></td>
                     <td colspan="3">
                       @let sprint = store.sprintOf(item);
                       @let idea = ideaOf(item);

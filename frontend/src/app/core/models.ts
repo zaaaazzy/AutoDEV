@@ -107,6 +107,7 @@ export interface DocumentEntry {
   title: string;
   content: string;
   sprintId: string | null;
+  developmentId?: string | null;
   updatedAt: string;
 }
 
