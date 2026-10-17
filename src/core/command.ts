@@ -19,6 +19,8 @@ export type CommandExecutor = (
     env?: NodeJS.ProcessEnv;
     onSpawn?: (pid: number) => void;
     onOutput?: (output: string) => void;
+    /** Every raw chunk, also beyond the captured-output limit (for parsing streamed agent events). */
+    onChunk?: (chunk: string) => void;
   },
 ) => Promise<CommandResult>;
 
@@ -50,6 +52,7 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     if (child.pid) options.onSpawn?.(child.pid);
     let output = '';
     const appendOutput = (chunk: Buffer): void => {
+      options.onChunk?.(chunk.toString('utf8'));
       if (output.length < MAX_CAPTURED_OUTPUT + 1_000) {
         output += chunk.toString('utf8').slice(0, MAX_CAPTURED_OUTPUT + 1_000 - output.length);
         options.onOutput?.(output);

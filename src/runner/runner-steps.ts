@@ -8,6 +8,7 @@ import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
 import { commitTaskToGit } from './git-sync.js';
+import { executeAgentCommand } from '../agent/claude-stream.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
@@ -186,13 +187,14 @@ async function invokeAgent(
   const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
-    const written = await execute(
+    const written = await executeAgentCommand(
+      execute,
       buildInvocation(
         fallbackCommand,
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
       options.cwd,
-      { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput: hooks.onOutput },
+      { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput: hooks.onOutput, onAction: hooks.onAction },
     ).catch((error: unknown) => ({
       exitCode: 1,
       durationMs: 0,
@@ -206,11 +208,12 @@ async function invokeAgent(
     };
   }
   if (!command) return builtinRun();
-  return execute(buildInvocation(command, prompt), options.cwd, {
+  return executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
     timeoutMs: options.timeoutMs,
     env: agentEnvironment(),
     onOutput: hooks.onOutput,
     onSpawn: hooks.onSpawn,
+    onAction: hooks.onAction,
   });
 }
 

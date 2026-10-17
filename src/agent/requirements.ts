@@ -7,6 +7,7 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { withAssistantPermissions } from './tool-permissions.js';
+import { executeAgentCommand } from './claude-stream.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -79,9 +80,10 @@ export async function runAuthorAgent(
   const command = configured && withAssistantPermissions(configured, role);
   try {
     const result = command
-      ? await execute(buildInvocation(command, prompt), options.cwd, {
+      ? await executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
           timeoutMs: options.timeoutMs,
           env: agentEnvironment(),
+          onAction: onProgress,
         })
       : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress });
     return { exitCode: result.exitCode, output: redactOutput(result.output, process.env).trim() };
