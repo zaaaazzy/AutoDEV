@@ -161,7 +161,7 @@
                 <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p>
               }
               @if (step.output) {
-                <article class="markdown task-body" [innerHTML]="step.output | markdown"></article>
+                <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
               } @else {
                 <p class="muted">Keine Ausgabe.</p>
               }

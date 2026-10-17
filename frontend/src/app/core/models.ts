@@ -10,6 +10,8 @@ export interface Project {
   repository: string;
   gitRemote?: string | null;
   testCommands?: string[][];
+  deployCommands?: string[][] | null;
+  deployStatus?: string | null;
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;

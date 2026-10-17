@@ -42,6 +42,21 @@
         ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label
       >
       <label class="wide"
+        >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
+          name="deployCommands"
+          [(ngModel)]="settings.deployCommands"
+          rows="2"
+          maxlength="2000"
+          placeholder="docker compose up -d --build"
+        ></textarea>
+      </label>
+      <p class="muted wide">
+        Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
+        @if (store.currentProject()?.deployStatus) {
+          Letzter Lauf: {{ store.currentProject()?.deployStatus }}
+        }
+      </p>
+      <label class="wide"
         >GitHub-Repository<input
           name="gitRemote"
           [(ngModel)]="settings.gitRemote"

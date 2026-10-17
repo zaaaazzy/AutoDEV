@@ -8,7 +8,7 @@ import { isRecord, PROJECT_SLUG, parseProjectSlug, projectFolderError, validText
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix", created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", created_at AS "createdAt"
          FROM projects
         ORDER BY name`,
     );
@@ -70,6 +70,20 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(commands ? JSON.stringify(commands) : null);
       sets.push(`test_commands = $${values.length}::jsonb`);
     }
+    if (body.deployCommands !== undefined) {
+      const lines =
+        typeof body.deployCommands === 'string'
+          ? body.deployCommands
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean)
+          : null;
+      if (!lines || lines.length > 10 || lines.some((line) => line.length > 500)) {
+        return fail('Deploy-Befehle: höchstens 10 Zeilen, ein Befehl pro Zeile.');
+      }
+      values.push(lines.length ? JSON.stringify(lines.map((line) => line.split(/\s+/))) : null);
+      sets.push(`deploy_commands = $${values.length}::jsonb`);
+    }
     for (const key of ['description', 'guidelines'] as const) {
       if (body[key] === undefined) continue;
       if (typeof body[key] !== 'string' || body[key].length > 10_000) {
@@ -88,7 +102,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", description, guidelines, auto_bugfix AS "autoBugfix"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix"`,
       values,
     );
     if (!result.rows[0]) {

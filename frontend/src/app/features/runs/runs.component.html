@@ -22,7 +22,7 @@
               <span class="status" [ngClass]="step.status | statusClass">{{ step.status | statusLabel }}</span>
               {{ step.command }} · {{ step.durationMs | duration }}
             </summary>
-            <pre>{{ step.output || 'Keine Konsolenausgabe.' }}</pre>
+            <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
           </details>
         }
       </article>

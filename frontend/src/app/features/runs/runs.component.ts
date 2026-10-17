@@ -1,3 +1,4 @@
+import { AgentOutputPipe } from '../../shared/agent-output.pipe.js';
 import { NgClass } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { ProjectStore } from '../../core/project-store.js';
@@ -6,7 +7,7 @@ import { DateTimePipe, DurationPipe, StatusClassPipe, StatusLabelPipe } from '..
 @Component({
   selector: 'app-runs',
   standalone: true,
-  imports: [NgClass, DateTimePipe, DurationPipe, StatusClassPipe, StatusLabelPipe],
+  imports: [NgClass, AgentOutputPipe, DateTimePipe, DurationPipe, StatusClassPipe, StatusLabelPipe],
   templateUrl: './runs.component.html',
   host: { style: 'display: contents' },
 })

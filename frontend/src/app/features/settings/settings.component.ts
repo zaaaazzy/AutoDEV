@@ -18,6 +18,7 @@ export class SettingsComponent {
   protected settings = {
     repository: '',
     testCommands: '',
+    deployCommands: '',
     gitRemote: '',
     description: '',
     guidelines: '',
@@ -43,6 +44,7 @@ export class SettingsComponent {
           repository: this.settings.repository.trim(),
           gitRemote: this.settings.gitRemote.trim(),
           testCommands: this.settings.testCommands,
+          deployCommands: this.settings.deployCommands,
           description: this.settings.description,
           guidelines: this.settings.guidelines,
           autoBugfix: this.settings.autoBugfix,
@@ -83,6 +85,7 @@ export class SettingsComponent {
       autoBugfix: project?.autoBugfix ?? true,
       databaseUrl: '',
       clearDatabase: false,
+      deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),
       testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
     };
   }

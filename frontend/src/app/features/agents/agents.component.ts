@@ -7,7 +7,7 @@ import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ModelIconComponent } from '../../shared/model-icon.component.js';
-import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { AgentOutputPipe } from '../../shared/agent-output.pipe.js';
 import { DateTimePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import {
   AGENT_PHASES,
@@ -28,7 +28,7 @@ import { AgentDetailComponent } from './agent-detail.component.js';
     FormsModule,
     AgentDetailComponent,
     ModelIconComponent,
-    MarkdownPipe,
+    AgentOutputPipe,
     DateTimePipe,
     StatusClassPipe,
     StatusLabelPipe,

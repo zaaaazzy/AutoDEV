@@ -6,6 +6,7 @@ import { loadProjectContext } from '../core/project-context.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { syncSprintToGit } from './git-sync.js';
+import { deployProject } from './deploy.js';
 import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
@@ -182,6 +183,11 @@ export async function runWorkflow(
     )),
   );
   await syncRepoDocs(pool, options.project, options.cwd);
+  if (results.some(({ result }) => result === 'passed')) {
+    await deployProject(pool, options.project, options.cwd, execute).catch((error) =>
+      console.error('Deploy fehlgeschlagen:', error),
+    );
+  }
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,
     [options.project],

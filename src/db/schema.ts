@@ -8,6 +8,8 @@ export const SCHEMA = `
     git_remote TEXT,
     database_url TEXT,
     test_commands JSONB,
+    deploy_commands JSONB,
+    deploy_status TEXT,
     auto_bugfix BOOLEAN NOT NULL DEFAULT TRUE,
     agents_seeded BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
