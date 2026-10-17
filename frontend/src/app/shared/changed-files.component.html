@@ -1,0 +1,17 @@
+@if (files().length) {
+  <ul class="changed-files">
+    @for (file of files(); track file.path) {
+      <li>
+        @if (file.url) {
+          <a [href]="file.url" target="_blank" rel="noopener"
+            ><code>{{ file.path }}</code></a
+          >
+        } @else {
+          <code>{{ file.path }}</code>
+        }
+      </li>
+    }
+  </ul>
+} @else {
+  <p class="muted">Keine geänderten Dateien aufgezeichnet.</p>
+}

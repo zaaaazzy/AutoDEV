@@ -2540,3 +2540,43 @@ h3 .link-button {
 .agent-workflow > li > details > :not(summary) {
   margin-inline: 12px;
 }
+
+/* Aufgeklappte Idee: Kurzfassung unter dem Titel, Auftrag über die volle Breite */
+.idea-summary {
+  margin: 0 0 12px;
+  color: #3f4a43;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.idea-summary > :first-child {
+  margin-top: 0;
+}
+.idea-summary > :last-child {
+  margin-bottom: 0;
+}
+.closed-info .span-all {
+  grid-column: 1 / -1;
+}
+.info-block .sub-heading {
+  margin-top: 12px;
+}
+.changed-files {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.changed-files code {
+  overflow-wrap: anywhere;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f1f3ef;
+  font-size: 12px;
+}
+.changed-files a {
+  text-decoration: none;
+}
+.changed-files a:hover code {
+  text-decoration: underline;
+}

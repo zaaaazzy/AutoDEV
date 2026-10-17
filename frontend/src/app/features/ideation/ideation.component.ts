@@ -13,6 +13,7 @@ import { compareRanks, includesText, toggleListValue, toggleSort, type SortState
 import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
+import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
@@ -33,6 +34,7 @@ type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
     GitTreeComponent,
     IdeaDetailComponent,
     AgentWorkflowComponent,
+    ChangedFilesComponent,
     MarkdownPipe,
     HoursPipe,
     PriorityLabelPipe,
