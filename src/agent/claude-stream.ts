@@ -65,7 +65,7 @@ export function describeToolUse(block: ContentBlock, cwd: string): string {
 export interface StreamParser {
   /** Feeds raw stdout; complete lines are parsed, the rest waits for the next chunk. */
   push(chunk: string): void;
-  /** Readable log of all actions so far, used as live output while the agent runs. */
+  /** The agent's Markdown text so far, used as live output while the agent runs. */
   transcript(): string;
   /** Final answer and token usage, or null when no result event arrived (e.g. the CLI failed to start). */
   result(): { text: string; isError: boolean; tokens: number } | null;
@@ -73,25 +73,27 @@ export interface StreamParser {
 
 export function createStreamParser(cwd: string, onAction: (message: string) => void): StreamParser {
   let buffer = '';
-  const lines: string[] = [];
+  // Live output reads like documentation: only the agent's own Markdown text; tool calls go to the history.
+  const paragraphs: string[] = [];
   let final: { text: string; isError: boolean; tokens: number } | null = null;
   const action = (message: string): void => {
-    if (!message) return;
-    lines.push(message);
-    onAction(message);
+    if (message) onAction(message);
   };
   const handle = (line: string): void => {
     let event: StreamEvent;
     try {
       event = JSON.parse(line) as StreamEvent;
     } catch {
-      if (line.trim()) lines.push(line.trim());
+      if (line.trim()) paragraphs.push(line.trim());
       return;
     }
     if (event.type === 'assistant') {
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use') action(describeToolUse(block, cwd));
-        else if (block.type === 'text' && block.text?.trim()) action(shorten(block.text));
+        else if (block.type === 'text' && block.text?.trim()) {
+          paragraphs.push(block.text.trim());
+          action(shorten(block.text));
+        }
       }
     } else if (event.type === 'result') {
       final = {
@@ -108,7 +110,7 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
       buffer = parts.pop() ?? '';
       for (const line of parts) handle(line);
     },
-    transcript: () => lines.join('\n'),
+    transcript: () => paragraphs.join('\n\n'),
     result() {
       if (buffer.trim()) {
         handle(buffer);
@@ -141,7 +143,8 @@ export async function executeAgentCommand(
     },
   });
   const final = parser.result();
-  if (!final) return result;
+  // Without a result event (abort, crash) keep the readable text instead of raw JSON lines.
+  if (!final) return { ...result, output: parser.transcript() || result.output };
   return {
     ...result,
     exitCode: final.isError && result.exitCode === 0 ? 1 : result.exitCode,

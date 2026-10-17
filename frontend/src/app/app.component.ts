@@ -71,6 +71,16 @@ export class AppComponent {
     if (this.section() === 'agents') return this.store.selectedAgent() ? '' : 'Neuer Agent';
     return CREATE_LABELS[this.section()] ?? '';
   });
+  /** Laufender Sprint mit erledigten/geplanten Aufgaben für die Kopfzeile. */
+  protected readonly activeSprint = computed(() => {
+    const data = this.store.data();
+    const sprint = data.sprints.find((candidate) => candidate.status === 'active');
+    if (!sprint) return null;
+    const items = data.development.filter((item) => item.sprintId === sprint.id);
+    const done = items.filter((item) => item.status === 'done').length;
+    const running = items.filter((item) => item.status === 'in_progress').length;
+    return { name: sprint.name, done, total: items.length, running };
+  });
   protected readonly workerText = computed(() => {
     if (this.store.workerFailure()) return 'Worker-Status nicht abrufbar';
     const worker = this.worker();

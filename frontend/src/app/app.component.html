@@ -63,6 +63,23 @@
           <app-agent-list />
         </div>
       </div>
+      @if (activeSprint(); as sprint) {
+        <a
+          class="sprint-status"
+          href="#sprints"
+          (click)="store.navigate('sprints')"
+          [title]="sprint.running ? sprint.running + ' Aufgabe(n) in Arbeit' : 'Zum Sprint'"
+        >
+          <span class="live-dot" aria-hidden="true"></span>
+          <span class="sprint-name">{{ sprint.name }}</span>
+          <strong>{{ sprint.done }}/{{ sprint.total }}</strong>
+          <span class="sprint-bar" aria-hidden="true"
+            ><span [style.width.%]="sprint.total ? (sprint.done / sprint.total) * 100 : 0"></span
+          ></span>
+        </a>
+      } @else {
+        <span class="sprint-status idle">Kein Sprint aktiv</span>
+      }
       <label class="project-picker"
         >Projekt
         <select [ngModel]="activeProject()" (ngModelChange)="store.loadProject($event)" aria-label="Projekt auswählen">

@@ -1,14 +1,25 @@
 @if (progress()) {
   <p class="live-progress"><span class="live-dot"></span>{{ progress() }}</p>
 }
-<details class="run-step" [open]="running() || eventsOpen()">
-  <summary>Verlauf</summary>
+<details class="run-step" [open]="eventsOpen()">
+  <summary>
+    Verlauf
+    @if (events()?.length) {
+      <span class="muted">({{ events()!.length }})</span>
+    }
+  </summary>
   @if (events()?.length) {
     <ol class="timeline">
       @for (event of events(); track $index) {
-        <li>
+        @let view = describe(event.text);
+        <li [class]="'event-' + view.kind">
           <time>{{ event.at | date: 'HH:mm:ss' }}</time>
-          <span>{{ event.text }}</span>
+          @if (view.label) {
+            <span class="event-kind">{{ view.label }}</span>
+            <code class="event-target" [title]="view.target">{{ view.target }}</code>
+          } @else {
+            <span class="event-text">{{ view.text }}</span>
+          }
         </li>
       }
     </ol>
@@ -23,6 +34,8 @@
   @if (output()) {
     <article class="step-output" [innerHTML]="output() | agentOutput"></article>
   } @else {
-    <p class="muted">{{ running() ? 'Ausgabe erscheint, sobald der Agent fertig ist.' : 'Keine Ausgabe.' }}</p>
+    <p class="muted">
+      {{ running() ? 'Der Agent hat noch nichts berichtet – Details im Verlauf.' : 'Keine Ausgabe.' }}
+    </p>
   }
 </details>

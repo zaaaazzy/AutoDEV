@@ -47,7 +47,10 @@ test('executeAgentCommand streams actions for claude and returns the plain answe
   const actions: string[] = [];
   const execute: CommandExecutor = async (command, _cwd, options) => {
     calls.push(command);
-    const raw = toolUse('Read', { file_path: '/repo/README.md' }) + RESULT;
+    const raw =
+      toolUse('Read', { file_path: '/repo/README.md' }) +
+      line({ type: 'assistant', message: { content: [{ type: 'text', text: '## Plan\nErst lesen.' }] } }) +
+      RESULT;
     options?.onChunk?.(raw);
     return { exitCode: 0, durationMs: 1, output: raw };
   };
@@ -56,12 +59,26 @@ test('executeAgentCommand streams actions for claude and returns the plain answe
     onAction: (message) => actions.push(message),
   });
   assert.equal(calls[0]?.[1], '--output-format');
-  assert.deepEqual(actions, ['Liest README.md']);
-  assert.equal(live.at(-1), 'Liest README.md');
+  assert.deepEqual(actions, ['Liest README.md', '## Plan Erst lesen.']);
+  assert.equal(live.at(-1), '## Plan\nErst lesen.');
   assert.equal(result.output, 'Fertig umgesetzt.');
   assert.equal(result.tokens, 15);
 
   const plain = await executeAgentCommand(execute, ['copilot', '-p', 'Hi'], '/repo', {});
   assert.deepEqual(calls[1], ['copilot', '-p', 'Hi']);
   assert.notEqual(plain.output, 'Fertig umgesetzt.');
+});
+
+test('an aborted claude run keeps readable text instead of raw JSON', async () => {
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    const raw =
+      line({ type: 'system', subtype: 'init' }) +
+      line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Prüfe den Stand.' }] } }) +
+      '\nProcess ended by SIGKILL (timeout or kill).\n';
+    options?.onChunk?.(raw);
+    return { exitCode: 1, durationMs: 1, output: raw };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.output, 'Prüfe den Stand.\n\nProcess ended by SIGKILL (timeout or kill).');
+  assert.equal(result.exitCode, 1);
 });
