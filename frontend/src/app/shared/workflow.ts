@@ -5,6 +5,7 @@ export interface WorkflowRow {
   key: string;
   name: string;
   role?: string;
+  command?: string[] | null;
   step: RunStep | undefined;
 }
 
@@ -31,6 +32,7 @@ export function buildWorkflow(data: BoardData, item: DevelopmentItem): WorkflowR
     key: agent.id,
     name: agent.name,
     role: agent.role,
+    command: agent.command,
     step: latest(agent),
   }));
   for (const step of steps) {

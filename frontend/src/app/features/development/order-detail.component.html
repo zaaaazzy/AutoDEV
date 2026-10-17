@@ -14,11 +14,14 @@
           ✎
         </button>
       </div>
-      @if (item.description) {
-        <article class="markdown" [innerHTML]="item.description | markdown"></article>
-      } @else {
-        <p class="muted">Keine Beschreibung.</p>
-      }
+      <details class="run-step order-brief">
+        <summary>Auftrag</summary>
+        @if (item.description) {
+          <article class="markdown" [innerHTML]="item.description | markdown"></article>
+        } @else {
+          <p class="muted">Keine Beschreibung.</p>
+        }
+      </details>
       <h4 class="workflow-title">Agents</h4>
       <app-agent-workflow [order]="item" />
     }

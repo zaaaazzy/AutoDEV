@@ -201,7 +201,10 @@
                                   Priorität {{ order.priority | priorityLabel }} · Aufwand
                                   {{ order.effortHours | hours }}
                                 </p>
-                                <div class="detail-text markdown" [innerHTML]="order.description | markdown"></div>
+                                <details class="run-step order-brief">
+                                  <summary>Auftrag</summary>
+                                  <div class="detail-text markdown" [innerHTML]="order.description | markdown"></div>
+                                </details>
                               } @else {
                                 <p class="muted">Kein Auftrag gefunden.</p>
                               }

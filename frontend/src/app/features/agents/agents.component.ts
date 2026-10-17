@@ -1,12 +1,12 @@
 import { NgClass } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { ModelIconComponent } from '../../shared/model-icon.component.js';
+import { AgentTableComponent, type AgentTableRow } from '../../shared/agent-table.component.js';
 import { AgentOutputPipe } from '../../shared/agent-output.pipe.js';
 import { DateTimePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import {
@@ -29,6 +29,16 @@ interface SystemAgent {
   envKey: string;
 }
 
+interface AgentRow extends AgentTableRow {
+  agent: Agent;
+  index: number;
+  last: boolean;
+}
+
+interface SystemRow extends AgentTableRow {
+  system: SystemAgent;
+}
+
 @Component({
   selector: 'app-agents',
   standalone: true,
@@ -36,7 +46,7 @@ interface SystemAgent {
     NgClass,
     FormsModule,
     AgentDetailComponent,
-    ModelIconComponent,
+    AgentTableComponent,
     AgentOutputPipe,
     DateTimePipe,
     StatusClassPipe,
@@ -106,6 +116,36 @@ export class AgentsComponent {
   protected agentsOfPhase(phase: AgentPhase): Agent[] {
     return this.data().agents.filter((agent) => agent.phase === phase);
   }
+
+  /** Status: läuft gerade (laut Worker), aktiv oder deaktiviert; darunter Rolle bzw. aktueller Auftrag. */
+  protected phaseRows(phase: AgentPhase): AgentRow[] {
+    const live = new Map(this.store.worker().agents.map((entry) => [entry.id, entry]));
+    const agents = this.agentsOfPhase(phase);
+    return agents.map((agent, index) => {
+      const running = live.get(agent.id)?.active ? live.get(agent.id) : undefined;
+      return {
+        key: agent.id,
+        name: agent.name,
+        command: agent.command,
+        status: running ? 'running' : agent.enabled ? 'active' : 'inactive',
+        hint: running?.orderTitle ? `arbeitet an „${running.orderTitle}“` : roleLabel(agent.role),
+        agent,
+        index,
+        last: index === agents.length - 1,
+      };
+    });
+  }
+
+  protected readonly systemRows = computed<SystemRow[]>(() =>
+    this.systemAgents().map((system) => ({
+      key: system.role,
+      name: system.name,
+      command: system.command,
+      status: 'active',
+      hint: system.command?.length ? system.command.join(' ') : system.model,
+      system,
+    })),
+  );
 
   protected startAgentEdit(agent: Agent): void {
     this.agentEdit = { name: agent.name, instructions: agent.instructions, command: agent.command?.join(' ') ?? '' };

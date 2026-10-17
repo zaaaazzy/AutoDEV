@@ -1,9 +1,8 @@
-import { NgClass } from '@angular/common';
 import { Component, computed, inject, input } from '@angular/core';
 import type { DevelopmentItem, DocumentEntry } from '../core/models.js';
 import { ProjectStore } from '../core/project-store.js';
 import { MarkdownPipe } from './markdown.pipe.js';
-import { StatusClassPipe, StatusLabelPipe } from './pipes.js';
+import { AgentTableComponent, type AgentTableRow } from './agent-table.component.js';
 import { StepResultComponent } from './step-result.component.js';
 import { buildWorkflow, type WorkflowRow } from './workflow.js';
 
@@ -11,6 +10,10 @@ const MANUAL_TITLES: Record<string, string> = {
   manual_writer: 'Anwendungshandbuch',
   user_manual_writer: 'Benutzerhandbuch',
 };
+
+interface WorkflowTableRow extends AgentTableRow {
+  workflow: WorkflowRow;
+}
 
 interface Attachment {
   label: string;
@@ -21,13 +24,22 @@ interface Attachment {
 @Component({
   selector: 'app-agent-workflow',
   standalone: true,
-  imports: [NgClass, MarkdownPipe, StatusClassPipe, StatusLabelPipe, StepResultComponent],
+  imports: [AgentTableComponent, MarkdownPipe, StepResultComponent],
   templateUrl: './agent-workflow.component.html',
 })
 export class AgentWorkflowComponent {
   private readonly store = inject(ProjectStore);
   readonly order = input.required<DevelopmentItem>();
-  protected readonly rows = computed(() => buildWorkflow(this.store.data(), this.order()));
+  protected readonly tableRows = computed<WorkflowTableRow[]>(() =>
+    buildWorkflow(this.store.data(), this.order()).map((row) => ({
+      key: row.key,
+      name: row.name,
+      command: row.command,
+      status: row.step?.status ?? 'waiting',
+      hint: this.attachment(row)?.label ?? null,
+      workflow: row,
+    })),
+  );
 
   /** Was der Agent hinterlassen hat: Auftragsdoku, Handbuch oder Testergebnis. */
   protected attachment(row: WorkflowRow): Attachment | null {

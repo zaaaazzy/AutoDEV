@@ -25,6 +25,7 @@ const STATUS_LABELS: Record<string, string> = {
   fixed: 'Behoben',
   wontfix: 'Kein Fix',
   active: 'Aktiv',
+  inactive: 'Inaktiv',
   completed: 'Abgeschlossen',
 };
 const PRIORITY_LABELS: Record<string, string> = { low: 'Niedrig', medium: 'Mittel', high: 'Hoch' };

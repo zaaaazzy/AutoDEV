@@ -2580,3 +2580,31 @@ h3 .link-button {
 .changed-files a:hover code {
   text-decoration: underline;
 }
+
+/* Agent-Tabelle (Agents-Seite, Workflows) */
+.agent-table .agent-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.agent-table .agent-cell small {
+  flex-basis: 100%;
+  padding-left: 26px;
+}
+.agent-table .closed-detail > td {
+  padding-left: 38px;
+}
+.agent-detail-body {
+  display: grid;
+  gap: 8px;
+}
+.agent-detail-body .actions {
+  flex-wrap: wrap;
+}
+.order-brief > summary {
+  font-weight: 650;
+}
+.progress-info .order-brief .detail-text {
+  max-height: none;
+}
