@@ -7,7 +7,7 @@ import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase, AgentRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { AgentTableRow } from '../../shared/agent-table.component.js';
-import { ModelIconComponent, providerLabel } from '../../shared/model-icon.component.js';
+import { ModelIconComponent } from '../../shared/model-icon.component.js';
 import {
   type DataColumn,
   DataCellDirective,
@@ -25,6 +25,7 @@ import {
   presetLabel,
   presetOf,
   roleLabel,
+  modelLabel,
 } from './agent-options.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
 
@@ -151,7 +152,7 @@ export class AgentsComponent {
           name: agent.name,
           command: agent.command,
           status: running ? 'running' : agent.enabled ? 'active' : 'inactive',
-          hint: running?.orderTitle ? `arbeitet an „${running.orderTitle}“` : roleLabel(agent.role),
+          hint: running?.orderTitle ? `arbeitet an „${running.orderTitle}“` : null,
           agent,
           index,
           last: index === agents.length - 1,
@@ -182,7 +183,7 @@ export class AgentsComponent {
   protected readonly agentColumns: DataColumn<AgentListRow>[] = [
     { id: 'name', header: 'Agent', value: (row) => row.name, filter: 'text', className: 'title-cell', sortable: false },
     { id: 'category', header: 'Kategorie', value: (row) => row.category, sortValue: (row) => row.categoryRank },
-    { id: 'model', header: 'Modell', value: (row) => providerLabel(row.command) },
+    { id: 'model', header: 'Modell', value: (row) => modelLabel(row.command, row.system?.model) },
     { id: 'status', header: 'Status', value: (row) => statusLabel(row.status) },
   ];
 
@@ -210,7 +211,7 @@ export class AgentsComponent {
         this.store.worker().agents.some((agent) => agent.id === 'assistant' && agent.active)
           ? 'running'
           : 'active',
-      hint: system.command?.length ? system.command.join(' ') : system.model,
+      hint: null,
       system,
     })),
   );

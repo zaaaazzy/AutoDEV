@@ -87,3 +87,19 @@ export function presetLabel(preset: ModelPreset): string {
 export function presetOf(command: string): string {
   return MODEL_PRESETS.find((preset) => preset.command === command.trim())?.id ?? 'custom';
 }
+
+/** Genaue Modellangabe eines Agent-Befehls, z. B. „Claude Opus“, „Gemini 2.5 Pro“ oder „Ollama · qwen3.5:9b“. */
+export function modelLabel(command: readonly string[] | null | undefined, localModel?: string | null): string {
+  if (!command?.length)
+    return localModel
+      ? `Ollama · ${localModel}`
+      : (MODEL_PRESETS.find((p) => p.id === 'local')?.label ?? 'Lokal (Ollama)');
+  const preset = MODEL_PRESETS.find((p) => p.command && p.command === command.join(' '));
+  if (preset) return preset.label;
+  const program = command[0]?.split('/').at(-1) ?? '';
+  const flag = command.findIndex((part) => part === '--model' || part === '-m');
+  const model = flag >= 0 ? command[flag + 1] : undefined;
+  const name = { claude: 'Claude', copilot: 'GitHub Copilot', gemini: 'Gemini' }[program] ?? program;
+  if (!model) return name;
+  return program === 'claude' ? `${name} ${model.charAt(0).toUpperCase()}${model.slice(1)}` : `${name} · ${model}`;
+}
