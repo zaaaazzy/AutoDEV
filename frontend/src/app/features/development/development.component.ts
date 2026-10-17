@@ -5,6 +5,7 @@ import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
+import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   type DataColumn,
   DataActionsDirective,
@@ -12,9 +13,9 @@ import {
   DataDetailDirective,
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
-import { DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
+import { CATEGORIES, DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { formatHours } from '../../shared/format.js';
-import { ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { CategoryLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 
@@ -35,6 +36,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     ShortTextPipe,
     StatusClassPipe,
     StatusLabelPipe,
+    CategoryLabelPipe,
   ],
   templateUrl: './development.component.html',
   host: { style: 'display: contents' },
@@ -61,6 +63,7 @@ export class DevelopmentComponent {
       value: (item) => priorityLabel(item.priority),
       sortValue: (item) => PRIORITY_RANK.indexOf(item.priority),
     },
+    categoryColumn<DevelopmentItem>((item) => item.category),
     { id: 'sprint', header: 'Sprint', value: (item) => this.store.sprintOf(item)?.name ?? 'Kein Sprint' },
     {
       id: 'effortHours',
@@ -70,7 +73,12 @@ export class DevelopmentComponent {
     },
   ];
 
-  protected developmentForm: { title: string; priority: Priority } = { title: '', priority: 'medium' };
+  protected developmentForm: { title: string; priority: Priority; category: string } = {
+    title: '',
+    priority: 'medium',
+    category: '',
+  };
+  protected readonly categories = CATEGORIES;
   protected readonly openOrder = signal<string | null>(null);
   protected readonly orderEditing = signal<string | null>(null);
   protected readonly showDoneOrders = signal(false);
@@ -103,8 +111,11 @@ export class DevelopmentComponent {
 
   protected async createDevelopment(): Promise<void> {
     await this.store.perform(async () => {
-      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/development`, this.developmentForm);
-      this.developmentForm = { title: '', priority: 'medium' };
+      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/development`, {
+        ...this.developmentForm,
+        category: this.developmentForm.category || null,
+      });
+      this.developmentForm = { title: '', priority: 'medium', category: '' };
       this.store.showCreate.set(false);
     }, 'Entwicklungsauftrag hinzugefügt.');
   }

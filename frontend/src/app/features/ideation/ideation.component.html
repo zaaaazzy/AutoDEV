@@ -15,6 +15,14 @@
             <option value="low">Niedrig</option>
           </select>
         </label>
+        <label
+          >Kategorie<select name="category" [(ngModel)]="ideaForm.category">
+            <option value="">Ohne Kategorie</option>
+            @for (category of categories; track category) {
+              <option [value]="category">{{ category | categoryLabel }}</option>
+            }
+          </select>
+        </label>
         <label class="wide"
           >Beschreibung<textarea name="description" [(ngModel)]="ideaForm.description" maxlength="10000"></textarea>
         </label>

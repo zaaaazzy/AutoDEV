@@ -9,6 +9,7 @@ import {
   PRIORITIES,
   parseFields,
   parseLongText,
+  parseCategory,
   parseOption,
   parseProjectSlug,
   parseTitle,
@@ -16,7 +17,7 @@ import {
 
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-  agent_note AS "agentNote"`;
+  agent_note AS "agentNote", category`;
 
 export const IDEA_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
@@ -24,6 +25,7 @@ export const IDEA_FIELDS = {
   // Only these statuses can be set manually; the workflow sets requested, drafting, and accepted.
   status: { column: 'status', parse: parseOption(EDITABLE_IDEATION_STATUSES) },
   priority: { column: 'priority', parse: parseOption(PRIORITIES) },
+  category: { column: 'category', parse: parseCategory },
   ...ESTIMATE_FIELDS,
 };
 
@@ -39,8 +41,8 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     const values = new Map(fields.map((field) => [field.column, field.value]));
     const result = await pool.query(
       `INSERT INTO ideation_items (project_slug, title, description, status, priority,
-                                   effort_hours, token_estimate, benefit, cost)
-       VALUES ($1, $2, $3, COALESCE($4, 'idea'), COALESCE($5, 'medium'), $6, $7, $8, $9)
+                                   effort_hours, token_estimate, benefit, cost, category)
+       VALUES ($1, $2, $3, COALESCE($4, 'idea'), COALESCE($5, 'medium'), $6, $7, $8, $9, $10)
        RETURNING ${IDEA_COLUMNS}`,
       [
         slug,
@@ -52,6 +54,7 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
         values.get('token_estimate') ?? null,
         values.get('benefit') ?? null,
         values.get('cost') ?? null,
+        values.get('category') ?? null,
       ],
     );
     response.status(201).json({ item: result.rows[0] });

@@ -18,6 +18,14 @@
           </select>
         </label>
         <label
+          >Kategorie<select name="category" [(ngModel)]="bugForm.category">
+            <option value="">Ohne Kategorie</option>
+            @for (category of categories; track category) {
+              <option [value]="category">{{ category | categoryLabel }}</option>
+            }
+          </select>
+        </label>
+        <label
           >Sprint<select name="sprintId" [(ngModel)]="bugForm.sprintId">
             <option value="">Kein Sprint</option>
             @for (sprint of availableSprints(); track sprint.id) {
@@ -131,6 +139,14 @@
                   <option value="medium">Mittel</option>
                   <option value="high">Hoch</option>
                   <option value="critical">Kritisch</option>
+                </select>
+              </label>
+              <label
+                >Kategorie<select name="category" [ngModel]="bug.category ?? ''">
+                  <option value="">Ohne Kategorie</option>
+                  @for (category of categories; track category) {
+                    <option [value]="category">{{ category | categoryLabel }}</option>
+                  }
                 </select>
               </label>
               <label

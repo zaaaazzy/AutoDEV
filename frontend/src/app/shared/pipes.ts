@@ -10,7 +10,7 @@ import {
   shortText,
   tokenCostUsd,
 } from './format.js';
-import { priorityLabel, severityLabel, statusClass, statusLabel } from './labels.js';
+import { categoryLabel, priorityLabel, severityLabel, statusClass, statusLabel } from './labels.js';
 
 @Pipe({ name: 'statusLabel', standalone: true })
 export class StatusLabelPipe implements PipeTransform {
@@ -93,5 +93,12 @@ export class TokensPipe implements PipeTransform {
 export class UsdPipe implements PipeTransform {
   transform(tokens: number | null | undefined): string {
     return formatUsd(tokenCostUsd(tokens));
+  }
+}
+
+@Pipe({ name: 'categoryLabel', standalone: true })
+export class CategoryLabelPipe implements PipeTransform {
+  transform(category: string | null | undefined): string {
+    return categoryLabel(category);
   }
 }

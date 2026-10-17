@@ -18,7 +18,11 @@ export interface Project {
   databaseConfigured?: boolean;
 }
 
+export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
+
 export interface Estimate {
+  /** Bereich der Arbeit; Aufträge erben ihn von Idee bzw. Bug. */
+  category?: Category | null;
   effortHours?: number | null;
   tokenEstimate?: number | null;
   benefit?: number | null;
@@ -91,7 +95,7 @@ export interface Sprint {
 
 export interface Bug {
   id: string;
-
+  category?: Category | null;
   title: string;
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';

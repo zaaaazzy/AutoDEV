@@ -8,6 +8,7 @@ import {
   parseFields,
   parseLongText,
   parseNullableUuid,
+  parseCategory,
   parseOption,
   parseProjectSlug,
   parseTitle,
@@ -15,7 +16,7 @@ import {
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
-  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt"`;
+  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category`;
 const BUG_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },
@@ -23,6 +24,7 @@ const BUG_FIELDS = {
   status: { column: 'status', parse: parseOption(BUG_STATUSES) },
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   fixNotes: { column: 'fix_notes', parse: parseLongText },
+  category: { column: 'category', parse: parseCategory },
 };
 
 /** Keeps the development order of a bug in line with the sprint the bug was added to. */
@@ -122,12 +124,19 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     }
     const sprintId = (values.get('sprint_id') as string | null | undefined) ?? null;
     const result = await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, sprint_id)
-       SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id
+      `INSERT INTO bugs (project_slug, title, description, severity, sprint_id, category)
+       SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id, $6
          FROM (SELECT 1) seed LEFT JOIN sprints s ON s.id = $5 AND s.project_slug = $1
         WHERE $5::uuid IS NULL OR s.id IS NOT NULL
        RETURNING ${BUG_COLUMNS}`,
-      [slug, values.get('title'), values.get('description') ?? '', values.get('severity') ?? null, sprintId],
+      [
+        slug,
+        values.get('title'),
+        values.get('description') ?? '',
+        values.get('severity') ?? null,
+        sprintId,
+        values.get('category') ?? null,
+      ],
     );
     if (!result.rows[0]) {
       response.status(400).json({ message: 'Sprint gehört zu einem anderen Projekt.' });

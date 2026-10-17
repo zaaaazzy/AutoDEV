@@ -12,10 +12,17 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
-import { severityLabel, statusLabel } from '../../shared/labels.js';
+import { CATEGORIES, severityLabel, statusLabel } from '../../shared/labels.js';
+import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { SeverityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import {
+  CategoryLabelPipe,
+  SeverityLabelPipe,
+  ShortTextPipe,
+  StatusClassPipe,
+  StatusLabelPipe,
+} from '../../shared/pipes.js';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
@@ -36,6 +43,7 @@ const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix'];
     ShortTextPipe,
     StatusClassPipe,
     StatusLabelPipe,
+    CategoryLabelPipe,
   ],
   templateUrl: './bugs.component.html',
   host: { style: 'display: contents' },
@@ -62,6 +70,7 @@ export class BugsComponent {
       value: (bug) => severityLabel(bug.severity),
       sortValue: (bug) => SEVERITY_RANK.indexOf(bug.severity),
     },
+    categoryColumn<Bug>((bug) => bug.category),
     { id: 'source', header: 'Quelle', value: (bug) => (bug.source === 'agent' ? 'Agent' : 'Manuell') },
     {
       id: 'sprint',
@@ -75,7 +84,8 @@ export class BugsComponent {
       sortValue: (bug) => bug.createdAt,
     },
   ];
-  protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '' };
+  protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
+  protected readonly categories = CATEGORIES;
   protected pendingImages: File[] = [];
 
   protected toggleBug(id: string): void {
@@ -96,7 +106,7 @@ export class BugsComponent {
       );
       this.pendingImages = [];
       await this.uploadImages(created.bug.id, files);
-      this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '' };
+      this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
       this.store.showCreate.set(false);
     }, 'Bug wurde gemeldet.');
   }
@@ -136,6 +146,7 @@ export class BugsComponent {
           severity: values['severity'],
           sprintId: values['sprintId'] || null,
           fixNotes: String(values['fixNotes'] ?? ''),
+          category: values['category'] || null,
         }),
       'Bug wurde gespeichert.',
     );

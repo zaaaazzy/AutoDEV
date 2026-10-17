@@ -310,4 +310,28 @@ export const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS docs_unique_title_idx ON docs (project_slug, kind, title)
     WHERE kind IN ('manual', 'sprint', 'repo');
   CREATE UNIQUE INDEX IF NOT EXISTS docs_order_idx ON docs (development_id) WHERE kind = 'order';
+
+  -- Kategorie (Frontend, Backend, Fullstack, Infrastruktur, Dokumentation) für Ideen, Aufträge und Bugs.
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS category TEXT
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs'));
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS category TEXT
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs'));
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS category TEXT
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs'));
+
+  -- Aufträge erben die Kategorie ihrer Idee bzw. ihres Bugs, egal auf welchem Weg sie entstehen.
+  CREATE OR REPLACE FUNCTION development_items_inherit_category() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.category IS NULL THEN
+      NEW.category := COALESCE(
+        (SELECT category FROM ideation_items WHERE id = NEW.ideation_id),
+        (SELECT category FROM bugs WHERE id = NEW.bug_id)
+      );
+    END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+  DROP TRIGGER IF EXISTS development_items_inherit_category ON development_items;
+  CREATE TRIGGER development_items_inherit_category BEFORE INSERT ON development_items
+    FOR EACH ROW EXECUTE FUNCTION development_items_inherit_category();
 `;

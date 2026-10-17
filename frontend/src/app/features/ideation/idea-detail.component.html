@@ -43,6 +43,14 @@
           </select>
         </label>
         <label
+          >Kategorie<select name="category" [ngModel]="idea.category ?? ''">
+            <option value="">Ohne Kategorie</option>
+            @for (category of categories; track category) {
+              <option [value]="category">{{ category | categoryLabel }}</option>
+            }
+          </select>
+        </label>
+        <label
           >Priorität<select name="priority" [ngModel]="idea.priority">
             <option value="low">Niedrig</option>
             <option value="medium">Mittel</option>
@@ -72,6 +80,7 @@
       <p>
         <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
         <span class="status">Priorität: {{ idea.priority | priorityLabel }}</span>
+        <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
       </p>
       <dl class="estimate">
         <div>

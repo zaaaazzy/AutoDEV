@@ -7,7 +7,7 @@
       </div>
     </div>
     @if (store.showCreate()) {
-      <form class="inline-form" (ngSubmit)="createDevelopment()">
+      <form class="inline-form dev-create" (ngSubmit)="createDevelopment()">
         <input
           name="title"
           [(ngModel)]="developmentForm.title"
@@ -15,6 +15,12 @@
           maxlength="180"
           required
         />
+        <select name="category" [(ngModel)]="developmentForm.category" aria-label="Kategorie">
+          <option value="">Ohne Kategorie</option>
+          @for (category of categories; track category) {
+            <option [value]="category">{{ category | categoryLabel }}</option>
+          }
+        </select>
         <select name="priority" [(ngModel)]="developmentForm.priority" aria-label="Priorität">
           <option value="medium">Mittel</option>
           <option value="high">Hoch</option>

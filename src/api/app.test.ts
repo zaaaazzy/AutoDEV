@@ -108,12 +108,25 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
     const created = await fetch(`${baseUrl}/api/projects/mainty/ideation`, {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ title: 'Sprints', effortHours: 12.5, tokenEstimate: 40000, benefit: 8, cost: 3 }),
+      body: JSON.stringify({
+        title: 'Sprints',
+        effortHours: 12.5,
+        tokenEstimate: 40000,
+        benefit: 8,
+        cost: 3,
+        category: 'frontend',
+      }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3]);
+    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend']);
 
-    for (const invalid of [{ benefit: 11 }, { cost: -1 }, { benefit: 2.5 }, { tokenEstimate: 'x' }]) {
+    for (const invalid of [
+      { benefit: 11 },
+      { cost: -1 },
+      { benefit: 2.5 },
+      { tokenEstimate: 'x' },
+      { category: 'mobile' },
+    ]) {
       const response = await fetch(`${baseUrl}/api/ideation/${ID}`, {
         method: 'PATCH',
         headers: jsonHeaders(),

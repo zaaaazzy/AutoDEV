@@ -33,6 +33,7 @@ export class OrderService {
           title: String(values['title'] ?? ''),
           description: String(values['description'] ?? ''),
           priority: values['priority'],
+          category: values['category'] || null,
           ...estimateValues(values),
         }),
       'Auftrag gespeichert.',

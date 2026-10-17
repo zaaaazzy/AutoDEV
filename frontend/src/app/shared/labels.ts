@@ -46,3 +46,24 @@ export function priorityLabel(priority: string): string {
 export function severityLabel(severity: string): string {
   return SEVERITY_LABELS[severity] ?? severity;
 }
+
+export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs'] as const;
+const CATEGORY_LABELS: Record<string, string> = {
+  frontend: 'Frontend',
+  backend: 'Backend',
+  fullstack: 'Fullstack',
+  infrastructure: 'Infrastruktur',
+  docs: 'Dokumentation',
+  mixed: 'Gemischt',
+};
+
+/** Kategorie eines Sprints aus seinen Aufträgen: eine einzige, Fullstack für Frontend+Backend, sonst gemischt. */
+export function combinedCategory(categories: (string | null | undefined)[]): string | null {
+  const unique = [...new Set(categories.filter((category): category is string => !!category))];
+  if (unique.length <= 1) return unique[0] ?? null;
+  return unique.every((category) => ['frontend', 'backend', 'fullstack'].includes(category)) ? 'fullstack' : 'mixed';
+}
+
+export function categoryLabel(category: string | null | undefined): string {
+  return category ? (CATEGORY_LABELS[category] ?? category) : 'Ohne Kategorie';
+}

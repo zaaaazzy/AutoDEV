@@ -5,16 +5,16 @@ import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
-import { DEVELOPMENT_STATUSES } from '../../shared/labels.js';
+import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { StatusLabelPipe } from '../../shared/pipes.js';
+import { CategoryLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { OrderService } from './order.service.js';
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
   selector: 'app-order-detail',
   standalone: true,
-  imports: [AgentWorkflowComponent, FormsModule, GalleryComponent, MarkdownPipe, StatusLabelPipe],
+  imports: [AgentWorkflowComponent, FormsModule, GalleryComponent, MarkdownPipe, StatusLabelPipe, CategoryLabelPipe],
   templateUrl: './order-detail.component.html',
   host: { style: 'display: contents' },
 })
@@ -24,6 +24,7 @@ export class OrderDetailComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
+  protected readonly categories = CATEGORIES;
   protected readonly manualAgent: Record<string, string> = {};
 
   readonly order = input.required<DevelopmentItem>();

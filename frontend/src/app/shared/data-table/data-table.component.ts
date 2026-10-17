@@ -38,6 +38,8 @@ export interface DataColumn<T> {
   sortable?: boolean;
   /** CSS-Klasse für Kopf und Zellen, z. B. `title-cell`. */
   className?: string;
+  /** Wert als farbiges Etikett darstellen; liefert die CSS-Klasse des Etiketts. */
+  badge?: (row: T) => string;
 }
 
 /** Eigene Darstellung einer Spalte: `<ng-template appDataCell="status" let-row>`. */

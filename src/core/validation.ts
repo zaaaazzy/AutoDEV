@@ -1,4 +1,5 @@
 export const PRIORITIES = new Set(['low', 'medium', 'high']);
+export const CATEGORIES = new Set(['frontend', 'backend', 'fullstack', 'infrastructure', 'docs']);
 export const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -85,6 +86,9 @@ export const parseOption =
   (options: Set<string>): Parser =>
   (value) =>
     validStatus(value, options) ? value : INVALID;
+/** Kategorie oder leer (null = keine Kategorie). */
+export const parseCategory: Parser = (value) =>
+  value === null || value === '' ? null : validStatus(value, CATEGORIES) ? value : INVALID;
 export const parseNullableUuid: Parser = (value) => (value === null || isUuid(value) ? value : INVALID);
 export const parseNullableDate: Parser = (value) => {
   if (value === null || value === '') {

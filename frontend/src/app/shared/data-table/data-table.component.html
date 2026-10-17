@@ -111,6 +111,10 @@
               <td [class]="column(cell.column.id)?.className ?? ''">
                 @if (template(cell.column.id); as custom) {
                   <ng-container *ngTemplateOutlet="custom; context: { $implicit: row.original }" />
+                } @else if (column(cell.column.id)?.badge; as badge) {
+                  <span class="tag" [class]="'tag ' + badge(row.original)">{{
+                    display(row.original, cell.column.id)
+                  }}</span>
                 } @else {
                   {{ display(row.original, cell.column.id) }}
                 }

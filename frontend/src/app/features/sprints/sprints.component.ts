@@ -14,7 +14,8 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
-import { statusLabel } from '../../shared/labels.js';
+import { combinedCategory, statusLabel } from '../../shared/labels.js';
+import { categoryColumn } from '../../shared/data-table/columns.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
@@ -75,6 +76,13 @@ export class SprintsComponent {
       value: (sprint) => statusLabel(sprint.status),
       sortValue: (sprint) => SPRINT_STATUS_RANK.indexOf(sprint.status),
     },
+    categoryColumn<Sprint>((sprint) =>
+      combinedCategory(
+        this.data()
+          .development.filter((item) => item.sprintId === sprint.id)
+          .map((item) => item.category),
+      ),
+    ),
     {
       id: 'start',
       header: 'Start',

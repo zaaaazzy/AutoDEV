@@ -3060,3 +3060,41 @@ h3 .link-button {
 .dt-table td {
   vertical-align: middle;
 }
+
+/* Kategorien: gleiche Farbe in allen Tabellen und Formularen */
+.tag.category-frontend {
+  background: #e7eff7;
+  color: #36608f;
+}
+.tag.category-backend {
+  background: #ece8f5;
+  color: #5b4a8b;
+}
+.tag.category-fullstack {
+  background: #e8f1ec;
+  color: #39704e;
+}
+.tag.category-infrastructure {
+  background: #faf1da;
+  color: #8b6825;
+}
+.tag.category-docs {
+  background: #f3e9ef;
+  color: #8b3f6a;
+}
+.tag.category-mixed {
+  background: #eef0ec;
+  color: #4b554e;
+}
+.tag.category-none {
+  background: transparent;
+  color: #9aa39c;
+}
+.inline-form.dev-create {
+  grid-template-columns: minmax(180px, 1fr) 160px 140px auto;
+}
+@media (max-width: 720px) {
+  .inline-form.dev-create {
+    grid-template-columns: 1fr;
+  }
+}

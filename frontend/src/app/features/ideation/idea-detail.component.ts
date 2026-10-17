@@ -6,14 +6,23 @@ import type { Idea } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
-import { PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { CategoryLabelPipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { CATEGORIES } from '../../shared/labels.js';
 import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
 @Component({
   selector: 'app-idea-detail',
   standalone: true,
-  imports: [DatePipe, FormsModule, GalleryComponent, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe],
+  imports: [
+    DatePipe,
+    FormsModule,
+    GalleryComponent,
+    CategoryLabelPipe,
+    PriorityLabelPipe,
+    StatusClassPipe,
+    StatusLabelPipe,
+  ],
   templateUrl: './idea-detail.component.html',
   host: { style: 'display: contents' },
 })
@@ -26,6 +35,7 @@ export class IdeaDetailComponent {
   readonly selected = input.required<Idea>();
   readonly editing = model(false);
   readonly closed = output<void>();
+  protected readonly categories = CATEGORIES;
 
   protected statusOptions(idea: Idea): string[] {
     return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? IDEA_SELECTABLE_STATUSES : [idea.status];
@@ -55,6 +65,7 @@ export class IdeaDetailComponent {
           description: String(values['description'] ?? ''),
           ...(IDEA_SELECTABLE_STATUSES.includes(idea.status) ? { status: values['status'] } : {}),
           priority: values['priority'],
+          category: values['category'] || null,
         }),
       'Idee gespeichert.',
     );

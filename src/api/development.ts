@@ -13,13 +13,14 @@ import {
   parseOption,
   parseProjectSlug,
   validStatus,
+  CATEGORIES,
   validText,
 } from '../core/validation.js';
 
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
   title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-  kind, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
+  kind, category, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
   failure, failure_bug_id AS "failureBugId",
   (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus"`;
@@ -71,14 +72,19 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       (body.status !== undefined && !validStatus(body.status, DEVELOPMENT_STATUSES)) ||
       (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
       (body.ideationId !== undefined && !isUuid(body.ideationId)) ||
-      (body.testRunId !== undefined && !isUuid(body.testRunId))
+      (body.testRunId !== undefined && !isUuid(body.testRunId)) ||
+      (body.category !== undefined &&
+        body.category !== null &&
+        body.category !== '' &&
+        !validStatus(body.category, CATEGORIES))
     ) {
       response.status(400).json({ message: 'Invalid development item.' });
       return;
     }
     const result = await pool.query(
-      `INSERT INTO development_items (project_slug, ideation_id, test_run_id, title, description, status, priority)
-       SELECT $1, i.id, tr.id, $4, $5, COALESCE($6, '${DEVELOPMENT_STATUS.backlog}'), COALESCE($7, 'medium')
+      `INSERT INTO development_items (project_slug, ideation_id, test_run_id, title, description, status, priority,
+                                      category)
+       SELECT $1, i.id, tr.id, $4, $5, COALESCE($6, '${DEVELOPMENT_STATUS.backlog}'), COALESCE($7, 'medium'), $8
          FROM (SELECT 1) seed
          LEFT JOIN ideation_items i ON i.id = $2 AND i.project_slug = $1
          LEFT JOIN test_runs tr ON tr.id = $3 AND tr.project_slug = $1
@@ -93,6 +99,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
         typeof body.description === 'string' ? body.description.trim() : '',
         body.status ?? null,
         body.priority ?? null,
+        body.category || null,
       ],
     );
     if (!result.rows[0]) {

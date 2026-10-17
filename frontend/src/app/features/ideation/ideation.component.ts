@@ -14,8 +14,16 @@ import {
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { formatHours, formatIsoDate } from '../../shared/format.js';
-import { priorityLabel, statusLabel } from '../../shared/labels.js';
-import { HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { CATEGORIES, priorityLabel, statusLabel } from '../../shared/labels.js';
+import { categoryColumn } from '../../shared/data-table/columns.js';
+import {
+  HoursPipe,
+  PriorityLabelPipe,
+  ShortTextPipe,
+  StatusClassPipe,
+  StatusLabelPipe,
+  CategoryLabelPipe,
+} from '../../shared/pipes.js';
 import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
@@ -48,6 +56,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     ShortTextPipe,
     StatusClassPipe,
     StatusLabelPipe,
+    CategoryLabelPipe,
   ],
   templateUrl: './ideation.component.html',
   host: { style: 'display: contents' },
@@ -67,6 +76,7 @@ export class IdeationComponent {
       value: (idea) => statusLabel(idea.status),
       sortValue: (idea) => IDEA_STATUSES.indexOf(idea.status),
     },
+    categoryColumn<Idea>((idea) => idea.category),
     {
       id: 'priority',
       header: 'Priorität',
@@ -88,20 +98,23 @@ export class IdeationComponent {
   ];
   /** In Bearbeitung und Abgeschlossen: Status aus Idee und Auftrag abgeleitet. */
   protected readonly groupColumns: DataColumn<Idea>[] = [
-    this.ideaColumns[0]!,
+    this.ideaColumns.find((column) => column.id === 'title')!,
     {
       id: 'status',
       header: 'Status',
       value: (idea) => statusLabel(this.ideaStatus(idea)),
       sortValue: (idea) => IDEA_STATUSES.indexOf(this.ideaStatus(idea)),
     },
-    this.ideaColumns[4]!,
+    this.ideaColumns.find((column) => column.id === 'category')!,
+    this.ideaColumns.find((column) => column.id === 'createdAt')!,
   ];
+  protected readonly categories = CATEGORIES;
 
-  protected ideaForm: { title: string; description: string; priority: Priority } = {
+  protected ideaForm: { title: string; description: string; priority: Priority; category: string } = {
     title: '',
     description: '',
     priority: 'medium',
+    category: '',
   };
   protected pendingImages: File[] = [];
   protected readonly openIdea = signal<string | null>(null);
@@ -159,7 +172,7 @@ export class IdeationComponent {
   }
 
   protected async createIdea(): Promise<void> {
-    const { title, description, priority } = this.ideaForm;
+    const { title, description, priority, category } = this.ideaForm;
     const files = this.pendingImages;
     await this.store.perform(async () => {
       const created = await this.api.post<{ item: Idea }>(
@@ -168,11 +181,12 @@ export class IdeationComponent {
           title,
           description,
           priority,
+          category: category || null,
         },
       );
       this.pendingImages = [];
       await this.uploadImages(created.item.id, files);
-      this.ideaForm = { title: '', description: '', priority: 'medium' };
+      this.ideaForm = { title: '', description: '', priority: 'medium', category: '' };
       this.store.showCreate.set(false);
     }, 'Idee wurde hinzugefügt.');
   }

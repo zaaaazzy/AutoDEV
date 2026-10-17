@@ -111,6 +111,14 @@
         >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
       </label>
       <label
+        >Kategorie<select name="category" [ngModel]="item.category ?? ''">
+          <option value="">Ohne Kategorie</option>
+          @for (category of categories; track category) {
+            <option [value]="category">{{ category | categoryLabel }}</option>
+          }
+        </select>
+      </label>
+      <label
         >Priorität<select name="priority" [ngModel]="item.priority">
           <option value="low">Niedrig</option>
           <option value="medium">Mittel</option>
