@@ -20,7 +20,12 @@
             <span class="nav-text">{{ item.label }}</span>
           </span>
           @if (navCount(item.id) > 0) {
-            <span class="nav-count">{{ navCount(item.id) }}</span>
+            <span
+              class="nav-count"
+              [class]="'nav-count ' + navTone(item.id)"
+              [attr.title]="item.id === 'sprints' ? sprintHealth()?.text : null"
+              >{{ navCount(item.id) }}</span
+            >
           }
         </a>
       }

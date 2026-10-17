@@ -1,8 +1,9 @@
 @let item = order();
 <div class="order-panel">
   <div class="order-controls">
-    <label
-      >Status<select
+    <label class="control"
+      ><span>Status</span
+      ><select
         [ngModel]="item.status"
         (ngModelChange)="update(item.id, { status: $event })"
         [name]="'status-' + item.id"
@@ -12,8 +13,9 @@
         }
       </select>
     </label>
-    <label
-      >Sprint<select
+    <label class="control"
+      ><span>Sprint</span
+      ><select
         [ngModel]="item.sprintId"
         (ngModelChange)="update(item.id, { sprintId: $event || null })"
         [name]="'sprint-' + item.id"
@@ -24,30 +26,28 @@
         }
       </select>
     </label>
-    <label
-      >Einzelner Agent
-      <span class="inline-form">
-        <select
-          [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
-          (ngModelChange)="manualAgent[item.id] = $event"
-          [name]="'agent-' + item.id"
-        >
-          <option value="">Agent wählen …</option>
-          @for (agent of data().agents; track agent.id) {
-            <option [value]="agent.id">{{ agent.name }}</option>
-          }
-        </select>
-        <button
-          class="button primary"
-          type="button"
-          title="Mit gewähltem Agent starten"
-          aria-label="Agent starten"
-          [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
-          (click)="startWithAgent(item)"
-        >
-          ▶
-        </button>
-      </span>
+    <label class="control control-agent"
+      ><span>Agent</span
+      ><select
+        [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+        (ngModelChange)="manualAgent[item.id] = $event"
+        [name]="'agent-' + item.id"
+      >
+        <option value="">Einzeln starten …</option>
+        @for (agent of data().agents; track agent.id) {
+          <option [value]="agent.id">{{ agent.name }}</option>
+        }
+      </select>
+      <button
+        class="button primary run-agent"
+        type="button"
+        title="Mit gewähltem Agent starten"
+        aria-label="Agent starten"
+        [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+        (click)="startWithAgent(item)"
+      >
+        ▶
+      </button>
     </label>
   </div>
   @if (item.status === 'blocked') {
@@ -104,20 +104,6 @@
       </p>
     </div>
   }
-  @if (item.analysis) {
-    <h4 class="order-section">🔎 Analyse des Assistenten</h4>
-    <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
-  }
-  @if (item.risks) {
-    <h4 class="order-section">⚠ Risiken</h4>
-    <article class="markdown" [innerHTML]="item.risks | markdown"></article>
-  }
-  @if (item.projectContext) {
-    <details class="order-context">
-      <summary>Projektbeschreibung &amp; Leitlinien</summary>
-      <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
-    </details>
-  }
   @if (editing()) {
     <form class="form-grid" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
       <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
@@ -156,4 +142,22 @@
     <summary>Agents</summary>
     <app-agent-workflow [order]="item" />
   </details>
+  @if (item.analysis) {
+    <details class="run-step order-brief">
+      <summary>🔎 Analyse des Assistenten</summary>
+      <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
+    </details>
+  }
+  @if (item.risks) {
+    <details class="run-step order-brief">
+      <summary>⚠ Risiken</summary>
+      <article class="markdown" [innerHTML]="item.risks | markdown"></article>
+    </details>
+  }
+  @if (item.projectContext) {
+    <details class="run-step order-brief">
+      <summary>Projektbeschreibung &amp; Leitlinien</summary>
+      <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
+    </details>
+  }
 </div>

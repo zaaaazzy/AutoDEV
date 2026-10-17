@@ -62,6 +62,25 @@ textarea {
   background: white;
   color: var(--ink);
 }
+/* Einheitliche Dropdowns: eigener Pfeil, ruhiger Rahmen, deutlicher Hover/Fokus */
+select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%235b665e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 11px center;
+  background-repeat: no-repeat;
+  background-size: 12px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+select:hover {
+  border-color: #9fb3a5;
+}
+select:focus {
+  border-color: #2f6f4f;
+  box-shadow: 0 0 0 3px rgb(47 111 79 / 14%);
+}
 textarea {
   min-height: 90px;
   resize: vertical;
@@ -178,6 +197,21 @@ h4 {
 .nav-link.active .nav-count {
   background: var(--orange);
   color: var(--ink);
+}
+.nav-count.ok,
+.nav-link.active .nav-count.ok {
+  background: #2f8a57;
+  color: #fff;
+}
+.nav-count.warn,
+.nav-link.active .nav-count.warn {
+  background: #e08a1e;
+  color: #fff;
+}
+.nav-count.stopped,
+.nav-link.active .nav-count.stopped {
+  background: #c0392b;
+  color: #fff;
 }
 .sidebar-foot {
   margin: auto 6px 0;
@@ -2708,26 +2742,38 @@ h3 .link-button {
   padding: 4px 0 6px;
 }
 .order-controls {
-  display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(240px, 2fr);
-  gap: 12px;
-  align-items: end;
-}
-.order-controls label {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.order-controls .inline-form {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  padding: 8px 12px;
+  border: 1px solid #e3e7de;
+  border-radius: 10px;
+  background: #fff;
+}
+.order-controls .control {
+  display: flex;
+  align-items: center;
   gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  color: #5b665e;
 }
-.order-controls .inline-form select {
+.order-controls .control select {
+  width: auto;
+  min-width: 150px;
+  min-height: 34px;
+  font-weight: 500;
+}
+.order-controls .control-agent {
   flex: 1;
-  min-width: 0;
+  min-width: 260px;
 }
-@media (max-width: 720px) {
-  .order-controls {
-    grid-template-columns: 1fr;
-  }
+.order-controls .control-agent select {
+  flex: 1;
+}
+.order-controls .run-agent {
+  min-height: 34px;
+  padding: 0 14px;
 }

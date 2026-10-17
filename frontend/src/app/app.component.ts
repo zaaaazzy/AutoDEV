@@ -81,6 +81,33 @@ export class AppComponent {
     const running = items.filter((item) => item.status === 'in_progress').length;
     return { name: sprint.name, done, total: items.length, running };
   });
+  /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, rot gestoppt. */
+  protected readonly sprintHealth = computed(() => {
+    const data = this.store.data();
+    const sprint = data.sprints.find((candidate) => candidate.status === 'active');
+    if (!sprint) return null;
+    const items = data.development.filter((item) => item.sprintId === sprint.id);
+    const open = items.filter((item) => item.status !== 'done').length;
+    const worker = this.worker();
+    if (this.store.workerFailure() || !worker.online)
+      return { open, tone: 'stopped', text: 'Sprint gestoppt: Worker offline' };
+    const failed = items.some(
+      (item) =>
+        item.status === 'blocked' ||
+        (item.status !== 'done' &&
+          data.agentRuns
+            .filter((run) => run.developmentId === item.id)
+            .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.status === 'failed'),
+    );
+    return failed
+      ? { open, tone: 'warn', text: 'Sprint läuft mit Fehlern' }
+      : { open, tone: 'ok', text: 'Sprint läuft' };
+  });
+
+  protected navTone(section: Section): string {
+    return section === 'sprints' ? (this.sprintHealth()?.tone ?? '') : '';
+  }
+
   protected readonly workerText = computed(() => {
     if (this.store.workerFailure()) return 'Worker-Status nicht abrufbar';
     const worker = this.worker();
@@ -95,9 +122,12 @@ export class AppComponent {
       case 'development':
         return this.store.openDevelopmentCount();
       case 'sprints':
-        return data.sprints.length;
+        return this.sprintHealth()?.open ?? 0;
       case 'ideation':
-        return data.ideas.filter((idea) => idea.status !== 'rejected').length;
+        return data.ideas.filter((idea) => {
+          const order = data.development.find((item) => item.ideationId === idea.id);
+          return idea.status === 'accepted' && order?.status !== 'done';
+        }).length;
       case 'bugs':
         return this.store.openBugCount();
       case 'docs':
