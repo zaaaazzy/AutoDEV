@@ -15,6 +15,8 @@ export class GalleryComponent {
   private readonly store = inject(ProjectStore);
 
   readonly ideationId = input<string | null | undefined>(null);
+  readonly removable = input(false);
+  protected readonly busy = this.store.busy;
   protected readonly images = computed<Attachment[]>(() => {
     const id = this.ideationId();
     return id ? this.store.data().attachments.filter((image) => image.ideationId === id) : [];
@@ -22,5 +24,13 @@ export class GalleryComponent {
 
   protected imageUrl(image: Attachment): string {
     return this.api.url(`/api/attachments/${encodeURIComponent(image.id)}`);
+  }
+
+  protected async remove(image: Attachment): Promise<void> {
+    if (!confirm(`Bild „${image.filename}“ entfernen?`)) return;
+    await this.store.perform(
+      () => this.api.delete(`/api/attachments/${encodeURIComponent(image.id)}`),
+      'Bild entfernt.',
+    );
   }
 }

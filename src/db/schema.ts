@@ -60,7 +60,7 @@ export const SCHEMA = `
     title TEXT NOT NULL CHECK (char_length(title) BETWEEN 1 AND 180),
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'idea'
-      CHECK (status IN ('idea', 'considering', 'requested', 'drafting', 'accepted', 'rejected')),
+      CHECK (status IN ('idea', 'considering', 'review', 'requested', 'drafting', 'accepted', 'rejected')),
     priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high')),
     effort_hours DOUBLE PRECISION CHECK (effort_hours >= 0),
     token_estimate BIGINT CHECK (token_estimate >= 0),
@@ -71,6 +71,10 @@ export const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+  -- Bestehende Datenbanken: Status-Check um 'review' (Prüfen) erweitern.
+  ALTER TABLE ideation_items DROP CONSTRAINT IF EXISTS ideation_items_status_check;
+  ALTER TABLE ideation_items ADD CONSTRAINT ideation_items_status_check
+    CHECK (status IN ('idea', 'considering', 'review', 'requested', 'drafting', 'accepted', 'rejected'));
   CREATE INDEX IF NOT EXISTS ideation_items_project_status_idx ON ideation_items (project_slug, status, created_at DESC);
 
   CREATE TABLE IF NOT EXISTS ideation_comments (

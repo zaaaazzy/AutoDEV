@@ -12,10 +12,9 @@ import { HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLab
 import { compareRanks, includesText, toggleListValue, toggleSort, type SortState } from '../../shared/table.js';
 import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
-import { IDEA_STATUSES } from './idea-options.js';
+import { IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const DEFAULT_STATUS_FILTER = ['Idee', 'In Abklärung', 'Wird ausformuliert'];
+const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
 
 type IdeaKey = 'title' | 'description' | 'status' | 'priority' | 'effortHours' | 'createdAt';
 type IdeaTextKey = 'title' | 'description';
@@ -185,6 +184,10 @@ export class IdeationComponent {
 
   protected workflowOf(order: DevelopmentItem) {
     return buildWorkflow(this.data(), order);
+  }
+
+  protected ideaStatus(idea: Idea): string {
+    return ideaDisplayStatus(idea, this.closedIdeaOrder(idea));
   }
 
   protected closedIdeaOrder(idea: Idea) {

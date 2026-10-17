@@ -49,6 +49,18 @@
             <option value="high">Hoch</option>
           </select>
         </label>
+        <label class="wide"
+          >Bilder anhängen (PNG, JPEG, WebP, GIF · max. 5 MB)
+          <input
+            type="file"
+            name="images"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            #imageInput
+            [disabled]="busy()"
+            (change)="addImages(idea, imageInput)"
+          />
+        </label>
         <div class="actions wide form-actions">
           <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
           <button class="button secondary" type="button" (click)="editing.set(false)">Abbrechen</button>
@@ -56,7 +68,9 @@
       </form>
     } @else {
       <p class="detail-text">{{ idea.description || 'Keine Beschreibung' }}</p>
+      @let status = displayStatus(idea);
       <p>
+        <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
         <span class="status">Priorität: {{ idea.priority | priorityLabel }}</span>
       </p>
       <dl class="estimate">
@@ -78,8 +92,8 @@
         </div>
       </dl>
     }
-    <app-gallery [ideationId]="idea.id" />
-    @if (!editing() && !linkedOrder(idea.id) && (idea.status === 'idea' || idea.status === 'considering')) {
+    <app-gallery [ideationId]="idea.id" [removable]="editing()" />
+    @if (!editing() && canPromote(idea)) {
       <div class="actions promote">
         <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
           Auftrag erstellen

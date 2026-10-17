@@ -5,6 +5,11 @@
         <a [href]="imageUrl(image)" target="_blank" rel="noopener">
           <img [src]="imageUrl(image)" [alt]="image.filename" loading="lazy" />
         </a>
+        @if (removable()) {
+          <button class="button secondary remove-image" type="button" (click)="remove(image)" [disabled]="busy()">
+            Entfernen
+          </button>
+        }
       </figure>
     }
   </div>

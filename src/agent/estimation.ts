@@ -85,7 +85,7 @@ export async function estimateNewIdeas(pool: Pool, project: string, estimate = q
   const ideas = (
     await pool.query<{ id: string; title: string; description: string }>(
       `SELECT id, title, description FROM ideation_items
-        WHERE project_slug = $1 AND status IN ('idea', 'considering', 'requested') AND agent_note IS NULL
+        WHERE project_slug = $1 AND status IN ('idea', 'considering', 'review', 'requested') AND agent_note IS NULL
           AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
         ORDER BY created_at LIMIT 5`,
       [project],

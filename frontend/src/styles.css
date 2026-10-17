@@ -553,7 +553,7 @@ a.summary-card:hover {
 .status-done,
 .status-passed,
 .status-fixed,
-.status-accepted {
+.status-implemented {
   background: #e8f1ec;
   color: #39704e;
 }
@@ -569,12 +569,15 @@ a.summary-card:hover {
 .status-active,
 .status-completed,
 .status-requested,
-.status-drafting {
+.status-drafting,
+.status-accepted,
+.status-considering {
   background: #e7eff7;
   color: #36608f;
 }
 .status-open,
 .status-idea,
+.status-review,
 .status-running {
   background: #faf1da;
   color: #8b6825;
@@ -1217,6 +1220,9 @@ h3 .link-button {
   margin: 3px 0 0;
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+.gallery .remove-image {
+  font-size: 0.85em;
 }
 .idea-detail .gallery img {
   max-width: 260px;

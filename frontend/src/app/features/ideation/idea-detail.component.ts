@@ -6,14 +6,14 @@ import type { Idea } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
-import { PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
-import { IDEA_SELECTABLE_STATUSES } from './idea-options.js';
+import { PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
 @Component({
   selector: 'app-idea-detail',
   standalone: true,
-  imports: [DatePipe, FormsModule, GalleryComponent, PriorityLabelPipe, StatusLabelPipe],
+  imports: [DatePipe, FormsModule, GalleryComponent, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe],
   templateUrl: './idea-detail.component.html',
   host: { style: 'display: contents' },
 })
@@ -29,6 +29,14 @@ export class IdeaDetailComponent {
 
   protected statusOptions(idea: Idea): string[] {
     return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? IDEA_SELECTABLE_STATUSES : [idea.status];
+  }
+
+  protected displayStatus(idea: Idea): string {
+    return ideaDisplayStatus(idea, this.linkedOrder(idea.id));
+  }
+
+  protected canPromote(idea: Idea): boolean {
+    return !this.linkedOrder(idea.id) && IDEA_SELECTABLE_STATUSES.includes(idea.status);
   }
 
   protected linkedOrder(ideationId: string) {
@@ -51,6 +59,21 @@ export class IdeaDetailComponent {
       'Idee gespeichert.',
     );
     this.editing.set(false);
+  }
+
+  protected async addImages(idea: Idea, input: HTMLInputElement): Promise<void> {
+    const files = Array.from(input.files ?? []);
+    input.value = '';
+    if (!files.length) return;
+    await this.store.perform(
+      async () => {
+        for (const file of files) {
+          if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} ist größer als 5 MB.`);
+          await this.api.upload(`/api/ideation/${encodeURIComponent(idea.id)}/attachments`, file);
+        }
+      },
+      files.length === 1 ? 'Bild angehängt.' : `${files.length} Bilder angehängt.`,
+    );
   }
 
   protected async promoteIdea(idea: Idea): Promise<void> {

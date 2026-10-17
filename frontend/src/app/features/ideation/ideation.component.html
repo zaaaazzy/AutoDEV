@@ -131,6 +131,7 @@
                   <th></th>
                   <th>Titel</th>
                   <th>Kurzfassung</th>
+                  <th>Status</th>
                   <th>Erstellt</th>
                 </tr>
               </thead>
@@ -156,12 +157,16 @@
                     <td class="summary-cell">
                       <div class="clamp">{{ idea.description | shortText }}</div>
                     </td>
+                    <td>
+                      @let status = ideaStatus(idea);
+                      <span class="status" [ngClass]="status | statusClass">{{ status | statusLabel }}</span>
+                    </td>
                     <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
                   </tr>
                   @if (openClosedIdea() === idea.id) {
                     <tr class="closed-detail">
                       <td></td>
-                      <td colspan="3">
+                      <td colspan="4">
                         @let order = closedIdeaOrder(idea);
                         @let sprint = store.sprintOf(order);
                         @if (group.progress) {

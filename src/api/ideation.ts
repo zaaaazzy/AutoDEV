@@ -14,8 +14,6 @@ import {
   parseTitle,
 } from '../core/validation.js';
 
-// Only these statuses can be set manually; the workflow sets requested, drafting, and accepted.
-
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
   agent_note AS "agentNote"`;
@@ -23,6 +21,7 @@ export const IDEA_COLUMNS = `id, title, description, status, priority, created_a
 export const IDEA_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },
+  // Only these statuses can be set manually; the workflow sets requested, drafting, and accepted.
   status: { column: 'status', parse: parseOption(EDITABLE_IDEATION_STATUSES) },
   priority: { column: 'priority', parse: parseOption(PRIORITIES) },
   ...ESTIMATE_FIELDS,
@@ -82,7 +81,7 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  // The author agent defines the idea; this is only possible from idea or considering.
+  // The author agent defines the idea; this is only possible from the manually editable statuses.
   app.post('/api/ideation/:id/define', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
@@ -90,8 +89,8 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', agent_note = NULL, updated_at = NOW()
-        WHERE id = $1 AND status IN ('${IDEATION_STATUS.idea}', '${IDEATION_STATUS.considering}') RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
-      [request.params.id],
+        WHERE id = $1 AND status = ANY($2) RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
+      [request.params.id, [...EDITABLE_IDEATION_STATUSES]],
     );
     if (!result.rows[0]) {
       response.status(409).json({ message: 'Die Idee ist nicht mehr in Bearbeitung durch Menschen.' });

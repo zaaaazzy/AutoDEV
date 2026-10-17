@@ -1,13 +1,18 @@
 export const IDEATION_STATUS = {
   idea: 'idea',
   considering: 'considering',
+  review: 'review',
   requested: 'requested',
   drafting: 'drafting',
   accepted: 'accepted',
   rejected: 'rejected',
 } as const;
 export type IdeationStatus = (typeof IDEATION_STATUS)[keyof typeof IDEATION_STATUS];
-export const EDITABLE_IDEATION_STATUSES = new Set<string>([IDEATION_STATUS.idea, IDEATION_STATUS.considering]);
+export const EDITABLE_IDEATION_STATUSES = new Set<string>([
+  IDEATION_STATUS.idea,
+  IDEATION_STATUS.considering,
+  IDEATION_STATUS.review,
+]);
 
 export const DEVELOPMENT_STATUS = {
   backlog: 'backlog',

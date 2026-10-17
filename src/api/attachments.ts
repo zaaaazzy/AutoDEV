@@ -6,7 +6,6 @@ import { isUuid, parseProjectSlug } from '../core/validation.js';
 
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 export const MAX_ATTACHMENTS_PER_IDEA = 10;
-const UPLOAD_WINDOW_SECONDS = 120;
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 const ATTACHMENT_DIRECTORY = join('.dev-log', 'attachments');
 
@@ -52,22 +51,13 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
       `INSERT INTO ideation_attachments (ideation_id, filename, mime, size, data)
        SELECT i.id, $2, $3, $4, $5 FROM ideation_items i
         WHERE i.id = $1
-          AND i.created_at > NOW() - make_interval(secs => $7)
           AND (SELECT count(*) FROM ideation_attachments WHERE ideation_id = i.id) < $6
        RETURNING id, ideation_id AS "ideationId", filename, mime, size`,
-      [
-        request.params.id,
-        safeFilename(request.query.name),
-        mime,
-        data.length,
-        data,
-        MAX_ATTACHMENTS_PER_IDEA,
-        UPLOAD_WINDOW_SECONDS,
-      ],
+      [request.params.id, safeFilename(request.query.name), mime, data.length, data, MAX_ATTACHMENTS_PER_IDEA],
     );
     if (!result.rows[0]) {
       response.status(409).json({
-        message: `Bilder können nur direkt beim Erstellen der Idee angehängt werden (max. ${MAX_ATTACHMENTS_PER_IDEA}).`,
+        message: `Idee nicht gefunden oder bereits ${MAX_ATTACHMENTS_PER_IDEA} Bilder angehängt.`,
       });
       return;
     }
