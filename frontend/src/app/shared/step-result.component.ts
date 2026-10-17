@@ -2,13 +2,14 @@ import { DatePipe } from '@angular/common';
 import { Component, input } from '@angular/core';
 import type { StepEvent } from '../core/models.js';
 import { AgentOutputPipe } from './agent-output.pipe.js';
+import { FileLinkComponent } from './file-link.component.js';
 import { describeStepEvent } from './step-event.js';
 
 /** Gemeinsame Ergebnisansicht eines Agent-Schritts: Live-Meldung, Verlauf mit Uhrzeit und Ausgabe. */
 @Component({
   selector: 'app-step-result',
   standalone: true,
-  imports: [DatePipe, AgentOutputPipe],
+  imports: [DatePipe, AgentOutputPipe, FileLinkComponent],
   templateUrl: './step-result.component.html',
 })
 export class StepResultComponent {

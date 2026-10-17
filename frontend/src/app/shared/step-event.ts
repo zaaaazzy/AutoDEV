@@ -7,8 +7,11 @@ export interface StepEventView {
   target: string;
   /** Freitext ohne Ziel, z. B. ein Zwischenstand des Agents. */
   text: string;
+  /** Das Ziel ist ein Dateipfad (Lesen/Schreiben einer Datei) und kann verlinkt werden. */
+  file: boolean;
 }
 
+const FILE_LABELS = new Set(['Liest', 'Bearbeitet', 'Schreibt']);
 const PATTERNS: [RegExp, StepEventKind, string][] = [
   [/^Liest (.+)$/, 'read', 'Liest'],
   [/^Sucht nach (.+)$/, 'read', 'Sucht'],
@@ -23,7 +26,7 @@ const STATE = /^(Schritt gestartet|Erfolgreich abgeschlossen|Fehlgeschlagen|Abge
 export function describeStepEvent(text: string): StepEventView {
   for (const [pattern, kind, label] of PATTERNS) {
     const match = pattern.exec(text);
-    if (match) return { kind, label, target: match[1]!.replace(/^„|“$/g, ''), text: '' };
+    if (match) return { kind, label, target: match[1]!.replace(/^„|“$/g, ''), text: '', file: FILE_LABELS.has(label) };
   }
-  return { kind: STATE.test(text) ? 'state' : 'note', label: '', target: '', text };
+  return { kind: STATE.test(text) ? 'state' : 'note', label: '', target: '', text, file: false };
 }

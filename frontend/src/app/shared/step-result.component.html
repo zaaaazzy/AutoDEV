@@ -16,7 +16,11 @@
           <time>{{ event.at | date: 'HH:mm:ss' }}</time>
           @if (view.label) {
             <span class="event-kind">{{ view.label }}</span>
-            <code class="event-target" [title]="view.target">{{ view.target }}</code>
+            @if (view.file) {
+              <app-file-link class="event-target" [path]="view.target" />
+            } @else {
+              <code class="event-target" [title]="view.target">{{ view.target }}</code>
+            }
           } @else {
             <span class="event-text">{{ view.text }}</span>
           }

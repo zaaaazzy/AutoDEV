@@ -29,6 +29,11 @@ services:
       DEV_LOG_HOST: 0.0.0.0
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
+      # Dateivorschau im Dashboard: Projektordner nur lesend eingebunden.
+      DEV_LOG_PROJECTS_HOST_ROOT: ${DEV_LOG_PROJECTS_ROOT:-/Volumes/External}
+      DEV_LOG_PROJECTS_MOUNT: /projects
+    volumes:
+      - ${DEV_LOG_PROJECTS_ROOT:-/Volumes/External}:/projects:ro
     depends_on:
       db:
         condition: service_healthy

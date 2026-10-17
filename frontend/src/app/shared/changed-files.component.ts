@@ -2,11 +2,7 @@ import { Component, computed, inject, input } from '@angular/core';
 import type { DevelopmentItem, Sprint } from '../core/models.js';
 import { ProjectStore } from '../core/project-store.js';
 import { describeStepEvent } from './step-event.js';
-
-interface ChangedFile {
-  path: string;
-  url: string | null;
-}
+import { FileLinkComponent } from './file-link.component.js';
 
 /** Web-Adresse des Repositorys aus dem Git-Remote (SSH oder HTTPS), sonst null. */
 export function repositoryWebUrl(remote: string | null | undefined): string | null {
@@ -22,6 +18,7 @@ export function repositoryWebUrl(remote: string | null | undefined): string | nu
 @Component({
   selector: 'app-changed-files',
   standalone: true,
+  imports: [FileLinkComponent],
   templateUrl: './changed-files.component.html',
 })
 export class ChangedFilesComponent {
@@ -29,7 +26,8 @@ export class ChangedFilesComponent {
   readonly order = input.required<DevelopmentItem>();
   readonly sprint = input<Sprint | null>(null);
 
-  protected readonly files = computed<ChangedFile[]>(() => {
+  protected readonly gitRef = computed(() => this.sprint()?.gitCommit || this.sprint()?.gitBranch || null);
+  protected readonly files = computed<string[]>(() => {
     const id = this.order().id;
     const paths = new Set<string>();
     for (const run of this.store.data().agentRuns.filter((candidate) => candidate.developmentId === id)) {
@@ -40,15 +38,6 @@ export class ChangedFilesComponent {
         }
       }
     }
-    const base = repositoryWebUrl(this.store.currentProject()?.gitRemote);
-    const sprint = this.sprint();
-    const ref = sprint?.gitCommit || sprint?.gitBranch || 'main';
-    return [...paths].sort().map((path) => ({
-      path,
-      url:
-        base && !path.startsWith('/')
-          ? `${base}/blob/${encodeURIComponent(ref)}/${path.split('/').map(encodeURIComponent).join('/')}`
-          : null,
-    }));
+    return [...paths].sort();
   });
 }

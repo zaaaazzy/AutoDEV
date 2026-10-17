@@ -7,7 +7,7 @@ import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { AgentTableComponent, type AgentTableRow } from '../../shared/agent-table.component.js';
-import { AgentOutputPipe } from '../../shared/agent-output.pipe.js';
+import { StepResultComponent } from '../../shared/step-result.component.js';
 import { DateTimePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import {
   AGENT_PHASES,
@@ -47,7 +47,7 @@ interface SystemRow extends AgentTableRow {
     FormsModule,
     AgentDetailComponent,
     AgentTableComponent,
-    AgentOutputPipe,
+    StepResultComponent,
     DateTimePipe,
     StatusClassPipe,
     StatusLabelPipe,

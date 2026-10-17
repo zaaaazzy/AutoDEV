@@ -1,0 +1,26 @@
+@if (url(); as href) {
+  <a [href]="href" target="_blank" rel="noopener"
+    ><code>{{ path() }}</code></a
+  >
+} @else {
+  <code>{{ path() }}</code>
+}
+@if (open()) {
+  <div class="file-preview" role="tooltip" [style.top.px]="position().top" [style.left.px]="position().left">
+    <p class="file-preview-title">{{ path() }}</p>
+    @if (preview() === undefined) {
+      <p class="muted">Lade Vorschau …</p>
+    } @else if (preview(); as file) {
+      @if (file.binary) {
+        <p class="muted">Binärdatei – keine Textvorschau.</p>
+      } @else {
+        <pre>{{ file.content }}</pre>
+        @if (file.truncated) {
+          <p class="muted">… gekürzt</p>
+        }
+      }
+    } @else {
+      <p class="muted">Keine Vorschau verfügbar.</p>
+    }
+  </div>
+}

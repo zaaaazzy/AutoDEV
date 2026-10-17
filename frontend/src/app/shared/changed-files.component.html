@@ -1,14 +1,8 @@
 @if (files().length) {
   <ul class="changed-files">
-    @for (file of files(); track file.path) {
+    @for (file of files(); track file) {
       <li>
-        @if (file.url) {
-          <a [href]="file.url" target="_blank" rel="noopener"
-            ><code>{{ file.path }}</code></a
-          >
-        } @else {
-          <code>{{ file.path }}</code>
-        }
+        <app-file-link [path]="file" [gitRef]="gitRef()" />
       </li>
     }
   </ul>

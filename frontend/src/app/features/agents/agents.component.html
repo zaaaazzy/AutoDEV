@@ -173,14 +173,12 @@
           @for (step of run.steps; track step.position) {
             <details class="run-step">
               <summary>{{ step.agentName || step.command }} · {{ step.status | statusLabel }}</summary>
-              @if (step.progress) {
-                <p class="live-progress"><span class="live-dot"></span>{{ step.progress }}</p>
-              }
-              @if (step.output) {
-                <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
-              } @else {
-                <p class="muted">Keine Ausgabe.</p>
-              }
+              <app-step-result
+                [events]="step.events"
+                [output]="step.output"
+                [progress]="step.progress"
+                [running]="step.status === 'running'"
+              />
             </details>
           }
         </article>
