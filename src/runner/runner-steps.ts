@@ -352,7 +352,8 @@ export async function runStep(
     output,
   });
   if (!passed) {
-    if (!cancelled)
+    // Dokumentations-Agents nach der Umsetzung sollen keinen Bug-Bericht für fertigen Code erzeugen.
+    if (!cancelled && agent.phase !== 'after_task')
       await registerFailure(pool, item, agent.name, output).catch((error) =>
         console.error('Bug report failed:', error),
       );
