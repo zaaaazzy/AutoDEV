@@ -294,6 +294,9 @@ export const SCHEMA = `
   );
   -- Verlauf der Assistenten-Aktionen (wie bei Agent-Schritten), damit der Chat dieselbe Ansicht nutzt.
   ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS events JSONB NOT NULL DEFAULT '[]'::jsonb;
+  -- Rückfrage des Assistenten und die Claude-Sitzung, mit der er nach der Antwort weiterarbeitet.
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS question TEXT;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS session_id TEXT;
   CREATE INDEX IF NOT EXISTS chat_messages_project_idx ON chat_messages (project_slug, created_at);
 
   CREATE TABLE IF NOT EXISTS docs (

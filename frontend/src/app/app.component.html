@@ -23,7 +23,9 @@
             <span
               class="nav-count"
               [class]="'nav-count ' + navTone(item.id)"
-              [attr.title]="item.id === 'sprints' ? sprintHealth()?.text : null"
+              [attr.title]="
+                item.id === 'sprints' ? sprintHealth()?.text : item.id === 'dashboard' ? store.openQuestion() : null
+              "
               >{{ navCount(item.id) }}</span
             >
           }
@@ -48,6 +50,9 @@
         >
           <app-nav-icon name="agents" />
           <span class="worker-count">{{ store.activeAgentCount() }}/{{ worker().agents.length }}</span>
+          @if (store.openQuestion(); as question) {
+            <span class="question-badge" [title]="question">?</span>
+          }
         </a>
         @if (notice() || resourceErrors().length) {
           <div

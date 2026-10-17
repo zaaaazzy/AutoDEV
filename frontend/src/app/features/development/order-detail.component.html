@@ -137,15 +137,7 @@
       <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
     </form>
   }
-  <details class="run-step order-brief">
-    <summary>Auftrag</summary>
-    @if (item.description) {
-      <article class="markdown" [innerHTML]="item.description | markdown"></article>
-    } @else {
-      <p class="muted">Keine Beschreibung.</p>
-    }
-    <app-gallery [ideationId]="item.ideationId" />
-  </details>
+  <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
   <details class="run-step order-brief">
     <summary>Agents</summary>
     <app-agent-workflow [order]="item" />

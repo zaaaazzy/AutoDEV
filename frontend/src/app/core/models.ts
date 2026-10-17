@@ -204,7 +204,15 @@ export interface WorkerStatus {
   online: boolean;
   worker: { lastError: string | null; intervalSeconds: number; cpuPercent: number | null } | null;
   running: { title: string; startedAt: string }[];
-  agents: { id: string; name: string; active: boolean; sprintName: string | null; orderTitle: string | null }[];
+  agents: {
+    id: string;
+    name: string;
+    active: boolean;
+    /** Wartet auf eine Antwort (Rückfrage des Dashboard-Assistenten). */
+    waiting?: boolean;
+    sprintName: string | null;
+    orderTitle: string | null;
+  }[];
 }
 
 export interface AgentStatus {
@@ -280,5 +288,7 @@ export interface ChatMessage {
   status: 'pending' | 'processing' | 'done' | 'failed';
   /** Aktionen des Assistenten (Lesen, Schreiben, Ausführen) – dieselbe Form wie bei Agent-Schritten. */
   events?: StepEvent[];
+  /** Rückfrage des Assistenten, auf die er eine Antwort erwartet. */
+  question?: string | null;
   createdAt: string;
 }

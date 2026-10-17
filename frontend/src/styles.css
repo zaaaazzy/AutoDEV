@@ -1910,19 +1910,22 @@ h3 .link-button {
   margin: 0;
 }
 .order-detail .markdown,
-.order-panel .markdown {
+.order-panel .markdown,
+.order-brief .markdown {
   max-height: none;
   background: #fff;
 }
 .order-detail .markdown h2,
-.order-panel .markdown h2 {
+.order-panel .markdown h2,
+.order-brief .markdown h2 {
   font-size: 16px;
   margin-top: 14px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--line);
 }
 .order-detail .markdown h2:first-child,
-.order-panel .markdown h2:first-child {
+.order-panel .markdown h2:first-child,
+.order-brief .markdown h2:first-child {
   margin-top: 0;
 }
 .order-section {
@@ -3097,4 +3100,46 @@ h3 .link-button {
   .inline-form.dev-create {
     grid-template-columns: 1fr;
   }
+}
+
+/* Rückfrage des Dashboard-Assistenten */
+.chat-question {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid #e08a1e;
+  border-radius: 6px;
+  background: #fdf3e4;
+}
+.chat-question p {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+.chat-question-label {
+  color: #a0610d;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.chat-msg.assistant.asking {
+  outline: 2px solid #e08a1e;
+}
+.agent-line.waiting .agent-dot {
+  background: #e08a1e;
+  box-shadow: 0 0 0 3px rgb(224 138 30 / 20%);
+}
+.agent-line.waiting small {
+  color: #a0610d;
+}
+.question-badge {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #e08a1e;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
 }

@@ -1,3 +1,4 @@
+import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -49,6 +50,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     GitTreeComponent,
     IdeaDetailComponent,
     AgentWorkflowComponent,
+    OrderBriefComponent,
     ChangedFilesComponent,
     MarkdownPipe,
     HoursPipe,

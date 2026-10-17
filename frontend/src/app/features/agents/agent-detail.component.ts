@@ -1,3 +1,4 @@
+import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
 import { NgClass } from '@angular/common';
 import { Component, inject, input } from '@angular/core';
@@ -10,7 +11,15 @@ import { roleLabel } from './agent-options.js';
 @Component({
   selector: 'app-agent-detail',
   standalone: true,
-  imports: [NgClass, DateTimePipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe, StepResultComponent],
+  imports: [
+    NgClass,
+    DateTimePipe,
+    OrderBriefComponent,
+    PriorityLabelPipe,
+    StatusClassPipe,
+    StatusLabelPipe,
+    StepResultComponent,
+  ],
   templateUrl: './agent-detail.component.html',
   host: { style: 'display: contents' },
 })

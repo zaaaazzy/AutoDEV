@@ -12,6 +12,13 @@ export function isClaudeCommand(command: string[]): boolean {
   return command[0] !== undefined && basename(command[0]) === 'claude';
 }
 
+/** Continues an earlier Claude session instead of starting a new conversation. */
+export function withResume(command: string[], sessionId: string | undefined): string[] {
+  const [binary, ...rest] = command;
+  if (!binary || !sessionId || !isClaudeCommand(command) || rest.includes('--resume')) return command;
+  return [binary, '--resume', sessionId, ...rest];
+}
+
 /** Adds streaming output unless the configured command already chose an output format. */
 export function withStreamJson(command: string[]): string[] {
   const [binary, ...rest] = command;
@@ -22,6 +29,7 @@ export function withStreamJson(command: string[]): string[] {
 type ContentBlock = { type?: string; name?: string; text?: string; input?: Record<string, unknown> };
 type StreamEvent = {
   type?: string;
+  session_id?: string;
   message?: { content?: ContentBlock[] };
   result?: string;
   is_error?: boolean;
@@ -69,6 +77,8 @@ export interface StreamParser {
   transcript(): string;
   /** Final answer and token usage, or null when no result event arrived (e.g. the CLI failed to start). */
   result(): { text: string; isError: boolean; tokens: number } | null;
+  /** Session of the run, reported in every event; used to continue the conversation. */
+  sessionId(): string | undefined;
 }
 
 export function createStreamParser(cwd: string, onAction: (message: string) => void): StreamParser {
@@ -76,6 +86,7 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
   // Live output reads like documentation: only the agent's own Markdown text; tool calls go to the history.
   const paragraphs: string[] = [];
   let final: { text: string; isError: boolean; tokens: number } | null = null;
+  let session: string | undefined;
   const action = (message: string): void => {
     if (message) onAction(message);
   };
@@ -87,6 +98,7 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
       if (line.trim()) paragraphs.push(line.trim());
       return;
     }
+    if (typeof event.session_id === 'string') session = event.session_id;
     if (event.type === 'assistant') {
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use') action(describeToolUse(block, cwd));
@@ -111,6 +123,7 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
       for (const line of parts) handle(line);
     },
     transcript: () => paragraphs.join('\n\n'),
+    sessionId: () => session,
     result() {
       if (buffer.trim()) {
         handle(buffer);
@@ -129,12 +142,16 @@ export async function executeAgentCommand(
   execute: CommandExecutor,
   command: string[],
   cwd: string,
-  options: NonNullable<Parameters<CommandExecutor>[2]> & { onAction?: (message: string) => void },
+  options: NonNullable<Parameters<CommandExecutor>[2]> & {
+    onAction?: (message: string) => void;
+    /** Claude-Sitzung, die fortgesetzt werden soll. */
+    resumeSession?: string;
+  },
 ): Promise<CommandResult> {
-  const { onAction, ...executeOptions } = options;
+  const { onAction, resumeSession, ...executeOptions } = options;
   if (!isClaudeCommand(command)) return execute(command, cwd, executeOptions);
   const parser = createStreamParser(cwd, (message) => onAction?.(message));
-  const result = await execute(withStreamJson(command), cwd, {
+  const result = await execute(withStreamJson(withResume(command, resumeSession)), cwd, {
     ...executeOptions,
     onOutput: undefined,
     onChunk: (chunk) => {
@@ -144,9 +161,10 @@ export async function executeAgentCommand(
   });
   const final = parser.result();
   // Without a result event (abort, crash) keep the readable text instead of raw JSON lines.
-  if (!final) return { ...result, output: parser.transcript() || result.output };
+  if (!final) return { ...result, output: parser.transcript() || result.output, sessionId: parser.sessionId() };
   return {
     ...result,
+    sessionId: parser.sessionId(),
     exitCode: final.isError && result.exitCode === 0 ? 1 : result.exitCode,
     output: final.text || parser.transcript(),
     tokens: final.tokens || result.tokens,

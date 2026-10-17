@@ -27,11 +27,7 @@
         <span class="status" [ngClass]="entry.stepStatus | statusClass">{{ entry.stepStatus | statusLabel }}</span>
         <span class="muted">{{ entry.startedAt | dateTime }}</span>
       </div>
-      <details class="run-step">
-        <summary>Auftrag</summary>
-        <p>{{ entry.orderDescription || 'Keine Beschreibung.' }}</p>
-        <p class="muted">Priorität: {{ entry.orderPriority | priorityLabel }}</p>
-      </details>
+      <app-order-brief [description]="entry.orderDescription" [priority]="entry.orderPriority" />
       <details class="run-step">
         <summary>Sprint{{ entry.sprintName ? ': ' + entry.sprintName : '' }}</summary>
         @if (entry.sprintName) {
@@ -80,11 +76,7 @@
           <span class="status" [ngClass]="entry.stepStatus | statusClass">{{ entry.stepStatus | statusLabel }}</span>
           <span class="muted">{{ entry.startedAt | dateTime }}</span>
         </div>
-        <details class="run-step">
-          <summary>Auftrag</summary>
-          <p>{{ entry.orderDescription || 'Keine Beschreibung.' }}</p>
-          <p class="muted">Priorität: {{ entry.orderPriority | priorityLabel }}</p>
-        </details>
+        <app-order-brief [description]="entry.orderDescription" [priority]="entry.orderPriority" />
         <details class="run-step">
           <summary>Sprint{{ entry.sprintName ? ': ' + entry.sprintName : '' }}</summary>
           @if (entry.sprintName) {

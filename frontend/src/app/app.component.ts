@@ -108,6 +108,7 @@ export class AppComponent {
   });
 
   protected navTone(section: Section): string {
+    if (section === 'dashboard') return 'warn';
     return section === 'sprints' ? (this.sprintHealth()?.tone ?? '') : '';
   }
 
@@ -139,6 +140,8 @@ export class AppComponent {
         return data.agents.length;
       case 'runs':
         return data.runs.length;
+      case 'dashboard':
+        return this.store.openQuestion() ? 1 : 0;
       default:
         return 0;
     }

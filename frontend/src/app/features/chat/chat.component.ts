@@ -20,6 +20,11 @@ export class ChatComponent {
   protected readonly chatWaiting = computed(() =>
     this.chat().some((message) => message.role === 'user' && ['pending', 'processing'].includes(message.status)),
   );
+  /** Letzte Nachricht ist eine unbeantwortete Rückfrage des Assistenten. */
+  protected readonly openQuestionId = computed(() => {
+    const last = this.chat().at(-1);
+    return last?.role === 'assistant' && last.question ? last.id : null;
+  });
   protected readonly chatProgressShown = computed(() =>
     this.chat().some((message) => message.role === 'assistant' && message.status === 'processing'),
   );

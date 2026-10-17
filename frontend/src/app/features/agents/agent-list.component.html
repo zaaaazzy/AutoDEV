@@ -4,7 +4,8 @@
       type="button"
       class="agent-line"
       [class.active]="agent.active"
-      [class.down]="!agent.active && !worker().online"
+      [class.waiting]="agent.waiting"
+      [class.down]="!agent.active && !agent.waiting && !worker().online"
       (click)="open(agent.id)"
     >
       <span class="agent-dot"></span>
@@ -13,9 +14,11 @@
         <small>{{
           agent.active
             ? (agent.sprintName ? agent.sprintName + ' - ' : '') + agent.orderTitle
-            : worker().online
-              ? 'Inaktiv'
-              : 'Worker offline'
+            : agent.waiting
+              ? agent.orderTitle
+              : worker().online
+                ? 'Inaktiv'
+                : 'Worker offline'
         }}</small>
       </span>
     </button>

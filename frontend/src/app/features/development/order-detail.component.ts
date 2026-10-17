@@ -1,10 +1,10 @@
+import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, inject, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
-import { GalleryComponent } from '../../shared/gallery.component.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
@@ -14,7 +14,7 @@ import { OrderService } from './order.service.js';
 @Component({
   selector: 'app-order-detail',
   standalone: true,
-  imports: [AgentWorkflowComponent, FormsModule, GalleryComponent, MarkdownPipe, StatusLabelPipe, CategoryLabelPipe],
+  imports: [OrderBriefComponent, AgentWorkflowComponent, FormsModule, MarkdownPipe, StatusLabelPipe, CategoryLabelPipe],
   templateUrl: './order-detail.component.html',
   host: { style: 'display: contents' },
 })

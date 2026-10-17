@@ -202,13 +202,31 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
           [slug],
         )
       ).rows[0];
+      // Offene Rückfrage: letzte Assistenten-Nachricht ist eine Frage und noch nicht beantwortet.
+      const question = chat
+        ? undefined
+        : (
+            await pool.query<{ question: string }>(
+              `SELECT question FROM chat_messages m
+                WHERE m.project_slug = $1 AND m.role = 'assistant' AND m.question IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM chat_messages u
+                                   WHERE u.project_slug = $1 AND u.role = 'user' AND u.created_at > m.created_at)
+                ORDER BY m.created_at DESC LIMIT 1`,
+              [slug],
+            )
+          ).rows[0]?.question;
       agents.push({
         id: ASSISTANT_AGENT_ID,
         name: 'Dashboard-Assistent',
         phase: 'system',
         sprintName: null,
-        orderTitle: chat ? `Chat: ${chat.content.replace(/\s+/g, ' ').slice(0, 60)}` : null,
+        orderTitle: chat
+          ? `Chat: ${chat.content.replace(/\s+/g, ' ').slice(0, 60)}`
+          : question
+            ? `Rückfrage: ${question.slice(0, 80)}`
+            : null,
         active: Boolean(chat),
+        waiting: Boolean(question),
       });
       const online = Boolean(beat) && beat.ageSeconds <= 60;
       response.set('Cache-Control', 'no-store').json({ worker: beat && { ...beat, online }, online, running, agents });

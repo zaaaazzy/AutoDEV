@@ -62,6 +62,8 @@ export class ProjectStore {
   );
   readonly selectedAgent = computed(() => this.data().agents.find((agent) => agent.id === this.openAgent()) ?? null);
   readonly activeAgentCount = computed(() => this.worker().agents.filter((agent) => agent.active).length);
+  /** Offene Rückfrage des Dashboard-Assistenten, falls vorhanden. */
+  readonly openQuestion = computed(() => this.worker().agents.find((agent) => agent.waiting)?.orderTitle ?? null);
   readonly openDevelopmentCount = computed(
     () => this.data().development.filter((item) => item.status !== 'done').length,
   );

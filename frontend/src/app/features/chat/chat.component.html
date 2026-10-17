@@ -22,13 +22,25 @@
     @for (message of chat(); track message.id) {
       @if (message.role === 'assistant') {
         @let running = message.status === 'processing';
-        <div class="chat-msg assistant" [class.failed]="message.status === 'failed'">
+        <div
+          class="chat-msg assistant"
+          [class.failed]="message.status === 'failed'"
+          [class.asking]="message.question && message.id === openQuestionId()"
+        >
           <app-step-result
             [events]="message.events"
             [output]="running ? '' : message.content"
             [progress]="running ? message.content : null"
             [running]="running"
           />
+          @if (message.question) {
+            <div class="chat-question">
+              <span class="chat-question-label">{{
+                message.id === openQuestionId() ? 'Rückfrage – wartet auf deine Antwort' : 'Rückfrage'
+              }}</span>
+              <p>{{ message.question }}</p>
+            </div>
+          }
         </div>
       } @else {
         <div class="chat-msg mine" [class.failed]="message.status === 'failed'">{{ message.content }}</div>
@@ -44,7 +56,7 @@
     <input
       name="chatInput"
       [(ngModel)]="chatInput"
-      placeholder="Nachricht an den Assistenten …"
+      [placeholder]="openQuestionId() ? 'Antwort auf die Rückfrage …' : 'Nachricht an den Assistenten …'"
       autocomplete="off"
       maxlength="4000"
     />

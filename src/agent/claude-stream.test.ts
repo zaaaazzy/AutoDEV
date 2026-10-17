@@ -82,3 +82,17 @@ test('an aborted claude run keeps readable text instead of raw JSON', async () =
   assert.equal(result.output, 'Prüfe den Stand.\n\nProcess ended by SIGKILL (timeout or kill).');
   assert.equal(result.exitCode, 1);
 });
+
+test('continues a claude session with --resume and reports the session id', async () => {
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command, _cwd, options) => {
+    calls.push(command);
+    const raw = line({ type: 'system', subtype: 'init', session_id: 'abc-123' }) + RESULT;
+    options?.onChunk?.(raw);
+    return { exitCode: 0, durationMs: 1, output: raw };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Ja'], '/repo', { resumeSession: 'abc-123' });
+  assert.deepEqual(calls[0]?.slice(0, 5), ['claude', '--output-format', 'stream-json', '--verbose', '--resume']);
+  assert.equal(calls[0]?.[5], 'abc-123');
+  assert.equal(result.sessionId, 'abc-123');
+});

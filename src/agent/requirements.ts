@@ -7,7 +7,7 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { withAssistantPermissions } from './tool-permissions.js';
-import { executeAgentCommand } from './claude-stream.js';
+import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -62,7 +62,9 @@ export async function runAuthorAgent(
   execute: CommandExecutor = runCommand,
   role = 'author',
   onProgress?: (message: string) => void,
-): Promise<{ exitCode: number; output: string }> {
+  /** Setzt eine frühere Claude-Sitzung mit einer kurzen Nachricht fort (nur Claude-CLI, sonst voller Prompt). */
+  resume?: { sessionId: string; prompt: string },
+): Promise<{ exitCode: number; output: string; sessionId?: string }> {
   const author = (
     await pool.query<{ instructions: string; command: string[] | null }>(
       `SELECT instructions, command FROM agents
@@ -78,15 +80,21 @@ export async function runAuthorAgent(
     ? author.command
     : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
   const command = configured && withAssistantPermissions(configured, role);
+  const resuming = resume && command && isClaudeCommand(command) ? resume : undefined;
   try {
     const result = command
-      ? await executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
+      ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {
           timeoutMs: options.timeoutMs,
           env: agentEnvironment(),
           onAction: onProgress,
+          resumeSession: resuming?.sessionId,
         })
       : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress });
-    return { exitCode: result.exitCode, output: redactOutput(result.output, process.env).trim() };
+    return {
+      exitCode: result.exitCode,
+      output: redactOutput(result.output, process.env).trim(),
+      sessionId: 'sessionId' in result ? (result.sessionId as string | undefined) : undefined,
+    };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };
   }

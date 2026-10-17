@@ -9,6 +9,8 @@ export interface CommandResult {
   output: string;
   /** Vom Modell gemeldete Tokens (Prompt + Antwort), falls bekannt. */
   tokens?: number;
+  /** Sitzung des Claude-CLI, um das Gespräch später fortzusetzen (--resume). */
+  sessionId?: string;
 }
 
 export type CommandExecutor = (
