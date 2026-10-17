@@ -1,4 +1,4 @@
-import { systemAgents } from '../agent/system-agents.js';
+import { SYSTEM_ROLES, systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
@@ -113,7 +113,37 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
   app.get('/api/system-agents', async (_request, response) => {
     const row = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'system_agents'`))
       .rows[0];
-    response.json({ agents: row ? JSON.parse(row.value) : systemAgents() });
+    const models = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ollama_models'`))
+      .rows[0];
+    const chosen = await pool.query<{ key: string; value: string }>(
+      `SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`,
+    );
+    const agents = (row ? JSON.parse(row.value) : systemAgents()) as { role: string; model: string }[];
+    response.json({
+      agents: agents.map((agent) => ({
+        ...agent,
+        model: chosen.rows.find((item) => item.key === `model:${agent.role}`)?.value ?? agent.model,
+      })),
+      models: models ? JSON.parse(models.value) : [],
+    });
+  });
+
+  app.put('/api/system-agents/:role', async (request, response) => {
+    const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
+    const model = (request.body as { model?: unknown } | undefined)?.model;
+    if (!role || typeof model !== 'string' || model.length > 200 || !/^[\w./:@+-]*$/.test(model)) {
+      response.status(400).json({ message: 'Ungültige Rolle oder ungültiges Modell.' });
+      return;
+    }
+    if (model) {
+      await pool.query(
+        `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [`model:${role}`, model],
+      );
+    } else {
+      await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`model:${role}`]);
+    }
+    response.json({ role, model });
   });
 
   // Workflow order: phase (pre, while, after), then position.

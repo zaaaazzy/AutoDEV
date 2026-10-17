@@ -149,7 +149,10 @@ async function main(): Promise<void> {
       if (known.length) startup = false;
     };
     void publishSystemAgents(pool).catch(() => undefined);
-    const heartbeat = setInterval(beat, 15_000);
+    const heartbeat = setInterval(() => {
+      beat();
+      void publishSystemAgents(pool).catch(() => undefined);
+    }, 15_000);
     // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
     let chatTargets: Target[] = [];
     const chatActive = new Set<string>();

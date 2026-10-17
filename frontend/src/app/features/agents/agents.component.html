@@ -153,10 +153,17 @@
             <div class="item-content">
               <strong>{{ system.name }}</strong>
               <p class="muted">{{ system.description }}</p>
-              <p class="muted">
-                Modell: <code>{{ system.model }}</code> · änderbar über <code>{{ system.envKey }}</code> (oder
-                <code>DEV_LOG_OLLAMA_MODEL</code> für alle) in der Worker-Umgebung
-              </p>
+              <label class="system-model"
+                >Modell (lokal, kostenlos)
+                <select [ngModel]="system.model" (ngModelChange)="setSystemModel(system.role, $event)">
+                  @if (!installedModels().includes(system.model)) {
+                    <option [value]="system.model">{{ system.model }}</option>
+                  }
+                  @for (model of installedModels(); track model) {
+                    <option [value]="model">{{ model }}</option>
+                  }
+                </select>
+              </label>
             </div>
           </article>
         }

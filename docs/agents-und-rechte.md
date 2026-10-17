@@ -76,3 +76,7 @@ Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gese
 - **Repo-Doku-Sync:** spiegelt `README.md` und `docs/*.md` ins Dashboard.
 - **Sprint-Bericht:** wird nach jedem Zyklus für den aktiven Sprint erzeugt.
 - **Test-Agent** (`test-agent.ts`): führt konfigurierte Testbefehle aus und protokolliert Läufe und Schritte.
+
+## System-Agents und ihre Modelle
+
+Dashboard-Assistent, Problemanalyse und Schnellschätzung laufen lokal über Ollama. Im Bereich „Agents“ wählst du ihr Modell aus den installierten Ollama-Modellen. Die Wahl wird in `app_settings` (`model:<rolle>`) gespeichert, der Worker übernimmt sie innerhalb von 15 Sekunden und sie hat Vorrang vor `DEV_LOG_OLLAMA_MODEL_<ROLLE>`.

@@ -49,8 +49,11 @@ export class AgentsComponent {
 
   constructor() {
     void this.api
-      .get<{ agents: SystemAgent[] }>('/api/system-agents')
-      .then((result) => this.systemAgents.set(result.agents))
+      .get<{ agents: SystemAgent[]; models: string[] }>('/api/system-agents')
+      .then((result) => {
+        this.systemAgents.set(result.agents);
+        this.installedModels.set(result.models);
+      })
       .catch(() => undefined);
   }
 
@@ -70,6 +73,11 @@ export class AgentsComponent {
     if (preset) target.command = preset.command;
   }
   protected readonly systemAgents = signal<SystemAgent[]>([]);
+  protected readonly installedModels = signal<string[]>([]);
+  protected async setSystemModel(role: string, model: string): Promise<void> {
+    await this.api.put(`/api/system-agents/${role}`, { model });
+    this.systemAgents.update((list) => list.map((item) => (item.role === role ? { ...item, model } : item)));
+  }
   protected readonly agentEditing = signal<string | null>(null);
   protected agentEdit = { name: '', instructions: '', command: '' };
   protected agentForm = {
