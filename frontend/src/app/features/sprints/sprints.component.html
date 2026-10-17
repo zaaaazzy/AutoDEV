@@ -124,27 +124,33 @@
               <h4>Aufgaben</h4>
               @for (item of sprintItems(sprint.id); track item.id) {
                 <div class="sprint-task">
-                  <button
-                    type="button"
-                    class="sprint-task-head"
-                    (click)="toggleSprintItem(item.id)"
-                    [attr.aria-expanded]="openSprintItems().has(item.id)"
-                  >
-                    <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true">▾</span>
-                    <strong>{{ item.title }}</strong>
-                    <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
-                  </button>
-                  @if (item.status === 'blocked') {
-                    <div class="sprint-task-retry">
-                      <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
-                        <app-nav-icon name="undo" />Erneut versuchen
-                        @if (item.retryCount) {
-                          ({{ item.retryCount }})
-                        }
+                  <div class="sprint-task-row">
+                    <button
+                      type="button"
+                      class="sprint-task-head"
+                      (click)="toggleSprintItem(item.id)"
+                      [attr.aria-expanded]="openSprintItems().has(item.id)"
+                    >
+                      <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true"
+                        >▾</span
+                      >
+                      <strong>{{ item.title }}</strong>
+                      <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+                    </button>
+                    @if (item.status === 'blocked') {
+                      <button
+                        class="button secondary retry-button"
+                        type="button"
+                        [disabled]="busy()"
+                        (click)="retry(item)"
+                        title="Es startet nur der fehlgeschlagene Agent."
+                      >
+                        <app-nav-icon name="undo" />Erneut versuchen{{
+                          item.retryCount ? ' (' + item.retryCount + ')' : ''
+                        }}
                       </button>
-                      <span class="muted">Es startet nur der fehlgeschlagene Agent.</span>
-                    </div>
-                  }
+                    }
+                  </div>
                   @if (openSprintItems().has(item.id)) {
                     <div class="sprint-task-body">
                       @let rows = workflow(item);

@@ -21,7 +21,7 @@
 <details class="run-step" [open]="running() || !!output()">
   <summary>Ausgabe</summary>
   @if (output()) {
-    <article class="markdown task-body" [innerHTML]="output() | markdown"></article>
+    <article class="step-output" [innerHTML]="output() | markdown"></article>
   } @else {
     <p class="muted">{{ running() ? 'Ausgabe erscheint, sobald der Agent fertig ist.' : 'Keine Ausgabe.' }}</p>
   }

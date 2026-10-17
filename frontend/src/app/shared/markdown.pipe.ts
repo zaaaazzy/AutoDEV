@@ -38,12 +38,25 @@ export class MarkdownPipe implements PipeTransform {
         codeLines.push(line);
         continue;
       }
-      const heading = line.match(/^(#{1,3})\s+(.*)$/);
+      const heading = line.match(/^(#{1,6})\s+(.*)$/);
       if (heading) {
         flushParagraph();
         flushList();
         const level = heading[1]!.length;
         blocks.push(`<h${level}>${this.inline(heading[2]!)}</h${level}>`);
+        continue;
+      }
+      if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
+        flushParagraph();
+        flushList();
+        blocks.push('<hr>');
+        continue;
+      }
+      const quote = line.match(/^>\s?(.*)$/);
+      if (quote) {
+        flushParagraph();
+        flushList();
+        blocks.push(`<blockquote>${this.inline(quote[1]!)}</blockquote>`);
         continue;
       }
       const unordered = line.match(/^[-*]\s+(.*)$/);
@@ -75,6 +88,7 @@ export class MarkdownPipe implements PipeTransform {
     const html = this.escape(text)
       .replace(/`([^`]+)`/g, (_match, value: string) => `@@CODE${code.push(value) - 1}@@`)
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,:;]|$)/g, '$1<em>$2</em>')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="doc-link">$1<span class="doc-link-url"> ($2)</span></span>');
     return html.replace(/@@CODE(\d+)@@/g, (_match, index: string) => `<code>${code[Number(index)]}</code>`);
   }

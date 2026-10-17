@@ -2224,8 +2224,117 @@ h3 .link-button {
   font-weight: 400;
 }
 
-.model-icon { display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; margin-left: 8px; border-radius: 8px; background: #f0f2ec; color: #5b655f; vertical-align: middle; }
-.model-icon.claude { background: #fbeee6; color: #c15f3c; }
-.model-icon.copilot { background: #ecebf8; color: #5b4fc4; }
-.model-icon.gemini { background: #e8f0fd; color: #3b6fd8; }
-.model-icon.ollama { background: #f0f2ec; color: #2b3a33; }
+.model-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+  border-radius: 8px;
+  background: #f0f2ec;
+  color: #5b655f;
+  vertical-align: middle;
+}
+.model-icon.claude {
+  background: #fbeee6;
+  color: #c15f3c;
+}
+.model-icon.copilot {
+  background: #ecebf8;
+  color: #5b4fc4;
+}
+.model-icon.gemini {
+  background: #e8f0fd;
+  color: #3b6fd8;
+}
+.model-icon.ollama {
+  background: #f0f2ec;
+  color: #2b3a33;
+}
+
+.sprint-task-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 10px;
+}
+.sprint-task-row .sprint-task-head {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.retry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.retry-button app-nav-icon {
+  width: 13px;
+  height: 13px;
+}
+.step-output {
+  max-height: 420px;
+  overflow: auto;
+  margin-top: 8px;
+  padding: 14px 16px;
+  border: 1px solid #dfe3da;
+  border-radius: 9px;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.step-output h1,
+.step-output h2 {
+  margin: 16px 0 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #e8ebe4;
+  font-size: 15px;
+}
+.step-output h3,
+.step-output h4,
+.step-output h5,
+.step-output h6 {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  color: var(--green);
+}
+.step-output > :first-child {
+  margin-top: 0;
+}
+.step-output > :last-child {
+  margin-bottom: 0;
+}
+.step-output ul,
+.step-output ol {
+  margin: 0 0 10px;
+  padding-left: 22px;
+}
+.step-output li {
+  margin: 2px 0;
+}
+.step-output blockquote {
+  margin: 0 0 10px;
+  padding: 4px 12px;
+  border-left: 3px solid var(--green);
+  color: var(--muted);
+  background: #f7f8f5;
+}
+.step-output hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px solid #e8ebe4;
+}
+.step-output code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: #f2f4f0;
+}
+.step-output pre code {
+  padding: 0;
+  background: none;
+}

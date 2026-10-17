@@ -86,7 +86,14 @@ export class SprintsComponent {
   }
 
   protected sprintItems(sprintId: string): DevelopmentItem[] {
-    return this.data().development.filter((item) => item.sprintId === sprintId);
+    const rank = (status: string): number => {
+      const order = ['in_progress', 'planned', 'backlog', 'blocked', 'done'];
+      const index = order.indexOf(status);
+      return index < 0 ? order.length : index;
+    };
+    return this.data()
+      .development.filter((item) => item.sprintId === sprintId)
+      .sort((left, right) => rank(left.status) - rank(right.status));
   }
 
   protected sprintProgress(sprintId: string): string {
