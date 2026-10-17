@@ -22,6 +22,41 @@ export function isAssistantServiceCommand(command: string): boolean {
   }
   return /^git (?:pull --ff-only|fetch|checkout [\w][\w./-]*)$/.test(command);
 }
+/**
+ * Same command scope as the local assistant (COMMAND_PATTERN + ASSISTANT_SERVICE_PATTERNS), expressed as
+ * Claude Code permission rules: with --permission-mode acceptEdits every other shell command is denied.
+ */
+export const CLAUDE_ASSISTANT_TOOLS = [
+  'npm test',
+  'npm run',
+  'npm install',
+  'npm ci',
+  'git status',
+  'git diff',
+  'git log',
+  'git fetch',
+  'git pull --ff-only',
+  'git checkout',
+  'git clone',
+  'docker compose ps',
+  'docker compose config --services',
+  'docker compose logs',
+  'docker compose up',
+  'docker compose stop',
+  'docker compose start',
+  'docker compose restart',
+  'docker compose down',
+  'docker compose build',
+  'docker compose pull',
+].map((prefix) => `Bash(${prefix}:*)`);
+
+/** Lets the dashboard assistant run its service commands when it is backed by the Claude Code CLI. */
+export function withAssistantPermissions(command: string[], role: string): string[] {
+  const [binary, ...rest] = command;
+  const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
+  if (role !== 'assistant' || !isClaude || rest.some((part) => /^--allowed-?tools$/i.test(part))) return command;
+  return [binary, '--allowedTools', CLAUDE_ASSISTANT_TOOLS.join(','), ...rest];
+}
 export const SECRET_IN_COMMAND = /\.env|\.pem\b|\.key\b|id_(?:rsa|ed25519|ecdsa)/i;
 const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
 const INSTALL_FLAGS = new Set([

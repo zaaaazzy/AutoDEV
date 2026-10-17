@@ -14,6 +14,24 @@ import { fetchProjectData } from './project-loader.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
+const ACTIVE_PROJECT_KEY = 'devlog.activeProject';
+
+/** Zuletzt gewähltes Projekt, damit ein Reload dasselbe Projekt öffnet. Speicher kann fehlen oder gesperrt sein. */
+function readStoredProject(): string {
+  try {
+    return globalThis.localStorage?.getItem(ACTIVE_PROJECT_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function storeProject(slug: string): void {
+  try {
+    if (slug) globalThis.localStorage?.setItem(ACTIVE_PROJECT_KEY, slug);
+  } catch {
+    // Ohne Speicher wird beim nächsten Laden einfach das erste Projekt gewählt.
+  }
+}
 
 /** Gemeinsamer Zustand: Projekte, geladene Projektdaten, Navigation, Hintergrund-Aktualisierung. */
 const NOTICE_MS = 5000;
@@ -24,7 +42,7 @@ export class ProjectStore {
   private requestVersion = 0;
 
   readonly projects = signal<Project[]>([]);
-  readonly activeProject = signal('');
+  readonly activeProject = signal(readStoredProject());
   readonly data = signal<ProjectData>(emptyProjectData());
   readonly errors = signal<Record<string, string>>({});
   readonly section = signal<Section>(sectionFromHash());
@@ -106,6 +124,7 @@ export class ProjectStore {
   async loadProject(slug: string, background = false): Promise<void> {
     const version = ++this.requestVersion;
     this.activeProject.set(slug);
+    storeProject(slug);
     if (!background) {
       this.openAgent.set(null);
       this.loading.set(true);

@@ -6,6 +6,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../api/bugs.js';
 import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
+import { withAssistantPermissions } from './tool-permissions.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -72,9 +73,10 @@ export async function runAuthorAgent(
     await loadProjectContext(pool, options.project),
     buildPrompt(author?.instructions ?? ''),
   );
-  const command = author?.command?.length
+  const configured = author?.command?.length
     ? author.command
     : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
+  const command = configured && withAssistantPermissions(configured, role);
   try {
     const result = command
       ? await execute(buildInvocation(command, prompt), options.cwd, {
