@@ -28,7 +28,6 @@ export class OrderDetailComponent {
 
   readonly order = input.required<DevelopmentItem>();
   readonly editing = input(false);
-  readonly editStarted = output<void>();
   readonly editCancelled = output<void>();
   readonly saved = output<FormValues>();
 

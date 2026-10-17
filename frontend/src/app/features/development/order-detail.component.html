@@ -1,132 +1,6 @@
 @let item = order();
-<div class="item-card order-detail">
-  <div class="item-content">
-    @if (!editing()) {
-      <div class="order-title-row">
-        <h3>{{ item.title }}</h3>
-        <button
-          class="button secondary"
-          type="button"
-          (click)="editStarted.emit()"
-          aria-label="Bearbeiten"
-          title="Bearbeiten"
-        >
-          ✎
-        </button>
-      </div>
-      <details class="run-step order-brief">
-        <summary>Auftrag</summary>
-        @if (item.description) {
-          <article class="markdown" [innerHTML]="item.description | markdown"></article>
-        } @else {
-          <p class="muted">Keine Beschreibung.</p>
-        }
-      </details>
-      <h4 class="workflow-title">Agents</h4>
-      <app-agent-workflow [order]="item" />
-    }
-    @if (item.status === 'blocked') {
-      <div class="blocked-box">
-        <strong>Blockiert</strong>
-        @if (item.failure) {
-          <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article>
-        }
-        @if (item.failureBugId) {
-          <p class="bug-link">
-            🐞 <a href="#bugs" (click)="store.navigate('bugs')">Bug-Bericht ansehen</a> ·
-            @switch (item.fixStatus) {
-              @case ('planned') {
-                Behebung ist eingeplant und startet automatisch.
-              }
-              @case ('in_progress') {
-                Behebung läuft gerade …
-              }
-              @case ('blocked') {
-                Die automatische Behebung ist gescheitert – bitte Problem analysieren.
-              }
-              @case ('done') {
-                Bug behoben, der Auftrag wird erneut gestartet.
-              }
-              @default {
-                Keine automatische Behebung (in den Einstellungen aktivierbar).
-              }
-            }
-          </p>
-        }
-        <div class="actions">
-          <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
-            ↻ Erneut versuchen
-            @if (item.retryCount) {
-              ({{ item.retryCount }})
-            }
-          </button>
-          <button
-            class="button secondary"
-            type="button"
-            [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
-            (click)="analyze(item)"
-          >
-            {{
-              item.analysisStatus === 'requested' || item.analysisStatus === 'running'
-                ? 'Assistent analysiert …'
-                : '🔎 Problem analysieren'
-            }}
-          </button>
-        </div>
-        <p class="muted">
-          Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und
-          erscheinen künftig bei den Risiken.
-        </p>
-      </div>
-    }
-    @if (item.analysis) {
-      <h4 class="order-section">🔎 Analyse des Assistenten</h4>
-      <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
-    }
-    @if (item.risks) {
-      <h4 class="order-section">⚠ Risiken</h4>
-      <article class="markdown" [innerHTML]="item.risks | markdown"></article>
-    }
-    @if (item.projectContext) {
-      <details class="order-context">
-        <summary>Projektbeschreibung &amp; Leitlinien</summary>
-        <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
-      </details>
-    }
-    <app-gallery [ideationId]="item.ideationId" />
-    @if (editing()) {
-      <form class="form-grid" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
-        <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
-        <label class="wide"
-          >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
-        </label>
-        <label
-          >Priorität<select name="priority" [ngModel]="item.priority">
-            <option value="low">Niedrig</option>
-            <option value="medium">Mittel</option>
-            <option value="high">Hoch</option>
-          </select>
-        </label>
-        <label
-          >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
-        </label>
-        <label
-          >Token-Schätzung<input
-            name="tokenEstimate"
-            type="number"
-            min="0"
-            step="1000"
-            [ngModel]="item.tokenEstimate"
-          />
-        </label>
-        <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" [ngModel]="item.benefit" /> </label>
-        <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" [ngModel]="item.cost" /> </label>
-        <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-        <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
-      </form>
-    }
-  </div>
-  <div class="item-controls">
+<div class="order-panel">
+  <div class="order-controls">
     <label
       >Status<select
         [ngModel]="item.status"
@@ -176,4 +50,110 @@
       </span>
     </label>
   </div>
+  @if (item.status === 'blocked') {
+    <div class="blocked-box">
+      <strong>Blockiert</strong>
+      @if (item.failure) {
+        <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article>
+      }
+      @if (item.failureBugId) {
+        <p class="bug-link">
+          🐞 <a href="#bugs" (click)="store.navigate('bugs')">Bug-Bericht ansehen</a> ·
+          @switch (item.fixStatus) {
+            @case ('planned') {
+              Behebung ist eingeplant und startet automatisch.
+            }
+            @case ('in_progress') {
+              Behebung läuft gerade …
+            }
+            @case ('blocked') {
+              Die automatische Behebung ist gescheitert – bitte Problem analysieren.
+            }
+            @case ('done') {
+              Bug behoben, der Auftrag wird erneut gestartet.
+            }
+            @default {
+              Keine automatische Behebung (in den Einstellungen aktivierbar).
+            }
+          }
+        </p>
+      }
+      <div class="actions">
+        <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
+          ↻ Erneut versuchen
+          @if (item.retryCount) {
+            ({{ item.retryCount }})
+          }
+        </button>
+        <button
+          class="button secondary"
+          type="button"
+          [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
+          (click)="analyze(item)"
+        >
+          {{
+            item.analysisStatus === 'requested' || item.analysisStatus === 'running'
+              ? 'Assistent analysiert …'
+              : '🔎 Problem analysieren'
+          }}
+        </button>
+      </div>
+      <p class="muted">
+        Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und
+        erscheinen künftig bei den Risiken.
+      </p>
+    </div>
+  }
+  @if (item.analysis) {
+    <h4 class="order-section">🔎 Analyse des Assistenten</h4>
+    <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
+  }
+  @if (item.risks) {
+    <h4 class="order-section">⚠ Risiken</h4>
+    <article class="markdown" [innerHTML]="item.risks | markdown"></article>
+  }
+  @if (item.projectContext) {
+    <details class="order-context">
+      <summary>Projektbeschreibung &amp; Leitlinien</summary>
+      <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
+    </details>
+  }
+  @if (editing()) {
+    <form class="form-grid" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
+      <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
+      <label class="wide"
+        >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
+      </label>
+      <label
+        >Priorität<select name="priority" [ngModel]="item.priority">
+          <option value="low">Niedrig</option>
+          <option value="medium">Mittel</option>
+          <option value="high">Hoch</option>
+        </select>
+      </label>
+      <label
+        >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
+      </label>
+      <label
+        >Token-Schätzung<input name="tokenEstimate" type="number" min="0" step="1000" [ngModel]="item.tokenEstimate" />
+      </label>
+      <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" [ngModel]="item.benefit" /> </label>
+      <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" [ngModel]="item.cost" /> </label>
+      <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+      <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
+    </form>
+  }
+  <details class="run-step order-brief">
+    <summary>Auftrag</summary>
+    @if (item.description) {
+      <article class="markdown" [innerHTML]="item.description | markdown"></article>
+    } @else {
+      <p class="muted">Keine Beschreibung.</p>
+    }
+    <app-gallery [ideationId]="item.ideationId" />
+  </details>
+  <details class="run-step order-brief">
+    <summary>Agents</summary>
+    <app-agent-workflow [order]="item" />
+  </details>
 </div>

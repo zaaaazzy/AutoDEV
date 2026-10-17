@@ -1,4 +1,4 @@
-import { NgClass } from '@angular/common';
+import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
@@ -22,6 +22,7 @@ type DevValueKey = 'status' | 'priority' | 'sprint' | 'effortHours';
   standalone: true,
   imports: [
     NgClass,
+    NgTemplateOutlet,
     FormsModule,
     ColumnHeaderComponent,
     OrderDetailComponent,
@@ -153,6 +154,12 @@ export class DevelopmentComponent {
 
   protected toggleOrder(id: string): void {
     this.openOrder.set(this.openOrder() === id ? null : id);
+  }
+
+  /** Stift in der Liste: Zeile aufklappen und direkt bearbeiten. */
+  protected editOrder(id: string): void {
+    this.openOrder.set(id);
+    this.orderEditing.set(this.orderEditing() === id ? null : id);
   }
 
   protected async saveOrder(item: DevelopmentItem, values: FormValues): Promise<void> {

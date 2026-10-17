@@ -1278,7 +1278,8 @@ h3 .link-button {
 }
 .idea-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 0.92rem;
 }
 .idea-table th,
@@ -1863,17 +1864,20 @@ h3 .link-button {
 .order-title-row h3 {
   margin: 0;
 }
-.order-detail .markdown {
+.order-detail .markdown,
+.order-panel .markdown {
   max-height: none;
   background: #fff;
 }
-.order-detail .markdown h2 {
+.order-detail .markdown h2,
+.order-panel .markdown h2 {
   font-size: 16px;
   margin-top: 14px;
   padding-bottom: 4px;
   border-bottom: 1px solid var(--line);
 }
-.order-detail .markdown h2:first-child {
+.order-detail .markdown h2:first-child,
+.order-panel .markdown h2:first-child {
   margin-top: 0;
 }
 .order-section {
@@ -2667,4 +2671,63 @@ h3 .link-button {
   padding: 0;
   background: none;
   overflow: visible;
+}
+
+/* Geöffnete Listenzeile und Detailbereich bilden einen gemeinsamen Rahmen */
+.idea-table tr.row-open > td {
+  border-top: 1px solid #c9d1c6;
+  border-bottom: 0;
+  background: #fafbf8;
+}
+.idea-table tr.row-open > td:first-child {
+  border-left: 1px solid #c9d1c6;
+  border-top-left-radius: 10px;
+}
+.idea-table tr.row-open > td:last-child {
+  border-right: 1px solid #c9d1c6;
+  border-top-right-radius: 10px;
+}
+.idea-table tr.row-open + .closed-detail > td {
+  border: 1px solid #c9d1c6;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: #fafbf8;
+}
+.idea-table tr.row-open + .closed-detail + tr > td {
+  border-top: 0;
+}
+.row-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+/* Auftragsdetail: Steuerung in einer Zeile, darunter aufklappbare Bereiche über die volle Breite */
+.order-panel {
+  display: grid;
+  gap: 10px;
+  padding: 4px 0 6px;
+}
+.order-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(240px, 2fr);
+  gap: 12px;
+  align-items: end;
+}
+.order-controls label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.order-controls .inline-form {
+  display: flex;
+  gap: 8px;
+}
+.order-controls .inline-form select {
+  flex: 1;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .order-controls {
+    grid-template-columns: 1fr;
+  }
 }

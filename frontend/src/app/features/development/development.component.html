@@ -56,58 +56,7 @@
           </thead>
           <tbody>
             @for (item of openOrders(); track item.id) {
-              <tr [class.row-open]="openOrder() === item.id">
-                <td class="title-cell">
-                  <div class="title-with-hint">
-                    <button
-                      type="button"
-                      class="link-button clamp"
-                      (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
-                    >
-                      {{ item.title }}
-                    </button>
-                    @if (item.description) {
-                      <span
-                        class="summary-hint"
-                        tabindex="0"
-                        [attr.data-tip]="item.description | shortText: 400"
-                        [attr.aria-label]="'Kurzfassung: ' + (item.description | shortText: 400)"
-                        >i</span
-                      >
-                    }
-                  </div>
-                </td>
-                <td>
-                  <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
-                </td>
-                <td>{{ item.priority | priorityLabel }}</td>
-                <td>{{ devCell(item, 'sprint') }}</td>
-                <td>{{ item.effortHours | hours }}</td>
-                <td class="expand-cell">
-                  <button
-                    type="button"
-                    class="button secondary icon-button"
-                    [attr.aria-expanded]="openOrder() === item.id"
-                    (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
-                    title="Details"
-                  >
-                    {{ openOrder() === item.id ? '▾' : '▸' }}
-                  </button>
-                </td>
-              </tr>
-              @if (openOrder() === item.id) {
-                <tr class="closed-detail">
-                  <td colspan="6">
-                    <app-order-detail
-                      [order]="item"
-                      [editing]="orderEditing() === item.id"
-                      (editStarted)="orderEditing.set(item.id)"
-                      (editCancelled)="orderEditing.set(null)"
-                      (saved)="saveOrder(item, $event)"
-                    />
-                  </td>
-                </tr>
-              }
+              <ng-container *ngTemplateOutlet="orderRow; context: { $implicit: item }" />
             } @empty {
               <tr>
                 <td colspan="6" class="empty-state">Keine offenen Aufträge für diese Filter.</td>
@@ -138,96 +87,15 @@
           <table class="idea-table">
             <thead>
               <tr>
-                <th>Titel</th>
-                <th>Erledigt</th>
+                @for (col of devColumns; track col.key) {
+                  <th>{{ col.label }}</th>
+                }
                 <th></th>
               </tr>
             </thead>
             <tbody>
               @for (item of doneOrders(); track item.id) {
-                <tr [class.row-open]="openOrder() === item.id">
-                  <td class="title-cell">
-                    <div class="title-with-hint">
-                      <button
-                        type="button"
-                        class="link-button clamp"
-                        (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
-                      >
-                        {{ item.title }}
-                      </button>
-                      @if (item.description) {
-                        <span
-                          class="summary-hint"
-                          tabindex="0"
-                          [attr.data-tip]="item.description | shortText: 400"
-                          [attr.aria-label]="'Kurzfassung: ' + (item.description | shortText: 400)"
-                          >i</span
-                        >
-                      }
-                    </div>
-                  </td>
-                  <td>{{ item.completedAt ? item.completedAt.slice(0, 10).split('-').reverse().join('.') : '–' }}</td>
-                  <td class="expand-cell">
-                    <button
-                      type="button"
-                      class="button secondary icon-button"
-                      [attr.aria-expanded]="openOrder() === item.id"
-                      (click)="openOrder.set(openOrder() === item.id ? null : item.id)"
-                      title="Idee und Sprint anzeigen"
-                    >
-                      {{ openOrder() === item.id ? '▾' : '▸' }}
-                    </button>
-                  </td>
-                </tr>
-                @if (openOrder() === item.id) {
-                  <tr class="closed-detail">
-                    <td colspan="3">
-                      @let sprint = store.sprintOf(item);
-                      @let idea = ideaOf(item);
-                      <div class="closed-info">
-                        <div class="info-block">
-                          <h4>Idee</h4>
-                          @if (idea) {
-                            <p>
-                              <strong>{{ idea.title }}</strong>
-                            </p>
-                            <p class="muted">{{ idea.description | shortText: 160 }}</p>
-                          } @else {
-                            <p class="muted">Nicht aus einer Idee entstanden.</p>
-                          }
-                        </div>
-                        <div class="info-block">
-                          <h4>Sprint</h4>
-                          @if (sprint) {
-                            <p>
-                              <strong>{{ sprint.name }}</strong> · {{ sprint.status | statusLabel }}
-                            </p>
-                            @if (sprint.goal) {
-                              <p class="muted">{{ sprint.goal }}</p>
-                            }
-                          } @else {
-                            <p class="muted">Keinem Sprint zugewiesen.</p>
-                          }
-                        </div>
-                        <div class="info-block">
-                          <h4>Auftrag</h4>
-                          <p>Priorität {{ item.priority | priorityLabel }} · Aufwand {{ item.effortHours | hours }}</p>
-                          <label
-                            >Status<select
-                              [ngModel]="item.status"
-                              (ngModelChange)="updateDevelopment(item.id, { status: $event })"
-                              [name]="'done-status-' + item.id"
-                            >
-                              @for (status of developmentStatuses; track status) {
-                                <option [value]="status">{{ status | statusLabel }}</option>
-                              }
-                            </select>
-                          </label>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                }
+                <ng-container *ngTemplateOutlet="orderRow; context: { $implicit: item }" />
               }
             </tbody>
           </table>
@@ -238,3 +106,63 @@
     }
   </section>
 }
+<ng-template #orderRow let-item>
+  <tr [class.row-open]="openOrder() === item.id">
+    <td class="title-cell">
+      <div class="title-with-hint">
+        <button type="button" class="link-button clamp" (click)="toggleOrder(item.id)">
+          {{ item.title }}
+        </button>
+        @if (item.description) {
+          <span
+            class="summary-hint"
+            tabindex="0"
+            [attr.data-tip]="item.description | shortText: 400"
+            [attr.aria-label]="'Kurzfassung: ' + (item.description | shortText: 400)"
+            >i</span
+          >
+        }
+      </div>
+    </td>
+    <td>
+      <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+    </td>
+    <td>{{ item.priority | priorityLabel }}</td>
+    <td>{{ devCell(item, 'sprint') }}</td>
+    <td>{{ item.effortHours | hours }}</td>
+    <td class="expand-cell">
+      <span class="row-actions">
+        <button
+          type="button"
+          class="button secondary icon-button"
+          (click)="editOrder(item.id)"
+          [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
+          title="Bearbeiten"
+        >
+          ✎
+        </button>
+        <button
+          type="button"
+          class="button secondary icon-button"
+          [attr.aria-expanded]="openOrder() === item.id"
+          (click)="toggleOrder(item.id)"
+          title="Details"
+        >
+          {{ openOrder() === item.id ? '▾' : '▸' }}
+        </button>
+      </span>
+    </td>
+  </tr>
+  @if (openOrder() === item.id) {
+    <tr class="closed-detail">
+      <td colspan="6">
+        <app-order-detail
+          [order]="item"
+          [editing]="orderEditing() === item.id"
+          (editCancelled)="orderEditing.set(null)"
+          (saved)="saveOrder(item, $event)"
+        />
+      </td>
+    </tr>
+  }
+</ng-template>
