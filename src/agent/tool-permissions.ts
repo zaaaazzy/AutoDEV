@@ -48,14 +48,50 @@ export const CLAUDE_ASSISTANT_TOOLS = [
   'docker compose down',
   'docker compose build',
   'docker compose pull',
+  // Diagnose ohne Rückfrage: Logs und Dateien lesen, Dienste und URLs prüfen, Builds und Tests starten.
+  'tail',
+  'head',
+  'cat',
+  'ls',
+  'grep',
+  'wc',
+  'curl',
+  'lsof -i',
+  'ps',
+  'docker ps',
+  'docker logs',
+  'netstat',
+  'npm --prefix',
+  'npx --prefix',
+  'npx ng',
+  'npx tsc',
+  'npx tsx',
+  'npx vitest',
+  'npx playwright',
+  'node --version',
+  'launchctl list',
 ].map((prefix) => `Bash(${prefix}:*)`);
 
-/** Lets the dashboard assistant run its service commands when it is backed by the Claude Code CLI. */
-export function withAssistantPermissions(command: string[], role: string): string[] {
+/** Rollen mit erweiterten Rechten: Dashboard-Assistent und Entwickler arbeiten selbstständig. */
+const TRUSTED_ROLES = new Set(['assistant', 'developer']);
+
+/** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
+export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {
+  const home = environment.HOME;
+  return home ? [`${home}/Library/Logs`] : [];
+}
+
+/** Gives the dashboard assistant and the developer their command rights when backed by the Claude Code CLI. */
+export function withAssistantPermissions(
+  command: string[],
+  role: string,
+  readDirectories: string[] = extraReadDirectories(),
+): string[] {
   const [binary, ...rest] = command;
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
-  if (role !== 'assistant' || !isClaude || rest.some((part) => /^--allowed-?tools$/i.test(part))) return command;
-  return [binary, '--allowedTools', CLAUDE_ASSISTANT_TOOLS.join(','), ...rest];
+  if (!TRUSTED_ROLES.has(role) || !isClaude || rest.some((part) => /^--allowed-?tools$/i.test(part))) return command;
+  const directories = readDirectories.flatMap((directory) => ['--add-dir', directory]);
+  return [binary, ...directories, '--allowedTools', CLAUDE_ASSISTANT_TOOLS.join(','), ...rest];
 }
 export const SECRET_IN_COMMAND = /\.env|\.pem\b|\.key\b|id_(?:rsa|ed25519|ecdsa)/i;
 const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;

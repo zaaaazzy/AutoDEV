@@ -9,6 +9,7 @@ import { type CommandExecutor, type CommandResult, redactOutput } from '../core/
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
 import { commitTaskToGit } from './git-sync.js';
 import { executeAgentCommand } from '../agent/claude-stream.js';
+import { withAssistantPermissions } from '../agent/tool-permissions.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
@@ -184,7 +185,8 @@ async function invokeAgent(
       signal: hooks.signal,
       onProgress: hooks.onAction,
     });
-  const command = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
+  const configured = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
+  const command = configured && withAssistantPermissions(configured, agent.role);
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
     const written = await executeAgentCommand(
