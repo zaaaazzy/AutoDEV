@@ -40,83 +40,63 @@
     <div class="section-heading">
       <div>
         <h2>Alle Ideen</h2>
-        <p class="muted">
-          {{ sortedIdeas().length }} von {{ data().ideas.length }} Einträgen · Spaltenkopf sortiert, ⏷ filtert
-          (Mehrfachauswahl)
-        </p>
+        <p class="muted">Offene Ideen · Spaltenkopf sortiert, Trichter filtert</p>
       </div>
-      @if (hasIdeaFilters()) {
-        <button type="button" class="button secondary" (click)="clearIdeaFilters()">Filter zurücksetzen</button>
+    </div>
+    <app-data-table
+      [rows]="openIdeas()"
+      [columns]="ideaColumns"
+      [rowId]="ideaId"
+      [initialFilters]="{ status: defaultStatusFilter }"
+      [initialSort]="[{ id: 'createdAt', desc: true }]"
+      [(expanded)]="expandedIdea"
+      emptyText="Keine Ideen für diese Filter."
+    >
+      <ng-template appDataCell="title" let-idea>
+        <ng-container *ngTemplateOutlet="ideaTitle; context: { $implicit: idea }" />
+      </ng-template>
+      <ng-template appDataCell="status" let-idea>
+        <span class="status" [ngClass]="idea.status | statusClass">{{ idea.status | statusLabel }}</span>
+      </ng-template>
+      <ng-template appDataActions let-idea>
+        <button
+          type="button"
+          class="button secondary icon-button"
+          (click)="editIdea(idea.id)"
+          [attr.aria-label]="'Idee bearbeiten: ' + idea.title"
+          title="Bearbeiten"
+        >
+          ✎
+        </button>
+      </ng-template>
+      <ng-template appDataDetail let-idea>
+        @if (idea.description) {
+          <div class="idea-summary markdown" [innerHTML]="idea.description | markdown"></div>
+        } @else {
+          <p class="muted">Keine Beschreibung.</p>
+        }
+        <p class="muted">
+          Aufwand {{ idea.effortHours | hours }} · Nutzen {{ idea.benefit ?? '–' }}/10 · Kosten
+          {{ idea.cost ?? '–' }}/10
+        </p>
+        <app-gallery [ideationId]="idea.id" />
+      </ng-template>
+    </app-data-table>
+  </section>
+  <ng-template #ideaTitle let-idea>
+    <div class="title-with-hint">
+      <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">{{ idea.title }}</button>
+      @if (idea.description) {
+        <span
+          class="summary-hint"
+          tabindex="0"
+          [attr.data-tip]="idea.description | shortText: 400"
+          [attr.aria-label]="'Kurzfassung: ' + (idea.description | shortText: 400)"
+          >i</span
+        >
       }
     </div>
-    @if (data().ideas.length) {
-      <div class="table-wrap">
-        <table class="idea-table">
-          <thead>
-            <tr>
-              @for (col of ideaColumns; track col.key) {
-                <th
-                  appColumnHeader
-                  [label]="col.label"
-                  [sortDir]="ideaSort().key === col.key ? ideaSort().dir : null"
-                  [filterActive]="ideaFilterActive(col.key)"
-                  [textFilter]="isTextColumn(col.key)"
-                  [textValue]="textValue(col.key)"
-                  [options]="ideaOptions(col.key)"
-                  [selected]="selectedValues(col.key)"
-                  (sortRequested)="sortIdeasBy(col.key)"
-                  (textChange)="setIdeaText(col.key, $event)"
-                  (valueToggle)="toggleIdeaValue(col.key, $event.option, $event.checked)"
-                ></th>
-              }
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (idea of sortedIdeas(); track idea.id) {
-              <tr>
-                <td class="title-cell">
-                  <div class="title-with-hint">
-                    <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">
-                      {{ idea.title }}
-                    </button>
-                    @if (idea.description) {
-                      <span
-                        class="summary-hint"
-                        tabindex="0"
-                        [attr.data-tip]="idea.description | shortText: 400"
-                        [attr.aria-label]="'Kurzfassung: ' + (idea.description | shortText: 400)"
-                        >i</span
-                      >
-                    }
-                  </div>
-                </td>
-                <td>
-                  <span class="status" [ngClass]="idea.status | statusClass">{{ idea.status | statusLabel }}</span>
-                </td>
-                <td>{{ idea.priority | priorityLabel }}</td>
-                <td>{{ idea.effortHours | hours }}</td>
-                <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
-                <td>
-                  <button
-                    type="button"
-                    class="button secondary icon-button"
-                    (click)="editIdea(idea.id)"
-                    [attr.aria-label]="'Idee bearbeiten: ' + idea.title"
-                    title="Bearbeiten"
-                  >
-                    ✎
-                  </button>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    } @else {
-      <p class="empty-state">Noch keine Ideen vorhanden.</p>
-    }
-  </section>
+  </ng-template>
   <ng-template #ideaGroup let-group>
     <section class="panel">
       <div class="section-heading">
@@ -131,140 +111,96 @@
         </button>
       </div>
       @if (group.open()) {
-        @if (group.ideas.length) {
-          <div class="table-wrap">
-            <table class="idea-table">
-              <thead>
-                <tr>
-                  <th>Titel</th>
-                  <th>Status</th>
-                  <th>Erstellt</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (idea of group.ideas; track idea.id) {
-                  <tr [class.row-open]="openClosedIdea() === idea.id">
-                    <td class="title-cell">
-                      <div class="title-with-hint">
-                        <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">
-                          {{ idea.title }}
-                        </button>
-                        @if (idea.description) {
-                          <span
-                            class="summary-hint"
-                            tabindex="0"
-                            [attr.data-tip]="idea.description | shortText: 400"
-                            [attr.aria-label]="'Kurzfassung: ' + (idea.description | shortText: 400)"
-                            >i</span
-                          >
-                        }
-                      </div>
-                    </td>
-                    <td>
-                      @let status = ideaStatus(idea);
-                      <span class="status" [ngClass]="status | statusClass">{{ status | statusLabel }}</span>
-                    </td>
-                    <td>{{ ideaCellValue(idea, 'createdAt') }}</td>
-                    <td class="expand-cell">
-                      <button
-                        type="button"
-                        class="button secondary icon-button"
-                        [attr.aria-expanded]="openClosedIdea() === idea.id"
-                        (click)="openClosedIdea.set(openClosedIdea() === idea.id ? null : idea.id)"
-                        [title]="group.progress ? 'Auftrag und Agents anzeigen' : 'Auftrag und Sprint anzeigen'"
-                      >
-                        {{ openClosedIdea() === idea.id ? '▾' : '▸' }}
-                      </button>
-                    </td>
-                  </tr>
-                  @if (openClosedIdea() === idea.id) {
-                    <tr class="closed-detail">
-                      <td colspan="4">
-                        @let order = closedIdeaOrder(idea);
-                        @let sprint = store.sprintOf(order);
-                        @if (idea.description) {
-                          <div class="idea-summary markdown" [innerHTML]="idea.description | markdown"></div>
-                        }
-                        @if (group.progress) {
-                          <div class="progress-info">
-                            <div class="info-block">
-                              <h4>Auftrag</h4>
-                              @if (order) {
-                                <p>
-                                  <strong>{{ order.title }}</strong>
-                                  <span class="status" [ngClass]="order.status | statusClass">{{
-                                    order.status | statusLabel
-                                  }}</span>
-                                </p>
-                                <p class="muted">
-                                  Priorität {{ order.priority | priorityLabel }} · Aufwand
-                                  {{ order.effortHours | hours }}
-                                </p>
-                                <details class="run-step order-brief">
-                                  <summary>Auftrag</summary>
-                                  <div class="detail-text markdown" [innerHTML]="order.description | markdown"></div>
-                                </details>
-                              } @else {
-                                <p class="muted">Kein Auftrag gefunden.</p>
-                              }
-                            </div>
-                            <div class="info-block">
-                              <h4>Agents</h4>
-                              @if (order) {
-                                <app-agent-workflow [order]="order" />
-                              }
-                            </div>
-                          </div>
-                        } @else {
-                          <div class="closed-info">
-                            <div class="info-block span-all">
-                              <h4>Auftrag</h4>
-                              @if (order) {
-                                <p>
-                                  <strong>{{ order.title }}</strong>
-                                </p>
-                                <p>
-                                  <span class="status" [ngClass]="order.status | statusClass">{{
-                                    order.status | statusLabel
-                                  }}</span>
-                                  · Priorität {{ order.priority | priorityLabel }} · Aufwand
-                                  {{ order.effortHours | hours }}
-                                </p>
-                                @if (order.completedAt) {
-                                  <p class="muted">
-                                    Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
-                                  </p>
-                                }
-                                <h4 class="sub-heading">Agents</h4>
-                                <app-agent-workflow [order]="order" />
-                              } @else {
-                                <p class="muted">
-                                  {{
-                                    idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.'
-                                  }}
-                                </p>
-                              }
-                            </div>
-                            @if (order) {
-                              <div class="info-block">
-                                <h4>Geänderte Dateien</h4>
-                                <app-changed-files [order]="order" [sprint]="sprint" />
-                              </div>
-                            }
-                            <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
-                          </div>
-                        }
-                      </td>
-                    </tr>
+        <app-data-table
+          [rows]="group.ideas"
+          [columns]="groupColumns"
+          [rowId]="ideaId"
+          [initialSort]="[{ id: 'createdAt', desc: true }]"
+          [(expanded)]="expandedIdea"
+          [emptyText]="group.empty"
+        >
+          <ng-template appDataCell="title" let-idea>
+            <ng-container *ngTemplateOutlet="ideaTitle; context: { $implicit: idea }" />
+          </ng-template>
+          <ng-template appDataCell="status" let-idea>
+            @let status = ideaStatus(idea);
+            <span class="status" [ngClass]="status | statusClass">{{ status | statusLabel }}</span>
+          </ng-template>
+          <ng-template appDataDetail let-idea>
+            @let order = closedIdeaOrder(idea);
+            @let sprint = store.sprintOf(order);
+            @if (idea.description) {
+              <div class="idea-summary markdown" [innerHTML]="idea.description | markdown"></div>
+            }
+            @if (group.progress) {
+              <div class="progress-info">
+                <div class="info-block">
+                  <h4>Auftrag</h4>
+                  @if (order) {
+                    <p>
+                      <strong>{{ order.title }}</strong>
+                      <span class="status" [ngClass]="order.status | statusClass">{{
+                        order.status | statusLabel
+                      }}</span>
+                    </p>
+                    <p class="muted">
+                      Priorität {{ order.priority | priorityLabel }} · Aufwand
+                      {{ order.effortHours | hours }}
+                    </p>
+                    <details class="run-step order-brief">
+                      <summary>Auftrag</summary>
+                      <div class="detail-text markdown" [innerHTML]="order.description | markdown"></div>
+                    </details>
+                  } @else {
+                    <p class="muted">Kein Auftrag gefunden.</p>
                   }
+                </div>
+                <div class="info-block">
+                  <h4>Agents</h4>
+                  @if (order) {
+                    <app-agent-workflow [order]="order" />
+                  }
+                </div>
+              </div>
+            } @else {
+              <div class="closed-info">
+                <div class="info-block span-all">
+                  <h4>Auftrag</h4>
+                  @if (order) {
+                    <p>
+                      <strong>{{ order.title }}</strong>
+                    </p>
+                    <p>
+                      <span class="status" [ngClass]="order.status | statusClass">{{
+                        order.status | statusLabel
+                      }}</span>
+                      · Priorität {{ order.priority | priorityLabel }} · Aufwand
+                      {{ order.effortHours | hours }}
+                    </p>
+                    @if (order.completedAt) {
+                      <p class="muted">
+                        Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
+                      </p>
+                    }
+                    <h4 class="sub-heading">Agents</h4>
+                    <app-agent-workflow [order]="order" />
+                  } @else {
+                    <p class="muted">
+                      {{ idea.status === 'rejected' ? 'Verworfen – kein Auftrag.' : 'Kein Auftrag gefunden.' }}
+                    </p>
+                  }
+                </div>
+                @if (order) {
+                  <div class="info-block">
+                    <h4>Geänderte Dateien</h4>
+                    <app-changed-files [order]="order" [sprint]="sprint" />
+                  </div>
                 }
-              </tbody>
-            </table>
-          </div>
-        } @else {
-          <p class="empty-state">{{ group.empty }}</p>
-        }
+                <app-git-tree [nodes]="gitNodes(idea, order, sprint)" />
+              </div>
+            }
+          </ng-template>
+        </app-data-table>
       }
     </section>
   </ng-template>

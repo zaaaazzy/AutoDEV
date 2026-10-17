@@ -4,12 +4,18 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Idea, Priority, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { ColumnHeaderComponent } from '../../shared/column-header.component.js';
+import {
+  type DataColumn,
+  DataActionsDirective,
+  DataCellDirective,
+  DataDetailDirective,
+  DataTableComponent,
+} from '../../shared/data-table/data-table.component.js';
+import { GalleryComponent } from '../../shared/gallery.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { formatHours, formatIsoDate } from '../../shared/format.js';
 import { priorityLabel, statusLabel } from '../../shared/labels.js';
 import { HoursPipe, PriorityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
-import { compareRanks, includesText, toggleListValue, toggleSort, type SortState } from '../../shared/table.js';
 import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
@@ -18,10 +24,7 @@ import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
 const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
-
-type IdeaKey = 'title' | 'description' | 'status' | 'priority' | 'effortHours' | 'createdAt';
-type IdeaTextKey = 'title' | 'description';
-type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
+const PRIORITY_RANK = ['low', 'medium', 'high'];
 
 @Component({
   selector: 'app-ideation',
@@ -30,7 +33,11 @@ type IdeaValueKey = 'status' | 'priority' | 'effortHours' | 'createdAt';
     NgClass,
     NgTemplateOutlet,
     FormsModule,
-    ColumnHeaderComponent,
+    DataTableComponent,
+    DataCellDirective,
+    DataDetailDirective,
+    DataActionsDirective,
+    GalleryComponent,
     GitTreeComponent,
     IdeaDetailComponent,
     AgentWorkflowComponent,
@@ -50,12 +57,45 @@ export class IdeationComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
-  protected readonly ideaColumns: { key: IdeaKey; label: string }[] = [
-    { key: 'title', label: 'Titel' },
-    { key: 'status', label: 'Status' },
-    { key: 'priority', label: 'Priorität' },
-    { key: 'effortHours', label: 'Aufwand' },
-    { key: 'createdAt', label: 'Erstellt' },
+  protected readonly defaultStatusFilter = DEFAULT_STATUS_FILTER;
+  protected readonly ideaId = (idea: Idea): string => idea.id;
+  protected readonly ideaColumns: DataColumn<Idea>[] = [
+    { id: 'title', header: 'Titel', value: (idea) => idea.title, filter: 'text', className: 'title-cell' },
+    {
+      id: 'status',
+      header: 'Status',
+      value: (idea) => statusLabel(idea.status),
+      sortValue: (idea) => IDEA_STATUSES.indexOf(idea.status),
+    },
+    {
+      id: 'priority',
+      header: 'Priorität',
+      value: (idea) => priorityLabel(idea.priority),
+      sortValue: (idea) => PRIORITY_RANK.indexOf(idea.priority),
+    },
+    {
+      id: 'effortHours',
+      header: 'Aufwand',
+      value: (idea) => formatHours(idea.effortHours),
+      sortValue: (idea) => idea.effortHours ?? -1,
+    },
+    {
+      id: 'createdAt',
+      header: 'Erstellt',
+      value: (idea) => formatIsoDate(idea.createdAt),
+      sortValue: (idea) => idea.createdAt,
+    },
+  ];
+  /** In Bearbeitung und Abgeschlossen: Status aus Idee und Auftrag abgeleitet. */
+  protected readonly groupColumns: DataColumn<Idea>[] = [
+    this.ideaColumns[0]!,
+    {
+      id: 'status',
+      header: 'Status',
+      value: (idea) => statusLabel(this.ideaStatus(idea)),
+      sortValue: (idea) => IDEA_STATUSES.indexOf(this.ideaStatus(idea)),
+    },
+    this.ideaColumns[4]!,
   ];
 
   protected ideaForm: { title: string; description: string; priority: Priority } = {
@@ -66,118 +106,18 @@ export class IdeationComponent {
   protected pendingImages: File[] = [];
   protected readonly openIdea = signal<string | null>(null);
   protected readonly ideaEditing = signal(false);
-  protected readonly ideaTextFilter = signal<Partial<Record<IdeaTextKey, string>>>({});
-  protected readonly ideaValueFilter = signal<Partial<Record<IdeaValueKey, string[]>>>({
-    status: [...DEFAULT_STATUS_FILTER],
-  });
-  protected readonly ideaSort = signal<SortState<IdeaKey>>({ key: 'createdAt', dir: 'desc' });
+  protected readonly expandedIdea = signal<string | null>(null);
   protected readonly showClosedIdeas = signal(false);
   protected readonly showInProgressIdeas = signal(true);
-  protected readonly openClosedIdea = signal<string | null>(null);
 
   protected readonly inProgressIdeas = computed(() => this.data().ideas.filter((idea) => this.isInProgress(idea)));
   protected readonly closedIdeas = computed(() => this.data().ideas.filter((idea) => this.isClosedIdea(idea)));
   protected readonly selectedIdea = computed(
     () => this.data().ideas.find((idea) => idea.id === this.openIdea()) ?? null,
   );
-  protected readonly sortedIdeas = computed(() => {
-    const text = this.ideaTextFilter();
-    const values = this.ideaValueFilter();
-    const { key, dir } = this.ideaSort();
-    const rank = (idea: Idea): string | number | null => {
-      switch (key) {
-        case 'status':
-          return IDEA_STATUSES.indexOf(idea.status);
-        case 'priority':
-          return ['low', 'medium', 'high'].indexOf(idea.priority);
-        case 'effortHours':
-          return idea.effortHours ?? null;
-        default:
-          return (idea[key] ?? '').toString().toLowerCase();
-      }
-    };
-    return this.data()
-      .ideas.filter((idea) => !this.isClosedIdea(idea) && !this.isInProgress(idea))
-      .filter(
-        (idea) =>
-          (['title', 'description'] as const).every((field) => includesText(idea[field], text[field])) &&
-          (Object.keys(values) as IdeaValueKey[]).every(
-            (field) => !values[field]?.length || values[field]!.includes(this.ideaCellValue(idea, field)),
-          ),
-      )
-      .sort((a, b) => compareRanks(rank(a), rank(b), dir));
-  });
-
-  protected ideaCellValue(idea: Idea, key: IdeaValueKey): string {
-    switch (key) {
-      case 'status':
-        return statusLabel(idea.status);
-      case 'priority':
-        return priorityLabel(idea.priority);
-      case 'effortHours':
-        return formatHours(idea.effortHours);
-      default:
-        return formatIsoDate(idea.createdAt);
-    }
-  }
-
-  protected ideaOptions(key: IdeaKey): string[] {
-    if (this.isTextColumn(key)) return [];
-    return [
-      ...new Set(
-        this.data()
-          .ideas.filter((idea) => !this.isClosedIdea(idea) && !this.isInProgress(idea))
-          .map((idea) => this.ideaCellValue(idea, key)),
-      ),
-    ].sort();
-  }
-
-  protected isTextColumn(key: IdeaKey): key is IdeaTextKey {
-    return key === 'title' || key === 'description';
-  }
-
-  protected textValue(key: IdeaKey): string | undefined {
-    return this.isTextColumn(key) ? this.ideaTextFilter()[key] : undefined;
-  }
-
-  protected selectedValues(key: IdeaKey): string[] | undefined {
-    return this.isTextColumn(key) ? undefined : this.ideaValueFilter()[key];
-  }
-
-  protected ideaFilterActive(key: IdeaKey): boolean {
-    return this.isTextColumn(key) ? !!this.ideaTextFilter()[key] : !!this.ideaValueFilter()[key]?.length;
-  }
-
-  protected hasIdeaFilters(): boolean {
-    const text = Object.values(this.ideaTextFilter()).some(Boolean);
-    const values = this.ideaValueFilter();
-    const keys = (Object.keys(values) as IdeaValueKey[]).filter((key) => values[key]?.length);
-    const sameAsDefault =
-      keys.length === 1 &&
-      keys[0] === 'status' &&
-      values.status!.length === DEFAULT_STATUS_FILTER.length &&
-      DEFAULT_STATUS_FILTER.every((label) => values.status!.includes(label));
-    return text || (keys.length > 0 && !sameAsDefault);
-  }
-
-  protected clearIdeaFilters(): void {
-    this.ideaTextFilter.set({});
-    this.ideaValueFilter.set({ status: [...DEFAULT_STATUS_FILTER] });
-  }
-
-  protected setIdeaText(key: IdeaKey, value: string): void {
-    if (!this.isTextColumn(key)) return;
-    this.ideaTextFilter.update((filter) => ({ ...filter, [key]: value }));
-  }
-
-  protected toggleIdeaValue(key: IdeaKey, value: string, checked: boolean): void {
-    if (this.isTextColumn(key)) return;
-    this.ideaValueFilter.update((filter) => ({ ...filter, [key]: toggleListValue(filter[key], value, checked) }));
-  }
-
-  protected sortIdeasBy(key: IdeaKey): void {
-    this.ideaSort.update((sort) => toggleSort(sort, key));
-  }
+  protected readonly openIdeas = computed(() =>
+    this.data().ideas.filter((idea) => !this.isClosedIdea(idea) && !this.isInProgress(idea)),
+  );
 
   protected gitNodes(idea: Idea, order: DevelopmentItem | null, sprint: Sprint | null): GitNode[] {
     return [

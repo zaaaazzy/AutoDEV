@@ -79,7 +79,10 @@ export class AppComponent {
     const items = data.development.filter((item) => item.sprintId === sprint.id);
     const done = items.filter((item) => item.status === 'done').length;
     const running = items.filter((item) => item.status === 'in_progress').length;
-    return { name: sprint.name, done, total: items.length, running };
+    const agentBusy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
+    // Alles erledigt und kein Agent mehr am Sprint: Haken statt blinkendem Punkt.
+    const finished = items.length > 0 && done === items.length && running === 0 && !agentBusy;
+    return { name: sprint.name, done, total: items.length, running, finished };
   });
   /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, rot gestoppt. */
   protected readonly sprintHealth = computed(() => {

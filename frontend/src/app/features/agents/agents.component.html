@@ -55,7 +55,7 @@
           <h3>
             {{ phase.label }} <small>{{ phase.hint }}</small>
           </h3>
-          <app-agent-table [rows]="phaseRows(phase.id)" empty="Keine Agents in dieser Phase.">
+          <app-agent-table [rows]="phaseRows()[phase.id] ?? []" empty="Keine Agents in dieser Phase.">
             <ng-template let-row>
               @let agent = row.agent;
               @if (agentEditing() === agent.id) {
@@ -163,15 +163,19 @@
         </app-agent-table>
       </section>
       <h3 class="subheading">Letzte Agent-Läufe</h3>
-      @for (run of data().agentRuns; track run.id) {
-        <article class="run-card">
-          <div class="list-row">
-            <strong>{{ run.title }}</strong>
-            <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
-            <span>{{ run.startedAt | dateTime }}</span>
-          </div>
+      <app-data-table
+        [rows]="data().agentRuns"
+        [columns]="runColumns"
+        [rowId]="runId"
+        [initialSort]="[{ id: 'startedAt', desc: true }]"
+        emptyText="Noch keine Agent-Läufe vorhanden."
+      >
+        <ng-template appDataCell="status" let-run>
+          <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+        </ng-template>
+        <ng-template appDataDetail let-run>
           @for (step of run.steps; track step.position) {
-            <details class="run-step">
+            <details class="run-step order-brief">
               <summary>{{ step.agentName || step.command }} · {{ step.status | statusLabel }}</summary>
               <app-step-result
                 [events]="step.events"
@@ -181,10 +185,8 @@
               />
             </details>
           }
-        </article>
-      } @empty {
-        <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p>
-      }
+        </ng-template>
+      </app-data-table>
     </section>
   }
 }

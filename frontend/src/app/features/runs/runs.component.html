@@ -6,16 +6,18 @@
         <p class="muted">Die letzten {{ data().runs.length }} Testläufe</p>
       </div>
     </div>
-    @for (run of data().runs; track run.id) {
-      <article class="run-card">
-        <div class="section-heading">
-          <strong>{{ run.id }}</strong>
-          <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
-        </div>
-        <p class="meta">
-          {{ run.startedAt | dateTime }} · {{ run.trigger === 'ci' ? 'CI' : 'Manuell' }} ·
-          {{ run.branch || 'ohne Branch' }} · {{ run.commitSha?.slice(0, 8) || 'ohne Commit' }}
-        </p>
+    <app-data-table
+      [rows]="data().runs"
+      [columns]="runColumns"
+      [rowId]="runId"
+      [initialSort]="[{ id: 'startedAt', desc: true }]"
+      [(expanded)]="openRun"
+      emptyText="Für dieses Projekt gibt es noch keine Testläufe."
+    >
+      <ng-template appDataCell="status" let-run>
+        <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+      </ng-template>
+      <ng-template appDataDetail let-run>
         @for (step of run.steps; track step.position) {
           <details class="run-step">
             <summary>
@@ -24,10 +26,10 @@
             </summary>
             <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
           </details>
+        } @empty {
+          <p class="muted">Keine Schritte aufgezeichnet.</p>
         }
-      </article>
-    } @empty {
-      <p class="empty-state">Für dieses Projekt gibt es noch keine Testläufe.</p>
-    }
+      </ng-template>
+    </app-data-table>
   </section>
 }

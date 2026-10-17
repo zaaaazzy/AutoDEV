@@ -1,16 +1,39 @@
 import { NgClass } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
-import { DateTimePipe, SeverityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import {
+  type DataColumn,
+  DataCellDirective,
+  DataDetailDirective,
+  DataTableComponent,
+} from '../../shared/data-table/data-table.component.js';
+import { formatIsoDate } from '../../shared/format.js';
+import { severityLabel, statusLabel } from '../../shared/labels.js';
+import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { SeverityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+
+const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
+const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix'];
 
 @Component({
   selector: 'app-bugs',
   standalone: true,
-  imports: [NgClass, FormsModule, DateTimePipe, SeverityLabelPipe, StatusClassPipe, StatusLabelPipe],
+  imports: [
+    NgClass,
+    FormsModule,
+    DataTableComponent,
+    DataCellDirective,
+    DataDetailDirective,
+    MarkdownPipe,
+    SeverityLabelPipe,
+    ShortTextPipe,
+    StatusClassPipe,
+    StatusLabelPipe,
+  ],
   templateUrl: './bugs.component.html',
   host: { style: 'display: contents' },
 })
@@ -20,13 +43,40 @@ export class BugsComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly bugStatuses: BugStatus[] = ['open', 'in_progress', 'fixed', 'wontfix'];
-  protected readonly bugFilter = signal<'all' | BugStatus>('all');
+  protected readonly openBug = signal<string | null>(null);
+  protected readonly bugId = (bug: Bug): string => bug.id;
+  protected readonly bugColumns: DataColumn<Bug>[] = [
+    { id: 'title', header: 'Titel', value: (bug) => bug.title, filter: 'text', className: 'title-cell' },
+    {
+      id: 'status',
+      header: 'Status',
+      value: (bug) => statusLabel(bug.status),
+      sortValue: (bug) => BUG_STATUS_RANK.indexOf(bug.status),
+    },
+    {
+      id: 'severity',
+      header: 'Schweregrad',
+      value: (bug) => severityLabel(bug.severity),
+      sortValue: (bug) => SEVERITY_RANK.indexOf(bug.severity),
+    },
+    { id: 'source', header: 'Quelle', value: (bug) => (bug.source === 'agent' ? 'Agent' : 'Manuell') },
+    {
+      id: 'sprint',
+      header: 'Sprint',
+      value: (bug) => this.data().sprints.find((sprint) => sprint.id === bug.sprintId)?.name ?? 'Kein Sprint',
+    },
+    {
+      id: 'createdAt',
+      header: 'Erstellt',
+      value: (bug) => formatIsoDate(bug.createdAt),
+      sortValue: (bug) => bug.createdAt,
+    },
+  ];
   protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '' };
 
-  protected readonly visibleBugs = computed<Bug[]>(() => {
-    const filter = this.bugFilter();
-    return this.data().bugs.filter((bug) => filter === 'all' || bug.status === filter);
-  });
+  protected toggleBug(id: string): void {
+    this.openBug.update((current) => (current === id ? null : id));
+  }
 
   protected availableSprints(): Sprint[] {
     return this.data().sprints.filter((sprint) => sprint.status !== 'completed');

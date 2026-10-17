@@ -2631,13 +2631,13 @@ h3 .link-button {
 }
 
 /* Agent-Tabelle (Agents-Seite, Workflows) */
-.agent-table .agent-cell {
+.agent-cell {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px 8px;
 }
-.agent-table .agent-cell small {
+.agent-cell small {
   flex-basis: 100%;
   padding-left: 26px;
 }
@@ -2787,4 +2787,221 @@ h3 .link-button {
 .order-controls .run-agent {
   min-height: 34px;
   padding: 0 14px;
+}
+
+/* Einheitliche Datentabelle (TanStack Table): Suche, Filter-Chips, Sortierung, Filtermenüs */
+.dt {
+  display: grid;
+  gap: 10px;
+}
+.dt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.dt-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 1 280px;
+  margin: 0;
+  color: #6b756f;
+}
+.dt-search svg {
+  position: absolute;
+  left: 10px;
+  pointer-events: none;
+}
+.dt-search input {
+  min-height: 34px;
+  padding: 6px 10px 6px 32px;
+  border-radius: 999px;
+  background: #fff;
+}
+.dt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: #e7eff7;
+  color: #36608f;
+  font-size: 12px;
+}
+.dt-chip button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  line-height: 1;
+}
+.dt-chip button:hover {
+  background: rgb(54 96 143 / 15%);
+}
+.dt-count {
+  margin-left: auto;
+  color: #6b756f;
+  font-size: 12px;
+}
+.dt-reset {
+  padding: 4px 10px;
+  border: 1px solid #dfe3da;
+  border-radius: 999px;
+  background: #fff;
+  color: #4a554d;
+  font-size: 12px;
+}
+.dt-reset:hover {
+  border-color: #9fb3a5;
+}
+.dt-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fafbf8;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #5b665e;
+  text-transform: uppercase;
+}
+.dt-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dt-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.dt-sort:hover {
+  background: #eef0ea;
+}
+.dt-sort-icon {
+  color: #b3bcb3;
+  font-size: 11px;
+}
+.dt-sort-icon.active {
+  color: #2f6f4f;
+}
+.dt-filter {
+  position: relative;
+}
+.dt-filter-button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: #b3bcb3;
+}
+.dt-filter-button:hover {
+  background: #eef0ea;
+  color: #5b665e;
+}
+.dt-filter-button.active {
+  background: #e7eff7;
+  color: #36608f;
+}
+.dt-filter-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #dfe3da;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+.dt-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.dt-option:hover {
+  background: #f4f5f1;
+}
+.dt-option input {
+  width: auto;
+  min-height: 0;
+}
+.dt-option span {
+  flex: 1;
+}
+.dt-option small {
+  color: #6b756f;
+}
+.dt-table tbody tr:not(.closed-detail):hover > td {
+  background: #fafbf8;
+}
+.sprint-progress-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sprint-progress-cell .sprint-bar {
+  display: inline-block;
+  width: 60px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8ebe4;
+}
+.sprint-progress-cell .sprint-bar span {
+  display: block;
+  height: 100%;
+  background: #2f6f4f;
+}
+.closed-detail .sprint-card {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 4px 0;
+}
+
+/* Titelspalte nimmt in allen Tabellen denselben Anteil ein, damit gestapelte Tabellen bündig sind */
+.dt-table th.title-cell,
+.dt-table td.title-cell {
+  width: 45%;
+  max-width: none;
+}
+
+.sprint-status .sprint-done {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: #2f8a57;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
 }

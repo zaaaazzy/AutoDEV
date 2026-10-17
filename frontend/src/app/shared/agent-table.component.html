@@ -1,52 +1,19 @@
-<div class="table-wrap">
-  <table class="idea-table agent-table">
-    <thead>
-      <tr>
-        <th>Agent</th>
-        <th>Status</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      @for (row of rows(); track row.key) {
-        <tr [class.row-open]="openKey() === row.key">
-          <td class="title-cell">
-            <div class="agent-cell">
-              <app-model-icon [command]="row.command" />
-              <button type="button" class="link-button" (click)="toggle(row.key)">{{ row.name }}</button>
-              @if (row.hint) {
-                <small class="muted">{{ row.hint }}</small>
-              }
-            </div>
-          </td>
-          <td>
-            <span class="status" [ngClass]="row.status | statusClass">{{ row.status | statusLabel }}</span>
-          </td>
-          <td class="expand-cell">
-            <button
-              type="button"
-              class="button secondary icon-button"
-              [attr.aria-expanded]="openKey() === row.key"
-              [attr.aria-label]="'Details zu ' + row.name"
-              (click)="toggle(row.key)"
-              title="Details"
-            >
-              {{ openKey() === row.key ? '▾' : '▸' }}
-            </button>
-          </td>
-        </tr>
-        @if (openKey() === row.key && detail(); as template) {
-          <tr class="closed-detail">
-            <td colspan="3">
-              <ng-container *ngTemplateOutlet="template; context: { $implicit: row }" />
-            </td>
-          </tr>
-        }
-      } @empty {
-        <tr>
-          <td colspan="3" class="empty-state">{{ empty() }}</td>
-        </tr>
+<app-data-table [rows]="rows()" [columns]="columns" [rowId]="rowKey" [searchable]="searchable()" [emptyText]="empty()">
+  <ng-template appDataCell="name" let-row>
+    <div class="agent-cell">
+      <app-model-icon [command]="row.command" />
+      <strong>{{ row.name }}</strong>
+      @if (row.hint) {
+        <small class="muted">{{ row.hint }}</small>
       }
-    </tbody>
-  </table>
-</div>
+    </div>
+  </ng-template>
+  <ng-template appDataCell="status" let-row>
+    <span class="status" [ngClass]="row.status | statusClass">{{ row.status | statusLabel }}</span>
+  </ng-template>
+  <ng-template appDataDetail let-row>
+    @if (detail(); as template) {
+      <ng-container *ngTemplateOutlet="template; context: { $implicit: row }" />
+    }
+  </ng-template>
+</app-data-table>

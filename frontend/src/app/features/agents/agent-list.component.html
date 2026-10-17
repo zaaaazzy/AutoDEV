@@ -5,7 +5,7 @@
       class="agent-line"
       [class.active]="agent.active"
       [class.down]="!agent.active && !worker().online"
-      (click)="activity.show(agent.id)"
+      (click)="open(agent.id)"
     >
       <span class="agent-dot"></span>
       <span class="agent-text">
@@ -19,7 +19,7 @@
         }}</small>
       </span>
     </button>
-    @if (agent.active) {
+    @if (agent.active && agent.id !== assistantId) {
       <button type="button" class="agent-cancel" (click)="cancel(agent.id, agent.name)" title="Agent abbrechen">
         ■ Abbrechen
       </button>

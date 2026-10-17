@@ -7,6 +7,14 @@ import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from '../development/order.service.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { buildWorkflow, type WorkflowRow } from '../../shared/workflow.js';
+import {
+  type DataColumn,
+  DataCellDirective,
+  DataDetailDirective,
+  DataTableComponent,
+} from '../../shared/data-table/data-table.component.js';
+import { formatIsoDate } from '../../shared/format.js';
+import { statusLabel } from '../../shared/labels.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
@@ -19,6 +27,8 @@ import {
   TokensPipe,
   UsdPipe,
 } from '../../shared/pipes.js';
+
+const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
 
 @Component({
   selector: 'app-sprints',
@@ -34,6 +44,9 @@ import {
     StatusClassPipe,
     StatusLabelPipe,
     AgentWorkflowComponent,
+    DataTableComponent,
+    DataCellDirective,
+    DataDetailDirective,
     TokensPipe,
     UsdPipe,
   ],
@@ -50,6 +63,49 @@ export class SprintsComponent {
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
   protected readonly editingId = signal<string | null>(null);
   protected readonly openSprintItems = signal<ReadonlySet<string>>(new Set());
+  protected readonly openSprint = signal<string | null>(
+    this.store.data().sprints.find((sprint) => sprint.status === 'active')?.id ?? null,
+  );
+  protected readonly sprintId = (sprint: Sprint): string => sprint.id;
+  protected readonly sprintColumns: DataColumn<Sprint>[] = [
+    { id: 'name', header: 'Sprint', value: (sprint) => sprint.name, filter: 'text', className: 'title-cell' },
+    {
+      id: 'status',
+      header: 'Status',
+      value: (sprint) => statusLabel(sprint.status),
+      sortValue: (sprint) => SPRINT_STATUS_RANK.indexOf(sprint.status),
+    },
+    {
+      id: 'start',
+      header: 'Start',
+      value: (sprint) => (sprint.startDate ? formatIsoDate(sprint.startDate) : ''),
+      sortValue: (sprint) => sprint.startDate ?? '',
+      filter: false,
+    },
+    {
+      id: 'end',
+      header: 'Ende',
+      value: (sprint) => (sprint.endDate ? formatIsoDate(sprint.endDate) : ''),
+      sortValue: (sprint) => sprint.endDate ?? '',
+      filter: false,
+    },
+    {
+      id: 'progress',
+      header: 'Aufträge',
+      value: (sprint) => `${this.sprintCounts(sprint.id).done}/${this.sprintCounts(sprint.id).total}`,
+      sortValue: (sprint) => this.sprintCounts(sprint.id).done,
+      filter: false,
+    },
+  ];
+
+  protected sprintCounts(sprintId: string): { done: number; total: number } {
+    const orders = this.data().development.filter((item) => item.sprintId === sprintId);
+    return { done: orders.filter((item) => item.status === 'done').length, total: orders.length };
+  }
+
+  protected toggleSprint(id: string): void {
+    this.openSprint.update((current) => (current === id ? null : id));
+  }
 
   protected retry(item: DevelopmentItem): Promise<void> {
     return this.orders.retry(item);

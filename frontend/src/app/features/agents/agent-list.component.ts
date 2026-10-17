@@ -15,6 +15,13 @@ export class AgentListComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly activity = inject(AgentActivityService);
   protected readonly worker = this.store.worker;
+  /** Der Dashboard-Assistent hat keine Agent-Aktivität, sondern arbeitet im Chat des Dashboards. */
+  protected readonly assistantId = 'assistant';
+
+  protected open(id: string): void {
+    if (id === this.assistantId) this.store.navigate('dashboard');
+    else this.activity.show(id);
+  }
 
   protected async cancel(id: string, name: string): Promise<void> {
     if (

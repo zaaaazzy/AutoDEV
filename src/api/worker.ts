@@ -32,6 +32,9 @@ export async function readMaxAgents(pool: Pool): Promise<number> {
   return Number.isInteger(value) && value >= 1 && value <= MAX_AGENTS_LIMIT ? value : DEFAULT_MAX_AGENTS;
 }
 
+/** Kennung des Dashboard-Assistenten in der Agent-Liste der Kopfzeile. */
+export const ASSISTANT_AGENT_ID = 'assistant';
+
 export function registerWorkerRoutes(app: Express, pool: Pool): void {
   app.get('/api/settings', async (_request, response, next) => {
     try {
@@ -191,6 +194,22 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
           [slug],
         )
       ).rows;
+      // Der Dashboard-Assistent ist kein Workflow-Agent, wird aber wie einer angezeigt (aktiv, solange er eine Chat-Anfrage bearbeitet).
+      const chat = (
+        await pool.query<{ content: string }>(
+          `SELECT content FROM chat_messages
+            WHERE project_slug = $1 AND role = 'user' AND status = 'processing' ORDER BY created_at LIMIT 1`,
+          [slug],
+        )
+      ).rows[0];
+      agents.push({
+        id: ASSISTANT_AGENT_ID,
+        name: 'Dashboard-Assistent',
+        phase: 'system',
+        sprintName: null,
+        orderTitle: chat ? `Chat: ${chat.content.replace(/\s+/g, ' ').slice(0, 60)}` : null,
+        active: Boolean(chat),
+      });
       const online = Boolean(beat) && beat.ageSeconds <= 60;
       response.set('Cache-Control', 'no-store').json({ worker: beat && { ...beat, online }, online, running, agents });
     } catch (error) {

@@ -1,0 +1,154 @@
+@let model = table;
+<div class="dt">
+  @if (searchable() || activeFilters().length || changed()) {
+    <div class="dt-toolbar">
+      @if (searchable()) {
+        <label class="dt-search">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+            <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <input
+            type="search"
+            placeholder="Suchen …"
+            aria-label="Tabelle durchsuchen"
+            [value]="search()"
+            (input)="search.set($any($event.target).value)"
+          />
+        </label>
+      }
+      @for (filter of activeFilters(); track filter.id) {
+        <span class="dt-chip"
+          >{{ filter.label }}: <strong>{{ filter.text }}</strong>
+          <button type="button" (click)="clearColumn(filter.id)" [attr.aria-label]="filter.label + '-Filter entfernen'">
+            ×
+          </button>
+        </span>
+      }
+      <span class="dt-count">{{ model.getRowModel().rows.length }} von {{ rows().length }}</span>
+      @if (changed()) {
+        <button type="button" class="dt-reset" (click)="resetAll()">Zurücksetzen</button>
+      }
+    </div>
+  }
+  <div class="table-wrap">
+    <table class="idea-table dt-table">
+      <thead>
+        <tr>
+          @for (header of model.getHeaderGroups()[0]!.headers; track header.id) {
+            @let col = header.column;
+            <th [class]="column(header.id)?.className ?? ''">
+              <div class="dt-head">
+                @if (col.getCanSort()) {
+                  <button type="button" class="dt-sort" (click)="col.toggleSorting()">
+                    {{ column(header.id)?.header }}
+                    <span class="dt-sort-icon" [class.active]="col.getIsSorted()" aria-hidden="true">{{
+                      col.getIsSorted() === 'asc' ? '↑' : col.getIsSorted() === 'desc' ? '↓' : '↕'
+                    }}</span>
+                  </button>
+                } @else {
+                  <span>{{ column(header.id)?.header }}</span>
+                }
+                @if (col.getCanFilter()) {
+                  <span class="dt-filter">
+                    <button
+                      type="button"
+                      class="dt-filter-button"
+                      [class.active]="col.getIsFiltered()"
+                      [attr.aria-label]="column(header.id)?.header + ' filtern'"
+                      (click)="toggleFilterMenu(header.id, $event)"
+                    >
+                      <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true">
+                        <path d="M3 5h18l-7 8v6l-4 2v-8z" fill="currentColor" />
+                      </svg>
+                    </button>
+                    @if (openFilter() === header.id) {
+                      <div
+                        class="dt-filter-menu"
+                        [style.top.px]="menuPosition().top"
+                        [style.left.px]="menuPosition().left"
+                        (click)="$event.stopPropagation()"
+                      >
+                        @if (column(header.id)?.filter === 'text') {
+                          <input
+                            type="search"
+                            placeholder="Enthält …"
+                            [value]="textFilter(header.id)"
+                            (input)="setText(header.id, $any($event.target).value)"
+                          />
+                        } @else {
+                          @for (facet of facets(header.id); track facet.value) {
+                            <label class="dt-option">
+                              <input
+                                type="checkbox"
+                                [checked]="selected(header.id).includes(facet.value)"
+                                (change)="toggleValue(header.id, facet.value, $any($event.target).checked)"
+                              />
+                              <span>{{ facet.value }}</span>
+                              <small>{{ facet.count }}</small>
+                            </label>
+                          } @empty {
+                            <p class="muted">Keine Werte.</p>
+                          }
+                        }
+                        @if (col.getIsFiltered()) {
+                          <button type="button" class="dt-reset" (click)="clearColumn(header.id)">Filter leeren</button>
+                        }
+                      </div>
+                    }
+                  </span>
+                }
+              </div>
+            </th>
+          }
+          <th class="expand-cell"></th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of model.getRowModel().rows; track row.id) {
+          @let open = expanded() === row.id;
+          <tr [class.row-open]="open">
+            @for (cell of row.getVisibleCells(); track cell.id) {
+              <td [class]="column(cell.column.id)?.className ?? ''">
+                @if (template(cell.column.id); as custom) {
+                  <ng-container *ngTemplateOutlet="custom; context: { $implicit: row.original }" />
+                } @else {
+                  {{ display(row.original, cell.column.id) }}
+                }
+              </td>
+            }
+            <td class="expand-cell">
+              <span class="row-actions">
+                @if (actions(); as extra) {
+                  <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: row.original }" />
+                }
+                @if (detail()) {
+                  <button
+                    type="button"
+                    class="button secondary icon-button"
+                    [attr.aria-expanded]="open"
+                    (click)="toggleRow(row.id)"
+                    title="Details"
+                  >
+                    {{ open ? '▾' : '▸' }}
+                  </button>
+                }
+              </span>
+            </td>
+          </tr>
+          @if (open && detail(); as content) {
+            <tr class="closed-detail">
+              <td [attr.colspan]="columnCount()">
+                <ng-container *ngTemplateOutlet="content.template; context: { $implicit: row.original }" />
+              </td>
+            </tr>
+          }
+        } @empty {
+          <tr>
+            <td [attr.colspan]="columnCount()" class="empty-state">{{ emptyText() }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+</div>

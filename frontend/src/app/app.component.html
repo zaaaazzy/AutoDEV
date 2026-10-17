@@ -75,7 +75,11 @@
           (click)="store.navigate('sprints')"
           [title]="sprint.running ? sprint.running + ' Aufgabe(n) in Arbeit' : 'Zum Sprint'"
         >
-          <span class="live-dot" aria-hidden="true"></span>
+          @if (sprint.finished) {
+            <span class="sprint-done" aria-label="Alle Aufgaben erledigt">✓</span>
+          } @else {
+            <span class="live-dot" aria-hidden="true"></span>
+          }
           <span class="sprint-name">{{ sprint.name }}</span>
           <strong>{{ sprint.done }}/{{ sprint.total }}</strong>
           <span class="sprint-bar" aria-hidden="true"

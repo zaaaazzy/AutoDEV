@@ -19,6 +19,7 @@
     "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3"
   },
   "dependencies": {
+    "@tanstack/angular-table": "^8.21.4",
     "express": "^5.1.0",
     "helmet": "^8.3.0",
     "pg": "^8.16.3",

@@ -4,11 +4,18 @@ import { FormsModule } from '@angular/forms';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
-import type { Agent, AgentPhase } from '../../core/models.js';
+import type { Agent, AgentPhase, AgentRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { AgentTableComponent, type AgentTableRow } from '../../shared/agent-table.component.js';
+import {
+  type DataColumn,
+  DataCellDirective,
+  DataDetailDirective,
+  DataTableComponent,
+} from '../../shared/data-table/data-table.component.js';
+import { statusLabel } from '../../shared/labels.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
-import { DateTimePipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import {
   AGENT_PHASES,
   AGENT_ROLES,
@@ -47,8 +54,10 @@ interface SystemRow extends AgentTableRow {
     FormsModule,
     AgentDetailComponent,
     AgentTableComponent,
+    DataTableComponent,
+    DataCellDirective,
+    DataDetailDirective,
     StepResultComponent,
-    DateTimePipe,
     StatusClassPipe,
     StatusLabelPipe,
   ],
@@ -118,30 +127,52 @@ export class AgentsComponent {
   }
 
   /** Status: läuft gerade (laut Worker), aktiv oder deaktiviert; darunter Rolle bzw. aktueller Auftrag. */
-  protected phaseRows(phase: AgentPhase): AgentRow[] {
+  protected readonly phaseRows = computed<Partial<Record<AgentPhase, AgentRow[]>>>(() => {
     const live = new Map(this.store.worker().agents.map((entry) => [entry.id, entry]));
-    const agents = this.agentsOfPhase(phase);
-    return agents.map((agent, index) => {
-      const running = live.get(agent.id)?.active ? live.get(agent.id) : undefined;
-      return {
-        key: agent.id,
-        name: agent.name,
-        command: agent.command,
-        status: running ? 'running' : agent.enabled ? 'active' : 'inactive',
-        hint: running?.orderTitle ? `arbeitet an „${running.orderTitle}“` : roleLabel(agent.role),
-        agent,
-        index,
-        last: index === agents.length - 1,
-      };
-    });
-  }
+    const rows: Partial<Record<AgentPhase, AgentRow[]>> = {};
+    for (const phase of AGENT_PHASES) {
+      const agents = this.agentsOfPhase(phase.id);
+      rows[phase.id] = agents.map((agent, index) => {
+        const running = live.get(agent.id)?.active ? live.get(agent.id) : undefined;
+        return {
+          key: agent.id,
+          name: agent.name,
+          command: agent.command,
+          status: running ? 'running' : agent.enabled ? 'active' : 'inactive',
+          hint: running?.orderTitle ? `arbeitet an „${running.orderTitle}“` : roleLabel(agent.role),
+          agent,
+          index,
+          last: index === agents.length - 1,
+        };
+      });
+    }
+    return rows;
+  });
+
+  protected readonly runId = (run: AgentRun): string => run.id;
+  protected readonly runColumns: DataColumn<AgentRun>[] = [
+    { id: 'title', header: 'Auftrag', value: (run) => run.title, filter: 'text', className: 'title-cell' },
+    { id: 'status', header: 'Status', value: (run) => statusLabel(run.status) },
+    {
+      id: 'startedAt',
+      header: 'Gestartet',
+      value: (run) => new Date(run.startedAt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }),
+      sortValue: (run) => run.startedAt,
+      filter: false,
+    },
+    { id: 'steps', header: 'Schritte', value: (run) => run.steps.length, filter: false },
+  ];
 
   protected readonly systemRows = computed<SystemRow[]>(() =>
     this.systemAgents().map((system) => ({
       key: system.role,
       name: system.name,
       command: system.command,
-      status: 'active',
+      status:
+        system.role === 'assistant' &&
+        this.store.worker().agents.some((agent) => agent.id === 'assistant' && agent.active)
+          ? 'running'
+          : 'active',
       hint: system.command?.length ? system.command.join(' ') : system.model,
       system,
     })),
