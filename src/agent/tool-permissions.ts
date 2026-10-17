@@ -70,7 +70,11 @@ export const CLAUDE_ASSISTANT_TOOLS = [
   'npx playwright',
   'node --version',
   'launchctl list',
-].map((prefix) => `Bash(${prefix}:*)`);
+]
+  .map((prefix) => `Bash(${prefix}:*)`)
+  // Projekt-Dienste (z. B. ch.mainty.dev-live) neu starten; DevLog selbst (com.devlog.*) und Systemdienste nicht.
+  // Wildcard statt Präfix, weil „:*“ nur an Wortgrenzen greift.
+  .concat(`Bash(launchctl kickstart -k gui/${process.getuid?.() ?? 501}/ch.*)`);
 
 /** Rollen mit erweiterten Rechten: Dashboard-Assistent und Entwickler arbeiten selbstständig. */
 const TRUSTED_ROLES = new Set(['assistant', 'developer']);

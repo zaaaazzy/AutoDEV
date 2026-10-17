@@ -20,7 +20,8 @@ test('grants the Claude-backed assistant and developer their commands and log fo
   for (const tool of ['tail', 'curl', 'netstat', 'npm --prefix', 'npx --prefix']) {
     assert.ok(CLAUDE_ASSISTANT_TOOLS.includes(`Bash(${tool}:*)`), tool);
   }
-  assert.ok(!CLAUDE_ASSISTANT_TOOLS.some((tool) => /git push|rm |sudo/.test(tool)));
+  assert.ok(!CLAUDE_ASSISTANT_TOOLS.some((tool) => /git push|rm |sudo|kill|com\.devlog/.test(tool)));
+  assert.ok(CLAUDE_ASSISTANT_TOOLS.some((tool) => /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/.test(tool)));
 });
 
 test('leaves other roles, other CLIs and explicit tool lists unchanged', () => {
