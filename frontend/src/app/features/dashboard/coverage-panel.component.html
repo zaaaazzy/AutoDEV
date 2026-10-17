@@ -1,0 +1,87 @@
+<article class="panel coverage-panel">
+  <div class="section-heading">
+    <div>
+      <h2>Testabdeckung</h2>
+      @if (report(); as current) {
+        <p class="muted">
+          Stand {{ current.createdAt | date: 'dd.MM.yyyy HH:mm' }}
+          @if (current.orderTitle) {
+            · gemessen nach „{{ current.orderTitle }}“
+          }
+          · Ziel {{ target }} % Zeilenabdeckung
+        </p>
+      }
+    </div>
+  </div>
+  @if (report(); as current) {
+    <div class="table-wrap">
+      <table class="idea-table coverage-table">
+        <thead>
+          <tr>
+            <th>Bereich</th>
+            <th title="Isolierte Funktionen und Services">Unit-Tests</th>
+            <th title="UI-Komponenten mit TestBed o. Ä.">Komponententests</th>
+            <th title="Mehrere Schichten, z. B. HTTP-Route mit Datenbank">Integrationstests</th>
+            <th title="Browser über die ganze Anwendung">E2E-Tests</th>
+            <th>Gesamt</th>
+            @for (metric of metrics; track metric.key) {
+              <th [title]="metric.hint">{{ metric.label }}</th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for (area of current.areas; track area.area) {
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: area }" />
+          }
+          @if (total(); as sum) {
+            <ng-container *ngTemplateOutlet="row; context: { $implicit: sum, total: true }" />
+          }
+        </tbody>
+      </table>
+    </div>
+    <details class="run-step order-brief">
+      <summary>Zusammenfassung des Testers</summary>
+      @if (current.summary) {
+        <article class="markdown" [innerHTML]="current.summary | markdown"></article>
+      } @else {
+        <p class="muted">Keine Zusammenfassung gemeldet.</p>
+      }
+    </details>
+  } @else {
+    <p class="empty-state">
+      Noch keine Testabdeckung gemeldet. Der Tester misst sie beim nächsten abgeschlossenen Auftrag und ergänzt fehlende
+      Tests.
+    </p>
+  }
+</article>
+
+<ng-template #row let-area let-total="total">
+  <tr [class.coverage-total]="total">
+    <td class="title-cell">
+      <strong>{{ area.area }}</strong>
+      @if (area.failed) {
+        <small class="coverage-failed">{{ area.failed }} fehlgeschlagen</small>
+      }
+    </td>
+    <td>{{ area.unit }}</td>
+    <td>{{ area.component }}</td>
+    <td>{{ area.integration }}</td>
+    <td>{{ area.e2e }}</td>
+    <td>
+      <strong>{{ count(area) }}</strong>
+    </td>
+    @for (metric of metrics; track metric.key) {
+      @let value = area[metric.key];
+      <td>
+        @if (value !== null) {
+          <span class="coverage-value" [class]="'coverage-value ' + tone(value)"
+            ><span class="coverage-bar"><span [style.width.%]="value"></span></span
+            >{{ value | number: '1.0-1' }} %</span
+          >
+        } @else {
+          <span class="muted">–</span>
+        }
+      </td>
+    }
+  </tr>
+</ng-template>

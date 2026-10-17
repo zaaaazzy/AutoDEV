@@ -64,7 +64,7 @@ export const DEFAULT_AGENTS = [
     role: 'tester',
     phase: 'after_task',
     instructions:
-      'Entwickelt anhand der Angaben des Entwicklers die Tests, führt Build und Tests aus und meldet Fehler als Bug.',
+      'Entwickelt anhand der Angaben des Entwicklers die Tests, misst die Testabdeckung je Bereich, ergänzt Tests für Lücken, führt Build und Tests aus und meldet Fehler als Bug.',
   },
   {
     name: 'Dokumentierer',

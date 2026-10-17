@@ -3156,3 +3156,51 @@ h3 .link-button {
 .dt-table tbody tr.dt-group:hover > td {
   background: transparent;
 }
+
+/* Testabdeckung im Dashboard */
+.coverage-panel {
+  grid-column: 1 / -1;
+}
+.coverage-table td,
+.coverage-table th {
+  white-space: nowrap;
+}
+.coverage-table .coverage-total td {
+  border-top: 2px solid #dfe3da;
+  background: #fafbf8;
+}
+.coverage-failed {
+  display: block;
+  color: #b4472f;
+  font-size: 11px;
+}
+.coverage-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.coverage-bar {
+  display: inline-block;
+  width: 44px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8ebe4;
+}
+.coverage-bar span {
+  display: block;
+  height: 100%;
+}
+.coverage-value.good .coverage-bar span {
+  background: #2f8a57;
+}
+.coverage-value.warn .coverage-bar span {
+  background: #e08a1e;
+}
+.coverage-value.bad .coverage-bar span {
+  background: #c0392b;
+}
+.coverage-value.bad {
+  color: #b4472f;
+}

@@ -9,6 +9,7 @@ import { type CommandExecutor, type CommandResult, redactOutput } from '../core/
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
 import { commitTaskToGit } from './git-sync.js';
 import { executeAgentCommand } from '../agent/claude-stream.js';
+import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { withAssistantPermissions } from '../agent/tool-permissions.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
@@ -325,7 +326,7 @@ export async function runStep(
   stopWatching();
   await progress.stop();
 
-  const output = redactOutput(result.output, process.env);
+  let output = redactOutput(result.output, process.env);
   if (isShuttingDown()) {
     await pool.query(
       `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
@@ -334,6 +335,15 @@ export async function runStep(
     return { passed: false, interrupted: true };
   }
   const passed = result.exitCode === 0 && !cancelled;
+  // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
+  const coverage = agent.role === 'tester' ? parseCoverage(output) : null;
+  if (coverage) {
+    await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) =>
+      console.error('Coverage could not be saved:', error),
+    );
+    await logEvent(pool, stepId, `Testabdeckung gemeldet (${coverage.areas.map((area) => area.area).join(', ')})`);
+    output = stripCoverage(output);
+  }
   await logEvent(
     pool,
     stepId,

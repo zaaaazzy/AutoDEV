@@ -4,6 +4,7 @@ import {
   emptyProjectData,
   type Agent,
   type Attachment,
+  CoverageReport,
   type Bug,
   type DevelopmentItem,
   type DocumentEntry,
@@ -35,11 +36,13 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     api.get<{ docs?: DocumentEntry[] }>(`${base}/docs`),
     api.get<{ reports?: SprintReport[] }>(`${base}/sprint-reports`),
     api.get<{ attachments?: Attachment[] }>(`${base}/attachments`),
+    api.get<{ report?: CoverageReport | null }>(`${base}/coverage`),
   ]);
 
   const data = emptyProjectData();
   const errors: Record<string, string> = {};
-  const [board, sprints, agents, agentRuns, runs, stats, bugs, docs, reports, attachments] = results;
+  const [board, sprints, agents, agentRuns, runs, stats, bugs, docs, reports, attachments, coverage] = results;
+  if (coverage.status === 'fulfilled') data.coverage = coverage.value.report ?? null;
   if (attachments.status === 'fulfilled') data.attachments = attachments.value.attachments ?? [];
   else errors.attachments = errorMessage(attachments.reason, 'Bilder konnten nicht geladen werden.');
   if (board.status === 'fulfilled') {

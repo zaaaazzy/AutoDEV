@@ -251,6 +251,30 @@ export interface AgentActivity {
   sprintEnd: string | null;
 }
 
+export interface CoverageArea {
+  area: string;
+  unit: number;
+  component: number;
+  integration: number;
+  e2e: number;
+  passed: number;
+  failed: number;
+  lines: number | null;
+  statements: number | null;
+  branches: number | null;
+  functions: number | null;
+}
+
+/** Letzter Abdeckungsbericht des Testers. */
+export interface CoverageReport {
+  id: string;
+  summary: string;
+  createdAt: string;
+  developmentId: string | null;
+  orderTitle: string | null;
+  areas: CoverageArea[];
+}
+
 export interface ProjectData {
   comments: IdeaComment[];
   ideas: Idea[];
@@ -264,6 +288,7 @@ export interface ProjectData {
   bugs: Bug[];
   docs: DocumentEntry[];
   reports: SprintReport[];
+  coverage: CoverageReport | null;
 }
 
 export const emptyProjectData = (): ProjectData => ({
@@ -279,6 +304,7 @@ export const emptyProjectData = (): ProjectData => ({
   bugs: [],
   docs: [],
   reports: [],
+  coverage: null,
 });
 
 export interface ChatMessage {

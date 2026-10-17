@@ -1,3 +1,4 @@
+import { CoveragePanelComponent } from './coverage-panel.component.js';
 import { NgClass } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { ProjectStore } from '../../core/project-store.js';
@@ -20,6 +21,7 @@ import { ChatComponent } from '../chat/chat.component.js';
     NgClass,
     AgentListComponent,
     ChatComponent,
+    CoveragePanelComponent,
     DateTimePipe,
     HoursPipe,
     LocaleNumberPipe,

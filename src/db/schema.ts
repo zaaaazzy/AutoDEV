@@ -337,4 +337,29 @@ export const SCHEMA = `
   DROP TRIGGER IF EXISTS development_items_inherit_category ON development_items;
   CREATE TRIGGER development_items_inherit_category BEFORE INSERT ON development_items
     FOR EACH ROW EXECUTE FUNCTION development_items_inherit_category();
+
+  -- Testabdeckung, die der Tester nach einem Auftrag meldet (pro Bereich wie Frontend/Backend).
+  CREATE TABLE IF NOT EXISTS test_coverage_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
+    development_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS test_coverage_reports_project_idx ON test_coverage_reports (project_slug, created_at DESC);
+  CREATE TABLE IF NOT EXISTS test_coverage_areas (
+    report_id UUID NOT NULL REFERENCES test_coverage_reports(id) ON DELETE CASCADE,
+    area TEXT NOT NULL,
+    unit_tests INTEGER NOT NULL DEFAULT 0,
+    component_tests INTEGER NOT NULL DEFAULT 0,
+    integration_tests INTEGER NOT NULL DEFAULT 0,
+    e2e_tests INTEGER NOT NULL DEFAULT 0,
+    passed INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    lines REAL,
+    statements REAL,
+    branches REAL,
+    functions REAL,
+    PRIMARY KEY (report_id, area)
+  );
 `;

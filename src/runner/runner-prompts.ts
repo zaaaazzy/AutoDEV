@@ -1,3 +1,4 @@
+import { COVERAGE_INSTRUCTIONS } from './coverage.js';
 import type { PromptExtras, StepSummary, WorkItem, WorkflowAgent } from './runner-types.js';
 
 export const PHASE_ORDER = ['pre_task', 'while_task', 'after_task'] as const;
@@ -36,6 +37,7 @@ export function buildPrompt(
       ? `## Bisheriges Handbuch (${agent.role === 'user_manual_writer' ? USER_MANUAL_TITLE : MANUAL_TITLE})\n${extras.manual.slice(0, MANUAL_PROMPT_CHARS) || '(noch leer – erstelle es vollständig)'}`
       : '',
     history.length ? `## Ergebnisse vorheriger Agents\n${history.join('\n\n')}` : '',
+    agent.role === 'tester' ? COVERAGE_INSTRUCTIONS : '',
   ]
     .filter(Boolean)
     .join('\n\n');
