@@ -1,5 +1,11 @@
 @if (store.ready()) {
-  <section class="sprints">
+  <section class="panel sprints">
+    <div class="section-heading">
+      <div>
+        <h2>Sprints</h2>
+        <p class="muted">Zeitraum, Fortschritt und Git-Stand je Sprint</p>
+      </div>
+    </div>
     @if (store.showCreate()) {
       <form class="form-grid create-form" (ngSubmit)="createSprint()">
         <label>Name<input name="name" [(ngModel)]="sprintForm.name" maxlength="120" required /> </label>
@@ -26,7 +32,7 @@
       <ng-template appDataCell="progress" let-sprint>
         @let progress = sprintCounts(sprint.id);
         <span class="sprint-progress-cell"
-          ><strong>{{ progress.done }}/{{ progress.total }}</strong>
+          ><span>{{ progress.done }}/{{ progress.total }}</span>
           <span class="sprint-bar" aria-hidden="true"
             ><span [style.width.%]="progress.total ? (progress.done / progress.total) * 100 : 0"></span></span
         ></span>

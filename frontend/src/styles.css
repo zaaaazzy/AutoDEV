@@ -2842,9 +2842,13 @@ h3 .link-button {
   background: rgb(54 96 143 / 15%);
 }
 .dt-count {
-  margin-left: auto;
-  color: #6b756f;
+  margin: 0;
+  color: #8a938c;
   font-size: 12px;
+  text-align: right;
+}
+.dt-reset-all {
+  margin-left: auto;
 }
 .dt-reset {
   padding: 4px 10px;
@@ -2966,10 +2970,14 @@ h3 .link-button {
   align-items: center;
   gap: 8px;
 }
+.sprint-progress-cell {
+  color: #4a554d;
+  font-variant-numeric: tabular-nums;
+}
 .sprint-progress-cell .sprint-bar {
   display: inline-block;
-  width: 60px;
-  height: 5px;
+  width: 44px;
+  height: 4px;
   overflow: hidden;
   border-radius: 999px;
   background: #e8ebe4;
@@ -3004,4 +3012,51 @@ h3 .link-button {
   color: #fff;
   font-size: 10px;
   font-weight: 800;
+}
+
+/* Aufklapp-Knopf der Tabellen: kompakt, dreht sich beim Öffnen */
+.dt-expand {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #dfe3da;
+  border-radius: 7px;
+  background: #fff;
+  color: #5b665e;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.dt-expand:hover {
+  border-color: #9fb3a5;
+  background: #f4f5f1;
+}
+.dt-expand svg {
+  transition: transform 0.15s;
+}
+.dt-expand.open {
+  border-color: #2f6f4f;
+  background: #2f6f4f;
+  color: #fff;
+}
+.dt-expand.open svg {
+  transform: rotate(90deg);
+}
+.dt .row-actions {
+  align-items: center;
+}
+.dt .row-actions .icon-button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  place-items: center;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.dt-table td {
+  vertical-align: middle;
 }

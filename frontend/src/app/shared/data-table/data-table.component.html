@@ -25,9 +25,8 @@
           </button>
         </span>
       }
-      <span class="dt-count">{{ model.getRowModel().rows.length }} von {{ rows().length }}</span>
       @if (changed()) {
-        <button type="button" class="dt-reset" (click)="resetAll()">Zurücksetzen</button>
+        <button type="button" class="dt-reset dt-reset-all" (click)="resetAll()">Zurücksetzen</button>
       }
     </div>
   }
@@ -125,12 +124,22 @@
                 @if (detail()) {
                   <button
                     type="button"
-                    class="button secondary icon-button"
+                    class="dt-expand"
+                    [class.open]="open"
                     [attr.aria-expanded]="open"
+                    [attr.aria-label]="open ? 'Details schließen' : 'Details öffnen'"
                     (click)="toggleRow(row.id)"
-                    title="Details"
                   >
-                    {{ open ? '▾' : '▸' }}
+                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                      <path
+                        d="M6 3.5 10.5 8 6 12.5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.8"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                    </svg>
                   </button>
                 }
               </span>
@@ -151,4 +160,14 @@
       </tbody>
     </table>
   </div>
+  @if (rows().length) {
+    <p class="dt-count">
+      {{
+        model.getRowModel().rows.length === rows().length
+          ? rows().length
+          : model.getRowModel().rows.length + ' von ' + rows().length
+      }}
+      {{ rows().length === 1 ? 'Eintrag' : 'Einträge' }}
+    </p>
+  }
 </div>
