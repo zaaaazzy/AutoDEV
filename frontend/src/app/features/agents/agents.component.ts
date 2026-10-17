@@ -6,7 +6,8 @@ import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase, AgentRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { AgentTableComponent, type AgentTableRow } from '../../shared/agent-table.component.js';
+import type { AgentTableRow } from '../../shared/agent-table.component.js';
+import { ModelIconComponent, providerLabel } from '../../shared/model-icon.component.js';
 import {
   type DataColumn,
   DataCellDirective,
@@ -46,6 +47,17 @@ interface SystemRow extends AgentTableRow {
   system: SystemAgent;
 }
 
+/** Eine Zeile der gemeinsamen Agent-Tabelle: Workflow-Agent oder System-Agent. */
+interface AgentListRow extends AgentTableRow {
+  category: string;
+  categoryRank: number;
+  role: string;
+  agent?: Agent;
+  index?: number;
+  last?: boolean;
+  system?: SystemAgent;
+}
+
 @Component({
   selector: 'app-agents',
   standalone: true,
@@ -53,7 +65,7 @@ interface SystemRow extends AgentTableRow {
     NgClass,
     FormsModule,
     AgentDetailComponent,
-    AgentTableComponent,
+    ModelIconComponent,
     DataTableComponent,
     DataCellDirective,
     DataDetailDirective,
@@ -148,6 +160,31 @@ export class AgentsComponent {
     }
     return rows;
   });
+
+  /** Alle Agents in einer Tabelle, gruppiert nach Kategorie (Workflow-Phase bzw. System). */
+  protected readonly agentRows = computed<AgentListRow[]>(() => [
+    ...AGENT_PHASES.flatMap((phase, rank) =>
+      (this.phaseRows()[phase.id] ?? []).map((row) => ({
+        ...row,
+        category: phase.label,
+        categoryRank: rank,
+        role: roleLabel(row.agent.role),
+      })),
+    ),
+    ...this.systemRows().map((row) => ({
+      ...row,
+      category: 'System',
+      categoryRank: AGENT_PHASES.length,
+      role: row.system.description,
+    })),
+  ]);
+  protected readonly agentRowId = (row: AgentListRow): string => row.key;
+  protected readonly agentColumns: DataColumn<AgentListRow>[] = [
+    { id: 'name', header: 'Agent', value: (row) => row.name, filter: 'text', className: 'title-cell', sortable: false },
+    { id: 'category', header: 'Kategorie', value: (row) => row.category, sortValue: (row) => row.categoryRank },
+    { id: 'model', header: 'Modell', value: (row) => providerLabel(row.command) },
+    { id: 'status', header: 'Status', value: (row) => statusLabel(row.status) },
+  ];
 
   protected readonly runId = (run: AgentRun): string => run.id;
   protected readonly runColumns: DataColumn<AgentRun>[] = [

@@ -3143,3 +3143,16 @@ h3 .link-button {
   font-size: 11px;
   font-weight: 800;
 }
+
+/* Gruppenüberschrift in Tabellen (z. B. Agents nach Kategorie) */
+.dt-table tr.dt-group > td {
+  padding: 14px 12px 6px;
+  border-bottom: 1px solid #dfe3da;
+  background: transparent;
+  color: #26312a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.dt-table tbody tr.dt-group:hover > td {
+  background: transparent;
+}

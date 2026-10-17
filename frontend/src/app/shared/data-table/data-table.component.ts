@@ -85,6 +85,8 @@ export class DataTableComponent<T> {
   readonly initialSort = input<SortingState>([]);
   /** Vorbelegte Filter je Spalte (Werte wie angezeigt). */
   readonly initialFilters = input<Record<string, string[]>>({});
+  /** Zeilen nach dieser Spalte gruppieren (Zwischenüberschrift je Wert, Reihenfolge nach deren Sortierwert). */
+  readonly groupBy = input<string | null>(null);
   /** Geöffnete Zeile; mit [(expanded)] von außen steuerbar. */
   readonly expanded = model<string | null>(null);
 
@@ -150,6 +152,32 @@ export class DataTableComponent<T> {
   }));
 
   protected readonly columnCount = computed(() => this.columns().length + 1);
+
+  /** Sichtbare Zeilen, bei groupBy in Gruppen mit Überschrift zusammengefasst. */
+  protected readonly groups = computed(() => {
+    const rows = this.table.getRowModel().rows;
+    const id = this.groupBy();
+    const column = id ? this.column(id) : undefined;
+    if (!rows.length) return [];
+    if (!column) return [{ key: '', label: '', rows }];
+    const groups = new Map<string, { key: string; label: string; rank: string | number; rows: typeof rows }>();
+    for (const row of rows) {
+      const label = String(column.value(row.original) ?? '');
+      const group = groups.get(label) ?? {
+        key: label,
+        label,
+        rank: (column.sortValue ?? column.value)(row.original) ?? label,
+        rows: [],
+      };
+      group.rows.push(row);
+      groups.set(label, group);
+    }
+    return [...groups.values()].sort((a, b) =>
+      typeof a.rank === 'number' && typeof b.rank === 'number'
+        ? a.rank - b.rank
+        : String(a.rank).localeCompare(String(b.rank), 'de'),
+    );
+  });
 
   protected template(id: string): TemplateRef<{ $implicit: unknown }> | null {
     return this.cellTemplates().find((cell) => cell.appDataCell() === id)?.template ?? null;

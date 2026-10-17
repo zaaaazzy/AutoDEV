@@ -104,57 +104,66 @@
         </tr>
       </thead>
       <tbody>
-        @for (row of model.getRowModel().rows; track row.id) {
-          @let open = expanded() === row.id;
-          <tr [class.row-open]="open">
-            @for (cell of row.getVisibleCells(); track cell.id) {
-              <td [class]="column(cell.column.id)?.className ?? ''">
-                @if (template(cell.column.id); as custom) {
-                  <ng-container *ngTemplateOutlet="custom; context: { $implicit: row.original }" />
-                } @else if (column(cell.column.id)?.badge; as badge) {
-                  <span class="tag" [class]="'tag ' + badge(row.original)">{{
-                    display(row.original, cell.column.id)
-                  }}</span>
-                } @else {
-                  {{ display(row.original, cell.column.id) }}
-                }
-              </td>
-            }
-            <td class="expand-cell">
-              <span class="row-actions">
-                @if (actions(); as extra) {
-                  <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: row.original }" />
-                }
-                @if (detail()) {
-                  <button
-                    type="button"
-                    class="dt-expand"
-                    [class.open]="open"
-                    [attr.aria-expanded]="open"
-                    [attr.aria-label]="open ? 'Details schließen' : 'Details öffnen'"
-                    (click)="toggleRow(row.id)"
-                  >
-                    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-                      <path
-                        d="M6 3.5 10.5 8 6 12.5"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.8"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </button>
-                }
-              </span>
-            </td>
-          </tr>
-          @if (open && detail(); as content) {
-            <tr class="closed-detail">
+        @for (group of groups(); track group.key) {
+          @if (group.label) {
+            <tr class="dt-group">
               <td [attr.colspan]="columnCount()">
-                <ng-container *ngTemplateOutlet="content.template; context: { $implicit: row.original }" />
+                {{ group.label }} <span class="muted">({{ group.rows.length }})</span>
               </td>
             </tr>
+          }
+          @for (row of group.rows; track row.id) {
+            @let open = expanded() === row.id;
+            <tr [class.row-open]="open">
+              @for (cell of row.getVisibleCells(); track cell.id) {
+                <td [class]="column(cell.column.id)?.className ?? ''">
+                  @if (template(cell.column.id); as custom) {
+                    <ng-container *ngTemplateOutlet="custom; context: { $implicit: row.original }" />
+                  } @else if (column(cell.column.id)?.badge; as badge) {
+                    <span class="tag" [class]="'tag ' + badge(row.original)">{{
+                      display(row.original, cell.column.id)
+                    }}</span>
+                  } @else {
+                    {{ display(row.original, cell.column.id) }}
+                  }
+                </td>
+              }
+              <td class="expand-cell">
+                <span class="row-actions">
+                  @if (actions(); as extra) {
+                    <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: row.original }" />
+                  }
+                  @if (detail()) {
+                    <button
+                      type="button"
+                      class="dt-expand"
+                      [class.open]="open"
+                      [attr.aria-expanded]="open"
+                      [attr.aria-label]="open ? 'Details schließen' : 'Details öffnen'"
+                      (click)="toggleRow(row.id)"
+                    >
+                      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                        <path
+                          d="M6 3.5 10.5 8 6 12.5"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.8"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  }
+                </span>
+              </td>
+            </tr>
+            @if (open && detail(); as content) {
+              <tr class="closed-detail">
+                <td [attr.colspan]="columnCount()">
+                  <ng-container *ngTemplateOutlet="content.template; context: { $implicit: row.original }" />
+                </td>
+              </tr>
+            }
           }
         } @empty {
           <tr>

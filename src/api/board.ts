@@ -39,8 +39,10 @@ export function registerBoardRoutes(app: Express, pool: Pool): void {
       return;
     }
     const runs = await pool.query(
-      `SELECT id, development_id AS "developmentId", status, started_at AS "startedAt", completed_at AS "completedAt"
-         FROM agent_runs WHERE project_slug = $1 ORDER BY started_at DESC LIMIT 150`,
+      `SELECT r.id, r.development_id AS "developmentId", COALESCE(d.title, 'Auftrag gelöscht') AS title, r.status,
+              r.started_at AS "startedAt", r.completed_at AS "completedAt"
+         FROM agent_runs r LEFT JOIN development_items d ON d.id = r.development_id
+        WHERE r.project_slug = $1 ORDER BY r.started_at DESC LIMIT 150`,
       [slug],
     );
     const steps = await pool.query(

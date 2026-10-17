@@ -8,6 +8,10 @@ export function providerOf(command: readonly string[] | null | undefined): Model
   return program === 'claude' || program === 'copilot' || program === 'gemini' ? program : 'custom';
 }
 
+export function providerLabel(command: readonly string[] | null | undefined): string {
+  return LABELS[providerOf(command)];
+}
+
 const LABELS: Record<ModelProvider, string> = {
   claude: 'Claude (Anthropic)',
   copilot: 'GitHub Copilot',
