@@ -2,14 +2,20 @@ import type { Pool } from 'pg';
 
 const INTERVAL_MS = 8000;
 
+export interface ChatEvent {
+  at: string;
+  text: string;
+}
+
 /** Zeigt im Chat eine Zwischenmeldung mit Laufzeit, bis `stop()` sie wieder entfernt. */
 export async function startProgress(
   pool: Pool,
   project: string,
   stages: string[],
   link: { stepId?: string; silent?: boolean } = {},
-): Promise<{ update: (message: string) => void; stop: () => Promise<void> }> {
+): Promise<{ update: (message: string) => void; stop: () => Promise<void>; events: () => ChatEvent[] }> {
   const started = Date.now();
+  const events: ChatEvent[] = [];
   let override = '';
   const text = (): string => {
     const seconds = Math.round((Date.now() - started) / 1000);
@@ -34,6 +40,7 @@ export async function startProgress(
         clearInterval(ticker);
         await writeStep(null);
       },
+      events: () => events,
     };
   }
   const id = (
@@ -45,7 +52,7 @@ export async function startProgress(
       )
       .catch(() => ({ rows: [] }))
   ).rows[0]?.id;
-  if (!id) return { update: () => undefined, stop: async () => undefined };
+  if (!id) return { update: () => undefined, stop: async () => undefined, events: () => events };
   const timer = setInterval(() => {
     void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
     void writeStep(text());
@@ -53,7 +60,15 @@ export async function startProgress(
   return {
     update: (message) => {
       override = message;
-      void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
+      const event = { at: new Date().toISOString(), text: message };
+      events.push(event);
+      void pool
+        .query(`UPDATE chat_messages SET content = $2, events = events || $3::jsonb WHERE id = $1`, [
+          id,
+          text(),
+          JSON.stringify([event]),
+        ])
+        .catch(() => undefined);
       void writeStep(text());
     },
     stop: async () => {
@@ -61,5 +76,6 @@ export async function startProgress(
       await writeStep(null);
       await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]).catch(() => undefined);
     },
+    events: () => events,
   };
 }

@@ -20,14 +20,19 @@
   </div>
   <div class="chat-log">
     @for (message of chat(); track message.id) {
-      <div
-        class="chat-msg"
-        [class.mine]="message.role === 'user'"
-        [class.failed]="message.status === 'failed'"
-        [class.typing]="message.role === 'assistant' && message.status === 'processing'"
-      >
-        {{ message.content }}
-      </div>
+      @if (message.role === 'assistant') {
+        @let running = message.status === 'processing';
+        <div class="chat-msg assistant" [class.failed]="message.status === 'failed'">
+          <app-step-result
+            [events]="message.events"
+            [output]="running ? '' : message.content"
+            [progress]="running ? message.content : null"
+            [running]="running"
+          />
+        </div>
+      } @else {
+        <div class="chat-msg mine" [class.failed]="message.status === 'failed'">{{ message.content }}</div>
+      }
     } @empty {
       <p class="muted">Stelle eine Frage oder gib eine Aufgabe – der Assistent führt sie selbst aus.</p>
     }

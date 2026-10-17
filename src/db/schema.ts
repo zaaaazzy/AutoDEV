@@ -284,6 +284,8 @@ export const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
   );
+  -- Verlauf der Assistenten-Aktionen (wie bei Agent-Schritten), damit der Chat dieselbe Ansicht nutzt.
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS events JSONB NOT NULL DEFAULT '[]'::jsonb;
   CREATE INDEX IF NOT EXISTS chat_messages_project_idx ON chat_messages (project_slug, created_at);
 
   CREATE TABLE IF NOT EXISTS docs (

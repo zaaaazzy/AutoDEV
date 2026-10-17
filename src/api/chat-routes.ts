@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { isRecord, parseProjectSlug } from '../core/validation.js';
 
 const MAX_MESSAGE_CHARS = 4000;
-const COLUMNS = `m.id, m.role, m.content, m.status, m.created_at AS "createdAt"`;
+const COLUMNS = `m.id, m.role, m.content, m.status, m.events, m.created_at AS "createdAt"`;
 
 async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
   return (

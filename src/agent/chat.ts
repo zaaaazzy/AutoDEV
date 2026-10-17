@@ -62,20 +62,24 @@ export async function processChat(
     await pool.query(`UPDATE chat_messages SET status = 'failed', updated_at = clock_timestamp() WHERE id = $1`, [
       claimed.id,
     ]);
-    await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`, [
-      options.project,
-      `Die Anfrage konnte nicht bearbeitet werden.${output ? `\n${output.slice(0, 500)}` : ''}`,
-    ]);
+    await pool.query(
+      `INSERT INTO chat_messages (project_slug, role, content, events) VALUES ($1, 'assistant', $2, $3::jsonb)`,
+      [
+        options.project,
+        `Die Anfrage konnte nicht bearbeitet werden.${output ? `\n${output.slice(0, 500)}` : ''}`,
+        JSON.stringify(progress.events()),
+      ],
+    );
     return true;
   }
   const text = output.replace(/^@@TASK\b.*$/gm, '').trim() || 'Erledigt.';
   await pool.query(`UPDATE chat_messages SET status = 'done', updated_at = clock_timestamp() WHERE id = $1`, [
     claimed.id,
   ]);
-  await pool.query(`INSERT INTO chat_messages (project_slug, role, content) VALUES ($1, 'assistant', $2)`, [
-    options.project,
-    text,
-  ]);
+  await pool.query(
+    `INSERT INTO chat_messages (project_slug, role, content, events) VALUES ($1, 'assistant', $2, $3::jsonb)`,
+    [options.project, text, JSON.stringify(progress.events())],
+  );
   return true;
 }
 

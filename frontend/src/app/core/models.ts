@@ -272,5 +272,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   status: 'pending' | 'processing' | 'done' | 'failed';
+  /** Aktionen des Assistenten (Lesen, Schreiben, Ausführen) – dieselbe Form wie bei Agent-Schritten. */
+  events?: StepEvent[];
   createdAt: string;
 }

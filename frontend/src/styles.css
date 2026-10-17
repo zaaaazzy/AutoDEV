@@ -1618,6 +1618,17 @@ h3 .link-button {
 .chat-msg.failed {
   outline: 1px solid #c0392b;
 }
+/* Assistenten-Antworten in derselben Schrittansicht wie Agents (Live-Zeile, Verlauf, Ausgabe) */
+.chat-msg.assistant {
+  width: min(100%, 860px);
+  max-width: 100%;
+  padding: 6px 10px 10px;
+  background: #f4f5f1;
+  white-space: normal;
+}
+.chat-msg.assistant .step-output {
+  max-height: none;
+}
 .chat-msg.typing {
   color: #6b756f;
   font-style: italic;

@@ -3,11 +3,12 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { ChatMessage } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { StepResultComponent } from '../../shared/step-result.component.js';
 
 @Component({
   selector: 'app-chat',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, StepResultComponent],
   templateUrl: './chat.component.html',
   host: { style: 'display: contents' },
 })
