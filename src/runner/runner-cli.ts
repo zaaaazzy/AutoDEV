@@ -90,6 +90,12 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     `UPDATE development_items SET status = 'planned', updated_at = NOW()
       WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`,
   );
+  // Orders left "in progress" without any running run would be stuck; a failed last run makes them retryable.
+  await pool.query(
+    `UPDATE development_items d SET status = 'blocked', updated_at = NOW()
+      WHERE d.status = 'in_progress' AND NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.development_id = d.id AND r.status = 'running')
+        AND (SELECT r.status FROM agent_runs r WHERE r.development_id = d.id ORDER BY r.started_at DESC LIMIT 1) = 'failed'`,
+  );
   await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
   await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
   await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
