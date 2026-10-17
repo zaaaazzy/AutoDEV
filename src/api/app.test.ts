@@ -174,6 +174,20 @@ test('stores image attachments for ideas and rejects other file types', async ()
   });
 });
 
+test('stores image attachments for bugs', async () => {
+  const { pool, queries } = recordingPool([{ id: ID, filename: 'bug.png' }]);
+  await withServer(pool, async (baseUrl) => {
+    const stored = await fetch(`${baseUrl}/api/bugs/${ID}/attachments?name=bug.png`, {
+      method: 'POST',
+      headers: { ...jsonHeaders(), 'Content-Type': 'image/png' },
+      body: new Uint8Array([137, 80, 78, 71]),
+    });
+    assert.equal(stored.status, 201);
+    assert.match(queries[0]?.sql ?? '', /bug_id/);
+    assert.deepEqual(queries[0]?.values.slice(0, 4), [ID, 'bug.png', 'image/png', 4]);
+  });
+});
+
 test('manages sprints with validation and a single active sprint', async () => {
   const { pool, queries } = recordingPool([{ id: SPRINT_ID, name: 'Sprint 1' }]);
   await withServer(pool, async (baseUrl) => {

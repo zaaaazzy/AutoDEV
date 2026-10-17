@@ -29,7 +29,7 @@ export function buildPrompt(
     `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
     item.risks?.trim() ? `## Risiken (vom Bug-Wächter geprüft)\n${item.risks.trim()}` : '',
     extras.images?.length
-      ? `## Angehängte Bilder (Referenzen aus dem Ideationboard, relativ zum Projektordner)\n${extras.images.map((path) => `- ${path}`).join('\n')}`
+      ? `## Angehängte Bilder (aus Idee bzw. Bug-Meldung, relativ zum Projektordner)\n${extras.images.map((path) => `- ${path}`).join('\n')}`
       : '',
     bugs.length ? `## Bekannte Bugs – offene und behobene. Wiederhole diese Fehler nicht.\n${bugs.join('\n')}` : '',
     extras.manual !== undefined

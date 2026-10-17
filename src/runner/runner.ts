@@ -116,7 +116,12 @@ export async function runWorkItem(
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
     ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
-    ctx.images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(() => []);
+    ctx.images = await materializeAttachments(
+      pool,
+      { ideationId: item.ideationId, bugId: item.bugId },
+      item.id,
+      options.cwd,
+    ).catch(() => []);
     ctx.projectContext = await loadProjectContext(pool, item.projectSlug);
     const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
     for (const [position, agent] of ordered.entries()) {

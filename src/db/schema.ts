@@ -173,6 +173,14 @@ export const SCHEMA = `
     fixed_at TIMESTAMPTZ
   );
   CREATE INDEX IF NOT EXISTS bugs_project_status_idx ON bugs (project_slug, status, created_at DESC);
+
+  -- Bilder gehören entweder zu einer Idee oder zu einem Bug.
+  ALTER TABLE ideation_attachments ALTER COLUMN ideation_id DROP NOT NULL;
+  ALTER TABLE ideation_attachments ADD COLUMN IF NOT EXISTS bug_id UUID REFERENCES bugs(id) ON DELETE CASCADE;
+  ALTER TABLE ideation_attachments DROP CONSTRAINT IF EXISTS ideation_attachments_owner_check;
+  ALTER TABLE ideation_attachments ADD CONSTRAINT ideation_attachments_owner_check
+    CHECK ((ideation_id IS NULL) <> (bug_id IS NULL));
+  CREATE INDEX IF NOT EXISTS ideation_attachments_bug_idx ON ideation_attachments (bug_id);
   CREATE INDEX IF NOT EXISTS bugs_sprint_idx ON bugs (sprint_id);
 
   CREATE TABLE IF NOT EXISTS development_items (

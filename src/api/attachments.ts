@@ -28,41 +28,49 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
       return;
     }
     const result = await pool.query(
-      `SELECT a.id, a.ideation_id AS "ideationId", a.filename, a.mime, a.size
-         FROM ideation_attachments a JOIN ideation_items i ON i.id = a.ideation_id
-        WHERE i.project_slug = $1 ORDER BY a.created_at`,
+      `SELECT a.id, a.ideation_id AS "ideationId", a.bug_id AS "bugId", a.filename, a.mime, a.size
+         FROM ideation_attachments a
+         LEFT JOIN ideation_items i ON i.id = a.ideation_id
+         LEFT JOIN bugs b ON b.id = a.bug_id
+        WHERE COALESCE(i.project_slug, b.project_slug) = $1 ORDER BY a.created_at`,
       [slug],
     );
     response.json({ attachments: result.rows });
   });
 
-  app.post('/api/ideation/:id/attachments', rawImage, async (request, response) => {
-    const data: unknown = request.body;
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
-      return;
-    }
-    if (!Buffer.isBuffer(data) || data.length === 0) {
-      response.status(415).json({ message: 'Nur Bilder (PNG, JPEG, WebP, GIF) bis 5 MB sind erlaubt.' });
-      return;
-    }
-    const mime = request.header('content-type')?.split(';')[0]?.trim() ?? '';
-    const result = await pool.query(
-      `INSERT INTO ideation_attachments (ideation_id, filename, mime, size, data)
-       SELECT i.id, $2, $3, $4, $5 FROM ideation_items i
-        WHERE i.id = $1
-          AND (SELECT count(*) FROM ideation_attachments WHERE ideation_id = i.id) < $6
-       RETURNING id, ideation_id AS "ideationId", filename, mime, size`,
-      [request.params.id, safeFilename(request.query.name), mime, data.length, data, MAX_ATTACHMENTS_PER_IDEA],
-    );
-    if (!result.rows[0]) {
-      response.status(409).json({
-        message: `Idee nicht gefunden oder bereits ${MAX_ATTACHMENTS_PER_IDEA} Bilder angehängt.`,
-      });
-      return;
-    }
-    response.status(201).json({ attachment: result.rows[0] });
-  });
+  // Bilder zu Ideen und Bugs; owner bestimmt die Spalte, die übrige Logik ist identisch.
+  for (const owner of [
+    { path: '/api/ideation/:id/attachments', table: 'ideation_items', column: 'ideation_id', label: 'Idee' },
+    { path: '/api/bugs/:id/attachments', table: 'bugs', column: 'bug_id', label: 'Bug' },
+  ] as const) {
+    app.post(owner.path, rawImage, async (request, response) => {
+      const data: unknown = request.body;
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Not found.' });
+        return;
+      }
+      if (!Buffer.isBuffer(data) || data.length === 0) {
+        response.status(415).json({ message: 'Nur Bilder (PNG, JPEG, WebP, GIF) bis 5 MB sind erlaubt.' });
+        return;
+      }
+      const mime = request.header('content-type')?.split(';')[0]?.trim() ?? '';
+      const result = await pool.query(
+        `INSERT INTO ideation_attachments (${owner.column}, filename, mime, size, data)
+         SELECT o.id, $2, $3, $4, $5 FROM ${owner.table} o
+          WHERE o.id = $1
+            AND (SELECT count(*) FROM ideation_attachments WHERE ${owner.column} = o.id) < $6
+         RETURNING id, ideation_id AS "ideationId", bug_id AS "bugId", filename, mime, size`,
+        [request.params.id, safeFilename(request.query.name), mime, data.length, data, MAX_ATTACHMENTS_PER_IDEA],
+      );
+      if (!result.rows[0]) {
+        response.status(409).json({
+          message: `${owner.label} nicht gefunden oder bereits ${MAX_ATTACHMENTS_PER_IDEA} Bilder angehängt.`,
+        });
+        return;
+      }
+      response.status(201).json({ attachment: result.rows[0] });
+    });
+  }
 
   app.get('/api/attachments/:id', async (request, response) => {
     const result = isUuid(request.params.id)
@@ -94,21 +102,22 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
   });
 }
 
-/** Writes the images of the originating idea into the project folder so CLI agents can open them. */
+/** Writes the images of the originating idea or bug into the project folder so CLI agents can open them. */
 export async function materializeAttachments(
   pool: Pool,
-  ideationId: string | null | undefined,
+  source: { ideationId?: string | null; bugId?: string | null },
   itemId: string,
   cwd: string,
 ): Promise<string[]> {
   const directory = join(cwd, ATTACHMENT_DIRECTORY, itemId);
   await rm(directory, { recursive: true, force: true });
-  if (!ideationId) {
+  if (!source.ideationId && !source.bugId) {
     return [];
   }
   const result = await pool.query<{ id: string; filename: string; data: Buffer }>(
-    `SELECT id, filename, data FROM ideation_attachments WHERE ideation_id = $1 ORDER BY created_at`,
-    [ideationId],
+    `SELECT id, filename, data FROM ideation_attachments
+      WHERE ideation_id = $1 OR bug_id = $2 ORDER BY created_at`,
+    [source.ideationId ?? null, source.bugId ?? null],
   );
   if (!result.rows.length) {
     return [];

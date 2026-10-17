@@ -28,6 +28,20 @@
         <label class="wide"
           >Beschreibung<textarea name="description" [(ngModel)]="bugForm.description" maxlength="10000"></textarea>
         </label>
+        <label class="wide"
+          >Bilder (PNG, JPEG, WebP, GIF · max. 5 MB)
+          <input
+            type="file"
+            name="images"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            #bugImages
+            (change)="selectPendingImages(bugImages)"
+          />
+        </label>
+        @if (pendingImages.length) {
+          <p class="muted wide">{{ pendingImages.length }} Bild(er) ausgewählt: {{ pendingImageNames() }}</p>
+        }
         <button class="button primary" type="submit" [disabled]="busy()">Bug melden</button>
       </form>
     }
@@ -96,6 +110,7 @@
             } @else {
               <p class="muted">Keine Beschreibung.</p>
             }
+            <app-gallery [bugId]="bug.id" />
           </details>
           @if (bug.fixNotes) {
             <details class="run-step order-brief">
@@ -129,6 +144,18 @@
               <label class="wide"
                 >Fix-Notizen<textarea name="fixNotes" [ngModel]="bug.fixNotes" maxlength="10000"></textarea>
               </label>
+              <label class="wide"
+                >Bilder anhängen (PNG, JPEG, WebP, GIF · max. 5 MB)
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  multiple
+                  #editImages
+                  [disabled]="busy()"
+                  (change)="addImages(bug.id, editImages)"
+                />
+              </label>
+              <div class="wide"><app-gallery [bugId]="bug.id" [removable]="true" /></div>
               <button class="button secondary" type="submit">Änderungen speichern</button>
             </form>
           </details>

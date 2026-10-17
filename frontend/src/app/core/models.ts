@@ -45,7 +45,8 @@ export interface IdeaComment {
 
 export interface Attachment {
   id: string;
-  ideationId: string;
+  ideationId: string | null;
+  bugId?: string | null;
   filename: string;
   mime: string;
   size: number;
@@ -90,6 +91,7 @@ export interface Sprint {
 
 export interface Bug {
   id: string;
+
   title: string;
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';

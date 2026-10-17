@@ -13,9 +13,11 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
 import { severityLabel, statusLabel } from '../../shared/labels.js';
+import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { SeverityLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
 const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix'];
 
@@ -28,6 +30,7 @@ const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix'];
     DataTableComponent,
     DataCellDirective,
     DataDetailDirective,
+    GalleryComponent,
     MarkdownPipe,
     SeverityLabelPipe,
     ShortTextPipe,
@@ -73,6 +76,7 @@ export class BugsComponent {
     },
   ];
   protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '' };
+  protected pendingImages: File[] = [];
 
   protected toggleBug(id: string): void {
     this.openBug.update((current) => (current === id ? null : id));
@@ -84,11 +88,43 @@ export class BugsComponent {
 
   protected async createBug(): Promise<void> {
     const body = { ...this.bugForm, sprintId: this.bugForm.sprintId || null };
+    const files = this.pendingImages;
     await this.store.perform(async () => {
-      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/bugs`, body);
+      const created = await this.api.post<{ bug: Bug }>(
+        `${this.api.projectPath(this.store.activeProject())}/bugs`,
+        body,
+      );
+      this.pendingImages = [];
+      await this.uploadImages(created.bug.id, files);
       this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '' };
       this.store.showCreate.set(false);
     }, 'Bug wurde gemeldet.');
+  }
+
+  protected pendingImageNames(): string {
+    return this.pendingImages.map((file) => file.name).join(', ');
+  }
+
+  protected selectPendingImages(input: HTMLInputElement): void {
+    this.pendingImages = [...this.pendingImages, ...Array.from(input.files ?? [])];
+    input.value = '';
+  }
+
+  protected async addImages(bugId: string, input: HTMLInputElement): Promise<void> {
+    const files = Array.from(input.files ?? []);
+    input.value = '';
+    if (!files.length) return;
+    await this.store.perform(
+      () => this.uploadImages(bugId, files),
+      files.length === 1 ? 'Bild angehängt.' : `${files.length} Bilder angehängt.`,
+    );
+  }
+
+  private async uploadImages(bugId: string, files: File[]): Promise<void> {
+    for (const file of files) {
+      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} ist größer als 5 MB.`);
+      await this.api.upload(`/api/bugs/${encodeURIComponent(bugId)}/attachments`, file);
+    }
   }
 
   protected async saveBug(bug: Bug, values: FormValues): Promise<void> {
