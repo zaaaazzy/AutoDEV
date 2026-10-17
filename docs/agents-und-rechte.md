@@ -79,4 +79,4 @@ Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gese
 
 ## System-Agents und ihre Modelle
 
-Dashboard-Assistent, Problemanalyse und Schnellschätzung laufen lokal über Ollama. Im Bereich „Agents“ wählst du ihr Modell aus den installierten Ollama-Modellen. Die Wahl wird in `app_settings` (`model:<rolle>`) gespeichert, der Worker übernimmt sie innerhalb von 15 Sekunden und sie hat Vorrang vor `DEV_LOG_OLLAMA_MODEL_<ROLLE>`.
+Dashboard-Assistent, Problemanalyse und Schnellschätzung laufen lokal über Ollama. Im Bereich „Agents“ wählst du ihr Modell aus den installierten Ollama-Modellen. Statt eines lokalen Modells kann dieselbe Auswahl auch eine externe CLI (Claude, Copilot, Gemini) sein; sie wird als `command:<rolle>` gespeichert, die Anmeldung liegt bei der CLI. Ein eigener Befehl am Projekt-Agent hat Vorrang. Die Schnellschätzung führt die CLI in einem temporären Ordner aus. Die Modellwahl wird in `app_settings` (`model:<rolle>`) gespeichert, der Worker übernimmt sie innerhalb von 15 Sekunden und sie hat Vorrang vor `DEV_LOG_OLLAMA_MODEL_<ROLLE>`.

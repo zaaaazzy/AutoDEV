@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, patientFetch, resolveModel } from './ollama-client.js';
 
 export interface SystemAgent {
+  command?: string[] | null;
   name: string;
   description: string;
   role: string;
@@ -56,4 +57,20 @@ export async function publishSystemAgents(pool: Pool): Promise<void> {
   const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await pool.query(upsert, ['system_agents', JSON.stringify(systemAgents())]);
   await pool.query(upsert, ['ollama_models', JSON.stringify(models)]);
+}
+
+/** External CLI chosen for a system role in the dashboard (e.g. copilot, claude); null means the local model. */
+export async function systemCommand(pool: Pool, role: string): Promise<string[] | null> {
+  const row = (
+    await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = $1`, [`command:${role}`])
+  ).rows[0];
+  if (!row) return null;
+  try {
+    const command: unknown = JSON.parse(row.value);
+    return Array.isArray(command) && command.length && command.every((part) => typeof part === 'string')
+      ? (command as string[])
+      : null;
+  } catch {
+    return null;
+  }
 }

@@ -1,3 +1,4 @@
+import { systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -71,7 +72,9 @@ export async function runAuthorAgent(
     await loadProjectContext(pool, options.project),
     buildPrompt(author?.instructions ?? ''),
   );
-  const command = author?.command?.length ? author.command : defaultAgentCommand();
+  const command = author?.command?.length
+    ? author.command
+    : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
   try {
     const result = command
       ? await execute(buildInvocation(command, prompt), options.cwd, {

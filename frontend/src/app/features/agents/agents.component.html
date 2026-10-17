@@ -154,14 +154,23 @@
               <strong>{{ system.name }}</strong>
               <p class="muted">{{ system.description }}</p>
               <label class="system-model"
-                >Modell (lokal, kostenlos)
-                <select [ngModel]="system.model" (ngModelChange)="setSystemModel(system.role, $event)">
-                  @if (!installedModels().includes(system.model)) {
-                    <option [value]="system.model">{{ system.model }}</option>
-                  }
-                  @for (model of installedModels(); track model) {
-                    <option [value]="model">{{ model }}</option>
-                  }
+                >Modell / Dienst
+                <select [ngModel]="systemChoice(system)" (ngModelChange)="setSystemChoice(system.role, $event)">
+                  <optgroup label="Lokal (Ollama, kostenlos)">
+                    @if (system.command?.length === 0 || !system.command) {
+                      @if (!installedModels().includes(system.model)) {
+                        <option [value]="'ollama:' + system.model">{{ system.model }}</option>
+                      }
+                    }
+                    @for (model of installedModels(); track model) {
+                      <option [value]="'ollama:' + model">{{ model }}</option>
+                    }
+                  </optgroup>
+                  <optgroup label="Externe CLI (Anmeldung dort)">
+                    @for (preset of externalPresets; track preset.id) {
+                      <option [value]="'preset:' + preset.id">{{ presetLabel(preset) }}</option>
+                    }
+                  </optgroup>
                 </select>
               </label>
             </div>

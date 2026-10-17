@@ -6,6 +6,7 @@ import {
   isRecord,
   isUuid,
   parseBoolean,
+  INVALID,
   parseCommand,
   parseFields,
   parseLongText,
@@ -119,10 +120,14 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       `SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`,
     );
     const agents = (row ? JSON.parse(row.value) : systemAgents()) as { role: string; model: string }[];
+    const commands = await pool.query<{ key: string; value: string }>(
+      `SELECT key, value FROM app_settings WHERE key LIKE 'command:%'`,
+    );
     response.json({
       agents: agents.map((agent) => ({
         ...agent,
         model: chosen.rows.find((item) => item.key === `model:${agent.role}`)?.value ?? agent.model,
+        command: JSON.parse(commands.rows.find((item) => item.key === `command:${agent.role}`)?.value ?? 'null'),
       })),
       models: models ? JSON.parse(models.value) : [],
     });
@@ -130,9 +135,29 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
 
   app.put('/api/system-agents/:role', async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
-    const model = (request.body as { model?: unknown } | undefined)?.model;
-    if (!role || typeof model !== 'string' || model.length > 200 || !/^[\w./:@+-]*$/.test(model)) {
-      response.status(400).json({ message: 'Ungültige Rolle oder ungültiges Modell.' });
+    const body = (request.body ?? {}) as { model?: unknown; command?: unknown };
+    const model = body.model ?? '';
+    const command = body.command === undefined ? undefined : parseCommand(body.command);
+    if (
+      !role ||
+      typeof model !== 'string' ||
+      model.length > 200 ||
+      !/^[\w./:@+-]*$/.test(model) ||
+      command === INVALID
+    ) {
+      response.status(400).json({ message: 'Ungültige Rolle, ungültiges Modell oder ungültiger Befehl.' });
+      return;
+    }
+    if (command !== undefined) {
+      if (command === null) await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`command:${role}`]);
+      else
+        await pool.query(
+          `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+          [`command:${role}`, JSON.stringify(command)],
+        );
+    }
+    if (!model && command !== undefined) {
+      response.json({ role, command });
       return;
     }
     if (model) {

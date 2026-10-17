@@ -1,3 +1,7 @@
+import { tmpdir } from 'node:os';
+import { runCommand } from '../core/command.js';
+import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
+import { systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
@@ -67,6 +71,15 @@ export async function quickEstimate(prompt: string, fetchImpl: typeof fetch = pa
   return parseEstimate(body.message?.content ?? '');
 }
 
+/** Uses the external CLI chosen for the author role; it runs in a temp folder because it only has to answer. */
+async function estimateWithCommand(command: string[], prompt: string): Promise<Estimate | null> {
+  const result = await runCommand(buildInvocation(command, prompt), tmpdir(), {
+    timeoutMs: ESTIMATE_TIMEOUT_MS * 2,
+    env: agentEnvironment(),
+  });
+  return result.exitCode === 0 ? parseEstimate(result.output) : null;
+}
+
 /** Estimates ideas that have no values yet; values entered by users are kept. Failures are noted once, not retried. */
 export async function estimateNewIdeas(pool: Pool, project: string, estimate = quickEstimate): Promise<number> {
   const ideas = (
@@ -80,6 +93,7 @@ export async function estimateNewIdeas(pool: Pool, project: string, estimate = q
   ).rows;
   if (!ideas.length) return 0;
   const context = (await loadProjectContext(pool, project)).slice(0, 600);
+  const external = await systemCommand(pool, 'author');
   for (const idea of ideas) {
     const prompt = [
       'Schätze Aufwand eines Entwicklungsauftrags. Antworte nur mit einem JSON-Objekt:',
@@ -89,7 +103,7 @@ export async function estimateNewIdeas(pool: Pool, project: string, estimate = q
     ]
       .filter(Boolean)
       .join('\n\n');
-    const result = await estimate(prompt).catch(() => null);
+    const result = await (external ? estimateWithCommand(external, prompt) : estimate(prompt)).catch(() => null);
     if (!result) {
       await pool.query(
         `UPDATE ideation_items SET agent_note = 'Aufwand konnte nicht geschätzt werden – bitte manuell ergänzen.' WHERE id = $1 AND agent_note IS NULL`,

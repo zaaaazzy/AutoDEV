@@ -25,6 +25,7 @@ interface SystemAgent {
   description: string;
   role: string;
   model: string;
+  command?: string[] | null;
   envKey: string;
 }
 
@@ -74,9 +75,23 @@ export class AgentsComponent {
   }
   protected readonly systemAgents = signal<SystemAgent[]>([]);
   protected readonly installedModels = signal<string[]>([]);
-  protected async setSystemModel(role: string, model: string): Promise<void> {
-    await this.api.put(`/api/system-agents/${role}`, { model });
-    this.systemAgents.update((list) => list.map((item) => (item.role === role ? { ...item, model } : item)));
+  protected readonly externalPresets = MODEL_PRESETS.filter((preset) => preset.command);
+
+  protected systemChoice(system: SystemAgent): string {
+    const preset = system.command?.length ? presetOf(system.command.join(' ')) : null;
+    return preset && preset !== 'custom' ? `preset:${preset}` : `ollama:${system.model}`;
+  }
+
+  protected async setSystemChoice(role: string, choice: string): Promise<void> {
+    const [kind, value = ''] = [choice.slice(0, choice.indexOf(':')), choice.slice(choice.indexOf(':') + 1)];
+    const preset = kind === 'preset' ? MODEL_PRESETS.find((item) => item.id === value) : undefined;
+    const command = preset ? parseCommand(preset.command) : null;
+    await this.api.put(`/api/system-agents/${role}`, kind === 'ollama' ? { model: value, command: null } : { command });
+    this.systemAgents.update((list) =>
+      list.map((item) =>
+        item.role === role ? { ...item, command, model: kind === 'ollama' ? value : item.model } : item,
+      ),
+    );
   }
   protected readonly agentEditing = signal<string | null>(null);
   protected agentEdit = { name: '', instructions: '', command: '' };
