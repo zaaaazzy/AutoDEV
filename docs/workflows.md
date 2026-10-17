@@ -83,3 +83,10 @@ Repo-Dokumentation spiegeln (`syncRepoDocs`), Sprint-Bericht für den aktiven Sp
 - Aufträge laufen sequenziell pro Projekt; mehrere Projekte parallel (`maxConcurrentAgents`).
 - Nach erfolgreichem Play-Lauf eines Bug-Auftrags wird der Ursprungsauftrag nicht automatisch fortgesetzt.
 - Auftrags-Commits werden nicht gepusht; erst die Sprint-Sicherung pusht.
+
+## Parallelität
+
+- **Auftragsautor:** Läuft in eigener Schleife des Workers und schreibt Anforderungen, während andere Aufträge entwickelt werden.
+- **Schnellschätzung:** Läuft ebenfalls unabhängig.
+- **Aufträge:** Der Worker nimmt bis zu 3 geplante Aufträge pro Durchgang (`--limit 3`). Die Phase „Umsetzung“ (Entwickler, Tester) läuft für höchstens einen Auftrag gleichzeitig, damit sich Änderungen am Arbeitsverzeichnis nicht überschneiden. Vorbereitung und Nachbereitung (Dokumentierer, Handbuch-Autoren) laufen parallel zur Umsetzung eines anderen Auftrags.
+- Grenze: Der Git-Commit eines Auftrags kann Änderungen enthalten, die ein parallel laufender Auftrag schon im Arbeitsverzeichnis hat.

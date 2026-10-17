@@ -6,7 +6,7 @@ import { loadProjectContext } from '../core/project-context.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { syncSprintToGit } from './git-sync.js';
-import { draftRequirements } from '../agent/requirements.js';
+import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
 import { selectItems, loadWorkflow, defaultAgentCommand } from './runner-selection.js';
@@ -120,7 +120,14 @@ export async function runWorkItem(
     const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
     for (const [position, agent] of ordered.entries()) {
       if (position < resumeFrom) continue;
-      const outcome = await runStep(ctx, agent, position, ordered.length);
+      // Developer and tester change the working tree, so they never overlap; author and documentation agents may.
+      const release = agent.phase === 'while_task' ? await options.implementationLock?.acquire() : undefined;
+      let outcome: Awaited<ReturnType<typeof runStep>>;
+      try {
+        outcome = await runStep(ctx, agent, position, ordered.length);
+      } finally {
+        release?.();
+      }
       if (outcome.interrupted) interrupted = true;
       if (!outcome.passed) {
         passed = false;
@@ -146,7 +153,6 @@ export async function runWorkflow(
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
-  await draftRequirements(pool, options, execute);
   await syncSprintToGit(pool, options.project, options.cwd, execute);
   // Orders in the active sprint run automatically, even when they are still in the backlog.
   await pool.query(
@@ -166,9 +172,15 @@ export async function runWorkflow(
   if (!agents.length) {
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
   }
-  for (const item of items) {
-    results.push({ itemId: item.id, result: await runWorkItem(pool, item, agents, { ...options, execute, builtin }) });
-  }
+  const implementationLock = new Mutex();
+  results.push(
+    ...(await Promise.all(
+      items.map(async (item) => ({
+        itemId: item.id,
+        result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),
+      })),
+    )),
+  );
   await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,

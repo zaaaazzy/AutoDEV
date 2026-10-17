@@ -16,7 +16,7 @@
     "test": "npm run build:ui && tsx --test \"src/**/*.test.ts\"",
     "test-agent": "tsx src/runner/test-agent.ts",
     "runner": "tsx src/runner/runner-cli.ts",
-    "worker": "tsx src/runner/runner-cli.ts --all --watch"
+    "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3"
   },
   "dependencies": {
     "express": "^5.1.0",

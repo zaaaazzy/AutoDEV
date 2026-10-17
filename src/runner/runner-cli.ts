@@ -6,6 +6,7 @@ import { processChat, rejectChat } from '../agent/chat.js';
 import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
+import { draftRequirements } from '../agent/requirements.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
@@ -152,6 +153,7 @@ async function main(): Promise<void> {
     const chatActive = new Set<string>();
     const analysisActive = new Set<string>();
     const estimateActive = new Set<string>();
+    const authorActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -167,6 +169,16 @@ async function main(): Promise<void> {
               logOnce(`estimate:${slug}`, `[${slug}] Schätzung fehlgeschlagen: ${describeError(error)}`),
             )
             .finally(() => estimateActive.delete(slug));
+        }
+        // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft.
+        if (!authorActive.has(slug) && !stopping) {
+          authorActive.add(slug);
+          void draftRequirements(pool, target.options)
+            .then(() => loggedErrors.delete(`author:${slug}`))
+            .catch((error: unknown) =>
+              logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => authorActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
@@ -229,7 +241,7 @@ async function main(): Promise<void> {
         }
       }
       await Promise.all(active.values());
-      while (chatActive.size || analysisActive.size) await sleep(200);
+      while (chatActive.size || analysisActive.size || authorActive.size || estimateActive.size) await sleep(200);
     } finally {
       clearInterval(heartbeat);
       clearInterval(chatTimer);
