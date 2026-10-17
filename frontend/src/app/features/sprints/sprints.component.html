@@ -54,15 +54,25 @@
                   >
                     <app-nav-icon name="git-push" />Push
                   </button>
-                  <button
-                    class="button git-button"
-                    type="button"
-                    (click)="syncGit(sprint.id, 'pull')"
-                    [disabled]="busy() || gitBusy(sprint) || !store.currentProject()?.gitRemote"
-                    title="Git Pull: Stand von GitHub laden"
-                  >
-                    <app-nav-icon name="git-pull" />Pull
-                  </button>
+                  @if (zipUrl(sprint); as zip) {
+                    <a
+                      class="button git-button"
+                      [href]="zip"
+                      download
+                      title="Code dieses Sprint-Stands als ZIP von GitHub herunterladen"
+                    >
+                      <app-nav-icon name="git-pull" />ZIP
+                    </a>
+                  } @else {
+                    <button
+                      class="button git-button"
+                      type="button"
+                      disabled
+                      title="Kein GitHub-Remote im Projekt hinterlegt"
+                    >
+                      <app-nav-icon name="git-pull" />ZIP
+                    </button>
+                  }
                 </span>
               </div>
             </div>

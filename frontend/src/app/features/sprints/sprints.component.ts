@@ -139,6 +139,14 @@ export class SprintsComponent {
     this.editingId.set(null);
   }
 
+  /** ZIP des Sprint-Stands direkt von GitHub (Commit, sonst Branch); ändert nichts am lokalen Repository. */
+  protected zipUrl(sprint: Sprint): string | null {
+    const base = this.githubBase();
+    if (!base) return null;
+    const ref = sprint.gitCommit || (sprint.gitBranch ? `refs/heads/${sprint.gitBranch}` : 'HEAD');
+    return `${base}/archive/${ref.split('/').map(encodeURIComponent).join('/')}.zip`;
+  }
+
   protected githubBase(): string | null {
     const remote = this.store.currentProject()?.gitRemote?.trim();
     const match = remote?.match(
@@ -185,7 +193,7 @@ export class SprintsComponent {
   protected async syncGit(id: string, action: 'push' | 'pull'): Promise<void> {
     await this.store.perform(
       () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`, { action }),
-      action === 'push' ? 'Git Push wird ausgeführt.' : 'Git Download wird ausgeführt.',
+      action === 'push' ? 'Git Push wird ausgeführt.' : 'Git Pull wird ausgeführt.',
     );
   }
 
