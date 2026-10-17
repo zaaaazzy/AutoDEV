@@ -146,6 +146,21 @@
           }
         </section>
       }
+      <section class="phase">
+        <h3>System-Agents <small>laufen lokal über Ollama, nicht im Workflow</small></h3>
+        @for (system of systemAgents(); track system.role) {
+          <article class="item-card">
+            <div class="item-content">
+              <strong>{{ system.name }}</strong>
+              <p class="muted">{{ system.description }}</p>
+              <p class="muted">
+                Modell: <code>{{ system.model }}</code> · änderbar über <code>{{ system.envKey }}</code> (oder
+                <code>DEV_LOG_OLLAMA_MODEL</code> für alle) in der Worker-Umgebung
+              </p>
+            </div>
+          </article>
+        }
+      </section>
       <h3 class="subheading">Letzte Agent-Läufe</h3>
       @for (run of data().agentRuns; track run.id) {
         <article class="run-card">

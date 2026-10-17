@@ -6,6 +6,7 @@ import { processChat, rejectChat } from '../agent/chat.js';
 import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
+import { publishSystemAgents } from '../agent/system-agents.js';
 import { draftRequirements } from '../agent/requirements.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
@@ -147,6 +148,7 @@ async function main(): Promise<void> {
       }
       if (known.length) startup = false;
     };
+    void publishSystemAgents(pool).catch(() => undefined);
     const heartbeat = setInterval(beat, 15_000);
     // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
     let chatTargets: Target[] = [];

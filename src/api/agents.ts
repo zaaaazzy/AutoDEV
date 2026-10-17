@@ -1,3 +1,4 @@
+import { systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
@@ -109,6 +110,12 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
 }
 
 export function registerAgentRoutes(app: Express, pool: Pool): void {
+  app.get('/api/system-agents', async (_request, response) => {
+    const row = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'system_agents'`))
+      .rows[0];
+    response.json({ agents: row ? JSON.parse(row.value) : systemAgents() });
+  });
+
   // Workflow order: phase (pre, while, after), then position.
   app.get('/api/projects/:slug/agents', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');

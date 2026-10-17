@@ -20,6 +20,14 @@ import {
 } from './agent-options.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
 
+interface SystemAgent {
+  name: string;
+  description: string;
+  role: string;
+  model: string;
+  envKey: string;
+}
+
 @Component({
   selector: 'app-agents',
   standalone: true,
@@ -38,6 +46,14 @@ import { AgentDetailComponent } from './agent-detail.component.js';
 })
 export class AgentsComponent {
   private readonly api = inject(ApiService);
+
+  constructor() {
+    void this.api
+      .get<{ agents: SystemAgent[] }>('/api/system-agents')
+      .then((result) => this.systemAgents.set(result.agents))
+      .catch(() => undefined);
+  }
+
   protected readonly store = inject(ProjectStore);
   protected readonly activity = inject(AgentActivityService);
   protected readonly data = this.store.data;
@@ -53,6 +69,7 @@ export class AgentsComponent {
     const preset = MODEL_PRESETS.find((item) => item.id === id);
     if (preset) target.command = preset.command;
   }
+  protected readonly systemAgents = signal<SystemAgent[]>([]);
   protected readonly agentEditing = signal<string | null>(null);
   protected agentEdit = { name: '', instructions: '', command: '' };
   protected agentForm = {
