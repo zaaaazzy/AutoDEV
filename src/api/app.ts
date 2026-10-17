@@ -8,7 +8,6 @@ import { registerBoardRoutes } from './board.js';
 import { registerBugRoutes } from './bugs.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { registerDevelopmentRoutes } from './development.js';
-import { registerFileRoutes } from './files.js';
 import { registerDocRoutes } from './docs.js';
 import { registerIdeationRoutes } from './ideation.js';
 import { registerProjectRoutes } from './projects.js';
@@ -48,7 +47,6 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerBugRoutes(app, pool);
   registerAttachmentRoutes(app, pool);
   registerDocRoutes(app, pool);
-  registerFileRoutes(app, pool);
   registerReportRoutes(app, pool);
   registerStatsRoutes(app, pool);
   registerChatRoutes(app, pool);

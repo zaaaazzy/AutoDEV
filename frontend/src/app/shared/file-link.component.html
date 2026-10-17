@@ -1,26 +1,11 @@
 @if (url(); as href) {
-  <a [href]="href" target="_blank" rel="noopener"
-    ><code>{{ path() }}</code></a
+  <a [href]="href" target="_blank" rel="noopener" [title]="'Auf GitHub öffnen: ' + path()"
+    ><span class="file-icon" aria-hidden="true">↗</span><span class="file-dir">{{ parts().dir }}</span
+    ><span class="file-name">{{ parts().name }}</span></a
   >
 } @else {
-  <code>{{ path() }}</code>
-}
-@if (open()) {
-  <div class="file-preview" role="tooltip" [style.top.px]="position().top" [style.left.px]="position().left">
-    <p class="file-preview-title">{{ path() }}</p>
-    @if (preview() === undefined) {
-      <p class="muted">Lade Vorschau …</p>
-    } @else if (preview(); as file) {
-      @if (file.binary) {
-        <p class="muted">Binärdatei – keine Textvorschau.</p>
-      } @else {
-        <pre>{{ file.content }}</pre>
-        @if (file.truncated) {
-          <p class="muted">… gekürzt</p>
-        }
-      }
-    } @else {
-      <p class="muted">Keine Vorschau verfügbar.</p>
-    }
-  </div>
+  <span class="file-plain" [title]="path()"
+    ><span class="file-dir">{{ parts().dir }}</span
+    ><span class="file-name">{{ parts().name }}</span></span
+  >
 }
