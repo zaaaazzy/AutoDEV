@@ -681,4 +681,17 @@ export const SCHEMA = `
   -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen.
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
   ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test'));
+
+  -- Sprint starten (Knopf oder Autopilot): ohne Startdatum gilt der Starttag (höchstens das Enddatum).
+  CREATE OR REPLACE FUNCTION sprint_default_start_date() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'active' AND NEW.start_date IS NULL THEN
+      NEW.start_date := LEAST(CURRENT_DATE, COALESCE(NEW.end_date, CURRENT_DATE));
+    END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER sprints_default_start_date
+    BEFORE INSERT OR UPDATE OF status ON sprints
+    FOR EACH ROW EXECUTE FUNCTION sprint_default_start_date();
 `;
