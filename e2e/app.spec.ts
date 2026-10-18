@@ -437,9 +437,11 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
 
   // Roadmap: 3 vorausberechnete Sprints, ohne dass etwas angelegt wird.
   const sprintList = async () =>
-    ((await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
-      sprints: { id: string; status: string }[];
-    }).sprints;
+    (
+      (await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
+        sprints: { id: string; status: string }[];
+      }
+    ).sprints;
   const sprintsBefore = (await sprintList()).length;
   await card.getByRole('button', { name: /Roadmap/ }).click();
   const roadmap = card.locator('.sprint-roadmap');
@@ -448,7 +450,10 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   expect((await sprintList()).length).toBe(sprintsBefore);
 
   // KI-Kommentar wird beim Worker angefragt; die Auswahl bleibt unverändert. Ohne Pause gibt es nichts freizugeben.
-  const asked = await request.post('/api/projects/e2e/sprints/proposal/comment', { headers, data: { ids: [order.id] } });
+  const asked = await request.post('/api/projects/e2e/sprints/proposal/comment', {
+    headers,
+    data: { ids: [order.id] },
+  });
   expect(asked.status()).toBe(202);
   expect((await asked.json()).comment.status).toBe('requested');
   const resumed = await request.post('/api/projects/e2e/sprints/autopilot/resume', { headers, data: {} });
