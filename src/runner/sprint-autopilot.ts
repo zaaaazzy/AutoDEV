@@ -68,7 +68,9 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
   if (active) {
     const items = (
       await pool.query<{ status: string; actionTodo: string | null }>(
-        `SELECT status, action_todo AS "actionTodo" FROM development_items WHERE sprint_id = $1 AND status <> 'rejected'`,
+        // Express-Anfragen sind ungeplant: Eine offene Rückfrage im Chat hält den Sprintabschluss nicht auf.
+        `SELECT status, action_todo AS "actionTodo" FROM development_items
+          WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
         [active.id],
       )
     ).rows;

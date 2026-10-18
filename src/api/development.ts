@@ -178,14 +178,15 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
               analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
-        WHERE d.id = $1 AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
+        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
               OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
         RETURNING ${DEV_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {
       response.status(409).json({
-        message: 'Nur blockierte, abgelehnte oder aus dem Sprint entfernte Aufträge können weiterbearbeitet werden.',
+        message:
+          'Nur blockierte, abgelehnte oder aus dem Sprint entfernte Aufträge können weiterbearbeitet werden. Express-Anfragen gehen im Dashboard-Chat weiter.',
       });
       return;
     }
@@ -268,7 +269,8 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `UPDATE development_items SET analysis_status = 'requested', updated_at = NOW()
-        WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND COALESCE(analysis_status, 'done') NOT IN ('requested', 'running') RETURNING ${DEV_COLUMNS}`,
+        WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.blocked}' AND kind <> 'express'
+          AND COALESCE(analysis_status, 'done') NOT IN ('requested', 'running') RETURNING ${DEV_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {

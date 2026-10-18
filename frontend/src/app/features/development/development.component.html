@@ -60,6 +60,13 @@
                 }
                 {{ item.kind === 'bug' ? item.title.replace('Bug: ', '') : item.title }}
               </button>
+              @if (item.kind === 'express') {
+                <span
+                  class="express-badge"
+                  title="Express-Anfrage aus dem Dashboard – ungeplant in den Sprint aufgenommen"
+                  >⚡ Express</span
+                >
+              }
               <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
             </div>
             @if (entry.badges.length || analysisRunning(item)) {
@@ -112,6 +119,20 @@
                   <p>
                     Warte kurz: Der Assistent analysiert den Auftrag. Die Schritte erscheinen hier, sobald er fertig
                     ist.
+                  </p>
+                } @else if (item.kind === 'express') {
+                  <p>
+                    {{
+                      item.actionTodo
+                        ? 'Der Assistent wartet auf deine Antwort auf seine Rückfrage.'
+                        : 'Die Anfrage konnte nicht bearbeitet werden.'
+                    }}
+                  </p>
+                  <p class="attention-next">
+                    → {{ item.actionTodo ? 'Antworte' : 'Stell die Anfrage neu' }} im
+                    <a href="#dashboard" (click)="$event.preventDefault(); store.navigate('dashboard')"
+                      >Dashboard-Chat</a
+                    >. Der Auftrag aktualisiert sich danach von selbst.
                   </p>
                 } @else if (item.failureBugId) {
                   @switch (item.fixStatus) {
@@ -279,7 +300,9 @@
               </details>
             }
             <div class="attention-actions">
-              @if (
+              @if (item.kind === 'express') {
+                <button class="button primary" type="button" (click)="store.navigate('dashboard')">Zum Chat</button>
+              } @else if (
                 auth.can('run') && (item.status === 'blocked' || item.status === 'rejected' || item.removedFromSprintAt)
               ) {
                 <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">
@@ -297,7 +320,7 @@
                   Geprüft – alles in Ordnung
                 </button>
               }
-              @if (item.status === 'blocked' && auth.can('run')) {
+              @if (item.status === 'blocked' && auth.can('run') && item.kind !== 'express') {
                 <button
                   class="button secondary"
                   type="button"
@@ -325,7 +348,7 @@
                 </button>
               }
             </div>
-            @if (!auth.can('run')) {
+            @if (!auth.can('run') && item.kind !== 'express') {
               <p class="muted small">
                 „Erneut versuchen“ und „Analysieren“ brauchen das Recht, Agents zu starten – frag dafür einen Admin.
               </p>

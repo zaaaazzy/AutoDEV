@@ -1,3 +1,4 @@
+import { ANSWERED } from './chat-routes.js';
 import type { Express } from 'express';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
@@ -34,6 +35,8 @@ export async function readMaxAgents(pool: Pool): Promise<number> {
 
 /** Kennung des Dashboard-Assistenten in der Agent-Liste der Kopfzeile. */
 export const ASSISTANT_AGENT_ID = 'assistant';
+/** Der Visionär ist ebenfalls kein Workflow-Agent; aktiv, solange ein Lauf angefragt ist oder läuft. */
+export const VISIONARY_AGENT_ID = 'visionary';
 
 export function registerWorkerRoutes(app: Express, pool: Pool): void {
   app.get('/api/settings', async (_request, response, next) => {
@@ -233,9 +236,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
         : (
             await pool.query<{ question: string }>(
               `SELECT question FROM chat_messages m
-                WHERE m.project_slug = $1 AND m.role = 'assistant' AND m.question IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM chat_messages u
-                                   WHERE u.project_slug = $1 AND u.role = 'user' AND u.created_at > m.created_at)
+                WHERE m.project_slug = $1 AND m.role = 'assistant' AND m.question IS NOT NULL AND NOT ${ANSWERED}
                 ORDER BY m.created_at DESC LIMIT 1`,
               [slug],
             )
@@ -252,6 +253,25 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
             : null,
         active: Boolean(chat),
         waiting: Boolean(question),
+      });
+      const visionary = (
+        await pool.query<{ status: string; progress: string | null }>(
+          `SELECT status, progress FROM visionary_runs
+            WHERE project_slug = $1 AND status IN ('requested', 'running') ORDER BY requested_at DESC LIMIT 1`,
+          [slug],
+        )
+      ).rows[0];
+      agents.push({
+        id: VISIONARY_AGENT_ID,
+        name: 'Visionär',
+        phase: 'system',
+        sprintName: null,
+        orderTitle: visionary
+          ? visionary.status === 'running'
+            ? `Ideen sammeln: ${visionary.progress ?? 'läuft …'}`.slice(0, 100)
+            : 'Lauf angefragt – wartet auf den Worker'
+          : null,
+        active: Boolean(visionary),
       });
       const online = Boolean(beat) && beat.ageSeconds <= 60;
       response

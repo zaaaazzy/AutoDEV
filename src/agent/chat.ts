@@ -4,6 +4,7 @@ import { isShuttingDown } from '../core/shutdown.js';
 import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
 import { runAuthorAgent } from './requirements.js';
+import { closeExpressOrder, openExpressOrder } from './express-order.js';
 import { saveRequestDoc } from './request-doc.js';
 import { type ChatReference, referenceContext } from './chat-references.js';
 import { replyToIdeaComment } from '../api/idea-comments.js';
@@ -11,17 +12,30 @@ import type { RunnerOptions } from '../runner/runner.js';
 
 const HISTORY_LIMIT = 20;
 const QUESTION_MARKER = /^@@FRAGE:\s*(.+)$/m;
+const OPTIONS_MARKER = /^@@OPTIONEN:\s*(.+)$/m;
+const MAX_OPTIONS = 4;
 const QUESTION_RULE =
-  'Rückfragen: Fehlt dir eine Information, ohne die du nicht sinnvoll weiterarbeiten kannst (z. B. eine Entscheidung zwischen klaren Alternativen), arbeite so weit wie möglich und stelle dann genau eine kurze Rückfrage. Beende die Antwort in diesem Fall mit einer eigenen Zeile `@@FRAGE: <deine Frage>`. Frage nicht, wenn du sinnvoll selbst entscheiden kannst.';
+  'Rückfragen: Fehlt dir eine Information, ohne die du nicht sinnvoll weiterarbeiten kannst (z. B. eine Entscheidung zwischen klaren Alternativen), arbeite so weit wie möglich und stelle dann genau eine kurze Rückfrage. Beende die Antwort in diesem Fall mit einer eigenen Zeile `@@FRAGE: <deine Frage>`. Gibt es naheliegende Antworten, nenne sie in einer weiteren Zeile `@@OPTIONEN: <Antwort 1> | <Antwort 2>` (höchstens 4, je ein kurzer Satz, den der Nutzer anklicken kann). Frage nicht, wenn du sinnvoll selbst entscheiden kannst.';
 
 /** Trennt die Rückfrage (@@FRAGE-Zeile) vom übrigen Antworttext. */
-export function splitQuestion(output: string): { text: string; question: string | null } {
+export function splitQuestion(output: string): { text: string; question: string | null; options: string[] } {
   const question = QUESTION_MARKER.exec(output)?.[1]?.trim() || null;
+  const options = question
+    ? [
+        ...new Set(
+          (OPTIONS_MARKER.exec(output)?.[1] ?? '')
+            .split('|')
+            .map((option) => option.trim().slice(0, 200))
+            .filter(Boolean),
+        ),
+      ].slice(0, MAX_OPTIONS)
+    : [];
   const text = output
     .replace(/^@@TASK\b.*$/gm, '')
     .replace(QUESTION_MARKER, '')
+    .replace(OPTIONS_MARKER, '')
     .trim();
-  return { text: text || question || 'Erledigt.', question };
+  return { text: text || question || 'Erledigt.', question, options };
 }
 export interface ChatAgent {
   name: string;
@@ -67,11 +81,19 @@ export async function processChat(
   execute: CommandExecutor = runCommand,
 ): Promise<boolean> {
   const claimed = (
-    await pool.query<{ id: string; content: string; agentId: string | null; references: ChatReference[] }>(
+    await pool.query<{
+      id: string;
+      content: string;
+      agentId: string | null;
+      references: ChatReference[];
+      ideaCommentId: string | null;
+      replyTo: string | null;
+    }>(
       `UPDATE chat_messages SET status = 'processing', updated_at = clock_timestamp()
       WHERE id = (SELECT id FROM chat_messages WHERE project_slug = $1 AND role = 'user' AND status = 'pending'
                    ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, content, agent_id AS "agentId", refs AS "references"`,
+      RETURNING id, content, agent_id AS "agentId", refs AS "references", idea_comment_id AS "ideaCommentId",
+                reply_to AS "replyTo"`,
       [options.project],
     )
   ).rows[0];
@@ -85,17 +107,24 @@ export async function processChat(
       WHERE project_slug = $1 AND status <> 'failed' AND NOT (role = 'assistant' AND status = 'processing') ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
     [options.project, HISTORY_LIMIT],
   );
-  // Antwort auf eine offene Rückfrage: dieselbe Claude-Sitzung fortsetzen, damit der Assistent den Kontext behält.
+  // Antwort auf eine Rückfrage: dieselbe Claude-Sitzung fortsetzen, damit der Agent den Kontext behält. Verweist die
+  // Antwort ausdrücklich auf eine Rückfrage, gilt diese – auch wenn inzwischen anderes im Chat stand.
   const openQuestion = (
-    await pool.query<{ question: string; sessionId: string | null }>(
-      `SELECT question, session_id AS "sessionId" FROM chat_messages
-        WHERE project_slug = $1 AND role = 'assistant' AND status = 'done' AND question IS NOT NULL
-          AND agent_id IS NOT DISTINCT FROM $3
-          AND created_at > COALESCE((SELECT max(created_at) FROM chat_messages
-                                      WHERE project_slug = $1 AND role = 'user' AND id <> $2), '-infinity')
-        ORDER BY created_at DESC LIMIT 1`,
-      [options.project, claimed.id, claimed.agentId],
-    )
+    claimed.replyTo
+      ? await pool.query<{ id: string; question: string; sessionId: string | null }>(
+          `SELECT id, question, session_id AS "sessionId" FROM chat_messages
+            WHERE id = $1 AND project_slug = $2 AND question IS NOT NULL`,
+          [claimed.replyTo, options.project],
+        )
+      : await pool.query<{ id: string; question: string; sessionId: string | null }>(
+          `SELECT id, question, session_id AS "sessionId" FROM chat_messages
+            WHERE project_slug = $1 AND role = 'assistant' AND status = 'done' AND question IS NOT NULL
+              AND agent_id IS NOT DISTINCT FROM $3
+              AND created_at > COALESCE((SELECT max(created_at) FROM chat_messages
+                                          WHERE project_slug = $1 AND role = 'user' AND id <> $2), '-infinity')
+            ORDER BY created_at DESC LIMIT 1`,
+          [options.project, claimed.id, claimed.agentId],
+        )
   ).rows[0];
   const resume = openQuestion?.sessionId
     ? {
@@ -103,6 +132,13 @@ export async function processChat(
         prompt: `Antwort des Nutzers auf deine Rückfrage „${openQuestion.question}“:\n${claimed.content}\n\nArbeite damit weiter. ${QUESTION_RULE}`,
       }
     : undefined;
+  // Anfragen aus dem Dashboard (nicht @Agent in Ideen-Kommentaren) erscheinen als Express-Auftrag im Sprint.
+  const expressId = claimed.ideaCommentId
+    ? null
+    : await openExpressOrder(pool, options.project, claimed, openQuestion?.id ?? null).catch((error: unknown) => {
+        console.error('Express-Auftrag konnte nicht angelegt werden:', error);
+        return null;
+      });
   const references = await referenceContext(pool, options.project, claimed.references ?? []).catch(() => '');
   const progress = await startProgress(pool, options.project, [
     'Lese die Anfrage und den Projektkontext …',
@@ -131,16 +167,18 @@ export async function processChat(
       claimed.id,
     ]);
     await pool.query(
-      `INSERT INTO chat_messages (project_slug, role, content, events, agent_id, agent_name)
-       VALUES ($1, 'assistant', $2, $3::jsonb, $4, $5)`,
+      `INSERT INTO chat_messages (project_slug, role, content, events, agent_id, agent_name, development_id)
+       VALUES ($1, 'assistant', $2, $3::jsonb, $4, $5, $6)`,
       [
         options.project,
         `Die Anfrage konnte nicht bearbeitet werden.${output ? `\n${output.slice(0, 500)}` : ''}`,
         JSON.stringify(progress.events()),
         claimed.agentId,
         agent?.name ?? null,
+        expressId,
       ],
     );
+    if (expressId) await closeExpressOrder(pool, expressId).catch(() => undefined);
     await saveRequestDoc(pool, options.project, {
       request: claimed.content,
       answer: output.slice(0, 2000),
@@ -157,7 +195,7 @@ export async function processChat(
     ).catch(() => undefined);
     return true;
   }
-  const { text, question } = splitQuestion(output);
+  const { text, question, options: answers } = splitQuestion(output);
   // Auslöser war ein Kommentar mit @Agent: die Antwort erscheint auch als Kommentar bei der Idee.
   await replyToIdeaComment(pool, claimed.id, agent?.name ?? null, question ? `${text}\n\n❓ ${question}` : text).catch(
     (error: unknown) => console.error('Antwort an Ideen-Kommentar fehlgeschlagen:', error),
@@ -166,8 +204,9 @@ export async function processChat(
     claimed.id,
   ]);
   await pool.query(
-    `INSERT INTO chat_messages (project_slug, role, content, events, question, session_id, agent_id, agent_name)
-     VALUES ($1, 'assistant', $2, $3::jsonb, $4, $5, $6, $7)`,
+    `INSERT INTO chat_messages (project_slug, role, content, events, question, session_id, agent_id, agent_name,
+                                development_id, question_options)
+     VALUES ($1, 'assistant', $2, $3::jsonb, $4, $5, $6, $7, $8, $9::jsonb)`,
     [
       options.project,
       text,
@@ -176,8 +215,15 @@ export async function processChat(
       sessionId ?? null,
       claimed.agentId,
       agent?.name ?? null,
+      expressId,
+      JSON.stringify(answers),
     ],
   );
+  if (expressId) {
+    await closeExpressOrder(pool, expressId).catch((error: unknown) =>
+      console.error('Express-Auftrag konnte nicht aktualisiert werden:', error),
+    );
+  }
   // Jede Anfrage samt Ergebnis landet unter Dokumentation → Anfragen.
   await saveRequestDoc(pool, options.project, {
     request: claimed.content,

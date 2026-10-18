@@ -24,10 +24,20 @@ export class ChatComponent {
   protected readonly chatWaiting = computed(() =>
     this.chat().some((message) => message.role === 'user' && ['pending', 'processing'].includes(message.status)),
   );
-  /** Letzte Nachricht ist eine unbeantwortete Rückfrage des Assistenten. */
-  protected readonly openQuestionId = computed(() => {
-    const last = this.chat().at(-1);
-    return last?.role === 'assistant' && last.question ? last.id : null;
+  /** Unbeantwortete Rückfragen – auch ältere, wenn inzwischen anderes im Chat stand. */
+  protected readonly openQuestions = computed(() =>
+    this.chat().filter((message) => message.role === 'assistant' && message.question && !message.answered),
+  );
+  /** Mit „Eigene Antwort …“ gewählte Rückfrage; sonst gilt die jüngste offene. */
+  private readonly chosenReply = signal<string | null>(null);
+  /** Mit ✕ verworfen: die nächste Nachricht ist eine neue Anfrage. */
+  private readonly dismissedReply = signal<string | null>(null);
+  protected readonly replyTarget = computed(() => {
+    const open = this.openQuestions();
+    const chosen = open.find((message) => message.id === this.chosenReply());
+    if (chosen) return chosen;
+    const latest = open.at(-1);
+    return latest && latest.id !== this.dismissedReply() ? latest : null;
   });
   protected readonly chatProgressShown = computed(() =>
     this.chat().some((message) => message.role === 'assistant' && message.status === 'processing'),
@@ -105,18 +115,49 @@ export class ChatComponent {
 
   protected async send(message: ComposedMessage, composer: ChatComposerComponent): Promise<void> {
     if (!this.store.activeProject()) return;
+    const reply = this.replyTarget();
     try {
-      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/chat`, {
-        content: message.content,
-        agentId: this.agentId() || null,
-        references: message.references.map(({ type, id }) => ({ type, id })),
-      });
-      // Ohne Live-Verbindung käme die Antwort nie an: sofort neu verbinden.
-      if (!this.connected()) this.reconnect();
+      await this.post(message.content, reply?.id ?? null, message.references);
+      this.chosenReply.set(null);
     } catch (error) {
       composer.restore(message);
       this.store.notice.set(error instanceof Error ? error.message : 'Nachricht konnte nicht gesendet werden.');
     }
+  }
+
+  /** Antwortmöglichkeit der Rückfrage anklicken: geht direkt als Antwort an den fragenden Agent. */
+  protected async answerWith(question: ChatMessage, option: string): Promise<void> {
+    try {
+      await this.post(option, question.id, []);
+      this.chosenReply.set(null);
+    } catch (error) {
+      this.store.notice.set(error instanceof Error ? error.message : 'Antwort konnte nicht gesendet werden.');
+    }
+  }
+
+  /** „Eigene Antwort …“: Eingabefeld auf diese Rückfrage richten. */
+  protected replyTo(question: ChatMessage): void {
+    this.chosenReply.set(question.id);
+    this.dismissedReply.set(null);
+    globalThis.setTimeout(() => document.querySelector<HTMLInputElement>('app-chat-composer input')?.focus());
+  }
+
+  /** ✕ am Antwort-Hinweis: nächste Nachricht ist eine neue Anfrage. */
+  protected newRequest(): void {
+    this.dismissedReply.set(this.replyTarget()?.id ?? null);
+    this.chosenReply.set(null);
+  }
+
+  private async post(content: string, replyTo: string | null, references: ComposedMessage['references']) {
+    await this.api.post(`${this.api.projectPath(this.store.activeProject())}/chat`, {
+      content,
+      // Antworten gehen an den Agent der Rückfrage; den bestimmt der Server.
+      agentId: replyTo ? null : this.agentId() || null,
+      replyTo,
+      references: references.map(({ type, id }) => ({ type, id })),
+    });
+    // Ohne Live-Verbindung käme die Antwort nie an: sofort neu verbinden.
+    if (!this.connected()) this.reconnect();
   }
 
   protected async clear(): Promise<void> {

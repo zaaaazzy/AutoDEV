@@ -95,7 +95,12 @@ export class StatsComponent {
 
   protected readonly orderColumns: DataColumn<OrderUsage>[] = [
     { id: 'title', header: 'Auftrag', value: (row) => row.title, className: 'title-cell', filter: 'text' },
-    { id: 'kind', header: 'Art', value: (row) => (row.kind === 'bug' ? 'Bug' : 'Auftrag'), filter: 'select' },
+    {
+      id: 'kind',
+      header: 'Art',
+      value: (row) => (row.kind === 'bug' ? 'Bug' : row.kind === 'express' ? 'Express' : 'Auftrag'),
+      filter: 'select',
+    },
     categoryColumn((row) => row.category),
     {
       id: 'estTokens',

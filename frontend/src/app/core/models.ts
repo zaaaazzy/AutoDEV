@@ -114,7 +114,8 @@ export interface DevelopmentItem extends Estimate {
   priority: Priority;
   sprintId: string | null;
   agentId?: string | null;
-  kind?: 'feature' | 'bug';
+  /** express = Anfrage aus dem Dashboard-Chat, ungeplant im Sprint (entsteht und endet im Chat). */
+  kind?: 'feature' | 'bug' | 'express';
   bugId?: string | null;
   ideationId?: string | null;
   testRunId?: string | null;
@@ -472,4 +473,10 @@ export interface ChatMessage {
   /** Verweise der Nachricht (/auftrag/…, /git/…, @Person), vom Server geprüft. */
   references?: { type: string; id: string; label: string }[];
   createdAt: string;
+  /** Antwortmöglichkeiten zur Rückfrage (zum Anklicken). */
+  questionOptions?: string[];
+  /** Rückfrage schon beantwortet. */
+  answered?: boolean;
+  /** Antwort auf diese Rückfrage. */
+  replyTo?: string | null;
 }

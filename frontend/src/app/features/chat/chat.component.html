@@ -34,7 +34,7 @@
         <div
           class="chat-msg assistant"
           [class.failed]="message.status === 'failed'"
-          [class.asking]="message.question && message.id === openQuestionId()"
+          [class.asking]="message.question && !message.answered"
         >
           @if (message.agentName) {
             <span class="chat-agent-name"
@@ -51,9 +51,26 @@
           @if (message.question) {
             <div class="chat-question">
               <span class="chat-question-label">{{
-                message.id === openQuestionId() ? 'Rückfrage – wartet auf deine Antwort' : 'Rückfrage'
+                message.answered ? 'Rückfrage – beantwortet' : 'Rückfrage – wartet auf deine Antwort'
               }}</span>
               <p>{{ message.question }}</p>
+              @if (!message.answered) {
+                <div class="chat-answers" role="group" aria-label="Antwort wählen">
+                  @for (option of message.questionOptions ?? []; track option) {
+                    <button type="button" class="chat-answer" (click)="answerWith(message, option)">
+                      {{ option }}
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="chat-answer own"
+                    [class.selected]="replyTarget()?.id === message.id"
+                    (click)="replyTo(message)"
+                  >
+                    ✎ Eigene Antwort …
+                  </button>
+                </div>
+              }
             </div>
           }
         </div>
@@ -82,10 +99,21 @@
       <div class="chat-msg typing">Assistent arbeitet …</div>
     }
   </div>
+  @if (replyTarget(); as reply) {
+    <div class="chat-reply-to" role="status">
+      <span
+        >↩ Antwort an <strong>{{ reply.agentName ?? 'Assistent' }}</strong
+        >: {{ reply.question }}</span
+      >
+      <button type="button" class="link-button" (click)="newRequest()" title="Stattdessen eine neue Anfrage stellen">
+        ✕ Neue Anfrage
+      </button>
+    </div>
+  }
   <app-chat-composer
     #composer
     [(agentId)]="agentId"
-    [placeholder]="openQuestionId() ? 'Antwort auf die Rückfrage …' : 'Nachricht – / Agent, @ Verweis …'"
+    [placeholder]="replyTarget() ? 'Antwort auf die Rückfrage …' : 'Nachricht – @ Agent, / Verweis …'"
     (sent)="send($event, composer)"
   />
 </section>

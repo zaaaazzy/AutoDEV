@@ -83,7 +83,7 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
               (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = 'blocked') AS troubled,
               d.action_todo AS "actionTodo"
          FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
-        WHERE d.project_slug = $1 AND d.status IN ('backlog', 'planned', 'blocked')
+        WHERE d.project_slug = $1 AND d.status IN ('backlog', 'planned', 'blocked') AND d.kind <> 'express'
           AND (d.sprint_id IS NULL OR s.status = 'completed')
         ORDER BY d.created_at, d.id`,
       [project],

@@ -259,7 +259,12 @@ export interface VisionaryContext {
 const clip = (value: string, max: number): string => (value.length > max ? `${value.slice(0, max)} […]` : value);
 const list = (lines: string[], empty: string): string => (lines.length ? lines.join('\n') : empty);
 
-export function buildVisionaryPrompt(instructions: string, context: VisionaryContext, limit: number): string {
+export function buildVisionaryPrompt(
+  instructions: string,
+  context: VisionaryContext,
+  limit: number,
+  focus: string | null = null,
+): string {
   const bugs = Object.entries(context.bugsByCategory).map(
     ([group, items]) =>
       `### ${group} (${items.length})\n${items.map((bug) => `- [${bug.status} / ${bug.severity}] ${bug.title}`).join('\n')}`,
@@ -269,6 +274,9 @@ export function buildVisionaryPrompt(instructions: string, context: VisionaryCon
       'begründete Erweiterungsideen vor, die dem Projekt den grössten Nutzen bringen. Du änderst nichts, führst keine ' +
       'Befehle aus und legst nichts selbst an.',
     `## Anweisung\n${instructions || 'Schlage konkrete, umsetzbare Erweiterungen vor, die sich auf die Daten unten stützen.'}`,
+    focus
+      ? `## Schwerpunkt des Nutzers\n${focus}\n\nRichte die Vorschläge auf diesen Schwerpunkt aus. Auch hier gilt: Jede Idee muss sich auf die Daten unten stützen.`
+      : '',
     `## Dokumentation (gekürzt)\n${list(
       context.docs.map((doc) => `### ${doc.path}\n${doc.text}`),
       'Keine README oder docs/*.md gefunden.',
@@ -537,13 +545,29 @@ export async function storeVisionaryIdeas(
   return result;
 }
 
+/** Antwort des Visionärs im Dashboard-Chat (Lauf wurde dort mit @Visionär gestartet). */
+async function replyInChat(pool: Pool, project: string, content: string): Promise<void> {
+  await pool
+    .query(`INSERT INTO chat_messages (project_slug, role, content, agent_name) VALUES ($1, 'assistant', $2, $3)`, [
+      project,
+      content,
+      VISIONARY_AUTHOR,
+    ])
+    .catch((error: unknown) => console.error('Visionär-Antwort im Chat fehlgeschlagen:', error));
+}
+
 /** Fordert einen Lauf an; null, wenn für das Projekt schon einer angefragt ist oder läuft. */
-export async function requestVisionaryRun(pool: Pool, slug: string, requestedBy: string): Promise<string | null> {
+export async function requestVisionaryRun(
+  pool: Pool,
+  slug: string,
+  requestedBy: string,
+  options: { focus?: string | null; replyInChat?: boolean } = {},
+): Promise<string | null> {
   const row = (
     await pool.query<{ id: string }>(
-      `INSERT INTO visionary_runs (project_slug, requested_by) VALUES ($1, $2)
+      `INSERT INTO visionary_runs (project_slug, requested_by, focus, reply_in_chat) VALUES ($1, $2, $3, $4)
        ON CONFLICT (project_slug) WHERE status IN ('requested', 'running') DO NOTHING RETURNING id`,
-      [slug, requestedBy.slice(0, 80)],
+      [slug, requestedBy.slice(0, 80), options.focus?.trim().slice(0, 1000) || null, options.replyInChat ?? false],
     )
   ).rows[0];
   return row?.id ?? null;
@@ -570,11 +594,11 @@ export async function processVisionaryRun(
   execute: CommandExecutor = runCommand,
 ): Promise<number> {
   const run = (
-    await pool.query<{ id: string }>(
+    await pool.query<{ id: string; focus: string | null; replyInChat: boolean }>(
       `UPDATE visionary_runs SET status = 'running', started_at = NOW(), progress = 'Sammelt den Projektkontext …'
         WHERE id = (SELECT id FROM visionary_runs WHERE project_slug = $1 AND status = 'requested'
                      ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-        RETURNING id`,
+        RETURNING id, focus, reply_in_chat AS "replyInChat"`,
       [options.project],
     )
   ).rows[0];
@@ -597,7 +621,7 @@ export async function processVisionaryRun(
     const { exitCode, output } = await runAuthorAgent(
       pool,
       options,
-      (instructions) => buildVisionaryPrompt(instructions, context, limit),
+      (instructions) => buildVisionaryPrompt(instructions, context, limit, run.focus),
       execute,
       VISIONARY_ROLE,
       (message) => void setProgress(pool, run.id, message),
@@ -632,6 +656,17 @@ export async function processVisionaryRun(
       [run.id, stored.created.length, stored.discarded],
     );
     const count = stored.created.length;
+    if (run.replyInChat) {
+      await replyInChat(
+        pool,
+        options.project,
+        count
+          ? `Ich habe ${count} neue ${count === 1 ? 'Idee' : 'Ideen'} in Ideation angelegt${
+              stored.discarded ? ` (${stored.discarded} verworfen: Dubletten, ohne Beleg oder über dem Limit)` : ''
+            }:\n\n${stored.created.map((idea) => `- ${idea.title}`).join('\n')}\n\nDu findest sie unter Ideation mit dem Badge „Visionär“ – dort lassen sie sich übernehmen oder mit Grund ablehnen.`
+          : `Ich habe keine neuen Ideen angelegt (${stored.discarded} verworfen: Dubletten, ohne Beleg oder über dem Limit).`,
+      );
+    }
     await sendPush(
       pool,
       {
@@ -646,11 +681,14 @@ export async function processVisionaryRun(
     ).catch((error: unknown) => console.error('Visionär-Meldung konnte nicht gesendet werden:', error));
     return count;
   } catch (error) {
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
     await pool.query(
       `UPDATE visionary_runs SET status = 'failed', finished_at = NOW(), progress = NULL, error = $2
         WHERE id = $1 AND status = 'running'`,
-      [run.id, (error instanceof Error ? error.message : String(error)).slice(0, 2000)],
+      [run.id, message],
     );
+    if (run.replyInChat)
+      await replyInChat(pool, options.project, `Der Lauf ist fehlgeschlagen: ${message.slice(0, 500)}`);
     return 0;
   } finally {
     clearInterval(watcher);

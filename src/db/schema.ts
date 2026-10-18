@@ -694,4 +694,17 @@ export const SCHEMA = `
   CREATE OR REPLACE TRIGGER sprints_default_start_date
     BEFORE INSERT OR UPDATE OF status ON sprints
     FOR EACH ROW EXECUTE FUNCTION sprint_default_start_date();
+
+  -- Express-Anfragen: Anfragen im Dashboard-Chat erscheinen als ungeplanter Auftrag im aktiven Sprint.
+  ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_kind_check;
+  ALTER TABLE development_items ADD CONSTRAINT development_items_kind_check
+    CHECK (kind IN ('feature', 'bug', 'express'));
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS development_id UUID REFERENCES development_items(id) ON DELETE SET NULL;
+  CREATE INDEX IF NOT EXISTS chat_messages_development_idx ON chat_messages (development_id) WHERE development_id IS NOT NULL;
+  -- Visionär aus dem Chat (@Visionär …): Schwerpunkt des Nutzers und Rückmeldung des Ergebnisses im Chat.
+  ALTER TABLE visionary_runs ADD COLUMN IF NOT EXISTS focus TEXT;
+  ALTER TABLE visionary_runs ADD COLUMN IF NOT EXISTS reply_in_chat BOOLEAN NOT NULL DEFAULT FALSE;
+  -- Rückfragen: Antwortmöglichkeiten des Agents und feste Verknüpfung der Antwort mit ihrer Rückfrage.
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS question_options JSONB NOT NULL DEFAULT '[]'::jsonb;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES chat_messages(id) ON DELETE SET NULL;
 `;

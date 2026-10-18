@@ -26,29 +26,31 @@
         }
       </select>
     </label>
-    <label class="control control-agent"
-      ><span>Agent</span
-      ><select
-        [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
-        (ngModelChange)="manualAgent[item.id] = $event"
-        [name]="'agent-' + item.id"
-      >
-        <option value="">Einzeln starten …</option>
-        @for (agent of data().agents; track agent.id) {
-          <option [value]="agent.id">{{ agent.name }}</option>
-        }
-      </select>
-      <button
-        class="button primary run-agent"
-        type="button"
-        title="Mit gewähltem Agent starten"
-        aria-label="Agent starten"
-        [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
-        (click)="startWithAgent(item)"
-      >
-        ▶
-      </button>
-    </label>
+    @if (item.kind !== 'express') {
+      <label class="control control-agent"
+        ><span>Agent</span
+        ><select
+          [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+          (ngModelChange)="manualAgent[item.id] = $event"
+          [name]="'agent-' + item.id"
+        >
+          <option value="">Einzeln starten …</option>
+          @for (agent of data().agents; track agent.id) {
+            <option [value]="agent.id">{{ agent.name }}</option>
+          }
+        </select>
+        <button
+          class="button primary run-agent"
+          type="button"
+          title="Mit gewähltem Agent starten"
+          aria-label="Agent starten"
+          [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+          (click)="startWithAgent(item)"
+        >
+          ▶
+        </button>
+      </label>
+    }
   </div>
   @if (item.status === 'blocked' || item.status === 'rejected') {
     <div class="blocked-box">

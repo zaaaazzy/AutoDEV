@@ -9205,3 +9205,66 @@ input.pick {
 .idea-reject textarea {
   min-height: 70px;
 }
+
+/* ── Express-Anfragen aus dem Dashboard: ungeplant im Sprint ──────────── */
+.express-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff3cd;
+  color: #8a5a00;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.tag.express-unplanned {
+  background: #fff8e6;
+  color: #8a5a00;
+}
+.kanban-card.express {
+  border-left: 3px solid #f0b429;
+}
+
+/* ── Rückfragen im Chat: Antworten zum Anklicken, Antwort-Hinweis ─────── */
+.chat-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chat-answer {
+  padding: 6px 12px;
+  border: 1px solid #e0a03a;
+  border-radius: 999px;
+  background: #fff;
+  color: #8a5a00;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-answer:hover,
+.chat-answer:focus-visible {
+  background: #fdf1e0;
+}
+.chat-answer.own {
+  border-style: dashed;
+  font-weight: 500;
+}
+.chat-answer.own.selected {
+  border-style: solid;
+  background: #fdf1e0;
+}
+.chat-reply-to {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 6px 12px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 8px;
+  background: #fdf6ec;
+  font-size: 13px;
+}

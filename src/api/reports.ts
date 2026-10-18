@@ -43,7 +43,9 @@ function toMarkdown(name: string, goal: string, report: SprintReport): string {
     ),
     '## Umgesetzt (Featureliste)',
     list(
-      report.implemented.map((item) => `- ${item.kind === 'bug' ? '🐞 ' : ''}${item.title}`),
+      report.implemented.map(
+        (item) => `- ${item.kind === 'bug' ? '🐞 ' : item.kind === 'express' ? '⚡ ' : ''}${item.title}`,
+      ),
       '_Nichts umgesetzt._',
     ),
     '## Offen / nicht umgesetzt',
@@ -125,9 +127,14 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     });
   }
   const percent = orders.rows.length ? Math.round((done.length / orders.rows.length) * 100) : 0;
+  const express = orders.rows.filter((order) => order.kind === 'express').length;
   const report: SprintReport = {
     sprintId,
-    summary: `${done.length} von ${orders.rows.length} Aufträgen umgesetzt (${percent} %). ${open.length} offen, ${problems.length} Problem(e) dokumentiert.`,
+    summary: `${done.length} von ${orders.rows.length} Aufträgen umgesetzt (${percent} %). ${open.length} offen, ${problems.length} Problem(e) dokumentiert.${
+      express
+        ? ` Davon ${express} Express-${express === 1 ? 'Anfrage' : 'Anfragen'} aus dem Dashboard (ungeplant).`
+        : ''
+    }`,
     implemented: done.map(({ id, title, kind, effortHours }) => ({ id, title, kind, effortHours })),
     missing: open.map(({ id, title, status }) => ({ id, title, status })),
     problems,
