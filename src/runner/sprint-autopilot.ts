@@ -45,12 +45,16 @@ export async function sprintAutopilot(pool: Pool, project: string): Promise<Auto
     ).rows.map((row) => row.status);
     if (!sprintSettled(statuses)) return 'working';
     await completeSprint(pool, active.id);
-    await sendPush(pool, {
-      title: `🏁 Sprint abgeschlossen · ${project}`,
-      body: `${active.name} wurde vom Autopilot abgeschlossen.`,
-      url: '#sprints',
-      tag: `autopilot-${project}`,
-    });
+    await sendPush(
+      pool,
+      {
+        title: `🏁 Sprint abgeschlossen · ${project}`,
+        body: `${active.name} wurde vom Autopilot abgeschlossen.`,
+        url: '#sprints',
+        tag: `autopilot-${project}`,
+      },
+      { project: project },
+    );
     return 'completed';
   }
 
@@ -62,11 +66,15 @@ export async function sprintAutopilot(pool: Pool, project: string): Promise<Auto
   const ids = [...selected].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)).map((item) => item.id);
   const result = await applyProposal(pool, project, ids, true);
   if (typeof result === 'string') return 'idle';
-  await sendPush(pool, {
-    title: `▶ Sprint gestartet · ${project}`,
-    body: `${proposal.name}: ${ids.length} Aufträge (${proposal.totals.hours} h) vom Autopilot eingeplant.`,
-    url: '#sprints',
-    tag: `autopilot-${project}`,
-  });
+  await sendPush(
+    pool,
+    {
+      title: `▶ Sprint gestartet · ${project}`,
+      body: `${proposal.name}: ${ids.length} Aufträge (${proposal.totals.hours} h) vom Autopilot eingeplant.`,
+      url: '#sprints',
+      tag: `autopilot-${project}`,
+    },
+    { project: project },
+  );
   return 'started';
 }

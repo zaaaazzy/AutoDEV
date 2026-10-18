@@ -32,7 +32,30 @@ export interface PermissionGroup {
 
 const prefixRules = (prefixes: string[]): string[] => prefixes.map((prefix) => `Bash(${prefix}:*)`);
 
+/** Datei-Werkzeuge der Claude-CLI; ohne den Befehl „files“ werden sie dem Agent ausdrücklich verboten. */
+export const FILE_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+/** Befehle ohne Claude-Regel: Dateien schreiben (Datei-Werkzeuge) und Dienst-Logs lesen (Zusatzordner). */
+export const FILES_COMMAND = 'files';
+export const LOGS_COMMAND = 'logs';
+const isToolRule = (rule: string): boolean => rule !== FILES_COMMAND && rule !== LOGS_COMMAND;
+
+/** Lesbare Bezeichnung eines Befehls für die Oberfläche. */
+export function commandLabel(rule: string): string {
+  if (rule === FILES_COMMAND) return 'Dateien erstellen und ändern';
+  if (rule === LOGS_COMMAND) return '~/Library/Logs lesen';
+  const bash = rule.match(/^Bash\((.+?)(:\*)?\)$/);
+  if (bash) return bash[2] ? `${bash[1]} …` : bash[1]!;
+  const web = rule.match(/^WebFetch\(domain:(.+)\)$/);
+  return web ? `Webseiten auf ${web[1]} abrufen` : rule;
+}
+
 export const PERMISSION_GROUPS: PermissionGroup[] = [
+  {
+    id: 'files',
+    label: 'Dateien',
+    description: 'Dateien im Projektordner anlegen und bearbeiten (Lesen ist immer erlaubt).',
+    rules: [FILES_COMMAND],
+  },
   {
     id: 'diagnose',
     label: 'Diagnose',
@@ -49,7 +72,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     id: 'logs',
     label: 'Dienst-Logs lesen',
     description: 'Zugriff auf ~/Library/Logs, z. B. das Log des Live-Modus.',
-    rules: [],
+    rules: [LOGS_COMMAND],
   },
   {
     id: 'build',
@@ -121,7 +144,9 @@ export const DEFAULT_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => group.
 
 /** Claude-Regeln der gewählten Gruppen (ohne Angabe: alle). */
 export function permissionRules(groups: readonly string[] = DEFAULT_PERMISSION_GROUPS): string[] {
-  return PERMISSION_GROUPS.filter((group) => groups.includes(group.id)).flatMap((group) => group.rules);
+  return PERMISSION_GROUPS.filter((group) => groups.includes(group.id))
+    .flatMap((group) => group.rules)
+    .filter(isToolRule);
 }
 
 /** Rechte-Gruppen eines Projekts; ohne Einstellung gelten alle Standardgruppen. */
@@ -243,4 +268,104 @@ export function composeViolation(configJson: string, root: string): string | nul
     }
   }
   return null;
+}
+
+/** Gruppen-IDs eigener Gruppen: Kleinbuchstaben, Ziffern und Bindestriche. */
+export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
+
+/** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, Dev Log und Daten). */
+const FORBIDDEN_COMMANDS =
+  /^(?:sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\d*|gem|cargo|go)\b/;
+const FORBIDDEN_SUBCOMMANDS =
+  /^(?:git (?:push|reset|clean|config|remote|rebase|filter-branch|update-ref|gc)|docker (?:run|exec|rm|rmi|system|volume|network|image|container|cp|login)|docker compose (?:exec|run|cp|rm)|npm (?:publish|exec|x|login|adduser|token|config|cache)|npm install(?! --ignore-scripts))\b/;
+const SAFE_PREFIX = /^[\w@./=:,+-]+(?: [\w@./=:,+-]+)*$/;
+
+/**
+ * Prüft eine Regel einer eigenen Gruppe. Erlaubt sind nur „Bash(<Befehl>:*)“ bzw. „Bash(<Befehl>)“ ohne
+ * Shell-Sonderzeichen und ohne gesperrte Befehle sowie WebFetch auf localhost. Liefert die Fehlermeldung oder null.
+ */
+export function customRuleProblem(rule: string): string | null {
+  const web = /^WebFetch\(domain:(?:localhost|127\.0\.0\.1)\)$/.test(rule);
+  if (web) return null;
+  const match = rule.match(/^Bash\((.+?)(:\*)?\)$/);
+  if (!match) return `„${rule}“: erlaubt sind Bash(befehl:*), Bash(befehl) oder WebFetch(domain:localhost).`;
+  const command = match[1]!.trim();
+  if (!SAFE_PREFIX.test(command))
+    return `„${rule}“: keine Shell-Sonderzeichen (; & | $ \` > < * ? Klammern, Anführungszeichen).`;
+  if (command.length > 120) return `„${rule}“: Befehl zu lang.`;
+  if (FORBIDDEN_COMMANDS.test(command) || FORBIDDEN_SUBCOMMANDS.test(command))
+    return `„${rule}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
+  if (/(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|DevLog)(?:[\s/]|$)/i.test(command) || /\.\./.test(command))
+    return `„${rule}“: Zugriff auf Geheimnisse, Dev Log selbst oder übergeordnete Ordner ist gesperrt.`;
+  return null;
+}
+
+/** Rechte eines Projekts: freigeschaltete Gruppen (null = alle) und eigene Gruppen dieses Projekts. */
+export interface ProjectPermissions {
+  enabled: string[] | null;
+  custom: PermissionGroup[];
+}
+
+export async function loadProjectPermissions(
+  pool: { query: <R>(sql: string, values: unknown[]) => Promise<{ rows: R[] }> },
+  project: string,
+): Promise<ProjectPermissions> {
+  const [enabled, custom] = await Promise.all([
+    pool
+      .query<{ groups: string[] | null }>('SELECT agent_permissions AS groups FROM projects WHERE slug = $1', [project])
+      .then((result) => result.rows[0]?.groups ?? null)
+      .catch(() => null),
+    pool
+      .query<PermissionGroup>(
+        'SELECT id, label, description, rules FROM project_permission_groups WHERE project_slug = $1 ORDER BY label',
+        [project],
+      )
+      .then((result) => result.rows)
+      .catch(() => [] as PermissionGroup[]),
+  ]);
+  return { enabled, custom };
+}
+
+/** Gruppen, die in einem Projekt zur Verfügung stehen: eingebaute (freigeschaltet) und eigene; „files“ immer. */
+export function availableGroups(permissions: ProjectPermissions): PermissionGroup[] {
+  const all = [...PERMISSION_GROUPS, ...permissions.custom];
+  return permissions.enabled
+    ? all.filter(
+        (group) =>
+          group.id === 'files' || permissions.enabled!.includes(group.id) || permissions.custom.includes(group),
+      )
+    : all;
+}
+
+/** Alle Befehle, die einem Agent in diesem Projekt zugewiesen werden können (je Kategorie). */
+export function availableCommands(permissions: ProjectPermissions): Set<string> {
+  return new Set(availableGroups(permissions).flatMap((group) => group.rules));
+}
+
+/**
+ * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gilt das bisherige
+ * Verhalten: Assistent, Entwickler, Tester und Reviewer bekommen die Projektkategorien. Mit Zuweisung bekommt jeder
+ * Agent genau die einzeln gesetzten Befehle – und ohne „Dateien erstellen und ändern“ keine Datei-Werkzeuge.
+ */
+export function withAgentPermissions(
+  command: string[],
+  role: string,
+  permissions: ProjectPermissions,
+  agentCommands: string[] | null,
+  readDirectories: string[] = extraReadDirectories(),
+): string[] {
+  const [binary, ...rest] = command;
+  const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
+  if (!isClaude || rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part))) return command;
+  if (agentCommands === null && !TRUSTED_ROLES.has(role)) return command;
+  const available = availableCommands(permissions);
+  const chosen =
+    agentCommands === null ? [...available] : [...new Set(agentCommands)].filter((rule) => available.has(rule));
+  const rules = chosen.filter(isToolRule);
+  const directories = chosen.includes(LOGS_COMMAND)
+    ? readDirectories.flatMap((directory) => ['--add-dir', directory])
+    : [];
+  const denied =
+    agentCommands !== null && !chosen.includes(FILES_COMMAND) ? ['--disallowedTools', FILE_TOOLS.join(',')] : [];
+  return [binary, ...directories, ...(rules.length ? ['--allowedTools', rules.join(',')] : []), ...denied, ...rest];
 }

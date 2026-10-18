@@ -15,7 +15,7 @@ import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
-import { loadPermissionGroups, withAssistantPermissions } from '../agent/tool-permissions.js';
+import { loadProjectPermissions, withAgentPermissions } from '../agent/tool-permissions.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
@@ -180,8 +180,9 @@ async function invokeAgent(
       onProgress: hooks.onAction,
     });
   const configured = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
-  const groups = await loadPermissionGroups(pool, item.projectSlug);
-  const command = configured && withAssistantPermissions(configured, agent.role, undefined, groups);
+  const permissions = await loadProjectPermissions(pool, item.projectSlug);
+  const command =
+    configured && withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null);
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
     const written = await executeAgentCommand(
@@ -377,12 +378,16 @@ export async function runStep(
       if (manual.length) {
         output += `\n\n## Von dir zu prüfen\n${manual.map((line) => `- ${line}`).join('\n')}`;
         await logEvent(pool, stepId, `Abnahme: ${manual.length} Punkt(e) nur manuell prüfbar`);
-        await sendPush(pool, {
-          title: `👤 Bitte selbst prüfen · ${item.projectSlug}`,
-          body: `${item.title}\n${manual.join('\n')}`,
-          url: '#development',
-          tag: `manual-${item.id}`,
-        });
+        await sendPush(
+          pool,
+          {
+            title: `👤 Bitte selbst prüfen · ${item.projectSlug}`,
+            body: `${item.title}\n${manual.join('\n')}`,
+            url: '#development',
+            tag: `manual-${item.id}`,
+          },
+          { project: item.projectSlug },
+        );
       }
     }
   }
@@ -449,12 +454,16 @@ export async function runStep(
 
 /** Push-Nachricht aufs Handy, wenn ein Auftrag fertig ist oder hängen bleibt. */
 async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, problem: string | null): Promise<void> {
-  await sendPush(pool, {
-    title: succeeded ? `✓ Auftrag erledigt · ${item.projectSlug}` : `⚠ Auftrag blockiert · ${item.projectSlug}`,
-    body: succeeded ? item.title : `${item.title}\n${problem ?? 'Ein Agent ist gescheitert – Details im Auftrag.'}`,
-    url: '#development',
-    tag: `order-${item.id}`,
-  });
+  await sendPush(
+    pool,
+    {
+      title: succeeded ? `✓ Auftrag erledigt · ${item.projectSlug}` : `⚠ Auftrag blockiert · ${item.projectSlug}`,
+      body: succeeded ? item.title : `${item.title}\n${problem ?? 'Ein Agent ist gescheitert – Details im Auftrag.'}`,
+      url: '#development',
+      tag: `order-${item.id}`,
+    },
+    { project: item.projectSlug },
+  );
 }
 
 /** Settle the order status and trigger follow-up actions such as commits or bugfix retries. */

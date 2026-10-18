@@ -40,8 +40,32 @@ export async function vapidKeys(pool: Pool): Promise<VapidKeys> {
   return JSON.parse(winner.rows[0]!.value) as VapidKeys;
 }
 
-export async function loadSubscriptions(pool: Pool): Promise<PushSubscriptionRow[]> {
-  return (await pool.query<PushSubscriptionRow>('SELECT endpoint, p256dh, auth FROM push_subscriptions')).rows;
+/**
+ * Empfänger (Mandantentrennung): Nachrichten eines Projekts gehen nur an Geräte von Administratoren und
+ * freigeschalteten Benutzern; ohne Projekt (Systemmeldungen) nur an Administratoren; `self` nur an die eigenen Geräte.
+ */
+export type PushAudience = { project?: string } | { self: { id: string | null } };
+
+export async function loadSubscriptions(pool: Pool, audience: PushAudience = {}): Promise<PushSubscriptionRow[]> {
+  if ('self' in audience) {
+    return (
+      await pool.query<PushSubscriptionRow>(
+        `SELECT endpoint, p256dh, auth FROM push_subscriptions
+          WHERE CASE WHEN $1::uuid IS NULL THEN system_admin ELSE user_id = $1 END`,
+        [audience.self.id],
+      )
+    ).rows;
+  }
+  return (
+    await pool.query<PushSubscriptionRow>(
+      `SELECT s.endpoint, s.p256dh, s.auth FROM push_subscriptions s LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.system_admin
+           OR (u.active AND ('admin' = ANY(u.roles)
+               OR ($1::text IS NOT NULL AND EXISTS (
+                     SELECT 1 FROM project_members m WHERE m.user_id = u.id AND m.project_slug = $1))))`,
+      [audience.project ?? null],
+    )
+  ).rows;
 }
 
 /**
@@ -76,9 +100,9 @@ export async function deliverPush(
 }
 
 /** Sendet eine Nachricht an alle Geräte; Fehler werden nur protokolliert, damit Abläufe nie daran scheitern. */
-export async function sendPush(pool: Pool, message: PushMessage): Promise<number> {
+export async function sendPush(pool: Pool, message: PushMessage, audience: PushAudience = {}): Promise<number> {
   try {
-    const subscriptions = await loadSubscriptions(pool);
+    const subscriptions = await loadSubscriptions(pool, audience);
     if (!subscriptions.length) return 0;
     const { sent, gone } = await deliverPush(await vapidKeys(pool), subscriptions, message);
     if (gone.length) await pool.query('DELETE FROM push_subscriptions WHERE endpoint = ANY($1)', [gone]);

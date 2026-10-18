@@ -40,7 +40,13 @@ function section(text: string, heading: RegExp): string {
   return match ? firstLine(match[1]!.replace(/^\s*(?:[-*]|\d+\.)\s+/gm, '')) : '';
 }
 
+function splitTodo(todo: string): [string, string] {
+  const index = todo.lastIndexOf(' – ');
+  return index > 0 ? [todo.slice(0, index), todo.slice(index + 3)] : [todo, ''];
+}
+
 export function orderProblem(item: ProblemSource): OrderProblem | null {
+  if (item.status === 'done' || item.status === 'rejected') return null;
   if (item.status !== 'blocked' && !item.actionTodo) return null;
   const analysis = item.analysis ?? '';
   const failure = item.failure ?? '';
@@ -50,7 +56,13 @@ export function orderProblem(item: ProblemSource): OrderProblem | null {
     vermerk.replace(/^(Umgebung|Projektregel)\s*–\s*/, '') ||
     firstLine(failure) ||
     'Ein Agent ist gescheitert.';
+  // „Projektregel verhindert … – Auftrag anpassen oder verwerfen“: vor dem Gedankenstrich das Problem, danach die Lösung.
+  const [todoProblem, todoSolution] = splitTodo(item.actionTodo ?? '');
   const solution =
-    item.actionTodo || section(analysis, /Lösung/) || 'Erneut versuchen oder vom Assistenten analysieren lassen';
-  return { problem: shorten(problem), solution: shorten(solution) };
+    todoSolution ||
+    item.actionTodo ||
+    section(analysis, /Lösung/) ||
+    'Erneut versuchen oder vom Assistenten analysieren lassen';
+  const finalProblem = todoSolution && !section(analysis, /Ursache/) ? todoProblem : problem;
+  return { problem: shorten(finalProblem), solution: shorten(solution) };
 }

@@ -1,9 +1,306 @@
 @if (store.ready()) {
+  @let run = selected();
+  <section class="panel test-overview">
+    <div class="section-heading">
+      <div>
+        <h2>Testübersicht</h2>
+        @if (run) {
+          <p class="muted">
+            <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+            {{ runDate(run) }} · {{ triggerLabel(run.trigger) }}
+            @if (run.branch) {
+              · {{ run.branch }}
+            }
+            @if (run.commitSha) {
+              <code>{{ run.commitSha.slice(0, 8) }}</code>
+            }
+          </p>
+        } @else {
+          <p class="muted">Noch keine Testläufe.</p>
+        }
+      </div>
+      @if (runs().length > 1) {
+        <label class="run-picker"
+          >Lauf
+          <select
+            [value]="run?.id ?? ''"
+            (change)="chosenRun.set($any($event.target).value)"
+            aria-label="Testlauf wählen"
+          >
+            @for (entry of runs(); track entry.id) {
+              <option [value]="entry.id">{{ runDate(entry) }} · {{ entry.status | statusLabel }}</option>
+            }
+          </select>
+        </label>
+      }
+    </div>
+
+    @if (run) {
+      <div class="test-kpis">
+        <div>
+          <strong>{{ headline().rate === null ? '–' : headline().rate + ' %' }}</strong>
+          <span>Erfolgsquote der letzten {{ headline().finished }} Läufe</span>
+        </div>
+        <div>
+          <strong>{{ headline().duration }}</strong>
+          <span>Dauer dieses Laufs</span>
+        </div>
+        <div>
+          <strong>{{ findingCount() }}</strong>
+          <span>Befunde{{ category() ? ' in ' + categoryLabel(category()!) : '' }}</span>
+        </div>
+        <div>
+          <strong>{{ run.mediaCount ?? 0 }}</strong>
+          <span>Screenshots &amp; Videos</span>
+        </div>
+      </div>
+
+      <div class="test-categories" role="group" aria-label="Nach Kategorie filtern">
+        @for (entry of stats(); track entry.id) {
+          <button
+            type="button"
+            class="test-category"
+            [class.active]="category() === entry.id"
+            [class.has-failures]="entry.failed > 0"
+            [class.idle]="!entry.total"
+            [attr.aria-pressed]="category() === entry.id"
+            (click)="toggleCategory(entry.id)"
+          >
+            <span class="test-category-head">
+              <strong>{{ entry.label }}</strong>
+              <span class="status" [ngClass]="entry.failed ? 'status-failed' : entry.total ? 'status-passed' : ''">
+                {{ entry.failed ? entry.failed + ' fehlgeschlagen' : entry.total ? 'alles grün' : 'nicht gelaufen' }}
+              </span>
+            </span>
+            <span class="test-category-count">
+              @if (entry.total) {
+                {{ entry.passed }}<small> / {{ entry.total - entry.skipped }} bestanden</small>
+              } @else {
+                –<small> in diesem Lauf nicht dabei</small>
+              }
+            </span>
+            <span class="test-bar" aria-hidden="true">
+              <span class="pass" [style.width.%]="percent(entry.passed, entry.total)"></span>
+              <span class="fail" [style.width.%]="percent(entry.failed, entry.total)"></span>
+              <span class="skip" [style.width.%]="percent(entry.skipped, entry.total)"></span>
+            </span>
+            <span class="test-category-foot">
+              <span class="muted">{{ entry.hint }}</span>
+              <span class="test-trend" [attr.aria-label]="'Verlauf ' + entry.label">
+                @for (point of entry.trend; track point.runId) {
+                  <i
+                    [class]="'dot ' + (point.state ?? 'none')"
+                    [class.current]="point.runId === run.id"
+                    [title]="
+                      point.startedAt.slice(0, 16).replace('T', ' ') +
+                      ' · ' +
+                      (point.state ? (point.state | statusLabel) : 'nicht gelaufen')
+                    "
+                  ></i>
+                }
+              </span>
+            </span>
+            @if (entry.skipped) {
+              <small class="muted">{{ entry.skipped }} übersprungen</small>
+            }
+          </button>
+        }
+      </div>
+      @if (category()) {
+        <p class="muted test-filter-note">
+          Gefiltert auf {{ categoryLabel(category()!) }} ·
+          <button type="button" class="link-button" (click)="category.set(null)">alle Kategorien zeigen</button>
+        </p>
+      }
+    }
+  </section>
+
+  @if (run) {
+    @if (casesError()) {
+      <p class="notice error">{{ casesError() }}</p>
+    }
+
+    @if (findingCount()) {
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Befunde</h2>
+            <p class="muted">Fehlgeschlagene und wackelige Tests dieses Laufs</p>
+          </div>
+        </div>
+        <ul class="test-findings">
+          @for (step of failedChecks(); track step.position) {
+            <li>
+              <div class="test-finding-head">
+                <strong>{{ step.command }}</strong>
+                <span class="tag">{{ categoryLabel('quality') }}</span>
+                <span class="status status-failed">Fehlgeschlagen</span>
+              </div>
+              <ul class="test-errors">
+                <li>{{ step.output.split('\n')[0] }}</li>
+              </ul>
+            </li>
+          }
+          @for (testCase of findings(); track testCase.id) {
+            <li>
+              <div class="test-finding-head">
+                <button type="button" class="link-button" (click)="showCase(testCase)">{{ testCase.title }}</button>
+                <span class="tag">{{ categoryLabel(testCase.category) }}</span>
+                @if (testCase.device) {
+                  <span class="tag">{{ deviceLabel(testCase.device) }}</span>
+                }
+                <span class="status" [ngClass]="'status-' + testCase.status">{{
+                  caseStatusLabel(testCase.status)
+                }}</span>
+              </div>
+              <ul class="test-errors">
+                @for (error of testCase.errors.slice(0, 4); track $index) {
+                  <li>{{ error }}</li>
+                }
+                @if (testCase.errors.length > 4) {
+                  <li class="muted">… {{ testCase.errors.length - 4 }} weitere</li>
+                }
+              </ul>
+              @if (testCase.media.length) {
+                <div class="test-thumbs">
+                  @for (file of testCase.media; track file.id) {
+                    @if (file.mime.startsWith('image/')) {
+                      <button type="button" class="test-thumb" (click)="openMedia(file, testCase)">
+                        <img [src]="mediaUrl(file)" [alt]="file.name" loading="lazy" />
+                      </button>
+                    } @else {
+                      <button type="button" class="test-thumb video" (click)="openMedia(file, testCase)">
+                        ▶ Video
+                      </button>
+                    }
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      </section>
+    }
+
+    @if (images().length || videos().length) {
+      <section class="panel">
+        <div class="section-heading">
+          <div>
+            <h2>Screenshots &amp; Videos</h2>
+            <p class="muted">{{ images().length }} Screenshots, {{ videos().length }} Videos aus Playwright</p>
+          </div>
+        </div>
+        @if (images().length) {
+          <div class="test-gallery">
+            @for (file of images(); track file.id) {
+              <figure>
+                <button type="button" class="test-thumb" (click)="open(file)">
+                  <img [src]="file.url" [alt]="file.name" loading="lazy" />
+                </button>
+                <figcaption>
+                  <strong>{{ file.name }}</strong>
+                  <span class="muted">{{ file.testCase.title }} · {{ deviceLabel(file.testCase.device) }}</span>
+                </figcaption>
+              </figure>
+            }
+          </div>
+        }
+        @if (videos().length) {
+          <details class="test-videos">
+            <summary>{{ videos().length }} Videos</summary>
+            <div class="test-gallery">
+              @for (file of videos(); track file.id) {
+                <figure>
+                  <video [src]="file.url" controls preload="none"></video>
+                  <figcaption>
+                    <strong>{{ file.testCase.title }}</strong>
+                    <span class="muted"
+                      >{{ deviceLabel(file.testCase.device) }} · {{ caseStatusLabel(file.testCase.status) }}</span
+                    >
+                  </figcaption>
+                </figure>
+              }
+            </div>
+          </details>
+        }
+      </section>
+    }
+
+    <section class="panel" id="test-cases">
+      <div class="section-heading">
+        <div>
+          <h2>Alle Tests</h2>
+          <p class="muted">
+            {{ casesLoading() ? 'Lädt …' : visibleCases().length + ' Einzeltests' }}
+            @if (qualitySteps().length) {
+              · {{ qualitySteps().length }} {{ qualitySteps().length === 1 ? 'Schritt' : 'Schritte' }}
+            }
+          </p>
+        </div>
+      </div>
+      @if (qualitySteps().length) {
+        <div class="test-steps">
+          @for (step of qualitySteps(); track step.position) {
+            <details class="run-step">
+              <summary>
+                <span class="status" [ngClass]="step.status | statusClass">{{ step.status | statusLabel }}</span>
+                <span class="tag">{{ categoryLabel(step.category ?? 'unit') }}</span>
+                {{ step.command }} · {{ step.durationMs | duration }}
+              </summary>
+              <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
+            </details>
+          }
+        </div>
+      }
+      <app-data-table
+        [rows]="visibleCases()"
+        [columns]="caseColumns"
+        [rowId]="caseId"
+        [initialSort]="[{ id: 'status', desc: false }]"
+        [(expanded)]="openCase"
+        emptyText="Für diesen Lauf sind keine Einzeltests gespeichert."
+      >
+        <ng-template appDataCell="status" let-testCase>
+          <span class="status" [ngClass]="'status-' + testCase.status">{{ caseStatusLabel(testCase.status) }}</span>
+        </ng-template>
+        <ng-template appDataDetail let-testCase>
+          @if (testCase.file) {
+            <p class="muted">
+              <code>{{ testCase.file }}</code>
+            </p>
+          }
+          @if (testCase.errors.length) {
+            <ul class="test-errors">
+              @for (error of testCase.errors; track $index) {
+                <li>{{ error }}</li>
+              }
+            </ul>
+          } @else {
+            <p class="muted">Keine Meldungen.</p>
+          }
+          @if (testCase.media.length) {
+            <div class="test-thumbs">
+              @for (file of testCase.media; track file.id) {
+                @if (file.mime.startsWith('image/')) {
+                  <button type="button" class="test-thumb" (click)="openMedia(file, testCase)">
+                    <img [src]="mediaUrl(file)" [alt]="file.name" loading="lazy" />
+                  </button>
+                } @else {
+                  <video [src]="mediaUrl(file)" controls preload="none"></video>
+                }
+              }
+            </div>
+          }
+        </ng-template>
+      </app-data-table>
+    </section>
+  }
+
   <section class="panel">
     <div class="section-heading">
       <div>
-        <h2>Testläufe</h2>
-        <p class="muted">Die letzten {{ data().runs.length }} Testläufe</p>
+        <h2>Verlauf</h2>
+        <p class="muted">Die letzten {{ data().runs.length }} Testläufe · Zeile öffnen für die Schritte</p>
       </div>
     </div>
     <app-data-table
@@ -15,11 +312,16 @@
       [(expanded)]="openRun"
       emptyText="Für dieses Projekt gibt es noch keine Testläufe."
     >
-      <ng-template appDataCell="status" let-run>
-        <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
+      <ng-template appDataCell="status" let-entry>
+        <span class="status" [ngClass]="entry.status | statusClass">{{ entry.status | statusLabel }}</span>
       </ng-template>
-      <ng-template appDataDetail let-run>
-        @for (step of run.steps; track step.position) {
+      <ng-template appDataDetail let-entry>
+        <p>
+          <button type="button" class="button secondary" (click)="choose(entry)" [disabled]="entry.id === run?.id">
+            {{ entry.id === run?.id ? 'Wird oben gezeigt' : 'In der Übersicht zeigen' }}
+          </button>
+        </p>
+        @for (step of entry.steps; track step.position) {
           <details class="run-step">
             <summary>
               <span class="status" [ngClass]="step.status | statusClass">{{ step.status | statusLabel }}</span>
@@ -33,4 +335,30 @@
       </ng-template>
     </app-data-table>
   </section>
+
+  @if (viewer(); as file) {
+    <div class="test-viewer" role="dialog" aria-modal="true" [attr.aria-label]="file.name" (click)="viewer.set(null)">
+      <figure (click)="$event.stopPropagation()">
+        @if (file.mime.startsWith('image/')) {
+          <img [src]="file.url" [alt]="file.name" />
+        } @else {
+          <video [src]="file.url" controls autoplay></video>
+        }
+        <figcaption>
+          <span>
+            <strong>{{ file.name }}</strong> · {{ file.testCase.title }} · {{ deviceLabel(file.testCase.device) }}
+          </span>
+          <span class="test-viewer-actions">
+            @if (file.mime.startsWith('image/') && images().length > 1) {
+              <button type="button" class="button secondary" (click)="step(-1)" aria-label="Vorheriges Bild">←</button>
+              <button type="button" class="button secondary" (click)="step(1)" aria-label="Nächstes Bild">→</button>
+            }
+            <button type="button" class="button secondary" (click)="showCase(file.testCase)">Zum Test</button>
+            <a class="button secondary" [href]="file.url" target="_blank" rel="noopener">Original</a>
+            <button type="button" class="button primary" (click)="viewer.set(null)">Schließen</button>
+          </span>
+        </figcaption>
+      </figure>
+    </div>
+  }
 }

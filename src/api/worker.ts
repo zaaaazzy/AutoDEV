@@ -64,18 +64,23 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
 
   app.get('/api/agent-status', async (_request, response, next) => {
     try {
+      const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
+      const visible = allowed ? [...allowed] : null;
       const projects = (
         await pool.query(
           `SELECT p.slug, p.name, h.last_error AS "lastError",
                 COALESCE(EXTRACT(EPOCH FROM (NOW() - h.last_seen)) <= 60, FALSE) AS online
-           FROM projects p LEFT JOIN worker_heartbeats h ON h.project_slug = p.slug ORDER BY p.name`,
+           FROM projects p LEFT JOIN worker_heartbeats h ON h.project_slug = p.slug
+          WHERE $1::text[] IS NULL OR p.slug = ANY($1) ORDER BY p.name`,
+          [visible],
         )
       ).rows;
       const running = (
         await pool.query(
           `SELECT r.project_slug AS project, d.title, r.started_at AS "startedAt"
            FROM agent_runs r JOIN development_items d ON d.id = r.development_id
-          WHERE r.status = 'running' ORDER BY r.started_at`,
+          WHERE r.status = 'running' AND ($1::text[] IS NULL OR r.project_slug = ANY($1)) ORDER BY r.started_at`,
+          [visible],
         )
       ).rows;
       response

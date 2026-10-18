@@ -49,6 +49,8 @@ export interface WorkflowAgent {
   position: number;
   instructions: string;
   command: string[] | null;
+  /** Einzeln freigegebene Befehle des Agents (null = Projektstandard). */
+  allowedCommands?: string[] | null;
 }
 
 export interface StepSummary {

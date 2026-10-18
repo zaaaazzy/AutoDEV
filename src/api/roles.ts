@@ -56,6 +56,8 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/setup\/jobs$/, 'admin'],
   ['PATCH', /^\/api\/projects\/[^/]+$/, 'admin'],
   ['PUT', /^\/api\/projects\/[^/]+\/permissions$/, 'admin'],
+  // Eigene Rechte-Gruppen anlegen, ändern, löschen: nur Administration.
+  ['*', /^\/api\/projects\/[^/]+\/permission-groups(?:\/[^/]+)?$/, 'admin'],
   ['PUT', /^\/api\/system-agents\//, 'admin'],
   ['POST', /^\/api\/projects\/[^/]+\/agents\/[^/]+\/cancel$/, 'run'],
   ['POST', /^\/api\/projects\/[^/]+\/agents(\/(defaults|order))?$/, 'agents'],

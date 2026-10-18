@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService, type Role } from '../../core/auth.service.js';
 import { errorMessage } from '../../core/errors.js';
+import { ProjectStore } from '../../core/project-store.js';
 import { DateTimePipe } from '../../shared/pipes.js';
 
 interface ManagedUser {
@@ -14,6 +15,8 @@ interface ManagedUser {
   totp: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** Projekte (Mandanten), die der Benutzer sieht; Administratoren sehen alle. */
+  projects: string[];
 }
 
 interface RoleInfo {
@@ -40,8 +43,17 @@ export class UsersSettingsComponent {
   protected readonly busy = signal(false);
   protected readonly message = signal('');
   protected readonly error = signal('');
-  protected form = { username: '', displayName: '', password: '', roles: [] as Role[] };
-  protected edit = { displayName: '', roles: [] as Role[], active: true, password: '' };
+  protected readonly store = inject(ProjectStore);
+  protected form = { username: '', displayName: '', password: '', roles: [] as Role[], projects: [] as string[] };
+  protected edit = { displayName: '', roles: [] as Role[], active: true, password: '', projects: [] as string[] };
+
+  protected toggleProject(list: string[], slug: string, checked: boolean): string[] {
+    return checked ? [...new Set([...list, slug])] : list.filter((entry) => entry !== slug);
+  }
+
+  protected projectName(slug: string): string {
+    return this.store.projects().find((project) => project.slug === slug)?.name ?? slug;
+  }
 
   constructor() {
     void this.load();
@@ -57,14 +69,20 @@ export class UsersSettingsComponent {
 
   protected startEdit(user: ManagedUser): void {
     this.editing.set(this.editing() === user.id ? null : user.id);
-    this.edit = { displayName: user.displayName, roles: [...user.roles], active: user.active, password: '' };
+    this.edit = {
+      displayName: user.displayName,
+      roles: [...user.roles],
+      active: user.active,
+      password: '',
+      projects: [...user.projects],
+    };
   }
 
   protected async create(): Promise<void> {
     await this.run(async () => {
       await this.api.post('/api/users', this.form);
       this.message.set(`Benutzer „${this.form.username}“ angelegt.`);
-      this.form = { username: '', displayName: '', password: '', roles: [] };
+      this.form = { username: '', displayName: '', password: '', roles: [], projects: [] };
       this.creating.set(false);
     });
   }
@@ -75,6 +93,7 @@ export class UsersSettingsComponent {
         displayName: this.edit.displayName,
         roles: this.edit.roles,
         active: this.edit.active,
+        projects: this.edit.projects,
       });
       if (this.edit.password) {
         await this.api.post(`/api/users/${user.id}/password`, { password: this.edit.password });

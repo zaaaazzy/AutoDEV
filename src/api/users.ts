@@ -8,7 +8,25 @@ import { isRole, type Principal, ROLE_INFO, ROLES } from './roles.js';
 const USERNAME = /^[a-zA-Z0-9._-]{3,40}$/;
 const MIN_PASSWORD = 12;
 const COLUMNS = `id, username, display_name AS "displayName", roles, active, totp_secret IS NOT NULL AS totp,
-  last_login_at AS "lastLoginAt", created_at AS "createdAt"`;
+  last_login_at AS "lastLoginAt", created_at AS "createdAt",
+  ARRAY(SELECT m.project_slug FROM project_members m WHERE m.user_id = users.id ORDER BY m.project_slug) AS projects`;
+
+/** Projektzugriff (Mandantentrennung): nur bestehende Projekte, doppelte entfernt. */
+async function projectsFrom(pool: Pool, value: unknown): Promise<string[] | null | undefined> {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 500 || !value.every((slug) => typeof slug === 'string')) return null;
+  const slugs = [...new Set(value as string[])];
+  const known = (await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE slug = ANY($1)', [slugs])).rows;
+  return known.length === slugs.length ? slugs : null;
+}
+
+async function saveProjects(pool: Pool, userId: string, slugs: string[]): Promise<void> {
+  await pool.query('DELETE FROM project_members WHERE user_id = $1 AND NOT (project_slug = ANY($2))', [userId, slugs]);
+  await pool.query(
+    `INSERT INTO project_members (user_id, project_slug) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
+    [userId, slugs],
+  );
+}
 
 function rolesFrom(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
@@ -55,6 +73,8 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
         response.status(400).json({ message: problem });
         return;
       }
+      const projects = await projectsFrom(pool, body.projects ?? []);
+      if (projects === null) return void response.status(400).json({ message: 'Unbekanntes Projekt.' });
       const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 120) : '';
       const result = await pool
         .query(
@@ -69,7 +89,9 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
         response.status(409).json({ message: 'Diesen Benutzernamen gibt es schon.' });
         return;
       }
-      response.status(201).json({ user: result.rows[0] });
+      // Neue Benutzer sehen nur die freigeschalteten Projekte (Mandantentrennung).
+      if (projects?.length) await saveProjects(pool, result.rows[0].id, projects);
+      response.status(201).json({ user: { ...result.rows[0], projects: projects ?? [] } });
     } catch (error) {
       next(error);
     }
@@ -81,6 +103,8 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
       const body = (request.body ?? {}) as Record<string, unknown>;
       const roles = body.roles === undefined ? undefined : rolesFrom(body.roles);
       if (roles === null) return void response.status(400).json({ message: 'Unbekannte Rolle.' });
+      const projects = await projectsFrom(pool, body.projects);
+      if (projects === null) return void response.status(400).json({ message: 'Unbekanntes Projekt.' });
       const self = me(response).id === request.params.id;
       if (self && ((roles && !roles.includes('admin')) || body.active === false)) {
         response.status(400).json({ message: 'Du kannst dir die Administration nicht selbst entziehen.' });
@@ -98,6 +122,10 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
         ],
       );
       if (!result.rows[0]) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
+      if (projects) {
+        await saveProjects(pool, request.params.id, projects);
+        result.rows[0].projects = projects.sort();
+      }
       // Deaktivierte Benutzer werden sofort abgemeldet.
       if (body.active === false) await pool.query('DELETE FROM auth_sessions WHERE user_id = $1', [request.params.id]);
       response.json({ user: result.rows[0] });

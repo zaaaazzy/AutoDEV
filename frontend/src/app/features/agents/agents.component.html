@@ -45,6 +45,7 @@
           <label class="wide"
             >Anweisung<textarea name="instructions" [(ngModel)]="agentForm.instructions" maxlength="10000"></textarea>
           </label>
+          <app-permission-picker class="wide" [groups]="permissionGroups()" [(selected)]="formCommands" />
           <div class="actions wide form-actions">
             <button class="button primary" type="submit">Agent anlegen</button>
           </div>
@@ -104,6 +105,7 @@
                     placeholder="claude -p"
                   />
                 </label>
+                <app-permission-picker class="wide" [groups]="permissionGroups()" [(selected)]="editCommands" />
                 <div class="actions wide form-actions">
                   <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
                   <button class="button secondary" type="button" (click)="agentEditing.set(null)">Abbrechen</button>

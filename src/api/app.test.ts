@@ -331,7 +331,10 @@ test('defines agents per workflow phase and persists their order', async () => {
       body: JSON.stringify({ name: 'Entwickler', role: 'developer', phase: 'while_task', instructions: 'Setzt um' }),
     });
     assert.equal(created.status, 201);
-    assert.equal(queries[0]?.values[3], 'while_task');
+    const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
+    assert.equal(insert?.values[3], 'while_task');
+    // Jeder Befehl wird einzeln gesetzt: ohne Angabe bekommt ein neuer Agent keine Befehle.
+    assert.deepEqual(insert?.values[7], []);
 
     const missingPhase = await fetch(`${baseUrl}/api/projects/mainty/agents`, {
       method: 'POST',

@@ -1,3 +1,4 @@
+import type { Principal } from './roles.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { sendPush, vapidKeys } from '../core/push.js';
@@ -22,10 +23,21 @@ export function registerPushRoutes(app: Express, pool: Pool): void {
         response.status(400).json({ message: 'Ungültige Push-Anmeldung.' });
         return;
       }
+      // Gerät gehört dem angemeldeten Benutzer (Systemadministrator ohne Konto: system_admin).
+      const principal = response.locals.principal as Principal | undefined;
       await pool.query(
-        `INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth`,
-        [endpoint, p256dh, auth, (request.get('user-agent') ?? '').slice(0, 300)],
+        `INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_agent, user_id, system_admin)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth,
+           user_id = EXCLUDED.user_id, system_admin = EXCLUDED.system_admin`,
+        [
+          endpoint,
+          p256dh,
+          auth,
+          (request.get('user-agent') ?? '').slice(0, 300),
+          principal?.id ?? null,
+          !principal?.id,
+        ],
       );
       response.json({ subscribed: true });
     } catch (error) {
@@ -46,12 +58,12 @@ export function registerPushRoutes(app: Express, pool: Pool): void {
 
   app.post('/api/push/test', async (_request, response, next) => {
     try {
-      const sent = await sendPush(pool, {
-        title: 'Dev Log',
-        body: 'Benachrichtigungen funktionieren. 🎉',
-        url: '#settings',
-        tag: 'test',
-      });
+      const principal = response.locals.principal as Principal | undefined;
+      const sent = await sendPush(
+        pool,
+        { title: 'Dev Log', body: 'Benachrichtigungen funktionieren. 🎉', url: '#settings', tag: 'test' },
+        { self: { id: principal?.id ?? null } },
+      );
       response.json({ sent });
     } catch (error) {
       next(error);

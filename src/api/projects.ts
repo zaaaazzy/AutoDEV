@@ -15,11 +15,15 @@ import {
 
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
+    // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
+    const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
       `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
+        WHERE $1::text[] IS NULL OR slug = ANY($1)
         ORDER BY name`,
+      [allowed ? [...allowed] : null],
     );
     response.json({ projects: result.rows });
   });

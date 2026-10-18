@@ -6,3 +6,5 @@ dist
 backups/
 test-results/
 playwright-report/
+# Videos und Screenshots von npm run test:full (nur bericht.md kommt ins Git)
+docs/tests/*/media/

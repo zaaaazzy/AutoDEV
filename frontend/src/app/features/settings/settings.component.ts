@@ -1,3 +1,4 @@
+import { PermissionGroupsSettingsComponent } from './permission-groups-settings.component.js';
 import { Component, effect, inject, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
@@ -11,7 +12,13 @@ import { AuthService } from '../../core/auth.service.js';
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, NotificationSettingsComponent, SecuritySettingsComponent, UsersSettingsComponent],
+  imports: [
+    PermissionGroupsSettingsComponent,
+    FormsModule,
+    NotificationSettingsComponent,
+    SecuritySettingsComponent,
+    UsersSettingsComponent,
+  ],
   templateUrl: './settings.component.html',
   host: { style: 'display: contents' },
 })

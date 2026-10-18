@@ -190,6 +190,9 @@
       </form>
     </section>
   }
+  @if (auth.can('admin') && store.currentProject()) {
+    <app-permission-groups-settings />
+  }
   @if (auth.can('admin')) {
     <app-users-settings />
   }

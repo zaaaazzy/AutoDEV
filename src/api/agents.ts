@@ -1,3 +1,4 @@
+import { validAgentCommands } from './permission-groups.js';
 import { SYSTEM_ROLES, systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
@@ -27,7 +28,8 @@ const ROLES = new Set([
   'custom',
 ]);
 const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
-const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command`;
+const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command,
+  allowed_commands AS "allowedCommands"`;
 const AGENT_FIELDS = {
   name: { column: 'name', parse: parseTitle(80) },
   role: { column: 'role', parse: parseOption(ROLES) },
@@ -201,9 +203,13 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       response.status(400).json({ message: 'Invalid agent.' });
       return;
     }
+    // Rechte: jeder Befehl wird einzeln gesetzt, nur aus Kategorien dieses Projekts (Mandantentrennung).
+    const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
+    const groups = await validAgentCommands(pool, slug, requested === undefined ? [] : requested);
+    if (typeof groups === 'string') return void response.status(400).json({ message: groups });
     const result = await pool.query(
-      `INSERT INTO agents (project_slug, name, role, phase, position, instructions, enabled, command)
-       SELECT $1, $2, COALESCE($3, 'custom'), $4, COALESCE(MAX(position), 0) + 1, $5, COALESCE($6, TRUE), $7
+      `INSERT INTO agents (project_slug, name, role, phase, position, instructions, enabled, command, allowed_commands)
+       SELECT $1, $2, COALESCE($3, 'custom'), $4, COALESCE(MAX(position), 0) + 1, $5, COALESCE($6, TRUE), $7, $8
          FROM agents WHERE project_slug = $1 AND phase = $4
        RETURNING ${AGENT_COLUMNS}`,
       [
@@ -214,6 +220,7 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
         values.get('instructions') ?? '',
         values.get('enabled') ?? null,
         values.get('command') ?? null,
+        groups,
       ],
     );
     response.status(201).json({ agent: result.rows[0] });
@@ -271,10 +278,20 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       response.status(404).json({ message: 'Not found.' });
       return;
     }
-    const fields = parseFields(request.body, AGENT_FIELDS);
+    const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
+    const fields = parseFields(request.body, AGENT_FIELDS) ?? (requested !== undefined ? [] : null);
     if (!fields) {
       response.status(400).json({ message: 'Invalid agent update.' });
       return;
+    }
+    if (requested !== undefined) {
+      const project = (
+        await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM agents WHERE id = $1', [request.params.id])
+      ).rows[0]?.slug;
+      if (!project) return void response.status(404).json({ message: 'Agent not found.' });
+      const commands = await validAgentCommands(pool, project, requested);
+      if (typeof commands === 'string') return void response.status(400).json({ message: commands });
+      fields.push({ column: 'allowed_commands', value: commands });
     }
     const update = buildUpdate('agents', request.params.id, fields, AGENT_COLUMNS);
     const result = await pool.query(update.sql, update.values);

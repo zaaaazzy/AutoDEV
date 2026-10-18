@@ -261,9 +261,7 @@
       <div class="content">
         <section class="page-heading">
           <div>
-            <p class="eyebrow">Entwicklungsübersicht</p>
             <h1>{{ activeSectionLabel() }}</h1>
-            <p>Projekte, Aufgaben und automatisierte Abläufe an einem Ort.</p>
           </div>
           <div class="actions">
             @if (createLabel(); as label) {
@@ -288,9 +286,16 @@
           <p class="loading" role="status">Dev Log wird geladen …</p>
         } @else if (!projects().length) {
           <section class="panel empty-state">
-            <h2>Kein Projekt verbunden</h2>
-            <p>Verbinde ein Projekt oder starte den Test-Agenten, um ein Projekt automatisch zu registrieren.</p>
-            <button class="button primary" type="button" (click)="showProjectForm.set(true)">Projekt einrichten</button>
+            @if (auth.can('admin')) {
+              <h2>Kein Projekt verbunden</h2>
+              <p>Verbinde ein Projekt oder starte den Test-Agenten, um ein Projekt automatisch zu registrieren.</p>
+              <button class="button primary" type="button" (click)="showProjectForm.set(true)">
+                Projekt einrichten
+              </button>
+            } @else {
+              <h2>Noch kein Projekt freigeschaltet</h2>
+              <p>Bitte einen Administrator, dir ein Projekt freizugeben.</p>
+            }
           </section>
         }
         @switch (section()) {
@@ -325,7 +330,7 @@
             <app-settings />
           }
         }
-        <footer class="footer">MAINTY <span>/</span> DEV LOG</footer>
+        <footer class="footer">{{ store.currentProject()?.name ?? 'Dev Log' }} <span>/</span> DEV LOG</footer>
       </div>
     </main>
   </div>

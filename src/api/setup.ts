@@ -60,7 +60,12 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
 
   app.get('/api/setup/permissions', (_request, response) => {
     response.json({
-      groups: PERMISSION_GROUPS.map(({ id, label, description }) => ({ id, label, description })),
+      // „Dateien“ ist eine Agent-Gruppe (immer verfügbar) und gehört nicht zur Projektfreigabe.
+      groups: PERMISSION_GROUPS.filter((group) => group.id !== 'files').map(({ id, label, description }) => ({
+        id,
+        label,
+        description,
+      })),
       defaults: DEFAULT_PERMISSION_GROUPS,
     });
   });

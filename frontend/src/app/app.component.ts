@@ -1,4 +1,4 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './core/api.service.js';
 import { AuthService } from './core/auth.service.js';
@@ -64,6 +64,11 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   templateUrl: './app.component.html',
 })
 export class AppComponent {
+  /** Browser-Tab zeigt das aktive Projekt (statt fest „Mainty“). */
+  private readonly tabTitle = effect(() => {
+    const name = this.store.currentProject()?.name;
+    globalThis.document.title = name ? `Dev Log | ${name}` : 'Dev Log';
+  });
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
@@ -77,7 +82,9 @@ export class AppComponent {
       !this.loading() &&
       !this.showProjectForm() &&
       !this.tour.active() &&
-      (this.afterProject() || (!this.welcomeDismissed() && (this.tour.welcome() || !this.projects().length))),
+      // Begrüssung mit „Projekt erstellen“ nur für Administratoren (andere sehen nur freigeschaltete Projekte).
+      (this.afterProject() ||
+        (!this.welcomeDismissed() && (this.tour.welcome() || (!this.projects().length && this.auth.can('admin'))))),
   );
 
   protected startTour(): void {

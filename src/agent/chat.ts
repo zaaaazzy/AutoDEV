@@ -4,6 +4,7 @@ import { isShuttingDown } from '../core/shutdown.js';
 import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
 import { runAuthorAgent } from './requirements.js';
+import { saveRequestDoc } from './request-doc.js';
 import { type ChatReference, referenceContext } from './chat-references.js';
 import type { RunnerOptions } from '../runner/runner.js';
 
@@ -139,6 +140,14 @@ export async function processChat(
         agent?.name ?? null,
       ],
     );
+    await saveRequestDoc(pool, options.project, {
+      request: claimed.content,
+      answer: output.slice(0, 2000),
+      agentName: agent?.name ?? null,
+      question: null,
+      failed: true,
+      at: new Date(),
+    }).catch(() => undefined);
     return true;
   }
   const { text, question } = splitQuestion(output);
@@ -158,14 +167,27 @@ export async function processChat(
       agent?.name ?? null,
     ],
   );
-  await sendPush(pool, {
-    title: question
-      ? `❓ Rückfrage ${agent ? `von ${agent.name}` : 'des Assistenten'} · ${options.project}`
-      : `💬 ${agent?.name ?? 'Assistent'} hat geantwortet · ${options.project}`,
-    body: question ?? text.replace(/\s+/g, ' ').slice(0, 160),
-    url: '#dashboard',
-    tag: `chat-${options.project}`,
-  });
+  // Jede Anfrage samt Ergebnis landet unter Dokumentation → Anfragen.
+  await saveRequestDoc(pool, options.project, {
+    request: claimed.content,
+    answer: text,
+    agentName: agent?.name ?? null,
+    question,
+    failed: false,
+    at: new Date(),
+  }).catch((error) => console.error('Anfrage konnte nicht dokumentiert werden:', error));
+  await sendPush(
+    pool,
+    {
+      title: question
+        ? `❓ Rückfrage ${agent ? `von ${agent.name}` : 'des Assistenten'} · ${options.project}`
+        : `💬 ${agent?.name ?? 'Assistent'} hat geantwortet · ${options.project}`,
+      body: question ?? text.replace(/\s+/g, ' ').slice(0, 160),
+      url: '#dashboard',
+      tag: `chat-${options.project}`,
+    },
+    { project: options.project },
+  );
   return true;
 }
 

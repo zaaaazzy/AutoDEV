@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { registerProject } from '../db/project.js';
-import { createTestRun, createTestRunStep, finishTestRun, finishTestRunStep } from '../db/test-runs.js';
+import { categoryOfCommand, parseTapCases } from '../core/test-results.js';
+import { createTestRun, createTestRunStep, finishTestRun, finishTestRunStep, saveTestCases } from '../db/test-runs.js';
 import type { Pool } from 'pg';
 import { redactOutput, runCommand } from '../core/command.js';
 import { killGroup } from '../core/shutdown.js';
@@ -125,6 +126,7 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       position,
       command: label,
       output: '',
+      category: categoryOfCommand(label),
     });
     let pid = 0;
     const abort = (): void => {
@@ -150,6 +152,8 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       durationMs: result.durationMs,
       output: safeOutput,
     });
+    // Einzeltests aus TAP-Ausgaben (node --test) für die Übersicht der Testläufe
+    if (categoryOfCommand(label) === 'unit') await saveTestCases(pool, runId, parseTapCases(safeOutput));
     allPassed &&= passed;
     console.info(`${passed ? 'PASS' : 'FAIL'} ${label} (${result.durationMs} ms)`);
     if (safeOutput.trim()) {

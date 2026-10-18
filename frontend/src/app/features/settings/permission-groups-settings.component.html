@@ -1,0 +1,73 @@
+<section class="panel">
+  <div class="section-heading">
+    <div>
+      <h2>Rechte-Kategorien</h2>
+      <p class="muted">
+        Gelten nur in diesem Projekt. Unter Agents gibst du jedem Agent die einzelnen Befehle frei. Neue Befehle legst
+        du in einer eigenen Kategorie an. Immer gesperrt: rm, sudo, kill, git push, curl, Shells, .env und Dev Log
+        selbst.
+      </p>
+    </div>
+    <button class="button primary" type="button" (click)="startNew()">+ Kategorie</button>
+  </div>
+  @if (editing() === 'new') {
+    <ng-container *ngTemplateOutlet="groupForm" />
+  }
+  <ul class="permission-list">
+    @for (group of groups(); track group.id) {
+      <li [class.custom]="!group.builtIn">
+        <div class="permission-head">
+          <strong>{{ group.label }}</strong>
+          <span class="tag">{{ group.builtIn ? 'eingebaut' : 'eigene' }}</span>
+          @if (!group.available) {
+            <span class="muted small">im Projekt ausgeschaltet</span>
+          }
+          @if (!group.builtIn) {
+            <span class="permission-actions">
+              <button class="button secondary small" type="button" (click)="startEdit(group)">Bearbeiten</button>
+              <button class="button danger small" type="button" (click)="remove(group)">Löschen</button>
+            </span>
+          }
+        </div>
+        <p class="muted small">{{ group.description }}</p>
+        @if (group.commands.length) {
+          <div class="permission-rules">
+            @for (command of group.commands; track command.rule) {
+              <code [title]="command.rule">{{ command.label }}</code>
+            }
+          </div>
+        }
+        @if (editing() === group.id) {
+          <ng-container *ngTemplateOutlet="groupForm" />
+        }
+      </li>
+    }
+  </ul>
+</section>
+
+<ng-template #groupForm>
+  <form class="form-grid permission-form" (ngSubmit)="save()">
+    <label
+      >Name<input name="label" [(ngModel)]="form.label" maxlength="80" required placeholder="z. B. Datenbank"
+    /></label>
+    <label
+      >Beschreibung<input name="description" [(ngModel)]="form.description" maxlength="500" placeholder="Wofür?"
+    /></label>
+    <label class="wide"
+      >Befehle (einer pro Zeile)<textarea
+        name="rules"
+        [(ngModel)]="form.rules"
+        rows="4"
+        required
+        placeholder="Bash(npm run lint:*)&#10;Bash(make test)&#10;WebFetch(domain:localhost)"
+      ></textarea>
+    </label>
+    @if (error()) {
+      <p class="wizard-error wide">{{ error() }}</p>
+    }
+    <div class="actions wide">
+      <button class="button primary" type="submit">Speichern</button>
+      <button class="button secondary" type="button" (click)="editing.set(null)">Abbrechen</button>
+    </div>
+  </form>
+</ng-template>

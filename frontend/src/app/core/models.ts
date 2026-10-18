@@ -126,7 +126,7 @@ export interface Bug {
 
 export interface DocumentEntry {
   id: string;
-  kind: 'manual' | 'sprint' | 'order' | 'repo';
+  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request';
   title: string;
   content: string;
   sprintId: string | null;
@@ -160,6 +160,8 @@ export interface Agent {
   instructions: string;
   enabled: boolean;
   command: string[] | null;
+  /** Einzeln freigegebene Befehle des Agents (null = Projektstandard der Rolle). */
+  allowedCommands?: string[] | null;
 }
 
 export interface StepEvent {
@@ -192,6 +194,8 @@ export interface AgentRun {
   steps: RunStep[];
 }
 
+export type TestCategory = 'quality' | 'unit' | 'e2e' | 'user';
+
 export interface TestRun {
   id: string;
   status: string;
@@ -200,7 +204,32 @@ export interface TestRun {
   commitSha: string | null;
   startedAt: string;
   completedAt: string | null;
-  steps: RunStep[];
+  steps: (RunStep & { category?: TestCategory })[];
+  /** Einzeltests je Kategorie und Status, z. B. { unit: { passed: 140, failed: 2 } }. */
+  summary?: Partial<Record<TestCategory, Partial<Record<TestCaseStatus, number>>>>;
+  mediaCount?: number;
+}
+
+export type TestCaseStatus = 'passed' | 'failed' | 'skipped' | 'flaky';
+
+export interface TestMedia {
+  id: string;
+  name: string;
+  mime: 'image/png' | 'image/jpeg' | 'video/webm';
+  size: number;
+}
+
+export interface TestCase {
+  id: string;
+  position: number;
+  category: Exclude<TestCategory, 'quality'>;
+  title: string;
+  file: string | null;
+  device: string | null;
+  status: TestCaseStatus;
+  durationMs: number | null;
+  errors: string[];
+  media: TestMedia[];
 }
 
 export interface SprintReport {

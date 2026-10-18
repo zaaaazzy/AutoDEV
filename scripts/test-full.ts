@@ -1,75 +1,157 @@
 /**
  * Kompletter Testlauf mit Bericht: Lint, Formatierung, Typen, Unit-Tests, E2E-Tests und der Oberflächentest
- * (e2e/full-ui.check.ts, mit Video und Screenshots). Schreibt den Bericht nach docs/tests/<Datum_Uhrzeit>/.
+ * (e2e/full-ui.check.ts, mit Video und Screenshots). Schreibt den Bericht nach docs/tests/<Datum_Uhrzeit>/ und,
+ * mit --projekt, den Lauf samt Einzeltests, Screenshots und Videos in die Ansicht „Testläufe“ dieses Projekts.
  *
- *   npm run test:full                       alles
- *   npm run test:full -- --nur-oberflaeche  nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
+ *   npm run test:full                          alles
+ *   npm run test:full -- --projekt devlog      zusätzlich in Dev Log unter Testläufe ablegen
+ *   npm run test:full -- --nur-oberflaeche     nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
+ *
+ * Datenbank für --projekt: DEV_LOG_DATABASE_URL, sonst die lokale aus docker-compose (127.0.0.1:5433).
  */
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
+import { promisify } from 'node:util';
+import type { Pool } from 'pg';
+import { redactOutput } from '../src/core/command.js';
+import {
+  parsePlaywrightCases,
+  parseTapCases,
+  type CaseCategory,
+  type PlaywrightReport,
+  type TestCaseResult,
+  type TestCategory,
+} from '../src/core/test-results.js';
+import { createDatabasePool, readDatabaseConfig } from '../src/db/database.js';
+import {
+  createTestRun,
+  createTestRunStep,
+  finishTestRun,
+  finishTestRunStep,
+  saveTestCases,
+} from '../src/db/test-runs.js';
 
 const ROOT = join(import.meta.dirname, '..');
+const argument = (name: string) => {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+};
 const onlyUi = process.argv.includes('--nur-oberflaeche');
+const project = argument('--projekt') ?? process.env.DEV_LOG_TEST_PROJECT;
 const started = new Date();
 const two = (value: number) => String(value).padStart(2, '0');
 const stamp = `${started.getFullYear()}-${two(started.getMonth() + 1)}-${two(started.getDate())}_${two(started.getHours())}-${two(started.getMinutes())}`;
-// Rohdaten des Oberflächentests je Lauf getrennt, damit parallele Läufe sich nicht gegenseitig löschen
-const UI_JSON = join(tmpdir(), `dev-log-full-ui-${stamp}.json`);
-const UI_OUTPUT = join(tmpdir(), `dev-log-full-ui-${stamp}`);
+// Rohdaten je Lauf getrennt, damit parallele Läufe sich nicht gegenseitig löschen
+const TEMP = join(tmpdir(), `dev-log-test-full-${stamp}`);
 const OUT = join(ROOT, 'docs', 'tests', stamp);
 const MEDIA = join(OUT, 'media');
-// Farbcodes der Konsolenausgabe (ESC [ … m)
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+const LOCAL_DATABASE = 'postgresql://devlog:devlog_local_dev@127.0.0.1:5433/dev_log';
 
-type Step = { name: string; args: string[]; summary: (output: string) => string };
-type StepResult = { name: string; ok: boolean; seconds: number; summary: string; tail: string };
+type Step = {
+  name: string;
+  command: string;
+  args: string[];
+  category: TestCategory;
+  summary: (output: string) => string;
+  /** Einzeltests aus der Ausgabe bzw. aus dem JSON-Bericht von Playwright. */
+  cases?: (output: string) => Promise<TestCaseResult[]>;
+};
+type StepResult = {
+  name: string;
+  ok: boolean;
+  seconds: number;
+  summary: string;
+  tail: string;
+  cases: TestCaseResult[];
+};
 
+const counted = (out: string, keys: string[]) =>
+  keys
+    .map((key) => new RegExp(`(\\d+) ${key}`).exec(out)?.[0])
+    .filter(Boolean)
+    .join(', ');
+
+async function playwrightCases(file: string, category: CaseCategory): Promise<TestCaseResult[]> {
+  if (!existsSync(file)) return [];
+  return parsePlaywrightCases(JSON.parse(await readFile(file, 'utf8')) as PlaywrightReport, category);
+}
+
+const E2E_JSON = join(TEMP, 'e2e.json');
+const UI_JSON = join(TEMP, 'user.json');
 const STEPS: Step[] = [
   {
     name: 'Lint',
+    command: 'npm',
     args: ['run', 'lint'],
+    category: 'quality',
     summary: (out) => /✖ (\d+ problems? \(\d+ errors?, \d+ warnings?\))/.exec(out)?.[1] ?? 'keine Meldungen',
   },
   {
     name: 'Formatierung',
+    command: 'npm',
     args: ['run', 'format:check'],
+    category: 'quality',
     summary: (out) => {
       const files = [...out.matchAll(/^\[warn\] (?!Code style)(.+)$/gm)].map((match) => match[1]);
       return files.length ? `nicht formatiert: ${files.join(', ')}` : 'alles formatiert';
     },
   },
-  { name: 'Typprüfung', args: ['run', 'typecheck'], summary: () => 'Backend und Oberfläche' },
+  {
+    name: 'Typprüfung',
+    command: 'npm',
+    args: ['run', 'typecheck'],
+    category: 'quality',
+    summary: () => 'Backend und Oberfläche',
+  },
   {
     name: 'Unit-Tests (inkl. UI-Build)',
+    command: 'npm',
     args: ['test'],
+    category: 'unit',
     summary: (out) => {
       const value = (key: string) => new RegExp(`^# ${key} (\\d+)$`, 'm').exec(out)?.[1];
       const warnings = (out.match(/\[WARNING\]/g) ?? []).length;
       return `${value('pass') ?? '?'} bestanden, ${value('fail') ?? '?'} fehlgeschlagen, ${warnings} Build-Warnungen`;
     },
+    cases: async (out) => parseTapCases(out),
   },
   {
     name: 'E2E-Tests',
-    args: ['run', 'test:e2e'],
-    summary: (out) =>
-      ['passed', 'failed', 'flaky', 'skipped']
-        .map((key) => new RegExp(`(\\d+) ${key}`).exec(out)?.[0])
-        .filter(Boolean)
-        .join(', '),
+    command: 'npx',
+    args: ['playwright', 'test', '-c', 'e2e/playwright.config.ts', '--reporter=list,json'],
+    category: 'e2e',
+    summary: (out) => counted(out, ['passed', 'failed', 'flaky', 'skipped']),
+    cases: () => playwrightCases(E2E_JSON, 'e2e'),
   },
 ];
+const USER_STEP: Step = {
+  name: 'Oberflächentest',
+  command: 'npx',
+  args: ['playwright', 'test', '-c', 'e2e/full.config.ts'],
+  category: 'user',
+  summary: (out) => counted(out, ['passed', 'failed', 'skipped']),
+  cases: () => playwrightCases(UI_JSON, 'user'),
+};
 
 /** Führt einen Befehl aus, zeigt die Ausgabe live und gibt sie gesammelt zurück. */
-function run(command: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<{ ok: boolean; output: string }> {
+function run(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
     const child = spawn(command, args, {
       cwd: ROOT,
       shell: process.platform === 'win32',
-      env: { ...process.env, FORCE_COLOR: '0', ...env },
+      env: {
+        ...process.env,
+        FORCE_COLOR: '0',
+        // nur für den E2E-Schritt: die Umgebungsvariable hat bei Playwright Vorrang vor der Konfiguration
+        ...(args.includes('e2e/playwright.config.ts') ? { PLAYWRIGHT_JSON_OUTPUT_FILE: E2E_JSON } : {}),
+        FULL_UI_JSON: UI_JSON,
+        FULL_UI_OUTPUT: join(TEMP, 'user'),
+      },
     });
     const collect = (chunk: Buffer) => {
       output += chunk.toString();
@@ -81,110 +163,147 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv = {}): Prom
   });
 }
 
-async function runStep(name: string, command: string, args: string[], summary: (output: string) => string) {
-  console.log(`\n━━ ${name} ━━`);
+/** Optional: Lauf in Dev Log ablegen (Ansicht „Testläufe“), Schritt für Schritt, damit er live erscheint. */
+class Recorder {
+  private constructor(
+    private readonly pool: Pool,
+    private readonly runId: string,
+  ) {}
+
+  static async open(slug: string): Promise<Recorder> {
+    const environment = { ...process.env, DEV_LOG_DATABASE_URL: process.env.DEV_LOG_DATABASE_URL ?? LOCAL_DATABASE };
+    const pool = await createDatabasePool(readDatabaseConfig(environment));
+    const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
+    if (!exists.rowCount) {
+      await pool.end();
+      throw new Error(`Projekt „${slug}“ gibt es in Dev Log nicht – zuerst in der Oberfläche anlegen.`);
+    }
+    const git = async (args: string[]) =>
+      (await promisify(execFile)('git', args, { cwd: ROOT }).catch(() => ({ stdout: '' }))).stdout.trim() || null;
+    const runId = await createTestRun(pool, {
+      projectSlug: slug,
+      trigger: 'full',
+      branch: await git(['rev-parse', '--abbrev-ref', 'HEAD']),
+      commitSha: await git(['rev-parse', 'HEAD']),
+    });
+    return new Recorder(pool, runId);
+  }
+
+  async start(position: number, step: Step): Promise<void> {
+    await createTestRunStep(this.pool, {
+      runId: this.runId,
+      position,
+      command: [step.command, ...step.args].join(' '),
+      output: '',
+      category: step.category,
+    });
+  }
+
+  async finish(position: number, result: StepResult): Promise<number> {
+    await finishTestRunStep(this.pool, {
+      runId: this.runId,
+      position,
+      exitCode: result.ok ? 0 : 1,
+      durationMs: result.seconds * 1000,
+      output: redactOutput(`${result.summary}\n\n${result.tail}`, process.env),
+    });
+    return saveTestCases(this.pool, this.runId, result.cases);
+  }
+
+  async close(passed: boolean): Promise<string> {
+    await finishTestRun(this.pool, this.runId, passed);
+    await this.pool.end();
+    return this.runId;
+  }
+}
+
+async function runStep(position: number, step: Step, recorder: Recorder | null): Promise<StepResult> {
+  console.log(`\n━━ ${step.name} ━━`);
+  await recorder?.start(position, step);
   const begin = Date.now();
-  const { ok, output } = await run(command, args, { FULL_UI_JSON: UI_JSON, FULL_UI_OUTPUT: UI_OUTPUT });
+  const { ok, output } = await run(step.command, step.args);
   const clean = output.replace(ANSI, '');
-  return {
-    name,
+  const result: StepResult = {
+    name: step.name,
     ok,
     seconds: Math.round((Date.now() - begin) / 1000),
-    summary: summary(clean),
+    summary: step.summary(clean),
     tail: clean.trim().split('\n').slice(-25).join('\n'),
-  } satisfies StepResult;
-}
-
-type Attachment = { name: string; contentType: string; path?: string };
-type Result = { status: string; duration: number; errors: { message?: string }[]; attachments: Attachment[] };
-type Spec = { title: string; tests: { projectName: string; results: Result[] }[] };
-type Suite = { specs?: Spec[]; suites?: Suite[] };
-
-function specs(suite: Suite): Spec[] {
-  return [...(suite.specs ?? []), ...(suite.suites ?? []).flatMap(specs)];
-}
-
-/** Kurzfassung einer Playwright-Fehlermeldung: eigene Meldung bzw. erste Zeile, dazu Locator und letzter Warteschritt. */
-function headline(message = ''): string {
-  const lines = message
-    .replace(ANSI, '')
-    .split('\n')
-    .map((line) => line.trim());
-  const first = (lines[0] ?? '').replace(/^Error: /, '');
-  const locator = lines.find((line) => line.startsWith('Locator:'));
-  const waiting = lines.filter((line) => line.startsWith('- waiting for')).at(-1);
-  const generic = /failed$|exceeded\.?$/.test(first);
-  return [first, generic ? (locator ?? waiting?.slice(2)) : undefined].filter(Boolean).join(' – ').slice(0, 300);
+    cases: (await step.cases?.(clean)) ?? [],
+  };
+  const media = await recorder?.finish(position, result);
+  if (media) console.log(`→ ${result.cases.length} Einzeltests und ${media} Screenshots/Videos in Dev Log abgelegt`);
+  return result;
 }
 
 let mediaCount = 0;
-async function keep(attachment: Attachment, label: string): Promise<string | null> {
-  if (!attachment.path || !existsSync(attachment.path)) return null;
+async function keep(path: string, label: string): Promise<string | null> {
+  if (!existsSync(path)) return null;
   mediaCount += 1;
   const safe = label
     .replace(/[^a-z0-9äöü]+/gi, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 60);
-  const target = join(MEDIA, `${String(mediaCount).padStart(3, '0')}-${safe}${extname(attachment.path)}`);
-  await copyFile(attachment.path, target);
+  const target = join(MEDIA, `${String(mediaCount).padStart(3, '0')}-${safe}${extname(path)}`);
+  await copyFile(path, target);
   return relative(OUT, target).split('\\').join('/');
 }
 
 const icon = (ok: boolean) => (ok ? '✅' : '❌');
+const STATUS_ICON: Record<TestCaseResult['status'], string> = {
+  passed: '✅',
+  failed: '❌',
+  skipped: '⏭️',
+  flaky: '⚠️',
+};
 
 async function main(): Promise<void> {
+  await mkdir(TEMP, { recursive: true });
+  const recorder = project ? await Recorder.open(project) : null;
+  const steps = onlyUi ? [USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
-  if (!onlyUi) for (const step of STEPS) results.push(await runStep(step.name, 'npm', step.args, step.summary));
-  await rm(UI_JSON, { force: true });
-  results.push(
-    await runStep('Oberflächentest', 'npx', ['playwright', 'test', '-c', 'e2e/full.config.ts'], (out) =>
-      ['passed', 'failed', 'skipped']
-        .map((key) => new RegExp(`(\\d+) ${key}`).exec(out)?.[0])
-        .filter(Boolean)
-        .join(', '),
-    ),
-  );
+  for (const [position, step] of steps.entries()) results.push(await runStep(position, step, recorder));
 
+  // Bericht: Befunde und Medien des Oberflächentests
   await mkdir(MEDIA, { recursive: true });
-  const report = existsSync(UI_JSON) ? (JSON.parse(await readFile(UI_JSON, 'utf8')) as { suites: Suite[] }) : null;
+  const userCases = results.at(-1)?.cases ?? [];
   const findings: string[] = [];
   const sections: string[] = [];
-  for (const spec of report?.suites.flatMap(specs) ?? []) {
-    for (const run of spec.tests) {
-      const result = run.results.at(-1);
-      if (!result) continue;
-      const label = `${spec.title} · ${run.projectName}`;
-      const ok = result.status === 'passed';
-      const errors = result.errors.map((error) => headline(error.message));
-      errors.forEach((error) =>
-        findings.push(`| ${run.projectName} | ${spec.title} | ${error.replace(/\|/g, '\\|')} |`),
+  for (const testCase of userCases) {
+    const label = `${testCase.title} · ${testCase.device}`;
+    testCase.errors.forEach((error) =>
+      findings.push(`| ${testCase.device} | ${testCase.title} | ${error.replace(/\|/g, '\\|').replace(/\n/g, ' ')} |`),
+    );
+    const lines = [
+      `### ${STATUS_ICON[testCase.status]} ${label}`,
+      '',
+      `Status: ${testCase.status} · Dauer ${((testCase.durationMs ?? 0) / 1000).toFixed(1)} s`,
+    ];
+    if (testCase.errors.length) lines.push('', '**Befunde:**', '', ...testCase.errors.map((error) => `- ${error}`));
+    for (const file of testCase.media) {
+      const saved = await keep(
+        file.path,
+        `${testCase.device}-${file.mime.startsWith('video') ? testCase.title : file.name}`,
       );
-      const lines = [
-        `### ${result.status === 'skipped' ? '⏭️' : icon(ok)} ${label}`,
+      if (!saved) continue;
+      lines.push(
         '',
-        `Status: ${result.status} · Dauer ${(result.duration / 1000).toFixed(1)} s`,
-      ];
-      if (errors.length) lines.push('', '**Befunde:**', '', ...errors.map((error) => `- ${error}`));
-      for (const attachment of result.attachments) {
-        const name = attachment.name === 'screenshot' ? `${label} (Ende)` : attachment.name;
-        if (attachment.contentType === 'image/png') {
-          const file = await keep(attachment, `${run.projectName}-${name}`);
-          if (file) lines.push('', `**${name}**`, '', `![${name}](${file})`);
-        } else if (attachment.contentType.startsWith('video/')) {
-          const file = await keep(attachment, `${run.projectName}-${spec.title}`);
-          if (file) lines.push('', `🎬 [Video ansehen](${file})`);
-        }
-      }
-      sections.push(lines.join('\n'));
+        file.mime.startsWith('video')
+          ? `🎬 [Video ansehen](${saved})`
+          : `**${file.name}**\n\n![${file.name}](${saved})`,
+      );
     }
+    sections.push(lines.join('\n'));
   }
 
   const allOk = results.every((result) => result.ok);
+  const runId = await recorder?.close(allOk);
   const markdown = [
     `# Testbericht ${started.toLocaleString('de-CH')}`,
     '',
-    `Erstellt mit \`npm run test:full${onlyUi ? ' -- --nur-oberflaeche' : ''}\`. Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'}.`,
+    `Erstellt mit \`npm run test:full\`. Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'}.`,
     'Der Oberflächentest läuft auf einer eigenen Testdatenbank (dev_log_full) ohne Worker: Agents, Chat-Antworten und der Projekt-Assistent starten dort nicht.',
+    runId ? `In Dev Log abgelegt: Projekt \`${project}\`, Testlauf \`${runId}\`.` : '',
     '',
     '## Übersicht',
     '',
@@ -212,11 +331,11 @@ async function main(): Promise<void> {
     '',
   ].join('\n');
   await writeFile(join(OUT, 'bericht.md'), markdown);
-  await rm(UI_OUTPUT, { recursive: true, force: true });
-  await rm(UI_JSON, { force: true });
+  await rm(TEMP, { recursive: true, force: true });
   console.log(
     `\nBericht: ${relative(ROOT, join(OUT, 'bericht.md'))} (${mediaCount} Screenshots/Videos in ${basename(MEDIA)}/)`,
   );
+  if (runId) console.log(`Dev Log: Projekt „${project}“ → Testläufe`);
   process.exitCode = allOk ? 0 : 1;
 }
 

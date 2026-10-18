@@ -69,6 +69,34 @@ export const SCHEMA = `
     output TEXT NOT NULL DEFAULT '',
     UNIQUE (run_id, position)
   );
+  -- Testkategorien (Qualität, Unit, E2E, User), Einzelergebnisse und Screenshots/Videos aus Playwright.
+  ALTER TABLE test_run_steps ADD COLUMN IF NOT EXISTS category TEXT
+    CHECK (category IN ('quality', 'unit', 'e2e', 'user'));
+  CREATE TABLE IF NOT EXISTS test_cases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id UUID NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('unit', 'e2e', 'user')),
+    title TEXT NOT NULL,
+    file TEXT,
+    device TEXT,
+    status TEXT NOT NULL CHECK (status IN ('passed', 'failed', 'skipped', 'flaky')),
+    duration_ms INTEGER,
+    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+    UNIQUE (run_id, position)
+  );
+  CREATE TABLE IF NOT EXISTS test_media (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    run_id UUID NOT NULL REFERENCES test_runs(id) ON DELETE CASCADE,
+    case_id UUID REFERENCES test_cases(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    mime TEXT NOT NULL CHECK (mime IN ('image/png', 'image/jpeg', 'video/webm')),
+    size INTEGER NOT NULL CHECK (size BETWEEN 1 AND 52428800),
+    data BYTEA NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS test_media_run_idx ON test_media (run_id);
+  CREATE INDEX IF NOT EXISTS test_media_case_idx ON test_media (case_id);
 
   CREATE TABLE IF NOT EXISTS ideation_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -518,4 +546,54 @@ export const SCHEMA = `
   -- Angenommene Ideen, deren Auftrag gelöscht wurde, sind wieder offen.
   UPDATE ideation_items i SET status = 'idea', updated_at = NOW()
    WHERE i.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id);
+  -- Erledigte oder abgelehnte Aufträge brauchen keine Aktion mehr: Hinweis beim Abschluss löschen (auch Altfälle).
+  CREATE OR REPLACE FUNCTION clear_action_todo() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status IN ('done', 'rejected') THEN
+      NEW.action_todo := NULL;
+    END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER development_items_clear_action_todo
+    BEFORE INSERT OR UPDATE OF status ON development_items
+    FOR EACH ROW EXECUTE FUNCTION clear_action_todo();
+  UPDATE development_items SET action_todo = NULL
+   WHERE status IN ('done', 'rejected') AND action_todo IS NOT NULL;
+  -- Mandantentrennung: Benutzer sehen nur freigeschaltete Projekte (Administratoren alle).
+  CREATE TABLE IF NOT EXISTS project_members (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, project_slug)
+  );
+  -- Push nur an Geräte von Benutzern mit Zugriff auf das Projekt.
+  ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+  ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS system_admin BOOLEAN NOT NULL DEFAULT FALSE;
+  -- Ältere Geräte ohne Besitzer stammen aus der Zeit vor Benutzerkonten: dem Systemadministrator zuordnen.
+  UPDATE push_subscriptions SET system_admin = TRUE WHERE user_id IS NULL AND NOT system_admin;
+  -- Einmalig beim Einführen der Mandantentrennung: bestehende Benutzer behalten Zugriff auf die bestehenden Projekte.
+  DO $$
+  BEGIN
+    IF NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'tenancy_migrated') THEN
+      INSERT INTO project_members (user_id, project_slug)
+        SELECT u.id, p.slug FROM users u CROSS JOIN projects p ON CONFLICT DO NOTHING;
+      INSERT INTO app_settings (key, value) VALUES ('tenancy_migrated', 'true');
+    END IF;
+  END $$;
+  -- Rechte je Agent auf Befehlsebene (null = Projektstandard wie bisher) und eigene Kategorien je Projekt (Administration).
+  ALTER TABLE agents DROP COLUMN IF EXISTS permission_groups;
+  ALTER TABLE agents ADD COLUMN IF NOT EXISTS allowed_commands TEXT[];
+  CREATE TABLE IF NOT EXISTS project_permission_groups (
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    id TEXT NOT NULL CHECK (id ~ '^[a-z0-9][a-z0-9-]{1,39}$'),
+    label TEXT NOT NULL CHECK (char_length(label) BETWEEN 1 AND 80),
+    description TEXT NOT NULL DEFAULT '',
+    rules TEXT[] NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (project_slug, id)
+  );
+  -- Dokumentgruppe „Anfragen“: Anfragen an Assistent und Agents samt Ergebnis.
+  ALTER TABLE docs DROP CONSTRAINT IF EXISTS docs_kind_check;
+  ALTER TABLE docs ADD CONSTRAINT docs_kind_check CHECK (kind IN ('manual', 'order', 'sprint', 'repo', 'request'));
 `;

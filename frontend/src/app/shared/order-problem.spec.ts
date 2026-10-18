@@ -2,8 +2,20 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { orderProblem } from './order-problem.js';
 
-test('Ohne Handlungsbedarf keine Kurzfassung', () => {
+test('Ohne Handlungsbedarf keine Kurzfassung – auch nicht mit altem Hinweis bei Erledigten', () => {
   assert.equal(orderProblem({ status: 'done' }), null);
+  assert.equal(orderProblem({ status: 'done', actionTodo: 'Zugang geben' }), null);
+  assert.equal(orderProblem({ status: 'rejected', actionTodo: 'Zugang geben' }), null);
+});
+
+test('Hinweis „Problem – Lösung“ wird getrennt, statt zweimal denselben Text zu zeigen', () => {
+  assert.deepEqual(
+    orderProblem({
+      status: 'blocked',
+      actionTodo: 'Projektregel verhindert den Auftrag: keine h1 – Auftrag anpassen oder verwerfen',
+    }),
+    { problem: 'Projektregel verhindert den Auftrag: keine h1', solution: 'Auftrag anpassen oder verwerfen' },
+  );
 });
 
 test('Problem aus der Analyse, Lösung aus der Aktion', () => {

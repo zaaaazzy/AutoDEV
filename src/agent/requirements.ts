@@ -6,7 +6,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../api/bugs.js';
 import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
-import { loadPermissionGroups, withAssistantPermissions } from './tool-permissions.js';
+import { loadProjectPermissions, withAgentPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
@@ -93,12 +93,12 @@ export async function runAuthorAgent(
 ): Promise<{ exitCode: number; output: string; sessionId?: string }> {
   const author = (
     agentId
-      ? await pool.query<{ instructions: string; command: string[] | null }>(
-          `SELECT instructions, command FROM agents WHERE project_slug = $1 AND id = $2`,
+      ? await pool.query<{ instructions: string; command: string[] | null; allowedCommands: string[] | null }>(
+          `SELECT instructions, command, allowed_commands AS "allowedCommands" FROM agents WHERE project_slug = $1 AND id = $2`,
           [options.project, agentId],
         )
-      : await pool.query<{ instructions: string; command: string[] | null }>(
-          `SELECT instructions, command FROM agents
+      : await pool.query<{ instructions: string; command: string[] | null; allowedCommands: string[] | null }>(
+          `SELECT instructions, command, allowed_commands AS "allowedCommands" FROM agents
           WHERE project_slug = $1 AND role = $2 AND enabled ORDER BY position LIMIT 1`,
           [options.project, role],
         )
@@ -110,8 +110,9 @@ export async function runAuthorAgent(
   const configured = author?.command?.length
     ? author.command
     : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
-  const groups = await loadPermissionGroups(pool, options.project);
-  const command = configured && withAssistantPermissions(configured, role, undefined, groups);
+  // Rechte: die des gewählten bzw. zuständigen Agents (eigene Zuweisung), sonst der Projektstandard der Rolle.
+  const permissions = await loadProjectPermissions(pool, options.project);
+  const command = configured && withAgentPermissions(configured, role, permissions, author?.allowedCommands ?? null);
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =

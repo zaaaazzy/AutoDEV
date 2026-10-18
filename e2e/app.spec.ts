@@ -177,7 +177,13 @@ test('Rollen: Autorin reicht Dokumentänderung ein, Redaktion gibt frei', async 
   const authorPassword = 'autorin-passwort-123';
   const created = await request.post('/api/users', {
     headers: admin,
-    data: { username: author, displayName: 'Anna Autorin', password: authorPassword, roles: ['docs'] },
+    data: {
+      username: author,
+      displayName: 'Anna Autorin',
+      password: authorPassword,
+      roles: ['docs'],
+      projects: ['e2e'],
+    },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const doc = (
@@ -389,6 +395,66 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await expect(row).toHaveClass(/unpicked/);
   await expect(card.getByRole('button', { name: 'Übernehmen', exact: true })).toBeVisible();
   await request.delete(`/api/development/${order.id}`, { headers });
+});
+
+test('Mandantentrennung: Benutzer sieht nur freigeschaltete Projekte, fremde sind „nicht gefunden“', async ({
+  request,
+  playwright,
+}) => {
+  const admin = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const name = `mandant${test.info().project.name}${Date.now() % 100000}`;
+  const secret = 'Mandant-Passwort-123';
+  const created = (
+    await (
+      await request.post('/api/users', { headers: admin, data: { username: name, password: secret, roles: ['plan'] } })
+    ).json()
+  ).user;
+  // Eigene Sitzung des Benutzers (Benutzerkonten melden sich per Login an, nicht per Basic-Anmeldung).
+  const user = await playwright.request.newContext({ baseURL: test.info().project.use.baseURL });
+  try {
+    expect((await user.post('/api/login', { data: { username: name, password: secret } })).ok()).toBe(true);
+    expect((await (await user.get('/api/projects')).json()).projects).toEqual([]);
+    expect((await user.get('/api/projects/e2e/board')).status()).toBe(404);
+    expect((await user.get('/api/users')).status()).toBe(403);
+    await request.patch(`/api/users/${created.id}`, { headers: admin, data: { projects: ['e2e'] } });
+    const visible = (await (await user.get('/api/projects')).json()).projects;
+    expect(visible.map((project: { slug: string }) => project.slug)).toEqual(['e2e']);
+    expect((await user.get('/api/projects/e2e/board')).status()).toBe(200);
+  } finally {
+    await user.dispose();
+    await request.delete(`/api/users/${created.id}`, { headers: admin });
+  }
+});
+
+test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln werden abgelehnt', async ({
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const response = await request.post('/api/projects/e2e/agents', {
+    headers,
+    data: { name: `Rechte-Test ${Date.now()}`, role: 'reviewer', phase: 'while_task' },
+  });
+  const agent = (await response.json()).agent;
+  try {
+    expect(agent.allowedCommands).toEqual([]);
+    const bad = await request.patch(`/api/agents/${agent.id}`, {
+      headers,
+      data: { allowedCommands: ['Bash(rm -rf:*)'] },
+    });
+    expect(bad.status()).toBe(400);
+    const ok = await request.patch(`/api/agents/${agent.id}`, {
+      headers,
+      data: { allowedCommands: ['files', 'Bash(git status:*)'] },
+    });
+    expect((await ok.json()).agent.allowedCommands).toEqual(['files', 'Bash(git status:*)']);
+    const rule = await request.post('/api/projects/e2e/permission-groups', {
+      headers,
+      data: { label: 'Gefährlich', rules: 'Bash(rm -rf:*)' },
+    });
+    expect(rule.status()).toBe(400);
+  } finally {
+    await request.delete(`/api/agents/${agent.id}`, { headers });
+  }
 });
 
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {

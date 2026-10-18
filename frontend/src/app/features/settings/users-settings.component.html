@@ -48,6 +48,22 @@
           </label>
         }
       </fieldset>
+      <fieldset class="role-grid">
+        <legend>Projekte (Mandanten) – sieht nur diese; Administratoren sehen alle</legend>
+        @for (project of store.projects(); track project.slug) {
+          <label class="role-option">
+            <input
+              type="checkbox"
+              [checked]="form.projects.includes(project.slug)"
+              (change)="form.projects = toggleProject(form.projects, project.slug, $any($event.target).checked)"
+            />
+            <span
+              ><strong>{{ project.name }}</strong
+              ><small>{{ project.slug }}</small></span
+            >
+          </label>
+        }
+      </fieldset>
       <button class="button primary" type="submit" [disabled]="busy()">Benutzer anlegen</button>
     </form>
   }
@@ -85,6 +101,17 @@
               <span class="muted small">nur lesen</span>
             }
           </span>
+          <span class="role-chips">
+            @if (user.roles.includes('admin')) {
+              <span class="muted small">alle Projekte</span>
+            } @else {
+              @for (slug of user.projects; track slug) {
+                <span class="role-chip project">{{ projectName(slug) }}</span>
+              } @empty {
+                <span class="muted small">kein Projekt freigeschaltet</span>
+              }
+            }
+          </span>
         </span>
         <button class="button secondary small" type="button" (click)="startEdit(user)">
           {{ editing() === user.id ? 'Schließen' : 'Bearbeiten' }}
@@ -119,6 +146,26 @@
                     ><small>{{ role.description }}</small></span
                   >
                 </label>
+              }
+            </fieldset>
+            <fieldset class="role-grid">
+              <legend>Projekte (Mandanten)</legend>
+              @if (edit.roles.includes('admin')) {
+                <p class="muted small">Administratoren sehen alle Projekte.</p>
+              } @else {
+                @for (project of store.projects(); track project.slug) {
+                  <label class="role-option">
+                    <input
+                      type="checkbox"
+                      [checked]="edit.projects.includes(project.slug)"
+                      (change)="edit.projects = toggleProject(edit.projects, project.slug, $any($event.target).checked)"
+                    />
+                    <span
+                      ><strong>{{ project.name }}</strong
+                      ><small>{{ project.slug }}</small></span
+                    >
+                  </label>
+                }
               }
             </fieldset>
             <div class="actions">

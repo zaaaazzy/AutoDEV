@@ -59,6 +59,8 @@ export class DocsComponent {
     { kind: 'sprint', label: 'Sprintberichte' },
     { kind: 'order', label: 'Auftrags-Dokumentation' },
     { kind: 'repo', label: 'Repository' },
+    // Anfragen an Assistent und Agents (auch Kurzbefehle) samt Ergebnis, neueste zuerst.
+    { kind: 'request', label: 'Anfragen' },
   ];
 
   constructor() {
@@ -111,7 +113,7 @@ export class DocsComponent {
   }
 
   protected canEdit(doc: DocumentEntry): boolean {
-    return doc.kind !== 'repo' && this.auth.can('docs');
+    return doc.kind !== 'repo' && doc.kind !== 'request' && this.auth.can('docs');
   }
 
   protected diff(revision: DocRevision) {

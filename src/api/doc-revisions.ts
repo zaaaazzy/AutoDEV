@@ -49,10 +49,10 @@ export function registerDocRevisionRoutes(app: Express, pool: Pool): void {
         )
       ).rows[0];
       if (!doc) return void response.status(404).json({ message: 'Dokument nicht gefunden.' });
-      if (doc.kind === 'repo') {
+      if (doc.kind === 'repo' || doc.kind === 'request') {
         response
           .status(400)
-          .json({ message: 'Repository-Dokumente spiegeln Dateien im Projekt und sind schreibgeschützt.' });
+          .json({ message: 'Repository-Dokumente und Anfragen sind ein Protokoll und schreibgeschützt.' });
         return;
       }
       if (doc.title === title && doc.content === content) {

@@ -222,6 +222,8 @@
             <article class="markdown" [innerHTML]="doc.content | markdown"></article>
             @if (doc.kind === 'repo') {
               <p class="muted">Spiegelt eine Datei im Projekt-Repository und ist hier schreibgeschützt.</p>
+            } @else if (doc.kind === 'request') {
+              <p class="muted">Protokoll einer Anfrage an den Assistenten – schreibgeschützt.</p>
             }
           }
 

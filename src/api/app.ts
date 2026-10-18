@@ -1,3 +1,5 @@
+import { registerPermissionGroupRoutes } from './permission-groups.js';
+import { tenantGuard } from './tenancy.js';
 import { registerSprintPlanningRoutes } from './sprint-planning.js';
 import { join } from 'node:path';
 import express, { type Express } from 'express';
@@ -48,6 +50,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     registerLoginRoutes(app, pool, auth, limiter);
     app.use(requireCredentials(auth, pool, limiter));
     app.use(authorize);
+    app.use(tenantGuard(pool));
     registerSecurityRoutes(app, pool, auth);
   } else {
     // Ohne Login (DEV_LOG_AUTH=off) arbeitet jeder als Administrator.
@@ -77,6 +80,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerSprintRoutes(app, pool);
   registerSprintPlanningRoutes(app, pool);
   registerAgentRoutes(app, pool);
+  registerPermissionGroupRoutes(app, pool);
   registerBugRoutes(app, pool);
   registerAttachmentRoutes(app, pool);
   registerDocRoutes(app, pool);

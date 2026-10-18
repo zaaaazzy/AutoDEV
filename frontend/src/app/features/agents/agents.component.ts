@@ -1,5 +1,6 @@
+import { PermissionPickerComponent, type PermissionGroupInfo } from './permission-picker.component.js';
 import { NgClass } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
@@ -63,6 +64,7 @@ interface AgentListRow extends AgentTableRow {
   selector: 'app-agents',
   standalone: true,
   imports: [
+    PermissionPickerComponent,
     OrderTableComponent,
     NgClass,
     FormsModule,
@@ -127,6 +129,29 @@ export class AgentsComponent {
   }
   protected readonly agentEditing = signal<string | null>(null);
   protected agentEdit = { name: '', instructions: '', command: '' };
+  /** Kategorien des Projekts (eingebaute und eigene) mit ihren einzelnen Befehlen. */
+  protected readonly permissionGroups = signal<PermissionGroupInfo[]>([]);
+  /** Neue Agents starten ohne Befehle: jeder wird einzeln freigegeben. */
+  protected formCommands: string[] = [];
+  protected editCommands: string[] = [];
+  private readonly loadGroups = effect(() => {
+    const slug = this.store.activeProject();
+    if (!slug) return;
+    void this.api
+      .get<{ groups: PermissionGroupInfo[] }>(`${this.api.projectPath(slug)}/permission-groups`)
+      .then((result) => this.permissionGroups.set(result.groups))
+      .catch(() => undefined);
+  });
+
+  /** Noch nicht festgelegt (null): so, wie der Agent heute läuft – vertraute Rollen mit allen Projektbefehlen. */
+  private effectiveCommands(agent: Agent): string[] {
+    if (agent.allowedCommands) return [...agent.allowedCommands];
+    const available = this.permissionGroups()
+      .filter((group) => group.available)
+      .flatMap((group) => group.rules);
+    return ['assistant', 'developer', 'tester', 'reviewer'].includes(agent.role) ? available : ['files'];
+  }
+
   protected agentForm = {
     name: '',
     role: 'developer',
@@ -218,6 +243,7 @@ export class AgentsComponent {
 
   protected startAgentEdit(agent: Agent): void {
     this.agentEdit = { name: agent.name, instructions: agent.instructions, command: agent.command?.join(' ') ?? '' };
+    this.editCommands = this.effectiveCommands(agent);
     this.agentEditing.set(agent.id);
   }
 
@@ -233,8 +259,10 @@ export class AgentsComponent {
       await this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents`, {
         ...this.agentForm,
         command,
+        allowedCommands: this.formCommands,
       });
       this.agentForm = { name: '', role: 'developer', phase: 'while_task', command: '', instructions: '' };
+      this.formCommands = [];
       this.store.showCreate.set(false);
     }, 'Agent angelegt.');
   }
@@ -261,7 +289,12 @@ export class AgentsComponent {
       this.store.notice.set(errorMessage(error, 'Der Agent-Befehl ist ungültig.'));
       return;
     }
-    await this.updateAgent(agent.id, { name: this.agentEdit.name, instructions: this.agentEdit.instructions, command });
+    await this.updateAgent(agent.id, {
+      name: this.agentEdit.name,
+      instructions: this.agentEdit.instructions,
+      command,
+      allowedCommands: this.editCommands,
+    });
     this.agentEditing.set(null);
   }
 
