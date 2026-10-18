@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { areaName, mergeCoverage, parseNodeCoverage, splitArgs } from './measured-coverage.js';
+import {
+  areaName,
+  measureCoverage,
+  mergeCoverage,
+  parseNodeCoverage,
+  splitArgs,
+  testRunnerOf,
+} from './measured-coverage.js';
 
 test('reads the node test runner coverage summary', () => {
   const output = `# tests 64\n# pass 63\n# fail 1\n# file | line % | branch % | funcs % | uncovered lines\n# all files                    |  84.02 |    82.64 |   91.78 |\n`;
@@ -62,4 +69,49 @@ test('measured percentages fill the tester report', () => {
   assert.equal(merged.areas[0]!.unit, 64);
   assert.match(merged.summary, /Gemessen von Dev Log/);
   assert.equal(mergeCoverage(null, []), null);
+});
+
+test('findet den Test-Runner auch hinter „&&“ und über „npm run“', () => {
+  const scripts = {
+    test: 'npm run build:ui && npm run test:unit',
+    'test:unit': 'tsx --test "src/**/*.test.ts" "frontend/src/**/*.spec.ts"',
+    'build:ui': 'ng build',
+  };
+  assert.deepEqual(testRunnerOf('npm run build:ui && tsx --test "a" "b"', {}), {
+    binary: 'tsx',
+    args: ['a', 'b'],
+    setup: [['npm', 'run', 'build:ui']],
+  });
+  assert.deepEqual(testRunnerOf(scripts.test, scripts), {
+    binary: 'tsx',
+    args: ['src/**/*.test.ts', 'frontend/src/**/*.spec.ts'],
+    setup: [['npm', 'run', 'build:ui']],
+  });
+  assert.equal(testRunnerOf('vitest run', {}), null);
+  // Endlose Verweise brechen ab statt zu hängen.
+  assert.equal(testRunnerOf('npm run a', { a: 'npm run a' }), null);
+});
+
+test('misst Dev Log selbst: erst vorbereiten, dann mit Abdeckung testen', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'coverage-'));
+  await writeFile(
+    join(dir, 'package.json'),
+    JSON.stringify({ name: 'dev-log', scripts: { test: 'npm run build:ui && tsx --test "src/**/*.test.ts"' } }),
+  );
+  const calls: string[][] = [];
+  const areas = await measureCoverage(dir, [['npm', 'test']], async (command) => {
+    calls.push(command);
+    const output = command.includes('--experimental-test-coverage')
+      ? '# pass 5\n# fail 0\n# all files | 80.5 | 70.25 | 90 |\n'
+      : '';
+    return { exitCode: 0, durationMs: 1, output };
+  });
+  assert.deepEqual(calls[0], ['npm', 'run', 'build:ui']);
+  assert.ok(calls[1]?.includes('--experimental-test-coverage'));
+  assert.ok(calls[1]?.includes('src/**/*.test.ts'));
+  assert.equal(areas[0]?.lines, 80.5);
+  assert.equal(areas[0]?.passed, 5);
 });

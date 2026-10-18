@@ -45,6 +45,39 @@ export function areaName(workspace: string): string {
   return name || 'Projekt';
 }
 
+export interface TestRunner {
+  /** `tsx` oder `node`. */
+  binary: string;
+  /** Argumente nach `--test` (Dateimuster usw.). */
+  args: string[];
+  /** Befehle, die im Skript vor dem Testlauf stehen (z. B. `npm run build:ui`); laufen vorher. */
+  setup: string[][];
+}
+
+const MAX_SCRIPT_DEPTH = 3;
+
+/**
+ * Findet den Node-Test-Runner in einem npm-Skript: auch hinter `&&` (z. B. `npm run build:ui && tsx --test …`)
+ * und über `npm run <name>` in anderen Skripten (höchstens ein paar Ebenen tief). Null, wenn keiner vorkommt.
+ */
+export function testRunnerOf(script: string, scripts: Record<string, string>, depth = 0): TestRunner | null {
+  const parts = script
+    .split('&&')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  for (const [index, part] of parts.entries()) {
+    const setup = parts.slice(0, index).map(splitArgs);
+    const runner = RUNNER.exec(part);
+    if (runner) return { binary: runner[1] ?? 'tsx', args: splitArgs(runner[2] ?? ''), setup };
+    const nested = /^npm\s+run\s+([\w:.-]+)$/.exec(part)?.[1];
+    if (nested && depth < MAX_SCRIPT_DEPTH && scripts[nested]) {
+      const inner = testRunnerOf(scripts[nested], scripts, depth + 1);
+      if (inner) return { ...inner, setup: [...setup, ...inner.setup] };
+    }
+  }
+  return null;
+}
+
 async function packageJson(
   dir: string,
 ): Promise<{ name?: string; workspaces?: string[]; scripts?: Record<string, string> } | null> {
@@ -78,21 +111,32 @@ export async function measureCoverage(
     const workspace = command.find((part) => part.startsWith('--workspace='))?.slice('--workspace='.length);
     const dir = workspace ? await workspaceDir(cwd, workspace) : cwd;
     if (!dir) continue;
-    const script = (await packageJson(dir))?.scripts?.test?.trim() ?? '';
-    const runner = RUNNER.exec(script);
-    if (!runner) continue;
+    const scripts = (await packageJson(dir))?.scripts ?? {};
+    const runner = testRunnerOf(scripts.test?.trim() ?? '', scripts);
+    if (!runner) {
+      console.warn(`[coverage] Abdeckung nicht messbar: Testskript in ${dir} nicht erkannt (kein tsx/node --test).`);
+      continue;
+    }
+    // Vorbereitende Schritte des Skripts (z. B. Oberfläche bauen) wie beim normalen Testlauf zuerst ausführen.
+    let prepared = true;
+    for (const step of runner.setup) {
+      const done = await execute(step, dir, { timeoutMs: TIMEOUT_MS }).catch(() => null);
+      if (done?.exitCode !== 0) prepared = false;
+    }
+    if (!prepared) continue;
     const result = await execute(
       [
         'npm',
         'exec',
         '--',
-        runner[1]!,
+        runner.binary,
         '--test',
         '--experimental-test-coverage',
         '--test-coverage-exclude=**/*.test.ts',
         '--test-coverage-exclude=**/*.test.js',
+        '--test-coverage-exclude=**/*.spec.ts',
         '--test-coverage-exclude=**/node_modules/**',
-        ...splitArgs(runner[2] ?? ''),
+        ...runner.args,
       ],
       dir,
       { timeoutMs: TIMEOUT_MS },
