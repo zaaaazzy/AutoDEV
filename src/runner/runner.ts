@@ -5,7 +5,7 @@ import { backfillFailures } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
-import { syncSprintToGit } from './git-sync.js';
+import { checkoutSprintBranch, restoreShelvedWork, syncSprintToGit } from './git-sync.js';
 import { deployProject } from './deploy.js';
 import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
@@ -81,6 +81,19 @@ async function resumePosition(
   return position;
 }
 
+/** Sprint-Aufträge arbeiten auf dem Sprint-Branch; geparkte Arbeit eines früheren Fehlversuchs wird zurückgeholt. */
+async function prepareWorkingTree(pool: Pool, item: WorkItem, options: WorkItemOptions): Promise<void> {
+  const execute = options.execute ?? runCommand;
+  if (item.sprintId) {
+    const sprint = (await pool.query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId]))
+      .rows[0];
+    if (sprint) await checkoutSprintBranch(options.cwd, sprint.name, execute);
+  }
+  if (await restoreShelvedWork(options.cwd, item.id, execute)) {
+    console.info(`[${item.id}] Geparkte Änderungen aus dem letzten Versuch übernommen.`);
+  }
+}
+
 export async function runWorkItem(
   pool: Pool,
   item: WorkItem,
@@ -96,6 +109,7 @@ export async function runWorkItem(
     `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', updated_at = NOW() WHERE id = $1`,
     [item.id],
   );
+  await prepareWorkingTree(pool, item, options);
 
   const ordered = selectWorkflowAgents(agents, item);
   const ctx: RunContext = {

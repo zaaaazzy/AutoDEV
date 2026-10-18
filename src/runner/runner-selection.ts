@@ -115,3 +115,22 @@ export function parseTestCommands(parsed: unknown): string[][] | null {
     ? (parsed as string[][])
     : null;
 }
+
+/** Testbefehle des Projekts (Einstellung, sonst DEV_LOG_TEST_COMMANDS, sonst Build und npm test). */
+export async function loadTestCommands(
+  pool: Pool,
+  project: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<string[][]> {
+  const stored = (
+    await pool.query<{ commands: unknown }>('SELECT test_commands AS commands FROM projects WHERE slug = $1', [project])
+  ).rows[0]?.commands;
+  const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
+  return (
+    parseTestCommands(stored) ??
+    (raw ? parseTestCommands(JSON.parse(raw)) : null) ?? [
+      ['npm', 'run', 'build'],
+      ['npm', 'test'],
+    ]
+  );
+}

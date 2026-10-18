@@ -7,7 +7,7 @@ import { startProgress } from '../agent/chat-progress.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { commitTaskToGit } from './git-sync.js';
+import { commitTaskToGit, shelveFailedWork } from './git-sync.js';
 import { executeAgentCommand } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { withAssistantPermissions } from '../agent/tool-permissions.js';
@@ -15,29 +15,11 @@ import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
 import type { BuiltinAgent, StepSummary, WorkItem, WorkflowAgent, WorkItemOptions } from './runner-types.js';
-import { parseTestCommands } from './runner-selection.js';
+import { loadTestCommands } from './runner-selection.js';
 
 const MANUAL_TITLE = 'Anwendungshandbuch';
 const USER_MANUAL_TITLE = 'Benutzerhandbuch';
 const MIN_MANUAL_CHARS = 200;
-
-async function testCommands(
-  pool: Pool,
-  project: string,
-  environment: NodeJS.ProcessEnv = process.env,
-): Promise<string[][]> {
-  const stored = (
-    await pool.query<{ commands: unknown }>('SELECT test_commands AS commands FROM projects WHERE slug = $1', [project])
-  ).rows[0]?.commands;
-  const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
-  return (
-    parseTestCommands(stored) ??
-    (raw ? parseTestCommands(JSON.parse(raw)) : null) ?? [
-      ['npm', 'run', 'build'],
-      ['npm', 'test'],
-    ]
-  );
-}
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
 export const runBuiltinAgent: BuiltinAgent = async ({
@@ -56,7 +38,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
       {
         project: item.projectSlug,
         cwd,
-        commands: await testCommands(pool, item.projectSlug),
+        commands: await loadTestCommands(pool, item.projectSlug),
         existingProject: true,
         timeoutMs,
         signal,
@@ -378,6 +360,20 @@ export async function runStep(
   return { passed, interrupted: false };
 }
 
+/** Dateien, die die Agents dieses Laufs laut Verlauf geschrieben oder bearbeitet haben (relativ zum Projektordner). */
+async function writtenPaths(pool: Pool, runId: string): Promise<string[]> {
+  const rows = (
+    await pool.query<{ text: string }>(
+      `SELECT e->>'text' AS text FROM agent_run_steps s, jsonb_array_elements(s.events) e WHERE s.run_id = $1`,
+      [runId],
+    )
+  ).rows;
+  const paths = rows
+    .map((row) => /^(?:Bearbeitet|Schreibt) (.+)$/.exec(row.text)?.[1]?.trim())
+    .filter((path): path is string => !!path);
+  return [...new Set(paths)];
+}
+
 /** Settle the order status and trigger follow-up actions such as commits or bugfix retries. */
 export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
   const { pool, item, options, execute } = ctx;
@@ -403,7 +399,13 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     `UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
     [item.id, passed ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
-  if (!passed) return;
+  if (!passed) {
+    // Änderungen eines fehlgeschlagenen Auftrags parken, damit der nächste Auftrags-Commit sauber bleibt.
+    if (await shelveFailedWork(options.cwd, item, await writtenPaths(pool, ctx.runId), execute)) {
+      console.info(`[${item.id}] Änderungen geparkt (git stash), sie kommen beim nächsten Versuch zurück.`);
+    }
+    return;
+  }
   if (item.sprintId) {
     const sprint = await pool
       .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])

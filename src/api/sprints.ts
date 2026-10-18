@@ -98,6 +98,12 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
       }
       if (result.rows[0].status === 'completed') {
         await generateSprintReport(pool, request.params.id);
+        // Sprintende: Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
+        await pool.query(
+          `UPDATE sprints SET git_sync = 'pending', git_action = 'push', git_message = NULL
+            WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))`,
+          [request.params.id],
+        );
       }
       response.json({ sprint: result.rows[0] });
     } catch (error) {

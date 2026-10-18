@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
 import { withProjectLock } from '../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
+import { loadTestCommands } from './runner-selection.js';
 
 const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -18,16 +19,30 @@ export function pushRemote(remote: string): string {
   return match ? `git@github.com:${match[1]}.git` : remote;
 }
 
-export function sprintTag(name: string, id: string): string {
-  const slug = name
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/\p{M}/gu, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40);
-  return `sprint-${slug || 'ohne-name'}-${id.slice(0, 6)}`;
+function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/\p{M}/gu, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'ohne-name'
+  );
 }
+
+export function sprintTag(name: string, id: string): string {
+  return `sprint-${slugify(name)}-${id.slice(0, 6)}`;
+}
+
+/** Branch, auf dem alle Aufträge eines Sprints committet werden; am Sprintende wird er nach main gemergt. */
+export function sprintBranch(name: string): string {
+  return `sprint/${slugify(name)}`;
+}
+
+const MAIN_BRANCH = 'main';
+const WIP_PREFIX = 'devlog-wip';
+const TEST_TIMEOUT_MS = 15 * 60_000;
 
 const INTERNAL_EXCLUDES = ['.dev-log-backups/', '.dev-log/', '.env', '.env.*'];
 
@@ -83,6 +98,107 @@ async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must']
   return initialized;
 }
 
+async function branchExists(git: GitHelpers['git'], branch: string): Promise<boolean> {
+  return (await git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`)).exitCode === 0;
+}
+
+/**
+ * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
+ * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
+ */
+export async function checkoutSprintBranch(
+  cwd: string,
+  sprintName: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  const branch = sprintBranch(sprintName);
+  try {
+    await ensureRepository(git, must, cwd);
+    if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output === branch) return branch;
+    if (await branchExists(git, branch)) await must('checkout', branch);
+    else if (await branchExists(git, MAIN_BRANCH)) await must('checkout', '-b', branch, MAIN_BRANCH);
+    else await must('checkout', '-b', branch);
+    return branch;
+  } catch (error) {
+    console.error(`Sprint-Branch ${branch} nicht aktiv: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/**
+ * Parkt die Änderungen eines fehlgeschlagenen Auftrags als Stash, damit sie nicht im Commit des nächsten Auftrags landen.
+ * Geparkt werden nur die Dateien, die der Auftrag laut Verlauf geschrieben hat (`paths`).
+ */
+export async function shelveFailedWork(
+  cwd: string,
+  item: { id: string; title: string },
+  paths: string[],
+  rawExecute: CommandExecutor = runCommand,
+): Promise<boolean> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  // Ohne Repository gibt es nichts zu parken (und es soll dafür keines angelegt werden).
+  if (!existsSync(join(cwd, '.git'))) return false;
+  try {
+    if (!(await must('status', '--porcelain'))) return false;
+    const existing = paths.filter(
+      (path) => !path.startsWith('/') && !path.includes('..') && existsSync(join(cwd, path)),
+    );
+    // Ohne bekannte Dateien nichts parken: ein Stash des ganzen Arbeitsstands träfe auch laufende andere Aufträge.
+    if (!existing.length) return false;
+    const title = item.title.replace(/\s+/g, ' ').slice(0, 60);
+    const args = ['stash', 'push', '--include-untracked', '-m', `${WIP_PREFIX} ${item.id} ${title}`];
+    const result = await git(...args, '--', ...existing);
+    return result.exitCode === 0 && !/No local changes/i.test(result.output);
+  } catch (error) {
+    console.error(`Auftrag ${item.id} nicht geparkt: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+/** Holt geparkte Änderungen eines Auftrags zurück, wenn er erneut startet. */
+export async function restoreShelvedWork(
+  cwd: string,
+  itemId: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<boolean> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git } = gitHelpers(execute, cwd);
+  if (!existsSync(join(cwd, '.git'))) return false;
+  const list = await git('stash', 'list', '--format=%gd %s');
+  const ref = list.output
+    .split('\n')
+    .find((line) => line.includes(`${WIP_PREFIX} ${itemId}`))
+    ?.split(' ')[0];
+  if (!ref) return false;
+  const popped = await git('stash', 'pop', ref);
+  if (popped.exitCode !== 0)
+    console.error(`Geparkte Arbeit für ${itemId} nicht übernommen: ${popped.output.slice(-300)}`);
+  return popped.exitCode === 0;
+}
+
+/** Führt die Testbefehle des Projekts aus; wirft mit dem Ausgabe-Ende, sobald einer fehlschlägt. */
+async function runTestGate(execute: CommandExecutor, cwd: string, commands: string[][], log: string[]): Promise<void> {
+  for (const command of commands) {
+    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS });
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${redactOutput(result.output, process.env).slice(-600)}`,
+      );
+    }
+  }
+  log.push(
+    commands.length
+      ? `Tests grün (${commands.length} Befehl${commands.length === 1 ? '' : 'e'}).`
+      : 'Keine Testbefehle hinterlegt.',
+  );
+}
+
 /** Conventional-Commits-Betreff: Typ aus der Auftragsart, Sprint als Scope, Titel auf eine Zeile gekürzt. */
 export function taskCommitMessage(
   kind: string | undefined,
@@ -134,6 +250,7 @@ interface PendingSprint {
   name: string;
   action: 'push' | 'pull' | null;
   remote: string | null;
+  status: string;
 }
 
 async function configureOrigin(git: GitHelpers['git'], must: GitHelpers['must'], remote: string): Promise<void> {
@@ -150,28 +267,68 @@ interface SyncResult {
   log: string[];
 }
 
-/** Commits the working tree with the sprint name, tags it, and pushes when the project has a repository URL. */
-async function pushSprint(helpers: GitHelpers, sprint: PendingSprint, log: string[]): Promise<SyncResult> {
-  const { must } = helpers;
+/**
+ * Sichert den Sprint-Branch: Reständerungen committen, Projekttests ausführen (Test-Gate) und nur bei grünen Tests pushen.
+ * Ist der Sprint abgeschlossen, wird der Sprint-Branch danach mit --no-ff nach main gemergt, erneut getestet und gepusht.
+ */
+async function pushSprint(
+  helpers: GitHelpers,
+  sprint: PendingSprint,
+  log: string[],
+  gate: (log: string[]) => Promise<void>,
+): Promise<SyncResult> {
+  const { git, must } = helpers;
+  const branch = sprintBranch(sprint.name);
+  if (await branchExists(git, branch)) {
+    if ((await must('rev-parse', '--abbrev-ref', 'HEAD')) !== branch) await must('checkout', branch);
+  } else {
+    log.push(`Kein Sprint-Branch ${branch} – sichere den aktuellen Branch.`);
+  }
   await must('add', '-A');
   if (await must('status', '--porcelain')) {
-    await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Mainty Dev Log.');
-    log.push('Commit erstellt.');
-  } else {
-    log.push('Keine Änderungen seit dem letzten Commit.');
+    await must(
+      'commit',
+      '-m',
+      `chore(${sprint.name}): Sprint-Stand sichern`,
+      '-m',
+      'Automatisch gesichert vom Mainty Dev Log.',
+    );
+    log.push('Reständerungen committet.');
+  }
+  await gate(log);
+  let current = await must('rev-parse', '--abbrev-ref', 'HEAD');
+  if (sprint.remote) {
+    await must('push', '-u', 'origin', current);
+    log.push(`${current} nach GitHub gepusht.`);
+  }
+  if (sprint.status === 'completed' && current === branch) {
+    if (await branchExists(git, MAIN_BRANCH)) {
+      await must('checkout', MAIN_BRANCH);
+      const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: Sprint ${sprint.name}`);
+      if (merged.exitCode !== 0) {
+        await git('merge', '--abort');
+        await must('checkout', branch);
+        throw new Error(
+          `Merge von ${branch} nach ${MAIN_BRANCH} hat Konflikte – bitte manuell zusammenführen. ${merged.output.slice(-300)}`,
+        );
+      }
+      await gate(log);
+    } else {
+      await must('branch', '-m', branch, MAIN_BRANCH);
+    }
+    current = MAIN_BRANCH;
+    log.push(`Sprint abgeschlossen: ${branch} nach ${MAIN_BRANCH} gemergt.`);
+    if (sprint.remote) await must('push', '-u', 'origin', MAIN_BRANCH);
   }
   const tag = sprintTag(sprint.name, sprint.id);
   await must('tag', '-f', tag);
-  const commit = await must('rev-parse', '--short', 'HEAD');
-  const branch = await must('rev-parse', '--abbrev-ref', 'HEAD');
   if (sprint.remote) {
-    await must('push', '-u', 'origin', 'HEAD');
     await must('push', '--force', 'origin', `refs/tags/${tag}`);
-    log.push(`Nach GitHub gepusht (${tag}).`);
+    log.push(`Tag ${tag} gepusht.`);
   } else {
     log.push('Kein GitHub-Repository am Projekt hinterlegt – nur lokal gesichert.');
   }
-  return { commit, branch, log };
+  return { commit: await must('rev-parse', '--short', 'HEAD'), branch: current, log };
 }
 
 /** Holt den Stand von GitHub per Fast-Forward; lokale Änderungen oder abweichende Historie brechen mit Fehlermeldung ab. */
@@ -204,7 +361,7 @@ export async function syncSprintToGit(
     `UPDATE sprints s SET git_sync = 'running'
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING s.id, s.name, s.git_action AS action,
+      RETURNING s.id, s.name, s.status, s.git_action AS action,
                 (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
   );
@@ -221,7 +378,10 @@ export async function syncSprintToGit(
     if (sprint.remote) {
       await configureOrigin(helpers.git, helpers.must, sprint.remote);
     }
-    const result = await (sprint.action === 'pull' ? pullSprint : pushSprint)(helpers, sprint, log);
+    const commands = await loadTestCommands(pool, project);
+    const gate = (entries: string[]) => runTestGate(rawExecute, cwd, commands, entries);
+    const result =
+      sprint.action === 'pull' ? await pullSprint(helpers, sprint, log) : await pushSprint(helpers, sprint, log, gate);
     await pool.query(
       `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
       [sprint.id, result.log.join(' '), result.commit, result.branch],

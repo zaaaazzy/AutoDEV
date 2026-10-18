@@ -5,11 +5,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { isValidGitRemote, pushRemote, sprintTag, syncSprintToGit } from './git-sync.js';
+import {
+  checkoutSprintBranch,
+  isValidGitRemote,
+  pushRemote,
+  restoreShelvedWork,
+  shelveFailedWork,
+  sprintBranch,
+  sprintTag,
+  syncSprintToGit,
+} from './git-sync.js';
 
 function fakePool(
   remote: string | null,
   action: 'push' | 'pull' = 'push',
+  testCommands: string[][] = [['true']],
+  status = 'active',
 ): { pool: Pool; updates: { sql: string; values: unknown[] }[] } {
   const updates: { sql: string; values: unknown[] }[] = [];
   let claimed = false;
@@ -18,8 +29,11 @@ function fakePool(
       updates.push({ sql, values });
       if (sql.includes("SET git_sync = 'running'") && !claimed) {
         claimed = true;
-        return { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', action, remote }] };
+        return {
+          rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', action, remote, status }],
+        };
       }
+      if (sql.includes('test_commands')) return { rows: [{ commands: testCommands }] };
       return { rows: [] };
     },
   } as unknown as Pool;
@@ -42,7 +56,10 @@ test('a completed sprint is committed with its name and tagged locally', async (
   await writeFile(join(cwd, '.env'), 'SECRET=1');
   const { pool, updates } = fakePool(null);
   assert.equal(await syncSprintToGit(pool, 'p', cwd), 1);
-  assert.equal(execFileSync('git', ['log', '-1', '--format=%s'], { cwd }).toString().trim(), 'Sprint: Sprint 1: Äpfel');
+  assert.equal(
+    execFileSync('git', ['log', '-1', '--format=%s'], { cwd }).toString().trim(),
+    'chore(Sprint 1: Äpfel): Sprint-Stand sichern',
+  );
   assert.match(execFileSync('git', ['tag'], { cwd }).toString(), /sprint-sprint-1-apfel-abcdef/);
   assert.ok(!execFileSync('git', ['ls-files'], { cwd }).toString().includes('.env\n'));
   const final = updates.at(-1);
@@ -108,4 +125,59 @@ test2('taskCommitMessage nutzt Conventional Commits', () => {
   assert2.equal(subject, 'fix(Sprint 1 Init): Login kaputt sofort');
   assert2.match(body, /Auftrag: abc/);
   assert2.equal(taskCommitMessage('feature', '', 'X', 'i')[0], 'feat(sprint): X');
+});
+
+test('red tests block the push and keep the sprint unsynced', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-gate-'));
+  await writeFile(join(cwd, 'a.txt'), 'x');
+  const pushed: string[][] = [];
+  const { pool, updates } = fakePool('https://github.com/a/b.git', 'push', [['false']]);
+  const result = await syncSprintToGit(pool, 'p', cwd, async (command, dir, options) => {
+    const { runCommand } = await import('../core/command.js');
+    if (command[1] === 'push') pushed.push(command);
+    return command[1] === 'push' ? { exitCode: 0, durationMs: 1, output: '' } : runCommand(command, dir, options);
+  });
+  assert.equal(result, 0);
+  assert.deepEqual(pushed, []);
+  assert.match(String(updates.at(-1)?.values[1]), /Push abgelehnt: `false`/);
+});
+
+test('orders work on the sprint branch and a completed sprint is merged into main', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-branch-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  assert.equal(sprintBranch('Sprint 1: Äpfel'), 'sprint/sprint-1-apfel');
+  assert.equal(await checkoutSprintBranch(cwd, 'Sprint 1: Äpfel'), 'sprint/sprint-1-apfel');
+  await writeFile(join(cwd, 'feature.txt'), 'neu');
+  git('add', '-A');
+  git('commit', '-m', 'feat: Auftrag');
+  const { pool } = fakePool(null, 'push', [['true']], 'completed');
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 1);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.match(git('log', '-1', '--format=%s'), /^Merge sprint\/sprint-1-apfel/);
+  assert.equal(git('show', 'main:feature.txt'), 'neu');
+});
+
+test('work of a failed order is parked and restored on the next attempt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-shelve-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  await writeFile(join(cwd, 'mine.txt'), 'fehlgeschlagen');
+  await writeFile(join(cwd, 'other.txt'), 'anderer Auftrag');
+  const item = { id: '11111111-2222-3333-4444-555555555555', title: 'Kaputt' };
+  assert.equal(await shelveFailedWork(cwd, item, ['mine.txt']), true);
+  assert.equal(git('status', '--porcelain'), '?? other.txt');
+  assert.equal(await shelveFailedWork(cwd, item, []), false);
+  assert.equal(await restoreShelvedWork(cwd, item.id), true);
+  assert.match(git('status', '--porcelain'), /mine\.txt/);
 });
