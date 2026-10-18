@@ -1,0 +1,93 @@
+<div class="thread">
+  @for (comment of comments(); track comment.id) {
+    @let agent = isAgent(comment);
+    @let own = isOwn(comment);
+    <article class="bubble-row" [class.own]="own" [class.agent]="agent">
+      <span class="avatar" [class.agent]="agent" aria-hidden="true">{{ agent ? '⚙︎' : initials(comment.author) }}</span>
+      <div class="bubble">
+        <header class="bubble-meta">
+          <strong>{{ comment.author }}</strong>
+          @if (agent) {
+            <span class="bubble-badge">Agent</span>
+          }
+          @if (replyAuthor(comment); as to) {
+            <span class="bubble-reply">↩ an {{ to }}</span>
+          }
+          <time>{{ comment.createdAt | date: 'dd.MM.yyyy HH:mm' }}</time>
+        </header>
+        <div class="bubble-body markdown" [innerHTML]="body(comment)"></div>
+        @if (comment.agentStatus === 'pending' || comment.agentStatus === 'processing') {
+          <p class="bubble-working">
+            <span class="typing"><i></i><i></i><i></i></span> Agent arbeitet an der Antwort …
+          </p>
+        } @else if (comment.agentStatus === 'failed') {
+          <p class="bubble-working failed">Agent-Anfrage fehlgeschlagen – Details im Chat.</p>
+        }
+      </div>
+    </article>
+  } @empty {
+    <p class="thread-empty">Noch keine Kommentare. Mit <kbd>&#64;</kbd> sprichst du einen Agent oder eine Person an.</p>
+  }
+</div>
+
+<div class="composer comment-composer">
+  @if (options().length) {
+    <div class="mention-pop" role="listbox" aria-label="Erwähnen">
+      <span class="mention-title">Agent oder Person erwähnen</span>
+      <div class="mention-bubbles">
+        @for (option of options(); track option.type + option.id; let index = $index) {
+          <button
+            type="button"
+            class="mention-bubble"
+            role="option"
+            [class.active]="index === active()"
+            [attr.aria-selected]="index === active()"
+            (mousedown)="$event.preventDefault()"
+            (click)="choose(option)"
+            (mouseenter)="active.set(index)"
+          >
+            <span class="mention-icon" aria-hidden="true">{{ option.type === 'agent' ? '⚙︎' : '👤' }}</span>
+            <span class="mention-label">{{ option.name }}</span>
+            <small>{{ option.type === 'agent' ? 'Agent' : 'Person' }}</small>
+          </button>
+        }
+      </div>
+    </div>
+  } @else if (trigger()) {
+    <div class="mention-pop empty"><span class="mention-title">Niemand gefunden – weiter tippen oder Esc</span></div>
+  }
+  <form class="comment-form" (submit)="$event.preventDefault(); submit()">
+    <button type="button" class="comment-at" title="Agent oder Person erwähnen" (click)="startMention()">&#64;</button>
+    <textarea
+      #field
+      rows="2"
+      maxlength="4000"
+      placeholder="Kommentar schreiben … @ spricht einen Agent oder eine Person an"
+      aria-label="Kommentar – @ für Agent oder Person"
+      (input)="onInput($event)"
+      (keydown)="onKeydown($event)"
+      (click)="onCaret()"
+      (keyup)="onCaret()"
+    ></textarea>
+    <button type="submit" class="chat-send" [disabled]="!text().trim() || busy() || options().length > 0">
+      Senden
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
+      </svg>
+    </button>
+  </form>
+  <p class="composer-hint">
+    <kbd>&#64;</kbd> Agent → antwortet hier · <kbd>&#64;</kbd> Person → Push-Meldung · <kbd>Enter</kbd> senden ·
+    <kbd>Shift</kbd>+<kbd>Enter</kbd> neue Zeile
+  </p>
+</div>

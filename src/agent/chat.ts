@@ -6,6 +6,7 @@ import { startProgress } from './chat-progress.js';
 import { runAuthorAgent } from './requirements.js';
 import { saveRequestDoc } from './request-doc.js';
 import { type ChatReference, referenceContext } from './chat-references.js';
+import { replyToIdeaComment } from '../api/idea-comments.js';
 import type { RunnerOptions } from '../runner/runner.js';
 
 const HISTORY_LIMIT = 20;
@@ -148,9 +149,19 @@ export async function processChat(
       failed: true,
       at: new Date(),
     }).catch(() => undefined);
+    await replyToIdeaComment(
+      pool,
+      claimed.id,
+      agent?.name ?? null,
+      'Ich konnte die Anweisung nicht bearbeiten. Details stehen im Chat.',
+    ).catch(() => undefined);
     return true;
   }
   const { text, question } = splitQuestion(output);
+  // Auslöser war ein Kommentar mit @Agent: die Antwort erscheint auch als Kommentar bei der Idee.
+  await replyToIdeaComment(pool, claimed.id, agent?.name ?? null, question ? `${text}\n\n❓ ${question}` : text).catch(
+    (error: unknown) => console.error('Antwort an Ideen-Kommentar fehlgeschlagen:', error),
+  );
   await pool.query(`UPDATE chat_messages SET status = 'done', updated_at = clock_timestamp() WHERE id = $1`, [
     claimed.id,
   ]);

@@ -51,7 +51,13 @@ export interface IdeaComment {
   id: string;
   ideationId: string;
   author: string;
+  /** 'agent' = Antwort eines Agents (eigene Bubble-Farbe). */
+  authorKind?: 'user' | 'agent';
   body: string;
+  mentions?: { type: 'agent' | 'user'; id: string; name: string }[];
+  replyTo?: string | null;
+  /** Status der Agent-Anfrage, die dieser Kommentar ausgelöst hat (pending/processing = Agent arbeitet). */
+  agentStatus?: string | null;
   createdAt: string;
 }
 

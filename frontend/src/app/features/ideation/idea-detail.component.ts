@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, inject, input, model, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
@@ -6,8 +6,10 @@ import type { Idea } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
+import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { CATEGORIES } from '../../shared/labels.js';
+import { CommentThreadComponent } from './comment-thread.component.js';
 import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
@@ -15,9 +17,12 @@ import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './
   selector: 'app-idea-detail',
   standalone: true,
   imports: [
+    CommentThreadComponent,
     DatePipe,
+    DecimalPipe,
     FormsModule,
     GalleryComponent,
+    MarkdownPipe,
     CategoryLabelPipe,
     PriorityLabelPipe,
     StatusClassPipe,
@@ -53,8 +58,12 @@ export class IdeaDetailComponent {
     return this.data().development.find((item) => item.ideationId === ideationId);
   }
 
-  protected commentsOf(ideationId: string) {
-    return this.data().comments.filter((comment) => comment.ideationId === ideationId);
+  protected commentCount(ideationId: string): number {
+    return this.data().comments.filter((comment) => comment.ideationId === ideationId).length;
+  }
+
+  protected imageCount(ideationId: string): number {
+    return this.data().attachments.filter((image) => image.ideationId === ideationId).length;
   }
 
   protected async saveIdea(idea: Idea, values: FormValues): Promise<void> {
@@ -92,15 +101,5 @@ export class IdeaDetailComponent {
       () => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/define`),
       'Der Agent formuliert den Auftrag aus.',
     );
-  }
-
-  protected async addComment(ideationId: string, input: HTMLInputElement): Promise<void> {
-    const body = input.value.trim();
-    if (!body) return;
-    await this.store.perform(
-      () => this.api.post(`/api/ideation/${encodeURIComponent(ideationId)}/comments`, { body }),
-      'Kommentar gespeichert.',
-    );
-    input.value = '';
   }
 }

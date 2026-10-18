@@ -7,17 +7,25 @@
     aria-labelledby="idea-title"
     (click)="$event.stopPropagation()"
   >
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Idee</p>
+    <header class="idea-hero">
+      <div class="idea-hero-text">
+        <p class="eyebrow">💡 Idee · erfasst am {{ idea.createdAt | date: 'dd.MM.yyyy' }}</p>
         @if (!editing()) {
           <h2 id="idea-title">{{ idea.title }}</h2>
+          @let status = displayStatus(idea);
+          <div class="idea-chips">
+            <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
+            <span class="status priority-{{ idea.priority }}">Priorität: {{ idea.priority | priorityLabel }}</span>
+            <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
+          </div>
+        } @else {
+          <h2 id="idea-title">Idee bearbeiten</h2>
         }
       </div>
-      <div class="actions">
+      <div class="idea-hero-actions">
         @if (!editing()) {
           <button
-            class="button secondary"
+            class="icon-button"
             type="button"
             (click)="editing.set(true)"
             aria-label="Bearbeiten"
@@ -26,9 +34,11 @@
             ✎
           </button>
         }
-        <button class="button secondary" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
+        <button class="icon-button" type="button" (click)="closed.emit()" aria-label="Schließen" title="Schließen">
+          ✕
+        </button>
       </div>
-    </div>
+    </header>
     @if (editing()) {
       <form class="form-grid" (ngSubmit)="saveIdea(idea, ideaEdit.value)" #ideaEdit="ngForm">
         <label class="wide">Titel<input name="title" [ngModel]="idea.title" maxlength="180" required /> </label>
@@ -75,55 +85,56 @@
         </div>
       </form>
     } @else {
-      <p class="detail-text">{{ idea.description || 'Keine Beschreibung' }}</p>
-      @let status = displayStatus(idea);
-      <p>
-        <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
-        <span class="status">Priorität: {{ idea.priority | priorityLabel }}</span>
-        <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
-      </p>
-      <dl class="estimate">
+      <dl class="idea-stats">
         <div>
           <dt>Aufwand</dt>
-          <dd>{{ idea.effortHours != null ? idea.effortHours + ' Std.' : 'Wird geschätzt …' }}</dd>
+          <dd>{{ idea.effortHours != null ? idea.effortHours + ' Std.' : 'wird geschätzt …' }}</dd>
         </div>
         <div>
           <dt>Token</dt>
-          <dd>{{ idea.tokenEstimate ?? '–' }}</dd>
+          <dd>{{ idea.tokenEstimate != null ? (idea.tokenEstimate | number: '1.0-0') : '–' }}</dd>
         </div>
-        <div>
+        <div class="meter benefit">
           <dt>Nutzen</dt>
           <dd>{{ idea.benefit != null ? idea.benefit + ' / 10' : '–' }}</dd>
+          <span class="meter-bar"><i [style.width.%]="(idea.benefit ?? 0) * 10"></i></span>
         </div>
-        <div>
+        <div class="meter cost">
           <dt>Kosten</dt>
           <dd>{{ idea.cost != null ? idea.cost + ' / 10' : '–' }}</dd>
+          <span class="meter-bar"><i [style.width.%]="(idea.cost ?? 0) * 10"></i></span>
         </div>
       </dl>
+      @if (canPromote(idea)) {
+        <div class="idea-promote">
+          <p>
+            <strong>Bereit für die Umsetzung?</strong> Der Auftragsautor formuliert daraus einen Auftrag im Backlog.
+          </p>
+          <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
+            Auftrag erstellen
+          </button>
+        </div>
+      } @else if (linkedOrder(idea.id); as order) {
+        <div class="idea-promote done">
+          <p>
+            Auftrag: <a [href]="'#development/' + order.id">{{ order.title }}</a>
+          </p>
+        </div>
+      }
+      <article
+        class="idea-description markdown"
+        [innerHTML]="idea.description || 'Keine Beschreibung' | markdown"
+      ></article>
+    }
+    @if (imageCount(idea.id); as count) {
+      <h3 class="subheading">
+        Bilder &amp; Folien <span class="count">{{ count }}</span>
+      </h3>
     }
     <app-gallery [ideationId]="idea.id" [removable]="editing()" />
-    @if (!editing() && canPromote(idea)) {
-      <div class="actions promote">
-        <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
-          Auftrag erstellen
-        </button>
-      </div>
-    }
-    <h3 class="subheading">Kommentare</h3>
-    @for (comment of commentsOf(idea.id); track comment.id) {
-      <article class="comment">
-        <div class="meta">
-          <strong>{{ comment.author }}</strong>
-          <span>{{ comment.createdAt | date: 'dd.MM.yyyy HH:mm' }}</span>
-        </div>
-        <p>{{ comment.body }}</p>
-      </article>
-    } @empty {
-      <p class="muted">Noch keine Kommentare.</p>
-    }
-    <form class="inline-form" (ngSubmit)="addComment(idea.id, commentText)">
-      <input #commentText name="comment" maxlength="4000" placeholder="Kommentar schreiben …" required />
-      <button class="button secondary" type="submit" [disabled]="busy()">Kommentieren</button>
-    </form>
+    <h3 class="subheading">
+      Kommentare <span class="count">{{ commentCount(idea.id) }}</span>
+    </h3>
+    <app-comment-thread [ideationId]="idea.id" />
   </section>
 </div>

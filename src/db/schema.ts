@@ -596,4 +596,10 @@ export const SCHEMA = `
   -- Dokumentgruppe „Anfragen“: Anfragen an Assistent und Agents samt Ergebnis.
   ALTER TABLE docs DROP CONSTRAINT IF EXISTS docs_kind_check;
   ALTER TABLE docs ADD CONSTRAINT docs_kind_check CHECK (kind IN ('manual', 'order', 'sprint', 'repo', 'request'));
+
+  -- Kommentare an Ideen: @-Erwähnungen von Agents und Personen; ein erwähnter Agent antwortet als Kommentar.
+  ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS author_kind TEXT NOT NULL DEFAULT 'user';
+  ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]'::jsonb;
+  ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES ideation_comments(id) ON DELETE SET NULL;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS idea_comment_id UUID REFERENCES ideation_comments(id) ON DELETE SET NULL;
 `;

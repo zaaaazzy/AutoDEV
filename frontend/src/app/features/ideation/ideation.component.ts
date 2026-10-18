@@ -30,7 +30,7 @@ import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
+import { IDEA_SELECTABLE_STATUSES, IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
 
 const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
 const PRIORITY_RANK = ['low', 'medium', 'high'];
@@ -77,6 +77,7 @@ export class IdeationComponent {
   });
   protected readonly ideaId = (idea: Idea): string => idea.id;
   protected readonly ideaColumns: DataColumn<Idea>[] = [
+    { id: 'pick', header: '', value: () => '', filter: false, sortable: false, className: 'pick-cell' },
     { id: 'title', header: 'Titel', value: (idea) => idea.title, filter: 'text', className: 'title-cell' },
     {
       id: 'status',
@@ -130,6 +131,10 @@ export class IdeationComponent {
   protected readonly expandedIdea = signal<string | null>(null);
   protected readonly showClosedIdeas = signal(false);
   protected readonly showInProgressIdeas = signal(true);
+  /** Mehrfachauswahl offener Ideen: für alle gewählten auf einmal einen Auftrag ausformulieren lassen. */
+  protected readonly picked = signal<ReadonlySet<string>>(new Set());
+  protected readonly promotable = computed(() => this.openIdeas().filter((idea) => this.canPromote(idea)));
+  protected readonly pickedIdeas = computed(() => this.promotable().filter((idea) => this.picked().has(idea.id)));
 
   protected readonly inProgressIdeas = computed(() => this.data().ideas.filter((idea) => this.isInProgress(idea)));
   protected readonly closedIdeas = computed(() => this.data().ideas.filter((idea) => this.isClosedIdea(idea)));
@@ -158,6 +163,49 @@ export class IdeationComponent {
 
   protected closedIdeaOrder(idea: Idea) {
     return this.data().development.find((item) => item.ideationId === idea.id) ?? null;
+  }
+
+  protected canPromote(idea: Idea): boolean {
+    return IDEA_SELECTABLE_STATUSES.includes(idea.status) && !this.closedIdeaOrder(idea);
+  }
+
+  protected togglePick(id: string): void {
+    this.picked.update((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  protected pickAll(): void {
+    this.picked.set(new Set(this.promotable().map((idea) => idea.id)));
+  }
+
+  protected clearPicks(): void {
+    this.picked.set(new Set());
+  }
+
+  /** Je gewählter Idee ein Auftrag: Die Ideen gehen an den Auftragsautor, der sie nacheinander ausformuliert. */
+  protected async promotePicked(): Promise<void> {
+    const ideas = this.pickedIdeas();
+    if (!ideas.length) return;
+    const failed: string[] = [];
+    await this.store.perform(
+      async () => {
+        for (const idea of ideas) {
+          try {
+            await this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/define`);
+          } catch {
+            failed.push(idea.title);
+          }
+        }
+        if (failed.length === ideas.length) throw new Error('Keine der gewählten Ideen konnte angefordert werden.');
+      },
+      `${ideas.length - failed.length} von ${ideas.length} Ideen gehen an den Auftragsautor – je Idee ein Auftrag.${
+        failed.length ? ` Nicht möglich: ${failed.join(', ')}.` : ''
+      }`,
+    );
+    this.clearPicks();
   }
 
   protected editIdea(id: string): void {
