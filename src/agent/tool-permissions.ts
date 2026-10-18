@@ -22,59 +22,128 @@ export function isAssistantServiceCommand(command: string): boolean {
   }
   return /^git (?:pull --ff-only|fetch|checkout [\w][\w./-]*)$/.test(command);
 }
-/**
- * Same command scope as the local assistant (COMMAND_PATTERN + ASSISTANT_SERVICE_PATTERNS), expressed as
- * Claude Code permission rules: with --permission-mode acceptEdits every other shell command is denied.
- */
-export const CLAUDE_ASSISTANT_TOOLS = [
-  'npm test',
-  'npm run',
-  'npm install',
-  'npm ci',
-  'git status',
-  'git diff',
-  'git log',
-  'git fetch',
-  'git pull --ff-only',
-  'git checkout',
-  'git clone',
-  'docker compose ps',
-  'docker compose config --services',
-  'docker compose logs',
-  'docker compose up',
-  'docker compose stop',
-  'docker compose start',
-  'docker compose restart',
-  'docker compose down',
-  'docker compose build',
-  'docker compose pull',
-  // Diagnose ohne Rückfrage: Logs und Dateien lesen, Dienste und URLs prüfen, Builds und Tests starten.
-  'tail',
-  'head',
-  'cat',
-  'ls',
-  'grep',
-  'wc',
-  'curl',
-  'lsof -i',
-  'ps',
-  'docker ps',
-  'docker logs',
-  'netstat',
-  'npm --prefix',
-  'npx --prefix',
-  'npx ng',
-  'npx tsc',
-  'npx tsx',
-  'npx vitest',
-  'npx playwright',
-  'node --version',
-  'launchctl list',
-]
-  .map((prefix) => `Bash(${prefix}:*)`)
-  // Projekt-Dienste (z. B. ch.mainty.dev-live) neu starten; DevLog selbst (com.devlog.*) und Systemdienste nicht.
-  // Wildcard statt Präfix, weil „:*“ nur an Wortgrenzen greift.
-  .concat(`Bash(launchctl kickstart -k gui/${process.getuid?.() ?? 501}/ch.*)`);
+/** Eine schaltbare Rechte-Gruppe für Dashboard-Assistent und Entwickler (Claude-CLI-Regeln). */
+export interface PermissionGroup {
+  id: string;
+  label: string;
+  description: string;
+  rules: string[];
+}
+
+const prefixRules = (prefixes: string[]): string[] => prefixes.map((prefix) => `Bash(${prefix}:*)`);
+
+export const PERMISSION_GROUPS: PermissionGroup[] = [
+  {
+    id: 'diagnose',
+    label: 'Diagnose',
+    description: 'Dateien und Logs lesen, Prozesse, Ports und URLs prüfen (tail, cat, grep, curl, ps, lsof, netstat).',
+    rules: prefixRules([
+      'tail',
+      'head',
+      'cat',
+      'ls',
+      'grep',
+      'wc',
+      'curl',
+      'lsof -i',
+      'ps',
+      'netstat',
+      'node --version',
+      'launchctl list',
+    ]),
+  },
+  {
+    id: 'logs',
+    label: 'Dienst-Logs lesen',
+    description: 'Zugriff auf ~/Library/Logs, z. B. das Log des Live-Modus.',
+    rules: [],
+  },
+  {
+    id: 'build',
+    label: 'Build und Tests',
+    description: 'npm-Skripte, Angular-, TypeScript- und Test-Werkzeuge ausführen.',
+    rules: prefixRules([
+      'npm test',
+      'npm run',
+      'npm --prefix',
+      'npx --prefix',
+      'npx ng',
+      'npx tsc',
+      'npx tsx',
+      'npx vitest',
+      'npx playwright',
+    ]),
+  },
+  {
+    id: 'install',
+    label: 'Pakete installieren',
+    description: 'Abhängigkeiten mit npm install bzw. npm ci installieren.',
+    rules: prefixRules(['npm install', 'npm ci']),
+  },
+  {
+    id: 'git',
+    label: 'Git lesen und aktualisieren',
+    description: 'status, diff, log, fetch, pull --ff-only, checkout, clone – kein Push.',
+    rules: prefixRules([
+      'git status',
+      'git diff',
+      'git log',
+      'git fetch',
+      'git pull --ff-only',
+      'git checkout',
+      'git clone',
+    ]),
+  },
+  {
+    id: 'docker',
+    label: 'Docker-Dienste',
+    description: 'docker compose ps/logs/up/stop/start/restart/down/build/pull, docker ps und docker logs.',
+    rules: prefixRules([
+      'docker compose ps',
+      'docker compose config --services',
+      'docker compose logs',
+      'docker compose up',
+      'docker compose stop',
+      'docker compose start',
+      'docker compose restart',
+      'docker compose down',
+      'docker compose build',
+      'docker compose pull',
+      'docker ps',
+      'docker logs',
+    ]),
+  },
+  {
+    id: 'services',
+    label: 'Projekt-Dienste neu starten',
+    description: 'Live-Dienste der Projekte (ch.*) per launchctl neu starten – nicht DevLog selbst.',
+    // Wildcard statt Präfix, weil „:*“ nur an Wortgrenzen greift.
+    rules: [`Bash(launchctl kickstart -k gui/${process.getuid?.() ?? 501}/ch.*)`],
+  },
+];
+
+export const DEFAULT_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => group.id);
+
+/** Claude-Regeln der gewählten Gruppen (ohne Angabe: alle). */
+export function permissionRules(groups: readonly string[] = DEFAULT_PERMISSION_GROUPS): string[] {
+  return PERMISSION_GROUPS.filter((group) => groups.includes(group.id)).flatMap((group) => group.rules);
+}
+
+/** Rechte-Gruppen eines Projekts; ohne Einstellung gelten alle Standardgruppen. */
+export async function loadPermissionGroups(
+  pool: { query: <R>(sql: string, values: unknown[]) => Promise<{ rows: R[] }> },
+  project: string,
+): Promise<string[]> {
+  const stored = (
+    await pool
+      .query<{ groups: string[] | null }>('SELECT agent_permissions AS groups FROM projects WHERE slug = $1', [project])
+      .catch(() => ({ rows: [] as { groups: string[] | null }[] }))
+  ).rows[0]?.groups;
+  return stored ?? DEFAULT_PERMISSION_GROUPS;
+}
+
+/** Alle Regeln mit Standardrechten (für Tests und Doku). */
+export const CLAUDE_ASSISTANT_TOOLS = permissionRules();
 
 /** Rollen mit erweiterten Rechten: Dashboard-Assistent und Entwickler arbeiten selbstständig. */
 const TRUSTED_ROLES = new Set(['assistant', 'developer']);
@@ -90,12 +159,14 @@ export function withAssistantPermissions(
   command: string[],
   role: string,
   readDirectories: string[] = extraReadDirectories(),
+  groups: readonly string[] = DEFAULT_PERMISSION_GROUPS,
 ): string[] {
   const [binary, ...rest] = command;
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
   if (!TRUSTED_ROLES.has(role) || !isClaude || rest.some((part) => /^--allowed-?tools$/i.test(part))) return command;
-  const directories = readDirectories.flatMap((directory) => ['--add-dir', directory]);
-  return [binary, ...directories, '--allowedTools', CLAUDE_ASSISTANT_TOOLS.join(','), ...rest];
+  const directories = groups.includes('logs') ? readDirectories.flatMap((directory) => ['--add-dir', directory]) : [];
+  const rules = permissionRules(groups);
+  return [binary, ...directories, ...(rules.length ? ['--allowedTools', rules.join(',')] : []), ...rest];
 }
 export const SECRET_IN_COMMAND = /\.env|\.pem\b|\.key\b|id_(?:rsa|ed25519|ecdsa)/i;
 const PACKAGE_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;

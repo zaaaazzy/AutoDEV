@@ -143,7 +143,7 @@
         </div>
       </section>
       @if (showProjectForm()) {
-        <app-project-form (saved)="showProjectForm.set(false)" />
+        <app-project-wizard (closed)="showProjectForm.set(false)" />
       }
       @if (loading()) {
         <p class="loading" role="status">Dev Log wird geladen …</p>
@@ -151,7 +151,7 @@
         <section class="panel empty-state">
           <h2>Kein Projekt verbunden</h2>
           <p>Verbinde ein Projekt oder starte den Test-Agenten, um ein Projekt automatisch zu registrieren.</p>
-          <button class="button primary" type="button" (click)="showProjectForm.set(true)">Projekt verbinden</button>
+          <button class="button primary" type="button" (click)="showProjectForm.set(true)">Projekt einrichten</button>
         </section>
       }
       @switch (section()) {

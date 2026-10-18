@@ -6,7 +6,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../api/bugs.js';
 import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
-import { withAssistantPermissions } from './tool-permissions.js';
+import { loadPermissionGroups, withAssistantPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
@@ -79,7 +79,8 @@ export async function runAuthorAgent(
   const configured = author?.command?.length
     ? author.command
     : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
-  const command = configured && withAssistantPermissions(configured, role);
+  const groups = await loadPermissionGroups(pool, options.project);
+  const command = configured && withAssistantPermissions(configured, role, undefined, groups);
   const resuming = resume && command && isClaudeCommand(command) ? resume : undefined;
   try {
     const result = command

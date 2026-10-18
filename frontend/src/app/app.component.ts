@@ -10,7 +10,7 @@ import { DevelopmentComponent } from './features/development/development.compone
 import { DocsComponent } from './features/docs/docs.component.js';
 import { HelpDialogComponent } from './features/help/help-dialog.component.js';
 import { IdeationComponent } from './features/ideation/ideation.component.js';
-import { ProjectFormComponent } from './features/projects/project-form.component.js';
+import { ProjectWizardComponent } from './features/projects/project-wizard.component.js';
 import { RunsComponent } from './features/runs/runs.component.js';
 import { SettingsComponent } from './features/settings/settings.component.js';
 import { SprintsComponent } from './features/sprints/sprints.component.js';
@@ -32,7 +32,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     FormsModule,
     NavIconComponent,
     AgentListComponent,
-    ProjectFormComponent,
+    ProjectWizardComponent,
     HelpDialogComponent,
     DashboardComponent,
     DevelopmentComponent,

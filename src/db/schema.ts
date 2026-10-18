@@ -362,4 +362,18 @@ export const SCHEMA = `
     functions REAL,
     PRIMARY KEY (report_id, area)
   );
+
+  -- Rechte-Gruppen der Agents pro Projekt (NULL = Standard) und Jobs des Einrichtungsassistenten.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_permissions TEXT[];
+  CREATE TABLE IF NOT EXISTS setup_jobs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    kind TEXT NOT NULL,
+    params JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'running', 'done', 'failed')),
+    result JSONB,
+    log TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS setup_jobs_pending_idx ON setup_jobs (status, created_at);
 `;

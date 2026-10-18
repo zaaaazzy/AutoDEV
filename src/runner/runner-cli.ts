@@ -7,6 +7,9 @@ import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
+import { processSetupJob } from '../setup/setup-jobs.js';
+
+const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
@@ -153,6 +156,15 @@ async function main(): Promise<void> {
       beat();
       void publishSystemAgents(pool).catch(() => undefined);
     }, 15_000);
+    // Einrichtungsassistent: Host-Aufgaben (Ordner, Git, GitHub, Vorlagen, Agent-Tests) schnell und parallel abarbeiten.
+    let setupActive = 0;
+    const setupTimer = setInterval(() => {
+      if (setupActive >= SETUP_PARALLEL || stopping) return;
+      setupActive += 1;
+      void processSetupJob(pool)
+        .catch((error: unknown) => logOnce('setup', `Einrichtungsaufgabe fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (setupActive -= 1));
+    }, 500);
     // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
     let chatTargets: Target[] = [];
     const chatActive = new Set<string>();
@@ -250,6 +262,7 @@ async function main(): Promise<void> {
     } finally {
       clearInterval(heartbeat);
       clearInterval(chatTimer);
+      clearInterval(setupTimer);
     }
   } finally {
     await pool.end();
