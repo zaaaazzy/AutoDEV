@@ -18,7 +18,8 @@
     "runner": "tsx src/runner/runner-cli.ts",
     "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3",
     "watchdog": "tsx src/runner/watchdog-cli.ts",
-    "test:e2e": "playwright test -c e2e/playwright.config.ts"
+    "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "test:full": "tsx scripts/test-full.ts"
   },
   "dependencies": {
     "@tanstack/angular-table": "^8.21.4",
