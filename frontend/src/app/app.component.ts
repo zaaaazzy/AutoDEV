@@ -58,6 +58,8 @@ export class AppComponent {
   protected readonly busy = this.store.busy;
   protected readonly showCreate = this.store.showCreate;
   protected readonly menuClosed = signal(false);
+  /** Ausgeklappte Navigation auf schmalen Bildschirmen. */
+  protected readonly mobileMenu = signal(false);
   protected readonly showProjectForm = signal(false);
   protected readonly showHelp = signal(false);
 

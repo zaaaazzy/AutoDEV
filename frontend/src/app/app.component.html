@@ -1,19 +1,34 @@
 <div class="app-shell">
-  <aside class="sidebar" [class.closed]="menuClosed()" (mouseleave)="menuClosed.set(false)">
-    <a class="brand" href="#dashboard" (click)="store.navigate('dashboard')">
+  <aside
+    class="sidebar"
+    [class.closed]="menuClosed()"
+    [class.mobile-open]="mobileMenu()"
+    (mouseleave)="menuClosed.set(false)"
+  >
+    <button
+      class="menu-toggle"
+      type="button"
+      [attr.aria-expanded]="mobileMenu()"
+      aria-controls="main-navigation"
+      [attr.aria-label]="mobileMenu() ? 'Menü schließen' : 'Menü öffnen'"
+      (click)="mobileMenu.set(!mobileMenu())"
+    >
+      <span></span><span></span><span></span>
+    </button>
+    <a class="brand" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
       <span class="brand-mark">m</span>
       <span>mainty</span>
       <span class="brand-divider">/</span>
       <small>dev log</small>
     </a>
     <p class="nav-label">Arbeitsbereich</p>
-    <nav aria-label="Dev-Log-Navigation">
+    <nav id="main-navigation" aria-label="Dev-Log-Navigation">
       @for (item of navigation; track item.id) {
         <a
           class="nav-link"
           [class.active]="section() === item.id"
           [href]="'#' + item.id"
-          (click)="store.navigate(item.id); menuClosed.set(true)"
+          (click)="store.navigate(item.id); menuClosed.set(true); mobileMenu.set(false)"
         >
           <span class="nav-title">
             <app-nav-icon [name]="item.id" />
@@ -34,6 +49,9 @@
     </nav>
     <p class="sidebar-foot">Projekt- und Testtracking</p>
   </aside>
+  @if (mobileMenu()) {
+    <div class="menu-backdrop" (click)="mobileMenu.set(false)" aria-hidden="true"></div>
+  }
 
   <main class="main">
     <header class="topbar">
@@ -114,8 +132,13 @@
       >
         ?
       </button>
-      <button class="button secondary" type="button" (click)="showProjectForm.set(!showProjectForm())">
-        + Projekt
+      <button
+        class="button secondary new-project"
+        type="button"
+        aria-label="Neues Projekt"
+        (click)="showProjectForm.set(!showProjectForm())"
+      >
+        +<span class="button-label"> Projekt</span>
       </button>
     </header>
 

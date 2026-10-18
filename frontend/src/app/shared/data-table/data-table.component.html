@@ -116,7 +116,10 @@
             @let open = expanded() === row.id;
             <tr [class.row-open]="open">
               @for (cell of row.getVisibleCells(); track cell.id) {
-                <td [class]="column(cell.column.id)?.className ?? ''">
+                <td
+                  [class]="column(cell.column.id)?.className ?? ''"
+                  [attr.data-label]="column(cell.column.id)?.header"
+                >
                   @if (template(cell.column.id); as custom) {
                     <ng-container *ngTemplateOutlet="custom; context: { $implicit: row.original }" />
                   } @else if (column(cell.column.id)?.badge; as badge) {

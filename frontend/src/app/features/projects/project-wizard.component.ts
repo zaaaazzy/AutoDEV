@@ -34,6 +34,13 @@ type GitMode = 'github-new' | 'github-existing' | 'local' | 'none' | 'keep';
 type Provider = 'ollama' | 'claude' | 'copilot' | 'gemini';
 
 const STEPS = ['Projekt', 'Git & Vorlage', 'Agents', 'Rechte'] as const;
+/** Überschrift und Kurzbeschreibung je Schritt für Seitenleiste und Kopf. */
+const STEP_INFO = [
+  { title: 'Wie heißt dein Projekt?', hint: 'Name und Ordner' },
+  { title: 'Versionierung & Vorlage', hint: 'Git, GitHub, Startcode' },
+  { title: 'Wer arbeitet für dich?', hint: 'Modell und Verbindung' },
+  { title: 'Was dürfen die Agents?', hint: 'Freigaben ohne Rückfrage' },
+] as const;
 const CHECK_DELAY_MS = 450;
 
 export const PROVIDERS: { id: Provider; label: string; paid: boolean; models: { id: string; label: string }[] }[] = [
@@ -110,6 +117,9 @@ export class ProjectWizardComponent implements OnDestroy {
   readonly closed = output<void>();
 
   protected readonly steps = STEPS;
+  protected readonly stepInfo = STEP_INFO;
+  /** Hilfe-Chat als ausklappbares Panel statt fester Spalte. */
+  protected readonly helpOpen = signal(false);
   protected readonly providers = PROVIDERS;
   protected readonly help = PROVIDER_HELP;
   protected readonly step = signal(0);
