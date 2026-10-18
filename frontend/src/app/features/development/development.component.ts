@@ -16,6 +16,7 @@ import {
 import { CATEGORIES, DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { formatHours } from '../../shared/format.js';
 import { CategoryLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 
@@ -25,6 +26,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
   selector: 'app-development',
   standalone: true,
   imports: [
+    MarkdownPipe,
     NgClass,
     NgTemplateOutlet,
     FormsModule,
@@ -89,8 +91,59 @@ export class DevelopmentComponent {
   protected readonly orderEditing = signal<string | null>(null);
   protected readonly showDoneOrders = signal(false);
 
-  protected readonly doneOrders = computed(() => this.data().development.filter((item) => item.status === 'done'));
-  protected readonly openOrders = computed(() => this.data().development.filter((item) => item.status !== 'done'));
+  /** Aufträge, die eine Entscheidung brauchen: fehlgeschlagen, aus dem Sprint genommen oder mit Punkten zum Prüfen. */
+  protected readonly attention = computed(() => {
+    const manual = new Map<string, number>();
+    for (const check of this.data().acceptance) {
+      if (check.status === 'manual') manual.set(check.developmentId, (manual.get(check.developmentId) ?? 0) + 1);
+    }
+    return this.data()
+      .development.map((item) => {
+        const reasons: { label: string; tone: 'error' | 'warn' | 'info' }[] = [];
+        if (item.status === 'blocked') reasons.push({ label: 'Fehlgeschlagen', tone: 'error' });
+        if (item.removedFromSprintAt && item.status !== 'done') {
+          reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
+        }
+        const open = manual.get(item.id) ?? 0;
+        if (open) reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });
+        return { item, reasons, manual: open };
+      })
+      .filter((entry) => entry.reasons.length);
+  });
+  private readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
+  protected readonly openAttention = signal<string | null>(null);
+  protected readonly doneOrders = computed(() =>
+    this.data().development.filter((item) => item.status === 'done' && !this.attentionIds().has(item.id)),
+  );
+  protected readonly openOrders = computed(() =>
+    this.data().development.filter((item) => item.status !== 'done' && !this.attentionIds().has(item.id)),
+  );
+
+  /** Kurzfassung des Fehlers: bevorzugt die nicht bestandenen Abnahmepunkte, sonst ein sauber beginnender Auszug. */
+  protected failureSummary(failure: string): string {
+    const acceptance = /## Abnahme nicht bestanden\n([\s\S]*?)(?:\n## |$)/.exec(failure)?.[1]?.trim();
+    if (acceptance) return `**Abnahme nicht bestanden**\n${acceptance}`;
+    const [head, ...rest] = failure.split('\n\n');
+    let body = rest.join('\n\n').trim();
+    if (/^[a-zäöüß`]/.test(body)) body = `…${body.replace(/^\S*\s*/, ' ')}`;
+    return [head, body].filter(Boolean).join('\n\n');
+  }
+
+  protected retryOrder(item: DevelopmentItem): Promise<void> {
+    return this.orders.retry(item);
+  }
+
+  protected analyzeOrder(item: DevelopmentItem): Promise<void> {
+    return this.orders.analyze(item);
+  }
+
+  protected deleteOrder(item: DevelopmentItem): Promise<void> {
+    return this.orders.remove(item);
+  }
+
+  protected confirmOrder(item: DevelopmentItem): Promise<void> {
+    return this.orders.confirmChecks(item);
+  }
 
   protected toggleOrder(id: string): void {
     this.openOrder.set(this.openOrder() === id ? null : id);

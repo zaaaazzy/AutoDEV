@@ -1,5 +1,7 @@
 @if (progress()) {
-  <p class="live-progress"><span class="live-dot"></span>{{ progress() }}</p>
+  <p class="live-progress" [title]="progress()">
+    <span class="live-dot"></span><span class="live-text">{{ progress() }}</span>
+  </p>
 }
 <details class="run-step" [open]="eventsOpen()">
   <summary>
@@ -9,13 +11,13 @@
     }
   </summary>
   @if (events()?.length) {
-    <ol class="timeline">
+    <ol class="timeline" #timeline (scroll)="onTimelineScroll(timeline)">
       @for (event of events(); track $index) {
         @let view = describe(event.text);
         <li [class]="'event-' + view.kind">
           <time>{{ event.at | date: 'HH:mm:ss' }}</time>
           @if (view.label) {
-            <span class="event-kind">{{ view.label }}</span>
+            <app-event-icon [icon]="view.icon" [label]="view.label" />
             @if (view.file) {
               <app-file-link class="event-target" [path]="view.target" />
             } @else {
@@ -33,6 +35,42 @@
     </p>
   }
 </details>
+@if (files(); as summary) {
+  @if (summary.written.length || summary.read.length || summary.run.length) {
+    <details class="run-step files-step">
+      <summary>
+        Dateien
+        <span class="muted"
+          >({{ summary.written.length }} geschrieben · {{ summary.read.length }} gelesen ·
+          {{ summary.run.length }} ausgeführt)</span
+        >
+      </summary>
+      @for (group of fileGroups(); track group.title) {
+        <details class="run-step file-group" [open]="group.icon === 'write'">
+          <summary>
+            <app-event-icon [icon]="group.icon" [label]="group.title" />
+            {{ group.title }}
+            <span class="muted">({{ group.items.length }})</span>
+          </summary>
+          <ul class="file-list">
+            @for (entry of group.items; track entry.target) {
+              <li>
+                @if (entry.file) {
+                  <app-file-link [path]="entry.target" />
+                } @else {
+                  <code [title]="entry.target">{{ entry.target }}</code>
+                }
+                <time [title]="entry.at | date: 'dd.MM.yyyy HH:mm:ss'"
+                  >{{ entry.at | date: 'dd.MM. HH:mm' }}{{ entry.count > 1 ? ' · ' + entry.count + '×' : '' }}</time
+                >
+              </li>
+            }
+          </ul>
+        </details>
+      }
+    </details>
+  }
+}
 <details class="run-step" [open]="running() || !!output()">
   <summary>Ausgabe</summary>
   @if (output()) {

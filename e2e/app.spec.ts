@@ -90,9 +90,14 @@ test('Aufträge erscheinen auf dem Handy als Karten, auf dem Desktop als Tabelle
   expect(display).toBe(isMobile ? 'grid' : 'table-row');
 });
 
-test('Projekt-Assistent öffnet, prüft Eingaben und schließt', async ({ page }) => {
+test('Projekt-Assistent öffnet, prüft Eingaben und schließt', async ({ page, isMobile }) => {
   await login(page);
-  await page.locator('.new-project').click();
+  if (isMobile) {
+    await page.getByRole('button', { name: 'Menü öffnen' }).click();
+    await page.getByRole('button', { name: 'Neues Projekt' }).click();
+  } else {
+    await page.locator('.new-project').click();
+  }
   const wizard = page.getByRole('dialog', { name: 'Projekt einrichten' });
   await expect(wizard).toBeVisible();
   await expect(wizard.locator('.wizard-step-title')).toHaveText('Wie heißt dein Projekt?');
@@ -117,6 +122,16 @@ test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten
   await page.getByRole('button', { name: 'Abbrechen' }).click();
 });
 
+test('Handy-Kopfzeile zeigt Projektwahl und Agents immer', async ({ page, isMobile }) => {
+  test.skip(!isMobile, 'nur auf dem Handy');
+  await login(page);
+  await expect(page.getByRole('combobox', { name: 'Projekt auswählen' }).first()).toBeVisible();
+  await page.locator('.mobile-chip').first().click();
+  await expect(page.locator('.mobile-agents')).toBeVisible();
+  await page.mouse.wheel(0, 2000);
+  await expect(page.locator('.mobile-chip').first()).toBeInViewport();
+});
+
 test('Statistik zeigt Verbrauch nach Bereich, Art, Auftrag und Agent', async ({ page }) => {
   await login(page);
   await page.goto('/#stats');
@@ -124,6 +139,37 @@ test('Statistik zeigt Verbrauch nach Bereich, Art, Auftrag und Agent', async ({ 
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   }
   await expect(page.locator('.stats-table').first()).toContainText('Login-Seite modernisieren');
+});
+
+test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden und löschen', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `Sprint-Aufgabe ${Date.now()}`;
+  const sprint = (
+    await (await request.post('/api/projects/e2e/sprints', { headers, data: { name: 'E2E-Sprint' } })).json()
+  ).sprint;
+  const item = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
+  await request.patch(`/api/development/${item.id}`, { headers, data: { sprintId: sprint.id } });
+
+  await login(page);
+  await page.goto('/#sprints');
+  await page.locator('.dt-table tbody tr').filter({ hasText: 'E2E-Sprint' }).locator('.dt-expand').first().click();
+  await page
+    .locator('.sprint-task')
+    .filter({ hasText: title })
+    .getByRole('button', { name: 'Aus Sprint entfernen' })
+    .click();
+
+  await page.goto('/#development');
+  const card = page.locator('.attention-card').filter({ hasText: title });
+  await expect(card).toContainText('Aus Sprint „E2E-Sprint“ genommen');
+  await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await card.getByRole('button', { name: 'Löschen' }).click();
+  await expect(card).toHaveCount(0);
+  await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
 
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {

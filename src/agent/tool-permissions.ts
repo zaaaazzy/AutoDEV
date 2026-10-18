@@ -64,6 +64,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       'npx tsc',
       'npx vitest',
       'npx playwright',
+      // Nur Syntaxprüfung, führt nichts aus.
+      'node --check',
     ]),
   },
   {

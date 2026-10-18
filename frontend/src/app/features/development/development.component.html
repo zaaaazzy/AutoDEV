@@ -36,6 +36,90 @@
       </ul>
     </section>
   }
+  @if (attention().length) {
+    <section class="panel attention-panel">
+      <div class="section-heading">
+        <div>
+          <h2>Besondere Aufmerksamkeit</h2>
+          <p class="muted">Fehlgeschlagen, aus einem Sprint genommen oder mit Punkten, die du prüfen musst.</p>
+        </div>
+      </div>
+      <ul class="attention-list">
+        @for (entry of attention(); track entry.item.id) {
+          @let item = entry.item;
+          <li class="attention-card">
+            <div class="attention-head">
+              <button
+                type="button"
+                class="link-button attention-title"
+                [attr.aria-expanded]="openAttention() === item.id"
+                (click)="openAttention.set(openAttention() === item.id ? null : item.id)"
+              >
+                {{ item.title }}
+              </button>
+              <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+            </div>
+            <div class="attention-reasons">
+              @for (reason of entry.reasons; track reason.label) {
+                <span class="attention-reason" [class]="'attention-reason ' + reason.tone">{{ reason.label }}</span>
+              }
+              @if (item.analysisStatus === 'requested' || item.analysisStatus === 'running') {
+                <span class="attention-reason info">Analyse läuft …</span>
+              }
+            </div>
+            @if (item.failure) {
+              <article
+                class="markdown attention-failure"
+                [innerHTML]="failureSummary(item.failure) | markdown"
+              ></article>
+            }
+            <div class="attention-actions">
+              @if (item.status === 'blocked' || item.removedFromSprintAt) {
+                <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">
+                  {{ item.status === 'blocked' ? 'Erneut versuchen' : 'Wieder einplanen' }}
+                </button>
+              }
+              @if (entry.manual) {
+                <button class="button primary" type="button" [disabled]="busy()" (click)="confirmOrder(item)">
+                  Geprüft – alles in Ordnung
+                </button>
+              }
+              @if (item.status === 'blocked') {
+                <button
+                  class="button secondary"
+                  type="button"
+                  [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
+                  (click)="analyzeOrder(item)"
+                >
+                  Analysieren
+                </button>
+              }
+              <button
+                class="button secondary"
+                type="button"
+                (click)="openAttention.set(openAttention() === item.id ? null : item.id)"
+              >
+                {{ openAttention() === item.id ? 'Details schließen' : 'Details & bearbeiten' }}
+              </button>
+              <button
+                class="button secondary danger"
+                type="button"
+                [disabled]="busy() || item.status === 'in_progress'"
+                (click)="deleteOrder(item)"
+              >
+                Löschen
+              </button>
+            </div>
+            @if (openAttention() === item.id) {
+              <div class="attention-detail">
+                <app-order-detail [order]="item" />
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    </section>
+  }
   <section class="panel">
     <div class="section-heading">
       <div>

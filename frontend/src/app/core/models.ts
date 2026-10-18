@@ -76,6 +76,9 @@ export interface DevelopmentItem extends Estimate {
   failure?: string | null;
   failureBugId?: string | null;
   fixStatus?: string | null;
+  /** Name des Sprints, aus dem der Auftrag herausgenommen wurde. */
+  removedFromSprint?: string | null;
+  removedFromSprintAt?: string | null;
   analysisStatus?: 'requested' | 'running' | 'done' | 'failed' | null;
   analysis?: string;
   projectContext?: string;

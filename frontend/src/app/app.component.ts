@@ -66,6 +66,8 @@ export class AppComponent {
   protected readonly menuClosed = signal(false);
   /** Ausgeklappte Navigation auf schmalen Bildschirmen. */
   protected readonly mobileMenu = signal(false);
+  /** Agent-Liste aus der Handy-Kopfzeile. */
+  protected readonly mobileAgents = signal(false);
   protected readonly showProjectForm = signal(false);
   protected readonly showHelp = signal(false);
 

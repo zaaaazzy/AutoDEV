@@ -430,4 +430,7 @@ export const SCHEMA = `
   ALTER TABLE acceptance_checks DROP CONSTRAINT IF EXISTS acceptance_checks_status_check;
   ALTER TABLE acceptance_checks ADD CONSTRAINT acceptance_checks_status_check
     CHECK (status IN ('open', 'met', 'unmet', 'manual'));
+  -- Aus einem Sprint herausgenommene Aufträge landen unter „Besondere Aufmerksamkeit“.
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS removed_from_sprint TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS removed_from_sprint_at TIMESTAMPTZ;
 `;

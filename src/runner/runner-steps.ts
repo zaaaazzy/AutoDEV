@@ -11,6 +11,7 @@ import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
 import { commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
 import { executeAgentCommand } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
+import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import { loadPermissionGroups, withAssistantPermissions } from '../agent/tool-permissions.js';
@@ -245,7 +246,7 @@ export async function runStep(
   position: number,
   total: number,
 ): Promise<StepOutcome> {
-  const { pool, item, runId, done } = ctx;
+  const { pool, item, runId, done, options, execute } = ctx;
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const stepId = (
     await pool.query<{ id: string }>(
@@ -392,12 +393,18 @@ export async function runStep(
   }
   const passed = result.exitCode === 0 && !cancelled && review === true && accepted;
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
-  const coverage = agent.role === 'tester' ? parseCoverage(output) : null;
+  const reported = agent.role === 'tester' ? parseCoverage(output) : null;
+  // Zusätzlich misst Dev Log selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
+  const measured =
+    agent.role === 'tester' && !cancelled
+      ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(() => [])
+      : [];
+  const coverage = mergeCoverage(reported, measured);
   if (coverage) {
     await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) =>
       console.error('Coverage could not be saved:', error),
     );
-    await logEvent(pool, stepId, `Testabdeckung gemeldet (${coverage.areas.map((area) => area.area).join(', ')})`);
+    await logEvent(pool, stepId, `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`);
     output = stripCoverage(output);
   }
   await logEvent(

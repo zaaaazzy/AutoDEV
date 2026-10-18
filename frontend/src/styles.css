@@ -4913,3 +4913,364 @@ h3 .link-button {
 .view-grid > .wide-panel {
   grid-column: 1 / -1;
 }
+
+/* ── Besondere Aufmerksamkeit ────────────────────────────────────────── */
+.attention-panel {
+  border-color: #f1d8b5;
+  background: linear-gradient(180deg, #fffaf3, #fff 120px);
+}
+.attention-list {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.attention-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.attention-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.attention-title {
+  font-size: 15px;
+  text-align: left;
+}
+.attention-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.attention-reason {
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.attention-reason.error {
+  background: #fbe9e6;
+  color: #a33d26;
+}
+.attention-reason.warn {
+  background: #fdf1e0;
+  color: #a0610d;
+}
+.attention-reason.info {
+  background: #e7eff7;
+  color: #36608f;
+}
+.attention-failure {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-line;
+}
+.attention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.attention-detail {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.remove-from-sprint {
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  .attention-actions .button {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+  }
+}
+.attention-failure {
+  display: -webkit-box;
+  max-height: 9em;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+}
+.attention-failure p,
+.attention-failure ul {
+  margin: 0 0 4px;
+}
+
+/* ── Verlauf: Symbole statt Etiketten, feste Höhe gegen Springen ─────── */
+.timeline {
+  max-height: 340px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.step-output {
+  max-height: 60vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.live-progress .live-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.live-progress {
+  min-width: 0;
+}
+.event-icon {
+  display: inline-grid;
+  flex: none;
+  width: 24px;
+  height: 22px;
+  place-items: center;
+  border-radius: 7px;
+}
+.event-icon svg,
+.file-group-title::before {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.event-icon.icon-read {
+  background: #e7eff7;
+  color: #36608f;
+}
+.event-icon.icon-search {
+  background: #eef0ea;
+  color: #5b665e;
+}
+.event-icon.icon-write {
+  background: #fdf1e0;
+  color: #a0610d;
+}
+.event-icon.icon-run {
+  background: #ece8f5;
+  color: #5b4a8b;
+}
+.timeline .event-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Dateien eines Schritts ──────────────────────────────────────────── */
+.file-group + .file-group {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.file-group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.file-group-title.icon-write {
+  color: #a0610d;
+}
+.file-group-title.icon-read {
+  color: #36608f;
+}
+.file-group-title.icon-run {
+  color: #5b4a8b;
+}
+.file-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.file-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  font-size: 13px;
+}
+.file-list li > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-list time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Handy-Kopfzeile: Projektwahl, Agents und Sprint immer sichtbar ──── */
+.mobile-tools,
+.nav-extra,
+.mobile-agents {
+  display: none;
+}
+@media (max-width: 720px) {
+  .sidebar .brand > :not(.brand-mark) {
+    display: none;
+  }
+  .mobile-tools {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .mobile-project {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    min-height: 36px;
+    padding: 4px 26px 4px 8px;
+    border: 0;
+    border-radius: 9px;
+    background-color: rgb(255 255 255 / 8%);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23f8f8f4' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-position: right 8px center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+  }
+  .mobile-project:focus {
+    box-shadow: 0 0 0 2px rgb(215 134 78 / 60%);
+  }
+  .mobile-project option {
+    color: var(--ink);
+  }
+  .mobile-chip {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: 5px;
+    min-height: 32px;
+    padding: 0 9px;
+    border: 1px solid rgb(255 255 255 / 16%);
+    border-radius: 999px;
+    background: rgb(255 255 255 / 6%);
+    color: #f1f4f1;
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-decoration: none;
+  }
+  .mobile-chip:hover {
+    text-decoration: none;
+  }
+  .mobile-chip .nav-icon {
+    width: 15px;
+    height: 15px;
+  }
+  .mobile-chip.online {
+    border-color: rgb(95 191 138 / 55%);
+  }
+  .mobile-chip.offline {
+    border-color: rgb(201 87 63 / 70%);
+  }
+  .nav-extra {
+    display: grid;
+    gap: 4px;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid #3a433d;
+  }
+  .nav-extra .nav-link {
+    width: 100%;
+    border: 0;
+    background: none;
+    text-align: left;
+  }
+  .nav-plus {
+    display: inline-grid;
+    width: 18px;
+    place-items: center;
+    font-weight: 700;
+  }
+  .mobile-agents {
+    position: fixed;
+    top: 62px;
+    right: 10px;
+    left: 10px;
+    z-index: 31;
+    display: block;
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    padding: 8px;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 18px 40px rgb(0 0 0 / 25%);
+    animation: wizard-in 0.2s ease-out;
+  }
+  .agents-backdrop {
+    z-index: 30;
+  }
+  /* Die bisherige Leiste darunter entfällt; Meldungen (Sprechblase) bleiben sichtbar. */
+  .topbar {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    backdrop-filter: none;
+  }
+  .topbar > :not(.agent-indicator),
+  .topbar .worker-status,
+  .topbar .agent-popover {
+    display: none !important;
+  }
+}
+.file-group .file-list {
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Dateigruppen: gleiche einklappbaren Abschnitte wie der Verlauf */
+.files-step .file-group {
+  margin: 8px 0 0;
+  background: #fff;
+}
+.files-step .file-group + .file-group {
+  padding-top: 0;
+  border-top: 0;
+}
+.files-step .file-group > summary app-event-icon {
+  margin: 0 4px 0 2px;
+  vertical-align: middle;
+}
+.files-step .file-group .file-list {
+  margin-top: 8px;
+}
+/* Dateigruppen: gleiche einklappbaren Abschnitte wie der Verlauf */
+.files-step .file-group {
+  margin: 8px 0 0;
+  background: #fff;
+}
+.files-step .file-group + .file-group {
+  padding-top: 9px;
+  border-top: 0;
+}
+.files-step .file-group > summary app-event-icon {
+  margin: 0 4px 0 2px;
+  vertical-align: middle;
+}
+.files-step .file-group .file-list {
+  margin-top: 8px;
+}

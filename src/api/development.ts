@@ -23,7 +23,8 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   kind, category, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
   failure, failure_bug_id AS "failureBugId",
-  (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus"`;
+  (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus",
+  removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt"`;
 
 const DEV_FIELDS = {
   ...IDEA_FIELDS,
@@ -116,17 +117,79 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       return;
     }
     const result = await pool.query(
-      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, retry_count = retry_count + 1, analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL,
+              retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
+              analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
-              updated_at = NOW()
-        WHERE d.id = $1 AND d.status = '${DEVELOPMENT_STATUS.blocked}' RETURNING ${DEV_COLUMNS}`,
+              removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
+        WHERE d.id = $1 AND (d.status = '${DEVELOPMENT_STATUS.blocked}'
+              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
+        RETURNING ${DEV_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {
-      response.status(409).json({ message: 'Nur blockierte Aufträge können erneut versucht werden.' });
+      response
+        .status(409)
+        .json({ message: 'Nur blockierte oder aus dem Sprint entfernte Aufträge können weiterbearbeitet werden.' });
       return;
     }
     response.json({ item: result.rows[0] });
+  });
+
+  // Aus dem Sprint nehmen: Der Auftrag wartet danach unter „Besondere Aufmerksamkeit“ auf eine Entscheidung.
+  app.post('/api/development/:id/remove-from-sprint', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Development item not found.' });
+      return;
+    }
+    const result = await pool.query(
+      `UPDATE development_items SET removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id),
+              removed_from_sprint_at = NOW(), sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
+              status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
+              updated_at = NOW()
+        WHERE id = $1 AND sprint_id IS NOT NULL
+          AND status NOT IN ('${DEVELOPMENT_STATUS.inProgress}', '${DEVELOPMENT_STATUS.done}')
+        RETURNING ${DEV_COLUMNS}`,
+      [request.params.id],
+    );
+    if (!result.rows[0]) {
+      response
+        .status(409)
+        .json({ message: 'Nur geplante oder blockierte Aufträge eines Sprints lassen sich herausnehmen.' });
+      return;
+    }
+    response.json({ item: result.rows[0] });
+  });
+
+  // Endgültig löschen (nicht, solange Agents daran arbeiten); Läufe und Abnahme werden mitgelöscht.
+  app.delete('/api/development/:id', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Development item not found.' });
+      return;
+    }
+    const result = await pool.query(
+      `DELETE FROM development_items WHERE id = $1 AND status <> '${DEVELOPMENT_STATUS.inProgress}' RETURNING id`,
+      [request.params.id],
+    );
+    if (!result.rows[0]) {
+      response.status(409).json({ message: 'Der Auftrag läuft gerade und kann nicht gelöscht werden.' });
+      return;
+    }
+    response.status(204).end();
+  });
+
+  // Rückfragen beantworten: Punkte, die der Tester „von dir zu prüfen“ gemeldet hat, als geprüft bestätigen.
+  app.post('/api/development/:id/acceptance/confirm', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Development item not found.' });
+      return;
+    }
+    const result = await pool.query(
+      `UPDATE acceptance_checks SET status = 'met', note = TRIM(note || ' (von dir bestätigt)'), checked_at = NOW()
+        WHERE development_id = $1 AND status = 'manual'`,
+      [request.params.id],
+    );
+    response.json({ confirmed: result.rowCount ?? 0 });
   });
 
   // Ask the troubleshooter to analyze a blocked order and record the findings as a bug.
@@ -196,6 +259,13 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       update.sql = update.sql.replace(
         ', updated_at = NOW()',
         `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`,
+      );
+    }
+    if (sprintField && sprintField.value !== null) {
+      // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
+      update.sql = update.sql.replace(
+        ', updated_at = NOW()',
+        ', removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()',
       );
     }
     if (manualStart) {

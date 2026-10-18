@@ -43,7 +43,30 @@ export class OrderService {
   async retry(item: DevelopmentItem): Promise<void> {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`),
-      'Auftrag wird erneut versucht.',
+      item.status === 'blocked' ? 'Auftrag wird erneut versucht.' : 'Auftrag ist wieder eingeplant.',
+    );
+  }
+
+  async removeFromSprint(item: DevelopmentItem): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`),
+      'Auftrag aus dem Sprint genommen – er steht jetzt unter „Besondere Aufmerksamkeit“.',
+    );
+  }
+
+  async remove(item: DevelopmentItem): Promise<void> {
+    if (!globalThis.confirm(`Auftrag „${item.title}“ endgültig löschen? Das lässt sich nicht rückgängig machen.`))
+      return;
+    await this.store.perform(
+      () => this.api.delete(`/api/development/${encodeURIComponent(item.id)}`),
+      'Auftrag gelöscht.',
+    );
+  }
+
+  async confirmChecks(item: DevelopmentItem): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/acceptance/confirm`),
+      'Danke – die Punkte sind als geprüft vermerkt.',
     );
   }
 

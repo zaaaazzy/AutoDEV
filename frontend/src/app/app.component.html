@@ -24,6 +24,48 @@
         <span class="brand-divider">/</span>
         <small>dev log</small>
       </a>
+      <div class="mobile-tools">
+        <select
+          class="mobile-project"
+          [ngModel]="activeProject()"
+          (ngModelChange)="store.loadProject($event)"
+          aria-label="Projekt auswählen"
+        >
+          @for (project of projects(); track project.slug) {
+            <option [value]="project.slug">{{ project.name }}</option>
+          }
+        </select>
+        <button
+          type="button"
+          class="mobile-chip"
+          [class.online]="worker().online"
+          [class.offline]="!worker().online"
+          [attr.aria-expanded]="mobileAgents()"
+          [attr.aria-label]="'Agents: ' + workerText()"
+          (click)="mobileAgents.set(!mobileAgents()); mobileMenu.set(false)"
+        >
+          <app-nav-icon name="agents" />
+          <span>{{ store.activeAgentCount() }}/{{ worker().agents.length }}</span>
+          @if (store.openQuestion()) {
+            <span class="question-badge">?</span>
+          }
+        </button>
+        @if (activeSprint(); as sprint) {
+          <a
+            class="mobile-chip sprint-chip"
+            href="#sprints"
+            (click)="store.navigate('sprints'); mobileMenu.set(false); mobileAgents.set(false)"
+            [attr.aria-label]="'Sprint ' + sprint.name + ': ' + sprint.done + ' von ' + sprint.total + ' erledigt'"
+          >
+            @if (sprint.finished) {
+              <span class="sprint-done" aria-hidden="true">✓</span>
+            } @else {
+              <span class="live-dot" aria-hidden="true"></span>
+            }
+            {{ sprint.done }}/{{ sprint.total }}
+          </a>
+        }
+      </div>
       <p class="nav-label">Arbeitsbereich</p>
       <nav id="main-navigation" aria-label="Dev-Log-Navigation">
         @for (item of navigation; track item.id) {
@@ -49,9 +91,28 @@
             }
           </a>
         }
+        <div class="nav-extra">
+          <button type="button" class="nav-link" (click)="showProjectForm.set(true); mobileMenu.set(false)">
+            <span class="nav-title"
+              ><span class="nav-plus" aria-hidden="true">+</span><span class="nav-text">Neues Projekt</span></span
+            >
+          </button>
+          <button type="button" class="nav-link" (click)="showHelp.set(true); mobileMenu.set(false)">
+            <span class="nav-title"
+              ><span class="nav-plus" aria-hidden="true">?</span><span class="nav-text">Hilfe</span></span
+            >
+          </button>
+        </div>
       </nav>
       <p class="sidebar-foot">Projekt- und Testtracking</p>
     </aside>
+    @if (mobileAgents()) {
+      <div class="menu-backdrop agents-backdrop" (click)="mobileAgents.set(false)" aria-hidden="true"></div>
+      <section class="mobile-agents" aria-label="Agents">
+        <p class="popover-title">Agents · {{ store.currentProject()?.name }}</p>
+        <app-agent-list />
+      </section>
+    }
     @if (mobileMenu()) {
       <div class="menu-backdrop" (click)="mobileMenu.set(false)" aria-hidden="true"></div>
     }

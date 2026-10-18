@@ -179,6 +179,17 @@
                           item.status | statusLabel
                         }}</span>
                       </button>
+                      @if (item.status !== 'done' && item.status !== 'in_progress') {
+                        <button
+                          class="button secondary remove-from-sprint"
+                          type="button"
+                          [disabled]="busy()"
+                          (click)="removeFromSprint(item)"
+                          title="Der Auftrag landet unter Auftrag → Besondere Aufmerksamkeit."
+                        >
+                          Aus Sprint entfernen
+                        </button>
+                      }
                       @if (item.status === 'blocked') {
                         <button
                           class="button secondary retry-button"

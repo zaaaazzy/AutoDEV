@@ -115,6 +115,10 @@ export class SprintsComponent {
     this.openSprint.update((current) => (current === id ? null : id));
   }
 
+  protected removeFromSprint(item: DevelopmentItem): Promise<void> {
+    return this.orders.removeFromSprint(item);
+  }
+
   protected retry(item: DevelopmentItem): Promise<void> {
     return this.orders.retry(item);
   }
