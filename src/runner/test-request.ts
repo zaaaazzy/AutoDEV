@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { withProjectLock } from '../core/project-lock.js';
@@ -19,6 +19,17 @@ const DEFAULT_COMMANDS = [
 interface Claimed {
   id: string;
   scope: 'full' | 'ui';
+}
+
+/**
+ * Im eigenen Agenten-Worktree (…-agents, siehe agent-workspace.ts) steht oft noch der Stand des letzten Auftrags.
+ * Getestet werden soll der aktuelle Stand: ist der Worktree sauber, wird main ausgecheckt (losgelöst, ohne Branch).
+ */
+export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<void> {
+  if (!basename(cwd).endsWith('-agents')) return;
+  const status = await execute(['git', 'status', '--porcelain'], cwd, { timeoutMs: 30_000 });
+  if (status.exitCode !== 0 || status.output.trim()) return;
+  await execute(['git', 'checkout', '-q', '--detach', 'main'], cwd, { timeoutMs: 60_000 });
 }
 
 /** Projekte mit eigenem Komplettlauf (Skript „test:full“, wie Dev Log selbst) nutzen ihn, sonst die Testbefehle. */
@@ -71,6 +82,7 @@ export async function processTestRequest(
   try {
     // Unter der Projektsperre: kein Agent und kein Git-Sync arbeitet währenddessen im Ordner.
     const result = await withProjectLock(options.cwd, async () => {
+      await useLatestMain(options.cwd, execute);
       if (await hasFullTestScript(options.cwd)) {
         const outcome = await execute(fullTestCommand(options.project, request), options.cwd, {
           timeoutMs: TEST_TIMEOUT_MS,

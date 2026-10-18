@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fullTestCommand } from '../runner/test-request.js';
+import { fullTestCommand, useLatestMain } from '../runner/test-request.js';
 import { parseScope } from '../api/test-requests.js';
 import { requiredRole } from '../api/roles.js';
 import { caseBugs, stepBug } from './test-bugs.js';
@@ -57,4 +57,20 @@ test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüf
   assert.equal(parseScope({ scope: 'ui' }), 'ui');
   assert.equal(parseScope({ scope: 'alles' }), null);
   assert.equal(requiredRole('POST', '/api/projects/dev-log/test-requests', {}), 'run');
+});
+
+test('Kompletter Test: im Agenten-Worktree wird bei sauberem Stand main ausgecheckt, sonst nichts', async () => {
+  const calls: string[] = [];
+  const execute = (output: string) => async (command: string[]) => {
+    calls.push(command.join(' '));
+    return { exitCode: 0, output, durationMs: 0 };
+  };
+  await useLatestMain('/x/DevLog-agents', execute(''));
+  assert.deepEqual(calls, ['git status --porcelain', 'git checkout -q --detach main']);
+  calls.length = 0;
+  await useLatestMain('/x/DevLog-agents', execute(' M datei.ts'));
+  assert.deepEqual(calls, ['git status --porcelain']);
+  calls.length = 0;
+  await useLatestMain('/x/Mainty', execute(''));
+  assert.deepEqual(calls, []);
 });
