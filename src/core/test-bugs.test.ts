@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { fullTestCommand, useLatestMain } from '../runner/test-request.js';
+import { failureTail, fullTestCommand, useLatestMain } from '../runner/test-request.js';
 import { parseScope } from '../api/test-requests.js';
 import { requiredRole } from '../api/roles.js';
 import { caseBugs, stepBug } from './test-bugs.js';
@@ -66,11 +66,20 @@ test('Kompletter Test: im Agenten-Worktree wird bei sauberem Stand main ausgeche
     return { exitCode: 0, output, durationMs: 0 };
   };
   await useLatestMain('/x/DevLog-agents', execute(''));
-  assert.deepEqual(calls, ['git status --porcelain', 'git checkout -q --detach main']);
+  assert.deepEqual(calls, ['git status --porcelain --untracked-files=no', 'git checkout -q --detach main']);
   calls.length = 0;
   await useLatestMain('/x/DevLog-agents', execute(' M datei.ts'));
-  assert.deepEqual(calls, ['git status --porcelain']);
+  assert.deepEqual(calls, ['git status --porcelain --untracked-files=no']);
   calls.length = 0;
   await useLatestMain('/x/Mainty', execute(''));
   assert.deepEqual(calls, []);
+});
+
+test('Kompletter Test: früh gescheiterter Befehl liefert die Fehlerzeile', () => {
+  assert.equal(
+    failureTail('> test:full\n\nError: http://127.0.0.1:3196/health is already used\n\nBericht: …'),
+    'Error: http://127.0.0.1:3196/health is already used',
+  );
+  assert.equal(failureTail('a\nb\nc\nd'), 'b · c · d');
+  assert.equal(failureTail(''), 'Testbefehl fehlgeschlagen.');
 });

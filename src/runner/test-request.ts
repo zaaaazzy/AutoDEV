@@ -27,7 +27,8 @@ interface Claimed {
  */
 export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<void> {
   if (!basename(cwd).endsWith('-agents')) return;
-  const status = await execute(['git', 'status', '--porcelain'], cwd, { timeoutMs: 30_000 });
+  // Nicht versionierte Dateien stören den Checkout nicht; nur echte Änderungen verhindern ihn.
+  const status = await execute(['git', 'status', '--porcelain', '--untracked-files=no'], cwd, { timeoutMs: 30_000 });
   if (status.exitCode !== 0 || status.output.trim()) return;
   await execute(['git', 'checkout', '-q', '--detach', 'main'], cwd, { timeoutMs: 60_000 });
 }
@@ -59,6 +60,18 @@ export function fullTestCommand(project: string, request: Claimed): string[] {
   ];
 }
 
+/** Die aussagekräftigen letzten Zeilen einer Ausgabe (ohne Leerzeilen), für die Statuszeile der Anforderung. */
+export function failureTail(output: string): string {
+  const lines = output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const error = lines.find((line) => /^Error:/.test(line));
+  return (
+    (error ?? lines.slice(-3).join(' · ') ?? 'Testbefehl fehlgeschlagen.').slice(0, 500) || 'Testbefehl fehlgeschlagen.'
+  );
+}
+
 /** Holt die älteste Testanforderung des Projekts und führt sie aus; false, wenn nichts anstand. */
 export async function processTestRequest(
   pool: Pool,
@@ -88,6 +101,13 @@ export async function processTestRequest(
           timeoutMs: TEST_TIMEOUT_MS,
           env: agentEnvironment(),
         });
+        const linked = (
+          await pool.query<{ runId: string | null }>('SELECT run_id AS "runId" FROM test_requests WHERE id = $1', [
+            request.id,
+          ])
+        ).rows[0]?.runId;
+        // Ohne Testlauf ist der Befehl schon vor den Tests gescheitert (z. B. Port belegt): Ausgabe als Fehler zeigen.
+        if (outcome.exitCode !== 0 && !linked) throw new Error(failureTail(outcome.output));
         return { passed: outcome.exitCode === 0, output: outcome.output };
       }
       const commands =
