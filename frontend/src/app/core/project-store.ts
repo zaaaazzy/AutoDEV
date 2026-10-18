@@ -178,7 +178,8 @@ export class ProjectStore {
     this.notice.set('');
     try {
       await action();
-      if (refresh && this.activeProject()) await this.loadProject(this.activeProject());
+      // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
+      if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
       this.notice.set(success);
       setTimeout(() => {
         if (this.notice() === success) this.notice.set('');
@@ -214,6 +215,8 @@ export class ProjectStore {
   private onHashChange(): void {
     const section = sectionFromHash();
     this.focusId.set(targetFromHash());
+    // Zurück aus der Agent-Detailansicht (#agents/<id> → #agents): Detail schließen.
+    if (this.openAgent() && targetFromHash() !== this.openAgent()) this.openAgent.set(null);
     if (section === this.section()) return;
     this.section.set(section);
     this.refreshActiveProject();

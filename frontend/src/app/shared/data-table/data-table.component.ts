@@ -270,7 +270,32 @@ export class DataTableComponent<T> {
       left: Math.max(8, Math.min(box.left, globalThis.innerWidth - 228)),
     });
     this.openFilter.update((current) => (current === id ? null : id));
+    // Textfilter: direkt lostippen können.
+    if (this.openFilter() === id)
+      setTimeout(() =>
+        this.host.nativeElement.querySelector<HTMLInputElement>('.dt-filter-menu input[type="search"]')?.focus(),
+      );
   }
+
+  /**
+   * Sortieren per Klick: aufsteigend → absteigend → ohne. Ist die Spalte nur durch die Voreinstellung sortiert,
+   * beginnt der erste Klick trotzdem aufsteigend (bzw. dreht eine aufsteigende Voreinstellung um).
+   */
+  protected sortBy(id: string, event: Event): void {
+    const preset = this.sorting() === null ? this.initialSort().find((entry) => entry.id === id) : undefined;
+    if (preset) {
+      this.sorting.set([{ id, desc: !preset.desc }]);
+      return;
+    }
+    this.table.getColumn(id)?.getToggleSortingHandler()?.(event);
+  }
+
+  /** Leertext: spricht nur von Filtern, wenn es Einträge gibt und wirklich gefiltert oder gesucht wird. */
+  protected readonly emptyMessage = computed(() =>
+    this.rows().length && (this.activeFilters().length || this.search())
+      ? this.emptyText()
+      : this.emptyText().replace(/\s+(für|mit|bei)\s+(diese[nmr]?|den gewählten|dem gewählten)\s+Filtern?/i, ''),
+  );
 
   @HostListener('window:scroll')
   @HostListener('window:resize')

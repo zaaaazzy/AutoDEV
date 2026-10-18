@@ -46,7 +46,7 @@
             >
               <div class="dt-head">
                 @if (col.getCanSort()) {
-                  <button type="button" class="dt-sort" (click)="col.getToggleSortingHandler()?.($event)">
+                  <button type="button" class="dt-sort" (click)="sortBy(header.id, $event)">
                     {{ column(header.id)?.header }}
                     @if (col.getIsSorted()) {
                       <span class="dt-sort-icon active" aria-hidden="true">{{
@@ -179,7 +179,7 @@
           }
         } @empty {
           <tr>
-            <td [attr.colspan]="columnCount()" class="empty-state">{{ emptyText() }}</td>
+            <td [attr.colspan]="columnCount()" class="empty-state">{{ emptyMessage() }}</td>
           </tr>
         }
       </tbody>

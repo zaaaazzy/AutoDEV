@@ -5,6 +5,7 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
+import { AuthService } from '../../core/auth.service.js';
 import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -95,6 +96,7 @@ export class AgentsComponent {
   }
 
   protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   protected readonly activity = inject(AgentActivityService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;

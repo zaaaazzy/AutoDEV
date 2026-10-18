@@ -8,7 +8,9 @@
           <h2>Agents &amp; Workflow</h2>
           <p class="muted">Agent-Rollen nach Workflow-Phase verwalten</p>
         </div>
-        <button class="button secondary" (click)="createDefaultAgents()">Standard-Workflow anlegen</button>
+        @if (auth.can('agents')) {
+          <button class="button secondary" (click)="createDefaultAgents()">Standard-Workflow anlegen</button>
+        }
       </div>
       @if (store.showCreate()) {
         <form class="form-grid create-form" (ngSubmit)="createAgent()">

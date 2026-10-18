@@ -1,5 +1,6 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
+import { AuthService } from '../../core/auth.service.js';
 import type { ChatMessage } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
@@ -17,6 +18,7 @@ import { ChatComposerComponent, type ComposedMessage } from './chat-composer.com
 export class ChatComponent {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
 
   protected readonly chat = signal<ChatMessage[]>([]);
   protected readonly chatWaiting = computed(() =>

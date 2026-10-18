@@ -1,5 +1,5 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, inject, input, model, output } from '@angular/core';
+import { Component, HostListener, inject, input, model, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { Idea } from '../../core/models.js';
@@ -41,6 +41,14 @@ export class IdeaDetailComponent {
   readonly editing = model(false);
   readonly closed = output<void>();
   protected readonly categories = CATEGORIES;
+
+  /** Escape schließt den Dialog bzw. die Bearbeitung (die @-Auswahl im Kommentar fängt ihr Escape selbst ab). */
+  @HostListener('document:keydown.escape')
+  protected onEscape(): void {
+    // Beim Bearbeiten zuerst nur die Bearbeitung verlassen, damit nichts versehentlich verloren geht.
+    if (this.editing()) this.editing.set(false);
+    else this.closed.emit();
+  }
 
   protected statusOptions(idea: Idea): string[] {
     return IDEA_SELECTABLE_STATUSES.includes(idea.status) ? IDEA_SELECTABLE_STATUSES : [idea.status];

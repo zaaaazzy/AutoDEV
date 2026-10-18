@@ -131,6 +131,7 @@ export class CommentThreadComponent {
       }
       if (event.key === 'Escape') {
         event.preventDefault();
+        event.stopPropagation();
         this.dismissed.set(true);
         return;
       }
