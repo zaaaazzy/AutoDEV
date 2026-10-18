@@ -2,6 +2,7 @@ import { NgClass } from '@angular/common';
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
+import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES, isFinished, statusLabel } from '../../shared/labels.js';
@@ -34,6 +35,7 @@ export class DevelopmentComponent {
   private readonly api = inject(ApiService);
   private readonly orders = inject(OrderService);
   protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
@@ -106,6 +108,15 @@ export class DevelopmentComponent {
   protected readonly openAttention = signal<string | null>(null);
 
   constructor() {
+    // „+ Neuer Auftrag“: Das Formular steht unter „Besondere Aufmerksamkeit“ – hinscrollen und Titel fokussieren.
+    effect(() => {
+      if (!this.store.showCreate()) return;
+      globalThis.setTimeout(() => {
+        const form = document.querySelector<HTMLFormElement>('form.dev-create');
+        form?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        form?.querySelector<HTMLInputElement>('input[name="title"]')?.focus({ preventScroll: true });
+      });
+    });
     // Aus einem Link (#development/<id>, z. B. im Sprintbericht): Auftrag aufklappen und hinscrollen.
     effect(() => {
       const id = this.store.focusId();

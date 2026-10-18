@@ -344,7 +344,7 @@ test('Dashboard: Kennzahlen, Links und Agent-Aktionen', async ({ page, isMobile 
   }
   await open(page, 'dashboard');
   await button(page, 'Aktionen').click();
-  await expect(page.getByRole('searchbox', { name: 'Aktion suchen' })).toBeFocused();
+  await expect(page.getByRole('combobox', { name: 'Aktion suchen' })).toBeFocused();
   await snap(page, info, 'Agent-Aktionen', false);
   await page.keyboard.press('Escape');
 });

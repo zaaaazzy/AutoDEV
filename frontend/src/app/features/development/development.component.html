@@ -62,10 +62,13 @@
               </button>
               <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
             </div>
-            @if (entry.badges.length) {
+            @if (entry.badges.length || analysisRunning(item)) {
               <div class="attention-reasons">
                 @for (reason of entry.badges; track reason.label) {
                   <span [class]="'attention-reason ' + reason.tone">{{ reason.label }}</span>
+                }
+                @if (analysisRunning(item)) {
+                  <span class="attention-reason info">Analyse läuft …</span>
                 }
               </div>
             }
@@ -276,7 +279,9 @@
               </details>
             }
             <div class="attention-actions">
-              @if (item.status === 'blocked' || item.status === 'rejected' || item.removedFromSprintAt) {
+              @if (
+                auth.can('run') && (item.status === 'blocked' || item.status === 'rejected' || item.removedFromSprintAt)
+              ) {
                 <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">
                   {{
                     item.status === 'blocked'
@@ -287,12 +292,12 @@
                   }}
                 </button>
               }
-              @if (entry.checks.length) {
+              @if (entry.checks.length && auth.can('plan')) {
                 <button class="button primary" type="button" [disabled]="busy()" (click)="confirmOrder(item)">
                   Geprüft – alles in Ordnung
                 </button>
               }
-              @if (item.status === 'blocked') {
+              @if (item.status === 'blocked' && auth.can('run')) {
                 <button
                   class="button secondary"
                   type="button"
@@ -309,15 +314,22 @@
               >
                 {{ openAttention() === item.id ? 'Details schließen' : 'Details & bearbeiten' }}
               </button>
-              <button
-                class="button secondary danger"
-                type="button"
-                [disabled]="busy() || item.status === 'in_progress'"
-                (click)="deleteOrder(item)"
-              >
-                Löschen
-              </button>
+              @if (auth.can('plan')) {
+                <button
+                  class="button secondary danger"
+                  type="button"
+                  [disabled]="busy() || item.status === 'in_progress'"
+                  (click)="deleteOrder(item)"
+                >
+                  Löschen
+                </button>
+              }
             </div>
+            @if (!auth.can('run')) {
+              <p class="muted small">
+                „Erneut versuchen“ und „Analysieren“ brauchen das Recht, Agents zu starten – frag dafür einen Admin.
+              </p>
+            }
             @if (openAttention() === item.id) {
               <div class="attention-detail">
                 <app-order-detail [order]="item" />
