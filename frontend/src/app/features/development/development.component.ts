@@ -9,6 +9,7 @@ import { CategoryLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } fr
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderTableComponent } from './order-table.component.js';
+import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
 
 @Component({
@@ -16,6 +17,7 @@ import { OrderService } from './order.service.js';
   standalone: true,
   imports: [
     OrderTableComponent,
+    BugIconComponent,
     MarkdownPipe,
     NgClass,
     FormsModule,

@@ -55,7 +55,10 @@
                 [attr.aria-expanded]="openAttention() === item.id"
                 (click)="openAttention.set(openAttention() === item.id ? null : item.id)"
               >
-                {{ item.title }}
+                @if (item.kind === 'bug') {
+                  <app-bug-icon />
+                }
+                {{ item.kind === 'bug' ? item.title.replace('Bug: ', '') : item.title }}
               </button>
               <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
             </div>

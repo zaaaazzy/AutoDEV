@@ -227,7 +227,7 @@ h4 {
   border-radius: 10px;
   background: transparent;
 }
-.menu-toggle span {
+.menu-lines span {
   display: block;
   width: 20px;
   height: 2px;
@@ -237,13 +237,13 @@ h4 {
     transform 0.2s ease,
     opacity 0.2s ease;
 }
-.mobile-open .menu-toggle span:nth-child(1) {
+.mobile-open .menu-lines span:nth-child(1) {
   transform: translateY(7px) rotate(45deg);
 }
-.mobile-open .menu-toggle span:nth-child(2) {
+.mobile-open .menu-lines span:nth-child(2) {
   opacity: 0;
 }
-.mobile-open .menu-toggle span:nth-child(3) {
+.mobile-open .menu-lines span:nth-child(3) {
   transform: translateY(-7px) rotate(-45deg);
 }
 @keyframes fade-in {
@@ -5334,5 +5334,175 @@ app-order-table {
 @media (max-width: 720px) {
   .order-table .order-title {
     text-align: left;
+  }
+}
+
+/* ── Käfer für Bugs, Favicon der Anwendung ───────────────────────────── */
+.bug-mark {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  place-items: center;
+  border-radius: 6px;
+  background: #fbe9e6;
+  color: #b4472f;
+  vertical-align: -4px;
+}
+.bug-mark svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.project-favicon {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  object-fit: contain;
+}
+@media (max-width: 720px) {
+  .mobile-tools .project-favicon {
+    width: 22px;
+    height: 22px;
+    padding: 2px;
+    border-radius: 6px;
+    background: #fff;
+  }
+}
+
+/* Handy-Kopfzeile: Logo nur ohne ladbares Favicon; im Menü immer oben */
+.nav-brand {
+  display: none;
+}
+@media (max-width: 720px) {
+  .sidebar.has-favicon > .brand {
+    display: none;
+  }
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 4px 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #3a433d;
+    color: #fff;
+    font-weight: 700;
+  }
+  .nav-brand small {
+    color: #aab3ab;
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .mobile-project {
+    flex: 0 1 auto;
+    max-width: 150px;
+  }
+  .mobile-tools .agents-chip {
+    margin-left: auto;
+  }
+  .sidebar {
+    gap: 8px;
+  }
+}
+
+/* Handy-Kopfzeile: alle Elemente gleich hoch, Favicon einheitlich grau-weiss */
+@media (max-width: 720px) {
+  .menu-toggle {
+    height: 34px;
+  }
+  .mobile-project,
+  .mobile-chip {
+    height: 34px;
+    min-height: 34px;
+  }
+  .mobile-chip {
+    padding-block: 0;
+  }
+  .mobile-tools .project-favicon {
+    box-sizing: border-box;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    padding: 8px;
+    border: 1px solid rgb(255 255 255 / 16%);
+    border-radius: 9px;
+    background: rgb(255 255 255 / 6%);
+    object-fit: contain;
+    filter: grayscale(1) brightness(2.4) contrast(0.8);
+    opacity: 0.9;
+  }
+  .sidebar > .brand .brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+/* Handy: Favicon bzw. Logo ist zugleich der Menüknopf */
+.menu-lines,
+.menu-icon {
+  display: none;
+}
+@media (max-width: 720px) {
+  .sidebar > .brand {
+    display: none !important;
+  }
+  .menu-toggle {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    margin-left: 0;
+    border: 1px solid rgb(255 255 255 / 16%);
+    border-radius: 9px;
+    background: rgb(255 255 255 / 6%);
+    place-items: center;
+  }
+  .menu-icon {
+    position: relative;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+  }
+  .menu-icon .project-favicon {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    background: none;
+    filter: grayscale(1) brightness(2.4) contrast(0.8);
+    opacity: 0.9;
+  }
+  .menu-icon .brand-mark {
+    width: 24px;
+    height: 24px;
+    font-size: 17px;
+  }
+  .menu-badge {
+    position: absolute;
+    right: -6px;
+    bottom: -6px;
+    display: grid;
+    width: 15px;
+    height: 15px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--orange);
+    box-shadow: 0 0 0 2px var(--ink);
+    color: var(--ink);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+  }
+  .mobile-open .menu-icon {
+    display: none;
+  }
+  .mobile-open .menu-lines {
+    display: grid;
+    gap: 5px;
   }
 }

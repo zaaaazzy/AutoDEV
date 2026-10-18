@@ -433,4 +433,8 @@ export const SCHEMA = `
   -- Aus einem Sprint herausgenommene Aufträge landen unter „Besondere Aufmerksamkeit“.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS removed_from_sprint TEXT;
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS removed_from_sprint_at TIMESTAMPTZ;
+  -- Favicon der betreuten Anwendung (vom Worker aus dem Projektordner übernommen).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS favicon BYTEA;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS favicon_type TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS favicon_mtime TIMESTAMPTZ;
 `;

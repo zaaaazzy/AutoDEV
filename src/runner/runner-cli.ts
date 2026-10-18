@@ -11,6 +11,7 @@ import { processSetupJob } from '../setup/setup-jobs.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
+import { syncFavicon } from './favicon.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
@@ -152,9 +153,18 @@ async function main(): Promise<void> {
       if (known.length) startup = false;
     };
     void publishSystemAgents(pool).catch(() => undefined);
+    // Favicons der Projekte alle 5 Minuten abgleichen (nur bei Änderung wird gespeichert).
+    let faviconCheck = 0;
     const heartbeat = setInterval(() => {
       beat();
       void publishSystemAgents(pool).catch(() => undefined);
+      if (Date.now() - faviconCheck > 5 * 60_000) {
+        faviconCheck = Date.now();
+        for (const target of chatTargets) {
+          if (target.problem) continue;
+          void syncFavicon(pool, target.options.project, target.options.cwd).catch(() => undefined);
+        }
+      }
     }, 15_000);
     // Einrichtungsassistent: Host-Aufgaben (Ordner, Git, GitHub, Vorlagen, Agent-Tests) schnell und parallel abarbeiten.
     let setupActive = 0;

@@ -6,6 +6,7 @@
       class="sidebar"
       [class.closed]="menuClosed()"
       [class.mobile-open]="mobileMenu()"
+      [class.has-favicon]="!!visibleFavicon()"
       (mouseleave)="menuClosed.set(false)"
     >
       <button
@@ -16,7 +17,15 @@
         [attr.aria-label]="mobileMenu() ? 'Menü schließen' : 'Menü öffnen'"
         (click)="mobileMenu.set(!mobileMenu())"
       >
-        <span></span><span></span><span></span>
+        <span class="menu-lines" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="menu-icon" aria-hidden="true">
+          @if (visibleFavicon(); as icon) {
+            <img class="project-favicon" [src]="icon" alt="" width="20" height="20" (error)="failedFavicon.set(icon)" />
+          } @else {
+            <span class="brand-mark">m</span>
+          }
+          <span class="menu-badge">≡</span>
+        </span>
       </button>
       <a class="brand" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
         <span class="brand-mark">m</span>
@@ -37,7 +46,7 @@
         </select>
         <button
           type="button"
-          class="mobile-chip"
+          class="mobile-chip agents-chip"
           [class.online]="worker().online"
           [class.offline]="!worker().online"
           [attr.aria-expanded]="mobileAgents()"
@@ -68,6 +77,7 @@
       </div>
       <p class="nav-label">Arbeitsbereich</p>
       <nav id="main-navigation" aria-label="Dev-Log-Navigation">
+        <div class="nav-brand"><span class="brand-mark">m</span><span>mainty</span><small>dev log</small></div>
         @for (item of navigation; track item.id) {
           <a
             class="nav-link"
@@ -178,6 +188,10 @@
         }
         <label class="project-picker"
           >Projekt
+
+          @if (visibleFavicon(); as icon) {
+            <img class="project-favicon" [src]="icon" alt="" width="20" height="20" (error)="failedFavicon.set(icon)" />
+          }
           <select
             [ngModel]="activeProject()"
             (ngModelChange)="store.loadProject($event)"

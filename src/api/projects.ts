@@ -15,11 +15,41 @@ import {
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", created_at AS "createdAt",
+              EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         ORDER BY name`,
     );
     response.json({ projects: result.rows });
+  });
+
+  // Favicon der Anwendung; strenge CSP, damit ein SVG aus dem Projekt nie als Seite mit Skripten läuft.
+  app.get('/api/projects/:slug/favicon', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const row = slug
+        ? (
+            await pool.query<{ favicon: Buffer | null; type: string | null }>(
+              'SELECT favicon, favicon_type AS type FROM projects WHERE slug = $1',
+              [slug],
+            )
+          ).rows[0]
+        : undefined;
+      if (!row?.favicon || !row.type) {
+        response.status(404).json({ message: 'Kein Favicon vorhanden.' });
+        return;
+      }
+      response
+        .set({
+          'Content-Type': row.type,
+          'Cache-Control': 'private, max-age=86400',
+          'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+          'X-Content-Type-Options': 'nosniff',
+        })
+        .send(row.favicon);
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.patch('/api/projects/:slug', async (request, response) => {

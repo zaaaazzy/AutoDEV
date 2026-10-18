@@ -18,6 +18,8 @@ export interface Project {
   databaseConfigured?: boolean;
   definitionOfReady?: string[] | null;
   definitionOfDone?: string[] | null;
+  /** Stand des Favicons der Anwendung (null = keines gefunden). */
+  faviconVersion?: number | null;
 }
 
 export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';

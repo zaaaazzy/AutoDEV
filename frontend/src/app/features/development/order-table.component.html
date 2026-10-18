@@ -9,7 +9,10 @@
 >
   <ng-template appDataCell="title" let-item>
     <button type="button" class="link-button order-title" [title]="item.title" (click)="toggleOrder(item.id)">
-      {{ item.title }}
+      @if (item.kind === 'bug') {
+        <app-bug-icon />
+      }
+      {{ displayTitle(item) }}
     </button>
   </ng-template>
   <ng-template appDataCell="status" let-item>

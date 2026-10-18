@@ -1,5 +1,6 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ApiService } from './core/api.service.js';
 import { AuthService } from './core/auth.service.js';
 import { NAVIGATION, type Section } from './core/navigation.js';
 import { LoginComponent } from './features/auth/login.component.js';
@@ -54,6 +55,20 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
 export class AppComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
+  private readonly api = inject(ApiService);
+  /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
+  /** Favicon-Adresse, die nicht geladen werden konnte – dann erscheint wieder das Dev-Log-Logo. */
+  protected readonly failedFavicon = signal<string | null>(null);
+  protected readonly visibleFavicon = computed(() => {
+    const icon = this.favicon();
+    return icon && icon !== this.failedFavicon() ? icon : null;
+  });
+  protected readonly favicon = computed(() => {
+    const project = this.store.currentProject();
+    return project?.faviconVersion
+      ? this.api.url(`/api/projects/${encodeURIComponent(project.slug)}/favicon?v=${project.faviconVersion}`)
+      : null;
+  });
   protected readonly navigation = NAVIGATION;
   protected readonly section = this.store.section;
   protected readonly projects = this.store.projects;
