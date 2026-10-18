@@ -50,10 +50,10 @@ Der Assistent ist **kein** Workflow-Agent, sondern bedient den Chat und die Prob
 Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 - **Lesen/Schreiben:** `read_file`, `list_files`, `search`, `write_file`, `replace_in_file` – nur innerhalb des Projektordners (Backups in `.dev-log-backups/`).
-- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Eine Transaktion, 15 s Limit, max. 50 Zeilen; `UPDATE`/`DELETE` nur mit `WHERE`; gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, GRANT/REVOKE, COPY, Rollenwechsel, Server-Funktionen. Die Dev-Log-Datenbank selbst wird abgelehnt.
+- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Eine Transaktion, 15 s Limit, max. 50 Zeilen; `UPDATE`/`DELETE` nur mit echter `WHERE`-Bedingung (nicht `WHERE true`, `1=1` …); erlaubt sind Daten-Änderungen und additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`); gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, `DROP TABLE/VIEW/SEQUENCE/TYPE/SCHEMA`, `TRUNCATE`, `ALTER TABLE … DROP`, `DO`-Blöcke, `EXECUTE`, eigene Funktionen/Trigger, GRANT/REVOKE, COPY, Rollenwechsel, Server- und Large-Object-Funktionen. Die Dev-Log-Datenbank selbst wird abgelehnt. Das ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze – dafür einen Datenbank-Benutzer mit eingeschränkten Rechten hinterlegen.
 - **Schleifenschutz:** Wiederholt ein Modell denselben Absatz (3×) oder denselben Werkzeugaufruf (4× in Folge), bricht der Lauf ab.
 - **Git:** `status`, `diff`, `log`, `show`, `branch`, `remote -v`, `ls-files`, `pull --ff-only`, `fetch`, `checkout <branch>`, `clone <https/ssh-URL> [Unterordner|.]`.
-- **npm/node:** `npm test`, `npm run <skript>`, `npm install|ci [Pakete]`, `npm ls|outdated|audit`, `node --version`, tsc/eslint/prettier/jest/vitest.
+- **npm/node:** `npm test`, `npm run <skript>`, `npm install|ci [Pakete]` (immer mit `--ignore-scripts`), `npm ls|outdated|audit`, `node --version`, tsc/eslint/prettier/jest/vitest.
 - **Docker Compose** (im Projektordner): `ps`, `config --services`, `logs`, `up -d [--build|--wait|--force-recreate] [Dienste]`, `stop`, `start`, `restart`, `down [--remove-orphans]`, `build`, `pull`.
 
 **Compose-Schutz:** Vor `up`, `start`, `restart` und `build` prüft der Worker `docker compose config`. Abgelehnt werden privilegierte Dienste, Host-Namensräume (`network_mode/pid/ipc: host`), `cap_add`, `devices`, Bind-Mounts und Build-Kontexte außerhalb des Projektordners (z. B. `docker.sock`).
@@ -69,6 +69,10 @@ Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 **Nicht erlaubt (für alle Agents):** Dateien außerhalb des Projektordners, `.env`, Schlüssel, `.git`, `node_modules`, Backup-Ordner, Symlink-Ausbrüche, `docker run`, `docker compose down -v`, `git push`, `rm`, verkettete Befehle (`;`, `&&`, Pipes – Befehle laufen ohne Shell), `git clone` mit `file://`, Optionen oder Zielen außerhalb des Projekts.
 
 Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gesetzt, läuft dieser statt des lokalen Modells und die obigen Werkzeugregeln greifen dafür nicht.
+
+**Claude-CLI als Assistent oder Entwickler:** Die Rechte-Gruppen in den Projekteinstellungen werden als `--allowedTools` übergeben. Shell-Lesebefehle (`cat`, `tail`, `grep` …) und `curl` sind bewusst nicht freigegeben – damit ließen sich Dateien außerhalb des Projekts lesen und verschicken. Dateien liest Claude mit seinem Lese-Werkzeug (Projektordner und, mit der Gruppe „Dienst-Logs“, `~/Library/Logs`), lokale URLs mit `WebFetch` (nur `localhost`/`127.0.0.1`). Ebenfalls nicht freigegeben: `npx --prefix` und `npx tsx`; Installationen nur als `npm install|ci --ignore-scripts`.
+
+**Grenze:** Diese Regeln verhindern Fehlgriffe, sind aber keine Sandbox. Tests und npm-Skripte führen von Agents geschriebenen Code mit den Rechten des Workers auf dem Host aus.
 
 ## 5. Weitere Hintergrundaufgaben (ohne eigenes Modell)
 

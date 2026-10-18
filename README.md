@@ -4,7 +4,7 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 
 ## Starten
 
-1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche `http://localhost:3101` (Datenbank `127.0.0.1:5433`, eigenes Volume).
+1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche `http://localhost:3100` (Datenbank `127.0.0.1:5433`, eigenes Volume).
 2. Worker (arbeitet alle Projekte automatisch ab, Autostart per launchd): `./scripts/install-worker.sh`. Log: `~/Library/Logs/dev-log-worker.log`. Ohne Autostart: `npm run worker`.
 3. Lokales Modell: Ollama (`DEV_LOG_OLLAMA_MODEL`, Standard `qwen3.5:9b`). Optional pro Rolle: `DEV_LOG_OLLAMA_MODEL_<ROLLE>` (z. B. `_DEVELOPER`) und Kontext `DEV_LOG_OLLAMA_CTX[_<ROLLE>]` (Standard 16384, Entwickler 32768); `DEV_LOG_OLLAMA_KEEP_ALIVE` (Standard `30m`) hält das Modell geladen. Ollama-Einstellungen (Modell dauerhaft geladen, Flash Attention, KV-Cache q8_0, ein Modell gleichzeitig) setzt `./scripts/configure-ollama.sh` und startet die Ollama-App neu. Bei Verbindungsfehlern wird bis zu zweimal mit wachsender Wartezeit wiederholt.
 
@@ -20,6 +20,10 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 ### Sicherheit
 
 Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Der Container-Port ist standardmäßig nur an `127.0.0.1` gebunden (`DEV_LOG_BIND=0.0.0.0` in `.env` öffnet ihn für das lokale Netz; Basic Auth läuft dann unverschlüsselt über HTTP), der Container läuft als Nicht-Root. Die API setzt Security-Header (CSP), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Mit `DEV_LOG_AUTH=off` lauscht der Server nur auf `127.0.0.1` (`DEV_LOG_HOST` überschreibt das).
+
+Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Für Zugriff von anderen Geräten daher nicht `DEV_LOG_BIND=0.0.0.0`, sondern einen HTTPS-Reverse-Proxy, Tailscale oder einen SSH-Tunnel verwenden; der Server warnt beim Start, wenn er im Netz erreichbar ist.
+
+**Grenzen der Agent-Rechte:** Die Werkzeugregeln (Projektordner, gesperrte Dateien, erlaubte Befehle) schützen vor Fehlgriffen des Modells, sind aber keine Sandbox. Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen mit den Rechten des Workers auf dem Host. Installationen laufen immer mit `--ignore-scripts`. Für die Projekt-Datenbank einen eigenen Benutzer ohne `DROP`-/Superuser-Rechte hinterlegen.
 
 ### Struktur
 
@@ -54,6 +58,6 @@ Datenmodell: [docs/erm.md](docs/erm.md).
 
 ## Git im Sprint
 
-Nach jedem erfolgreich erledigten Sprint-Auftrag erstellt der Worker einen lokalen Commit im Projektordner (Conventional Commits, z. B. `feat(Sprint 1): Titel`, Bugs als `fix`). Beim Abschluss des Sprints folgt ein Sammel-Commit mit Tag und – falls ein Repository hinterlegt ist – der Push. `.env`, `.dev-log/` und Agent-Sicherungen bleiben ausgeschlossen; Commits ohne Änderungen werden übersprungen.
+Jeder Sprint arbeitet auf einem eigenen Branch `sprint/<name>`. Nach jedem erfolgreich erledigten Sprint-Auftrag erstellt der Worker dort einen lokalen Commit (Conventional Commits, z. B. `feat(Sprint 1): Titel`, Bugs als `fix`); Änderungen fehlgeschlagener Aufträge werden geparkt statt mitcommittet. Die Sprint-Sicherung pusht nur bei grünen Projekttests; beim Abschluss wird nach `main` gemergt, erneut getestet, gepusht und getaggt. `.env`, `.dev-log/`, Agent-Sicherungen und Dateien, die nach Zugangsdaten aussehen, werden nie committet. Details: [Workflows](docs/workflows.md#6-git-im-sprint).
 
 Dokumentation: [Agents und Rechte](docs/agents-und-rechte.md), [Workflows](docs/workflows.md).

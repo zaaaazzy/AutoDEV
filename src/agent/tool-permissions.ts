@@ -36,21 +36,14 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     id: 'diagnose',
     label: 'Diagnose',
-    description: 'Dateien und Logs lesen, Prozesse, Ports und URLs prüfen (tail, cat, grep, curl, ps, lsof, netstat).',
-    rules: prefixRules([
-      'tail',
-      'head',
-      'cat',
-      'ls',
-      'grep',
-      'wc',
-      'curl',
-      'lsof -i',
-      'ps',
-      'netstat',
-      'node --version',
-      'launchctl list',
-    ]),
+    description:
+      'Prozesse und Ports prüfen (ps, lsof, netstat), lokale URLs abrufen (WebFetch auf localhost). Dateien liest der Agent mit seinem Lese-Werkzeug, nicht per Shell.',
+    rules: [
+      ...prefixRules(['lsof -i', 'ps', 'netstat', 'node --version', 'launchctl list']),
+      // Kein curl/cat/tail: Mit Shell-Lesebefehlen ließen sich Dateien außerhalb des Projekts lesen und per curl verschicken.
+      'WebFetch(domain:localhost)',
+      'WebFetch(domain:127.0.0.1)',
+    ],
   },
   {
     id: 'logs',
@@ -66,10 +59,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       'npm test',
       'npm run',
       'npm --prefix',
-      'npx --prefix',
+      // Kein „npx --prefix“ und kein „npx tsx“: beides startet beliebige Pakete bzw. Skripte.
       'npx ng',
       'npx tsc',
-      'npx tsx',
       'npx vitest',
       'npx playwright',
     ]),
@@ -77,8 +69,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     id: 'install',
     label: 'Pakete installieren',
-    description: 'Abhängigkeiten mit npm install bzw. npm ci installieren.',
-    rules: prefixRules(['npm install', 'npm ci']),
+    description:
+      'Abhängigkeiten mit npm install bzw. npm ci installieren – immer mit --ignore-scripts (keine Installationsskripte).',
+    rules: prefixRules(['npm install --ignore-scripts', 'npm ci --ignore-scripts']),
   },
   {
     id: 'git',
@@ -190,6 +183,16 @@ const SAFE_COMMANDS = [
 
 const READ_COMMAND =
   /^(?:git (?:status|log|diff|show|branch|remote -v|ls-files)(?: (?:--oneline|--stat|--graph|--decorate|--name-only|--name-status|--short|--all|-\d+|--max-count=\d+|[\w@:./~^][\w@:./=~^-]*))*|npm (?:ls|list|outdated)(?: --(?:depth=\d|json))*|node --version)$/;
+
+const INSTALL_SUBCOMMANDS = new Set(['install', 'i', 'ci']);
+
+/** npm-Installationen laufen immer ohne Installationsskripte (postinstall & Co. könnten beliebigen Code ausführen). */
+export function withIgnoreScripts(parts: readonly string[]): string[] {
+  if (parts[0] !== 'npm' || !INSTALL_SUBCOMMANDS.has(parts[1] ?? '') || parts.includes('--ignore-scripts')) {
+    return [...parts];
+  }
+  return [...parts, '--ignore-scripts'];
+}
 
 /** Allow safe fixed commands and validated package names/options for npm installs. */
 export function isAllowedCommand(command: string): boolean {

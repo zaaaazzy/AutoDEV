@@ -7,6 +7,8 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import {
   checkoutSprintBranch,
+  commitTaskToGit,
+  filesWithSecrets,
   isValidGitRemote,
   pushRemote,
   restoreShelvedWork,
@@ -180,4 +182,28 @@ test('work of a failed order is parked and restored on the next attempt', async 
   assert.equal(await shelveFailedWork(cwd, item, []), false);
   assert.equal(await restoreShelvedWork(cwd, item.id), true);
   assert.match(git('status', '--porcelain'), /mine\.txt/);
+});
+
+test('files that look like credentials are never committed', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-secrets-'));
+  await writeFile(join(cwd, 'a.txt'), 'hallo');
+  await writeFile(join(cwd, 'config.ts'), `export const token = 'ghp_${'a'.repeat(36)}';\n`);
+  await writeFile(join(cwd, 'deploy.pem'), '-----BEGIN RSA PRIVATE KEY-----\nabc\n');
+  const commit = await commitTaskToGit(cwd, { id: 'i1', title: 'Test' }, 'Sprint 1');
+  assert.ok(commit);
+  const files = execFileSync('git', ['ls-files'], { cwd }).toString().trim().split('\n');
+  assert.deepEqual(files, ['a.txt']);
+  const untracked = execFileSync('git', ['status', '--porcelain'], { cwd }).toString();
+  assert.match(untracked, /config\.ts/);
+});
+
+test('secret detection looks only at added lines', () => {
+  const diff = [
+    '+++ b/src/a.ts',
+    '+const key = "AKIAABCDEFGHIJKLMNOP";',
+    '+++ b/src/b.ts',
+    '-const old = "AKIAABCDEFGHIJKLMNOP";',
+    '+const ok = 1;',
+  ].join('\n');
+  assert.deepEqual(filesWithSecrets(diff), ['src/a.ts']);
 });

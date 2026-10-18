@@ -5,6 +5,7 @@ import { withProjectLock } from '../core/project-lock.js';
 import {
   isAllowedCommand,
   isAssistantServiceCommand,
+  withIgnoreScripts,
   composeViolation,
   COMPOSE_STARTING,
   SECRET_IN_COMMAND,
@@ -136,7 +137,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
             if (reason)
               return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
           }
-          const result = await context.execute(command.split(/\s+/), context.cwd, {
+          const result = await context.execute(withIgnoreScripts(command.split(/\s+/)), context.cwd, {
             timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
             env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_'))),
           });

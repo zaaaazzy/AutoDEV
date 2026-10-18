@@ -60,15 +60,16 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 
 ## 6. Git im Sprint
 
-| Zeitpunkt                                                               | Aktion                                                                                                                                                     |
-| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Auftrag im Sprint **erfolgreich**                                       | Lokaler Commit im Projektordner, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit.         |
-| Sprint abgeschlossen oder Git Push (Pfeil-hoch neben dem GitHub-Symbol) | Sammel-Commit (`Sprint: <Name>`) mit restlichen Änderungen, Tag `sprint-<name>-<id>`, Push (Branch + Tag), falls ein Repository am Projekt hinterlegt ist. |
-| Git Download (Pfeil-runter)                                             | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab.                       |
+| Zeitpunkt                                         | Aktion                                                                                                                                                                    |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vor einem Sprint-Auftrag                          | Wechsel auf den Sprint-Branch `sprint/<name>` (bei Bedarf von `main` angelegt).                                                                                           |
+| Auftrag im Sprint **erfolgreich**                 | Lokaler Commit auf dem Sprint-Branch, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit.                   |
+| Auftrag **fehlgeschlagen**                        | Die vom Auftrag geschriebenen Dateien werden als Stash (`devlog-wip …`) geparkt und landen nicht im nächsten Commit; beim erneuten Versuch werden sie wiederhergestellt.  |
+| Sprint-Sicherung (Pfeil-hoch neben GitHub-Symbol) | Reständerungen committen, **Test-Gate** (Projekttests), nur bei grünen Tests Push des Sprint-Branches.                                                                    |
+| Sprint abgeschlossen                              | Zusätzlich Merge des Sprint-Branches nach `main` (`--no-ff`), erneutes Test-Gate, Push von `main` und Tag `sprint-<name>-<id>`. Bei Merge-Konflikten Abbruch mit Meldung. |
+| Git Download (Pfeil-runter)                       | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab.                                      |
 
-Ausgeschlossen bleiben `.env`, `.dev-log/` und `.dev-log-backups/` (per `.git/info/exclude`). Alle Git-Aktionen laufen unter der Projektsperre, damit sie sich nicht mit Agent-Befehlen überschneiden.
-
-Bekannte Eigenheit: Scheitert ein Auftrag, bleiben seine Dateiänderungen uncommittet und landen im Commit des nächsten erfolgreichen Auftrags bzw. im Sammel-Commit.
+Ausgeschlossen bleiben `.env`, `.dev-log/`, `.dev-log-backups/` sowie typische Schlüsseldateien (`*.pem`, `*.key`, `id_rsa*`, `.netrc`, `credentials.json` …) per `.git/info/exclude`. Zusätzlich prüft jeder automatische Commit die hinzugefügten Zeilen auf Zugangsdaten (private Schlüssel, GitHub-, AWS-, Anthropic-, OpenAI-, Slack- und Google-Tokens); betroffene Dateien bleiben uncommittet im Arbeitsverzeichnis und werden im Log gemeldet. Alle Git-Aktionen laufen unter der Projektsperre, damit sie sich nicht mit Agent-Befehlen überschneiden.
 
 ## 7. Nach dem Zyklus
 
@@ -82,7 +83,7 @@ Repo-Dokumentation spiegeln (`syncRepoDocs`), Sprint-Bericht für den aktiven Sp
 
 - Aufträge laufen sequenziell pro Projekt; mehrere Projekte parallel (`maxConcurrentAgents`).
 - Nach erfolgreichem Play-Lauf eines Bug-Auftrags wird der Ursprungsauftrag nicht automatisch fortgesetzt.
-- Auftrags-Commits werden nicht gepusht; erst die Sprint-Sicherung pusht.
+- Auftrags-Commits werden nicht gepusht; erst die Sprint-Sicherung pusht (nur bei grünen Tests).
 
 ## Parallelität
 

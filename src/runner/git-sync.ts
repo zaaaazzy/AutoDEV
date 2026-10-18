@@ -44,7 +44,50 @@ const MAIN_BRANCH = 'main';
 const WIP_PREFIX = 'devlog-wip';
 const TEST_TIMEOUT_MS = 15 * 60_000;
 
-const INTERNAL_EXCLUDES = ['.dev-log-backups/', '.dev-log/', '.env', '.env.*'];
+const INTERNAL_EXCLUDES = [
+  '.dev-log-backups/',
+  '.dev-log/',
+  '.env',
+  '.env.*',
+  // Typische Zugangsdaten: gelten nur für noch nicht versionierte Dateien, bereits versionierte bleiben unberührt.
+  '*.pem',
+  '*.key',
+  '*.p12',
+  '*.pfx',
+  'id_rsa*',
+  'id_ed25519*',
+  'id_ecdsa*',
+  '.netrc',
+  '.pgpass',
+  'credentials.json',
+  '*service-account*.json',
+];
+
+/** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens). */
+const SECRET_CONTENT = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bgh[pousr]_[A-Za-z0-9]{36}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{40,}/,
+  /\bsk-ant-[A-Za-z0-9_-]{20,}/,
+  /\bsk-(?:proj-)?[A-Za-z0-9]{32,}/,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
+  /\bAIza[0-9A-Za-z_-]{35}\b/,
+];
+
+/** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
+export function filesWithSecrets(diff: string): string[] {
+  const found = new Set<string>();
+  let file: string | null = null;
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ ')) {
+      file = line.startsWith('+++ b/') ? line.slice(6) : null;
+    } else if (file && line.startsWith('+') && SECRET_CONTENT.some((pattern) => pattern.test(line))) {
+      found.add(file);
+    }
+  }
+  return [...found];
+}
 
 /** Hält Agent-Sicherungen, Anhänge und .env-Dateien aus dem automatischen Commit heraus (lokal, ohne .gitignore zu ändern). */
 async function excludeInternalFolders(cwd: string): Promise<void> {
@@ -82,6 +125,23 @@ function gitHelpers(execute: CommandExecutor, cwd: string) {
 }
 
 type GitHelpers = ReturnType<typeof gitHelpers>;
+
+/**
+ * „git add -A“ mit Schutz: Dateien, die nach Zugangsdaten aussehen, werden wieder aus dem Index genommen
+ * (sie bleiben im Arbeitsverzeichnis) und gemeldet. Gibt die zurückgehaltenen Dateien zurück.
+ */
+async function stageAll(git: GitHelpers['git'], must: GitHelpers['must'], log?: string[]): Promise<string[]> {
+  await must('add', '-A');
+  const diff = await git('diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
+  const held = diff.exitCode === 0 ? filesWithSecrets(diff.output) : [];
+  if (!held.length) return held;
+  const hasHead = (await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode === 0;
+  await must(...(hasHead ? ['reset', '-q', '--'] : ['rm', '--cached', '-q', '--']), ...held);
+  const message = `Nicht committet, weil sie nach Zugangsdaten aussehen: ${held.join(', ')}`;
+  if (log) log.push(message);
+  else console.warn(message);
+  return held;
+}
 
 /** Initialisiert das Repository bei Bedarf, setzt eine Commit-Identität und schließt interne Ordner aus. Gibt zurück, ob neu initialisiert wurde. */
 async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must'], cwd: string): Promise<boolean> {
@@ -232,8 +292,8 @@ export async function commitTaskToGit(
   const { git, must } = gitHelpers(execute, cwd);
   try {
     await ensureRepository(git, must, cwd);
-    await must('add', '-A');
-    if (!(await must('status', '--porcelain'))) return null;
+    await stageAll(git, must);
+    if (!(await must('diff', '--cached', '--name-only'))) return null;
     const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
     await must('commit', '-m', subject, '-m', body);
     return await must('rev-parse', '--short', 'HEAD');
@@ -284,8 +344,8 @@ async function pushSprint(
   } else {
     log.push(`Kein Sprint-Branch ${branch} – sichere den aktuellen Branch.`);
   }
-  await must('add', '-A');
-  if (await must('status', '--porcelain')) {
+  await stageAll(git, must, log);
+  if (await must('diff', '--cached', '--name-only')) {
     await must(
       'commit',
       '-m',

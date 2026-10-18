@@ -9,6 +9,27 @@ test('sqlViolation blocks server-level statements and unbounded writes', () => {
   assert.match(sqlViolation('DELETE FROM users') ?? '', /WHERE/);
   assert.equal(sqlViolation('UPDATE users SET a = 1 WHERE id = 2; SELECT 1'), null);
   assert.equal(sqlViolation('CREATE TABLE t (id int)'), null);
+  assert.equal(sqlViolation('ALTER TABLE t ADD COLUMN note text'), null);
+  assert.equal(sqlViolation("UPDATE users SET a = 1 WHERE email = 'x@y.ch' RETURNING id"), null);
+  assert.equal(sqlViolation("INSERT INTO todos (title) VALUES ('to do') ON CONFLICT DO NOTHING"), null);
+});
+
+test('sqlViolation blocks bulk data loss and dynamic SQL', () => {
+  for (const sql of [
+    'DROP TABLE users',
+    'drop view v',
+    'TRUNCATE orders',
+    'ALTER TABLE users DROP COLUMN email',
+    "DO $$ BEGIN EXECUTE 'select pg_' || 'read_file(''/etc/passwd'')'; END $$",
+    'CREATE OR REPLACE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN END $$',
+    'SELECT lo_create(0)',
+    'DELETE FROM users WHERE true',
+    'DELETE FROM users WHERE 1=1',
+    'UPDATE users SET a = 1 WHERE id = id',
+    "DELETE FROM users WHERE 'a' = 'a' RETURNING *",
+  ]) {
+    assert.ok(sqlViolation(sql), sql);
+  }
 });
 
 test('targetsDevLogDatabase compares database names', () => {
