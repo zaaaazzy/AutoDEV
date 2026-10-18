@@ -3,7 +3,7 @@ import { ApiService } from './api.service.js';
 import { errorMessage } from './errors.js';
 import { ProjectStore } from './project-store.js';
 
-/** Eine gespeicherte Aktion eines Agents (Quick Action), z. B. „Tests ausführen“ des Testers. */
+/** Eine gespeicherte Aktion eines Agents, z. B. „Tests ausführen“ des Testers. */
 export interface AgentAction {
   id: string;
   title: string;
@@ -22,9 +22,8 @@ export interface ActionForm {
 }
 
 /**
- * Aktionen je Agent für das aktive Projekt – eine Quelle für Aktionen-Menü im Assistenten, Agents-Seite und
- * Quick Actions im Dashboard. Gestartet wird eine Aktion als Anfrage an ihren Agent (Ergebnis im Chat und unter
- * Dokumentation → Anfragen).
+ * Aktionen je Agent für das aktive Projekt – eine Quelle für das Aktionen-Menü im Assistenten und die Agents-Seite.
+ * Gestartet wird eine Aktion als Anfrage an ihren Agent (Ergebnis im Chat und unter Dokumentation → Anfragen).
  */
 @Injectable({ providedIn: 'root' })
 export class AgentActionsService {

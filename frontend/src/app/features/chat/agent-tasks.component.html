@@ -69,60 +69,145 @@
             placeholder="Aktion suchen …"
             aria-label="Aktion suchen"
             [value]="query()"
+            role="combobox"
+            aria-autocomplete="list"
+            [attr.aria-expanded]="true"
+            [attr.aria-activedescendant]="entries().length ? 'agent-task-' + active() : null"
             (input)="setQuery($any($event.target).value)"
             (keydown)="keydown($event)"
           />
         </label>
-        <ul class="agent-tasks-list" role="listbox">
-          @for (entry of entries(); track entry.id; let index = $index) {
-            <li
-              class="agent-task"
-              role="option"
-              [class.active]="index === active()"
-              [attr.aria-selected]="index === active()"
-              (mouseenter)="active.set(index)"
-              (click)="run(entry)"
-              [title]="entry.prompt"
-            >
-              <span class="agent-task-run" aria-hidden="true">▶</span>
-              <span class="agent-task-text">
-                <strong
-                  >{{ entry.title }}
-                  @if (entry.agentName) {
-                    <span class="agent-task-agent">{{ entry.agentName }}</span>
-                  }
-                </strong>
-                <small class="muted">{{ entry.prompt }}</small>
-              </span>
-              @if (entry.runCount) {
-                <span class="agent-task-count muted" title="So oft gestartet">{{ entry.runCount }}×</span>
-              }
-              <button
-                type="button"
-                class="agent-task-icon"
-                title="Bearbeiten"
-                aria-label="Bearbeiten"
-                (click)="edit(entry, $event)"
+        <ul class="agent-tasks-list" role="listbox" aria-label="Aktionen nach Agent" (pointerleave)="leave($event)">
+          @for (group of groups(); track group.id) {
+            <li class="agent-tasks-group" role="presentation">{{ group.name }}</li>
+            @for (entry of group.entries; track entry.key) {
+              @let index = position(entry);
+              <li
+                class="agent-task"
+                role="option"
+                [id]="'agent-task-' + index"
+                [class.active]="index === active()"
+                [class.disabled]="disabled(entry)"
+                [attr.aria-selected]="index === active()"
+                [attr.aria-disabled]="disabled(entry)"
+                [attr.aria-describedby]="current() === entry ? 'agent-task-detail' : null"
+                (pointerenter)="hover(index, $event)"
+                (click)="run(entry)"
               >
-                ✎
-              </button>
-              <button
-                type="button"
-                class="agent-task-icon"
-                title="Löschen"
-                aria-label="Löschen"
-                (click)="remove(entry, $event)"
-              >
-                ✕
-              </button>
-            </li>
+                <span class="agent-task-run" aria-hidden="true">▶</span>
+                <span class="agent-task-text">
+                  <strong>{{ entry.title }}</strong>
+                  <small class="muted">{{ entry.summary }}</small>
+                </span>
+                @if (entry.action?.runCount) {
+                  <span class="agent-task-count muted" title="So oft gestartet">{{ entry.action?.runCount }}×</span>
+                }
+                <button
+                  type="button"
+                  class="agent-task-icon agent-task-info"
+                  title="Details"
+                  aria-label="Details"
+                  [attr.aria-expanded]="current() === entry"
+                  (click)="details(index, $event)"
+                >
+                  ⓘ
+                </button>
+                @if (entry.action; as action) {
+                  <button
+                    type="button"
+                    class="agent-task-icon"
+                    title="Bearbeiten"
+                    aria-label="Bearbeiten"
+                    (click)="edit(action, $event)"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    type="button"
+                    class="agent-task-icon"
+                    title="Löschen"
+                    aria-label="Löschen"
+                    (click)="remove(action, $event)"
+                  >
+                    ✕
+                  </button>
+                }
+              </li>
+            }
           } @empty {
             <li class="agent-tasks-empty muted">Keine Aktion gefunden.</li>
           }
         </ul>
-        <button type="button" class="agent-tasks-new" (click)="startNew()">
-          + {{ query().trim() ? 'Neue Aktion „' + query().trim() + '“' : 'Neue Aktion definieren' }}
-        </button>
+        @if (current(); as entry) {
+          <aside id="agent-task-detail" class="agent-task-detail" aria-live="polite">
+            <strong>{{ entry.title }}</strong>
+            <dl>
+              <dt>Ausgeführt von</dt>
+              <dd>{{ entry.runner }}</dd>
+              <dt>{{ entry.action ? 'Anweisung an den Agent' : 'Was geprüft wird' }}</dt>
+              <dd class="agent-task-detail-prompt">{{ entry.detail }}</dd>
+              <dt>Was passiert</dt>
+              <dd>{{ entry.effect }}</dd>
+              @if (entry.commands.length) {
+                <dt>Befehle</dt>
+                <dd class="agent-task-detail-commands">
+                  @for (command of entry.commands; track command) {
+                    <code>{{ command }}</code>
+                  }
+                </dd>
+              }
+              <dt>Bisher</dt>
+              <dd>
+                @if (entry.action; as action) {
+                  @if (action.runCount) {
+                    {{ action.runCount }}× gestartet
+                    @if (action.lastRunAt) {
+                      · zuletzt {{ action.lastRunAt | date: 'dd.MM.yyyy HH:mm' }}
+                    }
+                  } @else {
+                    Noch nie gestartet
+                  }
+                } @else if (latestTest(); as test) {
+                  @switch (test.status) {
+                    @case ('requested') {
+                      Wartet auf den Worker · angefordert {{ test.createdAt | date: 'HH:mm' }}
+                    }
+                    @case ('running') {
+                      {{ test.scope === 'ui' ? 'Oberflächentest' : 'Kompletter Test' }} läuft seit
+                      {{ test.startedAt | date: 'HH:mm' }}
+                    }
+                    @case ('done') {
+                      Letzter Test fertig {{ test.finishedAt | date: 'dd.MM. HH:mm' }} ·
+                      {{ test.bugCount ? test.bugCount + ' neue Bugs' : 'keine neuen Bugs' }}
+                    }
+                    @case ('failed') {
+                      Letzter Test abgebrochen: {{ test.error || 'unbekannter Fehler' }}
+                    }
+                  }
+                } @else {
+                  Noch kein Test angefordert
+                }
+              </dd>
+            </dl>
+          </aside>
+        }
+        @if (latestTest(); as test) {
+          @if (test.status === 'requested' || test.status === 'running') {
+            <p class="agent-tasks-status muted" role="status">
+              <span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>
+              {{ test.scope === 'ui' ? 'Oberflächentest' : 'Kompletter Test' }}
+              {{ test.status === 'running' ? 'läuft' : 'wartet auf den Worker' }}
+            </p>
+          }
+        }
+        <div class="agent-tasks-footer">
+          <button type="button" class="agent-tasks-new" (click)="startNew()">
+            + {{ query().trim() ? 'Neue Aktion „' + query().trim() + '“' : 'Neue Aktion definieren' }}
+          </button>
+          <a class="agent-tasks-manage" href="#agents" (click)="$event.preventDefault(); manage()"
+            >Aktionen verwalten</a
+          >
+        </div>
       }
     </div>
   }

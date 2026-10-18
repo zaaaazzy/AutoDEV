@@ -333,31 +333,59 @@ test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
 
-test('Agent-Aktionen: Tester hat die Standard-Aktionen, Quick Actions im Dashboard, eigene Aktion anlegen', async ({
+test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details beim Hover, eigene Aktion anlegen', async ({
   page,
 }) => {
   const title = `Build prüfen ${test.info().project.name}`;
   await login(page);
   await page.goto('/#dashboard');
-  // Quick Actions: die Standard-Aktionen gehören dem Tester.
-  const quick = page.locator('.quick-actions .quick-group', { hasText: 'Tester' });
-  await expect(quick.getByRole('button', { name: /Tests ausführen/ })).toBeVisible();
+  // Keine eigene Quick-Actions-Karte mehr: alles steckt im Menü „Aktionen“ des Assistenten.
+  await expect(page.locator('.quick-actions')).toHaveCount(0);
   await page.getByRole('button', { name: 'Aktionen' }).click();
-  const search = page.getByRole('searchbox', { name: 'Aktion suchen' });
+  const menu = page.getByRole('dialog', { name: 'Agent-Aktionen' });
+  const search = menu.getByRole('combobox', { name: 'Aktion suchen' });
   await expect(search).toBeFocused();
+  // Gruppen: Testläufe und die Standard-Aktionen des Testers.
+  const groups = menu.locator('.agent-tasks-group');
+  await expect(groups.filter({ hasText: /^Tests$/ })).toHaveCount(1);
+  await expect(groups.filter({ hasText: /^Tester$/ })).toHaveCount(1);
+  await expect(menu.locator('.agent-task', { hasText: 'Kompletter Test' })).toBeVisible();
+  // Hover zeigt die ausführliche Beschreibung mit vollständiger Anweisung, Agent und Befehlen.
+  await menu.locator('.agent-task', { hasText: 'Abhängigkeiten prüfen' }).hover();
+  const detail = menu.locator('.agent-task-detail');
+  await expect(detail).toContainText('Ausgeführt von');
+  await expect(detail).toContainText('Tester');
+  await expect(detail).toContainText('schlage Updates mit Risiko vor. Nichts installieren.');
+  await expect(detail.locator('code', { hasText: 'npm audit' })).toBeVisible();
+  // Auch auf dem Handy läuft nichts seitlich aus der Seite.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.mouse.move(0, 0);
+  await expect(detail).toHaveCount(0);
+  // Ohne Hover (Handy): der Info-Knopf zeigt die Details, ohne die Aktion zu starten.
+  const git = menu.locator('.agent-task', { hasText: 'Git-Status zusammenfassen' });
+  await git.getByRole('button', { name: 'Details' }).click();
+  await expect(detail).toContainText('Nichts ändern.');
+  await expect(detail).toContainText('Noch nie gestartet');
+  await expect(menu).toBeVisible();
+  // Suche filtert über alle Gruppen; Pfeiltaste zeigt die Details per Tastatur.
   await search.fill('docker');
-  await expect(page.locator('.agent-task')).toHaveCount(1);
-  await expect(page.locator('.agent-task')).toContainText('Docker-Dienste starten');
+  await expect(menu.locator('.agent-task')).toHaveCount(1);
+  await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
+  await expect(groups).toHaveText(['Tester']);
+  await search.press('ArrowDown');
+  await expect(detail).toContainText('docker compose up -d');
   await search.fill(title);
-  await page.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();
+  await expect(menu.getByText('Keine Aktion gefunden.')).toBeVisible();
+  await menu.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();
   await page.getByLabel('Anweisung an den Assistenten').fill('Führe npm run build aus und melde Fehler.');
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
-  const own = page.locator('.agent-task', { hasText: title });
+  const own = menu.locator('.agent-task', { hasText: title });
   await expect(own).toBeVisible();
   page.once('dialog', (dialog) => void dialog.accept());
   await own.hover();
   await own.getByRole('button', { name: 'Löschen' }).click();
   await expect(own).toHaveCount(0);
+  await expect(menu.getByRole('link', { name: 'Aktionen verwalten' })).toBeVisible();
 });
 
 test('Chat: „@“ wählt den Agent, „/“ verweist mit Bubbles, beim Tippen eingeschränkt', async ({ page }) => {

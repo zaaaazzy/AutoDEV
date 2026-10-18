@@ -1,7 +1,6 @@
 import { GitGraphPanelComponent } from './git-graph-panel.component.js';
 import { CoveragePanelComponent } from './coverage-panel.component.js';
 import { TestMethodsPanelComponent } from './test-methods-panel.component.js';
-import { QuickActionsComponent } from './quick-actions.component.js';
 import { NgClass } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
@@ -46,7 +45,6 @@ const RECENT_RUNS = 20;
     ChatComponent,
     CoveragePanelComponent,
     TestMethodsPanelComponent,
-    QuickActionsComponent,
     GitGraphPanelComponent,
     ShareBarComponent,
     DateTimePipe,

@@ -6831,6 +6831,96 @@ a.git-commit[href]:hover {
   padding: 10px 8px;
 }
 
+.agent-tasks-list .agent-tasks-group {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: #fff;
+}
+
+.agent-task.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Hover-Details: neben dem Menü, auf schmalen Bildschirmen darunter. */
+.agent-task-detail {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 8px);
+  width: 320px;
+  max-height: min(520px, 80vh);
+  padding: 12px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  font-size: 0.85rem;
+}
+
+.agent-task-detail dl {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+}
+
+.agent-task-detail dt {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-task-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-task-detail-prompt {
+  white-space: pre-wrap;
+}
+
+.agent-task-detail-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.agent-task-detail-commands code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--paper);
+  font-size: 0.78rem;
+}
+
+.agent-tasks-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0 8px;
+  font-size: 0.8rem;
+}
+
+.agent-tasks-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-tasks-footer .agent-tasks-new {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-tasks-manage {
+  flex: none;
+  font-size: 0.85rem;
+}
+
 .agent-tasks-new {
   width: 100%;
   padding: 8px;
@@ -6882,6 +6972,18 @@ a.git-commit[href]:hover {
     right: 0;
     left: 0;
     width: auto;
+  }
+
+  .agent-tasks-list {
+    max-height: 45vh;
+  }
+
+  .agent-task-detail {
+    position: static;
+    width: auto;
+    max-height: 30vh;
+    margin-bottom: 6px;
+    box-shadow: none;
   }
 
   .chat-clear-label {
@@ -8323,62 +8425,6 @@ a.app-link {
   gap: 6px;
 }
 
-/* Quick Actions im Dashboard: Aktionen je Agent als Knöpfe */
-.quick-actions {
-  display: grid;
-  gap: 10px;
-}
-
-.quick-group {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
-}
-
-.quick-agent {
-  display: inline-flex;
-  flex: 0 0 150px;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 0.84rem;
-  font-weight: 600;
-}
-
-.quick-buttons {
-  display: flex;
-  flex: 1;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.quick-button {
-  padding: 6px 12px;
-  border: 1px solid #cfe0d5;
-  border-radius: 999px;
-  background: #f6faf7;
-  color: var(--green);
-  font: inherit;
-  font-size: 0.84rem;
-  cursor: pointer;
-}
-
-.quick-button:hover:not(:disabled) {
-  background: #e2efe7;
-}
-
-.quick-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-@media (max-width: 720px) {
-  .quick-agent {
-    flex-basis: 100%;
-  }
-}
-
 /* Ideen-Dialog: Kopf mit Aktionen nebeneinander, Kennzahlen, formatierte Beschreibung. */
 .idea-detail {
   padding: 0;
@@ -9033,19 +9079,4 @@ input.pick {
 .step-raw > summary {
   color: var(--muted);
   font-size: 12px;
-}
-
-/* Quick Actions: Status des kompletten Tests. */
-.quick-test-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  flex-basis: 100%;
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-.quick-test-status.failed {
-  color: #a3361f;
 }
