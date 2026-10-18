@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
 import { targetsDevLogDatabase } from '../agent/tool-sql.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
+import { healthUrlError, SERVICE_NAME } from '../runner/production-monitor.js';
 import {
   isRecord,
   normalizeProjectSlug,
@@ -14,12 +15,58 @@ import {
   validText,
 } from '../core/validation.js';
 
+/** Einstellungen des Produktions-Rückkanals; vom Ingest-Token nur, ob eines hinterlegt ist. */
+const PRODUCTION_COLUMNS = `health_url AS "healthUrl", log_services AS "logServices", production_ignore AS "productionIgnore", production_retention_days AS "productionRetentionDays", ingest_token_hash IS NOT NULL AS "ingestConfigured"`;
+
+function lines(value: unknown, split: RegExp): string[] | null {
+  if (typeof value === 'string')
+    return value
+      .split(split)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string'))
+    return value.map((entry: string) => entry.trim()).filter(Boolean);
+  return null;
+}
+
+/** Prüft Health-URL, Log-Dienste, Ausschlussmuster und Aufbewahrung; liefert Spalten und Werte oder den Fehler. */
+export function parseProductionSettings(body: Record<string, unknown>): [string, unknown][] | string {
+  const sets: [string, unknown][] = [];
+  if (body.healthUrl !== undefined) {
+    const url = typeof body.healthUrl === 'string' ? body.healthUrl.trim() : body.healthUrl === null ? '' : null;
+    if (url === null) return 'Ungültige Health-URL.';
+    const error = url ? healthUrlError(url) : null;
+    if (error) return error;
+    sets.push(['health_url', url || null]);
+  }
+  if (body.logServices !== undefined) {
+    const services = lines(body.logServices, /[\s,]+/);
+    if (!services || services.length > 20 || services.some((service) => !SERVICE_NAME.test(service))) {
+      return 'Log-Dienste: bis zu 20 Compose-Dienstnamen (Buchstaben, Ziffern, „-“, „_“, „.“), mit Komma getrennt.';
+    }
+    sets.push(['log_services', [...new Set(services)]]);
+  }
+  if (body.productionIgnore !== undefined) {
+    const patterns = lines(body.productionIgnore, /\r?\n/);
+    if (!patterns || patterns.length > 50 || patterns.some((pattern) => pattern.length > 200)) {
+      return 'Ausschlussmuster: höchstens 50 Zeilen mit je bis zu 200 Zeichen.';
+    }
+    sets.push(['production_ignore', patterns]);
+  }
+  if (body.productionRetentionDays !== undefined) {
+    const days = Number(body.productionRetentionDays);
+    if (!Number.isInteger(days) || days < 1 || days > 365) return 'Aufbewahrung: 1 bis 365 Tage.';
+    sets.push(['production_retention_days', days]);
+  }
+  return sets;
+}
+
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -247,6 +294,12 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
         `autopilot_days = $${values.length}::smallint[]`,
       );
     }
+    const production = parseProductionSettings(body);
+    if (typeof production === 'string') return fail(production);
+    for (const [column, value] of production) {
+      values.push(value);
+      sets.push(`${column} = $${values.length}`);
+    }
     if (body.autoBugfix !== undefined) {
       if (typeof body.autoBugfix !== 'boolean')
         return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
@@ -257,7 +310,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}`,
       values,
     );
     if (!result.rows[0]) {

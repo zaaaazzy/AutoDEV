@@ -8,7 +8,8 @@ const COMMAND_PATTERN =
 const SERVICE_NAME = '[a-zA-Z0-9][\\w.-]*';
 const ASSISTANT_SERVICE_PATTERNS = [
   new RegExp(`^docker compose (?:ps|config --services)$`),
-  new RegExp(`^docker compose logs(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
+  // Auch der Log-Scan des Produktions-Rückkanals: docker compose logs --since 15m --no-color <dienste>.
+  new RegExp(`^docker compose logs(?: --since \\d+[smh])?(?: --no-color)?(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
   new RegExp(`^docker compose up -d(?: --build| --wait| --force-recreate)*(?: ${SERVICE_NAME})*$`),
   new RegExp(`^docker compose (?:stop|start|restart|down|build|pull)(?: ${SERVICE_NAME})*$`),
   /^docker compose down --remove-orphans$/,

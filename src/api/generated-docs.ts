@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { systemAgents, systemCommand } from '../agent/system-agents.js';
+import { productionGuide } from './production-snippets.js';
 import { ROLE_INFO, type Role } from './roles.js';
 
 /**
@@ -217,11 +218,24 @@ function settingsDoc(slug: string, key: string, title: string, content: string, 
 }
 
 /** Alle erzeugten Dokumente eines Projekts; die Benutzerübersicht nur für Administratoren. */
-export async function generatedDocs(pool: Pool, slug: string, isAdmin: boolean): Promise<GeneratedDoc[]> {
+export async function generatedDocs(
+  pool: Pool,
+  slug: string,
+  isAdmin: boolean,
+  baseUrl = 'http://localhost:3100',
+): Promise<GeneratedDoc[]> {
   const [reports, agents, users] = await Promise.all([
     testReports(pool, slug),
     agentSettings(pool, slug),
     isAdmin ? userOverview(pool, slug) : Promise.resolve(null),
   ]);
-  return [...reports, agents, ...(users ? [users] : [])];
+  // Anleitung mit kopierbaren Snippets für Browser und Node (Produktions-Rückkanal).
+  const production = settingsDoc(
+    slug,
+    'betrieb',
+    'Betrieb: Fehler an Dev Log melden',
+    productionGuide(baseUrl, slug),
+    null,
+  );
+  return [...reports, agents, production, ...(users ? [users] : [])];
 }

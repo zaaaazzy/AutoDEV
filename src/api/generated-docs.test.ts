@@ -46,22 +46,32 @@ const pool = {
 } as unknown as Pool;
 
 test('Testberichte, Agent-Einstellungen und Benutzerübersicht als schreibgeschützte Dokumente', async () => {
-  const docs = await generatedDocs(pool, 'dev-log', true);
+  const docs = await generatedDocs(pool, 'dev-log', true, 'https://devlog.example.ch');
   assert.deepEqual(
     docs.map((doc) => [doc.kind, doc.title.split(' 18.')[0]]),
     [
       ['test', 'Testbericht'],
       ['settings', 'Agent-Einstellungen'],
+      ['settings', 'Betrieb: Fehler an Dev Log melden'],
       ['settings', 'Benutzerübersicht'],
     ],
   );
   assert.match(docs[0]!.title, /mit Befunden/);
   assert.match(docs[1]!.content, /\| 1 \| Entwickler \| Entwickler \| Umsetzung \| Claude · opus \| Aktiv \|/);
   assert.match(
-    docs[2]!.content,
+    docs[3]!.content,
     /\| Anna Autorin \| anna \| Dokumentation bearbeiten \| ja \| nein \| nie \| Aktiv \|/,
   );
-  assert.doesNotMatch(docs[2]!.content, /password|hash/i);
+  assert.doesNotMatch(docs[3]!.content, /password|hash/i);
+});
+
+test('Die Betriebs-Anleitung enthält kopierbare Snippets für Browser und Node mit dem Ingest-Endpunkt', async () => {
+  const guide = (await generatedDocs(pool, 'dev-log', false, 'https://devlog.example.ch')).find(
+    (doc) => doc.id === 'einstellungen-betrieb',
+  )!;
+  assert.match(guide.content, /```html\n<script>[\s\S]*window\.onerror = function[\s\S]*<\/script>\n```/);
+  assert.match(guide.content, /```js\n[\s\S]*process\.on\('uncaughtException'[\s\S]*\n```/);
+  assert.match(guide.content, /https:\/\/devlog\.example\.ch\/api\/ingest\/dev-log\/<TOKEN>/);
 });
 
 test('Die Benutzerübersicht sehen nur Administratoren', async () => {

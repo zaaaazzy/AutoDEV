@@ -556,6 +556,56 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
   }
 });
 
+test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und Verlauf am Bug', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  for (const healthUrl of ['ftp://localhost/health', 'https://example.com/health']) {
+    expect((await request.patch('/api/projects/e2e', { headers, data: { healthUrl } })).status()).toBe(400);
+  }
+  // Zahlen fallen im Fingerabdruck weg: je Gerät ein eigener Text, damit jeder Lauf einen eigenen Bug anlegt.
+  const title = `E2E-Fehler im Betrieb ${isMobile ? 'Handy' : 'Desktop'}`;
+  await login(page);
+  await page.goto('/#settings');
+  const settings = page.locator('#production-settings');
+  // Ab dem zweiten Lauf ist ein Token hinterlegt: Rotieren fragt nach.
+  page.once('dialog', (dialog) => void dialog.accept());
+  await settings.getByRole('button', { name: /Token (erzeugen|rotieren)/ }).click();
+  const token = (await settings.getByTestId('ingest-token').textContent())!.trim();
+  await expect(settings.getByText(`/api/ingest/e2e/${token}`).first()).toBeAttached();
+
+  const anonymous = await request.post(`/api/ingest/e2e/${token}`, {
+    headers: { 'Content-Type': 'text/plain' },
+    data: JSON.stringify({ message: title, stack: '    at checkout (/app/src/kasse.js:1:1)', source: 'browser' }),
+  });
+  expect(anonymous.status()).toBe(202);
+  expect((await request.post('/api/ingest/e2e/falsches-token-1234567890', { data: '{}' })).status()).toBe(401);
+  expect((await request.get('/api/projects')).status()).toBe(401);
+
+  await page.goto('/#bugs');
+  const row = page.getByText(title).first();
+  await expect(row).toBeVisible();
+  await expect(page.getByText('Betrieb · 1× seit gestern').first()).toBeVisible();
+  await row.click();
+  await expect(page.getByText('Vorkommen je Stunde (48 h)').first()).toBeVisible();
+  await expect(page.getByText(/Kein Deploy-Verdacht|Deploy-Verdacht:/).first()).toBeVisible();
+
+  await page.goto('/#dashboard');
+  await expect(page.getByTestId('production-tile')).toContainText('Betrieb');
+
+  // Aufräumen: Mit Auto-Bugfix entstand ein Bug-Auftrag, der sonst in den Sprint-Tests des nächsten Geräts liegt.
+  const bug = (await (await request.get('/api/projects/e2e/bugs', { headers })).json()).bugs.find(
+    (entry: { title: string }) => entry.title.endsWith(title),
+  );
+  const board = await (await request.get('/api/projects/e2e/board', { headers })).json();
+  for (const item of board.development.filter((entry: { bugId: string | null }) => entry.bugId === bug.id)) {
+    await request.delete(`/api/development/${item.id}`, { headers });
+  }
+  await request.delete(`/api/bugs/${bug.id}`, { headers });
+});
+
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {
   const manifest = await (await request.get('/manifest.webmanifest')).json();
   expect(manifest.display).toBe('standalone');

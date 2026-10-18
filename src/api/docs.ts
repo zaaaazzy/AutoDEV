@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { generatedDocs } from './generated-docs.js';
+import { publicBaseUrl } from './production-snippets.js';
 import type { Principal } from './roles.js';
 import { isAdmin } from './tenancy.js';
 import { INVALID, buildUpdate, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
@@ -102,7 +103,12 @@ export function registerDocRoutes(app: Express, pool: Pool): void {
       [slug],
     );
     // Testberichte, Agent-Einstellungen und Benutzerübersicht (erzeugt, schreibgeschützt)
-    const generated = await generatedDocs(pool, slug, isAdmin(response.locals.principal as Principal | undefined));
+    const generated = await generatedDocs(
+      pool,
+      slug,
+      isAdmin(response.locals.principal as Principal | undefined),
+      publicBaseUrl(request),
+    );
     response.json({ docs: [...result.rows, ...generated] });
   });
 

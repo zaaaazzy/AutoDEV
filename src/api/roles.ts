@@ -56,6 +56,9 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/setup\/jobs$/, 'admin'],
   ['PATCH', /^\/api\/projects\/[^/]+$/, 'admin'],
   ['PUT', /^\/api\/projects\/[^/]+\/permissions$/, 'admin'],
+  // Ingest-Token des Produktions-Rückkanals erzeugen, rotieren, entfernen. Der Ingest-Endpunkt selbst
+  // (POST /api/ingest/<projekt>/<token>) liegt vor dem Login und braucht weder Anmeldung noch Rolle.
+  ['*', /^\/api\/projects\/[^/]+\/ingest-token$/, 'admin'],
   // Eigene Rechte-Gruppen anlegen, ändern, löschen: nur Administration.
   ['*', /^\/api\/projects\/[^/]+\/permission-groups(?:\/[^/]+)?$/, 'admin'],
   ['PUT', /^\/api\/system-agents\//, 'admin'],

@@ -171,16 +171,24 @@ export async function resumeAfterEnvironment(pool: Pool, project: string): Promi
   );
 }
 
-/** Erzeugt (einmalig) den Behebungsauftrag zu einem Bug; er läuft automatisch, auch ohne Sprint. */
-export async function queueBugFix(pool: Pool, item: FailedItem, bugId: string): Promise<void> {
+/**
+ * Erzeugt (einmalig) den Behebungsauftrag zu einem Bug; er läuft automatisch, auch ohne Sprint. Ohne `intro`
+ * behebt er den Fehler, der den Auftrag `item` blockiert; Bugs aus dem Betrieb geben einen eigenen Einstieg mit.
+ */
+export async function queueBugFix(
+  pool: Pool,
+  item: Pick<FailedItem, 'title' | 'sprintId'>,
+  bugId: string,
+  intro?: string,
+): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
      SELECT b.project_slug, $2, 'Bug: ' || b.title,
-            'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.' || E'\n\n' || b.description,
+            COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' || b.description,
             'planned', 'high', 'bug', b.id, TRUE
        FROM bugs b WHERE b.id = $1
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO NOTHING`,
-    [bugId, item.sprintId ?? null, item.title],
+    [bugId, item.sprintId ?? null, item.title, intro ?? null],
   );
 }
 

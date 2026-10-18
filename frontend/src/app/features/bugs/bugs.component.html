@@ -72,6 +72,14 @@
       <ng-template appDataCell="title" let-bug>
         <div class="title-with-hint">
           <button type="button" class="link-button clamp" (click)="toggleBug(bug.id)">{{ bug.title }}</button>
+          @if (bug.source === 'production') {
+            <span class="tag production-badge" [attr.title]="'Vorkommen der letzten 24 Stunden'"
+              >Betrieb · {{ bug.productionCount ?? 0 }}× seit gestern</span
+            >
+            @if (bug.regressedAt && (bug.status === 'open' || bug.status === 'in_progress')) {
+              <span class="tag regression-badge">Regression</span>
+            }
+          }
           @if (bug.description) {
             <span
               class="summary-hint"
@@ -128,6 +136,9 @@
             }
             <app-gallery [bugId]="bug.id" />
           </details>
+          @if (bug.source === 'production') {
+            <app-production-detail [bugId]="bug.id" />
+          }
           @if (bug.fixNotes) {
             <details class="run-step order-brief">
               <summary>Fix-Notizen</summary>

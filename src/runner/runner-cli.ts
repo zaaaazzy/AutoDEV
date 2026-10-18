@@ -16,6 +16,7 @@ import { draftRequirements } from '../agent/requirements.js';
 import { commentSprintProposal } from '../agent/sprint-comment.js';
 import { processVisionaryRun } from '../agent/visionary.js';
 import { syncFavicon } from './favicon.js';
+import { ProductionMonitor } from './production-monitor.js';
 import { syncGitGraph } from './git-graph.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
@@ -207,6 +208,8 @@ async function main(): Promise<void> {
       if (known.length) startup = false;
     };
     void publishSystemAgents(pool).catch(() => undefined);
+    // Produktions-Rückkanal: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten, Aufbewahrung stündlich.
+    const production = new ProductionMonitor(pool);
     // Favicons der Projekte alle 5 Minuten abgleichen (nur bei Änderung wird gespeichert).
     let faviconCheck = 0;
     // Git-Verlauf fürs Dashboard jede Minute.
@@ -214,6 +217,13 @@ async function main(): Promise<void> {
     const heartbeat = setInterval(() => {
       beat();
       void publishSystemAgents(pool).catch(() => undefined);
+      if (!stopping) {
+        production.tick(
+          chatTargets
+            .filter((target) => !target.problem)
+            .map((target) => ({ slug: target.options.project, cwd: target.options.cwd })),
+        );
+      }
       if (Date.now() - gitCheck > 60_000) {
         gitCheck = Date.now();
         for (const target of chatTargets) {

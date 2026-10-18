@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
 import { withProjectLock } from '../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
+import { SECRET_PATTERNS } from '../core/secrets.js';
 import { loadTestCommands } from './runner-selection.js';
 
 const GIT_TIMEOUT_MS = 120_000;
@@ -63,17 +64,8 @@ const INTERNAL_EXCLUDES = [
   '*service-account*.json',
 ];
 
-/** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens). */
-const SECRET_CONTENT = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\bAKIA[0-9A-Z]{16}\b/,
-  /\bgh[pousr]_[A-Za-z0-9]{36}\b/,
-  /\bgithub_pat_[A-Za-z0-9_]{40,}/,
-  /\bsk-ant-[A-Za-z0-9_-]{20,}/,
-  /\bsk-(?:proj-)?[A-Za-z0-9]{32,}/,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
-  /\bAIza[0-9A-Za-z_-]{35}\b/,
-];
+/** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens); gemeinsam mit der Maskierung. */
+const SECRET_CONTENT = SECRET_PATTERNS;
 
 /** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
 export function filesWithSecrets(diff: string): string[] {

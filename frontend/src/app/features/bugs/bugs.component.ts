@@ -16,6 +16,7 @@ import { CATEGORIES, severityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { ProductionDetailComponent } from './production-detail.component.js';
 import {
   CategoryLabelPipe,
   SeverityLabelPipe,
@@ -28,7 +29,12 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
 const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 
-const BUG_SOURCE_LABEL: Record<string, string> = { agent: 'Agent', manual: 'Manuell', test: 'Testlauf' };
+const BUG_SOURCE_LABEL: Record<string, string> = {
+  agent: 'Agent',
+  manual: 'Manuell',
+  test: 'Testlauf',
+  production: 'Betrieb',
+};
 @Component({
   selector: 'app-bugs',
   standalone: true,
@@ -39,6 +45,7 @@ const BUG_SOURCE_LABEL: Record<string, string> = { agent: 'Agent', manual: 'Manu
     DataCellDirective,
     DataDetailDirective,
     GalleryComponent,
+    ProductionDetailComponent,
     MarkdownPipe,
     SeverityLabelPipe,
     ShortTextPipe,
