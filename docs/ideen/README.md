@@ -9,7 +9,18 @@ Es wurde **nichts umgesetzt**. Jede Datei ist so aufgebaut, dass sie direkt als 
 - **Beschreibung für Ideation** → Inhalt des Beschreibungsfelds (kopierfertig)
 - Der Rest (Problem, Ablauf, Andockpunkte, Akzeptanzkriterien-Entwurf, Risiken, Ausbaustufen) ist Material für den Auftragsautor und den Bug-Wächter.
 
-Zu jedem Vorschlag gibt es einen Foliensatz (siehe Links in der Antwort des Visionärs).
+Zu jedem Vorschlag gibt es einen Foliensatz (je 6 Folien: Titel, Heute, Vorschlag, Ablauf, Umsetzung, Fahrplan & Risiken; privat, Teilen über das Share-Menü):
+
+| Nr. | Foliensatz |
+| --- | --- |
+| 01 | https://claude.ai/artifact/YKeVKuB2FGaNmYMWGXMMoo |
+| 02 | https://claude.ai/artifact/Fc6jVPBYrGG8e16AGgRf9T |
+| 03 | https://claude.ai/artifact/MvPxjx2mQixbo3T3nZGojX |
+| 04 | https://claude.ai/artifact/Sy7kxTKRX3K8Unmov1PXKr |
+| 05 | https://claude.ai/artifact/C9jYXDyZDNS3FgsqTnBJUE |
+| 06 | https://claude.ai/artifact/19cBs6hEpq4tapNAVzu1TJ |
+| 07 | https://claude.ai/artifact/QMxDzAZJ7LHsYi74hM1zy6 |
+| 08 | https://claude.ai/artifact/6ZMaSmcsjMF5iVuo9bikWy |
 
 ## Was Dev Log heute schon kann (Kurzbild)
 

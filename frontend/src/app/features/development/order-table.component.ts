@@ -21,11 +21,6 @@ import { OrderService } from './order.service.js';
 
 const PRIORITY_RANK = ['low', 'medium', 'high'];
 
-/** Blockiert, aber nur ein Mensch kann weiterhelfen: „Aktion notwendig“ statt „Blockiert“. */
-export function orderStatusLabel(item: DevelopmentItem): string {
-  return item.actionTodo && item.status === 'blocked' ? 'Aktion notwendig' : statusLabel(item.status);
-}
-
 /**
  * Auftragsliste mit aufklappbarer Detail- und Agent-Ansicht. Dieselbe Komponente nutzen die Auftragsseite
  * und die Agents-Seite („Letzte Aufträge“) – eine Änderung gilt überall.
@@ -59,7 +54,6 @@ export class OrderTableComponent {
   readonly agentsOpen = input(false);
 
   protected readonly openOrder = signal<string | null>(null);
-  protected readonly statusText = orderStatusLabel;
 
   constructor() {
     // Link auf einen Auftrag (#development/<id>): Zeile aufklappen.
@@ -75,7 +69,7 @@ export class OrderTableComponent {
     {
       id: 'status',
       header: 'Status',
-      value: (item) => orderStatusLabel(item),
+      value: (item) => statusLabel(item.status),
       sortValue: (item) => DEVELOPMENT_STATUSES.indexOf(item.status),
     },
     {

@@ -9,6 +9,7 @@ import { runOllamaAgent } from './ollama-agent.js';
 import { loadPermissionGroups, withAssistantPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
+import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -23,8 +24,23 @@ interface Idea {
   comments: string[];
 }
 
+const TITLE_LINE = /^\s*@@TITEL:\s*(.+)$/m;
+
+/** Trennt die Zeile „@@TITEL: …“ (kurzer Auftragstitel des Auftragsautors) vom Anforderungstext. */
+export function splitTitle(output: string): { title: string | null; text: string } {
+  const match = TITLE_LINE.exec(output);
+  if (!match) return { title: null, text: output };
+  const title = shortTitle(match[1]!.replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
+  return {
+    title: title || null,
+    text: (output.slice(0, match.index) + output.slice(match.index + match[0].length)).trim(),
+  };
+}
+
 const FORMAT = [
-  'Schreibe die Anforderung als Markdown mit genau diesen Abschnitten:',
+  `Beginne mit genau einer Zeile \`@@TITEL: <Auftragstitel>\`: höchstens 60 Zeichen, sagt knapp, was entsteht ` +
+    '(z. B. „Dunkelmodus für Einstellungen“), ohne Projektname, ohne Begründung, ohne Satzzeichen am Ende.',
+  'Schreibe danach die Anforderung als Markdown mit genau diesen Abschnitten:',
   '## Ziel',
   '## Anforderungen (Liste)',
   '## Akzeptanzkriterien (Liste, prüfbar)',
@@ -236,7 +252,8 @@ export async function draftRequirements(
     );
     return 0;
   }
-  const { requirement: output, estimate } = splitEstimate(rawOutput);
+  const { title: shortened, text } = splitTitle(rawOutput);
+  const { requirement: output, estimate } = splitEstimate(text);
   if (exitCode !== 0 || output.length < MIN_REQUIREMENT_CHARS) {
     await pool.query(
       `UPDATE ideation_items SET status = 'considering', agent_note = $2, progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
@@ -289,10 +306,11 @@ export async function draftRequirements(
     await pool.query(
       `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
                                     effort_hours, token_estimate, benefit, cost, risks, project_context)
-     SELECT i.project_slug, i.id, i.title, $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4
+     SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4
        FROM ideation_items i
       WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)`,
-      [idea.id, output.slice(0, 10_000), risks, projectContext],
+      // Neuer Auftrag: kurzer Titel des Auftragsautors; ein bestehender behält seinen (evtl. von Hand gesetzten) Titel.
+      [idea.id, output.slice(0, 10_000), risks, projectContext, shortened ?? shortTitle(idea.title, TITLE_MAX)],
     );
   await pool.query(
     `UPDATE ideation_items SET status = 'accepted', progress = NULL, progress_agent = NULL,

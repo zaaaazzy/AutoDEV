@@ -7,7 +7,14 @@
         </div>
       </div>
       <form class="form-grid create-form" (ngSubmit)="createIdea()">
-        <label class="wide">Titel<input name="title" [(ngModel)]="ideaForm.title" maxlength="180" required /> </label>
+        <label class="wide"
+          >Titel<input
+            name="title"
+            [(ngModel)]="ideaForm.title"
+            maxlength="80"
+            required
+            placeholder="Kurz: was soll entstehen (max. 80 Zeichen)"
+        /></label>
         <label
           >Priorität<select name="priority" [(ngModel)]="ideaForm.priority">
             <option value="medium">Mittel</option>

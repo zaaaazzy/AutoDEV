@@ -17,11 +17,7 @@
     </button>
   </ng-template>
   <ng-template appDataCell="status" let-item>
-    <span
-      class="status"
-      [ngClass]="item.actionTodo && item.status === 'blocked' ? 'status-action' : (item.status | statusClass)"
-      >{{ statusText(item) }}</span
-    >
+    <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
   </ng-template>
   <ng-template appDataActions let-item>
     <button

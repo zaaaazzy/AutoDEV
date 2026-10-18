@@ -13,6 +13,8 @@ import {
   parseOption,
   parseProjectSlug,
   parseTitle,
+  TITLE_MAX,
+  validText,
 } from '../core/validation.js';
 
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
@@ -36,6 +38,12 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     const fields = parseFields(body, IDEA_FIELDS);
     if (!slug || !fields || !isRecord(body) || body.title === undefined) {
       response.status(400).json({ message: 'Invalid ideation item.' });
+      return;
+    }
+    if (!validText(body.title, TITLE_MAX)) {
+      response
+        .status(400)
+        .json({ message: `Titel bitte kurz halten (max. ${TITLE_MAX} Zeichen); Details in die Beschreibung.` });
       return;
     }
     const values = new Map(fields.map((field) => [field.column, field.value]));

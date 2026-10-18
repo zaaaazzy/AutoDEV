@@ -11,6 +11,7 @@ import {
 } from './models.js';
 import { isSection, sectionFromHash, targetFromHash, type Section } from './navigation.js';
 import { fetchProjectData } from './project-loader.js';
+import { isFinished } from '../shared/labels.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
@@ -69,7 +70,7 @@ export class ProjectStore {
   /** Offene Rückfrage des Dashboard-Assistenten, falls vorhanden. */
   readonly openQuestion = computed(() => this.worker().agents.find((agent) => agent.waiting)?.orderTitle ?? null);
   readonly openDevelopmentCount = computed(
-    () => this.data().development.filter((item) => item.status !== 'done').length,
+    () => this.data().development.filter((item) => !isFinished(item.status)).length,
   );
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,

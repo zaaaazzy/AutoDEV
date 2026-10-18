@@ -60,11 +60,7 @@
                 }
                 {{ item.kind === 'bug' ? item.title.replace('Bug: ', '') : item.title }}
               </button>
-              <span
-                class="status"
-                [ngClass]="item.actionTodo && item.status === 'blocked' ? 'status-action' : (item.status | statusClass)"
-                >{{ statusText(item) }}</span
-              >
+              <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
             </div>
             <div class="attention-reasons">
               @for (reason of entry.reasons; track reason.label) {
@@ -74,24 +70,38 @@
                 <span class="attention-reason info">Analyse läuft …</span>
               }
             </div>
-            @if (item.actionTodo && item.status !== 'done') {
-              <p class="attention-todo">
-                <strong>Zu tun:</strong> {{ item.actionTodo }}
-                @if (sprintDoc(item); as docId) {
-                  · <a href="#docs" (click)="$event.preventDefault(); openDoc(docId)">ToDo im Sprintbericht</a>
-                }
-              </p>
-            }
-            @if (item.failure && !item.actionTodo) {
-              <article
-                class="markdown attention-failure"
-                [innerHTML]="failureSummary(item.failure) | markdown"
-              ></article>
+            @if (problem(item); as summary) {
+              <dl class="attention-todo">
+                <dt>Problem</dt>
+                <dd>{{ summary.problem }}</dd>
+                <dt>Lösung</dt>
+                <dd>
+                  {{ summary.solution }}
+                  @if (sprintDoc(item); as docId) {
+                    · <a href="#docs" (click)="$event.preventDefault(); openDoc(docId)">ToDo im Sprintbericht</a>
+                  }
+                </dd>
+              </dl>
+              @if (item.failure) {
+                <details class="attention-failure-details">
+                  <summary>Ausführliche Meldung</summary>
+                  <article
+                    class="markdown attention-failure"
+                    [innerHTML]="failureSummary(item.failure) | markdown"
+                  ></article>
+                </details>
+              }
             }
             <div class="attention-actions">
-              @if (item.status === 'blocked' || item.removedFromSprintAt) {
+              @if (item.status === 'blocked' || item.status === 'rejected' || item.removedFromSprintAt) {
                 <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">
-                  {{ item.status === 'blocked' ? 'Erneut versuchen' : 'Wieder einplanen' }}
+                  {{
+                    item.status === 'blocked'
+                      ? 'Erneut versuchen'
+                      : item.status === 'rejected'
+                        ? 'Angepasst – erneut versuchen'
+                        : 'Wieder einplanen'
+                  }}
                 </button>
               }
               @if (entry.manual) {
@@ -147,8 +157,8 @@
         <input
           name="title"
           [(ngModel)]="developmentForm.title"
-          placeholder="Neuer Entwicklungsauftrag …"
-          maxlength="180"
+          placeholder="Neuer Entwicklungsauftrag (kurzer Titel) …"
+          maxlength="80"
           required
         />
         <select name="category" [(ngModel)]="developmentForm.category" aria-label="Kategorie">

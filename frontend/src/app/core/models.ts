@@ -1,7 +1,7 @@
 export type Priority = 'low' | 'medium' | 'high';
 export type SprintStatus = 'planned' | 'active' | 'completed';
-export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'done';
-export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix';
+export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'done' | 'rejected';
+export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
 export type AgentPhase = 'pre_task' | 'while_task' | 'after_task';
 
 export interface Project {

@@ -1,4 +1,6 @@
 import { humanActionFor, setActionTodo } from './action-todo.js';
+import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
 
@@ -70,10 +72,14 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     const todo = rule
       ? `Projektregel verhindert den Auftrag: ${rule} – Auftrag anpassen oder verwerfen`
       : ENVIRONMENT_TODO;
-    await pool.query(`UPDATE development_items SET failure = $2, auto_run = FALSE WHERE id = $1`, [
-      item.id,
-      `Agent „${agentName}“ hat angehalten.\n\n**Vermerk:** ${rule ? 'Projektregel' : 'Umgebung'} – ${todo}.\n\n${detail}`,
-    ]);
+    // Verstoss gegen eine Projektregel: Status „abgelehnt“ (ein Bug-Auftrag lehnt per Trigger auch den Bug ab).
+    await pool.query(
+      `UPDATE development_items SET failure = $2, auto_run = FALSE${rule ? `, status = '${DEVELOPMENT_STATUS.rejected}'` : ''} WHERE id = $1`,
+      [
+        item.id,
+        `Agent „${agentName}“ hat angehalten.\n\n**Vermerk:** ${rule ? 'Projektregel' : 'Umgebung'} – ${todo}.\n\n${detail}`,
+      ],
+    );
     await setActionTodo(pool, item.id, todo.slice(0, 160)).catch(() => undefined);
     return;
   }
@@ -111,7 +117,8 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
   }
   const bugId = await reportAgentBug(pool, {
     projectSlug: item.projectSlug,
-    title: `Agent „${agentName}“ scheiterte bei „${item.title}“`,
+    // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung.
+    title: `${agentName}: ${shortTitle(item.title)}`,
     description: detail,
   });
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.

@@ -14,7 +14,11 @@
             (click)="choose(option)"
             (mouseenter)="active.set(index)"
           >
-            <span aria-hidden="true">{{ option.icon }}</span>
+            @if (option.kind === 'agent') {
+              <span class="mention-icon" aria-hidden="true"><app-nav-icon name="agents" /></span>
+            } @else {
+              <span class="mention-icon" aria-hidden="true">{{ option.icon }}</span>
+            }
             <span class="mention-label">{{ option.label }}</span>
             @if (option.hint) {
               <small>{{ option.hint }}</small>
@@ -30,7 +34,8 @@
     <div class="composer-chips">
       @if (agentName(); as name) {
         <span class="composer-chip agent">
-          🤖 {{ name }}
+          <span class="mention-icon" aria-hidden="true"><app-nav-icon name="agents" /></span>
+          {{ name }}
           <button type="button" aria-label="Agent entfernen" (click)="agentId.set('')">×</button>
         </span>
       }

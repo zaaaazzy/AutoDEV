@@ -78,6 +78,19 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Höchstlänge für neue Titel (Ideen, Aufträge, Bugs); bestehende längere Titel bleiben bearbeitbar (DB: 180). */
+export const TITLE_MAX = 80;
+const TITLE_TARGET = 60;
+
+/** Kürzt einen Titel an einer Wortgrenze auf höchstens `max` Zeichen (mit „…“). */
+export function shortTitle(title: string, max = TITLE_TARGET): string {
+  const clean = title.replace(/\s+/g, ' ').trim();
+  if (clean.length <= max) return clean;
+  const cut = clean.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.–-]+$/, '')}…`;
+}
+
 export function validText(value: unknown, maxLength: number): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= maxLength;
 }

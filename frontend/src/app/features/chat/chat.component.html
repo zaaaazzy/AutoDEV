@@ -29,7 +29,10 @@
           [class.asking]="message.question && message.id === openQuestionId()"
         >
           @if (message.agentName) {
-            <span class="chat-agent-name">{{ message.agentName }}</span>
+            <span class="chat-agent-name"
+              ><span class="mention-icon" aria-hidden="true"><app-nav-icon name="agents" /></span>
+              {{ message.agentName }}</span
+            >
           }
           <app-step-result
             [events]="message.events"
@@ -49,9 +52,12 @@
       } @else {
         <div class="chat-msg mine" [class.failed]="message.status === 'failed'">
           @if (message.agentName) {
-            <span class="chat-agent-name">an {{ message.agentName }}</span>
+            <span class="chat-agent-name"
+              ><span class="mention-icon" aria-hidden="true"><app-nav-icon name="agents" /></span> an
+              {{ message.agentName }}</span
+            >
           }
-          {{ message.content }}
+          <span class="chat-text">{{ message.content }}</span>
           @if (message.references?.length) {
             <span class="chat-refs">
               @for (reference of message.references; track reference.type + reference.id) {

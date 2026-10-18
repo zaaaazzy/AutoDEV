@@ -257,6 +257,8 @@ export const SCHEMA = `
          WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
       ELSIF NEW.status = 'in_progress' THEN
         UPDATE bugs SET status = 'in_progress', updated_at = NOW() WHERE id = NEW.bug_id AND status = 'open';
+      ELSIF NEW.status = 'rejected' THEN
+        UPDATE bugs SET status = 'rejected', updated_at = NOW() WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
       ELSIF NEW.status IN ('planned', 'backlog', 'blocked') THEN
         UPDATE bugs SET status = 'open', updated_at = NOW() WHERE id = NEW.bug_id AND status = 'in_progress';
       END IF;
@@ -502,4 +504,10 @@ export const SCHEMA = `
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS follow_up_of UUID REFERENCES development_items(id) ON DELETE SET NULL;
   -- Verweise einer Chat-Nachricht (@auftrag/…, @git/…), vom Server geprüft.
   ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS refs JSONB NOT NULL DEFAULT '[]'::jsonb;
+  -- Abgelehnt: Auftrag bzw. Bug verstösst gegen die Projektregeln (Do's and Don'ts) und wird nicht umgesetzt.
+  ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_status_check;
+  ALTER TABLE development_items ADD CONSTRAINT development_items_status_check
+    CHECK (status IN ('backlog', 'planned', 'in_progress', 'blocked', 'done', 'rejected'));
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_status_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_status_check CHECK (status IN ('open', 'in_progress', 'fixed', 'wontfix', 'rejected'));
 `;

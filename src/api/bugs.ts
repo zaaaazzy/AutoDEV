@@ -12,6 +12,8 @@ import {
   parseOption,
   parseProjectSlug,
   parseTitle,
+  TITLE_MAX,
+  validText,
 } from '../core/validation.js';
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -92,7 +94,7 @@ export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40)
   const result = await pool.query<KnownBug>(
     `SELECT title, description, severity, status, fix_notes AS "fixNotes"
        FROM bugs
-      WHERE project_slug = $1 AND status <> 'wontfix'
+      WHERE project_slug = $1 AND status NOT IN ('${BUG_STATUS.wontfix}', '${BUG_STATUS.rejected}')
       ORDER BY CASE status WHEN '${BUG_STATUS.open}' THEN 0 WHEN '${BUG_STATUS.inProgress}' THEN 0 ELSE 1 END, updated_at DESC
       LIMIT $2`,
     [projectSlug, limit],
@@ -120,6 +122,12 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     if (!slug || !fields || !values.get('title')) {
       response.status(400).json({ message: 'Invalid bug.' });
+      return;
+    }
+    if (!validText(values.get('title'), TITLE_MAX)) {
+      response
+        .status(400)
+        .json({ message: `Titel bitte kurz halten (max. ${TITLE_MAX} Zeichen); Details in die Beschreibung.` });
       return;
     }
     const sprintId = (values.get('sprint_id') as string | null | undefined) ?? null;

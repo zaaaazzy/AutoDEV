@@ -8,7 +8,14 @@
     </div>
     @if (store.showCreate()) {
       <form class="form-grid create-form" (ngSubmit)="createBug()">
-        <label class="wide">Titel<input name="title" [(ngModel)]="bugForm.title" maxlength="180" required /> </label>
+        <label class="wide"
+          >Titel<input
+            name="title"
+            [(ngModel)]="bugForm.title"
+            maxlength="80"
+            required
+            placeholder="Kurz: was ist kaputt (max. 80 Zeichen)"
+        /></label>
         <label
           >Schweregrad<select name="severity" [(ngModel)]="bugForm.severity">
             <option value="medium">Mittel</option>

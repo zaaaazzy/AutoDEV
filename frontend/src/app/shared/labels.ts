@@ -1,6 +1,18 @@
 import type { DevelopmentStatus } from '../core/models.js';
 
-export const DEVELOPMENT_STATUSES: DevelopmentStatus[] = ['backlog', 'planned', 'in_progress', 'blocked', 'done'];
+export const DEVELOPMENT_STATUSES: DevelopmentStatus[] = [
+  'backlog',
+  'planned',
+  'in_progress',
+  'blocked',
+  'done',
+  'rejected',
+];
+
+/** Abgeschlossen: erledigt oder abgelehnt (verstösst gegen die Projektregeln) – zählt nicht mehr als offen. */
+export function isFinished(status: string): boolean {
+  return status === 'done' || status === 'rejected';
+}
 
 const STATUS_LABELS: Record<string, string> = {
   running: 'Läuft',
@@ -15,11 +27,12 @@ const STATUS_LABELS: Record<string, string> = {
   drafting: 'Auftragsbeschreibung wird erstellt',
   accepted: 'Auftrag wird bearbeitet',
   implemented: 'Umgesetzt',
-  rejected: 'Verworfen',
+  rejected: 'Abgelehnt',
   backlog: 'Backlog',
   planned: 'Geplant',
   in_progress: 'In Arbeit',
-  blocked: 'Blockiert',
+  // Blockiert heisst immer: ein Mensch muss etwas tun (erneut versuchen, prüfen, Zugang geben) – ein Begriff überall.
+  blocked: 'Aktion notwendig',
   done: 'Erledigt',
   open: 'Offen',
   fixed: 'Behoben',

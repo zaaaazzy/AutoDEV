@@ -1,70 +1,117 @@
-<div class="kanban" cdkDropListGroup>
-  @for (column of lanes(); track column.id) {
-    <section class="kanban-column" [class]="'kanban-column col-' + column.id">
-      <header>
-        <strong>{{ column.title }}</strong>
-        <span class="kanban-count">{{ column.items.length }}</span>
-        @if (column.hint) {
-          <small class="muted">{{ column.hint }}</small>
-        }
-      </header>
-      <div
-        class="kanban-list"
-        cdkDropList
-        [id]="sprint().id + '-' + column.id"
-        [cdkDropListData]="column.items"
-        [cdkDropListDisabled]="!column.drop || !editable()"
-        [cdkDropListSortingDisabled]="column.id !== 'planned'"
-        (cdkDropListDropped)="drop($event)"
-      >
-        @for (item of column.items; track item.id; let index = $index) {
-          <article
-            class="kanban-card"
-            cdkDrag
-            [cdkDragData]="item"
-            [cdkDragDisabled]="!column.drop || !editable()"
-            [class.draggable]="column.drop && editable()"
+<div class="kanban-board" cdkDropListGroup>
+  <div class="kanban">
+    @for (column of lanes(); track column.id) {
+      <section class="kanban-column" [class]="'kanban-column col-' + column.id">
+        <header>
+          <strong>{{ column.title }}</strong>
+          <span class="kanban-count">{{ column.items.length }}</span>
+          @if (column.hint) {
+            <small class="muted">{{ column.hint }}</small>
+          }
+        </header>
+        <div
+          class="kanban-list"
+          cdkDropList
+          [id]="sprint().id + '-' + column.id"
+          [cdkDropListData]="column.items"
+          [cdkDropListDisabled]="!column.drop || !editable()"
+          [cdkDropListSortingDisabled]="column.id !== 'planned'"
+          (cdkDropListDropped)="drop($event)"
+        >
+          @for (item of column.items; track item.id; let index = $index) {
+            <article
+              class="kanban-card"
+              cdkDrag
+              [cdkDragData]="item"
+              [cdkDragDisabled]="!column.drop || !editable()"
+              [class.draggable]="column.drop && editable()"
+            >
+              <div class="kanban-card-head">
+                @if (column.id === 'planned') {
+                  <span class="kanban-rank">{{ index + 1 }}</span>
+                }
+                @if (item.kind === 'bug') {
+                  <app-bug-icon />
+                }
+                <a class="kanban-title" [href]="link(item)" [title]="item.title">{{ title(item) }}</a>
+                @if (column.id === 'running') {
+                  <span class="live-dot" aria-label="Agent arbeitet"></span>
+                }
+              </div>
+              <div class="kanban-meta">
+                <span [class]="'kanban-priority prio-' + item.priority">{{ priorityLabel(item.priority) }}</span>
+                @if (item.category) {
+                  <span [class]="'tag category category-' + item.category">{{ categoryLabel(item.category) }}</span>
+                }
+                @if (item.effortHours) {
+                  <span class="muted">{{ formatHours(item.effortHours) }}</span>
+                }
+                @if (editable() && (column.id === 'planned' || column.id === 'blocked')) {
+                  <button
+                    type="button"
+                    class="kanban-move"
+                    aria-label="Aus dem Sprint nehmen"
+                    title="Aus dem Sprint nehmen"
+                    (click)="move(item, false)"
+                  >
+                    ←
+                  </button>
+                }
+              </div>
+              <div class="kanban-placeholder" *cdkDragPlaceholder></div>
+            </article>
+          } @empty {
+            <p class="kanban-empty">
+              {{ column.drop ? 'Hierher ziehen' : '–' }}
+            </p>
+          }
+        </div>
+      </section>
+    }
+  </div>
+  @if (editable()) {
+    <section class="kanban-pool" aria-label="Für den Sprint verfügbar">
+      @for (pool of pools(); track pool.id) {
+        <div class="kanban-pool-group">
+          <header>
+            <strong>{{ pool.title }}</strong>
+            <span class="kanban-count">{{ pool.items.length }}</span>
+            <small class="muted">{{ pool.hint }}</small>
+          </header>
+          <div
+            class="kanban-pool-list"
+            cdkDropList
+            cdkDropListOrientation="horizontal"
+            [id]="sprint().id + '-' + pool.id"
+            [cdkDropListData]="pool.items"
+            [cdkDropListSortingDisabled]="true"
+            (cdkDropListDropped)="drop($event)"
           >
-            <div class="kanban-card-head">
-              @if (column.id === 'planned') {
-                <span class="kanban-rank">{{ index + 1 }}</span>
-              }
-              @if (item.kind === 'bug') {
-                <app-bug-icon />
-              }
-              <span class="kanban-title" [title]="item.title">{{ title(item) }}</span>
-              @if (column.id === 'running') {
-                <span class="live-dot" aria-label="Agent arbeitet"></span>
-              }
-            </div>
-            <div class="kanban-meta">
-              <span [class]="'kanban-priority prio-' + item.priority">{{ priorityLabel(item.priority) }}</span>
-              @if (item.category) {
-                <span [class]="'tag category category-' + item.category">{{ categoryLabel(item.category) }}</span>
-              }
-              @if (item.effortHours) {
-                <span class="muted">{{ formatHours(item.effortHours) }}</span>
-              }
-              @if (editable() && (column.id === 'open' || column.id === 'planned')) {
-                <button
-                  type="button"
-                  class="kanban-move"
-                  [attr.aria-label]="column.id === 'open' ? 'In den Sprint nehmen' : 'Aus dem Sprint nehmen'"
-                  [title]="column.id === 'open' ? 'In den Sprint nehmen' : 'Aus dem Sprint nehmen'"
-                  (click)="move(item, column.id === 'open')"
-                >
-                  {{ column.id === 'open' ? '→' : '←' }}
-                </button>
-              }
-            </div>
-            <div class="kanban-placeholder" *cdkDragPlaceholder></div>
-          </article>
-        } @empty {
-          <p class="kanban-empty">
-            {{ column.id === 'open' ? 'Keine offenen Aufträge' : column.drop ? 'Hierher ziehen' : '–' }}
-          </p>
-        }
-      </div>
+            @for (item of pool.items; track item.id) {
+              <article class="kanban-card kanban-pool-card draggable" cdkDrag [cdkDragData]="item">
+                <div class="kanban-card-head">
+                  @if (item.kind === 'bug') {
+                    <app-bug-icon />
+                  }
+                  <a class="kanban-title" [href]="link(item)" [title]="item.title">{{ title(item) }}</a>
+                  <button
+                    type="button"
+                    class="kanban-move"
+                    aria-label="In den Sprint nehmen"
+                    title="In den Sprint nehmen"
+                    (click)="move(item, true)"
+                  >
+                    →
+                  </button>
+                </div>
+                <div class="kanban-placeholder" *cdkDragPlaceholder></div>
+              </article>
+            } @empty {
+              <p class="kanban-empty">Keine</p>
+            }
+          </div>
+        </div>
+      }
     </section>
   }
 </div>

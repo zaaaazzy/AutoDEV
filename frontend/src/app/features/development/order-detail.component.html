@@ -50,9 +50,9 @@
       </button>
     </label>
   </div>
-  @if (item.status === 'blocked') {
+  @if (item.status === 'blocked' || item.status === 'rejected') {
     <div class="blocked-box">
-      <strong>Blockiert</strong>
+      <strong>{{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}</strong>
       @if (item.failure) {
         <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article>
       }
@@ -80,7 +80,7 @@
       }
       <div class="actions">
         <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
-          ↻ Erneut versuchen
+          ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
           @if (item.retryCount) {
             ({{ item.retryCount }})
           }
@@ -162,7 +162,7 @@
         >
           <strong class="wide">Folgeauftrag zu „{{ item.title }}“</strong>
           <label class="wide"
-            >Titel<input #fuTitle required maxlength="180" placeholder="z. B. Login-Seite: Passwort vergessen ergänzen"
+            >Titel<input #fuTitle required maxlength="80" placeholder="z. B. Login-Seite: Passwort vergessen ergänzen"
           /></label>
           <label class="wide"
             >Was soll sich ändern oder dazukommen?<textarea

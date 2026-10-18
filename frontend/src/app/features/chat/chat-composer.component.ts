@@ -2,6 +2,7 @@ import { Component, computed, ElementRef, inject, input, model, output, signal, 
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { statusLabel } from '../../shared/labels.js';
+import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import type { GitGraph } from '../dashboard/git-graph.js';
 import {
   applySuggestion,
@@ -28,6 +29,7 @@ const MAX_REFERENCES = 5;
 @Component({
   selector: 'app-chat-composer',
   standalone: true,
+  imports: [NavIconComponent],
   templateUrl: './chat-composer.component.html',
 })
 export class ChatComposerComponent {

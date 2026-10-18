@@ -674,7 +674,6 @@ a.summary-card:hover {
   background: #e8f1ec;
   color: #39704e;
 }
-.status-blocked,
 .status-failed,
 .status-rejected,
 .status-wontfix {
@@ -1729,8 +1728,8 @@ h3 .link-button {
 }
 .chat-msg.mine {
   align-self: flex-end;
-  background: #2f6f4f;
-  color: #fff;
+  background: #e2efe7;
+  color: var(--ink);
 }
 .chat-msg.failed {
   outline: 1px solid #c0392b;
@@ -6355,10 +6354,22 @@ app-order-table {
   gap: 6px;
 }
 .kanban-title {
+  display: -webkit-box;
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  color: inherit;
   font-weight: 650;
   line-height: 1.35;
+  text-decoration: none;
+  /* Lange Titel auf drei Zeilen begrenzen; der volle Titel steht im Tooltip. */
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+.kanban-title:hover,
+.kanban-title:focus-visible {
+  color: var(--green);
 }
 .kanban-rank {
   display: inline-grid;
@@ -7092,8 +7103,12 @@ body {
   font-weight: 600;
 }
 
-.chat-msg.mine .chat-agent-name {
-  color: rgb(255 255 255 / 75%);
+.chat-msg.mine {
+  white-space: normal;
+}
+
+.chat-msg.mine .chat-text {
+  white-space: pre-wrap;
 }
 
 .agent-task-agent {
@@ -7107,13 +7122,16 @@ body {
 }
 
 
-/* Aktion notwendig: wartet auf einen Menschen, nicht gescheitert */
-.status-action {
+/* Aktion notwendig (blockiert): wartet auf einen Menschen – überall orange */
+.status-blocked {
   background: #fdf1e0;
   color: #a0610d;
 }
 
 .attention-todo {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
   margin: 6px 0 8px;
   padding: 8px 10px;
   border-left: 3px solid #e0a040;
@@ -7443,8 +7461,24 @@ a.app-link {
 }
 
 .composer-chip.agent {
-  background: var(--green);
-  color: #fff;
+  background: #e2efe7;
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* Agent-Symbol wie in der Kopfzeile: einfarbig, Textgrösse */
+.mention-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.mention-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.chat-agent-name .mention-icon {
+  vertical-align: -2px;
 }
 
 .composer-chip .chip-label {
@@ -7490,6 +7524,133 @@ a.app-link {
 .chat-ref {
   padding: 1px 8px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 22%);
+  background: #fff;
+  border: 1px solid #c9dccf;
   font-size: 0.75rem;
+}
+
+/* Unter dem Board: offene und abgebrochene Aufträge zum Hineinziehen bzw. → */
+.kanban-board {
+  display: grid;
+  gap: 12px;
+}
+
+.kanban-pool {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px dashed #c9d1c4;
+  border-radius: 12px;
+  background: #fafbf8;
+}
+
+.kanban-pool-group header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 6px;
+}
+
+.kanban-pool-list {
+  display: flex;
+  gap: 8px;
+  min-height: 44px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.kanban-pool-list::-webkit-scrollbar {
+  display: none;
+}
+
+.kanban-pool-card {
+  flex: 0 0 220px;
+}
+
+/* Sprint-Hover: Aufträge mit Handlungsbedarf, Klick öffnet den Auftrag */
+.sprint-indicator {
+  position: relative;
+}
+
+.sprint-indicator:hover .sprint-popover,
+.sprint-indicator:focus-within .sprint-popover {
+  display: block;
+}
+
+.sprint-popover {
+  right: 0;
+  left: auto;
+  width: 340px;
+}
+
+.attention-line {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.attention-line:hover,
+.attention-line:focus-visible {
+  background: #fdf7ec;
+  outline: none;
+}
+
+.attention-line strong {
+  font-size: 0.88rem;
+}
+
+.attention-line b {
+  color: #a0610d;
+  font-weight: 600;
+}
+
+
+.attention-todo dt {
+  color: #a0610d;
+  font-weight: 600;
+}
+
+.attention-todo dd {
+  margin: 0;
+}
+
+.attention-failure-details > summary {
+  color: var(--muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+/* Tabellensuche rechts auf Höhe des Panel-Titels (Desktop, Tabelle direkt unter dem Titel); auf dem Handy darunter. */
+@media (min-width: 721px) {
+  .panel:has(> .section-heading + :is(app-data-table, app-order-table)) {
+    position: relative;
+  }
+
+  .panel > .section-heading:has(+ :is(app-data-table, app-order-table)) {
+    padding-right: min(300px, 40%);
+  }
+
+  .panel > .section-heading + app-data-table > .dt > .dt-toolbar > .dt-search,
+  .panel > .section-heading + app-order-table > app-data-table > .dt > .dt-toolbar > .dt-search {
+    position: absolute;
+    top: 14px;
+    right: 18px;
+    width: min(280px, 38%);
+  }
+
+  /* Bleibt in der Leiste nur die Suche, fällt die leere Zeile weg. */
+  .panel > .section-heading + app-data-table > .dt > .dt-toolbar:not(:has(.dt-chip, .dt-reset)),
+  .panel > .section-heading + app-order-table > app-data-table > .dt > .dt-toolbar:not(:has(.dt-chip, .dt-reset)) {
+    display: contents;
+  }
 }

@@ -13,13 +13,14 @@ import type { DevelopmentItem, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { formatHours } from '../../shared/format.js';
-import { categoryLabel, priorityLabel } from '../../shared/labels.js';
+import { categoryLabel, isFinished, priorityLabel, statusLabel } from '../../shared/labels.js';
 
 const PRIORITY = { high: 0, medium: 1, low: 2 } as const;
 
 /**
  * Kanban eines Sprints: offene Aufträge in den Sprint ziehen, Reihenfolge per Ziehen festlegen (die Agents arbeiten
- * sie von oben nach unten ab). In Arbeit, Blockiert und Erledigt zeigen den Stand – dort bewegen die Agents.
+ * sie von oben nach unten ab). In Arbeit, Blockiert, Erledigt und Abgelehnt zeigen den Stand – dort bewegen die Agents.
+ * Jeder Titel verlinkt auf den Auftrag (#development/<id>).
  */
 @Component({
   selector: 'app-sprint-board',
@@ -47,29 +48,45 @@ export class SprintBoardComponent {
     const items = this.store.data().development;
     const id = this.sprint().id;
     const mine = items.filter((item) => item.sprintId === id);
+    const free = items.filter((item) => !item.sprintId && !isFinished(item.status) && item.status !== 'in_progress');
     return {
-      open: this.byRank(
-        items.filter((item) => !item.sprintId && (item.status === 'backlog' || item.status === 'planned')),
-      ),
+      // Unter dem Board zur Auswahl: offene (noch in keinem Sprint) und abgebrochene (aus einem Sprint genommen
+      // oder ohne Sprint gescheitert) – per Ziehen oder → in den Sprint holen.
+      open: this.byRank(free.filter((item) => !item.removedFromSprintAt && item.status !== 'blocked')),
+      aborted: this.byRank(free.filter((item) => item.removedFromSprintAt || item.status === 'blocked')),
       planned: this.byRank(mine.filter((item) => item.status === 'planned' || item.status === 'backlog')),
       running: mine.filter((item) => item.status === 'in_progress'),
       blocked: mine.filter((item) => item.status === 'blocked'),
       done: mine.filter((item) => item.status === 'done'),
+      rejected: mine.filter((item) => item.status === 'rejected'),
     };
   });
 
   protected readonly lanes = computed(() => {
     const board = this.columns();
     return [
-      { id: 'open', title: 'Offen', hint: 'nicht im Sprint', items: board.open, drop: true },
       { id: 'planned', title: 'Geplant', hint: 'Reihenfolge = Abarbeitung', items: board.planned, drop: true },
       { id: 'running', title: 'In Arbeit', hint: '', items: board.running, drop: false },
-      { id: 'blocked', title: 'Blockiert', hint: '', items: board.blocked, drop: false },
+      { id: 'blocked', title: statusLabel('blocked'), hint: '', items: board.blocked, drop: false },
       { id: 'done', title: 'Erledigt', hint: '', items: board.done, drop: false },
+      { id: 'rejected', title: 'Abgelehnt', hint: 'verstösst gegen Projektregel', items: board.rejected, drop: false },
+    ];
+  });
+
+  /** Auswahl unter dem Board (nur solange der Sprint nicht abgeschlossen ist). */
+  protected readonly pools = computed(() => {
+    const board = this.columns();
+    return [
+      { id: 'open', title: 'Offen', hint: 'noch in keinem Sprint', items: board.open },
+      { id: 'aborted', title: 'Abgebrochen', hint: 'aus einem Sprint genommen oder gescheitert', items: board.aborted },
     ];
   });
 
   protected readonly editable = computed(() => this.sprint().status !== 'completed' && this.auth.can('plan'));
+
+  protected link(item: DevelopmentItem): string {
+    return `#development/${item.id}`;
+  }
 
   protected title(item: DevelopmentItem): string {
     return item.kind === 'bug' ? item.title.replace(/^Bug:\s*/i, '') : item.title;
@@ -91,9 +108,9 @@ export class SprintBoardComponent {
     await this.store.perform(
       async () => {
         if (toPlanned && !fromPlanned) {
-          await this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, { sprintId });
+          await this.takeIntoSprint(item);
         } else if (!toPlanned && fromPlanned) {
-          await this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, { sprintId: null });
+          await this.takeOutOfSprint(item);
           return;
         }
         await this.api.post(`/api/sprints/${encodeURIComponent(sprintId)}/order`, {
@@ -103,7 +120,7 @@ export class SprintBoardComponent {
       toPlanned && !fromPlanned
         ? `„${this.title(item)}“ ist im Sprint.`
         : !toPlanned
-          ? `„${this.title(item)}“ ist wieder offen.`
+          ? `„${this.title(item)}“ ist aus dem Sprint genommen.`
           : 'Reihenfolge gespeichert.',
     );
   }
@@ -111,11 +128,21 @@ export class SprintBoardComponent {
   /** Ohne Ziehen (z. B. Tastatur): Auftrag in den Sprint nehmen bzw. herausnehmen. */
   protected async move(item: DevelopmentItem, intoSprint: boolean): Promise<void> {
     await this.store.perform(
-      () =>
-        this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, {
-          sprintId: intoSprint ? this.sprint().id : null,
-        }),
-      intoSprint ? `„${this.title(item)}“ ist im Sprint.` : `„${this.title(item)}“ ist wieder offen.`,
+      () => (intoSprint ? this.takeIntoSprint(item) : this.takeOutOfSprint(item)),
+      intoSprint ? `„${this.title(item)}“ ist im Sprint.` : `„${this.title(item)}“ ist aus dem Sprint genommen.`,
     );
+  }
+
+  /** Herausgenommene gelten als abgebrochen: unter dem Board und unter „Besondere Aufmerksamkeit“. */
+  private takeOutOfSprint(item: DevelopmentItem): Promise<unknown> {
+    return this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`);
+  }
+
+  /** Offene kommen direkt in den Sprint; abgebrochene werden dabei neu eingeplant (Fehler und Vermerk zurückgesetzt). */
+  private async takeIntoSprint(item: DevelopmentItem): Promise<void> {
+    if (item.removedFromSprintAt || item.status === 'blocked') {
+      await this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`);
+    }
+    await this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, { sprintId: this.sprint().id });
   }
 }

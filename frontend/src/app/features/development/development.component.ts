@@ -4,11 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { CATEGORIES, DEVELOPMENT_STATUSES, statusLabel } from '../../shared/labels.js';
+import { CATEGORIES, DEVELOPMENT_STATUSES, isFinished, statusLabel } from '../../shared/labels.js';
 import { CategoryLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
-import { orderStatusLabel, OrderTableComponent } from './order-table.component.js';
+import { OrderTableComponent } from './order-table.component.js';
+import { orderProblem } from '../../shared/order-problem.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
 
@@ -64,9 +65,11 @@ export class DevelopmentComponent {
       .development.map((item) => {
         const reasons: { label: string; tone: 'error' | 'warn' | 'info' }[] = [];
         // Wartet der Auftrag auf einen Menschen, ist er nicht gescheitert, sondern braucht eine Aktion.
-        if (item.actionTodo && item.status !== 'done') reasons.push({ label: 'Aktion notwendig', tone: 'warn' });
-        else if (item.status === 'blocked') reasons.push({ label: 'Fehlgeschlagen', tone: 'error' });
-        if (item.removedFromSprintAt && item.status !== 'done') {
+        if (item.status === 'rejected')
+          reasons.push({ label: 'Abgelehnt – verstösst gegen Projektregel', tone: 'error' });
+        else if (item.status === 'blocked' || (item.actionTodo && !isFinished(item.status)))
+          reasons.push({ label: 'Aktion notwendig', tone: 'warn' });
+        if (item.removedFromSprintAt && !isFinished(item.status)) {
           reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
         }
         const open = manual.get(item.id) ?? 0;
@@ -79,7 +82,6 @@ export class DevelopmentComponent {
   });
   private readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   protected readonly openAttention = signal<string | null>(null);
-  protected readonly statusText = orderStatusLabel;
 
   constructor() {
     // Aus einem Link (#development/<id>, z. B. im Sprintbericht): Auftrag aufklappen und hinscrollen.
@@ -102,8 +104,11 @@ export class DevelopmentComponent {
     this.data().development.filter((item) => item.status === 'done' && !this.attentionIds().has(item.id)),
   );
   protected readonly openOrders = computed(() =>
-    this.data().development.filter((item) => item.status !== 'done' && !this.attentionIds().has(item.id)),
+    this.data().development.filter((item) => !isFinished(item.status) && !this.attentionIds().has(item.id)),
   );
+
+  /** Problem und Lösung in wenigen Worten (dieselbe Kurzfassung wie im Sprint-Hover der Kopfzeile). */
+  protected readonly problem = orderProblem;
 
   /** Sprintbericht mit dem ToDo-Kapitel des Auftrags (falls der Sprint schon dokumentiert ist). */
   protected sprintDoc(item: DevelopmentItem): string | null {

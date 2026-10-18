@@ -85,7 +85,8 @@ function rank<T extends { label: string; hint?: string }>(entries: T[], query: s
 export function suggestions(trigger: Trigger, source: MentionSource, limit = 8): Suggestion[] {
   switch (trigger.kind) {
     case 'agent':
-      return rank(source.agents, trigger.query, limit).map((agent) => ({ kind: 'agent', icon: '🤖', ...agent }));
+      // Das Agent-Symbol zeichnet die Oberfläche (dasselbe wie in der Kopfzeile).
+      return rank(source.agents, trigger.query, limit).map((agent) => ({ kind: 'agent', icon: '', ...agent }));
     case 'category':
       return rank(
         MENTION_CATEGORIES.map((category) => ({ ...category, hint: category.key })),

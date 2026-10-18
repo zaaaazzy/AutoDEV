@@ -1,13 +1,12 @@
 import { NgClass } from '@angular/common';
+import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { OrderService } from '../development/order.service.js';
 import { SprintBoardComponent } from './sprint-board.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
-import { buildWorkflow, type WorkflowRow } from '../../shared/workflow.js';
 import {
   type DataColumn,
   DataCellDirective,
@@ -17,8 +16,6 @@ import {
 import { formatIsoDate } from '../../shared/format.js';
 import { combinedCategory, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
-import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
-import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
 import {
   DurationPipe,
@@ -36,6 +33,7 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
   selector: 'app-sprints',
   standalone: true,
   imports: [
+    NavIconComponent,
     SprintBoardComponent,
     NgClass,
     FormsModule,
@@ -43,10 +41,8 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
     GitTreeComponent,
     HoursPipe,
     IsoDatePipe,
-    NavIconComponent,
     StatusClassPipe,
     StatusLabelPipe,
-    AgentWorkflowComponent,
     DataTableComponent,
     DataCellDirective,
     DataDetailDirective,
@@ -59,13 +55,11 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
 export class SprintsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
-  private readonly orders = inject(OrderService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly usdRate = USD_PER_MILLION_TOKENS;
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
   protected readonly editingId = signal<string | null>(null);
-  protected readonly openSprintItems = signal<ReadonlySet<string>>(new Set());
   protected readonly openSprint = signal<string | null>(
     this.store.data().sprints.find((sprint) => sprint.status === 'active')?.id ?? null,
   );
@@ -117,47 +111,13 @@ export class SprintsComponent {
     this.openSprint.update((current) => (current === id ? null : id));
   }
 
-  protected removeFromSprint(item: DevelopmentItem): Promise<void> {
-    return this.orders.removeFromSprint(item);
-  }
-
-  protected retry(item: DevelopmentItem): Promise<void> {
-    return this.orders.retry(item);
-  }
-
-  protected toggleSprintItem(id: string): void {
-    this.openSprintItems.update((set) => {
-      const next = new Set(set);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  }
-
   protected reportFor(sprintId: string): SprintReport | undefined {
     return this.data().reports.find((report) => report.sprintId === sprintId);
   }
 
-  /** Workflow einer Aufgabe: alle Agents in Laufreihenfolge, jeweils mit dem neuesten Schritt (oder „Ausstehend“). */
-  protected workflow(item: DevelopmentItem): WorkflowRow[] {
-    return buildWorkflow(this.data(), item);
-  }
-
-  /** Statuszeile der Aufgabe: aktueller Status und der laufende bzw. zuletzt gescheiterte Agent. */
-  protected workflowSummary(item: DevelopmentItem, rows: WorkflowRow[]): string {
-    const running = rows.find((row) => row.step?.status === 'running');
-    const failed = rows.find((row) => row.step?.status === 'failed');
-    const done = rows.filter((row) => row.step?.status === 'passed').length;
-    const progress = `${done} von ${rows.length} Agents abgeschlossen`;
-    if (running) return `Läuft: ${running.name} · ${progress}`;
-    if (item.status === 'blocked' && failed) return `Blockiert bei: ${failed.name} · ${progress}`;
-    if (item.status === 'done') return `Alle Agents abgeschlossen`;
-    if (item.status === 'planned') return `Wartet auf den Worker · ${progress}`;
-    return progress;
-  }
-
   protected sprintItems(sprintId: string): DevelopmentItem[] {
     const rank = (status: string): number => {
-      const order = ['in_progress', 'planned', 'backlog', 'blocked', 'done'];
+      const order = ['in_progress', 'planned', 'backlog', 'blocked', 'done', 'rejected'];
       const index = order.indexOf(status);
       return index < 0 ? order.length : index;
     };

@@ -16,6 +16,7 @@ import {
   validStatus,
   CATEGORIES,
   validText,
+  TITLE_MAX,
 } from '../core/validation.js';
 
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
@@ -71,7 +72,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     if (
       !slug ||
       !isRecord(body) ||
-      !validText(body.title, 180) ||
+      !validText(body.title, TITLE_MAX) ||
       (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000)) ||
       (body.status !== undefined && !validStatus(body.status, DEVELOPMENT_STATUSES)) ||
       (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
@@ -119,12 +120,12 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     if (
       !isUuid(request.params.id) ||
       !isRecord(body) ||
-      !validText(body.title, 180) ||
+      !validText(body.title, TITLE_MAX) ||
       (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000)) ||
       (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
       (body.sprintId !== undefined && body.sprintId !== null && !isUuid(body.sprintId))
     ) {
-      response.status(400).json({ message: 'Titel (max. 180 Zeichen) und Beschreibung prüfen.' });
+      response.status(400).json({ message: `Titel (max. ${TITLE_MAX} Zeichen) und Beschreibung prüfen.` });
       return;
     }
     const source = (
@@ -165,7 +166,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  // Retry a blocked order by planning it, using the project's active sprint when no sprint is assigned.
+  // Retry a blocked or (after adjusting) rejected order, using the project's active sprint when none is assigned.
   app.post('/api/development/:id/retry', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
@@ -177,15 +178,15 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
               analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
-        WHERE d.id = $1 AND (d.status = '${DEVELOPMENT_STATUS.blocked}'
+        WHERE d.id = $1 AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
               OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
         RETURNING ${DEV_COLUMNS}`,
       [request.params.id],
     );
     if (!result.rows[0]) {
-      response
-        .status(409)
-        .json({ message: 'Nur blockierte oder aus dem Sprint entfernte Aufträge können weiterbearbeitet werden.' });
+      response.status(409).json({
+        message: 'Nur blockierte, abgelehnte oder aus dem Sprint entfernte Aufträge können weiterbearbeitet werden.',
+      });
       return;
     }
     response.json({ item: result.rows[0] });

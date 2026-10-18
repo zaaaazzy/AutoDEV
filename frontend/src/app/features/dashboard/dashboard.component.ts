@@ -5,7 +5,14 @@ import { Component, computed, inject } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { CATEGORIES, categoryLabel, priorityLabel, severityLabel, statusLabel } from '../../shared/labels.js';
+import {
+  CATEGORIES,
+  categoryLabel,
+  isFinished,
+  priorityLabel,
+  severityLabel,
+  statusLabel,
+} from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { ShareBarComponent, type ShareSegment } from '../../shared/share-bar.component.js';
 import { AgentListComponent } from '../agents/agent-list.component.js';
@@ -16,10 +23,11 @@ const ORDER_TONES: Record<string, string> = {
   backlog: 'neutral',
   planned: 'info',
   in_progress: 'active',
-  blocked: 'bad',
+  blocked: 'warn',
   done: 'ok',
+  rejected: 'neutral',
 };
-const ORDER_STATUSES = ['done', 'in_progress', 'planned', 'backlog', 'blocked'] as const;
+const ORDER_STATUSES = ['done', 'in_progress', 'planned', 'backlog', 'rejected', 'blocked'] as const;
 const OPEN_IDEA_STATUSES = ['idea', 'considering', 'review', 'requested', 'drafting'];
 const RECENT_RUNS = 20;
 
@@ -130,6 +138,7 @@ export class DashboardComponent {
         ['in_progress', 'active'],
         ['fixed', 'ok'],
         ['wontfix', 'neutral'],
+        ['rejected', 'neutral'],
       ] as const
     ).map(([status, tone]) => ({
       label: statusLabel(status),
@@ -161,7 +170,7 @@ export class DashboardComponent {
 
   /** Offene Aufträge nach Priorität und nach Kategorie. */
   protected readonly priorityShares = computed<ShareSegment[]>(() => {
-    const open = this.data().development.filter((item) => item.status !== 'done');
+    const open = this.data().development.filter((item) => !isFinished(item.status));
     return (
       [
         ['high', 'bad'],
@@ -246,21 +255,18 @@ export class DashboardComponent {
       })),
   );
 
-  protected readonly legend = [
-    ...ORDER_STATUSES.slice(0, -1).map((status) => ({ label: statusLabel(status), tone: ORDER_TONES[status]! })),
-    { label: 'Aktion notwendig', tone: 'warn' },
-    { label: statusLabel('blocked'), tone: ORDER_TONES['blocked']! },
-  ];
+  protected readonly legend = ORDER_STATUSES.map((status) => ({
+    label: statusLabel(status),
+    tone: ORDER_TONES[status]!,
+  }));
 
   private orderSegments(items: DevelopmentItem[], sprint?: string): ShareSegment[] {
-    const action = items.filter((item) => item.status === 'blocked' && item.actionTodo).length;
-    const segments = ORDER_STATUSES.map((status) => {
+    return ORDER_STATUSES.map((status) => {
       const filters: Record<string, string[]> = { status: [statusLabel(status)] };
       if (sprint) filters['sprint'] = [sprint];
       return {
         label: statusLabel(status),
-        // Blockierte, die nur auf eine Aktion warten, zählen unter „Aktion notwendig“.
-        value: items.filter((item) => item.status === status && !(status === 'blocked' && item.actionTodo)).length,
+        value: items.filter((item) => item.status === status).length,
         tone: ORDER_TONES[status]!,
         link: {
           section: 'development',
@@ -269,15 +275,6 @@ export class DashboardComponent {
         },
       };
     });
-    const actionFilters: Record<string, string[]> = { status: ['Aktion notwendig'] };
-    if (sprint) actionFilters['sprint'] = [sprint];
-    segments.splice(segments.length - 1, 0, {
-      label: 'Aktion notwendig',
-      value: action,
-      tone: 'warn',
-      link: { section: 'development', filters: actionFilters, anchor: 'attention-orders' },
-    });
-    return segments;
   }
 
   protected openRuns(status: string): void {

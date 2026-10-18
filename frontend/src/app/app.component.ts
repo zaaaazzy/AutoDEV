@@ -24,6 +24,9 @@ import { firstStepsTour } from './features/tour/first-steps.tour.js';
 import { TourOverlayComponent } from './features/tour/tour-overlay.component.js';
 import { TourService } from './features/tour/tour.service.js';
 import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
+import type { DevelopmentItem } from './core/models.js';
+import { isFinished } from './shared/labels.js';
+import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
   development: 'Neuer Auftrag',
@@ -150,14 +153,14 @@ export class AppComponent {
     const sprint = data.sprints.find((candidate) => candidate.status === 'active');
     if (!sprint) return null;
     const items = data.development.filter((item) => item.sprintId === sprint.id);
-    const open = items.filter((item) => item.status !== 'done').length;
+    const open = items.filter((item) => !isFinished(item.status)).length;
     const worker = this.worker();
     if (this.store.workerFailure() || !worker.online)
       return { open, tone: 'stopped', text: 'Sprint gestoppt: Worker offline' };
     const failed = items.some(
       (item) =>
         item.status === 'blocked' ||
-        (item.status !== 'done' &&
+        (!isFinished(item.status) &&
           data.agentRuns
             .filter((run) => run.developmentId === item.id)
             .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.status === 'failed'),
@@ -166,6 +169,29 @@ export class AppComponent {
       ? { open, tone: 'warn', text: 'Sprint läuft mit Fehlern' }
       : { open, tone: 'ok', text: 'Sprint läuft' };
   });
+
+  /** Aufträge des laufenden Sprints mit Handlungsbedarf: Problem und Lösung in wenigen Worten (Sprint-Hover). */
+  protected readonly sprintAttention = computed(() => {
+    const data = this.store.data();
+    const sprint = data.sprints.find((candidate) => candidate.status === 'active');
+    if (!sprint) return [];
+    return data.development
+      .filter((item) => item.sprintId === sprint.id)
+      .map((item) => ({ item, summary: orderProblem(item) }))
+      .filter((entry): entry is { item: DevelopmentItem; summary: OrderProblem } => entry.summary !== null);
+  });
+
+  /** Handy: Mit Handlungsbedarf führt der Sprint-Chip direkt zu den betroffenen Aufträgen, sonst zu den Sprints. */
+  protected openSprintChip(): void {
+    const attention = this.sprintAttention();
+    if (attention.length === 1) this.openOrder(attention[0]!.item.id);
+    else if (attention.length) this.store.navigate('development', { anchor: 'attention-orders' });
+    else this.store.navigate('sprints');
+  }
+
+  protected openOrder(id: string): void {
+    this.store.navigate('development', { focus: id });
+  }
 
   /** Zustand des Sprint-Chips im Handy-Header: fertig, gestoppt, Risiko, läuft oder wartet. */
   protected readonly sprintState = computed<'done' | 'stopped' | 'warn' | 'running' | 'idle' | null>(() => {

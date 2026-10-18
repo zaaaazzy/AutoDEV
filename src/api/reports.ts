@@ -26,8 +26,7 @@ const STATUS_DE: Record<string, string> = {
   backlog: 'Backlog',
   planned: 'Geplant',
   in_progress: 'In Arbeit',
-  blocked: 'Blockiert',
-  action: 'Aktion notwendig',
+  blocked: 'Aktion notwendig',
   done: 'Erledigt',
 };
 
@@ -108,11 +107,10 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     problems.push({
       type: 'blocked',
       title: order.title,
-      detail: order.actionTodo
-        ? `Aktion notwendig: ${order.actionTodo}`
-        : failure
-          ? `Agent „${failure.agentName}“ ist fehlgeschlagen: ${failure.output.trim().slice(-300)}`
-          : 'Auftrag ist blockiert.',
+      detail: `Aktion notwendig: ${
+        order.actionTodo ??
+        (failure ? `Agent „${failure.agentName}“ ist gescheitert – erneut versuchen oder analysieren` : 'prüfen')
+      }`,
     });
   }
   for (const bug of bugs.rows) {
@@ -131,11 +129,7 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     sprintId,
     summary: `${done.length} von ${orders.rows.length} Aufträgen umgesetzt (${percent} %). ${open.length} offen, ${problems.length} Problem(e) dokumentiert.`,
     implemented: done.map(({ id, title, kind, effortHours }) => ({ id, title, kind, effortHours })),
-    missing: open.map(({ id, title, status, actionTodo }) => ({
-      id,
-      title,
-      status: status === 'blocked' && actionTodo ? 'action' : status,
-    })),
+    missing: open.map(({ id, title, status }) => ({ id, title, status })),
     problems,
     todos: orders.rows
       .filter((order) => order.actionTodo)

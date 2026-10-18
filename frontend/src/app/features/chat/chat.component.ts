@@ -2,6 +2,7 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { ChatMessage } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
 import { AgentTasksComponent } from './agent-tasks.component.js';
 import { ChatComposerComponent, type ComposedMessage } from './chat-composer.component.js';
@@ -9,7 +10,7 @@ import { ChatComposerComponent, type ComposedMessage } from './chat-composer.com
 @Component({
   selector: 'app-chat',
   standalone: true,
-  imports: [StepResultComponent, AgentTasksComponent, ChatComposerComponent],
+  imports: [StepResultComponent, AgentTasksComponent, ChatComposerComponent, NavIconComponent],
   templateUrl: './chat.component.html',
   host: { style: 'display: contents' },
 })

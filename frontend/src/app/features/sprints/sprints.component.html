@@ -165,65 +165,6 @@
                   </details>
                 }
               }
-              <section class="git-tree sprint-tasks" aria-label="Aufgaben">
-                <h4>Aufgaben</h4>
-                @for (item of sprintItems(sprint.id); track item.id) {
-                  <div class="sprint-task">
-                    <div class="sprint-task-row">
-                      <button
-                        type="button"
-                        class="sprint-task-head"
-                        (click)="toggleSprintItem(item.id)"
-                        [attr.aria-expanded]="openSprintItems().has(item.id)"
-                      >
-                        <span class="task-chevron" [class.open]="openSprintItems().has(item.id)" aria-hidden="true"
-                          >▾</span
-                        >
-                        <strong>{{ item.title }}</strong>
-                        <span class="status" [ngClass]="item.status | statusClass">{{
-                          item.status | statusLabel
-                        }}</span>
-                      </button>
-                      @if (item.status !== 'done' && item.status !== 'in_progress') {
-                        <button
-                          class="button secondary remove-from-sprint"
-                          type="button"
-                          [disabled]="busy()"
-                          (click)="removeFromSprint(item)"
-                          title="Der Auftrag landet unter Auftrag → Besondere Aufmerksamkeit."
-                        >
-                          Aus Sprint entfernen
-                        </button>
-                      }
-                      @if (item.status === 'blocked') {
-                        <button
-                          class="button secondary retry-button"
-                          type="button"
-                          [disabled]="busy()"
-                          (click)="retry(item)"
-                          title="Es startet nur der fehlgeschlagene Agent."
-                        >
-                          <app-nav-icon name="undo" />Erneut versuchen{{
-                            item.retryCount ? ' (' + item.retryCount + ')' : ''
-                          }}
-                        </button>
-                      }
-                    </div>
-                    @if (openSprintItems().has(item.id)) {
-                      <div class="sprint-task-body">
-                        @let rows = workflow(item);
-                        <p class="workflow-status">
-                          <strong>{{ item.status | statusLabel }}</strong> · {{ workflowSummary(item, rows) }}
-                        </p>
-                        <h5 class="workflow-title">Workflow</h5>
-                        <app-agent-workflow [order]="item" />
-                      </div>
-                    }
-                  </div>
-                } @empty {
-                  <p class="muted">Keine Aufgaben in diesem Sprint.</p>
-                }
-              </section>
             </div>
             <div class="sprint-side">
               <section class="git-tree sprint-details" aria-label="Details">

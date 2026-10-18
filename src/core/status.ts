@@ -20,6 +20,8 @@ export const DEVELOPMENT_STATUS = {
   inProgress: 'in_progress',
   blocked: 'blocked',
   done: 'done',
+  /** Verstösst gegen die Projektregeln (Do's and Don'ts): wird nicht umgesetzt. */
+  rejected: 'rejected',
 } as const;
 export type DevelopmentStatus = (typeof DEVELOPMENT_STATUS)[keyof typeof DEVELOPMENT_STATUS];
 export const DEVELOPMENT_STATUSES = new Set<string>(Object.values(DEVELOPMENT_STATUS));
@@ -29,6 +31,8 @@ export const BUG_STATUS = {
   inProgress: 'in_progress',
   fixed: 'fixed',
   wontfix: 'wontfix',
+  /** Behebung verstösst gegen die Projektregeln. */
+  rejected: 'rejected',
 } as const;
 export type BugStatus = (typeof BUG_STATUS)[keyof typeof BUG_STATUS];
 export const BUG_STATUSES = new Set<string>(Object.values(BUG_STATUS));

@@ -221,7 +221,10 @@ test('Rollen: Autorin reicht Dokumentänderung ein, Redaktion gibt frei', async 
   expect(history.revisions.find((revision: { docId: string }) => revision.docId === doc.id).status).toBe('approved');
 });
 
-test('Sprint-Board: offenen Auftrag in den Sprint nehmen und wieder herausnehmen', async ({ page, request }) => {
+test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint nehmen und wieder herausnehmen', async ({
+  page,
+  request,
+}) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Board-Auftrag ${Date.now()}`;
   const sprint = (
@@ -229,19 +232,26 @@ test('Sprint-Board: offenen Auftrag in den Sprint nehmen und wieder herausnehmen
       await request.post('/api/projects/e2e/sprints', { headers, data: { name: `Board ${Date.now() % 10000}` } })
     ).json()
   ).sprint;
-  await request.post('/api/projects/e2e/development', { headers, data: { title } });
+  const order = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
   await login(page);
   await page.goto('/#sprints');
   await page.locator('.dt-table tbody tr').filter({ hasText: sprint.name }).locator('.dt-expand').first().click();
-  const board = page.locator('.kanban').first();
-  const open = board.locator('.col-open .kanban-card', { hasText: title });
+  const board = page.locator('.kanban-board').first();
+  // Keine Spalte „Offen“ mehr: offene Aufträge stehen unter dem Board.
+  await expect(board.locator('.col-open')).toHaveCount(0);
+  const open = board.locator('.kanban-pool-card', { hasText: title });
   await expect(open).toBeVisible();
   await open.getByRole('button', { name: 'In den Sprint nehmen' }).click();
   const planned = board.locator('.col-planned .kanban-card', { hasText: title });
   await expect(planned).toBeVisible();
   await expect(planned.locator('.kanban-rank')).toHaveText('1');
   await planned.getByRole('button', { name: 'Aus dem Sprint nehmen' }).click();
-  await expect(board.locator('.col-open .kanban-card', { hasText: title })).toBeVisible();
+  await expect(board.locator('.kanban-pool-card', { hasText: title })).toBeVisible();
+  // Der Titel verlinkt auf den Auftrag.
+  await board.locator('.kanban-pool-card', { hasText: title }).getByRole('link', { name: title }).click();
+  await expect(page).toHaveURL(/#development\/[0-9a-f-]{36}$/);
+  await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+  await request.delete(`/api/development/${order.id}`, { headers });
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
 
@@ -301,10 +311,11 @@ test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden
   await page.goto('/#sprints');
   await page.locator('.dt-table tbody tr').filter({ hasText: 'E2E-Sprint' }).locator('.dt-expand').first().click();
   await page
-    .locator('.sprint-task')
+    .locator('.kanban-board .col-planned .kanban-card')
     .filter({ hasText: title })
-    .getByRole('button', { name: 'Aus Sprint entfernen' })
+    .getByRole('button', { name: 'Aus dem Sprint nehmen' })
     .click();
+  await expect(page.locator('.kanban-pool-card').filter({ hasText: title })).toBeVisible();
 
   await page.goto('/#development');
   const card = page.locator('.attention-card').filter({ hasText: title });

@@ -26,7 +26,7 @@ import {
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
-const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix'];
+const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 
 @Component({
   selector: 'app-bugs',
@@ -53,7 +53,7 @@ export class BugsComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
-  protected readonly bugStatuses: BugStatus[] = ['open', 'in_progress', 'fixed', 'wontfix'];
+  protected readonly bugStatuses: BugStatus[] = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
   protected readonly openBug = signal<string | null>(null);
   protected readonly bugId = (bug: Bug): string => bug.id;
   protected readonly bugColumns: DataColumn<Bug>[] = [

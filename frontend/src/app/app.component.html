@@ -64,7 +64,7 @@
             class="mobile-chip sprint-chip"
             [class]="'mobile-chip sprint-chip state-' + sprintState()"
             href="#sprints"
-            (click)="store.navigate('sprints'); mobileMenu.set(false); mobileAgents.set(false)"
+            (click)="$event.preventDefault(); openSprintChip(); mobileMenu.set(false); mobileAgents.set(false)"
             [attr.aria-label]="
               'Sprint ' +
               sprint.name +
@@ -195,42 +195,56 @@
             </div>
           </div>
           @if (activeSprint(); as sprint) {
-            <a
-              class="status-pill sprint-pill"
-              [class]="'status-pill sprint-pill state-' + sprintState()"
-              href="#sprints"
-              (click)="store.navigate('sprints')"
-              [attr.aria-label]="
-                'Sprint ' +
-                sprint.name +
-                ': ' +
-                sprint.done +
-                ' von ' +
-                sprint.total +
-                ' erledigt – ' +
-                (sprintHealth()?.text ?? '')
-              "
-            >
-              <app-nav-icon name="sprints" />
-              <span class="sprint-pill-name">{{ sprint.name }}</span>
-              <span class="worker-count">{{ sprint.done }}/{{ sprint.total }}</span>
-              <span class="sprint-state" aria-hidden="true">
-                @switch (sprintState()) {
-                  @case ('done') {
-                    ✓
+            <div class="sprint-indicator">
+              <a
+                class="status-pill sprint-pill"
+                [class]="'status-pill sprint-pill state-' + sprintState()"
+                href="#sprints"
+                (click)="store.navigate('sprints')"
+                [attr.aria-label]="
+                  'Sprint ' +
+                  sprint.name +
+                  ': ' +
+                  sprint.done +
+                  ' von ' +
+                  sprint.total +
+                  ' erledigt – ' +
+                  (sprintHealth()?.text ?? '')
+                "
+              >
+                <app-nav-icon name="sprints" />
+                <span class="sprint-pill-name">{{ sprint.name }}</span>
+                <span class="worker-count">{{ sprint.done }}/{{ sprint.total }}</span>
+                <span class="sprint-state" aria-hidden="true">
+                  @switch (sprintState()) {
+                    @case ('done') {
+                      ✓
+                    }
+                    @case ('warn') {
+                      !
+                    }
+                    @case ('stopped') {
+                      ■
+                    }
+                    @default {
+                      ▶
+                    }
                   }
-                  @case ('warn') {
-                    !
+                </span>
+              </a>
+              @if (sprintAttention().length) {
+                <div class="agent-popover sprint-popover" aria-label="Aufträge mit Handlungsbedarf">
+                  <p class="popover-title">Aktion notwendig · {{ sprintAttention().length }}</p>
+                  @for (entry of sprintAttention(); track entry.item.id) {
+                    <button type="button" class="attention-line" (click)="openOrder(entry.item.id)">
+                      <strong>{{ entry.item.title }}</strong>
+                      <span><b>Problem:</b> {{ entry.summary.problem }}</span>
+                      <span><b>Lösung:</b> {{ entry.summary.solution }}</span>
+                    </button>
                   }
-                  @case ('stopped') {
-                    ■
-                  }
-                  @default {
-                    ▶
-                  }
-                }
-              </span>
-            </a>
+                </div>
+              }
+            </div>
           }
           <button
             class="help-pill"
