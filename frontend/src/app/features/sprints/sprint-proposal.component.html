@@ -11,16 +11,49 @@
         <h3>Vorschlag für {{ plan.name }}</h3>
         <p class="muted">
           Kapazität {{ formatHours(plan.capacity.hours) }}
-          {{ plan.capacity.source === 'history' ? '(Median der letzten 3 Sprints)' : '(Einstellung)' }}
+          @if (plan.capacity.tokens !== null) {
+            · {{ plan.capacity.tokens | localeNumber }} Tokens
+          }
+          @if (plan.capacity.source === 'history') {
+            (Median der Ist-Werte der letzten 3 Sprints)
+          } @else {
+            <strong class="capacity-fallback" title="Noch keine abgeschlossenen Sprints mit gemessenem Aufwand"
+              >(Einstellung – noch keine Sprint-Historie)</strong
+            >
+          }
           @if (plan.mode === 'autopilot') {
             · <strong class="autopilot-badge">Autopilot aktiv</strong>
           }
         </p>
       </div>
-      @if (mode() === 'manual') {
-        <button class="button secondary small" type="button" (click)="opened.set(false)">Schliessen</button>
-      }
+      <div class="proposal-header-actions">
+        <button
+          class="button secondary small"
+          type="button"
+          [attr.aria-expanded]="roadmapOpen()"
+          (click)="toggleRoadmap()"
+        >
+          🗺 Roadmap
+        </button>
+        @if (mode() === 'manual') {
+          <button class="button secondary small" type="button" (click)="opened.set(false)">Schliessen</button>
+        }
+      </div>
     </header>
+    @if (plan.autopilot.message) {
+      <div
+        class="autopilot-notice"
+        [class.paused]="plan.autopilot.state === 'paused'"
+        [attr.role]="plan.autopilot.state === 'paused' ? 'alert' : 'status'"
+      >
+        <span>{{ plan.autopilot.message }}</span>
+        @if (plan.autopilot.state === 'paused' && auth.can('plan')) {
+          <button class="button secondary small" type="button" [disabled]="store.busy()" (click)="resumeAutopilot()">
+            Autopilot freigeben
+          </button>
+        }
+      </div>
+    }
     @if (plan.items.length) {
       <div class="table-wrap">
         <table class="idea-table proposal-table">
@@ -56,10 +89,13 @@
             }
           </tbody>
           <tfoot>
-            <tr>
+            <tr class="proposal-totals">
               <td></td>
               <td>
                 <strong>{{ chosen().length }} Aufträge</strong>
+                <small class="muted proposal-cost" [title]="priceSource()"
+                  >Kosten {{ formatUsd(totals().costUsd) }}</small
+                >
               </td>
               <td></td>
               <td class="num">
@@ -72,8 +108,32 @@
           </tfoot>
         </table>
       </div>
+      @if (comment(); as note) {
+        @if (commentPending()) {
+          <p class="proposal-comment muted" role="status">🤖 Der Auftragsautor kommentiert den Vorschlag …</p>
+        } @else if (note.status === 'failed') {
+          <p class="proposal-comment muted" role="status">🤖 {{ note.comment }}</p>
+        } @else if (note.comment) {
+          <p class="proposal-comment" [class.stale]="!commentMatches()">
+            <strong>🤖 Kommentar des Auftragsautors</strong>
+            @if (!commentMatches()) {
+              <small class="muted">(zu einer anderen Auswahl)</small>
+            }
+            <span>{{ note.comment }}</span>
+          </p>
+        }
+      }
       @if (auth.can('plan')) {
         <div class="proposal-actions">
+          <button
+            class="button secondary"
+            type="button"
+            [disabled]="store.busy() || !chosen().length || commentPending()"
+            title="Sprintziel und Risiken in 3–5 Sätzen – ändert die Auswahl nicht"
+            (click)="requestComment()"
+          >
+            🤖 KI-Kommentar
+          </button>
           <button
             class="button secondary"
             type="button"
@@ -95,6 +155,35 @@
       }
     } @else {
       <p class="empty-state">Keine offenen Aufträge im Backlog – nichts vorzuschlagen.</p>
+    }
+    @if (roadmapOpen()) {
+      <section class="sprint-roadmap" aria-label="Roadmap der nächsten Sprints">
+        <h4>Roadmap – die nächsten 3 Sprints (Vorschau, nichts wird angelegt)</h4>
+        @if (roadmap(); as map) {
+          @if (map.sprints.length) {
+            <ol class="roadmap-sprints">
+              @for (sprint of map.sprints; track sprint.name) {
+                <li class="roadmap-sprint">
+                  <strong>{{ sprint.name }}</strong>
+                  <small class="muted"
+                    >{{ sprint.items.length }} Aufträge · {{ formatHours(sprint.totals.hours) }} ·
+                    {{ sprint.totals.tokens | localeNumber }} Tokens · {{ formatUsd(costOf(sprint.totals)) }}</small
+                  >
+                  <ol>
+                    @for (item of sprint.items; track item.id) {
+                      <li [title]="item.reason">{{ item.title }}</li>
+                    }
+                  </ol>
+                </li>
+              }
+            </ol>
+          } @else {
+            <p class="empty-state">Keine offenen Aufträge für die Roadmap.</p>
+          }
+        } @else {
+          <p class="muted">Roadmap wird berechnet …</p>
+        }
+      </section>
     }
   </section>
 }

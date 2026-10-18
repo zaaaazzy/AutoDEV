@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { commandLabel, customRuleProblem, type ProjectPermissions, withAgentPermissions } from './tool-permissions.js';
+import {
+  commandHelp,
+  commandLabel,
+  customRuleProblem,
+  normalizeCommands,
+  PERMISSION_GROUPS,
+  type ProjectPermissions,
+  rulesAllow,
+  withAgentPermissions,
+} from './tool-permissions.js';
+import { decodePolicy } from './agent-guard.js';
 
 const CLAUDE = ['claude', '--permission-mode', 'acceptEdits', '-p', '{prompt}'];
 const project: ProjectPermissions = {
@@ -9,6 +19,17 @@ const project: ProjectPermissions = {
 };
 const option = (command: string[], flag: string): string | undefined =>
   command.includes(flag) ? command[command.indexOf(flag) + 1] : undefined;
+/** Richtlinie, die der Wächter-Hook in --settings bekommt. */
+const policyOf = (command: string[]) => {
+  const settings = JSON.parse(option(command, '--settings') ?? '{}') as {
+    hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
+  };
+  const hook = settings.hooks.PreToolUse[0]!;
+  assert.match(hook.matcher, /Write/);
+  assert.match(hook.matcher, /Bash/);
+  assert.match(hook.hooks[0]!.command, /agent-guard\.ts' '([\w-]+)' \|\| exit 2$/);
+  return decodePolicy(/agent-guard\.ts' '([\w-]+)'/.exec(hook.hooks[0]!.command)![1]);
+};
 
 test('Eigene Befehle: sichere ja, gesperrte und Shell-Tricks nein', () => {
   assert.equal(customRuleProblem('Bash(npm run lint:*)'), null);
@@ -18,6 +39,8 @@ test('Eigene Befehle: sichere ja, gesperrte und Shell-Tricks nein', () => {
     'Bash(rm -rf:*)',
     'Bash(sudo:*)',
     'Bash(git push:*)',
+    'Bash(git clone:*)',
+    'Bash(npm --prefix . exec:*)',
     'Bash(curl:*)',
     'Bash(npm run x; rm -rf /)',
     'Bash(cat ../secret)',
@@ -28,19 +51,27 @@ test('Eigene Befehle: sichere ja, gesperrte und Shell-Tricks nein', () => {
     'WebFetch(domain:example.com)',
     'Read(/etc/passwd)',
     'files',
+    'files:create',
   ]) {
     assert.ok(customRuleProblem(bad), bad);
   }
 });
 
-test('Agent bekommt genau die einzeln gesetzten Befehle, ohne „Dateien“ keine Datei-Werkzeuge', () => {
+test('Agent bekommt genau die einzeln gesetzten Befehle; Datei-Werkzeuge nur mit Anlegen bzw. Ändern', () => {
   const reviewer = withAgentPermissions(CLAUDE, 'reviewer', project, ['Bash(git status:*)', 'Bash(git diff:*)']);
   assert.equal(option(reviewer, '--allowedTools'), 'Bash(git status:*),Bash(git diff:*)');
-  assert.equal(option(reviewer, '--disallowedTools'), 'Edit,Write,MultiEdit,NotebookEdit');
+  assert.equal(option(reviewer, '--disallowedTools'), 'Write,Edit,NotebookEdit');
+  assert.deepEqual(policyOf(reviewer), { create: false, edit: false, scopes: [] });
+
+  const writer = withAgentPermissions(CLAUDE, 'documenter', project, ['files:create'], ['docs']);
+  assert.equal(option(writer, '--disallowedTools'), 'Edit,NotebookEdit');
+  assert.deepEqual(policyOf(writer), { create: true, edit: false, scopes: ['docs'] });
+
   const developer = withAgentPermissions(CLAUDE, 'developer', project, ['files', 'logs', 'Bash(npm run prisma:*)']);
   assert.equal(option(developer, '--allowedTools'), 'Bash(npm run prisma:*)');
   assert.ok(developer.includes('--add-dir'));
   assert.equal(developer.includes('--disallowedTools'), false);
+  assert.deepEqual(policyOf(developer), { create: true, edit: true, scopes: [] });
 });
 
 test('Befehle anderer Projekte oder ausgeschalteter Kategorien wirken nicht', () => {
@@ -53,14 +84,54 @@ test('Befehle anderer Projekte oder ausgeschalteter Kategorien wirken nicht', ()
   assert.equal(option(agent, '--allowedTools'), 'Bash(git status:*)');
 });
 
-test('Ohne Zuweisung bisheriges Verhalten: nur vertraute Rollen bekommen Projektrechte', () => {
-  assert.deepEqual(withAgentPermissions(CLAUDE, 'author', project, null), CLAUDE);
+test('Ohne Zuweisung gelten die Rollenstandards – auch dann mit Wächter', () => {
+  const author = withAgentPermissions(CLAUDE, 'author', project, null);
+  assert.equal(author.includes('--allowedTools'), false);
+  assert.deepEqual(policyOf(author), { create: true, edit: true, scopes: [] });
   assert.ok(withAgentPermissions(CLAUDE, 'developer', project, null).includes('--allowedTools'));
+  // Andere CLIs bleiben unverändert; eigene Werkzeug-Regeln im Befehl bleiben, der Wächter kommt dazu.
+  assert.deepEqual(withAgentPermissions(['copilot', '-p'], 'developer', project, null), ['copilot', '-p']);
+  const explicit = withAgentPermissions(['claude', '--allowedTools', 'Read', '-p'], 'developer', project, []);
+  assert.equal(option(explicit, '--allowedTools'), 'Read');
+  assert.ok(explicit.includes('--settings'));
 });
 
-test('Lesbare Bezeichnungen der Befehle', () => {
-  assert.equal(commandLabel('Bash(git status:*)'), 'git status …');
+test('Freigaben verwenden keine Befehle, die beliebigen Code laden oder ausserhalb schreiben', () => {
+  const rules = PERMISSION_GROUPS.flatMap((group) => group.rules);
+  for (const rule of rules) {
+    assert.ok(!/npm --prefix|git clone|npx (?!--no-install)|git push|rm |sudo|kill|com\.devlog|curl/.test(rule), rule);
+  }
+  assert.ok(rules.includes('Bash(npx --no-install tsc:*)'));
+});
+
+test('Bezeichnungen ohne „…“, jede eingebaute Freigabe mit eigener Erklärung', () => {
+  assert.equal(commandLabel('Bash(git status:*)'), 'git status');
   assert.equal(commandLabel('Bash(make test)'), 'make test');
-  assert.equal(commandLabel('files'), 'Dateien erstellen und ändern');
+  assert.equal(commandLabel('files:create'), 'Dateien anlegen');
+  assert.equal(commandLabel('files:edit'), 'Dateien ändern');
   assert.equal(commandLabel('WebFetch(domain:localhost)'), 'Webseiten auf localhost abrufen');
+  for (const rule of PERMISSION_GROUPS.flatMap((group) => group.rules)) {
+    assert.notEqual(commandHelp(rule), rule, rule);
+    assert.doesNotMatch(commandHelp(rule), /^Führt „/, rule);
+  }
+  assert.equal(commandHelp('Bash(make test:*)'), 'Führt „make test“ aus, auch mit weiteren Argumenten.');
+  assert.deepEqual(normalizeCommands(['files', 'files:edit', 'logs']), ['files:create', 'files:edit', 'logs']);
+});
+
+test('Lokales Modell: Shell-Befehle nur innerhalb der Freigaben des Agents', () => {
+  const rules = ['Bash(git status:*)', 'Bash(node --version)'];
+  assert.ok(rulesAllow(rules, 'git status'));
+  assert.ok(rulesAllow(rules, 'git status --short'));
+  assert.ok(!rulesAllow(rules, 'git statusx'));
+  assert.ok(!rulesAllow(rules, 'git diff'));
+  assert.ok(rulesAllow(rules, 'node --version'));
+  assert.ok(!rulesAllow(rules, 'node --version --x'));
+  assert.ok(PERMISSION_GROUPS.some((group) => group.rules.includes('database')));
+});
+
+test('Dienste-Freigabe wird erst beim Start mit der Benutzer-ID aufgelöst', () => {
+  assert.deepEqual(normalizeCommands(['Bash(launchctl kickstart -k gui/1000/ch.*)']), ['services']);
+  const agent = withAgentPermissions(CLAUDE, 'developer', project, ['services']);
+  assert.match(option(agent, '--allowedTools') ?? '', /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/);
+  assert.equal(commandLabel('services'), 'launchctl kickstart -k ch.*');
 });

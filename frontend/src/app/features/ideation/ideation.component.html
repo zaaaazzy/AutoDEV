@@ -55,9 +55,31 @@
     <div class="section-heading">
       <div>
         <h2>Alle Ideen</h2>
-        <p class="muted">Offene Ideen · Spaltenkopf sortiert, Trichter filtert</p>
+        <p class="muted">Offene Ideen · Spaltenkopf sortiert, Trichter filtert · Haken wählt Ideen für Aufträge</p>
       </div>
+      @if (promotable().length) {
+        <div class="actions">
+          @if (pickedIdeas().length < promotable().length) {
+            <button type="button" class="button secondary" (click)="pickAll()">
+              Alle {{ promotable().length }} auswählen
+            </button>
+          }
+        </div>
+      }
     </div>
+    @if (pickedIdeas().length) {
+      <div class="bulk-bar" role="region" aria-label="Auswahl">
+        <span class="bulk-count">{{ pickedIdeas().length }}</span>
+        <p>
+          <strong>{{ pickedIdeas().length === 1 ? 'Idee' : 'Ideen' }} ausgewählt.</strong>
+          Je Idee entsteht ein eigener Auftrag – der Auftragsautor arbeitet sie nacheinander ab.
+        </p>
+        <button type="button" class="button secondary" (click)="clearPicks()">Auswahl aufheben</button>
+        <button type="button" class="button primary" (click)="promotePicked()" [disabled]="busy()">
+          {{ pickedIdeas().length === 1 ? 'Auftrag erstellen' : pickedIdeas().length + ' Aufträge erstellen' }}
+        </button>
+      </div>
+    }
     <app-data-table
       [rows]="openIdeas()"
       [columns]="ideaColumns"
@@ -67,6 +89,18 @@
       [(expanded)]="expandedIdea"
       emptyText="Keine Ideen für diese Filter."
     >
+      <ng-template appDataCell="pick" let-idea>
+        @if (canPromote(idea)) {
+          <input
+            type="checkbox"
+            class="pick"
+            [checked]="picked().has(idea.id)"
+            (click)="$event.stopPropagation()"
+            (change)="togglePick(idea.id)"
+            [attr.aria-label]="'Für Auftrag auswählen: ' + idea.title"
+          />
+        }
+      </ng-template>
       <ng-template appDataCell="title" let-idea>
         <ng-container *ngTemplateOutlet="ideaTitle; context: { $implicit: idea }" />
       </ng-template>

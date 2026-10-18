@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { DEV_COLUMNS } from './development.js';
+import { COMMENT_COLUMNS } from './idea-comments.js';
 import { IDEA_COLUMNS } from './ideation.js';
 import { parseProjectSlug } from '../core/validation.js';
 
@@ -23,7 +24,7 @@ export function registerBoardRoutes(app: Express, pool: Pool): void {
         [slug],
       ),
       pool.query(
-        `SELECT c.id, c.ideation_id AS "ideationId", c.author, c.body, c.created_at AS "createdAt"
+        `SELECT ${COMMENT_COLUMNS}
            FROM ideation_comments c JOIN ideation_items i ON i.id = c.ideation_id
           WHERE i.project_slug = $1 ORDER BY c.created_at`,
         [slug],

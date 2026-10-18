@@ -82,10 +82,31 @@
             [(ngModel)]="settings.sprintCapacityHours"
           />
         </label>
+        <fieldset class="wide autopilot-hours">
+          <legend>Arbeitszeiten des Autopilots</legend>
+          <label>Von<input name="autopilotStart" type="time" required [(ngModel)]="settings.autopilotStart" /></label>
+          <label>Bis<input name="autopilotEnd" type="time" required [(ngModel)]="settings.autopilotEnd" /></label>
+          <span class="autopilot-days" role="group" aria-label="Wochentage">
+            @for (weekday of weekdays; track weekday.day) {
+              <label class="check"
+                ><input
+                  type="checkbox"
+                  [name]="'autopilotDay' + weekday.day"
+                  [checked]="settings.autopilotDays.includes(weekday.day)"
+                  (change)="toggleDay(weekday.day)"
+                />
+                {{ weekday.label }}</label
+              >
+            }
+          </span>
+        </fieldset>
         <p class="muted wide">
-          Die Kapazität stammt aus den letzten 3 abgeschlossenen Sprints (erledigte Stunden); ohne Historie gilt die
-          Einstellung. Der Autopilot schliesst einen Sprint ab, sobald nur noch „Aktion notwendig“ offen ist – diese
-          Aufträge wandern in den nächsten Sprint. Scheitert die Git-Sicherung, pausiert er.
+          Die Kapazität ist der Median der gemessenen Ist-Stunden und Ist-Tokens (Laufzeit der Agents) erledigter
+          Aufträge der letzten 3 abgeschlossenen Sprints; ohne Historie gilt die Einstellung. Der Autopilot startet neue
+          Sprints nur innerhalb der Arbeitszeiten (Ortszeit des Workers; „Bis“ vor „Von“ = über Mitternacht, gleiche
+          Zeiten = ganztägig). Er schliesst einen Sprint ab, sobald nur noch „Aktion notwendig“ offen ist – diese
+          Aufträge wandern in den nächsten Sprint. Scheitert der Abschluss (Merge/Git), pausiert er bis zur Freigabe in
+          Sprints. Ein Budget gibt es noch nicht; die Arbeitszeiten sind die Kostengrenze.
         </p>
         <label class="wide"
           >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea

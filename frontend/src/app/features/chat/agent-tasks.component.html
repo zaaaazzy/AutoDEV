@@ -10,17 +10,17 @@
     <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
       <path d="M7 4l13 8-13 8z" fill="currentColor" />
     </svg>
-    Aufgaben
+    Aktionen
     <span class="agent-tasks-caret" aria-hidden="true">▾</span>
   </button>
   @if (open()) {
-    <div class="agent-tasks-menu" role="dialog" aria-label="Agent-Aufgaben">
+    <div class="agent-tasks-menu" role="dialog" aria-label="Agent-Aktionen">
       @if (editing(); as form) {
         <form
           class="agent-task-form"
           (submit)="$event.preventDefault(); save(title.value, prompt.value, agent.value, false)"
         >
-          <strong>{{ form.id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe' }}</strong>
+          <strong>{{ form.id ? 'Aktion bearbeiten' : 'Neue Aktion' }}</strong>
           <label
             >Titel<input #title [value]="form.title" maxlength="120" required placeholder="z. B. Tests ausführen"
           /></label>
@@ -36,7 +36,7 @@
           </label>
           <label
             >Übernimmt
-            <select #agent aria-label="Agent, der die Aufgabe übernimmt">
+            <select #agent aria-label="Agent, der die Aktion übernimmt">
               <option value="" [selected]="!form.agentId">Assistent (allgemein)</option>
               @for (option of agents(); track option.id) {
                 <option [value]="option.id" [selected]="option.id === form.agentId">{{ option.name }}</option>
@@ -66,21 +66,15 @@
           <input
             #search
             type="search"
-            placeholder="Aufgabe suchen …"
-            aria-label="Aufgabe suchen"
+            placeholder="Aktion suchen …"
+            aria-label="Aktion suchen"
             [value]="query()"
             (input)="setQuery($any($event.target).value)"
             (keydown)="keydown($event)"
           />
         </label>
         <ul class="agent-tasks-list" role="listbox">
-          @for (entry of entries(); track entry.id ?? 'vorlage:' + entry.title; let index = $index) {
-            @if (index === 0 && entry.id) {
-              <li class="agent-tasks-group">Eigene Aufgaben</li>
-            }
-            @if (entry.builtIn && index === ownCount()) {
-              <li class="agent-tasks-group">Vorlagen</li>
-            }
+          @for (entry of entries(); track entry.id; let index = $index) {
             <li
               class="agent-task"
               role="option"
@@ -94,8 +88,8 @@
               <span class="agent-task-text">
                 <strong
                   >{{ entry.title }}
-                  @if (entry.id ? entry.agentName : agentName(agentId()); as who) {
-                    <span class="agent-task-agent">{{ who }}</span>
+                  @if (entry.agentName) {
+                    <span class="agent-task-agent">{{ entry.agentName }}</span>
                   }
                 </strong>
                 <small class="muted">{{ entry.prompt }}</small>
@@ -106,30 +100,28 @@
               <button
                 type="button"
                 class="agent-task-icon"
-                [title]="entry.builtIn ? 'Als eigene Aufgabe anpassen' : 'Bearbeiten'"
-                [attr.aria-label]="entry.builtIn ? 'Als eigene Aufgabe anpassen' : 'Bearbeiten'"
+                title="Bearbeiten"
+                aria-label="Bearbeiten"
                 (click)="edit(entry, $event)"
               >
                 ✎
               </button>
-              @if (!entry.builtIn) {
-                <button
-                  type="button"
-                  class="agent-task-icon"
-                  title="Löschen"
-                  aria-label="Löschen"
-                  (click)="remove(entry, $event)"
-                >
-                  ✕
-                </button>
-              }
+              <button
+                type="button"
+                class="agent-task-icon"
+                title="Löschen"
+                aria-label="Löschen"
+                (click)="remove(entry, $event)"
+              >
+                ✕
+              </button>
             </li>
           } @empty {
-            <li class="agent-tasks-empty muted">Keine Aufgabe gefunden.</li>
+            <li class="agent-tasks-empty muted">Keine Aktion gefunden.</li>
           }
         </ul>
         <button type="button" class="agent-tasks-new" (click)="startNew()">
-          + {{ query().trim() ? 'Neue Aufgabe „' + query().trim() + '“' : 'Neue Aufgabe definieren' }}
+          + {{ query().trim() ? 'Neue Aktion „' + query().trim() + '“' : 'Neue Aktion definieren' }}
         </button>
       }
     </div>

@@ -39,9 +39,29 @@ export class SettingsComponent {
     autoBugfix: true,
     sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
     sprintCapacityHours: 40,
+    autopilotStart: '08:00',
+    autopilotEnd: '18:00',
+    autopilotDays: [1, 2, 3, 4, 5] as number[],
     databaseUrl: '',
     clearDatabase: false,
   };
+  /** Wochentage der Arbeitszeiten (ISO: 1 = Montag). */
+  protected readonly weekdays = [
+    { day: 1, label: 'Mo' },
+    { day: 2, label: 'Di' },
+    { day: 3, label: 'Mi' },
+    { day: 4, label: 'Do' },
+    { day: 5, label: 'Fr' },
+    { day: 6, label: 'Sa' },
+    { day: 7, label: 'So' },
+  ];
+
+  protected toggleDay(day: number): void {
+    const days = this.settings.autopilotDays;
+    this.settings.autopilotDays = days.includes(day)
+      ? days.filter((value) => value !== day)
+      : [...days, day].sort((a, b) => a - b);
+  }
   protected maxAgents = 2;
   protected deleteConfirm = '';
   protected deleteFolder = false;
@@ -91,6 +111,9 @@ export class SettingsComponent {
           autoBugfix: this.settings.autoBugfix,
           sprintMode: this.settings.sprintMode,
           sprintCapacityHours: this.settings.sprintCapacityHours,
+          autopilotStart: this.settings.autopilotStart,
+          autopilotEnd: this.settings.autopilotEnd,
+          autopilotDays: this.settings.autopilotDays,
           ...(this.settings.clearDatabase
             ? { databaseUrl: '' }
             : this.settings.databaseUrl.trim()
@@ -130,6 +153,9 @@ export class SettingsComponent {
       autoBugfix: project?.autoBugfix ?? true,
       sprintMode: project?.sprintMode ?? 'manual',
       sprintCapacityHours: project?.sprintCapacityHours ?? 40,
+      autopilotStart: project?.autopilotStart ?? '08:00',
+      autopilotEnd: project?.autopilotEnd ?? '18:00',
+      autopilotDays: [...(project?.autopilotDays ?? [1, 2, 3, 4, 5])],
       databaseUrl: '',
       clearDatabase: false,
       deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),

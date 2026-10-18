@@ -1,4 +1,5 @@
 import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
+import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
@@ -18,7 +19,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -229,6 +230,23 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(hours);
       sets.push(`sprint_capacity_hours = $${values.length}`);
     }
+    if (body.autopilotStart !== undefined || body.autopilotEnd !== undefined || body.autopilotDays !== undefined) {
+      // Immer als Ganzes: Start, Ende und Wochentage.
+      const hours = { start: body.autopilotStart, end: body.autopilotEnd, days: body.autopilotDays };
+      if (
+        typeof hours.start !== 'string' ||
+        typeof hours.end !== 'string' ||
+        !Array.isArray(hours.days) ||
+        !isValidWorkingHours(hours as WorkingHours)
+      )
+        return fail('Arbeitszeiten: Start und Ende als HH:MM und mindestens ein Wochentag.');
+      values.push(hours.start, hours.end, hours.days);
+      sets.push(
+        `autopilot_start = $${values.length - 2}`,
+        `autopilot_end = $${values.length - 1}`,
+        `autopilot_days = $${values.length}::smallint[]`,
+      );
+    }
     if (body.autoBugfix !== undefined) {
       if (typeof body.autoBugfix !== 'boolean')
         return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
@@ -239,7 +257,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays"`,
       values,
     );
     if (!result.rows[0]) {

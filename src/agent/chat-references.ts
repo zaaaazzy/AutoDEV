@@ -1,11 +1,12 @@
 import type { Pool } from 'pg';
+import { SYSTEM_PERSON } from '../api/idea-comments.js';
 import { isUuid } from '../core/validation.js';
 
 /**
- * Verweise im Chat („@auftrag/…“, „@git/…“): Der Server prüft, dass jeder Verweis zum Projekt gehört, speichert
- * Typ, ID und den echten Titel und gibt dem Agent den Inhalt als Kontext mit.
+ * Verweise im Chat („/auftrag/…“, „/git/…“, „@Person“): Der Server prüft, dass jeder Verweis zum Projekt gehört,
+ * speichert Typ, ID und den echten Titel und gibt dem Agent den Inhalt als Kontext mit.
  */
-export const REFERENCE_TYPES = ['order', 'idea', 'bug', 'sprint', 'doc', 'commit'] as const;
+export const REFERENCE_TYPES = ['order', 'idea', 'bug', 'sprint', 'doc', 'commit', 'user'] as const;
 export type ReferenceType = (typeof REFERENCE_TYPES)[number];
 export const MAX_REFERENCES = 5;
 const MAX_TEXT = 2500;
@@ -31,7 +32,9 @@ export function parseReferences(value: unknown): { type: ReferenceType; id: stri
     const record = (entry ?? {}) as Record<string, unknown>;
     const type = REFERENCE_TYPES.find((candidate) => candidate === record.type);
     const id = typeof record.id === 'string' ? record.id.trim() : '';
-    if (!type || !(type === 'commit' ? COMMIT.test(id) : isUuid(id))) return 'Ungültiger Verweis.';
+    const valid =
+      type === 'commit' ? COMMIT.test(id) : type === 'user' ? id === SYSTEM_PERSON || isUuid(id) : isUuid(id);
+    if (!type || !valid) return 'Ungültiger Verweis.';
     if (!parsed.some((known) => known.type === type && known.id === id)) parsed.push({ type, id });
   }
   return parsed;
@@ -119,6 +122,19 @@ async function resolveOne(
             label: `${row.hash.slice(0, 7)} ${row.subject}`,
             context: `Git-Commit ${row.hash.slice(0, 7)} „${row.subject}“ – Details mit \`git show ${row.hash.slice(0, 12)}\`.`,
           }
+        : null;
+    }
+    case 'user': {
+      if (reference.id === SYSTEM_PERSON)
+        return { ...reference, label: 'Systemadministrator', context: 'Person „Systemadministrator“' };
+      // Nur Personen im Projekt: Administratoren und Mitglieder (wie bei den Erwähnungen in Kommentaren).
+      const row = await one<{ name: string }>(
+        `SELECT COALESCE(NULLIF(display_name, ''), username) AS name FROM users u
+          WHERE id = $1 AND active AND ('admin' = ANY(roles)
+            OR EXISTS (SELECT 1 FROM project_members m WHERE m.user_id = u.id AND m.project_slug = $2))`,
+      );
+      return row
+        ? { ...reference, label: row.name, context: `Person „${row.name}“ (Benutzer in diesem Projekt)` }
         : null;
     }
   }

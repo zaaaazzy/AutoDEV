@@ -27,6 +27,13 @@ interface Idea {
 const TITLE_LINE = /^\s*@@TITEL:\s*(.+)$/m;
 
 /** Trennt die Zeile „@@TITEL: …“ (kurzer Auftragstitel des Auftragsautors) vom Anforderungstext. */
+interface AgentRights {
+  instructions: string;
+  command: string[] | null;
+  allowedCommands: string[] | null;
+  fileScope: string[];
+}
+
 export function splitTitle(output: string): { title: string | null; text: string } {
   const match = TITLE_LINE.exec(output);
   if (!match) return { title: null, text: output };
@@ -90,15 +97,18 @@ export async function runAuthorAgent(
   resume?: { sessionId: string; prompt: string },
   /** Vom Nutzer gewählter Agent des Projekts (Name, Beschreibung, Modell); Rechte bleiben die der Rolle `role`. */
   agentId?: string | null,
+  /** Bricht den Lauf ab (z. B. „Abbrechen“ beim Visionär): beendet die CLI bzw. das lokale Modell. */
+  signal?: AbortSignal,
 ): Promise<{ exitCode: number; output: string; sessionId?: string }> {
   const author = (
     agentId
-      ? await pool.query<{ instructions: string; command: string[] | null; allowedCommands: string[] | null }>(
-          `SELECT instructions, command, allowed_commands AS "allowedCommands" FROM agents WHERE project_slug = $1 AND id = $2`,
+      ? await pool.query<AgentRights>(
+          `SELECT instructions, command, allowed_commands AS "allowedCommands", file_scope AS "fileScope"
+             FROM agents WHERE project_slug = $1 AND id = $2`,
           [options.project, agentId],
         )
-      : await pool.query<{ instructions: string; command: string[] | null; allowedCommands: string[] | null }>(
-          `SELECT instructions, command, allowed_commands AS "allowedCommands" FROM agents
+      : await pool.query<AgentRights>(
+          `SELECT instructions, command, allowed_commands AS "allowedCommands", file_scope AS "fileScope" FROM agents
           WHERE project_slug = $1 AND role = $2 AND enabled ORDER BY position LIMIT 1`,
           [options.project, role],
         )
@@ -112,13 +122,27 @@ export async function runAuthorAgent(
     : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
   // Rechte: die des gewählten bzw. zuständigen Agents (eigene Zuweisung), sonst der Projektstandard der Rolle.
   const permissions = await loadProjectPermissions(pool, options.project);
-  const command = configured && withAgentPermissions(configured, role, permissions, author?.allowedCommands ?? null);
+  const command =
+    configured &&
+    withAgentPermissions(configured, role, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =
     resume && command && isClaudeCommand(command)
       ? { ...resume, prompt: rules ? `${rules}\n\n${resume.prompt}` : resume.prompt }
       : undefined;
+  let pid: number | undefined;
+  // Der Agent läuft als eigene Prozessgruppe (detached); so endet auch alles, was er gestartet hat.
+  const kill = (): void => {
+    if (pid) {
+      try {
+        process.kill(-pid, 'SIGTERM');
+      } catch {
+        // bereits beendet
+      }
+    }
+  };
+  signal?.addEventListener('abort', kill, { once: true });
   try {
     const result = command
       ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {
@@ -126,8 +150,12 @@ export async function runAuthorAgent(
           env: agentEnvironment(),
           onAction: onProgress,
           resumeSession: resuming?.sessionId,
+          onSpawn: (spawned) => {
+            pid = spawned;
+            if (signal?.aborted) kill();
+          },
         })
-      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress });
+      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress, signal });
     await pool
       .query(
         `INSERT INTO agent_usage (project_slug, role, tokens, duration_ms, cost_usd, success)
@@ -149,6 +177,8 @@ export async function runAuthorAgent(
     };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };
+  } finally {
+    signal?.removeEventListener('abort', kill);
   }
 }
 

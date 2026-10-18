@@ -75,3 +75,13 @@ stateDiagram-v2
 2. Auto-Abschluss.
 3. Vollautopilot mit Arbeitszeiten und Budget.
 4. Roadmap-Ansicht: die nächsten 3 Sprints vorausberechnet.
+
+## Umsetzungsstand
+
+Umgesetzt sind die Stufen 1–4, ausser der Budgetprüfung. Beschreibung und Grenzen stehen in [workflows.md, Abschnitt 3a](../workflows.md#3a-sprintplanung-und-autopilot).
+
+- Kapazität aus Ist-Werten (gemessene Laufzeit und Tokens erledigter Aufträge), Kosten aus dem gemessenen Preis je Token.
+- KI-Kommentar des Auftragsautors auf Knopfdruck (nur Text, nicht gespeichert).
+- Arbeitszeiten je Projekt; Pause bei gescheitertem Abschluss mit Meldung und manueller Freigabe.
+- Auto-Abschluss nur, wenn alle verbleibenden Blockierten „Aktion notwendig“ haben.
+- **Offen:** Budgetprüfung, sobald Idee 04 umgesetzt ist (Andockpunkt `autopilotGuard` in `src/api/sprint-planning.ts`).

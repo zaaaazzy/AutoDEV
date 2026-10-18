@@ -6,7 +6,9 @@ import {
   customRuleProblem,
   loadProjectPermissions,
   availableCommands,
+  commandHelp,
   commandLabel,
+  normalizeCommands,
   PERMISSION_GROUPS,
 } from '../agent/tool-permissions.js';
 import { isRecord, normalizeProjectSlug, parseProjectSlug } from '../core/validation.js';
@@ -40,8 +42,9 @@ export async function validAgentCommands(
   if (!Array.isArray(value) || value.length > 300 || !value.every((rule) => typeof rule === 'string'))
     return 'Rechte: Liste von Befehlen.';
   const available = availableCommands(await loadProjectPermissions(pool, project));
-  const unknown = (value as string[]).find((rule) => !available.has(rule));
-  return unknown ? `Befehl „${unknown}“ ist in diesem Projekt nicht freigegeben.` : [...new Set(value as string[])];
+  const commands = normalizeCommands(value as string[]);
+  const unknown = commands.find((rule) => !available.has(rule));
+  return unknown ? `Befehl „${unknown}“ ist in diesem Projekt nicht freigegeben.` : commands;
 }
 
 export function registerPermissionGroupRoutes(app: Express, pool: Pool): void {
@@ -53,7 +56,7 @@ export function registerPermissionGroupRoutes(app: Express, pool: Pool): void {
       const available = new Set(availableGroups(permissions).map((group) => group.id));
       // Kategorien mit ihren einzelnen Befehlen (Regel und lesbare Bezeichnung).
       const withCommands = (group: { rules: string[] }) => ({
-        commands: group.rules.map((rule) => ({ rule, label: commandLabel(rule) })),
+        commands: group.rules.map((rule) => ({ rule, label: commandLabel(rule), help: commandHelp(rule) })),
       });
       response.json({
         groups: [

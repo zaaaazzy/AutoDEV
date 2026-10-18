@@ -1,4 +1,15 @@
-import { Component, computed, ElementRef, inject, input, model, output, signal, viewChild } from '@angular/core';
+import {
+  Component,
+  computed,
+  effect,
+  ElementRef,
+  inject,
+  input,
+  model,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { statusLabel } from '../../shared/labels.js';
@@ -9,7 +20,9 @@ import {
   type ChatReference,
   findTrigger,
   MENTION_CATEGORIES,
+  type MentionItem,
   type MentionSource,
+  PERSON_ICON,
   type Suggestion,
   suggestions,
   type Trigger,
@@ -23,8 +36,8 @@ export interface ComposedMessage {
 const MAX_REFERENCES = 5;
 
 /**
- * Chat-Eingabe: „/“ wählt den Agent, „@“ verweist auf Auftrag, Idee, Bug, Sprint, Doku oder Git. Vorschläge
- * erscheinen als Bubbles und werden beim Tippen eingeschränkt; Auswahl wird zum Chip über dem Eingabefeld.
+ * Chat-Eingabe: „@“ wählt den Agent oder spricht eine Person im Projekt an, „/“ verweist auf Auftrag, Idee, Bug,
+ * Sprint, Doku oder Git. Vorschläge erscheinen als Bubbles und werden beim Tippen eingeschränkt; Auswahl wird zum Chip über dem Eingabefeld.
  */
 @Component({
   selector: 'app-chat-composer',
@@ -49,6 +62,8 @@ export class ChatComposerComponent {
   /** Mit Escape geschlossen – bis sich der Text ändert. */
   private readonly dismissed = signal(false);
   private readonly commits = signal<GitGraph['commits']>([]);
+  /** Personen im Projekt (wie bei den Erwähnungen in Kommentaren). */
+  private readonly people = signal<MentionItem[]>([]);
 
   protected readonly agents = computed(() => this.store.data().agents.filter((agent) => agent.enabled));
   protected readonly agentName = computed(
@@ -59,6 +74,7 @@ export class ChatComposerComponent {
     const data = this.store.data();
     return {
       agents: this.agents().map((agent) => ({ id: agent.id, label: agent.name })),
+      people: this.people(),
       items: {
         order: data.development.map((item) => ({ id: item.id, label: item.title, hint: statusLabel(item.status) })),
         idea: data.ideas.map((idea) => ({ id: idea.id, label: idea.title, hint: statusLabel(idea.status) })),
@@ -84,10 +100,21 @@ export class ChatComposerComponent {
   protected readonly title = computed(() => {
     const trigger = this.trigger();
     if (!trigger) return '';
-    if (trigger.kind === 'agent') return 'Wer übernimmt?';
+    if (trigger.kind === 'agent') return 'Agent oder Person ansprechen';
     if (trigger.kind === 'category') return 'Worauf beziehst du dich?';
     return `${trigger.category.label} wählen`;
   });
+
+  constructor() {
+    effect(() => {
+      const slug = this.store.activeProject();
+      if (!slug) return;
+      this.api
+        .get<{ people?: { id: string; name: string }[] }>(`${this.api.projectPath(slug)}/people`)
+        .then((result) => this.people.set((result.people ?? []).map(({ id, name }) => ({ id, label: name }))))
+        .catch(() => this.people.set([]));
+    });
+  }
 
   protected onInput(event: Event): void {
     const field = event.target as HTMLInputElement;
@@ -151,7 +178,8 @@ export class ChatComposerComponent {
   }
 
   protected icon(reference: ChatReference): string {
-    return MENTION_CATEGORIES.find((category) => category.type === reference.type)?.icon ?? '@';
+    if (reference.type === 'user') return PERSON_ICON;
+    return MENTION_CATEGORIES.find((category) => category.type === reference.type)?.icon ?? '/';
   }
 
   protected submit(): void {

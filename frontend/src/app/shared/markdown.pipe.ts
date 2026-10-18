@@ -8,6 +8,7 @@ export class MarkdownPipe implements PipeTransform {
     let listType: 'ol' | 'ul' | '' = '';
     let listItems: string[] = [];
     let codeLines: string[] = [];
+    let tableRows: string[][] = [];
     let inCode = false;
 
     const flushParagraph = (): void => {
@@ -20,6 +21,20 @@ export class MarkdownPipe implements PipeTransform {
       listItems = [];
       listType = '';
     };
+    // Tabellen (GFM): erste Zeile Kopf, Trennzeile „|---|“ entfällt.
+    const flushTable = (): void => {
+      if (tableRows.length) {
+        const [head, ...body] = tableRows;
+        const cells = (row: string[], tag: 'th' | 'td') =>
+          row.map((cell) => `<${tag}>${this.inline(cell)}</${tag}>`).join('');
+        blocks.push(
+          `<div class="md-table"><table><thead><tr>${cells(head!, 'th')}</tr></thead><tbody>${body
+            .map((row) => `<tr>${cells(row, 'td')}</tr>`)
+            .join('')}</tbody></table></div>`,
+        );
+      }
+      tableRows = [];
+    };
     const flushCode = (): void => {
       if (codeLines.length)
         blocks.push(`<pre><code>${codeLines.map((line) => this.escape(line)).join('\n')}</code></pre>`);
@@ -30,6 +45,7 @@ export class MarkdownPipe implements PipeTransform {
       if (/^```/.test(line)) {
         flushParagraph();
         flushList();
+        flushTable();
         if (inCode) flushCode();
         inCode = !inCode;
         continue;
@@ -38,6 +54,18 @@ export class MarkdownPipe implements PipeTransform {
         codeLines.push(line);
         continue;
       }
+      if (/^\s*\|.*\|\s*$/.test(line)) {
+        flushParagraph();
+        flushList();
+        const row = line
+          .trim()
+          .slice(1, -1)
+          .split('|')
+          .map((cell) => cell.trim());
+        if (!row.every((cell) => /^:?-{2,}:?$/.test(cell))) tableRows.push(row);
+        continue;
+      }
+      flushTable();
       // Befehlszeilen („$ npm test“) als Code hervorheben.
       const command = line.match(/^\$ (.+)$/);
       if (command) {
@@ -87,6 +115,7 @@ export class MarkdownPipe implements PipeTransform {
     }
     flushParagraph();
     flushList();
+    flushTable();
     flushCode();
     return blocks.join('') || '<p>Keine Inhalte vorhanden.</p>';
   }
@@ -99,8 +128,12 @@ export class MarkdownPipe implements PipeTransform {
       .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,:;]|$)/g, '$1<em>$2</em>')
       .replace(/^\[ \] /, '☐ ')
       .replace(/^\[x\] /i, '☑ ')
-      // Links innerhalb der App (z. B. #development/<id>) sind klickbar, externe bleiben reiner Text.
+      // Links innerhalb der App (z. B. #development/<id>) und https-Links sind klickbar, andere bleiben reiner Text.
       .replace(/\[([^\]]+)\]\((#[a-z]+(?:\/[0-9a-f-]{36})?)\)/gi, '<a class="doc-link app-link" href="$2">$1</a>')
+      .replace(
+        /\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g,
+        '<a class="ext-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+      )
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="doc-link">$1<span class="doc-link-url"> ($2)</span></span>');
     return this.highlight(html).replace(
       /@@CODE(\d+)@@/g,

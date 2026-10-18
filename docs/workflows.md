@@ -25,7 +25,7 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 1. **Idee anlegen:** Aufwand, Tokens, Nutzen und Kosten sind optional und lassen sich manuell eintragen.
 2. **Auftragsautor** (`draftRequirements`): Idee mit Status `requested` → der Autor erhält Projektbeschreibung und Regeln (Einstellungen) und erzeugt in **einem Lauf** die Anforderung (Ziel, Akzeptanzkriterien, betroffene Dateien, Diagramme) und die Schätzung (Stunden, Tokens, Nutzen, Kosten). Manuell eingetragene Werte bleiben erhalten; die Schätzung wird in den Backlog-Auftrag übernommen.
 3. **Bug-Wächter** (`assessRisks`): übernimmt die Anforderung des Autors, prüft sie gegen alle bisherigen Bugs (offene und behobene samt Lösung) und speichert die Risiken am Auftrag („was nicht wiederholt werden darf“). Beide Schritte laufen beim Ausarbeiten und werden bei der Abarbeitung nicht wiederholt.
-4. Die Sprint-Zuordnung bleibt manuell. Hängende `drafting`-Ideen werden nach einer Frist zurückgesetzt.
+4. Die Sprint-Zuordnung ist manuell oder läuft über die Sprintplanung (Abschnitt 3a). Hängende `drafting`-Ideen werden nach einer Frist zurückgesetzt.
 
 ## 3. Sprint-Lebenszyklus
 
@@ -34,6 +34,45 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 | Geplant       | Sprint angelegt, Aufträge zuordenbar; der Worker arbeitet nichts ab.                                                                                |
 | Aktiv         | Maximal **ein** aktiver Sprint pro Projekt (DB-Constraint). Backlog-Aufträge des Sprints werden automatisch auf „Geplant“ gesetzt und abgearbeitet. |
 | Abgeschlossen | Sprint-Bericht wird erzeugt; die Git-Sicherung wird automatisch eingereiht (DB-Trigger).                                                            |
+
+## 3a. Sprintplanung und Autopilot
+
+Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`):
+
+| Modus                    | Verhalten                                                                                                                                               |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manual` (Standard)      | Sprints werden selbst zusammengestellt; der Vorschlag erscheint nur auf Knopfdruck („Nächsten Sprint vorschlagen“).                                    |
+| `suggest` (vorschlagen)  | Sprints zeigt immer die Karte „Vorschlag für Sprint N“; „Übernehmen“ bzw. „Übernehmen und starten“ per Klick.                                            |
+| `autopilot`              | Wie `suggest`, zusätzlich schliesst der Worker fertige Sprints ab und startet den nächsten Vorschlag selbst – nur innerhalb der Arbeitszeiten.         |
+
+**Planer** (`src/core/sprint-planner.ts`, deterministisch, ohne Modell):
+
+- Kandidaten: Aufträge `backlog`, `planned` und `blocked` ohne Sprint oder aus abgeschlossenen Sprints.
+- Score = Prioritätsgewicht (hoch 3, mittel 2, niedrig 1) × (Nutzen + 1) / (Kosten + 1); +2 für Bugs, +1 für Folgeaufträge mit erledigtem Vorgänger, −1,5 für Aufträge, die blockiert waren oder aus einem Sprint genommen wurden.
+- **Kapazität** = Median der Ist-Werte der letzten 3 abgeschlossenen Sprints: gemessene Laufzeit (Stunden) und Tokens aller Agent-Schritte erledigter Aufträge (`completedSprintUsage` in `src/api/usage.ts`). Ohne solche Sprints gilt `sprint_capacity_hours` (Standard 40 h); die Karte zeigt das als „Einstellung – noch keine Sprint-Historie“.
+- Aufgefüllt wird nach Score, solange Stunden (Schätzung `effort_hours`, sonst 2 h) und Tokens (`token_estimate`) in die Kapazität passen; der erste Auftrag passt immer.
+- Reihenfolge (`sprint_rank`): Ein Folgeauftrag kommt nur mit oder nach seinem Vorgänger in den Sprint und steht immer dahinter. Aufträge mit denselben betroffenen Dateien (Abschnitt „Technische Hinweise“ der Anforderung) stehen direkt hintereinander und laufen damit nacheinander unter der Projektsperre.
+- „Aktion notwendig“-Aufträge (`blocked` mit `action_todo`) aus dem vorigen Sprint werden immer übernommen. Andere blockierte Aufträge werden normal bewertet.
+
+**Vorschlagskarte:** Tabelle mit Begründung, Score, Stunden und Tokens je Auftrag; Summenzeile mit Stunden, Tokens und geschätzten Kosten. Die Kosten sind Tokens × Durchschnittspreis je Token aus den gemessenen Kosten (`tokenPriceUsd`, erst Projekt, sonst alle Projekte; ohne Messwerte Referenzpreis 5 $ je 1 Mio. Tokens). Ab- und Zuwählen aktualisiert die Summen sofort. „Übernehmen“ legt den Sprint an (Status geplant), ordnet die gewählten Aufträge zu und setzt `sprint_rank` in der angezeigten Reihenfolge; „Übernehmen und starten“ setzt ihn zusätzlich aktiv (nur, wenn kein anderer Sprint aktiv ist).
+
+**KI-Kommentar (optional):** Der Knopf „🤖 KI-Kommentar“ reiht eine Anfrage ein (`sprint_proposal_comments`); der Worker lässt den Auftragsautor die aktuelle Auswahl in 3–5 Sätzen kommentieren (Sprintziel, Risiken). Reiner Text, höchstens 5 Sätze, ohne Einfluss auf die Auswahl. Beim Übernehmen wird er gelöscht und nicht am Sprint gespeichert.
+
+**Roadmap:** „🗺 Roadmap“ berechnet die nächsten 3 Sprints nacheinander mit derselben Kapazität voraus. Eingeplante Aufträge gelten für die folgenden Sprints als erledigt (Folgeaufträge rücken nach) und erscheinen nicht erneut. Die Vorschau legt nichts an und ändert nichts (`GET …/sprints/roadmap`).
+
+**Autopilot** (`src/runner/sprint-autopilot.ts`, am Anfang jedes Worker-Zyklus):
+
+1. **Pause:** Ist die Git-Sicherung des zuletzt abgeschlossenen Sprints gescheitert (Merge-Konflikt, Test-Gate, Push), pausiert der Autopilot. Sprints zeigt die Meldung mit dem Git-Fehler, dazu kommt einmalig eine Push-Nachricht. Er startet keinen neuen Sprint, bis die Sicherung erneut erfolgreich läuft oder jemand mit der Rolle Planung „Autopilot freigeben“ klickt (`autopilot_released_sprint`). Der Merge- und Tag-Ablauf selbst bleibt unverändert.
+2. **Abschluss läuft:** Solange die Sicherung `pending`/`running` ist, wartet er.
+3. **Auto-Abschluss:** Ein aktiver Sprint wird abgeschlossen, sobald kein Auftrag mehr `backlog`, `planned` oder `in_progress` ist und alle verbleibenden `blocked`-Aufträge „Aktion notwendig“ haben. Blockierte ohne Aktion sind Fehler, die noch behoben werden, und halten den Sprint offen. Der Abschluss erzeugt den Bericht und reiht die Git-Sicherung ein (Test-Gate, Merge, Tag, Push). Er geht auch ausserhalb der Arbeitszeiten, weil dabei kein Agent läuft.
+4. **Nächster Sprint:** Nur innerhalb der Arbeitszeiten (`autopilot_start`, `autopilot_end`, `autopilot_days`; Standard Mo–Fr 08:00–18:00, Ortszeit des Workers; „Bis“ vor „Von“ = über Mitternacht, gleiche Zeiten = ganztägig). Der Vorschlag wird übernommen und gestartet; die „Aktion notwendig“-Aufträge wandern mit. Enthält der Vorschlag nur solche Aufträge, startet kein Sprint.
+
+**Grenzen:**
+
+- **Kein Budget:** Das Budget-Feature (Idee 04) gibt es noch nicht, deshalb prüft der Autopilot kein Budget. Einzige Kostengrenze sind die Arbeitszeiten. Kommt Idee 04, gehört die Prüfung in `autopilotGuard` (`src/api/sprint-planning.ts`).
+- Die Kapazität vergleicht gemessene Agent-Laufzeit mit geschätzten Stunden der Kandidaten. Bei wenig Historie ist der Median ungenau. Sprints ohne gemessene Laufzeit (z. B. von Hand erledigt) zählen nicht als Historie.
+- Die Roadmap rechnet mit der heutigen Kapazität und nimmt an, dass alle eingeplanten Aufträge erledigt werden.
+- Bereits geplante, noch nicht gestartete Sprints und ihre Aufträge fliessen nicht in Vorschlag und Roadmap ein.
 
 ## 4. Abarbeitung eines Auftrags (`runWorkItem`)
 

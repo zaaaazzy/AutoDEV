@@ -1,4 +1,7 @@
 import { validAgentCommands } from './permission-groups.js';
+import { seedDefaultActions } from './agent-tasks.js';
+import { SCOPE_PATTERN } from '../agent/agent-guard.js';
+import { materializeAgentCommands } from '../agent/tool-permissions.js';
 import { SYSTEM_ROLES, systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
@@ -29,7 +32,7 @@ const ROLES = new Set([
 ]);
 const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
 const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command,
-  allowed_commands AS "allowedCommands"`;
+  allowed_commands AS "allowedCommands", file_scope AS "fileScope"`;
 const AGENT_FIELDS = {
   name: { column: 'name', parse: parseTitle(80) },
   role: { column: 'role', parse: parseOption(ROLES) },
@@ -37,7 +40,20 @@ const AGENT_FIELDS = {
   instructions: { column: 'instructions', parse: parseLongText },
   enabled: { column: 'enabled', parse: parseBoolean },
   command: { column: 'command', parse: parseCommand },
+  fileScope: { column: 'file_scope', parse: parseFileScope },
 };
+
+/** Erlaubte Ordner für Dateirechte: relativ zum Projekt, ohne „..“, höchstens 20; leer = ganzes Projekt. */
+function parseFileScope(value: unknown): string[] | typeof INVALID {
+  const raw: unknown = typeof value === 'string' ? value.split(/[\n,]/) : value;
+  if (!Array.isArray(raw) || !raw.every((entry) => typeof entry === 'string')) return INVALID;
+  const scopes = [
+    ...new Set((raw as string[]).map((entry) => entry.trim().replace(/^\.\//, '').replace(/\/+$/, ''))),
+  ].filter(Boolean);
+  return scopes.length <= 20 && scopes.every((scope) => scope.length <= 200 && SCOPE_PATTERN.test(scope))
+    ? scopes
+    : INVALID;
+}
 
 export const DEFAULT_AGENTS = [
   {
@@ -117,6 +133,9 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
       DEFAULT_AGENTS.map((agent) => agent.instructions),
     ],
   );
+  // Neue Projekte bekommen mit den Agents auch die Standard-Aktionen des Testers.
+  await seedDefaultActions(pool, slug).catch(() => undefined);
+  await materializeAgentCommands(pool, slug).catch(() => undefined);
 }
 
 export function registerAgentRoutes(app: Express, pool: Pool): void {
@@ -128,7 +147,9 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     const chosen = await pool.query<{ key: string; value: string }>(
       `SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`,
     );
-    const agents = (row ? JSON.parse(row.value) : systemAgents()) as { role: string; model: string }[];
+    // Neue Rollen erscheinen sofort, auch wenn der Worker noch die ältere Liste veröffentlicht hat.
+    const published = (row ? JSON.parse(row.value) : []) as { role: string; model: string }[];
+    const agents = systemAgents().map((agent) => published.find((item) => item.role === agent.role) ?? agent);
     const commands = await pool.query<{ key: string; value: string }>(
       `SELECT key, value FROM app_settings WHERE key LIKE 'command:%'`,
     );
@@ -208,8 +229,10 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     const groups = await validAgentCommands(pool, slug, requested === undefined ? [] : requested);
     if (typeof groups === 'string') return void response.status(400).json({ message: groups });
     const result = await pool.query(
-      `INSERT INTO agents (project_slug, name, role, phase, position, instructions, enabled, command, allowed_commands)
-       SELECT $1, $2, COALESCE($3, 'custom'), $4, COALESCE(MAX(position), 0) + 1, $5, COALESCE($6, TRUE), $7, $8
+      `INSERT INTO agents (project_slug, name, role, phase, position, instructions, enabled, command, allowed_commands,
+         file_scope)
+       SELECT $1, $2, COALESCE($3, 'custom'), $4, COALESCE(MAX(position), 0) + 1, $5, COALESCE($6, TRUE), $7, $8,
+         COALESCE($9::text[], '{}')
          FROM agents WHERE project_slug = $1 AND phase = $4
        RETURNING ${AGENT_COLUMNS}`,
       [
@@ -221,6 +244,7 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
         values.get('enabled') ?? null,
         values.get('command') ?? null,
         groups,
+        values.get('file_scope') ?? null,
       ],
     );
     response.status(201).json({ agent: result.rows[0] });
@@ -246,6 +270,10 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
         DEFAULT_AGENTS.map((agent) => agent.instructions),
       ],
     );
+    if (result.rows.length) {
+      await seedDefaultActions(pool, slug).catch(() => undefined);
+      await materializeAgentCommands(pool, slug).catch(() => undefined);
+    }
     response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
   });
 

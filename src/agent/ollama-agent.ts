@@ -1,4 +1,6 @@
+import type { GuardPolicy } from './agent-guard.js';
 import { join } from 'node:path';
+import { READ_ONLY_ROLES } from './tool-permissions.js';
 import { shutdownSignal } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, runCommand } from '../core/command.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat } from './ollama-client.js';
@@ -27,6 +29,10 @@ export interface OllamaAgentOptions {
   onProgress?: (message: string) => void;
   /** Datenbank-Zugang des Projekts; aktiviert das Werkzeug run_sql für schreibende Rollen. */
   databaseUrl?: string | null;
+  /** Dateirechte des Agents (Anlegen, Ändern, Ordner); ohne Angabe gelten die Rechte der Rolle. */
+  files?: GuardPolicy;
+  /** Freigegebene Befehle des Agents (Shell und Datenbank). */
+  commands?: string[];
 }
 
 const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
@@ -41,7 +47,8 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const keepAlive = process.env.DEV_LOG_OLLAMA_KEEP_ALIVE?.trim() || '30m';
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl ?? patientFetch;
-  const canWrite = WRITE_ROLES.has(options.role);
+  // Nur lesende Rollen (z. B. Visionär) bekommen nie Schreib-, Befehls- oder Datenbank-Werkzeuge.
+  const canWrite = WRITE_ROLES.has(options.role) && !READ_ONLY_ROLES.has(options.role);
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns =
     options.maxTurns ??
@@ -51,6 +58,8 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     canWrite,
     canManageServices: options.role === 'assistant',
     databaseUrl: canWrite ? options.databaseUrl : null,
+    files: options.files,
+    commands: options.commands,
     changed: new Set(),
     backupRoot: join(options.cwd, BACKUP_DIRECTORY, new Date().toISOString().replace(/[:.]/g, '-')),
     execute: options.execute ?? runCommand,

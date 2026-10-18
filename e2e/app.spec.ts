@@ -333,18 +333,23 @@ test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
 
-test('Agent-Aufgaben: im Dropdown suchen, eigene Aufgabe definieren und wieder löschen', async ({ page }) => {
+test('Agent-Aktionen: Tester hat die Standard-Aktionen, Quick Actions im Dashboard, eigene Aktion anlegen', async ({
+  page,
+}) => {
   const title = `Build prüfen ${test.info().project.name}`;
   await login(page);
   await page.goto('/#dashboard');
-  await page.getByRole('button', { name: 'Aufgaben' }).click();
-  const search = page.getByRole('searchbox', { name: 'Aufgabe suchen' });
+  // Quick Actions: die Standard-Aktionen gehören dem Tester.
+  const quick = page.locator('.quick-actions .quick-group', { hasText: 'Tester' });
+  await expect(quick.getByRole('button', { name: /Tests ausführen/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Aktionen' }).click();
+  const search = page.getByRole('searchbox', { name: 'Aktion suchen' });
   await expect(search).toBeFocused();
   await search.fill('docker');
   await expect(page.locator('.agent-task')).toHaveCount(1);
   await expect(page.locator('.agent-task')).toContainText('Docker-Dienste starten');
   await search.fill(title);
-  await page.getByRole('button', { name: `+ Neue Aufgabe „${title}“` }).click();
+  await page.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();
   await page.getByLabel('Anweisung an den Assistenten').fill('Führe npm run build aus und melde Fehler.');
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
   const own = page.locator('.agent-task', { hasText: title });
@@ -355,20 +360,20 @@ test('Agent-Aufgaben: im Dropdown suchen, eigene Aufgabe definieren und wieder l
   await expect(own).toHaveCount(0);
 });
 
-test('Chat: „/“ wählt den Agent, „@“ verweist mit Bubbles, beim Tippen eingeschränkt', async ({ page }) => {
+test('Chat: „@“ wählt den Agent, „/“ verweist mit Bubbles, beim Tippen eingeschränkt', async ({ page }) => {
   await login(page);
   await page.goto('/#dashboard');
-  const input = page.getByRole('textbox', { name: /Nachricht – \/ für Agent/ });
+  const input = page.getByRole('textbox', { name: /Nachricht – @ für Agent oder Person/ });
   await input.click();
-  await input.pressSequentially('/tes');
-  await expect(page.locator('.mention-bubble')).toHaveCount(1);
+  await input.pressSequentially('@tester');
+  await expect(page.locator('.mention-bubble').first()).toContainText('Tester');
   await page.keyboard.press('Enter');
   await expect(page.locator('.composer-chip.agent')).toContainText('Tester');
-  await input.pressSequentially('@');
+  await input.pressSequentially('/');
   await expect(page.locator('.mention-bubble')).toHaveCount(6);
   await input.pressSequentially('auf');
   await page.keyboard.press('Enter');
-  await expect(input).toHaveValue('@auftrag/');
+  await expect(input).toHaveValue('/auftrag/');
   await input.pressSequentially('login');
   await expect(page.locator('.mention-bubble').first()).toContainText('Login-Seite modernisieren');
   await page.locator('.mention-bubble').first().click();
@@ -391,9 +396,54 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await expect(row).toContainText('Priorität hoch');
   const box = row.getByRole('checkbox');
   await expect(box).toBeChecked();
+  const totals = card.locator('.proposal-totals');
+  await expect(totals).toContainText('Kosten');
+  const before = await totals.textContent();
   await box.uncheck();
   await expect(row).toHaveClass(/unpicked/);
+  // Summen aktualisieren sich sofort.
+  await expect(totals).not.toHaveText(before ?? '');
+  await box.check();
   await expect(card.getByRole('button', { name: 'Übernehmen', exact: true })).toBeVisible();
+  await expect(card.getByRole('button', { name: /KI-Kommentar/ })).toBeVisible();
+
+  // Roadmap: 3 vorausberechnete Sprints, ohne dass etwas angelegt wird.
+  const sprintList = async () =>
+    ((await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
+      sprints: { id: string; status: string }[];
+    }).sprints;
+  const sprintsBefore = (await sprintList()).length;
+  await card.getByRole('button', { name: /Roadmap/ }).click();
+  const roadmap = card.locator('.sprint-roadmap');
+  await expect(roadmap.getByRole('heading', { name: /die nächsten 3 Sprints/ })).toBeVisible();
+  await expect(roadmap.locator('.roadmap-sprint').first()).toContainText(title);
+  expect((await sprintList()).length).toBe(sprintsBefore);
+
+  // KI-Kommentar wird beim Worker angefragt; die Auswahl bleibt unverändert. Ohne Pause gibt es nichts freizugeben.
+  const asked = await request.post('/api/projects/e2e/sprints/proposal/comment', { headers, data: { ids: [order.id] } });
+  expect(asked.status()).toBe(202);
+  expect((await asked.json()).comment.status).toBe('requested');
+  const resumed = await request.post('/api/projects/e2e/sprints/autopilot/resume', { headers, data: {} });
+  expect(resumed.status()).toBe(400);
+
+  // Übernehmen legt den Sprint mit Reihenfolge an (über die API, um andere Tests nicht zu stören).
+  const applied = await request.post('/api/projects/e2e/sprints/proposal/apply', {
+    headers,
+    data: { ids: [order.id], start: false },
+  });
+  expect(applied.status()).toBe(201);
+  const { sprintId } = (await applied.json()) as { sprintId: string };
+  expect((await sprintList()).find((sprint) => sprint.id === sprintId)?.status).toBe('planned');
+  // Der übernommene Auftrag ist kein Kandidat mehr.
+  const next = (await (await request.get('/api/projects/e2e/sprints/proposal', { headers })).json()).proposal as {
+    items: { id: string }[];
+  };
+  expect(next.items.some((item) => item.id === order.id)).toBe(false);
+  // Der Kommentar wird beim Übernehmen nicht gespeichert.
+  expect((await (await request.get('/api/projects/e2e/sprints/proposal/comment', { headers })).json()).comment).toBe(
+    null,
+  );
+  await request.delete(`/api/sprints/${sprintId}`, { headers });
   await request.delete(`/api/development/${order.id}`, { headers });
 });
 
@@ -434,6 +484,7 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
     headers,
     data: { name: `Rechte-Test ${Date.now()}`, role: 'reviewer', phase: 'while_task' },
   });
+  console.log('DEBUG', response.status(), (await response.text()).slice(0, 300));
   const agent = (await response.json()).agent;
   try {
     expect(agent.allowedCommands).toEqual([]);
@@ -444,9 +495,24 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
     expect(bad.status()).toBe(400);
     const ok = await request.patch(`/api/agents/${agent.id}`, {
       headers,
-      data: { allowedCommands: ['files', 'Bash(git status:*)'] },
+      data: { allowedCommands: ['files:create', 'Bash(git status:*)'], fileScope: ['docs', './src/app/'] },
     });
-    expect((await ok.json()).agent.allowedCommands).toEqual(['files', 'Bash(git status:*)']);
+    const saved = (await ok.json()).agent;
+    expect(saved.allowedCommands).toEqual(['files:create', 'Bash(git status:*)']);
+    expect(saved.fileScope).toEqual(['docs', 'src/app']);
+    // Frühere Sammelregel wird in Anlegen und Ändern aufgeteilt; Ordner ausserhalb des Projekts sind ungültig.
+    const legacy = await request.patch(`/api/agents/${agent.id}`, { headers, data: { allowedCommands: ['files'] } });
+    expect((await legacy.json()).agent.allowedCommands).toEqual(['files:create', 'files:edit']);
+    for (const fileScope of [['../x'], ['/etc'], ['a/../../b']]) {
+      expect((await request.patch(`/api/agents/${agent.id}`, { headers, data: { fileScope } })).status()).toBe(400);
+    }
+    const groups = (await (await request.get('/api/projects/e2e/permission-groups', { headers })).json()).groups;
+    const files = groups.find((group: { id: string }) => group.id === 'files');
+    expect(files.commands.map((command: { label: string }) => command.label)).toEqual([
+      'Dateien anlegen',
+      'Dateien ändern',
+    ]);
+    expect(files.commands.every((command: { help: string }) => command.help.length > 20)).toBeTruthy();
     const rule = await request.post('/api/projects/e2e/permission-groups', {
       headers,
       data: { label: 'Gefährlich', rules: 'Bash(rm -rf:*)' },
