@@ -1,9 +1,10 @@
+/* global self, URL */
 // Service Worker von Dev Log: zeigt Push-Nachrichten an und öffnet beim Antippen die passende Ansicht.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
 self.addEventListener('push', (event) => {
-  let data = {};
+  let data;
   try {
     data = event.data ? event.data.json() : {};
   } catch {

@@ -24,7 +24,8 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
   failure, failure_bug_id AS "failureBugId",
   (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus",
-  removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt"`;
+  removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt",
+  sprint_rank AS "sprintRank"`;
 
 const DEV_FIELDS = {
   ...IDEA_FIELDS,

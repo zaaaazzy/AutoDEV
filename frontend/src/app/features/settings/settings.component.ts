@@ -5,17 +5,20 @@ import type { AgentStatus, Project } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
 import { SecuritySettingsComponent } from './security-settings.component.js';
+import { UsersSettingsComponent } from './users-settings.component.js';
+import { AuthService } from '../../core/auth.service.js';
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule, NotificationSettingsComponent, SecuritySettingsComponent],
+  imports: [FormsModule, NotificationSettingsComponent, SecuritySettingsComponent, UsersSettingsComponent],
   templateUrl: './settings.component.html',
   host: { style: 'display: contents' },
 })
 export class SettingsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   protected readonly busy = this.store.busy;
   protected settings = {
     repository: '',
@@ -31,6 +34,29 @@ export class SettingsComponent {
     clearDatabase: false,
   };
   protected maxAgents = 2;
+  protected deleteConfirm = '';
+  protected deleteFolder = false;
+
+  /** Projekt löschen; den Ordner löscht auf Wunsch der Worker auf dem Rechner. */
+  protected async deleteProject(): Promise<void> {
+    const project = this.store.currentProject();
+    if (!project) return;
+    const withFolder = this.deleteFolder;
+    await this.store.perform(
+      async () => {
+        await this.api.delete(`/api/projects/${encodeURIComponent(project.slug)}`, {
+          confirm: this.deleteConfirm,
+          deleteFolder: withFolder,
+        });
+        this.deleteConfirm = '';
+        this.deleteFolder = false;
+        await this.store.loadProjects();
+        this.store.navigate('dashboard');
+      },
+      `Projekt „${project.name}“ gelöscht${withFolder ? ' – der Ordner wird auf dem Rechner entfernt' : ''}.`,
+      false,
+    );
+  }
 
   constructor() {
     effect(() => {

@@ -138,6 +138,26 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
     response.json({ sprint: result.rows[0] });
   });
 
+  // Kanban: Reihenfolge der Aufträge im Sprint festlegen (oberste zuerst).
+  app.post('/api/sprints/:id/order', async (request, response, next) => {
+    try {
+      const ids = (request.body as { ids?: unknown } | undefined)?.ids;
+      if (!isUuid(request.params.id) || !Array.isArray(ids) || ids.length > 500 || !ids.every(isUuid)) {
+        response.status(400).json({ message: 'Ungültige Reihenfolge.' });
+        return;
+      }
+      await pool.query(
+        `UPDATE development_items d SET sprint_rank = o.rank, updated_at = NOW()
+           FROM unnest($2::uuid[]) WITH ORDINALITY AS o(id, rank)
+          WHERE d.id = o.id AND d.sprint_id = $1`,
+        [request.params.id, ids],
+      );
+      response.json({ ordered: ids.length });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.delete('/api/sprints/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });

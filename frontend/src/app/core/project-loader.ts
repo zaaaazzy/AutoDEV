@@ -4,6 +4,7 @@ import {
   emptyProjectData,
   type AcceptanceCheck,
   type AcceptanceDefaults,
+  type DocRevision,
   type Agent,
   type Attachment,
   CoverageReport,
@@ -40,12 +41,27 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     api.get<{ attachments?: Attachment[] }>(`${base}/attachments`),
     api.get<{ report?: CoverageReport | null }>(`${base}/coverage`),
     api.get<{ checks?: AcceptanceCheck[]; defaults?: AcceptanceDefaults }>(`${base}/acceptance`),
+    api.get<{ revisions?: DocRevision[] }>(`${base}/doc-revisions`),
   ]);
 
   const data = emptyProjectData();
   const errors: Record<string, string> = {};
-  const [board, sprints, agents, agentRuns, runs, stats, bugs, docs, reports, attachments, coverage, acceptance] =
-    results;
+  const [
+    board,
+    sprints,
+    agents,
+    agentRuns,
+    runs,
+    stats,
+    bugs,
+    docs,
+    reports,
+    attachments,
+    coverage,
+    acceptance,
+    revisions,
+  ] = results;
+  if (revisions.status === 'fulfilled') data.docRevisions = revisions.value.revisions ?? [];
   if (acceptance.status === 'fulfilled') {
     data.acceptance = acceptance.value.checks ?? [];
     data.acceptanceDefaults = acceptance.value.defaults ?? null;

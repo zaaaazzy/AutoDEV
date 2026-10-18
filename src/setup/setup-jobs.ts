@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { lstat, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
 import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
@@ -101,6 +101,25 @@ async function createFolder(params: Params) {
   const folder = folderOf(params);
   await mkdir(folder, { recursive: true });
   return { created: true, path: folder };
+}
+
+/**
+ * Projektordner löschen (nur intern über DELETE /api/projects, der Pfad stammt aus der Datenbank).
+ * Mehrfach abgesichert: gültiger Projektordner, mindestens drei Ebenen tief, kein symbolischer Link, nicht Dev Log.
+ */
+export async function deleteProjectFolder(params: Params) {
+  const folder = resolve(folderOf(params));
+  const depth = folder.split(sep).filter(Boolean).length;
+  if (depth < 3) throw new Error(`Ordner ${folder} liegt zu weit oben und wird nicht gelöscht.`);
+  const devLog = resolve(import.meta.dirname, '..', '..');
+  if (folder === devLog || devLog.startsWith(folder + sep) || folder.startsWith(devLog + sep)) {
+    throw new Error('Der Dev-Log-Ordner selbst wird nie gelöscht.');
+  }
+  const info = await lstat(folder).catch(() => null);
+  if (!info) return { deleted: false, path: folder, reason: 'Ordner existiert nicht (mehr).' };
+  if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`${folder} ist kein normaler Ordner.`);
+  await rm(folder, { recursive: true, force: false });
+  return { deleted: true, path: folder };
 }
 
 /** GitHub-Verbindung: gh CLI (Anmeldung) und SSH-Schlüssel. */
@@ -305,7 +324,7 @@ async function helperChat(params: Params) {
 /** Arbeitet den ältesten offenen Einrichtungsjob ab; gibt false zurück, wenn keiner wartet. */
 export async function processSetupJob(pool: Pool, execute: CommandExecutor = runCommand): Promise<boolean> {
   const job = (
-    await pool.query<{ id: string; kind: SetupJobKind; params: Params }>(
+    await pool.query<{ id: string; kind: SetupJobKind | 'delete_folder'; params: Params }>(
       `UPDATE setup_jobs SET status = 'running', updated_at = NOW()
         WHERE id = (SELECT id FROM setup_jobs WHERE status = 'pending' ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
         RETURNING id, kind, params`,
@@ -336,7 +355,9 @@ export async function processSetupJob(pool: Pool, execute: CommandExecutor = run
                 ? await gitSetup(params, execute, log)
                 : job.kind === 'test_agent'
                   ? await testAgent(params, execute)
-                  : await helperChat(params);
+                  : job.kind === 'delete_folder'
+                    ? await deleteProjectFolder(params)
+                    : await helperChat(params);
     await pool.query(`UPDATE setup_jobs SET status = 'done', result = $2::jsonb, updated_at = NOW() WHERE id = $1`, [
       job.id,
       JSON.stringify(result),

@@ -14,7 +14,7 @@ pool.on('error', () => undefined);
 runWatchdog({
   pool,
   localUrl: process.env.DEV_LOG_LOCAL_URL ?? 'http://127.0.0.1:3100',
-  publicUrl: process.env.DEV_LOG_PUBLIC_URL ?? 'https://home.zaaaazzy.ch',
+  publicUrl: process.env.DEV_LOG_PUBLIC_URL?.trim() || null,
   backupDir: join(root, 'backups'),
   dataDir: root,
 })

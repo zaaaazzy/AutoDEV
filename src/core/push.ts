@@ -23,7 +23,9 @@ export interface PushSubscriptionRow {
 }
 
 const VAPID_KEY = 'push_vapid_keys';
-const SUBJECT = process.env.DEV_LOG_PUBLIC_URL?.trim() || 'https://home.zaaaazzy.ch';
+const SUBJECT =
+  process.env.DEV_LOG_PUBLIC_URL?.trim() ||
+  (process.env.DEV_LOG_DOMAIN?.trim() ? `https://${process.env.DEV_LOG_DOMAIN.trim()}` : 'mailto:devlog@localhost');
 
 export async function vapidKeys(pool: Pool): Promise<VapidKeys> {
   const stored = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);

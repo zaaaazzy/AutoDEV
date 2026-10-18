@@ -85,7 +85,7 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
        FROM development_items d
        LEFT JOIN sprints s ON s.id = d.sprint_id
       WHERE d.project_slug = $1 AND d.status = 'planned' AND (s.status = 'active' OR d.agent_id IS NOT NULL OR d.auto_run)
-      ORDER BY CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
+      ORDER BY d.sprint_rank NULLS LAST, CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at
       LIMIT $2`,
     [options.project, options.limit],
   );

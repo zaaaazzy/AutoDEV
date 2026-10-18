@@ -8,6 +8,7 @@ import {
   normalizeProjectSlug,
   PROJECT_SLUG,
   projectFolderError,
+  projectRoots,
   validText,
 } from '../core/validation.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
@@ -50,6 +51,11 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
         stack,
       })),
     });
+  });
+
+  // Projektbereich, damit der Assistent den Ordner vorschlagen und ausserhalb liegende Pfade erklären kann.
+  app.get('/api/setup/scope', (_request, response) => {
+    response.json({ roots: projectRoots() });
   });
 
   app.get('/api/setup/permissions', (_request, response) => {

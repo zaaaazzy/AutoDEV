@@ -25,6 +25,8 @@ services:
     environment:
       PORT: 3100
       DEV_LOG_TRUST_PROXY: uniquelocal
+      DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
+      DEV_LOG_PROJECT_ROOTS: ${DEV_LOG_PROJECT_ROOTS:-}
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/dev_log
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
       DEV_LOG_AUTH: ${DEV_LOG_AUTH:-on}
@@ -57,14 +59,16 @@ services:
       db:
         condition: service_healthy
 
+  # HTTPS-Zugang von aussen (optional): nur mit COMPOSE_PROFILES=https und DEV_LOG_DOMAIN in der .env.
   https:
+    profiles: ["https"]
     image: caddy:2.8.4-alpine
     ports:
       - "80:80"
       - "443:443"
     restart: unless-stopped
     environment:
-      DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-home.zaaaazzy.ch}
+      DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-localhost}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - devlog_caddy_data:/data

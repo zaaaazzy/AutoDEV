@@ -1,5 +1,5 @@
-import { existsSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
@@ -8,6 +8,7 @@ import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
 import { processSetupJob } from '../setup/setup-jobs.js';
+import { projectFolderError } from '../core/validation.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
@@ -15,6 +16,25 @@ import { syncFavicon } from './favicon.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
+
+/**
+ * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
+ * Dev Log selbst liegt (z. B. /Volumes/External). Ausserhalb davon legt der Worker nichts an und startet keine Agents.
+ */
+export function resolveProjectScope(environment: NodeJS.ProcessEnv, installDir: string): string {
+  const configured = environment.DEV_LOG_PROJECT_ROOTS?.trim();
+  if (configured) return configured;
+  try {
+    const line = readFileSync(resolve(installDir, '.env'), 'utf8')
+      .split(/\r?\n/)
+      .find((entry) => entry.startsWith('DEV_LOG_PROJECT_ROOTS='));
+    const value = line?.slice('DEV_LOG_PROJECT_ROOTS='.length).trim().replace(/^["']|["']$/g, '');
+    if (value) return value;
+  } catch {
+    // keine .env – Vorgabe unten
+  }
+  return dirname(installDir);
+}
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -73,13 +93,18 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
     'SELECT slug, repository FROM projects ORDER BY slug',
   );
   return projects.rows.map(({ slug, repository }) => {
+    const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
     const folder =
-      isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory() ? repository : null;
+      !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
+        ? repository
+        : null;
     return {
       options: { ...options, project: slug, cwd: folder ?? options.cwd },
-      problem: folder
-        ? null
-        : `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`,
+      problem: outside
+        ? `Projekt ausserhalb des Projektbereichs – Agents bleiben gestoppt: ${outside}`
+        : folder
+          ? null
+          : `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`,
     };
   });
 }
@@ -114,6 +139,11 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  process.env.DEV_LOG_PROJECT_ROOTS = resolveProjectScope(
+    process.env,
+    resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
+  );
+  console.log(`Projektbereich: ${process.env.DEV_LOG_PROJECT_ROOTS}`);
   const options = parseRunnerOptions(process.argv.slice(2));
   const pool = await connect(options.watch);
   let stopping = false;

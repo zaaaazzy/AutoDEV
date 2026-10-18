@@ -18,7 +18,7 @@ cat > "$PLIST" <<P
 <key>EnvironmentVariables</key><dict>
 <key>PATH</key><string>$NODE_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
 <key>DEV_LOG_DATABASE_URL</key><string>${DEV_LOG_DATABASE_URL:-postgresql://devlog:devlog_local_dev@localhost:5433/dev_log}</string>
-<key>DEV_LOG_PUBLIC_URL</key><string>${DEV_LOG_PUBLIC_URL:-https://home.zaaaazzy.ch}</string>
+<key>DEV_LOG_PUBLIC_URL</key><string>${DEV_LOG_PUBLIC_URL:-}</string>
 </dict>
 <key>StartInterval</key><integer>120</integer>
 <key>RunAtLoad</key><true/>

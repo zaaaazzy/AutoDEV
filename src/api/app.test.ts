@@ -44,9 +44,9 @@ function sessionPool(): Pool {
   return {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.startsWith('INSERT INTO auth_sessions')) sessions.set(values[0] as string, new Date());
-      else if (sql.startsWith('SELECT last_seen FROM auth_sessions')) {
+      else if (sql.includes('FROM auth_sessions s')) {
         const seen = sessions.get(values[0] as string);
-        return { rows: seen ? [{ last_seen: seen }] : [] };
+        return { rows: seen ? [{ last_seen: seen, user_id: null }] : [] };
       } else if (sql.startsWith('DELETE FROM auth_sessions WHERE token_hash <>')) {
         for (const key of [...sessions.keys()]) if (key !== values[0]) sessions.delete(key);
       } else if (sql.startsWith('DELETE FROM auth_sessions')) sessions.delete(values[0] as string);
@@ -70,7 +70,7 @@ test('login creates a session cookie; with a second factor basic auth and code-l
     const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const json = { 'Content-Type': 'application/json' };
     const session = await (await fetch(`${baseUrl}/api/session`)).json();
-    assert.deepEqual(session, { authenticated: false, authRequired: true, totp: true });
+    assert.deepEqual(session, { authenticated: false, authRequired: true, totp: true, user: null });
 
     assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Authorization: basicAuth() } })).status, 401);
     const withoutCode = await fetch(`${baseUrl}/api/login`, {
@@ -523,4 +523,70 @@ test('project ids are normalized and errors name the field', async () => {
     assert.equal(missing.status, 400);
     assert.match(((await missing.json()) as { message: string }).message, /Projektordner/);
   });
+});
+
+test('a planner may read but not manage users or agents', async () => {
+  const pool = {
+    query: async (sql: string) =>
+      sql.includes('FROM auth_sessions s')
+        ? {
+            rows: [
+              {
+                last_seen: new Date(),
+                user_id: 'u1',
+                username: 'pia',
+                display_name: 'Pia',
+                roles: ['plan'],
+                active: true,
+              },
+            ],
+          }
+        : { rows: [], rowCount: 0 },
+  } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const cookie = { Cookie: 'devlog_session=abc', 'Content-Type': 'application/json' };
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: cookie })).status, 200);
+    const users = await fetch(`${baseUrl}/api/users`, { method: 'POST', headers: cookie, body: '{}' });
+    assert.equal(users.status, 403);
+    assert.match((await users.json()).message, /Administration/);
+    const agent = await fetch(`${baseUrl}/api/agents/00000000-0000-0000-0000-000000000000`, {
+      method: 'DELETE',
+      headers: cookie,
+    });
+    assert.equal(agent.status, 403);
+  });
+});
+
+test('a locked-out account does not lock out other accounts from the same address', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const wrong = { Authorization: `Basic ${Buffer.from('jemand:falsch').toString('base64')}` };
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await fetch(`${baseUrl}/api/projects`, { headers: wrong });
+    }
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: wrong })).status, 429);
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Authorization: basicAuth() } })).status, 200);
+  });
+});
+
+test('with a second factor, cached basic credentials neither count as failures nor block the login', async () => {
+  const pool = { query: async () => ({ rows: [], rowCount: 0 }) } as unknown as Pool;
+  const server = createDevLogApp(pool, { ...auth, totpSecret: 'JBSWY3DPEHPK3PXP' }).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const cached = { Authorization: basicAuth() };
+    for (let attempt = 0; attempt < 15; attempt += 1) {
+      assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: cached })).status, 401);
+    }
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: auth.username, password: auth.password }),
+    });
+    assert.equal(login.status, 401);
+    assert.equal((await login.json()).totp, true, 'asks for the code instead of being locked out');
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

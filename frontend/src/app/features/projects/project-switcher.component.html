@@ -1,0 +1,51 @@
+<button
+  type="button"
+  class="switcher-trigger"
+  [class.open]="open()"
+  aria-haspopup="listbox"
+  [attr.aria-expanded]="open()"
+  aria-label="Projekt wechseln"
+  (click)="open.set(!open())"
+>
+  @if (icon(current()); as url) {
+    <img class="switcher-icon" [src]="url" alt="" width="20" height="20" (error)="iconFailed(url)" />
+  } @else {
+    <span class="switcher-icon brand-mark">m</span>
+  }
+  <span class="switcher-name">{{ current()?.name ?? 'Kein Projekt' }}</span>
+  <svg class="switcher-chevron" viewBox="0 0 12 12" aria-hidden="true">
+    <path d="M2.5 4.5 6 8l3.5-3.5" />
+  </svg>
+</button>
+@if (open()) {
+  <div class="switcher-menu" role="listbox" aria-label="Projekte" (keydown)="move($event)">
+    <p class="switcher-caption">Projekt wechseln</p>
+    @for (project of store.projects(); track project.slug) {
+      <button
+        type="button"
+        role="option"
+        class="switcher-item"
+        [class.active]="project.slug === store.activeProject()"
+        [attr.aria-selected]="project.slug === store.activeProject()"
+        (click)="choose(project)"
+      >
+        @if (icon(project); as url) {
+          <img class="switcher-icon" [src]="url" alt="" width="20" height="20" (error)="iconFailed(url)" />
+        } @else {
+          <span class="switcher-icon brand-mark">{{ project.name.charAt(0) }}</span>
+        }
+        <span class="switcher-text">
+          <strong>{{ project.name }}</strong>
+          <small>{{ project.repository }}</small>
+        </span>
+        @if (project.slug === store.activeProject()) {
+          <span class="switcher-check" aria-hidden="true">✓</span>
+        }
+      </button>
+    }
+    <button type="button" class="switcher-item switcher-new" (click)="newProject()">
+      <span class="switcher-icon switcher-plus" aria-hidden="true">+</span>
+      <span class="switcher-text"><strong>Neues Projekt</strong><small>Geführte Einrichtung</small></span>
+    </button>
+  </div>
+}

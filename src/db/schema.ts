@@ -437,4 +437,41 @@ export const SCHEMA = `
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS favicon BYTEA;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS favicon_type TEXT;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS favicon_mtime TIMESTAMPTZ;
+  -- Benutzer und Rollen (zusätzlich zum Systemadministrator aus der .env).
+  CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    password_hash TEXT NOT NULL,
+    roles TEXT[] NOT NULL DEFAULT '{}',
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    totp_secret TEXT,
+    totp_pending TEXT,
+    last_login_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS users_username_idx ON users (lower(username));
+  ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+
+  -- Änderungen an Dokumenten: werden eingereicht und erst nach Prüfung durch die Redaktion übernommen.
+  CREATE TABLE IF NOT EXISTS doc_revisions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    doc_id UUID NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    base_title TEXT NOT NULL DEFAULT '',
+    base_content TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+    author_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    author_name TEXT NOT NULL,
+    reviewer_name TEXT,
+    review_note TEXT,
+    reviewed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS doc_revisions_doc_idx ON doc_revisions (doc_id, created_at DESC);
+  -- Reihenfolge der Aufträge im Sprint (Kanban); die Agents arbeiten sie in dieser Reihenfolge ab.
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS sprint_rank INTEGER;
 `;

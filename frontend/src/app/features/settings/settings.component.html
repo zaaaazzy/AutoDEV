@@ -1,143 +1,175 @@
 @if (store.ready()) {
-  <section class="panel">
-    <div class="section-heading">
-      <div>
-        <h2>Projekteinstellungen</h2>
-        <p class="muted">{{ store.currentProject()?.name }}</p>
+  @if (auth.can('admin')) {
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Projekteinstellungen</h2>
+          <p class="muted">{{ store.currentProject()?.name }}</p>
+        </div>
       </div>
-    </div>
-    <form class="form-grid" (ngSubmit)="saveSettings()">
-      <label class="wide"
-        >Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
-      </label>
-      <label class="wide"
-        >Testbefehle (ein Befehl pro Zeile)<textarea
-          name="testCommands"
-          [(ngModel)]="settings.testCommands"
-          rows="3"
-          placeholder="npm run build&#10;npm test"
-        ></textarea>
-      </label>
-      <label class="wide"
-        >Projektbeschreibung<textarea
-          name="description"
-          [(ngModel)]="settings.description"
-          rows="4"
-          maxlength="10000"
-          placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"
-        ></textarea>
-      </label>
-      <label class="wide"
-        >Regeln für Agents (Do's and Don'ts)<textarea
-          name="guidelines"
-          [(ngModel)]="settings.guidelines"
-          rows="6"
-          maxlength="10000"
-          placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"
-        ></textarea>
-      </label>
-      <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
-      <label class="wide"
-        >Definition of Ready (ein Punkt pro Zeile)<textarea
-          name="definitionOfReady"
-          [(ngModel)]="settings.definitionOfReady"
-          rows="4"
-          [placeholder]="(store.data().acceptanceDefaults?.definitionOfReady ?? []).join('\n')"
-        ></textarea>
-      </label>
-      <p class="muted wide">Der Auftragsautor schreibt jeden Auftrag so, dass diese Punkte erfüllt sind.</p>
-      <label class="wide"
-        >Definition of Done (ein Punkt pro Zeile)<textarea
-          name="definitionOfDone"
-          [(ngModel)]="settings.definitionOfDone"
-          rows="5"
-          [placeholder]="(store.data().acceptanceDefaults?.definitionOfDone ?? []).join('\n')"
-        ></textarea>
-      </label>
-      <p class="muted wide">
-        Der Tester hakt diese Punkte und die Akzeptanzkriterien jedes Auftrags ab. Leer lassen für die Vorgabe (grau
-        angezeigt).
-      </p>
-      <label class="wide check">
-        <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" /> Automatisches Bugfixing: Scheitert
-        ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label
-      >
-      <label class="wide"
-        >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
-          name="deployCommands"
-          [(ngModel)]="settings.deployCommands"
-          rows="2"
-          maxlength="2000"
-          placeholder="docker compose up -d --build"
-        ></textarea>
-      </label>
-      <p class="muted wide">
-        Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
-        @if (store.currentProject()?.deployStatus) {
-          Letzter Lauf: {{ store.currentProject()?.deployStatus }}
-        }
-      </p>
-      <label class="wide"
-        >GitHub-Repository<input
-          name="gitRemote"
-          [(ngModel)]="settings.gitRemote"
-          maxlength="300"
-          placeholder="git@github.com:user/repo.git"
-        />
-      </label>
-      <label class="wide"
-        >Datenbank-Zugang für Entwickler (optional)<input
-          name="databaseUrl"
-          type="password"
-          autocomplete="off"
-          [(ngModel)]="settings.databaseUrl"
-          maxlength="500"
-          [placeholder]="
-            store.currentProject()?.databaseConfigured
-              ? 'Hinterlegt – leer lassen, um beizubehalten'
-              : 'postgresql://user:passwort@host:5432/datenbank'
-          "
-        />
-      </label>
-      @if (store.currentProject()?.databaseConfigured) {
+      <form class="form-grid" (ngSubmit)="saveSettings()">
+        <label class="wide"
+          >Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
+        </label>
+        <label class="wide"
+          >Testbefehle (ein Befehl pro Zeile)<textarea
+            name="testCommands"
+            [(ngModel)]="settings.testCommands"
+            rows="3"
+            placeholder="npm run build&#10;npm test"
+          ></textarea>
+        </label>
+        <label class="wide"
+          >Projektbeschreibung<textarea
+            name="description"
+            [(ngModel)]="settings.description"
+            rows="4"
+            maxlength="10000"
+            placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"
+          ></textarea>
+        </label>
+        <label class="wide"
+          >Regeln für Agents (Do's and Don'ts)<textarea
+            name="guidelines"
+            [(ngModel)]="settings.guidelines"
+            rows="6"
+            maxlength="10000"
+            placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"
+          ></textarea>
+        </label>
+        <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
+        <label class="wide"
+          >Definition of Ready (ein Punkt pro Zeile)<textarea
+            name="definitionOfReady"
+            [(ngModel)]="settings.definitionOfReady"
+            rows="4"
+            [placeholder]="(store.data().acceptanceDefaults?.definitionOfReady ?? []).join('\n')"
+          ></textarea>
+        </label>
+        <p class="muted wide">Der Auftragsautor schreibt jeden Auftrag so, dass diese Punkte erfüllt sind.</p>
+        <label class="wide"
+          >Definition of Done (ein Punkt pro Zeile)<textarea
+            name="definitionOfDone"
+            [(ngModel)]="settings.definitionOfDone"
+            rows="5"
+            [placeholder]="(store.data().acceptanceDefaults?.definitionOfDone ?? []).join('\n')"
+          ></textarea>
+        </label>
+        <p class="muted wide">
+          Der Tester hakt diese Punkte und die Akzeptanzkriterien jedes Auftrags ab. Leer lassen für die Vorgabe (grau
+          angezeigt).
+        </p>
         <label class="wide check">
-          <input type="checkbox" name="clearDatabase" [(ngModel)]="settings.clearDatabase" /> Datenbank-Zugang
-          entfernen</label
+          <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" /> Automatisches Bugfixing:
+          Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung
+          gestartet.</label
         >
-      }
-      <p class="muted wide">
-        Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
-        Dev-Log-Datenbank).
-      </p>
-      <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
-    </form>
-  </section>
-  <section class="panel">
-    <div class="section-heading">
-      <div>
-        <h2>Agents</h2>
-        <p class="muted">Gilt für alle Projekte</p>
+        <label class="wide"
+          >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
+            name="deployCommands"
+            [(ngModel)]="settings.deployCommands"
+            rows="2"
+            maxlength="2000"
+            placeholder="docker compose up -d --build"
+          ></textarea>
+        </label>
+        <p class="muted wide">
+          Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
+          @if (store.currentProject()?.deployStatus) {
+            Letzter Lauf: {{ store.currentProject()?.deployStatus }}
+          }
+        </p>
+        <label class="wide"
+          >GitHub-Repository<input
+            name="gitRemote"
+            [(ngModel)]="settings.gitRemote"
+            maxlength="300"
+            placeholder="git@github.com:user/repo.git"
+          />
+        </label>
+        <label class="wide"
+          >Datenbank-Zugang für Entwickler (optional)<input
+            name="databaseUrl"
+            type="password"
+            autocomplete="off"
+            [(ngModel)]="settings.databaseUrl"
+            maxlength="500"
+            [placeholder]="
+              store.currentProject()?.databaseConfigured
+                ? 'Hinterlegt – leer lassen, um beizubehalten'
+                : 'postgresql://user:passwort@host:5432/datenbank'
+            "
+          />
+        </label>
+        @if (store.currentProject()?.databaseConfigured) {
+          <label class="wide check">
+            <input type="checkbox" name="clearDatabase" [(ngModel)]="settings.clearDatabase" /> Datenbank-Zugang
+            entfernen</label
+          >
+        }
+        <p class="muted wide">
+          Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
+          Dev-Log-Datenbank).
+        </p>
+        <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
+      </form>
+    </section>
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Agents</h2>
+          <p class="muted">Gilt für alle Projekte</p>
+        </div>
       </div>
-    </div>
-    <form class="form-grid" (ngSubmit)="saveMaxAgents()">
-      <label
-        >Gleichzeitige Agents (1–8)<input
-          name="maxAgents"
-          type="number"
-          min="1"
-          max="8"
-          step="1"
-          [(ngModel)]="maxAgents"
-          required
-        />
-      </label>
-      <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-      <p class="muted wide">
-        Jedes Projekt arbeitet seine Aufträge nacheinander ab; mehrere Projekte laufen parallel. Der Worker übernimmt
-        die Änderung im nächsten Durchlauf.
-      </p>
-    </form>
-  </section>
+      <form class="form-grid" (ngSubmit)="saveMaxAgents()">
+        <label
+          >Gleichzeitige Agents (1–8)<input
+            name="maxAgents"
+            type="number"
+            min="1"
+            max="8"
+            step="1"
+            [(ngModel)]="maxAgents"
+            required
+          />
+        </label>
+        <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+        <p class="muted wide">
+          Jedes Projekt arbeitet seine Aufträge nacheinander ab; mehrere Projekte laufen parallel. Der Worker übernimmt
+          die Änderung im nächsten Durchlauf.
+        </p>
+      </form>
+    </section>
+  }
+  @if (auth.can('admin') && store.currentProject(); as project) {
+    <section class="panel danger-zone">
+      <div class="section-heading">
+        <div>
+          <h2>Projekt löschen</h2>
+          <p class="muted">Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus Dev Log.</p>
+        </div>
+      </div>
+      <form class="form-grid" (ngSubmit)="deleteProject()">
+        <label class="wide check">
+          <input type="checkbox" name="deleteFolder" [(ngModel)]="deleteFolder" />
+          Auch den Ordner <code>{{ project.repository }}</code> auf dem Rechner löschen (nicht rückgängig zu machen)
+        </label>
+        <label class="wide"
+          >Zur Bestätigung den Projektnamen eintippen<input
+            name="deleteConfirm"
+            [(ngModel)]="deleteConfirm"
+            autocomplete="off"
+            [placeholder]="project.name"
+        /></label>
+        <button class="button danger" type="submit" [disabled]="busy() || deleteConfirm.trim() !== project.name">
+          Projekt endgültig löschen
+        </button>
+      </form>
+    </section>
+  }
+  @if (auth.can('admin')) {
+    <app-users-settings />
+  }
   <app-notification-settings />
   <app-security-settings />
 }

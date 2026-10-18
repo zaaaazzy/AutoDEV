@@ -1,0 +1,105 @@
+import type { RequestHandler } from 'express';
+
+/**
+ * Rollen: Jede schreibende Aktion gehört zu genau einer Rolle. Lesen dürfen alle angemeldeten Benutzer.
+ * „admin“ umfasst alle Rollen; der Zugang aus der .env ist immer Administrator (kein Aussperren möglich).
+ */
+export const ROLES = ['admin', 'agents', 'run', 'plan', 'docs', 'editor', 'chat'] as const;
+export type Role = (typeof ROLES)[number];
+
+export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
+  admin: {
+    label: 'Administration',
+    description: 'Benutzer und Rollen, Projekte anlegen und einstellen, Agent-Rechte, globale Einstellungen.',
+  },
+  agents: { label: 'Agents verwalten', description: 'Agents anlegen, ändern, löschen und ordnen.' },
+  run: {
+    label: 'Agents ausführen',
+    description: 'Agents starten und abbrechen, Aufträge erneut versuchen und analysieren, Git-Abgleich.',
+  },
+  plan: { label: 'Planung', description: 'Ideen, Aufträge, Bugs, Sprints und Anhänge erstellen und bearbeiten.' },
+  docs: { label: 'Dokumentation bearbeiten', description: 'Handbücher anlegen und Änderungen zur Prüfung einreichen.' },
+  editor: {
+    label: 'Redaktion',
+    description: 'Eingereichte Dokumentänderungen prüfen, freigeben oder ablehnen; Dokumente löschen.',
+  },
+  chat: { label: 'Assistent nutzen', description: 'Mit dem Dashboard-Assistenten arbeiten.' },
+};
+
+export interface Principal {
+  /** null = Systemadministrator aus der .env */
+  id: string | null;
+  username: string;
+  displayName: string;
+  roles: Role[];
+}
+
+export function isRole(value: unknown): value is Role {
+  return typeof value === 'string' && (ROLES as readonly string[]).includes(value);
+}
+
+export function hasRole(principal: Principal | undefined, role: Role): boolean {
+  return Boolean(principal && (principal.roles.includes('admin') || principal.roles.includes(role)));
+}
+
+type Rule = [method: string, pattern: RegExp, role: Role | null | ((body: unknown) => Role)];
+
+/** null = jeder angemeldete Benutzer (eigenes Konto, eigene Geräte). Unbekannte Routen verlangen Administration. */
+const RULES: Rule[] = [
+  ['POST', /^\/api\/(login|logout)$/, null],
+  ['POST', /^\/api\/auth\//, null],
+  ['POST', /^\/api\/push\//, null],
+  ['*', /^\/api\/users/, 'admin'],
+  ['PUT', /^\/api\/settings$/, 'admin'],
+  ['POST', /^\/api\/projects$/, 'admin'],
+  ['POST', /^\/api\/projects\/setup$/, 'admin'],
+  ['POST', /^\/api\/setup\/jobs$/, 'admin'],
+  ['PATCH', /^\/api\/projects\/[^/]+$/, 'admin'],
+  ['PUT', /^\/api\/projects\/[^/]+\/permissions$/, 'admin'],
+  ['PUT', /^\/api\/system-agents\//, 'admin'],
+  ['POST', /^\/api\/projects\/[^/]+\/agents\/[^/]+\/cancel$/, 'run'],
+  ['POST', /^\/api\/projects\/[^/]+\/agents(\/(defaults|order))?$/, 'agents'],
+  ['*', /^\/api\/agents\//, 'agents'],
+  ['POST', /^\/api\/development\/[^/]+\/(retry|analyze)$/, 'run'],
+  ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
+  // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
+  [
+    'PATCH',
+    /^\/api\/development\/[^/]+$/,
+    (body) => (typeof body === 'object' && body !== null && 'agentId' in body ? 'run' : 'plan'),
+  ],
+  ['*', /^\/api\/development\//, 'plan'],
+  ['POST', /^\/api\/projects\/[^/]+\/(development|ideation|bugs|sprints)$/, 'plan'],
+  ['*', /^\/api\/(ideation|bugs|sprints)\//, 'plan'],
+  ['*', /^\/api\/(projects\/[^/]+\/)?attachments/, 'plan'],
+  ['*', /^\/api\/(ideation|development|bugs)\/[^/]+\/attachments/, 'plan'],
+  ['POST', /^\/api\/projects\/[^/]+\/docs$/, 'docs'],
+  ['POST', /^\/api\/docs\/[^/]+\/revisions$/, 'docs'],
+  ['POST', /^\/api\/doc-revisions\/[^/]+\/(approve|reject)$/, 'editor'],
+  ['*', /^\/api\/docs\//, 'editor'],
+  ['*', /^\/api\/projects\/[^/]+\/chat$/, 'chat'],
+];
+
+export function requiredRole(method: string, path: string, body: unknown): Role | null {
+  for (const [ruleMethod, pattern, role] of RULES) {
+    if ((ruleMethod === '*' || ruleMethod === method) && pattern.test(path)) {
+      return typeof role === 'function' ? role(body) : role;
+    }
+  }
+  return 'admin';
+}
+
+/** Prüft schreibende Anfragen gegen die Rollen des angemeldeten Benutzers (res.locals.principal). */
+export const authorize: RequestHandler = (request, response, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method) || !request.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+  const role = requiredRole(request.method, request.path, request.body);
+  const principal = response.locals.principal as Principal | undefined;
+  if (role === null || hasRole(principal, role)) {
+    next();
+    return;
+  }
+  response.status(403).json({ message: `Dafür fehlt dir die Rolle „${ROLE_INFO[role].label}“.` });
+};

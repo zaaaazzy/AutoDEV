@@ -20,4 +20,7 @@ test('project folders must be specific absolute paths', () => {
   }
   assert.equal(projectFolderError('/Volumes/External/Mainty', { DEV_LOG_PROJECT_ROOTS: '/Volumes/External' }), null);
   assert.ok(projectFolderError('/Users/me/x/y', { DEV_LOG_PROJECT_ROOTS: '/Volumes/External' }));
+  // Der Bereich selbst ist kein Projektordner, nur seine Unterordner.
+  assert.ok(projectFolderError('/Users/me/Projekte', { DEV_LOG_PROJECT_ROOTS: '/Users/me/Projekte' }));
+  assert.equal(projectFolderError('/Users/me/Projekte/a', { DEV_LOG_PROJECT_ROOTS: '/Users/me/Projekte/' }), null);
 });

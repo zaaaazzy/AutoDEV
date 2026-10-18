@@ -79,6 +79,8 @@ export interface DevelopmentItem extends Estimate {
   failureBugId?: string | null;
   fixStatus?: string | null;
   /** Name des Sprints, aus dem der Auftrag herausgenommen wurde. */
+  /** Reihenfolge im Sprint (Kanban). */
+  sprintRank?: number | null;
   removedFromSprint?: string | null;
   removedFromSprintAt?: string | null;
   analysisStatus?: 'requested' | 'running' | 'done' | 'failed' | null;
@@ -122,6 +124,23 @@ export interface DocumentEntry {
   sprintId: string | null;
   developmentId?: string | null;
   updatedAt: string;
+}
+
+export interface DocRevision {
+  id: string;
+  docId: string;
+  title: string;
+  content: string;
+  baseTitle: string;
+  baseContent: string;
+  note: string;
+  status: 'pending' | 'approved' | 'rejected';
+  authorId: string | null;
+  authorName: string;
+  reviewerName: string | null;
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
 }
 
 export interface Agent {
@@ -331,6 +350,7 @@ export interface ProjectData {
   coverage: CoverageReport | null;
   acceptance: AcceptanceCheck[];
   acceptanceDefaults: AcceptanceDefaults | null;
+  docRevisions: DocRevision[];
 }
 
 export const emptyProjectData = (): ProjectData => ({
@@ -349,6 +369,7 @@ export const emptyProjectData = (): ProjectData => ({
   coverage: null,
   acceptance: [],
   acceptanceDefaults: null,
+  docRevisions: [],
 });
 
 export interface ChatMessage {

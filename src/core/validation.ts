@@ -37,6 +37,14 @@ const BLOCKED_FOLDERS = [
   '/proc',
 ];
 
+/** Projektbereich: Ordner, in denen Dev Log Projekte anlegen, löschen und bearbeiten darf (DEV_LOG_PROJECT_ROOTS, mit „:“ getrennt). */
+export function projectRoots(environment: NodeJS.ProcessEnv = process.env): string[] {
+  return (environment.DEV_LOG_PROJECT_ROOTS ?? '')
+    .split(':')
+    .map((root) => root.trim().replace(/\/+$/, ''))
+    .filter((root) => root.startsWith('/'));
+}
+
 /** Projektordner müssen absolut, normalisiert und unterhalb eines Benutzer-/Datenträgerordners liegen (optional per DEV_LOG_PROJECT_ROOTS begrenzt). */
 export function projectFolderError(value: unknown, environment: NodeJS.ProcessEnv = process.env): string | null {
   const folder = typeof value === 'string' ? value.trim() : '';
@@ -56,11 +64,8 @@ export function projectFolderError(value: unknown, environment: NodeJS.ProcessEn
   ) {
     return 'Dieser Ordner ist als Projektordner nicht erlaubt (zu breit oder Systemordner). Wähle den Projektunterordner.';
   }
-  const roots = (environment.DEV_LOG_PROJECT_ROOTS ?? '')
-    .split(':')
-    .map((root) => root.trim().replace(/\/+$/, ''))
-    .filter(Boolean);
-  if (roots.length && !roots.some((root) => normalized === root || normalized.startsWith(`${root}/`))) {
+  const roots = projectRoots(environment);
+  if (roots.length && !roots.some((root) => normalized.startsWith(`${root}/`))) {
     return `Projektordner muss unterhalb von ${roots.join(' oder ')} liegen (DEV_LOG_PROJECT_ROOTS).`;
   }
   return null;

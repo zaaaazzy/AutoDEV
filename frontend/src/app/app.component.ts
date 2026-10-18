@@ -13,12 +13,17 @@ import { DevelopmentComponent } from './features/development/development.compone
 import { DocsComponent } from './features/docs/docs.component.js';
 import { HelpDialogComponent } from './features/help/help-dialog.component.js';
 import { IdeationComponent } from './features/ideation/ideation.component.js';
+import { ProjectSwitcherComponent } from './features/projects/project-switcher.component.js';
 import { ProjectWizardComponent } from './features/projects/project-wizard.component.js';
 import { RunsComponent } from './features/runs/runs.component.js';
 import { SettingsComponent } from './features/settings/settings.component.js';
 import { StatsComponent } from './features/stats/stats.component.js';
 import { SprintsComponent } from './features/sprints/sprints.component.js';
 import { NavIconComponent } from './shared/nav-icon.component.js';
+import { firstStepsTour } from './features/tour/first-steps.tour.js';
+import { TourOverlayComponent } from './features/tour/tour-overlay.component.js';
+import { TourService } from './features/tour/tour.service.js';
+import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
   development: 'Neuer Auftrag',
@@ -35,9 +40,12 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   imports: [
     FormsModule,
     LoginComponent,
+    TourOverlayComponent,
+    WelcomeDialogComponent,
     NavIconComponent,
     AgentListComponent,
     ProjectWizardComponent,
+    ProjectSwitcherComponent,
     HelpDialogComponent,
     DashboardComponent,
     DevelopmentComponent,
@@ -56,6 +64,31 @@ export class AppComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
   private readonly api = inject(ApiService);
+  protected readonly tour = inject(TourService);
+  /** Nach dem Anlegen eines Projekts die Tour anbieten. */
+  protected readonly afterProject = signal(false);
+  /** Begrüßung in dieser Sitzung weggeklickt (sonst erscheint sie ohne Projekt jedes Mal). */
+  protected readonly welcomeDismissed = signal(false);
+  protected readonly showWelcome = computed(
+    () =>
+      !this.loading() &&
+      !this.showProjectForm() &&
+      !this.tour.active() &&
+      (this.afterProject() || (!this.welcomeDismissed() && (this.tour.welcome() || !this.projects().length))),
+  );
+
+  protected startTour(): void {
+    this.afterProject.set(false);
+    this.showHelp.set(false);
+    this.mobileMenu.set(false);
+    this.tour.start(firstStepsTour(this.api));
+  }
+
+  protected dismissWelcome(): void {
+    this.tour.dismissWelcome();
+    this.afterProject.set(false);
+    this.welcomeDismissed.set(true);
+  }
   /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
   /** Favicon-Adresse, die nicht geladen werden konnte – dann erscheint wieder das Dev-Log-Logo. */
   protected readonly failedFavicon = signal<string | null>(null);
@@ -93,8 +126,10 @@ export class AppComponent {
     Object.entries(this.store.errors()).map(([resource, message]) => `${resource}: ${message}`),
   );
   protected readonly createLabel = computed(() => {
-    if (this.section() === 'agents') return this.store.selectedAgent() ? '' : 'Neuer Agent';
-    return CREATE_LABELS[this.section()] ?? '';
+    const section = this.section();
+    if (section === 'agents') return this.store.selectedAgent() || !this.auth.can('agents') ? '' : 'Neuer Agent';
+    const role = section === 'docs' ? 'docs' : 'plan';
+    return this.auth.user() && this.auth.can(role) ? (CREATE_LABELS[section] ?? '') : '';
   });
   /** Laufender Sprint mit erledigten/geplanten Aufgaben für die Kopfzeile. */
   protected readonly activeSprint = computed(() => {
@@ -130,6 +165,18 @@ export class AppComponent {
     return failed
       ? { open, tone: 'warn', text: 'Sprint läuft mit Fehlern' }
       : { open, tone: 'ok', text: 'Sprint läuft' };
+  });
+
+  /** Zustand des Sprint-Chips im Handy-Header: fertig, gestoppt, Risiko, läuft oder wartet. */
+  protected readonly sprintState = computed<'done' | 'stopped' | 'warn' | 'running' | 'idle' | null>(() => {
+    const sprint = this.activeSprint();
+    if (!sprint) return null;
+    if (sprint.finished) return 'done';
+    const tone = this.sprintHealth()?.tone;
+    if (tone === 'stopped') return 'stopped';
+    if (tone === 'warn') return 'warn';
+    const busy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
+    return sprint.running || busy ? 'running' : 'idle';
   });
 
   protected navTone(section: Section): string {

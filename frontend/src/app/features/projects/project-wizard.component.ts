@@ -115,6 +115,8 @@ export class ProjectWizardComponent implements OnDestroy {
   private readonly setup = inject(SetupService);
   private readonly store = inject(ProjectStore);
   readonly closed = output<void>();
+  /** Projekt wurde angelegt (Slug) – die App bietet danach die Tour an. */
+  readonly projectCreated = output<string>();
 
   protected readonly steps = STEPS;
   protected readonly stepInfo = STEP_INFO;
@@ -128,7 +130,11 @@ export class ProjectWizardComponent implements OnDestroy {
   protected readonly name = signal('');
   protected readonly slugInput = signal('');
   protected readonly slugTouched = signal(false);
-  protected readonly folder = signal('/Volumes/External/');
+  protected readonly folder = signal('');
+  /** Bis der Ordner von Hand geändert wird, folgt er dem Projektbereich + Projekt-ID. */
+  protected readonly folderTouched = signal(false);
+  /** Projektbereich (DEV_LOG_PROJECT_ROOTS): nur hier legt Dev Log Ordner an. */
+  protected readonly scopeRoots = signal<string[]>([]);
   protected readonly folderState = signal<CheckState>('idle');
   protected readonly folderInfo = signal<FolderInfo | null>(null);
   protected readonly folderError = signal('');
@@ -195,7 +201,11 @@ export class ProjectWizardComponent implements OnDestroy {
   protected readonly canNext = computed(() => {
     switch (this.step()) {
       case 0:
-        return !!this.name().trim() && !!this.slug() && this.folderState() === 'ok';
+        return (
+          !!this.name().trim() &&
+          !!this.slug() &&
+          (this.folderState() === 'ok' || (this.folderState() === 'warn' && !this.folderError()))
+        );
       case 1:
         return this.gitState() === 'ok' || (this.gitMode() === 'none' && this.template() === 'none');
       case 2:
@@ -220,6 +230,15 @@ export class ProjectWizardComponent implements OnDestroy {
         this.permissions.set(result.defaults);
       })
       .catch(() => undefined);
+    void this.api
+      .get<{ roots: string[] }>('/api/setup/scope')
+      .then((result) => this.scopeRoots.set(result.roots ?? []))
+      .catch(() => undefined);
+    effect(() => {
+      const root = this.scopeRoots()[0];
+      const slug = this.slug();
+      if (root && !untracked(() => this.folderTouched())) this.folder.set(slug ? `${root}/${slug}` : `${root}/`);
+    });
     // Ordner in Echtzeit prüfen (verzögert, damit nicht jeder Tastendruck einen Job startet).
     effect(() => {
       const path = this.folder();
@@ -233,6 +252,11 @@ export class ProjectWizardComponent implements OnDestroy {
 
   protected setName(value: string): void {
     this.name.set(value);
+  }
+
+  protected setFolder(value: string): void {
+    this.folderTouched.set(true);
+    this.folder.set(value);
   }
 
   protected setSlug(value: string): void {
@@ -265,7 +289,7 @@ export class ProjectWizardComponent implements OnDestroy {
       }
       const info = job.result!;
       this.folderInfo.set(info);
-      this.folderState.set(info.exists && info.isDirectory ? 'ok' : 'error');
+      this.folderState.set(info.exists ? (info.isDirectory ? 'ok' : 'error') : 'warn');
       if (info.exists && !info.isDirectory) this.folderError.set('Der Pfad ist eine Datei, kein Ordner.');
     } catch (error) {
       if (check !== this.folderCheck) return;
@@ -285,8 +309,13 @@ export class ProjectWizardComponent implements OnDestroy {
     await this.checkFolder();
   }
 
-  protected goTo(step: number): void {
+  protected async goTo(step: number): Promise<void> {
     if (step > this.step() && !this.canNext()) return;
+    // Fehlender Ordner im Projektbereich wird beim Weitergehen angelegt.
+    if (this.step() === 0 && step > 0 && this.folderState() === 'warn') {
+      await this.createFolder();
+      if (this.folderState() !== 'ok') return;
+    }
     this.step.set(step);
     if (step === 1) this.enterGitStep();
     if (step === 2 && this.agentState() === 'idle') void this.testAgent();
@@ -409,6 +438,7 @@ export class ProjectWizardComponent implements OnDestroy {
         permissions: this.permissions(),
       });
       this.created.set(result.project.slug);
+      this.projectCreated.emit(result.project.slug);
       await this.store.loadProjects(result.project.slug);
     } catch (error) {
       this.saveError.set(error instanceof Error ? error.message : String(error));

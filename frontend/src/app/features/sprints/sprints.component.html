@@ -39,6 +39,10 @@
       </ng-template>
       <ng-template appDataDetail let-sprint>
         <article class="sprint-card">
+          <details class="sprint-board-section" [open]="sprint.status !== 'completed'">
+            <summary>Board</summary>
+            <app-sprint-board [sprint]="sprint" />
+          </details>
           <div class="sprint-layout">
             <div class="sprint-main">
               <div class="section-heading">

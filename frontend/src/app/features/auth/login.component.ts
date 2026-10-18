@@ -34,6 +34,8 @@ export class LoginComponent {
       await this.api.post('/api/login', { username: this.username.trim(), password: this.password, code: this.code });
       globalThis.location.reload();
     } catch (error) {
+      const body = (error as { cause?: { error?: { totp?: boolean } } }).cause?.error;
+      if (body?.totp) this.totp.set(true);
       this.error.set(errorMessage(error, 'Anmeldung fehlgeschlagen.'));
       this.code = '';
       this.busy.set(false);

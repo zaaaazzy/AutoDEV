@@ -5,6 +5,7 @@ import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from '../development/order.service.js';
+import { SprintBoardComponent } from './sprint-board.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { buildWorkflow, type WorkflowRow } from '../../shared/workflow.js';
 import {
@@ -35,6 +36,7 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
   selector: 'app-sprints',
   standalone: true,
   imports: [
+    SprintBoardComponent,
     NgClass,
     FormsModule,
     DurationPipe,

@@ -34,7 +34,9 @@ async function seed(request: APIRequestContext): Promise<void> {
   });
 }
 
-async function login(page: Page): Promise<void> {
+async function login(page: Page, welcome = false): Promise<void> {
+  // Die Begrüßung erscheint sonst in jedem frischen Browser und überdeckt die Seite.
+  if (!welcome) await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Dev Log' })).toBeVisible();
   await page.getByLabel('Benutzername').fill(username);
@@ -96,7 +98,8 @@ test('Projekt-Assistent öffnet, prüft Eingaben und schließt', async ({ page, 
     await page.getByRole('button', { name: 'Menü öffnen' }).click();
     await page.getByRole('button', { name: 'Neues Projekt' }).click();
   } else {
-    await page.locator('.new-project').click();
+    await page.getByRole('button', { name: 'Projekt wechseln' }).click();
+    await page.getByRole('button', { name: /Neues Projekt/ }).click();
   }
   const wizard = page.getByRole('dialog', { name: 'Projekt einrichten' });
   await expect(wizard).toBeVisible();
@@ -130,6 +133,147 @@ test('Handy-Kopfzeile zeigt Projektwahl und Agents immer', async ({ page, isMobi
   await expect(page.locator('.mobile-agents')).toBeVisible();
   await page.mouse.wheel(0, 2000);
   await expect(page.locator('.mobile-chip').first()).toBeInViewport();
+});
+
+test('Dokumentation: Lesen statt Bearbeiten, Suche mit Ausschnitten, Inhaltsverzeichnis zuklappbar', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  await request.post('/api/projects/e2e/docs', {
+    headers,
+    data: { title: 'Handbuch Übersicht', content: '# Einstieg\n\nDie Zertifikatsprüfung läuft beim Start.' },
+  });
+  await login(page);
+  await page.goto('/#docs');
+  await page.locator('.doc-link', { hasText: 'Handbuch Übersicht' }).click();
+  await expect(page.locator('.doc-reader form')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Bearbeiten/ })).toBeVisible();
+  // Die Suche ist immer sichtbar; Tippen klappt das Inhaltsverzeichnis mit den Treffern auf.
+  await page.getByLabel('Dokumentation durchsuchen').fill('zertifikatspruefung');
+  const hit = page.locator('.search-hit', { hasText: 'Handbuch Übersicht' });
+  await expect(hit.locator('mark')).toContainText('Zertifikatsprüfung');
+  await page.getByLabel('Dokumentation durchsuchen').fill('');
+  if (isMobile) {
+    // Handy: kein Buch, das Inhaltsverzeichnis klappt nach oben ein.
+    await expect(page.locator('.book-toggle')).toBeHidden();
+    await page.locator('.docs-index-bar').click();
+    await expect(page.locator('.docs-index-body')).toBeHidden();
+    await page.locator('.docs-index-bar').click();
+    await expect(page.locator('.docs-index-body')).toBeVisible();
+  } else {
+    await page.getByRole('button', { name: 'Inhaltsverzeichnis zuklappen' }).click();
+    await expect(page.locator('.docs-index')).toBeHidden();
+    await expect(page.getByLabel('Dokumentation durchsuchen')).toBeVisible();
+    await page.getByRole('button', { name: 'Inhaltsverzeichnis öffnen' }).click();
+    await expect(page.locator('.docs-index')).toBeVisible();
+  }
+});
+
+test('Rollen: Autorin reicht Dokumentänderung ein, Redaktion gibt frei', async ({ page, browser, request }) => {
+  const admin = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const author = `autorin${Date.now() % 100000}`;
+  const authorPassword = 'autorin-passwort-123';
+  const created = await request.post('/api/users', {
+    headers: admin,
+    data: { username: author, displayName: 'Anna Autorin', password: authorPassword, roles: ['docs'] },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const doc = (
+    await (
+      await request.post('/api/projects/e2e/docs', {
+        headers: admin,
+        data: { title: `Rollen-Handbuch ${author}`, content: 'Alter Text.' },
+      })
+    ).json()
+  ).doc;
+
+  // Als Autorin: bearbeiten und einreichen, aber nicht freigeben
+  const context = await browser.newContext();
+  const authorPage = await context.newPage();
+  await authorPage.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
+  await authorPage.goto('/');
+  await authorPage.getByLabel('Benutzername').fill(author);
+  await authorPage.getByLabel('Passwort').fill(authorPassword);
+  await authorPage.getByRole('button', { name: 'Anmelden' }).click();
+  await authorPage.goto('/#docs');
+  await authorPage.getByLabel('Dokumentation durchsuchen').fill(author);
+  await authorPage.locator('.search-hit').first().click();
+  await authorPage.getByRole('button', { name: /Bearbeiten/ }).click();
+  await authorPage.locator('textarea[name="content"]').fill('Neuer, geprüfter Text.');
+  await authorPage.getByRole('button', { name: 'Zur Prüfung einreichen' }).click();
+  await expect(authorPage.locator('.revision-card')).toContainText('wartet auf die Redaktion');
+  await expect(authorPage.getByRole('button', { name: 'Freigeben' })).toHaveCount(0);
+  const forbidden = await authorPage.request.post('/api/users', { data: {} });
+  expect(forbidden.status()).toBe(403);
+  await context.close();
+
+  // Als Administration: freigeben
+  await login(page);
+  await page.goto('/#docs');
+  await page.getByLabel('Dokumentation durchsuchen').fill(author);
+  await page.locator('.search-hit').first().click();
+  await expect(page.locator('.diff-added')).toContainText('Neuer, geprüfter Text.');
+  await page.getByRole('button', { name: 'Freigeben' }).click();
+  await expect(page.locator('.doc-reader article.markdown')).toContainText('Neuer, geprüfter Text.');
+  const history = await (await request.get('/api/projects/e2e/doc-revisions', { headers: admin })).json();
+  expect(history.revisions.find((revision: { docId: string }) => revision.docId === doc.id).status).toBe('approved');
+});
+
+test('Sprint-Board: offenen Auftrag in den Sprint nehmen und wieder herausnehmen', async ({ page, request }) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `Board-Auftrag ${Date.now()}`;
+  const sprint = (
+    await (
+      await request.post('/api/projects/e2e/sprints', { headers, data: { name: `Board ${Date.now() % 10000}` } })
+    ).json()
+  ).sprint;
+  await request.post('/api/projects/e2e/development', { headers, data: { title } });
+  await login(page);
+  await page.goto('/#sprints');
+  await page.locator('.dt-table tbody tr').filter({ hasText: sprint.name }).locator('.dt-expand').first().click();
+  const board = page.locator('.kanban').first();
+  const open = board.locator('.col-open .kanban-card', { hasText: title });
+  await expect(open).toBeVisible();
+  await open.getByRole('button', { name: 'In den Sprint nehmen' }).click();
+  const planned = board.locator('.col-planned .kanban-card', { hasText: title });
+  await expect(planned).toBeVisible();
+  await expect(planned.locator('.kanban-rank')).toHaveText('1');
+  await planned.getByRole('button', { name: 'Aus dem Sprint nehmen' }).click();
+  await expect(board.locator('.col-open .kanban-card', { hasText: title })).toBeVisible();
+  await request.delete(`/api/sprints/${sprint.id}`, { headers });
+});
+
+test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async ({ page }) => {
+  await login(page, true);
+  const welcome = page.getByRole('dialog', { name: /Willkommen bei Dev Log/ });
+  await expect(welcome).toBeVisible();
+  await welcome.getByRole('button', { name: 'Tour starten' }).click();
+  const card = page.locator('.tour-card');
+  await expect(card.locator('h3')).toHaveText('Willkommen in Dev Log');
+  await card.getByRole('button', { name: 'Weiter' }).click();
+  await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
+  await expect(page).toHaveURL(/#ideation/);
+  await expect(page.locator('.tour-spotlight')).toBeVisible();
+  await card.getByRole('button', { name: 'Tour beenden' }).click();
+  await expect(card).toHaveCount(0);
+});
+
+test('Projekt löschen verlangt den genauen Namen', async ({ request }) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const slug = `loesch${Date.now() % 100000}`;
+  const created = await request.post('/api/projects', {
+    headers,
+    data: { slug, name: 'Lösch mich', repository: join(tmpdir(), 'dev-log-e2e-project') },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  expect((await request.delete(`/api/projects/${slug}`, { headers, data: { confirm: 'falsch' } })).status()).toBe(400);
+  expect(
+    (await request.delete(`/api/projects/${slug}`, { headers, data: { confirm: 'Lösch mich' } })).ok(),
+  ).toBeTruthy();
+  const projects = await (await request.get('/api/projects', { headers })).json();
+  expect(projects.projects.some((project: { slug: string }) => project.slug === slug)).toBe(false);
 });
 
 test('Statistik zeigt Verbrauch nach Bereich, Art, Auftrag und Agent', async ({ page }) => {

@@ -11,7 +11,10 @@
         <p class="eyebrow">Ablauf</p>
         <h2 id="help-title">So funktioniert Dev Log</h2>
       </div>
-      <button class="button secondary" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
+      <div class="actions">
+        <button class="button primary" type="button" (click)="startTour.emit()">▶ Interaktive Tour</button>
+        <button class="button secondary" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
+      </div>
     </div>
     <ol class="flow">
       @for (step of flow; track step.title; let i = $index) {

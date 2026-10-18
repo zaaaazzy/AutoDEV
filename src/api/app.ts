@@ -15,6 +15,9 @@ import { registerAcceptanceRoutes } from './acceptance.js';
 import { registerIdeationRoutes } from './ideation.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerPushRoutes } from './push.js';
+import { registerDocRevisionRoutes } from './doc-revisions.js';
+import { authorize } from './roles.js';
+import { registerUserRoutes } from './users.js';
 import { registerUsageRoutes } from './usage.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
@@ -42,10 +45,21 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     const limiter = new FailureLimiter();
     registerLoginRoutes(app, pool, auth, limiter);
     app.use(requireCredentials(auth, pool, limiter));
+    app.use(authorize);
     registerSecurityRoutes(app, pool, auth);
   } else {
+    // Ohne Login (DEV_LOG_AUTH=off) arbeitet jeder als Administrator.
+    app.use((_request, response, next) => {
+      response.locals.principal = { id: null, username: 'local', displayName: 'Lokal', roles: ['admin'] };
+      next();
+    });
     app.get('/api/session', (_request, response) =>
-      response.json({ authenticated: true, authRequired: false, totp: false }),
+      response.json({
+        authenticated: true,
+        authRequired: false,
+        totp: false,
+        user: { id: null, username: 'local', displayName: 'Lokal', roles: ['admin'] },
+      }),
     );
   }
   app.use(express.static(UI_DIRECTORY, { index: false }));
@@ -71,6 +85,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerChatRoutes(app, pool);
   registerWorkerRoutes(app, pool);
   registerPushRoutes(app, pool);
+  registerUserRoutes(app, pool, auth);
+  registerDocRevisionRoutes(app, pool);
   registerUsageRoutes(app, pool);
 
   app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));

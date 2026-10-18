@@ -5,7 +5,7 @@ import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
-import { CategoryLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { CategoryLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderTableComponent } from './order-table.component.js';
@@ -22,7 +22,6 @@ import { OrderService } from './order.service.js';
     NgClass,
     FormsModule,
     OrderDetailComponent,
-    ShortTextPipe,
     StatusClassPipe,
     StatusLabelPipe,
     CategoryLabelPipe,

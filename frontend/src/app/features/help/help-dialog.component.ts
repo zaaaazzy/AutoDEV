@@ -8,6 +8,7 @@ import { Component, output } from '@angular/core';
 })
 export class HelpDialogComponent {
   readonly closed = output<void>();
+  readonly startTour = output<void>();
 
   protected readonly flow = [
     { icon: '💡', title: 'Idee', text: 'Ideen und Fotos im Ideationboard erfassen.' },

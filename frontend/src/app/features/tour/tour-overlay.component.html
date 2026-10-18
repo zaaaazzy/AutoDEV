@@ -1,0 +1,53 @@
+@if (tour.step(); as step) {
+  <div class="tour-layer" role="dialog" aria-modal="true" [attr.aria-label]="step.title">
+    @for (shade of shades(); track $index) {
+      <div
+        class="tour-shade"
+        [style.top.px]="shade.top"
+        [style.left.px]="shade.left"
+        [style.width.px]="shade.width"
+        [style.height.px]="shade.height"
+      ></div>
+    }
+    @if (box(); as hole) {
+      <div
+        class="tour-spotlight"
+        [class.circle]="step.shape === 'circle'"
+        [style.top.px]="hole.top"
+        [style.left.px]="hole.left"
+        [style.width.px]="hole.width"
+        [style.height.px]="hole.height"
+      ></div>
+    }
+    <section class="tour-card" [class.centered]="!box()" [style]="cardStyle()">
+      <p class="tour-progress">Schritt {{ tour.index() + 1 }} von {{ tour.steps().length }}</p>
+      <h3>{{ step.title }}</h3>
+      <p>{{ step.text }}</p>
+      @if (waiting() && step.waitHint) {
+        <p class="tour-wait"><span class="live-dot"></span>{{ step.waitHint }}</p>
+      }
+      <div class="tour-actions">
+        <button type="button" class="link-button" (click)="tour.finish()">Tour beenden</button>
+        @if (tour.index() > 0) {
+          <button type="button" class="button secondary" (click)="tour.back()">Zurück</button>
+        }
+        @if (step.action; as action) {
+          <button type="button" class="button primary" (click)="runAction()">{{ action.label }}</button>
+        }
+        @if (!step.waitFor || step.action) {
+          <button
+            type="button"
+            class="button"
+            [class.primary]="!step.action"
+            [class.secondary]="!!step.action"
+            (click)="tour.next()"
+          >
+            {{ tour.index() + 1 === tour.steps().length ? 'Fertig' : 'Weiter' }}
+          </button>
+        } @else {
+          <button type="button" class="button secondary" (click)="tour.next()">Überspringen</button>
+        }
+      </div>
+    </section>
+  </div>
+}

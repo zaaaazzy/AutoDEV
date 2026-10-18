@@ -109,12 +109,18 @@
                     <span class="input-with-state">
                       <input
                         [ngModel]="folder()"
-                        (ngModelChange)="folder.set($event)"
+                        (ngModelChange)="setFolder($event)"
                         maxlength="500"
-                        placeholder="/Volumes/External/mein-projekt"
+                        [placeholder]="(scopeRoots()[0] || '/Users/name/Projekte') + '/mein-projekt'"
                       />
                       <app-check-state [state]="folderState()" />
                     </span>
+                    @if (scopeRoots().length) {
+                      <small class="muted"
+                        >Projektbereich: <code>{{ scopeRoots().join(' · ') }}</code> – Dev Log legt Ordner nur hier
+                        an, Agents arbeiten nur hier.</small
+                      >
+                    }
                   </label>
                 </div>
                 @if (folderState() === 'loading') {
@@ -124,8 +130,8 @@
                 } @else if (folderInfo(); as info) {
                   @if (!info.exists) {
                     <div class="wizard-hint warn">
-                      <p>Der Ordner existiert noch nicht.</p>
-                      <button class="button primary" type="button" (click)="createFolder()">Ordner anlegen</button>
+                      <p>Der Ordner existiert noch nicht – er wird mit „Weiter“ automatisch angelegt.</p>
+                      <button class="button secondary" type="button" (click)="createFolder()">Jetzt anlegen</button>
                     </div>
                   } @else {
                     <div class="wizard-hint ok">

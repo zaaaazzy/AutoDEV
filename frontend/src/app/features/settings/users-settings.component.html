@@ -1,0 +1,146 @@
+<section class="panel">
+  <div class="section-heading">
+    <div>
+      <h2>Benutzer &amp; Rollen</h2>
+      <p class="muted">Wer sich anmelden darf und was er tun darf. Lesen dürfen alle Benutzer.</p>
+    </div>
+    <button class="button primary" type="button" (click)="creating.set(!creating())">
+      {{ creating() ? 'Schließen' : '+ Benutzer' }}
+    </button>
+  </div>
+
+  @if (creating()) {
+    <form class="user-form" (ngSubmit)="create()">
+      <div class="form-grid">
+        <label
+          >Benutzername<input
+            name="username"
+            [(ngModel)]="form.username"
+            autocomplete="off"
+            autocapitalize="none"
+            maxlength="40"
+            required
+        /></label>
+        <label>Anzeigename<input name="displayName" [(ngModel)]="form.displayName" maxlength="120" /></label>
+        <label class="wide"
+          >Passwort (mind. 12 Zeichen)<input
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            [(ngModel)]="form.password"
+            minlength="12"
+            required
+        /></label>
+      </div>
+      <fieldset class="role-grid">
+        <legend>Rollen</legend>
+        @for (role of roles(); track role.id) {
+          <label class="role-option">
+            <input
+              type="checkbox"
+              [checked]="form.roles.includes(role.id)"
+              (change)="form.roles = toggle(form.roles, role.id, $any($event.target).checked)"
+            />
+            <span
+              ><strong>{{ role.label }}</strong
+              ><small>{{ role.description }}</small></span
+            >
+          </label>
+        }
+      </fieldset>
+      <button class="button primary" type="submit" [disabled]="busy()">Benutzer anlegen</button>
+    </form>
+  }
+
+  <ul class="user-list">
+    @if (systemAdmin(); as admin) {
+      <li class="user-row system">
+        <span class="user-avatar">★</span>
+        <span class="user-main">
+          <strong>Systemadministrator</strong>
+          <small class="muted"
+            >{{ admin.username }} · aus der .env · alle Rechte{{ admin.totp ? ' · Zwei-Faktor' : '' }}</small
+          >
+        </span>
+      </li>
+    }
+    @for (user of users(); track user.id) {
+      <li class="user-row" [class.inactive]="!user.active">
+        <span class="user-avatar">{{ (user.displayName || user.username).charAt(0).toUpperCase() }}</span>
+        <span class="user-main">
+          <strong
+            >{{ user.displayName || user.username }}
+            @if (!user.active) {
+              <span class="tag">deaktiviert</span>
+            }
+          </strong>
+          <small class="muted"
+            >{{ user.username }}{{ user.totp ? ' · Zwei-Faktor' : '' }} · zuletzt angemeldet
+            {{ user.lastLoginAt ? (user.lastLoginAt | dateTime) : 'nie' }}</small
+          >
+          <span class="role-chips">
+            @for (role of user.roles; track role) {
+              <span class="role-chip" [class.admin]="role === 'admin'">{{ roleLabel(role) }}</span>
+            } @empty {
+              <span class="muted small">nur lesen</span>
+            }
+          </span>
+        </span>
+        <button class="button secondary small" type="button" (click)="startEdit(user)">
+          {{ editing() === user.id ? 'Schließen' : 'Bearbeiten' }}
+        </button>
+        @if (editing() === user.id) {
+          <form class="user-edit" (ngSubmit)="save(user)">
+            <div class="form-grid">
+              <label>Anzeigename<input name="editName" [(ngModel)]="edit.displayName" maxlength="120" /></label>
+              <label
+                >Neues Passwort (leer = unverändert)<input
+                  name="editPassword"
+                  type="password"
+                  autocomplete="new-password"
+                  [(ngModel)]="edit.password"
+              /></label>
+              <label class="wide check">
+                <input type="checkbox" name="editActive" [(ngModel)]="edit.active" />
+                Aktiv (deaktivierte Benutzer werden sofort abgemeldet)
+              </label>
+            </div>
+            <fieldset class="role-grid">
+              <legend>Rollen</legend>
+              @for (role of roles(); track role.id) {
+                <label class="role-option">
+                  <input
+                    type="checkbox"
+                    [checked]="edit.roles.includes(role.id)"
+                    (change)="edit.roles = toggle(edit.roles, role.id, $any($event.target).checked)"
+                  />
+                  <span
+                    ><strong>{{ role.label }}</strong
+                    ><small>{{ role.description }}</small></span
+                  >
+                </label>
+              }
+            </fieldset>
+            <div class="actions">
+              <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+              @if (user.totp) {
+                <button class="button secondary" type="button" [disabled]="busy()" (click)="resetTotp(user)">
+                  Zwei-Faktor zurücksetzen
+                </button>
+              }
+              @if (auth.user()?.id !== user.id) {
+                <button class="button danger" type="button" [disabled]="busy()" (click)="remove(user)">Löschen</button>
+              }
+            </div>
+          </form>
+        }
+      </li>
+    }
+  </ul>
+  @if (message()) {
+    <p class="notice" role="status">{{ message() }}</p>
+  }
+  @if (error()) {
+    <p class="notice error" role="alert">{{ error() }}</p>
+  }
+</section>

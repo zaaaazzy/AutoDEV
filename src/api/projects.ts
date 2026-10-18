@@ -23,6 +23,50 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     response.json({ projects: result.rows });
   });
 
+  // Projekt löschen: Name zur Bestätigung; der Ordner auf dem Rechner wird auf Wunsch vom Worker gelöscht.
+  app.delete('/api/projects/:slug', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const body = (isRecord(request.body) ? request.body : {}) as { confirm?: unknown; deleteFolder?: unknown };
+      const project = slug
+        ? (
+            await pool.query<{ name: string; repository: string }>(
+              'SELECT name, repository FROM projects WHERE slug = $1',
+              [slug],
+            )
+          ).rows[0]
+        : undefined;
+      if (!project) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      if (typeof body.confirm !== 'string' || body.confirm.trim() !== project.name) {
+        return void response.status(400).json({ message: 'Bitte zur Bestätigung den Projektnamen genau eintippen.' });
+      }
+      const running = await pool.query(
+        `SELECT 1 FROM agent_runs WHERE project_slug = $1 AND status = 'running'
+          UNION ALL SELECT 1 FROM ideation_items WHERE project_slug = $1 AND status = 'drafting' LIMIT 1`,
+        [slug],
+      );
+      if (running.rows[0]) {
+        return void response
+          .status(409)
+          .json({ message: 'Gerade arbeitet ein Agent am Projekt – bitte warten oder abbrechen.' });
+      }
+      let folderJob: string | null = null;
+      if (body.deleteFolder === true) {
+        folderJob =
+          (
+            await pool.query<{ id: string }>(
+              `INSERT INTO setup_jobs (kind, params) VALUES ('delete_folder', $1::jsonb) RETURNING id`,
+              [JSON.stringify({ path: project.repository })],
+            )
+          ).rows[0]?.id ?? null;
+      }
+      await pool.query('DELETE FROM projects WHERE slug = $1', [slug]);
+      response.json({ deleted: true, folderJob });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Favicon der Anwendung; strenge CSP, damit ein SVG aus dem Projekt nie als Seite mit Skripten läuft.
   app.get('/api/projects/:slug/favicon', async (request, response, next) => {
     try {
