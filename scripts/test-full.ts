@@ -135,6 +135,13 @@ const STEPS: Step[] = [
     cases: () => playwrightCases(E2E_JSON, 'e2e'),
   },
 ];
+const UI_BUILD_STEP: Step = {
+  name: 'UI-Build',
+  command: 'npm',
+  args: ['run', 'build:ui'],
+  category: 'quality',
+  summary: (out) => (/bundle generation complete/i.test(out) ? 'Oberfläche gebaut' : 'Build fehlgeschlagen'),
+};
 const USER_STEP: Step = {
   name: 'Oberflächentest',
   command: 'npx',
@@ -346,7 +353,8 @@ function documentReport(results: StepResult[], allOk: boolean, runId: string): s
 async function main(): Promise<void> {
   await mkdir(TEMP, { recursive: true });
   const recorder = project ? await Recorder.open(project) : null;
-  const steps = onlyUi ? [USER_STEP] : [...STEPS, USER_STEP];
+  // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
+  const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
   for (const [position, step] of steps.entries()) results.push(await runStep(position, step, recorder));
 
