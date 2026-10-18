@@ -243,6 +243,15 @@ async function main(): Promise<void> {
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
+        // Kompletter Test auf Knopfdruck (Aktionen-Menü, Testläufe): unabhängig vom Chat, der sonst alles Weitere blockiert.
+        if (!testActive.has(slug) && !stopping && !target.problem) {
+          testActive.add(slug);
+          void processTestRequest(pool, target.options)
+            .catch((error: unknown) =>
+              logOnce(`test:${slug}`, `[${slug}] Kompletter Test fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => testActive.delete(slug));
+        }
         if (chatActive.has(slug) || stopping) continue;
         if (target.problem) {
           void rejectChat(pool, slug, target.problem).catch(() => undefined);
@@ -274,15 +283,6 @@ async function main(): Promise<void> {
               logOnce(`comment:${slug}`, `[${slug}] Sprint-Kommentar fehlgeschlagen: ${describeError(error)}`),
             )
             .finally(() => commentActive.delete(slug));
-        }
-        // Kompletter Test auf Knopfdruck (Dashboard, Testläufe) – dauert lange, läuft daher neben dem Chat.
-        if (!testActive.has(slug) && !stopping) {
-          testActive.add(slug);
-          void processTestRequest(pool, target.options)
-            .catch((error: unknown) =>
-              logOnce(`test:${slug}`, `[${slug}] Kompletter Test fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => testActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
