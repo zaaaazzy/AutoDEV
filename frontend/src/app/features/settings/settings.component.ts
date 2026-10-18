@@ -30,6 +30,8 @@ export class SettingsComponent {
     definitionOfReady: '',
     definitionOfDone: '',
     autoBugfix: true,
+    sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
+    sprintCapacityHours: 40,
     databaseUrl: '',
     clearDatabase: false,
   };
@@ -80,6 +82,8 @@ export class SettingsComponent {
           definitionOfReady: this.settings.definitionOfReady,
           definitionOfDone: this.settings.definitionOfDone,
           autoBugfix: this.settings.autoBugfix,
+          sprintMode: this.settings.sprintMode,
+          sprintCapacityHours: this.settings.sprintCapacityHours,
           ...(this.settings.clearDatabase
             ? { databaseUrl: '' }
             : this.settings.databaseUrl.trim()
@@ -117,6 +121,8 @@ export class SettingsComponent {
       definitionOfReady: (project?.definitionOfReady ?? []).join('\n'),
       definitionOfDone: (project?.definitionOfDone ?? []).join('\n'),
       autoBugfix: project?.autoBugfix ?? true,
+      sprintMode: project?.sprintMode ?? 'manual',
+      sprintCapacityHours: project?.sprintCapacityHours ?? 40,
       databaseUrl: '',
       clearDatabase: false,
       deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),

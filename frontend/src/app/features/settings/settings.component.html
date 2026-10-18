@@ -64,6 +64,29 @@
           Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung
           gestartet.</label
         >
+        <label
+          >Sprintplanung
+          <select name="sprintMode" [(ngModel)]="settings.sprintMode">
+            <option value="manual">Manuell – Sprints selbst zusammenstellen</option>
+            <option value="suggest">Vorschlagen – Dev Log schlägt vor, du übernimmst</option>
+            <option value="autopilot">Autopilot – vorschlagen, starten und abschliessen</option>
+          </select>
+        </label>
+        <label
+          >Sprint-Kapazität (Std., ohne Sprint-Historie)<input
+            name="sprintCapacityHours"
+            type="number"
+            min="1"
+            max="1000"
+            step="1"
+            [(ngModel)]="settings.sprintCapacityHours"
+          />
+        </label>
+        <p class="muted wide">
+          Die Kapazität stammt aus den letzten 3 abgeschlossenen Sprints (erledigte Stunden); ohne Historie gilt die
+          Einstellung. Der Autopilot schliesst einen Sprint ab, sobald nur noch „Aktion notwendig“ offen ist – diese
+          Aufträge wandern in den nächsten Sprint. Scheitert die Git-Sicherung, pausiert er.
+        </p>
         <label class="wide"
           >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
             name="deployCommands"

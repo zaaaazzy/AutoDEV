@@ -15,7 +15,7 @@ import {
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { formatHours, formatIsoDate } from '../../shared/format.js';
-import { CATEGORIES, priorityLabel, statusLabel } from '../../shared/labels.js';
+import { CATEGORIES, priorityLabel, statusLabel, isFinished } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   HoursPipe,
@@ -200,7 +200,9 @@ export class IdeationComponent {
   }
 
   private isInProgress(idea: Idea): boolean {
-    return idea.status === 'accepted' && this.closedIdeaOrder(idea)?.status !== 'done';
+    // Nur mit vorhandenem, noch nicht abgeschlossenen Auftrag gilt eine Idee als „in Bearbeitung“.
+    const order = this.closedIdeaOrder(idea);
+    return idea.status === 'accepted' && !!order && !isFinished(order.status);
   }
 
   private isClosedIdea(idea: Idea): boolean {

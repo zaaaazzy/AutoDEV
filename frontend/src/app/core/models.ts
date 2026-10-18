@@ -15,6 +15,10 @@ export interface Project {
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;
+  /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
+  sprintMode?: 'manual' | 'suggest' | 'autopilot';
+  /** Kapazität eines Sprints in Stunden, solange es keine abgeschlossenen Sprints gibt. */
+  sprintCapacityHours?: number;
   databaseConfigured?: boolean;
   definitionOfReady?: string[] | null;
   definitionOfDone?: string[] | null;

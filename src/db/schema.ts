@@ -510,4 +510,12 @@ export const SCHEMA = `
     CHECK (status IN ('backlog', 'planned', 'in_progress', 'blocked', 'done', 'rejected'));
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_status_check;
   ALTER TABLE bugs ADD CONSTRAINT bugs_status_check CHECK (status IN ('open', 'in_progress', 'fixed', 'wontfix', 'rejected'));
+  -- Sprintplanung je Projekt: manuell (Standard), vorschlagen oder Autopilot; Kapazität ohne Sprint-Historie.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS sprint_mode TEXT NOT NULL DEFAULT 'manual'
+    CHECK (sprint_mode IN ('manual', 'suggest', 'autopilot'));
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS sprint_capacity_hours DOUBLE PRECISION NOT NULL DEFAULT 40
+    CHECK (sprint_capacity_hours > 0);
+  -- Angenommene Ideen, deren Auftrag gelöscht wurde, sind wieder offen.
+  UPDATE ideation_items i SET status = 'idea', updated_at = NOW()
+   WHERE i.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id);
 `;

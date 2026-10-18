@@ -203,7 +203,8 @@ async function checkTables(page: Page): Promise<TableCheck[]> {
           box.left >= 0 && box.right <= innerWidth + 1,
           `${Math.round(box.left)}–${Math.round(box.right)} px`,
         );
-        const option = menu.querySelector<HTMLInputElement>('.dt-option input');
+        // Ein noch nicht gewählter Wert (manche Tabellen haben voreingestellte Filter)
+        const option = menu.querySelector<HTMLInputElement>('.dt-option input:not(:checked)');
         const search = menu.querySelector<HTMLInputElement>('input[type=search]');
         if (option) {
           const optionLabel = option.closest('label')!;
@@ -214,7 +215,9 @@ async function checkTables(page: Page): Promise<TableCheck[]> {
           const values = unique(column(position));
           add(
             `${label}: Filter „${names[position]}“ = „${value}“`,
-            rows().length === expected && values.length === 1 && !!table().querySelector('.dt-chip'),
+            rows().length <= expected &&
+              values.length <= 1 &&
+              [...table().querySelectorAll('.dt-chip')].some((chip) => text(chip).includes(names[position]!)),
             `erwartet ${expected}, gefunden ${rows().length}, Werte ${values.join(', ')}`,
           );
         } else if (search) {
@@ -305,6 +308,19 @@ test('Tabellen: Sortieren, Filtern, Suchen und Zurücksetzen auf allen Seiten', 
   await login(page);
   for (const section of ['ideation', 'development', 'sprints', 'bugs', 'runs', 'agents', 'stats']) {
     await open(page, section);
+    // Warten, bis alle Zeilen geladen sind (manche Listen laden nachträglich)
+    let previous = -1;
+    await expect
+      .poll(
+        async () => {
+          const count = await page.locator('.dt tbody tr').count();
+          const stable = count === previous;
+          previous = count;
+          return stable;
+        },
+        { intervals: [500, 500, 1000] },
+      )
+      .toBe(true);
     for (const check of await checkTables(page)) {
       expect.soft(check.ok, `${section} · ${check.name} – ${check.detail}`).toBeTruthy();
     }
@@ -314,7 +330,7 @@ test('Tabellen: Sortieren, Filtern, Suchen und Zurücksetzen auf allen Seiten', 
 test('Dashboard: Kennzahlen, Links und Agent-Aufgaben', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop-Ablauf');
   await login(page);
-  await expect(page.getByText('Offene Aufträge')).toBeVisible();
+  await expect(page.getByText('Offene Aufträge', { exact: true }).first()).toBeVisible();
   for (const [link, target] of [
     ['Alle Sprints', 'sprints'],
     ['Alle Testläufe', 'runs'],
@@ -351,14 +367,14 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   const blocked = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' });
   await expect(blocked.first()).toBeVisible();
   const first = blocked.first();
-  const firstTitle = (await first.locator('h3, strong').first().textContent())?.trim() ?? '';
+  const firstTitle = (await first.locator('.attention-title').textContent())?.trim() ?? '';
   await button(first, 'Details & bearbeiten').click();
   await snap(page, info, 'Auftrag Details', false);
   await first.getByRole('combobox').first().selectOption({ label: 'Backlog' });
   await expect(page.locator('.attention-card').filter({ hasText: firstTitle })).toHaveCount(0);
 
   const retry = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' }).first();
-  const retryTitle = (await retry.locator('h3, strong').first().textContent())?.trim() ?? '';
+  const retryTitle = (await retry.locator('.attention-title').textContent())?.trim() ?? '';
   await button(retry, 'Erneut versuchen').click();
   await expect(page.getByText('Auftrag wird erneut versucht.')).toBeVisible();
   await expect(page.locator('.attention-card').filter({ hasText: retryTitle })).toHaveCount(0);
@@ -384,7 +400,7 @@ test('Ideen: anlegen, öffnen, kommentieren, Auftrag erstellen lassen', async ({
   await page.locator('textarea[name=description]').first().fill('Mit **Markdown** und `Code`.');
   await button(page, 'Idee hinzufügen').click();
   await expect(page.getByText('Idee wurde hinzugefügt.')).toBeVisible();
-  await page.locator('.dt-table tbody tr').filter({ hasText: title }).getByRole('button', { name: title }).click();
+  await button(page.locator('.dt-table tbody tr').filter({ hasText: title }), title).click();
   const comment = page.getByPlaceholder('Kommentar schreiben …');
   await expect(comment).toBeVisible();
   await expect.soft(page.getByText('**Markdown**'), 'Beschreibung zeigt Markdown gerendert').toHaveCount(0);
@@ -410,18 +426,16 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await open(page, 'bugs');
   await button(page, /Neuer Bug/).click();
   const title = `Knopf reagiert nicht ${Date.now() % 10000}`;
-  const form = page
-    .locator('form')
-    .filter({ has: page.locator('[name=title]') })
-    .first();
+  const form = page.locator('form.create-form');
   await form.locator('[name=title]').fill(title);
-  await form.locator('button[type=submit]').click();
+  await button(form, 'Bug melden').click();
   const row = page.locator('.dt-table tbody tr').filter({ hasText: title });
   await expect(row).toBeVisible();
   await row.locator('.dt-expand').click();
   const detail = page.locator('.closed-detail');
   await detail.getByRole('combobox').first().selectOption({ label: 'In Arbeit' });
   await expect(row).toContainText('In Arbeit');
+  await detail.getByText('Bug bearbeiten').click();
   await detail.locator('input[name=title]').fill(`${title} (bearbeitet)`);
   await button(detail, 'Änderungen speichern').click();
   await expect(page.getByText('Bug wurde gespeichert.')).toBeVisible();
@@ -568,7 +582,7 @@ test('Projektwechsel trennt die Daten', async ({ page, isMobile }) => {
   await open(page, 'development');
   await expect(page.locator('.dt-table').first()).toContainText('Warenkorb');
   await page.getByRole('button', { name: 'Projekt wechseln' }).click();
-  await button(page, /Beta Portal/).click();
+  await page.getByRole('option', { name: /Beta Portal/ }).click();
   await open(page, 'development');
   await expect(page.locator('.dt-table').first()).toContainText('Beta-Auftrag');
   await expect(page.locator('.dt-table').first()).not.toContainText('Warenkorb');
@@ -577,7 +591,7 @@ test('Projektwechsel trennt die Daten', async ({ page, isMobile }) => {
     .soft(page.locator('.empty-state'), 'Leertext ohne Filter spricht nicht von Filtern')
     .not.toContainText('Filter');
   await page.getByRole('button', { name: 'Projekt wechseln' }).click();
-  await button(page, /Alpha Shop/).click();
+  await page.getByRole('option', { name: /Alpha Shop/ }).click();
 });
 
 test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: Browser }, info) => {

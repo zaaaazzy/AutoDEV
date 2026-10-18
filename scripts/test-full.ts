@@ -8,13 +8,17 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
-const UI_JSON = join(ROOT, 'test-results', 'full-ui.json');
 const onlyUi = process.argv.includes('--nur-oberflaeche');
 const started = new Date();
-const stamp = started.toISOString().slice(0, 16).replace('T', '_').replace(':', '-');
+const two = (value: number) => String(value).padStart(2, '0');
+const stamp = `${started.getFullYear()}-${two(started.getMonth() + 1)}-${two(started.getDate())}_${two(started.getHours())}-${two(started.getMinutes())}`;
+// Rohdaten des Oberflächentests je Lauf getrennt, damit parallele Läufe sich nicht gegenseitig löschen
+const UI_JSON = join(tmpdir(), `dev-log-full-ui-${stamp}.json`);
+const UI_OUTPUT = join(tmpdir(), `dev-log-full-ui-${stamp}`);
 const OUT = join(ROOT, 'docs', 'tests', stamp);
 const MEDIA = join(OUT, 'media');
 // Farbcodes der Konsolenausgabe (ESC [ … m)
@@ -80,7 +84,7 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv = {}): Prom
 async function runStep(name: string, command: string, args: string[], summary: (output: string) => string) {
   console.log(`\n━━ ${name} ━━`);
   const begin = Date.now();
-  const { ok, output } = await run(command, args, { FULL_UI_JSON: UI_JSON });
+  const { ok, output } = await run(command, args, { FULL_UI_JSON: UI_JSON, FULL_UI_OUTPUT: UI_OUTPUT });
   const clean = output.replace(ANSI, '');
   return {
     name,
@@ -100,12 +104,17 @@ function specs(suite: Suite): Spec[] {
   return [...(suite.specs ?? []), ...(suite.suites ?? []).flatMap(specs)];
 }
 
-/** Erste Zeile einer Playwright-Fehlermeldung, ohne Farbcodes und Stacktrace. */
+/** Kurzfassung einer Playwright-Fehlermeldung: eigene Meldung bzw. erste Zeile, dazu Locator und letzter Warteschritt. */
 function headline(message = ''): string {
-  const lines = message.replace(ANSI, '').split('\n');
-  const text = lines.find((line) => line.trim() && !line.startsWith('Error:')) ?? lines[0] ?? '';
-  const custom = /^Error: (.+)$/m.exec(message.replace(ANSI, ''))?.[1];
-  return (custom ?? text).trim().slice(0, 300);
+  const lines = message
+    .replace(ANSI, '')
+    .split('\n')
+    .map((line) => line.trim());
+  const first = (lines[0] ?? '').replace(/^Error: /, '');
+  const locator = lines.find((line) => line.startsWith('Locator:'));
+  const waiting = lines.filter((line) => line.startsWith('- waiting for')).at(-1);
+  const generic = /failed$|exceeded\.?$/.test(first);
+  return [first, generic ? (locator ?? waiting?.slice(2)) : undefined].filter(Boolean).join(' – ').slice(0, 300);
 }
 
 let mediaCount = 0;
@@ -175,7 +184,7 @@ async function main(): Promise<void> {
     `# Testbericht ${started.toLocaleString('de-CH')}`,
     '',
     `Erstellt mit \`npm run test:full${onlyUi ? ' -- --nur-oberflaeche' : ''}\`. Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'}.`,
-    'Der Oberflächentest läuft auf einer eigenen Testdatenbank (dev_log_e2e) ohne Worker: Agents, Chat-Antworten und der Projekt-Assistent starten dort nicht.',
+    'Der Oberflächentest läuft auf einer eigenen Testdatenbank (dev_log_full) ohne Worker: Agents, Chat-Antworten und der Projekt-Assistent starten dort nicht.',
     '',
     '## Übersicht',
     '',
@@ -203,6 +212,8 @@ async function main(): Promise<void> {
     '',
   ].join('\n');
   await writeFile(join(OUT, 'bericht.md'), markdown);
+  await rm(UI_OUTPUT, { recursive: true, force: true });
+  await rm(UI_JSON, { force: true });
   console.log(
     `\nBericht: ${relative(ROOT, join(OUT, 'bericht.md'))} (${mediaCount} Screenshots/Videos in ${basename(MEDIA)}/)`,
   );

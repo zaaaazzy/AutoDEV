@@ -15,6 +15,7 @@
         <button class="button primary" type="submit" [disabled]="busy()">Sprint anlegen</button>
       </form>
     }
+    <app-sprint-proposal />
     <app-data-table
       [rows]="data().sprints"
       [initialFilters]="store.filtersFor('sprints')"

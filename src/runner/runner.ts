@@ -4,6 +4,7 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { loadFollowUpContext } from './follow-up.js';
+import { sprintAutopilot } from './sprint-autopilot.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { enterOrderBranch, syncSprintToGit } from './git-sync.js';
@@ -220,6 +221,10 @@ export async function runWorkflow(
     [options.project],
   );
   await resumeAfterEnvironment(pool, options.project).catch(() => undefined);
+  // Autopilot: abgeschlossenen Sprint beenden bzw. den nächsten vorschlagen und starten.
+  await sprintAutopilot(pool, options.project).catch((error) =>
+    console.error('Sprint-Autopilot fehlgeschlagen:', error),
+  );
   await backfillFailures(pool, options.project).catch((error) =>
     console.error('Fehler-Nachtrag fehlgeschlagen:', error),
   );

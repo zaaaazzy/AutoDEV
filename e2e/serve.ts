@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import pg from 'pg';
 
 /** Startet Dev Log für die Oberflächentests auf einer frisch angelegten Datenbank mit einem Beispielprojekt. */
-const DATABASE = 'dev_log_e2e';
+const DATABASE = process.env.E2E_DATABASE ?? 'dev_log_e2e';
 const adminUrl = process.env.E2E_ADMIN_DATABASE_URL!;
 const admin = new pg.Pool({ connectionString: adminUrl, max: 1 });
 await admin.query(`DROP DATABASE IF EXISTS ${DATABASE} WITH (FORCE)`);
@@ -16,7 +16,7 @@ url.pathname = `/${DATABASE}`;
 process.env.DEV_LOG_DATABASE_URL = url.toString();
 delete process.env.DEV_LOG_ADMIN_DATABASE_URL;
 
-const folder = join(tmpdir(), 'dev-log-e2e-project');
+const folder = join(tmpdir(), `${DATABASE.replaceAll('_', '-')}-project`);
 await mkdir(folder, { recursive: true });
 process.env.E2E_PROJECT_FOLDER = folder;
 process.env.DEV_LOG_PROJECT_ROOTS = tmpdir();

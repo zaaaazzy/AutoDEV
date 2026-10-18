@@ -1,3 +1,4 @@
+import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
@@ -15,7 +16,7 @@ import {
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         ORDER BY name`,
@@ -212,6 +213,18 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(body[key].trim());
       sets.push(`${key} = $${values.length}`);
     }
+    if (body.sprintMode !== undefined) {
+      if (!SPRINT_MODES.includes(body.sprintMode as SprintMode))
+        return fail('Sprintplanung: manuell, vorschlagen oder Autopilot.');
+      values.push(body.sprintMode);
+      sets.push(`sprint_mode = $${values.length}`);
+    }
+    if (body.sprintCapacityHours !== undefined) {
+      const hours = Number(body.sprintCapacityHours);
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 1000) return fail('Kapazität: Stunden zwischen 1 und 1000.');
+      values.push(hours);
+      sets.push(`sprint_capacity_hours = $${values.length}`);
+    }
     if (body.autoBugfix !== undefined) {
       if (typeof body.autoBugfix !== 'boolean')
         return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
@@ -222,7 +235,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours"`,
       values,
     );
     if (!result.rows[0]) {

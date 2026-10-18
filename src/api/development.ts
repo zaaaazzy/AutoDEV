@@ -224,12 +224,22 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       return;
     }
     const result = await pool.query(
-      `DELETE FROM development_items WHERE id = $1 AND status <> '${DEVELOPMENT_STATUS.inProgress}' RETURNING id`,
+      `DELETE FROM development_items WHERE id = $1 AND status <> '${DEVELOPMENT_STATUS.inProgress}'
+       RETURNING id, ideation_id AS "ideationId"`,
       [request.params.id],
     );
     if (!result.rows[0]) {
       response.status(409).json({ message: 'Der Auftrag läuft gerade und kann nicht gelöscht werden.' });
       return;
+    }
+    // Ohne Auftrag ist die Idee wieder offen (sonst hinge sie dauerhaft auf „Auftrag wird bearbeitet“).
+    if (result.rows[0].ideationId) {
+      await pool.query(
+        `UPDATE ideation_items SET status = '${IDEATION_STATUS.idea}', updated_at = NOW()
+          WHERE id = $1 AND status = '${IDEATION_STATUS.accepted}'
+            AND NOT EXISTS (SELECT 1 FROM development_items WHERE ideation_id = $1)`,
+        [result.rows[0].ideationId],
+      );
     }
     response.status(204).end();
   });

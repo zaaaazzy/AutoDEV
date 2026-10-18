@@ -7654,3 +7654,68 @@ a.app-link {
     display: contents;
   }
 }
+
+/* Sprintplanung: Vorschlag mit Begründung, Summen und Auswahl */
+.sprint-propose {
+  margin-bottom: 12px;
+}
+
+.sprint-proposal {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #cfe0d5;
+  border-radius: 12px;
+  background: #f6faf7;
+}
+
+.sprint-proposal header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sprint-proposal h3 {
+  margin: 0 0 2px;
+}
+
+.sprint-proposal p {
+  margin: 0;
+}
+
+.autopilot-badge {
+  color: var(--green);
+}
+
+.proposal-table td,
+.proposal-table th {
+  vertical-align: top;
+}
+
+.proposal-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.proposal-table tr.unpicked td {
+  opacity: 0.5;
+}
+
+.proposal-reason {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.78rem;
+}
+
+.proposal-table tfoot td {
+  border-top: 2px solid var(--line);
+}
+
+.proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}

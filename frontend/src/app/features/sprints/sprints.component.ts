@@ -1,4 +1,5 @@
 import { NgClass } from '@angular/common';
+import { SprintProposalComponent } from './sprint-proposal.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -33,6 +34,7 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
   selector: 'app-sprints',
   standalone: true,
   imports: [
+    SprintProposalComponent,
     NavIconComponent,
     SprintBoardComponent,
     NgClass,

@@ -1,0 +1,100 @@
+@if (!visible()) {
+  @if (auth.can('plan')) {
+    <button class="button secondary sprint-propose" type="button" (click)="opened.set(true)">
+      ✨ Nächsten Sprint vorschlagen
+    </button>
+  }
+} @else if (proposal(); as plan) {
+  <section class="sprint-proposal" aria-label="Vorschlag für den nächsten Sprint">
+    <header>
+      <div>
+        <h3>Vorschlag für {{ plan.name }}</h3>
+        <p class="muted">
+          Kapazität {{ formatHours(plan.capacity.hours) }}
+          {{ plan.capacity.source === 'history' ? '(Median der letzten 3 Sprints)' : '(Einstellung)' }}
+          @if (plan.mode === 'autopilot') {
+            · <strong class="autopilot-badge">Autopilot aktiv</strong>
+          }
+        </p>
+      </div>
+      @if (mode() === 'manual') {
+        <button class="button secondary small" type="button" (click)="opened.set(false)">Schliessen</button>
+      }
+    </header>
+    @if (plan.items.length) {
+      <div class="table-wrap">
+        <table class="idea-table proposal-table">
+          <thead>
+            <tr>
+              <th aria-label="Auswahl"></th>
+              <th>Auftrag</th>
+              <th class="num">Score</th>
+              <th class="num">Std.</th>
+              <th class="num">Tokens</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of plan.items; track item.id) {
+              <tr [class.unpicked]="!picked().has(item.id)">
+                <td>
+                  <input
+                    type="checkbox"
+                    [checked]="picked().has(item.id)"
+                    [disabled]="!auth.can('plan')"
+                    [attr.aria-label]="'Einplanen: ' + item.title"
+                    (change)="toggle(item.id)"
+                  />
+                </td>
+                <td>
+                  <strong>{{ item.title }}</strong>
+                  <small class="muted proposal-reason">{{ item.reason }}</small>
+                </td>
+                <td class="num">{{ item.score }}</td>
+                <td class="num">{{ formatHours(item.hours) }}</td>
+                <td class="num">{{ item.tokens === null ? '–' : (item.tokens | localeNumber) }}</td>
+              </tr>
+            }
+          </tbody>
+          <tfoot>
+            <tr>
+              <td></td>
+              <td>
+                <strong>{{ chosen().length }} Aufträge</strong>
+              </td>
+              <td></td>
+              <td class="num">
+                <strong>{{ formatHours(totals().hours) }}</strong>
+              </td>
+              <td class="num">
+                <strong>{{ totals().tokens | localeNumber }}</strong>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      @if (auth.can('plan')) {
+        <div class="proposal-actions">
+          <button
+            class="button secondary"
+            type="button"
+            [disabled]="store.busy() || !chosen().length"
+            (click)="apply(false)"
+          >
+            Übernehmen
+          </button>
+          <button
+            class="button primary"
+            type="button"
+            [disabled]="store.busy() || !chosen().length || hasActive()"
+            [title]="hasActive() ? 'Es läuft schon ein Sprint – erst abschliessen' : ''"
+            (click)="apply(true)"
+          >
+            ▶ Übernehmen und starten
+          </button>
+        </div>
+      }
+    } @else {
+      <p class="empty-state">Keine offenen Aufträge im Backlog – nichts vorzuschlagen.</p>
+    }
+  </section>
+}

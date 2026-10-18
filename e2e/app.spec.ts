@@ -370,6 +370,27 @@ test('Chat: „/“ wählt den Agent, „@“ verweist mit Bubbles, beim Tippen 
   await expect(input).toHaveValue('');
 });
 
+test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuwählen', async ({ page, request }) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `Planungs-Auftrag ${test.info().project.name} ${Date.now()}`;
+  const order = (
+    await (await request.post('/api/projects/e2e/development', { headers, data: { title, priority: 'high' } })).json()
+  ).item;
+  await login(page);
+  await page.goto('/#sprints');
+  await page.getByRole('button', { name: /Nächsten Sprint vorschlagen/ }).click();
+  const card = page.locator('.sprint-proposal');
+  await expect(card.getByRole('heading', { name: /Vorschlag für Sprint/ })).toBeVisible();
+  const row = card.locator('tbody tr', { hasText: title });
+  await expect(row).toContainText('Priorität hoch');
+  const box = row.getByRole('checkbox');
+  await expect(box).toBeChecked();
+  await box.uncheck();
+  await expect(row).toHaveClass(/unpicked/);
+  await expect(card.getByRole('button', { name: 'Übernehmen', exact: true })).toBeVisible();
+  await request.delete(`/api/development/${order.id}`, { headers });
+});
+
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {
   const manifest = await (await request.get('/manifest.webmanifest')).json();
   expect(manifest.display).toBe('standalone');

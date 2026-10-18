@@ -1,3 +1,4 @@
+import { registerSprintPlanningRoutes } from './sprint-planning.js';
 import { join } from 'node:path';
 import express, { type Express } from 'express';
 import type { Pool } from 'pg';
@@ -74,6 +75,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerIdeationRoutes(app, pool);
   registerDevelopmentRoutes(app, pool);
   registerSprintRoutes(app, pool);
+  registerSprintPlanningRoutes(app, pool);
   registerAgentRoutes(app, pool);
   registerBugRoutes(app, pool);
   registerAttachmentRoutes(app, pool);
