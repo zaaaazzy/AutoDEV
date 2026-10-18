@@ -2,14 +2,14 @@ import { NgClass } from '@angular/common';
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
+import type { AcceptanceCheck, DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES, isFinished, statusLabel } from '../../shared/labels.js';
 import { CategoryLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderTableComponent } from './order-table.component.js';
-import { orderProblem } from '../../shared/order-problem.js';
+import { orderGuide } from '../../shared/order-problem.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
 
@@ -37,6 +37,7 @@ export class DevelopmentComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
+  protected readonly isFinished = isFinished;
 
   /** Laufzeit eines Entwurfs, z. B. „2 min“. */
   protected elapsed(startedAt: string): string {
@@ -57,9 +58,10 @@ export class DevelopmentComponent {
 
   /** Aufträge, die eine Entscheidung brauchen: fehlgeschlagen, aus dem Sprint genommen oder mit Punkten zum Prüfen. */
   protected readonly attention = computed(() => {
-    const manual = new Map<string, number>();
+    const manual = new Map<string, AcceptanceCheck[]>();
     for (const check of this.data().acceptance) {
-      if (check.status === 'manual') manual.set(check.developmentId, (manual.get(check.developmentId) ?? 0) + 1);
+      if (check.status === 'manual')
+        manual.set(check.developmentId, [...(manual.get(check.developmentId) ?? []), check]);
     }
     return this.data()
       .development.map((item) => {
@@ -72,14 +74,27 @@ export class DevelopmentComponent {
         if (item.removedFromSprintAt && !isFinished(item.status)) {
           reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
         }
-        const open = manual.get(item.id) ?? 0;
-        if (open && !item.actionTodo) {
+        const checks = manual.get(item.id) ?? [];
+        if (checks.length && !item.actionTodo) {
+          const open = checks.length;
           reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });
         }
-        return { item, reasons, manual: open };
+        // Das Etikett neben dem Titel nennt den Status schon; dieselbe Angabe nicht noch einmal darunter zeigen.
+        const badges = reasons.filter((reason) => reason.label !== statusLabel(item.status));
+        return { item, reasons, badges, checks: item.actionTodo ? [] : checks, guide: orderGuide(item) };
       })
       .filter((entry) => entry.reasons.length);
   });
+  /** Regel, gegen die ein abgelehnter Auftrag verstösst (aus dem Vermerk des Agents). */
+  protected rule(item: DevelopmentItem): string {
+    const vermerk = /\*\*Vermerk[^*]*:\*\*\s*([^\n]+)/.exec(item.failure ?? '')?.[1] ?? '';
+    return vermerk.replace(/^Projektregel\s*–\s*/, '').trim();
+  }
+
+  protected analysisRunning(item: DevelopmentItem): boolean {
+    return item.analysisStatus === 'requested' || item.analysisStatus === 'running';
+  }
+
   private readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   protected readonly openAttention = signal<string | null>(null);
 
@@ -106,9 +121,6 @@ export class DevelopmentComponent {
   protected readonly openOrders = computed(() =>
     this.data().development.filter((item) => !isFinished(item.status) && !this.attentionIds().has(item.id)),
   );
-
-  /** Problem und Lösung in wenigen Worten (dieselbe Kurzfassung wie im Sprint-Hover der Kopfzeile). */
-  protected readonly problem = orderProblem;
 
   /** Sprintbericht mit dem ToDo-Kapitel des Auftrags (falls der Sprint schon dokumentiert ist). */
   protected sprintDoc(item: DevelopmentItem): string | null {
@@ -146,6 +158,10 @@ export class DevelopmentComponent {
 
   protected confirmOrder(item: DevelopmentItem): Promise<void> {
     return this.orders.confirmChecks(item);
+  }
+
+  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
+    return this.orders.checkPoint(item, check, true);
   }
 
   protected ideaOf(item: DevelopmentItem): Idea | null {

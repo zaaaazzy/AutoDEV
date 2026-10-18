@@ -4971,6 +4971,54 @@ h3 .link-button {
   background: #e7eff7;
   color: #36608f;
 }
+/* „Was ist passiert?“ und „Das musst du tun“: zwei klar getrennte Blöcke je Karte. */
+.attention-block {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 10px;
+}
+.attention-block h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.attention-block p,
+.attention-block ol,
+.attention-block ul {
+  margin: 0;
+}
+.attention-block ol,
+.attention-block ul.attention-steps {
+  display: grid;
+  gap: 4px;
+  padding-left: 20px;
+}
+.attention-what {
+  background: #f6f6f3;
+}
+.attention-what h3 {
+  color: var(--muted);
+}
+.attention-task {
+  border-left: 3px solid #e0a03a;
+  background: #fdf6ec;
+}
+.attention-task h3 {
+  color: #a0610d;
+}
+.attention-next {
+  font-weight: 600;
+}
+.attention-next a {
+  margin-left: 6px;
+  font-weight: 400;
+}
+.attention-task .todo-list {
+  margin: 0;
+}
 .attention-failure {
   margin: 0;
   color: var(--muted);
@@ -5006,6 +5054,15 @@ h3 .link-button {
 .attention-failure p,
 .attention-failure ul {
   margin: 0 0 4px;
+}
+/* Die vollständige Analyse ist lang: ganz zeigen, aber innerhalb der Karte scrollen. */
+.attention-failure.attention-analysis {
+  display: block;
+  max-height: 50vh;
+  overflow-y: auto;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  white-space: normal;
 }
 
 /* ── Verlauf: Symbole statt Etiketten, feste Höhe gegen Springen ─────── */
@@ -7232,18 +7289,6 @@ body {
   color: #a0610d;
 }
 
-.attention-todo {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 2px 10px;
-  margin: 6px 0 8px;
-  padding: 8px 10px;
-  border-left: 3px solid #e0a040;
-  border-radius: 6px;
-  background: #fdf7ec;
-  font-size: 0.9rem;
-}
-
 a.app-link {
   color: var(--green);
   text-decoration: underline;
@@ -7719,15 +7764,6 @@ a.app-link {
   font-weight: 600;
 }
 
-
-.attention-todo dt {
-  color: #a0610d;
-  font-weight: 600;
-}
-
-.attention-todo dd {
-  margin: 0;
-}
 
 .attention-failure-details > summary {
   color: var(--muted);

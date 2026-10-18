@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { orderProblem } from './order-problem.js';
+import { orderGuide, orderProblem } from './order-problem.js';
 
 test('Ohne Handlungsbedarf keine Kurzfassung – auch nicht mit altem Hinweis bei Erledigten', () => {
   assert.equal(orderProblem({ status: 'done' }), null);
@@ -47,4 +47,79 @@ test('Ohne Analyse: Vermerk bzw. erste Fehlerzeile, Lösung aus der Analyse oder
     orderProblem({ status: 'blocked', failure: 'Agent „Tester“ scheiterte: Error: 401 Unauthorized' })!.problem,
     'Error: 401 Unauthorized',
   );
+});
+
+const ANALYSIS = [
+  '**Bug:** Arbeit landet im falschen Commit',
+  '',
+  '## Ursache',
+  'Es sind zwei Probleme, die sich überlagern:',
+  '',
+  '1. **Die Arbeit steckt in einem fremden Commit.** Der Entwickler hat im gemeinsamen Ordner gearbeitet.',
+  '   - `src/agent/visionary.ts`',
+  '2. **Der zweite Lauf wurde von außen beendet.** Der Worker wurde neu gestartet.',
+  '',
+  '## Lösung (konkrete Schritte)',
+  '1. **Testskript in `package.json` aufteilen:**',
+  '   ```json',
+  '   "test": "npm run test:unit"',
+  '   ```',
+  '2. **`measureCoverage()` robuster machen** (`src/runner/measured-coverage.ts`):',
+  '3. **Skript** in `package.json`: `"test:coverage": "tsx --test **/*.test.ts"`.',
+  '4. **Prüfen:** `npm run test:coverage` lokal ausführen.',
+  '5. Danach den Tester erneut starten.',
+].join('\n');
+
+test('Endet die Ursache mit „:“, folgen die Kernaussagen statt eines abgeschnittenen Satzes', () => {
+  const summary = orderProblem({ status: 'blocked', analysis: ANALYSIS })!;
+  assert.match(summary.problem, /^Es sind zwei Probleme, die sich überlagern: Die Arbeit steckt/);
+  assert.match(summary.solution, /^Testskript in package\.json aufteilen; measureCoverage\(\) robuster machen/);
+});
+
+test('Unterstriche in Namen bleiben erhalten', () => {
+  assert.equal(
+    orderProblem({ status: 'blocked', actionTodo: 'WEBAUTHN_RP_ID fehlt – in .env eintragen' })!.problem,
+    'WEBAUTHN_RP_ID fehlt',
+  );
+});
+
+test('Anleitung: Teilursachen und Schritte einzeln, ohne Codeblöcke und Unterpunkte', () => {
+  assert.deepEqual(orderGuide({ status: 'blocked', analysis: ANALYSIS }), {
+    problem: 'Es sind zwei Probleme, die sich überlagern:',
+    causes: ['Die Arbeit steckt in einem fremden Commit', 'Der zweite Lauf wurde von außen beendet'],
+    steps: [
+      'Testskript in package.json aufteilen',
+      'measureCoverage() robuster machen',
+      'Skript in package.json',
+      'Prüfen: npm run test:coverage lokal ausführen',
+      'Danach den Tester erneut starten',
+    ],
+    nothingToFix: false,
+  });
+});
+
+test('Anleitung: „keine (…)“ heißt, dass du nichts beheben musst', () => {
+  const guide = orderGuide({
+    status: 'blocked',
+    analysis: ANALYSIS,
+    actionTodo:
+      'keine (die Agents können es selbst beheben). Ein Mensch muss nur den Auftrag neu starten und darf den Worker währenddessen nicht neu starten.',
+  })!;
+  assert.equal(guide.nothingToFix, true);
+  assert.deepEqual(guide.steps, [
+    'Nichts selbst beheben – die Agents können es selbst beheben.',
+    'Ein Mensch muss nur den Auftrag neu starten und darf den Worker währenddessen nicht neu starten.',
+  ]);
+});
+
+test('Anleitung: Hinweis „Problem – Lösung“ und Fälle ohne Handlungsbedarf', () => {
+  assert.deepEqual(orderGuide({ status: 'blocked', actionTodo: 'WEBAUTHN_RP_ID fehlt – in .env eintragen' }), {
+    problem: 'WEBAUTHN_RP_ID fehlt',
+    causes: [],
+    steps: ['in .env eintragen'],
+    nothingToFix: false,
+  });
+  assert.equal(orderGuide({ status: 'done', actionTodo: 'x' }), null);
+  assert.equal(orderGuide({ status: 'rejected' }), null);
+  assert.deepEqual(orderGuide({ status: 'blocked', failure: 'Agent „Tester“ scheiterte:\n\nError: 401' })!.steps, []);
 });
