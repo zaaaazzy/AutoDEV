@@ -1,0 +1,38 @@
+<app-data-table
+  class="order-table"
+  [rows]="items()"
+  [columns]="columns"
+  [rowId]="orderId"
+  [initialSort]="initialSort()"
+  [(expanded)]="openOrder"
+  [emptyText]="emptyText()"
+>
+  <ng-template appDataCell="title" let-item>
+    <button type="button" class="link-button order-title" [title]="item.title" (click)="toggleOrder(item.id)">
+      {{ item.title }}
+    </button>
+  </ng-template>
+  <ng-template appDataCell="status" let-item>
+    <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+  </ng-template>
+  <ng-template appDataActions let-item>
+    <button
+      type="button"
+      class="button secondary icon-button"
+      (click)="editOrder(item.id)"
+      [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
+      title="Bearbeiten"
+    >
+      ✎
+    </button>
+  </ng-template>
+  <ng-template appDataDetail let-item>
+    <app-order-detail
+      [order]="item"
+      [editing]="orderEditing() === item.id"
+      [agentsOpen]="agentsOpen()"
+      (editCancelled)="orderEditing.set(null)"
+      (saved)="saveOrder(item, $event)"
+    />
+  </ng-template>
+</app-data-table>

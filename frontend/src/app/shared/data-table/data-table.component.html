@@ -36,14 +36,23 @@
         <tr>
           @for (header of model.getHeaderGroups()[0]!.headers; track header.id) {
             @let col = header.column;
-            <th [class]="column(header.id)?.className ?? ''">
+            <th
+              [class]="column(header.id)?.className ?? ''"
+              [class.dt-sorted]="!!col.getIsSorted()"
+              [class.dt-filtered]="col.getIsFiltered()"
+              [attr.aria-sort]="
+                col.getIsSorted() === 'asc' ? 'ascending' : col.getIsSorted() === 'desc' ? 'descending' : null
+              "
+            >
               <div class="dt-head">
                 @if (col.getCanSort()) {
-                  <button type="button" class="dt-sort" (click)="col.toggleSorting()">
+                  <button type="button" class="dt-sort" (click)="col.getToggleSortingHandler()?.($event)">
                     {{ column(header.id)?.header }}
-                    <span class="dt-sort-icon" [class.active]="col.getIsSorted()" aria-hidden="true">{{
-                      col.getIsSorted() === 'asc' ? '↑' : col.getIsSorted() === 'desc' ? '↓' : '↕'
-                    }}</span>
+                    @if (col.getIsSorted()) {
+                      <span class="dt-sort-icon active" aria-hidden="true">{{
+                        col.getIsSorted() === 'asc' ? '↑' : '↓'
+                      }}</span>
+                    }
                   </button>
                 } @else {
                   <span>{{ column(header.id)?.header }}</span>

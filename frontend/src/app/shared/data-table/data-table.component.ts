@@ -116,6 +116,8 @@ export class DataTableComponent<T> {
       header: column.header,
       accessorFn: (row: T) => column.value(row) ?? '',
       enableSorting: column.sortable !== false,
+      // 1. Klick aufsteigend, 2. Klick absteigend, 3. Klick ohne Sortierung.
+      sortDescFirst: false,
       enableColumnFilter: column.filter !== false,
       sortingFn: (left, right) => {
         const rank = column.sortValue ?? column.value;
@@ -144,6 +146,8 @@ export class DataTableComponent<T> {
     onColumnFiltersChange: (updater) => this.filters.set(apply(updater, this.effectiveFilters())),
     onGlobalFilterChange: (updater) => this.search.set(apply(updater, this.search())),
     globalFilterFn: 'includesString',
+    enableSortingRemoval: true,
+    enableMultiSort: false,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),

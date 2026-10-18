@@ -5274,3 +5274,65 @@ h3 .link-button {
 .files-step .file-group .file-list {
   margin-top: 8px;
 }
+
+/* Tabellen: aktive Sortierung bzw. aktiver Filter farbig hervorheben */
+.dt-table thead th.dt-sorted,
+.dt-table thead th.dt-filtered {
+  color: #2f6f4f;
+}
+.dt-table thead th.dt-filtered {
+  background: #e3efe7;
+}
+.dt-table th.dt-filtered .dt-filter-button {
+  background: #2f6f4f;
+  color: #fff;
+}
+.dt-table th.dt-sorted .dt-sort {
+  color: #2f6f4f;
+}
+@media (max-width: 720px) {
+  .dt-table th.dt-sorted .dt-head,
+  .dt-table th.dt-filtered .dt-head {
+    border-color: #2f6f4f;
+    background: #e3efe7;
+    color: #2f6f4f;
+  }
+}
+
+/* ── Auftragsliste: einzeilige Titel, kompakter ──────────────────────── */
+app-order-table {
+  display: block;
+}
+@media (min-width: 721px) {
+  .order-table .dt-table {
+    font-size: 13px;
+  }
+  .order-table .dt-table th,
+  .order-table .dt-table td {
+    padding: 8px 10px;
+  }
+  .order-table .dt-table td.title-cell {
+    max-width: 0;
+  }
+  .order-table .order-title {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    font-size: 13.5px;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .order-table .dt-table td:not(.title-cell):not(.expand-cell) {
+    white-space: nowrap;
+  }
+  .order-table .dt-table .tag,
+  .order-table .dt-table .status {
+    font-size: 11px;
+  }
+}
+@media (max-width: 720px) {
+  .order-table .order-title {
+    text-align: left;
+  }
+}

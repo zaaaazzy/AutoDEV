@@ -168,31 +168,13 @@
           }
         </ng-template>
       </app-data-table>
-      <h3 class="subheading">Letzte Agent-Läufe</h3>
-      <app-data-table
-        [rows]="data().agentRuns"
-        [columns]="runColumns"
-        [rowId]="runId"
-        [initialSort]="[{ id: 'startedAt', desc: true }]"
-        emptyText="Noch keine Agent-Läufe vorhanden."
-      >
-        <ng-template appDataCell="status" let-run>
-          <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
-        </ng-template>
-        <ng-template appDataDetail let-run>
-          @for (step of run.steps; track step.position) {
-            <details class="run-step order-brief">
-              <summary>{{ step.agentName || step.command }} · {{ step.status | statusLabel }}</summary>
-              <app-step-result
-                [events]="step.events"
-                [output]="step.output"
-                [progress]="step.progress"
-                [running]="step.status === 'running'"
-              />
-            </details>
-          }
-        </ng-template>
-      </app-data-table>
+      <h3 class="subheading">Letzte Aufträge</h3>
+      <app-order-table
+        [items]="recentOrders()"
+        [initialSort]="[]"
+        [agentsOpen]="true"
+        emptyText="Noch keine Aufträge mit Agent-Läufen."
+      />
     </section>
   }
 }

@@ -29,6 +29,8 @@ export class OrderDetailComponent {
 
   readonly order = input.required<DevelopmentItem>();
   readonly editing = input(false);
+  /** Agent-Ansicht gleich aufgeklappt zeigen (z. B. auf der Agents-Seite). */
+  readonly agentsOpen = input(false);
   readonly editCancelled = output<void>();
   readonly saved = output<FormValues>();
 

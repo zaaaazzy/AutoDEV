@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
-import type { Agent, AgentPhase, AgentRun } from '../../core/models.js';
+import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { AgentTableRow } from '../../shared/agent-table.component.js';
 import { ModelIconComponent } from '../../shared/model-icon.component.js';
@@ -15,7 +15,6 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { statusLabel } from '../../shared/labels.js';
-import { StepResultComponent } from '../../shared/step-result.component.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import {
   AGENT_PHASES,
@@ -27,6 +26,7 @@ import {
   roleLabel,
   modelLabel,
 } from './agent-options.js';
+import { OrderTableComponent } from '../development/order-table.component.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
 
 interface SystemAgent {
@@ -63,6 +63,7 @@ interface AgentListRow extends AgentTableRow {
   selector: 'app-agents',
   standalone: true,
   imports: [
+    OrderTableComponent,
     NgClass,
     FormsModule,
     AgentDetailComponent,
@@ -70,7 +71,6 @@ interface AgentListRow extends AgentTableRow {
     DataTableComponent,
     DataCellDirective,
     DataDetailDirective,
-    StepResultComponent,
     StatusClassPipe,
     StatusLabelPipe,
   ],
@@ -187,19 +187,19 @@ export class AgentsComponent {
     { id: 'status', header: 'Status', value: (row) => statusLabel(row.status) },
   ];
 
-  protected readonly runId = (run: AgentRun): string => run.id;
-  protected readonly runColumns: DataColumn<AgentRun>[] = [
-    { id: 'title', header: 'Auftrag', value: (run) => run.title, filter: 'text', className: 'title-cell' },
-    { id: 'status', header: 'Status', value: (run) => statusLabel(run.status) },
-    {
-      id: 'startedAt',
-      header: 'Gestartet',
-      value: (run) => new Date(run.startedAt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' }),
-      sortValue: (run) => run.startedAt,
-      filter: false,
-    },
-    { id: 'steps', header: 'Schritte', value: (run) => run.steps.length, filter: false },
-  ];
+  /** Aufträge mit Agent-Läufen, der zuletzt bearbeitete zuerst. */
+  protected readonly recentOrders = computed(() => {
+    const lastRun = new Map<string, string>();
+    for (const run of this.data().agentRuns) {
+      if (!run.developmentId) continue;
+      const seen = lastRun.get(run.developmentId);
+      if (!seen || run.startedAt > seen) lastRun.set(run.developmentId, run.startedAt);
+    }
+    return this.data()
+      .development.filter((item) => lastRun.has(item.id))
+      .sort((a, b) => lastRun.get(b.id)!.localeCompare(lastRun.get(a.id)!))
+      .slice(0, 20);
+  });
 
   protected readonly systemRows = computed<SystemRow[]>(() =>
     this.systemAgents().map((system) => ({

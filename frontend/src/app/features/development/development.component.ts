@@ -1,39 +1,24 @@
-import { NgClass, NgTemplateOutlet } from '@angular/common';
+import { NgClass } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import type { FormValues } from '../../shared/forms.js';
-import { categoryColumn } from '../../shared/data-table/columns.js';
-import {
-  type DataColumn,
-  DataActionsDirective,
-  DataCellDirective,
-  DataDetailDirective,
-  DataTableComponent,
-} from '../../shared/data-table/data-table.component.js';
-import { CATEGORIES, DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
-import { formatHours } from '../../shared/format.js';
+import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import { CategoryLabelPipe, ShortTextPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
+import { OrderTableComponent } from './order-table.component.js';
 import { OrderService } from './order.service.js';
-
-const PRIORITY_RANK = ['low', 'medium', 'high'];
 
 @Component({
   selector: 'app-development',
   standalone: true,
   imports: [
+    OrderTableComponent,
     MarkdownPipe,
     NgClass,
-    NgTemplateOutlet,
     FormsModule,
-    DataTableComponent,
-    DataCellDirective,
-    DataDetailDirective,
-    DataActionsDirective,
     OrderDetailComponent,
     ShortTextPipe,
     StatusClassPipe,
@@ -50,36 +35,12 @@ export class DevelopmentComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
-  protected readonly orderId = (item: DevelopmentItem): string => item.id;
 
   /** Laufzeit eines Entwurfs, z. B. „2 min“. */
   protected elapsed(startedAt: string): string {
     const seconds = Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000));
     return seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
   }
-  protected readonly devColumns: DataColumn<DevelopmentItem>[] = [
-    { id: 'title', header: 'Titel', value: (item) => item.title, filter: 'text', className: 'title-cell' },
-    {
-      id: 'status',
-      header: 'Status',
-      value: (item) => statusLabel(item.status),
-      sortValue: (item) => DEVELOPMENT_STATUSES.indexOf(item.status),
-    },
-    {
-      id: 'priority',
-      header: 'Priorität',
-      value: (item) => priorityLabel(item.priority),
-      sortValue: (item) => PRIORITY_RANK.indexOf(item.priority),
-    },
-    categoryColumn<DevelopmentItem>((item) => item.category),
-    { id: 'sprint', header: 'Sprint', value: (item) => this.store.sprintOf(item)?.name ?? 'Kein Sprint' },
-    {
-      id: 'effortHours',
-      header: 'Aufwand',
-      value: (item) => formatHours(item.effortHours),
-      sortValue: (item) => item.effortHours ?? -1,
-    },
-  ];
 
   protected developmentForm: { title: string; priority: Priority; category: string } = {
     title: '',
@@ -87,8 +48,6 @@ export class DevelopmentComponent {
     category: '',
   };
   protected readonly categories = CATEGORIES;
-  protected readonly openOrder = signal<string | null>(null);
-  protected readonly orderEditing = signal<string | null>(null);
   protected readonly showDoneOrders = signal(false);
 
   /** Aufträge, die eine Entscheidung brauchen: fehlgeschlagen, aus dem Sprint genommen oder mit Punkten zum Prüfen. */
@@ -143,21 +102,6 @@ export class DevelopmentComponent {
 
   protected confirmOrder(item: DevelopmentItem): Promise<void> {
     return this.orders.confirmChecks(item);
-  }
-
-  protected toggleOrder(id: string): void {
-    this.openOrder.set(this.openOrder() === id ? null : id);
-  }
-
-  /** Stift in der Liste: Zeile aufklappen und direkt bearbeiten. */
-  protected editOrder(id: string): void {
-    this.openOrder.set(id);
-    this.orderEditing.set(this.orderEditing() === id ? null : id);
-  }
-
-  protected async saveOrder(item: DevelopmentItem, values: FormValues): Promise<void> {
-    await this.orders.save(item, values);
-    this.orderEditing.set(null);
   }
 
   protected ideaOf(item: DevelopmentItem): Idea | null {

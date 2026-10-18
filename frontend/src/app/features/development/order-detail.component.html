@@ -168,7 +168,7 @@
       }
     </details>
   }
-  <details class="run-step order-brief">
+  <details class="run-step order-brief" [open]="agentsOpen()">
     <summary>Agents</summary>
     <app-agent-workflow [order]="item" />
   </details>

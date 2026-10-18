@@ -151,12 +151,7 @@
       </form>
     }
     @if (data().development.length) {
-      <ng-container
-        *ngTemplateOutlet="
-          orderTable;
-          context: { $implicit: openOrders(), empty: 'Keine offenen Aufträge für diese Filter.' }
-        "
-      />
+      <app-order-table [items]="openOrders()" emptyText="Keine offenen Aufträge für diese Filter." />
     } @else {
       <p class="empty-state">Noch keine Entwicklungsaufträge vorhanden.</p>
     }
@@ -174,56 +169,7 @@
       </button>
     </div>
     @if (showDoneOrders()) {
-      <ng-container
-        *ngTemplateOutlet="orderTable; context: { $implicit: doneOrders(), empty: 'Keine erledigten Aufträge.' }"
-      />
+      <app-order-table [items]="doneOrders()" emptyText="Keine erledigten Aufträge." />
     }
   </section>
 }
-<ng-template #orderTable let-orders let-empty="empty">
-  <app-data-table
-    [rows]="orders"
-    [columns]="devColumns"
-    [rowId]="orderId"
-    [initialSort]="[{ id: 'priority', desc: true }]"
-    [(expanded)]="openOrder"
-    [emptyText]="empty"
-  >
-    <ng-template appDataCell="title" let-item>
-      <div class="title-with-hint">
-        <button type="button" class="link-button clamp" (click)="toggleOrder(item.id)">{{ item.title }}</button>
-        @if (item.description) {
-          <span
-            class="summary-hint"
-            tabindex="0"
-            [attr.data-tip]="item.description | shortText: 400"
-            [attr.aria-label]="'Kurzfassung: ' + (item.description | shortText: 400)"
-            >i</span
-          >
-        }
-      </div>
-    </ng-template>
-    <ng-template appDataCell="status" let-item>
-      <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
-    </ng-template>
-    <ng-template appDataActions let-item>
-      <button
-        type="button"
-        class="button secondary icon-button"
-        (click)="editOrder(item.id)"
-        [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
-        title="Bearbeiten"
-      >
-        ✎
-      </button>
-    </ng-template>
-    <ng-template appDataDetail let-item>
-      <app-order-detail
-        [order]="item"
-        [editing]="orderEditing() === item.id"
-        (editCancelled)="orderEditing.set(null)"
-        (saved)="saveOrder(item, $event)"
-      />
-    </ng-template>
-  </app-data-table>
-</ng-template>
