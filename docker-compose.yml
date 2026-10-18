@@ -19,15 +19,17 @@ services:
   dev-log:
     build: .
     ports:
-      - "${DEV_LOG_BIND:-127.0.0.1}:3100:3100"
+      # Direkt nur vom eigenen Rechner aus; von aussen geht es über HTTPS (Dienst https).
+      - "127.0.0.1:3100:3100"
     restart: unless-stopped
     environment:
       PORT: 3100
+      DEV_LOG_TRUST_PROXY: uniquelocal
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/dev_log
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
       DEV_LOG_AUTH: ${DEV_LOG_AUTH:-on}
       DEV_LOG_HOST: 0.0.0.0
-      DEV_LOG_BIND: ${DEV_LOG_BIND:-127.0.0.1}
+      DEV_LOG_BIND: 127.0.0.1
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
     depends_on:
@@ -39,5 +41,22 @@ services:
       timeout: 5s
       retries: 10
 
+  https:
+    image: caddy:2.8.4-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    restart: unless-stopped
+    environment:
+      DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-home.zaaaazzy.ch}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - devlog_caddy_data:/data
+      - devlog_caddy_config:/config
+    depends_on:
+      - dev-log
+
 volumes:
   devlog_pgdata:
+  devlog_caddy_data:
+  devlog_caddy_config:

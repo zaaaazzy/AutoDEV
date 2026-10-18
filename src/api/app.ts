@@ -30,6 +30,10 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.disable('x-powered-by');
   app.get('/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(securityHeaders);
+  // Hinter dem HTTPS-Proxy: Protokoll und Client-IP aus X-Forwarded-* übernehmen,
+  // damit die Herkunftsprüfung https erkennt und Fehlversuche je Client zählen.
+  const trustProxy = process.env.DEV_LOG_TRUST_PROXY?.trim();
+  if (trustProxy) app.set('trust proxy', trustProxy);
   app.use(sameOriginWrites);
   app.use(express.json({ limit: '32kb' }));
   if (auth) {

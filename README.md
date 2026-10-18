@@ -4,7 +4,7 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 
 ## Starten
 
-1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche `http://localhost:3100` (Datenbank `127.0.0.1:5433`, eigenes Volume).
+1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche lokal `http://localhost:3100`, von aussen `https://<DEV_LOG_DOMAIN>` (Standard `home.zaaaazzy.ch`, siehe Sicherheit). Datenbank `127.0.0.1:5433`, eigenes Volume.
 2. Worker (arbeitet alle Projekte automatisch ab, Autostart per launchd): `./scripts/install-worker.sh`. Log: `~/Library/Logs/dev-log-worker.log`. Ohne Autostart: `npm run worker`.
 3. Lokales Modell: Ollama (`DEV_LOG_OLLAMA_MODEL`, Standard `qwen3.5:9b`). Optional pro Rolle: `DEV_LOG_OLLAMA_MODEL_<ROLLE>` (z. B. `_DEVELOPER`) und Kontext `DEV_LOG_OLLAMA_CTX[_<ROLLE>]` (Standard 16384, Entwickler 32768); `DEV_LOG_OLLAMA_KEEP_ALIVE` (Standard `30m`) hält das Modell geladen. Ollama-Einstellungen (Modell dauerhaft geladen, Flash Attention, KV-Cache q8_0, ein Modell gleichzeitig) setzt `./scripts/configure-ollama.sh` und startet die Ollama-App neu. Bei Verbindungsfehlern wird bis zu zweimal mit wachsender Wartezeit wiederholt.
 
@@ -19,9 +19,9 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 
 ### Sicherheit
 
-Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Der Container-Port ist standardmäßig nur an `127.0.0.1` gebunden (`DEV_LOG_BIND=0.0.0.0` in `.env` öffnet ihn für das lokale Netz; Basic Auth läuft dann unverschlüsselt über HTTP), der Container läuft als Nicht-Root. Die API setzt Security-Header (CSP), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Mit `DEV_LOG_AUTH=off` lauscht der Server nur auf `127.0.0.1` (`DEV_LOG_HOST` überschreibt das).
+Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Der Dev-Log-Container ist nur an `127.0.0.1:3100` gebunden und läuft als Nicht-Root. Von aussen geht der Zugriff ausschließlich über HTTPS: Der Dienst `https` (Caddy, `deploy/Caddyfile`) lauscht auf 80/443, holt das Zertifikat für `DEV_LOG_DOMAIN` automatisch bei Let's Encrypt und leitet an Dev Log weiter (Router: Port 443 auf diesen Rechner weiterleiten). Dev Log übernimmt Protokoll und Client-IP vom Proxy (`DEV_LOG_TRUST_PROXY`). Die API setzt Security-Header (CSP), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Mit `DEV_LOG_AUTH=off` lauscht der Server nur auf `127.0.0.1` (`DEV_LOG_HOST` überschreibt das).
 
-Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Für Zugriff von anderen Geräten daher nicht `DEV_LOG_BIND=0.0.0.0`, sondern einen HTTPS-Reverse-Proxy, Tailscale oder einen SSH-Tunnel verwenden; der Server warnt beim Start, wenn er im Netz erreichbar ist.
+Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Deshalb ein starkes Passwort verwenden und Dev Log nie per HTTP ins Netz stellen.
 
 **Grenzen der Agent-Rechte:** Die Werkzeugregeln (Projektordner, gesperrte Dateien, erlaubte Befehle) schützen vor Fehlgriffen des Modells, sind aber keine Sandbox. Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen mit den Rechten des Workers auf dem Host. Installationen laufen immer mit `--ignore-scripts`. Für die Projekt-Datenbank einen eigenen Benutzer ohne `DROP`-/Superuser-Rechte hinterlegen.
 

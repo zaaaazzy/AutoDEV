@@ -1,0 +1,8 @@
+# HTTPS-Zugang zu Dev Log: Caddy holt das Zertifikat bei Let's Encrypt
+# (Router muss dafür Port 443 an diesen Rechner weiterleiten) und
+# leitet die Anfragen an den Dev-Log-Container weiter, der selbst nur intern lauscht.
+{$DEV_LOG_DOMAIN} {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000"
+	reverse_proxy dev-log:3100
+}

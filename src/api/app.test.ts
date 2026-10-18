@@ -400,6 +400,29 @@ test('sets security headers and rejects cross-origin writes', async () => {
   });
 });
 
+test('behind the HTTPS proxy, same-origin writes over https are accepted', async () => {
+  process.env.DEV_LOG_TRUST_PROXY = 'loopback';
+  try {
+    const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+    await withServer(pool, async (baseUrl) => {
+      const host = new URL(baseUrl).host;
+      const proxied = await fetch(`${baseUrl}/api/projects`, {
+        method: 'POST',
+        headers: {
+          Authorization: basicAuth(),
+          Origin: `https://${host}`,
+          'X-Forwarded-Proto': 'https',
+          'Content-Type': 'application/json',
+        },
+        body: '{}',
+      });
+      assert.notEqual(proxied.status, 403);
+    });
+  } finally {
+    delete process.env.DEV_LOG_TRUST_PROXY;
+  }
+});
+
 test('blocks a client after repeated failed logins', async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
