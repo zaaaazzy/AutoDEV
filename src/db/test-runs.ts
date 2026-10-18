@@ -121,3 +121,8 @@ export async function saveTestCases(pool: Pool, runId: string, cases: TestCaseRe
   );
   return media;
 }
+
+/** Testbericht (Markdown) zum Lauf speichern; er erscheint in der Dokumentation unter „Testberichte“. */
+export async function saveTestReport(pool: Pool, runId: string, report: string): Promise<void> {
+  await pool.query('UPDATE test_runs SET report = $2 WHERE id = $1', [runId, report.slice(0, 200_000)]);
+}

@@ -32,6 +32,7 @@ import {
   finishTestRun,
   finishTestRunStep,
   saveTestCases,
+  saveTestReport,
 } from '../src/db/test-runs.js';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -210,7 +211,12 @@ class Recorder {
     return saveTestCases(this.pool, this.runId, result.cases);
   }
 
-  async close(passed: boolean): Promise<string> {
+  get id(): string {
+    return this.runId;
+  }
+
+  async close(passed: boolean, report: string): Promise<string> {
+    await saveTestReport(this.pool, this.runId, report);
     await finishTestRun(this.pool, this.runId, passed);
     await this.pool.end();
     return this.runId;
@@ -257,6 +263,65 @@ const STATUS_ICON: Record<TestCaseResult['status'], string> = {
   flaky: '⚠️',
 };
 
+/**
+ * Bericht für die Dokumentation in Dev Log (Gruppe „Testberichte“): Übersicht je Kategorie und alle Befunde.
+ * Screenshots und Videos zeigt die Ansicht „Testläufe“, auf die der Bericht verlinkt.
+ */
+function documentReport(results: StepResult[], allOk: boolean, runId: string): string {
+  const cases = results.flatMap((result) => result.cases);
+  const count = (category: string, status: string) =>
+    cases.filter((testCase) => testCase.category === category && testCase.status === status).length;
+  const categories = (['unit', 'e2e', 'user'] as const)
+    .map((category) => ({
+      label: { unit: 'Unit', e2e: 'E2E', user: 'User' }[category],
+      passed: count(category, 'passed'),
+      failed: count(category, 'failed') + count(category, 'flaky'),
+      skipped: count(category, 'skipped'),
+    }))
+    .filter((category) => category.passed + category.failed + category.skipped);
+  const failed = cases.filter((testCase) => testCase.status === 'failed' || testCase.status === 'flaky');
+  const row = (text: string) => text.replace(/\|/g, '/').replace(/\s+/g, ' ');
+  return [
+    `# Testbericht ${started.toLocaleString('de-CH', { dateStyle: 'medium', timeStyle: 'short' })}`,
+    '',
+    `Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'} · erstellt mit \`npm run test:full\``,
+    '',
+    `[Screenshots, Videos und alle Einzeltests in den Testläufen ansehen](#runs/${runId})`,
+    '',
+    '## Prüfungen',
+    '',
+    '| Prüfung | Ergebnis | Dauer | Zusammenfassung |',
+    '|---|---|---|---|',
+    ...results.map(
+      (result) => `| ${result.name} | ${icon(result.ok)} | ${result.seconds} s | ${row(result.summary || '–')} |`,
+    ),
+    '',
+    '## Einzeltests je Kategorie',
+    '',
+    '| Kategorie | Bestanden | Fehlgeschlagen | Übersprungen |',
+    '|---|---|---|---|',
+    ...categories.map(
+      (category) => `| ${category.label} | ${category.passed} | ${category.failed} | ${category.skipped} |`,
+    ),
+    '',
+    '## Befunde',
+    '',
+    ...(failed.length
+      ? failed.flatMap((testCase) => [
+          `### ${STATUS_ICON[testCase.status]} ${testCase.title}`,
+          '',
+          `${{ unit: 'Unit', e2e: 'E2E', user: 'User' }[testCase.category]}${testCase.device ? ` · ${testCase.device}` : ''}${testCase.file ? ` · \`${testCase.file}\`` : ''}`,
+          '',
+          ...(testCase.errors.length ? testCase.errors.map((error) => `- ${row(error)}`) : ['- ohne Meldung']),
+          '',
+        ])
+      : ['Keine Befunde.']),
+    ...results
+      .filter((result) => !result.ok && !result.cases.length)
+      .flatMap((result) => [`### ❌ ${result.name}`, '', `- ${row(result.summary || 'fehlgeschlagen')}`, '']),
+  ].join('\n');
+}
+
 async function main(): Promise<void> {
   await mkdir(TEMP, { recursive: true });
   const recorder = project ? await Recorder.open(project) : null;
@@ -297,7 +362,7 @@ async function main(): Promise<void> {
   }
 
   const allOk = results.every((result) => result.ok);
-  const runId = await recorder?.close(allOk);
+  const runId = recorder?.id;
   const markdown = [
     `# Testbericht ${started.toLocaleString('de-CH')}`,
     '',
@@ -331,6 +396,7 @@ async function main(): Promise<void> {
     '',
   ].join('\n');
   await writeFile(join(OUT, 'bericht.md'), markdown);
+  if (recorder) await recorder.close(allOk, documentReport(results, allOk, recorder.id));
   await rm(TEMP, { recursive: true, force: true });
   console.log(
     `\nBericht: ${relative(ROOT, join(OUT, 'bericht.md'))} (${mediaCount} Screenshots/Videos in ${basename(MEDIA)}/)`,

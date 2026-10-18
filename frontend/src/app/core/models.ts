@@ -126,7 +126,8 @@ export interface Bug {
 
 export interface DocumentEntry {
   id: string;
-  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request';
+  /** test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht (beide erzeugt, schreibgeschützt). */
+  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request' | 'test' | 'settings';
   title: string;
   content: string;
   sprintId: string | null;

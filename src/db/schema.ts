@@ -97,6 +97,8 @@ export const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS test_media_run_idx ON test_media (run_id);
   CREATE INDEX IF NOT EXISTS test_media_case_idx ON test_media (case_id);
+  -- Testbericht (Markdown) eines Laufs, erscheint in der Dokumentation unter „Testberichte“.
+  ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS report TEXT;
 
   CREATE TABLE IF NOT EXISTS ideation_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

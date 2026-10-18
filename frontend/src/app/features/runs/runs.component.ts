@@ -3,6 +3,7 @@ import { NgClass } from '@angular/common';
 import { Component, computed, effect, HostListener, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { TestCase, TestCaseStatus, TestCategory, TestMedia, TestRun } from '../../core/models.js';
+import { targetFromHash } from '../../core/navigation.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
   type DataColumn,
@@ -196,6 +197,9 @@ export class RunsComponent {
   ];
 
   constructor() {
+    // Link aus einem Testbericht (#runs/<id>): diesen Lauf in der Übersicht zeigen.
+    const target = targetFromHash();
+    if (target) this.chosenRun.set(target);
     // Einzeltests des gewählten Laufs nachladen, sobald sich Lauf oder Projekt ändern.
     effect(() => {
       const run = this.selected();
