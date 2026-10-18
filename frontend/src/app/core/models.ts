@@ -49,6 +49,24 @@ export interface Idea extends Estimate {
   priority: Priority;
   createdAt: string;
   agentNote?: string | null;
+  /** Herkunft: von Hand erfasst oder vom Visionär vorgeschlagen (weitere Quellen folgen). */
+  source?: IdeaSource;
+  rejectionReason?: string | null;
+}
+
+export type IdeaSource = 'human' | 'visionary' | 'routine' | 'production' | 'github';
+
+/** Lauf des Visionärs (Ideen vorschlagen lassen). */
+export interface VisionaryRun {
+  id: string;
+  status: 'requested' | 'running' | 'done' | 'failed' | 'cancelled';
+  progress: string | null;
+  createdCount: number;
+  discardedCount: number;
+  error: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface IdeaComment {

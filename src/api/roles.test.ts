@@ -17,6 +17,9 @@ test('every write maps to the right role; reads and own-account actions need non
   assert.equal(requiredRole('POST', '/api/projects/x/sprints/proposal/apply', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/projects/x/sprints/proposal/comment', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/projects/x/sprints/autopilot/resume', {}), 'plan');
+  assert.equal(requiredRole('POST', '/api/projects/x/ideation/visionary', {}), 'plan');
+  assert.equal(requiredRole('POST', '/api/projects/x/ideation/visionary/cancel', {}), 'plan');
+  assert.equal(requiredRole('POST', '/api/ideation/1/reject', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/auth/totp/setup', {}), null);
   assert.equal(requiredRole('POST', '/api/something-new', {}), 'admin', 'unknown writes default to admin');
 });

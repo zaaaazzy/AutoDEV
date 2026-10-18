@@ -13,6 +13,7 @@ import { projectFolderError } from '../core/validation.js';
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
 import { commentSprintProposal } from '../agent/sprint-comment.js';
+import { processVisionaryRun } from '../agent/visionary.js';
 import { syncFavicon } from './favicon.js';
 import { syncGitGraph } from './git-graph.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
@@ -141,6 +142,11 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
   await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
   await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
+  await pool
+    .query(
+      `UPDATE visionary_runs SET status = 'requested', started_at = NULL, progress = NULL WHERE status = 'running'`,
+    )
+    .catch(() => undefined);
   await pool.query(
     `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
   );
@@ -231,6 +237,7 @@ async function main(): Promise<void> {
     const estimateActive = new Set<string>();
     const authorActive = new Set<string>();
     const commentActive = new Set<string>();
+    const visionaryActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -265,6 +272,16 @@ async function main(): Promise<void> {
               logOnce(`comment:${slug}`, `[${slug}] Sprint-Kommentar fehlgeschlagen: ${describeError(error)}`),
             )
             .finally(() => commentActive.delete(slug));
+        }
+        // Visionär: angeforderte Läufe („Ideen vorschlagen lassen“) je Projekt nacheinander abarbeiten.
+        if (!visionaryActive.has(slug) && !stopping) {
+          visionaryActive.add(slug);
+          void processVisionaryRun(pool, target.options)
+            .then(() => loggedErrors.delete(`visionary:${slug}`))
+            .catch((error: unknown) =>
+              logOnce(`visionary:${slug}`, `[${slug}] Visionär fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => visionaryActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
@@ -328,7 +345,15 @@ async function main(): Promise<void> {
         }
       }
       await Promise.all(active.values());
-      while (chatActive.size || analysisActive.size || authorActive.size || estimateActive.size) await sleep(200);
+      while (
+        chatActive.size ||
+        analysisActive.size ||
+        authorActive.size ||
+        estimateActive.size ||
+        commentActive.size ||
+        visionaryActive.size
+      )
+        await sleep(200);
     } finally {
       clearInterval(heartbeat);
       clearInterval(chatTimer);

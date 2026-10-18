@@ -1,5 +1,5 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Component, inject, input, model, output } from '@angular/core';
+import { Component, inject, input, model, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { Idea } from '../../core/models.js';
@@ -94,6 +94,21 @@ export class IdeaDetailComponent {
       },
       files.length === 1 ? 'Bild angehängt.' : `${files.length} Bilder angehängt.`,
     );
+  }
+
+  protected readonly rejecting = signal(false);
+  protected rejectReason = '';
+
+  /** Ablehnen mit Grund: Status „Abgelehnt“, der Grund wird gespeichert und fliesst in den nächsten Visionär-Lauf. */
+  protected async rejectIdea(idea: Idea): Promise<void> {
+    const reason = this.rejectReason.trim();
+    if (!reason) return;
+    await this.store.perform(
+      () => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/reject`, { reason }),
+      'Idee abgelehnt.',
+    );
+    this.rejecting.set(false);
+    this.rejectReason = '';
   }
 
   protected async promoteIdea(idea: Idea): Promise<void> {

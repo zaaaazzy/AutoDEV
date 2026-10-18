@@ -8854,3 +8854,56 @@ input.pick {
   color: #fff;
   font-weight: 700;
 }
+
+/* Visionär: Lauf-Fortschritt in Ideation und Herkunfts-Badge an Ideen. */
+.visionary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid #d6c8ef;
+  border-radius: 14px;
+  background: #f6f2fd;
+}
+.visionary-bar p {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+.visionary-bar.done {
+  border-color: #b9d3c4;
+  background: #f0f7f2;
+}
+.visionary-bar.failed {
+  border-color: #efc4c4;
+  background: #fdf2f2;
+}
+.visionary-bar .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c9b6ec;
+  border-top-color: #6b46c1;
+  border-radius: 50%;
+  animation: check-spin 0.9s linear infinite;
+}
+.source-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.source-badge.visionary {
+  background: #ede6fb;
+  color: #553c9a;
+}
+.idea-reject {
+  display: grid;
+  gap: 8px;
+}
+.idea-reject textarea {
+  min-height: 70px;
+}

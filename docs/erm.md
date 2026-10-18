@@ -12,3 +12,10 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `development_items`: zusätzlich `kind`, `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
 - `agents.role`: author, developer, tester, reviewer, documenter, bug_reviewer, manual_writer, user_manual_writer, custom.
 - Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird.
+
+## Erweiterung: Visionär (Ideen-Herkunft und Läufe)
+
+- `ideation_items.source` (TEXT, NOT NULL, Standard `human`): Herkunft der Idee, Wertebereich `human` | `visionary` | `routine` | `production` | `github`. Bestehende Ideen erhalten beim Start `human` (`ADD COLUMN IF NOT EXISTS … DEFAULT 'human'`). Vom Visionär angelegte Ideen haben `status='idea'`, `source='visionary'` und die Begründung („Stützt sich auf …“) in `agent_note`; dazu kommt ein Kommentar in `ideation_comments` mit Autor „Visionär“ und den Belegen. `routine`, `production` und `github` sind vorgesehen, werden aber noch nicht befüllt.
+- `ideation_items.rejection_reason` (TEXT): Grund aus „Ablehnen mit Grund“ (`POST /api/ideation/:id/reject`, setzt `status='rejected'`, zusätzlich als Kommentar). Der nächste Visionär-Lauf bekommt Titel und Grund aller abgelehnten Ideen im Prompt.
+- `visionary_runs` (`id`, `project_slug` → `projects`, `status` requested/running/done/failed/cancelled, `progress`, `created_count`, `discarded_count`, `error`, `requested_by`, `requested_at`, `started_at`, `finished_at`): ein Lauf je Anfrage „Ideen vorschlagen lassen“. Ein eindeutiger Teilindex (`visionary_runs_open_idx`) erlaubt je Projekt höchstens einen angefragten oder laufenden Lauf.
+- `app_settings.visionary_max_ideas`: höchstens so viele Ideen je Lauf (Standard 5, Maximum 8).

@@ -72,6 +72,8 @@ const RULES: Rule[] = [
   ],
   ['*', /^\/api\/development\//, 'plan'],
   ['POST', /^\/api\/projects\/[^/]+\/(development|ideation|bugs|sprints)$/, 'plan'],
+  // Visionär-Lauf starten bzw. abbrechen: legt Ideen an, gehört also zur Planung.
+  ['POST', /^\/api\/projects\/[^/]+\/ideation\/visionary(\/cancel)?$/, 'plan'],
   ['POST', /^\/api\/projects\/[^/]+\/sprints\/(proposal\/(apply|comment)|autopilot\/resume)$/, 'plan'],
   ['*', /^\/api\/(ideation|bugs|sprints)\//, 'plan'],
   ['*', /^\/api\/(projects\/[^/]+\/)?attachments/, 'plan'],
