@@ -1,34 +1,63 @@
 import type { Pool } from 'pg';
-import { applyProposal, completeSprint, loadProposal } from '../api/sprint-planning.js';
+import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 
-export type AutopilotStep = 'off' | 'paused' | 'working' | 'completed' | 'started' | 'idle';
+export type AutopilotStep = 'off' | 'paused' | 'working' | 'completed' | 'started' | 'outside_hours' | 'idle';
 
-/** Offen = noch zu bearbeiten; „Aktion notwendig“ (blockiert) wartet auf einen Menschen und hält den Sprint nicht auf. */
-export function sprintSettled(statuses: string[]): boolean {
-  return statuses.length > 0 && !statuses.some((status) => ['backlog', 'planned', 'in_progress'].includes(status));
+/**
+ * Offen = noch zu bearbeiten. Blockierte Aufträge halten den Sprint nur dann nicht auf, wenn sie „Aktion notwendig“
+ * haben (warten auf einen Menschen); andere Blockierte sind Fehler, die noch behoben werden.
+ */
+export function sprintSettled(items: { status: string; actionTodo: string | null }[]): boolean {
+  return (
+    items.length > 0 &&
+    !items.some(
+      (item) =>
+        ['backlog', 'planned', 'in_progress'].includes(item.status) || (item.status === 'blocked' && !item.actionTodo),
+    )
+  );
+}
+
+/** Meldet eine Pause nur einmal je gescheitertem Sprint (der Worker prüft alle 30 s). */
+async function notifyPause(pool: Pool, project: string, sprintId: string, message: string): Promise<void> {
+  const key = `autopilot_paused:${project}`;
+  const fresh = (
+    await pool.query(
+      `INSERT INTO app_settings (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value WHERE app_settings.value IS DISTINCT FROM EXCLUDED.value
+       RETURNING key`,
+      [key, sprintId],
+    )
+  ).rows[0];
+  if (!fresh) return;
+  await sendPush(
+    pool,
+    {
+      title: `⏸ Autopilot pausiert · ${project}`,
+      body: message.slice(0, 200),
+      url: '#sprints',
+      tag: `autopilot-${project}`,
+    },
+    { project },
+  );
 }
 
 /**
  * Autopilot je Projekt (am Anfang jedes Worker-Zyklus): Ist im laufenden Sprint nichts mehr zu tun, wird er
- * abgeschlossen; danach wird der nächste Sprint vorgeschlagen, übernommen und gestartet. Offene „Aktion
- * notwendig“-Aufträge wandern dabei mit. Scheiterte die Git-Sicherung des letzten Sprints, pausiert der Autopilot.
+ * abgeschlossen; danach wird – nur innerhalb der Arbeitszeiten – der nächste Sprint vorgeschlagen, übernommen und
+ * gestartet. Offene „Aktion notwendig“-Aufträge wandern dabei mit. Scheitert der Abschluss (Merge/Git), pausiert
+ * der Autopilot bis zur manuellen Freigabe.
  */
-export async function sprintAutopilot(pool: Pool, project: string): Promise<AutopilotStep> {
-  const mode = (
-    await pool.query<{ mode: string }>('SELECT sprint_mode AS mode FROM projects WHERE slug = $1', [project])
-  ).rows[0]?.mode;
-  if (mode !== 'autopilot') return 'off';
-  const lastSync = (
-    await pool.query<{ sync: string | null }>(
-      `SELECT git_sync AS sync FROM sprints WHERE project_slug = $1 AND status = 'completed'
-        ORDER BY COALESCE(end_date, created_at::date) DESC, created_at DESC LIMIT 1`,
-      [project],
-    )
-  ).rows[0]?.sync;
-  if (lastSync === 'failed') return 'paused';
+export async function sprintAutopilot(pool: Pool, project: string, now = new Date()): Promise<AutopilotStep> {
+  const guard = await autopilotGuard(pool, project, now);
+  if (!guard || guard.state === 'off') return 'off';
+  if (guard.state === 'paused') {
+    if (guard.failedSprintId)
+      await notifyPause(pool, project, guard.failedSprintId, guard.message ?? '').catch(() => undefined);
+    return 'paused';
+  }
   // Abschluss läuft noch (Test-Gate, Merge, Push): erst danach den nächsten Sprint starten.
-  if (lastSync === 'pending' || lastSync === 'running') return 'working';
+  if (guard.state === 'finishing') return 'working';
 
   const active = (
     await pool.query<{ id: string; name: string }>(
@@ -37,13 +66,14 @@ export async function sprintAutopilot(pool: Pool, project: string): Promise<Auto
     )
   ).rows[0];
   if (active) {
-    const statuses = (
-      await pool.query<{ status: string }>(
-        `SELECT status FROM development_items WHERE sprint_id = $1 AND status <> 'rejected'`,
+    const items = (
+      await pool.query<{ status: string; actionTodo: string | null }>(
+        `SELECT status, action_todo AS "actionTodo" FROM development_items WHERE sprint_id = $1 AND status <> 'rejected'`,
         [active.id],
       )
-    ).rows.map((row) => row.status);
-    if (!sprintSettled(statuses)) return 'working';
+    ).rows;
+    if (!sprintSettled(items)) return 'working';
+    // Abschliessen geht auch ausserhalb der Arbeitszeiten (kein Agent, keine Tokens); nur Starten ist begrenzt.
     await completeSprint(pool, active.id);
     await sendPush(
       pool,
@@ -58,11 +88,11 @@ export async function sprintAutopilot(pool: Pool, project: string): Promise<Auto
     return 'completed';
   }
 
+  if (guard.state === 'outside_hours') return 'outside_hours';
   const proposal = await loadProposal(pool, project);
   const selected = proposal?.items.filter((item) => item.selected) ?? [];
   // Nur übernommene „Aktion notwendig“-Aufträge: kein neuer Sprint, sonst würde er sofort wieder abgeschlossen.
-  const workable = selected.some((item) => !item.reason.includes('aus dem vorigen Sprint übernommen'));
-  if (!proposal || !workable) return 'idle';
+  if (!proposal || !selected.some((item) => !item.carryOver)) return 'idle';
   const ids = [...selected].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)).map((item) => item.id);
   const result = await applyProposal(pool, project, ids, true);
   if (typeof result === 'string') return 'idle';

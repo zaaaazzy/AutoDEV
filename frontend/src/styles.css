@@ -7723,6 +7723,100 @@ a.app-link {
   gap: 8px;
 }
 
+.proposal-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.proposal-cost {
+  display: block;
+  font-size: 0.78rem;
+}
+
+.capacity-fallback {
+  color: var(--orange);
+  font-weight: 600;
+}
+
+.autopilot-hours {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.autopilot-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.autopilot-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.86rem;
+}
+
+.autopilot-notice.paused {
+  border-color: #e6b3b3;
+  background: #fdf3f3;
+  color: #8a1f1f;
+}
+
+.proposal-comment {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  background: #fff;
+  font-size: 0.9rem;
+  white-space: pre-line;
+}
+
+.proposal-comment.stale {
+  opacity: 0.6;
+}
+
+.sprint-roadmap h4 {
+  margin: 4px 0 8px;
+}
+
+.roadmap-sprints {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.roadmap-sprint {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.roadmap-sprint ol {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 0.86rem;
+}
+
 /* Rechte eines Agents: Kategorien zum Aufklappen, darin jeder Befehl einzeln */
 .permission-picker {
   display: grid;
@@ -7797,6 +7891,42 @@ a.app-link {
 
 .permission-command.on code {
   color: var(--green);
+}
+
+/* Erklärung des Befehls beim Überfahren bzw. Fokus (kompakt, über der Zeile). */
+.permission-command {
+  position: relative;
+}
+
+.permission-command[data-help]:is(:hover, :focus-within)::after {
+  content: attr(data-help);
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  max-width: min(320px, 80vw);
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: #1f2a24;
+  color: #fff;
+  font-size: 0.74rem;
+  line-height: 1.35;
+  white-space: normal;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  pointer-events: none;
+}
+
+.permission-scope {
+  display: grid;
+  gap: 3px;
+  padding: 0 10px 9px;
+  font-size: 0.8rem;
+}
+
+.permission-scope input {
+  font-size: 16px;
+  padding: 5px 8px;
 }
 
 .permission-hint {
@@ -8144,6 +8274,108 @@ a.app-link {
   }
   .run-picker select {
     max-width: 100%;
+  }
+}
+
+/* Aktionen eines Agents (Quick Actions) */
+.agent-actions-editor {
+  display: grid;
+  gap: 6px;
+}
+
+.agent-action-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-action-list > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.agent-action-list .agent-task-icon {
+  opacity: 1;
+}
+
+.agent-action-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-action-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-action-form {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+
+/* Quick Actions im Dashboard: Aktionen je Agent als Knöpfe */
+.quick-actions {
+  display: grid;
+  gap: 10px;
+}
+
+.quick-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.quick-agent {
+  display: inline-flex;
+  flex: 0 0 150px;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.quick-buttons {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.quick-button {
+  padding: 6px 12px;
+  border: 1px solid #cfe0d5;
+  border-radius: 999px;
+  background: #f6faf7;
+  color: var(--green);
+  font: inherit;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.quick-button:hover:not(:disabled) {
+  background: #e2efe7;
+}
+
+.quick-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .quick-agent {
+    flex-basis: 100%;
   }
 }
 

@@ -2,26 +2,57 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
   affectedFiles,
+  type Capacity,
   capacityFrom,
   type PlanCandidate,
+  type PlannedItem,
+  planRoadmap,
   proposeSprint,
   type SprintProposal,
 } from '../core/sprint-planner.js';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
+import { describeWorkingHours, type WorkingHours, withinWorkingHours } from '../core/working-hours.js';
 import { generateSprintReport } from './reports.js';
+import { completedSprintUsage, costOfTokens, tokenPriceUsd } from './usage.js';
 
 /** Modus der Sprintplanung je Projekt: manuell (Standard), vorschlagen, Autopilot. */
 export const SPRINT_MODES = ['manual', 'suggest', 'autopilot'] as const;
 export type SprintMode = (typeof SPRINT_MODES)[number];
 export const DEFAULT_CAPACITY_HOURS = 40;
+export const ROADMAP_SPRINTS = 3;
+
+/**
+ * Zustand des Autopilots: aus, pausiert (Git-Sicherung des letzten Sprints gescheitert, bis zur Freigabe),
+ * Abschluss läuft noch, ausserhalb der Arbeitszeiten oder bereit.
+ */
+export interface AutopilotGuard {
+  state: 'off' | 'paused' | 'finishing' | 'outside_hours' | 'ready';
+  message: string | null;
+  workingHours: WorkingHours;
+  /** Sprint, dessen Git-Fehler den Autopilot anhält (für die Freigabe). */
+  failedSprintId: string | null;
+}
 
 export interface LoadedProposal extends SprintProposal {
   mode: SprintMode;
   name: string;
+  totals: { hours: number; tokens: number; costUsd: number | null };
+  /** Durchschnittspreis je Token aus den gemessenen Kosten; null ohne Messwerte. */
+  tokenPriceUsd: number | null;
+  autopilot: AutopilotGuard;
+}
+
+interface PlanningInput {
+  mode: SprintMode;
+  sprintCount: number;
+  candidates: PlanCandidate[];
+  done: Set<string>;
+  capacity: Capacity;
+  tokenPriceUsd: number | null;
 }
 
 /** Offene Aufträge ausserhalb eines laufenden oder geplanten Sprints sind Kandidaten; „Aktion notwendig“ wird übernommen. */
-export async function loadProposal(pool: Pool, project: string): Promise<LoadedProposal | null> {
+async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningInput | null> {
   const settings = (
     await pool.query<{ mode: SprintMode; capacity: number | null; sprints: string }>(
       `SELECT sprint_mode AS mode, sprint_capacity_hours AS capacity,
@@ -45,13 +76,16 @@ export async function loadProposal(pool: Pool, project: string): Promise<LoadedP
       tokenEstimate: string | null;
       followUpOf: string | null;
       troubled: boolean;
+      actionTodo: string | null;
     }>(
       `SELECT d.id, d.title, d.description, d.status, d.priority, d.kind, d.benefit, d.cost,
               d.effort_hours AS "effortHours", d.token_estimate AS "tokenEstimate", d.follow_up_of AS "followUpOf",
-              (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = 'blocked') AS troubled
+              (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = 'blocked') AS troubled,
+              d.action_todo AS "actionTodo"
          FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
         WHERE d.project_slug = $1 AND d.status IN ('backlog', 'planned', 'blocked')
-          AND (d.sprint_id IS NULL OR s.status = 'completed')`,
+          AND (d.sprint_id IS NULL OR s.status = 'completed')
+        ORDER BY d.created_at, d.id`,
       [project],
     )
   ).rows;
@@ -62,17 +96,8 @@ export async function loadProposal(pool: Pool, project: string): Promise<LoadedP
       ])
     ).rows.map((row) => row.id),
   );
-  // Ist-Werte statt Schätzungen: erledigter Aufwand der letzten abgeschlossenen Sprints.
-  const history = (
-    await pool.query<{ hours: number; tokens: string }>(
-      `SELECT COALESCE(SUM(d.effort_hours) FILTER (WHERE d.status = 'done'), 0) AS hours,
-              COALESCE(SUM(d.token_estimate) FILTER (WHERE d.status = 'done'), 0) AS tokens
-         FROM sprints s LEFT JOIN development_items d ON d.sprint_id = s.id
-        WHERE s.project_slug = $1 AND s.status = 'completed'
-        GROUP BY s.id ORDER BY MAX(COALESCE(s.end_date, s.created_at::date)) DESC, MAX(s.created_at) DESC LIMIT 3`,
-      [project],
-    )
-  ).rows.map((row) => ({ hours: Number(row.hours), tokens: Number(row.tokens) }));
+  // Ist-Werte statt Schätzungen: gemessene Laufzeit und Tokens der erledigten Aufträge der letzten 3 Sprints.
+  const [history, price] = await Promise.all([completedSprintUsage(pool, project, 3), tokenPriceUsd(pool, project)]);
   const candidates: PlanCandidate[] = rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -84,20 +109,116 @@ export async function loadProposal(pool: Pool, project: string): Promise<LoadedP
     tokenEstimate: row.tokenEstimate === null ? null : Number(row.tokenEstimate),
     followUpOf: row.followUpOf,
     troubled: row.troubled,
-    carryOver: row.status === 'blocked',
+    // Nur „Aktion notwendig“ wartet auf einen Menschen und wandert fest mit; andere Blockierte werden normal bewertet.
+    carryOver: row.status === 'blocked' && !!row.actionTodo,
     files: affectedFiles(row.description ?? ''),
   }));
-  const proposal = proposeSprint(
+  return {
+    mode: settings.mode,
+    sprintCount: Number(settings.sprints),
     candidates,
     done,
-    capacityFrom(history, Number(settings.capacity ?? DEFAULT_CAPACITY_HOURS)),
-  );
-  return { ...proposal, mode: settings.mode, name: `Sprint ${Number(settings.sprints) + 1}` };
+    capacity: capacityFrom(history, Number(settings.capacity ?? DEFAULT_CAPACITY_HOURS)),
+    tokenPriceUsd: price,
+  };
+}
+
+/**
+ * Was den Autopilot anhält: gescheiterte Git-Sicherung des letzten abgeschlossenen Sprints (bis zur Freigabe),
+ * ein noch laufender Abschluss und die Arbeitszeiten (nur für das Starten neuer Sprints).
+ * Budget: Dev Log hat noch kein Budget-Feature (Idee 04) – bis dahin gibt es bewusst keine Budgetprüfung,
+ * die Arbeitszeiten sind die einzige Kostengrenze.
+ */
+export async function autopilotGuard(pool: Pool, project: string, now = new Date()): Promise<AutopilotGuard | null> {
+  const settings = (
+    await pool.query<{ mode: SprintMode; start: string; end: string; days: number[]; released: string | null }>(
+      `SELECT sprint_mode AS mode, autopilot_start AS start, autopilot_end AS "end", autopilot_days AS days,
+              autopilot_released_sprint AS released
+         FROM projects WHERE slug = $1`,
+      [project],
+    )
+  ).rows[0];
+  if (!settings) return null;
+  const workingHours = { start: settings.start, end: settings.end, days: settings.days.map(Number) };
+  const guard = (state: AutopilotGuard['state'], message: string | null, failedSprintId: string | null = null) => ({
+    state,
+    message,
+    workingHours,
+    failedSprintId,
+  });
+  if (settings.mode !== 'autopilot') return guard('off', null);
+  const last = (
+    await pool.query<{ id: string; name: string; sync: string | null; message: string | null }>(
+      `SELECT id, name, git_sync AS sync, git_message AS message FROM sprints
+        WHERE project_slug = $1 AND status = 'completed'
+        ORDER BY COALESCE(end_date, created_at::date) DESC, created_at DESC LIMIT 1`,
+      [project],
+    )
+  ).rows[0];
+  if (last?.sync === 'failed' && last.id !== settings.released) {
+    return guard(
+      'paused',
+      `Autopilot pausiert: Abschluss von „${last.name}“ gescheitert (Merge/Git)${last.message ? ` – ${last.message.slice(0, 400)}` : ''}. ` +
+        'Fehler beheben und die Git-Sicherung erneut starten oder den Autopilot freigeben.',
+      last.id,
+    );
+  }
+  if (last?.sync === 'pending' || last?.sync === 'running') {
+    return guard('finishing', `Abschluss von „${last.name}“ läuft (Test-Gate, Merge, Push).`);
+  }
+  if (!withinWorkingHours(now, workingHours)) {
+    return guard(
+      'outside_hours',
+      `Ausserhalb der Arbeitszeiten (${describeWorkingHours(workingHours)}): Der Autopilot startet keinen neuen Sprint.`,
+    );
+  }
+  return guard('ready', null);
+}
+
+const withCost = (totals: { hours: number; tokens: number }, price: number | null) => ({
+  ...totals,
+  costUsd: costOfTokens(totals.tokens, price),
+});
+
+export async function loadProposal(pool: Pool, project: string): Promise<LoadedProposal | null> {
+  const input = await loadPlanningInput(pool, project);
+  const autopilot = input && (await autopilotGuard(pool, project));
+  if (!input || !autopilot) return null;
+  const proposal = proposeSprint(input.candidates, input.done, input.capacity);
+  return {
+    ...proposal,
+    totals: withCost(proposal.totals, input.tokenPriceUsd),
+    mode: input.mode,
+    name: `Sprint ${input.sprintCount + 1}`,
+    tokenPriceUsd: input.tokenPriceUsd,
+    autopilot,
+  };
+}
+
+export interface Roadmap {
+  capacity: Capacity;
+  tokenPriceUsd: number | null;
+  sprints: { name: string; items: PlannedItem[]; totals: { hours: number; tokens: number; costUsd: number | null } }[];
+}
+
+/** Vorschau der nächsten 3 Sprints – nur berechnet, es wird nichts angelegt oder geändert. */
+export async function loadRoadmap(pool: Pool, project: string): Promise<Roadmap | null> {
+  const input = await loadPlanningInput(pool, project);
+  if (!input) return null;
+  return {
+    capacity: input.capacity,
+    tokenPriceUsd: input.tokenPriceUsd,
+    sprints: planRoadmap(input.candidates, input.done, input.capacity, ROADMAP_SPRINTS).map((sprint, index) => ({
+      name: `Sprint ${input.sprintCount + 1 + index}`,
+      items: sprint.items,
+      totals: withCost(sprint.totals, input.tokenPriceUsd),
+    })),
+  };
 }
 
 /**
  * Übernimmt einen Vorschlag: Sprint anlegen, Aufträge in der gegebenen Reihenfolge zuordnen (sprint_rank) und
- * optional starten. Nur Kandidaten des Projekts werden angenommen.
+ * optional starten. Nur Kandidaten des Projekts werden angenommen. Ein KI-Kommentar zum Vorschlag wird verworfen.
  */
 export async function applyProposal(
   pool: Pool,
@@ -137,6 +258,7 @@ export async function applyProposal(
         WHERE d.id = picked.id AND d.project_slug = $3`,
       [ids, sprintId, project],
     );
+    await client.query('DELETE FROM sprint_proposal_comments WHERE project_slug = $1', [project]);
     await client.query('COMMIT');
     return { sprintId, started: shouldStart };
   } catch (error) {
@@ -161,6 +283,15 @@ export async function completeSprint(pool: Pool, sprintId: string): Promise<void
   );
 }
 
+const parseIds = (body: unknown): string[] | null =>
+  isRecord(body) &&
+  Array.isArray(body.ids) &&
+  body.ids.length > 0 &&
+  body.ids.length <= 200 &&
+  body.ids.every((id) => isUuid(id))
+    ? (body.ids as string[])
+    : null;
+
 export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects/:slug/sprints/proposal', async (request, response, next) => {
     try {
@@ -176,19 +307,86 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
   app.post('/api/projects/:slug/sprints/proposal/apply', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
-      const body = request.body as unknown;
-      if (
-        !slug ||
-        !isRecord(body) ||
-        !Array.isArray(body.ids) ||
-        body.ids.length > 200 ||
-        !body.ids.every((id) => isUuid(id))
-      ) {
-        return void response.status(400).json({ message: 'Aufträge auswählen.' });
-      }
-      const result = await applyProposal(pool, slug, body.ids as string[], body.start === true);
+      const ids = parseIds(request.body);
+      if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
+      const result = await applyProposal(pool, slug, ids, isRecord(request.body) && request.body.start === true);
       if (typeof result === 'string') return void response.status(400).json({ message: result });
       response.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get('/api/projects/:slug/sprints/roadmap', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const roadmap = slug ? await loadRoadmap(pool, slug) : null;
+      if (!roadmap) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      response.json({ roadmap });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // KI-Kommentar: der Worker lässt den Auftragsautor den Vorschlag kommentieren (nur Text, ändert die Auswahl nicht).
+  app.get('/api/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+      const comment = (
+        await pool.query(
+          `SELECT item_ids AS "itemIds", status, comment, requested_at AS "requestedAt", finished_at AS "finishedAt"
+             FROM sprint_proposal_comments WHERE project_slug = $1`,
+          [slug],
+        )
+      ).rows[0];
+      response.json({ comment: comment ?? null });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.post('/api/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const ids = parseIds(request.body);
+      if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
+      const proposal = await loadProposal(pool, slug);
+      if (!proposal) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      const allowed = new Set(proposal.items.map((item) => item.id));
+      if (ids.some((id) => !allowed.has(id)))
+        return void response.status(400).json({ message: 'Nur vorgeschlagene Aufträge lassen sich kommentieren.' });
+      const comment = (
+        await pool.query(
+          `INSERT INTO sprint_proposal_comments (project_slug, item_ids, status) VALUES ($1, $2, 'requested')
+           ON CONFLICT (project_slug) DO UPDATE
+             SET item_ids = EXCLUDED.item_ids, status = 'requested', comment = NULL, requested_at = NOW(),
+                 finished_at = NULL
+           WHERE sprint_proposal_comments.status NOT IN ('requested', 'running')
+           RETURNING item_ids AS "itemIds", status, comment`,
+          [slug, ids],
+        )
+      ).rows[0];
+      if (!comment) return void response.status(409).json({ message: 'Der Kommentar wird schon geschrieben.' });
+      response.status(202).json({ comment });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Manuelle Freigabe nach gescheitertem Abschluss: der Fehler dieses Sprints hält den Autopilot nicht mehr an.
+  app.post('/api/projects/:slug/sprints/autopilot/resume', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const guard = slug ? await autopilotGuard(pool, slug) : null;
+      if (!slug || !guard) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      if (guard.state !== 'paused' || !guard.failedSprintId)
+        return void response.status(400).json({ message: 'Der Autopilot ist nicht pausiert.' });
+      await pool.query('UPDATE projects SET autopilot_released_sprint = $2 WHERE slug = $1', [
+        slug,
+        guard.failedSprintId,
+      ]);
+      response.json({ resumed: true });
     } catch (error) {
       next(error);
     }

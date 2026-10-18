@@ -3,13 +3,16 @@ import { dirname, join, relative } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { withProjectLock } from '../core/project-lock.js';
 import {
+  DATABASE_COMMAND,
   isAllowedCommand,
   isAssistantServiceCommand,
+  rulesAllow,
   withIgnoreScripts,
   composeViolation,
   COMPOSE_STARTING,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
+import { fileProblem, type GuardPolicy } from './agent-guard.js';
 import { runProjectSql, type SqlClientFactory } from './tool-sql.js';
 import type { ToolCall } from './ollama-types.js';
 import { MAX_FILE_BYTES, SECRET_NAME, SKIPPED_DIRECTORIES, resolveInside, walkText } from './tool-paths.js';
@@ -24,6 +27,10 @@ export interface ToolContext {
   cwd: string;
   canWrite: boolean;
   canManageServices?: boolean;
+  /** Dateirechte des Agents; geprüft wie bei der Claude-CLI (Anlegen/Ändern, Ordner, geschützte Pfade). */
+  files?: GuardPolicy;
+  /** Freigegebene Befehle des Agents; ohne Angabe gilt nur die feste Liste des lokalen Modells. */
+  commands?: string[];
   databaseUrl?: string | null;
   sqlClient?: SqlClientFactory;
   changed: Set<string>;
@@ -38,6 +45,11 @@ async function backup(context: ToolContext, target: string): Promise<void> {
   await mkdir(dirname(destination), { recursive: true });
   await copyFile(target, destination).catch(() => undefined);
 }
+
+const filesProblem = (context: ToolContext, tool: string, target: string): string | null =>
+  context.files
+    ? fileProblem({ tool_name: tool, tool_input: { file_path: target } }, context.files, context.cwd)
+    : null;
 
 /** Executes one tool call; failures are returned as text so the model can correct itself. */
 export async function executeTool(context: ToolContext, call: ToolCall): Promise<string> {
@@ -81,6 +93,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return 'Ungültiger Inhalt.';
         }
         const target = await resolveInside(context.cwd, args.path, true);
+        const denied = filesProblem(context, 'Write', target);
+        if (denied) return denied;
         await backup(context, target);
         await mkdir(dirname(target), { recursive: true });
         await writeFile(target, args.content, 'utf8');
@@ -95,6 +109,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return 'old_text und new_text müssen Texte sein.';
         }
         const target = await resolveInside(context.cwd, args.path);
+        const denied = filesProblem(context, 'Edit', target);
+        if (denied) return denied;
         const content = await readFile(target, 'utf8');
         const occurrences = content.split(args.old_text).length - 1;
         if (occurrences !== 1) {
@@ -116,6 +132,9 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         }
         if (SECRET_IN_COMMAND.test(command)) {
           return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind nicht erlaubt.';
+        }
+        if (context.commands && !rulesAllow(context.commands, command)) {
+          return `„${command}“ ist für diesen Agent nicht freigegeben (Rechte des Agents).`;
         }
         if (!isAllowedCommand(command) && !(context.canManageServices && isAssistantServiceCommand(command))) {
           return (
@@ -147,6 +166,9 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         });
       }
       case 'run_sql': {
+        if (context.commands && !context.commands.includes(DATABASE_COMMAND)) {
+          return 'SQL auf der Projekt-Datenbank ist für diesen Agent nicht freigegeben.';
+        }
         if (!context.canWrite || !context.databaseUrl) {
           return 'Für dieses Projekt ist kein Datenbank-Zugang hinterlegt.';
         }

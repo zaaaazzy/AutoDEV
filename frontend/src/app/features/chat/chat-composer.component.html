@@ -59,7 +59,7 @@
       [placeholder]="placeholder()"
       autocomplete="off"
       maxlength="4000"
-      aria-label="Nachricht – / für Agent, @ für Verweis"
+      aria-label="Nachricht – @ für Agent oder Person, / für Verweis"
       (input)="onInput($event)"
       (keydown)="onKeydown($event)"
       (click)="onCaret()"
@@ -83,6 +83,6 @@
     </button>
   </form>
   <p class="composer-hint">
-    <kbd>/</kbd> Agent wählen · <kbd>&#64;</kbd> auf Auftrag, Idee, Bug, Sprint, Doku oder Git verweisen
+    <kbd>&#64;</kbd> Agent oder Person ansprechen · <kbd>/</kbd> auf Auftrag, Idee, Bug, Sprint, Doku oder Git verweisen
   </p>
 </div>

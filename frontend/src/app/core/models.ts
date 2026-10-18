@@ -19,6 +19,10 @@ export interface Project {
   sprintMode?: 'manual' | 'suggest' | 'autopilot';
   /** Kapazität eines Sprints in Stunden, solange es keine abgeschlossenen Sprints gibt. */
   sprintCapacityHours?: number;
+  /** Arbeitszeiten des Sprint-Autopilots (HH:MM, Wochentage 1 = Montag … 7 = Sonntag). */
+  autopilotStart?: string;
+  autopilotEnd?: string;
+  autopilotDays?: number[];
   databaseConfigured?: boolean;
   definitionOfReady?: string[] | null;
   definitionOfDone?: string[] | null;
@@ -168,6 +172,8 @@ export interface Agent {
   command: string[] | null;
   /** Einzeln freigegebene Befehle des Agents (null = Projektstandard der Rolle). */
   allowedCommands?: string[] | null;
+  /** Erlaubte Ordner für Dateirechte (leer = ganzes Projekt). */
+  fileScope?: string[];
 }
 
 export interface StepEvent {
@@ -428,7 +434,7 @@ export interface ChatMessage {
   /** Agent, der die Anfrage übernimmt bzw. beantwortet hat (leer = allgemeiner Assistent). */
   agentId?: string | null;
   agentName?: string | null;
-  /** Verweise der Nachricht (@auftrag/…, @git/…), vom Server geprüft. */
+  /** Verweise der Nachricht (/auftrag/…, /git/…, @Person), vom Server geprüft. */
   references?: { type: string; id: string; label: string }[];
   createdAt: string;
 }

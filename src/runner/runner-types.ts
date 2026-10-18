@@ -51,6 +51,8 @@ export interface WorkflowAgent {
   command: string[] | null;
   /** Einzeln freigegebene Befehle des Agents (null = Projektstandard). */
   allowedCommands?: string[] | null;
+  /** Erlaubte Ordner für Dateirechte (leer = ganzes Projekt). */
+  fileScope?: string[];
 }
 
 export interface StepSummary {

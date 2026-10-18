@@ -9,9 +9,11 @@ import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
 import { processSetupJob } from '../setup/setup-jobs.js';
 import { projectFolderError } from '../core/validation.js';
+import { resolveAgentWorkspace } from './agent-workspace.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
+import { commentSprintProposal } from '../agent/sprint-comment.js';
 import { syncFavicon } from './favicon.js';
 import { syncGitGraph } from './git-graph.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
@@ -97,21 +99,25 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
   const projects = await pool.query<{ slug: string; repository: string }>(
     'SELECT slug, repository FROM projects ORDER BY slug',
   );
-  return projects.rows.map(({ slug, repository }) => {
-    const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
-    const folder =
-      !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
-        ? repository
-        : null;
-    return {
-      options: { ...options, project: slug, cwd: folder ?? options.cwd },
-      problem: outside
-        ? `Projekt ausserhalb des Projektbereichs – Agents bleiben gestoppt: ${outside}`
-        : folder
-          ? null
-          : `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`,
-    };
-  });
+  return Promise.all(
+    projects.rows.map(async ({ slug, repository }) => {
+      const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
+      const folder =
+        !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
+          ? repository
+          : null;
+      // Der Dev-Log-Ordner selbst: Agents arbeiten in einem eigenen Worktree, nie im Arbeitsordner der Menschen.
+      const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT) : null;
+      return {
+        options: { ...options, project: slug, cwd: workspace?.cwd ?? folder ?? options.cwd },
+        problem: outside
+          ? `Projekt ausserhalb des Projektbereichs – Agents bleiben gestoppt: ${outside}`
+          : !folder
+            ? `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`
+            : (workspace?.problem ?? null),
+      };
+    }),
+  );
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
@@ -147,11 +153,11 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
 }
 
+/** Ordner, aus dem dieser Worker läuft (die Dev-Log-Installation). */
+const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+
 async function main(): Promise<void> {
-  process.env.DEV_LOG_PROJECT_ROOTS = resolveProjectScope(
-    process.env,
-    resolve(dirname(fileURLToPath(import.meta.url)), '../..'),
-  );
+  process.env.DEV_LOG_PROJECT_ROOTS = resolveProjectScope(process.env, INSTALL_ROOT);
   console.log(`Projektbereich: ${process.env.DEV_LOG_PROJECT_ROOTS}`);
   const options = parseRunnerOptions(process.argv.slice(2));
   const pool = await connect(options.watch);
@@ -229,6 +235,7 @@ async function main(): Promise<void> {
     const analysisActive = new Set<string>();
     const estimateActive = new Set<string>();
     const authorActive = new Set<string>();
+    const commentActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -254,6 +261,15 @@ async function main(): Promise<void> {
               logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`),
             )
             .finally(() => authorActive.delete(slug));
+        }
+        // KI-Kommentar zum Sprintvorschlag (Auftragsautor, nur Text) – auf Knopfdruck in der Oberfläche.
+        if (!commentActive.has(slug) && !stopping) {
+          commentActive.add(slug);
+          void commentSprintProposal(pool, target.options)
+            .catch((error: unknown) =>
+              logOnce(`comment:${slug}`, `[${slug}] Sprint-Kommentar fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => commentActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)

@@ -29,6 +29,8 @@ export interface PlannedItem {
   tokens: number | null;
   selected: boolean;
   rank: number | null;
+  /** „Aktion notwendig“ aus dem vorigen Sprint: wartet auf einen Menschen. */
+  carryOver: boolean;
 }
 
 export interface Capacity {
@@ -65,7 +67,10 @@ function median(values: number[]): number | null {
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
-/** Kapazität = Median der erledigten Stunden (bzw. Tokens) der letzten 3 abgeschlossenen Sprints, sonst Einstellung. */
+/**
+ * Kapazität = Median der erledigten Ist-Stunden (bzw. Ist-Tokens) der letzten 3 abgeschlossenen Sprints, sonst
+ * Einstellung. Sprints ohne gemessene Stunden zählen nicht als Historie.
+ */
 export function capacityFrom(history: { hours: number; tokens: number }[], settingHours: number): Capacity {
   const recent = history.filter((sprint) => sprint.hours > 0).slice(0, 3);
   const hours = median(recent.map((sprint) => sprint.hours));
@@ -181,8 +186,41 @@ export function proposeSprint(
       tokens: candidate.tokenEstimate,
       selected,
       rank: rankOf.get(candidate.id) ?? null,
+      carryOver: candidate.carryOver,
     };
   });
   items.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score);
   return { capacity, items, totals: { hours: Math.round(hours * 10) / 10, tokens } };
+}
+
+export interface RoadmapSprint {
+  items: PlannedItem[];
+  totals: { hours: number; tokens: number };
+}
+
+/**
+ * Roadmap: die nächsten `count` Sprints nacheinander vorausberechnen. Eingeplante Aufträge gelten für die
+ * folgenden Sprints als erledigt (Folgeaufträge rücken nach) und erscheinen nicht erneut. Rein rechnerisch.
+ */
+export function planRoadmap(
+  candidates: PlanCandidate[],
+  doneIds: ReadonlySet<string>,
+  capacity: Capacity,
+  count = 3,
+): RoadmapSprint[] {
+  const sprints: RoadmapSprint[] = [];
+  const done = new Set(doneIds);
+  let remaining = candidates;
+  while (sprints.length < count && remaining.length) {
+    const proposal = proposeSprint(remaining, done, capacity);
+    const items = proposal.items.filter((item) => item.selected);
+    if (!items.length) break;
+    sprints.push({ items, totals: proposal.totals });
+    for (const item of items) done.add(item.id);
+    // Übernommene „Aktion notwendig“-Aufträge gehören nur in den ersten Sprint.
+    remaining = remaining
+      .filter((candidate) => !done.has(candidate.id))
+      .map((candidate) => ({ ...candidate, carryOver: false }));
+  }
+  return sprints;
 }

@@ -8,6 +8,7 @@ const SYSTEM_ROLES: Record<string, string> = {
   author: 'Auftragsautor (Ideen)',
   bug_reviewer: 'Bug-Wächter (Planung)',
   analyst: 'Problemanalyse',
+  visionary: 'Visionär',
 };
 
 interface Usage {
@@ -157,6 +158,57 @@ export async function collectUsage(pool: Pool, slug: string): Promise<Record<str
       .map((row) => ({ ...row, share: totalTokens ? Math.round((row.actual.tokens / totalTokens) * 1000) / 10 : 0 }))
       .sort((a, b) => b.actual.tokens - a.actual.tokens),
   };
+}
+
+/**
+ * Ist-Verbrauch der erledigten Aufträge je abgeschlossenem Sprint (neueste zuerst): Laufzeit und Tokens aller
+ * Agent-Schritte – Grundlage der Sprint-Kapazität statt der Schätzungen.
+ */
+export async function completedSprintUsage(pool: Pool, slug: string, limit = 3): Promise<Usage[]> {
+  const rows = await pool.query<{ tokens: string | null; ms: string | null; cost: string | null }>(
+    `SELECT SUM(st.tokens) FILTER (WHERE d.status = 'done') AS tokens,
+            SUM(st.duration_ms) FILTER (WHERE d.status = 'done') AS ms,
+            SUM(st.cost_usd) FILTER (WHERE d.status = 'done') AS cost
+       FROM sprints s
+       LEFT JOIN development_items d ON d.sprint_id = s.id
+       LEFT JOIN agent_runs r ON r.development_id = d.id
+       LEFT JOIN agent_run_steps st ON st.run_id = r.id
+      WHERE s.project_slug = $1 AND s.status = 'completed'
+      GROUP BY s.id
+      ORDER BY COALESCE(s.end_date, s.created_at::date) DESC, s.created_at DESC
+      LIMIT $2`,
+    [slug, limit],
+  );
+  return rows.rows.map(usage);
+}
+
+/**
+ * Durchschnittspreis je Token aus den gemessenen Kosten (erst das Projekt, sonst alle Projekte); null, solange
+ * nichts mit Kosten gemessen wurde (z. B. nur lokale Modelle).
+ */
+export async function tokenPriceUsd(pool: Pool, slug: string): Promise<number | null> {
+  for (const project of [slug, null]) {
+    const row = (
+      await pool.query<{ cost: string | null; tokens: string | null }>(
+        `SELECT SUM(cost) AS cost, SUM(tokens) AS tokens FROM (
+           SELECT st.cost_usd AS cost, st.tokens FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
+            WHERE ($1::text IS NULL OR r.project_slug = $1) AND st.cost_usd > 0 AND st.tokens > 0
+           UNION ALL
+           SELECT cost_usd, tokens FROM agent_usage
+            WHERE ($1::text IS NULL OR project_slug = $1) AND cost_usd > 0 AND tokens > 0
+         ) measured`,
+        [project],
+      )
+    ).rows[0];
+    const tokens = Number(row?.tokens ?? 0);
+    if (tokens > 0) return Number(row?.cost ?? 0) / tokens;
+  }
+  return null;
+}
+
+/** Geschätzte Kosten in USD für eine Tokenmenge (auf Cent gerundet); null ohne Preis. */
+export function costOfTokens(tokens: number, pricePerToken: number | null): number | null {
+  return pricePerToken === null ? null : Math.round(tokens * pricePerToken * 100) / 100;
 }
 
 export function registerUsageRoutes(app: Express, pool: Pool): void {

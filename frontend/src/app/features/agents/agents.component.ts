@@ -1,3 +1,4 @@
+import { AgentActionsEditorComponent } from './agent-actions-editor.component.js';
 import { PermissionPickerComponent, type PermissionGroupInfo } from './permission-picker.component.js';
 import { NgClass } from '@angular/common';
 import { Component, computed, effect, inject, signal } from '@angular/core';
@@ -64,6 +65,7 @@ interface AgentListRow extends AgentTableRow {
   selector: 'app-agents',
   standalone: true,
   imports: [
+    AgentActionsEditorComponent,
     PermissionPickerComponent,
     OrderTableComponent,
     NgClass,
@@ -134,6 +136,8 @@ export class AgentsComponent {
   /** Neue Agents starten ohne Befehle: jeder wird einzeln freigegeben. */
   protected formCommands: string[] = [];
   protected editCommands: string[] = [];
+  protected formScopes: string[] = [];
+  protected editScopes: string[] = [];
   private readonly loadGroups = effect(() => {
     const slug = this.store.activeProject();
     if (!slug) return;
@@ -149,7 +153,9 @@ export class AgentsComponent {
     const available = this.permissionGroups()
       .filter((group) => group.available)
       .flatMap((group) => group.rules);
-    return ['assistant', 'developer', 'tester', 'reviewer'].includes(agent.role) ? available : ['files'];
+    return ['assistant', 'developer', 'tester', 'reviewer'].includes(agent.role)
+      ? available
+      : ['files:create', 'files:edit'];
   }
 
   protected agentForm = {
@@ -244,6 +250,7 @@ export class AgentsComponent {
   protected startAgentEdit(agent: Agent): void {
     this.agentEdit = { name: agent.name, instructions: agent.instructions, command: agent.command?.join(' ') ?? '' };
     this.editCommands = this.effectiveCommands(agent);
+    this.editScopes = [...(agent.fileScope ?? [])];
     this.agentEditing.set(agent.id);
   }
 
@@ -260,9 +267,11 @@ export class AgentsComponent {
         ...this.agentForm,
         command,
         allowedCommands: this.formCommands,
+        fileScope: this.formScopes,
       });
       this.agentForm = { name: '', role: 'developer', phase: 'while_task', command: '', instructions: '' };
       this.formCommands = [];
+      this.formScopes = [];
       this.store.showCreate.set(false);
     }, 'Agent angelegt.');
   }
@@ -294,6 +303,7 @@ export class AgentsComponent {
       instructions: this.agentEdit.instructions,
       command,
       allowedCommands: this.editCommands,
+      fileScope: this.editScopes,
     });
     this.agentEditing.set(null);
   }

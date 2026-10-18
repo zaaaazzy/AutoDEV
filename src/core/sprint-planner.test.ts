@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { affectedFiles, capacityFrom, type PlanCandidate, proposeSprint, scoreOf } from './sprint-planner.js';
+import {
+  affectedFiles,
+  capacityFrom,
+  type PlanCandidate,
+  planRoadmap,
+  proposeSprint,
+  scoreOf,
+} from './sprint-planner.js';
 
 const base: PlanCandidate = {
   id: 'x',
@@ -86,10 +93,79 @@ test('Betroffene Dateien aus den technischen Hinweisen', () => {
   );
 });
 
+test('Folgeauftrag steht nie vor seinem Vorgänger, auch wenn er höher bewertet ist', () => {
+  const proposal = proposeSprint(
+    [
+      order({ id: 'follow', priority: 'high', benefit: 10, cost: 0, followUpOf: 'base' }),
+      order({ id: 'other', priority: 'medium' }),
+      order({ id: 'base', priority: 'low' }),
+    ],
+    new Set(),
+    { hours: 100, tokens: null, source: 'setting' },
+  );
+  const rank = (id: string) => proposal.items.find((item) => item.id === id)!.rank!;
+  assert.ok(rank('base') < rank('follow'));
+  // Knappe Kapazität: der Vorgänger kommt zuerst, der Folgeauftrag passt danach nicht mehr.
+  const tight = proposeSprint(
+    [
+      order({ id: 'follow', priority: 'high', benefit: 10, cost: 0, followUpOf: 'base', effortHours: 1 }),
+      order({ id: 'base', priority: 'low', effortHours: 10 }),
+    ],
+    new Set(),
+    { hours: 2, tokens: null, source: 'setting' },
+  );
+  assert.deepEqual(
+    tight.items.filter((item) => item.selected).map((item) => item.id),
+    ['base'],
+  );
+  assert.match(tight.items.find((item) => item.id === 'follow')!.reason, /Kapazität erreicht/);
+});
+
+test('Gleiche Dateien auch zusammen mit Folgeaufträgen direkt hintereinander', () => {
+  const proposal = proposeSprint(
+    [
+      order({ id: 'x', priority: 'high', benefit: 9, files: ['src/api.ts'] }),
+      order({ id: 'free', priority: 'high', benefit: 8 }),
+      order({ id: 'y', priority: 'low', files: ['src/api.ts'], followUpOf: 'done-before' }),
+    ],
+    new Set(['done-before']),
+    { hours: 100, tokens: null, source: 'setting' },
+  );
+  const ids = proposal.items.map((item) => item.id);
+  assert.equal(ids.indexOf('y'), ids.indexOf('x') + 1);
+});
+
+test('Roadmap: 3 Sprints, kein Auftrag doppelt, Folgeauftrag nach dem Sprint seines Vorgängers', () => {
+  const candidates = [
+    order({ id: 'a', priority: 'high' }),
+    order({ id: 'b', priority: 'high', followUpOf: 'a' }),
+    order({ id: 'c', priority: 'medium' }),
+    order({ id: 'd', priority: 'medium' }),
+    order({ id: 'e', priority: 'low' }),
+    order({ id: 'f', priority: 'low' }),
+    order({ id: 'g', priority: 'low' }),
+    order({ id: 'carry', priority: 'low', carryOver: true }),
+  ];
+  const capacity = { hours: 8, tokens: null, source: 'setting' } as const;
+  const roadmap = planRoadmap(candidates, new Set(), capacity);
+  assert.equal(roadmap.length, 3);
+  const ids = roadmap.flatMap((sprint) => sprint.items.map((item) => item.id));
+  assert.equal(new Set(ids).size, ids.length);
+  assert.ok(roadmap[0]!.items.some((item) => item.id === 'carry'));
+  const sprintOf = (id: string) => roadmap.findIndex((sprint) => sprint.items.some((item) => item.id === id));
+  assert.ok(sprintOf('a') <= sprintOf('b'));
+  for (const sprint of roadmap) assert.ok(sprint.totals.hours <= 8);
+  // Deterministisch: gleiche Eingabe, gleiche Roadmap.
+  assert.deepEqual(planRoadmap(candidates, new Set(), capacity), roadmap);
+});
+
 test('Autopilot: Sprint ist fertig, wenn nur noch Erledigtes oder „Aktion notwendig“ übrig ist', async () => {
   const { sprintSettled } = await import('../runner/sprint-autopilot.js');
-  assert.equal(sprintSettled(['done', 'blocked']), true);
-  assert.equal(sprintSettled(['done', 'planned']), false);
-  assert.equal(sprintSettled(['in_progress']), false);
+  const item = (status: string, actionTodo: string | null = null) => ({ status, actionTodo });
+  assert.equal(sprintSettled([item('done'), item('blocked', 'Zugangsdaten hinterlegen')]), true);
+  assert.equal(sprintSettled([item('done'), item('blocked')]), false, 'blockiert ohne Aktion: Fehler beheben');
+  assert.equal(sprintSettled([item('done'), item('planned')]), false);
+  assert.equal(sprintSettled([item('in_progress')]), false);
+  assert.equal(sprintSettled([item('backlog')]), false);
   assert.equal(sprintSettled([]), false);
 });
