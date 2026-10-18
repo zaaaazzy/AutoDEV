@@ -72,7 +72,7 @@ const RULES: Rule[] = [
   ],
   ['*', /^\/api\/development\//, 'plan'],
   ['POST', /^\/api\/projects\/[^/]+\/(development|ideation|bugs|sprints)$/, 'plan'],
-  ['POST', /^\/api\/projects\/[^/]+\/sprints\/proposal\/apply$/, 'plan'],
+  ['POST', /^\/api\/projects\/[^/]+\/sprints\/(proposal\/(apply|comment)|autopilot\/resume)$/, 'plan'],
   ['*', /^\/api\/(ideation|bugs|sprints)\//, 'plan'],
   ['*', /^\/api\/(projects\/[^/]+\/)?attachments/, 'plan'],
   ['*', /^\/api\/(ideation|development|bugs)\/[^/]+\/attachments/, 'plan'],

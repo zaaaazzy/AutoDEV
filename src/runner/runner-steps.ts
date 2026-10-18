@@ -15,7 +15,14 @@ import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
-import { loadProjectPermissions, withAgentPermissions } from '../agent/tool-permissions.js';
+import {
+  FILES_CREATE,
+  FILES_EDIT,
+  loadProjectPermissions,
+  normalizeCommands,
+  roleDefaultCommands,
+  withAgentPermissions,
+} from '../agent/tool-permissions.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
@@ -69,7 +76,16 @@ export const runBuiltinAgent: BuiltinAgent = async ({
       item.projectSlug,
     ])
   ).rows[0]?.url;
-  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl, onProgress });
+  // Dieselben Dateirechte und Ordner wie bei der Claude-CLI, geprüft vom selben Wächter.
+  const commands = normalizeCommands(
+    agent.allowedCommands ?? roleDefaultCommands(agent.role, await loadProjectPermissions(pool, item.projectSlug)),
+  );
+  const files = {
+    create: commands.includes(FILES_CREATE),
+    edit: commands.includes(FILES_EDIT),
+    scopes: agent.fileScope ?? [],
+  };
+  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl, onProgress, files, commands });
 };
 
 async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
@@ -182,13 +198,15 @@ async function invokeAgent(
   const configured = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
   const command =
-    configured && withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null);
+    configured &&
+    withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope);
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
     const written = await executeAgentCommand(
       execute,
       buildInvocation(
-        fallbackCommand,
+        // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers.
+        withAgentPermissions(fallbackCommand, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
       options.cwd,

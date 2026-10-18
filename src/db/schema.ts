@@ -598,4 +598,65 @@ export const SCHEMA = `
   -- Dokumentgruppe „Anfragen“: Anfragen an Assistent und Agents samt Ergebnis.
   ALTER TABLE docs DROP CONSTRAINT IF EXISTS docs_kind_check;
   ALTER TABLE docs ADD CONSTRAINT docs_kind_check CHECK (kind IN ('manual', 'order', 'sprint', 'repo', 'request'));
+
+  -- Dateirechte getrennt: „files“ wird zu „Dateien anlegen“ und „Dateien ändern“; dazu erlaubte Ordner je Agent.
+  ALTER TABLE agents ADD COLUMN IF NOT EXISTS file_scope TEXT[] NOT NULL DEFAULT '{}';
+  UPDATE agents SET allowed_commands = ARRAY(
+      SELECT DISTINCT unnest(array_remove(allowed_commands, 'files') || ARRAY['files:create', 'files:edit']))
+    WHERE 'files' = ANY(allowed_commands);
+  UPDATE project_permission_groups SET rules = ARRAY(
+      SELECT DISTINCT unnest(array_remove(rules, 'files') || ARRAY['files:create', 'files:edit']))
+    WHERE 'files' = ANY(rules);
+
+  -- Kommentare an Ideen: @-Erwähnungen von Agents und Personen; ein erwähnter Agent antwortet als Kommentar.
+  ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS author_kind TEXT NOT NULL DEFAULT 'user';
+  ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS mentions JSONB NOT NULL DEFAULT '[]'::jsonb;
+  ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES ideation_comments(id) ON DELETE SET NULL;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS idea_comment_id UUID REFERENCES ideation_comments(id) ON DELETE SET NULL;
+
+  -- Herkunft einer Idee (bestehende Ideen: human) und Ablehnungsgrund, den der Visionär beim nächsten Lauf beachtet.
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'human'
+    CHECK (source IN ('human', 'visionary', 'routine', 'production', 'github'));
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+  -- Läufe des Visionärs: angefragt → läuft → fertig/fehlgeschlagen/abgebrochen; je Projekt höchstens ein offener Lauf.
+  CREATE TABLE IF NOT EXISTS visionary_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'requested'
+      CHECK (status IN ('requested', 'running', 'done', 'failed', 'cancelled')),
+    progress TEXT,
+    created_count INTEGER NOT NULL DEFAULT 0,
+    discarded_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    requested_by TEXT,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS visionary_runs_open_idx ON visionary_runs (project_slug)
+    WHERE status IN ('requested', 'running');
+  CREATE INDEX IF NOT EXISTS visionary_runs_project_idx ON visionary_runs (project_slug, requested_at DESC);
+  -- launchctl-Freigabe ohne feste Benutzer-ID (der Container hat eine andere als der Worker).
+  UPDATE agents SET allowed_commands = ARRAY(SELECT DISTINCT CASE
+      WHEN rule ~ '^Bash\\(launchctl kickstart -k gui/[0-9]+/ch\\.\\*\\)$' THEN 'services' ELSE rule END
+      FROM unnest(allowed_commands) rule)
+    WHERE EXISTS (SELECT 1 FROM unnest(allowed_commands) rule WHERE rule LIKE 'Bash(launchctl kickstart -k gui/%');
+
+  -- Sprint-Autopilot: Arbeitszeiten (nur darin startet er Sprints; 1 = Montag … 7 = Sonntag) und manuelle Freigabe
+  -- nach gescheiterter Git-Sicherung (Sprint, dessen Fehler bewusst übergangen wird).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS autopilot_start TEXT NOT NULL DEFAULT '08:00'
+    CHECK (autopilot_start ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$');
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS autopilot_end TEXT NOT NULL DEFAULT '18:00'
+    CHECK (autopilot_end ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$');
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS autopilot_days SMALLINT[] NOT NULL DEFAULT '{1,2,3,4,5}';
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS autopilot_released_sprint UUID REFERENCES sprints(id) ON DELETE SET NULL;
+  -- KI-Kommentar zum Sprintvorschlag (Auftragsautor, nur Text): je Projekt der letzte, beim Übernehmen gelöscht.
+  CREATE TABLE IF NOT EXISTS sprint_proposal_comments (
+    project_slug TEXT PRIMARY KEY REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    item_ids UUID[] NOT NULL,
+    status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'running', 'done', 'failed')),
+    comment TEXT,
+    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ
+  );
 `;

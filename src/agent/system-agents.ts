@@ -14,6 +14,7 @@ export const SYSTEM_ROLES = [
   ['Dashboard-Assistent', 'Beantwortet Chat-Fragen, prüft Dienste und löst Probleme im Projektumfang.', 'assistant'],
   ['Problemanalyse', 'Analysiert blockierte Aufträge und schlägt Lösungen vor.', 'analyst'],
   ['Schnellschätzung', 'Schätzt Aufwand und Nutzen neuer Ideen (Auftragsautor-Modell).', 'author'],
+  ['Visionär', 'Analysiert das Projekt nur lesend und schlägt begründete Erweiterungsideen vor.', 'visionary'],
 ] as const;
 
 const envKey = (role: string): string => `DEV_LOG_OLLAMA_MODEL_${role.toUpperCase()}`;

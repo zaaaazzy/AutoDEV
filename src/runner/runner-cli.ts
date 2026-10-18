@@ -12,6 +12,7 @@ import { projectFolderError } from '../core/validation.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
+import { commentSprintProposal } from '../agent/sprint-comment.js';
 import { syncFavicon } from './favicon.js';
 import { syncGitGraph } from './git-graph.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
@@ -229,6 +230,7 @@ async function main(): Promise<void> {
     const analysisActive = new Set<string>();
     const estimateActive = new Set<string>();
     const authorActive = new Set<string>();
+    const commentActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -254,6 +256,15 @@ async function main(): Promise<void> {
               logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`),
             )
             .finally(() => authorActive.delete(slug));
+        }
+        // KI-Kommentar zum Sprintvorschlag (Auftragsautor, nur Text) – auf Knopfdruck in der Oberfläche.
+        if (!commentActive.has(slug) && !stopping) {
+          commentActive.add(slug);
+          void commentSprintProposal(pool, target.options)
+            .catch((error: unknown) =>
+              logOnce(`comment:${slug}`, `[${slug}] Sprint-Kommentar fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => commentActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)

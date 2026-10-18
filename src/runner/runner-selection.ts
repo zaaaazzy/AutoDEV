@@ -61,7 +61,8 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
 
 export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<WorkflowAgent[]> {
   const result = await pool.query<WorkflowAgent>(
-    `SELECT id, name, role, phase, position, instructions, command, allowed_commands AS "allowedCommands"
+    `SELECT id, name, role, phase, position, instructions, command, allowed_commands AS "allowedCommands",
+            file_scope AS "fileScope"
        FROM agents
       WHERE project_slug = $1 AND enabled
       ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,

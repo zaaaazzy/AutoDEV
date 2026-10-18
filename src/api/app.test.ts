@@ -391,8 +391,9 @@ test('seeds the default agent workflow when a project is created', async () => {
       body: JSON.stringify({ slug: 'mainty', name: 'Mainty', repository: '/repo' }),
     });
     assert.equal(response.status, 201);
-    const seed = queries.at(-1);
-    assert.match(seed?.sql ?? '', /INSERT INTO agents/);
+    // Danach folgen die Standard-Aktionen für den Tester (eigener Test in default-actions.test.ts).
+    const seed = queries.find((query) => /INSERT INTO agents/.test(query.sql));
+    assert.ok(seed);
     assert.equal(seed?.values[0], 'mainty');
     assert.deepEqual(seed?.values[3], [
       'pre_task',

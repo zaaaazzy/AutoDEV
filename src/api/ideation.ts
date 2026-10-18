@@ -109,25 +109,4 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     }
     response.json({ item: result.rows[0] });
   });
-
-  app.post('/api/ideation/:id/comments', async (request, response) => {
-    const text = isRecord(request.body) && typeof request.body.body === 'string' ? request.body.body.trim() : '';
-    if (!isUuid(request.params.id) || !text || text.length > 4000) {
-      response.status(400).json({ message: 'Bitte einen Kommentar eingeben (max. 4000 Zeichen).' });
-      return;
-    }
-    const encoded = /^Basic (.+)$/.exec(request.headers.authorization ?? '')?.[1] ?? '';
-    const author = Buffer.from(encoded, 'base64').toString().split(':')[0]?.slice(0, 60) || 'Nutzer';
-    const result = await pool.query(
-      `INSERT INTO ideation_comments (ideation_id, author, body)
-       SELECT id, $2, $3 FROM ideation_items WHERE id = $1
-       RETURNING id, ideation_id AS "ideationId", author, body, created_at AS "createdAt"`,
-      [request.params.id, author, text],
-    );
-    if (!result.rows[0]) {
-      response.status(404).json({ message: 'Idee nicht gefunden.' });
-      return;
-    }
-    response.status(201).json({ item: result.rows[0] });
-  });
 }
