@@ -55,6 +55,7 @@
     }
     <app-data-table
       [rows]="data().bugs"
+      [initialFilters]="store.filtersFor('bugs')"
       [columns]="bugColumns"
       [rowId]="bugId"
       [initialSort]="[{ id: 'createdAt', desc: true }]"

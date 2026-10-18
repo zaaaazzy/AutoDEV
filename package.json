@@ -13,7 +13,7 @@
     "format": "prettier --write src frontend/src",
     "format:check": "prettier --check src frontend/src",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p frontend/tsconfig.app.json --noEmit",
-    "test": "npm run build:ui && tsx --test \"src/**/*.test.ts\"",
+    "test": "npm run build:ui && tsx --test \"src/**/*.test.ts\" \"frontend/src/**/*.spec.ts\"",
     "test-agent": "tsx src/runner/test-agent.ts",
     "runner": "tsx src/runner/runner-cli.ts",
     "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3",

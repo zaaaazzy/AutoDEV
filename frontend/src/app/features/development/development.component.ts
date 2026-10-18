@@ -1,14 +1,14 @@
 import { NgClass } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
+import { CATEGORIES, DEVELOPMENT_STATUSES, statusLabel } from '../../shared/labels.js';
 import { CategoryLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
-import { OrderTableComponent } from './order-table.component.js';
+import { orderStatusLabel, OrderTableComponent } from './order-table.component.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
 
@@ -49,7 +49,10 @@ export class DevelopmentComponent {
     category: '',
   };
   protected readonly categories = CATEGORIES;
-  protected readonly showDoneOrders = signal(false);
+  /** Über einen Dashboard-Link auf „Erledigt“ gefiltert: erledigte Aufträge gleich aufklappen. */
+  protected readonly showDoneOrders = signal(
+    (this.store.filtersFor('development')['status'] ?? []).includes(statusLabel('done')),
+  );
 
   /** Aufträge, die eine Entscheidung brauchen: fehlgeschlagen, aus dem Sprint genommen oder mit Punkten zum Prüfen. */
   protected readonly attention = computed(() => {
@@ -60,24 +63,59 @@ export class DevelopmentComponent {
     return this.data()
       .development.map((item) => {
         const reasons: { label: string; tone: 'error' | 'warn' | 'info' }[] = [];
-        if (item.status === 'blocked') reasons.push({ label: 'Fehlgeschlagen', tone: 'error' });
+        // Wartet der Auftrag auf einen Menschen, ist er nicht gescheitert, sondern braucht eine Aktion.
+        if (item.actionTodo && item.status !== 'done') reasons.push({ label: 'Aktion notwendig', tone: 'warn' });
+        else if (item.status === 'blocked') reasons.push({ label: 'Fehlgeschlagen', tone: 'error' });
         if (item.removedFromSprintAt && item.status !== 'done') {
           reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
         }
         const open = manual.get(item.id) ?? 0;
-        if (open) reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });
+        if (open && !item.actionTodo) {
+          reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });
+        }
         return { item, reasons, manual: open };
       })
       .filter((entry) => entry.reasons.length);
   });
   private readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   protected readonly openAttention = signal<string | null>(null);
+  protected readonly statusText = orderStatusLabel;
+
+  constructor() {
+    // Aus einem Link (#development/<id>, z. B. im Sprintbericht): Auftrag aufklappen und hinscrollen.
+    effect(() => {
+      const id = this.store.focusId();
+      const inAttention = id ? this.attentionIds().has(id) : false;
+      if (!id || !this.data().development.some((item) => item.id === id)) return;
+      untracked(() => {
+        if (inAttention) this.openAttention.set(id);
+        else if (this.data().development.find((item) => item.id === id)?.status === 'done')
+          this.showDoneOrders.set(true);
+        globalThis.setTimeout(() => {
+          const target = document.getElementById(`order-${id}`) ?? document.querySelector('.row-open');
+          target?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        }, 200);
+      });
+    });
+  }
   protected readonly doneOrders = computed(() =>
     this.data().development.filter((item) => item.status === 'done' && !this.attentionIds().has(item.id)),
   );
   protected readonly openOrders = computed(() =>
     this.data().development.filter((item) => item.status !== 'done' && !this.attentionIds().has(item.id)),
   );
+
+  /** Sprintbericht mit dem ToDo-Kapitel des Auftrags (falls der Sprint schon dokumentiert ist). */
+  protected sprintDoc(item: DevelopmentItem): string | null {
+    const sprintId = item.sprintId;
+    return sprintId
+      ? (this.data().docs.find((doc) => doc.kind === 'sprint' && doc.sprintId === sprintId)?.id ?? null)
+      : null;
+  }
+
+  protected openDoc(id: string): void {
+    this.store.navigate('docs', { focus: id });
+  }
 
   /** Kurzfassung des Fehlers: bevorzugt die nicht bestandenen Abnahmepunkte, sonst ein sauber beginnender Auszug. */
   protected failureSummary(failure: string): string {

@@ -1,3 +1,5 @@
+import { parseActionLine, setActionTodo } from '../runner/action-todo.js';
+import { delegateAfterAnalysis } from '../runner/autofix.js';
 import type { Pool } from 'pg';
 import { loadKnownBugs } from '../api/bugs.js';
 import type { CommandExecutor } from '../core/command.js';
@@ -22,6 +24,7 @@ export function buildTroubleshootPrompt(
     [
       'Antworte genau in diesem Format:',
       'TITEL: <kurzer, allgemeiner Fehlertitel, an dem man das Problem später wiedererkennt>',
+      'AKTION: <in wenigen Worten, was ein Mensch tun muss (z. B. „API-Schlüssel in .env eintragen“) – oder „keine“, wenn die Agents es selbst beheben können>',
       '## Ursache',
       '## Lösung (konkrete Schritte)',
       '## Erkennung (woran man das Problem früh erkennt, Stichworte)',
@@ -35,7 +38,13 @@ export function buildTroubleshootPrompt(
 export function parseAnalysis(output: string, fallbackTitle: string): { title: string; body: string } {
   const match = output.match(/^\s*TITEL:\s*(.+)$/im);
   const title = (match?.[1] ?? '').trim().replace(/^["„]|["“]$/g, '') || fallbackTitle;
-  return { title: title.slice(0, 160), body: output.replace(/^\s*TITEL:.*$/im, '').trim() };
+  return {
+    title: title.slice(0, 160),
+    body: output
+      .replace(/^\s*TITEL:.*$/im, '')
+      .replace(/^\s*AKTION:.*$/im, '')
+      .trim(),
+  };
 }
 
 /** Analysiert einen blockierten Auftrag mit dem Dashboard-Assistenten und speichert die Erkenntnisse als Bug (für den Bug-Wächter). */
@@ -44,11 +53,19 @@ export async function analyzeBlocked(
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
   execute?: CommandExecutor,
 ): Promise<number> {
-  const claimed = await pool.query<{ id: string; title: string; description: string; bugId: string | null }>(
+  const claimed = await pool.query<{
+    id: string;
+    title: string;
+    description: string;
+    bugId: string | null;
+    kind: string;
+    sprintId: string | null;
+    failureBugId: string | null;
+  }>(
     `UPDATE development_items SET analysis_status = 'running'
       WHERE id = (SELECT id FROM development_items WHERE project_slug = $1 AND analysis_status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, title, description, bug_id AS "bugId"`,
+      RETURNING id, title, description, bug_id AS "bugId", kind, sprint_id AS "sprintId", failure_bug_id AS "failureBugId"`,
     [options.project],
   );
   const item = claimed.rows[0];
@@ -84,20 +101,34 @@ export async function analyzeBlocked(
     return 0;
   }
   const { title, body } = parseAnalysis(output, `Blockiert: ${item.title}`);
-  await pool.query(
-    `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes)
-     SELECT $1, $2, $3, 'high', 'agent', 'open', $4
-      WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)`,
-    [
-      options.project,
-      title,
-      `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000),
+  const action = parseActionLine(output);
+  if (action !== undefined) await setActionTodo(pool, item.id, action).catch(() => undefined);
+  if (item.failureBugId) {
+    // Bug-Bericht gibt es schon (vom gescheiterten Agent): die Analyse dort ergänzen statt einen zweiten anzulegen.
+    await pool.query(`UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1`, [
+      item.failureBugId,
       body.slice(0, 3000),
-    ],
-  );
+    ]);
+  } else {
+    await pool.query(
+      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes)
+       SELECT $1, $2, $3, 'high', 'agent', 'open', $4
+        WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)`,
+      [
+        options.project,
+        title,
+        `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000),
+        body.slice(0, 3000),
+      ],
+    );
+  }
   await pool.query(
     `UPDATE development_items SET analysis_status = 'done', analysis = $2, updated_at = NOW() WHERE id = $1`,
     [item.id, `**Bug:** ${title}\n\n${body}`.slice(0, 10_000)],
+  );
+  // Zweite Meinung abgeschlossen: an die Behebung delegieren oder auf eine Aktion warten – mit Vermerk.
+  await delegateAfterAnalysis(pool, { ...item, projectSlug: options.project }, { title, action }).catch((error) =>
+    console.error('Delegation nach Analyse fehlgeschlagen:', error),
   );
   return 1;
 }

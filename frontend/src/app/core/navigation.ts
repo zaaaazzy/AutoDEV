@@ -18,7 +18,13 @@ export function isSection(section: string): section is Section {
   return NAVIGATION.some((item) => item.id === section);
 }
 
+/** „#development/<id>“: Seite und optional der Eintrag, der geöffnet werden soll (z. B. aus Dokumenten verlinkt). */
 export function sectionFromHash(): Section {
-  const section = globalThis.location.hash.slice(1);
+  const section = globalThis.location.hash.slice(1).split('/')[0] ?? '';
   return isSection(section) ? section : 'dashboard';
+}
+
+export function targetFromHash(): string | null {
+  const target = globalThis.location.hash.slice(1).split('/')[1]?.split('?')[0] ?? '';
+  return /^[0-9a-f-]{36}$/i.test(target) ? target : null;
 }

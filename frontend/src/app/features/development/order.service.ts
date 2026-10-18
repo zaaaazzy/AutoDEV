@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, Estimate } from '../../core/models.js';
+import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { numberOrNull, type FormValues } from '../../shared/forms.js';
 
@@ -40,6 +40,27 @@ export class OrderService {
     );
   }
 
+  /** Neuer Auftrag mit Bezug auf einen erledigten; der Entwickler bekommt dessen Kontext mit. */
+  async followUp(
+    item: DevelopmentItem,
+    values: { title: string; description: string; sprintId: string | null },
+  ): Promise<string | null> {
+    let created: string | null = null;
+    await this.store.perform(
+      async () => {
+        const result = await this.api.post<{ item: DevelopmentItem }>(
+          `/api/development/${encodeURIComponent(item.id)}/follow-up`,
+          values,
+        );
+        created = result.item.id;
+      },
+      values.sprintId
+        ? 'Folgeauftrag erstellt und im Sprint eingeplant.'
+        : 'Folgeauftrag erstellt – weise ihn einem Sprint zu.',
+    );
+    return created;
+  }
+
   async retry(item: DevelopmentItem): Promise<void> {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`),
@@ -67,6 +88,31 @@ export class OrderService {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/acceptance/confirm`),
       'Danke – die Punkte sind als geprüft vermerkt.',
+    );
+  }
+
+  /** Einzelnen Abnahmepunkt abhaken oder wieder öffnen. */
+  async checkPoint(item: DevelopmentItem, check: AcceptanceCheck, checked: boolean): Promise<void> {
+    await this.store.perform(
+      () =>
+        this.api.post(`/api/development/${encodeURIComponent(item.id)}/acceptance/check`, {
+          kind: check.kind,
+          position: check.position,
+          checked,
+        }),
+      checked ? 'Punkt abgehakt.' : 'Punkt wieder offen.',
+    );
+  }
+
+  /** Offene Punkte (oder einen) vom Tester-Agent automatisch prüfen lassen. */
+  async verifyPoints(item: DevelopmentItem, check?: AcceptanceCheck): Promise<void> {
+    await this.store.perform(
+      () =>
+        this.api.post(
+          `/api/development/${encodeURIComponent(item.id)}/acceptance/verify`,
+          check ? { kind: check.kind, position: check.position } : {},
+        ),
+      'Der Tester prüft die offenen Punkte – das Ergebnis erscheint hier.',
     );
   }
 

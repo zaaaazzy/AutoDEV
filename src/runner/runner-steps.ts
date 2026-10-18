@@ -1,9 +1,10 @@
+import { manualTodo, setActionTodo } from './action-todo.js';
 import type { Pool } from 'pg';
 import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
-import { registerFailure, resumeBlockedByBug } from './autofix.js';
+import { registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
@@ -372,6 +373,7 @@ export async function runStep(
         await logEvent(pool, stepId, 'Abnahme: alle Kriterien und DoD-Punkte erfüllt');
       }
       const manual = manualChecks(acceptance, criteria);
+      await setActionTodo(pool, item.id, manualTodo(manual)).catch(() => undefined);
       if (manual.length) {
         output += `\n\n## Von dir zu prüfen\n${manual.map((line) => `- ${line}`).join('\n')}`;
         await logEvent(pool, stepId, `Abnahme: ${manual.length} Punkt(e) nur manuell prüfbar`);
@@ -391,7 +393,10 @@ export async function runStep(
   } else if (agent.role === 'reviewer') {
     await logEvent(pool, stepId, 'Review: freigegeben');
   }
-  const passed = result.exitCode === 0 && !cancelled && review === true && accepted;
+  // Lehnt ein Agent wegen einer Projektregel ab (@@REGEL), endet der Ablauf: „Aktion notwendig“ statt „Erledigt“.
+  const refusedByRule = ruleRefusal(output) !== null;
+  if (refusedByRule) await logEvent(pool, stepId, 'Abgelehnt wegen Projektregel');
+  const passed = result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule;
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
   const reported = agent.role === 'tester' ? parseCoverage(output) : null;
   // Zusätzlich misst Dev Log selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.

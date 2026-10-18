@@ -9,12 +9,14 @@ import {
   type Sprint,
   type WorkerStatus,
 } from './models.js';
-import { isSection, sectionFromHash, type Section } from './navigation.js';
+import { isSection, sectionFromHash, targetFromHash, type Section } from './navigation.js';
 import { fetchProjectData } from './project-loader.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
 const ACTIVE_PROJECT_KEY = 'devlog.activeProject';
+/** Immer dasselbe Objekt, sonst sehen Tabellen bei jeder Prüfung neue Filter und rendern endlos neu. */
+const NO_FILTERS: Record<string, string[]> = Object.freeze({}) as Record<string, string[]>;
 
 /** Zuletzt gewähltes Projekt, damit ein Reload dasselbe Projekt öffnet. Speicher kann fehlen oder gesperrt sein. */
 function readStoredProject(): string {
@@ -46,6 +48,8 @@ export class ProjectStore {
   readonly data = signal<ProjectData>(emptyProjectData());
   readonly errors = signal<Record<string, string>>({});
   readonly section = signal<Section>(sectionFromHash());
+  /** Eintrag, der auf der Seite geöffnet werden soll (Auftrag, Dokument) – aus Link oder Adresse. */
+  readonly focusId = signal<string | null>(targetFromHash());
   readonly loading = signal(true);
   readonly busy = signal(false);
   readonly notice = signal('');
@@ -93,12 +97,30 @@ export class ProjectStore {
     return item?.sprintId ? (this.data().sprints.find((sprint) => sprint.id === item.sprintId) ?? null) : null;
   }
 
-  navigate(section: string): void {
+  /** Filter, mit denen eine Seite über einen Link (z. B. aus dem Dashboard) geöffnet wurde. */
+  readonly linkFilters = signal<{ section: Section; filters: Record<string, string[]> } | null>(null);
+
+  /** Spaltenfilter für die Tabelle einer Seite, wenn sie über einen Link mit Filter geöffnet wurde. */
+  filtersFor(section: Section): Record<string, string[]> {
+    const link = this.linkFilters();
+    return link?.section === section ? link.filters : NO_FILTERS;
+  }
+
+  /** Wechselt die Seite; optional mit Tabellenfiltern und einem Abschnitt, zu dem gescrollt wird. */
+  navigate(section: string, link: { filters?: Record<string, string[]>; anchor?: string; focus?: string } = {}): void {
     if (!isSection(section)) return;
+    this.focusId.set(link.focus ?? null);
+    this.linkFilters.set(link.filters ? { section, filters: link.filters } : null);
+    if (link.anchor) {
+      const anchor = link.anchor;
+      globalThis.setTimeout(() => globalThis.document?.getElementById(anchor)?.scrollIntoView({ block: 'start' }), 150);
+    } else {
+      globalThis.scrollTo?.({ top: 0 });
+    }
     this.section.set(section);
     this.showCreate.set(false);
     this.openAgent.set(null);
-    globalThis.history.replaceState(null, '', `#${section}`);
+    globalThis.history.replaceState(null, '', link.focus ? `#${section}/${link.focus}` : `#${section}`);
     this.refreshActiveProject();
   }
 
@@ -190,6 +212,7 @@ export class ProjectStore {
 
   private onHashChange(): void {
     const section = sectionFromHash();
+    this.focusId.set(targetFromHash());
     if (section === this.section()) return;
     this.section.set(section);
     this.refreshActiveProject();

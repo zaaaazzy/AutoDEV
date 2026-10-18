@@ -1,0 +1,62 @@
+<article class="panel wide-panel git-panel">
+  <div class="section-heading">
+    <h2>Git-Verlauf</h2>
+    @if (graph(); as g) {
+      <span class="muted">
+        {{ g.commits.length }} Commits · {{ branchCount() }} Branches
+        @if (g.head) {
+          · aktuell <code>{{ g.head }}</code>
+        }
+        @if (g.webUrl) {
+          · <a [href]="g.webUrl" target="_blank" rel="noopener noreferrer">GitHub ↗</a>
+        }
+      </span>
+    }
+  </div>
+  @if (graph(); as g) {
+    <div class="git-graph" [style.--git-graph-width.px]="graphWidth()">
+      @for (row of visibleRows(); track row.commit.hash) {
+        @let url = commitUrl(row.commit);
+        <div class="git-row">
+          <svg class="git-lanes" [attr.width]="graphWidth()" [attr.height]="rowHeight" aria-hidden="true">
+            @for (edge of row.edges; track $index) {
+              <path [attr.d]="path(edge)" [attr.stroke]="color(edge.color)" fill="none" stroke-width="2" />
+            }
+            <circle
+              [attr.cx]="x(row.lane)"
+              [attr.cy]="rowHeight / 2"
+              [attr.r]="row.commit.parents.length > 1 ? 3.5 : 4.5"
+              [attr.fill]="row.commit.parents.length > 1 ? '#fff' : color(row.color)"
+              [attr.stroke]="color(row.color)"
+              stroke-width="2"
+            />
+          </svg>
+          <a
+            class="git-commit"
+            [class.local]="!url"
+            [attr.href]="url"
+            target="_blank"
+            rel="noopener noreferrer"
+            [title]="url ? 'Auf GitHub öffnen' : 'Noch nicht gepusht – nur lokal vorhanden'"
+          >
+            <code class="git-hash">{{ row.commit.hash.slice(0, 7) }}</code>
+            @for (ref of refs(row.commit); track ref.ref) {
+              <span [class]="'git-ref git-ref-' + ref.kind">{{ ref.label }}</span>
+            }
+            <span class="git-subject">{{ row.commit.subject }}</span>
+            <span class="git-meta muted">{{ row.commit.author }} · {{ relative(row.commit.date) }}</span>
+          </a>
+        </div>
+      }
+    </div>
+    @if (layout().rows.length > 25) {
+      <button class="button secondary small git-more" type="button" (click)="showAll.set(!showAll())">
+        {{ showAll() ? 'Weniger anzeigen' : 'Alle ' + layout().rows.length + ' Commits anzeigen' }}
+      </button>
+    }
+  } @else if (loaded()) {
+    <p class="empty-state">Noch kein Git-Verlauf – der Worker liest ihn jede Minute aus dem Projektordner.</p>
+  } @else {
+    <p class="muted">Git-Verlauf wird geladen …</p>
+  }
+</article>

@@ -4230,13 +4230,15 @@ h3 .link-button {
     display: block;
     width: 100%;
   }
+  /* Filter in einer Zeile, seitlich wischbar, ohne sichtbaren Scrollbalken. */
   .dt-table thead tr {
     display: flex;
     gap: 6px;
-    margin: 0 -2px;
-    padding: 2px 2px 8px;
+    padding: 2px 0 8px;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
     scrollbar-width: none;
+    touch-action: pan-x pan-y;
   }
   .dt-table thead tr::-webkit-scrollbar {
     display: none;
@@ -4910,7 +4912,8 @@ h3 .link-button {
   color: #a0610d;
   font-weight: 600;
 }
-.view-grid > .wide-panel {
+.view-grid > .wide-panel,
+.view-grid .git-panel {
   grid-column: 1 / -1;
 }
 
@@ -6556,4 +6559,937 @@ app-order-table {
   min-height: 44px;
   padding-inline: 20px;
   border-radius: 999px;
+}
+
+/* Git-Verlauf im Dashboard */
+.git-graph {
+  display: grid;
+  overflow: hidden;
+}
+
+.git-row {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  min-width: 0;
+}
+
+.git-lanes {
+  flex: none;
+}
+
+.git-commit {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+a.git-commit[href]:hover {
+  background: var(--paper);
+}
+
+.git-commit.local {
+  cursor: default;
+}
+
+.git-commit.local .git-hash {
+  opacity: 0.55;
+}
+
+.git-hash {
+  flex: none;
+  color: var(--green);
+  font-size: 0.82rem;
+}
+
+.git-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-meta {
+  flex: none;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.git-ref {
+  flex: none;
+  max-width: 220px;
+  padding: 1px 7px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-ref-head {
+  border-color: var(--green);
+  background: var(--green);
+  color: #fff;
+}
+
+.git-ref-branch {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.git-ref-remote {
+  color: var(--muted);
+}
+
+.git-ref-tag {
+  border-color: var(--orange);
+  color: #9a4f1c;
+}
+
+.git-ref-tag::before {
+  content: '🏷 ';
+}
+
+.git-more {
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .git-meta,
+  .git-ref-remote,
+  .git-ref-tag {
+    display: none;
+  }
+
+  .git-ref {
+    max-width: 120px;
+  }
+}
+
+/* Agent-Aufgaben im Assistenten: Dropdown mit Suche, Start mit einem Klick */
+.agent-tasks {
+  position: relative;
+  margin-left: auto;
+  margin-right: 8px;
+}
+
+.agent-tasks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  background: var(--green);
+  color: #fff;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.agent-tasks-toggle.open .agent-tasks-caret {
+  transform: rotate(180deg);
+}
+
+.agent-tasks-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(420px, calc(100vw - 32px));
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.agent-tasks-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid #d5dbd0;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.agent-tasks-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+}
+
+.agent-tasks-list {
+  max-height: 320px;
+  margin: 6px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.agent-tasks-group {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.agent-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.agent-task.active {
+  background: var(--paper);
+}
+
+.agent-task-run {
+  flex: none;
+  color: var(--green);
+  font-size: 0.8rem;
+}
+
+.agent-task-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-task-text strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.agent-task-text small,
+.agent-task-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-task-count {
+  flex: none;
+  font-size: 0.75rem;
+}
+
+.agent-task-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.agent-task.active .agent-task-icon,
+.agent-task-icon:focus-visible {
+  opacity: 1;
+}
+
+.agent-task-icon:hover {
+  background: #fff;
+  color: var(--ink);
+}
+
+.agent-tasks-empty {
+  padding: 10px 8px;
+}
+
+.agent-tasks-new {
+  width: 100%;
+  padding: 8px;
+  border: 1px dashed #c9d1c4;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--green);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.agent-task-form {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-task-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.agent-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (hover: none) {
+  .agent-task-icon {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .chat .section-heading {
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .agent-tasks {
+    position: static;
+  }
+
+  .agent-tasks-menu {
+    right: 0;
+    left: 0;
+    width: auto;
+  }
+
+  .chat-clear-label {
+    display: none;
+  }
+
+  .chat-clear {
+    padding: 6px 9px;
+  }
+}
+
+/* Anteilsbalken: überall gleiche Darstellung, 100 % = alle Einträge, Abschnitte klickbar */
+.share {
+  display: grid;
+  gap: 6px;
+}
+
+.share-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.share-stack.compact {
+  gap: 10px;
+}
+
+.share-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.share-label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-weight: 600;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.share-label:disabled {
+  cursor: default;
+}
+
+.share-total {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.share-bar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #eef1ec;
+}
+
+.share-stack.compact .share-bar {
+  height: 10px;
+}
+
+.share-seg {
+  flex-basis: 0;
+  min-width: 4px;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+
+.share-seg:hover,
+.share-seg:focus-visible {
+  outline: none;
+  filter: brightness(0.85);
+}
+
+.share-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+}
+
+.share-legend.static {
+  margin-bottom: 10px;
+}
+
+.share-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.share-legend.static .share-key {
+  color: var(--muted);
+  cursor: default;
+}
+
+button.share-key:hover {
+  text-decoration: underline;
+}
+
+.share-key.zero {
+  opacity: 0.5;
+}
+
+.share-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.tone-ok { background: #2b9a66; }
+.tone-active { background: #2f7de1; }
+.tone-info { background: #8bb6ee; }
+.tone-wait { background: #f0b44c; }
+.tone-warn { background: #e8590c; }
+.tone-bad { background: #d6453d; }
+.tone-neutral { background: #b9c1b5; }
+.tone-plain { background: #a48fd9; }
+
+.metric-links {
+  margin-top: 18px;
+}
+
+.metric-links a {
+  display: grid;
+  border-radius: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.metric-links a:hover strong {
+  color: var(--green);
+}
+
+.list-link {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.list-link:hover {
+  background: var(--paper);
+}
+
+/*
+ * iPhone: Safari zoomt beim Antippen von Feldern unter 16 px hinein; danach lässt sich die Seite seitlich schieben
+ * und rechts fehlt Rand. Auf Touch-Geräten daher mindestens 16 px, und seitliches Verschieben ist abgeschnitten.
+ */
+@media (pointer: coarse), (max-width: 720px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Nichts darf die Seite breiter machen: Felder und Rasterzellen dürfen schrumpfen, seitliches Verschieben ist gesperrt. */
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+.chat-form input,
+.panel,
+.view-grid > *,
+.summary-grid > * {
+  min-width: 0;
+}
+
+html {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+body {
+  overflow-x: clip;
+}
+
+/* iOS-Safari ignoriert overflow am Dokument beim Wischen: Inhalt selbst abschneiden und nur senkrechtes Wischen
+   (plus Zoomen) erlauben. Waagrecht scrollbare Bereiche (Tabellen-Filter) sind eigene Scroll-Container und
+   bleiben wischbar. */
+.app-shell,
+.app-shell > main,
+.content {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+@media (max-width: 720px) {
+  html,
+  body {
+    touch-action: pan-y pinch-zoom;
+  }
+}
+
+
+/* Kennzeichnung, welcher Agent eine Nachricht übernimmt bzw. beantwortet */
+.chat-agent-name {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.chat-msg.mine .chat-agent-name {
+  color: rgb(255 255 255 / 75%);
+}
+
+.agent-task-agent {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e8f1ec;
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+
+/* Aktion notwendig: wartet auf einen Menschen, nicht gescheitert */
+.status-action {
+  background: #fdf1e0;
+  color: #a0610d;
+}
+
+.attention-todo {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  border-left: 3px solid #e0a040;
+  border-radius: 6px;
+  background: #fdf7ec;
+  font-size: 0.9rem;
+}
+
+a.app-link {
+  color: var(--green);
+  text-decoration: underline;
+}
+
+/* Folgeauftrag: Bezug auf einen erledigten Auftrag */
+.follow-up {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.follow-up-form {
+  flex: 1 1 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafbf8;
+}
+
+.follow-up-ref {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: #eef5f0;
+  font-size: 0.9rem;
+}
+
+/* Kompakte Agent- und Testausgabe in Aufträgen */
+.order-brief .markdown,
+.order-panel .markdown {
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.order-brief .markdown :is(p, ul, ol, pre),
+.order-panel .markdown :is(p, ul, ol, pre) {
+  margin: 0 0 8px;
+}
+
+.order-brief .markdown :is(h1, h2, h3, h4),
+.order-panel .markdown :is(h1, h2, h3, h4) {
+  margin: 12px 0 6px;
+  font-size: 14px;
+}
+
+.markdown code.path,
+.markdown .cmd-line code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #eef1ec;
+  color: #2c4a3a;
+}
+
+.markdown .cmd-line {
+  margin: 4px 0;
+}
+
+.markdown a.ext-link {
+  color: #2f6fb0;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.test-step {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #2b9a66;
+  border-radius: 8px;
+  background: #fafbf8;
+  font-size: 13px;
+}
+
+.test-step.failed {
+  border-left-color: #d6453d;
+  background: #fdf5f3;
+}
+
+.test-icon {
+  flex: none;
+  font-weight: 700;
+  color: #2b9a66;
+}
+
+.test-step.failed .test-icon {
+  color: #d6453d;
+}
+
+.test-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.test-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.test-head code {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.test-summary {
+  color: var(--muted);
+}
+
+.test-raw summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.test-raw pre {
+  max-height: 260px;
+  margin: 6px 0 0;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+/* Abnahme: DoD mit Kriterien darunter, „! Noch zu erledigen“ mit Checkbox und Agent-Prüfung */
+.acceptance-nested {
+  list-style: none;
+  margin: -2px 0 4px 22px;
+}
+
+.acceptance-nested .acceptance-list {
+  padding-left: 0;
+  border-left: 2px solid var(--line);
+  padding-inline-start: 10px;
+}
+
+.acceptance-todo > summary {
+  color: #a0610d;
+  font-weight: 600;
+}
+
+.todo-bang {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  place-items: center;
+  border-radius: 50%;
+  background: #e8590c;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.todo-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.todo-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #f1d9b5;
+  border-left: 3px solid #e8590c;
+  border-radius: 8px;
+  background: #fffaf2;
+  font-size: 14px;
+}
+
+.todo-list li.verifying {
+  border-left-color: #2f7de1;
+  background: #f4f8fe;
+}
+
+.todo-list input[type='checkbox'] {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  accent-color: var(--green);
+}
+
+.todo-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.todo-state {
+  color: #2f7de1;
+}
+
+.todo-verify {
+  flex: none;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.todo-verify:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Chat-Eingabe: „/“ Agent, „@“ Verweis – Vorschläge als Bubbles, Auswahl als Chips */
+.composer {
+  position: relative;
+  z-index: 20;
+  display: grid;
+  gap: 6px;
+}
+
+.mention-pop {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(32 40 36 / 16%);
+  animation: mention-in 0.14s ease-out;
+}
+
+@keyframes mention-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+.mention-title {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mention-bubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.mention-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid #d5dbd0;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    transform 0.12s;
+}
+
+.mention-bubble small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.mention-bubble.active {
+  border-color: var(--green);
+  background: #e8f1ec;
+  transform: translateY(-1px);
+}
+
+.mention-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: #eef1ec;
+  font-size: 0.82rem;
+}
+
+.composer-chip.agent {
+  background: var(--green);
+  color: #fff;
+}
+
+.composer-chip .chip-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-chip button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 8%);
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.composer-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.composer-hint kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  font: inherit;
+  font-weight: 700;
+}
+
+.chat-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.chat-ref {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 22%);
+  font-size: 0.75rem;
 }

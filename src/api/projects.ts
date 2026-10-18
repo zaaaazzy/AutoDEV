@@ -67,6 +67,24 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     }
   });
 
+  // Git-Verlauf (Commits, Branches) fürs Dashboard, vom Worker erfasst.
+  app.get('/api/projects/:slug/git-graph', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const row = slug
+        ? (
+            await pool.query<{ graph: unknown; updatedAt: Date }>(
+              'SELECT graph, updated_at AS "updatedAt" FROM project_git_graphs WHERE project_slug = $1',
+              [slug],
+            )
+          ).rows[0]
+        : undefined;
+      response.json({ graph: row?.graph ?? null, updatedAt: row?.updatedAt ?? null });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Favicon der Anwendung; strenge CSP, damit ein SVG aus dem Projekt nie als Seite mit Skripten läuft.
   app.get('/api/projects/:slug/favicon', async (request, response, next) => {
     try {

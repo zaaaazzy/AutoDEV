@@ -17,6 +17,7 @@
     }
     <app-data-table
       [rows]="data().sprints"
+      [initialFilters]="store.filtersFor('sprints')"
       [columns]="sprintColumns"
       [rowId]="sprintId"
       [initialSort]="[{ id: 'status', desc: false }]"

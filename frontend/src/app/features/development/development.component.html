@@ -37,7 +37,7 @@
     </section>
   }
   @if (attention().length) {
-    <section class="panel attention-panel">
+    <section class="panel attention-panel" id="attention-orders">
       <div class="section-heading">
         <div>
           <h2>Besondere Aufmerksamkeit</h2>
@@ -47,7 +47,7 @@
       <ul class="attention-list">
         @for (entry of attention(); track entry.item.id) {
           @let item = entry.item;
-          <li class="attention-card">
+          <li class="attention-card" [id]="'order-' + item.id">
             <div class="attention-head">
               <button
                 type="button"
@@ -60,7 +60,11 @@
                 }
                 {{ item.kind === 'bug' ? item.title.replace('Bug: ', '') : item.title }}
               </button>
-              <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+              <span
+                class="status"
+                [ngClass]="item.actionTodo && item.status === 'blocked' ? 'status-action' : (item.status | statusClass)"
+                >{{ statusText(item) }}</span
+              >
             </div>
             <div class="attention-reasons">
               @for (reason of entry.reasons; track reason.label) {
@@ -70,7 +74,15 @@
                 <span class="attention-reason info">Analyse läuft …</span>
               }
             </div>
-            @if (item.failure) {
+            @if (item.actionTodo && item.status !== 'done') {
+              <p class="attention-todo">
+                <strong>Zu tun:</strong> {{ item.actionTodo }}
+                @if (sprintDoc(item); as docId) {
+                  · <a href="#docs" (click)="$event.preventDefault(); openDoc(docId)">ToDo im Sprintbericht</a>
+                }
+              </p>
+            }
+            @if (item.failure && !item.actionTodo) {
               <article
                 class="markdown attention-failure"
                 [innerHTML]="failureSummary(item.failure) | markdown"
@@ -159,7 +171,7 @@
       <p class="empty-state">Noch keine Entwicklungsaufträge vorhanden.</p>
     }
   </section>
-  <section class="panel">
+  <section class="panel" id="done-orders">
     <div class="section-heading">
       <button
         type="button"

@@ -1,6 +1,7 @@
 <section class="panel chat" aria-label="Assistent">
   <div class="section-heading">
     <h2>Assistent</h2>
+    <app-agent-tasks [agentId]="agentId() || null" />
     <button type="button" class="chat-clear" (click)="clear()" [disabled]="!chat().length" title="Verlauf leeren">
       <svg
         viewBox="0 0 24 24"
@@ -15,7 +16,7 @@
       >
         <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
       </svg>
-      Verlauf leeren
+      <span class="chat-clear-label">Verlauf leeren</span>
     </button>
   </div>
   <div class="chat-log">
@@ -27,6 +28,9 @@
           [class.failed]="message.status === 'failed'"
           [class.asking]="message.question && message.id === openQuestionId()"
         >
+          @if (message.agentName) {
+            <span class="chat-agent-name">{{ message.agentName }}</span>
+          }
           <app-step-result
             [events]="message.events"
             [output]="running ? '' : message.content"
@@ -43,7 +47,19 @@
           }
         </div>
       } @else {
-        <div class="chat-msg mine" [class.failed]="message.status === 'failed'">{{ message.content }}</div>
+        <div class="chat-msg mine" [class.failed]="message.status === 'failed'">
+          @if (message.agentName) {
+            <span class="chat-agent-name">an {{ message.agentName }}</span>
+          }
+          {{ message.content }}
+          @if (message.references?.length) {
+            <span class="chat-refs">
+              @for (reference of message.references; track reference.type + reference.id) {
+                <span class="chat-ref">{{ reference.label }}</span>
+              }
+            </span>
+          }
+        </div>
       }
     } @empty {
       <p class="muted">Stelle eine Frage oder gib eine Aufgabe – der Assistent führt sie selbst aus.</p>
@@ -52,29 +68,10 @@
       <div class="chat-msg typing">Assistent arbeitet …</div>
     }
   </div>
-  <form class="chat-form" (ngSubmit)="send()">
-    <input
-      name="chatInput"
-      [(ngModel)]="chatInput"
-      [placeholder]="openQuestionId() ? 'Antwort auf die Rückfrage …' : 'Nachricht an den Assistenten …'"
-      autocomplete="off"
-      maxlength="4000"
-    />
-    <button type="submit" class="chat-send" [disabled]="!chatInput.trim()">
-      Senden
-      <svg
-        viewBox="0 0 24 24"
-        width="16"
-        height="16"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
-      </svg>
-    </button>
-  </form>
+  <app-chat-composer
+    #composer
+    [(agentId)]="agentId"
+    [placeholder]="openQuestionId() ? 'Antwort auf die Rückfrage …' : 'Nachricht – / Agent, @ Verweis …'"
+    (sent)="send($event, composer)"
+  />
 </section>

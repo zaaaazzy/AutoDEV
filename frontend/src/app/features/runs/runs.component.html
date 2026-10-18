@@ -8,6 +8,7 @@
     </div>
     <app-data-table
       [rows]="data().runs"
+      [initialFilters]="store.filtersFor('runs')"
       [columns]="runColumns"
       [rowId]="runId"
       [initialSort]="[{ id: 'startedAt', desc: true }]"

@@ -55,7 +55,7 @@
       [rows]="openIdeas()"
       [columns]="ideaColumns"
       [rowId]="ideaId"
-      [initialFilters]="{ status: defaultStatusFilter }"
+      [initialFilters]="ideaFilters()"
       [initialSort]="[{ id: 'createdAt', desc: true }]"
       [(expanded)]="expandedIdea"
       emptyText="Keine Ideen für diese Filter."

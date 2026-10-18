@@ -316,6 +316,49 @@ test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
 
+test('Agent-Aufgaben: im Dropdown suchen, eigene Aufgabe definieren und wieder löschen', async ({ page }) => {
+  const title = `Build prüfen ${test.info().project.name}`;
+  await login(page);
+  await page.goto('/#dashboard');
+  await page.getByRole('button', { name: 'Aufgaben' }).click();
+  const search = page.getByRole('searchbox', { name: 'Aufgabe suchen' });
+  await expect(search).toBeFocused();
+  await search.fill('docker');
+  await expect(page.locator('.agent-task')).toHaveCount(1);
+  await expect(page.locator('.agent-task')).toContainText('Docker-Dienste starten');
+  await search.fill(title);
+  await page.getByRole('button', { name: `+ Neue Aufgabe „${title}“` }).click();
+  await page.getByLabel('Anweisung an den Assistenten').fill('Führe npm run build aus und melde Fehler.');
+  await page.getByRole('button', { name: 'Speichern', exact: true }).click();
+  const own = page.locator('.agent-task', { hasText: title });
+  await expect(own).toBeVisible();
+  page.once('dialog', (dialog) => void dialog.accept());
+  await own.hover();
+  await own.getByRole('button', { name: 'Löschen' }).click();
+  await expect(own).toHaveCount(0);
+});
+
+test('Chat: „/“ wählt den Agent, „@“ verweist mit Bubbles, beim Tippen eingeschränkt', async ({ page }) => {
+  await login(page);
+  await page.goto('/#dashboard');
+  const input = page.getByRole('textbox', { name: /Nachricht – \/ für Agent/ });
+  await input.click();
+  await input.pressSequentially('/tes');
+  await expect(page.locator('.mention-bubble')).toHaveCount(1);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.composer-chip.agent')).toContainText('Tester');
+  await input.pressSequentially('@');
+  await expect(page.locator('.mention-bubble')).toHaveCount(6);
+  await input.pressSequentially('auf');
+  await page.keyboard.press('Enter');
+  await expect(input).toHaveValue('@auftrag/');
+  await input.pressSequentially('login');
+  await expect(page.locator('.mention-bubble').first()).toContainText('Login-Seite modernisieren');
+  await page.locator('.mention-bubble').first().click();
+  await expect(page.locator('.composer-chip').nth(1)).toContainText('Login-Seite modernisieren');
+  await expect(input).toHaveValue('');
+});
+
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {
   const manifest = await (await request.get('/manifest.webmanifest')).json();
   expect(manifest.display).toBe('standalone');

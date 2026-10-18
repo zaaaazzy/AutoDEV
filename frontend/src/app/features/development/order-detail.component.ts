@@ -1,6 +1,7 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
-import { Component, computed, inject, input, output } from '@angular/core';
+import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -14,7 +15,15 @@ import { OrderService } from './order.service.js';
 @Component({
   selector: 'app-order-detail',
   standalone: true,
-  imports: [OrderBriefComponent, AgentWorkflowComponent, FormsModule, MarkdownPipe, StatusLabelPipe, CategoryLabelPipe],
+  imports: [
+    OrderBriefComponent,
+    AgentWorkflowComponent,
+    FormsModule,
+    NgTemplateOutlet,
+    MarkdownPipe,
+    StatusLabelPipe,
+    CategoryLabelPipe,
+  ],
   templateUrl: './order-detail.component.html',
   host: { style: 'display: contents' },
 })
@@ -34,20 +43,79 @@ export class OrderDetailComponent {
   readonly editCancelled = output<void>();
   readonly saved = output<FormValues>();
 
-  /** Abnahme des Testers: Akzeptanzkriterien und DoD-Punkte dieses Auftrags. */
+  /**
+   * Abnahme des Testers: Akzeptanzkriterien und DoD-Punkte. Der DoD-Punkt „Alle Akzeptanzkriterien …“ zeigt die
+   * Kriterien nochmals; alles noch nicht Erledigte steht zusätzlich unter „Noch zu erledigen“.
+   */
   protected readonly acceptance = computed(() => {
     const checks = this.data().acceptance.filter((check) => check.developmentId === this.order().id);
-    const groups = [
-      { title: 'Akzeptanzkriterien', checks: checks.filter((check) => check.kind === 'criterion') },
-      { title: 'Definition of Done', checks: checks.filter((check) => check.kind === 'done') },
-    ].filter((group) => group.checks.length);
-    const open = checks.filter((check) => check.status === 'open' || check.status === 'unmet').length;
-    const manual = checks.filter((check) => check.status === 'manual').length;
-    return { groups, open, manual, total: checks.length };
+    const criteria = checks.filter((check) => check.kind === 'criterion');
+    const done = checks.filter((check) => check.kind === 'done');
+    const todo = checks.filter((check) => check.status !== 'met');
+    return { criteria, done, todo, total: checks.length, verifying: todo.some((check) => this.isVerifying(check)) };
   });
 
+  constructor() {
+    // Während der Tester prüft, den Stand regelmässig nachladen.
+    effect((onCleanup) => {
+      if (!this.acceptance().verifying) return;
+      const timer = setInterval(() => void this.store.loadProject(this.store.activeProject(), true), 5000);
+      onCleanup(() => clearInterval(timer));
+    });
+  }
+
+  /** Formular für einen Folgeauftrag (nur bei erledigten Aufträgen). */
+  protected readonly followUpOpen = signal(false);
+  protected readonly activeSprintId = computed(
+    () => this.data().sprints.find((sprint) => sprint.status === 'active')?.id ?? null,
+  );
+  /** Vorgänger, auf den sich dieser Auftrag bezieht. */
+  protected readonly previous = computed(() => {
+    const id = this.order().followUpOf;
+    return id ? (this.data().development.find((item) => item.id === id) ?? null) : null;
+  });
+
+  protected async createFollowUp(
+    item: DevelopmentItem,
+    title: string,
+    description: string,
+    sprintId: string,
+  ): Promise<void> {
+    if (!title.trim()) return;
+    const created = await this.orders.followUp(item, {
+      title: title.trim(),
+      description: description.trim(),
+      sprintId: sprintId || null,
+    });
+    if (created) {
+      this.followUpOpen.set(false);
+      this.store.navigate('development', { focus: created });
+    }
+  }
+
+  protected openPrevious(id: string): void {
+    this.store.navigate('development', { focus: id });
+  }
+
+  protected coversCriteria(check: AcceptanceCheck): boolean {
+    return /akzeptanzkriterien/i.test(check.text);
+  }
+
+  protected isVerifying(check: AcceptanceCheck): boolean {
+    return check.status === 'verifying' || check.status === 'checking';
+  }
+
   protected mark(check: AcceptanceCheck): string {
+    if (this.isVerifying(check)) return '…';
     return check.status === 'met' ? '✓' : check.status === 'unmet' ? '✕' : check.status === 'manual' ? '👤' : '○';
+  }
+
+  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck, checked: boolean): Promise<void> {
+    return this.orders.checkPoint(item, check, checked);
+  }
+
+  protected verifyPoints(item: DevelopmentItem, check?: AcceptanceCheck): Promise<void> {
+    return this.orders.verifyPoints(item, check);
   }
 
   protected update(id: string, values: Partial<DevelopmentItem>): Promise<void> {

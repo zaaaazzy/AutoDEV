@@ -1,3 +1,4 @@
+import { humanActionFor, setActionTodo } from './action-todo.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
 
@@ -37,12 +38,48 @@ export function isAgentFailure(output: string): boolean {
   return AGENT_FAILURE_PATTERNS.some((pattern) => pattern.test(tail));
 }
 
+/** Projektordner bzw. Laufwerk war nicht erreichbar – kein Code-Fehler, der Auftrag startet wieder, sobald er da ist. */
+const ENVIRONMENT_PATTERNS = [
+  /Can't access working directory/i,
+  /Path "[^"]+" does not exist/i,
+  /Projektordner nicht gefunden/,
+  /no such file or directory, (?:chdir|uv_cwd|scandir) /i,
+];
+export const ENVIRONMENT_TODO =
+  'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen, der Auftrag startet dann neu';
+
+/** Ein Agent hat wegen einer Projektregel (Do's and Don'ts) abgelehnt: „@@REGEL: <Regel>“. */
+export function ruleRefusal(output: string): string | null {
+  return output.match(/^\s*@@REGEL:\s*(.+)$/m)?.[1]?.trim() || null;
+}
+
+export function isEnvironmentFailure(output: string): boolean {
+  const tail = output.slice(-3000);
+  return ENVIRONMENT_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
 /**
  * Hält den Fehler am Auftrag fest, legt einen Bug-Bericht an und – bei aktivem automatischen Bugfixing –
  * erzeugt sofort einen Behebungsauftrag, der ohne Sprint-Zuweisung vom Worker aufgenommen wird.
  */
 export async function registerFailure(pool: Pool, item: FailedItem, agentName: string, output: string): Promise<void> {
   const detail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
+  // Umgebung (Laufwerk weg) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag, sondern „Aktion notwendig“.
+  const rule = ruleRefusal(output);
+  if (rule || isEnvironmentFailure(detail)) {
+    const todo = rule
+      ? `Projektregel verhindert den Auftrag: ${rule} – Auftrag anpassen oder verwerfen`
+      : ENVIRONMENT_TODO;
+    await pool.query(`UPDATE development_items SET failure = $2, auto_run = FALSE WHERE id = $1`, [
+      item.id,
+      `Agent „${agentName}“ hat angehalten.\n\n**Vermerk:** ${rule ? 'Projektregel' : 'Umgebung'} – ${todo}.\n\n${detail}`,
+    ]);
+    await setActionTodo(pool, item.id, todo.slice(0, 160)).catch(() => undefined);
+    return;
+  }
+  // Wartet der Auftrag auf einen Menschen, heisst er „Aktion notwendig“ statt „fehlgeschlagen“.
+  const todo = humanActionFor(detail);
+  if (todo) await setActionTodo(pool, item.id, todo).catch(() => undefined);
   const auto =
     (
       await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [
@@ -77,12 +114,54 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     title: `Agent „${agentName}“ scheiterte bei „${item.title}“`,
     description: detail,
   });
-  await pool.query('UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE WHERE id = $1', [
+  // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
+  await pool.query(
+    `UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE,
+            analysis_status = CASE WHEN $4 AND analysis_status IS DISTINCT FROM 'running' THEN 'requested' ELSE analysis_status END
+      WHERE id = $1`,
+    [item.id, `Agent „${agentName}“ scheiterte:\n\n${detail}`, bugId, auto],
+  );
+}
+
+/**
+ * Nach der Problemanalyse: Bestätigt sie einen Code-Fehler, wird an einen Behebungsauftrag delegiert, sonst
+ * wartet der Auftrag auf eine Aktion. Beides wird als Vermerk am Auftrag und am Bug festgehalten.
+ */
+export async function delegateAfterAnalysis(
+  pool: Pool,
+  item: FailedItem & { failureBugId: string | null },
+  analysis: { title: string; action: string | null | undefined },
+): Promise<void> {
+  if (!item.failureBugId || item.kind === 'bug') return;
+  const human = typeof analysis.action === 'string';
+  const note = human
+    ? `**Vermerk der Problemanalyse:** kein Code-Fehler – Aktion notwendig: ${analysis.action}. Kein Behebungsauftrag erstellt.`
+    : `**Vermerk der Problemanalyse:** Code-Fehler bestätigt („${analysis.title}“) – an einen Behebungsauftrag delegiert.`;
+  await pool.query(`UPDATE development_items SET failure = COALESCE(failure, '') || E'\n\n' || $2 WHERE id = $1`, [
     item.id,
-    `Agent „${agentName}“ scheiterte:\n\n${detail}`,
-    bugId,
+    note,
   ]);
-  if (auto) await queueBugFix(pool, item, bugId);
+  if (human) return;
+  await pool.query(`UPDATE bugs SET description = description || E'\n\n' || $2, updated_at = NOW() WHERE id = $1`, [
+    item.failureBugId,
+    note,
+  ]);
+  const auto =
+    (
+      await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [
+        item.projectSlug,
+      ])
+    ).rows[0]?.auto ?? true;
+  if (auto) await queueBugFix(pool, item, item.failureBugId);
+}
+
+/** Ist der Projektordner wieder erreichbar, starten Aufträge, die nur darauf gewartet haben, erneut. */
+export async function resumeAfterEnvironment(pool: Pool, project: string): Promise<void> {
+  await pool.query(
+    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, updated_at = NOW()
+      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = $2`,
+    [project, ENVIRONMENT_TODO],
+  );
 }
 
 /** Erzeugt (einmalig) den Behebungsauftrag zu einem Bug; er läuft automatisch, auch ohne Sprint. */
@@ -101,7 +180,7 @@ export async function queueBugFix(pool: Pool, item: FailedItem, bugId: string): 
 /** Nach erfolgreicher Behebung: den blockierten Ursprungsauftrag erneut einplanen (begrenzte Versuche). */
 export async function resumeBlockedByBug(pool: Pool, bugId: string): Promise<void> {
   await pool.query(
-    `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, retry_count = retry_count + 1, updated_at = NOW()
+    `UPDATE development_items d SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
       WHERE d.failure_bug_id = $1 AND d.status = 'blocked' AND d.kind <> 'bug' AND d.retry_count < $2
         AND (SELECT auto_bugfix FROM projects WHERE slug = d.project_slug)`,
     [bugId, MAX_AUTO_RETRIES],

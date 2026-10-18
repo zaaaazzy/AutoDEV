@@ -1,8 +1,9 @@
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
-import { backfillFailures } from './autofix.js';
+import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
+import { loadFollowUpContext } from './follow-up.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { enterOrderBranch, syncSprintToGit } from './git-sync.js';
@@ -163,7 +164,13 @@ export async function runWorkItem(
       item.id,
       options.cwd,
     ).catch(() => []);
-    ctx.projectContext = await loadProjectContext(pool, item.projectSlug);
+    // Folgeauftrag: der Kontext des abgeschlossenen Vorgängers gehört zu jeder Agent-Anweisung.
+    ctx.projectContext = [
+      await loadProjectContext(pool, item.projectSlug),
+      await loadFollowUpContext(pool, item.id).catch(() => ''),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
     ctx.definitionOfDone = (await loadDefinitions(pool, item.projectSlug)).done;
     ctx.criteria = extractCriteria(item.description ?? '');
     const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
@@ -212,6 +219,7 @@ export async function runWorkflow(
       WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.backlog}' AND sprint_id IN (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active')`,
     [options.project],
   );
+  await resumeAfterEnvironment(pool, options.project).catch(() => undefined);
   await backfillFailures(pool, options.project).catch((error) =>
     console.error('Fehler-Nachtrag fehlgeschlagen:', error),
   );

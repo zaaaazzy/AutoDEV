@@ -429,7 +429,7 @@ export const SCHEMA = `
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS drafting_started_at TIMESTAMPTZ;
   ALTER TABLE acceptance_checks DROP CONSTRAINT IF EXISTS acceptance_checks_status_check;
   ALTER TABLE acceptance_checks ADD CONSTRAINT acceptance_checks_status_check
-    CHECK (status IN ('open', 'met', 'unmet', 'manual'));
+    CHECK (status IN ('open', 'met', 'unmet', 'manual', 'verifying', 'checking'));
   -- Aus einem Sprint herausgenommene Aufträge landen unter „Besondere Aufmerksamkeit“.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS removed_from_sprint TEXT;
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS removed_from_sprint_at TIMESTAMPTZ;
@@ -474,4 +474,32 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS doc_revisions_doc_idx ON doc_revisions (doc_id, created_at DESC);
   -- Reihenfolge der Aufträge im Sprint (Kanban); die Agents arbeiten sie in dieser Reihenfolge ab.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS sprint_rank INTEGER;
+  -- Git-Verlauf (Commits und Branches) fürs Dashboard; der Worker liest ihn aus dem Projektordner.
+  CREATE TABLE IF NOT EXISTS project_git_graphs (
+    project_slug TEXT PRIMARY KEY REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    graph JSONB,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  -- Agent-Aufgaben: gespeicherte Anweisungen, die mit einem Klick an den Assistenten gehen.
+  CREATE TABLE IF NOT EXISTS agent_tasks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    created_by TEXT,
+    run_count INTEGER NOT NULL DEFAULT 0,
+    last_run_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS agent_tasks_project_idx ON agent_tasks (project_slug);
+  -- Wer eine Chat-Anfrage oder Agent-Aufgabe übernimmt (leer = allgemeiner Assistent).
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES agents(id) ON DELETE SET NULL;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS agent_name TEXT;
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES agents(id) ON DELETE SET NULL;
+  -- Aktion notwendig: kurz, was ein Mensch tun muss (null = nichts zu tun).
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS action_todo TEXT;
+  -- Folgeauftrag: bezieht sich auf einen abgeschlossenen Auftrag, dessen Kontext der Entwickler mitbekommt.
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS follow_up_of UUID REFERENCES development_items(id) ON DELETE SET NULL;
+  -- Verweise einer Chat-Nachricht (@auftrag/…, @git/…), vom Server geprüft.
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS refs JSONB NOT NULL DEFAULT '[]'::jsonb;
 `;

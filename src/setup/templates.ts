@@ -271,7 +271,25 @@ volumes:
     description: 'Vue-Fullstack-Framework.',
     group: 'fullstack',
     stack: ['Nuxt', 'Vue', 'TypeScript'],
-    commands: [['npx', '-y', 'nuxi@latest', 'init', '.', '--packageManager', 'npm', '--gitInit', 'false', '--force']],
+    // Ohne Terminal verlangt nuxi eine Vorlage; npm 10 scheitert an Nuxts Peer-Abhängigkeiten ohne --legacy-peer-deps.
+    commands: [
+      [
+        'npx',
+        '-y',
+        'nuxi@latest',
+        'init',
+        '.',
+        '--template',
+        'minimal',
+        '--packageManager',
+        'npm',
+        '--gitInit',
+        'false',
+        '--no-install',
+        '--force',
+      ],
+      ['npm', 'install', '--legacy-peer-deps'],
+    ],
   },
   {
     id: 'nestjs',

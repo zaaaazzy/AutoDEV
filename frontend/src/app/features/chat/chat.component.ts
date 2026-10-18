@@ -1,14 +1,15 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { ChatMessage } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
+import { AgentTasksComponent } from './agent-tasks.component.js';
+import { ChatComposerComponent, type ComposedMessage } from './chat-composer.component.js';
 
 @Component({
   selector: 'app-chat',
   standalone: true,
-  imports: [FormsModule, StepResultComponent],
+  imports: [StepResultComponent, AgentTasksComponent, ChatComposerComponent],
   templateUrl: './chat.component.html',
   host: { style: 'display: contents' },
 })
@@ -28,7 +29,8 @@ export class ChatComponent {
   protected readonly chatProgressShown = computed(() =>
     this.chat().some((message) => message.role === 'assistant' && message.status === 'processing'),
   );
-  protected chatInput = '';
+  /** Wer die nächste Anfrage übernimmt ('' = allgemeiner Assistent); per „/“ in der Eingabe gewählt. */
+  protected readonly agentId = signal('');
 
   constructor() {
     effect((onCleanup) => {
@@ -49,14 +51,16 @@ export class ChatComponent {
     });
   }
 
-  protected async send(): Promise<void> {
-    const content = this.chatInput.trim();
-    if (!content || !this.store.activeProject()) return;
-    this.chatInput = '';
+  protected async send(message: ComposedMessage, composer: ChatComposerComponent): Promise<void> {
+    if (!this.store.activeProject()) return;
     try {
-      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/chat`, { content });
+      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/chat`, {
+        content: message.content,
+        agentId: this.agentId() || null,
+        references: message.references.map(({ type, id }) => ({ type, id })),
+      });
     } catch (error) {
-      this.chatInput = content;
+      composer.restore(message);
       this.store.notice.set(error instanceof Error ? error.message : 'Nachricht konnte nicht gesendet werden.');
     }
   }

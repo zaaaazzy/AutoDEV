@@ -38,6 +38,14 @@ export class MarkdownPipe implements PipeTransform {
         codeLines.push(line);
         continue;
       }
+      // Befehlszeilen („$ npm test“) als Code hervorheben.
+      const command = line.match(/^\$ (.+)$/);
+      if (command) {
+        flushParagraph();
+        flushList();
+        blocks.push(`<p class="cmd-line"><code>$ ${this.escape(command[1]!)}</code></p>`);
+        continue;
+      }
       const heading = line.match(/^(#{1,6})\s+(.*)$/);
       if (heading) {
         flushParagraph();
@@ -89,8 +97,41 @@ export class MarkdownPipe implements PipeTransform {
       .replace(/`([^`]+)`/g, (_match, value: string) => `@@CODE${code.push(value) - 1}@@`)
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,:;]|$)/g, '$1<em>$2</em>')
+      .replace(/^\[ \] /, '☐ ')
+      .replace(/^\[x\] /i, '☑ ')
+      // Links innerhalb der App (z. B. #development/<id>) sind klickbar, externe bleiben reiner Text.
+      .replace(/\[([^\]]+)\]\((#[a-z]+(?:\/[0-9a-f-]{36})?)\)/gi, '<a class="doc-link app-link" href="$2">$1</a>')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="doc-link">$1<span class="doc-link-url"> ($2)</span></span>');
-    return html.replace(/@@CODE(\d+)@@/g, (_match, index: string) => `<code>${code[Number(index)]}</code>`);
+    return this.highlight(html).replace(
+      /@@CODE(\d+)@@/g,
+      (_match, index: string) => `<code>${code[Number(index)]}</code>`,
+    );
+  }
+
+  /** Links (http/https) klickbar, Dateipfade als Code – nur im Text, nie in bereits erzeugten Tags oder Links. */
+  private highlight(html: string): string {
+    let insideLink = false;
+    return html
+      .split(/(<[^>]+>)/)
+      .map((part) => {
+        if (part.startsWith('<')) {
+          if (/^<a\b/i.test(part)) insideLink = true;
+          if (/^<\/a>/i.test(part)) insideLink = false;
+          return part;
+        }
+        if (insideLink) return part;
+        return part
+          .replace(
+            /\bhttps?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g,
+            (url) => `<a class="ext-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
+          )
+          .replace(
+            /(^|[\s(„"])((?:[\w.-]+\/)+[\w.-]+\.[a-z][a-z0-9]{0,5})(?=[\s).,;:!?“"]|$)/gi,
+            (_match, before: string, path: string) =>
+              /^https?:/i.test(path) ? `${before}${path}` : `${before}<code class="path">${path}</code>`,
+          );
+      })
+      .join('');
   }
 
   private escape(value: string): string {

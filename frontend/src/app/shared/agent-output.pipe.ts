@@ -1,5 +1,6 @@
 import { Pipe, type PipeTransform } from '@angular/core';
 import { MarkdownPipe } from './markdown.pipe.js';
+import { splitTestSteps, type TestStep } from './test-output.js';
 
 const escape = (value: string): string =>
   value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
@@ -18,8 +19,30 @@ const stripDuration = (line: string): string => line.replace(/\s+…\s*\d+\s*m?s
 export class AgentOutputPipe implements PipeTransform {
   private readonly markdown = new MarkdownPipe();
 
+  /** Testläufe als kompakte Karten (Befehl, Status, Kurzfazit), der Rest als Agent-Transkript bzw. Markdown. */
   transform(output: string | null | undefined): string {
-    const lines = (output ?? '').split(/\r?\n/);
+    const html = splitTestSteps(output ?? '')
+      .map((part) => (typeof part === 'string' ? this.transcript(part) : this.testCard(part)))
+      .filter((part) => part && !part.startsWith('<p class="muted">Keine Inhalte'))
+      .join('');
+    return html || '<p class="muted">Keine Inhalte vorhanden.</p>';
+  }
+
+  private testCard(step: TestStep): string {
+    const ok = step.status === 'passed';
+    return (
+      `<div class="test-step ${ok ? 'passed' : 'failed'}"><span class="test-icon" aria-hidden="true">${ok ? '✓' : '✕'}</span>` +
+      `<div class="test-body"><div class="test-head"><code>${escape(step.command)}</code>` +
+      `<span class="test-summary">${escape(step.summary)}</span></div>` +
+      (step.raw
+        ? `<details class="test-raw"><summary>Ausgabe</summary><pre>${escape(step.raw.slice(-6000))}</pre></details>`
+        : '') +
+      '</div></div>'
+    );
+  }
+
+  private transcript(output: string): string {
+    const lines = output.split(/\r?\n/);
     const parts: string[] = [];
     let text: string[] = [];
     const flushText = (): void => {
@@ -59,7 +82,7 @@ export class AgentOutputPipe implements PipeTransform {
       parts.push(this.card(call));
     }
     flushText();
-    return parts.join('') || '<p class="muted">Keine Inhalte vorhanden.</p>';
+    return parts.join('');
   }
 
   private card(call: ToolCall): string {

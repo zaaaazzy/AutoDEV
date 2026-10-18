@@ -62,6 +62,12 @@ export class DocsComponent {
   ];
 
   constructor() {
+    // Link auf ein Dokument (#docs/<id>, z. B. „ToDo im Sprintbericht“): dieses Dokument öffnen.
+    effect(() => {
+      const id = this.store.focusId();
+      const doc = id ? this.data().docs.find((entry) => entry.id === id) : undefined;
+      if (doc) untracked(() => this.select(doc));
+    });
     effect(() => {
       const docs = this.data().docs;
       untracked(() => {

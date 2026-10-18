@@ -77,6 +77,10 @@ export interface DevelopmentItem extends Estimate {
   retryCount?: number;
   failure?: string | null;
   failureBugId?: string | null;
+  /** Aktion notwendig: in wenigen Worten, was ein Mensch tun muss (sonst leer). */
+  actionTodo?: string | null;
+  /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
+  followUpOf?: string | null;
   fixStatus?: string | null;
   /** Name des Sprints, aus dem der Auftrag herausgenommen wurde. */
   /** Reihenfolge im Sprint (Kanban). */
@@ -324,7 +328,8 @@ export interface AcceptanceCheck {
   kind: 'criterion' | 'done';
   position: number;
   text: string;
-  status: 'open' | 'met' | 'unmet' | 'manual';
+  /** verifying = Agent-Prüfung angefragt, checking = Agent prüft gerade. */
+  status: 'open' | 'met' | 'unmet' | 'manual' | 'verifying' | 'checking';
   note: string | null;
   checkedAt: string | null;
 }
@@ -381,5 +386,10 @@ export interface ChatMessage {
   events?: StepEvent[];
   /** Rückfrage des Assistenten, auf die er eine Antwort erwartet. */
   question?: string | null;
+  /** Agent, der die Anfrage übernimmt bzw. beantwortet hat (leer = allgemeiner Assistent). */
+  agentId?: string | null;
+  agentName?: string | null;
+  /** Verweise der Nachricht (@auftrag/…, @git/…), vom Server geprüft. */
+  references?: { type: string; id: string; label: string }[];
   createdAt: string;
 }

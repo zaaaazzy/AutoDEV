@@ -9,6 +9,7 @@ interface OrderRow {
   kind: string;
   status: string;
   effortHours: number | null;
+  actionTodo: string | null;
 }
 
 export interface SprintReport {
@@ -17,6 +18,8 @@ export interface SprintReport {
   implemented: { id: string; title: string; kind: string; effortHours: number | null }[];
   missing: { id: string; title: string; status: string }[];
   problems: { type: string; title: string; detail: string }[];
+  /** Aufträge, bei denen ein Mensch etwas tun muss (Kapitel „ToDo“). */
+  todos?: { id: string; title: string; todo: string }[];
 }
 
 const STATUS_DE: Record<string, string> = {
@@ -24,6 +27,7 @@ const STATUS_DE: Record<string, string> = {
   planned: 'Geplant',
   in_progress: 'In Arbeit',
   blocked: 'Blockiert',
+  action: 'Aktion notwendig',
   done: 'Erledigt',
 };
 
@@ -33,6 +37,11 @@ function toMarkdown(name: string, goal: string, report: SprintReport): string {
     `# Sprint-Dokumentation: ${name}`,
     goal ? `**Sprintziel:** ${goal}` : '',
     report.summary,
+    '## ToDo',
+    list(
+      (report.todos ?? []).map((item) => `- [ ] **${item.todo}** – [${item.title}](#development/${item.id})`),
+      '_Keine offenen Aktionen._',
+    ),
     '## Umgesetzt (Featureliste)',
     list(
       report.implemented.map((item) => `- ${item.kind === 'bug' ? '🐞 ' : ''}${item.title}`),
@@ -70,7 +79,7 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     return null;
   }
   const orders = await pool.query<OrderRow>(
-    `SELECT id, title, kind, status, effort_hours AS "effortHours" FROM development_items
+    `SELECT id, title, kind, status, effort_hours AS "effortHours", action_todo AS "actionTodo" FROM development_items
       WHERE sprint_id = $1 ORDER BY created_at`,
     [sprintId],
   );
@@ -99,9 +108,11 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     problems.push({
       type: 'blocked',
       title: order.title,
-      detail: failure
-        ? `Agent „${failure.agentName}“ ist fehlgeschlagen: ${failure.output.trim().slice(-300)}`
-        : 'Auftrag ist blockiert.',
+      detail: order.actionTodo
+        ? `Aktion notwendig: ${order.actionTodo}`
+        : failure
+          ? `Agent „${failure.agentName}“ ist fehlgeschlagen: ${failure.output.trim().slice(-300)}`
+          : 'Auftrag ist blockiert.',
     });
   }
   for (const bug of bugs.rows) {
@@ -120,8 +131,15 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     sprintId,
     summary: `${done.length} von ${orders.rows.length} Aufträgen umgesetzt (${percent} %). ${open.length} offen, ${problems.length} Problem(e) dokumentiert.`,
     implemented: done.map(({ id, title, kind, effortHours }) => ({ id, title, kind, effortHours })),
-    missing: open.map(({ id, title, status }) => ({ id, title, status })),
+    missing: open.map(({ id, title, status, actionTodo }) => ({
+      id,
+      title,
+      status: status === 'blocked' && actionTodo ? 'action' : status,
+    })),
     problems,
+    todos: orders.rows
+      .filter((order) => order.actionTodo)
+      .map((order) => ({ id: order.id, title: order.title, todo: order.actionTodo! })),
   };
   await pool.query(
     `INSERT INTO sprint_reports (sprint_id, project_slug, summary, implemented, missing, problems)

@@ -1,18 +1,22 @@
 @if (store.ready()) {
   <section class="summary-grid" aria-label="Projektkennzahlen">
-    <a class="summary-card" href="#development" (click)="store.navigate('development')">
+    <a class="summary-card" href="#development" (click)="$event.preventDefault(); store.navigate('development')">
       <strong>{{ store.openDevelopmentCount() }}</strong>
       <span>Offene Aufträge</span>
     </a>
-    <a class="summary-card" href="#ideation" (click)="store.navigate('ideation')">
+    <a class="summary-card" href="#ideation" (click)="$event.preventDefault(); store.navigate('ideation')">
       <strong>{{ openIdeasCount() }}</strong>
       <span>Offene Ideen</span>
     </a>
-    <a class="summary-card" href="#bugs" (click)="store.navigate('bugs')">
+    <a
+      class="summary-card"
+      href="#bugs"
+      (click)="$event.preventDefault(); store.navigate('bugs', { filters: { status: ['Offen', 'In Arbeit'] } })"
+    >
       <strong>{{ store.openBugCount() }}</strong>
       <span>Offene Bugs</span>
     </a>
-    <a class="summary-card" href="#runs" (click)="store.navigate('runs')">
+    <a class="summary-card" href="#runs" (click)="$event.preventDefault(); store.navigate('runs')">
       <strong>{{ data().stats?.testRuns?.total ?? data().runs.length }}</strong>
       <span>Testläufe</span>
     </a>
@@ -24,43 +28,46 @@
         <h2>Projektübersicht</h2>
         <span class="muted">{{ store.currentProject()?.repository }}</span>
       </div>
-      <div class="metric-grid">
-        <div>
-          <span>Aufträge erledigt</span>
-          <strong>{{ data().stats?.orders?.['done'] ?? 0 }} / {{ orderTotal() }}</strong>
-        </div>
-        <div>
-          <span>Test-Erfolgsquote</span>
-          <strong>{{
-            data().stats?.testRuns?.passRate === null || data().stats?.testRuns?.passRate === undefined
-              ? '–'
-              : data().stats?.testRuns?.passRate + '%'
-          }}</strong>
-          <small class="muted">{{
-            data().stats?.testRuns?.total ? 'aus den letzten Testläufen' : 'noch keine Testläufe'
-          }}</small>
-        </div>
-        <div>
-          <span>Agent-Laufzeit (tatsächlich)</span>
+      <div class="share-stack">
+        <app-share-bar
+          label="Aufträge"
+          [link]="{ section: 'development' }"
+          [segments]="orderShares()"
+          [showTotal]="true"
+        />
+        <app-share-bar label="Ideen" [link]="{ section: 'ideation' }" [segments]="ideaShares()" [showTotal]="true" />
+        <app-share-bar label="Bugs" [link]="{ section: 'bugs' }" [segments]="bugShares()" [showTotal]="true" />
+        <app-share-bar
+          [label]="'Testläufe (letzte ' + recentRuns + ')'"
+          [link]="{ section: 'runs' }"
+          [segments]="testShares()"
+          [showTotal]="true"
+        />
+        <app-share-bar
+          label="Agent-Einsätze"
+          [link]="{ section: 'agents' }"
+          [segments]="agentShares()"
+          [showTotal]="true"
+        />
+      </div>
+      <div class="metric-grid metric-links">
+        <a href="#stats" (click)="$event.preventDefault(); store.navigate('stats')">
+          <span>Agent-Laufzeit</span>
           <strong>{{ data().stats?.actual?.hours ?? 0 | hours }}</strong>
-          <small class="muted">Schätzung: {{ data().stats?.effort?.plannedHours | hours }}</small>
-        </div>
-        <div>
-          <span>Tokens verbraucht</span>
+          <small class="muted">geschätzt {{ data().stats?.effort?.plannedHours | hours }}</small>
+        </a>
+        <a href="#stats" (click)="$event.preventDefault(); store.navigate('stats')">
+          <span>Tokens</span>
           <strong>{{ data().stats?.actual?.tokens ?? 0 | localeNumber }}</strong>
-          <small class="muted">Schätzung: {{ data().stats?.effort?.tokens | localeNumber }}</small>
-        </div>
-        <div>
+          <small class="muted">geschätzt {{ data().stats?.effort?.tokens | localeNumber }}</small>
+        </a>
+        <a href="#stats" (click)="$event.preventDefault(); store.navigate('stats')">
           <span>API-Kosten</span>
           <strong>{{
             data().stats?.actual?.costUsd ? (data().stats?.actual?.costUsd | localeNumber) + ' $' : '–'
           }}</strong>
-        </div>
-        <div>
-          <span>Agent-Einsätze</span>
-          <strong>{{ agentRuns() }}</strong>
-          <small class="muted">davon {{ agentFailures() }} gescheitert</small>
-        </div>
+          <small class="muted">alle Agent-Läufe</small>
+        </a>
       </div>
     </article>
     <article class="panel">
@@ -78,18 +85,17 @@
     <article class="panel">
       <div class="section-heading">
         <h2>Aktiver Sprint</h2>
-        <a href="#sprints" (click)="store.navigate('sprints')">Alle Sprints</a>
+        <a href="#sprints" (click)="$event.preventDefault(); store.navigate('sprints')">Alle Sprints</a>
       </div>
       @if (activeSprint(); as sprint) {
-        <h3>{{ sprint.name }}</h3>
+        <app-share-bar
+          [label]="sprint.name"
+          [link]="{ section: 'development', filters: { sprint: [sprint.name] } }"
+          [segments]="sprintShares()"
+          [showTotal]="true"
+          suffix="Aufträge"
+        />
         <p class="muted">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
-        <div class="progress">
-          <span [style.width.%]="data().stats?.sprint?.percent ?? 0"> </span>
-        </div>
-        <p>
-          {{ data().stats?.sprint?.done ?? 0 }} / {{ data().stats?.sprint?.total ?? 0 }} erledigt ·
-          {{ data().stats?.sprint?.percent ?? 0 }}%
-        </p>
         <details>
           <summary>Burndown-Verlauf</summary>
           @for (point of data().stats?.sprint?.burndown ?? []; track point.day) {
@@ -111,88 +117,103 @@
     <article class="panel">
       <div class="section-heading">
         <h2>Letzte Testläufe</h2>
-        <a href="#runs" (click)="store.navigate('runs')">Alle Testläufe</a>
+        <a href="#runs" (click)="$event.preventDefault(); store.navigate('runs')">Alle Testläufe</a>
       </div>
       @for (run of data().runs.slice(0, 5); track run.id) {
-        <div class="list-row">
+        <button type="button" class="list-row list-link" (click)="openRuns(run.status)">
           <span class="status" [ngClass]="run.status | statusClass">{{ run.status | statusLabel }}</span>
           <span>{{ run.startedAt | dateTime }}</span>
           <span>{{ run.branch || 'ohne Branch' }}</span>
-        </div>
+        </button>
       } @empty {
         <p class="empty-state">Noch keine Testläufe vorhanden.</p>
       }
     </article>
     <app-coverage-panel />
+    <app-git-graph-panel />
     <article class="panel">
       <div class="section-heading">
-        <h2>Aufträge nach Status</h2>
+        <h2>Offene Arbeit</h2>
       </div>
-      <div class="status-list">
-        @for (status of developmentStatuses; track status) {
-          <div class="list-row">
-            <span>{{ status | statusLabel }}</span>
-            <strong>{{ data().stats?.orders?.[status] ?? 0 }}</strong>
-          </div>
+      <div class="share-stack">
+        <app-share-bar
+          label="Offene Bugs nach Schweregrad"
+          [link]="{ section: 'bugs', filters: { status: ['Offen', 'In Arbeit'] } }"
+          [segments]="severityShares()"
+          [showTotal]="true"
+        />
+        <app-share-bar
+          label="Offene Aufträge nach Priorität"
+          [link]="{ section: 'development' }"
+          [segments]="priorityShares()"
+          [showTotal]="true"
+        />
+        <app-share-bar
+          label="Aufträge nach Kategorie"
+          [link]="{ section: 'development' }"
+          [segments]="categoryShares()"
+          [showTotal]="true"
+        />
+      </div>
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <h2>Sprints</h2>
+        <a href="#sprints" (click)="$event.preventDefault(); store.navigate('sprints')">Alle Sprints</a>
+      </div>
+      <div class="share-legend static">
+        @for (entry of legend; track entry.label) {
+          <span class="share-key"><span [class]="'share-dot tone-' + entry.tone"></span>{{ entry.label }}</span>
+        }
+      </div>
+      <div class="share-stack compact">
+        @for (row of sprintRows(); track row.sprint.id) {
+          <app-share-bar
+            [label]="row.sprint.name"
+            [link]="{ section: 'development', filters: { sprint: [row.sprint.name] } }"
+            [segments]="row.segments"
+            [legend]="false"
+            [showTotal]="true"
+          />
+        } @empty {
+          <p class="empty-state">Noch keine Sprints vorhanden.</p>
         }
       </div>
     </article>
     <article class="panel">
       <div class="section-heading">
-        <h2>Offene Bugs nach Schweregrad</h2>
-      </div>
-      @for (severity of severityLevels; track severity) {
-        <div class="bar-row">
-          <span>{{ severity | severityLabel }}</span>
-          <div class="bar-track">
-            <span [style.width.%]="barWidth(data().stats?.openBugsBySeverity?.[severity] ?? 0, maxSeverityCount())">
-            </span>
-          </div>
-          <strong>{{ data().stats?.openBugsBySeverity?.[severity] ?? 0 }}</strong>
-        </div>
-      }
-    </article>
-    <article class="panel">
-      <div class="section-heading">
-        <h2>Sprint-Velocity</h2>
-      </div>
-      @for (sprint of data().stats?.velocity ?? []; track sprint.name) {
-        <div class="bar-row">
-          <span>{{ sprint.name }}</span>
-          <div class="bar-track">
-            <span [style.width.%]="barWidth(sprint.done, maxVelocity())"> </span>
-          </div>
-          <strong>{{ sprint.done }}/{{ sprint.total }}</strong>
-        </div>
-      } @empty {
-        <p class="empty-state">Noch keine abgeschlossenen Sprints vorhanden.</p>
-      }
-    </article>
-    <article class="panel">
-      <div class="section-heading">
         <h2>Agent-Erfolg</h2>
+        <a href="#agents" (click)="$event.preventDefault(); store.navigate('agents')">Alle Agents</a>
       </div>
-      @for (agent of data().stats?.agents ?? []; track agent.agent) {
-        <div class="bar-row">
-          <span>{{ agent.agent }}</span>
-          <div class="bar-track">
-            <span [style.width.%]="barWidth(agent.passed, maxAgentRuns())"> </span>
-          </div>
-          <strong>{{ agent.passed }}/{{ agent.passed + agent.failed + agent.skipped }}</strong>
-        </div>
-      } @empty {
-        <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p>
-      }
+      <div class="share-legend static">
+        <span class="share-key"><span class="share-dot tone-ok"></span>Bestanden</span>
+        <span class="share-key"><span class="share-dot tone-bad"></span>Fehlgeschlagen</span>
+        <span class="share-key"><span class="share-dot tone-neutral"></span>Übersprungen</span>
+      </div>
+      <div class="share-stack compact">
+        @for (row of agentRows(); track row.name) {
+          <app-share-bar
+            [label]="row.name"
+            [link]="row.link"
+            [segments]="row.segments"
+            [legend]="false"
+            [showTotal]="true"
+          />
+        } @empty {
+          <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p>
+        }
+      </div>
     </article>
-    <article class="panel wide-panel">
+    <article class="panel">
       <div class="section-heading">
         <h2>Offene Ideen nach Nutzen und Kosten</h2>
+        <a href="#ideation" (click)="$event.preventDefault(); store.navigate('ideation')">Alle Ideen</a>
       </div>
       @for (idea of ratedIdeas(); track idea.id) {
-        <div class="list-row">
+        <button type="button" class="list-row list-link" (click)="store.navigate('ideation')">
           <strong>{{ idea.title }}</strong>
           <span>Nutzen {{ idea.benefit }}/10 · Kosten {{ idea.cost }}/10</span>
-        </div>
+        </button>
       } @empty {
         <p class="empty-state">Keine offenen, bewerteten Ideen.</p>
       }

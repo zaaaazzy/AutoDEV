@@ -1,5 +1,5 @@
 import { NgClass } from '@angular/common';
-import { Component, inject, input, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import type { SortingState } from '@tanstack/angular-table';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -20,6 +20,11 @@ import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 
 const PRIORITY_RANK = ['low', 'medium', 'high'];
+
+/** Blockiert, aber nur ein Mensch kann weiterhelfen: „Aktion notwendig“ statt „Blockiert“. */
+export function orderStatusLabel(item: DevelopmentItem): string {
+  return item.actionTodo && item.status === 'blocked' ? 'Aktion notwendig' : statusLabel(item.status);
+}
 
 /**
  * Auftragsliste mit aufklappbarer Detail- und Agent-Ansicht. Dieselbe Komponente nutzen die Auftragsseite
@@ -44,6 +49,8 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
 export class OrderTableComponent {
   private readonly orders = inject(OrderService);
   private readonly store = inject(ProjectStore);
+  /** Filter aus einem Dashboard-Link (z. B. Status „Blockiert“). */
+  protected readonly linkFilters = computed(() => this.store.filtersFor('development'));
 
   readonly items = input.required<DevelopmentItem[]>();
   readonly emptyText = input('Keine Aufträge.');
@@ -52,6 +59,15 @@ export class OrderTableComponent {
   readonly agentsOpen = input(false);
 
   protected readonly openOrder = signal<string | null>(null);
+  protected readonly statusText = orderStatusLabel;
+
+  constructor() {
+    // Link auf einen Auftrag (#development/<id>): Zeile aufklappen.
+    effect(() => {
+      const id = this.store.focusId();
+      if (id && this.items().some((item) => item.id === id)) untracked(() => this.openOrder.set(id));
+    });
+  }
   protected readonly orderEditing = signal<string | null>(null);
   protected readonly orderId = (item: DevelopmentItem): string => item.id;
   protected readonly columns: DataColumn<DevelopmentItem>[] = [
@@ -59,7 +75,7 @@ export class OrderTableComponent {
     {
       id: 'status',
       header: 'Status',
-      value: (item) => statusLabel(item.status),
+      value: (item) => orderStatusLabel(item),
       sortValue: (item) => DEVELOPMENT_STATUSES.indexOf(item.status),
     },
     {

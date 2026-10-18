@@ -7,6 +7,7 @@ import { type DevLogAuth, registerLoginRoutes, registerSecurityRoutes, requireCr
 import { registerBoardRoutes } from './board.js';
 import { registerBugRoutes } from './bugs.js';
 import { registerChatRoutes } from './chat-routes.js';
+import { registerAgentTaskRoutes } from './agent-tasks.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
 import { registerCoverageRoutes } from './coverage.js';
@@ -83,6 +84,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerReportRoutes(app, pool);
   registerStatsRoutes(app, pool);
   registerChatRoutes(app, pool);
+  registerAgentTaskRoutes(app, pool);
   registerWorkerRoutes(app, pool);
   registerPushRoutes(app, pool);
   registerUserRoutes(app, pool, auth);

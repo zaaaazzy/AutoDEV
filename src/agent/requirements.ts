@@ -1,6 +1,6 @@
 import { systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
-import { loadProjectContext, withProjectContext } from '../core/project-context.js';
+import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../api/bugs.js';
@@ -72,13 +72,20 @@ export async function runAuthorAgent(
   onProgress?: (message: string) => void,
   /** Setzt eine frühere Claude-Sitzung mit einer kurzen Nachricht fort (nur Claude-CLI, sonst voller Prompt). */
   resume?: { sessionId: string; prompt: string },
+  /** Vom Nutzer gewählter Agent des Projekts (Name, Beschreibung, Modell); Rechte bleiben die der Rolle `role`. */
+  agentId?: string | null,
 ): Promise<{ exitCode: number; output: string; sessionId?: string }> {
   const author = (
-    await pool.query<{ instructions: string; command: string[] | null }>(
-      `SELECT instructions, command FROM agents
-      WHERE project_slug = $1 AND role = $2 AND enabled ORDER BY position LIMIT 1`,
-      [options.project, role],
-    )
+    agentId
+      ? await pool.query<{ instructions: string; command: string[] | null }>(
+          `SELECT instructions, command FROM agents WHERE project_slug = $1 AND id = $2`,
+          [options.project, agentId],
+        )
+      : await pool.query<{ instructions: string; command: string[] | null }>(
+          `SELECT instructions, command FROM agents
+          WHERE project_slug = $1 AND role = $2 AND enabled ORDER BY position LIMIT 1`,
+          [options.project, role],
+        )
   ).rows[0];
   const prompt = withProjectContext(
     await loadProjectContext(pool, options.project),
@@ -89,7 +96,12 @@ export async function runAuthorAgent(
     : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
   const groups = await loadPermissionGroups(pool, options.project);
   const command = configured && withAssistantPermissions(configured, role, undefined, groups);
-  const resuming = resume && command && isClaudeCommand(command) ? resume : undefined;
+  // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
+  const rules = resume ? await loadProjectRules(pool, options.project) : '';
+  const resuming =
+    resume && command && isClaudeCommand(command)
+      ? { ...resume, prompt: rules ? `${rules}\n\n${resume.prompt}` : resume.prompt }
+      : undefined;
   try {
     const result = command
       ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {

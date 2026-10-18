@@ -13,9 +13,11 @@ import { projectFolderError } from '../core/validation.js';
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
 import { syncFavicon } from './favicon.js';
+import { syncGitGraph } from './git-graph.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
+import { verifyAcceptance } from './verify-acceptance.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
@@ -28,7 +30,10 @@ export function resolveProjectScope(environment: NodeJS.ProcessEnv, installDir: 
     const line = readFileSync(resolve(installDir, '.env'), 'utf8')
       .split(/\r?\n/)
       .find((entry) => entry.startsWith('DEV_LOG_PROJECT_ROOTS='));
-    const value = line?.slice('DEV_LOG_PROJECT_ROOTS='.length).trim().replace(/^["']|["']$/g, '');
+    const value = line
+      ?.slice('DEV_LOG_PROJECT_ROOTS='.length)
+      .trim()
+      .replace(/^["']|["']$/g, '');
     if (value) return value;
   } catch {
     // keine .env – Vorgabe unten
@@ -111,6 +116,10 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
 async function recoverInterruptedRuns(pool: Pool): Promise<void> {
+  // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
+  await pool
+    .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
+    .catch(() => undefined);
   const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
     `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`,
   );
@@ -185,9 +194,18 @@ async function main(): Promise<void> {
     void publishSystemAgents(pool).catch(() => undefined);
     // Favicons der Projekte alle 5 Minuten abgleichen (nur bei Änderung wird gespeichert).
     let faviconCheck = 0;
+    // Git-Verlauf fürs Dashboard jede Minute.
+    let gitCheck = 0;
     const heartbeat = setInterval(() => {
       beat();
       void publishSystemAgents(pool).catch(() => undefined);
+      if (Date.now() - gitCheck > 60_000) {
+        gitCheck = Date.now();
+        for (const target of chatTargets) {
+          if (target.problem) continue;
+          void syncGitGraph(pool, target.options.project, target.options.cwd).catch(() => undefined);
+        }
+      }
       if (Date.now() - faviconCheck > 5 * 60_000) {
         faviconCheck = Date.now();
         for (const target of chatTargets) {
@@ -246,6 +264,7 @@ async function main(): Promise<void> {
         if (analysisActive.has(slug)) continue;
         analysisActive.add(slug);
         void analyzeBlocked(pool, target.options)
+          .then((count) => (count ? count : verifyAcceptance(pool, target.options)))
           .then(() => loggedErrors.delete(`analysis:${slug}`))
           .catch((error: unknown) =>
             logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`),

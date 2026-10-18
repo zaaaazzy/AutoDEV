@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOllamaAgent } from './ollama-agent.js';
-import { splitQuestion } from './chat.js';
+import { splitQuestion, buildChatPrompt } from './chat.js';
 
 test('reports concrete tool activity through the progress callback', async () => {
   const progress: string[] = [];
@@ -39,4 +39,15 @@ test('splits a follow-up question from the assistant answer', () => {
     question: null,
   });
   assert.deepEqual(splitQuestion('@@FRAGE: Welcher Port?'), { text: 'Welcher Port?', question: 'Welcher Port?' });
+});
+
+test('Gewählter Agent übernimmt mit Bezeichnung und Beschreibung', () => {
+  const prompt = buildChatPrompt([{ role: 'user', content: 'Prüfe die Tests' }], {
+    name: 'Tester',
+    role: 'tester',
+    instructions: 'Teste gründlich, ändere keinen Code.',
+  });
+  assert.match(prompt, /als Agent „Tester“/);
+  assert.match(prompt, /Teste gründlich, ändere keinen Code\./);
+  assert.match(buildChatPrompt([]), /allgemeine Assistent/);
 });

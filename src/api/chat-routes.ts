@@ -1,9 +1,11 @@
 import type { Express } from 'express';
 import type { Pool } from 'pg';
-import { isRecord, parseProjectSlug } from '../core/validation.js';
+import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
+import { parseReferences, resolveReferences } from '../agent/chat-references.js';
 
 const MAX_MESSAGE_CHARS = 4000;
-const COLUMNS = `m.id, m.role, m.content, m.status, m.events, m.question, m.created_at AS "createdAt"`;
+const COLUMNS = `m.id, m.role, m.content, m.status, m.events, m.question, m.agent_id AS "agentId",
+  m.agent_name AS "agentName", m.refs AS "references", m.created_at AS "createdAt"`;
 
 async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
   return (
@@ -71,10 +73,32 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
           .status(400)
           .json({ message: `Nachricht erforderlich (max. ${MAX_MESSAGE_CHARS} Zeichen).` });
       }
+      // Optional: ein Agent des Projekts übernimmt die Anfrage (sonst der allgemeine Assistent).
+      const agentId = isRecord(request.body) && isUuid(request.body.agentId) ? request.body.agentId : null;
+      const agent = agentId
+        ? (
+            await pool.query<{ name: string }>('SELECT name FROM agents WHERE id = $1 AND project_slug = $2', [
+              agentId,
+              slug,
+            ])
+          ).rows[0]
+        : undefined;
+      if (agentId && !agent) return void response.status(400).json({ message: 'Agent gehört nicht zum Projekt.' });
+      const requested = parseReferences(isRecord(request.body) ? request.body.references : undefined);
+      if (typeof requested === 'string') return void response.status(400).json({ message: requested });
+      const references = await resolveReferences(pool, slug, requested);
+      if (!references) return void response.status(400).json({ message: 'Ein Verweis gehört nicht zum Projekt.' });
       const result = await pool.query(
-        `INSERT INTO chat_messages (project_slug, role, content, status)
-         SELECT slug, 'user', $2, 'pending' FROM projects WHERE slug = $1 RETURNING id, role, content, status, created_at AS "createdAt"`,
-        [slug, content],
+        `INSERT INTO chat_messages (project_slug, role, content, status, agent_id, agent_name, refs)
+         SELECT slug, 'user', $2, 'pending', $3, $4, $5::jsonb FROM projects WHERE slug = $1
+         RETURNING id, role, content, status, created_at AS "createdAt"`,
+        [
+          slug,
+          content,
+          agentId,
+          agent?.name ?? null,
+          JSON.stringify(references.map(({ type, id, label }) => ({ type, id, label }))),
+        ],
       );
       if (!result.rows[0]) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
       response.status(201).json(result.rows[0]);

@@ -1,0 +1,137 @@
+@if (auth.can('chat')) {
+  <button
+    type="button"
+    class="agent-tasks-toggle"
+    [class.open]="open()"
+    [attr.aria-expanded]="open()"
+    aria-haspopup="listbox"
+    (click)="toggle()"
+  >
+    <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+      <path d="M7 4l13 8-13 8z" fill="currentColor" />
+    </svg>
+    Aufgaben
+    <span class="agent-tasks-caret" aria-hidden="true">▾</span>
+  </button>
+  @if (open()) {
+    <div class="agent-tasks-menu" role="dialog" aria-label="Agent-Aufgaben">
+      @if (editing(); as form) {
+        <form
+          class="agent-task-form"
+          (submit)="$event.preventDefault(); save(title.value, prompt.value, agent.value, false)"
+        >
+          <strong>{{ form.id ? 'Aufgabe bearbeiten' : 'Neue Aufgabe' }}</strong>
+          <label
+            >Titel<input #title [value]="form.title" maxlength="120" required placeholder="z. B. Tests ausführen"
+          /></label>
+          <label
+            >Anweisung an den Assistenten<textarea
+              #prompt
+              [value]="form.prompt"
+              rows="5"
+              maxlength="3500"
+              required
+              placeholder="Was soll der Agent tun? Je genauer, desto besser."
+            ></textarea>
+          </label>
+          <label
+            >Übernimmt
+            <select #agent aria-label="Agent, der die Aufgabe übernimmt">
+              <option value="" [selected]="!form.agentId">Assistent (allgemein)</option>
+              @for (option of agents(); track option.id) {
+                <option [value]="option.id" [selected]="option.id === form.agentId">{{ option.name }}</option>
+              }
+            </select>
+            <small class="muted">Die Do's and Don'ts aus den Projekt-Einstellungen gelten für jeden Agent.</small>
+          </label>
+          <div class="agent-task-actions">
+            <button
+              class="button primary small"
+              type="button"
+              [disabled]="busy()"
+              (click)="save(title.value, prompt.value, agent.value, true)"
+            >
+              ▶ Speichern & starten
+            </button>
+            <button class="button secondary small" type="submit" [disabled]="busy()">Speichern</button>
+            <button class="button secondary small" type="button" (click)="editing.set(null)">Abbrechen</button>
+          </div>
+        </form>
+      } @else {
+        <label class="agent-tasks-search">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+            <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+          <input
+            #search
+            type="search"
+            placeholder="Aufgabe suchen …"
+            aria-label="Aufgabe suchen"
+            [value]="query()"
+            (input)="setQuery($any($event.target).value)"
+            (keydown)="keydown($event)"
+          />
+        </label>
+        <ul class="agent-tasks-list" role="listbox">
+          @for (entry of entries(); track entry.id ?? 'vorlage:' + entry.title; let index = $index) {
+            @if (index === 0 && entry.id) {
+              <li class="agent-tasks-group">Eigene Aufgaben</li>
+            }
+            @if (entry.builtIn && index === ownCount()) {
+              <li class="agent-tasks-group">Vorlagen</li>
+            }
+            <li
+              class="agent-task"
+              role="option"
+              [class.active]="index === active()"
+              [attr.aria-selected]="index === active()"
+              (mouseenter)="active.set(index)"
+              (click)="run(entry)"
+              [title]="entry.prompt"
+            >
+              <span class="agent-task-run" aria-hidden="true">▶</span>
+              <span class="agent-task-text">
+                <strong
+                  >{{ entry.title }}
+                  @if (entry.id ? entry.agentName : agentName(agentId()); as who) {
+                    <span class="agent-task-agent">{{ who }}</span>
+                  }
+                </strong>
+                <small class="muted">{{ entry.prompt }}</small>
+              </span>
+              @if (entry.runCount) {
+                <span class="agent-task-count muted" title="So oft gestartet">{{ entry.runCount }}×</span>
+              }
+              <button
+                type="button"
+                class="agent-task-icon"
+                [title]="entry.builtIn ? 'Als eigene Aufgabe anpassen' : 'Bearbeiten'"
+                [attr.aria-label]="entry.builtIn ? 'Als eigene Aufgabe anpassen' : 'Bearbeiten'"
+                (click)="edit(entry, $event)"
+              >
+                ✎
+              </button>
+              @if (!entry.builtIn) {
+                <button
+                  type="button"
+                  class="agent-task-icon"
+                  title="Löschen"
+                  aria-label="Löschen"
+                  (click)="remove(entry, $event)"
+                >
+                  ✕
+                </button>
+              }
+            </li>
+          } @empty {
+            <li class="agent-tasks-empty muted">Keine Aufgabe gefunden.</li>
+          }
+        </ul>
+        <button type="button" class="agent-tasks-new" (click)="startNew()">
+          + {{ query().trim() ? 'Neue Aufgabe „' + query().trim() + '“' : 'Neue Aufgabe definieren' }}
+        </button>
+      }
+    </div>
+  }
+}

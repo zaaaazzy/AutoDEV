@@ -69,6 +69,12 @@ export class IdeationComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly defaultStatusFilter = DEFAULT_STATUS_FILTER;
+  private readonly defaultFilters = { status: DEFAULT_STATUS_FILTER };
+  /** Dashboard-Link mit Filter hat Vorrang vor dem Standardfilter. */
+  protected readonly ideaFilters = computed(() => {
+    const linked = this.store.filtersFor('ideation');
+    return Object.keys(linked).length ? linked : this.defaultFilters;
+  });
   protected readonly ideaId = (idea: Idea): string => idea.id;
   protected readonly ideaColumns: DataColumn<Idea>[] = [
     { id: 'title', header: 'Titel', value: (idea) => idea.title, filter: 'text', className: 'title-cell' },

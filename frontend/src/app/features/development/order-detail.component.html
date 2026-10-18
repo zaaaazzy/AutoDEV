@@ -137,36 +137,165 @@
       <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
     </form>
   }
+  @if (item.followUpOf) {
+    <p class="follow-up-ref">
+      ↪ Folgeauftrag zu
+      @if (previous(); as prev) {
+        <a href="#development" (click)="$event.preventDefault(); openPrevious(prev.id)">„{{ prev.title }}“</a>
+      } @else {
+        einem früheren Auftrag
+      }
+      – der Entwickler bekommt dessen Beschreibung, Dokumentation und Git-Branch als Kontext.
+    </p>
+  }
+  @if (item.status === 'done') {
+    <div class="follow-up">
+      @if (!followUpOpen()) {
+        <button class="button secondary" type="button" (click)="followUpOpen.set(true)">
+          ↪ Folgeauftrag erstellen
+        </button>
+        <small class="muted">Neuer Auftrag, der auf diesem Ergebnis aufbaut.</small>
+      } @else {
+        <form
+          class="form-grid follow-up-form"
+          (submit)="$event.preventDefault(); createFollowUp(item, fuTitle.value, fuDescription.value, fuSprint.value)"
+        >
+          <strong class="wide">Folgeauftrag zu „{{ item.title }}“</strong>
+          <label class="wide"
+            >Titel<input #fuTitle required maxlength="180" placeholder="z. B. Login-Seite: Passwort vergessen ergänzen"
+          /></label>
+          <label class="wide"
+            >Was soll sich ändern oder dazukommen?<textarea
+              #fuDescription
+              rows="5"
+              maxlength="10000"
+              placeholder="Bezieht sich auf das Ergebnis des erledigten Auftrags – beschreibe nur, was neu ist."
+            ></textarea>
+          </label>
+          <label class="wide"
+            >Sprint
+            <select #fuSprint>
+              <option value="">Kein Sprint (Backlog) – später zuweisen</option>
+              @for (sprint of data().sprints; track sprint.id) {
+                @if (sprint.status !== 'completed') {
+                  <option [value]="sprint.id" [selected]="sprint.id === activeSprintId()">
+                    {{ sprint.name }}{{ sprint.status === 'active' ? ' (aktiv)' : '' }}
+                  </option>
+                }
+              }
+            </select>
+          </label>
+          <div class="actions wide">
+            <button class="button primary" type="submit" [disabled]="busy()">Folgeauftrag erstellen</button>
+            <button class="button secondary" type="button" (click)="followUpOpen.set(false)">Abbrechen</button>
+          </div>
+        </form>
+      }
+    </div>
+  }
   <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
   @if (acceptance().total) {
+    <ng-template #checkLine let-check>
+      <li [class]="'acceptance-' + check.status">
+        <span class="acceptance-mark" [attr.aria-label]="check.status">{{ mark(check) }}</span>
+        <span
+          >{{ check.text }}
+          @if (check.note) {
+            <small class="muted">{{ check.note }}</small>
+          }
+        </span>
+      </li>
+    </ng-template>
     <details class="run-step order-brief acceptance">
       <summary>
         Abnahme
-        @if (acceptance().open) {
-          <span class="muted">– {{ acceptance().open }} von {{ acceptance().total }} offen</span>
-        } @else if (acceptance().manual) {
-          <span class="acceptance-manual-hint">– {{ acceptance().manual }} von dir zu prüfen</span>
+        @if (acceptance().todo.length) {
+          <span class="acceptance-manual-hint"
+            >– {{ acceptance().todo.length }} von {{ acceptance().total }} offen</span
+          >
         } @else {
           <span class="muted">– alle Punkte erfüllt</span>
         }
       </summary>
-      @for (group of acceptance().groups; track group.title) {
-        <h4>{{ group.title }}</h4>
+      @if (acceptance().criteria.length) {
+        <h4>Akzeptanzkriterien</h4>
         <ul class="acceptance-list">
-          @for (check of group.checks; track check.position) {
-            <li [class]="'acceptance-' + check.status">
-              <span class="acceptance-mark" [attr.aria-label]="check.status">{{ mark(check) }}</span>
-              <span
-                >{{ check.text }}
-                @if (check.note) {
-                  <small class="muted">{{ check.note }}</small>
+          @for (check of acceptance().criteria; track check.position) {
+            <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
+          }
+        </ul>
+      }
+      @if (acceptance().done.length) {
+        <h4>Definition of Done</h4>
+        <ul class="acceptance-list">
+          @for (check of acceptance().done; track check.position) {
+            <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
+            @if (coversCriteria(check)) {
+              <li class="acceptance-nested">
+                @if (acceptance().criteria.length) {
+                  <ul class="acceptance-list">
+                    @for (criterion of acceptance().criteria; track criterion.position) {
+                      <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: criterion }" />
+                    }
+                  </ul>
+                } @else {
+                  <small class="muted">Der Auftrag nennt keine eigenen Akzeptanzkriterien.</small>
                 }
-              </span>
-            </li>
+              </li>
+            }
           }
         </ul>
       }
     </details>
+    @if (acceptance().todo.length) {
+      <details class="run-step order-brief acceptance-todo" open>
+        <summary>
+          <span class="todo-bang" aria-hidden="true">!</span> Noch zu erledigen
+          <span class="muted">({{ acceptance().todo.length }})</span>
+        </summary>
+        <ul class="todo-list">
+          @for (check of acceptance().todo; track check.kind + check.position) {
+            <li [class.verifying]="isVerifying(check)">
+              <input
+                type="checkbox"
+                [checked]="false"
+                [disabled]="busy() || isVerifying(check)"
+                [attr.aria-label]="'Abhaken: ' + check.text"
+                (change)="checkPoint(item, check, true)"
+              />
+              <span class="todo-text"
+                >{{ check.text }}
+                @if (isVerifying(check)) {
+                  <small class="todo-state">🤖 Tester prüft …</small>
+                } @else if (check.note) {
+                  <small class="muted">{{ check.note }}</small>
+                }
+              </span>
+              <button
+                type="button"
+                class="todo-verify"
+                title="Vom Tester automatisch prüfen lassen"
+                [disabled]="busy() || isVerifying(check)"
+                (click)="verifyPoints(item, check)"
+              >
+                🤖 Prüfen
+              </button>
+            </li>
+          }
+        </ul>
+        @if (acceptance().todo.length > 1) {
+          <button
+            class="button secondary small"
+            type="button"
+            [disabled]="busy() || acceptance().verifying"
+            (click)="verifyPoints(item)"
+          >
+            🤖 Alle automatisch prüfen
+          </button>
+        }
+        <p class="muted small">Offen, bis du den Punkt abhakst oder der Tester ihn als erfüllt bestätigt.</p>
+      </details>
+    }
   }
   <details class="run-step order-brief" [open]="agentsOpen()">
     <summary>Agents</summary>

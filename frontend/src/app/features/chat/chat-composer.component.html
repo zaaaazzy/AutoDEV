@@ -1,0 +1,83 @@
+<div class="composer">
+  @if (options().length) {
+    <div class="mention-pop" role="listbox" [attr.aria-label]="title()">
+      <span class="mention-title">{{ title() }}</span>
+      <div class="mention-bubbles">
+        @for (option of options(); track option.kind + option.id; let index = $index) {
+          <button
+            type="button"
+            class="mention-bubble"
+            role="option"
+            [class.active]="index === active()"
+            [attr.aria-selected]="index === active()"
+            (mousedown)="$event.preventDefault()"
+            (click)="choose(option)"
+            (mouseenter)="active.set(index)"
+          >
+            <span aria-hidden="true">{{ option.icon }}</span>
+            <span class="mention-label">{{ option.label }}</span>
+            @if (option.hint) {
+              <small>{{ option.hint }}</small>
+            }
+          </button>
+        }
+      </div>
+    </div>
+  } @else if (trigger()) {
+    <div class="mention-pop empty"><span class="mention-title">Nichts gefunden – weiter tippen oder Esc</span></div>
+  }
+  @if (agentName() || references().length) {
+    <div class="composer-chips">
+      @if (agentName(); as name) {
+        <span class="composer-chip agent">
+          🤖 {{ name }}
+          <button type="button" aria-label="Agent entfernen" (click)="agentId.set('')">×</button>
+        </span>
+      }
+      @for (reference of references(); track reference.type + reference.id) {
+        <span class="composer-chip" [title]="reference.label">
+          {{ icon(reference) }} <span class="chip-label">{{ reference.label }}</span>
+          <button
+            type="button"
+            [attr.aria-label]="'Verweis entfernen: ' + reference.label"
+            (click)="removeReference(reference)"
+          >
+            ×
+          </button>
+        </span>
+      }
+    </div>
+  }
+  <form class="chat-form" (submit)="$event.preventDefault(); submit()">
+    <input
+      #field
+      [placeholder]="placeholder()"
+      autocomplete="off"
+      maxlength="4000"
+      aria-label="Nachricht – / für Agent, @ für Verweis"
+      (input)="onInput($event)"
+      (keydown)="onKeydown($event)"
+      (click)="onCaret()"
+      (keyup)="onCaret()"
+    />
+    <button type="submit" class="chat-send" [disabled]="!text().trim() || options().length > 0">
+      Senden
+      <svg
+        viewBox="0 0 24 24"
+        width="16"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
+      </svg>
+    </button>
+  </form>
+  <p class="composer-hint">
+    <kbd>/</kbd> Agent wählen · <kbd>&#64;</kbd> auf Auftrag, Idee, Bug, Sprint, Doku oder Git verweisen
+  </p>
+</div>

@@ -1,3 +1,4 @@
+import { setActionTodo } from '../runner/action-todo.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
@@ -22,7 +23,8 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
   kind, category, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
-  failure, failure_bug_id AS "failureBugId",
+  failure, failure_bug_id AS "failureBugId", action_todo AS "actionTodo",
+  follow_up_of AS "followUpOf",
   (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus",
   removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt",
   sprint_rank AS "sprintRank"`;
@@ -111,6 +113,58 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
+  // Folgeauftrag zu einem erledigten Auftrag: neuer Auftrag mit Bezug, optional gleich in einem Sprint eingeplant.
+  app.post('/api/development/:id/follow-up', async (request, response) => {
+    const body = request.body as unknown;
+    if (
+      !isUuid(request.params.id) ||
+      !isRecord(body) ||
+      !validText(body.title, 180) ||
+      (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000)) ||
+      (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
+      (body.sprintId !== undefined && body.sprintId !== null && !isUuid(body.sprintId))
+    ) {
+      response.status(400).json({ message: 'Titel (max. 180 Zeichen) und Beschreibung prüfen.' });
+      return;
+    }
+    const source = (
+      await pool.query<{ projectSlug: string; status: string; category: string | null }>(
+        `SELECT project_slug AS "projectSlug", status, category FROM development_items WHERE id = $1`,
+        [request.params.id],
+      )
+    ).rows[0];
+    if (!source) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+    if (source.status !== DEVELOPMENT_STATUS.done) {
+      response.status(400).json({ message: 'Ein Folgeauftrag bezieht sich auf einen erledigten Auftrag.' });
+      return;
+    }
+    const sprintId = typeof body.sprintId === 'string' ? body.sprintId : null;
+    if (
+      sprintId &&
+      !(await pool.query('SELECT 1 FROM sprints WHERE id = $1 AND project_slug = $2', [sprintId, source.projectSlug]))
+        .rows[0]
+    ) {
+      response.status(400).json({ message: 'Sprint gehört nicht zum Projekt.' });
+      return;
+    }
+    const result = await pool.query(
+      `INSERT INTO development_items (project_slug, title, description, status, priority, category, sprint_id, follow_up_of)
+       VALUES ($1, $2, $3, $4, COALESCE($5, 'medium'), $6, $7, $8)
+       RETURNING ${DEV_COLUMNS}`,
+      [
+        source.projectSlug,
+        body.title.trim(),
+        typeof body.description === 'string' ? body.description.trim() : '',
+        sprintId ? DEVELOPMENT_STATUS.planned : DEVELOPMENT_STATUS.backlog,
+        body.priority ?? null,
+        source.category,
+        sprintId,
+        request.params.id,
+      ],
+    );
+    response.status(201).json({ item: result.rows[0] });
+  });
+
   // Retry a blocked order by planning it, using the project's active sprint when no sprint is assigned.
   app.post('/api/development/:id/retry', async (request, response) => {
     if (!isUuid(request.params.id)) {
@@ -118,7 +172,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       return;
     }
     const result = await pool.query(
-      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL,
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL,
               retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
               analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
@@ -190,6 +244,8 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
         WHERE development_id = $1 AND status = 'manual'`,
       [request.params.id],
     );
+    // Alle manuellen Punkte bestätigt: nichts mehr zu tun (Sprintbericht wird aktualisiert).
+    await setActionTodo(pool, request.params.id, null).catch(() => undefined);
     response.json({ confirmed: result.rowCount ?? 0 });
   });
 
