@@ -15,13 +15,14 @@ export async function createTestRun(
     trigger: string;
     branch: string | null;
     commitSha: string | null;
+    platform?: string;
   },
 ): Promise<string> {
   const id = randomUUID();
   await pool.query(
-    `INSERT INTO test_runs (id, project_slug, status, trigger, branch, commit_sha)
-     VALUES ($1, $2, '${TEST_RUN_STATUS.running}', $3, $4, $5)`,
-    [id, run.projectSlug, run.trigger, run.branch, run.commitSha],
+    `INSERT INTO test_runs (id, project_slug, status, trigger, branch, commit_sha, platform)
+     VALUES ($1, $2, '${TEST_RUN_STATUS.running}', $3, $4, $5, $6)`,
+    [id, run.projectSlug, run.trigger, run.branch, run.commitSha, run.platform ?? process.platform],
   );
   return id;
 }
@@ -120,4 +121,9 @@ export async function saveTestCases(pool: Pool, runId: string, cases: TestCaseRe
     [runId, RUNS_WITH_MEDIA],
   );
   return media;
+}
+
+/** Testbericht (Markdown) zum Lauf speichern; er erscheint in der Dokumentation unter „Testberichte“. */
+export async function saveTestReport(pool: Pool, runId: string, report: string): Promise<void> {
+  await pool.query('UPDATE test_runs SET report = $2 WHERE id = $1', [runId, report.slice(0, 200_000)]);
 }

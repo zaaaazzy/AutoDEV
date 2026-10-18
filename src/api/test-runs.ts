@@ -11,7 +11,7 @@ export function registerTestRunRoutes(app: Express, pool: Pool): void {
       return;
     }
     const runs = await pool.query(
-      `SELECT id, status, trigger, branch, commit_sha AS "commitSha",
+      `SELECT id, status, trigger, branch, commit_sha AS "commitSha", platform,
               started_at AS "startedAt", completed_at AS "completedAt"
          FROM test_runs
         WHERE project_slug = $1
