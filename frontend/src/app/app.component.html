@@ -315,19 +315,39 @@
             <app-bugs />
           }
           @case ('docs') {
-            <app-docs />
+            @defer (on immediate) {
+              <app-docs />
+            } @placeholder {
+              <p class="loading" role="status">Wird geladen …</p>
+            }
           }
           @case ('agents') {
-            <app-agents />
+            @defer (on immediate) {
+              <app-agents />
+            } @placeholder {
+              <p class="loading" role="status">Wird geladen …</p>
+            }
           }
           @case ('runs') {
-            <app-runs />
+            @defer (on immediate) {
+              <app-runs />
+            } @placeholder {
+              <p class="loading" role="status">Wird geladen …</p>
+            }
           }
           @case ('stats') {
-            <app-stats />
+            @defer (on immediate) {
+              <app-stats />
+            } @placeholder {
+              <p class="loading" role="status">Wird geladen …</p>
+            }
           }
           @case ('settings') {
-            <app-settings />
+            @defer (on immediate) {
+              <app-settings />
+            } @placeholder {
+              <p class="loading" role="status">Wird geladen …</p>
+            }
           }
         }
         <footer class="footer">{{ store.currentProject()?.name ?? 'Dev Log' }} <span>/</span> DEV LOG</footer>
