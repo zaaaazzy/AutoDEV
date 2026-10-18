@@ -3,7 +3,14 @@ import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
 import { targetsDevLogDatabase } from '../agent/tool-sql.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
-import { isRecord, PROJECT_SLUG, parseProjectSlug, projectFolderError, validText } from '../core/validation.js';
+import {
+  isRecord,
+  normalizeProjectSlug,
+  PROJECT_SLUG,
+  parseProjectSlug,
+  projectFolderError,
+  validText,
+} from '../core/validation.js';
 
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
@@ -114,14 +121,24 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
 
   app.post('/api/projects', async (request, response) => {
     const body = request.body as unknown;
+    if (isRecord(body) && typeof body.slug === 'string') body.slug = normalizeProjectSlug(body.slug);
+    const invalid = !isRecord(body)
+      ? 'Ungültige Anfrage.'
+      : !validText(body.name, 120)
+        ? 'Bitte einen Projektnamen angeben (max. 120 Zeichen).'
+        : typeof body.slug !== 'string' || !PROJECT_SLUG.test(body.slug)
+          ? 'Die Projekt-ID darf nur Kleinbuchstaben, Ziffern und Bindestriche enthalten (z. B. „keyguard“).'
+          : !validText(body.repository, 500)
+            ? 'Bitte den Projektordner angeben.'
+            : null;
     if (
+      invalid ||
       !isRecord(body) ||
       typeof body.slug !== 'string' ||
-      !PROJECT_SLUG.test(body.slug) ||
-      !validText(body.name, 120) ||
-      !validText(body.repository, 500)
+      typeof body.name !== 'string' ||
+      typeof body.repository !== 'string'
     ) {
-      response.status(400).json({ message: 'Project slug, name, and repository are required.' });
+      response.status(400).json({ message: invalid ?? 'Ungültige Anfrage.' });
       return;
     }
     const folderError = projectFolderError(body.repository);

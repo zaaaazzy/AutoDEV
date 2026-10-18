@@ -410,3 +410,25 @@ test('blocks a client after repeated failed logins', async () => {
     assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Authorization: basicAuth() } })).status, 429);
   });
 });
+
+test('project ids are normalized and errors name the field', async () => {
+  const { pool, queries } = recordingPool([
+    { slug: 'kg1', name: 'KeyGuard', repository: '/Volumes/External/KeyGuard' },
+  ]);
+  await withServer(pool, async (baseUrl) => {
+    const created = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ slug: 'KG1', name: 'KeyGuard', repository: '/Volumes/External/KeyGuard' }),
+    });
+    assert.equal(created.status, 201);
+    assert.equal(queries.find((query) => query.sql.includes('INSERT INTO projects'))?.values[0], 'kg1');
+    const missing = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ slug: 'kg1', name: 'KeyGuard' }),
+    });
+    assert.equal(missing.status, 400);
+    assert.match(((await missing.json()) as { message: string }).message, /Projektordner/);
+  });
+});

@@ -20,11 +20,24 @@ export class ProjectFormComponent {
 
   readonly saved = output<void>();
 
+  /** Gültige Projekt-ID aus der Eingabe (Kleinbuchstaben, Ziffern, Bindestriche) – wie sie gespeichert wird. */
+  protected slugPreview(): string {
+    return this.projectForm.slug
+      .trim()
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/\p{M}/gu, '')
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 63);
+  }
+
   protected async createProject(): Promise<void> {
     await this.store.perform(
       async () => {
         const result = await this.api.post<{ project: Project }>('/api/projects', {
-          slug: this.projectForm.slug.trim(),
+          slug: this.slugPreview(),
           name: this.projectForm.name.trim(),
           repository: this.projectForm.repository.trim(),
         });
