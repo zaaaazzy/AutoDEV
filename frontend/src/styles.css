@@ -1710,6 +1710,18 @@ h3 .link-button {
 .chat {
   margin-bottom: 16px;
 }
+.chat-offline {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fdf1e0;
+  color: #a0610d;
+  font-size: 13px;
+}
+.chat-offline .link-button {
+  margin-left: 6px;
+  font-weight: 600;
+}
 .chat-log {
   display: flex;
   flex-direction: column;

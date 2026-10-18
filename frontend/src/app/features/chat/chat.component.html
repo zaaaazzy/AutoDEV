@@ -21,6 +21,12 @@
       </button>
     }
   </div>
+  @if (!connected()) {
+    <p class="chat-offline" role="status">
+      Verbindung zum Assistenten unterbrochen – wird automatisch neu aufgebaut.
+      <button type="button" class="link-button" (click)="reconnect()">Jetzt neu verbinden</button>
+    </p>
+  }
   <div class="chat-log">
     @for (message of chat(); track message.id) {
       @if (message.role === 'assistant') {
