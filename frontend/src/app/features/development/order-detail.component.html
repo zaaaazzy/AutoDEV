@@ -144,6 +144,8 @@
         Abnahme
         @if (acceptance().open) {
           <span class="muted">– {{ acceptance().open }} von {{ acceptance().total }} offen</span>
+        } @else if (acceptance().manual) {
+          <span class="acceptance-manual-hint">– {{ acceptance().manual }} von dir zu prüfen</span>
         } @else {
           <span class="muted">– alle Punkte erfüllt</span>
         }

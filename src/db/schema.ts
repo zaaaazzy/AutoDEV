@@ -423,4 +423,11 @@ export const SCHEMA = `
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
   CREATE INDEX IF NOT EXISTS agent_usage_project_idx ON agent_usage (project_slug, created_at);
+  -- Live-Fortschritt, während der Auftragsautor (bzw. Bug-Wächter) aus einer Idee einen Auftrag schreibt.
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS progress TEXT;
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS progress_agent TEXT;
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS drafting_started_at TIMESTAMPTZ;
+  ALTER TABLE acceptance_checks DROP CONSTRAINT IF EXISTS acceptance_checks_status_check;
+  ALTER TABLE acceptance_checks ADD CONSTRAINT acceptance_checks_status_check
+    CHECK (status IN ('open', 'met', 'unmet', 'manual'));
 `;

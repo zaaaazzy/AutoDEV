@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { acceptanceProblems, extractCriteria, parseAcceptance, stripAcceptance } from './acceptance.js';
+import { acceptanceProblems, extractCriteria, manualChecks, parseAcceptance, stripAcceptance } from './acceptance.js';
 
 const ORDER = `## Ziel
 Login-Seite modernisieren.
@@ -37,4 +37,12 @@ test('evaluates the tester acceptance block and lists open points', () => {
   ]);
   assert.equal(stripAcceptance(output), 'Alles geprüft.');
   assert.equal(parseAcceptance('kein Block', 1, 1), null);
+});
+
+test('points only a human can check do not fail the acceptance', () => {
+  const output = `@@ACCEPTANCE {"criteria":[{"nr":1,"met":true},{"nr":2,"met":false,"manual":true,"note":"Redirect-URI bei Google anpassen"}],"done":[{"nr":1,"met":true}]}`;
+  const result = parseAcceptance(output, 2, 1);
+  assert.ok(result);
+  assert.deepEqual(acceptanceProblems(result, ['A', 'Google-Login'], ['Tests grün']), []);
+  assert.deepEqual(manualChecks(result, ['A', 'Google-Login']), ['Google-Login – Redirect-URI bei Google anpassen']);
 });

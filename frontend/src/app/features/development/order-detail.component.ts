@@ -39,12 +39,13 @@ export class OrderDetailComponent {
       { title: 'Akzeptanzkriterien', checks: checks.filter((check) => check.kind === 'criterion') },
       { title: 'Definition of Done', checks: checks.filter((check) => check.kind === 'done') },
     ].filter((group) => group.checks.length);
-    const open = checks.filter((check) => check.status !== 'met').length;
-    return { groups, open, total: checks.length };
+    const open = checks.filter((check) => check.status === 'open' || check.status === 'unmet').length;
+    const manual = checks.filter((check) => check.status === 'manual').length;
+    return { groups, open, manual, total: checks.length };
   });
 
   protected mark(check: AcceptanceCheck): string {
-    return check.status === 'met' ? '✓' : check.status === 'unmet' ? '✕' : '○';
+    return check.status === 'met' ? '✓' : check.status === 'unmet' ? '✕' : check.status === 'manual' ? '👤' : '○';
   }
 
   protected update(id: string, values: Partial<DevelopmentItem>): Promise<void> {

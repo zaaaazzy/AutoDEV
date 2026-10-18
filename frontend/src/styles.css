@@ -594,6 +594,7 @@ a.summary-card:hover {
   gap: 14px;
 }
 .view-grid .panel {
+  min-width: 0;
   margin: 0;
 }
 .metric-grid {
@@ -1195,7 +1196,7 @@ details > summary {
   .view-grid,
   .report-columns,
   .docs-layout {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .docs-layout aside {
     padding: 0;
@@ -4815,4 +4816,100 @@ h3 .link-button {
 .stats-table .dt-table td.title-cell {
   width: auto;
   min-width: 160px;
+}
+
+/* ── Aufträge in Entstehung ──────────────────────────────────────────── */
+.drafts-panel {
+  border-color: #cfe5d8;
+  background: linear-gradient(180deg, #f6fbf8, #fff 120px);
+}
+.draft-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.draft-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.draft-card.active {
+  border-color: #b9d3c3;
+  box-shadow: 0 0 0 3px rgb(47 111 79 / 8%);
+}
+.draft-state {
+  display: grid;
+  width: 26px;
+  flex: none;
+  place-items: center;
+}
+.draft-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid #d5e6dc;
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.draft-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.draft-text small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.draft-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Handy: Kopfleiste als eigene Ebene, damit das Agent-Popup über dem Seiteninhalt liegt */
+@media (max-width: 720px) {
+  .topbar {
+    position: relative;
+    z-index: 25;
+  }
+  .agent-popover {
+    position: fixed;
+    top: auto;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: min(70vh, 560px);
+    overflow-y: auto;
+    margin-top: 6px;
+    overscroll-behavior: contain;
+  }
+}
+.acceptance-manual .acceptance-mark {
+  font-size: 13px;
+}
+.acceptance-manual {
+  border-radius: 8px;
+  background: #fdf6ec;
+}
+.acceptance-manual-hint {
+  color: #a0610d;
+  font-weight: 600;
+}
+.view-grid > .wide-panel {
+  grid-column: 1 / -1;
 }

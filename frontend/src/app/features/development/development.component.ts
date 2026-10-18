@@ -49,6 +49,12 @@ export class DevelopmentComponent {
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
   protected readonly orderId = (item: DevelopmentItem): string => item.id;
+
+  /** Laufzeit eines Entwurfs, z. B. „2 min“. */
+  protected elapsed(startedAt: string): string {
+    const seconds = Math.max(0, Math.round((Date.now() - new Date(startedAt).getTime()) / 1000));
+    return seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
+  }
   protected readonly devColumns: DataColumn<DevelopmentItem>[] = [
     { id: 'title', header: 'Titel', value: (item) => item.title, filter: 'text', className: 'title-cell' },
     {

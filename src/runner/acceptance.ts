@@ -35,6 +35,8 @@ export function extractCriteria(markdown: string): string[] {
 export interface Checked {
   nr: number;
   met: boolean;
+  /** Nur von einem Menschen prüfbar (z. B. Login bei einem externen Anbieter) – blockiert den Auftrag nicht. */
+  manual?: boolean;
   note: string;
 }
 
@@ -52,8 +54,13 @@ ${criteria.length ? list(criteria) : '(keine im Auftrag angegeben)'}
 ### Definition of Done
 ${list(definitionOfDone)}
 
+Lässt sich ein Punkt grundsätzlich nur durch einen Menschen prüfen (z. B. Login bei einem externen Anbieter, Verhalten
+auf einem echten Gerät, Einstellungen außerhalb des Projekts), setze "manual":true und beschreibe in "note", was der Mensch
+prüfen oder einstellen muss. Nutze das nie für Punkte, die du mit Tests oder durch Ausführen prüfen könntest.
+Der DoD-Punkt „Alle Akzeptanzkriterien sind erfüllt“ gilt als erfüllt, wenn alle übrigen Kriterien erfüllt sind.
+
 Beende die Antwort (nach dem @@COVERAGE-Block) mit genau einer Zeile gültigem JSON:
-@@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"}],"done":[{"nr":1,"met":true,"note":""}]}`;
+@@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"},{"nr":2,"met":false,"manual":true,"note":"Was der Mensch prüfen muss"}],"done":[{"nr":1,"met":true,"note":""}]}`;
 }
 
 function checks(value: unknown, count: number): Checked[] {
@@ -63,6 +70,7 @@ function checks(value: unknown, count: number): Checked[] {
     .map((entry) => ({
       nr: Math.round(Number(entry.nr)),
       met: entry.met === true,
+      manual: entry.met !== true && entry.manual === true,
       note: typeof entry.note === 'string' ? entry.note.slice(0, 500) : '',
     }))
     .filter((entry) => entry.nr >= 1 && entry.nr <= count);
@@ -97,7 +105,7 @@ export function acceptanceProblems(
   const missing = (items: string[], checked: Checked[], label: string) =>
     items.flatMap((item, index) => {
       const entry = checked.find((check) => check.nr === index + 1);
-      if (entry?.met) return [];
+      if (entry?.met || entry?.manual) return [];
       return [`${label} ${index + 1} „${item}“: ${entry ? entry.note || 'nicht erfüllt' : 'nicht geprüft'}`];
     });
   return [...missing(criteria, result.criteria, 'Kriterium'), ...missing(definitionOfDone, result.done, 'DoD')];
@@ -118,6 +126,13 @@ export async function loadDefinitions(pool: Pool, project: string): Promise<{ re
   };
 }
 
+/** Punkte, die ein Mensch prüfen muss (für Hinweis und Push-Nachricht). */
+export function manualChecks(result: { criteria: Checked[]; done: Checked[] } | null, criteria: string[]): string[] {
+  return (result?.criteria ?? [])
+    .filter((entry) => entry.manual)
+    .map((entry) => `${criteria[entry.nr - 1] ?? `Kriterium ${entry.nr}`}${entry.note ? ` – ${entry.note}` : ''}`);
+}
+
 /** Speichert das Abnahme-Ergebnis eines Auftrags (ersetzt das vorige). */
 export async function saveAcceptance(
   pool: Pool,
@@ -133,7 +148,7 @@ export async function saveAcceptance(
         kind,
         position: index + 1,
         text,
-        status: entry ? (entry.met ? 'met' : 'unmet') : 'open',
+        status: entry ? (entry.met ? 'met' : entry.manual ? 'manual' : 'unmet') : 'open',
         note: entry?.note ?? '',
       };
     });

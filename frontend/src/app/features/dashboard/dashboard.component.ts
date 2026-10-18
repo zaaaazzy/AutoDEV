@@ -58,6 +58,12 @@ export class DashboardComponent {
   protected readonly orderTotal = computed(() =>
     Object.values(this.data().stats?.orders ?? {}).reduce((sum, count) => sum + count, 0),
   );
+  protected readonly agentRuns = computed(() =>
+    (this.data().stats?.agents ?? []).reduce((sum, agent) => sum + agent.passed + agent.failed, 0),
+  );
+  protected readonly agentFailures = computed(() =>
+    (this.data().stats?.agents ?? []).reduce((sum, agent) => sum + agent.failed, 0),
+  );
   protected readonly maxVelocity = computed(() =>
     Math.max(1, ...(this.data().stats?.velocity ?? []).map((sprint) => sprint.total)),
   );

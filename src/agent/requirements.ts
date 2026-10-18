@@ -130,6 +130,7 @@ async function assessRisks(
   title: string,
   description: string,
   execute: CommandExecutor,
+  onProgress?: (message: string) => void,
 ): Promise<string> {
   const bugs = await loadKnownBugs(pool, options.project, 60).catch(() => []);
   if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
@@ -150,10 +151,22 @@ async function assessRisks(
       ].join('\n\n'),
     execute,
     'bug_reviewer',
+    onProgress,
   );
   return exitCode === 0 && output
     ? output.slice(0, 6000)
     : `Bekannte Bugs (nicht gefiltert):\n${list.slice(0, 15).join('\n')}`;
+}
+
+/** Hält fest, was beim Schreiben eines Auftrags gerade passiert (Anzeige unter „Auftrag → In Entstehung“). */
+async function draftProgress(pool: Pool, ideaId: string, agent: string, message: string): Promise<void> {
+  await pool
+    .query(`UPDATE ideation_items SET progress = $3, progress_agent = $2 WHERE id = $1 AND status = 'drafting'`, [
+      ideaId,
+      agent,
+      message.slice(0, 300),
+    ])
+    .catch(() => undefined);
 }
 
 /** Turns one requested idea into a backlog order. Sprint assignment stays a manual decision. */
@@ -168,7 +181,8 @@ export async function draftRequirements(
     [options.project, String(STALE_DRAFT_MINUTES)],
   );
   const claimed = await pool.query<Omit<Idea, 'comments'>>(
-    `UPDATE ideation_items SET status = 'drafting', agent_note = NULL, updated_at = NOW()
+    `UPDATE ideation_items SET status = 'drafting', agent_note = NULL, updated_at = NOW(), drafting_started_at = NOW(),
+             progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
       WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING id, project_slug AS "projectSlug", title, description, priority`,
@@ -200,15 +214,20 @@ export async function draftRequirements(
     options,
     (instructions) => buildRequirementPrompt(instructions, idea, existing?.description, definitions.ready),
     execute,
+    'author',
+    (message) => void draftProgress(pool, idea.id, 'author', message),
   );
   if (isShuttingDown()) {
-    await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE id = $1`, [idea.id]);
+    await pool.query(
+      `UPDATE ideation_items SET status = 'requested', progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
+      [idea.id],
+    );
     return 0;
   }
   const { requirement: output, estimate } = splitEstimate(rawOutput);
   if (exitCode !== 0 || output.length < MIN_REQUIREMENT_CHARS) {
     await pool.query(
-      `UPDATE ideation_items SET status = 'considering', agent_note = $2, updated_at = NOW() WHERE id = $1`,
+      `UPDATE ideation_items SET status = 'considering', agent_note = $2, progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
       [idea.id, `Anforderung konnte nicht erstellt werden: ${output.slice(-600) || 'leere Antwort'}`],
     );
     return 0;
@@ -221,16 +240,27 @@ export async function draftRequirements(
       [idea.id, estimate.effortHours, estimate.tokenEstimate, estimate.benefit, estimate.cost],
     );
   }
-  const risks = await assessRisks(pool, options, idea.title, output, execute);
+  await draftProgress(pool, idea.id, 'bug_reviewer', 'Prüft bekannte Bugs auf Bezug zum Auftrag …');
+  const risks = await assessRisks(
+    pool,
+    options,
+    idea.title,
+    output,
+    execute,
+    (message) => void draftProgress(pool, idea.id, 'bug_reviewer', message),
+  );
   const projectContext = await loadProjectContext(pool, options.project);
   if (isShuttingDown()) {
-    await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE id = $1`, [idea.id]);
+    await pool.query(
+      `UPDATE ideation_items SET status = 'requested', progress = NULL, progress_agent = NULL, updated_at = NOW() WHERE id = $1`,
+      [idea.id],
+    );
     return 0;
   }
   if (existing) {
     if (!['backlog', 'planned', 'blocked'].includes(existing.status)) {
       await pool.query(
-        `UPDATE ideation_items SET status = 'accepted',
+        `UPDATE ideation_items SET status = 'accepted', progress = NULL, progress_agent = NULL,
                 agent_note = 'Der Auftrag ist bereits in Arbeit oder erledigt und wurde nicht überschrieben.', updated_at = NOW() WHERE id = $1`,
         [idea.id],
       );
@@ -253,7 +283,7 @@ export async function draftRequirements(
       [idea.id, output.slice(0, 10_000), risks, projectContext],
     );
   await pool.query(
-    `UPDATE ideation_items SET status = 'accepted',
+    `UPDATE ideation_items SET status = 'accepted', progress = NULL, progress_agent = NULL,
             agent_note = 'Anforderung vom Agenten erstellt – Auftrag liegt im Backlog.',
             updated_at = NOW() WHERE id = $1`,
     [idea.id],

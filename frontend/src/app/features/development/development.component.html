@@ -1,4 +1,41 @@
 @if (store.ready()) {
+  @if (store.worker().drafts?.length) {
+    <section class="panel drafts-panel" aria-live="polite">
+      <div class="section-heading">
+        <div>
+          <h2>In Entstehung</h2>
+          <p class="muted">Der Auftragsautor schreibt aus diesen Ideen gerade Aufträge.</p>
+        </div>
+      </div>
+      <ul class="draft-list">
+        @for (draft of store.worker().drafts; track draft.id) {
+          <li class="draft-card" [class.active]="draft.status === 'drafting'">
+            <span class="draft-state" aria-hidden="true">
+              @if (draft.status === 'drafting') {
+                <span class="draft-spinner"></span>
+              } @else {
+                ⏳
+              }
+            </span>
+            <span class="draft-text">
+              <strong>{{ draft.title }}</strong>
+              <small>
+                @if (draft.status === 'drafting') {
+                  {{ draft.agent === 'bug_reviewer' ? 'Bug-Wächter' : 'Auftragsautor' }} ·
+                  {{ draft.progress || 'arbeitet …' }}
+                } @else {
+                  Wartet auf den Auftragsautor
+                }
+              </small>
+            </span>
+            @if (draft.status === 'drafting' && draft.startedAt) {
+              <span class="draft-time">{{ elapsed(draft.startedAt) }}</span>
+            }
+          </li>
+        }
+      </ul>
+    </section>
+  }
   <section class="panel">
     <div class="section-heading">
       <div>

@@ -12,7 +12,7 @@ import { commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync
 import { executeAgentCommand } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { parseReview } from './review.js';
-import { acceptanceProblems, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
+import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import { loadPermissionGroups, withAssistantPermissions } from '../agent/tool-permissions.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
@@ -369,6 +369,17 @@ export async function runStep(
         await logEvent(pool, stepId, `Abnahme: ${problems.length} Punkt(e) offen oder nicht erfüllt`);
       } else {
         await logEvent(pool, stepId, 'Abnahme: alle Kriterien und DoD-Punkte erfüllt');
+      }
+      const manual = manualChecks(acceptance, criteria);
+      if (manual.length) {
+        output += `\n\n## Von dir zu prüfen\n${manual.map((line) => `- ${line}`).join('\n')}`;
+        await logEvent(pool, stepId, `Abnahme: ${manual.length} Punkt(e) nur manuell prüfbar`);
+        await sendPush(pool, {
+          title: `👤 Bitte selbst prüfen · ${item.projectSlug}`,
+          body: `${item.title}\n${manual.join('\n')}`,
+          url: '#development',
+          tag: `manual-${item.id}`,
+        });
       }
     }
   }

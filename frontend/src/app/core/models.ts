@@ -208,13 +208,25 @@ export interface ProjectStats {
   velocity: { name: string; status: string; total: number; done: number; hours: number }[];
 }
 
+export interface DraftOrder {
+  id: string;
+  title: string;
+  status: 'requested' | 'drafting';
+  progress: string | null;
+  agent: string | null;
+  startedAt: string | null;
+}
+
 export interface WorkerStatus {
   online: boolean;
   worker: { lastError: string | null; intervalSeconds: number; cpuPercent: number | null } | null;
   running: { title: string; startedAt: string }[];
+  /** Aufträge in Entstehung: Ideen, aus denen der Auftragsautor gerade einen Auftrag schreibt. */
+  drafts?: DraftOrder[];
   agents: {
     id: string;
     name: string;
+    role?: string;
     active: boolean;
     /** Wartet auf eine Antwort (Rückfrage des Dashboard-Assistenten). */
     waiting?: boolean;
@@ -288,7 +300,7 @@ export interface AcceptanceCheck {
   kind: 'criterion' | 'done';
   position: number;
   text: string;
-  status: 'open' | 'met' | 'unmet';
+  status: 'open' | 'met' | 'unmet' | 'manual';
   note: string | null;
   checkedAt: string | null;
 }

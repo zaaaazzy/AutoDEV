@@ -50,12 +50,17 @@
           <strong>{{ data().stats?.actual?.tokens ?? 0 | localeNumber }}</strong>
           <small class="muted">Schätzung: {{ data().stats?.effort?.tokens | localeNumber }}</small>
         </div>
-        @if (data().stats?.actual?.costUsd) {
-          <div>
-            <span>API-Kosten</span>
-            <strong>{{ data().stats?.actual?.costUsd | localeNumber }} $</strong>
-          </div>
-        }
+        <div>
+          <span>API-Kosten</span>
+          <strong>{{
+            data().stats?.actual?.costUsd ? (data().stats?.actual?.costUsd | localeNumber) + ' $' : '–'
+          }}</strong>
+        </div>
+        <div>
+          <span>Agent-Einsätze</span>
+          <strong>{{ agentRuns() }}</strong>
+          <small class="muted">davon {{ agentFailures() }} gescheitert</small>
+        </div>
       </div>
     </article>
     <article class="panel">
@@ -103,7 +108,6 @@
         <p class="empty-state">Aktuell ist kein Sprint aktiv.</p>
       }
     </article>
-    <app-coverage-panel />
     <article class="panel">
       <div class="section-heading">
         <h2>Letzte Testläufe</h2>
@@ -119,6 +123,7 @@
         <p class="empty-state">Noch keine Testläufe vorhanden.</p>
       }
     </article>
+    <app-coverage-panel />
     <article class="panel">
       <div class="section-heading">
         <h2>Aufträge nach Status</h2>
@@ -179,7 +184,7 @@
         <p class="empty-state">Noch keine Agent-Läufe vorhanden.</p>
       }
     </article>
-    <article class="panel">
+    <article class="panel wide-panel">
       <div class="section-heading">
         <h2>Offene Ideen nach Nutzen und Kosten</h2>
       </div>

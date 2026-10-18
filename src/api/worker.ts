@@ -180,7 +180,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
       ).rows;
       const agents = (
         await pool.query(
-          `SELECT a.id, a.name, a.phase, s.name AS "sprintName", d.title AS "orderTitle",
+          `SELECT a.id, a.name, a.phase, a.role, s.name AS "sprintName", d.title AS "orderTitle",
                 (st.id IS NOT NULL) AS active
            FROM agents a
            LEFT JOIN LATERAL (
@@ -194,6 +194,26 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
           [slug],
         )
       ).rows;
+      // Aufträge in Entstehung: Ideen, aus denen der Auftragsautor gerade einen Auftrag schreibt (oder schreiben wird).
+      const drafts = (
+        await pool.query<{
+          id: string;
+          title: string;
+          status: string;
+          progress: string | null;
+          agent: string | null;
+          startedAt: string | null;
+        }>(
+          `SELECT id, title, status, progress, progress_agent AS agent, drafting_started_at AS "startedAt"
+             FROM ideation_items WHERE project_slug = $1 AND status IN ('requested', 'drafting')
+            ORDER BY status = 'drafting' DESC, updated_at`,
+          [slug],
+        )
+      ).rows;
+      for (const draft of drafts.filter((entry) => entry.status === 'drafting' && entry.agent)) {
+        const agent = agents.find((entry) => entry.role === draft.agent && !entry.active);
+        if (agent) Object.assign(agent, { active: true, orderTitle: `Neuer Auftrag: ${draft.title}` });
+      }
       // Der Dashboard-Assistent ist kein Workflow-Agent, wird aber wie einer angezeigt (aktiv, solange er eine Chat-Anfrage bearbeitet).
       const chat = (
         await pool.query<{ content: string }>(
@@ -229,7 +249,9 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
         waiting: Boolean(question),
       });
       const online = Boolean(beat) && beat.ageSeconds <= 60;
-      response.set('Cache-Control', 'no-store').json({ worker: beat && { ...beat, online }, online, running, agents });
+      response
+        .set('Cache-Control', 'no-store')
+        .json({ worker: beat && { ...beat, online }, online, running, agents, drafts });
     } catch (error) {
       next(error);
     }

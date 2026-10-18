@@ -173,7 +173,11 @@ export class ProjectStore {
     try {
       const status = await this.api.get<WorkerStatus>(`${this.api.projectPath(slug)}/worker`);
       if (slug === this.activeProject()) {
+        // Ist ein Auftrag fertig geschrieben, sofort nachladen, damit er in der Liste erscheint.
+        const current = new Set((status.drafts ?? []).map((draft) => draft.id));
+        const finished = (this.worker().drafts ?? []).some((draft) => !current.has(draft.id));
         this.worker.set(status);
+        if (finished) this.refreshActiveProject();
         this.workerFailure.set(false);
       }
     } catch {
