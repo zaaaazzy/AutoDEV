@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
@@ -155,6 +155,20 @@ async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must']
   }
   await excludeInternalFolders(cwd);
   return initialized;
+}
+
+/** Ordner eines anderen Worktrees, in dem der Branch ausgecheckt ist (sonst null). */
+export async function checkedOutElsewhere(git: GitHelpers['git'], branch: string, cwd: string): Promise<string | null> {
+  const listing = await git('worktree', 'list', '--porcelain');
+  if (listing.exitCode !== 0) return null;
+  const real = (path: string): string => (existsSync(path) ? realpathSync(path) : path);
+  const own = real(cwd);
+  for (const block of listing.output.split(/\n\s*\n/)) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1];
+    const lines = block.split('\n');
+    if (path && lines.includes(`branch refs/heads/${branch}`) && real(path) !== own) return path;
+  }
+  return null;
 }
 
 async function branchExists(git: GitHelpers['git'], branch: string): Promise<boolean> {
@@ -548,7 +562,13 @@ async function pushSprint(
   }
   if (sprint.status === 'completed' && current === branch) {
     if (sprint.remote) await waitForCi(ci.execute, ci.cwd, branch, log);
-    if (await branchExists(git, MAIN_BRANCH)) {
+    const elsewhere = await checkedOutElsewhere(git, MAIN_BRANCH, ci.cwd);
+    if (elsewhere) {
+      // Agents im eigenen Worktree: main gehört dem Arbeitsordner der Menschen und wird dort nicht angefasst.
+      log.push(
+        `Sprint abgeschlossen: ${branch} ist bereit. ${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt – dort mit „git merge ${branch}“ übernehmen.`,
+      );
+    } else if (await branchExists(git, MAIN_BRANCH)) {
       await must('checkout', MAIN_BRANCH);
       const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: Sprint ${sprint.name}`);
       if (merged.exitCode !== 0) {
@@ -562,9 +582,11 @@ async function pushSprint(
     } else {
       await must('branch', '-m', branch, MAIN_BRANCH);
     }
-    current = MAIN_BRANCH;
-    log.push(`Sprint abgeschlossen: ${branch} nach ${MAIN_BRANCH} gemergt.`);
-    if (sprint.remote) await must('push', '-u', 'origin', MAIN_BRANCH);
+    if (!elsewhere) {
+      current = MAIN_BRANCH;
+      log.push(`Sprint abgeschlossen: ${branch} nach ${MAIN_BRANCH} gemergt.`);
+      if (sprint.remote) await must('push', '-u', 'origin', MAIN_BRANCH);
+    }
   }
   const tag = sprintTag(sprint.name, sprint.id);
   await must('tag', '-f', tag);
