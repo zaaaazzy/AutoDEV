@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { orderGuide, orderProblem } from './order-problem.js';
+import { failureParts, orderGuide, orderProblem } from './order-problem.js';
 
 test('Ohne Handlungsbedarf keine Kurzfassung – auch nicht mit altem Hinweis bei Erledigten', () => {
   assert.equal(orderProblem({ status: 'done' }), null);
@@ -122,4 +122,35 @@ test('Anleitung: Hinweis „Problem – Lösung“ und Fälle ohne Handlungsbeda
   assert.equal(orderGuide({ status: 'done', actionTodo: 'x' }), null);
   assert.equal(orderGuide({ status: 'rejected' }), null);
   assert.deepEqual(orderGuide({ status: 'blocked', failure: 'Agent „Tester“ scheiterte:\n\nError: 401' })!.steps, []);
+});
+
+test('Ausführliche Meldung: Abnahmepunkte, Bericht, letzter Vermerk und Testprotokoll getrennt', () => {
+  const parts = failureParts(
+    [
+      'Agent „Tester“ scheiterte:',
+      '',
+      'bdeckung konnte ich nicht messen. Der Wächter blockiert den Befehl.',
+      '',
+      '## Testlauf (Projekttests)',
+      '$ npm test → passed',
+      '',
+      '## Abnahme nicht bestanden',
+      '- DoD 3 „Abdeckung mindestens 75 %“: Abdeckung nicht messbar',
+      '- Sonstiges ohne Kriterium',
+      '',
+      '**Vermerk der Problemanalyse:** kein Code-Fehler – Aktion notwendig: keine.',
+      '',
+      '**Vermerk der Problemanalyse:** Code-Fehler bestätigt („Abdeckung fehlt“) – an einen Behebungsauftrag delegiert.',
+    ].join('\n'),
+  );
+  assert.deepEqual(parts, {
+    agent: 'Tester',
+    unmet: [
+      { label: 'DoD 3', criterion: 'Abdeckung mindestens 75 %', reason: 'Abdeckung nicht messbar' },
+      { label: '', criterion: 'Sonstiges ohne Kriterium', reason: '' },
+    ],
+    report: '…konnte ich nicht messen. Der Wächter blockiert den Befehl.',
+    note: 'Code-Fehler bestätigt („Abdeckung fehlt“) – an einen Behebungsauftrag delegiert.',
+    log: '$ npm test → passed',
+  });
 });

@@ -173,3 +173,38 @@ export function orderGuide(item: ProblemSource): OrderGuide | null {
   }
   return { problem: sentences(problem), causes, steps, nothingToFix: !!nothing };
 }
+
+/** Rohmeldung eines gescheiterten Agents, aufgeteilt in Teile, die man einzeln lesen kann. */
+export interface FailureParts {
+  /** Agent, der gescheitert ist („Tester“). */
+  agent: string;
+  /** Nicht erfüllte Abnahmepunkte: Kennung („DoD 3“), Kriterium und Grund. */
+  unmet: { label: string; criterion: string; reason: string }[];
+  /** Bericht des Agents ohne Testprotokoll und Vermerke. */
+  report: string;
+  /** Letzter Vermerk der Problemanalyse (frühere sind überholt). */
+  note: string;
+  /** Ausgabe des Testlaufs, nur für Interessierte. */
+  log: string;
+}
+
+export function failureParts(failure: string): FailureParts {
+  const text = failure.trim();
+  const agent = /^Agent „([^“]+)“/.exec(text)?.[1] ?? '';
+  const notes = [...text.matchAll(/\*\*Vermerk[^*]*:\*\*\s*([^\n]+)/g)].map((match) => clean(match[1] ?? ''));
+  const body = text.replace(/\*\*Vermerk[^*]*:\*\*[^\n]*\n?/g, '').replace(/^Agent „[^“]+“[^\n]*\n*/, '');
+  const unmet = sectionBody(body, /Abnahme nicht bestanden/)
+    .split('\n')
+    .map((line) => line.trim().replace(/^[-*]\s*/, ''))
+    .filter(Boolean)
+    .map((line) => {
+      const match = /^(.*?)\s*„([^“]+)“\s*:\s*(.+)$/.exec(line);
+      return match
+        ? { label: clean(match[1] ?? ''), criterion: clean(match[2] ?? ''), reason: clean(match[3] ?? '') }
+        : { label: '', criterion: clean(line), reason: '' };
+    });
+  let report = (body.split(/(?:^|\n)## /)[0] ?? '').trim();
+  // Gespeicherte Meldungen sind vorne gekürzt: angeschnittenes Wort weglassen.
+  if (/^[a-zäöüß]/.test(report)) report = `…${report.replace(/^\S*\s*/, '')}`;
+  return { agent, unmet, report, note: notes.at(-1) ?? '', log: sectionBody(body, /Testlauf/).trim() };
+}

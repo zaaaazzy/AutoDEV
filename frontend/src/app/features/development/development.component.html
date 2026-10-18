@@ -110,6 +110,48 @@
                     Warte kurz: Der Assistent analysiert den Auftrag. Die Schritte erscheinen hier, sobald er fertig
                     ist.
                   </p>
+                } @else if (item.failureBugId) {
+                  @switch (item.fixStatus) {
+                    @case ('planned') {
+                      <p>
+                        <strong>Du musst nichts tun.</strong> Die Problemanalyse hat einen Code-Fehler gefunden. Ein
+                        Behebungsauftrag ist eingeplant; danach startet dieser Auftrag automatisch neu.
+                      </p>
+                    }
+                    @case ('in_progress') {
+                      <p>
+                        <strong>Du musst nichts tun.</strong> Ein Behebungsauftrag repariert gerade den gefundenen
+                        Code-Fehler; danach startet dieser Auftrag automatisch neu.
+                      </p>
+                    }
+                    @case ('done') {
+                      <p>Der Code-Fehler ist behoben, der Auftrag startet automatisch neu.</p>
+                      <p class="attention-next">→ Passiert nichts, klicke auf <strong>„Erneut versuchen“</strong>.</p>
+                    }
+                    @default {
+                      <p>
+                        Die Problemanalyse hat einen Code-Fehler gefunden und einen
+                        <a href="#bugs" (click)="$event.preventDefault(); openBug(item.failureBugId)">Bug-Bericht</a>
+                        angelegt.
+                        {{
+                          item.fixStatus === 'blocked'
+                            ? 'Die automatische Behebung ist gescheitert.'
+                            : 'Die automatische Behebung ist nicht aktiv (in den Einstellungen einschaltbar).'
+                        }}
+                        Damit es weitergeht, muss der Code geändert werden:
+                      </p>
+                      @if (entry.guide?.steps?.length) {
+                        <ol class="attention-steps">
+                          @for (step of entry.guide!.steps; track $index) {
+                            <li>{{ step }}</li>
+                          }
+                        </ol>
+                      }
+                      <p class="attention-next">
+                        → Sind die Änderungen drin, klicke auf <strong>„Erneut versuchen“</strong>.
+                      </p>
+                    }
+                  }
                 } @else if (entry.guide?.nothingToFix) {
                   <ul class="attention-steps">
                     @for (step of entry.guide!.steps; track $index) {
@@ -190,14 +232,47 @@
                 }
               }
             </div>
-            @if (item.analysis || item.failure) {
+            @if (entry.failure; as failure) {
               <details class="attention-failure-details">
-                <summary>{{ item.analysis ? 'Vollständige Analyse' : 'Ausführliche Meldung' }}</summary>
-                <article
-                  class="markdown attention-failure"
-                  [class.attention-analysis]="!!item.analysis"
-                  [innerHTML]="item.analysis || failureSummary(item.failure!) | markdown"
-                ></article>
+                <summary>Ausführliche Meldung{{ failure.agent ? ' des Agents „' + failure.agent + '“' : '' }}</summary>
+                <div class="attention-failure-body">
+                  @if (failure.unmet.length) {
+                    <h4>Diese Abnahmepunkte sind nicht erfüllt</h4>
+                    <ul class="attention-unmet">
+                      @for (point of failure.unmet; track $index) {
+                        <li>
+                          @if (point.label) {
+                            <strong>{{ point.label }}:</strong>
+                          }
+                          {{ point.criterion }}
+                          @if (point.reason) {
+                            <small>Grund: {{ point.reason }}</small>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                  @if (failure.report) {
+                    <h4>Bericht{{ failure.agent ? ' des Agents' : '' }}</h4>
+                    <article class="markdown attention-report" [innerHTML]="failure.report | markdown"></article>
+                  }
+                  @if (failure.note) {
+                    <h4>Ergebnis der Problemanalyse</h4>
+                    <p>{{ noteText(item, failure.note) }}</p>
+                  }
+                  @if (failure.log) {
+                    <details>
+                      <summary>Testprotokoll</summary>
+                      <pre class="attention-log">{{ failure.log }}</pre>
+                    </details>
+                  }
+                </div>
+              </details>
+            }
+            @if (item.analysis) {
+              <details class="attention-failure-details">
+                <summary>Vollständige Problemanalyse</summary>
+                <article class="markdown attention-analysis" [innerHTML]="item.analysis | markdown"></article>
               </details>
             }
             <div class="attention-actions">

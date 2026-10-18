@@ -5019,12 +5019,6 @@ h3 .link-button {
 .attention-task .todo-list {
   margin: 0;
 }
-.attention-failure {
-  margin: 0;
-  color: var(--muted);
-  font-size: 13px;
-  white-space: pre-line;
-}
 .attention-actions {
   display: flex;
   flex-wrap: wrap;
@@ -5043,26 +5037,55 @@ h3 .link-button {
     justify-content: center;
   }
 }
-.attention-failure {
-  display: -webkit-box;
-  max-height: 9em;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 6;
-  line-clamp: 6;
-}
-.attention-failure p,
-.attention-failure ul {
-  margin: 0 0 4px;
-}
-/* Die vollständige Analyse ist lang: ganz zeigen, aber innerhalb der Karte scrollen. */
-.attention-failure.attention-analysis {
-  display: block;
-  max-height: 50vh;
+/* Ausführliche Meldung und Analyse: gegliedert, lang, aber innerhalb der Karte scrollbar. */
+.attention-failure-body,
+.attention-analysis {
+  display: grid;
+  gap: 6px;
+  max-height: 60vh;
+  margin-top: 8px;
+  padding: 10px 14px;
   overflow-y: auto;
-  -webkit-line-clamp: unset;
-  line-clamp: unset;
-  white-space: normal;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafaf8;
+  font-size: 14px;
+  overscroll-behavior: contain;
+}
+.attention-analysis {
+  display: block;
+}
+.attention-failure-body h4 {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+.attention-failure-body p {
+  margin: 0;
+}
+.attention-unmet {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+.attention-unmet small {
+  display: block;
+  color: var(--muted);
+}
+.attention-failure-body .markdown {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.attention-report > :first-child {
+  margin-top: 0;
+}
+.attention-log {
+  max-height: 240px;
+  margin: 6px 0 0;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 
 /* ── Verlauf: Symbole statt Etiketten, feste Höhe gegen Springen ─────── */

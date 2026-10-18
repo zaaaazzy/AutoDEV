@@ -9,7 +9,7 @@ import { CategoryLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../share
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderTableComponent } from './order-table.component.js';
-import { orderGuide } from '../../shared/order-problem.js';
+import { failureParts, orderGuide } from '../../shared/order-problem.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
 
@@ -81,7 +81,14 @@ export class DevelopmentComponent {
         }
         // Das Etikett neben dem Titel nennt den Status schon; dieselbe Angabe nicht noch einmal darunter zeigen.
         const badges = reasons.filter((reason) => reason.label !== statusLabel(item.status));
-        return { item, reasons, badges, checks: item.actionTodo ? [] : checks, guide: orderGuide(item) };
+        return {
+          item,
+          reasons,
+          badges,
+          checks: item.actionTodo ? [] : checks,
+          guide: orderGuide(item),
+          failure: item.failure ? failureParts(item.failure) : null,
+        };
       })
       .filter((entry) => entry.reasons.length);
   });
@@ -134,14 +141,13 @@ export class DevelopmentComponent {
     this.store.navigate('docs', { focus: id });
   }
 
-  /** Kurzfassung des Fehlers: bevorzugt die nicht bestandenen Abnahmepunkte, sonst ein sauber beginnender Auszug. */
-  protected failureSummary(failure: string): string {
-    const acceptance = /## Abnahme nicht bestanden\n([\s\S]*?)(?:\n## |$)/.exec(failure)?.[1]?.trim();
-    if (acceptance) return `**Abnahme nicht bestanden**\n${acceptance}`;
-    const [head, ...rest] = failure.split('\n\n');
-    let body = rest.join('\n\n').trim();
-    if (/^[a-zäöüß`]/.test(body)) body = `…${body.replace(/^\S*\s*/, ' ')}`;
-    return [head, body].filter(Boolean).join('\n\n');
+  /** Ohne gestarteten Behebungsauftrag stimmt „an einen Behebungsauftrag delegiert“ nicht: weglassen. */
+  protected noteText(item: DevelopmentItem, note: string): string {
+    return item.fixStatus ? note : note.replace(/\s*–\s*an einen Behebungsauftrag delegiert\.?$/, '.');
+  }
+
+  protected openBug(id: string): void {
+    this.store.navigate('bugs', { focus: id });
   }
 
   protected retryOrder(item: DevelopmentItem): Promise<void> {
