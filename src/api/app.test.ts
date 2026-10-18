@@ -331,6 +331,7 @@ test('seeds the default agent workflow when a project is created', async () => {
       'after_task',
       'after_task',
       'after_task',
+      'after_task',
     ]);
   });
 });

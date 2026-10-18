@@ -32,7 +32,7 @@ test('grants the Claude-backed assistant and developer their commands and log fo
 
 test('leaves other roles, other CLIs and explicit tool lists unchanged', () => {
   assert.deepEqual(withAssistantPermissions(CLAUDE, 'author'), CLAUDE);
-  assert.deepEqual(withAssistantPermissions(CLAUDE, 'tester'), CLAUDE);
+  assert.deepEqual(withAssistantPermissions(CLAUDE, 'documenter'), CLAUDE);
   assert.deepEqual(withAssistantPermissions(['copilot', '-p', '{prompt}'], 'assistant'), ['copilot', '-p', '{prompt}']);
   const explicit = ['claude', '--allowedTools', 'Read', '-p', '{prompt}'];
   assert.deepEqual(withAssistantPermissions(explicit, 'assistant'), explicit);

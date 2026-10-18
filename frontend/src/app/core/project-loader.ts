@@ -2,6 +2,8 @@ import type { ApiService } from './api.service.js';
 import { errorMessage } from './errors.js';
 import {
   emptyProjectData,
+  type AcceptanceCheck,
+  type AcceptanceDefaults,
   type Agent,
   type Attachment,
   CoverageReport,
@@ -37,11 +39,17 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     api.get<{ reports?: SprintReport[] }>(`${base}/sprint-reports`),
     api.get<{ attachments?: Attachment[] }>(`${base}/attachments`),
     api.get<{ report?: CoverageReport | null }>(`${base}/coverage`),
+    api.get<{ checks?: AcceptanceCheck[]; defaults?: AcceptanceDefaults }>(`${base}/acceptance`),
   ]);
 
   const data = emptyProjectData();
   const errors: Record<string, string> = {};
-  const [board, sprints, agents, agentRuns, runs, stats, bugs, docs, reports, attachments, coverage] = results;
+  const [board, sprints, agents, agentRuns, runs, stats, bugs, docs, reports, attachments, coverage, acceptance] =
+    results;
+  if (acceptance.status === 'fulfilled') {
+    data.acceptance = acceptance.value.checks ?? [];
+    data.acceptanceDefaults = acceptance.value.defaults ?? null;
+  }
   if (coverage.status === 'fulfilled') data.coverage = coverage.value.report ?? null;
   if (attachments.status === 'fulfilled') data.attachments = attachments.value.attachments ?? [];
   else errors.attachments = errorMessage(attachments.reason, 'Bilder konnten nicht geladen werden.');

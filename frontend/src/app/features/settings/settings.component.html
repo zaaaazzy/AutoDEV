@@ -37,6 +37,27 @@
         ></textarea>
       </label>
       <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
+      <label class="wide"
+        >Definition of Ready (ein Punkt pro Zeile)<textarea
+          name="definitionOfReady"
+          [(ngModel)]="settings.definitionOfReady"
+          rows="4"
+          [placeholder]="(store.data().acceptanceDefaults?.definitionOfReady ?? []).join('\n')"
+        ></textarea>
+      </label>
+      <p class="muted wide">Der Auftragsautor schreibt jeden Auftrag so, dass diese Punkte erfüllt sind.</p>
+      <label class="wide"
+        >Definition of Done (ein Punkt pro Zeile)<textarea
+          name="definitionOfDone"
+          [(ngModel)]="settings.definitionOfDone"
+          rows="5"
+          [placeholder]="(store.data().acceptanceDefaults?.definitionOfDone ?? []).join('\n')"
+        ></textarea>
+      </label>
+      <p class="muted wide">
+        Der Tester hakt diese Punkte und die Akzeptanzkriterien jedes Auftrags ab. Leer lassen für die Vorgabe (grau
+        angezeigt).
+      </p>
       <label class="wide check">
         <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" /> Automatisches Bugfixing: Scheitert
         ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label

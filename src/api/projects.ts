@@ -15,7 +15,7 @@ import {
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", created_at AS "createdAt"
          FROM projects
         ORDER BY name`,
     );
@@ -63,6 +63,27 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(folder);
       sets.push(`repository = $${values.length}`);
     }
+    for (const [field, column] of [
+      ['definitionOfReady', 'definition_of_ready'],
+      ['definitionOfDone', 'definition_of_done'],
+    ] as const) {
+      if (body[field] === undefined) continue;
+      const raw = body[field];
+      const items =
+        typeof raw === 'string'
+          ? raw
+              .split('\n')
+              .map((line) => line.replace(/^\s*[-*]\s*/, '').trim())
+              .filter(Boolean)
+          : Array.isArray(raw) && raw.every((entry) => typeof entry === 'string')
+            ? (raw as string[]).map((entry) => entry.trim()).filter(Boolean)
+            : null;
+      if (!items || items.length > 20 || items.some((item) => item.length > 300)) {
+        return fail('Definition of Ready/Done: höchstens 20 Punkte mit je bis zu 300 Zeichen, ein Punkt pro Zeile.');
+      }
+      values.push(items.length ? items : null);
+      sets.push(`${column} = $${values.length}`);
+    }
     if (body.testCommands !== undefined) {
       let commands: string[][] | null = null;
       if (typeof body.testCommands === 'string' && body.testCommands.trim()) {
@@ -109,7 +130,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone"`,
       values,
     );
     if (!result.rows[0]) {

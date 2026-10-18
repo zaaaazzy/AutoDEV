@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { ensureDefaultAgents } from '../api/agents.js';
+import { ensureDefaultAgents, ensureReviewer } from '../api/agents.js';
 import { SCHEMA } from './schema.js';
 
 export interface DatabaseConfig {
@@ -55,6 +55,10 @@ export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> 
     const projects = await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE NOT agents_seeded');
     for (const project of projects.rows) {
       await ensureDefaultAgents(pool, project.slug);
+    }
+    const withoutReviewer = await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE NOT reviewer_seeded');
+    for (const project of withoutReviewer.rows) {
+      await ensureReviewer(pool, project.slug);
     }
     return pool;
   } catch (error) {

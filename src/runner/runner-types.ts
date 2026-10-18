@@ -21,6 +21,11 @@ export interface PromptExtras {
   bugs?: KnownBug[];
   manual?: string;
   images?: string[];
+  /** Branch, gegen den der Reviewer die Änderungen prüft (Sprint- bzw. Basis-Branch). */
+  baseBranch?: string | null;
+  /** Akzeptanzkriterien aus dem Auftragstext und Definition of Done des Projekts (für den Tester). */
+  criteria?: string[];
+  definitionOfDone?: string[];
 }
 
 /** Runs an agent that has no command of its own (built-in tester or local model). */

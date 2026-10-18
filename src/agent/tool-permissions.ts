@@ -138,8 +138,8 @@ export async function loadPermissionGroups(
 /** Alle Regeln mit Standardrechten (für Tests und Doku). */
 export const CLAUDE_ASSISTANT_TOOLS = permissionRules();
 
-/** Rollen mit erweiterten Rechten: Dashboard-Assistent und Entwickler arbeiten selbstständig. */
-const TRUSTED_ROLES = new Set(['assistant', 'developer']);
+/** Rollen mit erweiterten Rechten: Assistent, Entwickler, Tester (Tests, Coverage) und Reviewer (git diff). */
+const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {

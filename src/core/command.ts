@@ -62,7 +62,14 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     };
     child.stdout.on('data', appendOutput);
     child.stderr.on('data', appendOutput);
-    child.once('error', (error) => appendOutput(Buffer.from(`\n${error.message}\n`)));
+    child.once('error', (error: NodeJS.ErrnoException) => {
+      const hint =
+        error.code === 'ENOENT'
+          ? ` – Befehl „${command[0]}“ wurde im PATH des Workers nicht gefunden (PATH=${(options.env ?? process.env).PATH ?? ''}). ` +
+            'Absoluten Pfad im Agent-Befehl angeben oder ./scripts/install-worker.sh in einem Terminal erneut ausführen, in dem der Befehl funktioniert.'
+          : '';
+      appendOutput(Buffer.from(`\n${error.message}${hint}\n`));
+    });
     child.once('close', (code, signal) => {
       untrack();
       if (signal) {

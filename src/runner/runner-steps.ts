@@ -7,9 +7,11 @@ import { startProgress } from '../agent/chat-progress.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { commitTaskToGit, shelveFailedWork } from './git-sync.js';
+import { commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
 import { executeAgentCommand } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
+import { parseReview } from './review.js';
+import { acceptanceProblems, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import { loadPermissionGroups, withAssistantPermissions } from '../agent/tool-permissions.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
@@ -103,6 +105,12 @@ export interface RunContext {
   images: string[];
   fallbackCommand: string[] | null;
   projectContext: string;
+  /** Eigener Git-Branch des Auftrags (null, wenn ohne Git oder kein Agent Dateien ändert). */
+  branch?: OrderBranch | null;
+  /** Akzeptanzkriterien aus dem Auftragstext und Definition of Done des Projekts. */
+  criteria?: string[];
+  definitionOfDone?: string[];
+  sprintName?: string | null;
 }
 
 interface StepOutcome {
@@ -240,7 +248,14 @@ export async function runStep(
       : undefined;
   const prompt = withProjectContext(
     ctx.projectContext,
-    buildPrompt(agent, item, done, { bugs: ctx.bugs, manual, images: ctx.images }),
+    buildPrompt(agent, item, done, {
+      bugs: ctx.bugs,
+      manual,
+      images: ctx.images,
+      baseBranch: ctx.branch?.base,
+      criteria: ctx.criteria,
+      definitionOfDone: ctx.definitionOfDone,
+    }),
   );
 
   const stepAbort = new AbortController();
@@ -317,7 +332,37 @@ export async function runStep(
     );
     return { passed: false, interrupted: true };
   }
-  const passed = result.exitCode === 0 && !cancelled;
+  // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.
+  let accepted = true;
+  if (agent.role === 'tester' && ctx.definitionOfDone) {
+    const criteria = ctx.criteria ?? [];
+    const acceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
+    await saveAcceptance(pool, item.id, criteria, ctx.definitionOfDone, acceptance).catch((error) =>
+      console.error('Abnahme konnte nicht gespeichert werden:', error),
+    );
+    // Nur Tester mit eigenem CLI-Befehl melden die Abnahme; der eingebaute Tester führt nur Build und Tests aus.
+    if (agent.command?.length && result.exitCode === 0) {
+      const problems = acceptance
+        ? acceptanceProblems(acceptance, criteria, ctx.definitionOfDone)
+        : ['Kein Abnahme-Ergebnis (@@ACCEPTANCE) gemeldet – bitte jedes Kriterium einzeln prüfen.'];
+      output = stripAcceptance(output);
+      if (problems.length) {
+        accepted = false;
+        output += `\n\n## Abnahme nicht bestanden\n${problems.map((line) => `- ${line}`).join('\n')}`;
+        await logEvent(pool, stepId, `Abnahme: ${problems.length} Punkt(e) offen oder nicht erfüllt`);
+      } else {
+        await logEvent(pool, stepId, 'Abnahme: alle Kriterien und DoD-Punkte erfüllt');
+      }
+    }
+  }
+  // Der Reviewer muss ausdrücklich freigeben; ohne eindeutiges Ergebnis gilt der Schritt als nicht bestanden.
+  const review = agent.role === 'reviewer' ? parseReview(output) : true;
+  if (review !== true && result.exitCode === 0) {
+    await logEvent(pool, stepId, review === false ? 'Review: Änderungen nötig' : 'Review ohne eindeutiges Ergebnis');
+  } else if (agent.role === 'reviewer') {
+    await logEvent(pool, stepId, 'Review: freigegeben');
+  }
+  const passed = result.exitCode === 0 && !cancelled && review === true && accepted;
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
   const coverage = agent.role === 'tester' ? parseCoverage(output) : null;
   if (coverage) {
@@ -361,20 +406,6 @@ export async function runStep(
   return { passed, interrupted: false };
 }
 
-/** Dateien, die die Agents dieses Laufs laut Verlauf geschrieben oder bearbeitet haben (relativ zum Projektordner). */
-async function writtenPaths(pool: Pool, runId: string): Promise<string[]> {
-  const rows = (
-    await pool.query<{ text: string }>(
-      `SELECT e->>'text' AS text FROM agent_run_steps s, jsonb_array_elements(s.events) e WHERE s.run_id = $1`,
-      [runId],
-    )
-  ).rows;
-  const paths = rows
-    .map((row) => /^(?:Bearbeitet|Schreibt) (.+)$/.exec(row.text)?.[1]?.trim())
-    .filter((path): path is string => !!path);
-  return [...new Set(paths)];
-}
-
 /** Settle the order status and trigger follow-up actions such as commits or bugfix retries. */
 export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
   const { pool, item, options, execute } = ctx;
@@ -386,32 +417,35 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     );
     return;
   }
+  // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
+  let mergeProblem: string | null = null;
+  if (ctx.branch) {
+    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute);
+    console.info(`[${item.id}] ${result.message}`);
+    if (passed && !result.merged) mergeProblem = result.message;
+  } else if (passed && ctx.sprintName) {
+    await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
+  }
+  const succeeded = passed && !mergeProblem;
+  if (mergeProblem) {
+    await pool
+      .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, mergeProblem])
+      .catch(() => undefined);
+  }
   if (item.agentId) {
     // A one-agent play restores the previous status; a blocked order resumes normally after success.
     await pool.query(
       `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
               status = CASE WHEN NOT $2 THEN '${DEVELOPMENT_STATUS.blocked}' WHEN return_status IS NULL OR return_status = '${DEVELOPMENT_STATUS.blocked}' THEN '${DEVELOPMENT_STATUS.planned}' ELSE return_status END
         WHERE id = $1`,
-      [item.id, passed],
+      [item.id, succeeded],
     );
     return;
   }
   await pool.query(
     `UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
-    [item.id, passed ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
+    [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
-  if (!passed) {
-    // Änderungen eines fehlgeschlagenen Auftrags parken, damit der nächste Auftrags-Commit sauber bleibt.
-    if (await shelveFailedWork(options.cwd, item, await writtenPaths(pool, ctx.runId), execute)) {
-      console.info(`[${item.id}] Änderungen geparkt (git stash), sie kommen beim nächsten Versuch zurück.`);
-    }
-    return;
-  }
-  if (item.sprintId) {
-    const sprint = await pool
-      .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
-      .catch(() => null);
-    if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
-  }
+  if (!succeeded) return;
   if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
 }

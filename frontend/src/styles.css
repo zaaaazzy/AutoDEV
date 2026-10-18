@@ -3507,3 +3507,40 @@ h3 .link-button {
 .wizard .form-grid {
   align-items: start;
 }
+
+.acceptance h4 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.85rem;
+}
+
+.acceptance-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.acceptance-list li {
+  display: grid;
+  grid-template-columns: 1.25rem 1fr;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.acceptance-list small {
+  display: block;
+}
+
+.acceptance-mark {
+  font-weight: 700;
+  text-align: center;
+}
+
+.acceptance-met .acceptance-mark {
+  color: var(--green);
+}
+
+.acceptance-unmet .acceptance-mark {
+  color: #b3261e;
+}

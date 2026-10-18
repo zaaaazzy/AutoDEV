@@ -5,7 +5,8 @@ import { backfillFailures } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
-import { checkoutSprintBranch, restoreShelvedWork, syncSprintToGit } from './git-sync.js';
+import { enterOrderBranch, syncSprintToGit } from './git-sync.js';
+import { extractCriteria, loadDefinitions } from './acceptance.js';
 import { deployProject } from './deploy.js';
 import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
@@ -42,6 +43,14 @@ export type {
   WorkItemOptions,
 } from './runner-types.js';
 
+const PROMPT_BUG_LIMIT = 15;
+const TREE_ROLES = new Set(['developer', 'tester']);
+
+/** Developer and tester (and every agent of the implementation phase) modify files in the project folder. */
+export function changesWorkingTree(agent: Pick<WorkflowAgent, 'phase' | 'role'>): boolean {
+  return agent.phase === 'while_task' || TREE_ROLES.has(agent.role);
+}
+
 /**
  * After a failed run only the failed agent and the ones after it run again: leading agents that already passed in the
  * previous run are skipped and their output is handed on to the following agents.
@@ -73,6 +82,22 @@ async function resumePosition(
     done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
     position += 1;
   }
+  // Lehnen Tester oder Reviewer ab, beginnt der nächste Versuch wieder beim Entwickler – mit deren Rückmeldung.
+  const failed = steps[position];
+  const failedAgent = ordered[position];
+  if (failed && failed.status !== AGENT_STEP_STATUS.passed && failedAgent && LOOP_BACK_ROLES.has(failedAgent.role)) {
+    const restart = ordered.findIndex((agent) => agent.phase === 'while_task');
+    if (restart >= 0 && restart < position) {
+      done.splice(restart);
+      done.push({
+        agentName: failed.agent_name,
+        phase: failed.phase,
+        status: 'failed',
+        output: `Rückmeldung aus dem letzten Versuch – bitte beheben:\n${failed.output}`,
+      });
+      return restart;
+    }
+  }
   // If everything passed already, repeat at least the last agent.
   if (position === ordered.length && position > 0) {
     done.pop();
@@ -81,18 +106,17 @@ async function resumePosition(
   return position;
 }
 
-/** Sprint-Aufträge arbeiten auf dem Sprint-Branch; geparkte Arbeit eines früheren Fehlversuchs wird zurückgeholt. */
-async function prepareWorkingTree(pool: Pool, item: WorkItem, options: WorkItemOptions): Promise<void> {
-  const execute = options.execute ?? runCommand;
-  if (item.sprintId) {
-    const sprint = (await pool.query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId]))
-      .rows[0];
-    if (sprint) await checkoutSprintBranch(options.cwd, sprint.name, execute);
-  }
-  if (await restoreShelvedWork(options.cwd, item.id, execute)) {
-    console.info(`[${item.id}] Geparkte Änderungen aus dem letzten Versuch übernommen.`);
-  }
+/** Name des Sprints eines Auftrags (für Sprint-Branch und Commit-Nachrichten). */
+async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> {
+  if (!item.sprintId) return null;
+  const sprint = await pool
+    .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
+    .catch(() => null);
+  return sprint?.rows[0]?.name ?? null;
 }
+
+/** Rollen, deren Ablehnung den Auftrag zurück zum Entwickler schickt. */
+const LOOP_BACK_ROLES = new Set(['tester', 'reviewer']);
 
 export async function runWorkItem(
   pool: Pool,
@@ -109,7 +133,6 @@ export async function runWorkItem(
     `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', updated_at = NOW() WHERE id = $1`,
     [item.id],
   );
-  await prepareWorkingTree(pool, item, options);
 
   const ordered = selectWorkflowAgents(agents, item);
   const ctx: RunContext = {
@@ -127,9 +150,13 @@ export async function runWorkItem(
   };
   let passed = true;
   let interrupted = false;
+  // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
+  // order is settled, so no other order edits files while this one is tested and committed.
+  let releaseTree: (() => void) | undefined;
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
-    ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
+    // Risks were already filtered by the bug reviewer; otherwise only a short list of known bugs is passed on.
+    ctx.bugs = item.risks?.trim() ? [] : await loadKnownBugs(pool, item.projectSlug, PROMPT_BUG_LIMIT).catch(() => []);
     ctx.images = await materializeAttachments(
       pool,
       { ideationId: item.ideationId, bugId: item.bugId },
@@ -137,17 +164,18 @@ export async function runWorkItem(
       options.cwd,
     ).catch(() => []);
     ctx.projectContext = await loadProjectContext(pool, item.projectSlug);
+    ctx.definitionOfDone = (await loadDefinitions(pool, item.projectSlug)).done;
+    ctx.criteria = extractCriteria(item.description ?? '');
     const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
     for (const [position, agent] of ordered.entries()) {
       if (position < resumeFrom) continue;
-      // Developer and tester change the working tree, so they never overlap; author and documentation agents may.
-      const release = agent.phase === 'while_task' ? await options.implementationLock?.acquire() : undefined;
-      let outcome: Awaited<ReturnType<typeof runStep>>;
-      try {
-        outcome = await runStep(ctx, agent, position, ordered.length);
-      } finally {
-        release?.();
+      if (!releaseTree && changesWorkingTree(agent)) {
+        releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
+        // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
+        ctx.sprintName = await sprintNameOf(pool, item);
+        ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
       }
+      const outcome = await runStep(ctx, agent, position, ordered.length);
       if (outcome.interrupted) interrupted = true;
       if (!outcome.passed) {
         passed = false;
@@ -162,7 +190,11 @@ export async function runWorkItem(
       runId,
       passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
     ]);
-    await settleItem(ctx, passed, interrupted);
+    try {
+      await settleItem(ctx, passed, interrupted);
+    } finally {
+      releaseTree?.();
+    }
   }
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
 }

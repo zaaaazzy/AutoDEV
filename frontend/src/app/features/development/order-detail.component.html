@@ -138,6 +138,34 @@
     </form>
   }
   <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
+  @if (acceptance().total) {
+    <details class="run-step order-brief acceptance">
+      <summary>
+        Abnahme
+        @if (acceptance().open) {
+          <span class="muted">– {{ acceptance().open }} von {{ acceptance().total }} offen</span>
+        } @else {
+          <span class="muted">– alle Punkte erfüllt</span>
+        }
+      </summary>
+      @for (group of acceptance().groups; track group.title) {
+        <h4>{{ group.title }}</h4>
+        <ul class="acceptance-list">
+          @for (check of group.checks; track check.position) {
+            <li [class]="'acceptance-' + check.status">
+              <span class="acceptance-mark" [attr.aria-label]="check.status">{{ mark(check) }}</span>
+              <span
+                >{{ check.text }}
+                @if (check.note) {
+                  <small class="muted">{{ check.note }}</small>
+                }
+              </span>
+            </li>
+          }
+        </ul>
+      }
+    </details>
+  }
   <details class="run-step order-brief">
     <summary>Agents</summary>
     <app-agent-workflow [order]="item" />

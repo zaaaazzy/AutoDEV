@@ -16,6 +16,8 @@ export interface Project {
   guidelines?: string;
   autoBugfix?: boolean;
   databaseConfigured?: boolean;
+  definitionOfReady?: string[] | null;
+  definitionOfDone?: string[] | null;
 }
 
 export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
@@ -275,6 +277,21 @@ export interface CoverageReport {
   areas: CoverageArea[];
 }
 
+export interface AcceptanceCheck {
+  developmentId: string;
+  kind: 'criterion' | 'done';
+  position: number;
+  text: string;
+  status: 'open' | 'met' | 'unmet';
+  note: string | null;
+  checkedAt: string | null;
+}
+
+export interface AcceptanceDefaults {
+  definitionOfReady: string[];
+  definitionOfDone: string[];
+}
+
 export interface ProjectData {
   comments: IdeaComment[];
   ideas: Idea[];
@@ -289,6 +306,8 @@ export interface ProjectData {
   docs: DocumentEntry[];
   reports: SprintReport[];
   coverage: CoverageReport | null;
+  acceptance: AcceptanceCheck[];
+  acceptanceDefaults: AcceptanceDefaults | null;
 }
 
 export const emptyProjectData = (): ProjectData => ({
@@ -305,6 +324,8 @@ export const emptyProjectData = (): ProjectData => ({
   docs: [],
   reports: [],
   coverage: null,
+  acceptance: [],
+  acceptanceDefaults: null,
 });
 
 export interface ChatMessage {

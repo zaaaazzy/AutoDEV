@@ -1,3 +1,5 @@
+import { acceptanceInstructions } from './acceptance.js';
+import { reviewInstructions } from './review.js';
 import { COVERAGE_INSTRUCTIONS } from './coverage.js';
 import type { PromptExtras, StepSummary, WorkItem, WorkflowAgent } from './runner-types.js';
 
@@ -38,6 +40,10 @@ export function buildPrompt(
       : '',
     history.length ? `## Ergebnisse vorheriger Agents\n${history.join('\n\n')}` : '',
     agent.role === 'tester' ? COVERAGE_INSTRUCTIONS : '',
+    agent.role === 'tester' && extras.definitionOfDone
+      ? acceptanceInstructions(extras.criteria ?? [], extras.definitionOfDone)
+      : '',
+    agent.role === 'reviewer' ? reviewInstructions(extras.baseBranch ?? null) : '',
   ]
     .filter(Boolean)
     .join('\n\n');

@@ -7,12 +7,14 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import {
   checkoutSprintBranch,
+  ciWorkflowYaml,
   commitTaskToGit,
   filesWithSecrets,
   isValidGitRemote,
   pushRemote,
-  restoreShelvedWork,
-  shelveFailedWork,
+  enterOrderBranch,
+  finishOrderBranch,
+  orderBranch,
   sprintBranch,
   sprintTag,
   syncSprintToGit,
@@ -165,8 +167,8 @@ test('orders work on the sprint branch and a completed sprint is merged into mai
   assert.equal(git('show', 'main:feature.txt'), 'neu');
 });
 
-test('work of a failed order is parked and restored on the next attempt', async () => {
-  const cwd = await mkdtemp(join(tmpdir(), 'git-shelve-'));
+test('each order works on its own branch and is merged into the sprint branch on success', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-order-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
   execFileSync('git', ['init', '-b', 'main'], { cwd });
   git('config', 'user.email', 'a@b.c');
@@ -174,14 +176,31 @@ test('work of a failed order is parked and restored on the next attempt', async 
   await writeFile(join(cwd, 'base.txt'), 'base');
   git('add', '-A');
   git('commit', '-m', 'base');
-  await writeFile(join(cwd, 'mine.txt'), 'fehlgeschlagen');
-  await writeFile(join(cwd, 'other.txt'), 'anderer Auftrag');
-  const item = { id: '11111111-2222-3333-4444-555555555555', title: 'Kaputt' };
-  assert.equal(await shelveFailedWork(cwd, item, ['mine.txt']), true);
-  assert.equal(git('status', '--porcelain'), '?? other.txt');
-  assert.equal(await shelveFailedWork(cwd, item, []), false);
-  assert.equal(await restoreShelvedWork(cwd, item.id), true);
-  assert.match(git('status', '--porcelain'), /mine\.txt/);
+  const item = { id: '11111111-2222-3333-4444-555555555555', title: 'Login Seite' };
+  assert.equal(orderBranch(item), 'auftrag/11111111-login-seite');
+
+  const failed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(failed, { branch: 'auftrag/11111111-login-seite', base: 'sprint/sprint-1' });
+  await writeFile(join(cwd, 'login.txt'), 'halb fertig');
+  const wip = await finishOrderBranch(cwd, item, failed!, 'Sprint 1', false);
+  assert.match(wip.message, /Zwischenstand/);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1');
+  assert.equal(git('status', '--porcelain'), '');
+
+  const retry = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.equal(git('show', 'HEAD:login.txt'), 'halb fertig');
+  await writeFile(join(cwd, 'login.txt'), 'fertig');
+  const done = await finishOrderBranch(cwd, item, retry!, 'Sprint 1', true);
+  assert.equal(done.merged, true);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1');
+  assert.equal(git('show', 'sprint/sprint-1:login.txt'), 'fertig');
+  assert.match(git('log', '-1', '--format=%s'), /^Merge auftrag\/11111111-login-seite/);
+  assert.equal(git('branch', '--list', 'auftrag/*'), '');
+});
+
+test('projects without git get no order branch', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-none-'));
+  assert.equal(await enterOrderBranch(cwd, { id: 'x', title: 'y' }, null), null);
 });
 
 test('files that look like credentials are never committed', async () => {
@@ -206,4 +225,23 @@ test('secret detection looks only at added lines', () => {
     '+const ok = 1;',
   ].join('\n');
   assert.deepEqual(filesWithSecrets(diff), ['src/a.ts']);
+});
+
+test('the CI workflow runs the same test commands as the local gate', () => {
+  const yaml = ciWorkflowYaml(
+    [
+      ['npm', 'run', 'build'],
+      ['npm', 'test', '--', '--grep', 'login page'],
+    ],
+    {
+      node: true,
+      lockfile: true,
+      python: false,
+    },
+  );
+  assert.match(yaml, /actions\/setup-node@v4/);
+  assert.match(yaml, /- run: npm ci/);
+  assert.match(yaml, /- run: npm run build/);
+  assert.match(yaml, /- run: npm test -- --grep 'login page'/);
+  assert.match(yaml, /branches: \[main, 'sprint\/\*\*'\]/);
 });

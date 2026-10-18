@@ -11,6 +11,7 @@ import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
 import { registerCoverageRoutes } from './coverage.js';
 import { registerSetupRoutes } from './setup.js';
+import { registerAcceptanceRoutes } from './acceptance.js';
 import { registerIdeationRoutes } from './ideation.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerReportRoutes } from './reports.js';
@@ -51,6 +52,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerDocRoutes(app, pool);
   registerCoverageRoutes(app, pool);
   registerSetupRoutes(app, pool);
+  registerAcceptanceRoutes(app, pool);
   registerReportRoutes(app, pool);
   registerStatsRoutes(app, pool);
   registerChatRoutes(app, pool);

@@ -376,4 +376,21 @@ export const SCHEMA = `
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
   CREATE INDEX IF NOT EXISTS setup_jobs_pending_idx ON setup_jobs (status, created_at);
+
+  -- Reviewer nachträglich in bestehende Workflows aufnehmen (einmalig je Projekt).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS reviewer_seeded BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Definition of Ready/Done pro Projekt (NULL = Standard) und Abnahme je Auftrag (Akzeptanzkriterien und DoD).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS definition_of_ready TEXT[];
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS definition_of_done TEXT[];
+  CREATE TABLE IF NOT EXISTS acceptance_checks (
+    development_id UUID NOT NULL REFERENCES development_items(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('criterion', 'done')),
+    position INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'met', 'unmet')),
+    note TEXT NOT NULL DEFAULT '',
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (development_id, kind, position)
+  );
 `;

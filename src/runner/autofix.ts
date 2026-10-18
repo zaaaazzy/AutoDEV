@@ -13,6 +13,31 @@ interface FailedItem {
 }
 
 /**
+ * Fehler des Agents selbst (Zeitlimit, Schleife, Modell nicht erreichbar, Befehl fehlt …) sind keine Fehler im Code.
+ * Ein Bug-Auftrag dafür kann nichts beheben und würde nur weitere Fehlschläge und Prompt-Ballast erzeugen.
+ */
+const AGENT_FAILURE_PATTERNS = [
+  /Zeitlimit erreicht/,
+  /Schleife erkannt/,
+  /wiederholt mit denselben Argumenten/,
+  /Maximale Anzahl von \d+ Schritten erreicht/,
+  /Der Entwickler-Agent hat keine Dateien geändert/,
+  /Ollama nicht erreichbar/,
+  /Ollama antwortete mit \d+/,
+  /Ollama lieferte keine Nachricht/,
+  /Das Modell lieferte keine Antwort/,
+  /im PATH des Workers nicht gefunden/,
+  /\bENOENT\b/,
+  /Process ended by SIG\w+ \(timeout or kill\)/,
+  /Unterbrochen: Der Worker wurde beendet/,
+];
+
+export function isAgentFailure(output: string): boolean {
+  const tail = output.slice(-1500);
+  return AGENT_FAILURE_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
+/**
  * Hält den Fehler am Auftrag fest, legt einen Bug-Bericht an und – bei aktivem automatischen Bugfixing –
  * erzeugt sofort einen Behebungsauftrag, der ohne Sprint-Zuweisung vom Worker aufgenommen wird.
  */
@@ -34,6 +59,16 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
               analysis_status = CASE WHEN $4 AND analysis_status IS NULL THEN 'requested' ELSE analysis_status END
         WHERE id = $1`,
       [item.id, `Agent „${agentName}“ scheiterte:\n\n${detail}`, item.bugId, auto],
+    );
+    return;
+  }
+  if (isAgentFailure(detail)) {
+    // Kein Bug-Bericht: Auftrag bleibt blockiert, die Problemanalyse schlägt das weitere Vorgehen vor.
+    await pool.query(
+      `UPDATE development_items SET failure = $2, auto_run = FALSE,
+              analysis_status = CASE WHEN analysis_status IS NULL THEN 'requested' ELSE analysis_status END
+        WHERE id = $1`,
+      [item.id, `Agent „${agentName}“ konnte nicht arbeiten (kein Code-Fehler, daher kein Bug-Auftrag):\n\n${detail}`],
     );
     return;
   }

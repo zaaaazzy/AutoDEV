@@ -22,6 +22,8 @@ export class SettingsComponent {
     gitRemote: '',
     description: '',
     guidelines: '',
+    definitionOfReady: '',
+    definitionOfDone: '',
     autoBugfix: true,
     databaseUrl: '',
     clearDatabase: false,
@@ -47,6 +49,8 @@ export class SettingsComponent {
           deployCommands: this.settings.deployCommands,
           description: this.settings.description,
           guidelines: this.settings.guidelines,
+          definitionOfReady: this.settings.definitionOfReady,
+          definitionOfDone: this.settings.definitionOfDone,
           autoBugfix: this.settings.autoBugfix,
           ...(this.settings.clearDatabase
             ? { databaseUrl: '' }
@@ -82,6 +86,8 @@ export class SettingsComponent {
       gitRemote: project?.gitRemote ?? '',
       description: project?.description ?? '',
       guidelines: project?.guidelines ?? '',
+      definitionOfReady: (project?.definitionOfReady ?? []).join('\n'),
+      definitionOfDone: (project?.definitionOfDone ?? []).join('\n'),
       autoBugfix: project?.autoBugfix ?? true,
       databaseUrl: '',
       clearDatabase: false,

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
 import { withProjectLock } from '../core/project-lock.js';
@@ -41,7 +41,6 @@ export function sprintBranch(name: string): string {
 }
 
 const MAIN_BRANCH = 'main';
-const WIP_PREFIX = 'devlog-wip';
 const TEST_TIMEOUT_MS = 15 * 60_000;
 
 const INTERNAL_EXCLUDES = [
@@ -188,58 +187,242 @@ export async function checkoutSprintBranch(
   }
 }
 
+/** Branch eines Auftrags, z. B. auftrag/1a2b3c4d-login-seite. */
+export function orderBranch(item: { id: string; title: string }): string {
+  return `auftrag/${item.id.slice(0, 8)}-${slugify(item.title).slice(0, 32)}`;
+}
+
+export interface OrderBranch {
+  branch: string;
+  base: string;
+}
+
 /**
- * Parkt die Änderungen eines fehlgeschlagenen Auftrags als Stash, damit sie nicht im Commit des nächsten Auftrags landen.
- * Geparkt werden nur die Dateien, die der Auftrag laut Verlauf geschrieben hat (`paths`).
+ * Wechselt für einen Auftrag auf seinen eigenen Branch: bei Sprint-Aufträgen vom Sprint-Branch abgezweigt, sonst vom
+ * aktuellen Branch. Existiert der Branch schon (erneuter Versuch), wird er fortgesetzt und der Basis-Stand eingemergt.
  */
-export async function shelveFailedWork(
+export async function enterOrderBranch(
   cwd: string,
   item: { id: string; title: string },
-  paths: string[],
+  sprintName: string | null,
   rawExecute: CommandExecutor = runCommand,
-): Promise<boolean> {
+): Promise<OrderBranch | null> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
-  // Ohne Repository gibt es nichts zu parken (und es soll dafür keines angelegt werden).
-  if (!existsSync(join(cwd, '.git'))) return false;
+  // Projekte ohne Git (bewusst gewählt) bekommen keinen Auftrags-Branch.
+  if (!existsSync(join(cwd, '.git'))) return null;
   try {
-    if (!(await must('status', '--porcelain'))) return false;
-    const existing = paths.filter(
-      (path) => !path.startsWith('/') && !path.includes('..') && existsSync(join(cwd, path)),
-    );
-    // Ohne bekannte Dateien nichts parken: ein Stash des ganzen Arbeitsstands träfe auch laufende andere Aufträge.
-    if (!existing.length) return false;
-    const title = item.title.replace(/\s+/g, ' ').slice(0, 60);
-    const args = ['stash', 'push', '--include-untracked', '-m', `${WIP_PREFIX} ${item.id} ${title}`];
-    const result = await git(...args, '--', ...existing);
-    return result.exitCode === 0 && !/No local changes/i.test(result.output);
+    await ensureRepository(git, must, cwd);
+    if (sprintName) await checkoutSprintBranch(cwd, sprintName, rawExecute);
+    let base = await must('rev-parse', '--abbrev-ref', 'HEAD');
+    const branch = orderBranch(item);
+    if (base === branch) {
+      // Nach einem Abbruch steht der Ordner noch auf dem Auftrags-Branch.
+      base = sprintName ? sprintBranch(sprintName) : MAIN_BRANCH;
+      return { branch, base };
+    }
+    if (!(await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode) {
+      if (await branchExists(git, branch)) {
+        await must('checkout', branch);
+        const merged = await git('merge', '--no-edit', base);
+        if (merged.exitCode !== 0) await git('merge', '--abort');
+      } else {
+        await must('checkout', '-b', branch);
+      }
+    } else {
+      // Leeres Repository ohne Commit: Branch direkt anlegen.
+      await must('checkout', '-b', branch);
+    }
+    return { branch, base };
   } catch (error) {
-    console.error(`Auftrag ${item.id} nicht geparkt: ${error instanceof Error ? error.message : String(error)}`);
-    return false;
+    console.error(
+      `Auftrags-Branch für ${item.id} nicht aktiv: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
   }
 }
 
-/** Holt geparkte Änderungen eines Auftrags zurück, wenn er erneut startet. */
-export async function restoreShelvedWork(
+/**
+ * Schließt den Auftrags-Branch ab. Erfolg: Commit, Merge (--no-ff) in den Basis-Branch, Branch löschen.
+ * Misserfolg: Zwischenstand als WIP-Commit auf dem Auftrags-Branch sichern und zur Basis zurückkehren, damit der
+ * nächste Auftrag sauber startet; der nächste Versuch setzt den Branch fort.
+ */
+export async function finishOrderBranch(
   cwd: string,
-  itemId: string,
+  item: { id: string; title: string; kind?: string },
+  target: OrderBranch,
+  sprintName: string,
+  passed: boolean,
   rawExecute: CommandExecutor = runCommand,
-): Promise<boolean> {
+): Promise<{ merged: boolean; commit: string | null; message: string }> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
-  const { git } = gitHelpers(execute, cwd);
-  if (!existsSync(join(cwd, '.git'))) return false;
-  const list = await git('stash', 'list', '--format=%gd %s');
-  const ref = list.output
-    .split('\n')
-    .find((line) => line.includes(`${WIP_PREFIX} ${itemId}`))
-    ?.split(' ')[0];
-  if (!ref) return false;
-  const popped = await git('stash', 'pop', ref);
-  if (popped.exitCode !== 0)
-    console.error(`Geparkte Arbeit für ${itemId} nicht übernommen: ${popped.output.slice(-300)}`);
-  return popped.exitCode === 0;
+  const { git, must } = gitHelpers(execute, cwd);
+  try {
+    // Wie bei allen Auftrags-Commits: Dateien, die nach Zugangsdaten aussehen, bleiben außen vor.
+    await stageAll(git, must);
+    const dirty = Boolean(await must('diff', '--cached', '--name-only'));
+    if (passed) {
+      if (dirty) {
+        const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
+        await must('commit', '-m', subject, '-m', body);
+      }
+      await must('checkout', target.base);
+      const merged = await git(
+        'merge',
+        '--no-ff',
+        target.branch,
+        '-m',
+        `Merge ${target.branch}: ${item.title.slice(0, 72)}`,
+      );
+      if (merged.exitCode !== 0) {
+        await git('merge', '--abort');
+        return {
+          merged: false,
+          commit: null,
+          message: `Merge-Konflikt mit ${target.base} – Branch ${target.branch} bleibt bestehen.`,
+        };
+      }
+      await git('branch', '-d', target.branch);
+      return {
+        merged: true,
+        commit: await must('rev-parse', '--short', 'HEAD'),
+        message: `In ${target.base} gemergt.`,
+      };
+    }
+    if (dirty) {
+      await must(
+        'commit',
+        '--no-verify',
+        '-m',
+        `wip(${sprintName || 'auftrag'}): ${item.title.slice(0, 60)}`,
+        '-m',
+        `Auftrag: ${item.id}\nZwischenstand eines fehlgeschlagenen Versuchs.`,
+      );
+    }
+    await must('checkout', target.base);
+    return { merged: false, commit: null, message: `Zwischenstand auf ${target.branch} gesichert.` };
+  } catch (error) {
+    return { merged: false, commit: null, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+const CI_WORKFLOW = join('.github', 'workflows', 'devlog-ci.yml');
+const CI_WAIT_MS = 30 * 60_000;
+
+const shellArg = (part: string): string => (/^[\w@%+=:,./-]+$/.test(part) ? part : `'${part.replace(/'/g, `'\\''`)}'`);
+
+/** GitHub-Actions-Workflow: dieselben Testbefehle wie das lokale Test-Gate, bei Push und Pull Request. */
+export function ciWorkflowYaml(
+  commands: string[][],
+  options: { node: boolean; lockfile: boolean; python: boolean },
+): string {
+  const steps = [
+    '      - uses: actions/checkout@v4',
+    ...(options.node
+      ? [
+          '      - uses: actions/setup-node@v4',
+          '        with:',
+          "          node-version-file: '.nvmrc'",
+          ...(options.lockfile ? ["          cache: 'npm'"] : []),
+          `      - run: ${options.lockfile ? 'npm ci' : 'npm install'}`,
+        ]
+      : []),
+    ...(options.python
+      ? [
+          '      - uses: actions/setup-python@v5',
+          '        with:',
+          "          python-version: '3.12'",
+          '      - run: pip install -r requirements.txt',
+        ]
+      : []),
+    ...commands.map((command) => `      - run: ${command.map(shellArg).join(' ')}`),
+  ];
+  return `# Automatisch von Dev Log angelegt: Build und Tests als Quality Gate für Pull Requests und main.
+name: CI
+on:
+  push:
+    branches: [main, 'sprint/**']
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+${steps.join('\n')}
+`;
+}
+
+/** Legt den CI-Workflow an, falls das Projekt nach GitHub pusht und noch keinen Workflow hat. */
+async function ensureCiWorkflow(cwd: string, commands: string[][], helpers: GitHelpers, log: string[]): Promise<void> {
+  const directory = join(cwd, '.github', 'workflows');
+  const existing = existsSync(directory) ? (await readdir(directory)).filter((file) => /\.ya?ml$/.test(file)) : [];
+  if (existing.length || !commands.length) return;
+  const node = existsSync(join(cwd, 'package.json'));
+  if (node && !existsSync(join(cwd, '.nvmrc'))) await writeFile(join(cwd, '.nvmrc'), '22\n');
+  await mkdir(directory, { recursive: true });
+  await writeFile(
+    join(cwd, CI_WORKFLOW),
+    ciWorkflowYaml(commands, {
+      node,
+      lockfile: existsSync(join(cwd, 'package-lock.json')),
+      python: existsSync(join(cwd, 'requirements.txt')),
+    }),
+  );
+  await helpers.must('add', CI_WORKFLOW, ...(node ? ['.nvmrc'] : []));
+  await helpers.must(
+    'commit',
+    '-m',
+    'ci: GitHub-Actions-Workflow für Build und Tests',
+    '-m',
+    'Automatisch angelegt vom Mainty Dev Log.',
+  );
+  log.push('CI-Workflow (GitHub Actions) angelegt.');
+}
+
+/**
+ * Wartet auf den GitHub-Actions-Lauf für den gepushten Stand (über die gh CLI). Ohne gh bleibt das lokale Test-Gate
+ * maßgeblich; ein roter CI-Lauf verhindert den Merge nach main.
+ */
+async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, log: string[]): Promise<void> {
+  const env = { ...process.env, GH_PROMPT_DISABLED: '1' };
+  const gh = async (...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs: CI_WAIT_MS, env });
+  const auth = await gh('auth', 'status', '--hostname', 'github.com').catch(() => null);
+  if (!auth || auth.exitCode !== 0) {
+    log.push('CI-Status nicht prüfbar (GitHub CLI fehlt oder ist nicht angemeldet) – das lokale Test-Gate gilt.');
+    return;
+  }
+  const sha = (await execute(['git', 'rev-parse', 'HEAD'], cwd, { timeoutMs: GIT_TIMEOUT_MS })).output.trim();
+  let runId = '';
+  for (let attempt = 0; attempt < 24 && !runId; attempt += 1) {
+    const list = await gh(
+      'run',
+      'list',
+      '--branch',
+      branch,
+      '--commit',
+      sha,
+      '--limit',
+      '1',
+      '--json',
+      'databaseId',
+      '--jq',
+      '.[0].databaseId',
+    );
+    runId = list.exitCode === 0 ? list.output.trim() : '';
+    if (!runId) await new Promise((resolve) => setTimeout(resolve, 5000));
+  }
+  if (!runId) {
+    log.push('Kein CI-Lauf gefunden (Workflow fehlt oder GitHub Actions ist aus) – das lokale Test-Gate gilt.');
+    return;
+  }
+  const watched = await gh('run', 'watch', runId, '--exit-status');
+  if (watched.exitCode !== 0) {
+    throw new Error(
+      `Merge nach main abgelehnt: CI-Lauf ${runId} auf ${branch} ist rot. ${redactOutput(watched.output, process.env).slice(-400)}`,
+    );
+  }
+  log.push(`CI grün (Lauf ${runId}).`);
 }
 
 /** Führt die Testbefehle des Projekts aus; wirft mit dem Ausgabe-Ende, sobald einer fehlschlägt. */
@@ -336,6 +519,7 @@ async function pushSprint(
   sprint: PendingSprint,
   log: string[],
   gate: (log: string[]) => Promise<void>,
+  ci: { cwd: string; commands: string[][]; execute: CommandExecutor },
 ): Promise<SyncResult> {
   const { git, must } = helpers;
   const branch = sprintBranch(sprint.name);
@@ -355,6 +539,7 @@ async function pushSprint(
     );
     log.push('Reständerungen committet.');
   }
+  if (sprint.remote && /github\.com/.test(sprint.remote)) await ensureCiWorkflow(ci.cwd, ci.commands, helpers, log);
   await gate(log);
   let current = await must('rev-parse', '--abbrev-ref', 'HEAD');
   if (sprint.remote) {
@@ -362,6 +547,7 @@ async function pushSprint(
     log.push(`${current} nach GitHub gepusht.`);
   }
   if (sprint.status === 'completed' && current === branch) {
+    if (sprint.remote) await waitForCi(ci.execute, ci.cwd, branch, log);
     if (await branchExists(git, MAIN_BRANCH)) {
       await must('checkout', MAIN_BRANCH);
       const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: Sprint ${sprint.name}`);
@@ -441,7 +627,9 @@ export async function syncSprintToGit(
     const commands = await loadTestCommands(pool, project);
     const gate = (entries: string[]) => runTestGate(rawExecute, cwd, commands, entries);
     const result =
-      sprint.action === 'pull' ? await pullSprint(helpers, sprint, log) : await pushSprint(helpers, sprint, log, gate);
+      sprint.action === 'pull'
+        ? await pullSprint(helpers, sprint, log)
+        : await pushSprint(helpers, sprint, log, gate, { cwd, commands, execute: rawExecute });
     await pool.query(
       `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
       [sprint.id, result.log.join(' '), result.commit, result.branch],

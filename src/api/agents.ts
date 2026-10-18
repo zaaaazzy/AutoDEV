@@ -67,6 +67,13 @@ export const DEFAULT_AGENTS = [
       'Entwickelt anhand der Angaben des Entwicklers die Tests, misst die Testabdeckung je Bereich, ergänzt Tests für Lücken, führt Build und Tests aus und meldet Fehler als Bug.',
   },
   {
+    name: 'Reviewer',
+    role: 'reviewer',
+    phase: 'after_task',
+    instructions:
+      'Prüft die Änderungen des Auftrags wie ein Code-Review vor dem Merge: Akzeptanzkriterien, Leitlinien, Lesbarkeit, Sicherheit und Tests. Gibt frei oder fordert Änderungen an.',
+  },
+  {
     name: 'Dokumentierer',
     role: 'documenter',
     phase: 'after_task',
@@ -290,4 +297,41 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     }
     response.status(204).end();
   });
+}
+
+/**
+ * Ergänzt bestehende Projekte einmalig um den Reviewer (direkt nach dem Tester, mit dem Befehl des Entwicklers).
+ * Das Merkmal reviewer_seeded verhindert, dass ein bewusst gelöschter Reviewer wiederkommt.
+ */
+export async function ensureReviewer(pool: Pool, slug: string): Promise<void> {
+  const claimed = await pool.query(
+    `UPDATE projects SET reviewer_seeded = TRUE WHERE slug = $1 AND NOT reviewer_seeded RETURNING slug`,
+    [slug],
+  );
+  if (!claimed.rowCount) return;
+  const exists = await pool.query(`SELECT 1 FROM agents WHERE project_slug = $1 AND role = 'reviewer'`, [slug]);
+  if (exists.rowCount) return;
+  const tester = (
+    await pool.query<{ position: number }>(
+      `SELECT position FROM agents WHERE project_slug = $1 AND role = 'tester' AND phase = 'after_task' ORDER BY position LIMIT 1`,
+      [slug],
+    )
+  ).rows[0];
+  const developer = (
+    await pool.query<{ command: string[] | null }>(
+      `SELECT command FROM agents WHERE project_slug = $1 AND role = 'developer' ORDER BY position LIMIT 1`,
+      [slug],
+    )
+  ).rows[0];
+  const position = (tester?.position ?? 0) + 1;
+  await pool.query(
+    `UPDATE agents SET position = position + 1 WHERE project_slug = $1 AND phase = 'after_task' AND position >= $2`,
+    [slug, position],
+  );
+  const reviewer = DEFAULT_AGENTS.find((agent) => agent.role === 'reviewer')!;
+  await pool.query(
+    `INSERT INTO agents (project_slug, name, role, phase, position, instructions, command)
+     VALUES ($1, $2, 'reviewer', 'after_task', $3, $4, $5)`,
+    [slug, reviewer.name, position, reviewer.instructions, developer?.command ?? null],
+  );
 }

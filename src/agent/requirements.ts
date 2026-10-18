@@ -8,6 +8,7 @@ import { splitEstimate } from './estimation.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { loadPermissionGroups, withAssistantPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
+import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -37,7 +38,12 @@ const FORMAT = [
   'Erfinde keine Dateien. Beschreibe nur, was umgesetzt werden soll – ändere selbst nichts.',
 ].join('\n');
 
-export function buildRequirementPrompt(instructions: string, idea: Idea, current?: string): string {
+export function buildRequirementPrompt(
+  instructions: string,
+  idea: Idea,
+  current?: string,
+  definitionOfReady: string[] = DEFAULT_DEFINITION_OF_READY,
+): string {
   return [
     'Du bist der Agent "Auftragsautor" und machst aus einer Idee eine umsetzbare Anforderung für einen Entwicklungsauftrag.',
     `## Anweisung\n${instructions || 'Formuliere präzise, umsetzbare Anforderungen.'}`,
@@ -51,6 +57,8 @@ export function buildRequirementPrompt(instructions: string, idea: Idea, current
         ]
       : []),
     FORMAT,
+    `## Definition of Ready (vor der Abgabe prüfen)\n${definitionOfReady.map((item) => `- ${item}`).join('\n')}\n` +
+      'Schreibe die Akzeptanzkriterien als Liste mit genau einem prüfbaren Satz je Punkt – der Tester hakt sie einzeln ab.',
   ].join('\n\n');
 }
 
@@ -171,11 +179,12 @@ export async function draftRequirements(
       [idea.id],
     )
   ).rows[0];
+  const definitions = await loadDefinitions(pool, options.project);
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,
     options,
-    (instructions) => buildRequirementPrompt(instructions, idea, existing?.description),
+    (instructions) => buildRequirementPrompt(instructions, idea, existing?.description, definitions.ready),
     execute,
   );
   if (isShuttingDown()) {
