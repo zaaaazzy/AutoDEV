@@ -57,16 +57,46 @@
         <h2>Alle Ideen</h2>
         <p class="muted">Offene Ideen · Spaltenkopf sortiert, Trichter filtert · Haken wählt Ideen für Aufträge</p>
       </div>
-      @if (promotable().length) {
-        <div class="actions">
-          @if (pickedIdeas().length < promotable().length) {
-            <button type="button" class="button secondary" (click)="pickAll()">
-              Alle {{ promotable().length }} auswählen
-            </button>
-          }
-        </div>
-      }
+      <div class="actions">
+        @if (promotable().length && pickedIdeas().length < promotable().length) {
+          <button type="button" class="button secondary" (click)="pickAll()">
+            Alle {{ promotable().length }} auswählen
+          </button>
+        }
+        @if (!visionaryOpen() && auth.can('plan')) {
+          <button
+            type="button"
+            class="button secondary"
+            (click)="startVisionary()"
+            [disabled]="busy()"
+            title="Der Visionär liest das Projekt (nur lesend) und schlägt begründete Erweiterungsideen vor."
+          >
+            ✨ Ideen vorschlagen lassen
+          </button>
+        }
+      </div>
     </div>
+    @if (visionaryRun(); as run) {
+      @if (visionaryOpen()) {
+        <div class="visionary-bar" role="status" aria-live="polite">
+          <span class="spinner" aria-hidden="true"></span>
+          <p>
+            <strong>Visionär {{ run.status === 'requested' ? 'wartet auf den Worker' : 'arbeitet' }}.</strong>
+            {{ run.progress ?? 'Der Lauf ist angefragt …' }}
+          </p>
+          <button type="button" class="button secondary" (click)="cancelVisionary()" [disabled]="busy()">
+            Abbrechen
+          </button>
+        </div>
+      } @else if (run.status === 'done') {
+        <p class="visionary-bar done" role="status">
+          Letzter Visionär-Lauf: {{ run.createdCount }} neue {{ run.createdCount === 1 ? 'Idee' : 'Ideen' }},
+          {{ run.discardedCount }} verworfen (Dubletten, ohne Beleg oder über dem Limit).
+        </p>
+      } @else if (run.status === 'failed') {
+        <p class="visionary-bar failed" role="status">Visionär-Lauf fehlgeschlagen: {{ run.error }}</p>
+      }
+    }
     @if (pickedIdeas().length) {
       <div class="bulk-bar" role="region" aria-label="Auswahl">
         <span class="bulk-count">{{ pickedIdeas().length }}</span>
@@ -135,6 +165,9 @@
   <ng-template #ideaTitle let-idea>
     <div class="title-with-hint">
       <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">{{ idea.title }}</button>
+      @if (idea.source === 'visionary') {
+        <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">Visionär</span>
+      }
       @if (idea.description) {
         <span
           class="summary-hint"

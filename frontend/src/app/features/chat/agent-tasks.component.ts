@@ -3,7 +3,7 @@ import { Component, computed, DestroyRef, ElementRef, inject, input, signal, vie
 import { type ActionForm, type AgentAction, AgentActionsService } from '../../core/agent-actions.service.js';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
-import type { TestRequest } from '../../core/models.js';
+import type { TestRequest, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 
 const normalize = (value: string) => value.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '');
@@ -25,6 +25,8 @@ export interface MenuEntry {
   commands: string[];
   action?: AgentAction;
   scope?: 'full' | 'ui';
+  /** Startet einen Visionär-Lauf (wie „Ideen vorschlagen lassen“ in Ideation). */
+  visionary?: boolean;
 }
 
 export interface MenuGroup {
@@ -68,6 +70,20 @@ const TEST_ENTRIES: MenuEntry[] = [
   },
 ];
 
+/** Visionär: liest das Projekt nur lesend und legt begründete Erweiterungsideen in Ideation an. */
+const VISIONARY_ENTRY: MenuEntry = {
+  key: 'visionary',
+  visionary: true,
+  title: 'Visionär: Ideen vorschlagen lassen',
+  summary: 'Liest das Projekt (nur lesend) und schlägt begründete Erweiterungsideen vor',
+  detail:
+    'Der Visionär sieht sich Projektbeschreibung, Doku, Dateibaum, Sprintberichte, Bugs, offene Aufträge und Testabdeckung an und schlägt neue Ideen mit Begründung vor. Dubletten zu offenen oder abgelehnten Ideen legt er nicht an; Ablehnungsgründe beachtet er beim nächsten Lauf.',
+  runner: 'Visionär (Worker)',
+  effect:
+    'Der Worker startet den Lauf. Die Ideen erscheinen unter Ideation mit dem Badge „Visionär“ – dort lassen sie sich übernehmen oder mit Grund ablehnen.',
+  commands: [],
+};
+
 /** Befehle aus einer Anweisung: Angaben in Backticks oder in Klammern wie „(z. B. npm outdated, npm audit)“. */
 export function promptCommands(prompt: string): string[] {
   const ticks = [...prompt.matchAll(/`([^`]+)`/g)].map((match) => (match[1] ?? '').trim());
@@ -106,6 +122,11 @@ export class AgentTasksComponent {
   protected readonly testBusy = computed(
     () => this.store.busy() || ['requested', 'running'].includes(this.latestTest()?.status ?? ''),
   );
+  /** Letzter Visionär-Lauf des Projekts; solange er offen ist, ist der Eintrag gesperrt. */
+  protected readonly latestVisionary = signal<VisionaryRun | null>(null);
+  protected readonly visionaryOpen = computed(() =>
+    ['requested', 'running'].includes(this.latestVisionary()?.status ?? ''),
+  );
   /** Formular: null = geschlossen, id null = neue Aktion. */
   protected readonly editing = signal<ActionForm | null>(null);
   /** Im Chat gewählter Agent: Vorgabe für neue Aktionen. */
@@ -134,6 +155,7 @@ export class AgentTasksComponent {
     const byAgent = this.actions.byAgent();
     const groups: MenuGroup[] = [];
     if (this.auth.can('run')) groups.push({ id: 'tests', name: 'Tests', entries: TEST_ENTRIES });
+    if (this.auth.can('plan')) groups.push({ id: 'visionary', name: 'Visionär', entries: [VISIONARY_ENTRY] });
     for (const agent of this.store.data().agents) {
       const own = byAgent.get(agent.id);
       if (own) groups.push({ id: agent.id, name: agent.name, entries: own.map((a) => toEntry(a, agent.name)) });
@@ -161,6 +183,7 @@ export class AgentTasksComponent {
     // Solange ein Test wartet oder läuft und das Menü offen ist, den Stand regelmäßig nachladen.
     const timer = globalThis.setInterval(() => {
       if (this.open() && ['requested', 'running'].includes(this.latestTest()?.status ?? '')) void this.loadTests();
+      if (this.open() && this.visionaryOpen()) void this.loadVisionary();
     }, POLL_MS);
     inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
   }
@@ -178,6 +201,7 @@ export class AgentTasksComponent {
     this.editing.set(null);
     void this.actions.load();
     if (this.auth.can('run')) void this.loadTests();
+    if (this.auth.can('plan')) void this.loadVisionary();
     setTimeout(() => this.search()?.nativeElement.focus());
   }
 
@@ -233,12 +257,16 @@ export class AgentTasksComponent {
   }
 
   protected disabled(entry: MenuEntry): boolean {
+    if (entry.visionary) return this.store.busy() || this.visionaryOpen();
     return entry.scope ? this.testBusy() : this.busy();
   }
 
   protected async run(entry: MenuEntry): Promise<void> {
     if (this.disabled(entry)) return;
-    if (entry.scope) {
+    if (entry.visionary) {
+      await this.startVisionary();
+      this.close();
+    } else if (entry.scope) {
       await this.requestTest(entry.scope);
       this.close();
     } else if (entry.action && (await this.actions.run(entry.action))) this.close();
@@ -289,6 +317,31 @@ export class AgentTasksComponent {
         : 'Kompletter Test angefordert – der Worker startet ihn gleich.',
       false,
     );
+  }
+
+  private visionaryPath(): string {
+    return `${this.api.projectPath(this.store.activeProject())}/ideation/visionary`;
+  }
+
+  private async startVisionary(): Promise<void> {
+    await this.store.perform(
+      async () => {
+        const { run } = await this.api.post<{ run: VisionaryRun }>(this.visionaryPath());
+        this.latestVisionary.set(run);
+      },
+      'Visionär-Lauf gestartet – die Ideen erscheinen unter Ideation.',
+      false,
+    );
+  }
+
+  private async loadVisionary(): Promise<void> {
+    const slug = this.store.activeProject();
+    try {
+      const { run } = await this.api.get<{ run: VisionaryRun | null }>(this.visionaryPath());
+      if (slug === this.store.activeProject()) this.latestVisionary.set(run);
+    } catch {
+      /* nächster Versuch beim nächsten Takt */
+    }
   }
 
   private async loadTests(): Promise<void> {

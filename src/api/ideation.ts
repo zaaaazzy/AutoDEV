@@ -16,10 +16,15 @@ import {
   TITLE_MAX,
   validText,
 } from '../core/validation.js';
+import type { Principal } from './roles.js';
 
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-  agent_note AS "agentNote", category`;
+  agent_note AS "agentNote", category, source, rejection_reason AS "rejectionReason"`;
+
+/** Herkunft einer Idee; `routine`, `production` und `github` sind vorgesehen, werden aber noch nicht befüllt. */
+export const IDEA_SOURCES = new Set(['human', 'visionary', 'routine', 'production', 'github']);
+export const MAX_REJECTION_REASON = 1000;
 
 export const IDEA_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
@@ -99,7 +104,8 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
       return;
     }
     const result = await pool.query(
-      `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', agent_note = NULL, updated_at = NOW()
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.requested}', updated_at = NOW(),
+              agent_note = CASE WHEN source = 'visionary' THEN agent_note END
         WHERE id = $1 AND status = ANY($2) RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
       [request.params.id, [...EDITABLE_IDEATION_STATUSES]],
     );
@@ -107,6 +113,41 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
       response.status(409).json({ message: 'Die Idee ist nicht mehr in Bearbeitung durch Menschen.' });
       return;
     }
+    response.json({ item: result.rows[0] });
+  });
+
+  // Ablehnen mit Grund: Der Grund steht an der Idee und als Kommentar; der Visionär beachtet ihn beim nächsten Lauf.
+  app.post('/api/ideation/:id/reject', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Not found.' });
+      return;
+    }
+    const body = request.body as unknown;
+    const reason = isRecord(body) && typeof body.reason === 'string' ? body.reason.trim() : '';
+    if (!reason || reason.length > MAX_REJECTION_REASON) {
+      response
+        .status(400)
+        .json({ message: `Bitte einen Ablehnungsgrund angeben (max. ${MAX_REJECTION_REASON} Zeichen).` });
+      return;
+    }
+    const result = await pool.query(
+      `UPDATE ideation_items SET status = '${IDEATION_STATUS.rejected}', rejection_reason = $2, updated_at = NOW()
+        WHERE id = $1 AND status = ANY($3) RETURNING ${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
+      [request.params.id, reason, [...EDITABLE_IDEATION_STATUSES]],
+    );
+    if (!result.rows[0]) {
+      response.status(409).json({ message: 'Die Idee kann nicht mehr abgelehnt werden.' });
+      return;
+    }
+    const principal = response.locals.principal as Principal | undefined;
+    await pool.query(
+      `INSERT INTO ideation_comments (ideation_id, author, author_kind, body) VALUES ($1, $2, 'user', $3)`,
+      [
+        request.params.id,
+        (principal?.displayName || principal?.username || 'Nutzer').slice(0, 60),
+        `**Abgelehnt:** ${reason}`,
+      ],
+    );
     response.json({ item: result.rows[0] });
   });
 }

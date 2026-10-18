@@ -19,6 +19,7 @@ import { registerSetupRoutes } from './setup.js';
 import { registerAcceptanceRoutes } from './acceptance.js';
 import { registerIdeaCommentRoutes } from './idea-comments.js';
 import { registerIdeationRoutes } from './ideation.js';
+import { registerVisionaryRoutes } from './visionary.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerPushRoutes } from './push.js';
 import { registerDocRevisionRoutes } from './doc-revisions.js';
@@ -79,6 +80,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerBoardRoutes(app, pool);
   registerIdeationRoutes(app, pool);
   registerIdeaCommentRoutes(app, pool);
+  registerVisionaryRoutes(app, pool);
   registerDevelopmentRoutes(app, pool);
   registerSprintRoutes(app, pool);
   registerSprintPlanningRoutes(app, pool);

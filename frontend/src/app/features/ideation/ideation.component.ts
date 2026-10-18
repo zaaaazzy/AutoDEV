@@ -1,9 +1,10 @@
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { NgClass, NgTemplateOutlet } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, Idea, Priority, Sprint } from '../../core/models.js';
+import { AuthService } from '../../core/auth.service.js';
+import type { DevelopmentItem, Idea, Priority, Sprint, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
   type DataColumn,
@@ -30,7 +31,16 @@ import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { IDEA_SELECTABLE_STATUSES, IDEA_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
+import {
+  IDEA_SELECTABLE_STATUSES,
+  IDEA_STATUSES,
+  ideaDisplayStatus,
+  MAX_IMAGE_BYTES,
+  sourceLabel,
+} from './idea-options.js';
+
+const VISIONARY_POLL_MS = 3000;
+const OPEN_RUN = new Set(['requested', 'running']);
 
 const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
 const PRIORITY_RANK = ['low', 'medium', 'high'];
@@ -68,6 +78,7 @@ export class IdeationComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
+  protected readonly auth = inject(AuthService);
   protected readonly defaultStatusFilter = DEFAULT_STATUS_FILTER;
   private readonly defaultFilters = { status: DEFAULT_STATUS_FILTER };
   /** Dashboard-Link mit Filter hat Vorrang vor dem Standardfilter. */
@@ -86,6 +97,7 @@ export class IdeationComponent {
       sortValue: (idea) => IDEA_STATUSES.indexOf(idea.status),
     },
     categoryColumn<Idea>((idea) => idea.category),
+    { id: 'source', header: 'Herkunft', value: (idea) => sourceLabel(idea.source) },
     {
       id: 'priority',
       header: 'Priorität',
@@ -133,6 +145,60 @@ export class IdeationComponent {
   protected readonly showInProgressIdeas = signal(true);
   /** Mehrfachauswahl offener Ideen: für alle gewählten auf einmal einen Auftrag ausformulieren lassen. */
   protected readonly picked = signal<ReadonlySet<string>>(new Set());
+  /** Letzter Visionär-Lauf des Projekts; solange er angefragt ist oder läuft, wird der Fortschritt abgefragt. */
+  protected readonly visionaryRun = signal<VisionaryRun | null>(null);
+  protected readonly visionaryOpen = computed(() => OPEN_RUN.has(this.visionaryRun()?.status ?? ''));
+
+  constructor() {
+    effect(() => {
+      const slug = this.store.activeProject();
+      untracked(() => {
+        this.visionaryRun.set(null);
+        if (slug) void this.loadVisionaryRun(slug);
+      });
+    });
+    const timer = globalThis.setInterval(() => {
+      const slug = this.store.activeProject();
+      if (slug && this.visionaryOpen() && !document.hidden) void this.loadVisionaryRun(slug);
+    }, VISIONARY_POLL_MS);
+    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
+  }
+
+  private visionaryPath(slug = this.store.activeProject()): string {
+    return `${this.api.projectPath(slug)}/ideation/visionary`;
+  }
+
+  private async loadVisionaryRun(slug: string): Promise<void> {
+    const wasOpen = this.visionaryOpen();
+    const result = await this.api.get<{ run: VisionaryRun | null }>(this.visionaryPath(slug)).catch(() => null);
+    if (!result || slug !== this.store.activeProject()) return;
+    this.visionaryRun.set(result.run);
+    // Lauf eben fertig geworden: neue Ideen laden.
+    if (wasOpen && !this.visionaryOpen()) await this.store.loadProject(slug, true);
+  }
+
+  protected async startVisionary(): Promise<void> {
+    await this.store.perform(
+      async () => {
+        const result = await this.api.post<{ run: VisionaryRun }>(this.visionaryPath());
+        this.visionaryRun.set(result.run);
+      },
+      'Der Visionär sammelt Ideen – der Fortschritt erscheint hier.',
+      false,
+    );
+  }
+
+  protected async cancelVisionary(): Promise<void> {
+    await this.store.perform(
+      async () => {
+        const result = await this.api.post<{ run: VisionaryRun }>(`${this.visionaryPath()}/cancel`);
+        this.visionaryRun.set(result.run);
+      },
+      'Visionär-Lauf abgebrochen.',
+      false,
+    );
+  }
+
   protected readonly promotable = computed(() => this.openIdeas().filter((idea) => this.canPromote(idea)));
   protected readonly pickedIdeas = computed(() => this.promotable().filter((idea) => this.picked().has(idea.id)));
 

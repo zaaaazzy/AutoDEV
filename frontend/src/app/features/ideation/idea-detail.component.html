@@ -17,6 +17,9 @@
             <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
             <span class="status priority-{{ idea.priority }}">Priorität: {{ idea.priority | priorityLabel }}</span>
             <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
+            @if (idea.source === 'visionary') {
+              <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">Visionär</span>
+            }
           </div>
         } @else {
           <h2 id="idea-title">Idee bearbeiten</h2>
@@ -105,14 +108,43 @@
           <span class="meter-bar"><i [style.width.%]="(idea.cost ?? 0) * 10"></i></span>
         </div>
       </dl>
+      @if (idea.source === 'visionary' && idea.agentNote) {
+        <div class="idea-promote done">
+          <p><strong>Begründung des Visionärs:</strong> {{ idea.agentNote }}</p>
+        </div>
+      }
+      @if (idea.status === 'rejected' && idea.rejectionReason) {
+        <div class="idea-promote done">
+          <p><strong>Abgelehnt:</strong> {{ idea.rejectionReason }}</p>
+        </div>
+      }
       @if (canPromote(idea)) {
         <div class="idea-promote">
           <p>
             <strong>Bereit für die Umsetzung?</strong> Der Auftragsautor formuliert daraus einen Auftrag im Backlog.
           </p>
-          <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
-            Auftrag erstellen
-          </button>
+          <div class="actions">
+            <button class="button secondary" type="button" (click)="rejecting.set(!rejecting())" [disabled]="busy()">
+              Ablehnen mit Grund
+            </button>
+            <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
+              {{ idea.source === 'visionary' ? 'Übernehmen' : 'Auftrag erstellen' }}
+            </button>
+          </div>
+          @if (rejecting()) {
+            <form class="idea-reject wide" (ngSubmit)="rejectIdea(idea)">
+              <label
+                >Ablehnungsgrund (der Visionär beachtet ihn beim nächsten Lauf)
+                <textarea name="reason" [(ngModel)]="rejectReason" maxlength="1000" required></textarea>
+              </label>
+              <div class="actions">
+                <button class="button secondary" type="button" (click)="rejecting.set(false)">Abbrechen</button>
+                <button class="button primary" type="submit" [disabled]="busy() || !rejectReason.trim()">
+                  Ablehnen
+                </button>
+              </div>
+            </form>
+          }
         </div>
       } @else if (linkedOrder(idea.id); as order) {
         <div class="idea-promote done">

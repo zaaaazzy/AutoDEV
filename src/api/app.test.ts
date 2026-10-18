@@ -561,6 +561,115 @@ test('a planner may read but not manage users or agents', async () => {
   });
 });
 
+/** Sitzung eines Benutzers mit den angegebenen Rollen, freigeschaltet für Projekt „p“; weitere Abfragen über `answer`. */
+function memberPool(roles: string[], answer: (sql: string, values: unknown[]) => unknown = () => undefined): Pool {
+  return {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('FROM auth_sessions s')) {
+        return {
+          rows: [{ last_seen: new Date(), user_id: 'u1', username: 'pia', display_name: 'Pia', roles, active: true }],
+        };
+      }
+      if (sql.includes('FROM project_members')) return { rows: [{ slug: 'p' }] };
+      return answer(sql, values) ?? { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+}
+
+const IDEA_ID = '11111111-1111-4111-8111-111111111111';
+const sessionHeaders = { Cookie: 'devlog_session=abc', 'Content-Type': 'application/json' };
+
+test('Visionär-Lauf: ohne Rolle „Planung“ 403, mit Planung angefragt, je Projekt nur einer, abbrechbar', async () => {
+  await withServer(memberPool(['chat']), async (baseUrl) => {
+    const denied = await fetch(`${baseUrl}/api/projects/p/ideation/visionary`, {
+      method: 'POST',
+      headers: sessionHeaders,
+    });
+    assert.equal(denied.status, 403);
+    assert.match((await denied.json()).message, /Planung/);
+  });
+  let open = false;
+  const run = () => ({ id: 'r1', status: open ? 'requested' : 'cancelled', progress: null });
+  const pool = memberPool(['plan'], (sql) => {
+    if (sql.startsWith('SELECT 1 FROM projects')) return { rows: [{}], rowCount: 1 };
+    if (sql.includes('INSERT INTO visionary_runs')) {
+      if (open) return { rows: [] };
+      open = true;
+      return { rows: [{ id: 'r1' }] };
+    }
+    if (sql.includes("SET status = 'cancelled'")) {
+      const was = open;
+      open = false;
+      return { rows: was ? [{ id: 'r1' }] : [], rowCount: was ? 1 : 0 };
+    }
+    if (sql.includes('FROM visionary_runs')) return { rows: [run()] };
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const path = `${baseUrl}/api/projects/p/ideation/visionary`;
+    const started = await fetch(path, { method: 'POST', headers: sessionHeaders });
+    assert.equal(started.status, 202);
+    assert.equal((await started.json()).run.status, 'requested');
+    assert.equal((await fetch(path, { method: 'POST', headers: sessionHeaders })).status, 409);
+    assert.equal(
+      ((await (await fetch(path, { headers: sessionHeaders })).json()) as { run: { id: string } }).run.id,
+      'r1',
+    );
+    const cancelled = await fetch(`${path}/cancel`, { method: 'POST', headers: sessionHeaders });
+    assert.equal(cancelled.status, 200);
+    assert.equal((await cancelled.json()).run.status, 'cancelled');
+    assert.equal((await fetch(`${path}/cancel`, { method: 'POST', headers: sessionHeaders })).status, 409);
+  });
+});
+
+test('Ablehnen mit Grund: Status rejected, Grund an der Idee und als Kommentar', async () => {
+  const calls: { sql: string; values: unknown[] }[] = [];
+  const pool = memberPool(['plan'], (sql, values) => {
+    calls.push({ sql, values });
+    if (sql.includes('FROM ideation_items WHERE id = $1') && sql.startsWith('SELECT project_slug')) {
+      return { rows: [{ slug: 'p' }] };
+    }
+    if (sql.startsWith('UPDATE ideation_items')) {
+      return { rows: [{ id: IDEA_ID, status: 'rejected', rejectionReason: values[1] }] };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const path = `${baseUrl}/api/ideation/${IDEA_ID}/reject`;
+    const empty = await fetch(path, { method: 'POST', headers: sessionHeaders, body: '{"reason":"  "}' });
+    assert.equal(empty.status, 400);
+    const rejected = await fetch(path, {
+      method: 'POST',
+      headers: sessionHeaders,
+      body: JSON.stringify({ reason: 'Kein Bedarf im Team' }),
+    });
+    assert.equal(rejected.status, 200);
+    assert.equal((await rejected.json()).item.status, 'rejected');
+  });
+  const update = calls.find((call) => call.sql.startsWith('UPDATE ideation_items'))!;
+  assert.match(update.sql, /status = 'rejected', rejection_reason = \$2/);
+  assert.deepEqual(update.values.slice(0, 2), [IDEA_ID, 'Kein Bedarf im Team']);
+  const comment = calls.find((call) => call.sql.includes('INSERT INTO ideation_comments'))!;
+  assert.deepEqual(comment.values, [IDEA_ID, 'Pia', '**Abgelehnt:** Kein Bedarf im Team']);
+});
+
+test('Filter „Herkunft“: das Board liefert auf Wunsch nur Ideen des Visionärs', async () => {
+  const sources: unknown[] = [];
+  const pool = memberPool(['plan'], (sql, values) => {
+    if (sql.includes('FROM ideation_items WHERE project_slug = $1')) {
+      assert.match(sql, /source = \$2/);
+      sources.push(values[1]);
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    for (const query of ['?source=visionary', '', '?source=erfunden']) {
+      assert.equal((await fetch(`${baseUrl}/api/projects/p/board${query}`, { headers: sessionHeaders })).status, 200);
+    }
+  });
+  assert.deepEqual(sources, ['visionary', null, null]);
+});
+
 test('a locked-out account does not lock out other accounts from the same address', async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {

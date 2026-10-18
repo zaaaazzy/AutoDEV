@@ -2,7 +2,7 @@ import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { DEV_COLUMNS } from './development.js';
 import { COMMENT_COLUMNS } from './idea-comments.js';
-import { IDEA_COLUMNS } from './ideation.js';
+import { IDEA_COLUMNS, IDEA_SOURCES } from './ideation.js';
 import { parseProjectSlug } from '../core/validation.js';
 
 export function registerBoardRoutes(app: Express, pool: Pool): void {
@@ -12,11 +12,14 @@ export function registerBoardRoutes(app: Express, pool: Pool): void {
       response.status(400).json({ message: 'Invalid project slug.' });
       return;
     }
+    // Optionaler Filter „Herkunft“ (?source=visionary); unbekannte Werte zeigen alle Ideen.
+    const source =
+      typeof request.query.source === 'string' && IDEA_SOURCES.has(request.query.source) ? request.query.source : null;
     const [ideas, development, comments] = await Promise.all([
       pool.query(
-        `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1
+        `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1 AND ($2::text IS NULL OR source = $2)
           ORDER BY created_at DESC LIMIT 200`,
-        [slug],
+        [slug, source],
       ),
       pool.query(
         `SELECT ${DEV_COLUMNS} FROM development_items WHERE project_slug = $1

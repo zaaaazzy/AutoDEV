@@ -167,6 +167,29 @@
                   } @else {
                     Noch nie gestartet
                   }
+                } @else if (entry.visionary) {
+                  @if (latestVisionary(); as run) {
+                    @switch (run.status) {
+                      @case ('requested') {
+                        Wartet auf den Worker · angefragt {{ run.requestedAt | date: 'HH:mm' }}
+                      }
+                      @case ('running') {
+                        Läuft seit {{ run.startedAt | date: 'HH:mm' }}{{ run.progress ? ' · ' + run.progress : '' }}
+                      }
+                      @case ('done') {
+                        Letzter Lauf {{ run.finishedAt | date: 'dd.MM. HH:mm' }} · {{ run.createdCount }} neue Ideen,
+                        {{ run.discardedCount }} verworfen
+                      }
+                      @case ('failed') {
+                        Letzter Lauf fehlgeschlagen: {{ run.error || 'unbekannter Fehler' }}
+                      }
+                      @case ('cancelled') {
+                        Letzter Lauf abgebrochen
+                      }
+                    }
+                  } @else {
+                    Noch nie gestartet
+                  }
                 } @else if (latestTest(); as test) {
                   @switch (test.status) {
                     @case ('requested') {
@@ -190,6 +213,13 @@
               </dd>
             </dl>
           </aside>
+        }
+        @if (visionaryOpen()) {
+          <p class="agent-tasks-status muted" role="status">
+            <span class="typing" aria-hidden="true"><i></i><i></i><i></i></span>
+            Visionär {{ latestVisionary()?.status === 'running' ? 'arbeitet' : 'wartet auf den Worker' }}
+            {{ latestVisionary()?.progress ? '· ' + latestVisionary()?.progress : '' }}
+          </p>
         }
         @if (latestTest(); as test) {
           @if (test.status === 'requested' || test.status === 'running') {
