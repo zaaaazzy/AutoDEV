@@ -1,6 +1,8 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { AuthService } from './core/auth.service.js';
 import { NAVIGATION, type Section } from './core/navigation.js';
+import { LoginComponent } from './features/auth/login.component.js';
 import { ProjectStore } from './core/project-store.js';
 import { AgentListComponent } from './features/agents/agent-list.component.js';
 import { AgentsComponent } from './features/agents/agents.component.js';
@@ -13,6 +15,7 @@ import { IdeationComponent } from './features/ideation/ideation.component.js';
 import { ProjectWizardComponent } from './features/projects/project-wizard.component.js';
 import { RunsComponent } from './features/runs/runs.component.js';
 import { SettingsComponent } from './features/settings/settings.component.js';
+import { StatsComponent } from './features/stats/stats.component.js';
 import { SprintsComponent } from './features/sprints/sprints.component.js';
 import { NavIconComponent } from './shared/nav-icon.component.js';
 
@@ -30,6 +33,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   standalone: true,
   imports: [
     FormsModule,
+    LoginComponent,
     NavIconComponent,
     AgentListComponent,
     ProjectWizardComponent,
@@ -43,11 +47,13 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     AgentsComponent,
     RunsComponent,
     SettingsComponent,
+    StatsComponent,
   ],
   templateUrl: './app.component.html',
 })
 export class AppComponent {
   protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   protected readonly navigation = NAVIGATION;
   protected readonly section = this.store.section;
   protected readonly projects = this.store.projects;

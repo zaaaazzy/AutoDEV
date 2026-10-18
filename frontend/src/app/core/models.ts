@@ -189,7 +189,13 @@ export interface ProjectStats {
   bugs: Record<string, number>;
   openBugsBySeverity: Record<string, number>;
   effort: { plannedHours: number; doneHours: number; tokens: number };
-  testRuns: { recent: { id: string; status: string; startedAt: string }[]; passRate: number | null };
+  /** Tatsächlich von den Agents verbraucht (Laufzeit, Tokens, API-Kosten). */
+  actual?: { tokens: number; hours: number; costUsd: number };
+  testRuns: {
+    total?: number;
+    recent: { id: string; status: string; startedAt: string }[];
+    passRate: number | null;
+  };
   agents: { agent: string; passed: number; failed: number; skipped: number }[];
   sprint: {
     id: string;

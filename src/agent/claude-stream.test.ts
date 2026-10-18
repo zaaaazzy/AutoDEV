@@ -38,7 +38,7 @@ test('parses split lines into readable actions and the final answer', () => {
   parser.push(stream.slice(0, 40));
   parser.push(stream.slice(40));
   assert.deepEqual(actions, ['Bearbeitet src/app.ts', 'Führt aus: npm test']);
-  assert.deepEqual(parser.result(), { text: 'Fertig umgesetzt.', isError: false, tokens: 15 });
+  assert.deepEqual(parser.result(), { text: 'Fertig umgesetzt.', isError: false, tokens: 15, costUsd: 0 });
 });
 
 test('executeAgentCommand streams actions for claude and returns the plain answer', async () => {

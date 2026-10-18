@@ -1,4 +1,5 @@
 import { createDevLogApp } from './api/app.js';
+import { loadTotpSecret } from './api/auth.js';
 import { createDatabasePool, readDatabaseConfig } from './db/database.js';
 
 async function start(): Promise<void> {
@@ -22,13 +23,11 @@ async function start(): Promise<void> {
   }
   const pool = await createDatabasePool(readDatabaseConfig());
   const port = Number(process.env.PORT ?? 3100);
-  const server = createDevLogApp(pool, username && password && !authDisabled ? { username, password } : null).listen(
-    port,
-    host,
-    () => {
-      console.info(`Dev Log listening on ${host}:${port}.`);
-    },
-  );
+  const auth =
+    username && password && !authDisabled ? { username, password, totpSecret: await loadTotpSecret(pool) } : null;
+  const server = createDevLogApp(pool, auth).listen(port, host, () => {
+    console.info(`Dev Log listening on ${host}:${port}.`);
+  });
   const shutdown = (): void => {
     server.close(() => void pool.end());
   };

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
+import { sendPush } from '../core/push.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { registerFailure, resumeBlockedByBug } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
@@ -202,13 +203,29 @@ async function invokeAgent(
     };
   }
   if (!command) return builtinRun();
-  return executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
+  const result = await executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
     timeoutMs: options.timeoutMs,
     env: agentEnvironment(),
     onOutput: hooks.onOutput,
     onSpawn: hooks.onSpawn,
     onAction: hooks.onAction,
   });
+  // Ein Tester mit eigenem CLI prüft selbst; danach laufen die hinterlegten Projekttests zusätzlich als
+  // gespeicherter Testlauf – objektiv, sichtbar unter „Testläufe“ und in der Erfolgsquote des Dashboards.
+  if (
+    agent.role === 'tester' &&
+    result.exitCode === 0 &&
+    !hooks.signal?.aborted &&
+    (await loadTestCommands(pool, item.projectSlug)).length
+  ) {
+    const run = await builtinRun();
+    return {
+      exitCode: run.exitCode,
+      durationMs: result.durationMs + run.durationMs,
+      output: `${result.output}\n\n## Testlauf (Projekttests)\n${run.output}`,
+    };
+  }
+  return result;
 }
 
 /** Appends a timestamped entry to the step's history (shown as "Verlauf"). */
@@ -378,7 +395,7 @@ export async function runStep(
     cancelled ? 'Abgebrochen' : passed ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit-Code ${result.exitCode})`,
   );
   await pool.query(
-    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6 WHERE id = $1`,
+    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6, cost_usd = $7 WHERE id = $1`,
     [
       stepId,
       passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
@@ -386,6 +403,7 @@ export async function runStep(
       result.durationMs,
       output,
       result.tokens ?? 0,
+      result.costUsd ?? 0,
     ],
   );
   done.push({
@@ -404,6 +422,16 @@ export async function runStep(
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
   return { passed, interrupted: false };
+}
+
+/** Push-Nachricht aufs Handy, wenn ein Auftrag fertig ist oder hängen bleibt. */
+async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, problem: string | null): Promise<void> {
+  await sendPush(pool, {
+    title: succeeded ? `✓ Auftrag erledigt · ${item.projectSlug}` : `⚠ Auftrag blockiert · ${item.projectSlug}`,
+    body: succeeded ? item.title : `${item.title}\n${problem ?? 'Ein Agent ist gescheitert – Details im Auftrag.'}`,
+    url: '#development',
+    tag: `order-${item.id}`,
+  });
 }
 
 /** Settle the order status and trigger follow-up actions such as commits or bugfix retries. */
@@ -440,12 +468,14 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
         WHERE id = $1`,
       [item.id, succeeded],
     );
+    await notifySettled(pool, item, succeeded, mergeProblem);
     return;
   }
   await pool.query(
     `UPDATE development_items SET status = $2, agent_id = NULL, return_status = NULL, updated_at = NOW() WHERE id = $1`,
     [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
+  await notifySettled(pool, item, succeeded, mergeProblem);
   if (!succeeded) return;
   if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
 }

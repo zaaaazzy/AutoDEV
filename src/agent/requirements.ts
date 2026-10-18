@@ -99,6 +99,20 @@ export async function runAuthorAgent(
           resumeSession: resuming?.sessionId,
         })
       : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress });
+    await pool
+      .query(
+        `INSERT INTO agent_usage (project_slug, role, tokens, duration_ms, cost_usd, success)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          options.project,
+          role,
+          result.tokens ?? 0,
+          Math.round(result.durationMs ?? 0),
+          'costUsd' in result ? (result.costUsd ?? 0) : 0,
+          result.exitCode === 0,
+        ],
+      )
+      .catch(() => undefined);
     return {
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),

@@ -3,11 +3,13 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { AgentStatus, Project } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { NotificationSettingsComponent } from './notification-settings.component.js';
+import { SecuritySettingsComponent } from './security-settings.component.js';
 
 @Component({
   selector: 'app-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, NotificationSettingsComponent, SecuritySettingsComponent],
   templateUrl: './settings.component.html',
   host: { style: 'display: contents' },
 })

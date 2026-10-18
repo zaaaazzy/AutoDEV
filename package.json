@@ -16,14 +16,18 @@
     "test": "npm run build:ui && tsx --test \"src/**/*.test.ts\"",
     "test-agent": "tsx src/runner/test-agent.ts",
     "runner": "tsx src/runner/runner-cli.ts",
-    "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3"
+    "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3",
+    "watchdog": "tsx src/runner/watchdog-cli.ts",
+    "test:e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "dependencies": {
     "@tanstack/angular-table": "^8.21.4",
     "express": "^5.1.0",
     "helmet": "^8.3.0",
     "pg": "^8.16.3",
-    "undici": "^6.29.0"
+    "qrcode": "1.5.4",
+    "undici": "^6.29.0",
+    "web-push": "3.6.7"
   },
   "devDependencies": {
     "@angular-devkit/build-angular": "^20.3.40",
@@ -35,9 +39,12 @@
     "@angular/forms": "^20.3.34",
     "@angular/platform-browser": "^20.3.34",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "1.64.1",
     "@types/express": "^5.0.3",
     "@types/node": "^22.15.30",
     "@types/pg": "^8.15.5",
+    "@types/qrcode": "1.5.6",
+    "@types/web-push": "3.6.4",
     "eslint": "^10.13.0",
     "prettier": "^3.9.10",
     "rxjs": "^7.8.2",

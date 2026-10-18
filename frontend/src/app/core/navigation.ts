@@ -1,5 +1,5 @@
 export type Section =
-  'dashboard' | 'development' | 'sprints' | 'ideation' | 'bugs' | 'docs' | 'agents' | 'runs' | 'settings';
+  'dashboard' | 'development' | 'sprints' | 'ideation' | 'bugs' | 'docs' | 'agents' | 'runs' | 'stats' | 'settings';
 
 export const NAVIGATION: { id: Section; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -10,6 +10,7 @@ export const NAVIGATION: { id: Section; label: string }[] = [
   { id: 'bugs', label: 'Bugs' },
   { id: 'runs', label: 'Testläufe' },
   { id: 'agents', label: 'Agents' },
+  { id: 'stats', label: 'Statistik' },
   { id: 'settings', label: 'Einstellungen' },
 ];
 

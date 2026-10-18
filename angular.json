@@ -18,7 +18,7 @@
             "polyfills": ["zone.js"],
             "tsConfig": "frontend/tsconfig.app.json",
             "inlineStyleLanguage": "css",
-            "assets": [],
+            "assets": [{ "glob": "**/*", "input": "frontend/public" }],
             "styles": ["frontend/src/styles.css"]
           },
           "configurations": {

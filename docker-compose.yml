@@ -41,6 +41,22 @@ services:
       timeout: 5s
       retries: 10
 
+  backup:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    environment:
+      PGHOST: db
+      PGUSER: ${DEV_LOG_DB_USER:-devlog}
+      PGPASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
+      BACKUP_KEEP_DAYS: ${DEV_LOG_BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./backups:/backups
+      - ./deploy/backup.sh:/backup.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
   https:
     image: caddy:2.8.4-alpine
     ports:

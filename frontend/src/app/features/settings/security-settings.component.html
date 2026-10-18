@@ -1,0 +1,91 @@
+<section class="panel">
+  <div class="section-heading">
+    <div>
+      <h2>Sicherheit</h2>
+      <p class="muted">Anmeldung und Geräte</p>
+    </div>
+  </div>
+  @if (status(); as current) {
+    <div class="security-grid">
+      <div class="security-item">
+        <span class="security-badge" [class.on]="current.totp">{{ current.totp ? 'Aktiv' : 'Aus' }}</span>
+        <div>
+          <h3>Zwei-Faktor-Anmeldung</h3>
+          <p class="muted">
+            Zusätzlich zum Passwort ein Code aus einer Authenticator-App (z. B. Apple Passwörter, Google Authenticator,
+            1Password).
+          </p>
+        </div>
+      </div>
+      @if (!current.totp && !setup()) {
+        <button class="button primary" type="button" [disabled]="busy()" (click)="startSetup()">Einrichten</button>
+      }
+      @if (setup(); as pending) {
+        <div class="totp-setup">
+          <img [src]="pending.qr" width="200" height="200" alt="QR-Code für die Authenticator-App" />
+          <ol>
+            <li>QR-Code mit der Authenticator-App scannen – auf dem Handy direkt: Schlüssel antippen und kopieren.</li>
+            <li>
+              Schlüssel: <code class="totp-secret">{{ pending.secret }}</code>
+            </li>
+            <li>Den angezeigten 6-stelligen Code eingeben und bestätigen.</li>
+          </ol>
+          <form class="totp-confirm" (ngSubmit)="enable()">
+            <input
+              name="code"
+              [(ngModel)]="code"
+              inputmode="numeric"
+              autocomplete="one-time-code"
+              maxlength="7"
+              placeholder="123 456"
+              aria-label="Code aus der App"
+            />
+            <button class="button primary" type="submit" [disabled]="busy() || code.trim().length < 6">
+              Bestätigen
+            </button>
+            <button class="button secondary" type="button" (click)="setup.set(null)">Abbrechen</button>
+          </form>
+        </div>
+      }
+      @if (current.totp) {
+        <form class="totp-confirm" (ngSubmit)="disable()">
+          <input
+            name="disableCode"
+            [(ngModel)]="code"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="7"
+            placeholder="Code zum Ausschalten"
+            aria-label="Code zum Ausschalten"
+          />
+          <button class="button secondary" type="submit" [disabled]="busy() || code.trim().length < 6">
+            Ausschalten
+          </button>
+        </form>
+      }
+      <div class="security-item">
+        <span class="security-badge on">{{ current.sessions }}</span>
+        <div>
+          <h3>Angemeldete Geräte</h3>
+          <p class="muted">Sitzungen bleiben 30 Tage gültig.</p>
+        </div>
+      </div>
+      <div class="security-actions">
+        <button class="button secondary" type="button" [disabled]="busy()" (click)="logoutOthers()">
+          Andere Geräte abmelden
+        </button>
+        @if (current.sessionLogin) {
+          <button class="button secondary" type="button" [disabled]="busy()" (click)="logout()">Abmelden</button>
+        }
+      </div>
+    </div>
+  } @else {
+    <p class="muted">Ohne Login (DEV_LOG_AUTH=off) gibt es hier nichts einzustellen.</p>
+  }
+  @if (message()) {
+    <p class="notice" role="status">{{ message() }}</p>
+  }
+  @if (error()) {
+    <p class="notice error" role="alert">{{ error() }}</p>
+  }
+</section>

@@ -3,7 +3,7 @@ import express, { type Express } from 'express';
 import type { Pool } from 'pg';
 import { registerAgentRoutes } from './agents.js';
 import { registerAttachmentRoutes } from './attachments.js';
-import { type DevLogAuth, requireCredentials } from './auth.js';
+import { type DevLogAuth, registerLoginRoutes, registerSecurityRoutes, requireCredentials } from './auth.js';
 import { registerBoardRoutes } from './board.js';
 import { registerBugRoutes } from './bugs.js';
 import { registerChatRoutes } from './chat-routes.js';
@@ -14,9 +14,11 @@ import { registerSetupRoutes } from './setup.js';
 import { registerAcceptanceRoutes } from './acceptance.js';
 import { registerIdeationRoutes } from './ideation.js';
 import { registerProjectRoutes } from './projects.js';
+import { registerPushRoutes } from './push.js';
+import { registerUsageRoutes } from './usage.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
-import { sameOriginWrites, securityHeaders } from './security.js';
+import { FailureLimiter, sameOriginWrites, securityHeaders } from './security.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerTestRunRoutes } from './test-runs.js';
 import { registerWorkerRoutes } from './worker.js';
@@ -37,7 +39,14 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.use(sameOriginWrites);
   app.use(express.json({ limit: '32kb' }));
   if (auth) {
-    app.use(requireCredentials(auth));
+    const limiter = new FailureLimiter();
+    registerLoginRoutes(app, pool, auth, limiter);
+    app.use(requireCredentials(auth, pool, limiter));
+    registerSecurityRoutes(app, pool, auth);
+  } else {
+    app.get('/api/session', (_request, response) =>
+      response.json({ authenticated: true, authRequired: false, totp: false }),
+    );
   }
   app.use(express.static(UI_DIRECTORY, { index: false }));
   app.get('/', async (_request, response) => {
@@ -61,6 +70,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerStatsRoutes(app, pool);
   registerChatRoutes(app, pool);
   registerWorkerRoutes(app, pool);
+  registerPushRoutes(app, pool);
+  registerUsageRoutes(app, pool);
 
   app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));
   return app;

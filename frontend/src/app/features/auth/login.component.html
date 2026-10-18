@@ -1,0 +1,46 @@
+<main class="login-screen">
+  <form class="login-card" (ngSubmit)="login()">
+    <div class="login-brand">
+      <span class="brand-mark">m</span>
+      <div>
+        <p class="eyebrow">Mainty</p>
+        <h1>Dev Log</h1>
+      </div>
+    </div>
+    <p class="login-lead">Willkommen zurück. Melde dich an, um Projekte und Agents zu steuern.</p>
+    <label
+      >Benutzername<input
+        name="username"
+        [(ngModel)]="username"
+        autocomplete="username"
+        autocapitalize="none"
+        spellcheck="false"
+        required
+    /></label>
+    <label
+      >Passwort<input name="password" type="password" [(ngModel)]="password" autocomplete="current-password" required
+    /></label>
+    @if (totp()) {
+      <label
+        >Code aus der Authenticator-App<input
+          class="login-code"
+          name="code"
+          [(ngModel)]="code"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="7"
+          placeholder="123 456"
+          required
+      /></label>
+    }
+    @if (error()) {
+      <p class="login-error" role="alert">{{ error() }}</p>
+    }
+    <button class="button primary login-submit" type="submit" [disabled]="busy()">
+      {{ busy() ? 'Wird angemeldet …' : 'Anmelden' }}
+    </button>
+    <p class="login-foot">
+      <span aria-hidden="true">🔒</span> Verschlüsselte Verbindung{{ totp() ? ' · Zwei-Faktor aktiv' : '' }}
+    </p>
+  </form>
+</main>

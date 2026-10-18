@@ -21,6 +21,15 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 
 Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Der Dev-Log-Container ist nur an `127.0.0.1:3100` gebunden und läuft als Nicht-Root. Von aussen geht der Zugriff ausschließlich über HTTPS: Der Dienst `https` (Caddy, `deploy/Caddyfile`) lauscht auf 80/443, holt das Zertifikat für `DEV_LOG_DOMAIN` automatisch bei Let's Encrypt und leitet an Dev Log weiter (Router: Port 443 auf diesen Rechner weiterleiten). Dev Log übernimmt Protokoll und Client-IP vom Proxy (`DEV_LOG_TRUST_PROXY`). Die API setzt Security-Header (CSP), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Mit `DEV_LOG_AUTH=off` lauscht der Server nur auf `127.0.0.1` (`DEV_LOG_HOST` überschreibt das).
 
+Anmeldung über die Login-Seite (Sitzungs-Cookie, 30 Tage). Unter Einstellungen → Sicherheit lässt sich die Zwei-Faktor-Anmeldung mit einer Authenticator-App einrichten; danach gilt Basic Auth (für Skripte) nicht mehr. Code verloren: `docker compose exec db psql -U devlog dev_log -c "DELETE FROM app_settings WHERE key = 'auth_totp_secret'"` und `docker compose restart dev-log`.
+
+### Betrieb
+
+- **App & Push:** Dev Log ist als App installierbar (Manifest, Service Worker). Unter Einstellungen → App & Benachrichtigungen pro Gerät Push einschalten (iPhone: erst „Zum Home-Bildschirm“). Meldungen: Auftrag erledigt/blockiert, Antwort/Rückfrage des Assistenten, Ausfall.
+- **Backups:** Dienst `backup` schreibt täglich `backups/dev_log-*.dump` (14 Tage, `DEV_LOG_BACKUP_KEEP_DAYS`). Wiederherstellen: `docker compose exec -T db pg_restore -U devlog -d dev_log --clean < backups/<datei>.dump`.
+- **Wächter:** `./scripts/install-watchdog.sh` prüft alle zwei Minuten Dienst, HTTPS, Datenbank, Worker, Backup-Alter und Speicherplatz und meldet Probleme per Push (Log: `~/Library/Logs/dev-log-watchdog.log`). Fällt der ganze Rechner oder die Internetleitung aus, kann er nichts melden – dafür einen externen Monitor auf `https://<DEV_LOG_DOMAIN>/health` setzen.
+- **Oberflächentests:** `npm run test:e2e` (Playwright, Desktop und Handy) startet Dev Log auf einer eigenen Datenbank `dev_log_e2e`; einmalig `npx playwright install chromium`.
+
 Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Deshalb ein starkes Passwort verwenden und Dev Log nie per HTTP ins Netz stellen.
 
 **Grenzen der Agent-Rechte:** Die Werkzeugregeln (Projektordner, gesperrte Dateien, erlaubte Befehle) schützen vor Fehlgriffen des Modells, sind aber keine Sandbox. Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen mit den Rechten des Workers auf dem Host. Installationen laufen immer mit `--ignore-scripts`. Für die Projekt-Datenbank einen eigenen Benutzer ohne `DROP`-/Superuser-Rechte hinterlegen.

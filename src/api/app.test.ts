@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
+import { currentStep, hotp } from './totp.js';
 
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
 
@@ -21,12 +22,12 @@ function basicAuth(): string {
   return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`;
 }
 
-test('protects the Dev Log UI and API with HTTP basic authentication', async () => {
+test('protects the API; basic auth works for scripts while no second factor is set up', async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const anonymous = await fetch(`${baseUrl}/api/projects`);
     assert.equal(anonymous.status, 401);
-    assert.match(anonymous.headers.get('www-authenticate') ?? '', /^Basic/);
+    assert.equal(anonymous.headers.get('www-authenticate'), null);
 
     const authorized = await fetch(`${baseUrl}/api/projects`, {
       headers: { Authorization: basicAuth() },
@@ -34,6 +35,73 @@ test('protects the Dev Log UI and API with HTTP basic authentication', async () 
     assert.equal(authorized.status, 200);
     assert.deepEqual(await authorized.json(), { projects: [] });
   });
+});
+
+/** Speicher für Sitzungen und Einstellungen, damit Login und Zwei-Faktor ohne Datenbank laufen. */
+function sessionPool(): Pool {
+  const sessions = new Map<string, Date>();
+  const settings = new Map<string, string>();
+  return {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.startsWith('INSERT INTO auth_sessions')) sessions.set(values[0] as string, new Date());
+      else if (sql.startsWith('SELECT last_seen FROM auth_sessions')) {
+        const seen = sessions.get(values[0] as string);
+        return { rows: seen ? [{ last_seen: seen }] : [] };
+      } else if (sql.startsWith('DELETE FROM auth_sessions WHERE token_hash <>')) {
+        for (const key of [...sessions.keys()]) if (key !== values[0]) sessions.delete(key);
+      } else if (sql.startsWith('DELETE FROM auth_sessions')) sessions.delete(values[0] as string);
+      else if (sql.includes('INTO app_settings')) settings.set(values[0] as string, values[1] as string);
+      else if (sql.startsWith('SELECT value FROM app_settings')) {
+        const value = settings.get(values[0] as string);
+        return { rows: value ? [{ value }] : [] };
+      } else if (sql.startsWith('DELETE FROM app_settings')) settings.delete(values[0] as string);
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+}
+
+test('login creates a session cookie; with a second factor basic auth and code-less logins are refused', async () => {
+  const secret = 'JBSWY3DPEHPK3PXP';
+  const pool = sessionPool();
+  const totpAuth = { ...auth, totpSecret: secret as string | null };
+  const server = createDevLogApp(pool, totpAuth).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const json = { 'Content-Type': 'application/json' };
+    const session = await (await fetch(`${baseUrl}/api/session`)).json();
+    assert.deepEqual(session, { authenticated: false, authRequired: true, totp: true });
+
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Authorization: basicAuth() } })).status, 401);
+    const withoutCode = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ username: auth.username, password: auth.password }),
+    });
+    assert.equal(withoutCode.status, 401);
+
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ username: auth.username, password: auth.password, code: hotp(secret, currentStep()) }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0]!;
+    assert.match(login.headers.get('set-cookie') ?? '', /HttpOnly; SameSite=Lax/);
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Cookie: cookie } })).status, 200);
+
+    const replay = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ username: auth.username, password: auth.password, code: hotp(secret, currentStep()) }),
+    });
+    assert.equal(replay.status, 401, 'a code is accepted only once');
+
+    await fetch(`${baseUrl}/api/logout`, { method: 'POST', headers: { Cookie: cookie } });
+    assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Cookie: cookie } })).status, 401);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('serves the Angular application shell', async () => {

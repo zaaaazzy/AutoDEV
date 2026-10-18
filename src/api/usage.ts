@@ -1,0 +1,172 @@
+import type { Express } from 'express';
+import type { Pool } from 'pg';
+import { parseProjectSlug } from '../core/validation.js';
+
+/** Bezeichnungen der Agents außerhalb des Auftrags-Workflows (Tabelle agent_usage). */
+const SYSTEM_ROLES: Record<string, string> = {
+  assistant: 'Dashboard-Assistent',
+  author: 'Auftragsautor (Ideen)',
+  bug_reviewer: 'Bug-Wächter (Planung)',
+  analyst: 'Problemanalyse',
+};
+
+interface Usage {
+  tokens: number;
+  hours: number;
+  costUsd: number;
+}
+
+const usage = (row: { tokens: string | null; ms: string | null; cost: string | null }): Usage => ({
+  tokens: Number(row.tokens ?? 0),
+  hours: Math.round((Number(row.ms ?? 0) / 3_600_000) * 100) / 100,
+  costUsd: Math.round(Number(row.cost ?? 0) * 100) / 100,
+});
+
+/**
+ * Verbrauch eines Projekts: nach Bereich, nach Art (Auftrag, Bug, Dashboard, Planung), Schätzung gegen tatsächlichen
+ * Aufwand je Auftrag und die Agents im Vergleich.
+ */
+export async function collectUsage(pool: Pool, slug: string): Promise<Record<string, unknown>> {
+  const [orders, system, agents] = await Promise.all([
+    pool.query<{
+      id: string;
+      title: string;
+      kind: string;
+      category: string | null;
+      status: string;
+      estHours: string | null;
+      estTokens: string | null;
+      tokens: string | null;
+      ms: string | null;
+      cost: string | null;
+      runs: string;
+    }>(
+      `SELECT d.id, d.title, d.kind, d.category, d.status,
+              d.effort_hours AS "estHours", d.token_estimate AS "estTokens",
+              SUM(st.tokens) AS tokens, SUM(st.duration_ms) AS ms, SUM(st.cost_usd) AS cost,
+              COUNT(DISTINCT r.id) AS runs
+         FROM development_items d
+         LEFT JOIN agent_runs r ON r.development_id = d.id
+         LEFT JOIN agent_run_steps st ON st.run_id = r.id
+        WHERE d.project_slug = $1
+        GROUP BY d.id
+        ORDER BY d.created_at DESC`,
+      [slug],
+    ),
+    pool.query<{ role: string; count: string; failed: string; tokens: string; ms: string; cost: string }>(
+      `SELECT role, COUNT(*) AS count, COUNT(*) FILTER (WHERE NOT success) AS failed,
+              SUM(tokens) AS tokens, SUM(duration_ms) AS ms, SUM(cost_usd) AS cost
+         FROM agent_usage WHERE project_slug = $1 GROUP BY role`,
+      [slug],
+    ),
+    pool.query<{ agent: string; count: string; failed: string; tokens: string; ms: string; cost: string }>(
+      `SELECT st.agent_name AS agent, COUNT(*) AS count, COUNT(*) FILTER (WHERE st.status = 'failed') AS failed,
+              SUM(st.tokens) AS tokens, SUM(st.duration_ms) AS ms, SUM(st.cost_usd) AS cost
+         FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
+        WHERE r.project_slug = $1 AND st.status IN ('passed', 'failed')
+        GROUP BY st.agent_name`,
+      [slug],
+    ),
+  ]);
+
+  const orderRows = orders.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    kind: row.kind,
+    category: row.category,
+    status: row.status,
+    runs: Number(row.runs),
+    estimate: {
+      hours: row.estHours === null ? null : Number(row.estHours),
+      tokens: row.estTokens === null ? null : Number(row.estTokens),
+    },
+    actual: usage(row),
+  }));
+
+  const group = (key: (row: (typeof orderRows)[number]) => string) => {
+    const result = new Map<
+      string,
+      { key: string; count: number; actual: Usage; estimate: { hours: number; tokens: number } }
+    >();
+    for (const row of orderRows) {
+      const entry = result.get(key(row)) ?? {
+        key: key(row),
+        count: 0,
+        actual: { tokens: 0, hours: 0, costUsd: 0 },
+        estimate: { hours: 0, tokens: 0 },
+      };
+      entry.count += 1;
+      entry.actual.tokens += row.actual.tokens;
+      entry.actual.hours = Math.round((entry.actual.hours + row.actual.hours) * 100) / 100;
+      entry.actual.costUsd = Math.round((entry.actual.costUsd + row.actual.costUsd) * 100) / 100;
+      entry.estimate.hours += row.estimate.hours ?? 0;
+      entry.estimate.tokens += row.estimate.tokens ?? 0;
+      result.set(key(row), entry);
+    }
+    return [...result.values()].sort((a, b) => b.actual.tokens - a.actual.tokens);
+  };
+
+  const byKind = group((row) => (row.kind === 'bug' ? 'bug' : 'order'));
+  const chat = system.rows.filter((row) => row.role === 'assistant');
+  const planning = system.rows.filter((row) => row.role !== 'assistant');
+  const systemEntry = (key: string, rows: typeof system.rows) => ({
+    key,
+    count: rows.reduce((sum, row) => sum + Number(row.count), 0),
+    actual: usage({
+      tokens: String(rows.reduce((sum, row) => sum + Number(row.tokens), 0)),
+      ms: String(rows.reduce((sum, row) => sum + Number(row.ms), 0)),
+      cost: String(rows.reduce((sum, row) => sum + Number(row.cost), 0)),
+    }),
+    estimate: { hours: 0, tokens: 0 },
+  });
+  if (chat.length) byKind.push(systemEntry('dashboard', chat));
+  if (planning.length) byKind.push(systemEntry('planning', planning));
+
+  const agentRows = [
+    ...agents.rows.map((row) => ({ ...row, source: 'workflow' })),
+    ...system.rows.map((row) => ({ ...row, agent: SYSTEM_ROLES[row.role] ?? row.role, source: 'system' })),
+  ].map((row) => {
+    const count = Number(row.count);
+    const actual = usage(row);
+    return {
+      agent: row.agent,
+      source: row.source,
+      count,
+      failed: Number(row.failed),
+      successRate: count ? Math.round(((count - Number(row.failed)) / count) * 100) : null,
+      actual,
+      avgTokens: count ? Math.round(actual.tokens / count) : 0,
+      avgSeconds: count ? Math.round(Number(row.ms) / count / 1000) : 0,
+    };
+  });
+  const totalTokens = agentRows.reduce((sum, row) => sum + row.actual.tokens, 0);
+
+  const estimated = orderRows.filter((row) => row.estimate.tokens && row.actual.tokens);
+  return {
+    totals: {
+      tokens: totalTokens,
+      hours: Math.round(agentRows.reduce((sum, row) => sum + row.actual.hours, 0) * 100) / 100,
+      costUsd: Math.round(agentRows.reduce((sum, row) => sum + row.actual.costUsd, 0) * 100) / 100,
+      estimateTokens: estimated.reduce((sum, row) => sum + (row.estimate.tokens ?? 0), 0),
+      estimateActualTokens: estimated.reduce((sum, row) => sum + row.actual.tokens, 0),
+    },
+    byCategory: group((row) => row.category ?? 'none'),
+    byKind,
+    orders: orderRows,
+    agents: agentRows
+      .map((row) => ({ ...row, share: totalTokens ? Math.round((row.actual.tokens / totalTokens) * 1000) / 10 : 0 }))
+      .sort((a, b) => b.actual.tokens - a.actual.tokens),
+  };
+}
+
+export function registerUsageRoutes(app: Express, pool: Pool): void {
+  app.get('/api/projects/:slug/usage', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+      response.json(await collectUsage(pool, slug));
+    } catch (error) {
+      next(error);
+    }
+  });
+}

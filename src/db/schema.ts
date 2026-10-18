@@ -20,6 +20,22 @@ export const SCHEMA = `
     value TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS auth_sessions (
+    token_hash TEXT PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    endpoint TEXT PRIMARY KEY,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    user_agent TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
   CREATE TABLE IF NOT EXISTS worker_heartbeats (
     project_slug TEXT PRIMARY KEY,
     last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -393,4 +409,18 @@ export const SCHEMA = `
     checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (development_id, kind, position)
   );
+
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(10, 4) NOT NULL DEFAULT 0;
+  -- Verbrauch der Agents außerhalb des Auftrags-Workflows (Dashboard-Assistent, Auftragsautor, Bug-Wächter, Analyse, Schätzung).
+  CREATE TABLE IF NOT EXISTS agent_usage (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    tokens BIGINT NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    cost_usd NUMERIC(10, 4) NOT NULL DEFAULT 0,
+    success BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS agent_usage_project_idx ON agent_usage (project_slug, created_at);
 `;

@@ -34,6 +34,7 @@ type StreamEvent = {
   result?: string;
   is_error?: boolean;
   usage?: { input_tokens?: number; output_tokens?: number };
+  total_cost_usd?: number;
 };
 
 function shorten(text: string): string {
@@ -76,7 +77,7 @@ export interface StreamParser {
   /** The agent's Markdown text so far, used as live output while the agent runs. */
   transcript(): string;
   /** Final answer and token usage, or null when no result event arrived (e.g. the CLI failed to start). */
-  result(): { text: string; isError: boolean; tokens: number } | null;
+  result(): { text: string; isError: boolean; tokens: number; costUsd: number } | null;
   /** Session of the run, reported in every event; used to continue the conversation. */
   sessionId(): string | undefined;
 }
@@ -85,7 +86,7 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
   let buffer = '';
   // Live output reads like documentation: only the agent's own Markdown text; tool calls go to the history.
   const paragraphs: string[] = [];
-  let final: { text: string; isError: boolean; tokens: number } | null = null;
+  let final: { text: string; isError: boolean; tokens: number; costUsd: number } | null = null;
   let session: string | undefined;
   const action = (message: string): void => {
     if (message) onAction(message);
@@ -112,6 +113,7 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
         text: event.result ?? '',
         isError: event.is_error === true,
         tokens: (event.usage?.input_tokens ?? 0) + (event.usage?.output_tokens ?? 0),
+        costUsd: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : 0,
       };
     }
   };
@@ -168,5 +170,6 @@ export async function executeAgentCommand(
     exitCode: final.isError && result.exitCode === 0 ? 1 : result.exitCode,
     output: final.text || parser.transcript(),
     tokens: final.tokens || result.tokens,
+    costUsd: final.costUsd || result.costUsd,
   };
 }

@@ -47,8 +47,16 @@ export class DashboardComponent {
   );
   protected readonly ratedIdeas = computed(() =>
     this.data().ideas.filter(
-      (idea) => idea.benefit !== null && idea.benefit !== undefined && idea.cost !== null && idea.cost !== undefined,
+      (idea) =>
+        !['accepted', 'rejected'].includes(idea.status) &&
+        idea.benefit !== null &&
+        idea.benefit !== undefined &&
+        idea.cost !== null &&
+        idea.cost !== undefined,
     ),
+  );
+  protected readonly orderTotal = computed(() =>
+    Object.values(this.data().stats?.orders ?? {}).reduce((sum, count) => sum + count, 0),
   );
   protected readonly maxVelocity = computed(() =>
     Math.max(1, ...(this.data().stats?.velocity ?? []).map((sprint) => sprint.total)),

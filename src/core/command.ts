@@ -9,6 +9,8 @@ export interface CommandResult {
   output: string;
   /** Vom Modell gemeldete Tokens (Prompt + Antwort), falls bekannt. */
   tokens?: number;
+  /** Vom Claude-CLI gemeldete API-Kosten in US-Dollar, falls bekannt. */
+  costUsd?: number;
   /** Sitzung des Claude-CLI, um das Gespräch später fortzusetzen (--resume). */
   sessionId?: string;
 }

@@ -1,0 +1,120 @@
+@if (error()) {
+  <p class="notice error" role="alert">{{ error() }}</p>
+}
+@if (usage(); as data) {
+  <section class="summary-grid" aria-label="Verbrauch gesamt">
+    <div class="summary-card">
+      <strong>{{ data.totals.tokens | localeNumber }}</strong>
+      <span>Tokens verbraucht</span>
+    </div>
+    <div class="summary-card">
+      <strong>{{ data.totals.hours | hours }}</strong>
+      <span>Agent-Laufzeit</span>
+    </div>
+    <div class="summary-card">
+      <strong>{{ data.totals.costUsd ? (data.totals.costUsd | localeNumber) + ' $' : '–' }}</strong>
+      <span>API-Kosten{{ data.totals.costUsd ? '' : ' (ab jetzt erfasst)' }}</span>
+    </div>
+    <div class="summary-card">
+      <strong>{{ ratioText(data.totals.estimateActualTokens, data.totals.estimateTokens) }}</strong>
+      <span>Tokens tatsächlich gegenüber Schätzung</span>
+    </div>
+  </section>
+
+  <section class="view-grid">
+    <article class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Nach Bereich</h2>
+          <p class="muted">Tokens der Auftrags-Agents je Kategorie</p>
+        </div>
+      </div>
+      @for (group of data.byCategory; track group.key) {
+        <div class="usage-row">
+          <div class="usage-head">
+            <span class="tag" [class]="'tag category category-' + group.key">{{ categoryLabel(group.key) }}</span>
+            <strong>{{ group.actual.tokens | localeNumber }}</strong>
+          </div>
+          <div class="bar-track"><span [style.width.%]="share(group.actual.tokens, data.byCategory)"></span></div>
+          <small class="muted"
+            >{{ group.count }} Aufträge · Laufzeit {{ group.actual.hours | hours }} · Schätzung
+            {{ group.estimate.tokens | localeNumber }} Tokens / {{ group.estimate.hours | hours }} ·
+            {{ ratioText(group.actual.tokens, group.estimate.tokens) }}</small
+          >
+        </div>
+      } @empty {
+        <p class="empty-state">Noch keine Aufträge.</p>
+      }
+    </article>
+    <article class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Nach Art</h2>
+          <p class="muted">Aufträge, Bugs, Dashboard-Assistent und Planung</p>
+        </div>
+      </div>
+      @for (group of data.byKind; track group.key) {
+        <div class="usage-row">
+          <div class="usage-head">
+            <span>{{ kindLabel(group.key) }}</span>
+            <strong>{{ group.actual.tokens | localeNumber }}</strong>
+          </div>
+          <div class="bar-track"><span [style.width.%]="share(group.actual.tokens, data.byKind)"></span></div>
+          <small class="muted"
+            >{{ group.count }} {{ group.key === 'order' || group.key === 'bug' ? 'Aufträge' : 'Einsätze' }} · Laufzeit
+            {{ group.actual.hours | hours }}
+            @if (group.estimate.tokens) {
+              · {{ ratioText(group.actual.tokens, group.estimate.tokens) }}
+            }
+          </small>
+        </div>
+      } @empty {
+        <p class="empty-state">Noch kein Verbrauch erfasst.</p>
+      }
+      <p class="muted usage-note">
+        Dashboard-Assistent und Planungs-Agents werden seit heute erfasst; ältere Einsätze fehlen hier.
+      </p>
+    </article>
+  </section>
+
+  <section class="panel stats-table">
+    <div class="section-heading">
+      <div>
+        <h2>Schätzung gegen tatsächlich</h2>
+        <p class="muted">Je Auftrag: geschätzte Tokens und Aufwand gegenüber dem Verbrauch der Agents</p>
+      </div>
+    </div>
+    <app-data-table
+      [rows]="data.orders"
+      [columns]="orderColumns"
+      [rowId]="orderId"
+      [initialSort]="[{ id: 'tokens', desc: true }]"
+      emptyText="Noch keine Aufträge."
+    />
+  </section>
+
+  <section class="panel stats-table">
+    <div class="section-heading">
+      <div>
+        <h2>Agents im Vergleich</h2>
+        <p class="muted">Einsätze, Erfolgsquote, Anteil am Verbrauch und Durchschnitt je Einsatz</p>
+      </div>
+    </div>
+    <app-data-table
+      [rows]="data.agents"
+      [columns]="agentColumns"
+      [rowId]="agentId"
+      [initialSort]="[{ id: 'tokens', desc: true }]"
+      emptyText="Noch keine Agent-Einsätze."
+    >
+      <ng-template appDataCell="share" let-row>
+        <span class="share-cell">
+          <span class="bar-track"><span [style.width.%]="row.share"></span></span>
+          {{ row.share }} %
+        </span>
+      </ng-template>
+    </app-data-table>
+  </section>
+} @else if (!error()) {
+  <p class="loading" role="status">Statistik wird geladen …</p>
+}

@@ -13,7 +13,7 @@
       <span>Offene Bugs</span>
     </a>
     <a class="summary-card" href="#runs" (click)="store.navigate('runs')">
-      <strong>{{ data().runs.length }}</strong>
+      <strong>{{ data().stats?.testRuns?.total ?? data().runs.length }}</strong>
       <span>Testläufe</span>
     </a>
   </section>
@@ -27,26 +27,35 @@
       <div class="metric-grid">
         <div>
           <span>Aufträge erledigt</span>
-          <strong>{{ data().stats?.orders?.['done'] ?? 0 }}</strong>
+          <strong>{{ data().stats?.orders?.['done'] ?? 0 }} / {{ orderTotal() }}</strong>
         </div>
         <div>
-          <span>Test-Passrate</span>
+          <span>Test-Erfolgsquote</span>
           <strong>{{
             data().stats?.testRuns?.passRate === null || data().stats?.testRuns?.passRate === undefined
               ? '–'
               : data().stats?.testRuns?.passRate + '%'
           }}</strong>
+          <small class="muted">{{
+            data().stats?.testRuns?.total ? 'aus den letzten Testläufen' : 'noch keine Testläufe'
+          }}</small>
         </div>
         <div>
-          <span>Aufwand erledigt / geplant</span>
-          <strong
-            >{{ data().stats?.effort?.doneHours | hours }} / {{ data().stats?.effort?.plannedHours | hours }}</strong
-          >
+          <span>Agent-Laufzeit (tatsächlich)</span>
+          <strong>{{ data().stats?.actual?.hours ?? 0 | hours }}</strong>
+          <small class="muted">Schätzung: {{ data().stats?.effort?.plannedHours | hours }}</small>
         </div>
         <div>
-          <span>Geschätzte Tokens</span>
-          <strong>{{ data().stats?.effort?.tokens | localeNumber }}</strong>
+          <span>Tokens verbraucht</span>
+          <strong>{{ data().stats?.actual?.tokens ?? 0 | localeNumber }}</strong>
+          <small class="muted">Schätzung: {{ data().stats?.effort?.tokens | localeNumber }}</small>
         </div>
+        @if (data().stats?.actual?.costUsd) {
+          <div>
+            <span>API-Kosten</span>
+            <strong>{{ data().stats?.actual?.costUsd | localeNumber }} $</strong>
+          </div>
+        }
       </div>
     </article>
     <article class="panel">
@@ -172,7 +181,7 @@
     </article>
     <article class="panel">
       <div class="section-heading">
-        <h2>Ideen nach Nutzen und Kosten</h2>
+        <h2>Offene Ideen nach Nutzen und Kosten</h2>
       </div>
       @for (idea of ratedIdeas(); track idea.id) {
         <div class="list-row">
@@ -180,7 +189,7 @@
           <span>Nutzen {{ idea.benefit }}/10 · Kosten {{ idea.cost }}/10</span>
         </div>
       } @empty {
-        <p class="empty-state">Noch keine bewerteten Ideen vorhanden.</p>
+        <p class="empty-state">Keine offenen, bewerteten Ideen.</p>
       }
     </article>
   </section>

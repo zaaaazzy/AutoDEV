@@ -1,215 +1,226 @@
-<div class="app-shell">
-  <aside
-    class="sidebar"
-    [class.closed]="menuClosed()"
-    [class.mobile-open]="mobileMenu()"
-    (mouseleave)="menuClosed.set(false)"
-  >
-    <button
-      class="menu-toggle"
-      type="button"
-      [attr.aria-expanded]="mobileMenu()"
-      aria-controls="main-navigation"
-      [attr.aria-label]="mobileMenu() ? 'Menü schließen' : 'Menü öffnen'"
-      (click)="mobileMenu.set(!mobileMenu())"
+@if (auth.required()) {
+  <app-login />
+} @else {
+  <div class="app-shell">
+    <aside
+      class="sidebar"
+      [class.closed]="menuClosed()"
+      [class.mobile-open]="mobileMenu()"
+      (mouseleave)="menuClosed.set(false)"
     >
-      <span></span><span></span><span></span>
-    </button>
-    <a class="brand" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
-      <span class="brand-mark">m</span>
-      <span>mainty</span>
-      <span class="brand-divider">/</span>
-      <small>dev log</small>
-    </a>
-    <p class="nav-label">Arbeitsbereich</p>
-    <nav id="main-navigation" aria-label="Dev-Log-Navigation">
-      @for (item of navigation; track item.id) {
-        <a
-          class="nav-link"
-          [class.active]="section() === item.id"
-          [href]="'#' + item.id"
-          (click)="store.navigate(item.id); menuClosed.set(true); mobileMenu.set(false)"
-        >
-          <span class="nav-title">
-            <app-nav-icon [name]="item.id" />
-            <span class="nav-text">{{ item.label }}</span>
-          </span>
-          @if (navCount(item.id) > 0) {
-            <span
-              class="nav-count"
-              [class]="'nav-count ' + navTone(item.id)"
-              [attr.title]="
-                item.id === 'sprints' ? sprintHealth()?.text : item.id === 'dashboard' ? store.openQuestion() : null
-              "
-              >{{ navCount(item.id) }}</span
+      <button
+        class="menu-toggle"
+        type="button"
+        [attr.aria-expanded]="mobileMenu()"
+        aria-controls="main-navigation"
+        [attr.aria-label]="mobileMenu() ? 'Menü schließen' : 'Menü öffnen'"
+        (click)="mobileMenu.set(!mobileMenu())"
+      >
+        <span></span><span></span><span></span>
+      </button>
+      <a class="brand" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
+        <span class="brand-mark">m</span>
+        <span>mainty</span>
+        <span class="brand-divider">/</span>
+        <small>dev log</small>
+      </a>
+      <p class="nav-label">Arbeitsbereich</p>
+      <nav id="main-navigation" aria-label="Dev-Log-Navigation">
+        @for (item of navigation; track item.id) {
+          <a
+            class="nav-link"
+            [class.active]="section() === item.id"
+            [href]="'#' + item.id"
+            (click)="store.navigate(item.id); menuClosed.set(true); mobileMenu.set(false)"
+          >
+            <span class="nav-title">
+              <app-nav-icon [name]="item.id" />
+              <span class="nav-text">{{ item.label }}</span>
+            </span>
+            @if (navCount(item.id) > 0) {
+              <span
+                class="nav-count"
+                [class]="'nav-count ' + navTone(item.id)"
+                [attr.title]="
+                  item.id === 'sprints' ? sprintHealth()?.text : item.id === 'dashboard' ? store.openQuestion() : null
+                "
+                >{{ navCount(item.id) }}</span
+              >
+            }
+          </a>
+        }
+      </nav>
+      <p class="sidebar-foot">Projekt- und Testtracking</p>
+    </aside>
+    @if (mobileMenu()) {
+      <div class="menu-backdrop" (click)="mobileMenu.set(false)" aria-hidden="true"></div>
+    }
+
+    <main class="main">
+      <header class="topbar">
+        <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>Dev Log</strong></div>
+        <div class="agent-indicator">
+          <a
+            class="worker-status"
+            [class.online]="worker().online"
+            [class.offline]="!worker().online"
+            href="#agents"
+            (click)="store.navigate('agents')"
+            role="status"
+            [attr.aria-label]="'Agent-Status: ' + workerText() + ' – zu den Agents'"
+          >
+            <app-nav-icon name="agents" />
+            <span class="worker-count">{{ store.activeAgentCount() }}/{{ worker().agents.length }}</span>
+            @if (store.openQuestion(); as question) {
+              <span class="question-badge" [title]="question">?</span>
+            }
+          </a>
+          @if (notice() || resourceErrors().length) {
+            <div
+              class="speech-bubble"
+              [class.error]="resourceErrors().length"
+              [attr.role]="resourceErrors().length ? 'alert' : 'status'"
             >
+              @if (notice()) {
+                <p>{{ notice() }}</p>
+              }
+              @for (error of resourceErrors(); track error) {
+                <p>{{ error }}</p>
+              }
+            </div>
           }
-        </a>
-      }
-    </nav>
-    <p class="sidebar-foot">Projekt- und Testtracking</p>
-  </aside>
-  @if (mobileMenu()) {
-    <div class="menu-backdrop" (click)="mobileMenu.set(false)" aria-hidden="true"></div>
-  }
-
-  <main class="main">
-    <header class="topbar">
-      <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>Dev Log</strong></div>
-      <div class="agent-indicator">
-        <a
-          class="worker-status"
-          [class.online]="worker().online"
-          [class.offline]="!worker().online"
-          href="#agents"
-          (click)="store.navigate('agents')"
-          role="status"
-          [attr.aria-label]="'Agent-Status: ' + workerText() + ' – zu den Agents'"
-        >
-          <app-nav-icon name="agents" />
-          <span class="worker-count">{{ store.activeAgentCount() }}/{{ worker().agents.length }}</span>
-          @if (store.openQuestion(); as question) {
-            <span class="question-badge" [title]="question">?</span>
-          }
-        </a>
-        @if (notice() || resourceErrors().length) {
-          <div
-            class="speech-bubble"
-            [class.error]="resourceErrors().length"
-            [attr.role]="resourceErrors().length ? 'alert' : 'status'"
-          >
-            @if (notice()) {
-              <p>{{ notice() }}</p>
-            }
-            @for (error of resourceErrors(); track error) {
-              <p>{{ error }}</p>
-            }
+          <div class="agent-popover" role="tooltip">
+            <p class="popover-title">Agents · {{ store.currentProject()?.name }}</p>
+            <app-agent-list />
           </div>
-        }
-        <div class="agent-popover" role="tooltip">
-          <p class="popover-title">Agents · {{ store.currentProject()?.name }}</p>
-          <app-agent-list />
         </div>
-      </div>
-      @if (activeSprint(); as sprint) {
-        <a
-          class="sprint-status"
-          href="#sprints"
-          (click)="store.navigate('sprints')"
-          [title]="sprint.running ? sprint.running + ' Aufgabe(n) in Arbeit' : 'Zum Sprint'"
-        >
-          @if (sprint.finished) {
-            <span class="sprint-done" aria-label="Alle Aufgaben erledigt">✓</span>
-          } @else {
-            <span class="live-dot" aria-hidden="true"></span>
-          }
-          <span class="sprint-name">{{ sprint.name }}</span>
-          <strong>{{ sprint.done }}/{{ sprint.total }}</strong>
-          <span class="sprint-bar" aria-hidden="true"
-            ><span [style.width.%]="sprint.total ? (sprint.done / sprint.total) * 100 : 0"></span
-          ></span>
-        </a>
-      } @else {
-        <span class="sprint-status idle">Kein Sprint aktiv</span>
-      }
-      <label class="project-picker"
-        >Projekt
-        <select [ngModel]="activeProject()" (ngModelChange)="store.loadProject($event)" aria-label="Projekt auswählen">
-          @for (project of projects(); track project.slug) {
-            <option [value]="project.slug">{{ project.name }}</option>
-          }
-          @if (!projects().length) {
-            <option value="">Noch kein Projekt</option>
-          }
-        </select>
-      </label>
-      <button
-        class="button secondary help-button"
-        type="button"
-        aria-label="Hilfe"
-        title="So funktioniert Dev Log"
-        (click)="showHelp.set(true)"
-      >
-        ?
-      </button>
-      <button
-        class="button secondary new-project"
-        type="button"
-        aria-label="Neues Projekt"
-        (click)="showProjectForm.set(!showProjectForm())"
-      >
-        +<span class="button-label"> Projekt</span>
-      </button>
-    </header>
-
-    <div class="content">
-      <section class="page-heading">
-        <div>
-          <p class="eyebrow">Entwicklungsübersicht</p>
-          <h1>{{ activeSectionLabel() }}</h1>
-          <p>Projekte, Aufgaben und automatisierte Abläufe an einem Ort.</p>
-        </div>
-        <div class="actions">
-          @if (createLabel(); as label) {
-            <button class="button primary" type="button" (click)="showCreate.set(!showCreate())">
-              {{ showCreate() ? 'Schließen' : '+ ' + label }}
-            </button>
-          }
-          <button
-            class="button secondary"
-            type="button"
-            (click)="store.loadProjects(activeProject())"
-            [disabled]="busy()"
+        @if (activeSprint(); as sprint) {
+          <a
+            class="sprint-status"
+            href="#sprints"
+            (click)="store.navigate('sprints')"
+            [title]="sprint.running ? sprint.running + ' Aufgabe(n) in Arbeit' : 'Zum Sprint'"
           >
-            Aktualisieren
-          </button>
-        </div>
-      </section>
-      @if (showProjectForm()) {
-        <app-project-wizard (closed)="showProjectForm.set(false)" />
-      }
-      @if (loading()) {
-        <p class="loading" role="status">Dev Log wird geladen …</p>
-      } @else if (!projects().length) {
-        <section class="panel empty-state">
-          <h2>Kein Projekt verbunden</h2>
-          <p>Verbinde ein Projekt oder starte den Test-Agenten, um ein Projekt automatisch zu registrieren.</p>
-          <button class="button primary" type="button" (click)="showProjectForm.set(true)">Projekt einrichten</button>
+            @if (sprint.finished) {
+              <span class="sprint-done" aria-label="Alle Aufgaben erledigt">✓</span>
+            } @else {
+              <span class="live-dot" aria-hidden="true"></span>
+            }
+            <span class="sprint-name">{{ sprint.name }}</span>
+            <strong>{{ sprint.done }}/{{ sprint.total }}</strong>
+            <span class="sprint-bar" aria-hidden="true"
+              ><span [style.width.%]="sprint.total ? (sprint.done / sprint.total) * 100 : 0"></span
+            ></span>
+          </a>
+        } @else {
+          <span class="sprint-status idle">Kein Sprint aktiv</span>
+        }
+        <label class="project-picker"
+          >Projekt
+          <select
+            [ngModel]="activeProject()"
+            (ngModelChange)="store.loadProject($event)"
+            aria-label="Projekt auswählen"
+          >
+            @for (project of projects(); track project.slug) {
+              <option [value]="project.slug">{{ project.name }}</option>
+            }
+            @if (!projects().length) {
+              <option value="">Noch kein Projekt</option>
+            }
+          </select>
+        </label>
+        <button
+          class="button secondary help-button"
+          type="button"
+          aria-label="Hilfe"
+          title="So funktioniert Dev Log"
+          (click)="showHelp.set(true)"
+        >
+          ?
+        </button>
+        <button
+          class="button secondary new-project"
+          type="button"
+          aria-label="Neues Projekt"
+          (click)="showProjectForm.set(!showProjectForm())"
+        >
+          +<span class="button-label"> Projekt</span>
+        </button>
+      </header>
+
+      <div class="content">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow">Entwicklungsübersicht</p>
+            <h1>{{ activeSectionLabel() }}</h1>
+            <p>Projekte, Aufgaben und automatisierte Abläufe an einem Ort.</p>
+          </div>
+          <div class="actions">
+            @if (createLabel(); as label) {
+              <button class="button primary" type="button" (click)="showCreate.set(!showCreate())">
+                {{ showCreate() ? 'Schließen' : '+ ' + label }}
+              </button>
+            }
+            <button
+              class="button secondary"
+              type="button"
+              (click)="store.loadProjects(activeProject())"
+              [disabled]="busy()"
+            >
+              Aktualisieren
+            </button>
+          </div>
         </section>
-      }
-      @switch (section()) {
-        @case ('dashboard') {
-          <app-dashboard />
+        @if (showProjectForm()) {
+          <app-project-wizard (closed)="showProjectForm.set(false)" />
         }
-        @case ('development') {
-          <app-development />
+        @if (loading()) {
+          <p class="loading" role="status">Dev Log wird geladen …</p>
+        } @else if (!projects().length) {
+          <section class="panel empty-state">
+            <h2>Kein Projekt verbunden</h2>
+            <p>Verbinde ein Projekt oder starte den Test-Agenten, um ein Projekt automatisch zu registrieren.</p>
+            <button class="button primary" type="button" (click)="showProjectForm.set(true)">Projekt einrichten</button>
+          </section>
         }
-        @case ('sprints') {
-          <app-sprints />
+        @switch (section()) {
+          @case ('dashboard') {
+            <app-dashboard />
+          }
+          @case ('development') {
+            <app-development />
+          }
+          @case ('sprints') {
+            <app-sprints />
+          }
+          @case ('ideation') {
+            <app-ideation />
+          }
+          @case ('bugs') {
+            <app-bugs />
+          }
+          @case ('docs') {
+            <app-docs />
+          }
+          @case ('agents') {
+            <app-agents />
+          }
+          @case ('runs') {
+            <app-runs />
+          }
+          @case ('stats') {
+            <app-stats />
+          }
+          @case ('settings') {
+            <app-settings />
+          }
         }
-        @case ('ideation') {
-          <app-ideation />
-        }
-        @case ('bugs') {
-          <app-bugs />
-        }
-        @case ('docs') {
-          <app-docs />
-        }
-        @case ('agents') {
-          <app-agents />
-        }
-        @case ('runs') {
-          <app-runs />
-        }
-        @case ('settings') {
-          <app-settings />
-        }
-      }
-      <footer class="footer">MAINTY <span>/</span> DEV LOG</footer>
-    </div>
-  </main>
-</div>
-@if (showHelp()) {
-  <app-help-dialog (closed)="showHelp.set(false)" />
+        <footer class="footer">MAINTY <span>/</span> DEV LOG</footer>
+      </div>
+    </main>
+  </div>
+  @if (showHelp()) {
+    <app-help-dialog (closed)="showHelp.set(false)" />
+  }
 }

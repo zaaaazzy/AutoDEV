@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { isShuttingDown } from '../core/shutdown.js';
+import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
 import { runAuthorAgent } from './requirements.js';
 import type { RunnerOptions } from '../runner/runner.js';
@@ -113,6 +114,14 @@ export async function processChat(
      VALUES ($1, 'assistant', $2, $3::jsonb, $4, $5)`,
     [options.project, text, JSON.stringify(progress.events()), question, sessionId ?? null],
   );
+  await sendPush(pool, {
+    title: question
+      ? `❓ Rückfrage des Assistenten · ${options.project}`
+      : `💬 Assistent hat geantwortet · ${options.project}`,
+    body: question ?? text.replace(/\s+/g, ' ').slice(0, 160),
+    url: '#dashboard',
+    tag: `chat-${options.project}`,
+  });
   return true;
 }
 
