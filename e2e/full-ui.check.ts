@@ -92,6 +92,7 @@ async function seed(request: APIRequestContext): Promise<void> {
     displayName: 'Anna Autorin',
     password: AUTHOR.password,
     roles: ['docs'],
+    projects: ['alpha'],
   });
 }
 

@@ -136,7 +136,8 @@ export interface Bug {
 
 export interface DocumentEntry {
   id: string;
-  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request';
+  /** test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht (beide erzeugt, schreibgeschützt). */
+  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request' | 'test' | 'settings';
   title: string;
   content: string;
   sprintId: string | null;
@@ -214,6 +215,8 @@ export interface TestRun {
   trigger: string;
   branch: string | null;
   commitSha: string | null;
+  /** Betriebssystem des Rechners (darwin, win32, linux). */
+  platform?: string | null;
   startedAt: string;
   completedAt: string | null;
   steps: (RunStep & { category?: TestCategory })[];

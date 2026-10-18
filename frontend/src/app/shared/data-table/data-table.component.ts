@@ -248,6 +248,16 @@ export class DataTableComponent<T> {
     this.expanded.update((current) => (current === id ? null : id));
   }
 
+  /** Klick irgendwo in die Zeile öffnet die Details – außer auf Bedienelemente oder beim Markieren von Text. */
+  protected rowClick(id: string, event: MouseEvent): void {
+    if (!this.detail()) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, select, textarea, label, summary, [role="button"], [contenteditable]'))
+      return;
+    if (globalThis.getSelection?.()?.toString()) return;
+    this.toggleRow(id);
+  }
+
   protected toggleFilterMenu(id: string, event: Event): void {
     event.stopPropagation();
     const box = (event.currentTarget as HTMLElement).getBoundingClientRect();

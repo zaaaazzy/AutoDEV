@@ -3,6 +3,7 @@ import { NgClass } from '@angular/common';
 import { Component, computed, effect, HostListener, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { TestCase, TestCaseStatus, TestCategory, TestMedia, TestRun } from '../../core/models.js';
+import { targetFromHash } from '../../core/navigation.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
   type DataColumn,
@@ -13,6 +14,8 @@ import {
 import { formatDuration } from '../../shared/format.js';
 import { statusLabel } from '../../shared/labels.js';
 import { DurationPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { summarizeOutput } from './output-summary.js';
+import { StepSummaryComponent } from './step-summary.component.js';
 
 export const CATEGORIES: { id: TestCategory; label: string; hint: string }[] = [
   { id: 'quality', label: 'Qualität', hint: 'Lint, Formatierung, Typen, Build' },
@@ -28,6 +31,40 @@ const CASE_STATUS_LABEL: Record<TestCaseStatus, string> = {
 };
 const TRIGGER_LABEL: Record<string, string> = { ci: 'CI', full: 'Komplettlauf', manual: 'Manuell' };
 const TREND_RUNS = 12;
+const PLATFORM_LABEL: Record<string, string> = { darwin: 'macOS', win32: 'Windows', linux: 'Linux' };
+/** Sicht (Bereich der Anwendung), erkannt am Testnamen; die erste passende Regel gewinnt. */
+const AREAS: [string, RegExp][] = [
+  [
+    'Navigation & Bedienung',
+    /tabelle|sortier|filter|navigation|alle (seiten|bereiche)|überlauf|menü|knopf|link|begrüßung|tour/i,
+  ],
+  [
+    'Anmeldung & Sicherheit',
+    /login|anmeld|rolle|role|admin|autorin|benutzer|passw|scrypt|lock|limiter|totp|rfc 6238|time step|https|same-origin|credential|secret|sqlviolation|auth|session/i,
+  ],
+  ['Git & Repository', /\bgit\b|commit|remote|github|branch|favicon/i],
+  ['Dashboard & Chat', /dashboard|chat|assistent|erwähnung|mention|verweis|kommentar|split lines|final answer/i],
+  ['Ideen', /idee|ideas?\b|ideation|visionär|estimate|effort|benefit/i],
+  [
+    'Aufträge',
+    /auftrag|aufträge|order|development|abnahme|acceptance|follow-up|problem|analyse|aktion|handlungsbedarf|kurzfassung|hinweis/i,
+  ],
+  ['Sprints', /sprint|kanban|board|autopilot|arbeitszeit/i],
+  ['Bugs', /\bbugs?\b/i],
+  ['Dokumentation', /doku|\bdocs?\b|handbuch|markdown|testbericht|shorttitle/i],
+  [
+    'Testläufe & Qualität',
+    /test-?lauf|testläufe|coverage|testabdeckung|\btap\b|playwright|vitest|jest|lint|locator|measured|kurzfazit|script arguments|tester report/i,
+  ],
+  [
+    'Agents & Worker',
+    /agent|runner|worker|delegation|ollama|claude|werkzeug|tool|befehl|command|wächter|hook|model|loopguard|reviewer|prompt|freigabe|fails honestly|reports (new|recovery)/i,
+  ],
+  [
+    'Einstellungen & Projekte',
+    /einstellung|setting|projekt|project|push|manifest|service worker|wizard|setup|template|folder|ordner|application shell|bundle|attachment|image/i,
+  ],
+];
 
 interface CategoryStats {
   id: TestCategory;
@@ -59,6 +96,7 @@ interface MediaItem extends TestMedia {
     DurationPipe,
     StatusClassPipe,
     StatusLabelPipe,
+    StepSummaryComponent,
   ],
   templateUrl: './runs.component.html',
   host: { style: 'display: contents' },
@@ -73,6 +111,17 @@ export class RunsComponent {
   /** Gewählter Lauf für die Übersicht; ohne Wahl der neueste. */
   protected readonly chosenRun = signal<string | null>(null);
   protected readonly category = signal<TestCategory | null>(null);
+  /** Gruppierung der Tabelle „Alle Tests“ (Spalten-ID) und geöffneter Prüfschritt. */
+  protected readonly groupBy = signal<string | null>('area');
+  protected readonly openStep = signal<number | null>(null);
+  protected readonly groupOptions = [
+    { id: '', label: 'nicht gruppieren' },
+    { id: 'category', label: 'Kategorie' },
+    { id: 'area', label: 'Sicht' },
+    { id: 'method', label: 'Methode' },
+    { id: 'device', label: 'Gerät' },
+    { id: 'status', label: 'Status' },
+  ];
   protected readonly cases = signal<TestCase[]>([]);
   protected readonly casesLoading = signal(false);
   protected readonly casesError = signal('');
@@ -150,7 +199,9 @@ export class RunsComponent {
       sortValue: (testCase) => CATEGORIES.findIndex((category) => category.id === testCase.category),
     },
     { id: 'title', header: 'Test', value: (testCase) => testCase.title, filter: 'text', className: 'title-cell' },
-    { id: 'device', header: 'Gerät', value: (testCase) => deviceLabel(testCase.device) },
+    { id: 'area', header: 'Sicht', value: (testCase) => this.areaOf(testCase) },
+    { id: 'method', header: 'Methode', value: (testCase) => this.methodOf(testCase) },
+    { id: 'device', header: 'Gerät', value: (testCase) => this.deviceOf(testCase) },
     {
       id: 'status',
       header: 'Status',
@@ -196,12 +247,79 @@ export class RunsComponent {
   ];
 
   constructor() {
+    // Link aus einem Testbericht (#runs/<id>): diesen Lauf in der Übersicht zeigen.
+    const target = targetFromHash();
+    if (target) this.chosenRun.set(target);
     // Einzeltests des gewählten Laufs nachladen, sobald sich Lauf oder Projekt ändern.
     effect(() => {
       const run = this.selected();
       const slug = this.store.activeProject();
       void this.loadCases(slug, run);
     });
+  }
+
+  /** Was diese Kategorie im Lauf geprüft hat, z. B. „Lint · Formatierung · Typprüfung“ oder „155 Tests“. */
+  protected checksOf(entry: CategoryStats): string {
+    const steps = (this.selected()?.steps ?? []).filter((step) => step.category === entry.id);
+    if (entry.id === 'quality') {
+      return steps.map((step) => stepName(step.command)).join(' · ') || entry.hint;
+    }
+    if (!entry.total) return entry.hint;
+    return `${entry.total} ${entry.total === 1 ? 'Test' : 'Tests'} · ${entry.hint}`;
+  }
+
+  /** Verlauf nur aus Läufen, in denen die Kategorie dabei war (älteste zuerst). */
+  protected historyOf(entry: CategoryStats): { runId: string; state: 'passed' | 'failed'; startedAt: string }[] {
+    return entry.trend.filter(
+      (point): point is { runId: string; state: 'passed' | 'failed'; startedAt: string } => point.state !== null,
+    );
+  }
+
+  protected historyText(entry: CategoryStats): string {
+    const points = this.historyOf(entry);
+    if (!points.length) return 'noch kein Verlauf';
+    const green = points.filter((point) => point.state === 'passed').length;
+    return `${green} von ${points.length} grün`;
+  }
+
+  protected historyTitle(point: { runId: string; state: string; startedAt: string }, currentId: string): string {
+    const date = new Date(point.startedAt).toLocaleString('de-CH', { dateStyle: 'short', timeStyle: 'short' });
+    return `${date} · ${point.state === 'passed' ? 'bestanden' : 'fehlgeschlagen'}${point.runId === currentId ? ' · dieser Lauf' : ''}`;
+  }
+
+  protected areaOf(testCase: TestCase): string {
+    const text = `${testCase.title} ${testCase.file ?? ''}`;
+    return AREAS.find(([, pattern]) => pattern.test(text))?.[0] ?? 'Allgemein';
+  }
+
+  /** API-Methode aus Testname oder Meldungen; Oberflächentests ohne Methode heißen „UI“. */
+  protected methodOf(testCase: TestCase): string {
+    const method = /\b(GET|POST|PUT|PATCH|DELETE)\b/.exec(`${testCase.title} ${testCase.errors.join(' ')}`)?.[1];
+    return method ?? (testCase.category === 'unit' ? '–' : 'UI');
+  }
+
+  /** Gerät (PC/Handy) und Betriebssystem des Laufs, z. B. „PC · macOS“. */
+  protected deviceOf(testCase: TestCase): string {
+    const platform = PLATFORM_LABEL[this.selected()?.platform ?? ''] ?? '';
+    const device = testCase.device ? deviceLabel(testCase.device) : '';
+    return [device, platform].filter(Boolean).join(' · ') || '–';
+  }
+
+  protected stepHeadline(step: { command: string; output: string; status: string }): string {
+    return summarizeOutput(step.command, step.output ?? '', step.status).headline;
+  }
+
+  /** Klick auf einen Befund (nicht auf Knöpfe darin): Test bzw. Prüfschritt unter „Alle Tests“ öffnen. */
+  protected openFinding(event: MouseEvent, testCase: TestCase | null, stepPosition: number | null): void {
+    if ((event.target as HTMLElement | null)?.closest('button, a, video')) return;
+    if (testCase) {
+      this.showCase(testCase);
+      return;
+    }
+    this.openStep.set(stepPosition);
+    queueMicrotask(() =>
+      document.getElementById(`step-${stepPosition}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    );
   }
 
   protected choose(run: TestRun): void {
@@ -322,7 +440,16 @@ function categoryLabel(category: TestCategory): string {
 
 function deviceLabel(device: string | null): string {
   if (!device) return '–';
-  return device === 'handy' ? 'Handy' : device === 'desktop' ? 'Desktop' : device;
+  return device === 'handy' ? 'Handy' : device === 'desktop' ? 'PC' : device;
+}
+
+/** Kurzname eines Prüfbefehls: „npm run format:check“ → „Formatierung“. */
+function stepName(command: string): string {
+  if (/lint|eslint/.test(command)) return 'Lint';
+  if (/format|prettier/.test(command)) return 'Formatierung';
+  if (/typecheck|tsc/.test(command)) return 'Typprüfung';
+  if (/build/.test(command)) return 'Build';
+  return command.replace(/^npm (run )?/, '');
 }
 
 function triggerLabel(trigger: string): string {

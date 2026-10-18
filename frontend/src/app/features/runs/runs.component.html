@@ -39,7 +39,12 @@
       <div class="test-kpis">
         <div>
           <strong>{{ headline().rate === null ? '–' : headline().rate + ' %' }}</strong>
-          <span>Erfolgsquote der letzten {{ headline().finished }} Läufe</span>
+          <span
+            >Erfolgsquote
+            {{
+              headline().finished === 1 ? 'des letzten Laufs' : 'der letzten ' + headline().finished + ' Läufe'
+            }}</span
+          >
         </div>
         <div>
           <strong>{{ headline().duration }}</strong>
@@ -84,25 +89,29 @@
               <span class="fail" [style.width.%]="percent(entry.failed, entry.total)"></span>
               <span class="skip" [style.width.%]="percent(entry.skipped, entry.total)"></span>
             </span>
-            <span class="test-category-foot">
-              <span class="muted">{{ entry.hint }}</span>
-              <span class="test-trend" [attr.aria-label]="'Verlauf ' + entry.label">
-                @for (point of entry.trend; track point.runId) {
-                  <i
-                    [class]="'dot ' + (point.state ?? 'none')"
-                    [class.current]="point.runId === run.id"
-                    [title]="
-                      point.startedAt.slice(0, 16).replace('T', ' ') +
-                      ' · ' +
-                      (point.state ? (point.state | statusLabel) : 'nicht gelaufen')
-                    "
-                  ></i>
-                }
-              </span>
-            </span>
+            <span class="test-category-checks">{{ checksOf(entry) }}</span>
             @if (entry.skipped) {
               <small class="muted">{{ entry.skipped }} übersprungen</small>
             }
+            <span class="test-history" [attr.aria-label]="historyText(entry)">
+              <span class="test-history-head">
+                <span>Letzte Läufe</span>
+                <span>{{ historyText(entry) }}</span>
+              </span>
+              @if (historyOf(entry).length) {
+                <span class="test-history-bars">
+                  <small>älter</small>
+                  @for (point of historyOf(entry); track point.runId) {
+                    <i
+                      [class]="'bar ' + point.state"
+                      [class.current]="point.runId === run.id"
+                      [title]="historyTitle(point, run.id)"
+                    ></i>
+                  }
+                  <small>neuer</small>
+                </span>
+              }
+            </span>
           </button>
         }
       </div>
@@ -130,25 +139,22 @@
         </div>
         <ul class="test-findings">
           @for (step of failedChecks(); track step.position) {
-            <li>
+            <li class="clickable" (click)="openFinding($event, null, step.position)">
               <div class="test-finding-head">
                 <strong>{{ step.command }}</strong>
                 <span class="tag">{{ categoryLabel('quality') }}</span>
                 <span class="status status-failed">Fehlgeschlagen</span>
               </div>
-              <ul class="test-errors">
-                <li>{{ step.output.split('\n')[0] }}</li>
-              </ul>
+              <p class="test-finding-summary">{{ stepHeadline(step) }}</p>
             </li>
           }
           @for (testCase of findings(); track testCase.id) {
-            <li>
+            <li class="clickable" (click)="openFinding($event, testCase, null)">
               <div class="test-finding-head">
                 <button type="button" class="link-button" (click)="showCase(testCase)">{{ testCase.title }}</button>
                 <span class="tag">{{ categoryLabel(testCase.category) }}</span>
-                @if (testCase.device) {
-                  <span class="tag">{{ deviceLabel(testCase.device) }}</span>
-                }
+                <span class="tag">{{ areaOf(testCase) }}</span>
+                <span class="tag">{{ deviceOf(testCase) }}</span>
                 <span class="status" [ngClass]="'status-' + testCase.status">{{
                   caseStatusLabel(testCase.status)
                 }}</span>
@@ -237,18 +243,24 @@
             }
           </p>
         </div>
+        <label class="run-picker"
+          >Gruppieren nach
+          <select (change)="groupBy.set($any($event.target).value || null)">
+            @for (option of groupOptions; track option.id) {
+              <option [value]="option.id" [selected]="(groupBy() ?? '') === option.id">{{ option.label }}</option>
+            }
+          </select>
+        </label>
       </div>
       @if (qualitySteps().length) {
         <div class="test-steps">
           @for (step of qualitySteps(); track step.position) {
-            <details class="run-step">
-              <summary>
-                <span class="status" [ngClass]="step.status | statusClass">{{ step.status | statusLabel }}</span>
-                <span class="tag">{{ categoryLabel(step.category ?? 'unit') }}</span>
-                {{ step.command }} · {{ step.durationMs | duration }}
-              </summary>
-              <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
-            </details>
+            <app-step-summary
+              [attr.id]="'step-' + step.position"
+              [step]="step"
+              [label]="categoryLabel(step.category ?? 'unit')"
+              [open]="openStep() === step.position"
+            />
           }
         </div>
       }
@@ -257,6 +269,7 @@
         [columns]="caseColumns"
         [rowId]="caseId"
         [initialSort]="[{ id: 'status', desc: false }]"
+        [groupBy]="groupBy()"
         [(expanded)]="openCase"
         emptyText="Für diesen Lauf sind keine Einzeltests gespeichert."
       >
@@ -264,11 +277,36 @@
           <span class="status" [ngClass]="'status-' + testCase.status">{{ caseStatusLabel(testCase.status) }}</span>
         </ng-template>
         <ng-template appDataDetail let-testCase>
-          @if (testCase.file) {
-            <p class="muted">
-              <code>{{ testCase.file }}</code>
-            </p>
-          }
+          <dl class="step-facts">
+            <div>
+              <dt>Kategorie</dt>
+              <dd>{{ categoryLabel(testCase.category) }}</dd>
+            </div>
+            <div>
+              <dt>Sicht</dt>
+              <dd>{{ areaOf(testCase) }}</dd>
+            </div>
+            <div>
+              <dt>Methode</dt>
+              <dd>{{ methodOf(testCase) }}</dd>
+            </div>
+            <div>
+              <dt>Gerät</dt>
+              <dd>{{ deviceOf(testCase) }}</dd>
+            </div>
+            <div>
+              <dt>Dauer</dt>
+              <dd>{{ testCase.durationMs | duration }}</dd>
+            </div>
+            @if (testCase.file) {
+              <div>
+                <dt>Datei</dt>
+                <dd>
+                  <code>{{ testCase.file }}</code>
+                </dd>
+              </div>
+            }
+          </dl>
           @if (testCase.errors.length) {
             <ul class="test-errors">
               @for (error of testCase.errors; track $index) {
@@ -300,7 +338,7 @@
     <div class="section-heading">
       <div>
         <h2>Verlauf</h2>
-        <p class="muted">Die letzten {{ data().runs.length }} Testläufe · Zeile öffnen für die Schritte</p>
+        <p class="muted">Die letzten {{ data().runs.length }} Testläufe · Zeile anklicken für die Schritte</p>
       </div>
     </div>
     <app-data-table
@@ -322,13 +360,7 @@
           </button>
         </p>
         @for (step of entry.steps; track step.position) {
-          <details class="run-step">
-            <summary>
-              <span class="status" [ngClass]="step.status | statusClass">{{ step.status | statusLabel }}</span>
-              {{ step.command }} · {{ step.durationMs | duration }}
-            </summary>
-            <article class="step-output" [innerHTML]="step.output | agentOutput"></article>
-          </details>
+          <app-step-summary [step]="step" [label]="categoryLabel(step.category ?? 'unit')" />
         } @empty {
           <p class="muted">Keine Schritte aufgezeichnet.</p>
         }

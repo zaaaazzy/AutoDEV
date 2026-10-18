@@ -61,6 +61,9 @@ export class DocsComponent {
     { kind: 'repo', label: 'Repository' },
     // Anfragen an Assistent und Agents (auch Kurzbefehle) samt Ergebnis, neueste zuerst.
     { kind: 'request', label: 'Anfragen' },
+    // Erzeugt und schreibgeschützt: Berichte aus npm run test:full, Agents und Benutzer dieses Projekts.
+    { kind: 'test', label: 'Testberichte' },
+    { kind: 'settings', label: 'Agents & Benutzer' },
   ];
 
   constructor() {
@@ -113,7 +116,7 @@ export class DocsComponent {
   }
 
   protected canEdit(doc: DocumentEntry): boolean {
-    return doc.kind !== 'repo' && doc.kind !== 'request' && this.auth.can('docs');
+    return !['repo', 'request', 'test', 'settings'].includes(doc.kind) && this.auth.can('docs');
   }
 
   protected diff(revision: DocRevision) {

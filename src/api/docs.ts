@@ -2,6 +2,9 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
+import { generatedDocs } from './generated-docs.js';
+import type { Principal } from './roles.js';
+import { isAdmin } from './tenancy.js';
 import { INVALID, buildUpdate, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
 
 const MAX_API_CONTENT = 30_000;
@@ -98,7 +101,9 @@ export function registerDocRoutes(app: Express, pool: Pool): void {
         LIMIT 300`,
       [slug],
     );
-    response.json({ docs: result.rows });
+    // Testberichte, Agent-Einstellungen und Benutzerübersicht (erzeugt, schreibgeschützt)
+    const generated = await generatedDocs(pool, slug, isAdmin(response.locals.principal as Principal | undefined));
+    response.json({ docs: [...result.rows, ...generated] });
   });
 
   app.post('/api/projects/:slug/docs', async (request, response) => {
