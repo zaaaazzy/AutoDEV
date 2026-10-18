@@ -6,6 +6,7 @@
  *   npm run test:full                          alles
  *   npm run test:full -- --projekt devlog      zusätzlich in Dev Log unter Testläufe ablegen
  *   npm run test:full -- --nur-oberflaeche     nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
+ *   npm run test:full -- --projekt devlog --bugs   Befunde zusätzlich als Bugs anlegen (Quelle „Testlauf“)
  *
  * Datenbank für --projekt: DEV_LOG_DATABASE_URL, sonst die lokale aus docker-compose (127.0.0.1:5433).
  */
@@ -25,6 +26,7 @@ import {
   type TestCaseResult,
   type TestCategory,
 } from '../src/core/test-results.js';
+import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
 import { createDatabasePool, readDatabaseConfig } from '../src/db/database.js';
 import {
   createTestRun,
@@ -41,6 +43,10 @@ const argument = (name: string) => {
 };
 const onlyUi = process.argv.includes('--nur-oberflaeche');
 const project = argument('--projekt') ?? process.env.DEV_LOG_TEST_PROJECT;
+/** Testanforderung aus Dev Log (Dashboard, Testläufe): der Lauf wird ihr zugeordnet. */
+const requestId = argument('--anfrage');
+/** Befunde als Bugs anlegen (je fehlgeschlagenem Test einer, ohne Dubletten zu offenen Bugs). */
+const fileFindings = process.argv.includes('--bugs');
 const started = new Date();
 const two = (value: number) => String(value).padStart(2, '0');
 const stamp = `${started.getFullYear()}-${two(started.getMonth() + 1)}-${two(started.getDate())}_${two(started.getHours())}-${two(started.getMinutes())}`;
@@ -186,7 +192,22 @@ class Recorder {
       branch: await git(['rev-parse', '--abbrev-ref', 'HEAD']),
       commitSha: await git(['rev-parse', 'HEAD']),
     });
+    if (requestId) await pool.query('UPDATE test_requests SET run_id = $2 WHERE id = $1', [requestId, runId]);
     return new Recorder(pool, runId);
+  }
+
+  /** Bugs aus allen Befunden dieses Laufs; mit Anfrage wird die Zahl dort vermerkt. */
+  async fileBugs(results: StepResult[], project: string): Promise<number> {
+    const drafts = results.flatMap((result) =>
+      result.cases.length
+        ? caseBugs(result.cases, this.runId)
+        : result.ok
+          ? []
+          : [stepBug(result.name, result.tail, this.runId)],
+    );
+    const created = await fileBugs(this.pool, project, drafts);
+    if (requestId) await this.pool.query('UPDATE test_requests SET bug_count = $2 WHERE id = $1', [requestId, created]);
+    return created;
   }
 
   async start(position: number, step: Step): Promise<void> {
@@ -297,6 +318,10 @@ async function main(): Promise<void> {
   }
 
   const allOk = results.every((result) => result.ok);
+  if (recorder && fileFindings && project) {
+    const bugs = await recorder.fileBugs(results, project);
+    console.log(`→ ${bugs} neue Bugs aus den Befunden angelegt`);
+  }
   const runId = await recorder?.close(allOk);
   const markdown = [
     `# Testbericht ${started.toLocaleString('de-CH')}`,

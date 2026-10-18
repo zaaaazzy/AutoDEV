@@ -28,6 +28,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
 const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 
+const BUG_SOURCE_LABEL: Record<string, string> = { agent: 'Agent', manual: 'Manuell', test: 'Testlauf' };
 @Component({
   selector: 'app-bugs',
   standalone: true,
@@ -71,7 +72,7 @@ export class BugsComponent {
       sortValue: (bug) => SEVERITY_RANK.indexOf(bug.severity),
     },
     categoryColumn<Bug>((bug) => bug.category),
-    { id: 'source', header: 'Quelle', value: (bug) => (bug.source === 'agent' ? 'Agent' : 'Manuell') },
+    { id: 'source', header: 'Quelle', value: (bug) => BUG_SOURCE_LABEL[bug.source] ?? 'Manuell' },
     {
       id: 'sprint',
       header: 'Sprint',

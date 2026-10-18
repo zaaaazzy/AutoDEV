@@ -41,7 +41,8 @@ export function sprintBranch(name: string): string {
 }
 
 const MAIN_BRANCH = 'main';
-const TEST_TIMEOUT_MS = 15 * 60_000;
+// Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
+const TEST_TIMEOUT_MS = 45 * 60_000;
 
 const INTERNAL_EXCLUDES = [
   '.dev-log-backups/',

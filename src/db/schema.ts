@@ -657,4 +657,24 @@ export const SCHEMA = `
     requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     finished_at TIMESTAMPTZ
   );
+
+  -- Kompletter Test auf Knopfdruck (Dashboard, Testläufe): der Worker führt ihn im Projektordner aus.
+  CREATE TABLE IF NOT EXISTS test_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    scope TEXT NOT NULL DEFAULT 'full' CHECK (scope IN ('full', 'ui')),
+    status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'running', 'done', 'failed')),
+    requested_by TEXT,
+    run_id UUID REFERENCES test_runs(id) ON DELETE SET NULL,
+    bug_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS test_requests_open_idx ON test_requests (project_slug)
+    WHERE status IN ('requested', 'running');
+  -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen.
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test'));
 `;

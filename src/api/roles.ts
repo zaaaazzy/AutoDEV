@@ -83,6 +83,7 @@ const RULES: Rule[] = [
   ['*', /^\/api\/projects\/[^/]+\/chat$/, 'chat'],
   // Agent-Aufgaben definieren und starten gehört zum Arbeiten mit dem Assistenten.
   ['*', /^\/api\/(projects\/[^/]+\/agent-tasks$|agent-tasks\/[^/]+(\/run)?$)/, 'chat'],
+  ['POST', /^\/api\/projects\/[^/]+\/test-requests$/, 'run'],
 ];
 
 export function requiredRole(method: string, path: string, body: unknown): Role | null {

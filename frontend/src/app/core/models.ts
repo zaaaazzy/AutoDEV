@@ -51,6 +51,20 @@ export interface Idea extends Estimate {
   agentNote?: string | null;
 }
 
+/** Kompletter Test auf Knopfdruck (Dashboard): der Worker führt ihn aus und legt Bugs aus den Befunden an. */
+export interface TestRequest {
+  id: string;
+  scope: 'full' | 'ui';
+  status: 'requested' | 'running' | 'done' | 'failed';
+  requestedBy: string | null;
+  runId: string | null;
+  bugCount: number;
+  error: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 export interface IdeaComment {
   id: string;
   ideationId: string;
@@ -127,7 +141,7 @@ export interface Bug {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: BugStatus;
-  source: 'agent' | 'manual';
+  source: 'agent' | 'manual' | 'test';
   sprintId: string | null;
   fixNotes: string | null;
   createdAt: string;

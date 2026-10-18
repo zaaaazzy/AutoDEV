@@ -248,9 +248,13 @@ export class DataTableComponent<T> {
     this.expanded.update((current) => (current === id ? null : id));
   }
 
+  /** Knopf, der das Filtermenü geöffnet hat: nach Escape erhält er den Fokus zurück. */
+  private filterOpener: HTMLElement | null = null;
+
   protected toggleFilterMenu(id: string, event: Event): void {
     event.stopPropagation();
-    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.filterOpener = event.currentTarget as HTMLElement;
+    const box = this.filterOpener.getBoundingClientRect();
     this.menuPosition.set({
       top: box.bottom + 6,
       left: Math.max(8, Math.min(box.left, globalThis.innerWidth - 228)),
@@ -262,6 +266,13 @@ export class DataTableComponent<T> {
   @HostListener('window:resize')
   protected closeOnMove(): void {
     if (this.openFilter()) this.openFilter.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  protected closeOnEscape(): void {
+    if (!this.openFilter()) return;
+    this.openFilter.set(null);
+    this.filterOpener?.focus();
   }
 
   @HostListener('document:click', ['$event'])

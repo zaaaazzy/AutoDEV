@@ -20,6 +20,7 @@ import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
+import { processTestRequest, recoverTestRequests } from './test-request.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
@@ -122,6 +123,8 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
 async function recoverInterruptedRuns(pool: Pool): Promise<void> {
+  // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
+  await recoverTestRequests(pool).catch(() => undefined);
   // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
   await pool
     .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
@@ -236,6 +239,7 @@ async function main(): Promise<void> {
     const estimateActive = new Set<string>();
     const authorActive = new Set<string>();
     const commentActive = new Set<string>();
+    const testActive = new Set<string>();
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -270,6 +274,15 @@ async function main(): Promise<void> {
               logOnce(`comment:${slug}`, `[${slug}] Sprint-Kommentar fehlgeschlagen: ${describeError(error)}`),
             )
             .finally(() => commentActive.delete(slug));
+        }
+        // Kompletter Test auf Knopfdruck (Dashboard, Testläufe) – dauert lange, läuft daher neben dem Chat.
+        if (!testActive.has(slug) && !stopping) {
+          testActive.add(slug);
+          void processTestRequest(pool, target.options)
+            .catch((error: unknown) =>
+              logOnce(`test:${slug}`, `[${slug}] Kompletter Test fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => testActive.delete(slug));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)

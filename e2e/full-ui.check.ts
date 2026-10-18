@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type APIRequestContext, type Browser, expect, type Page, test, type TestInfo } from '@playwright/test';
@@ -325,6 +325,193 @@ test('Tabellen: Sortieren, Filtern, Suchen und Zurücksetzen auf allen Seiten', 
       expect.soft(check.ok, `${section} · ${check.name} – ${check.detail}`).toBeTruthy();
     }
   }
+});
+
+/** Knöpfe, die Daten löschen, abmelden oder laufende Arbeit abbrechen: im Klick-Test ausgelassen. */
+const RISKY =
+  /löschen|entfernen|abmelden|abbrechen|stoppen|verwerfen|zurückziehen|ablehnen|deaktivieren|delete|logout/i;
+const MAX_CLICKS_PER_PAGE = 45;
+
+interface Clickable {
+  kind: 'button' | 'link';
+  label: string;
+  /** n-tes Element mit derselben Beschriftung (für stabile Wiederfindung nach dem Neuladen). */
+  nth: number;
+  href: string;
+  external: boolean;
+}
+
+const CLICKABLE = 'main button, main a[href], main [role="button"]';
+
+/**
+ * Alle sichtbaren Knöpfe und Links im Inhaltsbereich, in Lesereihenfolge. Mit `mark` wird das passende Element
+ * (gleiche Art, Beschriftung und Position) mit data-clicktest markiert, damit es nach dem Neuladen genau wiedergefunden wird.
+ */
+async function clickables(page: Page, mark?: Clickable): Promise<Clickable[]> {
+  return page.evaluate(
+    ({ selector, mark }) => {
+      document.querySelectorAll('[data-clicktest]').forEach((element) => element.removeAttribute('data-clicktest'));
+      const seen = new Map<string, number>();
+      return [...document.querySelectorAll<HTMLElement>(selector)]
+        .filter((element) => {
+          const box = element.getBoundingClientRect();
+          return box.width > 0 && box.height > 0 && !element.closest('[aria-hidden="true"], .modal-backdrop');
+        })
+        .map((element) => {
+          const label = (element.getAttribute('aria-label') || element.innerText || element.title || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 60);
+          const kind = element.tagName === 'A' ? ('link' as const) : ('button' as const);
+          const key = `${kind}:${label}`;
+          const nth = seen.get(key) ?? 0;
+          seen.set(key, nth + 1);
+          if (mark && mark.kind === kind && mark.label === label && mark.nth === nth)
+            element.setAttribute('data-clicktest', '1');
+          const href = element.getAttribute('href') ?? '';
+          return {
+            kind,
+            label,
+            nth,
+            href,
+            external: /^https?:/i.test(href) && !href.startsWith(location.origin),
+          };
+        })
+        .filter((entry) => entry.label);
+    },
+    { selector: CLICKABLE, mark: mark ?? null },
+  );
+}
+
+/** Schließt offene Dialoge und Menüs (Escape, sonst „Schließen“); liefert Menüs, die offen bleiben. */
+async function closeDialogs(page: Page): Promise<string[]> {
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(150);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!(await page.locator('.modal-backdrop').count())) break;
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(150);
+    const close = page.locator('.modal-backdrop [aria-label="Schließen"]').first();
+    if ((await page.locator('.modal-backdrop').count()) && (await close.count())) await close.click().catch(() => {});
+  }
+  // Aufklapp-Menüs müssen sich mit Escape schließen lassen, sonst verdecken sie die Seite.
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('[class*="-menu"], [role="menu"], [role="listbox"]')]
+      .filter((element) => element.offsetHeight > 0 && getComputedStyle(element).position.match(/absolute|fixed/))
+      .map((element) => `${element.tagName.toLowerCase()}.${String(element.className).split(/\s+/)[0]}`),
+  );
+}
+
+test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fehler', async ({
+  page,
+  isMobile,
+}, info) => {
+  test.setTimeout(25 * 60_000);
+  const errors = watchConsole(page);
+  // Rückfragen wie „Wirklich …?“ verneinen: der Klick wird geprüft, ohne Daten zu ändern.
+  page.on('dialog', (dialog) => void dialog.dismiss().catch(() => {}));
+  await login(page);
+  const protocol: string[] = [`# Klickprotokoll (${isMobile ? 'Handy' : 'Desktop'})`, ''];
+  for (const section of SECTIONS) {
+    await open(page, section);
+    const targets = (await clickables(page)).slice(0, MAX_CLICKS_PER_PAGE);
+    protocol.push(`## ${section} (${targets.length} Elemente)`);
+    for (const target of targets) {
+      const name = `${section} · ${target.kind === 'link' ? 'Link' : 'Knopf'} „${target.label}“`;
+      if (RISKY.test(target.label)) {
+        protocol.push(`- ⏭️ ${target.label} (ausgelassen: ändert oder löscht Daten)`);
+        continue;
+      }
+      if (target.kind === 'link' && (target.external || target.href.startsWith('/api/'))) {
+        // Externe Links und Downloads nicht öffnen, nur auf ein gültiges Ziel prüfen.
+        expect
+          .soft(/^(https?:\/\/|\/api\/)\S+$/.test(target.href), `${name}: ungültiges Ziel „${target.href}“`)
+          .toBe(true);
+        protocol.push(`- 🔗 ${target.label} → ${target.href}`);
+        continue;
+      }
+      if (!page.url().includes(`#${section}`)) await open(page, section);
+      await closeDialogs(page);
+      await clickables(page, target);
+      const element = page.locator('[data-clicktest="1"]');
+      if (!(await element.count())) {
+        // Der vorige Klick hat die Seite verändert (Formular zu, Dokument offen …): frisch laden und erneut suchen.
+        await page.reload();
+        await open(page, section);
+        await clickables(page, target);
+      }
+      if (!(await element.count()) || !(await element.isVisible().catch(() => false))) {
+        protocol.push(`- ➖ ${target.label} (nach Neuladen nicht mehr sichtbar)`);
+        continue;
+      }
+      if (await element.isDisabled().catch(() => false)) {
+        protocol.push(`- ⏸️ ${target.label} (gesperrt)`);
+        continue;
+      }
+      const before = errors.length;
+      const clicked = await element
+        .click({ timeout: 4_000 })
+        .then(() => true)
+        .catch(async (error: Error) => {
+          // Grund ermitteln: Welches Element liegt über der Mitte des Knopfs?
+          const cover = await element
+            .evaluate((node) => {
+              node.scrollIntoView({ block: 'center' });
+              const box = node.getBoundingClientRect();
+              const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+              if (!top || top === node || node.contains(top)) return '';
+              const classes = String(top.getAttribute('class') ?? '')
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2);
+              return `${top.tagName.toLowerCase()}${classes.length ? '.' + classes.join('.') : ''}`;
+            })
+            .catch(() => '');
+          const reason = cover ? `verdeckt von ${cover}` : error.message.split('\n')[0];
+          expect.soft(false, `${name}: nicht klickbar – ${reason}`).toBe(true);
+          protocol.push(`- ❌ ${target.label} (nicht klickbar: ${reason})`);
+          return false;
+        });
+      if (!clicked) continue;
+      await page.waitForTimeout(300);
+      let result = '✅';
+      // Öffnet der Klick einen Dialog mit Formular: unverändert speichern, das darf keinen Fehler geben.
+      const dialog = page.locator('.modal-backdrop [role="dialog"], .modal-backdrop section').first();
+      if (await dialog.count()) {
+        const save = dialog.getByRole('button', { name: /^(Speichern|Übernehmen|Einreichen)$/ }).first();
+        if ((await save.count()) && (await save.isEnabled().catch(() => false))) {
+          await save.click({ timeout: 4_000 }).catch(() => {});
+          await page.waitForTimeout(500);
+          const failure = await page
+            .locator('.notice.error')
+            .first()
+            .textContent({ timeout: 300 })
+            .catch(() => null);
+          expect.soft(failure, `${name}: Speichern ohne Änderung meldet Fehler`).toBeNull();
+          result = failure ? `❌ Speichern: ${failure.trim()}` : '✅ Dialog gespeichert';
+        } else {
+          result = '✅ Dialog geöffnet';
+        }
+      }
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect.soft(overflow, `${name}: Seite ragt danach über den Rand`).toBeLessThanOrEqual(1);
+      const fresh = errors.slice(before);
+      expect.soft(fresh, `${name}: Konsolenfehler nach dem Klick`).toEqual([]);
+      if (fresh.length) result = `❌ ${fresh[0]}`;
+      const stuck = await closeDialogs(page);
+      expect.soft(stuck, `${name}: Menü bleibt nach Escape offen`).toEqual([]);
+      if (stuck.length) {
+        result = `❌ Menü bleibt nach Escape offen: ${stuck.join(', ')}`;
+        await page.reload();
+        await open(page, section);
+      }
+      protocol.push(`- ${result} · ${target.label}`);
+    }
+    await snap(page, info, `Klicktest ${section}${isMobile ? ' (Handy)' : ''}`, false);
+  }
+  const file = info.outputPath(`klickprotokoll-${isMobile ? 'handy' : 'desktop'}.md`);
+  await writeFile(file, protocol.join('\n'));
+  await info.attach(`Klickprotokoll${isMobile ? ' (Handy)' : ''}`, { path: file, contentType: 'text/markdown' });
 });
 
 test('Dashboard: Kennzahlen, Links und Agent-Aufgaben', async ({ page, isMobile }, info) => {

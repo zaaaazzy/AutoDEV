@@ -8854,3 +8854,18 @@ input.pick {
   color: #fff;
   font-weight: 700;
 }
+
+/* Quick Actions: Status des kompletten Tests. */
+.quick-test-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  flex-basis: 100%;
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+.quick-test-status.failed {
+  color: #a3361f;
+}
