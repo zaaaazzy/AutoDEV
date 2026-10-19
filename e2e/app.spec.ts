@@ -369,6 +369,7 @@ test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details
   await expect(menu).toBeVisible();
   // Suche filtert über alle Gruppen; Pfeiltaste zeigt die Details per Tastatur.
   // „Docker-Dienste“ statt nur „docker“: „AIdeation neu starten“ erwähnt docker compose ebenfalls.
+  await page.mouse.move(0, 0);
   await search.fill('docker-dienste');
   await expect(menu.locator('.agent-task')).toHaveCount(1);
   await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
