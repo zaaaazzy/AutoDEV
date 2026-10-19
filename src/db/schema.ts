@@ -822,4 +822,8 @@ export const SCHEMA = `
     message TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  -- Claude-Sitzung je Schritt: nach Abbruch oder Nachbesserung setzt derselbe Einsatz sie fort (claude --resume).
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS session_id TEXT;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS session_at TIMESTAMPTZ;
 `;

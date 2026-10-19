@@ -446,3 +446,78 @@ test('Workflow-Schritte: derselbe Agent zweimal, je mit eigener Anweisung; Nachr
   const inserted = queries.filter((query) => query.sql.includes('INSERT INTO agent_run_steps')).map((q) => q.values[5]);
   assert.deepEqual(inserted, [null, 'step-1', 'step-2']);
 });
+
+test('Nachbesserung: der Entwickler setzt seine Claude-Sitzung fort statt neu zu beginnen', async () => {
+  const sessions: string[] = [];
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push(sql);
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('SET session_id')) {
+        sessions.push(String(values[1]));
+        return { rows: [] };
+      }
+      if (sql.includes('s.session_id AS "sessionId"'))
+        return { rows: sessions.length ? [{ sessionId: sessions.at(-1), status: 'passed' }] : [] };
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const agents: WorkflowAgent[] = [
+    { ...agent('Dev', 'while_task', 1, ['claude', '-p']), role: 'developer' },
+    { ...agent('Review', 'after_task', 1, ['review']), role: 'reviewer' },
+  ];
+  const calls: string[][] = [];
+  let reviews = 0;
+  const execute: CommandExecutor = async (command, _cwd, options) => {
+    calls.push(command);
+    if (command[0] === 'review') {
+      reviews += 1;
+      return reviews === 1
+        ? { exitCode: 1, durationMs: 1, output: '@@REVIEW: ÄNDERUNGEN NÖTIG\nKnopf fehlt' }
+        : { exitCode: 0, durationMs: 1, output: '@@REVIEW: FREIGEGEBEN' };
+    }
+    const raw = [
+      JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sitzung-1' }),
+      JSON.stringify({ type: 'result', result: 'fertig', usage: {} }),
+      '',
+    ].join('\n');
+    options?.onChunk?.(raw);
+    return { exitCode: 0, durationMs: 1, output: raw };
+  };
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/r', timeoutMs: 1, execute }), 'passed');
+  const developer = calls.filter((call) => call[0] === 'claude');
+  assert.equal(developer.length, 2);
+  // Erster Lauf frisch, die Sitzung wird sofort gespeichert; die Nachbesserung setzt sie fort.
+  assert.ok(!developer[0]!.includes('--resume'));
+  assert.equal(sessions[0], 'sitzung-1');
+  assert.deepEqual(developer[1]!.slice(developer[1]!.indexOf('--resume'), developer[1]!.indexOf('--resume') + 2), [
+    '--resume',
+    'sitzung-1',
+  ]);
+  assert.match(developer[1]!.at(-1) ?? '', /Fortsetzung deiner früheren Sitzung[\s\S]*Knopf fehlt/);
+});
+
+test('Fortsetzen scheitert (Sitzung weg): derselbe Schritt startet frisch mit dem vollen Auftrag', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('s.session_id AS "sessionId"')) return { rows: [{ sessionId: 'alt', status: 'failed' }] };
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    return command.includes('--resume')
+      ? { exitCode: 1, durationMs: 1, output: 'No conversation found with session ID: alt' }
+      : { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const agents = [{ ...agent('Dev', 'while_task', 1, ['claude', '-p']), role: 'developer' }];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/r', timeoutMs: 1, execute }), 'passed');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0]!.includes('--resume'));
+  assert.match(calls[0]!.at(-1) ?? '', /abgebrochen/);
+  assert.ok(!calls[1]!.includes('--resume'));
+  assert.doesNotMatch(calls[1]!.at(-1) ?? '', /Fortsetzung/);
+});

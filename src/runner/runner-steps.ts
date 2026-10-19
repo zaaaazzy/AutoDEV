@@ -12,7 +12,7 @@ import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
 import { commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
-import { executeAgentCommand } from '../agent/claude-stream.js';
+import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
@@ -203,6 +203,53 @@ interface StepHooks {
   onOutput: (partial: string) => void;
   onSpawn: (pid: number) => void;
   onAction: (message: string) => void;
+  onSession?: (sessionId: string) => void;
+  /** Frühere Claude-Sitzung desselben Einsatzes, die fortgesetzt wird. */
+  resume?: ResumableSession | null;
+}
+
+export interface ResumableSession {
+  sessionId: string;
+  /** Der frühere Schritt war fertig (Nachbesserung) statt abgebrochen bzw. gescheitert. */
+  passed: boolean;
+}
+
+/** Wie lange eine frühere Sitzung fortgesetzt wird; danach ist ein frischer Start meist besser. */
+const RESUME_WINDOW = '24 hours';
+
+/**
+ * Letzte Claude-Sitzung desselben Einsatzes (Workflow-Schritt bzw. Agent) bei diesem Auftrag – aus einem
+ * abgebrochenen Lauf, einem früheren Versuch oder der Runde vor einer Nachbesserung im selben Lauf.
+ */
+export async function findResumableSession(
+  pool: Pool,
+  itemId: string,
+  agent: Pick<WorkflowAgent, 'id' | 'stepId'>,
+  currentStepId: string | undefined,
+): Promise<ResumableSession | null> {
+  const row = (
+    await pool.query<{ sessionId: string; status: string }>(
+      `SELECT s.session_id AS "sessionId", s.status
+         FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+        WHERE r.development_id = $1 AND s.id IS DISTINCT FROM $2::uuid AND s.session_id IS NOT NULL
+          AND COALESCE(s.workflow_step_id::text, s.agent_id::text) = $3
+          AND s.session_at > NOW() - INTERVAL '${RESUME_WINDOW}'
+        ORDER BY s.session_at DESC LIMIT 1`,
+      [itemId, currentStepId ?? null, agent.stepId ?? agent.id],
+    )
+  ).rows[0];
+  return row?.sessionId ? { sessionId: row.sessionId, passed: row.status === AGENT_STEP_STATUS.passed } : null;
+}
+
+/** Erste Nachricht in der fortgesetzten Sitzung: weitermachen statt neu beginnen, dann der aktuelle Auftrag. */
+export function resumePrompt(prompt: string, resume: ResumableSession): string {
+  const why = resume.passed
+    ? 'Du hast diesen Auftrag schon bearbeitet; jetzt gibt es Rückmeldungen, die du nachbessern sollst.'
+    : 'Dein letzter Lauf zu diesem Auftrag wurde unterbrochen oder abgebrochen.';
+  return `## Fortsetzung deiner früheren Sitzung
+${why} Du kennst den Verlauf dieser Sitzung; dein bisheriger Stand liegt im Arbeitsordner (auch noch nicht committete Änderungen). Prüfe kurz mit \`git status\` und \`git diff\`, was schon erledigt ist, und mach dort weiter – nicht von vorne beginnen. Es folgt der aktuelle Auftrag mit allen neuen Angaben; er hat Vorrang vor früheren Nachrichten.
+
+${prompt}`;
 }
 
 /** Run an agent command, the tester workflow, or the built-in local model. */
@@ -253,13 +300,27 @@ async function invokeAgent(
     };
   }
   if (!command) return builtinRun();
-  const result = await executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
-    timeoutMs: options.timeoutMs,
-    env: agentEnvironment(),
-    onOutput: hooks.onOutput,
-    onSpawn: hooks.onSpawn,
-    onAction: hooks.onAction,
-  });
+  const run = (resume: ResumableSession | null | undefined): Promise<CommandResult> =>
+    executeAgentCommand(
+      execute,
+      buildInvocation(command, resume ? resumePrompt(prompt, resume) : prompt),
+      options.cwd,
+      {
+        timeoutMs: options.timeoutMs,
+        env: agentEnvironment(),
+        onOutput: hooks.onOutput,
+        onSpawn: hooks.onSpawn,
+        onAction: hooks.onAction,
+        onSession: hooks.onSession,
+        resumeSession: resume?.sessionId,
+      },
+    );
+  let result = await run(hooks.resume);
+  // Sitzung nicht mehr vorhanden (z. B. anderer Ordner): frisch mit dem vollständigen Auftrag starten.
+  if (hooks.resume && result.exitCode !== 0 && !hooks.signal.aborted && resumeFailed(result.output)) {
+    hooks.onAction('Frühere Sitzung nicht mehr vorhanden – startet neu');
+    result = await run(null);
+  }
   // Ein Tester mit eigenem CLI prüft selbst; danach laufen die hinterlegten Projekttests zusätzlich als
   // gespeicherter Testlauf – objektiv, sichtbar unter „Testläufe“ und in der Erfolgsquote des Dashboards.
   if (
@@ -374,7 +435,20 @@ export async function runStep(
         .query('UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1', [stepId, pid])
         .catch(() => undefined);
     },
+    onSession: (sessionId) => {
+      void pool
+        .query('UPDATE agent_run_steps SET session_id = $2, session_at = NOW() WHERE id = $1', [stepId, sessionId])
+        .catch(() => undefined);
+    },
+    resume: await findResumableSession(pool, item.id, agent, stepId).catch(() => null),
   };
+  if (hooks.resume) {
+    await logEvent(
+      pool,
+      stepId,
+      hooks.resume.passed ? 'Setzt frühere Sitzung fort (Nachbesserung)' : 'Setzt abgebrochene Sitzung fort',
+    );
+  }
   const progress = await startProgress(
     pool,
     item.projectSlug,
