@@ -10021,3 +10021,95 @@ input.pick {
   font-size: 13px;
 }
 .system-tools { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12.5px; }
+
+/* Bug-Friedhof: geschlossene Bugs, ruhiger dargestellt */
+.panel.graveyard {
+  border-top: 3px solid #8a8f8b;
+  background: #f6f6f4;
+}
+.graveyard-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #4d5550;
+}
+.graveyard-cross {
+  font-size: 1.1em;
+  color: #6d746f;
+}
+.graveyard-heading p {
+  margin-top: 2px;
+}
+.panel.graveyard tbody tr {
+  color: #5d655f;
+}
+.graveyard-note {
+  max-width: 420px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Bug-Statistik */
+.bug-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+.bug-stats-card {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.bug-stats-card h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.bug-stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.bug-stats-table th {
+  padding: 4px 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: left;
+}
+.bug-stats-table td {
+  padding: 5px 6px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+.bug-stats-table .num {
+  width: 3.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.bug-stats-label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.bug-stats-table td:first-child {
+  max-width: 0;
+  width: 100%;
+}
+.bug-stats-bar {
+  display: flex;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 2px;
+  background: #eef0ec;
+  overflow: hidden;
+}
+.bug-stats-bar .open {
+  background: var(--orange);
+}
+.bug-stats-bar .buried {
+  background: #9aa29c;
+}
