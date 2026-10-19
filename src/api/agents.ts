@@ -1,4 +1,4 @@
-import { SYSTEM_ROLES, parseStoredCommand, systemAgents } from '../agent/system-agents.js';
+import { RESTRICTED_ROLES, SYSTEM_ROLES, parseStoredCommand, systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
@@ -121,13 +121,15 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     );
     const agents = (row ? JSON.parse(row.value) : systemAgents()) as { role: string; model: string }[];
     const commands = await pool.query<{ key: string; value: string }>(
-      `SELECT key, value FROM app_settings WHERE key LIKE 'command:%'`,
+      `SELECT key, value FROM app_settings WHERE key LIKE 'command:%' OR key LIKE 'allow_tools:%'`,
     );
     response.json({
       agents: agents.map((agent) => ({
         ...agent,
         model: chosen.rows.find((item) => item.key === `model:${agent.role}`)?.value ?? agent.model,
         command: parseStoredCommand(commands.rows.find((item) => item.key === `command:${agent.role}`)?.value),
+        restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
+        allowTools: commands.rows.some((item) => item.key === `allow_tools:${agent.role}` && item.value === 'true'),
       })),
       models: models ? JSON.parse(models.value) : [],
     });
@@ -135,12 +137,15 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
 
   app.put('/api/system-agents/:role', async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
-    const body = (request.body ?? {}) as { model?: unknown; command?: unknown };
+    const body = (request.body ?? {}) as { model?: unknown; command?: unknown; allowTools?: unknown };
     const model = body.model;
+    const allowTools = body.allowTools;
     const command = body.command === undefined ? undefined : parseCommand(body.command);
     if (
       !role ||
-      (model === undefined && command === undefined) ||
+      (model === undefined && command === undefined && allowTools === undefined) ||
+      (allowTools !== undefined &&
+        (typeof allowTools !== 'boolean' || !(RESTRICTED_ROLES as readonly string[]).includes(role))) ||
       (model !== undefined && (typeof model !== 'string' || model.length > 200 || !/^[\w./:@+-]*$/.test(model))) ||
       command === INVALID
     ) {
@@ -155,9 +160,15 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
           [`command:${role}`, JSON.stringify(command)],
         );
     }
+    if (allowTools === true)
+      await pool.query(
+        `INSERT INTO app_settings (key, value) VALUES ($1, 'true') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        [`allow_tools:${role}`],
+      );
+    else if (allowTools === false) await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`allow_tools:${role}`]);
     // Without a model field only the command changes; an empty model resets the choice to the worker default.
     if (model === undefined) {
-      response.json({ role, command });
+      response.json({ role, command, allowTools });
       return;
     }
     if (model) {

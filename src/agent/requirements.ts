@@ -1,4 +1,4 @@
-import { readOnlyCommand, systemCommand } from './system-agents.js';
+import { restrictedSystemCommand, systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -54,12 +54,12 @@ export function buildRequirementPrompt(instructions: string, idea: Idea, current
 
 /**
  * CLI chosen in the dashboard for the chat assistant or the analysis. "author" is left out on purpose: its
- * dashboard choice belongs to the quick estimation only, not to writing requirements. The analysis stays read-only.
+ * dashboard choice belongs to the quick estimation only, not to writing requirements. The analysis stays read-only
+ * unless full tool access was allowed for it in the dashboard.
  */
 async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
   if (role !== 'assistant' && role !== 'analyst') return null;
-  const command = await systemCommand(pool, role);
-  return command && role === 'analyst' ? readOnlyCommand(command) : command;
+  return role === 'analyst' ? restrictedSystemCommand(pool, role) : systemCommand(pool, role);
 }
 
 /** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */

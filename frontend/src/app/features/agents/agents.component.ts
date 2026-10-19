@@ -26,6 +26,8 @@ interface SystemAgent {
   role: string;
   model: string;
   command?: string[] | null;
+  restricted?: boolean;
+  allowTools?: boolean;
   envKey: string;
 }
 
@@ -82,6 +84,11 @@ export class AgentsComponent {
     if (!system.command?.length) return `ollama:${system.model}`;
     const preset = presetOf(system.command.join(' '));
     return preset === 'custom' ? 'custom:' : `preset:${preset}`;
+  }
+
+  protected async setAllowTools(role: string, allowTools: boolean): Promise<void> {
+    await this.api.put(`/api/system-agents/${role}`, { allowTools });
+    this.systemAgents.update((list) => list.map((item) => (item.role === role ? { ...item, allowTools } : item)));
   }
 
   protected async setSystemChoice(role: string, choice: string): Promise<void> {
