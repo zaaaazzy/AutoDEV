@@ -66,13 +66,13 @@ export async function syncSprintCommits(
         [sprint.id],
       )
     ).rows;
-    // Abgeschlossen und nach main gemergt: Bereich zwischen den Eltern des Merge-Commits.
-    const merge = await git('log', 'main', '--first-parent', '-1', '--format=%H', `--grep=^Merge ${branch}`);
-    const range = merge
-      ? `${merge}^1..${merge}^2`
-      : (await git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`))
-        ? `main..${branch}`
-        : null;
+    // Nach main gemergt (auch mehrfach, z. B. Nachträge): ab dem ersten Merge bis zum Branch-Ende bzw. letzten Merge.
+    const merges = ((await git('log', 'main', '--first-parent', '--format=%H', `--grep=^Merge ${branch}[: ]`)) ?? '')
+      .split('\n')
+      .filter(Boolean);
+    const exists = Boolean(await git('rev-parse', '--verify', '--quiet', `refs/heads/${branch}`));
+    const end = exists ? branch : merges[0] ? `${merges[0]}^2` : null;
+    const range = end ? `${merges.length ? `${merges.at(-1)}^1` : 'main'}..${end}` : null;
     const log = range ? await git('log', '--first-parent', `-${MAX_COMMITS}`, format, range) : null;
     const commits: SprintCommit[] = parseSprintLog(log ?? '').map((commit) => ({
       ...commit,
