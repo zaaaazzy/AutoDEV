@@ -240,7 +240,7 @@ export async function findResumableSession(
     await pool.query<{ sessionId: string; status: string }>(
       `SELECT s.session_id AS "sessionId", s.status
          FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
-        WHERE r.development_id = $1 AND s.id IS DISTINCT FROM $2::uuid AND s.session_id IS NOT NULL
+        WHERE r.development_id = $1 AND s.id IS DISTINCT FROM $2::bigint AND s.session_id IS NOT NULL
           AND COALESCE(s.workflow_step_id::text, s.agent_id::text) = $3
           AND s.session_at > NOW() - INTERVAL '${RESUME_WINDOW}'
         ORDER BY s.session_at DESC LIMIT 1`,
