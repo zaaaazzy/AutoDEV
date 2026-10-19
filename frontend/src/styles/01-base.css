@@ -1,0 +1,65 @@
+/* Farben, Grundelemente, Typografie */
+:root {
+  color-scheme: light;
+  font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+  color: #202824;
+  background: #f4f5f1;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --ink: #202824;
+  --muted: #6d766f;
+  --paper: #f4f5f1;
+  --line: #e2e7df;
+  --green: #24634e;
+  --orange: #d7864e;
+  --shadow: 0 10px 28px rgb(32 40 36 / 8%);
+}
+
+* {
+  box-sizing: border-box;
+}
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button,
+summary,
+select {
+  cursor: pointer;
+}
+a {
+  color: var(--green);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #cfd8ce;
+  border-radius: 7px;
+  background: white;
+  color: var(--ink);
+}
