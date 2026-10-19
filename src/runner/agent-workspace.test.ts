@@ -37,6 +37,9 @@ test('Projekt mit eigenem Arbeitsordner: Agents arbeiten im Worktree daneben', a
   assert.equal(cwd, agentWorkspacePath(folder));
   assert.ok(lstatSync(join(cwd!, 'frontend', 'node_modules')).isSymbolicLink());
   assert.equal(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  // Auch mit `node_modules/` in .gitignore (greift nicht für Symlinks) bleiben die Links unsichtbar für git.
+  writeFileSync(join(cwd!, '.gitignore'), 'node_modules/\n');
+  assert.equal(git(cwd!, 'status', '--short', '--untracked-files=all'), 'M .gitignore');
 });
 
 test('Dev-Log-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {

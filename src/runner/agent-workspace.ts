@@ -1,5 +1,14 @@
-import { existsSync, lstatSync, readdirSync, realpathSync, symlinkSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import {
+  appendFileSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+} from 'node:fs';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 
 /**
@@ -41,6 +50,21 @@ function linkDependencies(folder: string, workspace: string): void {
 }
 
 /**
+ * Verlinkte node_modules sind Symlinks; ein `node_modules/` in .gitignore greift dafür nicht, und `git add -A` der
+ * WIP-Commits würde sie einchecken. Deshalb lokal (info/exclude, gilt für alle Worktrees) ausschliessen.
+ */
+async function excludeLinkedDependencies(workspace: string, execute: CommandExecutor): Promise<void> {
+  const result = await execute(['git', 'rev-parse', '--git-common-dir'], workspace);
+  if (result.exitCode !== 0) return;
+  const common = result.output.trim().split('\n').pop() ?? '';
+  const file = join(isAbsolute(common) ? common : join(workspace, common), 'info', 'exclude');
+  const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : [];
+  if (lines.some((line) => line.trim() === 'node_modules')) return;
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${lines.length && lines.at(-1) !== '' ? '\n' : ''}node_modules\n`);
+}
+
+/**
  * Ordner, in dem die Agents eines Projekts arbeiten: der Projektordner selbst – ausser es ist der Dev-Log-Ordner oder
  * das Projekt verlangt einen eigenen Arbeitsordner (projects.agent_workspace, z. B. weil im Projektordner ein
  * Entwicklungsserver läuft), dann ein eigener Worktree (bei Bedarf angelegt, ausgehend von main). Scheitert das Anlegen, wird null geliefert;
@@ -71,6 +95,7 @@ export async function resolveAgentWorkspace(
   }
   try {
     linkDependencies(folder, workspace);
+    await excludeLinkedDependencies(workspace, execute);
   } catch {
     // Ohne verlinkte Abhängigkeiten installieren die Agents sie bei Bedarf selbst.
   }
