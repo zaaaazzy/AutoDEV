@@ -28,6 +28,11 @@ export const MIGRATIONS: readonly { name: string; sql: string }[] = [
       DELETE FROM app_settings WHERE key ~ '^(model|command|allow_tools):';
     `,
   },
+  {
+    // Orders of such projects run in their own Git worktree and branch instead of the project folder.
+    name: 'projects_isolated_runs',
+    sql: `ALTER TABLE projects ADD COLUMN IF NOT EXISTS isolated_runs BOOLEAN NOT NULL DEFAULT FALSE;`,
+  },
 ];
 
 /** Applies pending migrations, each in its own transaction. The caller holds the schema advisory lock. */

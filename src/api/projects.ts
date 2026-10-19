@@ -8,7 +8,7 @@ import { isRecord, PROJECT_SLUG, parseProjectSlug, projectFolderError, validText
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", created_at AS "createdAt"
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", isolated_runs AS "isolatedRuns", created_at AS "createdAt"
          FROM projects
         ORDER BY name`,
     );
@@ -98,11 +98,16 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(body.autoBugfix);
       sets.push(`auto_bugfix = $${values.length}`);
     }
+    if (body.isolatedRuns !== undefined) {
+      if (typeof body.isolatedRuns !== 'boolean') return fail('Isolierte Läufe müssen ein- oder ausgeschaltet sein.');
+      values.push(body.isolatedRuns);
+      sets.push(`isolated_runs = $${values.length}`);
+    }
     if (!sets.length) {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", isolated_runs AS "isolatedRuns"`,
       values,
     );
     if (!result.rows[0]) {

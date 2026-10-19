@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, symlink } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
 import { withProjectLock } from '../core/project-lock.js';
@@ -102,6 +103,88 @@ export function taskCommitMessage(
     `${type}(${scope}): ${subject}`,
     `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`,
   ];
+}
+
+export interface Worktree {
+  /** Folder the order's agents work in. */
+  path: string;
+  branch: string;
+  /** The project folder the branch is merged into. */
+  repo: string;
+}
+
+/** Worktrees live outside the project folder, so test runners and linters there never pick them up. */
+export function worktreeRoot(environment: NodeJS.ProcessEnv = process.env): string {
+  return environment.DEV_LOG_WORKTREE_ROOT?.trim() || join(homedir(), '.dev-log', 'worktrees');
+}
+
+/**
+ * Opens the order's own worktree on branch devlog/<id>, or reopens it after a failed or interrupted run so the
+ * retry continues with its changes. node_modules of the project folder is linked in, so tests run without a new
+ * install.
+ */
+export async function openWorktree(
+  cwd: string,
+  project: string,
+  itemId: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<Worktree> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  await ensureRepository(git, must, cwd);
+  if ((await git('rev-parse', '--verify', 'HEAD')).exitCode !== 0) {
+    throw new Error('Das Repository hat noch keinen Commit – isolierte Läufe brauchen einen Ausgangsstand.');
+  }
+  const id = itemId.slice(0, 8);
+  const worktree = { path: join(worktreeRoot(), project, id), branch: `devlog/${id}`, repo: cwd };
+  if (!existsSync(worktree.path)) {
+    await must('worktree', 'prune');
+    const branchExists = (await git('rev-parse', '--verify', `refs/heads/${worktree.branch}`)).exitCode === 0;
+    await mkdir(dirname(worktree.path), { recursive: true });
+    await must(
+      'worktree',
+      'add',
+      ...(branchExists ? [worktree.path, worktree.branch] : ['-b', worktree.branch, worktree.path, 'HEAD']),
+    );
+  }
+  const modules = join(cwd, 'node_modules');
+  if (existsSync(modules) && !existsSync(join(worktree.path, 'node_modules'))) {
+    await symlink(modules, join(worktree.path, 'node_modules'), 'dir');
+  }
+  return worktree;
+}
+
+/**
+ * Commits the order's changes on its branch and merges them into the project folder's current branch, then removes
+ * the worktree. A failed merge is aborted and the branch kept, so nothing in the project folder changes.
+ */
+export async function closeWorktree(
+  worktree: Worktree,
+  item: { id: string; title: string; kind?: string },
+  sprintName: string | null,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<{ merged: boolean; message: string }> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(worktree.repo, () => rawExecute(command, directory, options));
+  const tree = gitHelpers(execute, worktree.path);
+  const repo = gitHelpers(execute, worktree.repo);
+  await tree.must('add', '-A', '--', '.', ':(exclude)node_modules');
+  if ((await tree.git('diff', '--cached', '--quiet')).exitCode !== 0) {
+    const [subject, body] = taskCommitMessage(item.kind, sprintName ?? 'auftrag', item.title, item.id);
+    await tree.must('commit', '-m', subject, '-m', body);
+  }
+  const merge = await repo.git('merge', '--no-edit', worktree.branch);
+  if (merge.exitCode !== 0) {
+    await repo.git('merge', '--abort');
+    return {
+      merged: false,
+      message: `Die Änderungen liegen auf Branch \`${worktree.branch}\`, ließen sich aber nicht in den Projektordner übernehmen (Konflikt oder lokale Änderungen). Bitte manuell mergen.\n\n${merge.output.slice(-1500)}`,
+    };
+  }
+  await repo.must('worktree', 'remove', '--force', worktree.path);
+  await repo.git('branch', '-d', worktree.branch);
+  return { merged: true, message: `Branch ${worktree.branch} in den Projektordner übernommen.` };
 }
 
 /** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */

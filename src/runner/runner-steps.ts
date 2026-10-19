@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { logged } from '../core/log.js';
+import { describeError, logged } from '../core/log.js';
 import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -8,7 +8,7 @@ import { startProgress } from '../agent/chat-progress.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { commitTaskToGit } from './git-sync.js';
+import { closeWorktree, commitTaskToGit, type Worktree } from './git-sync.js';
 import { runOllamaAgent } from '../agent/ollama-agent.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
@@ -119,6 +119,8 @@ export interface RunContext {
   images: string[];
   fallbackCommand: string[] | null;
   projectContext: string;
+  /** Set when the project runs orders isolated; options.cwd then points into it. */
+  worktree?: Worktree;
 }
 
 interface StepOutcome {
@@ -390,11 +392,26 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     [item.id, passed ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
   if (!passed) return;
-  if (item.sprintId) {
-    const sprint = await pool
-      .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
-      .catch(logged(`task-commit:${item.id}`, null));
-    if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
-  }
+  const sprintName = item.sprintId
+    ? ((
+        await pool
+          .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
+          .catch(logged(`task-commit:${item.id}`, null))
+      )?.rows[0]?.name ?? null)
+    : null;
+  if (ctx.worktree) {
+    // Failed or interrupted orders keep their worktree for the retry; only a finished order is merged.
+    const result = await closeWorktree(ctx.worktree, item, sprintName, execute).catch((error: unknown) => ({
+      merged: false,
+      message: `Übernahme aus dem Worktree fehlgeschlagen: ${describeError(error)}`,
+    }));
+    if (!result.merged) {
+      await pool.query(
+        `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.blocked}', failure = $2, updated_at = NOW() WHERE id = $1`,
+        [item.id, result.message],
+      );
+      return;
+    }
+  } else if (sprintName) await commitTaskToGit(options.cwd, item, sprintName, execute);
   if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged(`bug-resume:${item.bugId}`));
 }

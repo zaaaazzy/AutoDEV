@@ -68,7 +68,7 @@ Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 **Nicht erlaubt (für alle Agents):** Dateien außerhalb des Projektordners, `.env`, Schlüssel, `.git`, `node_modules`, Backup-Ordner, Symlink-Ausbrüche, `docker run`, `docker compose down -v`, `git push`, `rm`, verkettete Befehle (`;`, `&&`, Pipes – Befehle laufen ohne Shell), `git clone` mit `file://`, Optionen oder Zielen außerhalb des Projekts.
 
-Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gesetzt, läuft dieser statt des lokalen Modells und die obigen Werkzeugregeln greifen dafür nicht.
+Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gesetzt, läuft dieser statt des lokalen Modells und die obigen Werkzeugregeln greifen dafür nicht. Mit „Aufträge isoliert ausführen“ (Projekteinstellungen) arbeiten Workflow-Agents in einem eigenen Git-Worktree außerhalb des Projektordners; auch ein externer Befehl mit vollen Rechten verändert dann nur diesen Worktree, bis der Auftrag erfolgreich ist und gemergt wird. Der Dashboard-Assistent arbeitet weiterhin direkt im Projektordner.
 
 ## 5. Weitere Hintergrundaufgaben (ohne eigenes Modell)
 

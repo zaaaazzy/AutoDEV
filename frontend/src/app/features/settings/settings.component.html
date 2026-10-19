@@ -41,6 +41,11 @@
         <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" /> Automatisches Bugfixing: Scheitert
         ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.</label
       >
+      <label class="wide check">
+        <input type="checkbox" name="isolatedRuns" [(ngModel)]="settings.isolatedRuns" /> Aufträge isoliert ausführen:
+        Jeder Auftrag arbeitet in einem eigenen Git-Worktree und Branch (<code>devlog/…</code>) außerhalb des
+        Projektordners. Erst ein erfolgreicher Auftrag wird committet und in den Projektordner gemergt.</label
+      >
       <label class="wide"
         >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
           name="deployCommands"

@@ -1,12 +1,12 @@
 import type { Pool } from 'pg';
-import { logged } from '../core/log.js';
+import { describeError, logged } from '../core/log.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
-import { syncSprintToGit } from './git-sync.js';
+import { openWorktree, syncSprintToGit } from './git-sync.js';
 import { deployProject } from './deploy.js';
 import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
@@ -116,8 +116,25 @@ export async function runWorkItem(
   let interrupted = false;
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
+    const isolated = (
+      await pool.query<{ isolated: boolean }>('SELECT isolated_runs AS isolated FROM projects WHERE slug = $1', [
+        item.projectSlug,
+      ])
+    ).rows[0]?.isolated;
+    if (isolated) {
+      try {
+        ctx.worktree = await openWorktree(options.cwd, item.projectSlug, item.id, ctx.execute);
+      } catch (error) {
+        await pool.query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [
+          item.id,
+          `Worktree für den isolierten Lauf konnte nicht angelegt werden: ${describeError(error)}`,
+        ]);
+        throw error;
+      }
+      ctx.options = { ...options, cwd: ctx.worktree.path };
+    }
     ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(logged(`bugs:${item.projectSlug}`, []));
-    ctx.images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(
+    ctx.images = await materializeAttachments(pool, item.ideationId, item.id, ctx.options.cwd).catch(
       logged(`attachments:${item.id}`, []),
     );
     ctx.projectContext = await loadProjectContext(pool, item.projectSlug);

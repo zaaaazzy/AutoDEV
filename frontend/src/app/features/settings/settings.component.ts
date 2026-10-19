@@ -23,6 +23,7 @@ export class SettingsComponent {
     description: '',
     guidelines: '',
     autoBugfix: true,
+    isolatedRuns: false,
     databaseUrl: '',
     clearDatabase: false,
   };
@@ -48,6 +49,7 @@ export class SettingsComponent {
           description: this.settings.description,
           guidelines: this.settings.guidelines,
           autoBugfix: this.settings.autoBugfix,
+          isolatedRuns: this.settings.isolatedRuns,
           ...(this.settings.clearDatabase
             ? { databaseUrl: '' }
             : this.settings.databaseUrl.trim()
@@ -83,6 +85,7 @@ export class SettingsComponent {
       description: project?.description ?? '',
       guidelines: project?.guidelines ?? '',
       autoBugfix: project?.autoBugfix ?? true,
+      isolatedRuns: project?.isolatedRuns ?? false,
       databaseUrl: '',
       clearDatabase: false,
       deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),

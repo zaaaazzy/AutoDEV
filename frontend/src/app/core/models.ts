@@ -15,6 +15,7 @@ export interface Project {
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;
+  isolatedRuns?: boolean;
   databaseConfigured?: boolean;
 }
 

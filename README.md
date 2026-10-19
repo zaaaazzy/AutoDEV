@@ -56,4 +56,13 @@ Datenmodell: [docs/erm.md](docs/erm.md).
 
 Nach jedem erfolgreich erledigten Sprint-Auftrag erstellt der Worker einen lokalen Commit im Projektordner (Conventional Commits, z. B. `feat(Sprint 1): Titel`, Bugs als `fix`). Beim Abschluss des Sprints folgt ein Sammel-Commit mit Tag und – falls ein Repository hinterlegt ist – der Push. `.env`, `.dev-log/` und Agent-Sicherungen bleiben ausgeschlossen; Commits ohne Änderungen werden übersprungen.
 
+### Isolierte Aufträge (optional)
+
+In den **Projekteinstellungen** lässt sich „Aufträge isoliert ausführen“ einschalten. Dann arbeitet jeder Auftrag in einem eigenen Git-Worktree auf dem Branch `devlog/<auftrag>`, abgelegt außerhalb des Projektordners unter `~/.dev-log/worktrees/<projekt>/` (`DEV_LOG_WORKTREE_ROOT` überschreibt den Ort). `node_modules` des Projektordners wird verlinkt.
+
+- Erst ein erfolgreich abgeschlossener Auftrag wird auf seinem Branch committet und in den aktuellen Branch des Projektordners gemergt; danach werden Worktree und Branch entfernt.
+- Scheitert ein Auftrag oder wird er unterbrochen, bleiben Worktree und Branch erhalten; der nächste Lauf setzt dort fort. Der Projektordner bleibt unverändert.
+- Lässt sich der Branch nicht mergen (Konflikt oder lokale Änderungen), wird der Merge abgebrochen, der Auftrag blockiert und der Grund am Auftrag angezeigt; der Branch bleibt zum manuellen Mergen.
+- Voraussetzung: Der Projektordner ist ein Git-Repository mit mindestens einem Commit.
+
 Dokumentation: [Agents und Rechte](docs/agents-und-rechte.md), [Workflows](docs/workflows.md).
