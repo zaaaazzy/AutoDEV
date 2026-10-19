@@ -41,6 +41,9 @@
       </ng-template>
       <ng-template appDataDetail let-sprint>
         <article class="sprint-card">
+          @if (store.currentProject()?.reviewCommand?.length) {
+            <app-sprint-review [sprint]="sprint" />
+          }
           <details class="sprint-board-section" [open]="sprint.status !== 'completed'">
             <summary>Board</summary>
             <app-sprint-board [sprint]="sprint" />

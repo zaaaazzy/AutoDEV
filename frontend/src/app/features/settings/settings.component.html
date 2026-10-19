@@ -85,20 +85,19 @@
             <option value="always">Immer</option>
           </select>
         </label>
-        <label
-          >Review-Adresse
-          <input name="reviewUrl" [(ngModel)]="settings.reviewUrl" placeholder="https://localhost:4201" />
-        </label>
         <label class="wide"
           >Review-Befehl
-          <input name="reviewCommand" [(ngModel)]="settings.reviewCommand" placeholder="sh scripts/review-live.sh" />
+          <input
+            name="reviewCommand"
+            [(ngModel)]="settings.reviewCommand"
+            placeholder="sh /source/scripts/review-live.sh"
+          />
         </label>
         <p class="muted wide">
           Mit Review-Freigabe wartet ein fertiger Auftrag, bis du ihn freigibst; erst dann wird er in den Sprint gemergt
-          (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl startet ihn in „{{
-            settings.repository || 'Projektordner'
-          }}-review“ – z. B. auf eigenen Ports mit einer Kopie der Datenbank. Zurückweisen schickt ihn mit deiner
-          Rückmeldung an die Agents zurück.
+          (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl läuft in einem Review-Container: dort ist
+          der Source-Ordner unter <code>/source</code> eingebunden, gearbeitet wird im gewählten Stand (Ports und
+          Datenbank-Kopie stellt der Container). In der Sprint-Ansicht lässt sich so jeder Stand mit ▶ starten.
         </p>
         <label
           >Kostengrenze je Auftrag (Tokens)
@@ -282,6 +281,7 @@
     <app-permission-groups-settings />
   }
   @if (auth.can('admin')) {
+    <app-review-slots-settings />
     <app-users-settings />
   }
   <app-notification-settings />

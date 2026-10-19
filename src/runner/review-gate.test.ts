@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { enterOrderBranch, finishOrderBranch, followPreview, mergeApprovedBranch } from './git-sync.js';
 import { needsApproval, touchesUi } from './review-gate.js';
-import { chooseReview } from './review-instance.js';
 
 const git = (cwd: string, ...args: string[]): string =>
   execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' } }).trim();
@@ -39,18 +38,6 @@ test('Oberflächen-Änderungen erkennen', () => {
   assert.equal(needsApproval('ui', ['frontend/a.html']), true);
   assert.equal(needsApproval('always', ['backend/a.ts']), true);
   assert.equal(needsApproval('always', []), false);
-});
-
-test('Review-Instanz zeigt den gewünschten, sonst den bisherigen, sonst den ältesten Auftrag', () => {
-  const items = [
-    { id: 'a', branch: 'auftrag/a' },
-    { id: 'b', branch: 'auftrag/b' },
-  ];
-  assert.equal(chooseReview(items, null)?.id, 'a');
-  assert.equal(chooseReview(items, { developmentId: 'b', requestedId: null })?.id, 'b');
-  assert.equal(chooseReview(items, { developmentId: 'b', requestedId: 'a' })?.id, 'a');
-  assert.equal(chooseReview(items, { developmentId: 'x', requestedId: 'y' })?.id, 'a');
-  assert.equal(chooseReview([], { developmentId: 'a', requestedId: null }), null);
 });
 
 test('Freigabe: Auftrag wartet auf seinem Branch, wird erst nach Freigabe gemergt und die Vorschau zieht nach', async () => {

@@ -510,17 +510,34 @@ export interface ChatMessage {
   replyTo?: string | null;
 }
 
-/** Review-Freigabe eines Projekts: Einstellung, laufende Review-Instanz und wartende Aufträge. */
+/** Review-Container (projektübergreifend geteilt): was er gerade zeigt und unter welcher Adresse. */
+export interface ReviewSlot {
+  slot: number;
+  enabled: boolean;
+  url: string;
+  status: 'idle' | 'requested' | 'starting' | 'running' | 'failed' | 'stopping';
+  message: string | null;
+  projectSlug: string | null;
+  label: string | null;
+  commit: string | null;
+  developmentId: string | null;
+  kind: 'manual' | 'approval' | null;
+  startedAt: string | null;
+}
+
+/** Review-Freigabe eines Projekts: Einstellung, Review-Container und wartende Aufträge. */
 export interface ReviewState {
   mode: 'off' | 'ui' | 'always';
-  url: string | null;
   configured: boolean;
-  instance: {
-    developmentId: string | null;
-    requestedId: string | null;
-    status: 'starting' | 'running' | 'failed' | 'stopped';
-    message: string | null;
-    updatedAt: string;
-  } | null;
+  slots: ReviewSlot[];
   waiting: { id: string; title: string; reviewSince: string | null; reviewApprovedAt: string | null }[];
+}
+
+/** Startbarer Stand eines Sprints (gemergter Auftrag oder offener Auftrags-Branch). */
+export interface SprintCommit {
+  hash: string;
+  subject: string;
+  date: string;
+  developmentId: string | null;
+  merged: boolean;
 }

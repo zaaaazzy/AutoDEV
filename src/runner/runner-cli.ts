@@ -11,7 +11,8 @@ import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
 import { projectFolderError } from '../core/validation.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
-import { syncReviewInstance } from './review-instance.js';
+import { ReviewSlots } from './review-slots.js';
+import { syncSprintCommits } from './sprint-commits.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
@@ -267,6 +268,7 @@ async function main(): Promise<void> {
         for (const target of chatTargets) {
           if (target.problem) continue;
           void syncGitGraph(pool, target.options.project, target.options.cwd).catch(() => undefined);
+          void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(() => undefined);
         }
       }
       if (Date.now() - faviconCheck > 5 * 60_000) {
@@ -314,21 +316,18 @@ async function main(): Promise<void> {
     const commentActive = new Set<string>();
     const visionaryActive = new Set<string>();
     const testActive = new Set<string>();
-    // Review-Instanzen (Auftrag wartet auf Freigabe) starten, wechseln oder beenden – je Projekt nacheinander.
-    const reviewActive = new Set<string>();
+    // Review-Container (projektübergreifend): angeforderte Stände starten, Freigaben zuweisen, Zustand prüfen.
+    const reviewSlots = new ReviewSlots(pool, INSTALL_ROOT);
+    let reviewActive = false;
     const reviewTimer = setInterval(() => {
-      for (const target of chatTargets) {
-        const slug = target.options.project;
-        if (reviewActive.has(slug) || stopping || target.problem || !isAbsolute(target.repository)) continue;
-        reviewActive.add(slug);
-        void syncReviewInstance(pool, slug, target.repository)
-          .then(() => loggedErrors.delete(`review:${slug}`))
-          .catch((error: unknown) =>
-            logOnce(`review:${slug}`, `[${slug}] Review-Instanz fehlgeschlagen: ${describeError(error)}`),
-          )
-          .finally(() => reviewActive.delete(slug));
-      }
-    }, 10_000);
+      if (reviewActive || stopping) return;
+      reviewActive = true;
+      void reviewSlots
+        .sync()
+        .then(() => loggedErrors.delete('review'))
+        .catch((error: unknown) => logOnce('review', `Review-Container fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (reviewActive = false));
+    }, 5_000);
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;

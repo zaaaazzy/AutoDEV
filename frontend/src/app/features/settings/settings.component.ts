@@ -1,5 +1,6 @@
 import { PermissionGroupsSettingsComponent } from './permission-groups-settings.component.js';
 import { Component, effect, inject, untracked } from '@angular/core';
+import { ReviewSlotsSettingsComponent } from './review-slots-settings.component.js';
 import { FolderPickerComponent } from '../../shared/folder-picker.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
@@ -14,6 +15,7 @@ import { AuthService } from '../../core/auth.service.js';
   selector: 'app-settings',
   standalone: true,
   imports: [
+    ReviewSlotsSettingsComponent,
     FolderPickerComponent,
     PermissionGroupsSettingsComponent,
     FormsModule,
@@ -41,7 +43,6 @@ export class SettingsComponent {
     autoBugfix: true,
     agentWorkspace: false,
     reviewMode: 'off' as 'off' | 'ui' | 'always',
-    reviewUrl: '',
     reviewCommand: '',
     orderTokenLimit: null as number | null,
     orderCostLimit: null as number | null,
@@ -120,7 +121,6 @@ export class SettingsComponent {
           autoBugfix: this.settings.autoBugfix,
           agentWorkspace: this.settings.agentWorkspace,
           reviewMode: this.settings.reviewMode,
-          reviewUrl: this.settings.reviewUrl.trim(),
           reviewCommand: this.settings.reviewCommand.trim(),
           orderTokenLimit: this.settings.orderTokenLimit || null,
           orderCostLimit: this.settings.orderCostLimit || null,
@@ -169,7 +169,6 @@ export class SettingsComponent {
       autoBugfix: project?.autoBugfix ?? true,
       agentWorkspace: project?.agentWorkspace ?? false,
       reviewMode: project?.reviewMode ?? 'off',
-      reviewUrl: project?.reviewUrl ?? '',
       reviewCommand: (project?.reviewCommand ?? []).join(' '),
       orderTokenLimit: project?.orderTokenLimit ?? null,
       orderCostLimit: project?.orderCostLimit ?? null,

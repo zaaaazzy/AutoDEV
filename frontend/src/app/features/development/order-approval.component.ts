@@ -1,6 +1,6 @@
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, ReviewState } from '../../core/models.js';
+import type { DevelopmentItem, ReviewSlot, ReviewState } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from './order.service.js';
 
@@ -22,26 +22,30 @@ import { OrderService } from './order.service.js';
         </p>
       } @else {
         <p>
-          Der Auftrag ist fertig und getestet, aber noch nicht im Sprint. Sieh ihn dir in der Review-Instanz an und gib
+          Der Auftrag ist fertig und getestet, aber noch nicht im Sprint. Sieh ihn dir im Review-Container an und gib
           ihn frei – erst dann wird er gemergt.
         </p>
       }
       @if (state(); as review) {
         @if (!review.configured) {
           <p class="muted">Kein Review-Befehl eingestellt – unter Einstellungen → Review-Freigabe ergänzen.</p>
-        } @else if (shown()) {
+        } @else if (shown(); as slot) {
           <p class="approval-instance">
-            <span class="approval-dot" [class]="review.instance?.status"></span>
+            <span class="approval-dot" [class]="slot.status"></span>
             {{ instanceLabel() }}
-            @if (review.url && review.instance?.status !== 'failed') {
-              · <a [href]="review.url" target="_blank" rel="noopener">Review-Instanz öffnen ↗</a>
+            @if (slot.status === 'running') {
+              · <a [href]="slot.url" target="_blank" rel="noopener">Review {{ slot.slot }} öffnen ↗</a>
             }
           </p>
-          @if (review.instance?.status === 'failed' && review.instance?.message) {
-            <pre class="approval-log">{{ review.instance?.message }}</pre>
+          @if (slot.status === 'failed' && slot.message) {
+            <pre class="approval-log">{{ slot.message }}</pre>
           }
+        } @else if (!review.slots.some(free)) {
+          <p class="muted">
+            Alle Review-Container sind belegt – mit „Im Review-Container anzeigen“ übernimmst du einen.
+          </p>
         } @else {
-          <p class="muted">Die Review-Instanz zeigt gerade einen anderen Auftrag.</p>
+          <p class="muted">Wird gleich in einem freien Review-Container gestartet …</p>
         }
       }
       @if (!item.reviewApprovedAt) {
@@ -50,9 +54,9 @@ import { OrderService } from './order.service.js';
           <button class="button secondary" type="button" [disabled]="busy()" (click)="reject(item)">
             ↩ Zurückweisen
           </button>
-          @if (state()?.configured && (!shown() || state()?.instance?.status === 'failed')) {
+          @if (state()?.configured && (!shown() || shown()?.status === 'failed')) {
             <button class="button secondary" type="button" [disabled]="busy()" (click)="show(item)">
-              {{ shown() ? '↻ Review-Instanz neu starten' : '👀 In Review-Instanz anzeigen' }}
+              {{ shown() ? '↻ Review-Container neu starten' : '👀 Im Review-Container anzeigen' }}
             </button>
           }
         </div>
@@ -68,23 +72,20 @@ export class OrderApprovalComponent {
 
   readonly order = input.required<DevelopmentItem>();
   protected readonly state = signal<ReviewState | null>(null);
-  /** Zeigt die Review-Instanz diesen Auftrag (bzw. ist er angefordert)? */
-  protected readonly shown = computed(() => {
-    const instance = this.state()?.instance;
-    const id = this.order().id;
-    if (!instance) return false;
-    return instance.developmentId === id || (instance.requestedId === id && instance.status === 'stopped');
-  });
+  /** Review-Container, der diesen Auftrag zeigt (bzw. für ihn angefordert ist). */
+  protected readonly shown = computed(
+    () => this.state()?.slots.find((slot) => slot.developmentId === this.order().id && slot.status !== 'idle') ?? null,
+  );
+  protected readonly free = (slot: ReviewSlot): boolean => slot.enabled && slot.status === 'idle';
   protected readonly instanceLabel = computed(() => {
-    const instance = this.state()?.instance;
-    if (instance?.developmentId !== this.order().id) return 'Wird gestartet …';
-    switch (instance.status) {
+    const slot = this.shown();
+    switch (slot?.status) {
       case 'running':
-        return 'Review-Instanz läuft';
+        return `Review ${slot.slot} läuft`;
       case 'starting':
-        return 'Review-Instanz startet (Datenbank-Kopie, Dev-Server) …';
+        return `Review ${slot.slot} startet (Abhängigkeiten, Datenbank-Kopie) …`;
       case 'failed':
-        return 'Review-Instanz konnte nicht starten';
+        return `Review ${slot.slot} konnte nicht starten`;
       default:
         return 'Wird gestartet …';
     }

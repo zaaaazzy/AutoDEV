@@ -826,4 +826,31 @@ export const SCHEMA = `
   -- Claude-Sitzung je Schritt: nach Abbruch oder Nachbesserung setzt derselbe Einsatz sie fort (claude --resume).
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS session_id TEXT;
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS session_at TIMESTAMPTZ;
+
+  -- Review-Container: projektübergreifend geteilte Docker-Container (Administrator gibt sie frei, einer ist Standard).
+  -- Jeder zeigt einen Commit eines Projekts auf eigenem Port (4200 + Nummer) mit eigener Datenbank-Kopie.
+  CREATE TABLE IF NOT EXISTS review_slots (
+    slot SMALLINT PRIMARY KEY CHECK (slot BETWEEN 1 AND 9),
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    project_slug TEXT REFERENCES projects(slug) ON DELETE SET NULL,
+    commit_sha TEXT,
+    label TEXT,
+    development_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    kind TEXT CHECK (kind IN ('manual', 'approval')),
+    status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'requested', 'starting', 'running', 'failed', 'stopping')),
+    message TEXT,
+    requested_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  INSERT INTO review_slots (slot, enabled) VALUES (1, TRUE), (2, FALSE), (3, FALSE) ON CONFLICT (slot) DO NOTHING;
+  -- Abgelöst durch review_slots (vorher ein Review-Prozess je Projekt auf dem Mac).
+  DROP TABLE IF EXISTS review_instances;
+  -- Commits je Sprint (vom Worker aus Git gelesen) für die Auswahl „Version starten“ in der Sprint-Ansicht.
+  CREATE TABLE IF NOT EXISTS sprint_commits (
+    sprint_id UUID PRIMARY KEY REFERENCES sprints(id) ON DELETE CASCADE,
+    branch TEXT,
+    commits JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
 `;

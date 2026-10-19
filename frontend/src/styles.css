@@ -10113,3 +10113,50 @@ input.pick {
 .bug-stats-bar .buried {
   background: #9aa29c;
 }
+
+/* Sprint: Version im Review-Container starten */
+.sprint-review {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+}
+.sprint-review-pick {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 320px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.sprint-review-pick select {
+  width: 100%;
+}
+.sprint-review-play {
+  min-width: 42px;
+}
+.sprint-review-status {
+  flex-basis: 100%;
+  font-size: 13px;
+  color: var(--muted);
+}
+.sprint-review-status.running {
+  color: var(--green);
+}
+.sprint-review-status.failed {
+  color: #c0392b;
+}
+.review-slot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.review-slot-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}

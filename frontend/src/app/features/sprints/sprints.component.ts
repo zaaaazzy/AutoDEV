@@ -2,6 +2,7 @@ import { NgClass } from '@angular/common';
 import { SprintProposalComponent } from './sprint-proposal.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { Component, inject, signal } from '@angular/core';
+import { SprintReviewComponent } from './sprint-review.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
@@ -34,6 +35,7 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
   selector: 'app-sprints',
   standalone: true,
   imports: [
+    SprintReviewComponent,
     SprintProposalComponent,
     NavIconComponent,
     SprintBoardComponent,

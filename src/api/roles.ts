@@ -51,6 +51,10 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/push\//, null],
   ['*', /^\/api\/users/, 'admin'],
   ['PUT', /^\/api\/settings$/, 'admin'],
+  // Review-Container freigeben ist Administration, einen Stand starten oder beenden ist Ausführen.
+  ['PUT', /^\/api\/review-slots\/\d+$/, 'admin'],
+  ['POST', /^\/api\/review-slots\/\d+\/stop$/, 'run'],
+  ['POST', /^\/api\/projects\/[^/]+\/review-slots\/start$/, 'run'],
   ['POST', /^\/api\/projects$/, 'admin'],
   ['POST', /^\/api\/projects\/setup$/, 'admin'],
   ['POST', /^\/api\/setup\/jobs$/, 'admin'],
