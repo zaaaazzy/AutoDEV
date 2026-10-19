@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { ensureDefaultAgents } from '../api/agents.js';
+import { applyMigrations } from './migrations.js';
 import { SCHEMA } from './schema.js';
 
 export interface DatabaseConfig {
@@ -48,6 +49,8 @@ export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> 
     try {
       await client.query('SELECT pg_advisory_lock(727401)');
       await client.query(SCHEMA);
+      const applied = await applyMigrations(client);
+      if (applied.length) console.info(`Datenbank-Migrationen angewendet: ${applied.join(', ')}.`);
     } finally {
       await client.query('SELECT pg_advisory_unlock(727401)').catch(() => undefined);
       client.release();
