@@ -7,6 +7,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { isValidGitRemote, pushRemote } from '../runner/git-sync.js';
 import { projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
+import { listFolders } from './folders.js';
 
 /** Aufgaben, die der Worker auf dem Rechner ausführt (der Server im Container sieht keine Projektordner). */
 export const SETUP_JOB_KINDS = [
@@ -17,6 +18,7 @@ export const SETUP_JOB_KINDS = [
   'git_setup',
   'test_agent',
   'helper_chat',
+  'list_folders',
 ] as const;
 export type SetupJobKind = (typeof SETUP_JOB_KINDS)[number];
 
@@ -357,7 +359,9 @@ export async function processSetupJob(pool: Pool, execute: CommandExecutor = run
                   ? await testAgent(params, execute)
                   : job.kind === 'delete_folder'
                     ? await deleteProjectFolder(params)
-                    : await helperChat(params);
+                    : job.kind === 'list_folders'
+                      ? await listFolders(params.path)
+                      : await helperChat(params);
     await pool.query(`UPDATE setup_jobs SET status = 'done', result = $2::jsonb, updated_at = NOW() WHERE id = $1`, [
       job.id,
       JSON.stringify(result),

@@ -9962,3 +9962,61 @@ input.pick {
     padding-left: 0;
   }
 }
+
+/* Ordnerauswahl (Projektordner) */
+.folder-picker-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.folder-picker {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+.folder-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.folder-picker-head code {
+  overflow-wrap: anywhere;
+}
+.folder-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 260px;
+  overflow: auto;
+}
+.folder-picker-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.folder-picker-git {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e8f1ec;
+  color: var(--green);
+}
+.folder-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.folder-picker-error {
+  margin: 4px 0;
+  color: #c0392b;
+  font-size: 13px;
+}

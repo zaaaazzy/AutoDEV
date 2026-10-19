@@ -11,6 +11,14 @@
         <label class="wide"
           >Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
         </label>
+        <div class="wide folder-picker-row">
+          <app-folder-picker [value]="settings.repository" (picked)="settings.repository = $event" />
+          @if (settings.repository !== (store.currentProject()?.repository ?? '')) {
+            <span class="muted"
+              >Neuer Ordner – mit „Speichern“ übernehmen. Die Agents arbeiten danach dort (bzw. in „…-agents“).</span
+            >
+          }
+        </div>
         <label class="wide"
           >Testbefehle (ein Befehl pro Zeile)<textarea
             name="testCommands"

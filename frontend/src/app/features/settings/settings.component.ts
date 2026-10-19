@@ -1,5 +1,6 @@
 import { PermissionGroupsSettingsComponent } from './permission-groups-settings.component.js';
 import { Component, effect, inject, untracked } from '@angular/core';
+import { FolderPickerComponent } from '../../shared/folder-picker.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { AgentStatus, Project } from '../../core/models.js';
@@ -13,6 +14,7 @@ import { AuthService } from '../../core/auth.service.js';
   selector: 'app-settings',
   standalone: true,
   imports: [
+    FolderPickerComponent,
     PermissionGroupsSettingsComponent,
     FormsModule,
     NotificationSettingsComponent,
