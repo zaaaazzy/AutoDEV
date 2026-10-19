@@ -382,6 +382,7 @@ export interface ProjectPermissions {
   custom: PermissionGroup[];
 }
 
+/** A database error fails the caller: without the project's choice every group would count as enabled. */
 export async function loadProjectPermissions(
   pool: { query: <R>(sql: string, values: unknown[]) => Promise<{ rows: R[] }> },
   project: string,
@@ -389,15 +390,13 @@ export async function loadProjectPermissions(
   const [enabled, custom] = await Promise.all([
     pool
       .query<{ groups: string[] | null }>('SELECT agent_permissions AS groups FROM projects WHERE slug = $1', [project])
-      .then((result) => result.rows[0]?.groups ?? null)
-      .catch(() => null),
+      .then((result) => result.rows[0]?.groups ?? null),
     pool
       .query<PermissionGroup>(
         'SELECT id, label, description, rules FROM project_permission_groups WHERE project_slug = $1 ORDER BY label',
         [project],
       )
-      .then((result) => result.rows)
-      .catch(() => [] as PermissionGroup[]),
+      .then((result) => result.rows),
   ]);
   return { enabled, custom };
 }

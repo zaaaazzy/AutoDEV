@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
@@ -183,7 +184,7 @@ export async function processChat(
         expressId,
       ],
     );
-    if (expressId) await closeExpressOrder(pool, expressId).catch(() => undefined);
+    if (expressId) await closeExpressOrder(pool, expressId).catch(logged('chat'));
     await saveRequestDoc(pool, options.project, {
       request: claimed.content,
       answer: output.slice(0, 2000),
@@ -191,13 +192,13 @@ export async function processChat(
       question: null,
       failed: true,
       at: new Date(),
-    }).catch(() => undefined);
+    }).catch(logged('chat'));
     await replyToIdeaComment(
       pool,
       claimed.id,
       agent?.name ?? null,
       'Ich konnte die Anweisung nicht bearbeiten. Details stehen im Chat.',
-    ).catch(() => undefined);
+    ).catch(logged('chat'));
     return true;
   }
   const { text, question, options: answers } = splitQuestion(output);

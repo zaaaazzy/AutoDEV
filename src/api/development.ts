@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { setActionTodo } from '../runner/action-todo.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
@@ -267,7 +268,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       [request.params.id],
     );
     // Alle manuellen Punkte bestätigt: nichts mehr zu tun (Sprintbericht wird aktualisiert).
-    await setActionTodo(pool, request.params.id, null).catch(() => undefined);
+    await setActionTodo(pool, request.params.id, null).catch(logged('development'));
     response.json({ confirmed: result.rowCount ?? 0 });
   });
 

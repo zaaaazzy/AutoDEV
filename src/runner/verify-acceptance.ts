@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { runAuthorAgent } from '../agent/requirements.js';
 import type { CommandExecutor } from '../core/command.js';
@@ -113,6 +114,6 @@ export async function verifyAcceptance(
       [developmentId, point.kind, point.position, status, note.slice(0, 1000)],
     );
   }
-  await refreshAcceptanceTodo(pool, developmentId).catch(() => undefined);
+  await refreshAcceptanceTodo(pool, developmentId).catch(logged('verify-acceptance'));
   return claimed.length;
 }

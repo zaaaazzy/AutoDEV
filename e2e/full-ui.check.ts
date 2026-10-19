@@ -377,6 +377,10 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   const retry = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' }).first();
   const retryTitle = (await retry.locator('.attention-title').textContent())?.trim() ?? '';
   await button(retry, 'Erneut versuchen').click();
+  // Erst nach Bestätigung (optional mit Hinweis für die Agents) wird der Auftrag wieder eingeplant.
+  const confirm = page.getByRole('dialog');
+  await expect(confirm).toContainText('erneut versuchen');
+  await confirm.getByRole('button', { name: 'Erneut versuchen' }).click();
   await expect(page.getByText('Auftrag wird erneut versucht.')).toBeVisible();
   await expect(page.locator('.attention-card').filter({ hasText: retryTitle })).toHaveCount(0);
 
@@ -509,20 +513,28 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   test.skip(isMobile, 'Desktop-Ablauf');
   await login(page);
   await open(page, 'agents');
-  const names = () =>
-    page.locator('.dt').first().locator('tbody tr:not(.closed-detail) td:first-child').allTextContents();
   await button(page, /Neuer Agent/).click();
   const agent = `Prüf-Agent ${Date.now() % 10000}`;
   await page.locator('input[name=name]').fill(agent);
   await page.locator('textarea[name=instructions]').fill('Prüft den Build.');
   await button(page, 'Agent anlegen').click();
   await expect(page.getByText('Agent angelegt.')).toBeVisible();
-  const before = (await names()).map((name) => name.trim());
-  const row = page.locator('.dt tbody tr').filter({ hasText: 'Reviewer' }).first();
-  await row.locator('.dt-expand').click();
-  await button(page.locator('.closed-detail'), '↑').click();
-  await expect.poll(async () => (await names()).map((name) => name.trim()).join()).not.toBe(before.join());
-  await expect.soft(page.locator('.closed-detail'), 'Detail bleibt nach ↑ offen').toBeVisible();
+  await expect(page.locator('.dt tbody tr').filter({ hasText: agent })).toBeVisible();
+  // Reihenfolge: in der Workflow-Karte innerhalb eines Zeitpunkts mit mindestens zwei Agents.
+  const card = page.locator('details.workflow-panel');
+  if ((await card.getAttribute('open')) === null) await card.locator('summary').click();
+  const phases = card.locator('.workflow-phase');
+  let phase = phases.first();
+  for (let index = 0; index < (await phases.count()); index += 1) {
+    if ((await phases.nth(index).locator('.workflow-step').count()) >= 2) {
+      phase = phases.nth(index);
+      break;
+    }
+  }
+  const order = () => phase.locator('.workflow-step-name').allTextContents();
+  const before = await order();
+  await phase.locator('.workflow-step').nth(1).getByRole('button', { name: 'Nach oben' }).click();
+  await expect.poll(async () => (await order()).join()).not.toBe(before.join());
   const tester = page.locator('.dt tbody tr').filter({ hasText: 'Tester' }).first();
   if (!(await page.locator('.closed-detail').count())) await tester.locator('.dt-expand').click();
   await button(page.locator('.closed-detail'), 'Aktivität').click();
@@ -589,9 +601,9 @@ test('Projektwechsel trennt die Daten', async ({ page, isMobile }) => {
   await expect(page.locator('.dt-table').first()).toContainText('Beta-Auftrag');
   await expect(page.locator('.dt-table').first()).not.toContainText('Warenkorb');
   await open(page, 'bugs');
-  await expect
-    .soft(page.locator('.empty-state'), 'Leertext ohne Filter spricht nicht von Filtern')
-    .not.toContainText('Filter');
+  for (const empty of await page.locator('.empty-state').all()) {
+    await expect.soft(empty, 'Leertext ohne Filter spricht nicht von Filtern').not.toContainText('Filter');
+  }
   await page.getByRole('button', { name: 'Projekt wechseln' }).click();
   await page.getByRole('option', { name: /Alpha Shop/ }).click();
 });

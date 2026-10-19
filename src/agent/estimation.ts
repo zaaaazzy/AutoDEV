@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -131,7 +132,7 @@ export async function estimateNewIdeas(
     ]
       .filter(Boolean)
       .join('\n\n');
-    const result = await run(prompt).catch(() => null);
+    const result = await run(prompt).catch(logged('estimation', null));
     if (!result) {
       await pool.query(
         `UPDATE ideation_items SET agent_note = 'Aufwand konnte nicht geschätzt werden – bitte manuell ergänzen.' WHERE id = $1 AND agent_note IS NULL`,

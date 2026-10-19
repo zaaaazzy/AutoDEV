@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
@@ -190,7 +191,7 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
       return;
     }
     // Worker sofort wecken: er mergt zwischen zwei Aufträgen.
-    await pool.query(`SELECT pg_notify('devlog_work', $1)`, [item.projectSlug]).catch(() => undefined);
+    await pool.query(`SELECT pg_notify('devlog_work', $1)`, [item.projectSlug]).catch(logged('review-routes'));
     response.json({ item });
   });
 

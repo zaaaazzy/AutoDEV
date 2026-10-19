@@ -653,6 +653,21 @@ async function pushSprint(
     );
     log.push('Reständerungen committet.');
   }
+  // Geprüft wird der Stand, der live geht: aktuellen main in den Sprint-Branch übernehmen (z. B. Korrekturen, die
+  // nach dem Sprintstart auf main kamen). Konflikte brechen ab, statt etwas Ungeprüftes zu mergen.
+  if (sprint.status === 'completed' && (await branchExists(git, MAIN_BRANCH))) {
+    const head = await must('rev-parse', '--abbrev-ref', 'HEAD');
+    if (head !== MAIN_BRANCH && (await git('merge-base', '--is-ancestor', MAIN_BRANCH, 'HEAD')).exitCode !== 0) {
+      const merged = await git('merge', '--no-edit', MAIN_BRANCH, '-m', `Merge ${MAIN_BRANCH} in ${head}`);
+      if (merged.exitCode !== 0) {
+        await git('merge', '--abort');
+        throw new Error(
+          `${MAIN_BRANCH} lässt sich nicht konfliktfrei in ${head} übernehmen – bitte zusammenführen. ${merged.output.slice(-300)}`,
+        );
+      }
+      log.push(`Aktuellen ${MAIN_BRANCH} in ${head} übernommen.`);
+    }
+  }
   if (sprint.remote && /github\.com/.test(sprint.remote)) await ensureCiWorkflow(ci.cwd, ci.commands, helpers, log);
   await gate(log);
   let current = await must('rev-parse', '--abbrev-ref', 'HEAD');

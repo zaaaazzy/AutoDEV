@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { applyProposal, autopilotGuard, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
@@ -94,7 +95,7 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
   if (!guard || guard.state === 'off') return 'off';
   if (guard.state === 'paused') {
     if (guard.failedSprintId)
-      await notifyPause(pool, project, guard.failedSprintId, guard.message ?? '').catch(() => undefined);
+      await notifyPause(pool, project, guard.failedSprintId, guard.message ?? '').catch(logged('sprint-autopilot'));
     return 'paused';
   }
   // Abschluss läuft noch (Test-Gate, Merge, Push): erst danach den nächsten Sprint starten.
