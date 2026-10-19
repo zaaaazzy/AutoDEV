@@ -17,6 +17,7 @@ Restart=always
 RestartSec=10
 Environment=PATH=$NODE_BIN:$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=DEV_LOG_DATABASE_URL=${DEV_LOG_DATABASE_URL:-postgresql://devlog:devlog_local_dev@localhost:5433/aideation}
+Environment=DEV_LOG_SECRET_KEY=${DEV_LOG_SECRET_KEY:-}
 
 [Install]
 WantedBy=default.target

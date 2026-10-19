@@ -1,3 +1,5 @@
+import { decryptSecret } from '../core/secrets.js';
+import { logged } from '../core/log.js';
 import { handoffTarget, ORDER_PHASES, parseHandoffs } from '../core/workflow-phases.js';
 import { manualTodo, setActionTodo } from './action-todo.js';
 import type { Pool } from 'pg';
@@ -74,11 +76,18 @@ export const runBuiltinAgent: BuiltinAgent = async ({
       .join('\n\n');
     return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
   }
-  const databaseUrl = (
+  const stored = (
     await pool.query<{ url: string | null }>('SELECT database_url AS url FROM projects WHERE slug = $1', [
       item.projectSlug,
     ])
   ).rows[0]?.url;
+  // Without the key the agent runs without database access instead of failing the whole step.
+  let databaseUrl: string | undefined;
+  try {
+    databaseUrl = stored ? decryptSecret(stored) : undefined;
+  } catch (error) {
+    logged(`database-url:${item.projectSlug}`)(error);
+  }
   // Dieselben Dateirechte und Ordner wie bei der Claude-CLI, geprüft vom selben Wächter.
   const commands = normalizeCommands(
     agent.allowedCommands ?? roleDefaultCommands(agent.role, await loadProjectPermissions(pool, item.projectSlug)),
@@ -351,7 +360,7 @@ function logEvent(pool: Pool, stepId: string | undefined, text: string): Promise
       stepId,
       JSON.stringify([{ at: new Date().toISOString(), text: redactOutput(text, process.env) }]),
     ])
-    .catch(() => undefined);
+    .catch(logged('runner-steps'));
 }
 
 /** Execute a workflow step and persist its progress, cancellation state, and result. */
@@ -411,7 +420,7 @@ export async function runStep(
           if (stepPid) killGroup(stepPid);
           resolveCancel({ exitCode: 130, durationMs: 0, output: 'Vom Benutzer abgebrochen.' });
         })
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     }, CANCEL_POLL_MS);
     stopWatching = () => clearInterval(watcher);
   });
@@ -428,7 +437,7 @@ export async function runStep(
           redactOutput(partial, process.env),
           AGENT_STEP_STATUS.running,
         ])
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     },
     onAction: (message) => {
       void logEvent(pool, stepId, message);
@@ -438,14 +447,14 @@ export async function runStep(
       stepPid = pid;
       void pool
         .query('UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1', [stepId, pid])
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     },
     onSession: (sessionId) => {
       void pool
         .query('UPDATE agent_run_steps SET session_id = $2, session_at = NOW() WHERE id = $1', [stepId, sessionId])
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     },
-    resume: await findResumableSession(pool, item.id, agent, stepId).catch(() => null),
+    resume: await findResumableSession(pool, item.id, agent, stepId).catch(logged('runner-steps', null)),
   };
   if (hooks.resume) {
     await logEvent(
@@ -537,7 +546,7 @@ export async function runStep(
         await logEvent(pool, stepId, 'Abnahme: alle Kriterien und DoD-Punkte erfüllt');
       }
       const manual = manualChecks(acceptance, criteria);
-      await setActionTodo(pool, item.id, manualTodo(manual)).catch(() => undefined);
+      await setActionTodo(pool, item.id, manualTodo(manual)).catch(logged('runner-steps'));
       if (manual.length) {
         output += `\n\n## Von dir zu prüfen\n${manual.map((line) => `- ${line}`).join('\n')}`;
         await logEvent(pool, stepId, `Abnahme: ${manual.length} Punkt(e) nur manuell prüfbar`);
@@ -570,7 +579,9 @@ export async function runStep(
   // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
   const measured =
     agent.role === 'tester' && !cancelled
-      ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(() => [])
+      ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(
+          logged('runner-steps', []),
+        )
       : [];
   const coverage = mergeCoverage(reported, measured);
   if (coverage) {
@@ -689,7 +700,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   if (mergeProblem) {
     await pool
       .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, mergeProblem])
-      .catch(() => undefined);
+      .catch(logged('runner-steps'));
   }
   if (item.agentId) {
     // A one-agent play restores the previous status; a blocked order resumes normally after success.
@@ -710,5 +721,5 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   );
   await notifySettled(pool, item, succeeded, mergeProblem);
   if (!succeeded) return;
-  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
+  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('runner-steps'));
 }

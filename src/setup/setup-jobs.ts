@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -340,7 +341,7 @@ export async function processSetupJob(pool: Pool, execute: CommandExecutor = run
         job.id,
         line,
       ])
-      .catch(() => undefined);
+      .catch(logged('setup-jobs'));
   };
   try {
     const params = job.params ?? {};
@@ -375,6 +376,6 @@ export async function processSetupJob(pool: Pool, execute: CommandExecutor = run
     ]);
   }
   // Alte Jobs aufräumen.
-  await pool.query(`DELETE FROM setup_jobs WHERE created_at < NOW() - INTERVAL '1 day'`).catch(() => undefined);
+  await pool.query(`DELETE FROM setup_jobs WHERE created_at < NOW() - INTERVAL '1 day'`).catch(logged('setup-jobs'));
   return true;
 }

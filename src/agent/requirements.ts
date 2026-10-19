@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { restrictedSystemCommand, systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
@@ -179,7 +180,7 @@ export async function runAuthorAgent(
           result.exitCode === 0,
         ],
       )
-      .catch(() => undefined);
+      .catch(logged('requirements'));
     return {
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
@@ -201,7 +202,7 @@ async function assessRisks(
   execute: CommandExecutor,
   onProgress?: (message: string) => void,
 ): Promise<string> {
-  const bugs = await loadKnownBugs(pool, options.project, 60).catch(() => []);
+  const bugs = await loadKnownBugs(pool, options.project, 60).catch(logged('requirements', []));
   if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
   const list = bugs.map(
     (bug) =>
@@ -235,7 +236,7 @@ async function draftProgress(pool: Pool, ideaId: string, agent: string, message:
       agent,
       message.slice(0, 300),
     ])
-    .catch(() => undefined);
+    .catch(logged('requirements'));
 }
 
 /** Turns one requested idea into a backlog order. Sprint assignment stays a manual decision. */

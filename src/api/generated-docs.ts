@@ -1,6 +1,7 @@
+import { logged } from '../core/log.js';
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import type { Pool } from 'pg';
-import { systemAgents, systemCommand } from '../agent/system-agents.js';
+import { loadSystemSettings, systemAgents, systemCommand } from '../agent/system-agents.js';
 import { ROLE_INFO, type Role } from './roles.js';
 import { workflowDocs } from './workflow-docs.js';
 
@@ -100,11 +101,8 @@ async function agentSettings(pool: Pool, slug: string): Promise<GeneratedDoc> {
   );
   const rows = agents.rows;
   // Im Dashboard gewählte Modelle der Systemagents gehen der Umgebung vor (wie beim Worker)
-  const chosen = (
-    await pool.query<{ key: string; value: string }>(`SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`)
-  ).rows;
-  const systemModel = (role: string, fallback: string) =>
-    chosen.find((row) => row.key === `model:${role}`)?.value.trim() || fallback;
+  const chosen = await loadSystemSettings(pool);
+  const systemModel = (role: string, fallback: string) => chosen.get(role)?.model || fallback;
   const lines = [
     '# Agent-Einstellungen',
     '',
@@ -227,7 +225,7 @@ export async function generatedDocs(pool: Pool, slug: string, isAdmin: boolean):
     testReports(pool, slug),
     agentSettings(pool, slug),
     isAdmin ? userOverview(pool, slug) : Promise.resolve(null),
-    workflowDocs(slug).catch(() => []),
+    workflowDocs(slug).catch(logged('generated-docs', [])),
   ]);
   return [...workflow, ...reports, agents, ...(users ? [users] : [])];
 }

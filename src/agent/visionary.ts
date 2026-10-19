@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
@@ -581,7 +582,7 @@ async function setProgress(pool: Pool, runId: string, message: string): Promise<
       runId,
       message.slice(0, 300),
     ])
-    .catch(() => undefined);
+    .catch(logged('visionary'));
 }
 
 /**
@@ -610,7 +611,7 @@ export async function processVisionaryRun(
       .then((result) => {
         if (result.rows[0]?.status !== 'running') controller.abort();
       })
-      .catch(() => undefined);
+      .catch(logged('visionary'));
   }, CANCEL_POLL_MS);
   try {
     const [context, limit] = await Promise.all([
