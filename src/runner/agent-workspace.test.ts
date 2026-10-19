@@ -25,6 +25,11 @@ function repository(): string {
   return folder;
 }
 
+test('Projekt in <Projekt>/source: Agents arbeiten in <Projekt>/agent', () => {
+  assert.equal(agentWorkspacePath('/Coding/Mainty/source'), '/Coding/Mainty/agent');
+  assert.equal(agentWorkspacePath('/Coding/Mainty'), '/Coding/Mainty-agents');
+});
+
 test('Fremde Projektordner bleiben der Arbeitsordner der Agents', async () => {
   const folder = repository();
   assert.deepEqual(await resolveAgentWorkspace(folder, '/somewhere/else'), { cwd: folder, problem: null });
@@ -66,9 +71,9 @@ test('npm-Workspaces: Workspace-Pakete zeigen auf den Code im Arbeitsordner, nic
   assert.equal(realpathSync(join(workspace, 'node_modules', 'lib')), realpathSync(join(folder, 'node_modules', 'lib')));
 });
 
-test('Dev-Log-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {
+test('AIdeation-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {
   const folder = repository();
-  // Offene Arbeit eines Menschen im Dev-Log-Ordner.
+  // Offene Arbeit eines Menschen im AIdeation-Ordner.
   writeFileSync(join(folder, 'a.txt'), 'meine offene Arbeit\n');
   const { cwd, problem } = await resolveAgentWorkspace(folder, folder);
   assert.equal(problem, null);

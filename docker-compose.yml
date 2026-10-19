@@ -1,34 +1,35 @@
-# Containernamen: devlog_<Aufgabe>_<Technik>. Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
+name: aideation
+# Containernamen: aideation_<Aufgabe>_<Technik>. Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
 services:
   db:
     image: postgres:17-alpine
-    container_name: devlog_database_postgres
+    container_name: aideation_database_postgres
     environment:
-      POSTGRES_DB: dev_log
+      POSTGRES_DB: aideation
       POSTGRES_USER: ${DEV_LOG_DB_USER:-devlog}
       POSTGRES_PASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
     volumes:
-      - devlog_pgdata:/var/lib/postgresql/data
+      - aideation_pgdata:/var/lib/postgresql/data
     ports:
       - "127.0.0.1:5433:5432"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DEV_LOG_DB_USER:-devlog} -d dev_log"]
+      test: ["CMD-SHELL", "pg_isready -U ${DEV_LOG_DB_USER:-devlog} -d aideation"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   dev-log:
     build: .
-    container_name: devlog_backend_nodejs
-    # Kein Port nach aussen: erreichbar über das Frontend (devlog_frontend_angular), das /api weiterleitet.
+    container_name: aideation_backend_nodejs
+    # Kein Port nach aussen: erreichbar über das Frontend (aideation_frontend_angular), das /api weiterleitet.
     restart: unless-stopped
     environment:
       PORT: 3100
       DEV_LOG_TRUST_PROXY: uniquelocal
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
       DEV_LOG_PROJECT_ROOTS: ${DEV_LOG_PROJECT_ROOTS:-}
-      DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/dev_log
+      DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
       DEV_LOG_AUTH: ${DEV_LOG_AUTH:-on}
       DEV_LOG_HOST: 0.0.0.0
@@ -48,7 +49,7 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend/Dockerfile
-    container_name: devlog_frontend_angular
+    container_name: aideation_frontend_angular
     ports:
       # Direkt nur vom eigenen Rechner aus; von aussen geht es über HTTPS (Dienst https).
       - "127.0.0.1:3100:8080"
@@ -64,7 +65,7 @@ services:
 
   backup:
     image: postgres:17-alpine
-    container_name: devlog_backup_postgres
+    container_name: aideation_backup_postgres
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/backup.sh"]
     environment:
@@ -83,7 +84,7 @@ services:
   https:
     profiles: ["https"]
     image: caddy:2.8.4-alpine
-    container_name: devlog_proxy_caddy
+    container_name: aideation_proxy_caddy
     ports:
       - "80:80"
       - "443:443"
@@ -92,12 +93,15 @@ services:
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-localhost}
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - devlog_caddy_data:/data
-      - devlog_caddy_config:/config
+      - aideation_caddy_data:/data
+      - aideation_caddy_config:/config
     depends_on:
       - frontend
 
 volumes:
-  devlog_pgdata:
-  devlog_caddy_data:
-  devlog_caddy_config:
+  aideation_pgdata:
+    name: aideation_pgdata
+  aideation_caddy_data:
+    name: aideation_caddy_data
+  aideation_caddy_config:
+    name: aideation_caddy_config

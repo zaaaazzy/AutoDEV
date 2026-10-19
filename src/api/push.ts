@@ -61,7 +61,7 @@ export function registerPushRoutes(app: Express, pool: Pool): void {
       const principal = response.locals.principal as Principal | undefined;
       const sent = await sendPush(
         pool,
-        { title: 'Dev Log', body: 'Benachrichtigungen funktionieren. 🎉', url: '#settings', tag: 'test' },
+        { title: 'AIdeation', body: 'Benachrichtigungen funktionieren. 🎉', url: '#settings', tag: 'test' },
         { self: { id: principal?.id ?? null } },
       );
       response.json({ sent });

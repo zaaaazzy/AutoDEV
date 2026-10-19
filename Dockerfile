@@ -8,7 +8,7 @@ COPY tsconfig.json ./
 COPY src ./src
 # Register „Workflow“ der Dokumentation: liest docs/*.md zur Laufzeit.
 COPY docs ./docs
-# Nur die API: die Oberfläche baut und liefert der Container devlog_frontend_angular (deploy/frontend).
+# Nur die API: die Oberfläche baut und liefert der Container aideation_frontend_angular (deploy/frontend).
 RUN npx tsc -p tsconfig.json && npm prune --omit=dev
 ENV NODE_ENV=production
 USER node

@@ -38,7 +38,7 @@ async function login(page: Page, welcome = false): Promise<void> {
   // Die Begrüßung erscheint sonst in jedem frischen Browser und überdeckt die Seite.
   if (!welcome) await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Dev Log' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AIdeation' })).toBeVisible();
   await page.getByLabel('Benutzername').fill(username);
   await page.getByLabel('Passwort').fill(password);
   await page.getByRole('button', { name: 'Anmelden' }).click();
@@ -263,11 +263,11 @@ test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint 
 
 test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async ({ page }) => {
   await login(page, true);
-  const welcome = page.getByRole('dialog', { name: /Willkommen bei Dev Log/ });
+  const welcome = page.getByRole('dialog', { name: /Willkommen bei AIdeation/ });
   await expect(welcome).toBeVisible();
   await welcome.getByRole('button', { name: 'Tour starten' }).click();
   const card = page.locator('.tour-card');
-  await expect(card.locator('h3')).toHaveText('Willkommen in Dev Log');
+  await expect(card.locator('h3')).toHaveText('Willkommen in AIdeation');
   await card.getByRole('button', { name: 'Weiter' }).click();
   await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
   await expect(page).toHaveURL(/#ideation/);
@@ -368,7 +368,7 @@ test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details
   await expect(detail).toContainText('Noch nie gestartet');
   await expect(menu).toBeVisible();
   // Suche filtert über alle Gruppen; Pfeiltaste zeigt die Details per Tastatur.
-  // „Docker-Dienste“ statt nur „docker“: „Dev Log neu starten“ erwähnt docker compose ebenfalls.
+  // „Docker-Dienste“ statt nur „docker“: „AIdeation neu starten“ erwähnt docker compose ebenfalls.
   await search.fill('docker-dienste');
   await expect(menu.locator('.agent-task')).toHaveCount(1);
   await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');

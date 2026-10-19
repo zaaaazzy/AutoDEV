@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { deleteProjectFolder } from './setup-jobs.js';
 
-test('deletes a project folder but refuses shallow paths, symlinks and Dev Log itself', async () => {
+test('deletes a project folder but refuses shallow paths, symlinks and AIdeation itself', async () => {
   const base = await mkdtemp(join(tmpdir(), 'devlog-delete-'));
   const project = join(base, 'projekt');
   await mkdir(join(project, 'src'), { recursive: true });
@@ -18,7 +18,7 @@ test('deletes a project folder but refuses shallow paths, symlinks and Dev Log i
   await assert.rejects(deleteProjectFolder({ path: '/Users' }), /Projektordner|zu weit oben/);
   await assert.rejects(
     deleteProjectFolder({ path: join(import.meta.dirname, '..', '..') }),
-    /Dev-Log-Ordner|Projektordner/,
+    /AIdeation-Ordner|Projektordner/,
   );
   assert.deepEqual(await deleteProjectFolder({ path: project }), { deleted: true, path: project });
   assert.equal(existsSync(project), false);

@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 
 /**
- * „Dev Log neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
+ * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
  * baut die Container mit `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive)
  * startet ihn sofort wieder – mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
  */
@@ -205,7 +205,7 @@ export async function processRestart(
   }
   // Gesundheitsprüfung: Antwortet die Oberfläche nicht, zurück auf das vorherige Abbild; der Worker bleibt auf dem
   // bisherigen Stand und startet nicht neu.
-  await writeRestart(pool, { ...building, message: 'Container gebaut – prüft, ob Dev Log antwortet …', log });
+  await writeRestart(pool, { ...building, message: 'Container gebaut – prüft, ob AIdeation antwortet …', log });
   if (!(await waitHealthy(options))) {
     let rolledBack = false;
     if (previous.length) {
@@ -228,7 +228,7 @@ export async function processRestart(
       status: 'failed',
       finishedAt: now().toISOString(),
       message: rolledBack
-        ? 'Der neue Stand antwortete nicht – Dev Log läuft wieder mit dem vorherigen Abbild. Der Worker wurde nicht neu gestartet.'
+        ? 'Der neue Stand antwortete nicht – AIdeation läuft wieder mit dem vorherigen Abbild. Der Worker wurde nicht neu gestartet.'
         : 'Der neue Stand antwortet nicht, Zurücksetzen war nicht möglich. Bitte auf dem Mac „docker compose logs dev-log frontend“ prüfen.',
       log,
     });

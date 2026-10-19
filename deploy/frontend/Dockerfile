@@ -1,4 +1,4 @@
-# devlog_frontend_angular: Angular-Oberfläche bauen und mit nginx ausliefern.
+# aideation_frontend_angular: Angular-Oberfläche bauen und mit nginx ausliefern.
 FROM node:22.22.3-bookworm-slim AS build
 WORKDIR /app
 COPY package*.json ./

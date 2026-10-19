@@ -2,11 +2,11 @@
 
 ## 1. Der Worker-Prozess
 
-Es gibt **einen** Worker (`npm run worker` = `tsx src/runner/runner-cli.ts --all --watch`). Er läuft auf dem Host, nicht im Docker-Container `dev-log`, und wird per launchd (`com.devlog.worker`, `./scripts/install-worker.sh`) gestartet und bei Absturz neu gestartet. Log: `~/Library/Logs/dev-log-worker.log`.
+Es gibt **einen** Worker (`npm run worker` = `tsx src/runner/runner-cli.ts --all --watch`). Er läuft auf dem Host, nicht im Docker-Container `dev-log`, und wird per launchd (`com.aideation.worker`, `./scripts/install-worker.sh`) gestartet und bei Absturz neu gestartet. Log: `~/Library/Logs/aideation-worker.log`.
 
 - Er bedient **alle registrierten Projekte**, jeweils mit dem Projektordner (`projects.repository`) als Arbeitsverzeichnis. Fehlt der Ordner, zeigt das Worker-Badge den Fehler und Chat-Nachrichten werden mit dem Grund beantwortet.
 - Er lädt Code nur beim Start. **Nach jeder Code-Änderung muss er neu gestartet werden:**
-  `launchctl kickstart -k gui/$(id -u)/com.devlog.worker`
+  `launchctl kickstart -k gui/$(id -u)/com.aideation.worker`
 - Alle 15 s sendet er einen Heartbeat (Worker-Badge im Dashboard).
 - Gleichzeitig laufen höchstens `maxConcurrentAgents` Projekte (Einstellung, Standard 2). Das Projekt, das am längsten wartet, kommt zuerst.
 
@@ -47,14 +47,14 @@ Mit der Claude-CLI bekommen Assistent, Entwickler, Tester und Reviewer alle frei
 
 ## 4. Der Dashboard-Assistent (Problemlöser)
 
-**Voller Zugriff (optional):** Enthält der Befehl des Dashboard-Assistenten `--dangerously-skip-permissions` oder `--permission-mode bypassPermissions` (Agents → Dashboard-Assistent → Eigener Befehl), startet Dev Log ihn ohne Wächter und ohne Sperrlisten: alle Befehle, alle Dateien, mit den Rechten des Workers – auch außerhalb des Projektordners. Gilt nur für den Assistenten; alle anderen Rollen behalten den Wächter, auch mit dieser Option. Wer sich im Dashboard anmelden kann, steuert damit den Rechner.
+**Voller Zugriff (optional):** Enthält der Befehl des Dashboard-Assistenten `--dangerously-skip-permissions` oder `--permission-mode bypassPermissions` (Agents → Dashboard-Assistent → Eigener Befehl), startet AIdeation ihn ohne Wächter und ohne Sperrlisten: alle Befehle, alle Dateien, mit den Rechten des Workers – auch außerhalb des Projektordners. Gilt nur für den Assistenten; alle anderen Rollen behalten den Wächter, auch mit dieser Option. Wer sich im Dashboard anmelden kann, steuert damit den Rechner.
 
 Der Assistent ist **kein** Workflow-Agent, sondern bedient den Chat und die Problemanalyse. Er führt Anfragen **selbst** aus, erstellt keine Aufträge und delegiert nicht; Fortschritt wird live im Chat gemeldet.
 
 Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 - **Lesen/Schreiben:** `read_file`, `list_files`, `search`, `write_file`, `replace_in_file` – nur innerhalb des Projektordners (Backups in `.dev-log-backups/`).
-- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Eine Transaktion, 15 s Limit, max. 50 Zeilen; `UPDATE`/`DELETE` nur mit echter `WHERE`-Bedingung (nicht `WHERE true`, `1=1` …); erlaubt sind Daten-Änderungen und additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`); gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, `DROP TABLE/VIEW/SEQUENCE/TYPE/SCHEMA`, `TRUNCATE`, `ALTER TABLE … DROP`, `DO`-Blöcke, `EXECUTE`, eigene Funktionen/Trigger, GRANT/REVOKE, COPY, Rollenwechsel, Server- und Large-Object-Funktionen. Die Dev-Log-Datenbank selbst wird abgelehnt. Das ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze – dafür einen Datenbank-Benutzer mit eingeschränkten Rechten hinterlegen.
+- **Datenbank:** `run_sql` (Entwickler und Assistent) – lesen und schreiben in der Projekt-Datenbank (`projects.database_url`, in den Einstellungen gepflegt, wird nie ans Frontend ausgegeben). Eine Transaktion, 15 s Limit, max. 50 Zeilen; `UPDATE`/`DELETE` nur mit echter `WHERE`-Bedingung (nicht `WHERE true`, `1=1` …); erlaubt sind Daten-Änderungen und additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`); gesperrt: DROP/ALTER/CREATE DATABASE/ROLE/EXTENSION, `DROP TABLE/VIEW/SEQUENCE/TYPE/SCHEMA`, `TRUNCATE`, `ALTER TABLE … DROP`, `DO`-Blöcke, `EXECUTE`, eigene Funktionen/Trigger, GRANT/REVOKE, COPY, Rollenwechsel, Server- und Large-Object-Funktionen. Die AIdeation-Datenbank selbst wird abgelehnt. Das ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze – dafür einen Datenbank-Benutzer mit eingeschränkten Rechten hinterlegen.
 - **Schleifenschutz:** Wiederholt ein Modell denselben Absatz (3×) oder denselben Werkzeugaufruf (4× in Folge), bricht der Lauf ab.
 - **Git:** `status`, `diff`, `log`, `show`, `branch`, `remote -v`, `ls-files`, `pull --ff-only`, `fetch`, `checkout <branch>`, `clone <https/ssh-URL> [Unterordner|.]`.
 - **npm/node:** `npm test`, `npm run <skript>`, `npm install|ci [Pakete]` (immer mit `--ignore-scripts`), `npm ls|outdated|audit`, `node --version`, tsc/eslint/prettier/jest/vitest.
@@ -82,7 +82,7 @@ Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gese
 
 ## 5. Weitere Hintergrundaufgaben (ohne eigenes Modell)
 
-- **Dev Log neu starten** (Assistent → Aktionen → System, nur Administration): Der Worker wartet, bis keine Aufgabe mehr läuft (höchstens 15 Minuten), führt im Dev-Log-Ordner `docker compose up -d --build` aus und beendet sich danach; launchd startet ihn mit dem neuen Code und den neuen Agents neu. Schlägt der Build fehl, läuft alles mit dem bisherigen Stand weiter und die Ausgabe steht im Menü. Nach dem Build prüft der Worker bis zu 2 Minuten, ob Dev Log unter `http://127.0.0.1:3100/health` antwortet. Wenn nicht, setzt er den Dienst `dev-log` auf das vorherige Abbild zurück (`docker tag` + `docker compose up -d --no-build dev-log`), startet sich selbst nicht neu und schickt eine Push-Nachricht. Mit der Projekteinstellung „Nach dem Sprint-Abschluss Dev Log neu starten“ wird der Neustart nach einem abgeschlossenen Sprint automatisch angefordert (siehe workflows.md, Git im Sprint). Stand in `app_settings` (`system:restart`), API `GET/POST /api/system/restart`.
+- **AIdeation neu starten** (Assistent → Aktionen → System, nur Administration): Der Worker wartet, bis keine Aufgabe mehr läuft (höchstens 15 Minuten), führt im AIdeation-Ordner `docker compose up -d --build` aus und beendet sich danach; launchd startet ihn mit dem neuen Code und den neuen Agents neu. Schlägt der Build fehl, läuft alles mit dem bisherigen Stand weiter und die Ausgabe steht im Menü. Nach dem Build prüft der Worker bis zu 2 Minuten, ob AIdeation unter `http://127.0.0.1:3100/health` antwortet. Wenn nicht, setzt er den Dienst `dev-log` auf das vorherige Abbild zurück (`docker tag` + `docker compose up -d --no-build dev-log`), startet sich selbst nicht neu und schickt eine Push-Nachricht. Mit der Projekteinstellung „Nach dem Sprint-Abschluss AIdeation neu starten“ wird der Neustart nach einem abgeschlossenen Sprint automatisch angefordert (siehe workflows.md, Git im Sprint). Stand in `app_settings` (`system:restart`), API `GET/POST /api/system/restart`.
 - **Git-Sync:** committet den Arbeitsstand mit dem Sprintnamen, setzt einen Tag und pusht, wenn das Projekt eine Repository-URL hat.
 - **Repo-Doku-Sync:** spiegelt `README.md` und `docs/*.md` ins Dashboard.
 - **Sprint-Bericht:** wird nach jedem Zyklus für den aktiven Sprint erzeugt.

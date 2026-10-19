@@ -1,9 +1,9 @@
 #!/bin/bash
-# Installiert den Dev-Log-Worker als macOS LaunchAgent (Autostart, Neustart bei Absturz).
-# Der Worker bedient alle im Dev Log registrierten Projekte, jeweils im eigenen Projektordner.
+# Installiert den AIdeation-Worker als macOS LaunchAgent (Autostart, Neustart bei Absturz).
+# Der Worker bedient alle im AIdeation registrierten Projekte, jeweils im eigenen Projektordner.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LABEL="com.devlog.worker"
+LABEL="com.aideation.worker"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 NODE_BIN="$(dirname "$(command -v node)")"
 # launchd startet mit minimalem PATH; externe Agent-CLIs (claude, copilot, gemini) liegen oft in
@@ -23,14 +23,17 @@ cat > "$PLIST" <<P
 <string>$NODE_BIN/npm</string><string>run</string><string>worker</string></array>
 <key>EnvironmentVariables</key><dict>
 <key>PATH</key><string>$WORKER_PATH</string>
-<key>DEV_LOG_DATABASE_URL</key><string>${DEV_LOG_DATABASE_URL:-postgresql://devlog:devlog_local_dev@localhost:5433/dev_log}</string>
+<key>DEV_LOG_DATABASE_URL</key><string>${DEV_LOG_DATABASE_URL:-postgresql://devlog:devlog_local_dev@localhost:5433/aideation}</string>
 <key>DEV_LOG_OLLAMA_MODEL</key><string>${DEV_LOG_OLLAMA_MODEL:-qwen3.5:9b}</string>
 </dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
-<key>StandardOutPath</key><string>$HOME/Library/Logs/dev-log-worker.log</string>
-<key>StandardErrorPath</key><string>$HOME/Library/Logs/dev-log-worker.log</string>
+<key>StandardOutPath</key><string>$HOME/Library/Logs/aideation-worker.log</string>
+<key>StandardErrorPath</key><string>$HOME/Library/Logs/aideation-worker.log</string>
 </dict></plist>
 P
+# Frühere Bezeichnung (Dev Log) abräumen.
+launchctl bootout "gui/$(id -u)/com.devlog.worker" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.devlog.worker.plist"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
-echo "Worker installiert: $PLIST (Log: ~/Library/Logs/dev-log-worker.log)"
+echo "Worker installiert: $PLIST (Log: ~/Library/Logs/aideation-worker.log)"

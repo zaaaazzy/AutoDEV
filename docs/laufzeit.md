@@ -1,4 +1,4 @@
-# Dev Log zur Laufzeit
+# AIdeation zur Laufzeit
 
 Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Stand: 19.10.2026. Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
 
@@ -9,14 +9,14 @@ Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker auf dem Mac; der F
 ```mermaid
 flowchart TB
   U(["Browser / Handy"]):::person -->|HTTPS| C["Caddy :443"]
-  C --> FE["devlog_frontend_angular<br/>nginx · Oberfläche :3100"]
-  FE -->|"/api"| API["devlog_backend_nodejs<br/>API (intern :3100)"]
+  C --> FE["aideation_frontend_angular<br/>nginx · Oberfläche :3100"]
+  FE -->|"/api"| API["aideation_backend_nodejs<br/>API (intern :3100)"]
   subgraph MAC["Mac"]
     direction TB
-    W["Worker<br/>launchd com.devlog.worker"]:::ok
+    W["Worker<br/>launchd com.aideation.worker"]:::ok
     WD["Watchdog<br/>alle 2 min"]:::wait
     AG["Agents<br/>Claude · Copilot · Gemini · Ollama"]:::ok
-    P[("Projektordner<br/>Dev Log: DevLog-agents")]
+    P[("Projektordner<br/>AIdeation: AIdeation/agent")]
   end
   API -->|"Wünsche: Status, Chat, Aufträge"| DB[("PostgreSQL")]
   W <-->|"liest Anfragen, schreibt Ergebnisse"| DB
@@ -34,7 +34,7 @@ flowchart TB
 | ------------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0,5 s         | Einrichtung        | Host-Aufgaben des Projekt-Assistenten (Ordner, Git, GitHub, Vorlagen, Agent-Tests), bis zu 4 parallel.                                                                                                                                                                                                    |
 | 1,5 s         | Chat-Takt          | Nacheinander angestoßen, jede Spur höchstens einmal gleichzeitig: Testanforderung → _falls kein Chat läuft:_ Schnellschätzung → Auftragsautor (Ideen) → KI-Kommentar zum Sprintvorschlag → Visionär → Chat-Nachricht → Problemanalyse, danach Abnahmeprüfung.                                             |
-| 5 s           | Neustart           | „Dev Log neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), `docker compose up -d --build`, prüft bis 2 min `/health`; antwortet Dev Log nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker, launchd startet ihn neu.                 |
+| 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), `docker compose up -d --build`, prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker, launchd startet ihn neu.                 |
 | 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; jede Minute Git-Verlauf, alle 5 min Favicon.                                                                                                                                                                                                     |
 | 30 s · sofort | Arbeitszyklus      | Sofort, wenn die Datenbank neue Arbeit meldet (`NOTIFY devlog_work`: Auftrag eingeplant, Sprint gestartet) oder ein Platz frei wird; sonst alle 30 s. `runWorkflow` je Projekt, höchstens **2 Projekte gleichzeitig** (Einstellung, max. 8); wer am längsten wartet, kommt zuerst. Ablauf in Abschnitt 4. |
 | Start         | Wiederherstellung  | Unterbrochene Läufe → Auftrag wieder „Geplant“, Testanforderungen „fehlgeschlagen“, Abnahmeprüfungen und Visionär neu angefragt, Neustart als „erledigt“ markiert.                                                                                                                                        |
@@ -251,7 +251,7 @@ stateDiagram-v2
 - **Auftrag:** Branch `auftrag/…` vom Sprint-Branch; Erfolg → Merge, Misserfolg → WIP-Commit.
 - **Sprint:** Branch `sprint/…`; Sicherung committet Reste, Test-Gate, Push.
 - **Abschluss:** Merge nach `main` (--no-ff), erneutes Test-Gate, gegebenenfalls GitHub-Actions abwarten, Push, Tag `sprint-name-id`.
-- **Dev Log selbst:** `main` liegt im Arbeitsordner der Menschen. Mit „Nach dem Sprint-Abschluss neu starten“ merged der Worker dort nur, wenn nichts offen ist, prüft die Tests (rot → `reset --keep`) und fordert den Neustart an.
+- **AIdeation selbst:** `main` liegt im Arbeitsordner der Menschen. Mit „Nach dem Sprint-Abschluss neu starten“ merged der Worker dort nur, wenn nichts offen ist, prüft die Tests (rot → `reset --keep`) und fordert den Neustart an.
 - Nie committet: `.env`, Backups, Schlüsseldateien, Zeilen mit Tokens.
 
 ## 8 · Chat, Aktionen und Anfragen auf Knopfdruck
@@ -289,14 +289,14 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Aktionen → gespeicherte Aktion                     | Chat-Nachricht an den hinterlegten Agent | Chat-Spur                                                                               |
 | Aktionen → Kompletter Test / Nur Oberfläche        | `test_requests` requested                | Test-Spur, startet erst, wenn im Projekt kein Agent-Lauf aktiv ist; Befunde werden Bugs |
 | Aktionen → Visionär / Ideation → Ideen vorschlagen | `visionary_runs` requested               | Visionär-Spur                                                                           |
-| Aktionen → System → Dev Log neu starten (Admin)    | `app_settings` system:restart            | Neustart-Takt 5 s                                                                       |
+| Aktionen → System → AIdeation neu starten (Admin)    | `app_settings` system:restart            | Neustart-Takt 5 s                                                                       |
 | Auftrag → Analysieren                              | `analysis_status` requested              | Analyse-Spur                                                                            |
 | Sprint → KI-Kommentar                              | `sprint_proposal_comments`               | Auftragsautor, nur Text                                                                 |
 | Sprint → Git hoch / runter                         | `git_sync` pending, push oder pull       | Arbeitszyklus, Schritt 1 und 11                                                         |
 
 ## 9 · Rechte je Agent
 
-Zwei Ausführungswege mit unterschiedlichen Grenzen. **Claude-CLI**: Rechte aus den freigeschalteten Gruppen des Projekts, Dev Log setzt sie als `--allowedTools`, der Wächter prüft jeden Schreib- und Shell-Zugriff. **Lokales Modell (Ollama)**: eingebaute Werkzeuge, Schreiben nur für Entwickler und Assistent. Die Standardrechte werden je Agent gespeichert und lassen sich im Agent-Formular einzeln ändern.
+Zwei Ausführungswege mit unterschiedlichen Grenzen. **Claude-CLI**: Rechte aus den freigeschalteten Gruppen des Projekts, AIdeation setzt sie als `--allowedTools`, der Wächter prüft jeden Schreib- und Shell-Zugriff. **Lokales Modell (Ollama)**: eingebaute Werkzeuge, Schreiben nur für Entwickler und Assistent. Die Standardrechte werden je Agent gespeichert und lassen sich im Agent-Formular einzeln ändern.
 
 Legende: ✅ erlaubt · ⚠️ eingeschränkt · ⛔ gesperrt
 

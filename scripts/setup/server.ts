@@ -1,5 +1,5 @@
 /**
- * Einrichtungs-Assistent für Dev Log (läuft vor dem ersten Start, nur auf 127.0.0.1).
+ * Einrichtungs-Assistent für AIdeation (läuft vor dem ersten Start, nur auf 127.0.0.1).
  * Prüft das System, schreibt die .env, startet Docker, richtet den Worker ein und öffnet danach die App.
  * Aufruf über start.sh / start.cmd – nicht direkt nötig.
  */
@@ -69,7 +69,7 @@ async function checks() {
     claude: { ok: Boolean(claude), version: claude },
     ollama: { ok: Boolean(ollama), version: ollama },
     envExists: existsSync(ENV_FILE),
-    // Vorschlag für den Projektbereich: der Ordner, in dem Dev Log liegt.
+    // Vorschlag für den Projektbereich: der Ordner, in dem AIdeation liegt.
     defaultProjectRoot: resolve(ROOT, '..'),
   };
 }
@@ -118,7 +118,7 @@ async function writeEnv(body: InstallRequest, log: (line: string) => void): Prom
     ['DEV_LOG_USERNAME', body.username],
     ['DEV_LOG_PASSWORD', body.password],
     ['DEV_LOG_DB_PASSWORD', dbPassword],
-    ['DEV_LOG_DATABASE_URL', `postgresql://devlog:${dbPassword}@localhost:5433/dev_log`],
+    ['DEV_LOG_DATABASE_URL', `postgresql://devlog:${dbPassword}@localhost:5433/aideation`],
   ]);
   if (body.projectRoots.trim()) values.set('DEV_LOG_PROJECT_ROOTS', body.projectRoots.trim());
   if (body.domain.trim()) {
@@ -127,7 +127,7 @@ async function writeEnv(body: InstallRequest, log: (line: string) => void): Prom
     values.set('COMPOSE_PROFILES', 'https');
   }
   const content = [
-    '# Dev Log – erzeugt vom Einrichtungs-Assistenten',
+    '# AIdeation – erzeugt vom Einrichtungs-Assistenten',
     ...[...values].map(([key, value]) => `${key}=${value}`),
     '',
   ].join('\n');
@@ -144,7 +144,7 @@ async function waitForHealth(log: (line: string) => void): Promise<boolean> {
     } catch {
       // startet noch
     }
-    if (attempt % 10 === 0) log('Warte auf Dev Log …');
+    if (attempt % 10 === 0) log('Warte auf AIdeation …');
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   return false;
@@ -174,7 +174,7 @@ async function install(body: InstallRequest, send: (event: Record<string, unknow
   step(
     'health',
     healthy ? 'ok' : 'error',
-    healthy ? '' : 'Dev Log antwortet nicht – „docker compose logs dev-log“ zeigt den Grund.',
+    healthy ? '' : 'AIdeation antwortet nicht – „docker compose logs dev-log“ zeigt den Grund.',
   );
   if (!healthy) {
     send({ type: 'done', ok: false });
@@ -267,7 +267,7 @@ const server = createServer(async (request, response) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   const link = `http://127.0.0.1:${PORT}/#${TOKEN}`;
-  console.log(`\n  Dev Log – Einrichtung: ${link}\n`);
+  console.log(`\n  AIdeation – Einrichtung: ${link}\n`);
   if (process.env.DEV_LOG_SETUP_NO_BROWSER) return;
   const opener = IS_WINDOWS
     ? ['cmd', ['/c', 'start', '', link]]

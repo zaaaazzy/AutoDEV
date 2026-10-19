@@ -31,7 +31,7 @@ import { listenForWork, WorkSignal } from './work-signal.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
- * Dev Log selbst liegt (z. B. /Volumes/External). Ausserhalb davon legt der Worker nichts an und startet keine Agents.
+ * AIdeation selbst liegt (z. B. /Volumes/External). Ausserhalb davon legt der Worker nichts an und startet keine Agents.
  */
 export function resolveProjectScope(environment: NodeJS.ProcessEnv, installDir: string): string {
   const configured = environment.DEV_LOG_PROJECT_ROOTS?.trim();
@@ -118,7 +118,7 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
         !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
           ? repository
           : null;
-      // Der Dev-Log-Ordner selbst (oder ein Projekt mit eigenem Arbeitsordner): Agents arbeiten in einem eigenen
+      // Der AIdeation-Ordner selbst (oder ein Projekt mit eigenem Arbeitsordner): Agents arbeiten in einem eigenen
       // Worktree, nie im Arbeitsordner der Menschen bzw. des laufenden Entwicklungsservers.
       const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT, undefined, separate) : null;
       const transient = !outside && !folder && isAbsolute(repository) && volumeOf(repository) !== null;
@@ -129,7 +129,7 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
           : transient
             ? missingFolderMessage(repository)
             : !folder
-              ? `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`
+              ? `Projektordner nicht gefunden: ${repository} (im AIdeation unter „Projekt“ den absoluten Pfad angeben)`
               : (workspace?.problem ?? null),
         repository,
         transient,
@@ -207,7 +207,7 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
 }
 
-/** Ordner, aus dem dieser Worker läuft (die Dev-Log-Installation). */
+/** Ordner, aus dem dieser Worker läuft (die AIdeation-Installation). */
 const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function main(): Promise<void> {
@@ -238,7 +238,7 @@ async function main(): Promise<void> {
       return;
     }
     await recoverInterruptedRuns(pool);
-    // Ein angeforderter Neustart („Dev Log neu starten“) ist mit diesem Start abgeschlossen.
+    // Ein angeforderter Neustart („AIdeation neu starten“) ist mit diesem Start abgeschlossen.
     await completeRestart(pool).catch((error: unknown) =>
       console.error('Neustart-Status konnte nicht gesetzt werden:', describeError(error)),
     );
@@ -279,7 +279,7 @@ async function main(): Promise<void> {
         }
       }
     }, 15_000);
-    // Projektordner und Dev-Log-Ordner überwachen: Ausfälle (z. B. externes Laufwerk) melden und für Agent-Läufe merken,
+    // Projektordner und AIdeation-Ordner überwachen: Ausfälle (z. B. externes Laufwerk) melden und für Agent-Läufe merken,
     // damit ein Abbruch in dieser Zeit als Unterbrechung gilt statt als Fehler im Auftrag.
     const stopFolderWatch = watchFolders(
       () => [
@@ -416,7 +416,7 @@ async function main(): Promise<void> {
         console.error(`[${slug}] Runner-Zyklus fehlgeschlagen:`, errors.get(slug));
       }
     };
-    // „Dev Log neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
+    // „AIdeation neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
     // launchd startet ihn mit dem neuen Code wieder.
     let restartActive = false;
     const restartTimer = setInterval(() => {
@@ -436,7 +436,7 @@ async function main(): Promise<void> {
           if (result === 'failed') {
             const state = await readRestart(pool).catch(() => null);
             await sendPush(pool, {
-              title: '⚠ Dev Log Neustart fehlgeschlagen',
+              title: '⚠ AIdeation Neustart fehlgeschlagen',
               body: state?.message ?? 'Details unter Assistent → Aktionen → System.',
               url: '#dashboard',
               tag: 'system-restart',

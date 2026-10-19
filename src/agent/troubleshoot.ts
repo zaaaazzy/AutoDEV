@@ -16,7 +16,7 @@ export function buildTroubleshootPrompt(
   bugs: string[],
 ): string {
   return [
-    'Du bist der Problemanalyst im Dev Log (nur lesender Zugriff). Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Diese angeforderte Analyse dokumentiert den Befund, ohne den Auftrag ungefragt umzusetzen.',
+    'Du bist der Problemanalyst im AIdeation (nur lesender Zugriff). Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Diese angeforderte Analyse dokumentiert den Befund, ohne den Auftrag ungefragt umzusetzen.',
     `## Anweisung\n${instructions || 'Analysiere gründlich und nenne konkrete Schritte.'}`,
     `## Auftrag\nTitel: ${item.title}\n${item.description.slice(0, 3000)}`,
     `## Fehlgeschlagene Schritte (neueste zuerst)\n${failures.join('\n\n') || 'Keine Fehlerausgabe vorhanden.'}`,

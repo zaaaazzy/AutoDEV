@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Dev Log einrichten</title>
+    <title>AIdeation einrichten</title>
     <style>
       :root {
         --ink: #202824;
@@ -321,7 +321,7 @@
           <span class="mark">m</span>
           <div>
             <small>Einrichtung</small>
-            <h1>Dev Log</h1>
+            <h1>AIdeation</h1>
           </div>
         </div>
         <ol class="steps" id="steps"></ol>
@@ -349,7 +349,7 @@
         { id: 'system', label: 'System', title: 'Ist alles bereit?' },
         { id: 'access', label: 'Zugang', title: 'Wie meldest du dich an?' },
         { id: 'options', label: 'Optionen', title: 'Zugriff und Worker' },
-        { id: 'install', label: 'Installation', title: 'Dev Log wird eingerichtet' },
+        { id: 'install', label: 'Installation', title: 'AIdeation wird eingerichtet' },
       ];
       const state = {
         step: 0,
@@ -394,7 +394,7 @@
           node: 'Node.js 22 oder neuer: https://nodejs.org/',
         };
         $('body').innerHTML = `
-          <p class="intro">Dev Log läuft in Docker; der Worker, der die Agents startet, läuft direkt auf deinem Rechner.</p>
+          <p class="intro">AIdeation läuft in Docker; der Worker, der die Agents startet, läuft direkt auf deinem Rechner.</p>
           <ul class="checks">
             ${item(c ? c.node.ok : null, 'Node.js 22+', c ? `gefunden: ${escape(c.node.version)}` : 'wird geprüft …')}
             ${item(c ? c.docker.ok : null, 'Docker läuft', c ? (c.docker.ok ? `Version ${escape(c.docker.version)}` : install.docker) : 'wird geprüft …')}
@@ -435,8 +435,8 @@
           <label>Eigene Domain für HTTPS-Zugriff von unterwegs (optional)
             <input type="text" id="domain" value="${escape(state.domain)}" placeholder="devlog.example.com" />
           </label>
-          <p class="hint">Mit Domain holt Dev Log automatisch ein Zertifikat; dein Router muss Port 443 an diesen Rechner weiterleiten. Ohne Domain ist Dev Log nur hier unter <code>http://localhost:3100</code> erreichbar.</p>
-          <label>Projektbereich – nur hier legt Dev Log Projekte an und arbeiten Agents
+          <p class="hint">Mit Domain holt AIdeation automatisch ein Zertifikat; dein Router muss Port 443 an diesen Rechner weiterleiten. Ohne Domain ist AIdeation nur hier unter <code>http://localhost:3100</code> erreichbar.</p>
+          <label>Projektbereich – nur hier legt AIdeation Projekte an und arbeiten Agents
             <input type="text" id="roots" value="${escape(state.projectRoots)}" placeholder="z. B. /Users/du/Projekte" />
           </label>
           <label class="check"><input type="checkbox" id="worker" ${state.installWorker ? 'checked' : ''} /> Worker automatisch beim Anmelden starten (empfohlen)</label>`;
@@ -451,7 +451,7 @@
         const labels = {
           env: 'Konfiguration schreiben',
           docker: 'Container bauen und starten',
-          health: 'Dev Log antwortet',
+          health: 'AIdeation antwortet',
           worker: 'Worker einrichten',
         };
         const status = {};
@@ -533,9 +533,9 @@
         $('body').innerHTML = `
           <div class="done">
             <span class="mark">m</span>
-            <h3>Dev Log ist eingerichtet</h3>
-            <p class="hint">Gleich öffnet sich Dev Log. Melde dich mit <strong>${escape(state.username)}</strong> an – danach begrüßt dich der Projekt-Assistent.</p>
-            <button type="button" class="primary" id="open">Dev Log öffnen</button>
+            <h3>AIdeation ist eingerichtet</h3>
+            <p class="hint">Gleich öffnet sich AIdeation. Melde dich mit <strong>${escape(state.username)}</strong> an – danach begrüßt dich der Projekt-Assistent.</p>
+            <button type="button" class="primary" id="open">AIdeation öffnen</button>
           </div>`;
         $('open').onclick = () => (location.href = url);
         $('back').style.display = 'none';

@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PATTERN='Zeitlimit erreicht|Schleife erkannt|wiederholt mit denselben Argumenten|Maximale Anzahl von [0-9]+ Schritten erreicht|Der Entwickler-Agent hat keine Dateien geändert|Ollama nicht erreichbar|Ollama antwortete mit [0-9]+|Ollama lieferte keine Nachricht|Das Modell lieferte keine Antwort|im PATH des Workers nicht gefunden|ENOENT|Process ended by SIG[A-Z]+ \(timeout or kill\)|Unterbrochen: Der Worker wurde beendet'
-docker compose exec -T db psql -U "${DEV_LOG_DB_USER:-devlog}" -d dev_log -v ON_ERROR_STOP=1 -v pattern="$PATTERN" <<'SQL'
+docker compose exec -T db psql -U "${DEV_LOG_DB_USER:-devlog}" -d aideation -v ON_ERROR_STOP=1 -v pattern="$PATTERN" <<'SQL'
 BEGIN;
 CREATE TEMP TABLE noise ON COMMIT DROP AS
   SELECT id FROM bugs

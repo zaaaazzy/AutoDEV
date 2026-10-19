@@ -562,7 +562,7 @@ export async function runStep(
   const passed = result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule;
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
   const reported = agent.role === 'tester' ? parseCoverage(output) : null;
-  // Zusätzlich misst Dev Log selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
+  // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
   const measured =
     agent.role === 'tester' && !cancelled
       ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(() => [])

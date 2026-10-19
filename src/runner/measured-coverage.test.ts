@@ -67,7 +67,7 @@ test('measured percentages fill the tester report', () => {
   assert.equal(merged.areas[0]!.lines, 84);
   assert.equal(merged.areas[0]!.passed, 69);
   assert.equal(merged.areas[0]!.unit, 64);
-  assert.match(merged.summary, /Gemessen von Dev Log/);
+  assert.match(merged.summary, /Gemessen von AIdeation/);
   assert.equal(mergeCoverage(null, []), null);
 });
 
@@ -92,7 +92,7 @@ test('findet den Test-Runner auch hinter „&&“ und über „npm run“', () =
   assert.equal(testRunnerOf('npm run a', { a: 'npm run a' }), null);
 });
 
-test('misst Dev Log selbst: erst vorbereiten, dann mit Abdeckung testen', async () => {
+test('misst AIdeation selbst: erst vorbereiten, dann mit Abdeckung testen', async () => {
   const { mkdtemp, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');

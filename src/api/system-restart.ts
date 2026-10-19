@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { readRestart, requestRestart } from '../runner/system-restart.js';
 import type { Principal } from './roles.js';
 
-/** Neustart von Dev Log (Container neu bauen, Worker neu starten): anfordern nur mit Administration, lesen alle. */
+/** Neustart von AIdeation (Container neu bauen, Worker neu starten): anfordern nur mit Administration, lesen alle. */
 export function registerSystemRestartRoutes(app: Express, pool: Pool): void {
   app.get('/api/system/restart', async (_request, response, next) => {
     try {

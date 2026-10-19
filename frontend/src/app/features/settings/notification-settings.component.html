@@ -11,7 +11,7 @@
         <strong>Als App installieren</strong>
         <small>{{
           standalone
-            ? 'Dev Log läuft als installierte App.'
+            ? 'AIdeation läuft als installierte App.'
             : 'Eigenes Symbol auf dem Home-Bildschirm, ohne Browserleiste.'
         }}</small>
       </span>
@@ -28,7 +28,7 @@
     <label class="setting-row">
       <span class="setting-text">
         <strong>Push-Nachrichten</strong>
-        <small>Auftrag erledigt oder blockiert, Antwort oder Rückfrage des Assistenten, Ausfall von Dev Log.</small>
+        <small>Auftrag erledigt oder blockiert, Antwort oder Rückfrage des Assistenten, Ausfall von AIdeation.</small>
       </span>
       <input
         class="switch"
@@ -70,7 +70,7 @@
         <div>
           <p class="eyebrow">Einrichtung</p>
           <h3 id="guide-title">
-            {{ kind === 'install' ? 'Dev Log als App installieren' : 'Benachrichtigungen erlauben' }}
+            {{ kind === 'install' ? 'AIdeation als App installieren' : 'Benachrichtigungen erlauben' }}
           </h3>
         </div>
         <button class="wizard-icon-button" type="button" aria-label="Schließen" (click)="guide.set(null)">✕</button>
@@ -89,10 +89,10 @@
             </li>
             <li>
               <strong>„Hinzufügen“ tippen</strong>
-              <small>Auf dem Home-Bildschirm erscheint das Dev-Log-Symbol.</small>
+              <small>Auf dem Home-Bildschirm erscheint das AIdeation-Symbol.</small>
             </li>
             <li>
-              <strong>Dev Log über das neue Symbol öffnen</strong>
+              <strong>AIdeation über das neue Symbol öffnen</strong>
               <small
                 >Dann hier unter Einstellungen „Push-Nachrichten“ einschalten – auf dem iPhone geht das nur in der
                 App.</small
@@ -105,7 +105,7 @@
             <li>
               <strong>„App installieren“ bzw. „Zum Startbildschirm hinzufügen“</strong><small>Dann bestätigen.</small>
             </li>
-            <li><strong>Dev Log über das neue Symbol öffnen</strong></li>
+            <li><strong>AIdeation über das neue Symbol öffnen</strong></li>
           </ol>
         } @else if (safariMac) {
           <ol class="guide-steps">
@@ -116,7 +116,7 @@
           <ol class="guide-steps">
             <li>
               <strong>In der Adressleiste rechts auf das Installieren-Symbol klicken</strong>
-              <small>Alternativ im Browsermenü „Dev Log installieren“.</small>
+              <small>Alternativ im Browsermenü „AIdeation installieren“.</small>
             </li>
             <li><strong>„Installieren“ bestätigen</strong></li>
           </ol>
@@ -131,7 +131,7 @@
             <small>Dort <span class="guide-key">Erlauben</span> wählen.</small>
           </li>
           <li>
-            <strong>Dev Log meldet dieses Gerät an</strong>
+            <strong>AIdeation meldet dieses Gerät an</strong>
             <small>Zur Kontrolle kommt sofort eine Testnachricht.</small>
           </li>
         </ol>
@@ -140,7 +140,7 @@
             <strong>Benachrichtigungen sind gesperrt.</strong>
             @if (ios) {
               <small
-                >Einstellungen → Mitteilungen → Dev Log → „Mitteilungen erlauben“ einschalten, dann hier erneut
+                >Einstellungen → Mitteilungen → AIdeation → „Mitteilungen erlauben“ einschalten, dann hier erneut
                 versuchen.</small
               >
             } @else if (android) {

@@ -768,7 +768,7 @@ export const SCHEMA = `
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_token_limit BIGINT CHECK (order_token_limit > 0);
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_cost_limit NUMERIC(10, 2) CHECK (order_cost_limit > 0);
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_since TIMESTAMPTZ;
-  -- Nach dem Sprint-Abschluss (Merge nach main) Dev Log selbst neu starten – nur für das Dev-Log-Projekt sinnvoll.
+  -- Nach dem Sprint-Abschluss (Merge nach main) AIdeation selbst neu starten – nur für das AIdeation-Projekt sinnvoll.
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS restart_after_sprint BOOLEAN NOT NULL DEFAULT FALSE;
 
   -- Workflow-Board: Phasen vor dem Sprint und am Ende eines Auftrags, Nachrichten zwischen Agents.

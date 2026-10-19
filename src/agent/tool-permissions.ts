@@ -96,7 +96,8 @@ const COMMAND_HELP: Record<string, string> = {
   [FILES_CREATE]:
     'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“.',
   [FILES_EDIT]: 'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten oder überschreiben.',
-  [SERVICES_COMMAND]: 'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht Dev Log selbst (com.devlog.*).',
+  [SERVICES_COMMAND]:
+    'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht AIdeation selbst (com.aideation.*).',
   [DATABASE_COMMAND]:
     'Liest und ändert die Projekt-Datenbank per SQL (Werkzeug run_sql des lokalen Modells; braucht eine hinterlegte Datenbank-URL).',
   [LOGS_COMMAND]: 'Liest Dienst-Logs unter ~/Library/Logs, z. B. das Log des Live-Modus (nur lesen).',
@@ -237,7 +238,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     id: 'services',
     label: 'Projekt-Dienste neu starten',
-    description: 'Live-Dienste der Projekte (ch.*) per launchctl neu starten – nicht DevLog selbst.',
+    description: 'Live-Dienste der Projekte (ch.*) per launchctl neu starten – nicht AIdeation selbst.',
     // Beim Start: Bash(launchctl kickstart -k gui/<uid>/ch.*) – Wildcard statt Präfix, weil „:*“ nur an Wortgrenzen greift.
     rules: [SERVICES_COMMAND],
   },
@@ -345,7 +346,7 @@ export function composeViolation(configJson: string, root: string): string | nul
 /** Gruppen-IDs eigener Gruppen: Kleinbuchstaben, Ziffern und Bindestriche. */
 export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
-/** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, Dev Log und Daten). */
+/** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMANDS =
   /^(?:sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\d*|gem|cargo|go)\b/;
 const FORBIDDEN_SUBCOMMANDS =
@@ -367,8 +368,11 @@ export function customRuleProblem(rule: string): string | null {
   if (command.length > 120) return `„${rule}“: Befehl zu lang.`;
   if (FORBIDDEN_COMMANDS.test(command) || FORBIDDEN_SUBCOMMANDS.test(command))
     return `„${rule}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
-  if (/(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|DevLog)(?:[\s/]|$)/i.test(command) || /\.\./.test(command))
-    return `„${rule}“: Zugriff auf Geheimnisse, Dev Log selbst oder übergeordnete Ordner ist gesperrt.`;
+  if (
+    /(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|com\.aideation|DevLog|AIdeation)(?:[\s/]|$)/i.test(command) ||
+    /\.\./.test(command)
+  )
+    return `„${rule}“: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.`;
   return null;
 }
 

@@ -28,7 +28,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       id: 'navigation',
       section: 'dashboard',
       targets: ['.sidebar nav', '.menu-toggle'],
-      title: 'Willkommen in Dev Log',
+      title: 'Willkommen in AIdeation',
       text: 'Links (auf dem Handy hinter dem Logo) findest du alle Bereiche. Wir gehen sie einmal gemeinsam durch – vom Einfall bis zum Agent, der ihn umsetzt.',
     },
     {
@@ -116,7 +116,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       section: 'agents',
       targets: ['.live-progress', 'app-order-table'],
       title: 'Live dabei',
-      text: 'Hier siehst du jeden Schritt: was gelesen, geschrieben und ausgeführt wird. Fertige Aufträge prüfen Tester und Reviewer – bei Fragen meldet sich Dev Log per Push. Viel Freude!',
+      text: 'Hier siehst du jeden Schritt: was gelesen, geschrieben und ausgeführt wird. Fertige Aufträge prüfen Tester und Reviewer – bei Fragen meldet sich AIdeation per Push. Viel Freude!',
     },
   ];
 }

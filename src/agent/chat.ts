@@ -47,9 +47,9 @@ export interface ChatAgent {
 /** Vom Nutzer gewählter Agent: Bezeichnung und Beschreibung bestimmen, wie die Anfrage bearbeitet wird. */
 export function agentIdentity(agent: ChatAgent | null): string {
   if (!agent)
-    return 'Du bist der allgemeine Assistent dieses Projekts im Dev Log. Beantworte Fragen knapp und auf Deutsch.';
+    return 'Du bist der allgemeine Assistent dieses Projekts im AIdeation. Beantworte Fragen knapp und auf Deutsch.';
   return [
-    `Du übernimmst diese Anfrage als Agent „${agent.name}“ dieses Projekts im Dev Log. Antworte knapp und auf Deutsch.`,
+    `Du übernimmst diese Anfrage als Agent „${agent.name}“ dieses Projekts im AIdeation. Antworte knapp und auf Deutsch.`,
     agent.instructions.trim() ? `## Deine Rolle und Arbeitsweise\n${agent.instructions.trim()}` : '',
   ]
     .filter(Boolean)

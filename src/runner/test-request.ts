@@ -33,7 +33,7 @@ export async function useLatestMain(cwd: string, execute: CommandExecutor): Prom
   await execute(['git', 'checkout', '-q', '--detach', 'main'], cwd, { timeoutMs: 60_000 });
 }
 
-/** Projekte mit eigenem Komplettlauf (Skript „test:full“, wie Dev Log selbst) nutzen ihn, sonst die Testbefehle. */
+/** Projekte mit eigenem Komplettlauf (Skript „test:full“, wie AIdeation selbst) nutzen ihn, sonst die Testbefehle. */
 export async function hasFullTestScript(cwd: string): Promise<boolean> {
   try {
     const manifest = JSON.parse(await readFile(join(cwd, 'package.json'), 'utf8')) as {

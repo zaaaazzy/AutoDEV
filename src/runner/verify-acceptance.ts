@@ -25,7 +25,7 @@ export interface CheckResult {
 
 export function buildVerifyPrompt(item: { title: string; description: string }, points: Point[]): string {
   return [
-    'Du bist der Tester im Dev Log. Prüfe die folgenden offenen Abnahmepunkte eines erledigten Auftrags selbst im Projekt: Code und Konfiguration lesen, Tests und Befehle ausführen, lokale Seiten und APIs mit WebFetch (nur localhost) abrufen. Ändere keine Dateien.',
+    'Du bist der Tester im AIdeation. Prüfe die folgenden offenen Abnahmepunkte eines erledigten Auftrags selbst im Projekt: Code und Konfiguration lesen, Tests und Befehle ausführen, lokale Seiten und APIs mit WebFetch (nur localhost) abrufen. Ändere keine Dateien.',
     `## Auftrag\n${item.title}\n${item.description.slice(0, 3000)}`,
     `## Zu prüfende Punkte\n${points
       .map((point, index) => `${index + 1}. ${point.text}${point.note ? `\n   Bisher: ${point.note}` : ''}`)

@@ -127,14 +127,15 @@
         </p>
         <label class="wide check">
           <input type="checkbox" name="restartAfterSprint" [(ngModel)]="settings.restartAfterSprint" /> Nach dem
-          Sprint-Abschluss Dev Log neu starten: Ist der Sprint nach <code>main</code> gemergt, baut Dev Log die
-          Container neu und startet den Worker neu – nur für das Projekt, in dem Dev Log selbst entwickelt wird.</label
+          Sprint-Abschluss AIdeation neu starten: Ist der Sprint nach <code>main</code> gemergt, baut AIdeation die
+          Container neu und startet den Worker neu – nur für das Projekt, in dem AIdeation selbst entwickelt
+          wird.</label
         >
         <label
           >Sprintplanung
           <select name="sprintMode" [(ngModel)]="settings.sprintMode">
             <option value="manual">Manuell – Sprints selbst zusammenstellen</option>
-            <option value="suggest">Vorschlagen – Dev Log schlägt vor, du übernimmst</option>
+            <option value="suggest">Vorschlagen – AIdeation schlägt vor, du übernimmst</option>
             <option value="autopilot">Autopilot – vorschlagen, starten und abschliessen</option>
           </select>
         </label>
@@ -219,7 +220,7 @@
         }
         <p class="muted wide">
           Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
-          Dev-Log-Datenbank).
+          AIdeation-Datenbank).
         </p>
         <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
       </form>
@@ -256,7 +257,9 @@
       <div class="section-heading">
         <div>
           <h2>Projekt löschen</h2>
-          <p class="muted">Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus Dev Log.</p>
+          <p class="muted">
+            Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus AIdeation.
+          </p>
         </div>
       </div>
       <form class="form-grid" (ngSubmit)="deleteProject()">

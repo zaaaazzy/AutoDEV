@@ -107,7 +107,7 @@ async function createFolder(params: Params) {
 
 /**
  * Projektordner löschen (nur intern über DELETE /api/projects, der Pfad stammt aus der Datenbank).
- * Mehrfach abgesichert: gültiger Projektordner, mindestens drei Ebenen tief, kein symbolischer Link, nicht Dev Log.
+ * Mehrfach abgesichert: gültiger Projektordner, mindestens drei Ebenen tief, kein symbolischer Link, nicht AIdeation.
  */
 export async function deleteProjectFolder(params: Params) {
   const folder = resolve(folderOf(params));
@@ -115,7 +115,7 @@ export async function deleteProjectFolder(params: Params) {
   if (depth < 3) throw new Error(`Ordner ${folder} liegt zu weit oben und wird nicht gelöscht.`);
   const devLog = resolve(import.meta.dirname, '..', '..');
   if (folder === devLog || devLog.startsWith(folder + sep) || folder.startsWith(devLog + sep)) {
-    throw new Error('Der Dev-Log-Ordner selbst wird nie gelöscht.');
+    throw new Error('Der AIdeation-Ordner selbst wird nie gelöscht.');
   }
   const info = await lstat(folder).catch(() => null);
   if (!info) return { deleted: false, path: folder, reason: 'Ordner existiert nicht (mehr).' };
@@ -212,7 +212,7 @@ async function gitSetup(params: Params, execute: CommandExecutor, log: Log) {
     await log('Git-Repository angelegt (Branch main).');
   }
   if (!(await run(execute, ['git', 'config', 'user.email'], folder)).output) {
-    await git('config', 'user.name', 'Mainty Dev Log');
+    await git('config', 'user.name', 'AIdeation');
     await git('config', 'user.email', 'dev-log@mainty.local');
   }
   const hasCommit = (await run(execute, ['git', 'rev-parse', '--verify', 'HEAD'], folder)).ok;
@@ -222,7 +222,7 @@ async function gitSetup(params: Params, execute: CommandExecutor, log: Log) {
       'commit',
       '--allow-empty',
       '-m',
-      hasCommit ? 'chore: Projekt mit Dev Log verbunden' : 'chore: Initial-Commit',
+      hasCommit ? 'chore: Projekt mit AIdeation verbunden' : 'chore: Initial-Commit',
     );
     await log('Commit erstellt.');
   }
@@ -282,7 +282,7 @@ async function testAgent(params: Params, execute: CommandExecutor) {
   return { installed: true, ok: result.ok && /ok/i.test(result.output), output: result.output.slice(-400) };
 }
 
-const HELPER_PROMPT = `Du bist der kostenlose Hilfe-Assistent im Einrichtungsassistenten von Dev Log. Dev Log verwaltet Software-Projekte mit KI-Agents (Auftragsautor, Entwickler, Tester, Dokumentierer) und Git-Sprints. Der Nutzer legt gerade ein Projekt an: 1) Ordner wählen, 2) Git/GitHub und Vorlage, 3) Agent-Anbieter (lokal Ollama oder bezahlt: Claude, Copilot, Gemini), 4) Rechte der Agents. Antworte kurz, konkret und auf Deutsch, mit Befehlen für macOS (Terminal) wo hilfreich.
+const HELPER_PROMPT = `Du bist der kostenlose Hilfe-Assistent im Einrichtungsassistenten von AIdeation. AIdeation verwaltet Software-Projekte mit KI-Agents (Auftragsautor, Entwickler, Tester, Dokumentierer) und Git-Sprints. Der Nutzer legt gerade ein Projekt an: 1) Ordner wählen, 2) Git/GitHub und Vorlage, 3) Agent-Anbieter (lokal Ollama oder bezahlt: Claude, Copilot, Gemini), 4) Rechte der Agents. Antworte kurz, konkret und auf Deutsch, mit Befehlen für macOS (Terminal) wo hilfreich.
 
 Verlässliche Fakten (nutze genau diese Befehle, erfinde keine anderen):
 - GitHub CLI: \`brew install gh\`, dann \`gh auth login\` (GitHub.com, SSH, im Browser bestätigen). Ohne gh kann ein vorhandenes Repository per SSH verbunden werden; Test: \`ssh -T git@github.com\`.

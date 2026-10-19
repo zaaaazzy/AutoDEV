@@ -18,7 +18,7 @@ async function start(): Promise<void> {
   const bind = process.env.DEV_LOG_BIND?.trim();
   if (bind && !['127.0.0.1', 'localhost', '::1'].includes(bind)) {
     console.warn(
-      `WARNUNG: DEV_LOG_BIND=${bind} – Dev Log ist im Netz erreichbar, Benutzername und Passwort gehen per HTTP unverschlüsselt über die Leitung. Wer sie mitliest, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf diesem Rechner ausführen. Besser: DEV_LOG_BIND=127.0.0.1 und Zugriff über HTTPS-Proxy, Tailscale oder SSH-Tunnel.`,
+      `WARNUNG: DEV_LOG_BIND=${bind} – AIdeation ist im Netz erreichbar, Benutzername und Passwort gehen per HTTP unverschlüsselt über die Leitung. Wer sie mitliest, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf diesem Rechner ausführen. Besser: DEV_LOG_BIND=127.0.0.1 und Zugriff über HTTPS-Proxy, Tailscale oder SSH-Tunnel.`,
     );
   }
   const pool = await createDatabasePool(readDatabaseConfig());
@@ -26,7 +26,7 @@ async function start(): Promise<void> {
   const auth =
     username && password && !authDisabled ? { username, password, totpSecret: await loadTotpSecret(pool) } : null;
   const server = createDevLogApp(pool, auth).listen(port, host, () => {
-    console.info(`Dev Log listening on ${host}:${port}.`);
+    console.info(`AIdeation listening on ${host}:${port}.`);
   });
   const shutdown = (): void => {
     server.close(() => void pool.end());
@@ -36,6 +36,6 @@ async function start(): Promise<void> {
 }
 
 start().catch((error: unknown) => {
-  console.error('Dev Log startup failed:', error);
+  console.error('AIdeation startup failed:', error);
   process.exitCode = 1;
 });

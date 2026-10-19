@@ -54,7 +54,7 @@ interface Roadmap {
 }
 
 /**
- * Sprintplanung: Dev Log schlägt aus dem Backlog den nächsten Sprint vor (Bewertung, Begründung, Summen mit Kosten).
+ * Sprintplanung: AIdeation schlägt aus dem Backlog den nächsten Sprint vor (Bewertung, Begründung, Summen mit Kosten).
  * Aufträge lassen sich ab- und zuwählen; „Übernehmen“ legt den Sprint mit dieser Reihenfolge an. Dazu: KI-Kommentar
  * des Auftragsautors (nur Text), Autopilot-Zustand mit Freigabe und eine Roadmap der nächsten 3 Sprints.
  */

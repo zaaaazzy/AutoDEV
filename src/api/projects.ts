@@ -148,7 +148,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
         return fail('Ungültiger Datenbank-Zugang. Erlaubt: postgresql://user:passwort@host:port/datenbank');
       }
       if (url && targetsDevLogDatabase(url)) {
-        return fail('Der Zugang darf nicht auf die Dev-Log-Datenbank zeigen.');
+        return fail('Der Zugang darf nicht auf die AIdeation-Datenbank zeigen.');
       }
       values.push(url || null);
       sets.push(`database_url = $${values.length}`);

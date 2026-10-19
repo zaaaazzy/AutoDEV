@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tägliches Backup der Dev-Log-Datenbank nach ./backups (pg_dump im Custom-Format, komprimiert).
+# Tägliches Backup der AIdeation-Datenbank nach ./backups (pg_dump im Custom-Format, komprimiert).
 # Läuft als eigener Container; sichert, sobald das letzte Backup älter als 23 Stunden ist, und
 # löscht Backups, die älter als BACKUP_KEEP_DAYS Tage sind.
 #
@@ -14,16 +14,16 @@ while true; do
     exit 1
   fi
   rm -f /backups/.write-test 2>/dev/null || true
-  if [ -z "$(find /backups -maxdepth 1 -name 'dev_log-*.dump' -mmin -1380 2>/dev/null)" ]; then
+  if [ -z "$(find /backups -maxdepth 1 -name 'aideation-*.dump' -mmin -1380 2>/dev/null)" ]; then
     stamp="$(date +%Y%m%d-%H%M%S)"
-    if pg_dump -Fc -d dev_log -f "/backups/.dev_log-$stamp.tmp"; then
-      mv "/backups/.dev_log-$stamp.tmp" "/backups/dev_log-$stamp.dump" || echo "$(date -Iseconds) Backup konnte nicht umbenannt werden" >&2
-      echo "$(date -Iseconds) Backup geschrieben: dev_log-$stamp.dump"
+    if pg_dump -Fc -d aideation -f "/backups/.aideation-$stamp.tmp"; then
+      mv "/backups/.aideation-$stamp.tmp" "/backups/aideation-$stamp.dump" || echo "$(date -Iseconds) Backup konnte nicht umbenannt werden" >&2
+      echo "$(date -Iseconds) Backup geschrieben: aideation-$stamp.dump"
     else
-      rm -f "/backups/.dev_log-$stamp.tmp" 2>/dev/null || true
+      rm -f "/backups/.aideation-$stamp.tmp" 2>/dev/null || true
       echo "$(date -Iseconds) Backup fehlgeschlagen" >&2
     fi
-    find /backups -maxdepth 1 -name 'dev_log-*.dump' -mtime "+$KEEP_DAYS" -delete 2>/dev/null || true
+    find /backups -maxdepth 1 -name '*.dump' -mtime "+$KEEP_DAYS" -delete 2>/dev/null || true
   fi
   sleep 3600
 done

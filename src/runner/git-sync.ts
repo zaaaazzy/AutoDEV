@@ -152,7 +152,7 @@ async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must']
     initialized = true;
   }
   if (!(await git('config', 'user.email')).output) {
-    await must('config', 'user.name', 'Mainty Dev Log');
+    await must('config', 'user.name', 'AIdeation');
     await must('config', 'user.email', 'dev-log@mainty.local');
   }
   await excludeInternalFolders(cwd);
@@ -419,7 +419,7 @@ export function ciWorkflowYaml(
       : []),
     ...commands.map((command) => `      - run: ${command.map(shellArg).join(' ')}`),
   ];
-  return `# Automatisch von Dev Log angelegt: Build und Tests als Quality Gate für Pull Requests und main.
+  return `# Automatisch von AIdeation angelegt: Build und Tests als Quality Gate für Pull Requests und main.
 name: CI
 on:
   push:
@@ -455,7 +455,7 @@ async function ensureCiWorkflow(cwd: string, commands: string[][], helpers: GitH
     '-m',
     'ci: GitHub-Actions-Workflow für Build und Tests',
     '-m',
-    'Automatisch angelegt vom Mainty Dev Log.',
+    'Automatisch angelegt vom AIdeation.',
   );
   log.push('CI-Workflow (GitHub Actions) angelegt.');
 }
@@ -539,7 +539,7 @@ export function taskCommitMessage(
   const subject = title.replace(/\s+/g, ' ').trim().slice(0, 72) || 'Auftrag';
   return [
     `${type}(${scope}): ${subject}`,
-    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`,
+    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom AIdeation.`,
   ];
 }
 
@@ -618,7 +618,7 @@ async function pushSprint(
       '-m',
       `chore(${sprint.name}): Sprint-Stand sichern`,
       '-m',
-      'Automatisch gesichert vom Mainty Dev Log.',
+      'Automatisch gesichert vom AIdeation.',
     );
     log.push('Reständerungen committet.');
   }
@@ -794,7 +794,7 @@ export async function syncSprintToGit(
         new Date(),
         `Automatisch nach dem Sprint „${sprint.name}“ (in main übernommen).`,
       );
-      result.log.push(created ? 'Neustart von Dev Log angefordert.' : 'Ein Neustart läuft bereits.');
+      result.log.push(created ? 'Neustart von AIdeation angefordert.' : 'Ein Neustart läuft bereits.');
     }
     await pool.query(
       `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,

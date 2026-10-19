@@ -18,7 +18,7 @@ Nach jedem Sprint-Abschluss analysiert ein Retrospektive-Agent (nur lesend) den 
 
 ## Problem heute
 
-Dev Log sammelt Wissen pro Fehler (Bug-Wächter, „bekannte Bugs mit Lösung“), aber nicht über Muster: Wenn der Entwickler zum fünften Mal Tests vergisst oder die Handy-Ansicht bricht, ändert sich nichts an den Leitlinien. Leitlinien (`projects.guidelines`), DoR/DoD (`definition_of_ready/done`) und Agent-Anweisungen werden nur von Hand gepflegt. Der Sprintbericht (`sprint_reports`) zählt auf, was passiert ist, aber nicht, was daraus folgt.
+AIdeation sammelt Wissen pro Fehler (Bug-Wächter, „bekannte Bugs mit Lösung“), aber nicht über Muster: Wenn der Entwickler zum fünften Mal Tests vergisst oder die Handy-Ansicht bricht, ändert sich nichts an den Leitlinien. Leitlinien (`projects.guidelines`), DoR/DoD (`definition_of_ready/done`) und Agent-Anweisungen werden nur von Hand gepflegt. Der Sprintbericht (`sprint_reports`) zählt auf, was passiert ist, aber nicht, was daraus folgt.
 
 ## Vorschlag
 

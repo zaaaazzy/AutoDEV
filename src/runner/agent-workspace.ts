@@ -14,18 +14,14 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:pat
 import { type CommandExecutor, runCommand } from '../core/command.js';
 
 /**
- * Eigener Arbeitsbaum für die Agents, wenn der Projektordner der Ordner ist, aus dem Dev Log selbst läuft.
- * Dort arbeiten Menschen (und andere Sitzungen) direkt; Branch-Wechsel und WIP-Commits der Aufträge würden ihre offenen
- * Änderungen mitnehmen und den laufenden Worker auf einen anderen Code-Stand setzen. Die Agents arbeiten deshalb in
- * einem Git-Worktree daneben (z. B. /Volumes/External/DevLog-agents); Branches und Historie sind dieselben.
+ * Eigener Arbeitsbaum für die Agents (Git-Worktree; Branches und Historie sind dieselben). Projekte liegen in
+ * <Projekt>/source, die Agents arbeiten daneben in <Projekt>/agent. Ältere Projekte ohne diese Struktur bekommen
+ * <Ordner>-agents daneben.
  */
 export function agentWorkspacePath(folder: string): string {
-  return join(dirname(folder), `${basename(folder)}-agents`);
-}
-
-/** Ordner der Review-Instanz (Auftrag, der auf die Freigabe wartet), z. B. /Volumes/…/Mainty-review. */
-export function reviewWorkspacePath(folder: string): string {
-  return join(dirname(folder), `${basename(folder)}-review`);
+  return basename(folder) === 'source'
+    ? join(dirname(folder), 'agent')
+    : join(dirname(folder), `${basename(folder)}-agents`);
 }
 
 const same = (left: string, right: string): boolean => {
@@ -153,7 +149,7 @@ export async function ensureWorktree(
 }
 
 /**
- * Ordner, in dem die Agents eines Projekts arbeiten: der Projektordner selbst – ausser es ist der Dev-Log-Ordner oder
+ * Ordner, in dem die Agents eines Projekts arbeiten: der Projektordner selbst – ausser es ist der AIdeation-Ordner oder
  * das Projekt verlangt einen eigenen Arbeitsordner (projects.agent_workspace, z. B. weil im Projektordner ein
  * Entwicklungsserver läuft), dann ein eigener Worktree (bei Bedarf angelegt, ausgehend von main). Scheitert das Anlegen, wird null geliefert;
  * die Agents bleiben dann gestoppt, statt im Arbeitsordner der Menschen zu arbeiten.

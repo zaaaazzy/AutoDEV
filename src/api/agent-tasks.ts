@@ -62,7 +62,7 @@ export async function seedDefaultActions(pool: Pool, project: string): Promise<n
   if (!tester) return 0;
   const inserted = await pool.query(
     `INSERT INTO agent_tasks (project_slug, title, prompt, agent_id, created_by)
-     SELECT $1, a.title, a.prompt, $2, 'Dev Log'
+     SELECT $1, a.title, a.prompt, $2, 'AIdeation'
        FROM unnest($3::text[], $4::text[]) AS a(title, prompt)
       WHERE NOT EXISTS (SELECT 1 FROM agent_tasks t WHERE t.project_slug = $1 AND lower(t.title) = lower(a.title))`,
     [project, tester.id, DEFAULT_ACTIONS.map((action) => action.title), DEFAULT_ACTIONS.map((action) => action.prompt)],

@@ -23,7 +23,7 @@ export interface Project {
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
   orderTokenLimit?: number | null;
   orderCostLimit?: number | null;
-  /** Dev Log nach dem Sprint-Abschluss automatisch neu starten (Dev-Log-Projekt). */
+  /** AIdeation nach dem Sprint-Abschluss automatisch neu starten (AIdeation-Projekt). */
   restartAfterSprint?: boolean;
   /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
   sprintMode?: 'manual' | 'suggest' | 'autopilot';
@@ -184,7 +184,7 @@ export interface Bug {
 export interface DocumentEntry {
   id: string;
   /**
-   * test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht, workflow = Arbeitsweise von Dev Log
+   * test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht, workflow = Arbeitsweise von AIdeation
    * (alle erzeugt, schreibgeschützt).
    */
   kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request' | 'test' | 'settings' | 'workflow';

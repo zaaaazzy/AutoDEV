@@ -78,7 +78,7 @@ const FILE_RIGHTS = ['files:create', 'files:edit'];
       }
       <small class="muted permission-hint"
         >Lesen und Durchsuchen ist immer erlaubt. Jeder Schreib- und Shell-Zugriff wird vor der Ausführung geprüft;
-        immer gesperrt: rm, sudo, kill, git push, .env/.git/.claude und Dev Log selbst.</small
+        immer gesperrt: rm, sudo, kill, git push, .env/.git/.claude und AIdeation selbst.</small
       >
     </div>
   `,

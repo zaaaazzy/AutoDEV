@@ -4,7 +4,7 @@
  * mit --projekt, den Lauf samt Einzeltests, Screenshots und Videos in die Ansicht „Testläufe“ dieses Projekts.
  *
  *   npm run test:full                          alles
- *   npm run test:full -- --projekt devlog      zusätzlich in Dev Log unter Testläufe ablegen
+ *   npm run test:full -- --projekt devlog      zusätzlich in AIdeation unter Testläufe ablegen
  *   npm run test:full -- --nur-oberflaeche     nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
  *   npm run test:full -- --projekt devlog --bugs   Befunde zusätzlich als Bugs anlegen (Quelle „Testlauf“)
  *
@@ -44,7 +44,7 @@ const argument = (name: string) => {
 };
 const onlyUi = process.argv.includes('--nur-oberflaeche');
 const project = argument('--projekt') ?? process.env.DEV_LOG_TEST_PROJECT;
-/** Testanforderung aus Dev Log (Dashboard, Testläufe): der Lauf wird ihr zugeordnet. */
+/** Testanforderung aus AIdeation (Dashboard, Testläufe): der Lauf wird ihr zugeordnet. */
 const requestId = argument('--anfrage');
 /** Befunde als Bugs anlegen (je fehlgeschlagenem Test einer, ohne Dubletten zu offenen Bugs). */
 const fileFindings = process.argv.includes('--bugs');
@@ -56,7 +56,7 @@ const TEMP = join(tmpdir(), `dev-log-test-full-${stamp}`);
 const OUT = join(ROOT, 'docs', 'tests', stamp);
 const MEDIA = join(OUT, 'media');
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-const LOCAL_DATABASE = 'postgresql://devlog:devlog_local_dev@127.0.0.1:5433/dev_log';
+const LOCAL_DATABASE = 'postgresql://devlog:devlog_local_dev@127.0.0.1:5433/aideation';
 
 type Step = {
   name: string;
@@ -177,7 +177,7 @@ function run(command: string, args: string[]): Promise<{ ok: boolean; output: st
   });
 }
 
-/** Optional: Lauf in Dev Log ablegen (Ansicht „Testläufe“), Schritt für Schritt, damit er live erscheint. */
+/** Optional: Lauf in AIdeation ablegen (Ansicht „Testläufe“), Schritt für Schritt, damit er live erscheint. */
 class Recorder {
   private constructor(
     private readonly pool: Pool,
@@ -190,7 +190,7 @@ class Recorder {
     const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
     if (!exists.rowCount) {
       await pool.end();
-      throw new Error(`Projekt „${slug}“ gibt es in Dev Log nicht – zuerst in der Oberfläche anlegen.`);
+      throw new Error(`Projekt „${slug}“ gibt es in AIdeation nicht – zuerst in der Oberfläche anlegen.`);
     }
     const git = async (args: string[]) =>
       (await promisify(execFile)('git', args, { cwd: ROOT }).catch(() => ({ stdout: '' }))).stdout.trim() || null;
@@ -266,7 +266,7 @@ async function runStep(position: number, step: Step, recorder: Recorder | null):
     cases: (await step.cases?.(clean)) ?? [],
   };
   const media = await recorder?.finish(position, result);
-  if (media) console.log(`→ ${result.cases.length} Einzeltests und ${media} Screenshots/Videos in Dev Log abgelegt`);
+  if (media) console.log(`→ ${result.cases.length} Einzeltests und ${media} Screenshots/Videos in AIdeation abgelegt`);
   return result;
 }
 
@@ -292,7 +292,7 @@ const STATUS_ICON: Record<TestCaseResult['status'], string> = {
 };
 
 /**
- * Bericht für die Dokumentation in Dev Log (Gruppe „Testberichte“): Übersicht je Kategorie und alle Befunde.
+ * Bericht für die Dokumentation in AIdeation (Gruppe „Testberichte“): Übersicht je Kategorie und alle Befunde.
  * Screenshots und Videos zeigt die Ansicht „Testläufe“, auf die der Bericht verlinkt.
  */
 function documentReport(results: StepResult[], allOk: boolean, runId: string): string {
@@ -397,7 +397,7 @@ async function main(): Promise<void> {
     '',
     `Erstellt mit \`npm run test:full\`. Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'}.`,
     'Der Oberflächentest läuft auf einer eigenen Testdatenbank (dev_log_full) ohne Worker: Agents, Chat-Antworten und der Projekt-Assistent starten dort nicht.',
-    runId ? `In Dev Log abgelegt: Projekt \`${project}\`, Testlauf \`${runId}\`.` : '',
+    runId ? `In AIdeation abgelegt: Projekt \`${project}\`, Testlauf \`${runId}\`.` : '',
     '',
     '## Übersicht',
     '',
@@ -435,7 +435,7 @@ async function main(): Promise<void> {
   console.log(
     `\nBericht: ${relative(ROOT, join(OUT, 'bericht.md'))} (${mediaCount} Screenshots/Videos in ${basename(MEDIA)}/)`,
   );
-  if (runId) console.log(`Dev Log: Projekt „${project}“ → Testläufe`);
+  if (runId) console.log(`AIdeation: Projekt „${project}“ → Testläufe`);
   process.exitCode = allOk ? 0 : 1;
 }
 
