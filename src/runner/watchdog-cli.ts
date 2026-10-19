@@ -17,6 +17,7 @@ runWatchdog({
   publicUrl: process.env.DEV_LOG_PUBLIC_URL?.trim() || null,
   backupDir: join(root, 'backups'),
   dataDir: root,
+  installRoot: root,
 })
   .catch((error: unknown) => {
     console.error('Wächter fehlgeschlagen:', error);

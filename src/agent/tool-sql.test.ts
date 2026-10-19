@@ -66,3 +66,20 @@ test('LoopGuard detects repeated paragraphs and identical calls', () => {
   const results = [1, 2, 3, 4].map(() => guard.repeatedCall('read_file', { path: 'a' }));
   assert.deepEqual(results, [false, false, false, true]);
 });
+
+test('LoopGuard: Wiederholung in Doku und Trennlinien sind keine Schleife', () => {
+  const guard = new LoopGuard();
+  const section = (name: string) =>
+    `## ${name}\n- **Timeout**: Konfigurierbar (Default: 3000ms) für alle Aufrufe dieses Endpunkts\n` +
+    `curl -X GET https://localhost:4200/api/container/status --header "Accept: application/json"\n`;
+  // Gleiche Zeilen in vier Abschnitten (nicht direkt hintereinander): Doku, keine Schleife.
+  assert.equal(guard.repeatedText(['Status', 'Logs', 'Neustart', 'Health'].map(section).join('\n')), null);
+  // Trennlinien zählen nicht, auch wenn sie direkt hintereinander stehen.
+  const rule = '='.repeat(60);
+  assert.equal(guard.repeatedText(`${rule}\n${rule}\n${rule}\n${rule}`), null);
+  // Dieselbe Zeile sehr oft im Text bleibt eine Schleife.
+  const line = 'Ich prüfe jetzt noch einmal die Konfiguration des Containers und der Umgebung.';
+  assert.ok(
+    guard.repeatedText(Array.from({ length: 8 }, (_, index) => `${line}\nZwischenschritt ${index}`).join('\n')),
+  );
+});

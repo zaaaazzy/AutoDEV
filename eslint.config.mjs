@@ -2,7 +2,8 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', '.angular/**', 'node_modules/**'] },
+  // .dev-log: Laufzeitdaten (Anhänge, Hilfsskripte), kein Projektcode.
+  { ignores: ['dist/**', '.angular/**', 'node_modules/**', '.dev-log/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

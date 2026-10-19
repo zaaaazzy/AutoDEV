@@ -106,6 +106,32 @@ test('stops at the first failing agent and blocks the order', async () => {
   ]);
 });
 
+test('Laufwerk fällt während eines Agents weg: Auftrag wird neu eingeplant statt blockiert, kein Bug', async () => {
+  const { mkdtempSync, renameSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const folder = mkdtempSync(join(tmpdir(), 'drive-'));
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => {
+    // Agent b arbeitet, als das Laufwerk wegfällt (Ordner verschwindet): Befehl scheitert mit ENOENT.
+    if (command[0] === 'b') renameSync(folder, `${folder}-weg`);
+    return { exitCode: command[0] === 'b' ? 1 : 0, durationMs: 1, output: command[0] === 'b' ? 'spawn x ENOENT' : '' };
+  };
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  const result = await runWorkItem(pool, item, agents, { cwd: folder, timeoutMs: 1000, execute });
+  renameSync(`${folder}-weg`, folder);
+  assert.equal(result, 'failed');
+  const settled = queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1);
+  assert.doesNotMatch(settled?.sql ?? '', /'blocked'/);
+  assert.notDeepEqual(settled?.values, ['item-1', 'blocked']);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  const step = queries.find(
+    (query) =>
+      query.sql.includes('UPDATE agent_run_steps SET status') && String(query.values[3]).includes('Unterbrochen'),
+  );
+  assert.match(String(step?.values[3]), /ist nicht erreichbar|Ordner nicht erreichbar/);
+});
+
 test('uses the built-in agent for agents without command, hides DEV_LOG secrets and never double-runs an item', async () => {
   process.env.DEV_LOG_PASSWORD = 'secret-secret-secret';
   const { pool, queries } = fakePool();

@@ -81,15 +81,23 @@ export async function openExpressOrder(
   /** Rückfrage, auf die diese Nachricht antwortet (null = neue Anfrage). */
   questionId: string | null,
 ): Promise<string> {
-  const previous = questionId
-    ? (
-        await pool.query<{ id: string }>(
-          `SELECT d.id FROM chat_messages m JOIN development_items d ON d.id = m.development_id
+  // Schon angelegt (die Anfrage läuft nach einer Unterbrechung erneut): denselben Auftrag weiterführen.
+  const own = (
+    await pool.query<{ id: string | null }>(`SELECT development_id AS id FROM chat_messages WHERE id = $1`, [
+      message.id,
+    ])
+  ).rows[0]?.id;
+  const previous = own
+    ? own
+    : questionId
+      ? (
+          await pool.query<{ id: string }>(
+            `SELECT d.id FROM chat_messages m JOIN development_items d ON d.id = m.development_id
             WHERE m.id = $1 AND m.project_slug = $2 AND d.kind = '${EXPRESS_KIND}'`,
-          [questionId, project],
-        )
-      ).rows[0]?.id
-    : undefined;
+            [questionId, project],
+          )
+        ).rows[0]?.id
+      : undefined;
   let id = previous;
   if (id) {
     await pool.query(

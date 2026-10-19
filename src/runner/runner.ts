@@ -1,3 +1,4 @@
+import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
@@ -152,6 +153,8 @@ export async function runWorkItem(
   };
   let passed = true;
   let interrupted = false;
+  const startedAt = Date.now();
+  const folderAtStart = folderAvailable(options.cwd);
   // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
   // order is settled, so no other order edits files while this one is tested and committed.
   let releaseTree: (() => void) | undefined;
@@ -192,6 +195,8 @@ export async function runWorkItem(
     }
   } catch (error) {
     passed = false;
+    // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
+    if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
     console.error(`Run ${runId} aborted:`, error);
   } finally {
     await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [

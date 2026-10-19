@@ -6,6 +6,7 @@ import { sendPush } from '../core/push.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
+import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
@@ -353,6 +354,9 @@ export async function runStep(
     { stepId, silent: true },
   );
   live.update = progress.update;
+  const stepStartedAt = Date.now();
+  // Nur ein Ordner, der beim Start da war, kann „weggefallen“ sein (sonst ist es ein Konfigurationsfehler).
+  const folderAtStart = folderAvailable(ctx.options.cwd);
   const work = invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
     exitCode: 1,
     durationMs: 0,
@@ -363,10 +367,16 @@ export async function runStep(
   await progress.stop();
 
   let output = redactOutput(result.output, process.env);
-  if (isShuttingDown()) {
+  // Worker beendet oder Projektordner zwischendurch weg (externes Laufwerk getrennt): kein Fehler im Auftrag, der Lauf
+  // wird erneut eingeplant – ohne Bug-Bericht und Problemanalyse.
+  const folderLost = result.exitCode !== 0 && folderAtStart && hadOutage(ctx.options.cwd, stepStartedAt);
+  if (isShuttingDown() || folderLost) {
+    const reason = folderLost
+      ? `Unterbrochen: ${missingFolderMessage(ctx.options.cwd)} Der Auftrag wird erneut eingeplant.`
+      : 'Unterbrochen: Der Worker wurde beendet.';
     await pool.query(
       `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-      [stepId, result.exitCode, result.durationMs, `${output}\nUnterbrochen: Der Worker wurde beendet.`],
+      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
     );
     return { passed: false, interrupted: true };
   }

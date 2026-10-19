@@ -7,6 +7,8 @@ import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat } from './ollama-cl
 import { resolveContext, resolveModel } from './ollama-client.js';
 import { systemPrompt, toolDefinitions } from './ollama-prompts.js';
 import { LoopGuard } from './loop-guard.js';
+
+const MAX_LOOP_WARNINGS = 1;
 import { BACKUP_DIRECTORY, executeTool, type ToolContext } from './ollama-tools.js';
 import type { ChatMessage, ToolCall } from './ollama-types.js';
 
@@ -74,6 +76,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   };
 
   const loopGuard = new LoopGuard();
+  let loopWarnings = 0;
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl)) },
     { role: 'user', content: options.prompt },
@@ -115,7 +118,8 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
             stream: false,
             think: false,
             keep_alive: keepAlive,
-            options: { num_ctx: contextSize, temperature: 0.2 },
+            // repeat_penalty: kleine lokale Modelle geraten sonst leicht in Wiederholungsschleifen.
+            options: { num_ctx: contextSize, temperature: 0.2, repeat_penalty: 1.15 },
           },
           controller.signal,
         );
@@ -145,7 +149,20 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
       }
       const repeated = loopGuard.repeatedText(message.content ?? '');
       if (repeated) {
-        return finish(1, `Abbruch: Das Modell wiederholt sich („${repeated}…“). Schleife erkannt.`);
+        // Erst ermahnen: Die Antwort wird verworfen, das Modell soll ohne Wiederholung neu ansetzen. Erst beim zweiten
+        // Mal wird abgebrochen.
+        if (loopWarnings >= MAX_LOOP_WARNINGS) {
+          return finish(1, `Abbruch: Das Modell wiederholt sich („${repeated}…“). Schleife erkannt.`);
+        }
+        loopWarnings += 1;
+        options.onProgress?.('Wiederholung erkannt – das Modell setzt neu an …');
+        messages.push({
+          role: 'user',
+          content:
+            `Deine letzte Antwort wiederholt immer wieder dieselbe Zeile („${repeated.slice(0, 80)}…“) und wurde ` +
+            'verworfen. Setze neu an: schreibe jede Aussage nur einmal, fasse Gleiches zusammen und schliesse ab.',
+        });
+        continue;
       }
       messages.push({ role: 'assistant', content: message.content ?? '', tool_calls: message.tool_calls });
       if (!message.tool_calls?.length) {

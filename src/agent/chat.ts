@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
@@ -146,6 +147,8 @@ export async function processChat(
     'Prüfe die Ergebnisse …',
     'Fasse die Ergebnisse zusammen …',
   ]);
+  const startedAt = Date.now();
+  const folderAtStart = folderAvailable(options.cwd);
   const { exitCode, output, sessionId } = await runAuthorAgent(
     pool,
     options,
@@ -156,7 +159,9 @@ export async function processChat(
     resume,
     claimed.agentId,
   ).finally(progress.stop);
-  if (isShuttingDown()) {
+  // Worker beendet oder Projektordner zwischendurch weg (Laufwerk getrennt): Anfrage bleibt wartend und läuft erneut,
+  // statt mit einer irreführenden Fehlermeldung zu scheitern.
+  if (isShuttingDown() || (exitCode !== 0 && folderAtStart && hadOutage(options.cwd, startedAt))) {
     await pool.query(`UPDATE chat_messages SET status = 'pending', updated_at = clock_timestamp() WHERE id = $1`, [
       claimed.id,
     ]);

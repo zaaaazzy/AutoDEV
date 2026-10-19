@@ -100,3 +100,9 @@ test('Abschluss: erledigt, Rückfrage offen (Aktion notwendig) oder fehlgeschlag
   await closeExpressOrder(pool, 'd1');
   assert.equal(queries.at(-1)?.values[2], 'Rückfrage: Welche Datei? – im Dashboard-Chat antworten');
 });
+
+test('Nach einer Unterbrechung: dieselbe Anfrage führt ihren Auftrag weiter statt einen zweiten anzulegen', async () => {
+  const { pool, queries } = fakePool({ 'SELECT development_id AS id FROM chat_messages': [{ id: 'd7' }] });
+  assert.equal(await openExpressOrder(pool, 'p', { id: 'm1', content: 'Anfrage' }, null), 'd7');
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO development_items')));
+});

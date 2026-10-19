@@ -8,6 +8,8 @@ import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
 import { processSetupJob } from '../setup/setup-jobs.js';
+import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
+import { sendPush } from '../core/push.js';
 import { projectFolderError } from '../core/validation.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
 
@@ -91,12 +93,16 @@ async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
 interface Target {
   options: RunnerOptions;
   problem: string | null;
+  /** Projektordner laut Projekt (für die Ausfall-Überwachung). */
+  repository: string;
+  /** Ordner fehlt nur vorübergehend (externes Laufwerk getrennt): Anfragen warten statt abgelehnt zu werden. */
+  transient: boolean;
 }
 
 /** With --all every registered project is served from its own project folder (projects.repository). */
 async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Target[]> {
   if (!options.all) {
-    return [{ options, problem: null }];
+    return [{ options, problem: null, repository: options.cwd, transient: false }];
   }
   const projects = await pool.query<{ slug: string; repository: string }>(
     'SELECT slug, repository FROM projects ORDER BY slug',
@@ -110,16 +116,50 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
           : null;
       // Der Dev-Log-Ordner selbst: Agents arbeiten in einem eigenen Worktree, nie im Arbeitsordner der Menschen.
       const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT) : null;
+      const transient = !outside && !folder && isAbsolute(repository) && volumeOf(repository) !== null;
       return {
         options: { ...options, project: slug, cwd: workspace?.cwd ?? folder ?? options.cwd },
         problem: outside
           ? `Projekt ausserhalb des Projektbereichs – Agents bleiben gestoppt: ${outside}`
-          : !folder
-            ? `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`
-            : (workspace?.problem ?? null),
+          : transient
+            ? missingFolderMessage(repository)
+            : !folder
+              ? `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`
+              : (workspace?.problem ?? null),
+        repository,
+        transient,
       };
     }),
   );
+}
+
+const FOLDER_NOTICE_KEY = 'folder_outage_notified';
+const FOLDER_NOTICE_PAUSE_MS = 10 * 60_000;
+/** Zuletzt gemeldeter Ausfall je Laufwerk: ein wackelndes Kabel soll nicht jede Minute einen Push auslösen. */
+const folderNotices = new Map<string, number>();
+
+/** Push an die betroffenen Projekte, wenn ein Laufwerk wegfällt oder wiederkommt (je Laufwerk und Zustand einmal). */
+async function notifyFolders(pool: Pool, targets: Target[], volume: string, back: boolean): Promise<void> {
+  const last = folderNotices.get(volume);
+  if (!back && last && Date.now() - last < FOLDER_NOTICE_PAUSE_MS) return;
+  if (back && !last) return;
+  if (back) folderNotices.delete(volume);
+  else folderNotices.set(volume, Date.now());
+  const name = volume.startsWith('/Volumes/') ? `Laufwerk „${volume.slice('/Volumes/'.length)}“` : volume;
+  for (const target of targets.filter((entry) => entry.repository.startsWith(volume))) {
+    await sendPush(
+      pool,
+      {
+        title: back ? `✅ ${name} wieder verbunden` : `⚠️ ${name} getrennt`,
+        body: back
+          ? 'Die Agents arbeiten weiter; unterbrochene Aufträge und wartende Anfragen laufen erneut.'
+          : 'Die Agents pausieren, bis der Projektordner wieder erreichbar ist. Kabel und Stromversorgung prüfen.',
+        url: '#dashboard',
+        tag: `${FOLDER_NOTICE_KEY}-${volume}`,
+      },
+      { project: target.options.project },
+    ).catch(() => undefined);
+  }
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
@@ -229,6 +269,25 @@ async function main(): Promise<void> {
         }
       }
     }, 15_000);
+    // Projektordner und Dev-Log-Ordner überwachen: Ausfälle (z. B. externes Laufwerk) melden und für Agent-Läufe merken,
+    // damit ein Abbruch in dieser Zeit als Unterbrechung gilt statt als Fehler im Auftrag.
+    const stopFolderWatch = watchFolders(
+      () => [
+        INSTALL_ROOT,
+        ...chatTargets.flatMap((target) => [target.repository, target.options.cwd]).filter((path) => isAbsolute(path)),
+      ],
+      ({ lost, back }) => {
+        const volumes = (paths: string[]) => [...new Set(paths.map((path) => volumeOf(path) ?? path))];
+        for (const volume of volumes(lost)) {
+          console.error(`[Ordner] nicht erreichbar: ${volume} – Agents pausieren.`);
+          void notifyFolders(pool, chatTargets, volume, false);
+        }
+        for (const volume of volumes(back)) {
+          console.info(`[Ordner] wieder erreichbar: ${volume}`);
+          void notifyFolders(pool, chatTargets, volume, true);
+        }
+      },
+    );
     // Einrichtungsassistent: Host-Aufgaben (Ordner, Git, GitHub, Vorlagen, Agent-Tests) schnell und parallel abarbeiten.
     let setupActive = 0;
     const setupTimer = setInterval(() => {
@@ -261,7 +320,8 @@ async function main(): Promise<void> {
         }
         if (chatActive.has(slug) || stopping) continue;
         if (target.problem) {
-          void rejectChat(pool, slug, target.problem).catch(() => undefined);
+          // Laufwerk nur kurz weg: Anfragen bleiben wartend und laufen, sobald der Ordner wieder da ist.
+          if (!target.transient) void rejectChat(pool, slug, target.problem).catch(() => undefined);
           continue;
         }
         if (!estimateActive.has(slug)) {
@@ -374,6 +434,7 @@ async function main(): Promise<void> {
         await sleep(200);
     } finally {
       clearInterval(heartbeat);
+      stopFolderWatch();
       clearInterval(chatTimer);
       clearInterval(setupTimer);
     }
