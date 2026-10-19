@@ -30,6 +30,15 @@ test('Fremde Projektordner bleiben der Arbeitsordner der Agents', async () => {
   assert.deepEqual(await resolveAgentWorkspace(folder, '/somewhere/else'), { cwd: folder, problem: null });
 });
 
+test('Projekt mit eigenem Arbeitsordner: Agents arbeiten im Worktree daneben', async () => {
+  const folder = repository();
+  const { cwd, problem } = await resolveAgentWorkspace(folder, '/somewhere/else', undefined, true);
+  assert.equal(problem, null);
+  assert.equal(cwd, agentWorkspacePath(folder));
+  assert.ok(lstatSync(join(cwd!, 'frontend', 'node_modules')).isSymbolicLink());
+  assert.equal(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+});
+
 test('Dev-Log-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {
   const folder = repository();
   // Offene Arbeit eines Menschen im Dev-Log-Ordner.

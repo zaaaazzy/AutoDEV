@@ -41,16 +41,18 @@ function linkDependencies(folder: string, workspace: string): void {
 }
 
 /**
- * Ordner, in dem die Agents eines Projekts arbeiten: der Projektordner selbst – ausser es ist der Dev-Log-Ordner,
- * dann ein eigener Worktree (bei Bedarf angelegt, ausgehend von main). Scheitert das Anlegen, wird null geliefert;
+ * Ordner, in dem die Agents eines Projekts arbeiten: der Projektordner selbst – ausser es ist der Dev-Log-Ordner oder
+ * das Projekt verlangt einen eigenen Arbeitsordner (projects.agent_workspace, z. B. weil im Projektordner ein
+ * Entwicklungsserver läuft), dann ein eigener Worktree (bei Bedarf angelegt, ausgehend von main). Scheitert das Anlegen, wird null geliefert;
  * die Agents bleiben dann gestoppt, statt im Arbeitsordner der Menschen zu arbeiten.
  */
 export async function resolveAgentWorkspace(
   folder: string,
   installRoot: string,
   execute: CommandExecutor = runCommand,
+  separate = false,
 ): Promise<{ cwd: string | null; problem: string | null }> {
-  if (!same(folder, installRoot)) return { cwd: folder, problem: null };
+  if (!separate && !same(folder, installRoot)) return { cwd: folder, problem: null };
   const workspace = agentWorkspacePath(folder);
   if (!existsSync(join(workspace, '.git'))) {
     const hasMain =

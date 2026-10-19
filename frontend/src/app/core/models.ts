@@ -16,6 +16,7 @@ export interface Project {
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;
+  agentWorkspace?: boolean;
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
   orderTokenLimit?: number | null;
   orderCostLimit?: number | null;

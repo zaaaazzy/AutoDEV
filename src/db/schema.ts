@@ -797,4 +797,7 @@ export const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS workflow_steps_project_idx ON workflow_steps (project_slug, phase, position);
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS workflow_step_id UUID REFERENCES workflow_steps(id) ON DELETE SET NULL;
+
+  -- Eigener Arbeitsordner (Worktree <Ordner>-agents) für die Agents, z. B. wenn im Projektordner ein Entwicklungsserver läuft.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_workspace BOOLEAN NOT NULL DEFAULT FALSE;
 `;

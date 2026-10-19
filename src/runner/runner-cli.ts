@@ -106,18 +106,19 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
   if (!options.all) {
     return [{ options, problem: null, repository: options.cwd, transient: false }];
   }
-  const projects = await pool.query<{ slug: string; repository: string }>(
-    'SELECT slug, repository FROM projects ORDER BY slug',
+  const projects = await pool.query<{ slug: string; repository: string; separate: boolean }>(
+    'SELECT slug, repository, agent_workspace AS separate FROM projects ORDER BY slug',
   );
   return Promise.all(
-    projects.rows.map(async ({ slug, repository }) => {
+    projects.rows.map(async ({ slug, repository, separate }) => {
       const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
       const folder =
         !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
           ? repository
           : null;
-      // Der Dev-Log-Ordner selbst: Agents arbeiten in einem eigenen Worktree, nie im Arbeitsordner der Menschen.
-      const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT) : null;
+      // Der Dev-Log-Ordner selbst (oder ein Projekt mit eigenem Arbeitsordner): Agents arbeiten in einem eigenen
+      // Worktree, nie im Arbeitsordner der Menschen bzw. des laufenden Entwicklungsservers.
+      const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT, undefined, separate) : null;
       const transient = !outside && !folder && isAbsolute(repository) && volumeOf(repository) !== null;
       return {
         options: { ...options, project: slug, cwd: workspace?.cwd ?? folder ?? options.cwd },
