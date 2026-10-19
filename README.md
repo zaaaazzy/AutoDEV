@@ -14,7 +14,7 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 - `npm run dev` startet die API auf Port 3100.
 - `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` an die API weiter.
 - `npm run build` baut die Angular-Oberfläche und kompiliert anschließend das Backend.
-- `npm test` baut die Oberfläche und führt die Backend-Tests aus.
+- `npm test` baut die Oberfläche und führt Backend- und Frontend-Tests aus; `npm run test:ui` nur die Frontend-Tests (Vitest mit jsdom, `*.spec.ts` neben den Komponenten).
 - `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen (läuft auch in der CI unter `.github/workflows`).
 
 ### Sicherheit
