@@ -146,6 +146,8 @@ export class AgentTasksComponent {
   protected readonly active = signal(0);
   /** Details nur, solange die Maus auf einem Eintrag ist oder mit der Tastatur gewählt wurde. */
   protected readonly showDetail = signal(false);
+  /** Details wurden per Pfeiltaste geöffnet (Maus-Verlassen schliesst sie dann nicht). */
+  private keyboardDetail = false;
   protected readonly busy = this.actions.busy;
   /** Letzter angeforderter Testlauf des Projekts. */
   protected readonly latestTest = signal<TestRequest | null>(null);
@@ -266,13 +268,19 @@ export class AgentTasksComponent {
 
   /** Hover nur mit der Maus: auf Touch-Geräten öffnet der Info-Knopf die Details. */
   protected hover(index: number, event: PointerEvent): void {
-    if (event.pointerType !== 'mouse') return;
+    if (event.pointerType !== 'mouse' || this.keyboardDetail) return;
     this.active.set(index);
     this.showDetail.set(true);
   }
 
   protected leave(event: PointerEvent): void {
-    if (event.pointerType === 'mouse') this.showDetail.set(false);
+    // Per Tastatur geöffnete Details nicht schliessen, nur weil sich die Liste unter der stehenden Maus verschoben hat.
+    if (event.pointerType === 'mouse' && !this.keyboardDetail) this.showDetail.set(false);
+  }
+
+  /** Erst eine echte Mausbewegung über der Liste übergibt die Details wieder an die Maus. */
+  protected moved(): void {
+    this.keyboardDetail = false;
   }
 
   /** Details per Knopf: auf Touch-Geräten gibt es kein Hover, ein Tippen auf den Eintrag startet ihn. */
@@ -290,6 +298,7 @@ export class AgentTasksComponent {
       // Erster Pfeil zeigt die Details des markierten Eintrags, weitere wandern durch die Liste.
       if (this.showDetail()) this.active.set((this.active() + (event.key === 'ArrowDown' ? 1 : count - 1)) % count);
       this.showDetail.set(true);
+      this.keyboardDetail = true;
       setTimeout(() =>
         this.host.nativeElement.querySelector('.agent-task.active')?.scrollIntoView?.({ block: 'nearest' }),
       );
