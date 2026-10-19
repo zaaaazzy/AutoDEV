@@ -521,3 +521,23 @@ test('Fortsetzen scheitert (Sitzung weg): derselbe Schritt startet frisch mit de
   assert.ok(!calls[1]!.includes('--resume'));
   assert.doesNotMatch(calls[1]!.at(-1) ?? '', /Fortsetzung/);
 });
+
+test('Tester schreibt Tests: der Prozess wird als PID des Schritts gemeldet, damit ein Abbruch ihn beendet', async () => {
+  process.env.DEV_LOG_AGENT_COMMAND = '["fake-agent"]';
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onSpawn?.(4242);
+    return { exitCode: 0, durationMs: 1, output: 'Tests geschrieben' };
+  };
+  const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'Tests grün' });
+  const tester = { ...agent('Tester', 'after_task', 1, null), role: 'tester' as const };
+  try {
+    assert.equal(await runWorkItem(pool, item, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin }), 'passed');
+  } finally {
+    delete process.env.DEV_LOG_AGENT_COMMAND;
+  }
+  assert.ok(
+    queries.some((query) => query.sql.includes('SET pid = $2') && query.values[1] === 4242),
+    'PID des Testschreibers wird gespeichert',
+  );
+});
