@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { parseReferences, resolveReferences } from '../agent/chat-references.js';
@@ -28,8 +28,8 @@ async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
   ).rows;
 }
 
-export function registerChatRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/chat', async (request, response, next) => {
+export function registerChatRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/chat', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -40,7 +40,7 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
   });
 
   // Offene Rückfrage zu einem Auftrag (Express-Anfrage): wird im Auftrag angezeigt und dort direkt beantwortet.
-  app.get('/api/development/:id/question', async (request, response, next) => {
+  app.get('/development/:id/question', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       const question = (
@@ -60,7 +60,7 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
   });
 
   // Server-Sent Events: sendet den Verlauf, sobald er sich ändert.
-  app.get('/api/projects/:slug/chat/stream', (request, response) => {
+  app.get('/projects/:slug/chat/stream', (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
     response.set({
@@ -97,11 +97,11 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
   });
 
   // Per @ ansprechbare System-Agents (dynamisch, je nach Recht des Benutzers).
-  app.get('/api/projects/:slug/chat/targets', (_request, response) => {
+  app.get('/projects/:slug/chat/targets', (_request, response) => {
     response.json({ targets: chatTargetsFor(response.locals.principal as Principal | undefined) });
   });
 
-  app.post('/api/projects/:slug/chat', async (request, response, next) => {
+  app.post('/projects/:slug/chat', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const content =
@@ -180,7 +180,7 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.delete('/api/projects/:slug/chat', async (request, response, next) => {
+  app.delete('/projects/:slug/chat', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });

@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import {
   availableGroups,
@@ -47,8 +47,8 @@ export async function validAgentCommands(
   return unknown ? `Befehl „${unknown}“ ist in diesem Projekt nicht freigegeben.` : commands;
 }
 
-export function registerPermissionGroupRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/permission-groups', async (request, response, next) => {
+export function registerPermissionGroupRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/permission-groups', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
@@ -74,7 +74,7 @@ export function registerPermissionGroupRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/permission-groups', async (request, response, next) => {
+  app.post('/projects/:slug/permission-groups', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const group = parseGroup(request.body);
@@ -105,7 +105,7 @@ export function registerPermissionGroupRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.patch('/api/projects/:slug/permission-groups/:id', async (request, response, next) => {
+  app.patch('/projects/:slug/permission-groups/:id', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const group = parseGroup(request.body);
@@ -127,7 +127,7 @@ export function registerPermissionGroupRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.delete('/api/projects/:slug/permission-groups/:id', async (request, response, next) => {
+  app.delete('/projects/:slug/permission-groups/:id', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug || !CUSTOM_GROUP_ID.test(request.params.id ?? '')) {

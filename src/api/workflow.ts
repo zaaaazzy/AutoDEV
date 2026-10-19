@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
@@ -28,8 +28,8 @@ export async function loadWorkflowSteps(pool: Pool, slug: string): Promise<unkno
   ).rows;
 }
 
-export function registerWorkflowRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/workflow', async (request, response, next) => {
+export function registerWorkflowRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/workflow', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -41,7 +41,7 @@ export function registerWorkflowRoutes(app: Express, pool: Pool): void {
   });
 
   // „+“: Agent (auch mehrfach) an das Ende einer Phase setzen, optional mit Anweisung für diesen Einsatz.
-  app.post('/api/projects/:slug/workflow/steps', async (request, response, next) => {
+  app.post('/projects/:slug/workflow/steps', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const body = request.body as unknown;
@@ -73,7 +73,7 @@ export function registerWorkflowRoutes(app: Express, pool: Pool): void {
   });
 
   // Reihenfolge einer Phase; Schritte aus anderen Phasen wechseln dabei in diese.
-  app.post('/api/projects/:slug/workflow/order', async (request, response, next) => {
+  app.post('/projects/:slug/workflow/order', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const body = request.body as unknown;
@@ -100,7 +100,7 @@ export function registerWorkflowRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.patch('/api/workflow-steps/:id', async (request, response, next) => {
+  app.patch('/workflow-steps/:id', async (request, response, next) => {
     try {
       const body = request.body as unknown;
       if (!isUuid(request.params.id) || !isRecord(body))
@@ -122,7 +122,7 @@ export function registerWorkflowRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.delete('/api/workflow-steps/:id', async (request, response, next) => {
+  app.delete('/workflow-steps/:id', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Schritt nicht gefunden.' });
       await pool.query('DELETE FROM workflow_steps WHERE id = $1', [request.params.id]);

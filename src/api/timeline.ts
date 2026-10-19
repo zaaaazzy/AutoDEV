@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { isUuid } from '../core/validation.js';
 import { ANSWERED } from './chat-routes.js';
@@ -209,9 +209,9 @@ export async function loadTimeline(
   return { waiting, entries };
 }
 
-export function registerTimelineRoutes(app: Express, pool: Pool): void {
+export function registerTimelineRoutes(app: Router, pool: Pool): void {
   // Zeitleiste eines Auftrags: wer hat wann was gemacht, und worauf wartet er gerade.
-  app.get('/api/development/:id/timeline', async (request, response, next) => {
+  app.get('/development/:id/timeline', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       const timeline = await loadTimeline(pool, request.params.id);

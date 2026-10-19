@@ -1,11 +1,11 @@
 import { logged } from '../core/log.js';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { Express, Request, RequestHandler, Response } from 'express';
+import type { Router, Request, RequestHandler, Response } from 'express';
 import type { Pool } from 'pg';
 import QRCode from 'qrcode';
 import { isRole, type Principal, type Role } from './roles.js';
-import { FailureLimiter } from './security.js';
+import { FailureLimiter, fullPath } from './security.js';
 import { currentStep, generateSecret, otpauthUri, verifyTotp } from './totp.js';
 
 const scrypt = promisify(scryptCallback) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
@@ -153,7 +153,7 @@ async function sessionPrincipal(pool: Pool, auth: DevLogAuth, token: string): Pr
  */
 export function requireCredentials(auth: DevLogAuth, pool: Pool, limiter = new FailureLimiter()): RequestHandler {
   return async (request, response, next) => {
-    if (!request.path.startsWith('/api/')) {
+    if (!fullPath(request).startsWith('/api/')) {
       next();
       return;
     }
@@ -247,8 +247,8 @@ async function findAccount(
 }
 
 /** Öffentliche Anmelde-Routen; vor requireCredentials registrieren. */
-export function registerLoginRoutes(app: Express, pool: Pool, auth: DevLogAuth, limiter: FailureLimiter): void {
-  app.get('/api/session', async (request, response, next) => {
+export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, limiter: FailureLimiter): void {
+  app.get('/session', async (request, response, next) => {
     try {
       const token = sessionToken(request);
       const principal = token ? await sessionPrincipal(pool, auth, token) : null;
@@ -264,7 +264,7 @@ export function registerLoginRoutes(app: Express, pool: Pool, auth: DevLogAuth, 
     }
   });
 
-  app.post('/api/login', async (request, response, next) => {
+  app.post('/login', async (request, response, next) => {
     try {
       const body = (request.body ?? {}) as Record<string, unknown>;
       const client = attemptKey(request.ip, body.username);
@@ -309,7 +309,7 @@ export function registerLoginRoutes(app: Express, pool: Pool, auth: DevLogAuth, 
     }
   });
 
-  app.post('/api/logout', async (request, response, next) => {
+  app.post('/logout', async (request, response, next) => {
     try {
       const token = sessionToken(request);
       if (token) await pool.query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashToken(token)]);
@@ -322,7 +322,7 @@ export function registerLoginRoutes(app: Express, pool: Pool, auth: DevLogAuth, 
 }
 
 /** Zwei-Faktor einrichten/abschalten und andere Geräte abmelden – jeweils für das eigene Konto. */
-export function registerSecurityRoutes(app: Express, pool: Pool, auth: DevLogAuth): void {
+export function registerSecurityRoutes(app: Router, pool: Pool, auth: DevLogAuth): void {
   const principalOf = (response: Response): Principal => response.locals.principal as Principal;
   const totpOf = async (principal: Principal): Promise<string | null> =>
     principal.id
@@ -333,7 +333,7 @@ export function registerSecurityRoutes(app: Express, pool: Pool, auth: DevLogAut
         ).rows[0]?.secret ?? null)
       : (auth.totpSecret ?? null);
 
-  app.get('/api/auth/status', async (request, response, next) => {
+  app.get('/auth/status', async (request, response, next) => {
     try {
       const principal = principalOf(response);
       const sessions = await pool.query<{ count: string }>(
@@ -351,7 +351,7 @@ export function registerSecurityRoutes(app: Express, pool: Pool, auth: DevLogAut
     }
   });
 
-  app.post('/api/auth/totp/setup', async (_request, response, next) => {
+  app.post('/auth/totp/setup', async (_request, response, next) => {
     try {
       const principal = principalOf(response);
       const secret = generateSecret();
@@ -372,7 +372,7 @@ export function registerSecurityRoutes(app: Express, pool: Pool, auth: DevLogAut
     }
   });
 
-  app.post('/api/auth/totp/enable', async (request, response, next) => {
+  app.post('/auth/totp/enable', async (request, response, next) => {
     try {
       const principal = principalOf(response);
       const pending = principal.id
@@ -414,7 +414,7 @@ export function registerSecurityRoutes(app: Express, pool: Pool, auth: DevLogAut
     }
   });
 
-  app.post('/api/auth/totp/disable', async (request, response, next) => {
+  app.post('/auth/totp/disable', async (request, response, next) => {
     try {
       const principal = principalOf(response);
       const secret = await totpOf(principal);
@@ -435,7 +435,7 @@ export function registerSecurityRoutes(app: Express, pool: Pool, auth: DevLogAut
     }
   });
 
-  app.post('/api/auth/logout-others', async (request, response, next) => {
+  app.post('/auth/logout-others', async (request, response, next) => {
     try {
       const token = sessionToken(request);
       const result = await pool.query(

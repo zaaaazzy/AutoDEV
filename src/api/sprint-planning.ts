@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import {
   affectedFiles,
@@ -296,8 +296,8 @@ const parseIds = (body: unknown): string[] | null =>
     ? (body.ids as string[])
     : null;
 
-export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/sprints/proposal', async (request, response, next) => {
+export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/sprints/proposal', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const proposal = slug ? await loadProposal(pool, slug) : null;
@@ -308,7 +308,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/sprints/proposal/apply', async (request, response, next) => {
+  app.post('/projects/:slug/sprints/proposal/apply', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const ids = parseIds(request.body);
@@ -323,7 +323,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/projects/:slug/sprints/roadmap', async (request, response, next) => {
+  app.get('/projects/:slug/sprints/roadmap', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const roadmap = slug ? await loadRoadmap(pool, slug) : null;
@@ -335,7 +335,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
   });
 
   // KI-Kommentar: der Worker lässt den Auftragsautor den Vorschlag kommentieren (nur Text, ändert die Auswahl nicht).
-  app.get('/api/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
+  app.get('/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -352,7 +352,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
+  app.post('/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const ids = parseIds(request.body);
@@ -381,7 +381,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
   });
 
   // Manuelle Freigabe nach gescheitertem Abschluss: der Fehler dieses Sprints hält den Autopilot nicht mehr an.
-  app.post('/api/projects/:slug/sprints/autopilot/resume', async (request, response, next) => {
+  app.post('/projects/:slug/sprints/autopilot/resume', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const guard = slug ? await autopilotGuard(pool, slug) : null;

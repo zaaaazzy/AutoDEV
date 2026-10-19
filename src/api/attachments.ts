@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import express, { type Express } from 'express';
+import express, { type Router } from 'express';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 
@@ -18,10 +18,10 @@ export function safeFilename(name: unknown): string {
   return cleaned && !cleaned.startsWith('.') ? cleaned : 'bild';
 }
 
-export function registerAttachmentRoutes(app: Express, pool: Pool): void {
+export function registerAttachmentRoutes(app: Router, pool: Pool): void {
   const rawImage = express.raw({ type: IMAGE_TYPES, limit: MAX_ATTACHMENT_BYTES });
 
-  app.get('/api/projects/:slug/attachments', async (request, response) => {
+  app.get('/projects/:slug/attachments', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -40,8 +40,8 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
 
   // Bilder zu Ideen und Bugs; owner bestimmt die Spalte, die übrige Logik ist identisch.
   for (const owner of [
-    { path: '/api/ideation/:id/attachments', table: 'ideation_items', column: 'ideation_id', label: 'Idee' },
-    { path: '/api/bugs/:id/attachments', table: 'bugs', column: 'bug_id', label: 'Bug' },
+    { path: '/ideation/:id/attachments', table: 'ideation_items', column: 'ideation_id', label: 'Idee' },
+    { path: '/bugs/:id/attachments', table: 'bugs', column: 'bug_id', label: 'Bug' },
   ] as const) {
     app.post(owner.path, rawImage, async (request, response) => {
       const data: unknown = request.body;
@@ -72,7 +72,7 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
     });
   }
 
-  app.get('/api/attachments/:id', async (request, response) => {
+  app.get('/attachments/:id', async (request, response) => {
     const result = isUuid(request.params.id)
       ? await pool.query(`SELECT mime, data FROM ideation_attachments WHERE id = $1`, [request.params.id])
       : { rows: [] };
@@ -90,7 +90,7 @@ export function registerAttachmentRoutes(app: Express, pool: Pool): void {
     response.send(row.data);
   });
 
-  app.delete('/api/attachments/:id', async (request, response) => {
+  app.delete('/attachments/:id', async (request, response) => {
     const result = isUuid(request.params.id)
       ? await pool.query(`DELETE FROM ideation_attachments WHERE id = $1`, [request.params.id])
       : { rowCount: 0 };

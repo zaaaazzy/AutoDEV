@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
 import { relatedResourceBelongsToProject } from './resource.js';
@@ -102,8 +102,8 @@ export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40)
   return result.rows;
 }
 
-export function registerBugRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/bugs', async (request, response) => {
+export function registerBugRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/bugs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -116,7 +116,7 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     response.json({ bugs: result.rows });
   });
 
-  app.post('/api/projects/:slug/bugs', async (request, response) => {
+  app.post('/projects/:slug/bugs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, BUG_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -154,7 +154,7 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ bug: result.rows[0] });
   });
 
-  app.patch('/api/bugs/:id', async (request, response) => {
+  app.patch('/bugs/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -193,7 +193,7 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     response.json({ bug: result.rows[0] });
   });
 
-  app.delete('/api/bugs/:id', async (request, response) => {
+  app.delete('/bugs/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

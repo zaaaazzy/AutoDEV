@@ -1,10 +1,10 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { parseProjectSlug } from '../core/validation.js';
 
 /** Letzter Abdeckungsbericht des Testers mit den Werten je Bereich. */
-export function registerCoverageRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/coverage', async (request, response, next) => {
+export function registerCoverageRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/coverage', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });

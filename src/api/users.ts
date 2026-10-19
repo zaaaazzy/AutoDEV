@@ -1,4 +1,4 @@
-import type { Express, Response } from 'express';
+import type { Router, Response } from 'express';
 import type { Pool } from 'pg';
 import { isUuid } from '../core/validation.js';
 import { type DevLogAuth, hashPassword } from './auth.js';
@@ -41,10 +41,10 @@ function passwordProblem(value: unknown): string | null {
   return value.length > 200 ? 'Das Passwort ist zu lang.' : null;
 }
 
-export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | null): void {
+export function registerUserRoutes(app: Router, pool: Pool, auth: DevLogAuth | null): void {
   const me = (response: Response) => response.locals.principal as Principal;
 
-  app.get('/api/users', async (_request, response, next) => {
+  app.get('/users', async (_request, response, next) => {
     try {
       const users = (await pool.query(`SELECT ${COLUMNS} FROM users ORDER BY lower(username)`)).rows;
       response.json({
@@ -57,7 +57,7 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
     }
   });
 
-  app.post('/api/users', async (request, response, next) => {
+  app.post('/users', async (request, response, next) => {
     try {
       const body = (request.body ?? {}) as Record<string, unknown>;
       const username = typeof body.username === 'string' ? body.username.trim() : '';
@@ -97,7 +97,7 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
     }
   });
 
-  app.patch('/api/users/:id', async (request, response, next) => {
+  app.patch('/users/:id', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
       const body = (request.body ?? {}) as Record<string, unknown>;
@@ -134,7 +134,7 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
     }
   });
 
-  app.post('/api/users/:id/password', async (request, response, next) => {
+  app.post('/users/:id/password', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
       const password = (request.body as { password?: unknown } | undefined)?.password;
@@ -153,7 +153,7 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
     }
   });
 
-  app.post('/api/users/:id/totp/reset', async (request, response, next) => {
+  app.post('/users/:id/totp/reset', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
       await pool.query('UPDATE users SET totp_secret = NULL, totp_pending = NULL WHERE id = $1', [request.params.id]);
@@ -163,7 +163,7 @@ export function registerUserRoutes(app: Express, pool: Pool, auth: DevLogAuth | 
     }
   });
 
-  app.delete('/api/users/:id', async (request, response, next) => {
+  app.delete('/users/:id', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
       if (me(response).id === request.params.id) {

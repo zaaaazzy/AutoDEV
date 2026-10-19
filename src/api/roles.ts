@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import { fullPath } from './security.js';
 
 /**
  * Rollen: Jede schreibende Aktion gehört zu genau einer Rolle. Lesen dürfen alle angemeldeten Benutzer.
@@ -109,11 +110,12 @@ export function requiredRole(method: string, path: string, body: unknown): Role 
 
 /** Prüft schreibende Anfragen gegen die Rollen des angemeldeten Benutzers (res.locals.principal). */
 export const authorize: RequestHandler = (request, response, next) => {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method) || !request.path.startsWith('/api/')) {
+  const path = fullPath(request);
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method) || !path.startsWith('/api/')) {
     next();
     return;
   }
-  const role = requiredRole(request.method, request.path, request.body);
+  const role = requiredRole(request.method, path, request.body);
   const principal = response.locals.principal as Principal | undefined;
   if (role === null || hasRole(principal, role)) {
     next();
