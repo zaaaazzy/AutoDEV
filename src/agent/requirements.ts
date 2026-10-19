@@ -157,7 +157,7 @@ export async function runAuthorAgent(
     const result = command
       ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {
           timeoutMs: options.timeoutMs,
-          env: agentEnvironment(),
+          env: agentEnvironment(options.cwd),
           onAction: onProgress,
           resumeSession: resuming?.sessionId,
           onSpawn: (spawned) => {

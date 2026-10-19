@@ -57,7 +57,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
         existingProject: true,
         timeoutMs,
         signal,
-        env: agentEnvironment(),
+        env: agentEnvironment(cwd),
       },
       pool,
     );
@@ -286,7 +286,12 @@ async function invokeAgent(
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
       options.cwd,
-      { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput: hooks.onOutput, onAction: hooks.onAction },
+      {
+        timeoutMs: options.timeoutMs,
+        env: agentEnvironment(options.cwd),
+        onOutput: hooks.onOutput,
+        onAction: hooks.onAction,
+      },
     ).catch((error: unknown) => ({
       exitCode: 1,
       durationMs: 0,
@@ -307,7 +312,7 @@ async function invokeAgent(
       options.cwd,
       {
         timeoutMs: options.timeoutMs,
-        env: agentEnvironment(),
+        env: agentEnvironment(options.cwd),
         onOutput: hooks.onOutput,
         onSpawn: hooks.onSpawn,
         onAction: hooks.onAction,
