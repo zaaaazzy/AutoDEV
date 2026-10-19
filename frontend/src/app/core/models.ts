@@ -38,6 +38,12 @@ export interface Project {
   definitionOfDone?: string[] | null;
   /** Stand des Favicons der Anwendung (null = keines gefunden). */
   faviconVersion?: number | null;
+  /** Produktions-Rückkanal: Health-URL, Compose-Dienste, Ausschlussmuster, Aufbewahrung, Ingest-Token hinterlegt. */
+  healthUrl?: string | null;
+  logServices?: string[];
+  productionIgnore?: string[];
+  productionRetentionDays?: number;
+  ingestConfigured?: boolean;
 }
 
 export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
@@ -176,11 +182,56 @@ export interface Bug {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: BugStatus;
-  source: 'agent' | 'manual' | 'test';
+  source: 'agent' | 'manual' | 'test' | 'production';
   sprintId: string | null;
   fixNotes: string | null;
   createdAt: string;
   fixedAt: string | null;
+  /** Betriebs-Bug, der nach dem Beheben wieder auftrat. */
+  regressedAt?: string | null;
+  /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
+  productionCount?: number | null;
+}
+
+/** Produktions-Rückkanal: Zustand fürs Dashboard und die Einstellungen. */
+export interface ProductionStatus {
+  healthUrl: string | null;
+  configured: boolean;
+  healthy: boolean;
+  down: boolean;
+  failures: number;
+  lastError: string | null;
+  checkedAt: string | null;
+  downSince: string | null;
+  logsScannedAt: string | null;
+  logError: string | null;
+  openBugs: number;
+  criticalBugs: number;
+  last24h: number;
+}
+
+export interface ProductionSnippets {
+  endpoint: string;
+  browser: string;
+  node: string;
+}
+
+export interface DeploySuspect {
+  deployedAt: string;
+  orders: { id: string; title: string }[];
+  sprints: { id: string; name: string }[];
+}
+
+export interface ProductionEvent {
+  id: string;
+  source: 'health' | 'logs' | 'ingest';
+  origin: string;
+  fingerprint: string;
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+  sample: string;
+  deploySuspect: DeploySuspect | null;
 }
 
 export interface DocumentEntry {

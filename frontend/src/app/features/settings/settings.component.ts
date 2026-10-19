@@ -7,6 +7,7 @@ import { ApiService } from '../../core/api.service.js';
 import type { AgentStatus, Project } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
+import { ProductionSettingsComponent } from './production-settings.component.js';
 import { SecuritySettingsComponent } from './security-settings.component.js';
 import { UsersSettingsComponent } from './users-settings.component.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -17,6 +18,7 @@ import { AuthService } from '../../core/auth.service.js';
   imports: [
     ReviewSlotsSettingsComponent,
     FolderPickerComponent,
+    ProductionSettingsComponent,
     PermissionGroupsSettingsComponent,
     FormsModule,
     NotificationSettingsComponent,

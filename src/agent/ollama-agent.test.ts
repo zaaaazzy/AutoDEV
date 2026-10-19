@@ -124,6 +124,7 @@ test('the developer may write with backup, but only run allowed commands', async
     'docker compose restart',
     'docker compose up -d --build',
     'docker compose logs --tail=50 backend',
+    'docker compose logs --since 15m --no-color api web',
     'git clone https://github.com/a/b.git',
     'git clone git@github.com:a/b.git app/src',
   ]) {

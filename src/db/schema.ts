@@ -678,9 +678,9 @@ export const SCHEMA = `
   );
   CREATE UNIQUE INDEX IF NOT EXISTS test_requests_open_idx ON test_requests (project_slug)
     WHERE status IN ('requested', 'running');
-  -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen.
+  -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen; aus dem Betrieb (Quelle „production“).
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
-  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test'));
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test', 'production'));
 
   -- Sprint starten (Knopf oder Autopilot): ohne Startdatum gilt der Starttag (höchstens das Enddatum).
   CREATE OR REPLACE FUNCTION sprint_default_start_date() RETURNS trigger AS $$
@@ -876,4 +876,61 @@ export const SCHEMA = `
            WHERE key ~ '^(model|command|allow_tools):') r
   ON CONFLICT (role) DO NOTHING;
   DELETE FROM app_settings WHERE key ~ '^(model|command|allow_tools):';
+
+  -- Produktions-Rückkanal: Health-URL, Compose-Dienste für den Log-Scan, Ingest-Token (nur der SHA-256-Hash),
+  -- Ausschlussmuster und Aufbewahrung der Fehlerbeispiele.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS health_url TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS log_services TEXT[] NOT NULL DEFAULT '{}';
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS ingest_token_hash TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS production_ignore TEXT[] NOT NULL DEFAULT '{}';
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS production_retention_days INTEGER NOT NULL DEFAULT 30
+    CHECK (production_retention_days BETWEEN 1 AND 365);
+  -- Wieder aufgetretene behobene Betriebs-Bugs tragen den Zeitpunkt der Regression.
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS regressed_at TIMESTAMPTZ;
+  -- Gebündelte Fehler: ein Datensatz je Fingerabdruck und Projekt, Beispiel gekürzt und maskiert.
+  CREATE TABLE IF NOT EXISTS production_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    fingerprint TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('health', 'logs', 'ingest')),
+    origin TEXT NOT NULL DEFAULT '',
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    count BIGINT NOT NULL DEFAULT 0,
+    sample TEXT NOT NULL DEFAULT '',
+    bug_id UUID REFERENCES bugs(id) ON DELETE SET NULL,
+    deploy_suspect JSONB,
+    UNIQUE (project_slug, fingerprint)
+  );
+  CREATE INDEX IF NOT EXISTS production_events_bug_idx ON production_events (bug_id);
+  CREATE INDEX IF NOT EXISTS production_events_seen_idx ON production_events (project_slug, last_seen);
+  -- Verlauf: Zähler je Stunde (für „seit gestern“, Schwere und das Diagramm im Bug-Detail).
+  CREATE TABLE IF NOT EXISTS production_event_buckets (
+    event_id UUID NOT NULL REFERENCES production_events(id) ON DELETE CASCADE,
+    hour TIMESTAMPTZ NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (event_id, hour)
+  );
+  CREATE INDEX IF NOT EXISTS production_event_buckets_hour_idx ON production_event_buckets (hour);
+  -- Erfolgreiche Deploys mit den Aufträgen, die seit dem vorigen Deploy erledigt (committet) wurden.
+  CREATE TABLE IF NOT EXISTS production_deploys (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    order_ids UUID[] NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS production_deploys_project_idx ON production_deploys (project_slug, deployed_at DESC);
+  -- Zustand der Sammler je Projekt: Health-Fehlschläge in Folge, Ausfall, gemeldete Probleme (wie der Wächter).
+  CREATE TABLE IF NOT EXISTS production_status (
+    project_slug TEXT PRIMARY KEY REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    failures INTEGER NOT NULL DEFAULT 0,
+    down BOOLEAN NOT NULL DEFAULT FALSE,
+    last_error TEXT,
+    checked_at TIMESTAMPTZ,
+    down_since TIMESTAMPTZ,
+    problems TEXT[] NOT NULL DEFAULT '{}',
+    notified_at TIMESTAMPTZ,
+    logs_scanned_at TIMESTAMPTZ,
+    log_error TEXT
+  );
 `;

@@ -17,6 +17,7 @@ import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { type BugStatRow, type BugStats, bugStats, isBuried } from './bug-stats.js';
+import { ProductionDetailComponent } from './production-detail.component.js';
 import {
   CategoryLabelPipe,
   SeverityLabelPipe,
@@ -32,7 +33,12 @@ const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 /** Pro Statistik-Karte höchstens so viele Zeilen, der Rest wird zusammengefasst. */
 const STAT_ROWS = 10;
 
-const BUG_SOURCE_LABEL: Record<string, string> = { agent: 'Agent', manual: 'Manuell', test: 'Testlauf' };
+const BUG_SOURCE_LABEL: Record<string, string> = {
+  agent: 'Agent',
+  manual: 'Manuell',
+  test: 'Testlauf',
+  production: 'Betrieb',
+};
 @Component({
   selector: 'app-bugs',
   standalone: true,
@@ -43,6 +49,7 @@ const BUG_SOURCE_LABEL: Record<string, string> = { agent: 'Agent', manual: 'Manu
     DataCellDirective,
     DataDetailDirective,
     GalleryComponent,
+    ProductionDetailComponent,
     MarkdownPipe,
     SeverityLabelPipe,
     ShortTextPipe,

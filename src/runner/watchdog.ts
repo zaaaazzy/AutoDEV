@@ -25,13 +25,33 @@ export interface WatchdogState {
   subscriptions?: PushSubscriptionRow[];
 }
 
-const REMIND_MS = 6 * 3600 * 1000;
+export const REMIND_MS = 6 * 3600 * 1000;
+
+/** Texte der Meldungen; der Betriebs-Rückkanal nutzt dieselbe Logik mit eigenen Texten. */
+export interface AlertLabels {
+  fresh: string;
+  ongoing: string;
+  recovered: string;
+  recoveredBody: string;
+  tag: string;
+  url: string;
+}
+
+const WATCHDOG_LABELS: AlertLabels = {
+  fresh: '⚠ AIdeation: Problem erkannt',
+  ongoing: '⚠ AIdeation: Problem besteht weiterhin',
+  recovered: '✓ AIdeation läuft wieder',
+  recoveredBody: 'Alle Prüfungen sind wieder in Ordnung.',
+  tag: 'watchdog',
+  url: '#dashboard',
+};
 
 /** Entscheidet, ob und was gemeldet wird: neue Probleme sofort, anhaltende alle 6 Stunden, Erholung einmal. */
 export function evaluate(
   previous: WatchdogState,
   problems: string[],
   now = Date.now(),
+  labels: AlertLabels = WATCHDOG_LABELS,
 ): { message: PushMessage | null; state: WatchdogState } {
   const before = new Set(previous.problems);
   const fresh = problems.filter((problem) => !before.has(problem));
@@ -39,7 +59,7 @@ export function evaluate(
   if (!problems.length) {
     if (!previous.problems.length) return { message: null, state };
     return {
-      message: { title: '✓ AIdeation läuft wieder', body: 'Alle Prüfungen sind wieder in Ordnung.', tag: 'watchdog' },
+      message: { title: labels.recovered, body: labels.recoveredBody, url: labels.url, tag: labels.tag },
       state: { ...state, notifiedAt: null },
     };
   }
@@ -47,10 +67,10 @@ export function evaluate(
   if (!fresh.length && !remind) return { message: null, state };
   return {
     message: {
-      title: fresh.length ? '⚠ AIdeation: Problem erkannt' : '⚠ AIdeation: Problem besteht weiterhin',
+      title: fresh.length ? labels.fresh : labels.ongoing,
       body: problems.join('\n'),
-      url: '#dashboard',
-      tag: 'watchdog',
+      url: labels.url,
+      tag: labels.tag,
     },
     state: { ...state, notifiedAt: now },
   };

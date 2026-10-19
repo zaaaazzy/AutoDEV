@@ -1,0 +1,78 @@
+<details class="run-step order-brief production-detail" open>
+  <summary>Betrieb: Verlauf und Deploy-Verdacht</summary>
+  @if (error(); as message) {
+    <p class="muted">{{ message }}</p>
+  }
+  <div class="production-history-head">
+    <strong>Vorkommen je Stunde (48 h)</strong>
+    <span class="muted">{{ total() }} insgesamt · Spitze {{ peak() }}/h</span>
+  </div>
+  <div class="production-history" role="img" [attr.aria-label]="'Vorkommen der letzten 48 Stunden: ' + total()">
+    @for (entry of history(); track entry.hour) {
+      <span
+        class="production-bar"
+        tabindex="0"
+        [attr.data-tip]="hourLabel(entry.hour) + ': ' + entry.count + '×'"
+        [attr.aria-label]="hourLabel(entry.hour) + ': ' + entry.count"
+        ><span [style.height.%]="barHeight(entry.count)"></span
+      ></span>
+    }
+  </div>
+  <div class="production-axis muted">
+    <span>vor 48 h</span>
+    <span>jetzt</span>
+  </div>
+  @for (event of events(); track event.id) {
+    <article class="production-event">
+      <div class="production-event-head">
+        <span class="tag">{{ sourceLabel[event.source] }}</span>
+        @if (event.origin) {
+          <code>{{ event.origin }}</code>
+        }
+        <span
+          >{{ event.count }}× · zuerst {{ event.firstSeen | dateTime }} · zuletzt {{ event.lastSeen | dateTime }}</span
+        >
+      </div>
+      <pre class="production-sample">{{ event.sample }}</pre>
+      @if (event.deploySuspect; as suspect) {
+        <div class="production-suspect">
+          <strong>Deploy-Verdacht:</strong> erstmals innerhalb von 30 min nach dem Deploy um
+          {{ suspect.deployedAt | dateTime }}.
+          @if (suspect.orders.length) {
+            Seit dem vorigen Deploy erledigt:
+            <ul>
+              @for (order of suspect.orders; track order.id) {
+                <li>
+                  <a
+                    href="#development"
+                    (click)="$event.preventDefault(); store.navigate('development', { focus: order.id })"
+                    >{{ order.title }}</a
+                  >
+                </li>
+              }
+            </ul>
+            @if (suspect.sprints.length) {
+              <span class="muted"
+                >Sprints:
+                @for (sprint of suspect.sprints; track sprint.id; let last = $last) {
+                  {{ sprint.name }}{{ last ? '' : ', ' }}
+                }
+              </span>
+            }
+          } @else {
+            <span class="muted">Seit dem vorigen Deploy wurden keine Aufträge erledigt.</span>
+          }
+        </div>
+      } @else {
+        <p class="muted">Kein Deploy-Verdacht (nicht innerhalb von 30 min nach einem Deploy aufgetreten).</p>
+      }
+      <small class="muted"
+        >Fingerabdruck <code>{{ event.fingerprint }}</code></small
+      >
+    </article>
+  } @empty {
+    @if (!error()) {
+      <p class="muted">Keine Ereignisse mehr vorhanden (Aufbewahrungsfrist abgelaufen).</p>
+    }
+  }
+</details>
