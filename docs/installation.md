@@ -76,6 +76,11 @@ npm run worker                    # Worker im Vordergrund starten (ohne Autostar
 ./start.sh --setup                # Einrichtung wiederholen
 ```
 
+Die Container heissen `devlog_database_postgres` (Datenbank), `devlog_backend_nodejs` (API und Oberfläche),
+`devlog_backup_postgres` (tägliche Sicherung) und `devlog_proxy_caddy` (HTTPS, optional). In den Befehlen oben
+stehen die Dienstnamen (`db`, `dev-log`, `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
+`docker exec -it devlog_database_postgres psql -U devlog dev_log`.
+
 ## Fehlerbehebung
 
 | Problem | Lösung |

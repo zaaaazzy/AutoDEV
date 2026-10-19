@@ -1,6 +1,8 @@
+# Containernamen: devlog_<Aufgabe>_<Technik>. Befehle nutzen weiter die Dienstnamen (db, dev-log, backup, https).
 services:
   db:
     image: postgres:17-alpine
+    container_name: devlog_database_postgres
     environment:
       POSTGRES_DB: dev_log
       POSTGRES_USER: ${DEV_LOG_DB_USER:-devlog}
@@ -18,6 +20,7 @@ services:
 
   dev-log:
     build: .
+    container_name: devlog_backend_nodejs
     ports:
       # Direkt nur vom eigenen Rechner aus; von aussen geht es über HTTPS (Dienst https).
       - "127.0.0.1:3100:3100"
@@ -45,6 +48,7 @@ services:
 
   backup:
     image: postgres:17-alpine
+    container_name: devlog_backup_postgres
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/backup.sh"]
     environment:
@@ -63,6 +67,7 @@ services:
   https:
     profiles: ["https"]
     image: caddy:2.8.4-alpine
+    container_name: devlog_proxy_caddy
     ports:
       - "80:80"
       - "443:443"
