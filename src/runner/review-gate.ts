@@ -7,7 +7,7 @@ import { followPreview, mergeApprovedBranch, type OrderBranch } from './git-sync
 
 /**
  * Review-Freigabe: Ein fertiger Auftrag wird nicht sofort in den Sprint-Branch gemergt, sondern wartet (Status
- * „review“), bis ein Mensch ihn in der Review-Instanz angesehen und freigegeben hat. Je Projekt einstellbar:
+ * „approval“), bis ein Mensch ihn in der Review-Instanz angesehen und freigegeben hat. Je Projekt einstellbar:
  * off = nie, ui = nur bei Änderungen an der Oberfläche, always = immer.
  */
 export type ReviewMode = 'off' | 'ui' | 'always';
