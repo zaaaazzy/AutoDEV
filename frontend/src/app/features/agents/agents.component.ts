@@ -239,11 +239,10 @@ export class AgentsComponent {
       key: system.role,
       name: system.name,
       command: system.command,
-      status:
-        system.role === 'assistant' &&
-        this.store.worker().agents.some((agent) => agent.id === 'assistant' && agent.active)
-          ? 'running'
-          : 'active',
+      // Assistent und Visionär stehen in der Worker-Liste unter ihrer Rolle (id „assistant“ bzw. „visionary“).
+      status: this.store.worker().agents.some((agent) => agent.id === system.role && agent.active)
+        ? 'running'
+        : 'active',
       hint: null,
       system,
     })),
