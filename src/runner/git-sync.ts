@@ -77,8 +77,8 @@ async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must']
     initialized = true;
   }
   if (!(await git('config', 'user.email')).output) {
-    await must('config', 'user.name', 'Mainty Dev Log');
-    await must('config', 'user.email', 'dev-log@mainty.local');
+    await must('config', 'user.name', 'Dev Log');
+    await must('config', 'user.email', 'dev-log@localhost');
   }
   await excludeInternalFolders(cwd);
   return initialized;
@@ -101,7 +101,7 @@ export function taskCommitMessage(
   const subject = title.replace(/\s+/g, ' ').trim().slice(0, 72) || 'Auftrag';
   return [
     `${type}(${scope}): ${subject}`,
-    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`,
+    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Dev Log.`,
   ];
 }
 
@@ -238,7 +238,7 @@ async function pushSprint(helpers: GitHelpers, sprint: PendingSprint, log: strin
   const { must } = helpers;
   await must('add', '-A');
   if (await must('status', '--porcelain')) {
-    await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Mainty Dev Log.');
+    await must('commit', '-m', `Sprint: ${sprint.name}`, '-m', 'Automatisch gesichert vom Dev Log.');
     log.push('Commit erstellt.');
   } else {
     log.push('Keine Änderungen seit dem letzten Commit.');

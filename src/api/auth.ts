@@ -42,7 +42,7 @@ export function requireCredentials(auth: DevLogAuth, limiter = new FailureLimite
       if (request.get('authorization')) {
         limiter.recordFailure(client);
       }
-      response.set('WWW-Authenticate', 'Basic realm="Mainty Dev Log", charset="UTF-8"');
+      response.set('WWW-Authenticate', 'Basic realm="Dev Log", charset="UTF-8"');
       response.status(401).send('Authentication required.');
       return;
     }
