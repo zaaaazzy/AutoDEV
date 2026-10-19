@@ -1,3 +1,4 @@
+import { decryptSecret } from '../core/secrets.js';
 import type { Pool } from 'pg';
 import { describeError, logged } from '../core/log.js';
 import type { KnownBug } from '../api/bugs.js';
@@ -75,11 +76,18 @@ export const runBuiltinAgent: BuiltinAgent = async ({
       .join('\n\n');
     return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
   }
-  const databaseUrl = (
+  const stored = (
     await pool.query<{ url: string | null }>('SELECT database_url AS url FROM projects WHERE slug = $1', [
       item.projectSlug,
     ])
   ).rows[0]?.url;
+  // Without the key the agent runs without database access instead of failing the whole step.
+  let databaseUrl: string | undefined;
+  try {
+    databaseUrl = stored ? decryptSecret(stored) : undefined;
+  } catch (error) {
+    logged(`database-url:${item.projectSlug}`)(error);
+  }
   return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl, onProgress });
 };
 

@@ -30,6 +30,7 @@ services:
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
       DEV_LOG_TRUST_PROXY: ${DEV_LOG_TRUST_PROXY:-}
+      DEV_LOG_SECRET_KEY: ${DEV_LOG_SECRET_KEY:-}
     depends_on:
       db:
         condition: service_healthy
