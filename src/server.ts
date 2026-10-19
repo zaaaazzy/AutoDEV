@@ -16,13 +16,11 @@ async function start(): Promise<void> {
   }
   const pool = await createDatabasePool(readDatabaseConfig());
   const port = Number(process.env.PORT ?? 3100);
-  const server = createDevLogApp(pool, username && password && !authDisabled ? { username, password } : null).listen(
-    port,
-    host,
-    () => {
-      console.info(`Dev Log listening on ${host}:${port}.`);
-    },
-  );
+  const server = createDevLogApp(pool, username && password && !authDisabled ? { username, password } : null, {
+    trustProxy: process.env.DEV_LOG_TRUST_PROXY?.trim() || undefined,
+  }).listen(port, host, () => {
+    console.info(`Dev Log listening on ${host}:${port}.`);
+  });
   const shutdown = (): void => {
     server.close(() => void pool.end());
   };

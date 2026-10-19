@@ -21,6 +21,8 @@ Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Spr
 
 Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Der Container-Port ist standardmäßig nur an `127.0.0.1` gebunden (`DEV_LOG_BIND=0.0.0.0` in `.env` öffnet ihn für das lokale Netz; Basic Auth läuft dann unverschlüsselt über HTTP), der Container läuft als Nicht-Root. Die API setzt Security-Header (CSP), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Mit `DEV_LOG_AUTH=off` lauscht der Server nur auf `127.0.0.1` (`DEV_LOG_HOST` überschreibt das).
 
+**HTTPS im lokalen Netz (optional):** `docker compose --profile tls up -d` startet zusätzlich einen Caddy-Proxy auf Port `3443` mit Zertifikat einer lokalen Zertifizierungsstelle. In `.env` dafür `DEV_LOG_TLS_HOST=<name-oder-ip-des-macs>` und `DEV_LOG_TRUST_PROXY=uniquelocal` setzen und `DEV_LOG_BIND` auf `127.0.0.1` lassen, damit der Dienst nur noch über den Proxy erreichbar ist (sonst ließen sich die `X-Forwarded-*`-Header fälschen). Das Stammzertifikat liegt im Volume `devlog_caddy` (`/data/caddy/pki/authorities/local/root.crt`) und muss einmal auf den Geräten als vertrauenswürdig hinterlegt werden.
+
 ### Struktur
 
 - `src/api/` Express-Routen, `src/core/` Hilfen (Validierung, Befehle, Sperren), `src/db/` Schema und Zugriff, `src/agent/` Ollama-Agent, Chat und Rollen, `src/runner/` Sprint-Runner, Worker, Tests und Git.

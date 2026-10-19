@@ -22,9 +22,14 @@ export type { DevLogAuth } from './auth.js';
 
 const UI_DIRECTORY = join(import.meta.dirname, '..', '..', 'dist', 'ui', 'browser');
 
-export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
+/**
+ * trustProxy (Express "trust proxy", e.g. "uniquelocal") is needed behind the optional TLS proxy: protocol and client
+ * address then come from X-Forwarded-*, so same-origin checks see https and the login lockout counts each client.
+ */
+export function createDevLogApp(pool: Pool, auth: DevLogAuth | null, options: { trustProxy?: string } = {}): Express {
   const app = express();
   app.disable('x-powered-by');
+  if (options.trustProxy) app.set('trust proxy', options.trustProxy);
   app.get('/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(securityHeaders);
   app.use(sameOriginWrites);

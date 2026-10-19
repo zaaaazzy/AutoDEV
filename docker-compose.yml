@@ -29,6 +29,7 @@ services:
       DEV_LOG_HOST: 0.0.0.0
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
+      DEV_LOG_TRUST_PROXY: ${DEV_LOG_TRUST_PROXY:-}
     depends_on:
       db:
         condition: service_healthy
@@ -38,5 +39,21 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional: HTTPS im lokalen Netz (docker compose --profile tls up -d), siehe README.
+  tls:
+    image: caddy:2.8.4-alpine
+    profiles: ["tls"]
+    ports:
+      - "${DEV_LOG_TLS_BIND:-0.0.0.0}:3443:443"
+    environment:
+      DEV_LOG_TLS_HOST: ${DEV_LOG_TLS_HOST:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - devlog_caddy:/data
+    depends_on:
+      - dev-log
+    restart: unless-stopped
+
 volumes:
   devlog_pgdata:
+  devlog_caddy:

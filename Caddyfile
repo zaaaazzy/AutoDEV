@@ -1,0 +1,10 @@
+# Optionaler TLS-Proxy vor Dev Log: docker compose --profile tls up -d
+# Zertifikat von Caddys lokaler Zertifizierungsstelle (einmal im Browser/System als vertrauenswürdig hinterlegen).
+{
+	local_certs
+}
+
+https://{$DEV_LOG_TLS_HOST:localhost} {
+	tls internal
+	reverse_proxy dev-log:3100
+}
