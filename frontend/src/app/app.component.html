@@ -47,6 +47,7 @@
         <button
           type="button"
           class="mobile-chip agents-chip"
+          [class.busy]="store.activeAgentCount() > 0"
           [class.online]="worker().online"
           [class.offline]="!worker().online"
           [attr.aria-expanded]="mobileAgents()"
@@ -162,6 +163,7 @@
           <div class="agent-indicator">
             <a
               class="worker-status"
+              [class.busy]="store.activeAgentCount() > 0"
               [class.online]="worker().online"
               [class.offline]="!worker().online"
               href="#agents"

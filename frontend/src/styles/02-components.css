@@ -409,6 +409,74 @@ a.summary-card:hover {
 .worker-status.offline::before {
   background: #c9573f;
 }
+/* Agents arbeiten: Roboter rüttelt ab und zu, schaut umher, Antenne blinkt. */
+.busy .nav-icon {
+  transform-origin: 50% 90%;
+  animation: robot-rattle 2.4s ease-in-out infinite;
+}
+.busy .nav-icon .robot-eyes {
+  animation: robot-look 2.4s ease-in-out infinite;
+}
+.busy .nav-icon .robot-antenna {
+  animation: robot-blink 1s steps(1) infinite;
+}
+@keyframes robot-rattle {
+  0%,
+  40%,
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+  5% {
+    transform: translate(-1px, 0) rotate(-6deg);
+  }
+  10% {
+    transform: translate(1px, -1px) rotate(6deg);
+  }
+  15% {
+    transform: translate(-1px, 0) rotate(-5deg);
+  }
+  20% {
+    transform: translate(1px, 0) rotate(4deg);
+  }
+  25% {
+    transform: rotate(-2deg);
+  }
+  30% {
+    transform: rotate(1deg);
+  }
+}
+@keyframes robot-look {
+  0%,
+  45%,
+  100% {
+    transform: translateX(0);
+  }
+  50%,
+  70% {
+    transform: translateX(1.5px);
+  }
+  75%,
+  95% {
+    transform: translateX(-1.5px);
+  }
+}
+@keyframes robot-blink {
+  0% {
+    fill: #328455;
+    stroke: #328455;
+  }
+  50% {
+    fill: transparent;
+    stroke: currentColor;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .busy .nav-icon,
+  .busy .nav-icon .robot-eyes,
+  .busy .nav-icon .robot-antenna {
+    animation: none;
+  }
+}
 .content {
   width: min(1280px, 100%);
   margin: 0 auto;
