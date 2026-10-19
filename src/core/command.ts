@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process';
 import { folderAvailable, missingFolderMessage } from './folder-guard.js';
-import { trackChild } from './shutdown.js';
+import { killGroup, trackChild } from './shutdown.js';
 
 export const MAX_CAPTURED_OUTPUT = 120_000;
+
+/** So lange wird nach dem Ende des Prozesses noch auf restliche Ausgabe gewartet, bevor die Pipes geschlossen werden. */
+export const OUTPUT_GRACE_MS = 2_000;
 
 export interface CommandResult {
   exitCode: number;
@@ -51,7 +54,6 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
       detached: true,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: options.timeoutMs,
     });
     const untrack = child.pid ? trackChild(child.pid) : () => undefined;
     if (child.pid) options.onSpawn?.(child.pid);
@@ -76,12 +78,37 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
               'Absoluten Pfad im Agent-Befehl angeben oder ./scripts/install-worker.sh in einem Terminal erneut ausführen, in dem der Befehl funktioniert.';
       appendOutput(Buffer.from(`\n${error.message}${hint}\n`));
     });
-    child.once('close', (code, signal) => {
+    // Eigener Timer statt spawn({ timeout }): der trifft nur den direkten Prozess. Gestartete Server oder Testläufer
+    // lebten weiter, hielten stdout offen, und 'close' käme nie.
+    const pid = child.pid;
+    const timer = options.timeoutMs
+      ? setTimeout(() => {
+          if (pid) killGroup(pid);
+          // Ohne Prozessgruppen (Windows) wenigstens den direkten Prozess beenden.
+          child.kill('SIGKILL');
+        }, options.timeoutMs)
+      : undefined;
+    let grace: NodeJS.Timeout | undefined;
+    let finished = false;
+    const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      clearTimeout(grace);
       untrack();
       if (signal) {
         appendOutput(Buffer.from(`\nProcess ended by ${signal} (timeout or kill).\n`));
       }
       resolveCommand({ exitCode: code ?? 1, durationMs: Date.now() - startedAt, output });
+    };
+    // Hält ein Enkelprozess ausserhalb der Gruppe die Pipes offen, nach kurzer Frist trotzdem abschliessen.
+    child.once('exit', (code, signal) => {
+      grace = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish(code, signal);
+      }, OUTPUT_GRACE_MS);
     });
+    child.once('close', (code, signal) => finish(code, signal));
   });
 };

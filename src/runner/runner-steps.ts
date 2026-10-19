@@ -290,6 +290,8 @@ async function invokeAgent(
         timeoutMs: options.timeoutMs,
         env: agentEnvironment(options.cwd),
         onOutput: hooks.onOutput,
+        // Damit ein Abbruch aus der Oberfläche auch diesen Agenten samt Kindprozessen beendet.
+        onSpawn: hooks.onSpawn,
         onAction: hooks.onAction,
       },
     ).catch((error: unknown) => ({
@@ -297,6 +299,7 @@ async function invokeAgent(
       durationMs: 0,
       output: error instanceof Error ? error.message : String(error),
     }));
+    if (hooks.signal.aborted) return written;
     const run = await builtinRun();
     return {
       ...run,
