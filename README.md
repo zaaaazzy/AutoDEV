@@ -26,6 +26,7 @@ Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeic
 ### Struktur
 
 - `src/api/` Express-Routen, `src/core/` Hilfen (Validierung, Befehle, Sperren), `src/db/` Schema und Zugriff, `src/agent/` Ollama-Agent, Chat und Rollen, `src/runner/` Sprint-Runner, Worker, Tests und Git.
+- `frontend/src/styles/` globale Styles, nach Bereichen nummeriert (die Reihenfolge in `angular.json` ist die Kaskade).
 - `frontend/src/app/` Shell (`app.component`), `core/` (Store, API, Modelle), `shared/` (Pipes, Hilfen, kleine Komponenten), `features/<bereich>/` je ein Bereich der Oberfläche.
 
 ## Projekt anlegen

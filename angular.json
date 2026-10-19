@@ -19,7 +19,15 @@
             "tsConfig": "frontend/tsconfig.app.json",
             "inlineStyleLanguage": "css",
             "assets": [],
-            "styles": ["frontend/src/styles.css"]
+            "styles": [
+              "frontend/src/styles/01-base.css",
+              "frontend/src/styles/02-shell.css",
+              "frontend/src/styles/03-components.css",
+              "frontend/src/styles/04-responsive.css",
+              "frontend/src/styles/05-widgets.css",
+              "frontend/src/styles/06-git-timeline.css",
+              "frontend/src/styles/07-views.css"
+            ]
           },
           "configurations": {
             "production": {

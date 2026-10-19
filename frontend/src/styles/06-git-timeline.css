@@ -1,0 +1,94 @@
+/* Git-Verlauf */
+/* Git-Verlauf: gemeinsame Zeitleiste für Sprints und Ideen */
+.git-tree {
+  padding: 12px 14px;
+  border: 1px solid #dfe3da;
+  border-radius: 10px;
+  background: #fafbf8;
+  font-size: 13px;
+}
+.git-tree h4 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b756f;
+}
+.git-tree ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.git-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 0 12px 22px;
+  overflow-wrap: anywhere;
+}
+.git-node::before {
+  content: '';
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  bottom: -2px;
+  width: 2px;
+  background: #c9d1c6;
+}
+.git-node:last-child {
+  padding-bottom: 0;
+}
+.git-node:last-child::before {
+  display: none;
+}
+.git-dot {
+  position: absolute;
+  left: 0;
+  top: 4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid #fafbf8;
+  background: #8aa291;
+  box-sizing: content-box;
+}
+.git-node.branch .git-dot {
+  background: #2f6f4f;
+}
+.git-node.commit .git-dot {
+  background: #d98a2b;
+}
+.git-node.empty .git-dot {
+  background: #fafbf8;
+  border-color: #c9d1c6;
+}
+.git-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6b756f;
+}
+.git-text {
+  font-weight: 600;
+  color: var(--ink);
+}
+.git-node.empty .git-text {
+  font-weight: 400;
+  color: #6b756f;
+}
+.git-detail {
+  color: #6b756f;
+}
+.git-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #e3e7df;
+}
+.git-actions .button {
+  justify-content: flex-start;
+  gap: 8px;
+}
