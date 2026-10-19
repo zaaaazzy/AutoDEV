@@ -550,7 +550,7 @@ export async function waitForCi(
     return;
   }
   const deadline = Date.now() + CI_WAIT_MS;
-  let state: { status: string; conclusion: string } | null = null;
+  let state: { status: string; conclusion: string } | null;
   let watched = '';
   for (;;) {
     const remaining = deadline - Date.now();
