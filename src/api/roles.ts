@@ -65,7 +65,8 @@ const RULES: Rule[] = [
   // Workflow-Schritte (welcher Agent wann läuft) gehören zur Agent-Verwaltung.
   ['*', /^\/api\/projects\/[^/]+\/workflow\/(steps|order)$/, 'agents'],
   ['*', /^\/api\/workflow-steps\//, 'agents'],
-  ['POST', /^\/api\/development\/[^/]+\/(retry|analyze)$/, 'run'],
+  // Review-Freigabe: freigeben, zurückweisen oder in der Review-Instanz anzeigen gehört zum Ausführen.
+  ['POST', /^\/api\/development\/[^/]+\/(retry|analyze|approve|review-reject|show-review)$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
   [

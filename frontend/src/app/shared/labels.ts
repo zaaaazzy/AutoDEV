@@ -5,6 +5,7 @@ export const DEVELOPMENT_STATUSES: DevelopmentStatus[] = [
   'planned',
   'in_progress',
   'blocked',
+  'approval',
   'done',
   'rejected',
 ];
@@ -33,6 +34,7 @@ const STATUS_LABELS: Record<string, string> = {
   in_progress: 'In Arbeit',
   // Blockiert heisst immer: ein Mensch muss etwas tun (erneut versuchen, prüfen, Zugang geben) – ein Begriff überall.
   blocked: 'Aktion notwendig',
+  approval: 'Wartet auf Freigabe',
   done: 'Erledigt',
   open: 'Offen',
   fixed: 'Behoben',

@@ -11,6 +11,7 @@ import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
 import { projectFolderError } from '../core/validation.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
+import { syncReviewInstance } from './review-instance.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
@@ -313,6 +314,21 @@ async function main(): Promise<void> {
     const commentActive = new Set<string>();
     const visionaryActive = new Set<string>();
     const testActive = new Set<string>();
+    // Review-Instanzen (Auftrag wartet auf Freigabe) starten, wechseln oder beenden – je Projekt nacheinander.
+    const reviewActive = new Set<string>();
+    const reviewTimer = setInterval(() => {
+      for (const target of chatTargets) {
+        const slug = target.options.project;
+        if (reviewActive.has(slug) || stopping || target.problem || !isAbsolute(target.repository)) continue;
+        reviewActive.add(slug);
+        void syncReviewInstance(pool, slug, target.repository)
+          .then(() => loggedErrors.delete(`review:${slug}`))
+          .catch((error: unknown) =>
+            logOnce(`review:${slug}`, `[${slug}] Review-Instanz fehlgeschlagen: ${describeError(error)}`),
+          )
+          .finally(() => reviewActive.delete(slug));
+      }
+    }, 10_000);
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -484,6 +500,7 @@ async function main(): Promise<void> {
       stopFolderWatch();
       clearInterval(restartTimer);
       clearInterval(chatTimer);
+      clearInterval(reviewTimer);
       clearInterval(setupTimer);
     }
   } finally {

@@ -1,4 +1,5 @@
 import { runPreSprint } from './pre-sprint.js';
+import { processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -322,6 +323,16 @@ export async function runWorkflow(
     [options.project],
   );
   await resumeAfterEnvironment(pool, options.project).catch(() => undefined);
+  // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
+  const approved = await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
+    console.error('Freigabe fehlgeschlagen:', error);
+    return 0;
+  });
+  if (approved) {
+    await deployProject(pool, options.project, options.cwd, execute).catch((error) =>
+      console.error('Deploy fehlgeschlagen:', error),
+    );
+  }
   // Autopilot: abgeschlossenen Sprint beenden bzw. den nächsten vorschlagen und starten.
   await sprintAutopilot(pool, options.project).catch((error) =>
     console.error('Sprint-Autopilot fehlgeschlagen:', error),

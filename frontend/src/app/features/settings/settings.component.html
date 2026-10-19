@@ -70,6 +70,29 @@
           Projektordner und ein dort laufender Entwicklungsserver bleiben unberührt.</label
         >
         <label
+          >Review-Freigabe
+          <select name="reviewMode" [(ngModel)]="settings.reviewMode">
+            <option value="off">Nie – fertige Aufträge werden sofort gemergt</option>
+            <option value="ui">Nur bei Oberflächen-Änderungen</option>
+            <option value="always">Immer</option>
+          </select>
+        </label>
+        <label
+          >Review-Adresse
+          <input name="reviewUrl" [(ngModel)]="settings.reviewUrl" placeholder="https://localhost:4201" />
+        </label>
+        <label class="wide"
+          >Review-Befehl
+          <input name="reviewCommand" [(ngModel)]="settings.reviewCommand" placeholder="sh scripts/review-live.sh" />
+        </label>
+        <p class="muted wide">
+          Mit Review-Freigabe wartet ein fertiger Auftrag, bis du ihn freigibst; erst dann wird er in den Sprint gemergt
+          (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl startet ihn in „{{
+            settings.repository || 'Projektordner'
+          }}-review“ – z. B. auf eigenen Ports mit einer Kopie der Datenbank. Zurückweisen schickt ihn mit deiner
+          Rückmeldung an die Agents zurück.
+        </p>
+        <label
           >Kostengrenze je Auftrag (Tokens)
           <input
             type="number"

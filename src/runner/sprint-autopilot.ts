@@ -13,7 +13,9 @@ export function sprintSettled(items: { status: string; actionTodo: string | null
     items.length > 0 &&
     !items.some(
       (item) =>
-        ['backlog', 'planned', 'in_progress'].includes(item.status) || (item.status === 'blocked' && !item.actionTodo),
+        // Wartet ein Auftrag auf die Review-Freigabe, ist er noch nicht im Sprint-Branch: der Sprint wartet mit.
+        ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
+        (item.status === 'blocked' && !item.actionTodo),
     )
   );
 }

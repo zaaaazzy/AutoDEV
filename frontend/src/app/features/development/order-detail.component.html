@@ -55,6 +55,9 @@
   @if (item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
     <app-order-question [order]="item" />
   }
+  @if (item.status === 'approval') {
+    <app-order-approval [order]="item" />
+  }
   @if (item.status === 'blocked' || item.status === 'rejected') {
     <div class="blocked-box">
       <strong>{{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}</strong>

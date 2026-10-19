@@ -16,6 +16,7 @@ import { executeAgentCommand } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
+import { followProjectPreview, holdForReview, loadReviewMode, needsApproval, type ReviewMode } from './review-gate.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import {
   FILES_CREATE,
@@ -582,9 +583,18 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
   let mergeProblem: string | null = null;
   if (ctx.branch) {
-    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute);
+    // Review-Freigabe (Projekteinstellung): nur ganze Abläufe, nicht das Ausführen eines einzelnen Agents.
+    const review =
+      passed && !item.agentId ? await loadReviewMode(pool, item.projectSlug).catch((): ReviewMode => 'off') : 'off';
+    const hold = review === 'off' ? undefined : (files: string[]) => needsApproval(review, files);
+    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute, hold);
     console.info(`[${item.id}] ${result.message}`);
+    if (result.held) {
+      await holdForReview(pool, item, ctx.branch);
+      return;
+    }
     if (passed && !result.merged) mergeProblem = result.message;
+    if (result.merged) await followProjectPreview(pool, item.projectSlug, options.cwd, ctx.branch.base, execute);
   } else if (passed && ctx.sprintName) {
     await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
   }

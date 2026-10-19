@@ -12,6 +12,7 @@ import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { OrderService } from './order.service.js';
+import { OrderApprovalComponent } from './order-approval.component.js';
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -19,6 +20,7 @@ import { OrderService } from './order.service.js';
   standalone: true,
   imports: [
     OrderBriefComponent,
+    OrderApprovalComponent,
     OrderQuestionComponent,
     OrderTimelineComponent,
     AgentWorkflowComponent,

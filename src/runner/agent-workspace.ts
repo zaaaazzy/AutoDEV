@@ -5,10 +5,12 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
+  rmSync,
   symlinkSync,
 } from 'node:fs';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 
 /**
@@ -21,6 +23,11 @@ export function agentWorkspacePath(folder: string): string {
   return join(dirname(folder), `${basename(folder)}-agents`);
 }
 
+/** Ordner der Review-Instanz (Auftrag, der auf die Freigabe wartet), z. B. /Volumes/…/Mainty-review. */
+export function reviewWorkspacePath(folder: string): string {
+  return join(dirname(folder), `${basename(folder)}-review`);
+}
+
 const same = (left: string, right: string): boolean => {
   try {
     return realpathSync(left) === realpathSync(right);
@@ -29,8 +36,64 @@ const same = (left: string, right: string): boolean => {
   }
 };
 
+const isLink = (path: string): boolean => {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+/** Verweist der Symlink (z. B. ein npm-Workspace-Paket) in den Projektordner selbst? */
+function pointsInto(link: string, folder: string): boolean {
+  try {
+    const target = resolve(dirname(link), readlinkSync(link));
+    const inside = relative(folder, target);
+    return !inside.startsWith('..') && !isAbsolute(inside) && !inside.startsWith(`node_modules`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * node_modules der Wurzel nachbauen: jedes Paket als Link auf den Hauptordner, ausser npm-Workspace-Pakete
+ * (z. B. @mainty/contracts → ../../contracts). Die bekommen denselben relativen Link, zeigen also auf den Code im
+ * Arbeitsordner statt auf den Stand im Hauptordner.
+ */
+function mirrorModules(source: string, target: string, folder: string): void {
+  mkdirSync(target, { recursive: true });
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const from = join(source, entry.name);
+    const to = join(target, entry.name);
+    if (existsSync(to) || isLink(to)) continue;
+    if (entry.isSymbolicLink() && pointsInto(from, folder)) {
+      symlinkSync(readlinkSync(from), to);
+    } else if (entry.isDirectory() && entry.name.startsWith('@')) {
+      mirrorModules(from, to, folder);
+    } else {
+      symlinkSync(from, to);
+    }
+  }
+}
+
+function hasWorkspaceLinks(modules: string, folder: string): boolean {
+  for (const entry of readdirSync(modules, { withFileTypes: true })) {
+    const path = join(modules, entry.name);
+    if (entry.isSymbolicLink() && pointsInto(path, folder)) return true;
+    if (entry.isDirectory() && entry.name.startsWith('@') && hasWorkspaceLinks(path, folder)) return true;
+  }
+  return false;
+}
+
 /** Abhängigkeiten nicht neu installieren: node_modules des Hauptordners verlinken (Wurzel und erste Ebene). */
-function linkDependencies(folder: string, workspace: string): void {
+export function linkDependencies(folder: string, workspace: string): void {
+  const rootSource = join(folder, 'node_modules');
+  const rootTarget = join(workspace, 'node_modules');
+  if (existsSync(rootSource) && hasWorkspaceLinks(rootSource, folder)) {
+    // Früher als ein einziger Link angelegt: damit zeigten Workspace-Pakete in den Hauptordner.
+    if (isLink(rootTarget)) rmSync(rootTarget);
+    mirrorModules(rootSource, rootTarget, folder);
+  }
   const candidates = [
     '.',
     ...readdirSync(folder, { withFileTypes: true })
@@ -53,7 +116,7 @@ function linkDependencies(folder: string, workspace: string): void {
  * Verlinkte node_modules sind Symlinks; ein `node_modules/` in .gitignore greift dafür nicht, und `git add -A` der
  * WIP-Commits würde sie einchecken. Deshalb lokal (info/exclude, gilt für alle Worktrees) ausschliessen.
  */
-async function excludeLinkedDependencies(workspace: string, execute: CommandExecutor): Promise<void> {
+export async function excludeLinkedDependencies(workspace: string, execute: CommandExecutor): Promise<void> {
   const result = await execute(['git', 'rev-parse', '--git-common-dir'], workspace);
   if (result.exitCode !== 0) return;
   const common = result.output.trim().split('\n').pop() ?? '';
@@ -62,6 +125,31 @@ async function excludeLinkedDependencies(workspace: string, execute: CommandExec
   if (lines.some((line) => line.trim() === 'node_modules')) return;
   mkdirSync(dirname(file), { recursive: true });
   appendFileSync(file, `${lines.length && lines.at(-1) !== '' ? '\n' : ''}node_modules\n`);
+}
+
+/** Git-Worktree neben dem Projektordner anlegen (falls nötig) und Abhängigkeiten verlinken. */
+export async function ensureWorktree(
+  folder: string,
+  workspace: string,
+  execute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  if (!existsSync(join(workspace, '.git'))) {
+    const hasMain =
+      (await execute(['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/main'], folder)).exitCode === 0;
+    const created = await execute(
+      ['git', 'worktree', 'add', '--detach', workspace, ...(hasMain ? ['main'] : [])],
+      folder,
+      { timeoutMs: 120_000 },
+    );
+    if (created.exitCode !== 0) return created.output.slice(-300) || 'git worktree add fehlgeschlagen';
+  }
+  try {
+    linkDependencies(folder, workspace);
+    await excludeLinkedDependencies(workspace, execute);
+  } catch {
+    // Ohne verlinkte Abhängigkeiten installieren die Agents sie bei Bedarf selbst.
+  }
+  return null;
 }
 
 /**
@@ -78,26 +166,12 @@ export async function resolveAgentWorkspace(
 ): Promise<{ cwd: string | null; problem: string | null }> {
   if (!separate && !same(folder, installRoot)) return { cwd: folder, problem: null };
   const workspace = agentWorkspacePath(folder);
-  if (!existsSync(join(workspace, '.git'))) {
-    const hasMain =
-      (await execute(['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/main'], folder)).exitCode === 0;
-    const created = await execute(
-      ['git', 'worktree', 'add', '--detach', workspace, ...(hasMain ? ['main'] : [])],
-      folder,
-      { timeoutMs: 120_000 },
-    );
-    if (created.exitCode !== 0) {
-      return {
-        cwd: null,
-        problem: `Eigener Arbeitsbaum für die Agents konnte nicht angelegt werden (${workspace}): ${created.output.slice(-300)}`,
-      };
-    }
-  }
-  try {
-    linkDependencies(folder, workspace);
-    await excludeLinkedDependencies(workspace, execute);
-  } catch {
-    // Ohne verlinkte Abhängigkeiten installieren die Agents sie bei Bedarf selbst.
+  const problem = await ensureWorktree(folder, workspace, execute);
+  if (problem) {
+    return {
+      cwd: null,
+      problem: `Eigener Arbeitsbaum für die Agents konnte nicht angelegt werden (${workspace}): ${problem}`,
+    };
   }
   return { cwd: workspace, problem: null };
 }

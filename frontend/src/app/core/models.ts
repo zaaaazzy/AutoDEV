@@ -1,6 +1,6 @@
 export type Priority = 'low' | 'medium' | 'high';
 export type SprintStatus = 'planned' | 'active' | 'completed';
-export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'done' | 'rejected';
+export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'approval' | 'done' | 'rejected';
 export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
 /** Workflow-Phasen (Spalten im Workflow-Board); siehe src/core/workflow-phases.ts. */
 export type AgentPhase = 'pre_sprint' | 'pre_task' | 'while_task' | 'after_task' | 'on_rejected' | 'on_done';
@@ -17,6 +17,9 @@ export interface Project {
   guidelines?: string;
   autoBugfix?: boolean;
   agentWorkspace?: boolean;
+  reviewMode?: 'off' | 'ui' | 'always';
+  reviewCommand?: string[] | null;
+  reviewUrl?: string | null;
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
   orderTokenLimit?: number | null;
   orderCostLimit?: number | null;
@@ -133,6 +136,10 @@ export interface DevelopmentItem extends Estimate {
   failureBugId?: string | null;
   /** Aktion notwendig: in wenigen Worten, was ein Mensch tun muss (sonst leer). */
   actionTodo?: string | null;
+  /** Review-Freigabe: Branch, seit wann er wartet, wann freigegeben. */
+  reviewBranch?: string | null;
+  reviewSince?: string | null;
+  reviewApprovedAt?: string | null;
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
   fixStatus?: string | null;
@@ -501,4 +508,19 @@ export interface ChatMessage {
   answered?: boolean;
   /** Antwort auf diese Rückfrage. */
   replyTo?: string | null;
+}
+
+/** Review-Freigabe eines Projekts: Einstellung, laufende Review-Instanz und wartende Aufträge. */
+export interface ReviewState {
+  mode: 'off' | 'ui' | 'always';
+  url: string | null;
+  configured: boolean;
+  instance: {
+    developmentId: string | null;
+    requestedId: string | null;
+    status: 'starting' | 'running' | 'failed' | 'stopped';
+    message: string | null;
+    updatedAt: string;
+  } | null;
+  waiting: { id: string; title: string; reviewSince: string | null; reviewApprovedAt: string | null }[];
 }

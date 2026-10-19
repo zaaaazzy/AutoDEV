@@ -271,7 +271,8 @@ export async function finishOrderBranch(
   sprintName: string,
   passed: boolean,
   rawExecute: CommandExecutor = runCommand,
-): Promise<{ merged: boolean; commit: string | null; message: string }> {
+  hold?: (files: string[]) => boolean,
+): Promise<{ merged: boolean; held?: boolean; commit: string | null; message: string }> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
@@ -283,6 +284,19 @@ export async function finishOrderBranch(
       if (dirty) {
         const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
         await must('commit', '-m', subject, '-m', body);
+      }
+      // Review-Freigabe: Branch bleibt bestehen und wird erst nach der Freigabe gemergt (mergeApprovedBranch).
+      if (hold) {
+        const changed = await git('diff', '--name-only', `${target.base}...${target.branch}`);
+        if (hold(changed.exitCode === 0 ? changed.output.split('\n').filter(Boolean) : [])) {
+          await must('checkout', target.base);
+          return {
+            merged: false,
+            held: true,
+            commit: null,
+            message: `Wartet auf Freigabe – ${target.branch} wird danach in ${target.base} gemergt.`,
+          };
+        }
       }
       await must('checkout', target.base);
       const merged = await git(
@@ -322,6 +336,56 @@ export async function finishOrderBranch(
   } catch (error) {
     return { merged: false, commit: null, message: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch) mergen und löschen. */
+export async function mergeApprovedBranch(
+  cwd: string,
+  item: { title: string },
+  branch: string,
+  base: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<{ merged: boolean; message: string }> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  try {
+    if (!(await branchExists(git, branch))) return { merged: false, message: `Branch ${branch} gibt es nicht mehr.` };
+    if (!(await branchExists(git, base))) return { merged: false, message: `Basis-Branch ${base} gibt es nicht mehr.` };
+    if ((await git('status', '--porcelain', '--untracked-files=no')).output)
+      return { merged: false, message: `Offene Änderungen im Arbeitsordner – ${branch} nicht gemergt.` };
+    if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output !== base) await must('checkout', base);
+    const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: ${item.title.slice(0, 72)}`);
+    if (merged.exitCode !== 0) {
+      await git('merge', '--abort');
+      return { merged: false, message: `Merge-Konflikt mit ${base} – Branch ${branch} bleibt bestehen.` };
+    }
+    await git('branch', '-d', branch);
+    return { merged: true, message: `Freigegeben und in ${base} gemergt.` };
+  } catch (error) {
+    return { merged: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Vorschau nachziehen: Arbeiten die Agents in einem eigenen Ordner, zeigt der Projektordner (z. B. mit laufendem
+ * Entwicklungsserver) den Sprint-Stand. Nur wenn er losgelöst (detached) und ohne offene Änderungen ist – ein
+ * ausgecheckter Branch oder eigene Arbeit eines Menschen bleibt unberührt. Liefert eine Meldung oder null.
+ */
+export async function followPreview(
+  folder: string,
+  base: string,
+  execute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  const { git } = gitHelpers(execute, folder);
+  if (!existsSync(join(folder, '.git'))) return null;
+  if ((await git('symbolic-ref', '-q', 'HEAD')).exitCode === 0) return null;
+  if ((await git('status', '--porcelain', '--untracked-files=no')).output)
+    return `Vorschau nicht nachgezogen: offene Änderungen in ${folder}.`;
+  const moved = await git('checkout', '-q', '--detach', base);
+  return moved.exitCode === 0
+    ? `Vorschau in ${folder} auf ${base} nachgezogen.`
+    : `Vorschau nicht nachgezogen: ${moved.output.slice(-200)}`;
 }
 
 const CI_WORKFLOW = join('.github', 'workflows', 'devlog-ci.yml');

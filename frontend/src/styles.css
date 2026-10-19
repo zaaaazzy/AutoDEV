@@ -2246,6 +2246,55 @@ h3 .link-button {
   margin: 0;
   font-size: 13px;
 }
+.approval-box {
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #b9d3c7;
+  border-left: 4px solid var(--green);
+  border-radius: 8px;
+  background: #eef6f1;
+}
+.approval-box p {
+  margin: 6px 0;
+  font-size: 13px;
+}
+.approval-box .actions {
+  margin: 8px 0 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.approval-instance {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.approval-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.approval-dot.running {
+  background: #2e9b5f;
+}
+.approval-dot.starting {
+  background: var(--orange);
+}
+.approval-dot.failed {
+  background: #c0392b;
+}
+.approval-log {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 160px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
 .agent-row {
   display: flex;
   align-items: center;

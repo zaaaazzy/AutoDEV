@@ -539,7 +539,7 @@ export const SCHEMA = `
   -- Abgelehnt: Auftrag bzw. Bug verstösst gegen die Projektregeln (Do's and Don'ts) und wird nicht umgesetzt.
   ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_status_check;
   ALTER TABLE development_items ADD CONSTRAINT development_items_status_check
-    CHECK (status IN ('backlog', 'planned', 'in_progress', 'blocked', 'done', 'rejected'));
+    CHECK (status IN ('backlog', 'planned', 'in_progress', 'blocked', 'approval', 'done', 'rejected'));
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_status_check;
   ALTER TABLE bugs ADD CONSTRAINT bugs_status_check CHECK (status IN ('open', 'in_progress', 'fixed', 'wontfix', 'rejected'));
   -- Sprintplanung je Projekt: manuell (Standard), vorschlagen oder Autopilot; Kapazität ohne Sprint-Historie.
@@ -800,4 +800,26 @@ export const SCHEMA = `
 
   -- Eigener Arbeitsordner (Worktree <Ordner>-agents) für die Agents, z. B. wenn im Projektordner ein Entwicklungsserver läuft.
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_workspace BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Review-Freigabe: fertige Aufträge warten (Status approval) auf die Freigabe; erst dann wird gemergt.
+  -- (Status approval steht in development_items_status_check weiter oben.)
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_branch TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_base TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_since TIMESTAMPTZ;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_approved_at TIMESTAMPTZ;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_mode TEXT NOT NULL DEFAULT 'off'
+    CHECK (review_mode IN ('off', 'ui', 'always'));
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_command JSONB;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_url TEXT;
+  -- Laufende Review-Instanz je Projekt (vom Worker auf dem Host gestartet).
+  CREATE TABLE IF NOT EXISTS review_instances (
+    project_slug TEXT PRIMARY KEY REFERENCES projects(slug) ON DELETE CASCADE,
+    development_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    requested_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    commit_sha TEXT,
+    pid INTEGER,
+    status TEXT NOT NULL DEFAULT 'stopped' CHECK (status IN ('starting', 'running', 'failed', 'stopped')),
+    message TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
 `;

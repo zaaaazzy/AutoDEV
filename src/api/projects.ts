@@ -13,13 +13,14 @@ import {
   projectFolderError,
   validText,
 } from '../core/validation.js';
+import { REVIEW_MODES } from '../core/status.js';
 
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -210,6 +211,25 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(lines.length ? JSON.stringify(lines.map((line) => line.split(/\s+/))) : null);
       sets.push(`deploy_commands = $${values.length}::jsonb`);
     }
+    if (body.reviewMode !== undefined) {
+      if (typeof body.reviewMode !== 'string' || !REVIEW_MODES.has(body.reviewMode))
+        return fail('Review-Freigabe: nie, nur bei Oberflächen-Änderungen oder immer.');
+      values.push(body.reviewMode);
+      sets.push(`review_mode = $${values.length}`);
+    }
+    if (body.reviewCommand !== undefined) {
+      const line = typeof body.reviewCommand === 'string' ? body.reviewCommand.trim() : null;
+      if (line === null || line.length > 500) return fail('Review-Befehl: ein Befehl, höchstens 500 Zeichen.');
+      values.push(line ? JSON.stringify(line.split(/\s+/)) : null);
+      sets.push(`review_command = $${values.length}::jsonb`);
+    }
+    if (body.reviewUrl !== undefined) {
+      const url = typeof body.reviewUrl === 'string' ? body.reviewUrl.trim() : null;
+      if (url === null || (url && !/^https?:\/\/\S{1,300}$/.test(url)))
+        return fail('Review-Adresse: leer lassen oder eine http(s)-Adresse angeben.');
+      values.push(url || null);
+      sets.push(`review_url = $${values.length}`);
+    }
     for (const key of ['description', 'guidelines'] as const) {
       if (body[key] === undefined) continue;
       if (typeof body[key] !== 'string' || body[key].length > 10_000) {
@@ -280,7 +300,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays"`,
       values,
     );
     if (!result.rows[0]) {
