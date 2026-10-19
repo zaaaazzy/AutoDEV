@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OUTPUT_GRACE_MS, runCommand } from './command.js';
 
 function alive(pid: number): boolean {
@@ -46,4 +48,18 @@ test('ein normaler Befehl liefert Ausgabe und Exit-Code wie bisher', async () =>
   const result = await runCommand(['sh', '-c', 'echo hallo; exit 3'], process.cwd(), { timeoutMs: 5_000 });
   assert.equal(result.exitCode, 3);
   assert.equal(result.output, 'hallo\n');
+});
+
+test('runCommand names a missing working directory instead of blaming the PATH', async () => {
+  const missing = join(tmpdir(), `dev-log-missing-${process.pid}-${Date.now()}`);
+  const result = await runCommand(['git', 'status'], missing);
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /Arbeitsordner nicht erreichbar/);
+  assert.doesNotMatch(result.output, /im PATH des Workers nicht gefunden/);
+});
+
+test('runCommand still points to the PATH when the command itself is missing', async () => {
+  const result = await runCommand(['dev-log-gibt-es-nicht'], tmpdir());
+  assert.notEqual(result.exitCode, 0);
+  assert.match(result.output, /im PATH des Workers nicht gefunden/);
 });

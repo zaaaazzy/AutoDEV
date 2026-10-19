@@ -18,7 +18,12 @@ import {
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
-  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category`;
+  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
+  regressed_at AS "regressedAt"`;
+/** Betriebs-Bugs: Vorkommen der letzten 24 Stunden („seit gestern“) über alle gebündelten Ereignisse. */
+const PRODUCTION_COUNT = `CASE WHEN source = 'production' THEN (
+    SELECT COALESCE(SUM(k.count), 0)::int FROM production_events e JOIN production_event_buckets k ON k.event_id = e.id
+     WHERE e.bug_id = bugs.id AND k.hour >= date_trunc('hour', NOW() - INTERVAL '24 hours')) END AS "productionCount"`;
 const BUG_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },
@@ -110,7 +115,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       return;
     }
     const result = await pool.query(
-      `SELECT ${BUG_COLUMNS} FROM bugs WHERE project_slug = $1 ORDER BY created_at DESC LIMIT 500`,
+      `SELECT ${BUG_COLUMNS}, ${PRODUCTION_COUNT} FROM bugs WHERE project_slug = $1 ORDER BY created_at DESC LIMIT 500`,
       [slug],
     );
     response.json({ bugs: result.rows });

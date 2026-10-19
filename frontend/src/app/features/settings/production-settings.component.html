@@ -1,0 +1,113 @@
+<section class="panel" id="production-settings">
+  <div class="section-heading">
+    <div>
+      <h2>Betrieb</h2>
+      <p class="muted">Fehler der Anwendung im Betrieb erkennen und als Bug mit Quelle „Betrieb“ erfassen</p>
+    </div>
+    @if (status(); as current) {
+      <span class="tag" [class.production-ok]="current.healthy" [class.production-bad]="!current.healthy">
+        {{ current.down ? 'Ausfall' : current.healthy ? 'Gesund' : 'Kritischer Fehler' }}
+      </span>
+    }
+  </div>
+  <form class="form-grid" (ngSubmit)="save()">
+    <label class="wide"
+      >Health-URL (optional)<input
+        name="healthUrl"
+        [(ngModel)]="form.healthUrl"
+        maxlength="500"
+        placeholder="http://localhost:8080/health"
+      />
+    </label>
+    <p class="muted wide">
+      Nur http(s) auf localhost, im lokalen Netz oder auf einer eigenen Domain. Alle 2 Minuten geprüft; zwei Fehlschläge
+      in Folge ergeben einen kritischen Bug und eine Push-Meldung, die Erholung eine Entwarnung.
+      @if (status()?.checkedAt) {
+        Zuletzt geprüft {{ status()?.checkedAt | dateTime
+        }}{{ status()?.lastError ? ': ' + status()?.lastError : ' – erreichbar' }}.
+      }
+    </p>
+    <label class="wide"
+      >Compose-Dienste für den Log-Scan<input
+        name="logServices"
+        [(ngModel)]="form.logServices"
+        maxlength="1000"
+        placeholder="api, web"
+      />
+    </label>
+    <p class="muted wide">
+      Alle 15 Minuten und nach jedem erfolgreichen Deploy: <code>docker compose logs --since 15m --no-color</code> im
+      Projektordner. Erkannt werden Stacktraces, ERROR-Zeilen und HTTP-5xx.
+      @if (status()?.logError) {
+        Letzter Scan fehlgeschlagen: {{ status()?.logError }}
+      } @else if (status()?.logsScannedAt) {
+        Zuletzt {{ status()?.logsScannedAt | dateTime }}.
+      }
+    </p>
+    <label class="wide"
+      >Ausschlussmuster (eines pro Zeile)<textarea
+        name="productionIgnore"
+        [(ngModel)]="form.productionIgnore"
+        rows="3"
+        placeholder="favicon.ico&#10;ECONNRESET"
+      ></textarea>
+    </label>
+    <p class="muted wide">
+      Zeilen, die einen dieser Texte enthalten (ohne Gross-/Kleinschreibung), erzeugen kein Ereignis.
+    </p>
+    <label
+      >Aufbewahrung (Tage)<input
+        name="productionRetentionDays"
+        type="number"
+        min="1"
+        max="365"
+        step="1"
+        [(ngModel)]="form.productionRetentionDays"
+        required
+      />
+    </label>
+    <button class="button primary" type="submit" [disabled]="busy()">Betrieb speichern</button>
+  </form>
+
+  <h3>Ingest-Endpunkt</h3>
+  <p class="muted">
+    Die Anwendung meldet Fehler selbst an Dev Log – ohne Login, nur mit Token (16 KB je Meldung, Rate-Limit).
+    Gespeichert wird nur der Hash des Tokens; den Klartext zeigt Dev Log einmalig direkt nach dem Erzeugen.
+  </p>
+  <div class="actions">
+    <button class="button secondary" type="button" [disabled]="busy()" (click)="createToken()">
+      {{ store.currentProject()?.ingestConfigured ? 'Token rotieren' : 'Token erzeugen' }}
+    </button>
+    @if (store.currentProject()?.ingestConfigured) {
+      <button class="button danger" type="button" [disabled]="busy()" (click)="removeToken()">Token entfernen</button>
+    }
+  </div>
+  @if (token(); as fresh) {
+    <div class="production-token" role="status">
+      <strong>Neues Token – jetzt kopieren, es wird nicht mehr angezeigt:</strong>
+      <code data-testid="ingest-token">{{ fresh }}</code>
+      <button class="button secondary" type="button" (click)="copy('token', fresh)">
+        {{ copied() === 'token' ? 'Kopiert ✓' : 'Kopieren' }}
+      </button>
+    </div>
+  } @else if (store.currentProject()?.ingestConfigured) {
+    <p class="muted">Ein Token ist hinterlegt. In den Snippets steht <code>&lt;TOKEN&gt;</code> als Platzhalter.</p>
+  }
+  @if (snippets(); as snippet) {
+    <details class="run-step order-brief">
+      <summary>Snippet für den Browser (window.onerror)</summary>
+      <pre class="production-snippet">{{ withToken(snippet.browser) }}</pre>
+      <button class="button secondary" type="button" (click)="copy('browser', withToken(snippet.browser))">
+        {{ copied() === 'browser' ? 'Kopiert ✓' : 'Snippet kopieren' }}
+      </button>
+    </details>
+    <details class="run-step order-brief">
+      <summary>Snippet für Node (process.on('uncaughtException'))</summary>
+      <pre class="production-snippet">{{ withToken(snippet.node) }}</pre>
+      <button class="button secondary" type="button" (click)="copy('node', withToken(snippet.node))">
+        {{ copied() === 'node' ? 'Kopiert ✓' : 'Snippet kopieren' }}
+      </button>
+    </details>
+    <p class="muted">Ausführlich: Dokumentation → „Betrieb: Fehler an Dev Log melden“.</p>
+  }
+</section>

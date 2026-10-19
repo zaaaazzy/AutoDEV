@@ -509,7 +509,7 @@ a.summary-card:hover {
 }
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -969,6 +969,9 @@ details > summary {
   }
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .summary-grid .production-tile {
+    grid-column: 1 / -1;
   }
   .item-card {
     grid-template-columns: minmax(0, 1fr) 190px;

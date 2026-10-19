@@ -281,6 +281,7 @@
     </section>
   }
   @if (auth.can('admin') && store.currentProject()) {
+    <app-production-settings />
     <app-permission-groups-settings />
   }
   @if (auth.can('admin')) {

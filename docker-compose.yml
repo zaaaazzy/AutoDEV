@@ -28,6 +28,8 @@ services:
       PORT: 3100
       DEV_LOG_TRUST_PROXY: uniquelocal
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
+      # Weitere eigene Domains für die Health-URL der betreuten Anwendungen (Komma-getrennt, inkl. Subdomains).
+      DEV_LOG_OWN_DOMAINS: ${DEV_LOG_OWN_DOMAINS:-}
       DEV_LOG_PROJECT_ROOTS: ${DEV_LOG_PROJECT_ROOTS:-}
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
