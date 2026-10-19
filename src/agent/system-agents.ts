@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, resolveModel } from './ollama-client.js';
 
 export interface SystemAgent {
@@ -72,7 +73,7 @@ async function installedModels(): Promise<string[]> {
 /** The worker owns the environment and reaches Ollama, so it publishes models and choices for the dashboard. */
 export async function publishSystemAgents(pool: Pool): Promise<void> {
   await applyModelSettings(pool);
-  const models = await installedModels().catch(() => []);
+  const models = await installedModels().catch(logged('ollama-models', [] as string[]));
   const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await pool.query(upsert, ['system_agents', JSON.stringify(systemAgents())]);
   await pool.query(upsert, ['ollama_models', JSON.stringify(models)]);

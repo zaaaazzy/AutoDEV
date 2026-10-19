@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures } from './autofix.js';
@@ -115,8 +116,10 @@ export async function runWorkItem(
   let interrupted = false;
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
-    ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(() => []);
-    ctx.images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(() => []);
+    ctx.bugs = await loadKnownBugs(pool, item.projectSlug).catch(logged(`bugs:${item.projectSlug}`, []));
+    ctx.images = await materializeAttachments(pool, item.ideationId, item.id, options.cwd).catch(
+      logged(`attachments:${item.id}`, []),
+    );
     ctx.projectContext = await loadProjectContext(pool, item.projectSlug);
     const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
     for (const [position, agent] of ordered.entries()) {

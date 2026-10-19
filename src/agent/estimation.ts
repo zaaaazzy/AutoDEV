@@ -5,6 +5,7 @@ import { runCommand } from '../core/command.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
 import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
 
@@ -131,7 +132,7 @@ export async function estimateNewIdeas(
     ]
       .filter(Boolean)
       .join('\n\n');
-    const result = await run(prompt).catch(() => null);
+    const result = await run(prompt).catch(logged(`estimate:${idea.id}`, null));
     if (!result) {
       await pool.query(
         `UPDATE ideation_items SET agent_note = 'Aufwand konnte nicht geschätzt werden – bitte manuell ergänzen.' WHERE id = $1 AND agent_note IS NULL`,

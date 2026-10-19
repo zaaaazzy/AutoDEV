@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
+import { clearLogged, describeError, logOnce, logged } from '../core/log.js';
 import { processChat, rejectChat } from '../agent/chat.js';
 import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
@@ -29,22 +30,6 @@ async function connect(watch: boolean): Promise<Pool> {
       await sleep(15_000);
     }
   }
-}
-
-const loggedErrors = new Map<string, string>();
-
-/** pg liefert bei ausgefallener Datenbank AggregateErrors ohne Text; der Code (z. B. ECONNREFUSED) ist dann die einzige Information. */
-function describeError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const code = (error as { code?: string }).code;
-  return error.message || code || error.name;
-}
-
-/** Gleiche Fehlermeldungen pro Schlüssel nur einmal ausgeben, bis sie sich ändern oder der Fehler verschwindet. */
-function logOnce(key: string, message: string): void {
-  if (loggedErrors.get(key) === message) return;
-  loggedErrors.set(key, message);
-  console.error(message);
 }
 
 async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
@@ -144,14 +129,16 @@ async function main(): Promise<void> {
     let startup = true;
     const beat = (): void => {
       for (const slug of known) {
-        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(() => undefined);
+        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(
+          logged(`heartbeat:${slug}`),
+        );
       }
       if (known.length) startup = false;
     };
-    void publishSystemAgents(pool).catch(() => undefined);
+    void publishSystemAgents(pool).catch(logged('system-agents'));
     const heartbeat = setInterval(() => {
       beat();
-      void publishSystemAgents(pool).catch(() => undefined);
+      void publishSystemAgents(pool).catch(logged('system-agents'));
     }, 15_000);
     // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
     let chatTargets: Target[] = [];
@@ -164,7 +151,7 @@ async function main(): Promise<void> {
         const slug = target.options.project;
         if (chatActive.has(slug) || stopping) continue;
         if (target.problem) {
-          void rejectChat(pool, slug, target.problem).catch(() => undefined);
+          void rejectChat(pool, slug, target.problem).catch(logged(`chat:${slug}`));
           continue;
         }
         if (!estimateActive.has(slug)) {
@@ -179,7 +166,7 @@ async function main(): Promise<void> {
         if (!authorActive.has(slug) && !stopping) {
           authorActive.add(slug);
           void draftRequirements(pool, target.options)
-            .then(() => loggedErrors.delete(`author:${slug}`))
+            .then(() => clearLogged(`author:${slug}`))
             .catch((error: unknown) =>
               logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`),
             )
@@ -187,14 +174,14 @@ async function main(): Promise<void> {
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
-          .then(() => loggedErrors.delete(`chat:${slug}`))
+          .then(() => clearLogged(`chat:${slug}`))
           .catch((error: unknown) => logOnce(`chat:${slug}`, `[${slug}] Chat fehlgeschlagen: ${describeError(error)}`))
           .finally(() => chatActive.delete(slug));
         // Lange Problemanalysen blockieren so keine neuen Chat-Nachrichten.
         if (analysisActive.has(slug)) continue;
         analysisActive.add(slug);
         void analyzeBlocked(pool, target.options)
-          .then(() => loggedErrors.delete(`analysis:${slug}`))
+          .then(() => clearLogged(`analysis:${slug}`))
           .catch((error: unknown) =>
             logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`),
           )

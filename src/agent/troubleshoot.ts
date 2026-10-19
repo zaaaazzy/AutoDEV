@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import type { CommandExecutor } from '../core/command.js';
 import { runAuthorAgent } from './requirements.js';
@@ -59,9 +60,9 @@ export async function analyzeBlocked(
       WHERE r.development_id = $1 AND s.status = 'failed' ORDER BY s.id DESC LIMIT 3`,
       [item.id],
     )
-    .catch(() => ({ rows: [] as { agent: string; output: string }[] }));
+    .catch(logged(`analysis-steps:${item.id}`, { rows: [] as { agent: string; output: string }[] }));
   const failures = steps.rows.map((step) => `### ${step.agent}\n${step.output.trim().slice(-2500)}`);
-  const known = (await loadKnownBugs(pool, options.project, 30).catch(() => [])).map(
+  const known = (await loadKnownBugs(pool, options.project, 30).catch(logged(`bugs:${options.project}`, []))).map(
     (bug) => `- [${bug.status}] ${bug.title}`,
   );
   console.info(`[${item.id}] Problemanalyse`);

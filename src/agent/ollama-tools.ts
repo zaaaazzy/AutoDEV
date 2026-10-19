@@ -35,7 +35,10 @@ async function backup(context: ToolContext, target: string): Promise<void> {
   const rel = relative(await realpath(context.cwd), target);
   const destination = join(context.backupRoot, rel);
   await mkdir(dirname(destination), { recursive: true });
-  await copyFile(target, destination).catch(() => undefined);
+  // A new file has nothing to back up; any other failure stops the write instead of changing a file without backup.
+  await copyFile(target, destination).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
 }
 
 /** Executes one tool call; failures are returned as text so the model can correct itself. */

@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 
 const INTERVAL_MS = 8000;
 
@@ -20,7 +21,7 @@ export async function startProgress(
     link.stepId
       ? pool
           .query('UPDATE agent_run_steps SET progress = $2 WHERE id = $1', [link.stepId, value])
-          .catch(() => undefined)
+          .catch(logged(`progress:${project}`))
       : Promise.resolve();
   void writeStep(text());
   if (link.silent) {
@@ -43,23 +44,27 @@ export async function startProgress(
      VALUES ($1, 'assistant', $2, 'processing') RETURNING id`,
         [project, text()],
       )
-      .catch(() => ({ rows: [] }))
+      .catch(logged(`progress:${project}`, { rows: [] as { id: string }[] }))
   ).rows[0]?.id;
   if (!id) return { update: () => undefined, stop: async () => undefined };
   const timer = setInterval(() => {
-    void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
+    void pool
+      .query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()])
+      .catch(logged(`progress:${project}`));
     void writeStep(text());
   }, INTERVAL_MS);
   return {
     update: (message) => {
       override = message;
-      void pool.query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()]).catch(() => undefined);
+      void pool
+        .query(`UPDATE chat_messages SET content = $2 WHERE id = $1`, [id, text()])
+        .catch(logged(`progress:${project}`));
       void writeStep(text());
     },
     stop: async () => {
       clearInterval(timer);
       await writeStep(null);
-      await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]).catch(() => undefined);
+      await pool.query(`DELETE FROM chat_messages WHERE id = $1`, [id]).catch(logged(`progress:${project}`));
     },
   };
 }

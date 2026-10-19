@@ -1,5 +1,6 @@
 import { restrictedSystemCommand, systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 import { loadProjectContext, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
@@ -106,7 +107,7 @@ async function assessRisks(
   description: string,
   execute: CommandExecutor,
 ): Promise<string> {
-  const bugs = await loadKnownBugs(pool, options.project, 60).catch(() => []);
+  const bugs = await loadKnownBugs(pool, options.project, 60).catch(logged(`bugs:${options.project}`, []));
   if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
   const list = bugs.map(
     (bug) =>

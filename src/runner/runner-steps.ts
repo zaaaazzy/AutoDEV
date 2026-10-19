@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { logged } from '../core/log.js';
 import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -221,7 +222,7 @@ function logEvent(pool: Pool, stepId: string | undefined, text: string): Promise
       stepId,
       JSON.stringify([{ at: new Date().toISOString(), text: redactOutput(text, process.env) }]),
     ])
-    .catch(() => undefined);
+    .catch(logged(`step-events:${stepId}`));
 }
 
 /** Execute a workflow step and persist its progress, cancellation state, and result. */
@@ -270,7 +271,7 @@ export async function runStep(
           if (stepPid) killGroup(stepPid);
           resolveCancel({ exitCode: 130, durationMs: 0, output: 'Vom Benutzer abgebrochen.' });
         })
-        .catch(() => undefined);
+        .catch(logged(`step-cancel:${stepId}`));
     }, CANCEL_POLL_MS);
     stopWatching = () => clearInterval(watcher);
   });
@@ -287,7 +288,7 @@ export async function runStep(
           redactOutput(partial, process.env),
           AGENT_STEP_STATUS.running,
         ])
-        .catch(() => undefined);
+        .catch(logged(`step-output:${stepId}`));
     },
     onAction: (message) => {
       void logEvent(pool, stepId, message);
@@ -297,7 +298,7 @@ export async function runStep(
       stepPid = pid;
       void pool
         .query('UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1', [stepId, pid])
-        .catch(() => undefined);
+        .catch(logged(`step-pid:${stepId}`));
     },
   };
   const progress = await startProgress(
@@ -392,8 +393,8 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   if (item.sprintId) {
     const sprint = await pool
       .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
-      .catch(() => null);
+      .catch(logged(`task-commit:${item.id}`, null));
     if (sprint?.rows[0]) await commitTaskToGit(options.cwd, item, sprint.rows[0].name, execute);
   }
-  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
+  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged(`bug-resume:${item.bugId}`));
 }
