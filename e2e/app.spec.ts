@@ -484,7 +484,6 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
     headers,
     data: { name: `Rechte-Test ${Date.now()}`, role: 'reviewer', phase: 'while_task' },
   });
-  console.log('DEBUG', response.status(), (await response.text()).slice(0, 300));
   const agent = (await response.json()).agent;
   try {
     expect(agent.allowedCommands).toEqual([]);

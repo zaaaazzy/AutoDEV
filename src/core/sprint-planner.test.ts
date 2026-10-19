@@ -48,6 +48,18 @@ test('Kapazität aus den letzten 3 Sprints (Median), ohne Historie aus der Einst
       source: 'history',
     },
   );
+  // Ist-Tokens ebenfalls als Median; Sprints ohne gemessene Laufzeit zählen nicht als Historie.
+  assert.deepEqual(
+    capacityFrom(
+      [
+        { hours: 5, tokens: 300_000 },
+        { hours: 0, tokens: 0 },
+        { hours: 7, tokens: 100_000 },
+      ],
+      40,
+    ),
+    { hours: 6, tokens: 200_000, source: 'history' },
+  );
   assert.deepEqual(capacityFrom([], 40), { hours: 40, tokens: null, source: 'setting' });
 });
 
