@@ -491,14 +491,35 @@ async function ensureCiWorkflow(cwd: string, commands: string[][], helpers: GitH
   log.push('CI-Workflow (GitHub Actions) angelegt.');
 }
 
+/** Status und Ergebnis eines GitHub-Actions-Laufs aus `gh run view --json status,conclusion`. */
+export function parseRunState(output: string): { status: string; conclusion: string } | null {
+  const json = /\{[^{}]*\}/.exec(output);
+  if (!json) return null;
+  try {
+    const value = JSON.parse(json[0]) as { status?: unknown; conclusion?: unknown };
+    return typeof value.status === 'string'
+      ? { status: value.status, conclusion: typeof value.conclusion === 'string' ? value.conclusion : '' }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Wartet auf den GitHub-Actions-Lauf für den gepushten Stand (über die gh CLI). Ohne gh bleibt das lokale Test-Gate
- * maßgeblich; ein roter CI-Lauf verhindert den Merge nach main.
+ * maßgeblich; ein roter CI-Lauf verhindert den Merge nach main. Das Urteil kommt aus dem Lauf selbst: `gh run watch`
+ * endet bei Netz- oder API-Fehlern auch vorzeitig mit Fehlercode, während der Lauf noch läuft.
  */
-async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, log: string[]): Promise<void> {
+export async function waitForCi(
+  execute: CommandExecutor,
+  cwd: string,
+  branch: string,
+  log: string[],
+  pollMs = 10_000,
+): Promise<void> {
   const env = { ...process.env, GH_PROMPT_DISABLED: '1' };
-  const gh = async (...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs: CI_WAIT_MS, env });
-  const auth = await gh('auth', 'status', '--hostname', 'github.com').catch(() => null);
+  const gh = async (timeoutMs: number, ...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs, env });
+  const auth = await gh(GIT_TIMEOUT_MS, 'auth', 'status', '--hostname', 'github.com').catch(() => null);
   if (!auth || auth.exitCode !== 0) {
     log.push('CI-Status nicht prüfbar (GitHub CLI fehlt oder ist nicht angemeldet) – das lokale Test-Gate gilt.');
     return;
@@ -507,6 +528,7 @@ async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, 
   let runId = '';
   for (let attempt = 0; attempt < 24 && !runId; attempt += 1) {
     const list = await gh(
+      GIT_TIMEOUT_MS,
       'run',
       'list',
       '--branch',
@@ -527,10 +549,24 @@ async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, 
     log.push('Kein CI-Lauf gefunden (Workflow fehlt oder GitHub Actions ist aus) – das lokale Test-Gate gilt.');
     return;
   }
-  const watched = await gh('run', 'watch', runId, '--exit-status');
-  if (watched.exitCode !== 0) {
+  const deadline = Date.now() + CI_WAIT_MS;
+  let state: { status: string; conclusion: string } | null = null;
+  let watched = '';
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining > 0) watched = (await gh(remaining, 'run', 'watch', runId)).output;
+    state = parseRunState((await gh(GIT_TIMEOUT_MS, 'run', 'view', runId, '--json', 'status,conclusion')).output);
+    if (state?.status === 'completed' || Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  if (state?.status !== 'completed') {
     throw new Error(
-      `Merge nach main abgelehnt: CI-Lauf ${runId} auf ${branch} ist rot. ${redactOutput(watched.output, process.env).slice(-400)}`,
+      `Merge nach main zurückgestellt: CI-Lauf ${runId} auf ${branch} ist nach ${CI_WAIT_MS / 60_000} Minuten noch nicht fertig (Status: ${state?.status ?? 'unbekannt'}).`,
+    );
+  }
+  if (state.conclusion !== 'success') {
+    throw new Error(
+      `Merge nach main abgelehnt: CI-Lauf ${runId} auf ${branch} ist rot (${state.conclusion || 'ohne Ergebnis'}). ${redactOutput(watched, process.env).slice(-400)}`,
     );
   }
   log.push(`CI grün (Lauf ${runId}).`);
