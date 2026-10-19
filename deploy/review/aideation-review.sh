@@ -18,5 +18,15 @@ export PORT="${REVIEW_FRONTEND_PORT:-4200}"
 
 echo "[aideation-review] Oberfläche bauen"
 npm run build:ui
+# Datenbank hier anlegen statt im Server: ältere Stände legten nur „dev_log“ an, ihre Vorschau brach sonst ab.
+echo "[aideation-review] Datenbank $SLOT_DB anlegen (falls nötig)"
+SLOT_DB="$SLOT_DB" node --input-type=module -e "
+import pg from 'pg';
+const client = new pg.Client({ connectionString: process.env.DEV_LOG_ADMIN_DATABASE_URL });
+await client.connect();
+const { rows } = await client.query('SELECT 1 FROM pg_database WHERE datname = \$1', [process.env.SLOT_DB]);
+if (!rows.length) await client.query('CREATE DATABASE ' + process.env.SLOT_DB);
+await client.end();
+"
 echo "[aideation-review] Server auf :$PORT (Datenbank $SLOT_DB)"
 exec npx tsx src/server.ts
