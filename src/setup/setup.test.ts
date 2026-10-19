@@ -8,6 +8,9 @@ import { agentCommand } from '../api/setup.js';
 import { processSetupJob } from './setup-jobs.js';
 import { TEMPLATES } from './templates.js';
 
+// Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
+delete process.env.DEV_LOG_PROJECT_ROOTS;
+
 function jobPool(kind: string, params: Record<string, unknown>) {
   const updates: { sql: string; values: unknown[] }[] = [];
   let claimed = false;

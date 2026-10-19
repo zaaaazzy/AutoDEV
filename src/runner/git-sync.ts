@@ -575,7 +575,10 @@ export async function waitForCi(
 /** Führt die Testbefehle des Projekts aus; wirft mit dem Ausgabe-Ende, sobald einer fehlschlägt. */
 async function runTestGate(execute: CommandExecutor, cwd: string, commands: string[][], log: string[]): Promise<void> {
   for (const command of commands) {
-    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS });
+    // Ohne die internen Variablen des Workers (DEV_LOG_*): Projekttests sollen weder AIdeation-Zugänge sehen noch
+    // vom Projektbereich des Workers abhängen.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_')));
+    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS, env });
     if (result.exitCode !== 0) {
       throw new Error(
         `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${redactOutput(result.output, process.env).slice(-600)}`,
