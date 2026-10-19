@@ -2,6 +2,7 @@ import { Component, computed, DestroyRef, effect, inject, signal } from '@angula
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { ConfirmService } from '../../core/confirm.service.js';
 import { formatHours, formatUsd, USD_PER_MILLION_TOKENS } from '../../shared/format.js';
 import { LocaleNumberPipe } from '../../shared/pipes.js';
 
@@ -67,6 +68,7 @@ export class SprintProposalComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
+  private readonly confirm = inject(ConfirmService);
   protected readonly formatHours = formatHours;
   protected readonly formatUsd = formatUsd;
 
@@ -148,12 +150,26 @@ export class SprintProposalComponent {
 
   protected async apply(start: boolean): Promise<void> {
     const proposal = this.proposal();
-    if (!proposal || !this.chosen().length) return;
+    const chosen = this.chosen();
+    if (!proposal || !chosen.length) return;
+    const answer = await this.confirm.ask({
+      title: start ? `${proposal.name} übernehmen und starten?` : `${proposal.name} übernehmen?`,
+      message: start
+        ? `Der Sprint wird mit ${chosen.length} Aufträgen angelegt und gleich gestartet; der Worker beginnt mit der Umsetzung.`
+        : `Der Sprint wird mit ${chosen.length} Aufträgen angelegt (noch nicht gestartet).`,
+      details: chosen.map((item) => item.title),
+      confirmLabel: start ? 'Übernehmen und starten' : 'Übernehmen',
+      commentLabel: 'Sprintziel / Kommentar (optional)',
+      commentPlaceholder: 'z. B. „Fokus: Login stabilisieren, keine neuen Features.“',
+      commentHint: 'Wird als Sprintziel gespeichert.',
+    });
+    if (!answer) return;
     await this.store.perform(
       () =>
         this.api.post(`${this.api.projectPath(this.store.activeProject())}/sprints/proposal/apply`, {
-          ids: this.chosen().map((item) => item.id),
+          ids: chosen.map((item) => item.id),
           start,
+          comment: answer.comment,
         }),
       start ? `${proposal.name} ist angelegt und gestartet.` : `${proposal.name} ist angelegt.`,
     );

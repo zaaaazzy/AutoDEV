@@ -128,12 +128,17 @@
                         : 'Die Anfrage konnte nicht bearbeitet werden.'
                     }}
                   </p>
-                  <p class="attention-next">
-                    → {{ item.actionTodo ? 'Antworte' : 'Stell die Anfrage neu' }} im
-                    <a href="#dashboard" (click)="$event.preventDefault(); store.navigate('dashboard')"
-                      >Dashboard-Chat</a
-                    >. Der Auftrag aktualisiert sich danach von selbst.
-                  </p>
+                  @if (item.actionTodo) {
+                    <app-order-question [order]="item" />
+                  } @else {
+                    <p class="attention-next">
+                      → Stell die Anfrage im
+                      <a href="#dashboard" (click)="$event.preventDefault(); store.navigate('dashboard')"
+                        >Dashboard-Chat</a
+                      >
+                      neu.
+                    </p>
+                  }
                 } @else if (item.failureBugId) {
                   @switch (item.fixStatus) {
                     @case ('planned') {
@@ -301,7 +306,9 @@
             }
             <div class="attention-actions">
               @if (item.kind === 'express') {
-                <button class="button primary" type="button" (click)="store.navigate('dashboard')">Zum Chat</button>
+                @if (!item.actionTodo) {
+                  <button class="button secondary" type="button" (click)="store.navigate('dashboard')">Zum Chat</button>
+                }
               } @else if (
                 auth.can('run') && (item.status === 'blocked' || item.status === 'rejected' || item.removedFromSprintAt)
               ) {

@@ -5,6 +5,7 @@ import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { TestRequest, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { ConfirmService } from '../../core/confirm.service.js';
 
 const normalize = (value: string) => value.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '');
 const POLL_MS = 10_000;
@@ -27,7 +28,35 @@ export interface MenuEntry {
   scope?: 'full' | 'ui';
   /** Startet einen Visionär-Lauf (wie „Ideen vorschlagen lassen“ in Ideation). */
   visionary?: boolean;
+  /** Startet Dev Log neu (Container neu bauen, Worker neu starten). */
+  restart?: boolean;
 }
+
+/** Stand des Neustarts von Dev Log (GET/POST /api/system/restart). */
+export interface RestartState {
+  status: 'requested' | 'building' | 'restarting' | 'done' | 'failed';
+  requestedAt: string;
+  requestedBy: string | null;
+  finishedAt?: string | null;
+  message?: string | null;
+  log?: string | null;
+}
+
+const RESTART_OPEN = ['requested', 'building', 'restarting'];
+
+/** Dev Log neu starten: neuer Code und neue Agents werden geladen (nur Administration). */
+const RESTART_ENTRY: MenuEntry = {
+  key: 'system:restart',
+  restart: true,
+  title: 'Dev Log neu starten',
+  summary: 'Container neu bauen und Worker neu starten – lädt neuen Code und neue Agents',
+  detail:
+    'Baut alle Dev-Log-Container mit dem aktuellen Code neu (docker compose up -d --build) und startet danach den Worker neu, damit auch er den neuen Code und die neuen Agents lädt. Laufende Aufgaben werden abgewartet (höchstens 15 Minuten); was dann noch läuft, wird nach dem Neustart fortgesetzt.',
+  runner: 'Worker (auf dem Rechner)',
+  effect:
+    'Das Dashboard ist während des Neustarts kurz nicht erreichbar und verbindet sich danach selbst neu. Der Stand steht hier im Menü.',
+  commands: ['docker compose up -d --build', 'Worker-Neustart (launchd)'],
+};
 
 export interface MenuGroup {
   id: string;
@@ -111,6 +140,7 @@ export class AgentTasksComponent {
   private readonly host = inject(ElementRef<HTMLElement>);
   protected readonly actions = inject(AgentActionsService);
   protected readonly auth = inject(AuthService);
+  private readonly confirm = inject(ConfirmService);
   protected readonly open = signal(false);
   protected readonly query = signal('');
   protected readonly active = signal(0);
@@ -127,6 +157,9 @@ export class AgentTasksComponent {
   protected readonly visionaryOpen = computed(() =>
     ['requested', 'running'].includes(this.latestVisionary()?.status ?? ''),
   );
+  /** Letzter Neustart von Dev Log; solange er läuft, ist der Eintrag gesperrt. */
+  protected readonly latestRestart = signal<RestartState | null>(null);
+  protected readonly restartOpen = computed(() => RESTART_OPEN.includes(this.latestRestart()?.status ?? ''));
   /** Formular: null = geschlossen, id null = neue Aktion. */
   protected readonly editing = signal<ActionForm | null>(null);
   /** Im Chat gewählter Agent: Vorgabe für neue Aktionen. */
@@ -156,6 +189,15 @@ export class AgentTasksComponent {
     const groups: MenuGroup[] = [];
     if (this.auth.can('run')) groups.push({ id: 'tests', name: 'Tests', entries: TEST_ENTRIES });
     if (this.auth.can('plan')) groups.push({ id: 'visionary', name: 'Visionär', entries: [VISIONARY_ENTRY] });
+    if (this.auth.can('admin')) {
+      const restart = this.latestRestart();
+      const summary = restart?.message && restart.status !== 'done' ? restart.message : RESTART_ENTRY.summary;
+      const detail =
+        restart?.status === 'failed' && restart.log
+          ? `${RESTART_ENTRY.detail}\n\nLetzter Versuch fehlgeschlagen:\n${restart.log.slice(-600)}`
+          : RESTART_ENTRY.detail;
+      groups.push({ id: 'system', name: 'System', entries: [{ ...RESTART_ENTRY, summary, detail }] });
+    }
     for (const agent of this.store.data().agents) {
       const own = byAgent.get(agent.id);
       if (own) groups.push({ id: agent.id, name: agent.name, entries: own.map((a) => toEntry(a, agent.name)) });
@@ -184,6 +226,7 @@ export class AgentTasksComponent {
     const timer = globalThis.setInterval(() => {
       if (this.open() && ['requested', 'running'].includes(this.latestTest()?.status ?? '')) void this.loadTests();
       if (this.open() && this.visionaryOpen()) void this.loadVisionary();
+      if (this.open() && this.restartOpen()) void this.loadRestart();
     }, POLL_MS);
     inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
   }
@@ -202,6 +245,7 @@ export class AgentTasksComponent {
     void this.actions.load();
     if (this.auth.can('run')) void this.loadTests();
     if (this.auth.can('plan')) void this.loadVisionary();
+    if (this.auth.can('admin')) void this.loadRestart();
     setTimeout(() => this.search()?.nativeElement.focus());
   }
 
@@ -258,18 +302,38 @@ export class AgentTasksComponent {
 
   protected disabled(entry: MenuEntry): boolean {
     if (entry.visionary) return this.store.busy() || this.visionaryOpen();
+    if (entry.restart) return this.store.busy() || this.restartOpen();
     return entry.scope ? this.testBusy() : this.busy();
   }
 
+  /** Jede Schnellaktion startet erst nach Bestätigung im eigenen Dialog, optional mit Kommentar. */
   protected async run(entry: MenuEntry): Promise<void> {
     if (this.disabled(entry)) return;
-    if (entry.visionary) {
-      await this.startVisionary();
-      this.close();
-    } else if (entry.scope) {
-      await this.requestTest(entry.scope);
-      this.close();
-    } else if (entry.action && (await this.actions.run(entry.action))) this.close();
+    this.close();
+    const answer = await this.confirm.ask({
+      title: `„${entry.title}“ starten?`,
+      message: entry.effect,
+      details: entry.commands.length ? entry.commands.map((command) => `$ ${command}`) : undefined,
+      confirmLabel: 'Starten',
+      commentLabel: entry.visionary ? 'Schwerpunkt (optional)' : 'Kommentar (optional)',
+      commentPlaceholder: entry.visionary
+        ? 'z. B. „Ideen rund um Benachrichtigungen“'
+        : entry.action
+          ? 'z. B. „Nur das Backend prüfen“'
+          : '',
+      commentHint: entry.visionary
+        ? 'Der Visionär richtet die Vorschläge dieses Laufs danach aus.'
+        : entry.action
+          ? `Wird der Anweisung an ${entry.runner} als Hinweis angehängt.`
+          : entry.restart
+            ? 'Wird mit dem Neustart vermerkt.'
+            : 'Wird mit dem Testlauf gespeichert.',
+    });
+    if (!answer) return;
+    if (entry.visionary) await this.startVisionary(answer.comment);
+    else if (entry.restart) await this.requestRestart(answer.comment);
+    else if (entry.scope) await this.requestTest(entry.scope, answer.comment);
+    else if (entry.action) await this.actions.run(entry.action, answer.comment);
   }
 
   protected startNew(): void {
@@ -288,7 +352,19 @@ export class AgentTasksComponent {
     if (!saved) return;
     this.editing.set(null);
     if (andRun) {
-      if (await this.actions.run(saved)) this.close();
+      const runner = saved.agentName ?? 'den Assistenten';
+      await this.run(
+        this.entries().find((candidate) => candidate.action?.id === saved.id) ?? {
+          key: saved.id,
+          title: saved.title,
+          summary: saved.prompt,
+          detail: saved.prompt,
+          runner,
+          effect: `Geht als Anfrage an ${runner}. Ergebnis und Rückfragen erscheinen im Chat.`,
+          commands: promptCommands(saved.prompt),
+          action: saved,
+        },
+      );
     } else this.store.notice.set(`Aktion „${saved.title}“ gespeichert.`);
   }
 
@@ -302,13 +378,13 @@ export class AgentTasksComponent {
     this.store.navigate('agents');
   }
 
-  private async requestTest(scope: 'full' | 'ui'): Promise<void> {
+  private async requestTest(scope: 'full' | 'ui', comment = ''): Promise<void> {
     const slug = this.store.activeProject();
     await this.store.perform(
       async () => {
         const { request } = await this.api.post<{ request: TestRequest }>(
           `${this.api.projectPath(slug)}/test-requests`,
-          { scope },
+          { scope, comment },
         );
         this.latestTest.set(request);
       },
@@ -319,14 +395,34 @@ export class AgentTasksComponent {
     );
   }
 
+  private async requestRestart(comment = ''): Promise<void> {
+    await this.store.perform(
+      async () => {
+        const { restart } = await this.api.post<{ restart: RestartState }>('/api/system/restart', { comment });
+        this.latestRestart.set(restart);
+      },
+      'Neustart angefordert – der Worker baut die Container neu und startet danach selbst neu.',
+      false,
+    );
+  }
+
+  private async loadRestart(): Promise<void> {
+    try {
+      const { restart } = await this.api.get<{ restart: RestartState | null }>('/api/system/restart');
+      this.latestRestart.set(restart);
+    } catch {
+      /* während des Neustarts ist die API kurz weg – nächster Versuch beim nächsten Takt */
+    }
+  }
+
   private visionaryPath(): string {
     return `${this.api.projectPath(this.store.activeProject())}/ideation/visionary`;
   }
 
-  private async startVisionary(): Promise<void> {
+  private async startVisionary(comment = ''): Promise<void> {
     await this.store.perform(
       async () => {
-        const { run } = await this.api.post<{ run: VisionaryRun }>(this.visionaryPath());
+        const { run } = await this.api.post<{ run: VisionaryRun }>(this.visionaryPath(), { comment });
         this.latestVisionary.set(run);
       },
       'Visionär-Lauf gestartet – die Ideen erscheinen unter Ideation.',

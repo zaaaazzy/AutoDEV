@@ -4,7 +4,7 @@ import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
-import { registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
+import { isTransientFailure, registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
@@ -110,6 +110,11 @@ async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, outpu
 }
 
 const RUN_TIMEOUT_HOURS = 3;
+/** Rollen, die nur dokumentieren: ihr Scheitern ist kein Fehler im Code. */
+/** Pause vor dem Wiederholen nach einem vorübergehenden Fehler. */
+const TRANSIENT_RETRY_DELAY_MS = 30_000;
+
+export const DOC_ROLES = new Set(['documenter', 'manual_writer', 'user_manual_writer']);
 const CANCEL_POLL_MS = 1500;
 const LIVE_OUTPUT_INTERVAL_MS = 1500;
 
@@ -136,6 +141,15 @@ export interface RunContext {
 interface StepOutcome {
   passed: boolean;
   interrupted: boolean;
+  /** Gescheitert, aber noch im selben Lauf vom Entwickler nachbesserbar (kein Bug-Bericht angelegt). */
+  correctable?: boolean;
+}
+
+export interface StepOptions {
+  /** Zeile in agent_run_steps; weicht bei einer Nachbesserung von der Agent-Position ab. */
+  stepPosition?: number;
+  /** Tester/Reviewer dürfen den Auftrag einmal pro Lauf zur Nachbesserung zurückgeben, statt einen Bug auszulösen. */
+  canCorrect?: boolean;
 }
 
 /** Claim an order run; an existing run older than three hours is treated as abandoned. */
@@ -266,6 +280,7 @@ export async function runStep(
   agent: WorkflowAgent,
   position: number,
   total: number,
+  stepOptions: StepOptions = {},
 ): Promise<StepOutcome> {
   const { pool, item, runId, done, options, execute } = ctx;
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
@@ -273,7 +288,7 @@ export async function runStep(
     await pool.query<{ id: string }>(
       `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status)
      VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}') RETURNING id`,
-      [runId, position, agent.id, agent.name, agent.phase],
+      [runId, stepOptions.stepPosition ?? position, agent.id, agent.name, agent.phase],
     )
   ).rows[0]?.id;
   await logEvent(pool, stepId, 'Schritt gestartet');
@@ -357,12 +372,36 @@ export async function runStep(
   const stepStartedAt = Date.now();
   // Nur ein Ordner, der beim Start da war, kann „weggefallen“ sein (sonst ist es ein Konfigurationsfehler).
   const folderAtStart = folderAvailable(ctx.options.cwd);
-  const work = invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
-    exitCode: 1,
-    durationMs: 0,
-    output: error instanceof Error ? error.message : String(error),
-  }));
-  const result = await Promise.race([work, cancelRequested]);
+  const attempt = (): Promise<CommandResult> =>
+    invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
+      exitCode: 1,
+      durationMs: 0,
+      output: error instanceof Error ? error.message : String(error),
+    }));
+  let result = await Promise.race([attempt(), cancelRequested]);
+  // Vorübergehender Fehler (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen.
+  if (result.exitCode !== 0 && !cancelled && !isShuttingDown() && isTransientFailure(result.output)) {
+    const delay = options.transientRetryDelayMs ?? TRANSIENT_RETRY_DELAY_MS;
+    await logEvent(pool, stepId, `Vorübergehender Fehler – neuer Versuch in ${Math.round(delay / 1000)} s`);
+    live.update?.(`${agent.name}: vorübergehender Fehler, neuer Versuch …`);
+    const first = result;
+    const paused = await Promise.race([
+      new Promise<null>((resolveDelay) => setTimeout(() => resolveDelay(null), delay)),
+      cancelRequested,
+    ]);
+    if (paused === null && !cancelled && !isShuttingDown()) {
+      const second = await Promise.race([attempt(), cancelRequested]);
+      result = {
+        ...second,
+        durationMs: first.durationMs + second.durationMs,
+        tokens: (first.tokens ?? 0) + (second.tokens ?? 0),
+        costUsd: (first.costUsd ?? 0) + (second.costUsd ?? 0),
+        output: `## Erster Versuch (vorübergehender Fehler)\n${first.output.slice(-1500)}\n\n## Zweiter Versuch\n${second.output}`,
+      };
+    } else if (paused) {
+      result = paused;
+    }
+  }
   stopWatching();
   await progress.stop();
 
@@ -468,16 +507,21 @@ export async function runStep(
     status: passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
     output,
   });
-  if (!passed) {
-    // Dokumentations-Agents nach der Umsetzung sollen keinen Bug-Bericht für fertigen Code erzeugen.
-    if (!cancelled && agent.phase !== 'after_task')
+  // Rote Tests oder eine Ablehnung im Review gehen zuerst einmal direkt zurück an den Entwickler.
+  const correctable = !passed && !cancelled && !refusedByRule && stepOptions.canCorrect === true;
+  if (correctable) {
+    await logEvent(pool, stepId, 'Zurück an den Entwickler zur Nachbesserung (im selben Lauf)');
+  } else if (!passed) {
+    // Dokumentations-Agents sollen keinen Bug-Bericht für fertigen Code erzeugen. Tester und Reviewer schon:
+    // rote Tests oder eine Ablehnung im Review führen zu Bug, Problemanalyse und (bei Code-Fehler) Behebung.
+    if (!cancelled && !DOC_ROLES.has(agent.role))
       await registerFailure(pool, item, agent.name, output).catch((error) =>
         console.error('Bug report failed:', error),
       );
   } else {
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
-  return { passed, interrupted: false };
+  return { passed, interrupted: false, correctable };
 }
 
 /** Push-Nachricht aufs Handy, wenn ein Auftrag fertig ist oder hängen bleibt. */

@@ -39,13 +39,34 @@ export function registerChatRoutes(app: Express, pool: Pool): void {
     }
   });
 
+  // Offene Rückfrage zu einem Auftrag (Express-Anfrage): wird im Auftrag angezeigt und dort direkt beantwortet.
+  app.get('/api/development/:id/question', async (request, response, next) => {
+    try {
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+      const question = (
+        await pool.query(
+          `SELECT m.id, m.question, m.question_options AS "options", m.agent_name AS "agentName",
+                  m.content, m.created_at AS "createdAt", m.project_slug AS "projectSlug"
+             FROM chat_messages m
+            WHERE m.development_id = $1 AND m.role = 'assistant' AND m.question IS NOT NULL AND NOT ${ANSWERED}
+            ORDER BY m.created_at DESC LIMIT 1`,
+          [request.params.id],
+        )
+      ).rows[0];
+      response.json({ question: question ?? null });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Server-Sent Events: sendet den Verlauf, sobald er sich ändert.
   app.get('/api/projects/:slug/chat/stream', (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
     response.set({
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      // no-transform: Proxys (z. B. Caddy mit „encode gzip“) dürfen den Stream nicht komprimieren und damit puffern.
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });

@@ -245,7 +245,11 @@ export async function processChat(
         ? `❓ Rückfrage ${agent ? `von ${agent.name}` : 'des Assistenten'} · ${options.project}`
         : `💬 ${agent?.name ?? 'Assistent'} hat geantwortet · ${options.project}`,
       body: question ?? text.replace(/\s+/g, ' ').slice(0, 160),
-      url: '#dashboard',
+      // Rückfrage zu einem Auftrag: Link öffnet den Auftrag mit dem Antwortfeld (auch vom Handy).
+      url:
+        question && expressId
+          ? `#development/${expressId}?project=${encodeURIComponent(options.project)}&answer=1`
+          : `#dashboard?project=${encodeURIComponent(options.project)}`,
       tag: `chat-${options.project}`,
     },
     { project: options.project },

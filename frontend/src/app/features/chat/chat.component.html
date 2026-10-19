@@ -47,6 +47,7 @@
             [output]="running ? '' : message.content"
             [progress]="running ? message.content : null"
             [running]="running"
+            [compact]="true"
           />
           @if (message.question) {
             <div class="chat-question">

@@ -8,7 +8,7 @@ import type { Principal } from './roles.js';
  * (alle Teststufen inkl. Playwright), legt den Lauf unter „Testläufe“ ab und aus den Befunden Bugs an.
  */
 export const COLUMNS = `id, scope, status, requested_by AS "requestedBy", run_id AS "runId", bug_count AS "bugCount",
-  error, created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt"`;
+  error, comment, created_at AS "createdAt", started_at AS "startedAt", finished_at AS "finishedAt"`;
 
 export function parseScope(body: unknown): 'full' | 'ui' | null {
   const scope = isRecord(body) ? (body.scope ?? 'full') : 'full';
@@ -49,9 +49,16 @@ export function registerTestRequestRoutes(app: Express, pool: Pool): void {
       if (open) return void response.status(409).json({ message: 'Ein kompletter Test läuft bereits.', request: open });
       const created = (
         await pool.query(
-          `INSERT INTO test_requests (project_slug, scope, requested_by)
-           SELECT slug, $2, $3 FROM projects WHERE slug = $1 RETURNING ${COLUMNS}`,
-          [slug, scope, me(response)?.displayName ?? null],
+          `INSERT INTO test_requests (project_slug, scope, requested_by, comment)
+           SELECT slug, $2, $3, $4 FROM projects WHERE slug = $1 RETURNING ${COLUMNS}`,
+          [
+            slug,
+            scope,
+            me(response)?.displayName ?? null,
+            isRecord(request.body) && typeof request.body.comment === 'string'
+              ? request.body.comment.trim().slice(0, 2000) || null
+              : null,
+          ],
         )
       ).rows[0];
       if (!created) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });

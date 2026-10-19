@@ -39,11 +39,11 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 
 Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`):
 
-| Modus                    | Verhalten                                                                                                                                               |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `manual` (Standard)      | Sprints werden selbst zusammengestellt; der Vorschlag erscheint nur auf Knopfdruck („Nächsten Sprint vorschlagen“).                                    |
-| `suggest` (vorschlagen)  | Sprints zeigt immer die Karte „Vorschlag für Sprint N“; „Übernehmen“ bzw. „Übernehmen und starten“ per Klick.                                            |
-| `autopilot`              | Wie `suggest`, zusätzlich schliesst der Worker fertige Sprints ab und startet den nächsten Vorschlag selbst – nur innerhalb der Arbeitszeiten.         |
+| Modus                   | Verhalten                                                                                                                                      |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `manual` (Standard)     | Sprints werden selbst zusammengestellt; der Vorschlag erscheint nur auf Knopfdruck („Nächsten Sprint vorschlagen“).                            |
+| `suggest` (vorschlagen) | Sprints zeigt immer die Karte „Vorschlag für Sprint N“; „Übernehmen“ bzw. „Übernehmen und starten“ per Klick.                                  |
+| `autopilot`             | Wie `suggest`, zusätzlich schliesst der Worker fertige Sprints ab und startet den nächsten Vorschlag selbst – nur innerhalb der Arbeitszeiten. |
 
 **Planer** (`src/core/sprint-planner.ts`, deterministisch, ohne Modell):
 
@@ -82,32 +82,48 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 - **Informationsfluss:** Entwickler erhalten Anforderung und Risiken; jeder Agent bekommt die Ergebnisse der vorherigen Agents (Entwickler: Dateiliste → Tester → Dokumentierer → Handbücher).
 - **Nach jedem Schritt:** Dokumentierer → Auftragsdoku, Handbuch-Autoren → Handbücher, Entwickler bei Bug-Aufträgen → Fix-Notiz am Bug.
 - **Abbruch:** Der Nutzer kann einen Lauf abbrechen (Status Blockiert). Beim Herunterfahren des Workers wird der Auftrag zurück auf „Geplant“ gesetzt und läuft beim nächsten Start weiter.
+- **Sofortstart:** Wird ein Auftrag eingeplant (neu, „Erneut versuchen“, Bugfix, Sprint gestartet), meldet die Datenbank das per `NOTIFY devlog_work`; der Worker startet den nächsten Durchgang sofort statt nach bis zu 30 s. Ein frei werdender Platz weckt ihn ebenfalls. Das Intervall bleibt als Absicherung.
+- **Kurze Ausfälle:** Scheitert ein Schritt vorübergehend (Modell nicht erreichbar, überlastet, Rate-Limit, Verbindung abgebrochen, Zeitlimit), wird er nach 30 s einmal wiederholt. Erst wenn auch das scheitert, gilt der Schritt als fehlgeschlagen. Im Verlauf steht „Vorübergehender Fehler – neuer Versuch“.
+- **Kostenbremse:** In den Projekteinstellungen lässt sich eine Grenze je Auftrag setzen (Tokens und/oder USD). Vor jedem Agent prüft der Worker den Verbrauch des Auftrags seit dem letzten „Erneut versuchen“; ist die Grenze erreicht, startet kein weiterer Agent. Der Auftrag wird blockiert mit „Aktion notwendig: Kostengrenze erreicht …“ – ohne Bug und ohne Bugfix. „Erneut versuchen“ gibt ihm ein neues Budget (`budget_since`).
+- **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 
 ## 5. Fehlerbehandlung und Auto-Bugfix
 
-1. Ein Schritt scheitert → Auftrag wird **Blockiert**, der Fehler am Auftrag gespeichert, ein **Bug-Bericht** angelegt.
+0. **Nachbesserung im selben Lauf:** Sind die Tests rot oder lehnt der Reviewer ab, geht der Auftrag zuerst einmal direkt zurück an den Entwickler – mit der Ausgabe von Tester bzw. Reviewer als Rückmeldung. Danach laufen Entwickler, Tester und Reviewer erneut. Erst wenn auch dieser Versuch scheitert, greift der folgende Ablauf. Die erste Rückmeldung bleibt als fehlgeschlagener Schritt im Lauf sichtbar („Zurück an den Entwickler zur Nachbesserung“). Bei einem einzelnen Agent (Play-Knopf) gibt es keine Nachbesserung.
+1. Ein Schritt scheitert → Auftrag wird **Blockiert**, der Fehler am Auftrag gespeichert, ein **Bug-Bericht** angelegt. Das gilt in allen Phasen, also auch für Tester und Reviewer in `after_task`; nur Fehler der Doku-Agents (Dokumentierer, Handbuch-Autoren) blockieren den Auftrag ohne Bug.
    Ausnahme: Scheitert der Agent selbst (Zeitlimit, Schleife, Schrittlimit, keine Dateien geändert, Modell nicht erreichbar, Befehl nicht gefunden), entsteht **kein** Bug und kein Bug-Auftrag – der Auftrag bleibt blockiert und die Problemanalyse wird angefordert.
-2. Ist `auto_bugfix` am Projekt aktiv (Standard), entsteht **einmalig** ein Bug-Auftrag (hohe Priorität, `auto_run`, auch ohne Sprint).
+2. Danach prüft die Problemanalyse (Rolle `analyst`, nur lesend) den Fehler. Erst wenn sie einen **Code-Fehler bestätigt** und `auto_bugfix` am Projekt aktiv ist (Standard), entsteht **einmalig** ein Bug-Auftrag (hohe Priorität, `auto_run`, auch ohne Sprint). Findet sie keinen Code-Fehler, bleibt der Auftrag mit „Aktion notwendig“ und ihrem Vermerk blockiert.
 3. Ist der Bug-Auftrag erfolgreich, wird der Ursprungsauftrag erneut geplant (`auto_run`). **Höchstens 2 automatische Wiederholungen** (`retry_count`).
 
 4. Scheitert ein Bug-Auftrag selbst, entsteht kein weiterer Bug (keine Endlosschleife); stattdessen wird eine Problemanalyse durch den Assistenten angefordert (nur lesend, Rolle `analyst`).
 5. `backfillFailures` holt Bug-Berichte für ältere blockierte Aufträge nach.
 
-**Wiederholung:** Ein blockierter Auftrag lässt sich in der Auftragsansicht und im Sprint („Erneut versuchen“) neu starten. Nach einem fehlgeschlagenen Lauf laufen nur der fehlgeschlagene Agent und die folgenden erneut; vorher erfolgreiche Agents werden übersprungen, ihre Ausgabe geht weiter an die Nachfolger.
+**Wiederholung:** Ein blockierter Auftrag lässt sich in der Auftragsansicht und im Sprint („Erneut versuchen“) neu starten. Vorher fragt ein Bestätigungsdialog nach; ein optionaler Kommentar wird mit Datum unter „Hinweis zum erneuten Versuch“ an die Beschreibung gehängt und geht so an die Agents. Nach einem fehlgeschlagenen Lauf laufen nur der fehlgeschlagene Agent und die folgenden erneut; vorher erfolgreiche Agents werden übersprungen, ihre Ausgabe geht weiter an die Nachfolger.
+
+**Rückfragen bei Chat-Aufträgen:** Braucht der Assistent bei einem Express-Auftrag aus dem Chat eine Antwort, zeigt der Auftrag (Liste und Detailansicht) die offene Frage samt Antwortoptionen. Die Antwort lässt sich direkt dort geben; sie wird als Antwort auf die Frage in den Chat gestellt (`GET /api/development/:id/question`, danach `POST …/chat` mit `replyTo`).
+
+**Bestätigung mit Kommentar:** „Erneut versuchen“, „Sprintvorschlag übernehmen“ und alle Schnellaktionen des Assistenten (Aktionen, Tests, Visionär, Dev Log neu starten) öffnen zuerst ein eigenes Modal. Der optionale Kommentar wird mitgegeben: beim Sprintvorschlag als Sprintziel, bei Aktionen als „Hinweis dazu“ im Auftrag an den Assistenten, beim Visionär als Fokus, bei Testläufen und Neustarts gespeichert.
+
+**Rückfrage per Push:** Die Push-Nachricht einer Rückfrage zu einem Auftrag öffnet direkt diesen Auftrag im richtigen Projekt und setzt den Cursor ins Antwortfeld (`#development/<id>?project=<slug>&answer=1`).
 
 **Behoben und dokumentiert:** Schließt der Bug-Auftrag erfolgreich ab, setzt ein DB-Trigger den Bug auf „Behoben“. Die Lösung (Ausgabe des Entwicklers) steht am Bug (`fix_notes`) und wird allen späteren Agents als „bekannte Bugs mit Lösung“ mitgegeben. Der Bug-Fix lässt sich per Klick am Bug, am Auftrag oder im Sprint starten.
 
 ## 6. Git im Sprint
 
-| Zeitpunkt                                         | Aktion                                                                                                                                                                    |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Vor einem Sprint-Auftrag                          | Wechsel auf den Sprint-Branch `sprint/<name>` (bei Bedarf von `main` angelegt).                                                                                           |
-| Auftrag im Sprint **erfolgreich**                 | Lokaler Commit auf dem Sprint-Branch, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit.                   |
-| Auftrag **fehlgeschlagen**                        | Die vom Auftrag geschriebenen Dateien werden als Stash (`devlog-wip …`) geparkt und landen nicht im nächsten Commit; beim erneuten Versuch werden sie wiederhergestellt.  |
-| Sprint-Sicherung (Pfeil-hoch neben GitHub-Symbol) | Reständerungen committen, **Test-Gate** (Projekttests), nur bei grünen Tests Push des Sprint-Branches.                                                                    |
-| Sprint abgeschlossen                              | Zusätzlich Merge des Sprint-Branches nach `main` (`--no-ff`), erneutes Test-Gate, Push von `main` und Tag `sprint-<name>-<id>`. Bei Merge-Konflikten Abbruch mit Meldung. |
-| Git Download (Pfeil-runter)                       | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab.                                      |
+| Zeitpunkt                                         | Aktion                                                                                                                                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vor einem Sprint-Auftrag                          | Wechsel auf den Sprint-Branch `sprint/<name>` (bei Bedarf von `main` angelegt).                                                                                                               |
+| Erster Agent, der Dateien ändert                  | Eigener **Auftrags-Branch** `auftrag/<id>-<titel>`, abgezweigt vom Sprint-Branch (sonst vom aktuellen Branch). Bei einem erneuten Versuch wird er fortgesetzt und der Basis-Stand eingemergt. |
+| Auftrag erfolgreich (mit Auftrags-Branch)         | Commit auf dem Auftrags-Branch, Merge (`--no-ff`) in den Sprint-/Basis-Branch, Branch wird gelöscht. Scheitert der Merge, bleibt der Auftrag blockiert mit Meldung.                           |
+| Auftrag fehlgeschlagen (mit Auftrags-Branch)      | Zwischenstand als WIP-Commit auf dem Auftrags-Branch, Rückkehr zur Basis; der nächste Versuch setzt dort fort.                                                                                |
+| Auftrag im Sprint **erfolgreich**                 | Lokaler Commit auf dem Sprint-Branch, Conventional Commits: `feat(<Sprint>): <Titel>`, Bug-Aufträge `fix(...)`. Kein Push. Ohne Änderungen kein Commit.                                       |
+| Auftrag **fehlgeschlagen**                        | Die vom Auftrag geschriebenen Dateien werden als Stash (`devlog-wip …`) geparkt und landen nicht im nächsten Commit; beim erneuten Versuch werden sie wiederhergestellt.                      |
+| Sprint-Sicherung (Pfeil-hoch neben GitHub-Symbol) | Reständerungen committen, **Test-Gate** (Projekttests), nur bei grünen Tests Push des Sprint-Branches.                                                                                        |
+| Sprint abgeschlossen                              | Zusätzlich Merge des Sprint-Branches nach `main` (`--no-ff`), erneutes Test-Gate, Push von `main` und Tag `sprint-<name>-<id>`. Bei Merge-Konflikten Abbruch mit Meldung.                     |
+| Git Download (Pfeil-runter)                       | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab.                                                          |
+
+**Dev Log entwickelt sich selbst:** Arbeiten die Agents in einem eigenen Worktree, ist `main` im Arbeitsordner der Menschen ausgecheckt und wird dort normalerweise nicht angefasst. Mit der Projekteinstellung „Nach dem Sprint-Abschluss Dev Log neu starten“ (`restart_after_sprint`) übernimmt der Worker den abgeschlossenen Sprint dort selbst – aber nur, wenn im Ordner keine Änderungen offen sind und `main` ausgecheckt ist. Danach läuft das Test-Gate in diesem Ordner; ist es rot, wird der Merge mit `git reset --keep ORIG_HEAD` zurückgenommen. Klappt alles, wird `main` gepusht (falls ein Repository hinterlegt ist) und „Dev Log neu starten“ angefordert.
 
 Ausgeschlossen bleiben `.env`, `.dev-log/`, `.dev-log-backups/` sowie typische Schlüsseldateien (`*.pem`, `*.key`, `id_rsa*`, `.netrc`, `credentials.json` …) per `.git/info/exclude`. Zusätzlich prüft jeder automatische Commit die hinzugefügten Zeilen auf Zugangsdaten (private Schlüssel, GitHub-, AWS-, Anthropic-, OpenAI-, Slack- und Google-Tokens); betroffene Dateien bleiben uncommittet im Arbeitsverzeichnis und werden im Log gemeldet. Alle Git-Aktionen laufen unter der Projektsperre, damit sie sich nicht mit Agent-Befehlen überschneiden.
 

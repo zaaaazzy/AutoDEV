@@ -266,3 +266,135 @@ test('after a failed run only the failed agent and the following ones run again'
   );
   assert.match(calls[0]?.at(-1) ?? '', /fertig A/);
 });
+
+test('a failing reviewer (after_task) reports a bug; a failing documenter does not', async () => {
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'bad' ? 1 : 0,
+    durationMs: 1,
+    output: 'Änderungen nötig',
+  });
+  const roleAgent = (name: string, role: string, command: string[]): WorkflowAgent => ({
+    ...agent(name, 'after_task', 1, command),
+    role,
+  });
+  const reviewer = fakePool();
+  await runWorkItem(reviewer.pool, item, [roleAgent('Reviewer', 'reviewer', ['bad'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.ok(
+    reviewer.queries.some(
+      (query) => query.sql.includes('INSERT INTO bugs') && String(query.values[1]).includes('Reviewer'),
+    ),
+  );
+
+  const documenter = fakePool();
+  await runWorkItem(documenter.pool, item, [roleAgent('Doku', 'documenter', ['bad'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.ok(!documenter.queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+});
+
+test('a rejecting reviewer first sends the order back to the developer once within the same run', async () => {
+  const roleAgent = (name: string, role: string, phase: string, command: string[]): WorkflowAgent => ({
+    ...agent(name, phase, 1, command),
+    role,
+  });
+  const agents = [
+    roleAgent('Dev', 'developer', 'while_task', ['dev']),
+    roleAgent('Review', 'reviewer', 'after_task', ['test']),
+  ];
+  // Erstes Review lehnt ab, nach der Nachbesserung Freigabe: kein Bug, Auftrag erledigt.
+  const fixed = fakePool();
+  const calls: string[][] = [];
+  let testRuns = 0;
+  const flaky: CommandExecutor = async (command) => {
+    calls.push(command);
+    if (command[0] !== 'test') return { exitCode: 0, durationMs: 1, output: `ok ${command[0]}` };
+    testRuns += 1;
+    return {
+      exitCode: testRuns === 1 ? 1 : 0,
+      durationMs: 1,
+      output: testRuns === 1 ? '@@REVIEW: ÄNDERUNGEN NÖTIG\nTest X rot' : '@@REVIEW: FREIGEGEBEN',
+    };
+  };
+  assert.equal(await runWorkItem(fixed.pool, item, agents, { cwd: '/r', timeoutMs: 1, execute: flaky }), 'passed');
+  assert.deepEqual(
+    calls.map((call) => call[0]),
+    ['dev', 'test', 'dev', 'test'],
+  );
+  assert.match(calls[2]?.at(-1) ?? '', /Rückmeldung von Review[\s\S]*Test X rot/);
+  assert.ok(!fixed.queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+  const positions = fixed.queries
+    .filter((query) => query.sql.includes('INSERT INTO agent_run_steps'))
+    .map((query) => query.values[1]);
+  assert.deepEqual(positions, [0, 1, 2, 3]);
+
+  // Lehnt der Reviewer erneut ab, gibt es genau eine Nachbesserung und danach den Bug-Bericht.
+  const broken = fakePool();
+  const brokenCalls: string[] = [];
+  const failing: CommandExecutor = async (command) => {
+    brokenCalls.push(command[0] ?? '');
+    return { exitCode: command[0] === 'test' ? 1 : 0, durationMs: 1, output: 'rot' };
+  };
+  assert.equal(await runWorkItem(broken.pool, item, agents, { cwd: '/r', timeoutMs: 1, execute: failing }), 'failed');
+  assert.deepEqual(brokenCalls, ['dev', 'test', 'dev', 'test']);
+  assert.equal(broken.queries.filter((query) => query.sql.includes('INSERT INTO bugs')).length, 1);
+});
+
+test('a transient failure (model unreachable) is retried once before the order blocks', async () => {
+  const flaky = fakePool();
+  let calls = 0;
+  const execute: CommandExecutor = async () => {
+    calls += 1;
+    return calls === 1
+      ? { exitCode: 1, durationMs: 1, output: 'Fehler: Ollama nicht erreichbar' }
+      : { exitCode: 0, durationMs: 1, output: 'fertig' };
+  };
+  const options = { cwd: '/r', timeoutMs: 1, execute, transientRetryDelayMs: 0 };
+  assert.equal(await runWorkItem(flaky.pool, item, [agent('dev', 'while_task', 1, ['x'])], options), 'passed');
+  assert.equal(calls, 2);
+
+  // Ein echter Fehler (kein vorübergehender) wird nicht wiederholt.
+  const broken = fakePool();
+  let brokenCalls = 0;
+  const failing: CommandExecutor = async () => {
+    brokenCalls += 1;
+    return { exitCode: 1, durationMs: 1, output: 'TypeError: x is undefined' };
+  };
+  await runWorkItem(broken.pool, item, [agent('dev', 'while_task', 1, ['x'])], { ...options, execute: failing });
+  assert.equal(brokenCalls, 1);
+});
+
+test('the cost brake stops an order before the next agent once its limit is reached', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('INSERT INTO agent_run_steps')) return { rows: [{ id: 'step-1' }] };
+      if (sql.includes('order_token_limit')) return { rows: [{ tokens: '1000', cost: null }] };
+      if (sql.includes('SUM(s.tokens)')) return { rows: [{ tokens: queries.length > 0 ? '1500' : '0', cost: '0' }] };
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, []);
+  assert.ok(
+    queries.some((query) => query.sql.includes('action_todo') && String(query.values[1]).includes('Kostengrenze')),
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+});

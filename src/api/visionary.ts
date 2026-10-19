@@ -30,7 +30,13 @@ export function registerVisionaryRoutes(app: Express, pool: Pool): void {
       return;
     }
     const principal = response.locals.principal as Principal | undefined;
-    const id = await requestVisionaryRun(pool, slug, principal?.displayName || principal?.username || 'Nutzer');
+    // Kommentar aus der Bestätigung: Schwerpunkt für diesen Lauf.
+    const body = request.body as { comment?: unknown; focus?: unknown } | undefined;
+    const focus =
+      typeof body?.comment === 'string' ? body.comment : typeof body?.focus === 'string' ? body.focus : null;
+    const id = await requestVisionaryRun(pool, slug, principal?.displayName || principal?.username || 'Nutzer', {
+      focus,
+    });
     const run = await latestRun(pool, slug);
     if (!id) {
       response.status(409).json({ message: 'Für dieses Projekt läuft bereits ein Visionär-Lauf.', run });

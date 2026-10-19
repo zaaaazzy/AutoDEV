@@ -65,6 +65,37 @@
           gestartet.</label
         >
         <label
+          >Kostengrenze je Auftrag (Tokens)
+          <input
+            type="number"
+            name="orderTokenLimit"
+            min="1000"
+            step="1000"
+            placeholder="keine Grenze"
+            [(ngModel)]="settings.orderTokenLimit"
+          />
+        </label>
+        <label
+          >Kostengrenze je Auftrag (USD)
+          <input
+            type="number"
+            name="orderCostLimit"
+            min="0.01"
+            step="0.5"
+            placeholder="keine Grenze"
+            [(ngModel)]="settings.orderCostLimit"
+          />
+        </label>
+        <p class="muted wide">
+          Ist eine Grenze erreicht, startet für den Auftrag kein weiterer Agent; er wartet mit „Aktion notwendig“ auf
+          dich. „Erneut versuchen“ gibt ihm ein neues Budget. Leer lassen für keine Grenze.
+        </p>
+        <label class="wide check">
+          <input type="checkbox" name="restartAfterSprint" [(ngModel)]="settings.restartAfterSprint" /> Nach dem
+          Sprint-Abschluss Dev Log neu starten: Ist der Sprint nach <code>main</code> gemergt, baut Dev Log die
+          Container neu und startet den Worker neu – nur für das Projekt, in dem Dev Log selbst entwickelt wird.</label
+        >
+        <label
           >Sprintplanung
           <select name="sprintMode" [(ngModel)]="settings.sprintMode">
             <option value="manual">Manuell – Sprints selbst zusammenstellen</option>

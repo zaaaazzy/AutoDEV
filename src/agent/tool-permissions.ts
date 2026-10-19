@@ -251,7 +251,7 @@ const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
  * Rollen, die nur lesen (Werkzeugumfang der Problemanalyse beim lokalen Modell): keine Datei-Werkzeuge, keine Shell –
  * auch nicht über eine eigene Zuweisung am Agent oder eigene Werkzeug-Regeln im Befehl.
  */
-export const READ_ONLY_ROLES = new Set(['visionary']);
+export const READ_ONLY_ROLES = new Set(['visionary', 'analyst']);
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -468,6 +468,23 @@ export function guardHookCommand(policy: {
   return `${[process.execPath, ...loader, script, encoded].map(shellQuote).join(' ')} || exit 2`;
 }
 
+/** Rollen, denen der Admin per Befehl vollen Zugriff geben kann (ohne Wächter). */
+export const FULL_ACCESS_ROLES = new Set(['assistant']);
+
+/**
+ * Verlangt der Befehl ausdrücklich alle Rechte (`--dangerously-skip-permissions` oder
+ * `--permission-mode bypassPermissions`)? Gilt nur für Rollen in FULL_ACCESS_ROLES; alle anderen behalten den Wächter.
+ */
+export function hasFullAccess(command: readonly string[], role: string): boolean {
+  if (!FULL_ACCESS_ROLES.has(role)) return false;
+  return command.some(
+    (part, index) =>
+      part === '--dangerously-skip-permissions' ||
+      part === '--permission-mode=bypassPermissions' ||
+      (part === '--permission-mode' && command[index + 1] === 'bypassPermissions'),
+  );
+}
+
 /**
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
@@ -484,6 +501,9 @@ export function withAgentPermissions(
   const [binary, ...rest] = command;
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
   if (!isClaude) return command;
+  // Voller Zugriff nur für den Dashboard-Assistenten und nur, wenn der Admin ihn im Befehl ausdrücklich verlangt:
+  // dann weder Wächter noch Sperrlisten – der Assistent arbeitet mit allen Rechten des Workers.
+  if (hasFullAccess(command, role)) return command;
   const readOnly = READ_ONLY_ROLES.has(role);
   const custom = !readOnly && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
   const available = availableCommands(permissions);

@@ -19,15 +19,16 @@ export interface MentionCategory {
 }
 
 export const MENTION_CATEGORIES: readonly MentionCategory[] = [
-  { type: 'order', key: 'auftrag', label: 'Auftrag', icon: '📋' },
-  { type: 'idea', key: 'idee', label: 'Idee', icon: '💡' },
-  { type: 'bug', key: 'bug', label: 'Bug', icon: '🐞' },
-  { type: 'sprint', key: 'sprint', label: 'Sprint', icon: '🏁' },
-  { type: 'doc', key: 'doku', label: 'Doku', icon: '📖' },
-  { type: 'commit', key: 'git', label: 'Git', icon: '⎇' },
+  { type: 'order', key: 'auftrag', label: 'Auftrag', icon: 'development' },
+  { type: 'idea', key: 'idee', label: 'Idee', icon: 'ideation' },
+  { type: 'bug', key: 'bug', label: 'Bug', icon: 'bugs' },
+  { type: 'sprint', key: 'sprint', label: 'Sprint', icon: 'sprints' },
+  { type: 'doc', key: 'doku', label: 'Doku', icon: 'docs' },
+  { type: 'commit', key: 'git', label: 'Git', icon: 'git' },
 ];
 
-export const PERSON_ICON = '👤';
+/** Symbolnamen für app-nav-icon (einfarbig wie die Navigation). */
+export const PERSON_ICON = 'person';
 
 export interface MentionItem {
   id: string;

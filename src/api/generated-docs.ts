@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { systemAgents, systemCommand } from '../agent/system-agents.js';
 import { ROLE_INFO, type Role } from './roles.js';
+import { workflowDocs } from './workflow-docs.js';
 
 /**
  * Automatisch erzeugte, schreibgeschützte Dokumente für die Dokumentation: Testberichte (aus test:full),
@@ -9,7 +10,7 @@ import { ROLE_INFO, type Role } from './roles.js';
 export interface GeneratedDoc {
   id: string;
   projectSlug: string;
-  kind: 'test' | 'settings';
+  kind: 'test' | 'settings' | 'workflow';
   title: string;
   content: string;
   developmentId: null;
@@ -218,10 +219,11 @@ function settingsDoc(slug: string, key: string, title: string, content: string, 
 
 /** Alle erzeugten Dokumente eines Projekts; die Benutzerübersicht nur für Administratoren. */
 export async function generatedDocs(pool: Pool, slug: string, isAdmin: boolean): Promise<GeneratedDoc[]> {
-  const [reports, agents, users] = await Promise.all([
+  const [reports, agents, users, workflow] = await Promise.all([
     testReports(pool, slug),
     agentSettings(pool, slug),
     isAdmin ? userOverview(pool, slug) : Promise.resolve(null),
+    workflowDocs(slug).catch(() => []),
   ]);
-  return [...reports, agents, ...(users ? [users] : [])];
+  return [...workflow, ...reports, agents, ...(users ? [users] : [])];
 }

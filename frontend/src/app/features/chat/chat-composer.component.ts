@@ -194,7 +194,7 @@ export class ChatComposerComponent {
 
   protected icon(reference: ChatReference): string {
     if (reference.type === 'user') return PERSON_ICON;
-    return MENTION_CATEGORIES.find((category) => category.type === reference.type)?.icon ?? '/';
+    return MENTION_CATEGORIES.find((category) => category.type === reference.type)?.icon ?? 'docs';
   }
 
   protected submit(): void {

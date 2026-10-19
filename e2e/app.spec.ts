@@ -368,7 +368,8 @@ test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details
   await expect(detail).toContainText('Noch nie gestartet');
   await expect(menu).toBeVisible();
   // Suche filtert über alle Gruppen; Pfeiltaste zeigt die Details per Tastatur.
-  await search.fill('docker');
+  // „Docker-Dienste“ statt nur „docker“: „Dev Log neu starten“ erwähnt docker compose ebenfalls.
+  await search.fill('docker-dienste');
   await expect(menu.locator('.agent-task')).toHaveCount(1);
   await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
   await expect(groups).toHaveText(['Tester']);

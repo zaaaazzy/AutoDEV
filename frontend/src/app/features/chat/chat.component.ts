@@ -8,6 +8,9 @@ import { StepResultComponent } from '../../shared/step-result.component.js';
 import { AgentTasksComponent } from './agent-tasks.component.js';
 import { ChatComposerComponent, type ComposedMessage } from './chat-composer.component.js';
 
+/** Nachladen per GET, solange die Live-Verbindung (noch) nichts geliefert hat. */
+const FALLBACK_POLL_MS = 3_000;
+
 @Component({
   selector: 'app-chat',
   standalone: true,
@@ -57,22 +60,44 @@ export class ChatComponent {
       let retry: ReturnType<typeof setTimeout> | undefined;
       let attempt = 0;
       let stopped = false;
+      let shown = '';
       const show = (messages: ChatMessage[]): void => {
+        // Unveränderten Verlauf nicht neu setzen (sonst springt die Ansicht bei jedem Nachladen nach unten).
+        const snapshot = JSON.stringify(messages);
+        if (snapshot === shown) return;
+        shown = snapshot;
         this.chat.set(messages);
         globalThis.setTimeout(() => {
           const log = document.querySelector('.chat-log');
           if (log) log.scrollTop = log.scrollHeight;
         });
       };
+      // Der Verlauf wird sofort per GET geladen und nicht erst mit der ersten Nachricht der Live-Verbindung:
+      // Hängt diese (Proxy puffert, Browser-Verbindungslimit, Seitenwechsel), bliebe der Chat sonst leer.
+      // Solange die Live-Verbindung nichts liefert, wird zusätzlich regelmäßig nachgeladen.
+      let streamDelivered = false;
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const loadOnce = (): void => {
+        void this.api
+          .get<{ messages?: ChatMessage[] }>(`${this.api.projectPath(slug)}/chat`)
+          .then((result) => !stopped && !streamDelivered && show(result.messages ?? []))
+          .catch(() => undefined);
+      };
       const connect = (): void => {
         globalThis.clearTimeout(retry);
+        globalThis.clearInterval(poll);
         stream?.close();
+        streamDelivered = false;
+        loadOnce();
+        poll = globalThis.setInterval(() => !streamDelivered && loadOnce(), FALLBACK_POLL_MS);
         stream = new EventSource(this.api.url(`${this.api.projectPath(slug)}/chat/stream`));
         stream.onopen = () => {
           attempt = 0;
           this.connected.set(true);
         };
         stream.onmessage = (event: MessageEvent<string>) => {
+          streamDelivered = true;
+          globalThis.clearInterval(poll);
           this.connected.set(true);
           show(JSON.parse(event.data) as ChatMessage[]);
         };
@@ -99,6 +124,7 @@ export class ChatComponent {
       onCleanup(() => {
         stopped = true;
         globalThis.clearTimeout(retry);
+        globalThis.clearInterval(poll);
         document.removeEventListener('visibilitychange', wake);
         globalThis.removeEventListener('online', wake);
         stream?.close();

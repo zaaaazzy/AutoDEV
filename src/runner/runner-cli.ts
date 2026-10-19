@@ -9,7 +9,6 @@ import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
 import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
-import { sendPush } from '../core/push.js';
 import { projectFolderError } from '../core/validation.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
 
@@ -24,6 +23,9 @@ import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
+import { completeRestart, processRestart, readRestart } from './system-restart.js';
+import { sendPush } from '../core/push.js';
+import { listenForWork, WorkSignal } from './work-signal.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
@@ -233,6 +235,10 @@ async function main(): Promise<void> {
       return;
     }
     await recoverInterruptedRuns(pool);
+    // Ein angeforderter Neustart („Dev Log neu starten“) ist mit diesem Start abgeschlossen.
+    await completeRestart(pool).catch((error: unknown) =>
+      console.error('Neustart-Status konnte nicht gesetzt werden:', describeError(error)),
+    );
     const intervalSeconds = Math.round(options.intervalMs / 1000);
     console.info(
       `Worker gestartet (${options.all ? 'alle Projekte' : options.project}, Intervall ${intervalSeconds} s).`,
@@ -381,6 +387,9 @@ async function main(): Promise<void> {
     // Each project runs in its own task; at most "maxConcurrentAgents" tasks run at the same time.
     const active = new Map<string, Promise<void>>();
     const lastStart = new Map<string, number>();
+    // Sofortstart: Die Datenbank meldet neue Aufträge (LISTEN devlog_work); ein freier Platz weckt ebenfalls.
+    const signal = new WorkSignal();
+    const stopListening = listenForWork(pool, () => signal.wake());
     const runTarget = async (target: Target): Promise<void> => {
       const slug = target.options.project;
       try {
@@ -391,6 +400,41 @@ async function main(): Promise<void> {
         console.error(`[${slug}] Runner-Zyklus fehlgeschlagen:`, errors.get(slug));
       }
     };
+    // „Dev Log neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
+    // launchd startet ihn mit dem neuen Code wieder.
+    let restartActive = false;
+    const restartTimer = setInterval(() => {
+      if (restartActive || stopping) return;
+      restartActive = true;
+      const busy = (): number =>
+        active.size +
+        chatActive.size +
+        analysisActive.size +
+        authorActive.size +
+        commentActive.size +
+        visionaryActive.size +
+        testActive.size +
+        setupActive;
+      void processRestart(pool, INSTALL_ROOT, busy)
+        .then(async (result) => {
+          if (result === 'failed') {
+            const state = await readRestart(pool).catch(() => null);
+            await sendPush(pool, {
+              title: '⚠ Dev Log Neustart fehlgeschlagen',
+              body: state?.message ?? 'Details unter Assistent → Aktionen → System.',
+              url: '#dashboard',
+              tag: 'system-restart',
+            });
+          }
+          if (result !== 'restart') return;
+          console.info('Container neu gebaut – Worker beendet sich und startet mit dem neuen Code neu.');
+          stop();
+          // Falls noch etwas den Prozess offen hält: spätestens nach einer Minute beenden, damit launchd neu startet.
+          setTimeout(() => process.exit(0), 60_000).unref();
+        })
+        .catch((error: unknown) => logOnce('restart', `Neustart fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (restartActive = false));
+    }, 5_000);
     try {
       while (!stopping) {
         try {
@@ -411,16 +455,17 @@ async function main(): Promise<void> {
               continue;
             }
             lastStart.set(slug, Date.now());
-            const task = runTarget(target).finally(() => active.delete(slug));
+            const task = runTarget(target).finally(() => {
+              active.delete(slug);
+              signal.wake();
+            });
             active.set(slug, task);
           }
         } catch (error) {
           console.error('Worker-Zyklus fehlgeschlagen:', error instanceof Error ? error.message : error);
         }
         beat();
-        for (let waited = 0; waited < options.intervalMs && !stopping; waited += 1000) {
-          await sleep(1000);
-        }
+        await signal.wait(options.intervalMs, () => stopping);
       }
       await Promise.all(active.values());
       while (
@@ -433,8 +478,10 @@ async function main(): Promise<void> {
       )
         await sleep(200);
     } finally {
+      await stopListening();
       clearInterval(heartbeat);
       stopFolderWatch();
+      clearInterval(restartTimer);
       clearInterval(chatTimer);
       clearInterval(setupTimer);
     }

@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { ConfirmService } from '../../core/confirm.service.js';
 import { numberOrNull, type FormValues } from '../../shared/forms.js';
 
 function estimateValues(values: FormValues): Estimate {
@@ -18,6 +19,7 @@ function estimateValues(values: FormValues): Estimate {
 export class OrderService {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  private readonly confirm = inject(ConfirmService);
 
   async update(id: string, values: Partial<DevelopmentItem>): Promise<void> {
     await this.store.perform(
@@ -61,10 +63,30 @@ export class OrderService {
     return created;
   }
 
+  /** Erneut versuchen bzw. wieder einplanen – erst nach Bestätigung, optional mit Hinweis für die Agents. */
   async retry(item: DevelopmentItem): Promise<void> {
+    const blocked = item.status === 'blocked';
+    const answer = await this.confirm.ask({
+      title: blocked
+        ? 'Auftrag erneut versuchen?'
+        : item.status === 'rejected'
+          ? 'Angepassten Auftrag erneut versuchen?'
+          : 'Auftrag wieder einplanen?',
+      message: `„${item.title}“ wird wieder eingeplant; der Worker übernimmt ihn beim nächsten Zyklus.`,
+      details: [
+        blocked
+          ? 'Bereits bestandene Agents werden übersprungen; lehnten Tester oder Reviewer ab, beginnt es beim Entwickler.'
+          : 'Der Auftrag durchläuft alle Agents.',
+      ],
+      confirmLabel: blocked ? 'Erneut versuchen' : 'Einplanen',
+      commentLabel: 'Hinweis für die Agents (optional)',
+      commentPlaceholder: 'z. B. „Der Test schlägt wegen der Zeitzone fehl – bitte UTC verwenden.“',
+      commentHint: 'Wird mit Datum an die Beschreibung des Auftrags angehängt und so allen Agents mitgegeben.',
+    });
+    if (!answer) return;
     await this.store.perform(
-      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`),
-      item.status === 'blocked' ? 'Auftrag wird erneut versucht.' : 'Auftrag ist wieder eingeplant.',
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`, { comment: answer.comment }),
+      blocked ? 'Auftrag wird erneut versucht.' : 'Auftrag ist wieder eingeplant.',
     );
   }
 

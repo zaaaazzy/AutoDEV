@@ -1,4 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
+import { OrderTimelineComponent } from '../../shared/order-timeline.component.js';
+import { OrderQuestionComponent } from '../../shared/order-question.component.js';
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
@@ -17,6 +19,8 @@ import { OrderService } from './order.service.js';
   standalone: true,
   imports: [
     OrderBriefComponent,
+    OrderQuestionComponent,
+    OrderTimelineComponent,
     AgentWorkflowComponent,
     FormsModule,
     NgTemplateOutlet,

@@ -86,6 +86,8 @@ const RULES: Rule[] = [
   // Agent-Aufgaben definieren und starten gehört zum Arbeiten mit dem Assistenten.
   ['*', /^\/api\/(projects\/[^/]+\/agent-tasks$|agent-tasks\/[^/]+(\/run)?$)/, 'chat'],
   ['POST', /^\/api\/projects\/[^/]+\/test-requests$/, 'run'],
+  // Dev Log neu starten (Container neu bauen, Worker neu starten): betrifft alle Projekte.
+  ['POST', /^\/api\/system\/restart$/, 'admin'],
 ];
 
 export function requiredRole(method: string, path: string, body: unknown): Role | null {

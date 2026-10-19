@@ -3,81 +3,104 @@
     <span class="live-dot"></span><span class="live-text">{{ progress() }}</span>
   </p>
 }
-<details class="run-step" [open]="eventsOpen()">
-  <summary>
-    Verlauf
-    @if (events()?.length) {
-      <span class="muted">({{ events()!.length }})</span>
-    }
-  </summary>
-  @if (events()?.length) {
-    <ol class="timeline" #timeline (scroll)="onTimelineScroll(timeline)">
-      @for (event of events(); track $index) {
-        @let view = describe(event.text);
-        <li [class]="'event-' + view.kind">
-          <time>{{ event.at | date: 'HH:mm:ss' }}</time>
-          @if (view.label) {
-            <app-event-icon [icon]="view.icon" [label]="view.label" />
-            @if (view.file) {
-              <app-file-link class="event-target" [path]="view.target" />
-            } @else {
-              <code class="event-target" [title]="view.target">{{ view.target }}</code>
-            }
-          } @else {
-            <span class="event-text">{{ view.text }}</span>
-          }
-        </li>
-      }
-    </ol>
-  } @else {
-    <p class="muted">
-      {{ running() ? 'Noch keine Ereignisse – der Agent arbeitet …' : 'Keine Ereignisse aufgezeichnet.' }}
-    </p>
-  }
-</details>
-@if (files(); as summary) {
-  @if (summary.written.length || summary.read.length || summary.run.length) {
-    <details class="run-step files-step">
-      <summary>
-        Dateien
-        <span class="muted"
-          >({{ summary.written.length }} geschrieben · {{ summary.read.length }} gelesen ·
-          {{ summary.run.length }} ausgeführt)</span
-        >
-      </summary>
-      @for (group of fileGroups(); track group.title) {
-        <details class="run-step file-group" [open]="group.icon === 'write'">
-          <summary>
-            <app-event-icon [icon]="group.icon" [label]="group.title" />
-            {{ group.title }}
-            <span class="muted">({{ group.items.length }})</span>
-          </summary>
-          <ul class="file-list">
-            @for (entry of group.items; track entry.target) {
-              <li>
-                @if (entry.file) {
-                  <app-file-link [path]="entry.target" />
-                } @else {
-                  <code [title]="entry.target">{{ entry.target }}</code>
-                }
-                <time [title]="entry.at | date: 'dd.MM.yyyy HH:mm:ss'"
-                  >{{ entry.at | date: 'dd.MM. HH:mm' }}{{ entry.count > 1 ? ' · ' + entry.count + '×' : '' }}</time
-                >
-              </li>
-            }
-          </ul>
-        </details>
-      }
-    </details>
-  }
-}
-<details class="run-step" [open]="running() || !!output()">
-  <summary>Ausgabe</summary>
+@if (compact()) {
+  <!-- Kompakt (Chat): die Antwort steht direkt da, Verlauf und Dateien erst nach dem Aufklappen. -->
   @if (output()) {
     <article class="step-output" [innerHTML]="output() | agentOutput"></article>
-  } @else {
-    <p class="muted">
-      {{ running() ? 'Der Agent hat noch nichts berichtet – Details im Verlauf.' : 'Keine Ausgabe.' }}
-    </p>
+  } @else if (!running()) {
+    <p class="muted">Keine Ausgabe.</p>
   }
-</details>
+  @if (events()?.length || running()) {
+    <details class="step-details">
+      <summary>
+        Details: Verlauf und Dateien
+        @if (events()?.length) {
+          <span class="muted">({{ events()!.length }} Schritte)</span>
+        }
+      </summary>
+      <ng-container [ngTemplateOutlet]="trace" />
+    </details>
+  }
+} @else {
+  <ng-container [ngTemplateOutlet]="trace" />
+  <details class="run-step" [open]="running() || !!output()">
+    <summary>Ausgabe</summary>
+    @if (output()) {
+      <article class="step-output" [innerHTML]="output() | agentOutput"></article>
+    } @else {
+      <p class="muted">
+        {{ running() ? 'Der Agent hat noch nichts berichtet – Details im Verlauf.' : 'Keine Ausgabe.' }}
+      </p>
+    }
+  </details>
+}
+<ng-template #trace>
+  <details class="run-step" [open]="eventsOpen()">
+    <summary>
+      Verlauf
+      @if (events()?.length) {
+        <span class="muted">({{ events()!.length }})</span>
+      }
+    </summary>
+    @if (events()?.length) {
+      <ol class="timeline" #timeline (scroll)="onTimelineScroll(timeline)">
+        @for (event of events(); track $index) {
+          @let view = describe(event.text);
+          <li [class]="'event-' + view.kind">
+            <time>{{ event.at | date: 'HH:mm:ss' }}</time>
+            @if (view.label) {
+              <app-event-icon [icon]="view.icon" [label]="view.label" />
+              @if (view.file) {
+                <app-file-link class="event-target" [path]="view.target" />
+              } @else {
+                <code class="event-target" [title]="view.target">{{ view.target }}</code>
+              }
+            } @else {
+              <span class="event-text">{{ view.text }}</span>
+            }
+          </li>
+        }
+      </ol>
+    } @else {
+      <p class="muted">
+        {{ running() ? 'Noch keine Ereignisse – der Agent arbeitet …' : 'Keine Ereignisse aufgezeichnet.' }}
+      </p>
+    }
+  </details>
+  @if (files(); as summary) {
+    @if (summary.written.length || summary.read.length || summary.run.length) {
+      <details class="run-step files-step">
+        <summary>
+          Dateien
+          <span class="muted"
+            >({{ summary.written.length }} geschrieben · {{ summary.read.length }} gelesen ·
+            {{ summary.run.length }} ausgeführt)</span
+          >
+        </summary>
+        @for (group of fileGroups(); track group.title) {
+          <details class="run-step file-group" [open]="group.icon === 'write'">
+            <summary>
+              <app-event-icon [icon]="group.icon" [label]="group.title" />
+              {{ group.title }}
+              <span class="muted">({{ group.items.length }})</span>
+            </summary>
+            <ul class="file-list">
+              @for (entry of group.items; track entry.target) {
+                <li>
+                  @if (entry.file) {
+                    <app-file-link [path]="entry.target" />
+                  } @else {
+                    <code [title]="entry.target">{{ entry.target }}</code>
+                  }
+                  <time [title]="entry.at | date: 'dd.MM.yyyy HH:mm:ss'"
+                    >{{ entry.at | date: 'dd.MM. HH:mm' }}{{ entry.count > 1 ? ' · ' + entry.count + '×' : '' }}</time
+                  >
+                </li>
+              }
+            </ul>
+          </details>
+        }
+      </details>
+    }
+  }
+</ng-template>
