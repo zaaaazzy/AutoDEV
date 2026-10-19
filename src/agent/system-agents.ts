@@ -60,18 +60,71 @@ export async function publishSystemAgents(pool: Pool): Promise<void> {
   await pool.query(upsert, ['ollama_models', JSON.stringify(models)]);
 }
 
-/** External CLI chosen for a system role in the dashboard (e.g. copilot, claude); null means the local model. */
-export async function systemCommand(pool: Pool, role: string): Promise<string[] | null> {
-  const row = (
-    await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = $1`, [`command:${role}`])
-  ).rows[0];
-  if (!row) return null;
+/** Reads a stored "command:<role>" value; anything but a non-empty string array counts as no command. */
+export function parseStoredCommand(value: string | undefined): string[] | null {
+  if (value === undefined) return null;
   try {
-    const command: unknown = JSON.parse(row.value);
+    const command: unknown = JSON.parse(value);
     return Array.isArray(command) && command.length && command.every((part) => typeof part === 'string')
       ? (command as string[])
       : null;
   } catch {
     return null;
   }
+}
+
+/** External CLI chosen for a system role in the dashboard (e.g. copilot, claude); null means the local model. */
+export async function systemCommand(pool: Pool, role: string): Promise<string[] | null> {
+  if (!SYSTEM_ROLES.some(([, , value]) => value === role)) return null;
+  const row = (
+    await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = $1`, [`command:${role}`])
+  ).rows[0];
+  return parseStoredCommand(row?.value);
+}
+
+/** Roles whose CLI loses its permission flags unless the user allows full tool access ("allow_tools:<role>"). */
+export const RESTRICTED_ROLES = ['analyst', 'author'] as const;
+
+/** Dashboard CLI of a restricted role: read-only by default, with the preset's flags only if the user allowed it. */
+export async function restrictedSystemCommand(pool: Pool, role: string): Promise<string[] | null> {
+  const command = await systemCommand(pool, role);
+  if (!command) return null;
+  const allowed = (
+    await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = $1`, [`allow_tools:${role}`])
+  ).rows[0];
+  return allowed?.value === 'true' ? command : readOnlyCommand(command);
+}
+
+/** CLI flags that grant write or shell access without asking; flags in VALUE_FLAGS also consume the next part. */
+const PERMISSION_FLAGS = new Set([
+  '--permission-mode',
+  '--dangerously-skip-permissions',
+  '--allowedTools',
+  '--allowed-tools',
+  '--allow-all-tools',
+  '--allow-all-paths',
+  '--allow-tool',
+  '--yolo',
+  '-y',
+  '--approval-mode',
+]);
+const VALUE_FLAGS = new Set([
+  '--permission-mode',
+  '--allowedTools',
+  '--allowed-tools',
+  '--allow-tool',
+  '--approval-mode',
+]);
+
+/** Removes permission-granting flags so a read-only system role (analysis, estimation) cannot edit or run commands. */
+export function readOnlyCommand(command: string[]): string[] {
+  const result: string[] = [];
+  let skipValue = false;
+  for (const part of command) {
+    const [flag = part] = part.split('=');
+    if (skipValue) skipValue = false;
+    else if (!PERMISSION_FLAGS.has(flag)) result.push(part);
+    else skipValue = VALUE_FLAGS.has(flag) && !part.includes('=');
+  }
+  return result;
 }

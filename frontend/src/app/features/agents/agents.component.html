@@ -89,6 +89,9 @@
             <label class="system-model"
               >Modell / Dienst
               <select [ngModel]="systemChoice(system)" (ngModelChange)="setSystemChoice(system.role, $event)">
+                @if (systemChoice(system) === 'custom:') {
+                  <option value="custom:">Eigener Befehl: {{ system.command?.join(' ') }}</option>
+                }
                 <optgroup label="Lokal (Ollama, kostenlos)">
                   @if (system.command?.length === 0 || !system.command) {
                     @if (!installedModels().includes(system.model)) {
@@ -106,6 +109,26 @@
                 </optgroup>
               </select>
             </label>
+            @if (system.restricted && system.command?.length) {
+              <label class="system-tools">
+                <input
+                  type="checkbox"
+                  [ngModel]="system.allowTools"
+                  (ngModelChange)="setAllowTools(system.role, $event)"
+                  [name]="'allow-tools-' + system.role"
+                />
+                Volle Werkzeugrechte der CLI erlauben (z. B. <code>--allow-all-tools</code>)
+              </label>
+              <p class="muted">
+                @if (system.allowTools) {
+                  Die CLI kann Dateien ändern und Befehle ausführen{{
+                    system.role === 'author' ? ' – im leeren, danach gelöschten Temp-Ordner' : ' – im Projektordner'
+                  }}. Die Regeln für Agents sind dann nur eine Bitte im Prompt.
+                } @else {
+                  Rechte-Flags werden entfernt: die CLI darf nur lesen bzw. antworten.
+                }
+              </p>
+            }
           }
         </ng-template>
       </app-data-table>

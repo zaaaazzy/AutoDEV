@@ -40,6 +40,8 @@ interface SystemAgent {
   role: string;
   model: string;
   command?: string[] | null;
+  restricted?: boolean;
+  allowTools?: boolean;
   envKey: string;
 }
 
@@ -119,12 +121,20 @@ export class AgentsComponent {
   protected readonly installedModels = signal<string[]>([]);
   protected readonly externalPresets = MODEL_PRESETS.filter((preset) => preset.command);
 
+  /** A stored command that matches no preset stays visible as "custom" so the UI never hides an active CLI. */
   protected systemChoice(system: SystemAgent): string {
-    const preset = system.command?.length ? presetOf(system.command.join(' ')) : null;
-    return preset && preset !== 'custom' ? `preset:${preset}` : `ollama:${system.model}`;
+    if (!system.command?.length) return `ollama:${system.model}`;
+    const preset = presetOf(system.command.join(' '));
+    return preset === 'custom' ? 'custom:' : `preset:${preset}`;
+  }
+
+  protected async setAllowTools(role: string, allowTools: boolean): Promise<void> {
+    await this.api.put(`/api/system-agents/${role}`, { allowTools });
+    this.systemAgents.update((list) => list.map((item) => (item.role === role ? { ...item, allowTools } : item)));
   }
 
   protected async setSystemChoice(role: string, choice: string): Promise<void> {
+    if (choice === 'custom:') return;
     const [kind, value = ''] = [choice.slice(0, choice.indexOf(':')), choice.slice(choice.indexOf(':') + 1)];
     const preset = kind === 'preset' ? MODEL_PRESETS.find((item) => item.id === value) : undefined;
     const command = preset ? parseCommand(preset.command) : null;

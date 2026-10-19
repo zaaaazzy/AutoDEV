@@ -10020,3 +10020,4 @@ input.pick {
   color: #c0392b;
   font-size: 13px;
 }
+.system-tools { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12.5px; }
