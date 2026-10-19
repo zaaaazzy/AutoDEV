@@ -156,11 +156,12 @@
               <label class="system-model"
                 >Modell / Dienst
                 <select [ngModel]="systemChoice(system)" (ngModelChange)="setSystemChoice(system.role, $event)">
+                  @if (systemChoice(system) === 'custom:') {
+                    <option value="custom:">Eigener Befehl: {{ system.command?.join(' ') }}</option>
+                  }
                   <optgroup label="Lokal (Ollama, kostenlos)">
-                    @if (system.command?.length === 0 || !system.command) {
-                      @if (!installedModels().includes(system.model)) {
-                        <option [value]="'ollama:' + system.model">{{ system.model }}</option>
-                      }
+                    @if (!system.command?.length && !installedModels().includes(system.model)) {
+                      <option [value]="'ollama:' + system.model">{{ system.model }}</option>
                     }
                     @for (model of installedModels(); track model) {
                       <option [value]="'ollama:' + model">{{ model }}</option>

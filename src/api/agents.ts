@@ -1,4 +1,4 @@
-import { SYSTEM_ROLES, systemAgents } from '../agent/system-agents.js';
+import { SYSTEM_ROLES, parseStoredCommand, systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
@@ -127,7 +127,7 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       agents: agents.map((agent) => ({
         ...agent,
         model: chosen.rows.find((item) => item.key === `model:${agent.role}`)?.value ?? agent.model,
-        command: JSON.parse(commands.rows.find((item) => item.key === `command:${agent.role}`)?.value ?? 'null'),
+        command: parseStoredCommand(commands.rows.find((item) => item.key === `command:${agent.role}`)?.value),
       })),
       models: models ? JSON.parse(models.value) : [],
     });
@@ -136,13 +136,12 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
   app.put('/api/system-agents/:role', async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
     const body = (request.body ?? {}) as { model?: unknown; command?: unknown };
-    const model = body.model ?? '';
+    const model = body.model;
     const command = body.command === undefined ? undefined : parseCommand(body.command);
     if (
       !role ||
-      typeof model !== 'string' ||
-      model.length > 200 ||
-      !/^[\w./:@+-]*$/.test(model) ||
+      (model === undefined && command === undefined) ||
+      (model !== undefined && (typeof model !== 'string' || model.length > 200 || !/^[\w./:@+-]*$/.test(model))) ||
       command === INVALID
     ) {
       response.status(400).json({ message: 'Ungültige Rolle, ungültiges Modell oder ungültiger Befehl.' });
@@ -156,7 +155,8 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
           [`command:${role}`, JSON.stringify(command)],
         );
     }
-    if (!model && command !== undefined) {
+    // Without a model field only the command changes; an empty model resets the choice to the worker default.
+    if (model === undefined) {
       response.json({ role, command });
       return;
     }
