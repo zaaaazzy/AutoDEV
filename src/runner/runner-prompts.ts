@@ -1,3 +1,4 @@
+import { HANDOFF_RULE } from '../core/workflow-phases.js';
 import { acceptanceInstructions } from './acceptance.js';
 import { reviewInstructions } from './review.js';
 import { COVERAGE_INSTRUCTIONS } from './coverage.js';
@@ -38,12 +39,18 @@ export function buildPrompt(
     extras.manual !== undefined
       ? `## Bisheriges Handbuch (${agent.role === 'user_manual_writer' ? USER_MANUAL_TITLE : MANUAL_TITLE})\n${extras.manual.slice(0, MANUAL_PROMPT_CHARS) || '(noch leer – erstelle es vollständig)'}`
       : '',
+    extras.sprintNotes?.trim() ? `## Vor dem Sprint (Planung)\n${extras.sprintNotes.trim().slice(0, 4000)}` : '',
     history.length ? `## Ergebnisse vorheriger Agents\n${history.join('\n\n')}` : '',
+    extras.messages?.length
+      ? `## Nachrichten an dich\n${extras.messages.map((message) => `- Von ${message.from}: ${message.text}`).join('\n')}`
+      : '',
+    extras.outcome ? `## Ergebnis des Auftrags\n${extras.outcome}` : '',
     agent.role === 'tester' ? COVERAGE_INSTRUCTIONS : '',
     agent.role === 'tester' && extras.definitionOfDone
       ? acceptanceInstructions(extras.criteria ?? [], extras.definitionOfDone)
       : '',
     agent.role === 'reviewer' ? reviewInstructions(extras.baseBranch ?? null) : '',
+    HANDOFF_RULE,
   ]
     .filter(Boolean)
     .join('\n\n');

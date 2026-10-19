@@ -1,3 +1,4 @@
+import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import type { Pool } from 'pg';
 import { systemAgents, systemCommand } from '../agent/system-agents.js';
 import { ROLE_INFO, type Role } from './roles.js';
@@ -20,9 +21,12 @@ export interface GeneratedDoc {
 }
 
 const PHASE_LABEL: Record<string, string> = {
-  pre_task: 'Vorbereitung',
-  while_task: 'Umsetzung',
-  after_task: 'Abschluss',
+  pre_sprint: 'Vor dem Sprint',
+  pre_task: 'Vor dem Auftrag',
+  while_task: 'Während',
+  after_task: 'Danach',
+  on_rejected: 'Bei abgelehnt',
+  on_done: 'Bei abgeschlossen',
 };
 const ROLE_LABEL: Record<string, string> = {
   author: 'Auftragsautor',
@@ -91,7 +95,7 @@ async function agentSettings(pool: Pool, slug: string): Promise<GeneratedDoc> {
     `SELECT name, role, phase, position, enabled, instructions, command, allowed_commands AS "allowedCommands",
             updated_at AS "updatedAt"
        FROM agents WHERE project_slug = $1
-      ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,
+      ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
     [slug],
   );
   const rows = agents.rows;

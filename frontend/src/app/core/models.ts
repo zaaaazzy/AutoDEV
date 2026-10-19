@@ -2,7 +2,8 @@ export type Priority = 'low' | 'medium' | 'high';
 export type SprintStatus = 'planned' | 'active' | 'completed';
 export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'done' | 'rejected';
 export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
-export type AgentPhase = 'pre_task' | 'while_task' | 'after_task';
+/** Workflow-Phasen (Spalten im Workflow-Board); siehe src/core/workflow-phases.ts. */
+export type AgentPhase = 'pre_sprint' | 'pre_task' | 'while_task' | 'after_task' | 'on_rejected' | 'on_done';
 
 export interface Project {
   slug: string;
@@ -216,6 +217,8 @@ export interface Agent {
   allowedCommands?: string[] | null;
   /** Erlaubte Ordner für Dateirechte (leer = ganzes Projekt). */
   fileScope?: string[];
+  /** Empfänger der Nachrichten dieses Agents (null = nächster Agent im Workflow). */
+  handoffTo?: string | null;
 }
 
 export interface StepEvent {

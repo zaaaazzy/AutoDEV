@@ -58,7 +58,7 @@ test('Testberichte, Agent-Einstellungen und Benutzerübersicht als schreibgesch�
     ],
   );
   assert.match(docs[0]!.title, /mit Befunden/);
-  assert.match(docs[1]!.content, /\| 1 \| Entwickler \| Entwickler \| Umsetzung \| Claude · opus \| Aktiv \|/);
+  assert.match(docs[1]!.content, /\| 1 \| Entwickler \| Entwickler \| Während \| Claude · opus \| Aktiv \|/);
   assert.match(
     docs[2]!.content,
     /\| Anna Autorin \| anna \| Dokumentation bearbeiten \| ja \| nein \| nie \| Aktiv \|/,

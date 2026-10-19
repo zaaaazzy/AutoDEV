@@ -1,3 +1,4 @@
+import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { isUuid } from '../core/validation.js';
@@ -62,10 +63,10 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
 export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<WorkflowAgent[]> {
   const result = await pool.query<WorkflowAgent>(
     `SELECT id, name, role, phase, position, instructions, command, allowed_commands AS "allowedCommands",
-            file_scope AS "fileScope"
+            file_scope AS "fileScope", handoff_to AS "handoffTo"
        FROM agents
       WHERE project_slug = $1 AND enabled
-      ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,
+      ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
     [projectSlug],
   );
   return result.rows;

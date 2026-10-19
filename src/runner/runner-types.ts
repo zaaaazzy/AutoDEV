@@ -26,6 +26,12 @@ export interface PromptExtras {
   /** Akzeptanzkriterien aus dem Auftragstext und Definition of Done des Projekts (für den Tester). */
   criteria?: string[];
   definitionOfDone?: string[];
+  /** Nachrichten anderer Agents an diesen Agent (@@NACHRICHT). */
+  messages?: { from: string; text: string }[];
+  /** Ergebnis von „Vor dem Sprint“. */
+  sprintNotes?: string | null;
+  /** Nur „Bei abgelehnt“ / „Bei abgeschlossen“: wie der Auftrag ausgegangen ist. */
+  outcome?: string;
 }
 
 /** Runs an agent that has no command of its own (built-in tester or local model). */
@@ -53,6 +59,8 @@ export interface WorkflowAgent {
   allowedCommands?: string[] | null;
   /** Erlaubte Ordner für Dateirechte (leer = ganzes Projekt). */
   fileScope?: string[];
+  /** Empfänger der Nachrichten dieses Agents (null = nächster Agent). */
+  handoffTo?: string | null;
 }
 
 export interface StepSummary {

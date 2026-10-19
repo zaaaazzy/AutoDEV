@@ -31,6 +31,8 @@ import {
 } from './agent-options.js';
 import { OrderTableComponent } from '../development/order-table.component.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
+import { AgentSettingsComponent } from './agent-settings.component.js';
+import { WorkflowBoardComponent } from './workflow-board.component.js';
 
 interface SystemAgent {
   name: string;
@@ -72,6 +74,8 @@ interface AgentListRow extends AgentTableRow {
     NgClass,
     FormsModule,
     AgentDetailComponent,
+    AgentSettingsComponent,
+    WorkflowBoardComponent,
     ModelIconComponent,
     DataTableComponent,
     DataCellDirective,
@@ -131,15 +135,11 @@ export class AgentsComponent {
       ),
     );
   }
-  protected readonly agentEditing = signal<string | null>(null);
-  protected agentEdit = { name: '', instructions: '', command: '' };
   /** Kategorien des Projekts (eingebaute und eigene) mit ihren einzelnen Befehlen. */
   protected readonly permissionGroups = signal<PermissionGroupInfo[]>([]);
   /** Neue Agents starten ohne Befehle: jeder wird einzeln freigegeben. */
   protected formCommands: string[] = [];
-  protected editCommands: string[] = [];
   protected formScopes: string[] = [];
-  protected editScopes: string[] = [];
   private readonly loadGroups = effect(() => {
     const slug = this.store.activeProject();
     if (!slug) return;
@@ -148,17 +148,6 @@ export class AgentsComponent {
       .then((result) => this.permissionGroups.set(result.groups))
       .catch(() => undefined);
   });
-
-  /** Noch nicht festgelegt (null): so, wie der Agent heute läuft – vertraute Rollen mit allen Projektbefehlen. */
-  private effectiveCommands(agent: Agent): string[] {
-    if (agent.allowedCommands) return [...agent.allowedCommands];
-    const available = this.permissionGroups()
-      .filter((group) => group.available)
-      .flatMap((group) => group.rules);
-    return ['assistant', 'developer', 'tester', 'reviewer'].includes(agent.role)
-      ? available
-      : ['files:create', 'files:edit'];
-  }
 
   protected agentForm = {
     name: '',
@@ -249,13 +238,6 @@ export class AgentsComponent {
     })),
   );
 
-  protected startAgentEdit(agent: Agent): void {
-    this.agentEdit = { name: agent.name, instructions: agent.instructions, command: agent.command?.join(' ') ?? '' };
-    this.editCommands = this.effectiveCommands(agent);
-    this.editScopes = [...(agent.fileScope ?? [])];
-    this.agentEditing.set(agent.id);
-  }
-
   protected async createAgent(): Promise<void> {
     let command: string[] | null;
     try {
@@ -290,24 +272,6 @@ export class AgentsComponent {
       () => this.api.patch(`/api/agents/${encodeURIComponent(id)}`, values),
       'Agent aktualisiert.',
     );
-  }
-
-  protected async saveAgentEdit(agent: Agent): Promise<void> {
-    let command: string[] | null;
-    try {
-      command = parseCommand(this.agentEdit.command);
-    } catch (error) {
-      this.store.notice.set(errorMessage(error, 'Der Agent-Befehl ist ungültig.'));
-      return;
-    }
-    await this.updateAgent(agent.id, {
-      name: this.agentEdit.name,
-      instructions: this.agentEdit.instructions,
-      command,
-      allowedCommands: this.editCommands,
-      fileScope: this.editScopes,
-    });
-    this.agentEditing.set(null);
   }
 
   protected async deleteAgent(id: string): Promise<void> {

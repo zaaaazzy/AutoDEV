@@ -9547,3 +9547,84 @@ input.pick {
   color: #b4472f;
   font-size: 0.85rem;
 }
+
+/* ── Workflow-Board (Agents): Spalten je Phase, Karten ziehen, Einstellungen per Klick ── */
+.workflow-board {
+  grid-auto-columns: minmax(190px, 1fr);
+}
+.workflow-lane.lane-pre_sprint {
+  background: #f3f0fb;
+}
+.workflow-lane.lane-on_rejected {
+  background: #fdf2ef;
+}
+.workflow-lane.lane-on_done {
+  background: #eef6f1;
+}
+.workflow-card {
+  cursor: pointer;
+}
+.workflow-card.disabled {
+  opacity: 0.6;
+}
+.workflow-card.selected {
+  border-color: var(--accent, #2f6b4f);
+  box-shadow: 0 0 0 2px rgb(47 107 79 / 25%);
+}
+.workflow-card.running {
+  border-color: #6a9bd8;
+}
+.workflow-card:focus-visible {
+  outline: 2px solid var(--accent, #2f6b4f);
+  outline-offset: 2px;
+}
+.workflow-handoff {
+  color: #6b4fa0;
+  font-size: 12px;
+}
+.workflow-settings {
+  position: relative;
+  margin-top: 12px;
+}
+.workflow-settings-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+.agent-settings {
+  display: grid;
+  gap: 10px;
+}
+.agent-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 36px;
+}
+.agent-settings-head > div {
+  display: grid;
+  flex: 1;
+}
+.agent-settings-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+}
+.agent-settings-list dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.agent-settings-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .agent-settings-list {
+    grid-template-columns: 1fr;
+  }
+  .agent-settings-list dd {
+    margin-bottom: 6px;
+  }
+}

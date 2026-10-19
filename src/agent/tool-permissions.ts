@@ -251,7 +251,8 @@ const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
  * Rollen, die nur lesen (Werkzeugumfang der Problemanalyse beim lokalen Modell): keine Datei-Werkzeuge, keine Shell –
  * auch nicht über eine eigene Zuweisung am Agent oder eigene Werkzeug-Regeln im Befehl.
  */
-export const READ_ONLY_ROLES = new Set(['visionary', 'analyst']);
+// pre_sprint: Agents „Vor dem Sprint“ planen und prüfen nur (ihre Änderungen würden sonst im ersten Auftrag landen).
+export const READ_ONLY_ROLES = new Set(['visionary', 'analyst', 'pre_sprint']);
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {

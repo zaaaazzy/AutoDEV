@@ -14,10 +14,12 @@ import {
   parseCommand,
   parseFields,
   parseLongText,
+  parseNullableUuid,
   parseOption,
   parseProjectSlug,
   parseTitle,
 } from '../core/validation.js';
+import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 
 const ROLES = new Set([
   'author',
@@ -30,9 +32,9 @@ const ROLES = new Set([
   'user_manual_writer',
   'custom',
 ]);
-const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
+const PHASES = PHASE_SET;
 const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command,
-  allowed_commands AS "allowedCommands", file_scope AS "fileScope"`;
+  allowed_commands AS "allowedCommands", file_scope AS "fileScope", handoff_to AS "handoffTo"`;
 const AGENT_FIELDS = {
   name: { column: 'name', parse: parseTitle(80) },
   role: { column: 'role', parse: parseOption(ROLES) },
@@ -41,6 +43,7 @@ const AGENT_FIELDS = {
   enabled: { column: 'enabled', parse: parseBoolean },
   command: { column: 'command', parse: parseCommand },
   fileScope: { column: 'file_scope', parse: parseFileScope },
+  handoffTo: { column: 'handoff_to', parse: parseNullableUuid },
 };
 
 /** Erlaubte Ordner für Dateirechte: relativ zum Projekt, ohne „..“, höchstens 20; leer = ganzes Projekt. */
@@ -210,7 +213,7 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `SELECT ${AGENT_COLUMNS} FROM agents WHERE project_slug = $1
-        ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,
+        ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
       [slug],
     );
     response.json({ agents: result.rows });
@@ -293,9 +296,10 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       return;
     }
     await pool.query(
-      `UPDATE agents a SET position = o.ord, updated_at = NOW()
+      // Reihenfolge einer Spalte im Workflow-Board; Agents aus anderen Spalten wechseln dabei in diese Phase.
+      `UPDATE agents a SET position = o.ord, phase = $2, updated_at = NOW()
          FROM unnest($3::uuid[]) WITH ORDINALITY AS o(id, ord)
-        WHERE a.id = o.id AND a.project_slug = $1 AND a.phase = $2`,
+        WHERE a.id = o.id AND a.project_slug = $1`,
       [slug, body.phase, body.ids],
     );
     response.status(204).end();

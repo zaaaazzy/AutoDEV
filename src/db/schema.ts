@@ -770,4 +770,15 @@ export const SCHEMA = `
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_since TIMESTAMPTZ;
   -- Nach dem Sprint-Abschluss (Merge nach main) Dev Log selbst neu starten – nur für das Dev-Log-Projekt sinnvoll.
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS restart_after_sprint BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Workflow-Board: Phasen vor dem Sprint und am Ende eines Auftrags, Nachrichten zwischen Agents.
+  ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_phase_check;
+  ALTER TABLE agents ADD CONSTRAINT agents_phase_check
+    CHECK (phase IN ('pre_sprint', 'pre_task', 'while_task', 'after_task', 'on_rejected', 'on_done'));
+  -- Empfänger der Nachrichten dieses Agents (leer = nächster Agent in der Reihenfolge).
+  ALTER TABLE agents ADD COLUMN IF NOT EXISTS handoff_to UUID REFERENCES agents(id) ON DELETE SET NULL;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS handoffs JSONB NOT NULL DEFAULT '[]'::jsonb;
+  -- „Vor dem Sprint“: einmal je Sprint; Ergebnis fliesst in die Aufträge des Sprints.
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_at TIMESTAMPTZ;
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_notes TEXT;
 `;

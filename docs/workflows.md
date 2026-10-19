@@ -88,6 +88,29 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 - **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 
+## 4a. Workflow-Board (Agents → Workflow)
+
+Unter „Agents“ zeigt ein Kanban, wann welcher Agent läuft. Phase und Reihenfolge stehen in `agents.phase` und
+`agents.position`; Ziehen speichert beides (`POST /api/projects/:slug/agents/order`). Ein Klick auf eine Karte zeigt
+die Einstellungen, ✎ macht sie bearbeitbar (dasselbe Formular wie in der Agent-Tabelle).
+
+| Spalte | Phase | Wann |
+|---|---|---|
+| Vor dem Sprint | `pre_sprint` | einmal, wenn ein Sprint aktiv wird, bevor sein erster Auftrag startet; nur lesend (Rolle `pre_sprint` in `READ_ONLY_ROLES`). Das Ergebnis steht in `sprints.pre_sprint_notes` und steht in jeder Agent-Anweisung der Aufträge dieses Sprints. |
+| Vor dem Auftrag | `pre_task` | für jeden Auftrag, vor der Umsetzung |
+| Während | `while_task` | Umsetzung |
+| Danach | `after_task` | Tests, Review, Doku |
+| Bei abgelehnt | `on_rejected` | am Ende eines gescheiterten Auftrags (nicht bei Unterbrechung oder Kostenbremse) |
+| Bei abgeschlossen | `on_done` | am Ende eines erfolgreichen Auftrags |
+
+„Bei abgelehnt/abgeschlossen“ laufen noch vor dem Abschluss des Auftrags (ihre Änderungen landen im Commit), ändern
+aber sein Ergebnis nicht: kein Bug, keine Abnahme, kein Statuswechsel.
+
+**Nachrichten zwischen Agents:** Ein Agent schreibt `@@NACHRICHT: …` (an den nächsten Agent) oder
+`@@NACHRICHT an <Name>: …`. Ist beim Absender „Nachricht geht an“ (`agents.handoff_to`) gesetzt, geht eine Nachricht
+ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
+`agent_run_steps.handoffs`. Implementierung: `src/core/workflow-phases.ts`, `src/runner/pre-sprint.ts`.
+
 ## 5. Fehlerbehandlung und Auto-Bugfix
 
 0. **Nachbesserung im selben Lauf:** Sind die Tests rot oder lehnt der Reviewer ab, geht der Auftrag zuerst einmal direkt zurück an den Entwickler – mit der Ausgabe von Tester bzw. Reviewer als Rückmeldung. Danach laufen Entwickler, Tester und Reviewer erneut. Erst wenn auch dieser Versuch scheitert, greift der folgende Ablauf. Die erste Rückmeldung bleibt als fehlgeschlagener Schritt im Lauf sichtbar („Zurück an den Entwickler zur Nachbesserung“). Bei einem einzelnen Agent (Play-Knopf) gibt es keine Nachbesserung.

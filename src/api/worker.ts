@@ -1,3 +1,4 @@
+import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { ANSWERED } from './chat-routes.js';
 import type { Express } from 'express';
 import { cpus, loadavg } from 'node:os';
@@ -198,7 +199,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
            LEFT JOIN development_items d ON d.id = st.development_id
            LEFT JOIN sprints s ON s.id = d.sprint_id
           WHERE a.project_slug = $1 AND a.enabled
-          ORDER BY CASE a.phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, a.position`,
+          ORDER BY ${PHASE_SQL_ORDER.replace('CASE phase', 'CASE a.phase')}, a.position`,
           [slug],
         )
       ).rows;

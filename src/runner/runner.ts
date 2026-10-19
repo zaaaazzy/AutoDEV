@@ -1,3 +1,4 @@
+import { runPreSprint } from './pre-sprint.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -183,6 +184,17 @@ export async function runWorkItem(
       .filter(Boolean)
       .join('\n\n');
     ctx.definitionOfDone = (await loadDefinitions(pool, item.projectSlug)).done;
+    ctx.ordered = ordered;
+    ctx.messages = [];
+    ctx.sprintNotes = item.sprintId
+      ? ((
+          await pool
+            .query<{ notes: string | null }>(`SELECT pre_sprint_notes AS notes FROM sprints WHERE id = $1`, [
+              item.sprintId,
+            ])
+            .catch(() => ({ rows: [] }))
+        ).rows[0]?.notes ?? null)
+      : null;
     ctx.criteria = extractCriteria(item.description ?? '');
     let position = await resumePosition(pool, item.id, runId, ordered, ctx.done);
     let stepPosition = position;
@@ -232,6 +244,28 @@ export async function runWorkItem(
       }
       position += 1;
     }
+    // Ende des Auftrags: „Bei abgeschlossen“ bzw. „Bei abgelehnt“ – noch vor dem Abschluss, damit ihre Änderungen im
+    // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung oder Kostenbremse.
+    if (!interrupted && !budgetStop && !item.agentId) {
+      const phase = passed ? 'on_done' : 'on_rejected';
+      const observers = agents.filter((agent) => agent.phase === phase);
+      const last = ctx.done.at(-1);
+      const outcome = passed
+        ? 'Erledigt: Alle Schritte des Workflows waren erfolgreich.'
+        : `Gescheitert bei „${last?.agentName ?? 'einem Agent'}“:\n${last?.output.slice(-1500) ?? ''}`;
+      for (const [index, agent] of observers.entries()) {
+        if (!releaseTree && changesWorkingTree(agent)) {
+          releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
+          ctx.sprintName = await sprintNameOf(pool, item);
+          ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
+        }
+        await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
+          stepPosition,
+          observer: { outcome },
+        });
+        stepPosition += 1;
+      }
+    }
   } catch (error) {
     passed = false;
     // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
@@ -279,12 +313,14 @@ export async function runWorkflow(
   await backfillFailures(pool, options.project).catch((error) =>
     console.error('Fehler-Nachtrag fehlgeschlagen:', error),
   );
-  const items = await selectItems(pool, options);
   const results: { itemId: string; result: string }[] = [];
+  const agents = await loadWorkflow(pool, options.project);
+  // „Vor dem Sprint“: einmal je Sprint, bevor dessen Aufträge starten (diese laufen dann im nächsten Zyklus).
+  if (await runPreSprint(pool, options, agents, execute)) return results;
+  const items = await selectItems(pool, options);
   if (!items.length) {
     return results;
   }
-  const agents = await loadWorkflow(pool, options.project);
   if (!agents.length) {
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
   }

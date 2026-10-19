@@ -1,3 +1,4 @@
+import { handoffTarget, ORDER_PHASES, parseHandoffs } from '../core/workflow-phases.js';
 import { manualTodo, setActionTodo } from './action-todo.js';
 import type { Pool } from 'pg';
 import type { KnownBug } from '../api/bugs.js';
@@ -136,6 +137,12 @@ export interface RunContext {
   criteria?: string[];
   definitionOfDone?: string[];
   sprintName?: string | null;
+  /** Agents des Auftrags in Workflow-Reihenfolge (für Nachrichten an „den nächsten“ Agent). */
+  ordered?: WorkflowAgent[];
+  /** Nachrichten zwischen Agents (@@NACHRICHT), je Empfänger. */
+  messages?: { toId: string; from: string; text: string }[];
+  /** Ergebnis von „Vor dem Sprint“ für alle Aufträge des Sprints. */
+  sprintNotes?: string | null;
 }
 
 interface StepOutcome {
@@ -150,6 +157,11 @@ export interface StepOptions {
   stepPosition?: number;
   /** Tester/Reviewer dürfen den Auftrag einmal pro Lauf zur Nachbesserung zurückgeben, statt einen Bug auszulösen. */
   canCorrect?: boolean;
+  /**
+   * „Bei abgelehnt“ / „Bei abgeschlossen“: läuft nach dem Ergebnis des Auftrags und ändert es nicht (kein Bug, keine
+   * Abnahme); `outcome` beschreibt das Ergebnis für den Agent.
+   */
+  observer?: { outcome: string };
 }
 
 /** Claim an order run; an existing run older than three hours is treated as abandoned. */
@@ -172,6 +184,7 @@ export async function claimRun(pool: Pool, item: WorkItem): Promise<string | nul
 /** Select agents in phase and position order, or only the assigned agent for a manual run. */
 export function selectWorkflowAgents(agents: WorkflowAgent[], item: WorkItem): WorkflowAgent[] {
   return agents
+    .filter((agent) => (ORDER_PHASES as readonly string[]).includes(agent.phase))
     .filter((agent) =>
       item.agentId
         ? agent.id === item.agentId
@@ -309,6 +322,9 @@ export async function runStep(
       baseBranch: ctx.branch?.base,
       criteria: ctx.criteria,
       definitionOfDone: ctx.definitionOfDone,
+      messages: (ctx.messages ?? []).filter((message) => message.toId === agent.id),
+      sprintNotes: ctx.sprintNotes,
+      outcome: stepOptions.observer?.outcome,
     }),
   );
 
@@ -421,7 +437,7 @@ export async function runStep(
   }
   // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.
   let accepted = true;
-  if (agent.role === 'tester' && ctx.definitionOfDone) {
+  if (agent.role === 'tester' && ctx.definitionOfDone && !stepOptions.observer) {
     const criteria = ctx.criteria ?? [];
     const acceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
     await saveAcceptance(pool, item.id, criteria, ctx.definitionOfDone, acceptance).catch((error) =>
@@ -489,8 +505,18 @@ export async function runStep(
     stepId,
     cancelled ? 'Abgebrochen' : passed ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit-Code ${result.exitCode})`,
   );
+  // Nachrichten an andere Agents (@@NACHRICHT): Empfänger bestimmen und für deren Anweisung merken.
+  const handoffs = parseHandoffs(output).flatMap((handoff) => {
+    const target = handoffTarget(handoff, agent, ctx.ordered ?? []);
+    return target ? [{ to: target.name, toId: target.id, text: handoff.text }] : [];
+  });
+  for (const handoff of handoffs) {
+    ctx.messages = [...(ctx.messages ?? []), { toId: handoff.toId, from: agent.name, text: handoff.text }];
+    await logEvent(pool, stepId, `Nachricht an ${handoff.to}: ${handoff.text.slice(0, 120)}`);
+  }
   await pool.query(
-    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6, cost_usd = $7 WHERE id = $1`,
+    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6, cost_usd = $7,
+            handoffs = $8::jsonb WHERE id = $1`,
     [
       stepId,
       passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
@@ -499,6 +525,7 @@ export async function runStep(
       output,
       result.tokens ?? 0,
       result.costUsd ?? 0,
+      JSON.stringify(handoffs.map(({ to, text }) => ({ to, text }))),
     ],
   );
   done.push({
@@ -507,6 +534,8 @@ export async function runStep(
     status: passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
     output,
   });
+  // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
+  if (stepOptions.observer) return { passed, interrupted: false };
   // Rote Tests oder eine Ablehnung im Review gehen zuerst einmal direkt zurück an den Entwickler.
   const correctable = !passed && !cancelled && !refusedByRule && stepOptions.canCorrect === true;
   if (correctable) {

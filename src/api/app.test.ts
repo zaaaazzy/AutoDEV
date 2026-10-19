@@ -366,7 +366,8 @@ test('defines agents per workflow phase and persists their order', async () => {
 
     const list = await fetch(`${baseUrl}/api/projects/mainty/agents`, { headers: jsonHeaders() });
     assert.equal(list.status, 200);
-    assert.match(queries.at(-1)?.sql ?? '', /pre_task' THEN 0 WHEN 'while_task' THEN 1/);
+    // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
+    assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
   });
 });
 
