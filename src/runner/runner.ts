@@ -1,5 +1,6 @@
+import { isShuttingDown } from '../core/shutdown.js';
 import { runPreSprint } from './pre-sprint.js';
-import { processApprovals } from './review-gate.js';
+import { followProjectPreview, processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -7,7 +8,7 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { loadFollowUpContext } from './follow-up.js';
-import { sprintAutopilot } from './sprint-autopilot.js';
+import { markSprintReady, sprintAutopilot } from './sprint-autopilot.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { enterOrderBranch, syncSprintToGit } from './git-sync.js';
@@ -309,13 +310,26 @@ export async function runWorkItem(
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
 }
 
+/**
+ * Live schalten (nach dem Go zum Sprint, wenn er in main gemergt ist): Projektordner (z. B. mit dev-live) auf main
+ * nachziehen und die Deploy-Befehle des Projekts dort ausführen. Vorher sieht man den Sprint nur in der Vorschau.
+ */
+async function goLive(pool: Pool, project: string, cwd: string, execute?: CommandExecutor): Promise<void> {
+  await followProjectPreview(pool, project, cwd, 'main', execute);
+  const live = (await pool.query<{ repository: string }>('SELECT repository FROM projects WHERE slug = $1', [project]))
+    .rows[0]?.repository;
+  await deployProject(pool, project, live ?? cwd, execute);
+}
+
 export async function runWorkflow(
   pool: Pool,
   options: RunnerOptions,
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
-  await syncSprintToGit(pool, options.project, options.cwd, execute);
+  await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+    goLive(pool, options.project, options.cwd, execute),
+  );
   // Orders in the active sprint run automatically, even when they are still in the backlog.
   await pool.query(
     `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', updated_at = NOW()
@@ -324,16 +338,13 @@ export async function runWorkflow(
   );
   await resumeAfterEnvironment(pool, options.project).catch(() => undefined);
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
-  const approved = await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
+  await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
     console.error('Freigabe fehlgeschlagen:', error);
     return 0;
   });
-  if (approved) {
-    await deployProject(pool, options.project, options.cwd, execute).catch((error) =>
-      console.error('Deploy fehlgeschlagen:', error),
-    );
-  }
-  // Autopilot: abgeschlossenen Sprint beenden bzw. den nächsten vorschlagen und starten.
+  // Sprint fertig? Dann wartet er auf das Go (Vorschau ansehen, „Live schalten“).
+  await markSprintReady(pool, options.project).catch((error) => console.error('Sprint-Review fehlgeschlagen:', error));
+  // Autopilot: nach dem Go den nächsten Sprint vorschlagen und starten.
   await sprintAutopilot(pool, options.project).catch((error) =>
     console.error('Sprint-Autopilot fehlgeschlagen:', error),
   );
@@ -351,21 +362,16 @@ export async function runWorkflow(
   if (!agents.length) {
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
   }
+  // Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent).
   const implementationLock = new Mutex();
-  results.push(
-    ...(await Promise.all(
-      items.map(async (item) => ({
-        itemId: item.id,
-        result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),
-      })),
-    )),
-  );
-  await syncRepoDocs(pool, options.project, options.cwd);
-  if (results.some(({ result }) => result === 'passed')) {
-    await deployProject(pool, options.project, options.cwd, execute).catch((error) =>
-      console.error('Deploy fehlgeschlagen:', error),
-    );
+  for (const item of items) {
+    if (isShuttingDown()) break;
+    results.push({
+      itemId: item.id,
+      result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),
+    });
   }
+  await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,
     [options.project],
@@ -373,6 +379,8 @@ export async function runWorkflow(
   if (active.rows[0]) {
     await generateSprintReport(pool, active.rows[0].id);
   }
-  await syncSprintToGit(pool, options.project, options.cwd, execute);
+  await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+    goLive(pool, options.project, options.cwd, execute),
+  );
   return results;
 }

@@ -338,6 +338,37 @@ export async function finishOrderBranch(
   }
 }
 
+/**
+ * Commit nach jedem Agent: was der Agent im Arbeitsordner geändert hat, landet sofort als eigener Commit auf dem
+ * Auftrags-Branch („Entwickler: Titel“, bei einem gescheiterten Schritt „wip(Tester): Titel“). Ohne Änderungen
+ * passiert nichts. Liefert den Kurz-Hash oder null.
+ */
+export async function commitAgentStep(
+  cwd: string,
+  item: { id: string; title: string },
+  agentName: string,
+  sprintName: string | null,
+  passed: boolean,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  if (!existsSync(join(cwd, '.git'))) return null;
+  try {
+    await stageAll(git, must);
+    if (!(await must('diff', '--cached', '--name-only'))) return null;
+    const title = item.title.slice(0, 60);
+    const subject = passed ? `${agentName}: ${title}` : `wip(${agentName}): ${title}`;
+    const body = `Auftrag: ${item.id}${sprintName ? `\nSprint: ${sprintName}` : ''}\nCommit nach dem Agent „${agentName}“.`;
+    await must('commit', '--no-verify', '-m', subject, '-m', body);
+    return await must('rev-parse', '--short', 'HEAD');
+  } catch (error) {
+    console.error(`Commit nach ${agentName} fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 /** Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch) mergen und löschen. */
 export async function mergeApprovedBranch(
   cwd: string,
@@ -739,6 +770,8 @@ export async function syncSprintToGit(
   project: string,
   cwd: string,
   rawExecute: CommandExecutor = runCommand,
+  /** Nach dem Merge nach main („Live schalten“): Live-Ordner nachziehen und deployen. */
+  onMergedMain?: () => Promise<void>,
 ): Promise<number> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
@@ -787,6 +820,12 @@ export async function syncSprintToGit(
             execute: rawExecute,
             mergeElsewhere: restartAfterSprint,
           });
+    if (result.mergedMain && onMergedMain) {
+      await onMergedMain().catch((error: unknown) =>
+        result.log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`),
+      );
+      result.log.push('Live geschaltet: Projektordner auf main nachgezogen und deployt.');
+    }
     if (result.mergedMain && restartAfterSprint) {
       const { created } = await requestRestart(
         pool,

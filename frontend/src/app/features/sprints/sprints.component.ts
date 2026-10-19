@@ -210,6 +210,21 @@ export class SprintsComponent {
     );
   }
 
+  /** Go zum Sprint: Tests, CI, Merge nach main, dann zieht der Projektordner nach und es wird deployt. */
+  protected async goLive(sprint: Sprint): Promise<void> {
+    const open = sprint.reviewReadyAt ? '' : '\n\nAchtung: Es sind noch nicht alle Aufträge durch.';
+    if (
+      !globalThis.confirm(
+        `„${sprint.name}“ live schalten?\n\nTests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.${open}`,
+      )
+    )
+      return;
+    await this.store.perform(
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed' }),
+      'Wird live geschaltet – Tests, CI und Merge laufen im Hintergrund.',
+    );
+  }
+
   protected async deleteSprint(id: string): Promise<void> {
     if (!globalThis.confirm('Sprint löschen? Die Aufträge bleiben im Backlog erhalten.')) return;
     await this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.');

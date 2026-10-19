@@ -11,12 +11,12 @@ import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
+import { commitAgentStep, commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
 import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
-import { followProjectPreview, holdForReview, loadReviewMode, needsApproval, type ReviewMode } from './review-gate.js';
+import { holdForReview, loadReviewMode, needsApproval, type ReviewMode } from './review-gate.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import {
   FILES_CREATE,
@@ -615,8 +615,16 @@ export async function runStep(
     status: passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
     output,
   });
+  const commitStep = async (): Promise<void> => {
+    if (!ctx.branch || cancelled) return;
+    const commit = await commitAgentStep(options.cwd, item, agent.name, ctx.sprintName ?? null, passed, execute);
+    if (commit) await logEvent(pool, stepId, `Commit ${commit} (Änderungen von ${agent.name})`);
+  };
   // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
-  if (stepOptions.observer) return { passed, interrupted: false };
+  if (stepOptions.observer) {
+    await commitStep();
+    return { passed, interrupted: false };
+  }
   // Rote Tests oder eine Ablehnung im Review gehen zuerst einmal direkt zurück an den Entwickler.
   const correctable = !passed && !cancelled && !refusedByRule && stepOptions.canCorrect === true;
   if (correctable) {
@@ -631,6 +639,7 @@ export async function runStep(
   } else {
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
+  await commitStep();
   return { passed, interrupted: false, correctable };
 }
 
@@ -673,7 +682,6 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
       return;
     }
     if (passed && !result.merged) mergeProblem = result.message;
-    if (result.merged) await followProjectPreview(pool, item.projectSlug, options.cwd, ctx.branch.base, execute);
   } else if (passed && ctx.sprintName) {
     await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
   }

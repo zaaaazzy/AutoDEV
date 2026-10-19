@@ -179,3 +179,18 @@ Repo-Dokumentation spiegeln (`syncRepoDocs`), Sprint-Bericht für den aktiven Sp
 ## Deploy nach Aufträgen
 
 Pro Projekt lassen sich in den Einstellungen Deploy-Befehle hinterlegen (z. B. `docker compose up -d --build`). Der Worker führt sie im Projektordner aus, sobald ein Zyklus mindestens einen erfolgreichen Auftrag hatte. So laufen Container mit dem Code der Agents. Das Ergebnis steht in den Einstellungen.
+
+## Sprint-Ablauf: vom Start bis Live
+
+1. **Sprint starten:** Aufträge laufen auf dem Sprint-Branch `sprint/<name>`.
+2. **Ein Auftrag nach dem anderen:** Jeder Auftrag zweigt auf seinen eigenen Branch `auftrag/<id>-…` ab; je Projekt
+   läuft immer nur ein Auftrag.
+3. **Commit nach jedem Agent:** Was ein Agent ändert, wird sofort committet („Entwickler: Titel“, bei einem
+   gescheiterten Schritt „wip(Tester): Titel“). Bricht etwas ab, setzt der Agent dort und in seiner Sitzung fort.
+4. **Auftrag fertig:** Der Auftrags-Branch wird in den Sprint-Branch gemergt.
+5. **Vorschau:** In der Sprint-Ansicht jeden Stand wählen und mit ▶ im Review-Container starten (eigener Port,
+   eigene Datenbank-Kopie).
+6. **Sprint-Review:** Sind alle Aufträge durch, wartet der Sprint auf dein Go (Push-Nachricht, Hinweis im Sprint).
+   Der Autopilot schaltet nie selbst live.
+7. **Live schalten:** Tests und CI laufen, der Sprint wird nach `main` gemergt, der Projektordner (z. B. mit dev-live)
+   auf `main` nachgezogen und die Deploy-Befehle laufen. Live ist damit immer der freigegebene Stand von `main`.

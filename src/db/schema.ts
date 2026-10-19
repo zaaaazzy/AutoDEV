@@ -853,4 +853,7 @@ export const SCHEMA = `
     commits JSONB NOT NULL DEFAULT '[]'::jsonb,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+
+  -- Sprint-Review: alle Aufträge durch → wartet auf das Go („Live schalten“ = nach main mergen und deployen).
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS review_ready_at TIMESTAMPTZ;
 `;

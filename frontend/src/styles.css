@@ -10160,3 +10160,27 @@ input.pick {
   gap: 10px;
   flex-wrap: wrap;
 }
+
+/* Sprint wartet auf das Go */
+.sprint-go {
+  display: flex;
+  align-items: center;
+  gap: 8px 14px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid #b9d3c7;
+  border-left: 4px solid var(--green);
+  border-radius: 8px;
+  background: #eef6f1;
+  font-size: 13.5px;
+}
+.sprint-go span {
+  flex: 1 1 260px;
+  color: var(--muted);
+}
+.sprint-go.failed {
+  border-color: #e6b8b3;
+  border-left-color: #c0392b;
+  background: #fdf1ef;
+}

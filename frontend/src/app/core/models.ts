@@ -165,6 +165,8 @@ export interface Sprint {
   gitCommit?: string | null;
   gitBranch?: string | null;
   gitSyncedAt?: string | null;
+  /** Alle Aufträge durch: wartet auf das Go („Live schalten“). */
+  reviewReadyAt?: string | null;
 }
 
 export interface Bug {

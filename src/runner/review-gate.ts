@@ -151,7 +151,6 @@ export async function processApprovals(
       { project },
     );
     if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
-    await followProjectPreview(pool, project, cwd, item.base!, execute);
   }
   return merged;
 }

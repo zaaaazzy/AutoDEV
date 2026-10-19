@@ -17,7 +17,8 @@ const SPRINT_STATUSES = new Set(['planned', 'active', 'completed']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(end_date, 'YYYY-MM-DD') AS "endDate",
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
-  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt"`;
+  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt",
+  review_ready_at AS "reviewReadyAt"`;
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },

@@ -4,7 +4,13 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { enterOrderBranch, finishOrderBranch, followPreview, mergeApprovedBranch } from './git-sync.js';
+import {
+  commitAgentStep,
+  enterOrderBranch,
+  finishOrderBranch,
+  followPreview,
+  mergeApprovedBranch,
+} from './git-sync.js';
 import { needsApproval, touchesUi } from './review-gate.js';
 
 const git = (cwd: string, ...args: string[]): string =>
@@ -87,4 +93,19 @@ test('Vorschau bleibt bei eigener Arbeit oder ausgechecktem Branch unberührt', 
   git(folder, 'checkout', '-q', 'main');
   assert.equal(await followPreview(folder, 'sprint/s1'), null);
   assert.equal(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+});
+
+test('Commit nach jedem Agent: eigener Commit je Schritt, ohne Änderung keiner', async () => {
+  const { agents } = repository();
+  const item = { id: 'abcdef14-0000', title: 'Checklisten' };
+  const branch = await enterOrderBranch(agents, item, 's1');
+  writeFileSync(join(agents, 'liste.ts'), 'export {};\n');
+  assert.ok(await commitAgentStep(agents, item, 'Entwickler', 's1', true));
+  assert.equal(await commitAgentStep(agents, item, 'Reviewer', 's1', true), null);
+  writeFileSync(join(agents, 'liste.test.ts'), 'test\n');
+  assert.ok(await commitAgentStep(agents, item, 'Tester', 's1', false));
+  assert.deepEqual(git(agents, 'log', '--format=%s', `${branch!.base}..HEAD`).split('\n'), [
+    'wip(Tester): Checklisten',
+    'Entwickler: Checklisten',
+  ]);
 });

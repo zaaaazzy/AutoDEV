@@ -1,8 +1,9 @@
 import type { Pool } from 'pg';
-import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
+import { applyProposal, autopilotGuard, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 
-export type AutopilotStep = 'off' | 'paused' | 'working' | 'completed' | 'started' | 'outside_hours' | 'idle';
+export type AutopilotStep =
+  'off' | 'paused' | 'working' | 'review' | 'completed' | 'started' | 'outside_hours' | 'idle';
 
 /**
  * Offen = noch zu bearbeiten. Blockierte Aufträge halten den Sprint nur dann nicht auf, wenn sie „Aktion notwendig“
@@ -45,8 +46,46 @@ async function notifyPause(pool: Pool, project: string, sprintId: string, messag
 }
 
 /**
- * Autopilot je Projekt (am Anfang jedes Worker-Zyklus): Ist im laufenden Sprint nichts mehr zu tun, wird er
- * abgeschlossen; danach wird – nur innerhalb der Arbeitszeiten – der nächste Sprint vorgeschlagen, übernommen und
+ * Sprint-Review: Sind alle Aufträge des laufenden Sprints erledigt (bzw. warten nur noch auf einen Menschen), wartet
+ * der Sprint auf das Go. Einmal Bescheid geben; kommt wieder Arbeit dazu, gilt er wieder als offen.
+ */
+export async function markSprintReady(pool: Pool, project: string): Promise<boolean> {
+  const active = (
+    await pool.query<{ id: string; name: string; ready: boolean }>(
+      `SELECT id, name, review_ready_at IS NOT NULL AS ready FROM sprints WHERE project_slug = $1 AND status = 'active'`,
+      [project],
+    )
+  ).rows[0];
+  if (!active) return false;
+  const items = (
+    await pool.query<{ status: string; actionTodo: string | null }>(
+      `SELECT status, action_todo AS "actionTodo" FROM development_items
+        WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
+      [active.id],
+    )
+  ).rows;
+  const settled = sprintSettled(items);
+  if (settled && !active.ready) {
+    await pool.query(`UPDATE sprints SET review_ready_at = NOW() WHERE id = $1`, [active.id]);
+    await sendPush(
+      pool,
+      {
+        title: `🚀 Sprint fertig · ${project}`,
+        body: `${active.name}: Alle Aufträge sind durch. Vorschau ansehen und „Live schalten“.`,
+        url: '#sprints',
+        tag: `sprint-ready-${active.id}`,
+      },
+      { project },
+    );
+  } else if (!settled && active.ready) {
+    await pool.query(`UPDATE sprints SET review_ready_at = NULL WHERE id = $1`, [active.id]);
+  }
+  return settled;
+}
+
+/**
+ * Autopilot je Projekt (am Anfang jedes Worker-Zyklus): Ist im laufenden Sprint nichts mehr zu tun, wartet er
+ * auf das Go („Live schalten“); erst danach wird – nur innerhalb der Arbeitszeiten – der nächste Sprint vorgeschlagen, übernommen und
  * gestartet. Offene „Aktion notwendig“-Aufträge wandern dabei mit. Scheitert der Abschluss (Merge/Git), pausiert
  * der Autopilot bis zur manuellen Freigabe.
  */
@@ -77,19 +116,9 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
       )
     ).rows;
     if (!sprintSettled(items)) return 'working';
-    // Abschliessen geht auch ausserhalb der Arbeitszeiten (kein Agent, keine Tokens); nur Starten ist begrenzt.
-    await completeSprint(pool, active.id);
-    await sendPush(
-      pool,
-      {
-        title: `🏁 Sprint abgeschlossen · ${project}`,
-        body: `${active.name} wurde vom Autopilot abgeschlossen.`,
-        url: '#sprints',
-        tag: `autopilot-${project}`,
-      },
-      { project: project },
-    );
-    return 'completed';
+    // Alles erledigt: Der Sprint wartet auf das Go (Vorschau ansehen, „Live schalten“) – der Autopilot schaltet nie
+    // selbst live und startet den nächsten Sprint erst danach.
+    return 'review';
   }
 
   if (guard.state === 'outside_hours') return 'outside_hours';
