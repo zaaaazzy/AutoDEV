@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { trackChild } from './shutdown.js';
 
 export const MAX_CAPTURED_OUTPUT = 120_000;
@@ -65,11 +66,14 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     child.stdout.on('data', appendOutput);
     child.stderr.on('data', appendOutput);
     child.once('error', (error: NodeJS.ErrnoException) => {
+      // Fehlt das Arbeitsverzeichnis, meldet spawn ebenfalls ENOENT – dann liegt es nicht am PATH.
       const hint =
-        error.code === 'ENOENT'
-          ? ` – Befehl „${command[0]}“ wurde im PATH des Workers nicht gefunden (PATH=${(options.env ?? process.env).PATH ?? ''}). ` +
-            'Absoluten Pfad im Agent-Befehl angeben oder ./scripts/install-worker.sh in einem Terminal erneut ausführen, in dem der Befehl funktioniert.'
-          : '';
+        error.code === 'ENOENT' && !existsSync(cwd)
+          ? ` – Arbeitsverzeichnis „${cwd}“ existiert nicht (gelöscht, verschoben oder Laufwerk nicht eingehängt).`
+          : error.code === 'ENOENT'
+            ? ` – Befehl „${command[0]}“ wurde im PATH des Workers nicht gefunden (PATH=${(options.env ?? process.env).PATH ?? ''}). ` +
+              'Absoluten Pfad im Agent-Befehl angeben oder ./scripts/install-worker.sh in einem Terminal erneut ausführen, in dem der Befehl funktioniert.'
+            : '';
       appendOutput(Buffer.from(`\n${error.message}${hint}\n`));
     });
     child.once('close', (code, signal) => {
