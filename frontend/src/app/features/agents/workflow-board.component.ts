@@ -14,7 +14,15 @@ import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ModelIconComponent } from '../../shared/model-icon.component.js';
 import { AgentSettingsComponent } from './agent-settings.component.js';
-import { AGENT_PHASES, modelLabel, roleLabel } from './agent-options.js';
+import {
+  AGENT_PHASES,
+  AGENT_ROLES,
+  MODEL_PRESETS,
+  modelLabel,
+  parseCommand,
+  presetLabel,
+  roleLabel,
+} from './agent-options.js';
 import type { PermissionGroupInfo } from './permission-picker.component.js';
 
 interface Lane {
@@ -39,7 +47,51 @@ interface Lane {
           <header>
             <strong>{{ laneIndex + 1 }}. {{ lane.label }}</strong>
             <span class="kanban-count">{{ lane.agents.length }}</span>
+            @if (editable()) {
+              <button
+                type="button"
+                class="icon-button workflow-add"
+                [attr.aria-expanded]="adding() === lane.id"
+                [attr.aria-label]="'Karte in „' + lane.label + '“ einfügen'"
+                [title]="'Karte in „' + lane.label + '“ einfügen'"
+                (click)="toggleAdd(lane.id)"
+              >
+                +
+              </button>
+            }
             <small class="muted">{{ lane.hint }}</small>
+            @if (adding() === lane.id) {
+              <div class="workflow-add-menu" role="dialog" [attr.aria-label]="'Karte in „' + lane.label + '“ einfügen'">
+                <h4>Neuer Agent</h4>
+                <form
+                  (submit)="$event.preventDefault(); createAgent(lane.id, newName.value, newRole.value, newModel.value)"
+                >
+                  <input #newName name="name" placeholder="Name, z. B. Sicherheitsprüfer" maxlength="80" required />
+                  <select #newRole name="role" aria-label="Rolle">
+                    @for (role of roles; track role.value) {
+                      <option [value]="role.value" [selected]="role.value === 'custom'">{{ role.label }}</option>
+                    }
+                  </select>
+                  <select #newModel name="model" aria-label="Modell">
+                    @for (preset of presets; track preset.id) {
+                      <option [value]="preset.id">{{ presetLabel(preset) }}</option>
+                    }
+                  </select>
+                  <button class="button primary small" type="submit">Anlegen</button>
+                </form>
+                @if (existing().length) {
+                  <h4>Bestehenden Agent hier einsetzen</h4>
+                  <div class="workflow-add-existing">
+                    @for (agent of existing(); track agent.id) {
+                      <button type="button" (click)="placeCopy(agent, lane.id)">
+                        <strong>{{ agent.name }}</strong>
+                        <small class="muted"> · {{ roleLabel(agent.role) }} · {{ modelLabel(agent.command) }}</small>
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
+            }
           </header>
           <div
             class="kanban-list"
@@ -61,25 +113,20 @@ interface Lane {
                 [class.running]="running().has(agent.id)"
                 tabindex="0"
                 role="button"
-                [attr.aria-label]="'Einstellungen von ' + agent.name"
+                [attr.aria-label]="'Einstellungen von ' + agent.name + (agent.enabled ? '' : ' (deaktiviert)')"
                 (click)="select(agent.id)"
                 (keydown.enter)="select(agent.id)"
               >
-                <div class="kanban-card-head">
+                <!-- Name einmal, Logo rechts daneben auf gleicher Höhe; grüner Punkt nur, solange der Agent arbeitet. -->
+                <div class="workflow-card-head">
                   <span class="kanban-rank">{{ index + 1 }}</span>
-                  <app-model-icon [command]="agent.command" />
                   <strong class="kanban-title">{{ agent.name }}</strong>
                   @if (running().has(agent.id)) {
-                    <span class="live-dot" aria-label="arbeitet gerade"></span>
+                    <span class="workflow-live" title="arbeitet gerade" aria-label="arbeitet gerade"></span>
                   }
+                  <app-model-icon [command]="agent.command" />
                 </div>
-                <div class="kanban-meta">
-                  <span class="tag">{{ roleLabel(agent.role) }}</span>
-                  <small class="muted">{{ modelLabel(agent.command) }}</small>
-                  @if (!agent.enabled) {
-                    <span class="tag">deaktiviert</span>
-                  }
-                </div>
+                <small class="muted workflow-model">{{ modelLabel(agent.command) }}</small>
                 @if (handoffOf(agent); as target) {
                   <small class="workflow-handoff" title="Nachrichten dieses Agents gehen an">✉ → {{ target }}</small>
                 }
@@ -103,7 +150,7 @@ interface Lane {
         >
           ✕
         </button>
-        <app-agent-settings [agent]="agent" [groups]="groups()" />
+        <app-agent-settings [agent]="agent" [groups]="groups()" [startEditing]="editNext() === agent.id" />
       </aside>
     }
   `,
@@ -118,7 +165,24 @@ export class WorkflowBoardComponent {
 
   protected readonly roleLabel = roleLabel;
   protected readonly modelLabel = modelLabel;
+  protected readonly roles = AGENT_ROLES;
+  protected readonly presets = MODEL_PRESETS;
+  protected readonly presetLabel = presetLabel;
   protected readonly selectedId = signal<string | null>(null);
+  /** Spalte, deren „+“-Menü offen ist. */
+  protected readonly adding = signal<AgentPhase | null>(null);
+  /** Frisch angelegter Agent: Einstellungen direkt im Bearbeiten-Modus öffnen. */
+  protected readonly editNext = signal<string | null>(null);
+  /** Agents, die sich an weiterer Stelle einsetzen lassen (je Name und Rolle einmal). */
+  protected readonly existing = computed(() => {
+    const seen = new Set<string>();
+    return this.store.data().agents.filter((agent) => {
+      const key = `${agent.name}|${agent.role}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
   protected readonly editable = computed(() => this.auth.can('agents'));
 
   protected readonly lanes = computed<Lane[]>(() =>
@@ -143,6 +207,61 @@ export class WorkflowBoardComponent {
           .map((agent) => agent.id),
       ),
   );
+
+  protected toggleAdd(phase: AgentPhase): void {
+    this.adding.set(this.adding() === phase ? null : phase);
+  }
+
+  private async create(body: Record<string, unknown>, message: string, edit: boolean): Promise<void> {
+    let created: string | null = null;
+    await this.store.perform(async () => {
+      const result = await this.api.post<{ agent: Agent }>(
+        `${this.api.projectPath(this.store.activeProject())}/agents`,
+        body,
+      );
+      created = result.agent.id;
+    }, message);
+    if (!created) return;
+    this.adding.set(null);
+    this.editNext.set(edit ? created : null);
+    this.selectedId.set(created);
+  }
+
+  /** „+“ → Neuer Agent: in dieser Spalte am Ende; danach die Einstellungen zum Verfeinern öffnen. */
+  protected async createAgent(phase: AgentPhase, name: string, role: string, model: string): Promise<void> {
+    if (!name.trim()) return;
+    const preset = MODEL_PRESETS.find((item) => item.id === model);
+    await this.create(
+      {
+        name: name.trim(),
+        role,
+        phase,
+        instructions: '',
+        command: preset ? parseCommand(preset.command) : null,
+        allowedCommands: [],
+      },
+      `Agent „${name.trim()}“ angelegt.`,
+      true,
+    );
+  }
+
+  /** „+“ → Bestehenden Agent einsetzen: eigene Karte mit denselben Einstellungen, separat anpassbar. */
+  protected async placeCopy(agent: Agent, phase: AgentPhase): Promise<void> {
+    await this.create(
+      {
+        name: agent.name,
+        role: agent.role,
+        phase,
+        instructions: agent.instructions,
+        command: agent.command,
+        enabled: agent.enabled,
+        allowedCommands: agent.allowedCommands ?? null,
+        fileScope: agent.fileScope ?? [],
+      },
+      `„${agent.name}“ zusätzlich in „${AGENT_PHASES.find((entry) => entry.id === phase)?.label}“ eingesetzt.`,
+      false,
+    );
+  }
 
   protected select(id: string): void {
     this.selectedId.set(this.selectedId() === id ? null : id);

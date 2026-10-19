@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { Component, computed, ElementRef, inject, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -37,17 +37,21 @@ import { PermissionPickerComponent, type PermissionGroupInfo } from './permissio
             <small class="muted">{{ roleLabel(current.role) }} · {{ phaseLabel(current.phase) }}</small>
           </div>
           @if (auth.can('agents')) {
-            <button
-              type="button"
-              class="icon-button"
-              (click)="startEdit()"
-              title="Einstellungen bearbeiten"
-              aria-label="Einstellungen bearbeiten"
-            >
-              ✎
+            <button type="button" class="button secondary small" (click)="startEdit()" title="Einstellungen bearbeiten">
+              ✎ Bearbeiten
             </button>
           }
         </header>
+        <!-- Anweisung zuerst und gut sichtbar: Das ist, was der Agent tun soll. -->
+        <section class="agent-settings-instructions">
+          <h4>Anweisung</h4>
+          <p class="detail-text">{{ current.instructions || 'Keine Anweisung hinterlegt.' }}</p>
+          @if (auth.can('agents')) {
+            <button type="button" class="button secondary small" (click)="startEdit(true)">
+              ✎ Anweisung bearbeiten
+            </button>
+          }
+        </section>
         <dl class="agent-settings-list">
           <dt>Status</dt>
           <dd>{{ current.enabled ? 'Aktiv' : 'Deaktiviert' }}</dd>
@@ -67,15 +71,18 @@ import { PermissionPickerComponent, type PermissionGroupInfo } from './permissio
                 : 'Projektstandard der Rolle'
             }}{{ current.fileScope?.length ? ' · nur in ' + current.fileScope!.join(', ') : '' }}
           </dd>
-          <dt>Anweisung</dt>
-          <dd class="detail-text">{{ current.instructions || 'Keine Anweisung hinterlegt.' }}</dd>
         </dl>
+        @if (auth.can('agents')) {
+          <!-- Aktionen (Aufgaben mit eigener Anweisung) direkt bedienbar, nicht erst im Bearbeiten-Modus. -->
+          <app-agent-actions-editor [agentId]="current.id" />
+        }
       </div>
     } @else {
       <form class="form-grid" (ngSubmit)="save()">
         <label class="wide">Name<input name="name" [(ngModel)]="form.name" maxlength="80" required /></label>
         <label class="wide"
           >Verhalten (Anweisung)<textarea
+            #instructionsField
             name="instructions"
             [(ngModel)]="form.instructions"
             rows="6"
@@ -112,7 +119,6 @@ import { PermissionPickerComponent, type PermissionGroupInfo } from './permissio
           >
         </label>
         <app-permission-picker class="wide" [groups]="groups()" [(selected)]="commands" [(scopes)]="scopes" />
-        <app-agent-actions-editor class="wide" [agentId]="current.id" />
         <div class="actions wide form-actions">
           <button class="button primary" type="submit" [disabled]="store.busy()">Speichern</button>
           <button class="button secondary" type="button" (click)="cancel()">Abbrechen</button>
@@ -167,7 +173,9 @@ export class AgentSettingsComponent {
       : ['files:create', 'files:edit'];
   }
 
-  protected startEdit(): void {
+  private readonly instructionsField = viewChild<ElementRef<HTMLTextAreaElement>>('instructionsField');
+
+  protected startEdit(focusInstructions = false): void {
     const agent = this.agent();
     this.form = {
       name: agent.name,
@@ -178,6 +186,7 @@ export class AgentSettingsComponent {
     this.commands = this.effectiveCommands(agent);
     this.scopes = [...(agent.fileScope ?? [])];
     this.editing.set(true);
+    if (focusInstructions) globalThis.setTimeout(() => this.instructionsField()?.nativeElement.focus());
   }
 
   protected applyPreset(id: string): void {

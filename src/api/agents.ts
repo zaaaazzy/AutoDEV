@@ -229,7 +229,9 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     }
     // Rechte: jeder Befehl wird einzeln gesetzt, nur aus Kategorien dieses Projekts (Mandantentrennung).
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
-    const groups = await validAgentCommands(pool, slug, requested === undefined ? [] : requested);
+    // null = Projektstandard der Rolle (z. B. beim Einsetzen eines bestehenden Agents an weiterer Stelle).
+    const groups =
+      requested === null ? null : await validAgentCommands(pool, slug, requested === undefined ? [] : requested);
     if (typeof groups === 'string') return void response.status(400).json({ message: groups });
     const result = await pool.query(
       `INSERT INTO agents (project_slug, name, role, phase, position, instructions, enabled, command, allowed_commands,

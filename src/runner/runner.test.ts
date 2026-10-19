@@ -398,3 +398,23 @@ test('the cost brake stops an order before the next agent once its limit is reac
   );
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
 });
+
+test('Workflow-Reihenfolge: der Auftrag läuft genau wie im Board – Spalte für Spalte, darin nach Position', async () => {
+  const { pool } = fakePool();
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  // Absichtlich durcheinander geliefert; dieselbe Karte darf an mehreren Stellen stehen (Tester zweimal).
+  const agents = [
+    agent('test-2', 'on_done', 1, ['test-2']),
+    agent('doc', 'after_task', 2, ['doc']),
+    agent('test', 'after_task', 1, ['test']),
+    agent('dev', 'while_task', 1, ['dev']),
+    agent('prep', 'pre_task', 1, ['prep']),
+    agent('plan', 'pre_sprint', 1, ['plan']),
+  ];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'passed');
+  assert.deepEqual(calls, ['prep', 'dev', 'test', 'doc', 'test-2']);
+});
