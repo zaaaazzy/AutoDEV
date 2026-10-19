@@ -12,6 +12,7 @@ import { draftRequirements } from '../agent/requirements.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
+import { RUN_CHANNEL, listenForWork } from './work-signals.js';
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -31,6 +32,9 @@ async function connect(watch: boolean): Promise<Pool> {
     }
   }
 }
+
+/** With LISTEN active, a full check of all projects still runs every 15 s in case a signal was missed. */
+const FALLBACK_TICKS = 10;
 
 async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
   const results = await runWorkflow(pool, options);
@@ -146,10 +150,21 @@ async function main(): Promise<void> {
     const analysisActive = new Set<string>();
     const estimateActive = new Set<string>();
     const authorActive = new Set<string>();
-    const chatTimer = setInterval(() => {
+    // Work that a job finished or a signal announced while the project was busy; checked again right away.
+    const wanted = new Set<string>();
+    const settle = (active: Set<string>, slug: string, didWork: boolean): void => {
+      active.delete(slug);
+      if (didWork || wanted.delete(slug)) setImmediate(() => tickChat(slug));
+    };
+    const tickChat = (only?: string): void => {
       for (const target of chatTargets) {
         const slug = target.options.project;
-        if (chatActive.has(slug) || stopping) continue;
+        if (only && slug !== only) continue;
+        if (stopping) return;
+        if (chatActive.has(slug)) {
+          if (only) wanted.add(slug);
+          continue;
+        }
         if (target.problem) {
           void rejectChat(pool, slug, target.problem).catch(logged(`chat:${slug}`));
           continue;
@@ -157,36 +172,62 @@ async function main(): Promise<void> {
         if (!estimateActive.has(slug)) {
           estimateActive.add(slug);
           void estimateNewIdeas(pool, slug)
-            .catch((error: unknown) =>
-              logOnce(`estimate:${slug}`, `[${slug}] Schätzung fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => estimateActive.delete(slug));
+            .catch((error: unknown) => {
+              logOnce(`estimate:${slug}`, `[${slug}] Schätzung fehlgeschlagen: ${describeError(error)}`);
+              return 0;
+            })
+            .then((count) => settle(estimateActive, slug, count > 0));
         }
         // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft.
         if (!authorActive.has(slug) && !stopping) {
           authorActive.add(slug);
           void draftRequirements(pool, target.options)
-            .then(() => clearLogged(`author:${slug}`))
-            .catch((error: unknown) =>
-              logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => authorActive.delete(slug));
+            .then((count) => {
+              clearLogged(`author:${slug}`);
+              return count;
+            })
+            .catch((error: unknown) => {
+              logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`);
+              return 0;
+            })
+            .then((count) => settle(authorActive, slug, count > 0));
         }
         chatActive.add(slug);
         void processChat(pool, target.options)
-          .then(() => clearLogged(`chat:${slug}`))
-          .catch((error: unknown) => logOnce(`chat:${slug}`, `[${slug}] Chat fehlgeschlagen: ${describeError(error)}`))
-          .finally(() => chatActive.delete(slug));
+          .then((handled) => {
+            clearLogged(`chat:${slug}`);
+            return handled;
+          })
+          .catch((error: unknown) => {
+            logOnce(`chat:${slug}`, `[${slug}] Chat fehlgeschlagen: ${describeError(error)}`);
+            return false;
+          })
+          .then((handled) => settle(chatActive, slug, handled));
         // Lange Problemanalysen blockieren so keine neuen Chat-Nachrichten.
         if (analysisActive.has(slug)) continue;
         analysisActive.add(slug);
         void analyzeBlocked(pool, target.options)
-          .then(() => clearLogged(`analysis:${slug}`))
-          .catch((error: unknown) =>
-            logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`),
-          )
-          .finally(() => analysisActive.delete(slug));
+          .then((count) => {
+            clearLogged(`analysis:${slug}`);
+            return count;
+          })
+          .catch((error: unknown) => {
+            logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`);
+            return 0;
+          })
+          .then((count) => settle(analysisActive, slug, count > 0));
       }
+    };
+    // Database triggers announce new work; without the LISTEN connection the worker polls every 1.5 s as before.
+    let runWanted = false;
+    const signals = listenForWork(pool, (channel, slug) => {
+      if (channel === RUN_CHANNEL) runWanted = true;
+      else tickChat(slug);
+    });
+    let ticks = 0;
+    const chatTimer = setInterval(() => {
+      ticks += 1;
+      if (!signals.listening || ticks % FALLBACK_TICKS === 0) tickChat();
     }, 1500);
     // Each project runs in its own task; at most "maxConcurrentAgents" tasks run at the same time.
     const active = new Map<string, Promise<void>>();
@@ -203,6 +244,7 @@ async function main(): Promise<void> {
     };
     try {
       while (!stopping) {
+        runWanted = false;
         try {
           const targets = await resolveTargets(pool, options);
           known = targets.map((target) => target.options.project);
@@ -228,7 +270,7 @@ async function main(): Promise<void> {
           console.error('Worker-Zyklus fehlgeschlagen:', error instanceof Error ? error.message : error);
         }
         beat();
-        for (let waited = 0; waited < options.intervalMs && !stopping; waited += 1000) {
+        for (let waited = 0; waited < options.intervalMs && !stopping && !runWanted; waited += 1000) {
           await sleep(1000);
         }
       }
@@ -237,6 +279,7 @@ async function main(): Promise<void> {
     } finally {
       clearInterval(heartbeat);
       clearInterval(chatTimer);
+      signals.stop();
     }
   } finally {
     await pool.end();

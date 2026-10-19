@@ -33,6 +33,27 @@ export const MIGRATIONS: readonly { name: string; sql: string }[] = [
     name: 'projects_isolated_runs',
     sql: `ALTER TABLE projects ADD COLUMN IF NOT EXISTS isolated_runs BOOLEAN NOT NULL DEFAULT FALSE;`,
   },
+  {
+    // Lets the worker react to new work at once instead of polling (src/runner/work-signals.ts).
+    name: 'work_notifications',
+    sql: `
+      CREATE OR REPLACE FUNCTION devlog_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN
+        PERFORM pg_notify(TG_ARGV[0], NEW.project_slug);
+        RETURN NULL;
+      END $$;
+      CREATE TRIGGER chat_messages_work AFTER INSERT OR UPDATE OF status ON chat_messages
+        FOR EACH ROW WHEN (NEW.status = 'pending') EXECUTE FUNCTION devlog_notify('devlog_work');
+      CREATE TRIGGER ideation_items_work AFTER INSERT OR UPDATE OF status ON ideation_items
+        FOR EACH ROW WHEN (NEW.status IN ('idea', 'considering', 'requested')) EXECUTE FUNCTION devlog_notify('devlog_work');
+      CREATE TRIGGER development_items_analysis AFTER INSERT OR UPDATE OF analysis_status ON development_items
+        FOR EACH ROW WHEN (NEW.analysis_status = 'requested') EXECUTE FUNCTION devlog_notify('devlog_work');
+      CREATE TRIGGER development_items_run AFTER INSERT OR UPDATE OF status ON development_items
+        FOR EACH ROW WHEN (NEW.status = 'planned') EXECUTE FUNCTION devlog_notify('devlog_run');
+      CREATE TRIGGER sprints_run AFTER INSERT OR UPDATE OF status ON sprints
+        FOR EACH ROW WHEN (NEW.status = 'active') EXECUTE FUNCTION devlog_notify('devlog_run');
+    `,
+  },
 ];
 
 /** Applies pending migrations, each in its own transaction. The caller holds the schema advisory lock. */
