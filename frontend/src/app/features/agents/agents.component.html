@@ -2,17 +2,7 @@
   @if (store.selectedAgent(); as agent) {
     <app-agent-detail [selected]="agent" />
   } @else {
-    <section class="panel" id="workflow">
-      <div class="section-heading">
-        <div>
-          <h2>Workflow</h2>
-          <p class="muted">
-            Wann welcher Agent läuft – Karten ziehen ändert Phase und Reihenfolge, ein Klick zeigt die Einstellungen.
-          </p>
-        </div>
-      </div>
-      <app-workflow-board [groups]="permissionGroups()" />
-    </section>
+    <app-workflow-steps id="workflow" [groups]="permissionGroups()" />
     <section class="panel">
       <div class="section-heading">
         <div>
@@ -30,13 +20,6 @@
             >Rolle<select name="role" [(ngModel)]="agentForm.role">
               @for (role of agentRoles; track role.value) {
                 <option [value]="role.value">{{ role.label }}</option>
-              }
-            </select>
-          </label>
-          <label
-            >Phase<select name="phase" [(ngModel)]="agentForm.phase">
-              @for (phase of phases; track phase.id) {
-                <option [value]="phase.id">{{ phase.label }}</option>
               }
             </select>
           </label>
@@ -94,18 +77,6 @@
             <div class="agent-detail-body">
               <div class="actions">
                 <button class="button secondary" type="button" (click)="activity.show(agent.id)">Aktivität</button>
-                <button class="button secondary" (click)="moveAgent(agent, -1)" [disabled]="row.index === 0">↑</button>
-                <button class="button secondary" (click)="moveAgent(agent, 1)" [disabled]="row.last">↓</button>
-                <select
-                  [ngModel]="agent.phase"
-                  (ngModelChange)="updateAgent(agent.id, { phase: $event })"
-                  [name]="'agent-phase-' + agent.id"
-                  aria-label="Workflow-Phase"
-                >
-                  @for (entry of phases; track entry.id) {
-                    <option [value]="entry.id">{{ entry.label }}</option>
-                  }
-                </select>
                 <button class="button secondary" (click)="updateAgent(agent.id, { enabled: !agent.enabled })">
                   {{ agent.enabled ? 'Deaktivieren' : 'Aktivieren' }}
                 </button>

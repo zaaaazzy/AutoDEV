@@ -76,16 +76,32 @@ async function resumePosition(
   ).rows[0];
   if (previous?.status !== AGENT_RUN_STATUS.failed) return 0;
   const rows = (
-    await pool.query<{ agent_id: string; agent_name: string; phase: string; status: string; output: string }>(
-      `SELECT agent_id, agent_name, phase, status, output FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
+    await pool.query<{
+      agent_id: string;
+      workflow_step_id: string | null;
+      agent_name: string;
+      phase: string;
+      status: string;
+      output: string;
+    }>(
+      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output
+         FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
       [previous.id],
     )
   ).rows;
-  // Nach einer Nachbesserung im Lauf zählt je Agent nur sein letzter Schritt.
-  const latest = new Map(rows.map((row) => [row.agent_id, row]));
-  const steps = rows.length > ordered.length ? ordered.map((agent) => latest.get(agent.id)) : rows;
+  // Schlüssel je Einsatz: derselbe Agent kann im Workflow mehrfach vorkommen.
+  const keyOf = (row: { agent_id: string; workflow_step_id: string | null }) => row.workflow_step_id ?? row.agent_id;
+  const keyOfAgent = (agent: WorkflowAgent) => agent.stepId ?? agent.id;
+  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt.
+  const latest = new Map(rows.map((row) => [keyOf(row), row]));
+  const steps = rows.length > ordered.length ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
-  while (position < ordered.length && steps[position]?.agent_id === ordered[position]?.id) {
+  while (
+    position < ordered.length &&
+    steps[position] &&
+    ordered[position] &&
+    keyOf(steps[position]!) === keyOfAgent(ordered[position]!)
+  ) {
     const step = steps[position];
     if (!step) break;
     if (step.status !== AGENT_STEP_STATUS.passed) break;

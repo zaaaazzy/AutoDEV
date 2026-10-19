@@ -61,6 +61,23 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
 }
 
 export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<WorkflowAgent[]> {
+  // Workflow-Schritte (Agents → Workflow): derselbe Agent darf mehrfach vorkommen, je mit eigener Anweisung.
+  const steps = await pool.query<WorkflowAgent>(
+    `SELECT a.id, a.name, a.role, s.phase, s.position, a.instructions, a.command,
+            a.allowed_commands AS "allowedCommands", a.file_scope AS "fileScope", a.handoff_to AS "handoffTo",
+            s.id AS "stepId", s.instructions AS "stepInstructions"
+       FROM workflow_steps s JOIN agents a ON a.id = s.agent_id
+      WHERE s.project_slug = $1 AND s.enabled AND a.enabled
+      ORDER BY ${PHASE_SQL_ORDER.replace('CASE phase', 'CASE s.phase')}, s.position, s.created_at`,
+    [projectSlug],
+  );
+  const configured = (
+    await pool.query<{ exists: boolean }>('SELECT EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)', [
+      projectSlug,
+    ])
+  ).rows[0]?.exists;
+  if (configured) return steps.rows;
+  // Ältere Projekte ohne Schritte: Phase und Position am Agent.
   const result = await pool.query<WorkflowAgent>(
     `SELECT id, name, role, phase, position, instructions, command, allowed_commands AS "allowedCommands",
             file_scope AS "fileScope", handoff_to AS "handoffTo"

@@ -279,6 +279,14 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       await seedDefaultActions(pool, slug).catch(() => undefined);
       await materializeAgentCommands(pool, slug).catch(() => undefined);
     }
+    // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
+    await pool.query(
+      `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
+       SELECT a.project_slug, a.phase, a.position, a.id FROM agents a
+        WHERE a.project_slug = $1 AND a.id = ANY($2::uuid[])
+          AND EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)`,
+      [slug, result.rows.map((row: { id: string }) => row.id)],
+    );
     response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
   });
 

@@ -418,3 +418,31 @@ test('Workflow-Reihenfolge: der Auftrag läuft genau wie im Board – Spalte fü
   assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'passed');
   assert.deepEqual(calls, ['prep', 'dev', 'test', 'doc', 'test-2']);
 });
+
+test('Workflow-Schritte: derselbe Agent zweimal, je mit eigener Anweisung; Nachricht erreicht den richtigen Einsatz', async () => {
+  const { pool, queries } = fakePool();
+  const prompts: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    prompts.push(command.at(-1) ?? '');
+    return {
+      exitCode: 0,
+      durationMs: 1,
+      output: prompts.length === 2 ? 'Getestet.\n@@NACHRICHT: Nur noch die Doku prüfen.' : 'ok',
+    };
+  };
+  const tester = agent('Tester', 'after_task', 1, ['tester']);
+  const agents = [
+    agent('Entwickler', 'while_task', 1, ['dev']),
+    { ...tester, stepId: 'step-1', stepInstructions: 'Teste nur die API.' },
+    { ...tester, position: 2, stepId: 'step-2', stepInstructions: 'Teste jetzt die Oberfläche.' },
+  ];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'passed');
+  assert.equal(prompts.length, 3);
+  assert.match(prompts[1]!, /## Anweisung für diesen Schritt \(hat Vorrang\)\nTeste nur die API\./);
+  assert.match(prompts[2]!, /Teste jetzt die Oberfläche\./);
+  assert.doesNotMatch(prompts[2]!, /Teste nur die API/);
+  assert.match(prompts[2]!, /## Nachrichten an dich\n- Von Tester: Nur noch die Doku prüfen\./);
+  // Jeder Einsatz wird mit seinem Workflow-Schritt protokolliert.
+  const inserted = queries.filter((query) => query.sql.includes('INSERT INTO agent_run_steps')).map((q) => q.values[5]);
+  assert.deepEqual(inserted, [null, 'step-1', 'step-2']);
+});

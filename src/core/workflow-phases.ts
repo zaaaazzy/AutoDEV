@@ -44,23 +44,27 @@ export interface HandoffAgent {
   id: string;
   name: string;
   handoffTo?: string | null;
+  stepId?: string | null;
 }
 
 /**
  * Empfänger einer Nachricht: ausdrücklich genannter Agent, sonst der beim Absender eingestellte, sonst der nächste in
  * der Reihenfolge. null, wenn es keinen Empfänger mehr gibt.
  */
-export function handoffTarget(
+export function handoffTarget<T extends HandoffAgent>(
   handoff: Handoff,
   from: HandoffAgent,
-  ordered: readonly HandoffAgent[],
-): HandoffAgent | null {
-  const named = handoff.to
-    ? ordered.find((agent) => agent.name.toLowerCase() === handoff.to!.toLowerCase())
-    : undefined;
+  ordered: readonly T[],
+  /** Stelle des Absenders im Ablauf (derselbe Agent kann mehrfach vorkommen); sonst die erste mit seiner ID. */
+  fromIndex = ordered.findIndex((agent) => agent.id === from.id),
+): T | null {
+  // Bei mehreren Einsätzen desselben Agents gilt der nächste nach dem Absender, sonst der erste.
+  const later = (match: (agent: T) => boolean): T | undefined =>
+    ordered.slice(fromIndex + 1).find(match) ?? ordered.find(match);
+  const name = handoff.to?.toLowerCase();
+  const named = name ? later((agent) => agent.name.toLowerCase() === name) : undefined;
   if (named) return named;
-  const configured = from.handoffTo ? ordered.find((agent) => agent.id === from.handoffTo) : undefined;
+  const configured = from.handoffTo ? later((agent) => agent.id === from.handoffTo) : undefined;
   if (configured) return configured;
-  const index = ordered.findIndex((agent) => agent.id === from.id);
-  return index >= 0 ? (ordered[index + 1] ?? null) : null;
+  return fromIndex >= 0 ? (ordered[fromIndex + 1] ?? null) : null;
 }

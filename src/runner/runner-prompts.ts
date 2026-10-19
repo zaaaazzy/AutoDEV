@@ -30,6 +30,9 @@ export function buildPrompt(
   return [
     `Du bist der Agent "${agent.name}" (Rolle: ${agent.role}) in der Phase ${agent.phase}.`,
     `## Anweisung\n${agent.instructions || 'Keine zusätzliche Anweisung.'}`,
+    agent.stepInstructions?.trim()
+      ? `## Anweisung für diesen Schritt (hat Vorrang)\n${agent.stepInstructions.trim()}`
+      : '',
     `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
     item.risks?.trim() ? `## Risiken (vom Bug-Wächter geprüft)\n${item.risks.trim()}` : '',
     extras.images?.length

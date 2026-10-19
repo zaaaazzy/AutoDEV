@@ -62,6 +62,9 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/projects\/[^/]+\/agents\/[^/]+\/cancel$/, 'run'],
   ['POST', /^\/api\/projects\/[^/]+\/agents(\/(defaults|order))?$/, 'agents'],
   ['*', /^\/api\/agents\//, 'agents'],
+  // Workflow-Schritte (welcher Agent wann läuft) gehören zur Agent-Verwaltung.
+  ['*', /^\/api\/projects\/[^/]+\/workflow\/(steps|order)$/, 'agents'],
+  ['*', /^\/api\/workflow-steps\//, 'agents'],
   ['POST', /^\/api\/development\/[^/]+\/(retry|analyze)$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.

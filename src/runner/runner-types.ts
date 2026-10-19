@@ -61,6 +61,10 @@ export interface WorkflowAgent {
   fileScope?: string[];
   /** Empfänger der Nachrichten dieses Agents (null = nächster Agent). */
   handoffTo?: string | null;
+  /** Workflow-Schritt, aus dem dieser Einsatz stammt (derselbe Agent kann mehrfach vorkommen). */
+  stepId?: string | null;
+  /** Anweisung nur für diesen Einsatz, zusätzlich zur Anweisung des Agents. */
+  stepInstructions?: string | null;
 }
 
 export interface StepSummary {

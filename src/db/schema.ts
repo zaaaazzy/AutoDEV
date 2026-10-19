@@ -781,4 +781,20 @@ export const SCHEMA = `
   -- „Vor dem Sprint“: einmal je Sprint; Ergebnis fliesst in die Aufträge des Sprints.
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_at TIMESTAMPTZ;
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_notes TEXT;
+
+  -- Workflow-Schritte: welcher Agent bei welcher Phase an welcher Stelle läuft, mit eigener Anweisung für diesen
+  -- Einsatz. Derselbe Agent kann mehrfach vorkommen. Ohne Schritte gilt noch die Phase am Agent (ältere Projekte).
+  CREATE TABLE IF NOT EXISTS workflow_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    phase TEXT NOT NULL
+      CHECK (phase IN ('pre_sprint', 'pre_task', 'while_task', 'after_task', 'on_rejected', 'on_done')),
+    position INTEGER NOT NULL DEFAULT 0,
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    instructions TEXT NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS workflow_steps_project_idx ON workflow_steps (project_slug, phase, position);
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS workflow_step_id UUID REFERENCES workflow_steps(id) ON DELETE SET NULL;
 `;

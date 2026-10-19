@@ -27,6 +27,9 @@ export function preSprintPrompt(
     `Du bist der Agent "${agent.name}" (Rolle: ${agent.role}) in der Phase „Vor dem Sprint“. Du arbeitest nur lesend: ` +
       'prüfe und plane, ändere keine Dateien. Dein Ergebnis bekommen alle Agents der Aufträge dieses Sprints mit.',
     `## Anweisung\n${instructions || agent.instructions || 'Prüfe den Sprint und gib Hinweise für die Umsetzung.'}`,
+    agent.stepInstructions?.trim()
+      ? `## Anweisung für diesen Schritt (hat Vorrang)\n${agent.stepInstructions.trim()}`
+      : '',
     `## Sprint ${sprint.name}${sprint.goal ? `\nZiel: ${sprint.goal}` : ''}\n${
       orders.map((order) => `- [${order.status}] ${order.title}`).join('\n') || '(noch keine Aufträge)'
     }`,
@@ -72,7 +75,7 @@ export async function runPreSprint(
   ).rows;
   const messages: { toId: string; from: string; text: string }[] = [];
   const results: { agent: string; output: string }[] = [];
-  for (const agent of ordered) {
+  for (const [index, agent] of ordered.entries()) {
     console.info(`[${options.project}] Vor dem Sprint › ${agent.name}`);
     const { exitCode, output } = await runAuthorAgent(
       pool,
@@ -83,7 +86,7 @@ export async function runPreSprint(
           instructions,
           sprint,
           orders,
-          messages.filter((message) => message.toId === agent.id),
+          messages.filter((message) => message.toId === (agent.stepId ?? agent.id)),
           results,
         ),
       execute,
@@ -95,8 +98,8 @@ export async function runPreSprint(
     const text = exitCode === 0 ? output.trim() : `(fehlgeschlagen) ${output.trim().slice(-1000)}`;
     results.push({ agent: agent.name, output: text });
     for (const handoff of parseHandoffs(output)) {
-      const target = handoffTarget(handoff, agent, ordered);
-      if (target) messages.push({ toId: target.id, from: agent.name, text: handoff.text });
+      const target = handoffTarget(handoff, agent, ordered, index);
+      if (target) messages.push({ toId: target.stepId ?? target.id, from: agent.name, text: handoff.text });
     }
   }
   const notes = results

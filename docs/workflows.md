@@ -88,13 +88,18 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 - **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 
-## 4a. Workflow-Board (Agents → Workflow)
+## 4a. Workflow (Agents → Workflow)
 
-Unter „Agents“ zeigt ein Kanban, wann welcher Agent läuft. Phase und Reihenfolge stehen in `agents.phase` und
-`agents.position`; Ziehen speichert beides (`POST /api/projects/:slug/agents/order`). Ein Klick auf eine Karte zeigt
-die Einstellungen, ✎ macht sie bearbeitbar (dasselbe Formular wie in der Agent-Tabelle).
+Unter „Agents“ legt die aufklappbare Karte „Workflow“ fest, wann welcher Agent läuft. Gespeichert sind Einsätze in
+`workflow_steps` (Phase, Position, Agent, eigene Anweisung, aktiv). Derselbe Agent kann mehrfach vorkommen, z. B.
+der Tester einmal „Danach“ für die API und einmal für die Oberfläche; die Anweisung des Einsatzes kommt zusätzlich
+zur Anweisung des Agents in den Prompt und hat Vorrang. „+ Agent“ fügt einen bestehenden oder neuen Agent an das
+Ende einer Phase, ↑↓ ordnet, „Pausieren“ nimmt einen Einsatz aus dem Ablauf, „Entfernen“ löscht nur den Einsatz.
+Projekte ohne Schritte übernehmen beim ersten Öffnen ihren bisherigen Ablauf (Phase und Position am Agent); bis
+dahin gilt dieser auch im Worker. API: `GET /api/projects/:slug/workflow`, `POST …/workflow/steps`,
+`POST …/workflow/order`, `PATCH|DELETE /api/workflow-steps/:id` (Recht „Agents verwalten“).
 
-| Spalte | Phase | Wann |
+| Zeitpunkt | Phase | Wann |
 |---|---|---|
 | Vor dem Sprint | `pre_sprint` | einmal, wenn ein Sprint aktiv wird, bevor sein erster Auftrag startet; nur lesend (Rolle `pre_sprint` in `READ_ONLY_ROLES`). Das Ergebnis steht in `sprints.pre_sprint_notes` und steht in jeder Agent-Anweisung der Aufträge dieses Sprints. |
 | Vor dem Auftrag | `pre_task` | für jeden Auftrag, vor der Umsetzung |

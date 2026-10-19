@@ -221,6 +221,16 @@ export interface Agent {
   handoffTo?: string | null;
 }
 
+/** Ein Einsatz im Workflow: welcher Agent bei welcher Phase an welcher Stelle läuft, mit eigener Anweisung. */
+export interface WorkflowStep {
+  id: string;
+  phase: AgentPhase;
+  position: number;
+  agentId: string;
+  instructions: string;
+  enabled: boolean;
+}
+
 export interface StepEvent {
   at: string;
   text: string;

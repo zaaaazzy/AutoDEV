@@ -299,9 +299,9 @@ export async function runStep(
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const stepId = (
     await pool.query<{ id: string }>(
-      `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status)
-     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}') RETURNING id`,
-      [runId, stepOptions.stepPosition ?? position, agent.id, agent.name, agent.phase],
+      `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status, workflow_step_id)
+     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}', $6) RETURNING id`,
+      [runId, stepOptions.stepPosition ?? position, agent.id, agent.name, agent.phase, agent.stepId ?? null],
     )
   ).rows[0]?.id;
   await logEvent(pool, stepId, 'Schritt gestartet');
@@ -322,7 +322,7 @@ export async function runStep(
       baseBranch: ctx.branch?.base,
       criteria: ctx.criteria,
       definitionOfDone: ctx.definitionOfDone,
-      messages: (ctx.messages ?? []).filter((message) => message.toId === agent.id),
+      messages: (ctx.messages ?? []).filter((message) => message.toId === (agent.stepId ?? agent.id)),
       sprintNotes: ctx.sprintNotes,
       outcome: stepOptions.observer?.outcome,
     }),
@@ -507,8 +507,9 @@ export async function runStep(
   );
   // Nachrichten an andere Agents (@@NACHRICHT): Empfänger bestimmen und für deren Anweisung merken.
   const handoffs = parseHandoffs(output).flatMap((handoff) => {
-    const target = handoffTarget(handoff, agent, ctx.ordered ?? []);
-    return target ? [{ to: target.name, toId: target.id, text: handoff.text }] : [];
+    const ordered = ctx.ordered ?? [];
+    const target = handoffTarget(handoff, agent, ordered, ordered.indexOf(agent));
+    return target ? [{ to: target.name, toId: target.stepId ?? target.id, text: handoff.text }] : [];
   });
   for (const handoff of handoffs) {
     ctx.messages = [...(ctx.messages ?? []), { toId: handoff.toId, from: agent.name, text: handoff.text }];

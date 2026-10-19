@@ -32,7 +32,7 @@ import {
 import { OrderTableComponent } from '../development/order-table.component.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
 import { AgentSettingsComponent } from './agent-settings.component.js';
-import { WorkflowBoardComponent } from './workflow-board.component.js';
+import { WorkflowStepsComponent } from './workflow-steps.component.js';
 
 interface SystemAgent {
   name: string;
@@ -75,7 +75,7 @@ interface AgentListRow extends AgentTableRow {
     FormsModule,
     AgentDetailComponent,
     AgentSettingsComponent,
-    WorkflowBoardComponent,
+    WorkflowStepsComponent,
     ModelIconComponent,
     DataTableComponent,
     DataCellDirective,
@@ -184,20 +184,18 @@ export class AgentsComponent {
     return rows;
   });
 
-  /** Alle Agents in einer Tabelle, gruppiert nach Kategorie (Workflow-Phase bzw. System). */
+  /** Alle Agents in einer Tabelle: Workflow-Agents (wann sie laufen, legt der Workflow fest) und System-Agents. */
   protected readonly agentRows = computed<AgentListRow[]>(() => [
-    ...AGENT_PHASES.flatMap((phase, rank) =>
-      (this.phaseRows()[phase.id] ?? []).map((row) => ({
-        ...row,
-        category: phase.label,
-        categoryRank: rank,
-        role: roleLabel(row.agent.role),
-      })),
-    ),
+    ...AGENT_PHASES.flatMap((phase) => this.phaseRows()[phase.id] ?? []).map((row) => ({
+      ...row,
+      category: 'Workflow-Agent',
+      categoryRank: 0,
+      role: roleLabel(row.agent.role),
+    })),
     ...this.systemRows().map((row) => ({
       ...row,
       category: 'System',
-      categoryRank: AGENT_PHASES.length,
+      categoryRank: 1,
       role: row.system.description,
     })),
   ]);
@@ -277,23 +275,5 @@ export class AgentsComponent {
   protected async deleteAgent(id: string): Promise<void> {
     if (!globalThis.confirm('Agent löschen?')) return;
     await this.store.perform(() => this.api.delete(`/api/agents/${encodeURIComponent(id)}`), 'Agent gelöscht.');
-  }
-
-  protected async moveAgent(agent: Agent, direction: -1 | 1): Promise<void> {
-    const ids = this.data()
-      .agents.filter((item) => item.phase === agent.phase)
-      .map((item) => item.id);
-    const index = ids.indexOf(agent.id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return;
-    [ids[index], ids[nextIndex]] = [ids[nextIndex]!, ids[index]!];
-    await this.store.perform(
-      () =>
-        this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/order`, {
-          phase: agent.phase,
-          ids,
-        }),
-      'Reihenfolge gespeichert.',
-    );
   }
 }
