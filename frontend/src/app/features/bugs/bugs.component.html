@@ -72,6 +72,7 @@
       <ng-template appDataCell="title" let-bug>
         <div class="title-with-hint">
           <button type="button" class="link-button clamp" (click)="toggleBug(bug.id)">{{ bug.title }}</button>
+          <app-github-link [ref]="bug.externalRef" />
           @if (bug.description) {
             <span
               class="summary-hint"

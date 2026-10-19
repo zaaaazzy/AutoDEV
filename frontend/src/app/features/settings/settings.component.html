@@ -162,6 +162,57 @@
             placeholder="git@github.com:user/repo.git"
           />
         </label>
+        <fieldset class="wide github-bridge">
+          <legend>GitHub-Brücke</legend>
+          <label
+            >Modus
+            <select name="githubMode" [(ngModel)]="settings.githubMode">
+              <option value="aus">Aus</option>
+              <option value="issues">Issues – importieren und Status zurückmelden</option>
+              <option value="issues+pr">Issues und Pull Request beim Sprint-Abschluss</option>
+            </select>
+          </label>
+          @if (settings.githubMode === 'issues+pr') {
+            <label class="check"
+              ><input type="checkbox" name="githubRequireApproval" [(ngModel)]="settings.githubRequireApproval" />
+              Freigabe erforderlich: erst nach Approve eines Menschen mergen</label
+            >
+          }
+          @let project = store.currentProject();
+          <p
+            class="muted github-auth"
+            [class.ok]="project?.githubAuth === 'ok'"
+            [class.missing]="project?.githubAuth === 'missing'"
+          >
+            @if (!githubRemote()) {
+              Nur mit einem GitHub-Repository (github.com) möglich.
+            } @else if ((project?.githubMode ?? 'aus') === 'aus') {
+              Aus – Dev Log ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
+            } @else if (project?.githubAuth === 'ok') {
+              ✓ Angemeldet (gh auth status{{
+                project?.githubAuthCheckedAt
+                  ? ', geprüft ' + (project?.githubAuthCheckedAt | date: 'dd.MM. HH:mm')
+                  : ''
+              }}).
+            } @else if (project?.githubAuth === 'missing') {
+              ⚠ {{ project?.githubAuthMessage }} Bis dahin bleibt der Modus wirkungslos; Git-Sicherung, Merge und Tag
+              laufen wie bisher.
+            } @else {
+              {{ project?.githubAuthMessage || 'Anmeldung wird beim nächsten Worker-Takt geprüft …' }}
+            }
+          </p>
+          @if (githubRemote() && (project?.githubMode ?? 'aus') !== 'aus') {
+            <button class="button" type="button" (click)="checkGithub()" [disabled]="busy()">
+              Anmeldung erneut prüfen
+            </button>
+          }
+        </fieldset>
+        <p class="muted wide">
+          Issues mit Label <code>idea</code> bzw. <code>bug</code> werden alle 5 Minuten als Idee bzw. Bug übernommen
+          (Bilder nur als Link); Statuswechsel kommen als Kommentar ins Issue, „erledigt“ schließt es. Im PR-Modus
+          öffnet der Sprint-Abschluss einen Pull Request und merged erst nach grüner CI. Es wird kein Token gespeichert:
+          Dev Log nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des Worker-Benutzers.
+        </p>
         <label class="wide"
           >Datenbank-Zugang für Entwickler (optional)<input
             name="databaseUrl"

@@ -770,4 +770,47 @@ export const SCHEMA = `
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_since TIMESTAMPTZ;
   -- Nach dem Sprint-Abschluss (Merge nach main) Dev Log selbst neu starten – nur für das Dev-Log-Projekt sinnvoll.
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS restart_after_sprint BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- GitHub-Brücke: Issue-Import, Rückmeldung und Sprint-Pull-Request über die gh-Anmeldung des Workers (kein Token).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_mode TEXT NOT NULL DEFAULT 'aus'
+    CHECK (github_mode IN ('aus', 'issues', 'issues+pr'));
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_require_approval BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_synced_at TIMESTAMPTZ;
+  -- Ergebnis von „gh auth status“ (vom Worker geprüft): ok, missing; null = noch nicht geprüft.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_auth TEXT CHECK (github_auth IN ('ok', 'missing'));
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_auth_message TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_auth_checked_at TIMESTAMPTZ;
+  -- Sprint im Review: Pull Request offen, Merge und Tag folgen nach grüner CI (und ggf. Freigabe).
+  ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_status_check;
+  ALTER TABLE sprints ADD CONSTRAINT sprints_status_check CHECK (status IN ('planned', 'active', 'review', 'completed'));
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pr_url TEXT;
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS ci_status TEXT CHECK (ci_status IN ('pending', 'success', 'failure'));
+  -- CI-Lauf, zu dem schon ein Bug angelegt wurde (höchstens ein Bug je Lauf).
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS ci_bug_run TEXT;
+  -- Review → abgeschlossen (Merge auf GitHub) stößt keine zweite Git-Sicherung an.
+  CREATE OR REPLACE FUNCTION sprints_queue_git_sync() RETURNS trigger AS $fn$
+  BEGIN
+    IF NEW.status = 'completed' AND OLD.status NOT IN ('completed', 'review') THEN
+      NEW.git_sync := 'pending';
+      NEW.git_action := 'push';
+      NEW.git_message := NULL;
+    END IF;
+    RETURN NEW;
+  END;
+  $fn$ LANGUAGE plpgsql;
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS external_ref TEXT;
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS github_synced_status TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS ideation_items_external_ref_idx ON ideation_items (project_slug, external_ref)
+    WHERE external_ref IS NOT NULL;
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS external_ref TEXT;
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS github_synced_status TEXT;
+  CREATE UNIQUE INDEX IF NOT EXISTS bugs_external_ref_idx ON bugs (project_slug, external_ref)
+    WHERE external_ref IS NOT NULL;
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test', 'github'));
+  ALTER TABLE ideation_items DROP CONSTRAINT IF EXISTS ideation_items_source_check;
+  ALTER TABLE ideation_items ADD CONSTRAINT ideation_items_source_check
+    CHECK (source IN ('human', 'visionary', 'routine', 'production', 'github'));
+  -- Commit, mit dem ein Auftrag in den Sprint-Branch kam (Verweis beim Schließen des GitHub-Issues).
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS git_commit TEXT;
 `;

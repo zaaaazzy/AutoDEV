@@ -1,4 +1,5 @@
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
+import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -49,6 +50,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
   selector: 'app-ideation',
   standalone: true,
   imports: [
+    GithubLinkComponent,
     NgClass,
     NgTemplateOutlet,
     FormsModule,

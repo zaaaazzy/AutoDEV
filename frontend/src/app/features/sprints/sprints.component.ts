@@ -28,7 +28,7 @@ import {
   UsdPipe,
 } from '../../shared/pipes.js';
 
-const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
+const SPRINT_STATUS_RANK = ['active', 'review', 'planned', 'completed'];
 
 @Component({
   selector: 'app-sprints',
@@ -211,6 +211,22 @@ export class SprintsComponent {
   protected async deleteSprint(id: string): Promise<void> {
     if (!globalThis.confirm('Sprint löschen? Die Aufträge bleiben im Backlog erhalten.')) return;
     await this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.');
+  }
+
+  /** Pull Request des Sprints (PR-Modus); nur echte GitHub-PR-Links werden verlinkt. */
+  protected pullRequest(sprint: Sprint): { url: string; number: string } | null {
+    const match = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)$/.exec(sprint.prUrl ?? '');
+    return match ? { url: sprint.prUrl!, number: match[1]! } : null;
+  }
+
+  protected ciLabel(sprint: Sprint): string {
+    return sprint.ciStatus === 'success'
+      ? 'grün'
+      : sprint.ciStatus === 'failure'
+        ? 'rot'
+        : sprint.ciStatus === 'pending'
+          ? 'läuft'
+          : 'unbekannt';
   }
 
   protected gitBusy(sprint: Sprint): boolean {

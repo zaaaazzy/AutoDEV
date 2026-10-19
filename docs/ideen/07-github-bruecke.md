@@ -11,6 +11,7 @@
 | Kosten | 4 |
 | Aufwand | ca. 18 h |
 | Abhängigkeit | Projekt mit `git_remote` auf GitHub; die CI-Vorlage `devlog-ci.yml` existiert bereits |
+| Stand | Ausbaustufen 1–3 umgesetzt (Auftrag 42f9bfae), siehe `docs/workflows.md` → „GitHub-Brücke“; Stufe 4 offen |
 
 ## Beschreibung für Ideation (kopierfertig)
 
@@ -75,3 +76,7 @@ flowchart LR
 2. Rückmeldung/Schließen.
 3. PR-Modus mit CI-Ampel.
 4. Review-Kommentare im PR als Folgeauftrag (`follow_up_of`) übernehmen.
+
+## Testabdeckung (Auftrag 42f9bfae)
+
+Die neuen Module liegen über der Vorgabe von 75 % (Zeilen): `github.ts` ≈ 97 %, `github-sync.ts` ≈ 98 %, `git-sync.ts` ≈ 90 %. `hoster.ts` enthält fast nur Typen (Interface) und Konstanten. Node zählt die Typzeilen als „nicht ausgeführt“, deshalb wirkt der Wert dort niedrig; die ausführbaren Teile (`HosterError`, `containsUntrusted`) sind in `hoster.test.ts` getestet. Die Gesamtabdeckung des Repos (≈ 60 %) lag schon vor diesem Auftrag unter 75 %, vor allem wegen API-Routen und Frontend ohne Unit-Tests. Das ist Altbestand und nicht Gegenstand dieses Auftrags.

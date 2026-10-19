@@ -1,6 +1,7 @@
 import { NgClass } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -28,11 +29,17 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
 const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 
-const BUG_SOURCE_LABEL: Record<string, string> = { agent: 'Agent', manual: 'Manuell', test: 'Testlauf' };
+const BUG_SOURCE_LABEL: Record<string, string> = {
+  agent: 'Agent',
+  manual: 'Manuell',
+  test: 'Testlauf',
+  github: 'GitHub',
+};
 @Component({
   selector: 'app-bugs',
   standalone: true,
   imports: [
+    GithubLinkComponent,
     NgClass,
     FormsModule,
     DataTableComponent,

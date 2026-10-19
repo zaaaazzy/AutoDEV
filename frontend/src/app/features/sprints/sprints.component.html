@@ -30,6 +30,9 @@
       </ng-template>
       <ng-template appDataCell="status" let-sprint>
         <span class="status" [ngClass]="sprint.status | statusClass">{{ sprint.status | statusLabel }}</span>
+        @if (sprint.status === 'review' && sprint.ciStatus) {
+          <span class="ci-light" [ngClass]="sprint.ciStatus" [title]="'CI: ' + ciLabel(sprint)"></span>
+        }
       </ng-template>
       <ng-template appDataCell="progress" let-sprint>
         @let progress = sprintCounts(sprint.id);
@@ -111,10 +114,20 @@
                 </div>
               </div>
               <p class="sprint-goal">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
+              @if (pullRequest(sprint); as pr) {
+                <p class="sprint-pr">
+                  <a class="gh-link" [href]="pr.url" target="_blank" rel="noopener noreferrer"
+                    >Pull Request #{{ pr.number }}</a
+                  >
+                  <span class="ci-light" [ngClass]="sprint.ciStatus ?? ''" [title]="'CI: ' + ciLabel(sprint)">
+                    CI {{ ciLabel(sprint) }}</span
+                  >
+                </p>
+              }
               @if (sprint.gitMessage) {
                 <p class="notice">{{ sprint.gitMessage }}</p>
               }
-              @if (sprint.status === 'completed') {
+              @if (sprint.status === 'completed' || sprint.status === 'review') {
                 <div class="actions">
                   <button class="button secondary" (click)="refreshReport(sprint.id)">
                     Sprintbericht aktualisieren
