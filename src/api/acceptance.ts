@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEFAULT_DEFINITION_OF_DONE, DEFAULT_DEFINITION_OF_READY } from '../runner/acceptance.js';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
@@ -7,8 +7,8 @@ import { refreshAcceptanceTodo } from '../runner/action-todo.js';
 const OPEN_STATUSES = ['open', 'unmet', 'manual'];
 
 /** Abnahme je Auftrag (Akzeptanzkriterien und DoD-Punkte mit Status) sowie die Standard-Definitionen. */
-export function registerAcceptanceRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/acceptance', async (request, response, next) => {
+export function registerAcceptanceRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/acceptance', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -30,7 +30,7 @@ export function registerAcceptanceRoutes(app: Express, pool: Pool): void {
   });
 
   // Einzelnen Abnahmepunkt abhaken (erledigt) oder wieder öffnen.
-  app.post('/api/development/:id/acceptance/check', async (request, response, next) => {
+  app.post('/development/:id/acceptance/check', async (request, response, next) => {
     try {
       const body = request.body as unknown;
       if (
@@ -61,7 +61,7 @@ export function registerAcceptanceRoutes(app: Express, pool: Pool): void {
   });
 
   // Offene Punkte (oder einen einzelnen) vom Tester-Agent automatisch prüfen lassen; der Worker übernimmt.
-  app.post('/api/development/:id/acceptance/verify', async (request, response, next) => {
+  app.post('/development/:id/acceptance/verify', async (request, response, next) => {
     try {
       const body = (isRecord(request.body) ? request.body : {}) as Record<string, unknown>;
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });

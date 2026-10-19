@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { EDITABLE_IDEATION_STATUSES, IDEATION_STATUS } from '../core/status.js';
 import {
@@ -36,8 +36,8 @@ export const IDEA_FIELDS = {
   ...ESTIMATE_FIELDS,
 };
 
-export function registerIdeationRoutes(app: Express, pool: Pool): void {
-  app.post('/api/projects/:slug/ideation', async (request, response) => {
+export function registerIdeationRoutes(app: Router, pool: Pool): void {
+  app.post('/projects/:slug/ideation', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     const fields = parseFields(body, IDEA_FIELDS);
@@ -73,7 +73,7 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  app.patch('/api/ideation/:id', async (request, response) => {
+  app.patch('/ideation/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -98,7 +98,7 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
   });
 
   // The author agent defines the idea; this is only possible from the manually editable statuses.
-  app.post('/api/ideation/:id/define', async (request, response) => {
+  app.post('/ideation/:id/define', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -117,7 +117,7 @@ export function registerIdeationRoutes(app: Express, pool: Pool): void {
   });
 
   // Ablehnen mit Grund: Der Grund steht an der Idee und als Kommentar; der Visionär beachtet ihn beim nächsten Lauf.
-  app.post('/api/ideation/:id/reject', async (request, response) => {
+  app.post('/ideation/:id/reject', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

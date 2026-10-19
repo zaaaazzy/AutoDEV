@@ -1,6 +1,6 @@
 import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
 import { targetsDevLogDatabase } from '../agent/tool-sql.js';
@@ -15,8 +15,8 @@ import {
 } from '../core/validation.js';
 import { REVIEW_MODES } from '../core/status.js';
 
-export function registerProjectRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects', async (_request, response) => {
+export function registerProjectRoutes(app: Router, pool: Pool): void {
+  app.get('/projects', async (_request, response) => {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
@@ -31,7 +31,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
   });
 
   // Projekt löschen: Name zur Bestätigung; der Ordner auf dem Rechner wird auf Wunsch vom Worker gelöscht.
-  app.delete('/api/projects/:slug', async (request, response, next) => {
+  app.delete('/projects/:slug', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const body = (isRecord(request.body) ? request.body : {}) as { confirm?: unknown; deleteFolder?: unknown };
@@ -75,7 +75,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
   });
 
   // Git-Verlauf (Commits, Branches) fürs Dashboard, vom Worker erfasst.
-  app.get('/api/projects/:slug/git-graph', async (request, response, next) => {
+  app.get('/projects/:slug/git-graph', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const row = slug
@@ -93,7 +93,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
   });
 
   // Favicon der Anwendung; strenge CSP, damit ein SVG aus dem Projekt nie als Seite mit Skripten läuft.
-  app.get('/api/projects/:slug/favicon', async (request, response, next) => {
+  app.get('/projects/:slug/favicon', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const row = slug
@@ -121,7 +121,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.patch('/api/projects/:slug', async (request, response) => {
+  app.patch('/projects/:slug', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body: Record<string, unknown> = isRecord(request.body) ? request.body : {};
     const sets: string[] = [];
@@ -310,7 +310,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     response.json({ project: result.rows[0] });
   });
 
-  app.post('/api/projects', async (request, response) => {
+  app.post('/projects', async (request, response) => {
     const body = request.body as unknown;
     if (isRecord(body) && typeof body.slug === 'string') body.slug = normalizeProjectSlug(body.slug);
     const invalid = !isRecord(body)

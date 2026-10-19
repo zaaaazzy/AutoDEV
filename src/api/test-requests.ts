@@ -1,4 +1,4 @@
-import type { Express, Response } from 'express';
+import type { Router, Response } from 'express';
 import type { Pool } from 'pg';
 import { isRecord, parseProjectSlug } from '../core/validation.js';
 import type { Principal } from './roles.js';
@@ -15,10 +15,10 @@ export function parseScope(body: unknown): 'full' | 'ui' | null {
   return scope === 'full' || scope === 'ui' ? scope : null;
 }
 
-export function registerTestRequestRoutes(app: Express, pool: Pool): void {
+export function registerTestRequestRoutes(app: Router, pool: Pool): void {
   const me = (response: Response) => response.locals.principal as Principal | undefined;
 
-  app.get('/api/projects/:slug/test-requests', async (request, response, next) => {
+  app.get('/projects/:slug/test-requests', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -34,7 +34,7 @@ export function registerTestRequestRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/test-requests', async (request, response, next) => {
+  app.post('/projects/:slug/test-requests', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const scope = parseScope(request.body);

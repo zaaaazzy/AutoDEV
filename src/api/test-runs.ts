@@ -1,10 +1,10 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { categoryOfCommand } from '../core/test-results.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 
-export function registerTestRunRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/test-runs', async (request, response) => {
+export function registerTestRunRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/test-runs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -60,7 +60,7 @@ export function registerTestRunRoutes(app: Express, pool: Pool): void {
     });
   });
 
-  app.get('/api/projects/:slug/test-runs/:id/cases', async (request, response) => {
+  app.get('/projects/:slug/test-runs/:id/cases', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug || !isUuid(request.params.id)) {
       response.status(400).json({ message: 'Invalid test run.' });
@@ -90,7 +90,7 @@ export function registerTestRunRoutes(app: Express, pool: Pool): void {
   });
 
   // Screenshots und Videos; Videos mit Range-Anfragen, damit der Browser darin springen kann.
-  app.get('/api/test-media/:id', async (request, response) => {
+  app.get('/test-media/:id', async (request, response) => {
     const result = isUuid(request.params.id)
       ? await pool.query<{ mime: string; data: Buffer }>(`SELECT mime, data FROM test_media WHERE id = $1`, [
           request.params.id,

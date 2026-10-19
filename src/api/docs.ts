@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { generatedDocs } from './generated-docs.js';
 import type { Principal } from './roles.js';
@@ -88,8 +88,8 @@ export async function syncRepoDocs(pool: Pool, projectSlug: string, cwd: string)
   return synced;
 }
 
-export function registerDocRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/docs', async (request, response) => {
+export function registerDocRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/docs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -106,7 +106,7 @@ export function registerDocRoutes(app: Express, pool: Pool): void {
     response.json({ docs: [...result.rows, ...generated] });
   });
 
-  app.post('/api/projects/:slug/docs', async (request, response) => {
+  app.post('/projects/:slug/docs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, DOC_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -127,7 +127,7 @@ export function registerDocRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ doc: result.rows[0] });
   });
 
-  app.patch('/api/docs/:id', async (request, response) => {
+  app.patch('/docs/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -146,7 +146,7 @@ export function registerDocRoutes(app: Express, pool: Pool): void {
     response.json({ doc: result.rows[0] });
   });
 
-  app.delete('/api/docs/:id', async (request, response) => {
+  app.delete('/docs/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

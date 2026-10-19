@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { requestVisionaryRun } from '../agent/visionary.js';
 import { parseProjectSlug } from '../core/validation.js';
@@ -17,8 +17,8 @@ const latestRun = async (pool: Pool, slug: string): Promise<Record<string, unkno
   ).rows[0] ?? null;
 
 /** Visionär: Lauf anfragen (der Worker arbeitet ihn ab), Fortschritt abfragen, Lauf abbrechen. */
-export function registerVisionaryRoutes(app: Express, pool: Pool): void {
-  app.post('/api/projects/:slug/ideation/visionary', async (request, response) => {
+export function registerVisionaryRoutes(app: Router, pool: Pool): void {
+  app.post('/projects/:slug/ideation/visionary', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -45,7 +45,7 @@ export function registerVisionaryRoutes(app: Express, pool: Pool): void {
     response.status(202).json({ run });
   });
 
-  app.get('/api/projects/:slug/ideation/visionary', async (request, response) => {
+  app.get('/projects/:slug/ideation/visionary', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -54,7 +54,7 @@ export function registerVisionaryRoutes(app: Express, pool: Pool): void {
     response.json({ run: await latestRun(pool, slug) });
   });
 
-  app.post('/api/projects/:slug/ideation/visionary/cancel', async (request, response) => {
+  app.post('/projects/:slug/ideation/visionary/cancel', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });

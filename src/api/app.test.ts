@@ -37,6 +37,30 @@ test('protects the API; basic auth works for scripts while no second factor is s
   });
 });
 
+test('API paths are case-sensitive, so other spellings never reach a route past the login', async () => {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    for (const path of ['/API/projects', '/Api/users', '/API/session']) {
+      const response = await fetch(`${baseUrl}${path}`);
+      assert.equal(response.status, 404, path);
+    }
+    // Unter /api laufen die Wächter vor jeder Route, auch wenn der Rest anders geschrieben ist.
+    assert.equal((await fetch(`${baseUrl}/api/Projects`)).status, 401);
+    const restart = await fetch(`${baseUrl}/API/system/restart`, { method: 'POST' });
+    assert.ok(restart.status >= 400, `POST /API/system/restart: ${restart.status}`);
+    assert.deepEqual(queries, []);
+
+    // Die richtige Schreibweise bleibt geschützt.
+    assert.equal((await fetch(`${baseUrl}/api/users`)).status, 401);
+  });
+});
+
 /** Speicher für Sitzungen und Einstellungen, damit Login und Zwei-Faktor ohne Datenbank laufen. */
 function sessionPool(): Pool {
   const sessions = new Map<string, Date>();

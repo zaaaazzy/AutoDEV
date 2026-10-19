@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { upsertDoc } from './docs.js';
 import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
@@ -167,8 +167,8 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
   return report;
 }
 
-export function registerReportRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/sprint-reports', async (request, response) => {
+export function registerReportRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/sprint-reports', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -184,7 +184,7 @@ export function registerReportRoutes(app: Express, pool: Pool): void {
     response.json({ reports: result.rows });
   });
 
-  app.post('/api/sprints/:id/report', async (request, response) => {
+  app.post('/sprints/:id/report', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -197,7 +197,7 @@ export function registerReportRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ report });
   });
 
-  app.patch('/api/sprints/:id/report', async (request, response) => {
+  app.patch('/sprints/:id/report', async (request, response) => {
     const body = request.body as unknown;
     if (!isUuid(request.params.id) || !isRecord(body) || typeof body.notes !== 'string' || body.notes.length > 10_000) {
       response.status(400).json({ message: 'Invalid report notes.' });

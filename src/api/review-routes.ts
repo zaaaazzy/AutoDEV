@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
@@ -70,8 +70,8 @@ async function requestSlot(
  * Review-Freigabe und Review-Container: Ein fertiger Auftrag wartet (Status approval), bis ein Mensch ihn im Review-Container angesehen hat; in der Sprint-Ansicht lässt sich jeder Stand eines Sprints starten.
  * Freigeben merkt die Freigabe vor; gemergt wird vom Worker auf dem Host (dort liegt das Git-Repository).
  */
-export function registerReviewRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/review', async (request, response) => {
+export function registerReviewRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/review', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug);
     if (!slug) {
       response.status(404).json({ message: 'Projekt nicht gefunden.' });
@@ -99,12 +99,12 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
     });
   });
 
-  app.get('/api/review-slots', async (_request, response) => {
+  app.get('/review-slots', async (_request, response) => {
     response.json({ slots: await loadSlots(pool, response.locals.allowedProjects as Set<string> | null | undefined) });
   });
 
   // Administrator: Review-Container freigeben bzw. sperren (ein gesperrter wird vom Worker beendet).
-  app.put('/api/review-slots/:slot', async (request, response) => {
+  app.put('/review-slots/:slot', async (request, response) => {
     const slot = Number(request.params.slot);
     const enabled = (request.body as { enabled?: unknown } | undefined)?.enabled;
     if (!Number.isInteger(slot) || slot < 1 || slot > 9 || typeof enabled !== 'boolean') {
@@ -119,7 +119,7 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
     response.json({ slots: await loadSlots(pool, null) });
   });
 
-  app.post('/api/review-slots/:slot/stop', async (request, response) => {
+  app.post('/review-slots/:slot/stop', async (request, response) => {
     const slot = Number(request.params.slot);
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
@@ -135,7 +135,7 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
   });
 
   // Sprint-Ansicht: einen Stand (Commit) des Projekts in einem Review-Container starten.
-  app.post('/api/projects/:slug/review-slots/start', async (request, response) => {
+  app.post('/projects/:slug/review-slots/start', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug);
     const body = (request.body ?? {}) as { commit?: unknown; label?: unknown; developmentId?: unknown };
     const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit : null;
@@ -161,7 +161,7 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
     response.json({ slot });
   });
 
-  app.get('/api/sprints/:id/commits', async (request, response) => {
+  app.get('/sprints/:id/commits', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
@@ -174,7 +174,7 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
     response.json(row ?? { branch: null, commits: [], updatedAt: null });
   });
 
-  app.post('/api/development/:id/approve', async (request, response) => {
+  app.post('/development/:id/approve', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
@@ -194,7 +194,7 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
     response.json({ item });
   });
 
-  app.post('/api/development/:id/review-reject', async (request, response) => {
+  app.post('/development/:id/review-reject', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
@@ -223,7 +223,7 @@ export function registerReviewRoutes(app: Express, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  app.post('/api/development/:id/show-review', async (request, response) => {
+  app.post('/development/:id/show-review', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;

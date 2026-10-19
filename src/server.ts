@@ -6,7 +6,8 @@ async function start(): Promise<void> {
   const username = process.env.DEV_LOG_USERNAME?.trim();
   const password = process.env.DEV_LOG_PASSWORD;
   const authDisabled = process.env.DEV_LOG_AUTH === 'off';
-  const host = process.env.DEV_LOG_HOST ?? (authDisabled ? '127.0.0.1' : '0.0.0.0');
+  // Standardmäßig nur lokal erreichbar; nach aussen (z. B. im Container hinter nginx) mit DEV_LOG_HOST=0.0.0.0.
+  const host = process.env.DEV_LOG_HOST?.trim() || '127.0.0.1';
   if (!authDisabled && (!username || !password || password.length < 16)) {
     throw new Error('Set DEV_LOG_USERNAME and a DEV_LOG_PASSWORD of at least 16 characters, or DEV_LOG_AUTH=off.');
   }

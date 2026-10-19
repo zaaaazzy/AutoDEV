@@ -1,5 +1,5 @@
 import { setActionTodo } from '../runner/action-todo.js';
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 import { relatedResourceBelongsToProject } from './resource.js';
@@ -44,9 +44,9 @@ export function retryComment(body: unknown): string | null {
   return raw ? raw.slice(0, 2000) : null;
 }
 
-export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
+export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
-  app.post('/api/ideation/:id/promote', async (request, response) => {
+  app.post('/ideation/:id/promote', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(400).json({ message: 'Invalid idea.' });
       return;
@@ -73,7 +73,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  app.post('/api/projects/:slug/development', async (request, response) => {
+  app.post('/projects/:slug/development', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     if (
@@ -122,7 +122,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   });
 
   // Folgeauftrag zu einem erledigten Auftrag: neuer Auftrag mit Bezug, optional gleich in einem Sprint eingeplant.
-  app.post('/api/development/:id/follow-up', async (request, response) => {
+  app.post('/development/:id/follow-up', async (request, response) => {
     const body = request.body as unknown;
     if (
       !isUuid(request.params.id) ||
@@ -174,7 +174,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   });
 
   // Retry a blocked or (after adjusting) rejected order, using the project's active sprint when none is assigned.
-  app.post('/api/development/:id/retry', async (request, response) => {
+  app.post('/development/:id/retry', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -204,7 +204,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   });
 
   // Aus dem Sprint nehmen: Der Auftrag wartet danach unter „Besondere Aufmerksamkeit“ auf eine Entscheidung.
-  app.post('/api/development/:id/remove-from-sprint', async (request, response) => {
+  app.post('/development/:id/remove-from-sprint', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -229,7 +229,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   });
 
   // Endgültig löschen (nicht, solange Agents daran arbeiten); Läufe und Abnahme werden mitgelöscht.
-  app.delete('/api/development/:id', async (request, response) => {
+  app.delete('/development/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -256,7 +256,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   });
 
   // Rückfragen beantworten: Punkte, die der Tester „von dir zu prüfen“ gemeldet hat, als geprüft bestätigen.
-  app.post('/api/development/:id/acceptance/confirm', async (request, response) => {
+  app.post('/development/:id/acceptance/confirm', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -272,7 +272,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   });
 
   // Ask the troubleshooter to analyze a blocked order and record the findings as a bug.
-  app.post('/api/development/:id/analyze', async (request, response) => {
+  app.post('/development/:id/analyze', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -290,7 +290,7 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  app.patch('/api/development/:id', async (request, response) => {
+  app.patch('/development/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

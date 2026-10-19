@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import type { Principal } from './roles.js';
+import { fullPath } from './security.js';
 
 /**
  * Mandantentrennung: Ein Mandant ist ein Projekt. Administratoren sehen alle Projekte, alle anderen nur die, für
@@ -67,18 +68,17 @@ export async function projectOfRequest(pool: Pool, path: string): Promise<string
 export function tenantGuard(pool: Pool): RequestHandler {
   return async (request, response, next) => {
     try {
-      if (!request.path.startsWith('/api/')) return next();
+      const path = fullPath(request);
+      if (!path.startsWith('/api/')) return next();
       const principal = response.locals.principal as Principal | undefined;
       const allowed = await allowedProjects(pool, principal);
       response.locals.allowedProjects = allowed;
       if (allowed === null) return next();
       if (
-        GLOBAL_ROUTES.some(
-          ([method, pattern]) => (method === '*' || method === request.method) && pattern.test(request.path),
-        )
+        GLOBAL_ROUTES.some(([method, pattern]) => (method === '*' || method === request.method) && pattern.test(path))
       )
         return next();
-      const project = await projectOfRequest(pool, request.path);
+      const project = await projectOfRequest(pool, path);
       if (project === undefined) {
         // Nicht zuordenbar und nicht ausdrücklich global: nur für Administratoren.
         return void response.status(403).json({ message: 'Dafür braucht es Administrationsrechte.' });
