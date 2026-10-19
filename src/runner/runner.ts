@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { runPreSprint } from './pre-sprint.js';
 import { followProjectPreview, processApprovals } from './review-gate.js';
@@ -139,7 +140,7 @@ async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> 
   if (!item.sprintId) return null;
   const sprint = await pool
     .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
-    .catch(() => null);
+    .catch(logged('runner', null));
   return sprint?.rows[0]?.name ?? null;
 }
 
@@ -187,13 +188,15 @@ export async function runWorkItem(
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
     // Risks were already filtered by the bug reviewer; otherwise only a short list of known bugs is passed on.
-    ctx.bugs = item.risks?.trim() ? [] : await loadKnownBugs(pool, item.projectSlug, PROMPT_BUG_LIMIT).catch(() => []);
+    ctx.bugs = item.risks?.trim()
+      ? []
+      : await loadKnownBugs(pool, item.projectSlug, PROMPT_BUG_LIMIT).catch(logged('runner', []));
     ctx.images = await materializeAttachments(
       pool,
       { ideationId: item.ideationId, bugId: item.bugId },
       item.id,
       options.cwd,
-    ).catch(() => []);
+    ).catch(logged('runner', []));
     // Folgeauftrag: der Kontext des abgeschlossenen Vorgängers gehört zu jeder Agent-Anweisung.
     ctx.projectContext = [
       await loadProjectContext(pool, item.projectSlug),
@@ -210,7 +213,7 @@ export async function runWorkItem(
             .query<{ notes: string | null }>(`SELECT pre_sprint_notes AS notes FROM sprints WHERE id = $1`, [
               item.sprintId,
             ])
-            .catch(() => ({ rows: [] }))
+            .catch(logged('runner', { rows: [] }))
         ).rows[0]?.notes ?? null)
       : null;
     ctx.criteria = extractCriteria(item.description ?? '');
@@ -298,8 +301,8 @@ export async function runWorkItem(
       console.info(`[${item.id}] ${budgetStop}`);
       await pool
         .query(`UPDATE development_items SET failure = $2, auto_run = FALSE WHERE id = $1`, [item.id, budgetStop])
-        .catch(() => undefined);
-      await setActionTodo(pool, item.id, `${budgetStop} ${BUDGET_TODO_SUFFIX}`.slice(0, 160)).catch(() => undefined);
+        .catch(logged('runner'));
+      await setActionTodo(pool, item.id, `${budgetStop} ${BUDGET_TODO_SUFFIX}`.slice(0, 160)).catch(logged('runner'));
     }
     try {
       await settleItem(ctx, passed, interrupted);
@@ -336,7 +339,7 @@ export async function runWorkflow(
       WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.backlog}' AND sprint_id IN (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active')`,
     [options.project],
   );
-  await resumeAfterEnvironment(pool, options.project).catch(() => undefined);
+  await resumeAfterEnvironment(pool, options.project).catch(logged('runner'));
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
   await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
     console.error('Freigabe fehlgeschlagen:', error);

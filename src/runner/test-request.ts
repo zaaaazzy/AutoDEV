@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Pool } from 'pg';
@@ -154,7 +155,7 @@ export async function processTestRequest(
         tag: `test-${request.id}`,
       },
       { project: options.project },
-    ).catch(() => undefined);
+    ).catch(logged('test-request'));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await pool.query(`UPDATE test_requests SET status = 'failed', finished_at = NOW(), error = $2 WHERE id = $1`, [

@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile, stat, statfs, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
@@ -148,7 +149,7 @@ export async function collectProblems(options: WatchdogOptions): Promise<{ probl
           WHERE r.started_at > NOW() - make_interval(hours => $1) AND st.status IN ('passed', 'failed')`,
         [FAILURE_WINDOW_HOURS],
       )
-      .catch(() => ({ rows: [] }));
+      .catch(logged('watchdog', { rows: [] }));
     const failures = failureProblem(steps.rows);
     if (failures) problems.push(failures);
   }
@@ -165,7 +166,7 @@ export async function collectProblems(options: WatchdogOptions): Promise<{ probl
   else if (Date.now() - newest > 26 * 3600 * 1000) {
     problems.push(`Letztes Datenbank-Backup ist ${Math.round((Date.now() - newest) / 3600_000)} Stunden alt.`);
   }
-  const disk = await statfs(options.dataDir).catch(() => null);
+  const disk = await statfs(options.dataDir).catch(logged('watchdog', null));
   if (disk) {
     const freeGb = (disk.bavail * disk.bsize) / 1024 ** 3;
     if (freeGb < 5) problems.push(`Nur noch ${freeGb.toFixed(1)} GB frei auf dem Projektlaufwerk.`);
@@ -207,7 +208,7 @@ export async function runWatchdog(options: WatchdogOptions, file = stateFile()):
     if (gone.length && dbOk) {
       await options.pool
         .query('DELETE FROM push_subscriptions WHERE endpoint = ANY($1)', [gone])
-        .catch(() => undefined);
+        .catch(logged('watchdog'));
     }
   }
   if (message) console.info(`${new Date().toISOString()} ${message.title}: ${message.body.replace(/\n/g, ' | ')}`);

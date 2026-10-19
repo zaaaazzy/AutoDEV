@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import type { Pool } from 'pg';
 import { systemAgents, systemCommand } from '../agent/system-agents.js';
@@ -227,7 +228,7 @@ export async function generatedDocs(pool: Pool, slug: string, isAdmin: boolean):
     testReports(pool, slug),
     agentSettings(pool, slug),
     isAdmin ? userOverview(pool, slug) : Promise.resolve(null),
-    workflowDocs(slug).catch(() => []),
+    workflowDocs(slug).catch(logged('generated-docs', [])),
   ]);
   return [...workflow, ...reports, agents, ...(users ? [users] : [])];
 }

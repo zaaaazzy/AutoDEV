@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { sendPush } from '../core/push.js';
 import { DEVELOPMENT_STATUS, REVIEW_MODES } from '../core/status.js';
@@ -55,7 +56,7 @@ export async function followProjectPreview(
   base: string,
   execute: CommandExecutor = runCommand,
 ): Promise<void> {
-  const folder = await previewFolder(pool, project, cwd).catch(() => null);
+  const folder = await previewFolder(pool, project, cwd).catch(logged('review-gate', null));
   if (!folder) return;
   const message = await followPreview(folder, base, execute).catch((error: unknown) => String(error));
   if (message) console.info(`[${project}] ${message}`);
@@ -150,7 +151,7 @@ export async function processApprovals(
       { title: `✓ Auftrag freigegeben · ${project}`, body: item.title, url: '#development', tag: `order-${item.id}` },
       { project },
     );
-    if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
+    if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('review-gate'));
   }
   return merged;
 }

@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
 import { seedDefaultActions } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
@@ -137,8 +138,8 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
     ],
   );
   // Neue Projekte bekommen mit den Agents auch die Standard-Aktionen des Testers.
-  await seedDefaultActions(pool, slug).catch(() => undefined);
-  await materializeAgentCommands(pool, slug).catch(() => undefined);
+  await seedDefaultActions(pool, slug).catch(logged('agents'));
+  await materializeAgentCommands(pool, slug).catch(logged('agents'));
 }
 
 export function registerAgentRoutes(app: Express, pool: Pool): void {
@@ -287,8 +288,8 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       ],
     );
     if (result.rows.length) {
-      await seedDefaultActions(pool, slug).catch(() => undefined);
-      await materializeAgentCommands(pool, slug).catch(() => undefined);
+      await seedDefaultActions(pool, slug).catch(logged('agents'));
+      await materializeAgentCommands(pool, slug).catch(logged('agents'));
     }
     // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
     await pool.query(
