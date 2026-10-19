@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
+import type { HosterAdapter } from './hoster.js';
 import {
+  ciLogExcerpt,
+  maskSecrets,
+  pollSprintReviews,
   checkoutSprintBranch,
   mergeIntoCheckedOutMain,
   ciWorkflowYaml,
@@ -271,4 +276,270 @@ test('merges a finished sprint into main checked out elsewhere only when that fo
   const red = run('', true);
   assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), false);
   assert.ok(red.calls.includes('git reset --keep ORIG_HEAD'));
+});
+
+/** Projekt mit main (gepusht auf ein lokales Bare-Repository als „GitHub“) und einem Sprint-Branch mit einem Auftrag. */
+async function sprintRepository(): Promise<{ cwd: string; remote: string; git: (...args: string[]) => string }> {
+  const base = await mkdtemp(join(tmpdir(), 'git-pr-'));
+  const remote = join(base, 'remote.git');
+  const cwd = join(base, 'project');
+  execFileSync('git', ['init', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['init', '-b', 'main', cwd]);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('remote', 'add', 'origin', remote);
+  git('push', '-u', 'origin', 'main');
+  git('checkout', '-b', 'sprint/sprint-1-apfel');
+  await writeFile(join(cwd, 'feature.txt'), 'neu');
+  git('add', '-A');
+  git('commit', '-m', 'feat: Auftrag');
+  return { cwd, remote, git };
+}
+
+function prPool(mode: string, report = '# Sprint-Dokumentation: Sprint 1') {
+  const { pool, updates } = fakePool('https://github.com/a/b.git', 'push', [['true']], 'completed');
+  const query = pool.query.bind(pool) as (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }>;
+  (pool as unknown as { query: typeof query }).query = async (sql, values = []) => {
+    if (sql.includes('github_mode AS mode')) {
+      updates.push({ sql, values });
+      return { rows: [{ mode }] };
+    }
+    if (sql.includes("kind = 'sprint'")) {
+      updates.push({ sql, values });
+      return { rows: [{ content: report }] };
+    }
+    return query(sql, values);
+  };
+  return { pool, updates };
+}
+
+/** Echte Git-Befehle, aber Push ins Bare-Repository statt nach GitHub und gh als Mock. */
+function prExecutor(gh: (command: string[]) => { exitCode?: number; output?: string }, remote: string) {
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command, dir, options) => {
+    calls.push(command);
+    if (command[0] === 'gh') return { exitCode: 0, durationMs: 1, output: '', ...gh(command) };
+    const { runCommand } = await import('../core/command.js');
+    if (command[0] === 'git' && command[1] === 'remote' && command[2] === 'set-url')
+      return runCommand(['git', 'remote', 'set-url', 'origin', remote], dir, options);
+    return runCommand(command, dir, options);
+  };
+  return { calls, execute };
+}
+
+test('PR mode: sprint completion opens a pull request with the sprint report and does not merge', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  const { pool, updates } = prPool('issues+pr', '# Sprint-Dokumentation: Sprint 1\n\n- Feature `x`');
+  let body = '';
+  const { calls, execute } = prExecutor((command) => {
+    if (command[2] === 'list') return { output: '[]' };
+    if (command[2] === 'create') {
+      body = readFileSync(command[command.indexOf('--body-file') + 1]!, 'utf8');
+      return { output: 'https://github.com/a/b/pull/42\n' };
+    }
+    return {};
+  }, remote);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 1);
+  const create = calls.find((call) => call[0] === 'gh' && call[2] === 'create')!;
+  assert.equal(create[create.indexOf('--title') + 1], 'Sprint: Sprint 1: Äpfel');
+  assert.equal(create[create.indexOf('--head') + 1], 'sprint/sprint-1-apfel');
+  assert.match(body, /^# Sprint-Dokumentation: Sprint 1\n\n- Feature `x`/);
+  assert.ok(!calls.some((call) => call[0] === 'gh' && call[1] === 'run'), 'kein Warten auf CI im Abschluss');
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1-apfel');
+  assert.throws(() => git('show', 'main:feature.txt'));
+  assert.equal(git('tag'), '');
+  const final = updates.at(-1)!;
+  assert.match(final.sql, /SET status = 'review', pr_url = \$5, ci_status = 'pending'/);
+  assert.equal(final.values[4], 'https://github.com/a/b/pull/42');
+});
+
+test('PR mode without gh login completes the sprint like today (direct merge and tag)', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  const { pool, updates } = prPool('issues+pr');
+  const { calls, execute } = prExecutor(() => ({ exitCode: 1, output: 'not logged in' }), remote);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 1);
+  assert.ok(!calls.some((call) => call[0] === 'gh' && call[1] === 'pr'));
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('show', 'main:feature.txt'), 'neu');
+  assert.match(git('tag'), /sprint-sprint-1-apfel-abcdef/);
+  assert.match(String(updates.at(-1)?.values[1]), /PR-Modus übersprungen/);
+});
+
+test('mode "issues" keeps the direct merge path', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  const { pool } = prPool('issues');
+  const { calls, execute } = prExecutor(() => ({ exitCode: 1, output: 'not logged in' }), remote);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 1);
+  assert.ok(!calls.some((call) => call[0] === 'gh' && call[1] === 'pr'));
+  assert.equal(git('show', 'main:feature.txt'), 'neu');
+});
+
+interface ReviewRow {
+  id: string;
+  name: string;
+  prUrl: string;
+  ciStatus: string | null;
+  ciBugRun: string | null;
+  status: string;
+}
+
+function reviewPool(sprint: ReviewRow) {
+  const updates: { sql: string; values: unknown[] }[] = [];
+  const bugs: { title: string; description: string; source: string }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      updates.push({ sql, values });
+      if (sql.includes("status = 'review' AND pr_url IS NOT NULL"))
+        return { rows: sprint.status === 'review' ? [{ ...sprint }] : [] };
+      if (sql.includes('SET ci_bug_run')) {
+        if (sprint.ciBugRun === values[1]) return { rows: [] };
+        sprint.ciBugRun = String(values[1]);
+        return { rows: [{ id: sprint.id }] };
+      }
+      if (sql.includes('INSERT INTO bugs')) {
+        assert.match(sql, /'github'/);
+        bugs.push({ title: String(values[1]), description: String(values[2]), source: 'github' });
+      }
+      if (sql.includes('SET ci_status = $2 WHERE')) sprint.ciStatus = String(values[1]);
+      if (sql.includes("SET status = 'completed'")) sprint.status = 'completed';
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  return { pool, updates, bugs };
+}
+
+function reviewAdapter(state: {
+  checks: 'pending' | 'success' | 'failure';
+  approved?: boolean;
+  pr?: 'open' | 'merged' | 'closed';
+  log?: string;
+}) {
+  const merged: string[] = [];
+  const adapter: HosterAdapter = {
+    authStatus: async () => ({ ok: true, message: 'ok' }),
+    listIssues: async () => [],
+    commentIssue: async () => undefined,
+    closeIssue: async () => undefined,
+    findPullRequest: async () => null,
+    createPullRequest: async () => '',
+    pullRequestChecks: async () => ({ status: state.checks, failedRun: state.checks === 'failure' ? '77' : null }),
+    pullRequestState: async () => ({ state: state.pr ?? 'open', approved: state.approved ?? false }),
+    mergePullRequest: async (url) => void merged.push(url),
+    failedRunLog: async () => state.log ?? '',
+  };
+  return { adapter, merged };
+}
+
+const REVIEW: ReviewRow = {
+  id: 'abcdef12-0000-0000-0000-000000000000',
+  name: 'Sprint 1: Äpfel',
+  prUrl: 'https://github.com/a/b/pull/42',
+  ciStatus: 'pending',
+  ciBugRun: null,
+  status: 'review',
+};
+
+/** Simuliert den Merge auf GitHub: Sprint-Branch im Bare-Repository nach main mergen. */
+async function mergeOnGithub(remote: string): Promise<void> {
+  const clone = await mkdtemp(join(tmpdir(), 'git-gh-'));
+  execFileSync('git', ['clone', '-q', remote, clone]);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: clone, stdio: 'pipe' });
+  git('config', 'user.email', 'gh@b.c');
+  git('config', 'user.name', 'gh');
+  git('fetch', 'origin', 'sprint/sprint-1-apfel');
+  git('merge', '--no-ff', 'FETCH_HEAD', '-m', 'Merge pull request #42');
+  git('push', 'origin', 'main');
+}
+
+test('green CI without required approval merges the pull request and tags main', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const { pool, updates } = reviewPool({ ...REVIEW });
+  const { adapter, merged } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = async (url) => {
+    merged.push(url);
+    await mergeOnGithub(remote);
+  };
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, adapter, false), 1);
+  assert.deepEqual(merged, ['https://github.com/a/b/pull/42']);
+  const tagged = execFileSync('git', ['rev-parse', 'refs/tags/sprint-sprint-1-apfel-abcdef^{commit}'], { cwd: remote })
+    .toString()
+    .trim();
+  assert.equal(tagged, execFileSync('git', ['rev-parse', 'main'], { cwd: remote }).toString().trim());
+  assert.equal(git('show', 'main:feature.txt'), 'neu');
+  const final = updates.at(-1)!;
+  assert.match(final.sql, /SET status = 'completed', ci_status = \$5, git_sync = 'done'/);
+  assert.equal(final.values[4], 'success');
+});
+
+test('required approval: green CI waits until a human approves', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const sprint = { ...REVIEW };
+  const { pool, updates } = reviewPool(sprint);
+  const waiting = reviewAdapter({ checks: 'success', approved: false });
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, waiting.adapter, true), 0);
+  assert.deepEqual(waiting.merged, []);
+  assert.match(String(updates.at(-1)?.values[1]), /wartet auf Freigabe/);
+  assert.equal(sprint.status, 'review');
+  const approved = reviewAdapter({ checks: 'success', approved: true });
+  approved.adapter.mergePullRequest = async (url) => {
+    approved.merged.push(url);
+    await mergeOnGithub(remote);
+  };
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, approved.adapter, true), 1);
+  assert.equal(approved.merged.length, 1);
+});
+
+test('red CI never merges and files one bug per run with a masked, shortened log excerpt', async () => {
+  const { cwd } = await sprintRepository();
+  const sprint = { ...REVIEW };
+  const { pool, bugs } = reviewPool(sprint);
+  process.env.DEVLOG_CI_TEST_SECRET = 'hunter2hunter2';
+  try {
+    const log = [
+      ...Array.from({ length: 200 }, (_, index) => `test\tstep\tZeile ${index}`),
+      'Error: login failed with hunter2hunter2',
+      `token ghp_${'a'.repeat(36)} leaked`,
+      'API_KEY=abcdefghijkl',
+    ].join('\n');
+    const red = reviewAdapter({ checks: 'failure', log });
+    assert.equal(await pollSprintReviews(pool, 'p', cwd, red.adapter, false), 0);
+    assert.equal(await pollSprintReviews(pool, 'p', cwd, red.adapter, false), 0);
+    assert.deepEqual(red.merged, []);
+    assert.equal(bugs.length, 1);
+    const bug = bugs[0]!;
+    assert.equal(bug.title, 'CI rot im Pull Request von „Sprint 1: Äpfel“');
+    assert.match(bug.description, /Error: login failed with \[REDACTED\]/);
+    assert.ok(!bug.description.includes('hunter2hunter2'));
+    assert.ok(!bug.description.includes(`ghp_${'a'.repeat(36)}`));
+    assert.ok(!bug.description.includes('abcdefghijkl'));
+    assert.ok(!bug.description.includes('Zeile 0\n'));
+    assert.ok(bug.description.length < 4_000);
+    assert.equal(sprint.ciStatus, 'failure');
+    assert.equal(sprint.status, 'review');
+  } finally {
+    delete process.env.DEVLOG_CI_TEST_SECRET;
+  }
+});
+
+test('a pull request closed without merge ends the review as failed sync', async () => {
+  const { cwd } = await sprintRepository();
+  const sprint = { ...REVIEW };
+  const { pool, updates } = reviewPool(sprint);
+  const closed = reviewAdapter({ checks: 'pending', pr: 'closed' });
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, closed.adapter, false), 0);
+  assert.match(updates.at(-1)!.sql, /git_sync = 'failed'/);
+  assert.match(String(updates.at(-1)!.values[1]), /ohne Merge geschlossen/);
+});
+
+test('log excerpts mask known token formats and secret assignments', () => {
+  const excerpt = ciLogExcerpt(`a\nPASSWORD: "geheim123"\nAKIAABCDEFGHIJKLMNOP\n`, {});
+  assert.ok(!excerpt.includes('geheim123'));
+  assert.ok(!excerpt.includes('AKIAABCDEFGHIJKLMNOP'));
+  assert.equal(maskSecrets('nichts geheim', {}), 'nichts geheim');
 });
