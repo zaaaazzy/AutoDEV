@@ -54,12 +54,12 @@ async function requestSlot(
   request: { commit: string | null; label: string; developmentId: string | null; kind: 'manual' | 'approval' },
 ): Promise<number | null> {
   const result = await pool.query<{ slot: number }>(
-    `UPDATE review_slots SET status = 'requested', project_slug = $2, commit_sha = $3, label = $4, development_id = $5,
-            kind = $6, message = 'Angefordert – startet gleich.', requested_at = NOW(), updated_at = NOW()
+    `UPDATE review_slots SET status = 'requested', project_slug = $1, commit_sha = $2, label = $3, development_id = $4,
+            kind = $5, message = 'Angefordert – startet gleich.', requested_at = NOW(), updated_at = NOW()
       WHERE slot = (
         SELECT slot FROM review_slots WHERE enabled
-         ORDER BY (development_id IS NOT DISTINCT FROM $5::uuid AND $5::uuid IS NOT NULL) DESC,
-                  (project_slug IS NOT DISTINCT FROM $2) DESC, (status = 'idle') DESC, requested_at NULLS FIRST, slot
+         ORDER BY (development_id IS NOT DISTINCT FROM $4::uuid AND $4::uuid IS NOT NULL) DESC,
+                  (project_slug IS NOT DISTINCT FROM $1) DESC, (status = 'idle') DESC, requested_at NULLS FIRST, slot
          LIMIT 1)
       RETURNING slot`,
     [project, request.commit, request.label, request.developmentId, request.kind],
