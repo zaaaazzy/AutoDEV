@@ -20,9 +20,10 @@ import type { Principal } from './roles.js';
 
 export const IDEA_COLUMNS = `id, title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
-  agent_note AS "agentNote", category, source, rejection_reason AS "rejectionReason"`;
+  agent_note AS "agentNote", category, source, rejection_reason AS "rejectionReason",
+  external_ref AS "externalRef"`;
 
-/** Herkunft einer Idee; `routine`, `production` und `github` sind vorgesehen, werden aber noch nicht befüllt. */
+/** Herkunft einer Idee; `github` stammt aus dem Issue-Import, `routine` und `production` sind vorgesehen. */
 export const IDEA_SOURCES = new Set(['human', 'visionary', 'routine', 'production', 'github']);
 export const MAX_REJECTION_REASON = 1000;
 

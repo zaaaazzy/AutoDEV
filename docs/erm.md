@@ -11,7 +11,8 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `docs` (Projekt, kind manual/sprint/order/repo, Titel, Inhalt).
 - `development_items`: zusätzlich `kind`, `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
 - `agents.role`: author, developer, tester, reviewer, documenter, bug_reviewer, manual_writer, user_manual_writer, custom.
-- Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird.
+- Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird (nicht beim Übergang `review` → `completed`).
+- GitHub-Brücke: `projects.github_mode` (aus/issues/issues+pr), `github_require_approval`, `github_synced_at`, `github_auth` (ok/missing) mit `github_auth_message` und `github_auth_checked_at`; `sprints.status` zusätzlich `review`, dazu `pr_url`, `ci_status` (pending/success/failure) und `ci_bug_run`; `ideation_items` und `bugs` mit `source='github'`, `external_ref` (`owner/repo#N`, eindeutig je Projekt) und `github_synced_status`; `development_items.git_commit`.
 
 ## Erweiterung: Visionär (Ideen-Herkunft und Läufe)
 

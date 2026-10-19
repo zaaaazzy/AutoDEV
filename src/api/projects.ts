@@ -5,6 +5,7 @@ import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
 import { targetsDevLogDatabase } from '../agent/tool-sql.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
+import { GITHUB_MODES, type GithubMode, githubRepo } from '../runner/github.js';
 import {
   isRecord,
   normalizeProjectSlug,
@@ -14,12 +15,34 @@ import {
   validText,
 } from '../core/validation.js';
 
+/** GitHub-Brücke: Modus, Freigabe-Option und der vom Worker geprüfte Anmeldestatus (kein Token). */
+const GITHUB_COLUMNS = `github_mode AS "githubMode", github_require_approval AS "githubRequireApproval",
+  github_synced_at AS "githubSyncedAt", github_auth AS "githubAuth", github_auth_message AS "githubAuthMessage",
+  github_auth_checked_at AS "githubAuthCheckedAt"`;
+
 export function registerProjectRoutes(app: Express, pool: Pool): void {
+  // „Anmeldung prüfen“: Der Worker fragt `gh auth status` beim nächsten Takt erneut ab (nur bei aktivem Modus).
+  app.post('/api/projects/:slug/github/check', async (request, response, next) => {
+    try {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      const result = slug
+        ? await pool.query(
+            `UPDATE projects SET github_auth_checked_at = NULL WHERE slug = $1 RETURNING ${GITHUB_COLUMNS}`,
+            [slug],
+          )
+        : null;
+      if (!result?.rows[0]) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      response.json({ github: result.rows[0] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get('/api/projects', async (_request, response) => {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${GITHUB_COLUMNS}, created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -271,11 +294,36 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(body.restartAfterSprint);
       sets.push(`restart_after_sprint = $${values.length}`);
     }
+    if (body.githubMode !== undefined) {
+      if (!GITHUB_MODES.includes(body.githubMode as GithubMode))
+        return fail('GitHub-Brücke: aus, Issues oder Issues und Pull Request.');
+      if (body.githubMode !== 'aus') {
+        const remote =
+          typeof body.gitRemote === 'string'
+            ? body.gitRemote.trim()
+            : (
+                await pool.query<{ remote: string | null }>(
+                  'SELECT git_remote AS remote FROM projects WHERE slug = $1',
+                  [slug],
+                )
+              ).rows[0]?.remote;
+        if (!githubRepo(remote))
+          return fail('Die GitHub-Brücke braucht ein GitHub-Repository (github.com) am Projekt.');
+      }
+      values.push(body.githubMode);
+      // Neuer Modus: Anmeldung beim nächsten Worker-Takt neu prüfen.
+      sets.push(`github_mode = $${values.length}`, 'github_auth_checked_at = NULL');
+    }
+    if (body.githubRequireApproval !== undefined) {
+      if (typeof body.githubRequireApproval !== 'boolean') return fail('Freigabe erforderlich: ein oder aus.');
+      values.push(body.githubRequireApproval);
+      sets.push(`github_require_approval = $${values.length}`);
+    }
     if (!sets.length) {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays"`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${GITHUB_COLUMNS}`,
       values,
     );
     if (!result.rows[0]) {

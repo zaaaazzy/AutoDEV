@@ -56,6 +56,7 @@ In der Oberfläche ein Projekt anlegen und unter **Projekteinstellungen** angebe
 - **Projektordner**: absoluter Pfad. Dort lesen und schreiben die Agents, dort laufen die Tests und der Git-Sync.
 - **Testbefehle** (optional): ein Befehl pro Zeile, Standard `npm run build` + `npm test`.
 - **GitHub-Repository** (optional): `git@github.com:user/repo.git`, Zugang über SSH-Key, nie Zugangsdaten in der URL.
+- **GitHub-Brücke** (optional, Standard aus): Issues mit Label `idea`/`bug` übernehmen und Status zurückmelden, wahlweise Sprint-Abschluss als Pull Request mit CI-Ampel. Braucht `gh auth login` des Worker-Benutzers, kein Token in Dev Log (siehe `docs/workflows.md`).
 
 Der Worker bedient jedes registrierte Projekt in dessen Ordner. Fehlt der Ordner, zeigt das Worker-Badge den Fehler.
 

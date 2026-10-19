@@ -18,7 +18,8 @@ import {
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
-  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category`;
+  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
+  external_ref AS "externalRef"`;
 const BUG_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },

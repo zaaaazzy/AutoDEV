@@ -18,6 +18,7 @@ import { commentSprintProposal } from '../agent/sprint-comment.js';
 import { processVisionaryRun } from '../agent/visionary.js';
 import { syncFavicon } from './favicon.js';
 import { syncGitGraph } from './git-graph.js';
+import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
@@ -257,6 +258,7 @@ async function main(): Promise<void> {
     let faviconCheck = 0;
     // Git-Verlauf fürs Dashboard jede Minute.
     let gitCheck = 0;
+    const githubActive = new Set<string>();
     const heartbeat = setInterval(() => {
       beat();
       void publishSystemAgents(pool).catch(() => undefined);
@@ -265,6 +267,16 @@ async function main(): Promise<void> {
         for (const target of chatTargets) {
           if (target.problem) continue;
           void syncGitGraph(pool, target.options.project, target.options.cwd).catch(() => undefined);
+          // GitHub-Brücke: Issue-Import, Rückmeldung und Sprints im Review (Intervalle begrenzt das Modul selbst).
+          const slug = target.options.project;
+          if (githubActive.has(slug) || stopping) continue;
+          githubActive.add(slug);
+          void syncGitHub(pool, slug, target.options.cwd)
+            .then(() => loggedErrors.delete(`github:${slug}`))
+            .catch((error: unknown) =>
+              logOnce(`github:${slug}`, `[${slug}] GitHub-Brücke fehlgeschlagen: ${describeError(error)}`),
+            )
+            .finally(() => githubActive.delete(slug));
         }
       }
       if (Date.now() - faviconCheck > 5 * 60_000) {
