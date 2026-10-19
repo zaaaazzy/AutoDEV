@@ -71,14 +71,15 @@ Push-Nachrichten.
 
 ```bash
 docker compose ps                 # Zustand der Dienste
-docker compose logs -f dev-log    # Protokoll von Dev Log
+docker compose logs -f dev-log    # Protokoll der API (Oberfläche: frontend)
 npm run worker                    # Worker im Vordergrund starten (ohne Autostart)
 ./start.sh --setup                # Einrichtung wiederholen
 ```
 
-Die Container heissen `devlog_database_postgres` (Datenbank), `devlog_backend_nodejs` (API und Oberfläche),
-`devlog_backup_postgres` (tägliche Sicherung) und `devlog_proxy_caddy` (HTTPS, optional). In den Befehlen oben
-stehen die Dienstnamen (`db`, `dev-log`, `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
+Die Container heissen `devlog_frontend_angular` (Oberfläche, nginx, leitet `/api` weiter), `devlog_backend_nodejs`
+(API), `devlog_database_postgres` (Datenbank), `devlog_backup_postgres` (tägliche Sicherung) und
+`devlog_proxy_caddy` (HTTPS, optional). In den Befehlen oben stehen die Dienstnamen (`frontend`, `dev-log`, `db`,
+`backup`, `https`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it devlog_database_postgres psql -U devlog dev_log`.
 
 ## Fehlerbehebung

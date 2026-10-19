@@ -4,12 +4,13 @@ Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher A
 
 ## 1 · Prozesse und Takte
 
-Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker auf dem Mac; der Container liefert Dashboard und API und schreibt nur Wünsche in die Datenbank.
+Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker auf dem Mac; der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter; der schreibt nur Wünsche in die Datenbank.
 
 ```mermaid
 flowchart TB
   U(["Browser / Handy"]):::person -->|HTTPS| C["Caddy :443"]
-  C --> API["Container dev-log<br/>Dashboard + API :3100"]
+  C --> FE["devlog_frontend_angular<br/>nginx · Oberfläche :3100"]
+  FE -->|"/api"| API["devlog_backend_nodejs<br/>API (intern :3100)"]
   subgraph MAC["Mac"]
     direction TB
     W["Worker<br/>launchd com.devlog.worker"]:::ok
