@@ -10,6 +10,7 @@ export class MarkdownPipe implements PipeTransform {
     let codeLines: string[] = [];
     let tableRows: string[][] = [];
     let inCode = false;
+    let codeLanguage = '';
 
     const flushParagraph = (): void => {
       if (paragraph.length) blocks.push(`<p>${this.inline(paragraph.join(' '))}</p>`);
@@ -36,7 +37,12 @@ export class MarkdownPipe implements PipeTransform {
       tableRows = [];
     };
     const flushCode = (): void => {
-      if (codeLines.length)
+      // ```mermaid: Quelltext bleibt sichtbar, bis MermaidDirective ihn als Diagramm zeichnet.
+      if (codeLines.length && codeLanguage === 'mermaid')
+        blocks.push(
+          `<div class="mermaid-diagram"><pre class="mermaid-source">${codeLines.map((line) => this.escape(line)).join('\n')}</pre></div>`,
+        );
+      else if (codeLines.length)
         blocks.push(`<pre><code>${codeLines.map((line) => this.escape(line)).join('\n')}</code></pre>`);
       codeLines = [];
     };
@@ -48,6 +54,7 @@ export class MarkdownPipe implements PipeTransform {
         flushTable();
         if (inCode) flushCode();
         inCode = !inCode;
+        codeLanguage = inCode ? line.replace(/^```/, '').trim().toLowerCase() : '';
         continue;
       }
       if (inCode) {

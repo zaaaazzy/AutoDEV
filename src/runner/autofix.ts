@@ -35,6 +35,29 @@ const AGENT_FAILURE_PATTERNS = [
   /Unterbrochen: Der Worker wurde beendet/,
 ];
 
+/**
+ * Vorübergehende Fehler: Modell oder Dienst kurz nicht erreichbar, überlastet, Verbindung abgebrochen, Zeitlimit.
+ * Solche Schritte werden einmal nach kurzer Pause wiederholt, bevor der Auftrag blockiert.
+ */
+const TRANSIENT_PATTERNS = [
+  /Ollama nicht erreichbar/,
+  /Ollama antwortete mit (?:429|5\d\d)/,
+  /Ollama lieferte keine Nachricht/,
+  /Das Modell lieferte keine Antwort/,
+  /Zeitlimit erreicht/,
+  /Process ended by SIG\w+ \(timeout or kill\)/,
+  /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up)\b/,
+  /\boverloaded(?:_error)?\b/i,
+  /\brate[ _-]?limit/i,
+  /API Error:? (?:429|5\d\d)\b/i,
+  /\b(?:502 Bad Gateway|503 Service Unavailable|529)\b/,
+];
+
+export function isTransientFailure(output: string): boolean {
+  const tail = output.slice(-1500);
+  return TRANSIENT_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
 export function isAgentFailure(output: string): boolean {
   const tail = output.slice(-1500);
   return AGENT_FAILURE_PATTERNS.some((pattern) => pattern.test(tail));

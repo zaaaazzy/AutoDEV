@@ -57,11 +57,11 @@ export class AgentActionsService {
     if (result && slug === this.store.activeProject()) this.actions.set(result.tasks);
   }
 
-  async run(action: AgentAction): Promise<boolean> {
+  async run(action: AgentAction, comment = ''): Promise<boolean> {
     if (this.busy()) return false;
     this.busy.set(true);
     try {
-      await this.api.post(`/api/agent-tasks/${encodeURIComponent(action.id)}/run`, {});
+      await this.api.post(`/api/agent-tasks/${encodeURIComponent(action.id)}/run`, { comment });
       this.store.notice.set(`„${action.title}“ gestartet – ${action.agentName ?? 'der Assistent'} arbeitet daran.`);
       await this.load();
       return true;

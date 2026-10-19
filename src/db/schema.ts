@@ -703,8 +703,71 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS chat_messages_development_idx ON chat_messages (development_id) WHERE development_id IS NOT NULL;
   -- Visionär aus dem Chat (@Visionär …): Schwerpunkt des Nutzers und Rückmeldung des Ergebnisses im Chat.
   ALTER TABLE visionary_runs ADD COLUMN IF NOT EXISTS focus TEXT;
+  -- Kommentar aus der Bestätigung beim Anfordern eines Testlaufs.
+  ALTER TABLE test_requests ADD COLUMN IF NOT EXISTS comment TEXT;
   ALTER TABLE visionary_runs ADD COLUMN IF NOT EXISTS reply_in_chat BOOLEAN NOT NULL DEFAULT FALSE;
   -- Rückfragen: Antwortmöglichkeiten des Agents und feste Verknüpfung der Antwort mit ihrer Rückfrage.
   ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS question_options JSONB NOT NULL DEFAULT '[]'::jsonb;
   ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES chat_messages(id) ON DELETE SET NULL;
+
+  -- Sofortstart: neue oder wieder eingeplante Aufträge und gestartete Sprints wecken den Worker (LISTEN devlog_work).
+  CREATE OR REPLACE FUNCTION development_items_notify_work() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'planned' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status
+        OR OLD.auto_run IS DISTINCT FROM NEW.auto_run OR OLD.sprint_id IS DISTINCT FROM NEW.sprint_id) THEN
+      PERFORM pg_notify('devlog_work', NEW.project_slug);
+    END IF;
+    RETURN NULL;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER development_items_notify_work
+    AFTER INSERT OR UPDATE OF status, auto_run, sprint_id ON development_items
+    FOR EACH ROW EXECUTE FUNCTION development_items_notify_work();
+  CREATE OR REPLACE FUNCTION sprints_notify_work() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'active' AND OLD.status IS DISTINCT FROM NEW.status THEN
+      PERFORM pg_notify('devlog_work', NEW.project_slug);
+    END IF;
+    RETURN NULL;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER sprints_notify_work
+    AFTER UPDATE OF status ON sprints
+    FOR EACH ROW EXECUTE FUNCTION sprints_notify_work();
+
+  -- Zeitleiste im Auftrag: Statuswechsel und Problemanalyse werden mit Zeitpunkt festgehalten.
+  CREATE TABLE IF NOT EXISTS development_events (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    development_id UUID NOT NULL REFERENCES development_items(id) ON DELETE CASCADE,
+    at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS development_events_item_idx ON development_events (development_id, at);
+  CREATE OR REPLACE FUNCTION development_items_log_event() RETURNS trigger AS $$
+  BEGIN
+    IF TG_OP = 'INSERT' THEN
+      INSERT INTO development_events (development_id, kind, detail) VALUES (NEW.id, 'created', NEW.status);
+    ELSE
+      IF OLD.status IS DISTINCT FROM NEW.status THEN
+        INSERT INTO development_events (development_id, kind, detail)
+          VALUES (NEW.id, 'status', COALESCE(OLD.status, '') || '>' || NEW.status);
+      END IF;
+      IF OLD.analysis_status IS DISTINCT FROM NEW.analysis_status AND NEW.analysis_status IS NOT NULL THEN
+        INSERT INTO development_events (development_id, kind, detail) VALUES (NEW.id, 'analysis', NEW.analysis_status);
+      END IF;
+    END IF;
+    RETURN NULL;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER development_items_log_event
+    AFTER INSERT OR UPDATE OF status, analysis_status ON development_items
+    FOR EACH ROW EXECUTE FUNCTION development_items_log_event();
+
+  -- Kostenbremse: Grenze je Auftrag (Tokens bzw. USD) ab dem letzten manuellen Start (budget_since).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_token_limit BIGINT CHECK (order_token_limit > 0);
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_cost_limit NUMERIC(10, 2) CHECK (order_cost_limit > 0);
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_since TIMESTAMPTZ;
+  -- Nach dem Sprint-Abschluss (Merge nach main) Dev Log selbst neu starten – nur für das Dev-Log-Projekt sinnvoll.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS restart_after_sprint BOOLEAN NOT NULL DEFAULT FALSE;
 `;

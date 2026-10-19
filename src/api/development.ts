@@ -37,6 +37,12 @@ const DEV_FIELDS = {
   agentId: { column: 'agent_id', parse: parseNullableUuid },
 };
 
+/** Kommentar beim erneuten Versuch: geht als Hinweis an die Agents (wird an die Beschreibung angehängt). */
+export function retryComment(body: unknown): string | null {
+  const raw = isRecord(body) && typeof body.comment === 'string' ? body.comment.trim() : '';
+  return raw ? raw.slice(0, 2000) : null;
+}
+
 export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
   // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
   app.post('/api/ideation/:id/promote', async (request, response) => {
@@ -172,16 +178,19 @@ export function registerDevelopmentRoutes(app: Express, pool: Pool): void {
       response.status(404).json({ message: 'Development item not found.' });
       return;
     }
+    const comment = retryComment(request.body);
     const result = await pool.query(
       `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL,
+              description = CASE WHEN $2::text IS NULL THEN d.description
+                                 ELSE COALESCE(d.description, '') || E'\n\n## Hinweis zum erneuten Versuch (' || to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\n' || $2::text END,
               retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
               analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
               sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
-              removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
+              removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()
         WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
               OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
         RETURNING ${DEV_COLUMNS}`,
-      [request.params.id],
+      [request.params.id, comment],
     );
     if (!result.rows[0]) {
       response.status(409).json({

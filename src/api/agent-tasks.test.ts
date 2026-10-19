@@ -27,3 +27,11 @@ test('Agent-Aufgaben verlangen die Rolle „Assistent nutzen“', () => {
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/run', {}), 'chat');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/other', {}), 'admin');
 });
+
+test('der Kommentar aus der Bestätigung wird an die Aufgabe angehängt', () => {
+  assert.equal(taskMessage({ title: 'Tests', prompt: 'npm test' }), 'Aufgabe „Tests“:\nnpm test');
+  assert.equal(
+    taskMessage({ title: 'Tests', prompt: 'npm test' }, '  nur Backend  '),
+    'Aufgabe „Tests“:\nnpm test\n\nHinweis dazu: nur Backend',
+  );
+});

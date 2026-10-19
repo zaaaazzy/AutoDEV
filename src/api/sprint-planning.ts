@@ -225,6 +225,8 @@ export async function applyProposal(
   project: string,
   ids: string[],
   start: boolean,
+  /** Kommentar beim Übernehmen: wird das Sprintziel. */
+  comment = '',
 ): Promise<{ sprintId: string; started: boolean } | string> {
   const proposal = await loadProposal(pool, project);
   if (!proposal) return 'Projekt nicht gefunden.';
@@ -244,7 +246,9 @@ export async function applyProposal(
         [
           project,
           proposal.name,
-          `Vorschlag der Sprintplanung: ${ids.length} Aufträge`,
+          comment.trim()
+            ? `${comment.trim().slice(0, 2000)}\n\n(Vorschlag der Sprintplanung: ${ids.length} Aufträge)`
+            : `Vorschlag der Sprintplanung: ${ids.length} Aufträge`,
           shouldStart ? 'active' : 'planned',
         ],
       )
@@ -309,7 +313,9 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const ids = parseIds(request.body);
       if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
-      const result = await applyProposal(pool, slug, ids, isRecord(request.body) && request.body.start === true);
+      const body = isRecord(request.body) ? request.body : {};
+      const comment = typeof body.comment === 'string' ? body.comment : '';
+      const result = await applyProposal(pool, slug, ids, body.start === true, comment);
       if (typeof result === 'string') return void response.status(400).json({ message: result });
       response.status(201).json(result);
     } catch (error) {

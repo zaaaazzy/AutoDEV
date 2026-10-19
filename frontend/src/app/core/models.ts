@@ -15,6 +15,11 @@ export interface Project {
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;
+  /** Kostenbremse je Auftrag (leer = keine Grenze). */
+  orderTokenLimit?: number | null;
+  orderCostLimit?: number | null;
+  /** Dev Log nach dem Sprint-Abschluss automatisch neu starten (Dev-Log-Projekt). */
+  restartAfterSprint?: boolean;
   /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
   sprintMode?: 'manual' | 'suggest' | 'autopilot';
   /** Kapazität eines Sprints in Stunden, solange es keine abgeschlossenen Sprints gibt. */
@@ -169,8 +174,11 @@ export interface Bug {
 
 export interface DocumentEntry {
   id: string;
-  /** test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht (beide erzeugt, schreibgeschützt). */
-  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request' | 'test' | 'settings';
+  /**
+   * test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht, workflow = Arbeitsweise von Dev Log
+   * (alle erzeugt, schreibgeschützt).
+   */
+  kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request' | 'test' | 'settings' | 'workflow';
   title: string;
   content: string;
   sprintId: string | null;

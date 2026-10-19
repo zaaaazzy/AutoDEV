@@ -1,4 +1,5 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
+import { ConfirmDialogComponent } from './shared/confirm-dialog.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './core/api.service.js';
 import { AuthService } from './core/auth.service.js';
@@ -42,6 +43,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   standalone: true,
   imports: [
     FormsModule,
+    ConfirmDialogComponent,
     LoginComponent,
     TourOverlayComponent,
     WelcomeDialogComponent,

@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
+import type { CommandExecutor } from '../core/command.js';
 import {
   checkoutSprintBranch,
+  mergeIntoCheckedOutMain,
   ciWorkflowYaml,
   commitTaskToGit,
   filesWithSecrets,
@@ -244,4 +246,29 @@ test('the CI workflow runs the same test commands as the local gate', () => {
   assert.match(yaml, /- run: npm run build/);
   assert.match(yaml, /- run: npm test -- --grep 'login page'/);
   assert.match(yaml, /branches: \[main, 'sprint\/\*\*'\]/);
+});
+
+test('merges a finished sprint into main checked out elsewhere only when that folder is clean', async () => {
+  const run = (dirty: string, gateFails = false) => {
+    const calls: string[] = [];
+    const execute: CommandExecutor = async (command) => {
+      calls.push(command.join(' '));
+      if (command.includes('--abbrev-ref')) return { exitCode: 0, durationMs: 1, output: 'main\n' };
+      if (command.includes('--porcelain')) return { exitCode: 0, durationMs: 1, output: dirty };
+      if (command[0] === 'npm') return { exitCode: gateFails ? 1 : 0, durationMs: 1, output: 'rot' };
+      return { exitCode: 0, durationMs: 1, output: '' };
+    };
+    return { calls, execute };
+  };
+  const clean = run('');
+  assert.equal(await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), true);
+  assert.ok(clean.calls.some((call) => call.startsWith('git merge --no-ff sprint/s1')));
+
+  const busy = run(' M src/app.ts\n');
+  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), false);
+  assert.ok(!busy.calls.some((call) => call.startsWith('git merge')));
+
+  const red = run('', true);
+  assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), false);
+  assert.ok(red.calls.includes('git reset --keep ORIG_HEAD'));
 });

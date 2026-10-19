@@ -46,7 +46,9 @@ const pool = {
 } as unknown as Pool;
 
 test('Testberichte, Agent-Einstellungen und Benutzerübersicht als schreibgeschützte Dokumente', async () => {
-  const docs = await generatedDocs(pool, 'dev-log', true);
+  const all = await generatedDocs(pool, 'dev-log', true);
+  // Das Register „Workflow“ kommt aus docs/*.md und hat einen eigenen Test (workflow-docs.test.ts).
+  const docs = all.filter((doc) => doc.kind !== 'workflow');
   assert.deepEqual(
     docs.map((doc) => [doc.kind, doc.title.split(' 18.')[0]]),
     [

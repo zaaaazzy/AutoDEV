@@ -80,4 +80,6 @@ export interface WorkItemOptions {
   timeoutMs: number;
   execute?: CommandExecutor;
   builtin?: BuiltinAgent;
+  /** Pause vor dem einmaligen Wiederholen eines Schritts nach einem vorübergehenden Fehler (Standard 30 s). */
+  transientRetryDelayMs?: number;
 }

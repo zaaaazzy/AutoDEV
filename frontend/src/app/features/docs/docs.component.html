@@ -219,8 +219,13 @@
             </form>
           } @else {
             <h3 class="doc-title">{{ doc.title }}</h3>
-            <article class="markdown" [innerHTML]="doc.content | markdown"></article>
-            @if (doc.kind === 'repo') {
+            <article class="markdown" [innerHTML]="doc.content | markdown" [appMermaid]="doc.content"></article>
+            @if (doc.kind === 'workflow') {
+              <p class="muted">
+                Beschreibt, wie Dev Log selbst arbeitet (gilt für alle Projekte). Quelle:
+                <code>docs/{{ doc.id.replace('workflow-', '') }}.md</code> im Dev-Log-Ordner – schreibgeschützt.
+              </p>
+            } @else if (doc.kind === 'repo') {
               <p class="muted">Spiegelt eine Datei im Projekt-Repository und ist hier schreibgeschützt.</p>
             } @else if (doc.kind === 'request') {
               <p class="muted">Protokoll einer Anfrage an den Assistenten – schreibgeschützt.</p>

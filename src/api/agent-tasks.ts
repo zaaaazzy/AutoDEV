@@ -1,6 +1,6 @@
 import type { Express, Response } from 'express';
 import type { Pool } from 'pg';
-import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import type { Principal } from './roles.js';
 
 /**
@@ -88,8 +88,9 @@ async function agentInProject(pool: Pool, agentId: string | null, slug: string):
 }
 
 /** Nachricht an den Assistenten: Titel als Überschrift, damit der Verlauf zeigt, welche Aufgabe lief. */
-export function taskMessage(task: { title: string; prompt: string }): string {
-  return `Aufgabe „${task.title}“:\n${task.prompt}`;
+export function taskMessage(task: { title: string; prompt: string }, comment = ''): string {
+  const note = comment.trim().slice(0, 2000);
+  return `Aufgabe „${task.title}“:\n${task.prompt}${note ? `\n\nHinweis dazu: ${note}` : ''}`;
 }
 
 export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
@@ -191,7 +192,14 @@ export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
           `INSERT INTO chat_messages (project_slug, role, content, status, agent_id, agent_name)
            VALUES ($1, 'user', $2, 'pending', $3, (SELECT name FROM agents WHERE id = $3))
            RETURNING id, role, content, status, created_at AS "createdAt"`,
-          [task.projectSlug, taskMessage(task), task.agentId],
+          [
+            task.projectSlug,
+            taskMessage(
+              task,
+              isRecord(request.body) && typeof request.body.comment === 'string' ? request.body.comment : '',
+            ),
+            task.agentId,
+          ],
         )
       ).rows[0];
       response.status(201).json(message);

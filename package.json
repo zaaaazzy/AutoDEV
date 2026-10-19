@@ -20,7 +20,8 @@
     "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3",
     "watchdog": "tsx src/runner/watchdog-cli.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "test:full": "tsx scripts/test-full.ts"
+    "test:full": "tsx scripts/test-full.ts",
+    "check:diagrams": "tsx scripts/check-diagrams.ts"
   },
   "dependencies": {
     "@tanstack/angular-table": "^8.21.4",
@@ -49,6 +50,7 @@
     "@types/qrcode": "1.5.6",
     "@types/web-push": "3.6.4",
     "eslint": "^10.13.0",
+    "mermaid": "11.17.2",
     "prettier": "^3.9.10",
     "rxjs": "^7.8.2",
     "tsx": "^4.20.6",

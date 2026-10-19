@@ -11,6 +11,7 @@ import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatNumber } from '../../shared/format.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
+import { QualityPanelComponent } from './quality-panel.component.js';
 
 interface Usage {
   tokens: number;
@@ -80,7 +81,7 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
 @Component({
   selector: 'app-stats',
   standalone: true,
-  imports: [DataTableComponent, DataCellDirective, HoursPipe, LocaleNumberPipe],
+  imports: [DataTableComponent, DataCellDirective, HoursPipe, LocaleNumberPipe, QualityPanelComponent],
   templateUrl: './stats.component.html',
   host: { style: 'display: contents' },
 })

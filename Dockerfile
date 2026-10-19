@@ -8,6 +8,8 @@ COPY tsconfig.json ./
 COPY angular.json ./
 COPY frontend ./frontend
 COPY src ./src
+# Register „Workflow“ der Dokumentation: liest docs/*.md zur Laufzeit.
+COPY docs ./docs
 RUN npm run build && npm prune --omit=dev
 ENV NODE_ENV=production
 USER node

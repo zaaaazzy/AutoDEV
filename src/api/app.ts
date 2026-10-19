@@ -30,7 +30,10 @@ import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
 import { FailureLimiter, sameOriginWrites, securityHeaders } from './security.js';
 import { registerStatsRoutes } from './stats.js';
+import { registerSystemRestartRoutes } from './system-restart.js';
 import { registerTestRunRoutes } from './test-runs.js';
+import { registerTimelineRoutes } from './timeline.js';
+import { registerQualityRoutes } from './quality.js';
 import { registerWorkerRoutes } from './worker.js';
 
 export type { DevLogAuth } from './auth.js';
@@ -95,8 +98,11 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerReportRoutes(app, pool);
   registerStatsRoutes(app, pool);
   registerChatRoutes(app, pool);
+  registerTimelineRoutes(app, pool);
+  registerQualityRoutes(app, pool);
   registerAgentTaskRoutes(app, pool);
   registerTestRequestRoutes(app, pool);
+  registerSystemRestartRoutes(app, pool);
   registerWorkerRoutes(app, pool);
   registerPushRoutes(app, pool);
   registerUserRoutes(app, pool, auth);

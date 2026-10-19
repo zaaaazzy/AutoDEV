@@ -52,6 +52,9 @@
       </label>
     }
   </div>
+  @if (item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
+    <app-order-question [order]="item" />
+  }
   @if (item.status === 'blocked' || item.status === 'rejected') {
     <div class="blocked-box">
       <strong>{{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}</strong>
@@ -81,12 +84,14 @@
         </p>
       }
       <div class="actions">
-        <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
-          ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
-          @if (item.retryCount) {
-            ({{ item.retryCount }})
-          }
-        </button>
+        @if (item.kind !== 'express') {
+          <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
+            ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
+            @if (item.retryCount) {
+              ({{ item.retryCount }})
+            }
+          </button>
+        }
         <button
           class="button secondary"
           type="button"
@@ -299,6 +304,7 @@
       </details>
     }
   }
+  <app-order-timeline [order]="item" />
   <details class="run-step order-brief" [open]="agentsOpen()">
     <summary>Agents</summary>
     <app-agent-workflow [order]="item" />

@@ -1,4 +1,5 @@
 import { NgClass } from '@angular/common';
+import { OrderQuestionComponent } from '../../shared/order-question.component.js';
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
@@ -24,6 +25,7 @@ import { OrderService } from './order.service.js';
     NgClass,
     FormsModule,
     OrderDetailComponent,
+    OrderQuestionComponent,
     StatusClassPipe,
     StatusLabelPipe,
     CategoryLabelPipe,

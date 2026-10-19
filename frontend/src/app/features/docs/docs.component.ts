@@ -6,6 +6,7 @@ import type { DocRevision, DocumentEntry } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { MermaidDirective } from '../../shared/mermaid.directive.js';
 import { DateTimePipe } from '../../shared/pipes.js';
 import { searchDocs } from './doc-search.js';
 import { compactDiff, lineDiff } from './line-diff.js';
@@ -23,7 +24,7 @@ function readCollapsed(): boolean {
 @Component({
   selector: 'app-docs',
   standalone: true,
-  imports: [FormsModule, MarkdownPipe, DateTimePipe],
+  imports: [FormsModule, MarkdownPipe, MermaidDirective, DateTimePipe],
   templateUrl: './docs.component.html',
   host: { style: 'display: contents' },
 })
@@ -56,6 +57,7 @@ export class DocsComponent {
   protected readonly reviewNote = signal('');
   protected readonly documentGroups: { kind: DocumentEntry['kind']; label: string }[] = [
     { kind: 'manual', label: 'Handbücher' },
+    { kind: 'workflow', label: 'Workflow' },
     { kind: 'sprint', label: 'Sprintberichte' },
     { kind: 'order', label: 'Auftrags-Dokumentation' },
     { kind: 'repo', label: 'Repository' },
@@ -116,7 +118,7 @@ export class DocsComponent {
   }
 
   protected canEdit(doc: DocumentEntry): boolean {
-    return !['repo', 'request', 'test', 'settings'].includes(doc.kind) && this.auth.can('docs');
+    return !['repo', 'request', 'test', 'settings', 'workflow'].includes(doc.kind) && this.auth.can('docs');
   }
 
   protected diff(revision: DocRevision) {

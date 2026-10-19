@@ -14,6 +14,8 @@ import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
 import { selectItems, loadWorkflow, defaultAgentCommand } from './runner-selection.js';
+import { budgetExceeded, BUDGET_TODO_SUFFIX, loadOrderLimits, loadOrderSpend } from './budget.js';
+import { setActionTodo } from './action-todo.js';
 import {
   claimRun,
   runStep,
@@ -71,15 +73,19 @@ async function resumePosition(
     )
   ).rows[0];
   if (previous?.status !== AGENT_RUN_STATUS.failed) return 0;
-  const steps = (
+  const rows = (
     await pool.query<{ agent_id: string; agent_name: string; phase: string; status: string; output: string }>(
       `SELECT agent_id, agent_name, phase, status, output FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
       [previous.id],
     )
   ).rows;
+  // Nach einer Nachbesserung im Lauf zählt je Agent nur sein letzter Schritt.
+  const latest = new Map(rows.map((row) => [row.agent_id, row]));
+  const steps = rows.length > ordered.length ? ordered.map((agent) => latest.get(agent.id)) : rows;
   let position = 0;
   while (position < ordered.length && steps[position]?.agent_id === ordered[position]?.id) {
-    const step = steps[position]!;
+    const step = steps[position];
+    if (!step) break;
     if (step.status !== AGENT_STEP_STATUS.passed) break;
     done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
     position += 1;
@@ -152,6 +158,7 @@ export async function runWorkItem(
   };
   let passed = true;
   let interrupted = false;
+  let budgetStop: string | null = null;
   // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
   // order is settled, so no other order edits files while this one is tested and committed.
   let releaseTree: (() => void) | undefined;
@@ -174,21 +181,53 @@ export async function runWorkItem(
       .join('\n\n');
     ctx.definitionOfDone = (await loadDefinitions(pool, item.projectSlug)).done;
     ctx.criteria = extractCriteria(item.description ?? '');
-    const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
-    for (const [position, agent] of ordered.entries()) {
-      if (position < resumeFrom) continue;
+    let position = await resumePosition(pool, item.id, runId, ordered, ctx.done);
+    let stepPosition = position;
+    let corrected = false;
+    const developerAt = ordered.findIndex((agent) => agent.phase === 'while_task');
+    const limits = await loadOrderLimits(pool, item.projectSlug).catch(() => ({ tokens: null, costUsd: null }));
+    const limited = limits.tokens !== null || limits.costUsd !== null;
+    while (position < ordered.length) {
+      const agent = ordered[position];
+      if (!agent) break;
+      // Kostenbremse: Ist die Grenze des Auftrags erreicht, startet kein weiterer Agent.
+      if (limited) {
+        budgetStop = budgetExceeded(await loadOrderSpend(pool, item.id), limits);
+        if (budgetStop) {
+          passed = false;
+          break;
+        }
+      }
       if (!releaseTree && changesWorkingTree(agent)) {
         releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
         // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
         ctx.sprintName = await sprintNameOf(pool, item);
         ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
       }
-      const outcome = await runStep(ctx, agent, position, ordered.length);
+      const canCorrect =
+        !corrected && !item.agentId && LOOP_BACK_ROLES.has(agent.role) && developerAt >= 0 && developerAt < position;
+      const outcome = await runStep(ctx, agent, position, ordered.length, { stepPosition, canCorrect });
+      stepPosition += 1;
       if (outcome.interrupted) interrupted = true;
+      if (!outcome.passed && outcome.correctable && !interrupted) {
+        // Einmalige Nachbesserung: ab dem Entwickler erneut, mit der Rückmeldung von Tester oder Reviewer.
+        corrected = true;
+        const feedback = ctx.done.at(-1);
+        ctx.done.splice(developerAt);
+        ctx.done.push({
+          agentName: agent.name,
+          phase: agent.phase,
+          status: 'failed',
+          output: `Rückmeldung von ${agent.name} – bitte beheben:\n${feedback?.output ?? ''}`,
+        });
+        position = developerAt;
+        continue;
+      }
       if (!outcome.passed) {
         passed = false;
         break;
       }
+      position += 1;
     }
   } catch (error) {
     passed = false;
@@ -198,6 +237,13 @@ export async function runWorkItem(
       runId,
       passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
     ]);
+    if (budgetStop) {
+      console.info(`[${item.id}] ${budgetStop}`);
+      await pool
+        .query(`UPDATE development_items SET failure = $2, auto_run = FALSE WHERE id = $1`, [item.id, budgetStop])
+        .catch(() => undefined);
+      await setActionTodo(pool, item.id, `${budgetStop} ${BUDGET_TODO_SUFFIX}`.slice(0, 160)).catch(() => undefined);
+    }
     try {
       await settleItem(ctx, passed, interrupted);
     } finally {
