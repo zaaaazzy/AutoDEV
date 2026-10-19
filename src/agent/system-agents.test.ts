@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseStoredCommand, readOnlyCommand } from './system-agents.js';
+import { asCommand, readOnlyCommand } from './system-agents.js';
 
 test('readOnlyCommand strips permission flags of the CLI presets', () => {
   assert.deepEqual(
@@ -15,9 +15,10 @@ test('readOnlyCommand strips permission flags of the CLI presets', () => {
   ]);
 });
 
-test('parseStoredCommand accepts only non-empty string arrays', () => {
-  assert.deepEqual(parseStoredCommand('["copilot","-p"]'), ['copilot', '-p']);
-  assert.equal(parseStoredCommand('kein json'), null);
-  assert.equal(parseStoredCommand('[]'), null);
-  assert.equal(parseStoredCommand(undefined), null);
+test('asCommand accepts only non-empty string arrays', () => {
+  assert.deepEqual(asCommand(['copilot', '-p']), ['copilot', '-p']);
+  assert.equal(asCommand('kein array'), null);
+  assert.equal(asCommand([]), null);
+  assert.equal(asCommand([1]), null);
+  assert.equal(asCommand(null), null);
 });

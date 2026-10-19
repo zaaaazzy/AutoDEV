@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -163,18 +164,18 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
         tag: `${FOLDER_NOTICE_KEY}-${volume}`,
       },
       { project: target.options.project },
-    ).catch(() => undefined);
+    ).catch(logged('runner-cli'));
   }
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
 async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
-  await recoverTestRequests(pool).catch(() => undefined);
+  await recoverTestRequests(pool).catch(logged('runner-cli'));
   // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
   await pool
     .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
-    .catch(() => undefined);
+    .catch(logged('runner-cli'));
   const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
     `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`,
   );
@@ -199,7 +200,7 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     .query(
       `UPDATE visionary_runs SET status = 'requested', started_at = NULL, progress = NULL WHERE status = 'running'`,
     )
-    .catch(() => undefined);
+    .catch(logged('runner-cli'));
   await pool.query(
     `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
   );
@@ -251,31 +252,31 @@ async function main(): Promise<void> {
     let startup = true;
     const beat = (): void => {
       for (const slug of known) {
-        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(() => undefined);
+        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(logged('runner-cli'));
       }
       if (known.length) startup = false;
     };
-    void publishSystemAgents(pool).catch(() => undefined);
+    void publishSystemAgents(pool).catch(logged('runner-cli'));
     // Favicons der Projekte alle 5 Minuten abgleichen (nur bei Änderung wird gespeichert).
     let faviconCheck = 0;
     // Git-Verlauf fürs Dashboard jede Minute.
     let gitCheck = 0;
     const heartbeat = setInterval(() => {
       beat();
-      void publishSystemAgents(pool).catch(() => undefined);
+      void publishSystemAgents(pool).catch(logged('runner-cli'));
       if (Date.now() - gitCheck > 60_000) {
         gitCheck = Date.now();
         for (const target of chatTargets) {
           if (target.problem) continue;
-          void syncGitGraph(pool, target.options.project, target.options.cwd).catch(() => undefined);
-          void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(() => undefined);
+          void syncGitGraph(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
+          void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
         }
       }
       if (Date.now() - faviconCheck > 5 * 60_000) {
         faviconCheck = Date.now();
         for (const target of chatTargets) {
           if (target.problem) continue;
-          void syncFavicon(pool, target.options.project, target.options.cwd).catch(() => undefined);
+          void syncFavicon(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
         }
       }
     }, 15_000);
@@ -343,7 +344,7 @@ async function main(): Promise<void> {
         if (chatActive.has(slug) || stopping) continue;
         if (target.problem) {
           // Laufwerk nur kurz weg: Anfragen bleiben wartend und laufen, sobald der Ordner wieder da ist.
-          if (!target.transient) void rejectChat(pool, slug, target.problem).catch(() => undefined);
+          if (!target.transient) void rejectChat(pool, slug, target.problem).catch(logged('runner-cli'));
           continue;
         }
         if (!estimateActive.has(slug)) {
@@ -434,7 +435,7 @@ async function main(): Promise<void> {
       void processRestart(pool, INSTALL_ROOT, busy)
         .then(async (result) => {
           if (result === 'failed') {
-            const state = await readRestart(pool).catch(() => null);
+            const state = await readRestart(pool).catch(logged('runner-cli', null));
             await sendPush(pool, {
               title: '⚠ AIdeation Neustart fehlgeschlagen',
               body: state?.message ?? 'Details unter Assistent → Aktionen → System.',

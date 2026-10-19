@@ -5,6 +5,9 @@ import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
 import { currentStep, hotp } from './totp.js';
 
+// Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
+delete process.env.DEV_LOG_PROJECT_ROOTS;
+
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
 
 async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {

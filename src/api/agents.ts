@@ -1,8 +1,9 @@
+import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
 import { seedDefaultActions } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
-import { RESTRICTED_ROLES, SYSTEM_ROLES, parseStoredCommand, systemAgents } from '../agent/system-agents.js';
+import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import {
@@ -137,8 +138,8 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
     ],
   );
   // Neue Projekte bekommen mit den Agents auch die Standard-Aktionen des Testers.
-  await seedDefaultActions(pool, slug).catch(() => undefined);
-  await materializeAgentCommands(pool, slug).catch(() => undefined);
+  await seedDefaultActions(pool, slug).catch(logged('agents'));
+  await materializeAgentCommands(pool, slug).catch(logged('agents'));
 }
 
 export function registerAgentRoutes(app: Express, pool: Pool): void {
@@ -147,22 +148,17 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       .rows[0];
     const models = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ollama_models'`))
       .rows[0];
-    const chosen = await pool.query<{ key: string; value: string }>(
-      `SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`,
-    );
     // Neue Rollen erscheinen sofort, auch wenn der Worker noch die ältere Liste veröffentlicht hat.
     const published = (row ? JSON.parse(row.value) : []) as { role: string; model: string }[];
     const agents = systemAgents().map((agent) => published.find((item) => item.role === agent.role) ?? agent);
-    const commands = await pool.query<{ key: string; value: string }>(
-      `SELECT key, value FROM app_settings WHERE key LIKE 'command:%' OR key LIKE 'allow_tools:%'`,
-    );
+    const settings = await loadSystemSettings(pool);
     response.json({
       agents: agents.map((agent) => ({
         ...agent,
-        model: chosen.rows.find((item) => item.key === `model:${agent.role}`)?.value ?? agent.model,
-        command: parseStoredCommand(commands.rows.find((item) => item.key === `command:${agent.role}`)?.value),
+        model: settings.get(agent.role)?.model ?? agent.model,
+        command: settings.get(agent.role)?.command ?? null,
         restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
-        allowTools: commands.rows.some((item) => item.key === `allow_tools:${agent.role}` && item.value === 'true'),
+        allowTools: settings.get(agent.role)?.allowTools ?? false,
       })),
       models: models ? JSON.parse(models.value) : [],
     });
@@ -185,34 +181,25 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       response.status(400).json({ message: 'Ungültige Rolle, ungültiges Modell oder ungültiger Befehl.' });
       return;
     }
-    if (command !== undefined) {
-      if (command === null) await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`command:${role}`]);
-      else
-        await pool.query(
-          `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-          [`command:${role}`, JSON.stringify(command)],
-        );
-    }
-    if (allowTools === true)
-      await pool.query(
-        `INSERT INTO app_settings (key, value) VALUES ($1, 'true') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        [`allow_tools:${role}`],
-      );
-    else if (allowTools === false) await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`allow_tools:${role}`]);
-    // Without a model field only the command changes; an empty model resets the choice to the worker default.
-    if (model === undefined) {
-      response.json({ role, command, allowTools });
-      return;
-    }
-    if (model) {
-      await pool.query(
-        `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        [`model:${role}`, model],
-      );
-    } else {
-      await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`model:${role}`]);
-    }
-    response.json({ role, model });
+    // Only the given fields change; an empty model resets the choice to the worker default.
+    const saved = await pool.query<{ model: string | null; command: string[] | null; allowTools: boolean }>(
+      `INSERT INTO system_agent_settings (role, model, command, allow_tools)
+       VALUES ($1, NULLIF($2, ''), $3::jsonb, COALESCE($4, FALSE))
+       ON CONFLICT (role) DO UPDATE SET
+         model = CASE WHEN $5 THEN EXCLUDED.model ELSE system_agent_settings.model END,
+         command = CASE WHEN $6 THEN EXCLUDED.command ELSE system_agent_settings.command END,
+         allow_tools = COALESCE($4, system_agent_settings.allow_tools)
+       RETURNING model, command, allow_tools AS "allowTools"`,
+      [
+        role,
+        model ?? null,
+        command ? JSON.stringify(command) : null,
+        allowTools ?? null,
+        model !== undefined,
+        command !== undefined,
+      ],
+    );
+    response.json({ role, ...saved.rows[0] });
   });
 
   // Workflow order: phase (pre, while, after), then position.
@@ -287,8 +274,8 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       ],
     );
     if (result.rows.length) {
-      await seedDefaultActions(pool, slug).catch(() => undefined);
-      await materializeAgentCommands(pool, slug).catch(() => undefined);
+      await seedDefaultActions(pool, slug).catch(logged('agents'));
+      await materializeAgentCommands(pool, slug).catch(logged('agents'));
     }
     // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
     await pool.query(

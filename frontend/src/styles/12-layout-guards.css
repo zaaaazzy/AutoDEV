@@ -1,0 +1,218 @@
+/* Breitenschutz, Kennzeichnungen, kompakte Ausgaben */
+/*
+ * iPhone: Safari zoomt beim Antippen von Feldern unter 16 px hinein; danach lässt sich die Seite seitlich schieben
+ * und rechts fehlt Rand. Auf Touch-Geräten daher mindestens 16 px, und seitliches Verschieben ist abgeschnitten.
+ */
+@media (pointer: coarse), (max-width: 720px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Nichts darf die Seite breiter machen: Felder und Rasterzellen dürfen schrumpfen, seitliches Verschieben ist gesperrt. */
+input,
+select,
+textarea {
+  max-width: 100%;
+}
+
+.chat-form input,
+.panel,
+.view-grid > *,
+.summary-grid > * {
+  min-width: 0;
+}
+
+html {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+body {
+  overflow-x: clip;
+}
+
+/* iOS-Safari ignoriert overflow am Dokument beim Wischen: Inhalt selbst abschneiden und nur senkrechtes Wischen
+   (plus Zoomen) erlauben. Waagrecht scrollbare Bereiche (Tabellen-Filter) sind eigene Scroll-Container und
+   bleiben wischbar. */
+.app-shell,
+.app-shell > main,
+.content {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+@media (max-width: 720px) {
+  html,
+  body {
+    touch-action: pan-y pinch-zoom;
+  }
+}
+
+
+/* Kennzeichnung, welcher Agent eine Nachricht übernimmt bzw. beantwortet */
+.chat-agent-name {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.chat-msg.mine {
+  white-space: normal;
+}
+
+.chat-msg.mine .chat-text {
+  white-space: pre-wrap;
+}
+
+.agent-task-agent {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e8f1ec;
+  color: var(--green);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+
+/* Aktion notwendig (blockiert): wartet auf einen Menschen – überall orange */
+.status-blocked {
+  background: #fdf1e0;
+  color: #a0610d;
+}
+
+a.app-link {
+  color: var(--green);
+  text-decoration: underline;
+}
+
+/* Folgeauftrag: Bezug auf einen erledigten Auftrag */
+.follow-up {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+
+.follow-up-form {
+  flex: 1 1 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafbf8;
+}
+
+.follow-up-ref {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--green);
+  border-radius: 6px;
+  background: #eef5f0;
+  font-size: 0.9rem;
+}
+
+/* Kompakte Agent- und Testausgabe in Aufträgen */
+.order-brief .markdown,
+.order-panel .markdown {
+  padding: 10px 12px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.order-brief .markdown :is(p, ul, ol, pre),
+.order-panel .markdown :is(p, ul, ol, pre) {
+  margin: 0 0 8px;
+}
+
+.order-brief .markdown :is(h1, h2, h3, h4),
+.order-panel .markdown :is(h1, h2, h3, h4) {
+  margin: 12px 0 6px;
+  font-size: 14px;
+}
+
+.markdown code.path,
+.markdown .cmd-line code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #eef1ec;
+  color: #2c4a3a;
+}
+
+.markdown .cmd-line {
+  margin: 4px 0;
+}
+
+.markdown a.ext-link {
+  color: #2f6fb0;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.test-step {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #2b9a66;
+  border-radius: 8px;
+  background: #fafbf8;
+  font-size: 13px;
+}
+
+.test-step.failed {
+  border-left-color: #d6453d;
+  background: #fdf5f3;
+}
+
+.test-icon {
+  flex: none;
+  font-weight: 700;
+  color: #2b9a66;
+}
+
+.test-step.failed .test-icon {
+  color: #d6453d;
+}
+
+.test-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.test-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.test-head code {
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+
+.test-summary {
+  color: var(--muted);
+}
+
+.test-raw summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.test-raw pre {
+  max-height: 260px;
+  margin: 6px 0 0;
+  overflow: auto;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+

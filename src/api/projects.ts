@@ -1,3 +1,4 @@
+import { encryptSecret, isEncrypted } from '../core/secrets.js';
 import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
 import type { Express } from 'express';
@@ -14,6 +15,24 @@ import {
   validText,
 } from '../core/validation.js';
 import { REVIEW_MODES } from '../core/status.js';
+
+/** With DEV_LOG_SECRET_KEY set, database access stored before encryption existed is encrypted once at start. */
+export async function encryptProjectSecrets(pool: Pool): Promise<number> {
+  if (!process.env.DEV_LOG_SECRET_KEY?.trim()) return 0;
+  const rows = (
+    await pool.query<{ slug: string; url: string }>(
+      'SELECT slug, database_url AS url FROM projects WHERE database_url IS NOT NULL',
+    )
+  ).rows.filter((row) => !isEncrypted(row.url));
+  for (const row of rows) {
+    await pool.query('UPDATE projects SET database_url = $2 WHERE slug = $1 AND database_url = $3', [
+      row.slug,
+      encryptSecret(row.url),
+      row.url,
+    ]);
+  }
+  return rows.length;
+}
 
 export function registerProjectRoutes(app: Express, pool: Pool): void {
   app.get('/api/projects', async (_request, response) => {
@@ -150,7 +169,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       if (url && targetsDevLogDatabase(url)) {
         return fail('Der Zugang darf nicht auf die AIdeation-Datenbank zeigen.');
       }
-      values.push(url || null);
+      values.push(url ? encryptSecret(url) : null);
       sets.push(`database_url = $${values.length}`);
     }
     if (body.repository !== undefined) {

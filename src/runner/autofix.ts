@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
@@ -103,12 +104,12 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
         `Agent „${agentName}“ hat angehalten.\n\n**Vermerk:** ${rule ? 'Projektregel' : 'Umgebung'} – ${todo}.\n\n${detail}`,
       ],
     );
-    await setActionTodo(pool, item.id, todo.slice(0, 160)).catch(() => undefined);
+    await setActionTodo(pool, item.id, todo.slice(0, 160)).catch(logged('autofix'));
     return;
   }
   // Wartet der Auftrag auf einen Menschen, heisst er „Aktion notwendig“ statt „fehlgeschlagen“.
   const todo = humanActionFor(detail);
-  if (todo) await setActionTodo(pool, item.id, todo).catch(() => undefined);
+  if (todo) await setActionTodo(pool, item.id, todo).catch(logged('autofix'));
   const auto =
     (
       await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [

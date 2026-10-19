@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Express } from 'express';
 import type { Pool } from 'pg';
 import { DEFAULT_DEFINITION_OF_DONE, DEFAULT_DEFINITION_OF_READY } from '../runner/acceptance.js';
@@ -53,7 +54,7 @@ export function registerAcceptanceRoutes(app: Express, pool: Pool): void {
         [request.params.id, body.kind, body.position],
       );
       if (!result.rowCount) return void response.status(404).json({ message: 'Abnahmepunkt nicht gefunden.' });
-      await refreshAcceptanceTodo(pool, request.params.id).catch(() => undefined);
+      await refreshAcceptanceTodo(pool, request.params.id).catch(logged('acceptance'));
       response.json({ ok: true });
     } catch (error) {
       next(error);

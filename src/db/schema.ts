@@ -856,4 +856,24 @@ export const SCHEMA = `
 
   -- Sprint-Review: alle Aufträge durch → wartet auf das Go („Live schalten“ = nach main mergen und deployen).
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS review_ready_at TIMESTAMPTZ;
+
+  -- Dashboard-Wahl der Systemagents (Modell, externe CLI, volle Werkzeugrechte) statt loser app_settings-Schlüssel.
+  -- Die Übernahme alter Schlüssel ist idempotent: Danach sind sie gelöscht, ein späterer Start findet nichts mehr.
+  CREATE TABLE IF NOT EXISTS system_agent_settings (
+    role TEXT PRIMARY KEY,
+    model TEXT,
+    command JSONB CHECK (command IS NULL OR jsonb_typeof(command) = 'array'),
+    allow_tools BOOLEAN NOT NULL DEFAULT FALSE
+  );
+  INSERT INTO system_agent_settings (role, model, command, allow_tools)
+  SELECT r.role,
+         (SELECT NULLIF(btrim(value), '') FROM app_settings WHERE key = 'model:' || r.role),
+         (SELECT CASE WHEN pg_input_is_valid(value, 'jsonb') THEN
+                   CASE WHEN jsonb_typeof(value::jsonb) = 'array' THEN value::jsonb END END
+            FROM app_settings WHERE key = 'command:' || r.role),
+         COALESCE((SELECT value = 'true' FROM app_settings WHERE key = 'allow_tools:' || r.role), FALSE)
+    FROM (SELECT DISTINCT split_part(key, ':', 2) AS role FROM app_settings
+           WHERE key ~ '^(model|command|allow_tools):') r
+  ON CONFLICT (role) DO NOTHING;
+  DELETE FROM app_settings WHERE key ~ '^(model|command|allow_tools):';
 `;

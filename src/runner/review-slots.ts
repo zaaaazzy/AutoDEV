@@ -1,3 +1,5 @@
+import { decryptSecret } from '../core/secrets.js';
+import { logged } from '../core/log.js';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
@@ -114,7 +116,13 @@ export class ReviewSlots {
       Array.isArray(row.command) && row.command.every((part) => typeof part === 'string')
         ? (row.command as string[])
         : [];
-    return { folder: row.folder, command, databaseUrl: row.databaseUrl };
+    let databaseUrl: string | null = null;
+    try {
+      databaseUrl = row.databaseUrl ? decryptSecret(row.databaseUrl) : null;
+    } catch (error) {
+      logged(`database-url:${slug}`)(error);
+    }
+    return { folder: row.folder, command, databaseUrl };
   }
 
   /** Wartende Aufträge (Review-Freigabe) bekommen automatisch einen freien Container. */

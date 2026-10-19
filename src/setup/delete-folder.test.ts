@@ -6,6 +6,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { deleteProjectFolder } from './setup-jobs.js';
 
+// Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
+delete process.env.DEV_LOG_PROJECT_ROOTS;
+
 test('deletes a project folder but refuses shallow paths, symlinks and AIdeation itself', async () => {
   const base = await mkdtemp(join(tmpdir(), 'devlog-delete-'));
   const project = join(base, 'projekt');

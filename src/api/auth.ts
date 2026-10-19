@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { Express, Request, RequestHandler, Response } from 'express';
@@ -84,9 +85,13 @@ function setSessionCookie(request: Request, response: Response, token: string, m
 
 /** Lädt den TOTP-Schlüssel des Systemadministrators (fehlt die Tabelle noch, gilt: kein zweiter Faktor). */
 export async function loadTotpSecret(pool: Pool): Promise<string | null> {
+  // Only a missing table (fresh database) means no second factor; any other error must not switch it off.
   const result = await pool
     .query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [TOTP_KEY])
-    .catch(() => null);
+    .catch((error: { code?: string }) => {
+      if (error.code === '42P01') return null;
+      throw error;
+    });
   return result?.rows[0]?.value ?? null;
 }
 
@@ -221,7 +226,7 @@ async function findAccount(
           WHERE lower(username) = lower($1) AND active`,
         [username.trim()],
       )
-      .catch(() => ({ rows: [] }))
+      .catch(logged('auth', { rows: [] }))
   ).rows[0];
   if (!user) {
     dummyHash ??= hashPassword('dummy-password-for-timing');
@@ -295,7 +300,7 @@ export function registerLoginRoutes(app: Express, pool: Pool, auth: DevLogAuth, 
       if (account.principal.id) {
         await pool
           .query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [account.principal.id])
-          .catch(() => undefined);
+          .catch(logged('auth'));
       }
       setSessionCookie(request, response, token, SESSION_DAYS * 24 * 3600);
       response.json({ authenticated: true, user: account.principal });
