@@ -3,6 +3,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import {
+  budgetHold,
   type BuiltinAgent,
   buildInvocation,
   buildPrompt,
@@ -780,4 +781,38 @@ test('ein Auftrag scheitert unerwartet (z. B. gelöscht): die übrigen ausgewäh
     ['passed', 'failed', 'passed'],
   );
   assert.equal(between, 2);
+});
+
+test('Budget mitten im Zyklus erreicht: ein Auftrag wartet sichtbar, die übrigen bleiben eingeplant', async () => {
+  let spent = 0;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('FROM budgets')) return { rows: [{ period: 'day', maxTokens: '1000', maxCostUsd: null }] };
+      if (sql.includes('to_char(CURRENT_DATE')) return { rows: [{ key: '2026-10-20', since: '2026-10-20' }] };
+      if (sql.includes('FROM agent_run_steps s JOIN agent_runs r'))
+        return { rows: [{ tokens: String(spent), cost: '0' }] };
+      if (sql.includes("SET status = 'blocked'")) return { rows: [{ id: values[0] }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const items = ['a', 'b', 'c'].map((id) => ({ ...item, id }));
+  const ran: string[] = [];
+  const results = await runSelectedItems(
+    items,
+    async (current) => {
+      ran.push(current.id);
+      spent = 1500; // Auftrag a verbraucht das Tageslimit.
+      return 'passed';
+    },
+    undefined,
+    budgetHold(pool, 'mainty'),
+  );
+  assert.deepEqual(ran, ['a']);
+  assert.deepEqual(results, [{ itemId: 'a', result: 'passed' }]);
+  const blocked = queries
+    .filter((query) => query.sql.includes("SET status = 'blocked'"))
+    .map((query) => query.values[0]);
+  assert.deepEqual(blocked, ['b'], 'nur der nächste Auftrag wartet, c bleibt eingeplant');
 });

@@ -378,15 +378,33 @@ async function goLive(pool: Pool, project: string, cwd: string, execute?: Comman
  * Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent). Scheitert
  * einer unerwartet (z. B. inzwischen gelöscht), laufen die übrigen trotzdem.
  */
+/**
+ * Tages- oder Sprintbudget erreicht? Dann wartet `item` mit „Aktion notwendig: Budget“ (höchstens einer je Projekt,
+ * siehe holdForBudget) und es startet kein weiterer Auftrag.
+ */
+export function budgetHold(pool: Pool, project: string): (item: WorkItem) => Promise<boolean> {
+  return async (item) => {
+    const exhausted = await projectBudgetExceeded(pool, project).catch(logged('runner', null));
+    if (!exhausted) return false;
+    await holdForBudget(pool, item, exhausted).catch(logged('runner'));
+    return true;
+  };
+}
+
 export async function runSelectedItems(
   items: WorkItem[],
   run: (item: WorkItem) => Promise<string>,
   between: () => Promise<unknown> = async () => undefined,
+  heldForBudget: (item: WorkItem) => Promise<boolean> = async () => false,
 ): Promise<{ itemId: string; result: string }[]> {
   const results: { itemId: string; result: string }[] = [];
   for (const item of items) {
     if (isShuttingDown()) break;
-    if (results.length) await between().catch(logged('runner'));
+    if (results.length) {
+      await between().catch(logged('runner'));
+      // Budget während des Zyklus erreicht: nur der nächste Auftrag wartet sichtbar, die übrigen bleiben eingeplant.
+      if (await heldForBudget(item)) break;
+    }
     const result = await run(item).catch((error: unknown) => {
       console.error(`Auftrag ${item.id} abgebrochen:`, error);
       return AGENT_RUN_STATUS.failed;
@@ -440,11 +458,8 @@ export async function runWorkflow(
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
   }
   // Tages- oder Sprintbudget erreicht: kein neuer Lauf. Der nächste Auftrag zeigt „Aktion notwendig: Budget“.
-  const exhausted = await projectBudgetExceeded(pool, options.project).catch(logged('runner', null));
-  if (exhausted && items[0]) {
-    await holdForBudget(pool, items[0], exhausted).catch(logged('runner'));
-    return results;
-  }
+  const held = budgetHold(pool, options.project);
+  if (items[0] && (await held(items[0]))) return results;
   results.push(
     ...(await runSelectedItems(
       items,
@@ -455,6 +470,7 @@ export async function runWorkflow(
         syncSprintToGit(pool, options.project, options.cwd, execute, () =>
           goLive(pool, options.project, options.cwd, execute),
         ),
+      held,
     )),
   );
   await syncRepoDocs(pool, options.project, options.cwd);

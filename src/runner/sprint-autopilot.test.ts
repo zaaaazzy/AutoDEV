@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { sprintAutopilot } from './sprint-autopilot.js';
+import { sprintAutopilot, sprintSettled } from './sprint-autopilot.js';
 
 // Montag, 19.10.2026 (Ortszeit): 10:00 liegt in den Arbeitszeiten Mo–Fr 08:00–18:00, 22:00 nicht.
 const MONDAY_10 = new Date(2026, 9, 19, 10, 0);
@@ -63,4 +63,16 @@ test('Autopilot pausiert nach gescheitertem Merge und startet keinen Sprint', as
   const { pool, started } = fakePool({ id: 'old', name: 'Sprint 1', sync: 'failed', message: 'Merge-Konflikt' });
   assert.equal(await sprintAutopilot(pool, 'demo', MONDAY_10), 'paused');
   assert.equal(started(), false);
+});
+
+test('Sprint nicht fertig, solange ein Auftrag wegen Budget wartet (er läuft von selbst weiter)', () => {
+  const budget = { status: 'blocked', actionTodo: 'Budget erreicht: Tageslimit …', budgetBlocked: 'day' };
+  assert.equal(sprintSettled([{ status: 'done', actionTodo: null }, budget]), false);
+  assert.equal(
+    sprintSettled([
+      { status: 'done', actionTodo: null },
+      { ...budget, budgetBlocked: null },
+    ]),
+    true,
+  );
 });
