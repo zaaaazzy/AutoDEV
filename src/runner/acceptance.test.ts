@@ -46,3 +46,14 @@ test('points only a human can check do not fail the acceptance', () => {
   assert.deepEqual(acceptanceProblems(result, ['A', 'Google-Login'], ['Tests grün']), []);
   assert.deepEqual(manualChecks(result, ['A', 'Google-Login']), ['Google-Login – Redirect-URI bei Google anpassen']);
 });
+
+test('the last acceptance block wins over an interim one', () => {
+  const output = [
+    '@@ACCEPTANCE {"criteria":[{"nr":1,"met":true}],"done":[{"nr":1,"met":true}]}',
+    'Nachprüfung: Kriterium 1 doch nicht erfüllt.',
+    '@@ACCEPTANCE {"criteria":[{"nr":1,"met":false,"note":"Fehlt"}],"done":[{"nr":1,"met":true}]}',
+  ].join('\n');
+  const result = parseAcceptance(output, 1, 1);
+  assert.equal(result?.criteria[0]?.met, false);
+  assert.equal(stripAcceptance(output), '\nNachprüfung: Kriterium 1 doch nicht erfüllt.');
+});

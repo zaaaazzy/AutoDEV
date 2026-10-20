@@ -40,7 +40,7 @@ export interface Checked {
   note: string;
 }
 
-const MARKER = /^@@ACCEPTANCE\s+(\{.*\})\s*$/m;
+const MARKER = /^@@ACCEPTANCE\s+(\{.*\})\s*$/gm;
 
 /** Ergebnis je Prüfpunkt als @@CHECK-Zeile (Agent-Prüfung offener Punkte, visuelle Prüfung, KI-Urteil). */
 export interface CheckResult {
@@ -113,7 +113,8 @@ export function parseAcceptance(
   criteriaCount: number,
   doneCount: number,
 ): { criteria: Checked[]; done: Checked[] } | null {
-  const json = MARKER.exec(output)?.[1];
+  // Die Antwort endet mit dem Urteil: bei mehreren Blöcken zählt der letzte.
+  const json = [...output.matchAll(MARKER)].at(-1)?.[1];
   if (!json) return null;
   try {
     const data = JSON.parse(json) as { criteria?: unknown; done?: unknown };
