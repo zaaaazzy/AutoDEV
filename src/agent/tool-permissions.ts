@@ -214,8 +214,10 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     id: 'git',
     label: 'Git lesen und aktualisieren',
     // Kein „git clone“: mit -u/--upload-pack führt es beliebige Befehle aus und schreibt ausserhalb des Projekts.
-    description: 'status, diff, log, fetch, pull --ff-only, checkout – kein Push, kein Clone.',
-    rules: prefixRules(['git status', 'git diff', 'git log', 'git fetch', 'git pull --ff-only', 'git checkout']),
+    // Kein „git checkout“: Branch und Commits eines Auftrags verwaltet AIdeation; ein Checkout würde dem laufenden
+    // Auftrag den Branch wechseln oder seine offenen Änderungen verwerfen.
+    description: 'status, diff, log, fetch, pull --ff-only – kein Checkout, kein Push, kein Clone.',
+    rules: prefixRules(['git status', 'git diff', 'git log', 'git fetch', 'git pull --ff-only']),
   },
   {
     id: 'docker',
@@ -255,6 +257,8 @@ const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
  */
 // pre_sprint: Agents „Vor dem Sprint“ planen und prüfen nur (ihre Änderungen würden sonst im ersten Auftrag landen).
 export const READ_ONLY_ROLES = new Set(['visionary', 'analyst', 'pre_sprint']);
+/** Rolle, deren (lesende) Rechte ein Agent bekommt, der vorübergehend nur lesen darf. */
+export const READ_ONLY_PERMISSION_ROLE = 'analyst';
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {

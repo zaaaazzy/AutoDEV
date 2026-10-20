@@ -35,6 +35,8 @@ export interface OllamaAgentOptions {
   files?: GuardPolicy;
   /** Freigegebene Befehle des Agents (Shell und Datenbank). */
   commands?: string[];
+  /** Nur lesen, auch wenn die Rolle sonst schreiben darf. */
+  readOnly?: boolean;
 }
 
 const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
@@ -50,7 +52,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl ?? patientFetch;
   // Nur lesende Rollen (z. B. Visionär) bekommen nie Schreib-, Befehls- oder Datenbank-Werkzeuge.
-  const canWrite = WRITE_ROLES.has(options.role) && !READ_ONLY_ROLES.has(options.role);
+  const canWrite = WRITE_ROLES.has(options.role) && !READ_ONLY_ROLES.has(options.role) && !options.readOnly;
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns =
     options.maxTurns ??
@@ -58,7 +60,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const context: ToolContext = {
     cwd: options.cwd,
     canWrite,
-    canManageServices: options.role === 'assistant',
+    canManageServices: options.role === 'assistant' && !options.readOnly,
     databaseUrl: canWrite ? options.databaseUrl : null,
     files: options.files,
     commands: options.commands,

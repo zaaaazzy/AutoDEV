@@ -813,7 +813,15 @@ export async function runStep(
   });
   const commitStep = async (): Promise<void> => {
     if (!ctx.branch || cancelled) return;
-    const commit = await commitAgentStep(options.cwd, item, agent.name, ctx.sprintName ?? null, passed, execute);
+    const commit = await commitAgentStep(
+      options.cwd,
+      item,
+      agent.name,
+      ctx.sprintName ?? null,
+      passed,
+      execute,
+      ctx.branch.branch,
+    );
     if (commit) await logEvent(pool, stepId, `Commit ${commit} (Änderungen von ${agent.name})`);
   };
   // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
