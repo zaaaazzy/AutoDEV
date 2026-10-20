@@ -242,8 +242,24 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Not found.' });
       return;
     }
-    const result = await pool.query('DELETE FROM sprints WHERE id = $1 RETURNING id', [request.params.id]);
+    // Nur geplante oder abgeschlossene Sprints ohne laufende Aufträge und ohne laufende Git-Sicherung:
+    // sonst verlieren laufende Aufträge ihren Sprint bzw. ein offener PR bleibt ohne Sprint zurück.
+    const result = await pool.query(
+      `DELETE FROM sprints s WHERE id = $1 AND status IN ('planned', 'completed')
+          AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))
+          AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status = 'in_progress')
+        RETURNING id`,
+      [request.params.id],
+    );
     if (!result.rows[0]) {
+      const exists = (await pool.query('SELECT 1 FROM sprints WHERE id = $1', [request.params.id])).rows[0];
+      if (exists) {
+        response.status(409).json({
+          message:
+            'Nur geplante oder abgeschlossene Sprints ohne laufende Aufträge und Git-Sicherung lassen sich löschen.',
+        });
+        return;
+      }
       response.status(404).json({ message: 'Sprint not found.' });
       return;
     }

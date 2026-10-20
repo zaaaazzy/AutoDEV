@@ -429,6 +429,36 @@ test('sprint status changes follow the transition table and are checked atomical
   });
 });
 
+test('deletes only planned or completed sprints without running work', async () => {
+  // DELETE trifft keine Zeile (aktiv, Review, laufende Aufträge oder Git-Sicherung), der Sprint existiert aber.
+  const blocked: { sql: string; values: unknown[] }[] = [];
+  const blockedPool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      blocked.push({ sql, values });
+      return { rows: sql.startsWith('SELECT 1 FROM sprints') ? [{ '?column?': 1 }] : [] };
+    },
+  } as unknown as Pool;
+  await withServer(blockedPool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
+    assert.equal(response.status, 409);
+    assert.match(blocked[0]?.sql ?? '', /status IN \('planned', 'completed'\)/);
+    assert.match(blocked[0]?.sql ?? '', /in_progress/);
+    assert.match(blocked[0]?.sql ?? '', /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+  });
+
+  const missing = recordingPool([]);
+  await withServer(missing.pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
+    assert.equal(response.status, 404);
+  });
+
+  const deletable = recordingPool([{ id: SPRINT_ID }]);
+  await withServer(deletable.pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
+    assert.equal(response.status, 204);
+  });
+});
+
 test('new sprints can only be created as planned', async () => {
   const { pool, queries } = recordingPool([{ id: SPRINT_ID }]);
   await withServer(pool, async (baseUrl) => {
