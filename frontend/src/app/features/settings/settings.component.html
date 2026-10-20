@@ -23,13 +23,26 @@
           }
         </div>
         <label class="wide"
-          >Testbefehle (ein Befehl pro Zeile)<textarea
+          >Testbefehle (Live schalten, ein Befehl pro Zeile)<textarea
             name="testCommands"
             [(ngModel)]="settings.testCommands"
             rows="3"
             placeholder="npm run build&#10;npm test"
           ></textarea>
         </label>
+        <label class="wide"
+          >Testbefehle je Auftrag (ein Befehl pro Zeile)<textarea
+            name="orderTestCommands"
+            [(ngModel)]="settings.orderTestCommands"
+            rows="3"
+            placeholder="npm run typecheck&#10;npx tsx --test &#123;tests&#125;"
+          ></textarea>
+        </label>
+        <p class="muted wide">
+          Laufen im Tester-Schritt jedes Auftrags. &#123;tests&#125; = Testdateien zu den geänderten Dateien,
+          &#123;files&#125; = geänderte Dateien. Leer = wie Testbefehle. Die Testbefehle oben laufen nur noch beim Live
+          schalten.
+        </p>
         <label class="wide"
           >Projektbeschreibung<textarea
             name="description"

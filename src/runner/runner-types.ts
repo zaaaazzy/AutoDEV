@@ -54,6 +54,8 @@ export type BuiltinAgent = (context: {
   onProgress?: (message: string) => void;
   /** Vom Modell-Routing gewähltes Ollama-Modell (sonst das Modell der Rolle). */
   model?: string;
+  /** Nur Tester: vom Auftrag geänderte Dateien (undefined = unbekannt, dann laufen die Testbefehle des Projekts). */
+  changedFiles?: string[];
 }) => Promise<CommandResult>;
 
 export interface WorkflowAgent {

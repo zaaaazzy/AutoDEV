@@ -13,6 +13,8 @@ export interface Project {
   repository: string;
   gitRemote?: string | null;
   testCommands?: string[][];
+  /** Testbefehle je Auftrag (Tester-Schritt, mit {tests}/{files}); null = wie testCommands. */
+  orderTestCommands?: string[][] | null;
   deployCommands?: string[][] | null;
   deployStatus?: string | null;
   description?: string;
@@ -203,6 +205,8 @@ export interface DevelopmentItem extends Estimate {
   /** Optische Freigabe im Reiter „Ansicht“: wann und von wem. */
   visualApprovedAt?: string | null;
   visualApprovedBy?: string | null;
+  /** Vom Auftrag geänderte Dateien (gegenüber der Basis, nach jedem Agent-Schritt aktualisiert). */
+  changedFiles?: string[];
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
   fixStatus?: string | null;

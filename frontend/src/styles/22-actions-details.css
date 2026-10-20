@@ -326,3 +326,18 @@ input.dt-select:disabled {
     justify-content: center;
   }
 }
+
+/* Geänderte Dateien eines Auftrags: kompakte Liste in Monospace. */
+.changed-file-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font:
+    12px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.changed-file-list li {
+  overflow-wrap: anywhere;
+}

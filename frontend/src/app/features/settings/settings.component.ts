@@ -42,6 +42,7 @@ export class SettingsComponent {
   protected settings = {
     repository: '',
     testCommands: '',
+    orderTestCommands: '',
     deployCommands: '',
     gitRemote: '',
     description: '',
@@ -121,6 +122,7 @@ export class SettingsComponent {
           repository: this.settings.repository.trim(),
           gitRemote: this.settings.gitRemote.trim(),
           testCommands: this.settings.testCommands,
+          orderTestCommands: this.settings.orderTestCommands,
           deployCommands: this.settings.deployCommands,
           description: this.settings.description,
           guidelines: this.settings.guidelines,
@@ -210,6 +212,7 @@ export class SettingsComponent {
       githubRequireApproval: project?.githubRequireApproval ?? false,
       deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),
       testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
+      orderTestCommands: (project?.orderTestCommands ?? []).map((command) => command.join(' ')).join('\n'),
     };
   }
 

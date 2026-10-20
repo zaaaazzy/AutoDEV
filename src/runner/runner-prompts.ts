@@ -12,6 +12,9 @@ const PREVIOUS_OUTPUT_CHARS = 1_500;
 const MANUAL_TITLE = 'Anwendungshandbuch';
 const USER_MANUAL_TITLE = 'Benutzerhandbuch';
 const MANUAL_PROMPT_CHARS = 12_000;
+/** Der Entwickler listet am Ende jede geänderte Datei auf (der Tester-Schritt testet nur diese Dateien). */
+export const CHANGED_FILES_INSTRUCTIONS = `## Geänderte Dateien melden
+Beende deine Antwort mit dem Abschnitt „## Geänderte Dateien“ und liste darin jede Datei, die du angelegt, geändert oder gelöscht hast – eine Zeile pro Datei im Format \`- pfad/zur/datei\` (relativ zum Projektordner, gelöschte mit „(gelöscht)“). Lass keine Datei weg: Der Tester-Schritt testet nur die geänderten Dateien.`;
 
 export function buildPrompt(
   agent: WorkflowAgent,
@@ -56,6 +59,7 @@ export function buildPrompt(
       ? acceptanceInstructions(extras.criteria ?? [], extras.definitionOfDone)
       : '',
     agent.role === 'reviewer' ? reviewInstructions(extras.baseBranch ?? null) : '',
+    agent.role === 'developer' ? CHANGED_FILES_INSTRUCTIONS : '',
     HANDOFF_RULE,
   ]
     .filter(Boolean)

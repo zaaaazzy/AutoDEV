@@ -154,3 +154,13 @@ export async function loadTestCommands(
     ]
   );
 }
+
+/** Testbefehle je Auftrag (Tester-Schritt, mit {tests}/{files}); null = nicht gesetzt, dann gelten die Testbefehle. */
+export async function loadOrderTestCommands(pool: Pool, project: string): Promise<string[][] | null> {
+  const stored = (
+    await pool.query<{ commands: unknown }>('SELECT order_test_commands AS commands FROM projects WHERE slug = $1', [
+      project,
+    ])
+  ).rows[0]?.commands;
+  return parseTestCommands(stored);
+}

@@ -1056,4 +1056,9 @@ export const SCHEMA = `
     CHECK (routing_strong_command IS NULL OR jsonb_typeof(routing_strong_command) = 'array');
   -- Prompt-Protokoll der Systemagents (Auftragsautor, Chat, Visionär …), gekürzt.
   ALTER TABLE agent_usage ADD COLUMN IF NOT EXISTS prompt TEXT;
+  -- Testbefehle je Auftrag (Tester-Schritt, mit {tests}/{files}); test_commands laufen nur noch beim Live schalten.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_test_commands JSONB
+    CHECK (order_test_commands IS NULL OR jsonb_typeof(order_test_commands) = 'array');
+  -- Vom Auftrag geänderte Dateien (gegenüber der Basis), nach jedem Agent-Schritt aktualisiert.
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS changed_files TEXT[] NOT NULL DEFAULT '{}';
 `;
