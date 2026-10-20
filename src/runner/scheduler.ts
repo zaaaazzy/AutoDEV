@@ -244,8 +244,8 @@ async function closeOldSprints({ pool, job, deps, signal }: JobContext): Promise
   for (const sprint of candidates) {
     if (signal.aborted) break;
     const items = (
-      await pool.query<{ status: string; actionTodo: string | null }>(
-        `SELECT status, action_todo AS "actionTodo" FROM development_items
+      await pool.query<{ status: string; actionTodo: string | null; budgetBlocked: string | null }>(
+        `SELECT status, action_todo AS "actionTodo", budget_blocked AS "budgetBlocked" FROM development_items
           WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
         [sprint.id],
       )
