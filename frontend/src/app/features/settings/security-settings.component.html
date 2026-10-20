@@ -18,7 +18,17 @@
         </div>
       </div>
       @if (!current.totp && !setup()) {
-        <button class="button primary" type="button" [disabled]="busy()" (click)="startSetup()">Einrichten</button>
+        <form class="totp-confirm" (ngSubmit)="startSetup()">
+          <input
+            type="password"
+            name="password"
+            [(ngModel)]="password"
+            autocomplete="current-password"
+            placeholder="Aktuelles Passwort"
+            aria-label="Aktuelles Passwort"
+          />
+          <button class="button primary" type="submit" [disabled]="busy() || !password">Einrichten</button>
+        </form>
       }
       @if (setup(); as pending) {
         <div class="totp-setup">
@@ -43,7 +53,7 @@
             <button class="button primary" type="submit" [disabled]="busy() || code.trim().length < 6">
               Bestätigen
             </button>
-            <button class="button secondary" type="button" (click)="setup.set(null)">Abbrechen</button>
+            <button class="button secondary" type="button" (click)="cancelSetup()">Abbrechen</button>
           </form>
         </div>
       }
