@@ -5,6 +5,8 @@ COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json angular.json ./
 COPY frontend ./frontend
+# Gemeinsame Messung der Überbreite (Diagnose im Browser und visuelle Prüfung des Workers).
+COPY src/core/layout-measure.ts ./src/core/layout-measure.ts
 RUN npm run build:ui
 
 FROM nginx:1.27.3-alpine

@@ -26,6 +26,7 @@ const ROLES = new Set([
   'author',
   'developer',
   'tester',
+  'visual_tester',
   'reviewer',
   'documenter',
   'bug_reviewer',
@@ -59,6 +60,9 @@ function parseFileScope(value: unknown): string[] | typeof INVALID {
     : INVALID;
 }
 
+const VISUAL_TESTER_INSTRUCTIONS =
+  'Nimmt bei Frontend- und Fullstack-Aufträgen die Seiten der Vorschau auf Desktop und Handy auf, vergleicht sie mit dem letzten Stand und prüft Überbreite, Konsolenfehler, fehlende Ressourcen, leere Seiten und abgeschnittene Texte. Ohne Vorschau-Adresse wird der Schritt übersprungen.';
+
 export const DEFAULT_AGENTS = [
   {
     name: 'Auftragsautor',
@@ -87,6 +91,12 @@ export const DEFAULT_AGENTS = [
     phase: 'after_task',
     instructions:
       'Entwickelt anhand der Angaben des Entwicklers die Tests, misst die Testabdeckung je Bereich, ergänzt Tests für Lücken, führt Build und Tests aus und meldet Fehler als Bug.',
+  },
+  {
+    name: 'Visueller Tester',
+    role: 'visual_tester',
+    phase: 'after_task',
+    instructions: VISUAL_TESTER_INSTRUCTIONS,
   },
   {
     name: 'Reviewer',
@@ -354,6 +364,52 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     }
     response.status(204).end();
   });
+}
+
+/**
+ * Legt den visuellen Tester direkt nach dem Tester an, wenn das Projekt noch keinen hat (auch als Workflow-Schritt,
+ * falls das Projekt schon Schritte nutzt). Läuft, sobald eine Vorschau-Adresse gesetzt wird.
+ */
+export async function ensureVisualTester(pool: Pool, slug: string): Promise<void> {
+  const exists = await pool.query(`SELECT 1 FROM agents WHERE project_slug = $1 AND role = 'visual_tester'`, [slug]);
+  if (exists.rowCount) return;
+  const tester = (
+    await pool.query<{ position: number }>(
+      `SELECT position FROM agents WHERE project_slug = $1 AND role = 'tester' AND phase = 'after_task' ORDER BY position LIMIT 1`,
+      [slug],
+    )
+  ).rows[0];
+  const position = (tester?.position ?? 0) + 1;
+  await pool.query(
+    `UPDATE agents SET position = position + 1 WHERE project_slug = $1 AND phase = 'after_task' AND position >= $2`,
+    [slug, position],
+  );
+  const agent = (
+    await pool.query<{ id: string }>(
+      `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
+       VALUES ($1, 'Visueller Tester', 'visual_tester', 'after_task', $2, $3) RETURNING id`,
+      [slug, position, VISUAL_TESTER_INSTRUCTIONS],
+    )
+  ).rows[0];
+  if (!agent) return;
+  const step = (
+    await pool.query<{ position: number }>(
+      `SELECT s.position FROM workflow_steps s JOIN agents a ON a.id = s.agent_id
+        WHERE s.project_slug = $1 AND s.phase = 'after_task' AND a.role = 'tester' ORDER BY s.position LIMIT 1`,
+      [slug],
+    )
+  ).rows[0];
+  const steps = await pool.query(`SELECT 1 FROM workflow_steps WHERE project_slug = $1 LIMIT 1`, [slug]);
+  if (!steps.rowCount) return;
+  const stepPosition = (step?.position ?? 0) + 1;
+  await pool.query(
+    `UPDATE workflow_steps SET position = position + 1 WHERE project_slug = $1 AND phase = 'after_task' AND position >= $2`,
+    [slug, stepPosition],
+  );
+  await pool.query(
+    `INSERT INTO workflow_steps (project_slug, phase, position, agent_id) VALUES ($1, 'after_task', $2, $3)`,
+    [slug, stepPosition, agent.id],
+  );
 }
 
 /**

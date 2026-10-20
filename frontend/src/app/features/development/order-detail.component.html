@@ -345,6 +345,14 @@
           <p class="muted small">Offen, bis du den Punkt abhakst oder der Tester ihn als erfüllt bestätigt.</p>
         </details>
       }
+        @if (acceptance().visual.length) {
+          <h4>Visuelle Prüfung</h4>
+          <ul class="acceptance-list">
+            @for (check of acceptance().visual; track check.position) {
+              <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
+            }
+          </ul>
+        }
     }
     <details class="run-step order-brief" [open]="agentsOpen()">
       <summary>Agents</summary>
@@ -355,6 +363,9 @@
         <summary>Analyse des Assistenten</summary>
         <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
       </details>
+    }
+    @if (showVisual()) {
+      <app-order-visual [order]="item" />
     }
     @if (item.risks?.trim()) {
       @let parsed = risks();

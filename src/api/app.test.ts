@@ -432,7 +432,10 @@ test('seeds the default agent workflow when a project is created', async () => {
       'after_task',
       'after_task',
       'after_task',
+      'after_task',
     ]);
+    // Der visuelle Tester steht direkt nach dem Tester.
+    assert.deepEqual((seed?.values[2] as string[]).slice(3, 5), ['tester', 'visual_tester']);
   });
 });
 

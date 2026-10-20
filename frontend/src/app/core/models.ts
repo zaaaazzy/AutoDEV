@@ -23,8 +23,6 @@ export interface Project {
   reviewCommand?: string[] | null;
   reviewUrl?: string | null;
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
-  orderTokenLimit?: number | null;
-  orderCostLimit?: number | null;
   /** AIdeation nach dem Sprint-Abschluss automatisch neu starten (AIdeation-Projekt). */
   restartAfterSprint?: boolean;
   /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
@@ -55,6 +53,49 @@ export interface Project {
   productionIgnore?: string[];
   productionRetentionDays?: number;
   ingestConfigured?: boolean;
+  /** Visuelle Prüfung: Adresse der laufenden Vorschau, aufzunehmende Seiten und Einstellungen. */
+  previewUrl?: string | null;
+  previewPages?: string[];
+  visualSettings?: VisualSettings;
+}
+
+export interface VisualLogin {
+  path: string;
+  userSelector: string;
+  passwordSelector: string;
+  submitSelector: string;
+  /** Namen der Testwerte in der .env.example des Projekts. */
+  userKey: string;
+  passwordKey: string;
+}
+
+export interface VisualSettings {
+  /** Ab diesem Anteil geänderter Pixel (Prozent) gilt eine Seite als geändert. */
+  tolerance: number;
+  threshold: number;
+  masks: string[];
+  login: VisualLogin | null;
+  aiJudge: boolean;
+  visionModel: string | null;
+}
+
+export type VisualDevice = 'desktop' | 'mobile';
+
+export interface VisualSnapshot {
+  id: string;
+  developmentId: string | null;
+  page: string;
+  device: VisualDevice;
+  kind: 'shot' | 'diff';
+  diffPercent: number | null;
+  baseId: string | null;
+  size: number;
+  createdAt: string;
+}
+
+export interface VisualApproval {
+  approvedAt: string | null;
+  approvedBy: string | null;
 }
 
 export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
@@ -159,6 +200,9 @@ export interface DevelopmentItem extends Estimate {
   reviewBranch?: string | null;
   reviewSince?: string | null;
   reviewApprovedAt?: string | null;
+  /** Optische Freigabe im Reiter „Ansicht“: wann und von wem. */
+  visualApprovedAt?: string | null;
+  visualApprovedBy?: string | null;
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
   fixStatus?: string | null;
@@ -334,6 +378,10 @@ export interface RunStep {
   progress?: string | null;
   events?: StepEvent[];
   tokens?: number | string | null;
+  costUsd?: number | null;
+  /** Verwendetes Modell (z. B. qwen3.5:9b oder claude (opus)) und die greifende Routing-Regel. */
+  model?: string | null;
+  routingRule?: string | null;
 }
 
 export interface AgentRun {
@@ -512,7 +560,8 @@ export interface CoverageReport {
 
 export interface AcceptanceCheck {
   developmentId: string;
-  kind: 'criterion' | 'done';
+  /** visual = Befund der visuellen Prüfung (Screenshots, Browser-Prüfungen, KI-Urteil). */
+  kind: 'criterion' | 'done' | 'visual';
   position: number;
   text: string;
   /** verifying = Agent-Prüfung angefragt, checking = Agent prüft gerade. */
@@ -617,4 +666,50 @@ export interface SprintCommit {
   date: string;
   developmentId: string | null;
   merged: boolean;
+}
+
+export type BudgetPeriod = 'day' | 'sprint' | 'order';
+export type RuleEffect = 'local' | 'strong' | 'up' | 'down';
+
+export interface BudgetLimit {
+  maxTokens: number | null;
+  maxCostUsd: number | null;
+}
+
+export interface RoutingCondition {
+  categories?: string[];
+  minHours?: number;
+  maxHours?: number;
+  minRetries?: number;
+  minBudgetPercent?: number;
+}
+
+export interface RoutingRule {
+  condition: RoutingCondition;
+  tier: RuleEffect;
+  label?: string;
+}
+
+export interface BudgetStatus {
+  period: BudgetPeriod;
+  spend: { tokens: number; costUsd: number };
+  limit: BudgetLimit & { period: BudgetPeriod };
+  percent: number;
+}
+
+/** Budget eines Projekts: Limits, Anzeigewährung, Stand (Tag/Sprint) und Modell-Routing. */
+export interface BudgetOverview {
+  limits: Record<BudgetPeriod, BudgetLimit>;
+  currency: 'USD' | 'CHF';
+  chfPerUsd: number;
+  warnPercent: number;
+  status: BudgetStatus[];
+  routing: {
+    rules: RoutingRule[];
+    customized: boolean;
+    defaults: RoutingRule[];
+    localModel: string | null;
+    strongCommand: string[] | null;
+  };
+  ollamaModels: string[];
 }

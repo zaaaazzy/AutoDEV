@@ -1,6 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseEstimate, splitEstimate } from './estimation.js';
+import type { Pool } from 'pg';
+import { loadActualReference, parseEstimate, referenceSection, splitEstimate } from './estimation.js';
+import { buildRequirementPrompt } from './requirements.js';
+
+test('lernende Schätzung: Median-Ist-Werte erledigter Aufträge derselben Kategorie im Autor-Prompt', async () => {
+  const queries: unknown[][] = [];
+  const pool = {
+    query: async (_sql: string, values: unknown[]) => {
+      queries.push(values);
+      return { rows: [{ count: '3', hours: '1.25', tokens: '42000.5' }] };
+    },
+  } as unknown as Pool;
+  const reference = await loadActualReference(pool, 'mainty', 'docs');
+  assert.deepEqual(reference, { category: 'docs', count: 3, medianHours: 1.3, medianTokens: 42001 });
+  assert.deepEqual(queries[0], ['mainty', 'docs']);
+  const idea = { id: 'i', projectSlug: 'mainty', title: 'Doku', description: 'x', priority: 'medium', comments: [] };
+  const prompt = buildRequirementPrompt('', idea, undefined, undefined, reference);
+  assert.match(prompt, /## Ist-Werte ähnlicher erledigter Aufträge/);
+  assert.match(prompt, /3 erledigte Aufträge der Kategorie „docs“: Median 1,3 h Agent-Laufzeit und 42001 Tokens/);
+  // Ohne erledigte Aufträge kein Abschnitt.
+  const none = { query: async () => ({ rows: [{ count: '0', hours: null, tokens: null }] }) } as unknown as Pool;
+  assert.equal(await loadActualReference(none, 'mainty', null), null);
+  assert.doesNotMatch(buildRequirementPrompt('', idea), /Ist-Werte/);
+  assert.match(referenceSection({ category: null, count: 1, medianHours: 2, medianTokens: 5 }), /ohne Kategorie/);
+});
 
 test('splitEstimate separates the requirement from the estimate section', () => {
   const output =

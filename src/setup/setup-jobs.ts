@@ -20,6 +20,8 @@ export const SETUP_JOB_KINDS = [
   'test_agent',
   'helper_chat',
   'list_folders',
+  'check_chromium',
+  'install_chromium',
 ] as const;
 export type SetupJobKind = (typeof SETUP_JOB_KINDS)[number];
 
@@ -324,6 +326,33 @@ async function helperChat(params: Params) {
   return { answer: (body.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim() || '–' };
 }
 
+/** Chromium für die visuelle Prüfung: Playwright-Paket vorhanden und Browser heruntergeladen? */
+export async function checkChromium(
+  load: () => Promise<{ chromium: { executablePath(): string } }> = () => import('playwright'),
+) {
+  const playwright = await load().catch(() => null);
+  if (!playwright) return { installed: false, playwright: false, command: CHROMIUM_INSTALL.join(' ') };
+  const path = (() => {
+    try {
+      return playwright.chromium.executablePath();
+    } catch {
+      return '';
+    }
+  })();
+  return { installed: Boolean(path) && existsSync(path), playwright: true, command: CHROMIUM_INSTALL.join(' ') };
+}
+
+/** Lädt Chromium mit der in AIdeation installierten Playwright-Version (npx ohne Nachladen fremder Pakete). */
+const CHROMIUM_INSTALL = ['npx', '--no-install', 'playwright', 'install', 'chromium'];
+
+async function installChromium(execute: CommandExecutor, log: Log) {
+  await log(`$ ${CHROMIUM_INSTALL.join(' ')}`);
+  const result = await run(execute, CHROMIUM_INSTALL, resolve(import.meta.dirname, '..', '..'), STEP_TIMEOUT_MS);
+  await log(result.output.slice(-2000));
+  if (!result.ok) throw new Error('Chromium konnte nicht installiert werden.');
+  return checkChromium();
+}
+
 /** Arbeitet den ältesten offenen Einrichtungsjob ab; gibt false zurück, wenn keiner wartet. */
 export async function processSetupJob(pool: Pool, execute: CommandExecutor = runCommand): Promise<boolean> {
   const job = (
@@ -362,7 +391,11 @@ export async function processSetupJob(pool: Pool, execute: CommandExecutor = run
                     ? await deleteProjectFolder(params)
                     : job.kind === 'list_folders'
                       ? await listFolders(params.path)
-                      : await helperChat(params);
+                      : job.kind === 'check_chromium'
+                        ? await checkChromium()
+                        : job.kind === 'install_chromium'
+                          ? await installChromium(execute, log)
+                          : await helperChat(params);
     await pool.query(`UPDATE setup_jobs SET status = 'done', result = $2::jsonb, updated_at = NOW() WHERE id = $1`, [
       job.id,
       JSON.stringify(result),

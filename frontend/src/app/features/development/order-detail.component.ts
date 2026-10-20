@@ -14,6 +14,7 @@ import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from
 import { parseRisks } from '../../shared/risk-list.js';
 import { OrderService } from './order.service.js';
 import { OrderApprovalComponent } from './order-approval.component.js';
+import { OrderVisualComponent } from './order-visual.component.js';
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -22,6 +23,7 @@ import { OrderApprovalComponent } from './order-approval.component.js';
   imports: [
     OrderBriefComponent,
     OrderApprovalComponent,
+    OrderVisualComponent,
     OrderQuestionComponent,
     OrderTimelineComponent,
     AgentWorkflowComponent,
@@ -60,8 +62,27 @@ export class OrderDetailComponent {
     const checks = this.data().acceptance.filter((check) => check.developmentId === this.order().id);
     const criteria = checks.filter((check) => check.kind === 'criterion');
     const done = checks.filter((check) => check.kind === 'done');
+    const visual = checks.filter((check) => check.kind === 'visual');
     const todo = checks.filter((check) => check.status !== 'met');
-    return { criteria, done, todo, total: checks.length, verifying: todo.some((check) => this.isVerifying(check)) };
+    return {
+      criteria,
+      done,
+      visual,
+      todo,
+      total: checks.length,
+      verifying: todo.some((check) => this.isVerifying(check)),
+    };
+  });
+
+  /** Reiter „Ansicht“ bei Frontend- und Fullstack-Aufträgen (oder wenn es schon Befunde bzw. eine Freigabe gibt). */
+  protected readonly showVisual = computed(() => {
+    const item = this.order();
+    return (
+      item.category === 'frontend' ||
+      item.category === 'fullstack' ||
+      Boolean(item.visualApprovedAt) ||
+      this.acceptance().visual.length > 0
+    );
   });
 
   constructor() {

@@ -8,9 +8,11 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
-import { formatHours, formatNumber } from '../../shared/format.js';
+import { formatHours, formatMoney, formatNumber } from '../../shared/format.js';
+import type { BudgetOverview } from '../../core/models.js';
+import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
-import { HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
+import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
 
 interface Usage {
@@ -51,6 +53,21 @@ interface ProjectUsage {
   byKind: UsageGroup[];
   orders: OrderUsage[];
   agents: AgentUsage[];
+  /** Verbrauch je Modell und geschätzte Ersparnis durch das Routing (null = noch kein Preis gemessen). */
+  routing?: {
+    routedSteps: number;
+    localTokens: number;
+    savedUsd: number | null;
+    byModel: { model: string; count: number; routed: number; tokens: number; costUsd: number }[];
+  };
+}
+interface PromptEntry {
+  id: string;
+  agent: string;
+  prompt: string;
+  tokens: number;
+  createdAt: string;
+  success: boolean;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -81,7 +98,15 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
 @Component({
   selector: 'app-stats',
   standalone: true,
-  imports: [DataTableComponent, DataCellDirective, HoursPipe, LocaleNumberPipe, QualityPanelComponent],
+  imports: [
+    DataTableComponent,
+    DataCellDirective,
+    HoursPipe,
+    LocaleNumberPipe,
+    QualityPanelComponent,
+    BudgetMeterComponent,
+    DateTimePipe,
+  ],
   templateUrl: './stats.component.html',
   host: { style: 'display: contents' },
 })
@@ -89,6 +114,8 @@ export class StatsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
   protected readonly usage = signal<ProjectUsage | null>(null);
+  protected readonly budget = signal<BudgetOverview | null>(null);
+  protected readonly prompts = signal<PromptEntry[]>([]);
   protected readonly error = signal('');
   protected readonly ratioText = ratioText;
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;
@@ -195,6 +222,10 @@ export class StatsComponent {
     return Math.round((value / max) * 100);
   }
 
+  protected money(usd: number | null | undefined): string {
+    return formatMoney(usd, this.budget());
+  }
+
   private async load(slug: string): Promise<void> {
     try {
       this.error.set('');
@@ -202,5 +233,14 @@ export class StatsComponent {
     } catch (error) {
       this.error.set(errorMessage(error, 'Statistik konnte nicht geladen werden.'));
     }
+    // Budget und Prompt-Protokoll sind Zusatz: ohne sie bleibt die Statistik vollständig.
+    this.budget.set(await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`).catch(() => null));
+    this.prompts.set(
+      (
+        await this.api
+          .get<{ prompts: PromptEntry[] }>(`${this.api.projectPath(slug)}/usage/prompts?role=author`)
+          .catch(() => ({ prompts: [] }))
+      ).prompts,
+    );
   }
 }

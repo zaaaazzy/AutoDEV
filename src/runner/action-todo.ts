@@ -42,6 +42,11 @@ export function manualTodo(checks: string[]): string | null {
   return shorten(`Selbst prüfen: ${short}`);
 }
 
+/** „Budget erreicht“: Limit erhöhen oder warten (beim Tageslimit bis zum Folgetag); `detail` nennt Limit und Stand. */
+export function budgetActionTodo(daily: boolean, detail: string): string {
+  return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
+}
+
 /** Liest die AKTION-Zeile der Problemanalyse: Text, „keine“ (= null) oder undefined, wenn sie fehlt. */
 export function parseActionLine(output: string): string | null | undefined {
   const match = output.match(/^\s*AKTION:\s*(.+)$/im);

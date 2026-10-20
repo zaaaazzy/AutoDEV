@@ -61,6 +61,8 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/setup\/jobs$/, 'admin'],
   ['PATCH', /^\/api\/projects\/[^/]+$/, 'admin'],
   ['PUT', /^\/api\/projects\/[^/]+\/permissions$/, 'admin'],
+  // Budget-Limits, Währung/Kurs und Modell-Routing (inkl. CLI-Befehl der starken Stufe): Administration.
+  ['PUT', /^\/api\/projects\/[^/]+\/budget$/, 'admin'],
   // Ingest-Token des Produktions-Rückkanals erzeugen, rotieren, entfernen. Der Ingest-Endpunkt selbst
   // (POST /api/ingest/<projekt>/<token>) liegt vor dem Login und braucht weder Anmeldung noch Rolle.
   ['*', /^\/api\/projects\/[^/]+\/ingest-token$/, 'admin'],
@@ -75,6 +77,8 @@ const RULES: Rule[] = [
   ['*', /^\/api\/workflow-steps\//, 'agents'],
   // Review-Freigabe: freigeben, zurückweisen oder in der Review-Instanz anzeigen gehört zum Ausführen.
   ['POST', /^\/api\/development\/[^/]+\/(retry|analyze|approve|review-reject|show-review)$/, 'run'],
+  // Optische Freigabe im Reiter „Ansicht“ ist wie die Review-Freigabe Ausführen.
+  ['POST', /^\/api\/development\/[^/]+\/visual\/approve$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
   [

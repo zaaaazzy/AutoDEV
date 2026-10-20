@@ -9,8 +9,10 @@ import type { AgentStatus, GithubMode, Project } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
 import { ProductionSettingsComponent } from './production-settings.component.js';
+import { VisualSettingsComponent } from './visual-settings.component.js';
 import { SecuritySettingsComponent } from './security-settings.component.js';
 import { UsersSettingsComponent } from './users-settings.component.js';
+import { BudgetSettingsComponent } from './budget-settings.component.js';
 import { AuthService } from '../../core/auth.service.js';
 
 @Component({
@@ -20,12 +22,14 @@ import { AuthService } from '../../core/auth.service.js';
     ReviewSlotsSettingsComponent,
     FolderPickerComponent,
     ProductionSettingsComponent,
+    VisualSettingsComponent,
     PermissionGroupsSettingsComponent,
     DatePipe,
     FormsModule,
     NotificationSettingsComponent,
     SecuritySettingsComponent,
     UsersSettingsComponent,
+    BudgetSettingsComponent,
   ],
   templateUrl: './settings.component.html',
   host: { style: 'display: contents' },
@@ -48,8 +52,6 @@ export class SettingsComponent {
     agentWorkspace: false,
     reviewMode: 'off' as 'off' | 'ui' | 'always',
     reviewCommand: '',
-    orderTokenLimit: null as number | null,
-    orderCostLimit: null as number | null,
     restartAfterSprint: false,
     sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
     sprintCapacityHours: 40,
@@ -128,8 +130,6 @@ export class SettingsComponent {
           agentWorkspace: this.settings.agentWorkspace,
           reviewMode: this.settings.reviewMode,
           reviewCommand: this.settings.reviewCommand.trim(),
-          orderTokenLimit: this.settings.orderTokenLimit || null,
-          orderCostLimit: this.settings.orderCostLimit || null,
           restartAfterSprint: this.settings.restartAfterSprint,
           sprintMode: this.settings.sprintMode,
           sprintCapacityHours: this.settings.sprintCapacityHours,
@@ -198,8 +198,6 @@ export class SettingsComponent {
       agentWorkspace: project?.agentWorkspace ?? false,
       reviewMode: project?.reviewMode ?? 'off',
       reviewCommand: (project?.reviewCommand ?? []).join(' '),
-      orderTokenLimit: project?.orderTokenLimit ?? null,
-      orderCostLimit: project?.orderCostLimit ?? null,
       restartAfterSprint: project?.restartAfterSprint ?? false,
       sprintMode: project?.sprintMode ?? 'manual',
       sprintCapacityHours: project?.sprintCapacityHours ?? 40,

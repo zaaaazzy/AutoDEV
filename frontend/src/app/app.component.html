@@ -192,15 +192,22 @@
             </div>
           </div>
           @if (activeSprint(); as sprint) {
-            <div class="sprint-indicator">
+            <div
+              class="sprint-indicator"
+              [class.open]="sprintPopover()"
+              (mouseenter)="sprintHover.set(true)"
+              (mouseleave)="sprintHover.set(false)"
+              (focusin)="sprintFocus.set(true)"
+              (focusout)="sprintFocusOut($event)"
+              (keydown.escape)="escapeSprintPopover()"
+            >
               <a
                 class="status-pill sprint-pill"
                 [class]="'status-pill sprint-pill state-' + sprintState()"
                 href="#sprints"
                 (click)="store.navigate('sprints')"
                 [attr.aria-label]="
-                  'Sprint ' +
-                  sprint.name +
+                  sprintLabel(sprint.name) +
                   ': ' +
                   sprint.done +
                   ' von ' +
@@ -229,15 +236,55 @@
                   }
                 </span>
               </a>
-              @if (sprintAttention().length) {
-                <div class="agent-popover sprint-popover" aria-label="Aufträge mit Handlungsbedarf">
-                  <p class="popover-title">Aktion notwendig · {{ sprintAttention().length }}</p>
-                  @for (entry of sprintAttention(); track entry.item.id) {
-                    <button type="button" class="attention-line" (click)="openOrder(entry.item.id)">
-                      <strong>{{ entry.item.title }}</strong>
-                      <span><b>Problem:</b> {{ entry.summary.problem }}</span>
-                      <span><b>Lösung:</b> {{ entry.summary.solution }}</span>
-                    </button>
+              @if (sprintPopover()) {
+                <div class="agent-popover sprint-popover" role="group" aria-label="Sprint-Vorschau">
+                  @if (sprintAttention().length) {
+                    <div class="sprint-attention" aria-label="Aufträge mit Handlungsbedarf">
+                      <p class="popover-title">Aktion notwendig · {{ sprintAttention().length }}</p>
+                      @for (entry of sprintAttention(); track entry.item.id) {
+                        <button type="button" class="attention-line" (click)="openOrder(entry.item.id)">
+                          <strong>{{ entry.item.title }}</strong>
+                          <span><b>Problem:</b> {{ entry.summary.problem }}</span>
+                          <span><b>Lösung:</b> {{ entry.summary.solution }}</span>
+                        </button>
+                      }
+                    </div>
+                  }
+                  <p class="popover-title">
+                    {{ sprintLabel(sprint.name) }} · {{ sprint.done }}/{{ sprint.total }} erledigt
+                  </p>
+                  <div
+                    class="sprint-popover-progress"
+                    role="progressbar"
+                    aria-label="Fortschritt des Sprints"
+                    [attr.aria-valuenow]="sprint.done"
+                    aria-valuemin="0"
+                    [attr.aria-valuemax]="sprint.total"
+                  >
+                    <span [style.width.%]="sprint.total ? (sprint.done / sprint.total) * 100 : 0"></span>
+                  </div>
+                  <ul class="sprint-popover-orders" aria-label="Nächste offene Aufträge">
+                    @for (item of sprintPreview(); track item.id) {
+                      <li>
+                        <button
+                          type="button"
+                          class="agent-line"
+                          [class.active]="item.status === 'in_progress'"
+                          (click)="openOrder(item.id)"
+                        >
+                          <span class="agent-dot"></span>
+                          <span class="agent-text">
+                            <strong>{{ item.title }}</strong>
+                            <small>{{ item.status === 'in_progress' ? 'In Arbeit' : 'Offen' }}</small>
+                          </span>
+                        </button>
+                      </li>
+                    } @empty {
+                      <li class="muted">Keine offenen Aufträge</li>
+                    }
+                  </ul>
+                  @if (store.currentProject()?.reviewCommand?.length) {
+                    <app-sprint-review [sprint]="sprint" [compact]="true" />
                   }
                 </div>
               }

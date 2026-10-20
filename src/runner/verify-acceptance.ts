@@ -4,6 +4,7 @@ import { runAuthorAgent } from '../agent/requirements.js';
 import type { CommandExecutor } from '../core/command.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { refreshAcceptanceTodo } from './action-todo.js';
+import { parseChecks } from './acceptance.js';
 import type { RunnerOptions } from './runner.js';
 
 /**
@@ -17,12 +18,8 @@ interface Point {
   note: string;
 }
 
-export interface CheckResult {
-  nr: number;
-  met: boolean;
-  manual: boolean;
-  note: string;
-}
+// Format der @@CHECK-Zeilen: gemeinsam mit der visuellen Prüfung in acceptance.ts.
+export { parseChecks, type CheckResult } from './acceptance.js';
 
 export function buildVerifyPrompt(item: { title: string; description: string }, points: Point[]): string {
   return [
@@ -33,25 +30,6 @@ export function buildVerifyPrompt(item: { title: string; description: string }, 
       .join('\n')}`,
     'Antworte knapp. Schliesse mit genau einer Zeile je Punkt ab:\n@@CHECK {"nr":1,"met":true,"manual":false,"note":"kurze Begründung"}\nSetze "manual":true nur, wenn ein Mensch es prüfen muss (echtes Gerät, externe Konsole, anderer Rechner) – und beschreibe in "note" in wenigen Worten, was zu tun ist.',
   ].join('\n\n');
-}
-
-export function parseChecks(output: string): CheckResult[] {
-  const results: CheckResult[] = [];
-  for (const match of output.matchAll(/^\s*@@CHECK\s+(\{.*\})\s*$/gm)) {
-    try {
-      const entry = JSON.parse(match[1]!) as Partial<CheckResult>;
-      if (!Number.isInteger(entry.nr)) continue;
-      results.push({
-        nr: entry.nr!,
-        met: entry.met === true,
-        manual: entry.met !== true && entry.manual === true,
-        note: String(entry.note ?? '').slice(0, 500),
-      });
-    } catch {
-      // unlesbare Zeile überspringen
-    }
-  }
-  return results;
 }
 
 /** Übernimmt die nächste angefragte Prüfung eines Auftrags; liefert die Zahl geprüfter Punkte. */

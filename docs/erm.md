@@ -30,3 +30,10 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `production_deploys` (`project_slug`, `deployed_at`, `order_ids` UUID[]): erfolgreiche Deploys mit den seit dem vorigen Deploy erledigten Aufträgen; Grundlage des Deploy-Verdachts (30 min).
 - `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des Log-Scans und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
 - Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.
+
+## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
+
+- `projects`: `preview_url` (http(s), ohne Zugangsdaten; leer = Schritt übersprungen), `preview_pages` (JSONB-Liste von Pfaden wie `/#dashboard`), `visual_settings` (JSONB: `tolerance` in Prozent, `threshold` Farbabstand, `masks` CSS-Selektoren, `login` mit Seite, Selektoren und den **Namen** der Testwerte aus der `.env.example`, `aiJudge`, `visionModel`).
+- `agents.role` zusätzlich `visual_tester`; `acceptance_checks.kind` zusätzlich `visual` (Befunde der visuellen Prüfung, ersetzt bei jedem Lauf; der Tester lässt sie stehen).
+- `development_items`: `visual_approved_at`, `visual_approved_by` (Anzeigename) – „Optisch freigeben“ im Reiter „Ansicht“.
+- `visual_snapshots` (`id` UUID, `development_id` → `development_items`, `project_slug` → `projects` (Mandant), `page`, `device` desktop/mobile, `kind` shot/diff, `data` PNG als BYTEA höchstens 2 MB, `diff_percent`, `base_id` → Vorher-Stand, `created_at`). Je Projekt, Seite, Gerät und Art bleiben die letzten 3 Stände; ältere löscht der Schritt beim Speichern. Auslieferung über `/api/visual-snapshots/<id>` mit Mandantenprüfung (`tenancy.ts`).
