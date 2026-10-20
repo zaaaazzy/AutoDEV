@@ -348,6 +348,10 @@ export async function enterOrderBranch(
       await must('checkout', MAIN_BRANCH);
     }
     const base = await currentBranch(git);
+    // Sprint-Aufträge zweigen nur vom Sprint-Branch ab: sonst landete der Merge am Ende z. B. direkt in main.
+    if (sprintName && base !== sprintBranch(sprintName)) {
+      throw new OrderBranchError(`Arbeitsordner ${cwd} steht auf ${base} statt auf ${sprintBranch(sprintName)}.`);
+    }
     // Nie von einem losgelösten Stand oder vom Branch eines anderen Auftrags abzweigen: der Merge am Ende ginge ins Leere
     // bzw. in den fremden Auftrag statt in den Sprint.
     if (base === 'HEAD' || base.startsWith('auftrag/')) {
@@ -409,12 +413,14 @@ export async function finishOrderBranch(
       message: `Arbeitsordner steht auf ${head} statt auf ${target.branch} – nichts committet und nichts gemergt.`,
     };
   }
+  // Patch des Arbeitsstands vor einem verworfenen Merge (siehe unten).
+  let backup: string | null = null;
   try {
     // Konflikte nicht gelöst: offenen Merge verwerfen, damit kein Konfliktmarker committet wird und der nächste
     // Auftrag auf einem sauberen Stand beginnt (der Branch behält seine bisherigen Commits). Was der Agent bis dahin
     // gelöst oder geändert hat, bleibt als Patch erhalten.
     if ((await unresolvedConflicts(cwd, execute)).length) {
-      const backup = await backupWorkingTree(git, cwd, `merge-abbruch-${item.id.slice(0, 8)}`).catch(() => null);
+      backup = await backupWorkingTree(git, cwd, `merge-abbruch-${item.id.slice(0, 8)}`).catch(() => null);
       if (backup) console.warn(`Offener Merge von ${target.branch} verworfen, Arbeitsstand gesichert in ${backup}`);
       await git('merge', '--abort');
     }
@@ -473,7 +479,14 @@ export async function finishOrderBranch(
       );
     }
     await must('checkout', target.base);
-    return { merged: false, commit: null, message: `Zwischenstand auf ${target.branch} gesichert.` };
+    // Nur melden, was wirklich gesichert ist: nach einem verworfenen Merge steckt der Stand oft nur im Patch.
+    const saved = [
+      dirty ? `Zwischenstand auf ${target.branch} gesichert.` : '',
+      backup ? `Offener Merge verworfen, Arbeitsstand als Patch gesichert in ${backup}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return { merged: false, commit: null, message: saved || 'Keine Änderungen zu sichern.' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Z. B. ein Commit-Hook lehnt ab: Gestagtes darf nicht liegen bleiben, sonst wandert es beim nächsten Checkout in
@@ -1128,14 +1141,33 @@ export function changedFilesSection(files: ChangedFile[]): string {
   return `## Geänderte Dateien\n${lines.length ? lines.join('\n') : 'Keine Dateien geändert.'}`;
 }
 
+/**
+ * Live schalten nach dem Merge nach main und das Ergebnis protokollieren. Erfolg nur, wenn der Deploy nicht
+ * gescheitert ist (deployProject meldet das mit false statt zu werfen).
+ */
+async function goLiveLogged(onMergedMain: () => Promise<boolean | null | void>, log: string[]): Promise<void> {
+  try {
+    const deployed = await onMergedMain();
+    log.push(
+      deployed === false
+        ? 'Live schalten unvollständig: Deploy fehlgeschlagen (Details im Deploy-Status des Projekts).'
+        : deployed === null
+          ? 'Live geschaltet: Projektordner auf main nachgezogen (keine Deploy-Befehle hinterlegt).'
+          : 'Live geschaltet: Projektordner auf main nachgezogen und deployt.',
+    );
+  } catch (error) {
+    log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /** Works through the next queued Git request (push or pull) of the project's sprints. */
 export async function syncSprintToGit(
   pool: Pool,
   project: string,
   cwd: string,
   rawExecute: CommandExecutor = runCommand,
-  /** Nach dem Merge nach main („Live schalten“): Live-Ordner nachziehen und deployen. */
-  onMergedMain?: () => Promise<void>,
+  /** Nach dem Merge nach main („Live schalten“): Live-Ordner nachziehen und deployen (Ergebnis wie goLive). */
+  onMergedMain?: () => Promise<boolean | null | void>,
 ): Promise<number> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
@@ -1201,12 +1233,7 @@ export async function syncSprintToGit(
       );
       return 1;
     }
-    if (result.mergedMain && onMergedMain) {
-      await onMergedMain().catch((error: unknown) =>
-        result.log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`),
-      );
-      result.log.push('Live geschaltet: Projektordner auf main nachgezogen und deployt.');
-    }
+    if (result.mergedMain && onMergedMain) await goLiveLogged(onMergedMain, result.log);
     if (result.mergedMain && restartAfterSprint) {
       const { created } = await requestRestart(
         pool,
@@ -1346,11 +1373,12 @@ export async function tagMergedSprint(
   cwd: string,
   sprint: { id: string; name: string },
   rawExecute: CommandExecutor = runCommand,
-): Promise<{ commit: string; log: string[] }> {
+): Promise<{ commit: string; log: string[]; mainUpdated: boolean }> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
   const log: string[] = [];
+  let mainUpdated = false;
   const remoteMain = `refs/remotes/origin/${MAIN_BRANCH}`;
   await must('fetch', 'origin', `+refs/heads/${MAIN_BRANCH}:${remoteMain}`);
   const tag = sprintTag(sprint.name, sprint.id);
@@ -1367,13 +1395,14 @@ export async function tagMergedSprint(
       head === MAIN_BRANCH
         ? await git('merge', '--ff-only', remoteMain)
         : await git('fetch', 'origin', `${MAIN_BRANCH}:${MAIN_BRANCH}`);
+    mainUpdated = updated.exitCode === 0;
     log.push(
-      updated.exitCode === 0
+      mainUpdated
         ? `Lokales ${MAIN_BRANCH} aktualisiert.`
         : `Lokales ${MAIN_BRANCH} weicht ab – bitte mit „git pull“ übernehmen.`,
     );
   }
-  return { commit: await must('rev-parse', '--short', remoteMain), log };
+  return { commit: await must('rev-parse', '--short', remoteMain), log, mainUpdated };
 }
 
 /**
@@ -1388,6 +1417,8 @@ export async function pollSprintReviews(
   adapter: HosterAdapter,
   requireApproval: boolean,
   rawExecute: CommandExecutor = runCommand,
+  /** Nach dem Merge des Pull Requests „Live schalten“ wie beim direkten Merge (goLive). */
+  onMergedMain?: () => Promise<boolean | null | void>,
 ): Promise<number> {
   const sprints = (
     await pool.query<ReviewSprint>(
@@ -1435,6 +1466,8 @@ export async function pollSprintReviews(
       await adapter.mergePullRequest(sprint.prUrl);
     }
     const tagged = await tagMergedSprint(cwd, sprint, rawExecute);
+    // Nur mit nachgezogenem lokalem main: sonst würde der alte Stand deployt.
+    if (tagged.mainUpdated && onMergedMain) await goLiveLogged(onMergedMain, tagged.log);
     await pool.query(
       `UPDATE sprints SET status = 'completed', ci_status = $5, git_sync = 'done', git_message = $2, git_commit = $3,
               git_branch = $4, git_synced_at = NOW() WHERE id = $1`,

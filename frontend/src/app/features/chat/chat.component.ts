@@ -1,6 +1,8 @@
 import { Component, ElementRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
+import { ConfirmService } from '../../core/confirm.service.js';
+import { errorMessage } from '../../core/errors.js';
 import type { ChatMessage } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
@@ -30,6 +32,7 @@ export type ChatZoom = 'docked' | 'modal' | null;
 export class ChatComponent {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  private readonly confirm = inject(ConfirmService);
   protected readonly auth = inject(AuthService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
@@ -230,7 +233,26 @@ export class ChatComponent {
     if (!this.connected()) this.reconnect();
   }
 
+  /** Verlauf leeren erst nach Rückfrage; wartende Anfragen werden dabei mitgelöscht und deshalb ausdrücklich genannt. */
   protected async clear(): Promise<void> {
-    await this.api.delete(`${this.api.projectPath(this.store.activeProject())}/chat`);
+    const waiting = this.chat().filter((message) => message.role === 'user' && message.status === 'pending').length;
+    const answer = await this.confirm.ask({
+      title: 'Chat-Verlauf leeren?',
+      message: 'Alle Nachrichten dieses Projekts werden gelöscht. Eine gerade bearbeitete Anfrage bleibt erhalten.',
+      details: waiting
+        ? [
+            waiting === 1
+              ? 'Auch 1 wartende Anfrage wird gelöscht und nicht mehr bearbeitet.'
+              : `Auch ${waiting} wartende Anfragen werden gelöscht und nicht mehr bearbeitet.`,
+          ]
+        : undefined,
+      confirmLabel: 'Verlauf leeren',
+    });
+    if (!answer) return;
+    try {
+      await this.api.delete(`${this.api.projectPath(this.store.activeProject())}/chat`);
+    } catch (error) {
+      this.store.notice.set(errorMessage(error, 'Verlauf konnte nicht geleert werden.'));
+    }
   }
 }

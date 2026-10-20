@@ -131,8 +131,7 @@ export class AgentsComponent {
   }
 
   protected async setAllowTools(role: string, allowTools: boolean): Promise<void> {
-    await this.api.put(`/api/system-agents/${role}`, { allowTools });
-    this.systemAgents.update((list) => list.map((item) => (item.role === role ? { ...item, allowTools } : item)));
+    await this.saveSystemAgent(role, { allowTools }, (item) => ({ ...item, allowTools }));
   }
 
   protected async setSystemChoice(role: string, choice: string): Promise<void> {
@@ -140,12 +139,30 @@ export class AgentsComponent {
     const [kind, value = ''] = [choice.slice(0, choice.indexOf(':')), choice.slice(choice.indexOf(':') + 1)];
     const preset = kind === 'preset' ? MODEL_PRESETS.find((item) => item.id === value) : undefined;
     const command = preset ? parseCommand(preset.command) : null;
-    await this.api.put(`/api/system-agents/${role}`, kind === 'ollama' ? { model: value, command: null } : { command });
-    this.systemAgents.update((list) =>
-      list.map((item) =>
-        item.role === role ? { ...item, command, model: kind === 'ollama' ? value : item.model } : item,
-      ),
-    );
+    await this.saveSystemAgent(role, kind === 'ollama' ? { model: value, command: null } : { command }, (item) => ({
+      ...item,
+      command,
+      model: kind === 'ollama' ? value : item.model,
+    }));
+  }
+
+  /**
+   * Zeigt die Änderung sofort an und speichert sie. Scheitert das Speichern (z. B. 403 ohne Admin-Recht oder 500),
+   * springt die Auswahl auf den gespeicherten Wert zurück und eine Meldung erscheint.
+   */
+  private async saveSystemAgent(
+    role: string,
+    body: Record<string, unknown>,
+    change: (item: SystemAgent) => SystemAgent,
+  ): Promise<void> {
+    const previous = this.systemAgents();
+    this.systemAgents.set(previous.map((item) => (item.role === role ? change(item) : item)));
+    try {
+      await this.api.put(`/api/system-agents/${role}`, body);
+    } catch (error) {
+      this.systemAgents.set(previous);
+      this.store.notice.set(errorMessage(error, 'Einstellung konnte nicht gespeichert werden.'));
+    }
   }
   /** Kategorien des Projekts (eingebaute und eigene) mit ihren einzelnen Befehlen. */
   protected readonly permissionGroups = signal<PermissionGroupInfo[]>([]);

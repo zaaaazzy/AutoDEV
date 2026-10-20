@@ -3,10 +3,13 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import {
+  budgetHold,
   type BuiltinAgent,
   buildInvocation,
   buildPrompt,
   parseRunnerOptions,
+  recoverStuckItems,
+  runSelectedItems,
   runWorkItem,
   type WorkflowAgent,
 } from './runner.js';
@@ -678,4 +681,193 @@ test('Sprint pausiert: der Entwickler beendet seinen Schritt, der Tester startet
   calls.length = 0;
   assert.equal(await runWorkItem(pool, sprintItem, agents, options), 'passed');
   assert.deepEqual(calls, ['tester']);
+});
+
+test('Fortsetzung nach Nachbesserung und frühem Abbruch: der Entwickler bekommt die letzte Rückmeldung des Testers', async () => {
+  // Vorheriger Lauf: Entwickler, Tester ✗ (Nachbesserung), Entwickler, Tester ✗ – danach abgebrochen, also nicht mehr
+  // Zeilen als Agents im Ablauf (4).
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-2' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [{ id: 'run-1', status: 'failed' }] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) {
+        const step = (id: string, name: string, phase: string, status: string, output: string) => ({
+          agent_id: id,
+          workflow_step_id: null,
+          agent_name: name,
+          phase,
+          status,
+          output,
+        });
+        return {
+          rows: [
+            step('dev-id', 'dev', 'while_task', 'passed', 'gebaut'),
+            step('tester-id', 'tester', 'after_task', 'failed', 'erste Rückmeldung'),
+            step('dev-id', 'dev', 'while_task', 'passed', 'nachgebessert'),
+            step('tester-id', 'tester', 'after_task', 'failed', 'zweite Rückmeldung'),
+          ],
+        };
+      }
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const agents = [
+    { ...agent('dev', 'while_task', 1, ['dev']), role: 'developer' },
+    { ...agent('tester', 'after_task', 1, ['tester']), role: 'tester' },
+    agent('doc', 'after_task', 2, ['doc']),
+    agent('check', 'after_task', 3, ['check']),
+  ];
+  await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+  assert.equal(calls[0]?.[0], 'dev');
+  assert.match(calls[0]?.at(-1) ?? '', /zweite Rückmeldung/);
+  assert.doesNotMatch(calls[0]?.at(-1) ?? '', /erste Rückmeldung/);
+});
+
+test('ausgewählter Auftrag inzwischen abgelehnt oder aus dem Sprint genommen: er startet nicht, der Lauf wird verworfen', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }], rowCount: 1 };
+      // Der bedingte Start trifft nichts mehr: Status ist nicht mehr „Geplant“.
+      if (sql.includes("SET status = 'in_progress'")) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.equal(result, 'skipped');
+  assert.deepEqual(calls, []);
+  const start = queries.find((query) => query.sql.includes("SET status = 'in_progress'"));
+  assert.match(start?.sql ?? '', /d\.status = 'planned'/);
+  assert.deepEqual(start?.values, ['item-1', false]);
+  assert.ok(queries.some((query) => query.sql.includes('DELETE FROM agent_runs') && query.values[0] === 'run-1'));
+  assert.ok(
+    !queries.some((query) => query.sql.includes('UPDATE agent_runs SET status = $2')),
+    'kein gescheiterter Lauf',
+  );
+});
+
+test('ein Auftrag scheitert unerwartet (z. B. gelöscht): die übrigen ausgewählten Aufträge laufen weiter', async () => {
+  const items = ['a', 'b', 'c'].map((id) => ({ ...item, id }));
+  const ran: string[] = [];
+  let between = 0;
+  const results = await runSelectedItems(
+    items,
+    async (current) => {
+      ran.push(current.id);
+      if (current.id === 'b') throw new Error('insert or update on table "agent_runs" violates foreign key constraint');
+      return 'passed';
+    },
+    async () => {
+      between += 1;
+    },
+  );
+  assert.deepEqual(ran, ['a', 'b', 'c']);
+  assert.deepEqual(
+    results.map((entry) => entry.result),
+    ['passed', 'failed', 'passed'],
+  );
+  assert.equal(between, 2);
+});
+
+test('Budget mitten im Zyklus erreicht: ein Auftrag wartet sichtbar, die übrigen bleiben eingeplant', async () => {
+  let spent = 0;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('FROM budgets')) return { rows: [{ period: 'day', maxTokens: '1000', maxCostUsd: null }] };
+      if (sql.includes('to_char(CURRENT_DATE')) return { rows: [{ key: '2026-10-20', since: '2026-10-20' }] };
+      if (sql.includes('FROM agent_run_steps s JOIN agent_runs r'))
+        return { rows: [{ tokens: String(spent), cost: '0' }] };
+      if (sql.includes("SET status = 'blocked'")) return { rows: [{ id: values[0] }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const items = ['a', 'b', 'c'].map((id) => ({ ...item, id }));
+  const ran: string[] = [];
+  const results = await runSelectedItems(
+    items,
+    async (current) => {
+      ran.push(current.id);
+      spent = 1500; // Auftrag a verbraucht das Tageslimit.
+      return 'passed';
+    },
+    undefined,
+    budgetHold(pool, 'mainty'),
+  );
+  assert.deepEqual(ran, ['a']);
+  assert.deepEqual(results, [{ itemId: 'a', result: 'passed' }]);
+  const blocked = queries
+    .filter((query) => query.sql.includes("SET status = 'blocked'"))
+    .map((query) => query.values[0]);
+  assert.deepEqual(blocked, ['b'], 'nur der nächste Auftrag wartet, c bleibt eingeplant');
+});
+
+test('Datenbank-Aussetzer beim Abschluss: der Auftrag bleibt nicht „In Arbeit“ hängen, der Lauf endet erst danach', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  let outage = false;
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }], rowCount: 1 };
+      // Abschluss (settleItem) und Lauf-Status scheitern: die Datenbank ist kurz weg.
+      if (outage && (sql.includes('status = CASE') || sql.includes('UPDATE agent_runs SET status = $2')))
+        throw new Error('Connection terminated unexpectedly');
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => {
+    outage = true;
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.equal(result, 'failed');
+  const stuck = queries.findIndex(
+    (query) => query.sql.includes("SET status = 'blocked', failure = COALESCE") && query.values[0] === 'item-1',
+  );
+  assert.ok(stuck >= 0, 'Auftrag wird blockiert statt in Arbeit zu bleiben');
+  const run = queries.findIndex((query) => query.sql.includes('UPDATE agent_runs SET status = $2'));
+  assert.ok(run > stuck, 'der Lauf wird erst nach dem Abschluss beendet');
+  assert.equal(queries[run]?.values[1], 'failed');
+});
+
+test('Hängende Aufträge (In Arbeit ohne laufenden Lauf) werden je Projekt und beim Start blockiert', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: [], rowCount: 2 };
+    },
+  } as unknown as Pool;
+  assert.equal(await recoverStuckItems(pool, 'mainty'), 2);
+  await recoverStuckItems(pool, null);
+  const [project, all] = queries;
+  assert.match(project?.sql ?? '', /d\.status = 'in_progress'/);
+  assert.match(
+    project?.sql ?? '',
+    /NOT EXISTS \(SELECT 1 FROM agent_runs r WHERE r\.development_id = d\.id AND r\.status = 'running'\)/,
+  );
+  // Nur Aufträge mit Läufen: Express-Aufträge aus dem Chat sind ohne Lauf „In Arbeit“.
+  assert.match(project?.sql ?? '', /AND EXISTS \(SELECT 1 FROM agent_runs r WHERE r\.development_id = d\.id\)/);
+  assert.equal(project?.values[0], 'mainty');
+  assert.equal(all?.values[0], null);
 });

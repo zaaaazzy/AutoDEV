@@ -1,12 +1,19 @@
 import type { Pool } from 'pg';
 import { runAuthorAgent } from '../agent/requirements.js';
 import type { CommandExecutor } from '../core/command.js';
+import { logged } from '../core/log.js';
 import { handoffTarget, HANDOFF_RULE, parseHandoffs } from '../core/workflow-phases.js';
+import { projectBudgetExceeded } from './budget.js';
 import type { RunnerOptions } from './runner.js';
 import type { WorkflowAgent } from './runner-types.js';
 
 /** Rolle, unter der „Vor dem Sprint“ läuft: nur lesen (siehe READ_ONLY_ROLES). */
 export const PRE_SPRINT_ROLE = 'pre_sprint';
+
+/** So oft wird eine gescheiterte Phase „Vor dem Sprint“ wiederholt, bevor die Aufträge ohne sie starten. */
+export const PRE_SPRINT_ATTEMPTS = 3;
+/** Gescheiterte Versuche je Sprint (seit dem Start des Workers). */
+const failedAttempts = new Map<string, number>();
 
 interface ActiveSprint {
   id: string;
@@ -67,6 +74,9 @@ export async function runPreSprint(
     await pool.query(`UPDATE sprints SET pre_sprint_at = NOW() WHERE id = $1`, [sprint.id]);
     return false;
   }
+  // Budget erreicht: die Phase nicht verbrauchen, sondern nachholen, sobald das Budget wieder reicht. Die Aufträge
+  // warten ohnehin (holdForBudget in runWorkflow).
+  if (await projectBudgetExceeded(pool, options.project).catch(logged('pre-sprint', null))) return false;
   const orders = (
     await pool.query<{ title: string; status: string }>(
       `SELECT title, status FROM development_items WHERE sprint_id = $1 ORDER BY sprint_rank NULLS LAST, created_at`,
@@ -95,17 +105,32 @@ export async function runPreSprint(
       undefined,
       agent.id,
     );
-    const text = exitCode === 0 ? output.trim() : `(fehlgeschlagen) ${output.trim().slice(-1000)}`;
-    results.push({ agent: agent.name, output: text });
+    if (exitCode !== 0) {
+      // Budget unterwegs erreicht: kein Fehlversuch, die Phase wird nachgeholt, sobald das Budget wieder reicht.
+      if (await projectBudgetExceeded(pool, options.project).catch(logged('pre-sprint', null))) return false;
+      // Sonst gescheitert (Modell nicht erreichbar …): Die Phase gilt nicht als erledigt und läuft im nächsten Zyklus
+      // erneut. Erst nach PRE_SPRINT_ATTEMPTS Versuchen starten die Aufträge ohne sie – die Fehlermeldung landet nie
+      // als Sprint-Hinweis in den Agent-Anweisungen.
+      const attempts = (failedAttempts.get(sprint.id) ?? 0) + 1;
+      failedAttempts.set(sprint.id, attempts);
+      console.error(
+        `[${options.project}] Vor dem Sprint › ${agent.name} gescheitert (Versuch ${attempts}/${PRE_SPRINT_ATTEMPTS}): ${output.trim().slice(-300)}`,
+      );
+      if (attempts < PRE_SPRINT_ATTEMPTS) return true;
+      break;
+    }
+    results.push({ agent: agent.name, output: output.trim() });
     for (const handoff of parseHandoffs(output)) {
       const target = handoffTarget(handoff, agent, ordered, index);
       if (target) messages.push({ toId: target.stepId ?? target.id, from: agent.name, text: handoff.text });
     }
   }
-  const notes = results
-    .map((result) => `### ${result.agent}\n${result.output}`)
-    .join('\n\n')
-    .slice(0, 20_000);
+  failedAttempts.delete(sprint.id);
+  const notes =
+    results
+      .map((result) => `### ${result.agent}\n${result.output}`)
+      .join('\n\n')
+      .slice(0, 20_000) || null;
   await pool.query(`UPDATE sprints SET pre_sprint_at = NOW(), pre_sprint_notes = $2 WHERE id = $1`, [sprint.id, notes]);
   return true;
 }

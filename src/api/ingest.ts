@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import express, { type ErrorRequestHandler, type Express, type RequestHandler } from 'express';
 import type { Pool } from 'pg';
+import { logOnce } from '../core/log.js';
 import { isRecord, parseProjectSlug } from '../core/validation.js';
 import { isExcluded, type ProductionError, recordEvent } from '../runner/production-events.js';
 import { updateAlerts } from '../runner/production-monitor.js';
@@ -84,9 +85,16 @@ export function registerIngestRoutes(
     try {
       const slug = parseProjectSlug(String(request.params.project ?? ''));
       const client = request.ip ?? 'unbekannt';
-      if (!limits.perClient.allow(client) || (slug && !limits.perProject.allow(slug))) {
-        return void response.status(429).set('Retry-After', '60').json({ message: 'Zu viele Meldungen.' });
+      // Hinter Caddy/nginx ohne DEV_LOG_TRUST_PROXY ist request.ip die Proxy-Adresse: alle Absender teilen sich
+      // dann das Limit je Absender.
+      if (request.get('x-forwarded-for') && !request.app.get('trust proxy')) {
+        logOnce(
+          'ingest-trust-proxy',
+          '[ingest] X-Forwarded-For ohne DEV_LOG_TRUST_PROXY: alle Absender teilen sich ein Rate-Limit.',
+        );
       }
+      const tooMany = () => void response.status(429).set('Retry-After', '60').json({ message: 'Zu viele Meldungen.' });
+      if (!limits.perClient.allow(client)) return tooMany();
       if (Number(request.get('content-length') ?? 0) > INGEST_LIMIT_BYTES) {
         return void response.status(413).json({ message: 'Meldung grösser als 16 KB.' });
       }
@@ -99,9 +107,11 @@ export function registerIngestRoutes(
           ).rows[0]
         : undefined;
       // Unbekanntes Projekt und falsches oder rotiertes Token sehen gleich aus.
-      if (!project || !tokenMatches(String(request.params.token ?? ''), project.hash)) {
+      if (!slug || !project || !tokenMatches(String(request.params.token ?? ''), project.hash)) {
         return void response.status(401).json({ message: 'Ungültiges Ingest-Token.' });
       }
+      // Erst nach gültigem Token zählen: Müll-Anfragen mit bekanntem Slug verbrauchen das Projektlimit nicht.
+      if (!limits.perProject.allow(slug)) return tooMany();
       response.locals.ingest = { slug, ignore: project.ignore ?? [] };
       next();
     } catch (error) {

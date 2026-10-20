@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OUTPUT_GRACE_MS, runCommand } from './command.js';
+import { OUTPUT_GRACE_MS, redactOutput, runCommand } from './command.js';
 
 function alive(pid: number): boolean {
   try {
@@ -63,4 +63,35 @@ test('runCommand still points to the PATH when the command itself is missing', a
   const result = await runCommand(['dev-log-gibt-es-nicht'], tmpdir());
   assert.notEqual(result.exitCode, 0);
   assert.match(result.output, /im PATH des Workers nicht gefunden/);
+});
+
+test('ein Umlaut, der über eine Chunk-Grenze fällt, bleibt erhalten', async () => {
+  // „ä“ = 0xC3 0xA4: erstes Byte, Pause, zweites Byte – landet in zwei getrennten Chunks.
+  const script =
+    'process.stdout.write(Buffer.from([0x47, 0xc3]));' +
+    'setTimeout(() => process.stdout.write(Buffer.from([0xa4, 0x72, 0x74, 0x0a])), 150);';
+  const chunks: string[] = [];
+  const result = await runCommand([process.execPath, '-e', script], process.cwd(), {
+    onChunk: (chunk) => chunks.push(chunk),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.output, 'Gärt\n');
+  assert.equal(chunks.join(''), 'Gärt\n');
+  assert.ok(!chunks.join('').includes('�'));
+});
+
+test('redactOutput maskiert API-Schlüssel, Tokens und Secrets aus der Umgebung', () => {
+  const env = {
+    ANTHROPIC_API_KEY: 'sk-ant-geheim-1234',
+    OPENAI_APIKEY: 'openai-geheim',
+    GITHUB_TOKEN: 'ghtoken-geheim',
+    STRIPE_SECRET: 'stripe-geheim',
+    AWS_ACCESS_KEY: 'aws-geheim',
+    HOME: '/Users/test',
+  };
+  const output = redactOutput(
+    'key=sk-ant-geheim-1234 openai-geheim ghtoken-geheim stripe-geheim aws-geheim /Users/test',
+    env,
+  );
+  assert.equal(output, 'key=[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] /Users/test');
 });

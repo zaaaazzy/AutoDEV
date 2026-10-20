@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { logged } from '../core/log.js';
 import { sendPush } from '../core/push.js';
+import { localDay, localTimeZone } from '../core/time-zone.js';
 import { budgetActionTodo, setActionTodo } from './action-todo.js';
 
 export const BUDGET_PERIODS = ['day', 'sprint', 'order'] as const;
@@ -121,21 +122,18 @@ async function periodSpend(
   scope: BudgetScope,
 ): Promise<{ key: string; spend: Spend } | null> {
   if (period === 'day') {
-    const day = (
-      await pool.query<{ key: string; since: string }>(
-        `SELECT to_char(CURRENT_DATE, 'YYYY-MM-DD') AS key, date_trunc('day', NOW())::text AS since`,
-      )
-    ).rows[0];
-    return day ? { key: day.key, spend: await spendSince(pool, project, day.since) } : null;
+    // Budget-Tag in Ortszeit (DEV_LOG_TIMEZONE): beginnt um Mitternacht vor Ort, nicht um Mitternacht UTC.
+    const day = localDay();
+    return { key: day.key, spend: await spendSince(pool, project, day.since) };
   }
   if (period === 'sprint') {
     // Sprint des Auftrags, sonst der aktive Sprint des Projekts.
     const sprint = (
       await pool.query<{ id: string; since: string }>(
-        `SELECT id, COALESCE(start_date::timestamptz, created_at)::text AS since FROM sprints
+        `SELECT id, COALESCE(start_date::timestamp AT TIME ZONE $3::text, created_at)::text AS since FROM sprints
           WHERE project_slug = $1 AND (id = $2::uuid OR ($2::uuid IS NULL AND status = 'active'))
           ORDER BY status = 'active' DESC LIMIT 1`,
-        [project, scope.sprintId ?? null],
+        [project, scope.sprintId ?? null, localTimeZone()],
       )
     ).rows[0];
     return sprint ? { key: sprint.id, spend: await spendSince(pool, project, sprint.since) } : null;

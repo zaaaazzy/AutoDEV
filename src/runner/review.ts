@@ -13,11 +13,15 @@ export function reviewInstructions(base: string | null): string {
 @@REVIEW: ÄNDERUNGEN NÖTIG   (mindestens ein blockierender Befund)`;
 }
 
-const VERDICT = /^@@REVIEW:\s*(FREIGEGEBEN|ÄNDERUNGEN NÖTIG|AENDERUNGEN NOETIG)\s*$/im;
+const VERDICT = /^@@REVIEW:\s*(FREIGEGEBEN|ÄNDERUNGEN NÖTIG|AENDERUNGEN NOETIG)\s*$/gim;
 
-/** true = freigegeben, false = Änderungen nötig, null = kein eindeutiges Ergebnis. */
+/**
+ * true = freigegeben, false = Änderungen nötig, null = kein eindeutiges Ergebnis.
+ * Stehen mehrere Urteilszeilen in der Antwort (z. B. Zwischenfassung), gilt die Freigabe nur,
+ * wenn keine davon „Änderungen nötig“ lautet – widersprüchliche Urteile werden konservativ abgelehnt.
+ */
 export function parseReview(output: string): boolean | null {
-  const match = VERDICT.exec(output)?.[1]?.toUpperCase();
-  if (!match) return null;
-  return match === 'FREIGEGEBEN';
+  const verdicts = [...output.matchAll(VERDICT)].map((match) => (match[1] ?? '').toUpperCase());
+  if (!verdicts.length) return null;
+  return verdicts.every((verdict) => verdict === 'FREIGEGEBEN');
 }

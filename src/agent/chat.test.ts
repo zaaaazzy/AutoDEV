@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOllamaAgent } from './ollama-agent.js';
-import { splitQuestion, buildChatPrompt } from './chat.js';
+import { splitQuestion, buildChatPrompt, loadChatHistory } from './chat.js';
 
 test('reports concrete tool activity through the progress callback', async () => {
   const progress: string[] = [];
@@ -71,4 +71,22 @@ test('Gewählter Agent übernimmt mit Bezeichnung und Beschreibung', () => {
   assert.match(prompt, /als Agent „Tester“/);
   assert.match(prompt, /Teste gründlich, ändere keinen Code\./);
   assert.match(buildChatPrompt([]), /allgemeine Assistent/);
+});
+
+test('Verlauf endet bei der übernommenen Nachricht und lässt wartende Nutzernachrichten weg', async () => {
+  const calls: { sql: string; params: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, params: unknown[]) => {
+      calls.push({ sql, params });
+      return { rows: [{ role: 'user', content: 'Nachricht 1' }] };
+    },
+  } as unknown as Parameters<typeof loadChatHistory>[0];
+  const history = await loadChatHistory(pool, 'demo', 'msg-1');
+  assert.deepEqual(history.rows, [{ role: 'user', content: 'Nachricht 1' }]);
+  const [call] = calls;
+  assert.ok(call);
+  assert.deepEqual(call.params, ['demo', 20, 'msg-1']);
+  const sql = call.sql.replace(/\s+/g, ' ');
+  assert.match(sql, /created_at <= \(SELECT created_at FROM chat_messages WHERE id = \$3\)/);
+  assert.match(sql, /\(role <> 'user' OR status NOT IN \('pending', 'processing'\) OR id = \$3\)/);
 });

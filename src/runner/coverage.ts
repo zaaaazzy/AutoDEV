@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 /** Ab dieser Zeilenabdeckung gilt ein Bereich als ausreichend getestet. */
 export const COVERAGE_TARGET = 75;
 
-const MARKER = /^@@COVERAGE\s+(\{.*\})\s*$/m;
+const MARKER = /^@@COVERAGE\s+(\{.*\})\s*$/gm;
 
 /** Anweisung an den Tester: Abdeckung messen, Lücken mit Tests schließen, Ergebnis maschinenlesbar melden. */
 export const COVERAGE_INSTRUCTIONS = `## Testabdeckung (Pflicht für den Tester)
@@ -40,7 +40,8 @@ const percent = (value: unknown): number | null =>
 
 /** Liest den @@COVERAGE-Block des Testers; null, wenn keiner oder kein gültiger vorhanden ist. */
 export function parseCoverage(output: string): CoverageReport | null {
-  const json = MARKER.exec(output)?.[1];
+  // Bei mehreren Blöcken zählt der letzte (Messung nach dem Schreiben neuer Tests).
+  const json = [...output.matchAll(MARKER)].at(-1)?.[1];
   if (!json) return null;
   try {
     const data = JSON.parse(json) as { summary?: unknown; areas?: unknown };

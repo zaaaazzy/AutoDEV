@@ -1,7 +1,7 @@
 import { logged } from '../core/log.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { runPreSprint } from './pre-sprint.js';
-import { followProjectPreview, processApprovals } from './review-gate.js';
+import { processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -14,7 +14,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { enterOrderBranch, OrderBranchError, syncSprintToGit } from './git-sync.js';
 import { extractCriteria, loadDefinitions } from './acceptance.js';
-import { deployProject } from './deploy.js';
+import { goLive } from './go-live.js';
 import { acquireTree } from '../core/project-lock.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
@@ -102,9 +102,15 @@ async function resumePosition(
   // Schlüssel je Einsatz: derselbe Agent kann im Workflow mehrfach vorkommen.
   const keyOf = (row: { agent_id: string; workflow_step_id: string | null }) => row.workflow_step_id ?? row.agent_id;
   const keyOfAgent = (agent: WorkflowAgent) => agent.stepId ?? agent.id;
-  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt.
+  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt – auch wenn der Lauf danach früh
+  // abbrach und daher nicht mehr Zeilen als Agents hat. Erkannt wird sie daran, dass ein Einsatz öfter vorkommt als
+  // im Ablauf; sonst gilt die Position (derselbe Agent ohne eigenen Workflow-Schritt kann mehrfach vorkommen).
   const latest = new Map(rows.map((row) => [keyOf(row), row]));
-  const steps = rows.length > ordered.length ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
+  const count = <T>(keys: T[]) =>
+    keys.reduce((map, key) => map.set(key, (map.get(key) ?? 0) + 1), new Map<T, number>());
+  const planned = count(ordered.map(keyOfAgent));
+  const corrected = [...count(rows.map(keyOf))].some(([key, times]) => times > (planned.get(key) ?? times));
+  const steps = corrected ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
   while (
     position < ordered.length &&
@@ -177,11 +183,28 @@ export async function runWorkItem(
     return 'skipped';
   }
   // Ein neuer Lauf hebt eine frühere Budget-Blockade auf; reicht das Budget nicht, setzt die Prüfung sie neu.
-  await pool.query(
-    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
-      WHERE id = $1`,
-    [item.id],
-  );
+  // Der Worker wählt mehrere Aufträge auf einmal und arbeitet sie nacheinander ab: Wurde dieser inzwischen
+  // abgelehnt, zurückgestellt, aus dem Sprint genommen oder der Sprint pausiert, startet er nicht (wie selectItems).
+  // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon. Scheitert schon der Start (z. B. Datenbank kurz
+  // weg), den Lauf verwerfen: sonst hält er claimRun stundenlang auf.
+  const started = await pool
+    .query(
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
+      WHERE d.id = $1 AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express' AND (
+        d.agent_id IS NOT NULL OR (
+          NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
+          AND (d.auto_run OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
+      [item.id, Boolean(options.itemId)],
+    )
+    .catch(async (error: unknown) => {
+      await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
+      throw error;
+    });
+  if (started.rowCount === 0) {
+    await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
+    console.info(`Skipping ${item.id}: der Auftrag ist nicht mehr eingeplant.`);
+    return 'skipped';
+  }
 
   const ordered = selectWorkflowAgents(agents, item);
   const ctx: RunContext = {
@@ -327,34 +350,101 @@ export async function runWorkItem(
     }
     console.error(`Run ${runId} aborted:`, error);
   } finally {
-    await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
-      runId,
-      passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
-    ]);
     if (budgetStop) {
       const todo = await blockForBudget(pool, item.id, budgetStop).catch(logged('runner', null));
       console.info(`[${item.id}] ${todo ?? 'Budget erreicht'}`);
       if (todo) await setActionTodo(pool, item.id, todo).catch(logged('runner'));
       ctx.stopReason = todo;
     }
+    // Erst den Auftrag abschliessen, dann den Lauf: Stirbt der Worker dazwischen, gilt der Lauf als unterbrochen und
+    // recoverInterruptedRuns plant den Auftrag wieder ein. Jeder Schritt ist einzeln abgesichert, damit ein kurzer
+    // Datenbank-Aussetzer den Auftrag nicht „In Arbeit“ hängen lässt.
     try {
       await settleItem(ctx, passed, interrupted);
+    } catch (error) {
+      passed = false;
+      console.error(`[${item.id}] Abschluss fehlgeschlagen:`, error);
+      await blockStuckItem(pool, item.id).catch(logged('runner'));
     } finally {
       releaseTree?.();
     }
+    await pool
+      .query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
+        runId,
+        passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
+      ])
+      .catch(logged('runner'));
   }
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
 }
 
+/** Hinweis an Aufträgen, deren Abschluss nicht durchlief (kein Code-Fehler, daher kein Bug-Bericht). */
+export const STUCK_FAILURE =
+  'Der Abschluss des Auftrags wurde unterbrochen (z. B. Datenbank kurz nicht erreichbar). Bitte erneut starten.';
+
+/** Auftrag, dessen Abschluss scheiterte: blockiert statt dauerhaft „In Arbeit“. */
+async function blockStuckItem(pool: Pool, itemId: string): Promise<void> {
+  await pool.query(
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.blocked}', failure = COALESCE(failure, $2), updated_at = NOW()
+      WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.inProgress}'`,
+    [itemId, STUCK_FAILURE],
+  );
+}
+
 /**
- * Live schalten (nach dem Go zum Sprint, wenn er in main gemergt ist): Projektordner (z. B. mit dev-live) auf main
- * nachziehen und die Deploy-Befehle des Projekts dort ausführen. Vorher sieht man den Sprint nur in der Vorschau.
+ * Aufträge „In Arbeit“ ohne laufenden Lauf hängen (Abschluss scheiterte, Worker starb zwischen Lauf und Abschluss):
+ * blockieren, damit sie sichtbar sind und erneut gestartet werden können. Läuft am Anfang jedes Zyklus (je Projekt)
+ * und beim Start des Workers (alle Projekte). Express-Aufträge aus dem Chat haben keine Läufe und bleiben unberührt.
  */
-async function goLive(pool: Pool, project: string, cwd: string, execute?: CommandExecutor): Promise<void> {
-  await followProjectPreview(pool, project, cwd, 'main', execute);
-  const live = (await pool.query<{ repository: string }>('SELECT repository FROM projects WHERE slug = $1', [project]))
-    .rows[0]?.repository;
-  await deployProject(pool, project, live ?? cwd, execute);
+export async function recoverStuckItems(pool: Pool, project: string | null): Promise<number> {
+  const result = await pool.query(
+    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.blocked}', failure = COALESCE(d.failure, $2), updated_at = NOW()
+      WHERE d.status = '${DEVELOPMENT_STATUS.inProgress}' AND ($1::text IS NULL OR d.project_slug = $1)
+        AND EXISTS (SELECT 1 FROM agent_runs r WHERE r.development_id = d.id)
+        AND NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.development_id = d.id AND r.status = '${AGENT_RUN_STATUS.running}')`,
+    [project, STUCK_FAILURE],
+  );
+  return result.rowCount ?? 0;
+}
+
+/**
+ * Tages- oder Sprintbudget erreicht? Dann wartet `item` mit „Aktion notwendig: Budget“ (höchstens einer je Projekt,
+ * siehe holdForBudget) und es startet kein weiterer Auftrag.
+ */
+export function budgetHold(pool: Pool, project: string): (item: WorkItem) => Promise<boolean> {
+  return async (item) => {
+    const exhausted = await projectBudgetExceeded(pool, project).catch(logged('runner', null));
+    if (!exhausted) return false;
+    await holdForBudget(pool, item, exhausted).catch(logged('runner'));
+    return true;
+  };
+}
+
+/**
+ * Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent). Scheitert
+ * einer unerwartet (z. B. inzwischen gelöscht), laufen die übrigen trotzdem.
+ */
+export async function runSelectedItems(
+  items: WorkItem[],
+  run: (item: WorkItem) => Promise<string>,
+  between: () => Promise<unknown> = async () => undefined,
+  heldForBudget: (item: WorkItem) => Promise<boolean> = async () => false,
+): Promise<{ itemId: string; result: string }[]> {
+  const results: { itemId: string; result: string }[] = [];
+  for (const item of items) {
+    if (isShuttingDown()) break;
+    if (results.length) {
+      await between().catch(logged('runner'));
+      // Budget während des Zyklus erreicht: nur der nächste Auftrag wartet sichtbar, die übrigen bleiben eingeplant.
+      if (await heldForBudget(item)) break;
+    }
+    const result = await run(item).catch((error: unknown) => {
+      console.error(`Auftrag ${item.id} abgebrochen:`, error);
+      return AGENT_RUN_STATUS.failed;
+    });
+    results.push({ itemId: item.id, result });
+  }
+  return results;
 }
 
 export async function runWorkflow(
@@ -373,6 +463,8 @@ export async function runWorkflow(
     [options.project],
   );
   await resumeAfterEnvironment(pool, options.project).catch(logged('runner'));
+  // Hängengebliebene Aufträge (Abschluss scheiterte) nicht erst beim nächsten Worker-Start aufräumen.
+  await recoverStuckItems(pool, options.project).catch(logged('runner', 0));
   // Budget wieder frei (Folgetag, Limit erhöht oder entfernt): wegen Budget blockierte Aufträge laufen weiter.
   await releaseBudgetBlocks(pool, options.project).catch(logged('runner', []));
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
@@ -401,26 +493,21 @@ export async function runWorkflow(
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
   }
   // Tages- oder Sprintbudget erreicht: kein neuer Lauf. Der nächste Auftrag zeigt „Aktion notwendig: Budget“.
-  const exhausted = await projectBudgetExceeded(pool, options.project).catch(logged('runner', null));
-  if (exhausted && items[0]) {
-    await holdForBudget(pool, items[0], exhausted).catch(logged('runner'));
-    return results;
-  }
-  // Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent).
-  for (const item of items) {
-    if (isShuttingDown()) break;
-    // Angeforderte Live-Schaltungen (Git-Sicherung) nicht hinter dem ganzen Durchlauf warten lassen: zwischen zwei
-    // Aufträgen erledigen, der Ordner ist dann sauber. Vor dem ersten Auftrag lief sie oben schon.
-    if (results.length) {
-      await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
-        goLive(pool, options.project, options.cwd, execute),
-      ).catch(logged('runner'));
-    }
-    results.push({
-      itemId: item.id,
-      result: await runWorkItem(pool, item, agents, { ...options, execute, builtin }),
-    });
-  }
+  const held = budgetHold(pool, options.project);
+  if (items[0] && (await held(items[0]))) return results;
+  results.push(
+    ...(await runSelectedItems(
+      items,
+      (item) => runWorkItem(pool, item, agents, { ...options, execute, builtin }),
+      // Angeforderte Live-Schaltungen (Git-Sicherung) nicht hinter dem ganzen Durchlauf warten lassen: zwischen zwei
+      // Aufträgen erledigen, der Ordner ist dann sauber. Vor dem ersten Auftrag lief sie oben schon.
+      () =>
+        syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+          goLive(pool, options.project, options.cwd, execute),
+        ),
+      held,
+    )),
+  );
   await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,

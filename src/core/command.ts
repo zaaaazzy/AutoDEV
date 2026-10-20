@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 import { folderAvailable, missingFolderMessage } from './folder-guard.js';
 import { killGroup, trackChild } from './shutdown.js';
 
@@ -35,7 +36,11 @@ export type CommandExecutor = (
 export function redactOutput(output: string, environment: NodeJS.ProcessEnv): string {
   let safeOutput = output;
   for (const [key, value] of Object.entries(environment)) {
-    if (value && /(?:PASSWORD|SECRET|TOKEN|DATABASE_URL)/i.test(key) && value.length >= 4) {
+    if (
+      value &&
+      /(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY|ACCESS_KEY|DATABASE_URL)/i.test(key) &&
+      value.length >= 4
+    ) {
       safeOutput = safeOutput.replaceAll(value, '[REDACTED]');
     }
   }
@@ -58,15 +63,19 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     const untrack = child.pid ? trackChild(child.pid) : () => undefined;
     if (child.pid) options.onSpawn?.(child.pid);
     let output = '';
-    const appendOutput = (chunk: Buffer): void => {
-      options.onChunk?.(chunk.toString('utf8'));
+    const appendOutput = (text: string): void => {
+      if (!text) return;
+      options.onChunk?.(text);
       if (output.length < MAX_CAPTURED_OUTPUT + 1_000) {
-        output += chunk.toString('utf8').slice(0, MAX_CAPTURED_OUTPUT + 1_000 - output.length);
+        output += text.slice(0, MAX_CAPTURED_OUTPUT + 1_000 - output.length);
         options.onOutput?.(output);
       }
     };
-    child.stdout.on('data', appendOutput);
-    child.stderr.on('data', appendOutput);
+    // Je Stream ein Decoder: ein Umlaut, der über eine Chunk-Grenze fällt, wird sonst zu U+FFFD.
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+    child.stdout.on('data', (chunk: Buffer) => appendOutput(stdoutDecoder.write(chunk)));
+    child.stderr.on('data', (chunk: Buffer) => appendOutput(stderrDecoder.write(chunk)));
     child.once('error', (error: NodeJS.ErrnoException) => {
       // ENOENT kommt auch, wenn der Arbeitsordner fehlt (z. B. externes Laufwerk getrennt) – dann nicht auf PATH zeigen.
       const hint =
@@ -76,7 +85,7 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
             ? ` – Arbeitsordner nicht erreichbar: ${missingFolderMessage(cwd)}`
             : ` – Befehl „${command[0]}“ wurde im PATH des Workers nicht gefunden (PATH=${(options.env ?? process.env).PATH ?? ''}). ` +
               'Absoluten Pfad im Agent-Befehl angeben oder ./scripts/install-worker.sh in einem Terminal erneut ausführen, in dem der Befehl funktioniert.';
-      appendOutput(Buffer.from(`\n${error.message}${hint}\n`));
+      appendOutput(`\n${error.message}${hint}\n`);
     });
     // Eigener Timer statt spawn({ timeout }): der trifft nur den direkten Prozess. Gestartete Server oder Testläufer
     // lebten weiter, hielten stdout offen, und 'close' käme nie.
@@ -96,8 +105,10 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
       clearTimeout(timer);
       clearTimeout(grace);
       untrack();
+      appendOutput(stdoutDecoder.end());
+      appendOutput(stderrDecoder.end());
       if (signal) {
-        appendOutput(Buffer.from(`\nProcess ended by ${signal} (timeout or kill).\n`));
+        appendOutput(`\nProcess ended by ${signal} (timeout or kill).\n`);
       }
       resolveCommand({ exitCode: code ?? 1, durationMs: Date.now() - startedAt, output });
     };

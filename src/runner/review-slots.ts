@@ -55,6 +55,20 @@ export function reviewDatabase(databaseUrl: string, slot: number): { source: URL
   }
 }
 
+/**
+ * Skript für die Datenbank-Kopie (im Postgres-Container unter `sh -c`). Erst in eine Datei dumpen, dann einspielen:
+ * In einer Pipe zählte nur der Exit-Code von psql, ein gescheiterter pg_dump (Passwort, Host, Version) ergäbe still
+ * eine leere Datenbank. ON_ERROR_STOP=1: auch SQL-Fehler beim Einspielen lassen die Kopie scheitern.
+ */
+export const DATABASE_COPY_SCRIPT = [
+  'export PGHOST=$S_HOST PGPORT=$S_PORT PGUSER=$S_USER PGPASSWORD=$S_PASSWORD',
+  'dropdb --if-exists --force "$T_DB"',
+  'createdb "$T_DB"',
+  'DUMP=$(mktemp)',
+  'pg_dump --no-owner -f "$DUMP" "$S_DB"',
+  'psql -q -v ON_ERROR_STOP=1 -d "$T_DB" -f "$DUMP" > /dev/null',
+].join(' && ');
+
 async function update(pool: Pool, slot: number, fields: Record<string, unknown>): Promise<void> {
   const keys = Object.keys(fields);
   await pool.query(
@@ -313,12 +327,6 @@ export class ReviewSlots {
       `${prefix}PASSWORD=${decodeURIComponent(url.password)}`,
       `${prefix}DB=${url.pathname.slice(1)}`,
     ];
-    const script = [
-      'export PGHOST=$S_HOST PGPORT=$S_PORT PGUSER=$S_USER PGPASSWORD=$S_PASSWORD',
-      'dropdb --if-exists --force "$T_DB"',
-      'createdb "$T_DB"',
-      'pg_dump --no-owner "$S_DB" | psql -q -v ON_ERROR_STOP=0 -d "$T_DB" > /dev/null',
-    ].join(' && ');
     const result = await this.docker(
       [
         'run',
@@ -329,7 +337,7 @@ export class ReviewSlots {
         'postgres:17-alpine',
         'sh',
         '-c',
-        script,
+        DATABASE_COPY_SCRIPT,
       ],
       5 * 60_000,
     );
