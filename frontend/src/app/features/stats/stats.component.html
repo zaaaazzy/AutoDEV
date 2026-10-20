@@ -24,6 +24,54 @@
   <app-quality-panel />
 
   <section class="view-grid">
+    <article class="panel" data-testid="stats-budget">
+      <div class="section-heading">
+        <div>
+          <h2>Verbrauch gegen Budget</h2>
+          <p class="muted">Heute und im aktiven Sprint; Limits unter Einstellungen → Budget</p>
+        </div>
+      </div>
+      @if (budget(); as current) {
+        <app-budget-meter [status]="current.status" [display]="current" [warnPercent]="current.warnPercent" />
+      } @else {
+        <p class="muted">Budget konnte nicht geladen werden.</p>
+      }
+    </article>
+    <article class="panel" data-testid="stats-routing">
+      <div class="section-heading">
+        <div>
+          <h2>Modell-Routing</h2>
+          <p class="muted">Verbrauch je Modell und geschätzte Ersparnis durch lokale Läufe</p>
+        </div>
+      </div>
+      @if (data.routing; as routing) {
+        <p>
+          <strong>{{ money(routing.savedUsd) }}</strong> geschätzte Ersparnis ·
+          {{ routing.localTokens | localeNumber }} Tokens lokal statt kostenpflichtig ·
+          {{ routing.routedSteps }} Schritte vom Routing gewählt
+        </p>
+        @for (entry of routing.byModel; track entry.model) {
+          <div class="usage-row">
+            <div class="usage-head">
+              <span>{{ entry.model }}</span>
+              <strong>{{ entry.tokens | localeNumber }}</strong>
+            </div>
+            <small class="muted"
+              >{{ entry.count }} Schritte ({{ entry.routed }} geroutet) · {{ money(entry.costUsd) }}</small
+            >
+          </div>
+        } @empty {
+          <p class="empty-state">Noch keine Schritte mit erfasstem Modell.</p>
+        }
+        <p class="muted usage-note">
+          Ersparnis = lokal gelaufene, geroutete Tokens × gemessener Durchschnittspreis je Token (– solange kein Preis
+          gemessen ist).
+        </p>
+      }
+    </article>
+  </section>
+
+  <section class="view-grid">
     <article class="panel">
       <div class="section-heading">
         <div>
@@ -93,6 +141,29 @@
       [initialSort]="[{ id: 'tokens', desc: true }]"
       emptyText="Noch keine Aufträge."
     />
+  </section>
+
+  <section class="panel prompt-log" data-testid="prompt-log">
+    <div class="section-heading">
+      <div>
+        <h2>Prompt-Protokoll (Auftragsautor)</h2>
+        <p class="muted">
+          Letzte Prompts – mit den Ist-Werten ähnlicher erledigter Aufträge, an denen der Autor seine Schätzung
+          ausrichtet
+        </p>
+      </div>
+    </div>
+    @for (entry of prompts(); track entry.id) {
+      <details>
+        <summary>
+          {{ entry.createdAt | dateTime }} · {{ entry.agent }} · {{ entry.tokens | localeNumber }} Tokens
+          {{ entry.success ? '' : '· gescheitert' }}
+        </summary>
+        <pre>{{ entry.prompt }}</pre>
+      </details>
+    } @empty {
+      <p class="empty-state">Noch keine Prompts protokolliert.</p>
+    }
   </section>
 
   <section class="panel stats-table">

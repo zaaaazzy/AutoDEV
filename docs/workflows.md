@@ -69,7 +69,7 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 
 **Grenzen:**
 
-- **Kein Budget:** Das Budget-Feature (Idee 04) gibt es noch nicht, deshalb prüft der Autopilot kein Budget. Einzige Kostengrenze sind die Arbeitszeiten. Kommt Idee 04, gehört die Prüfung in `autopilotGuard` (`src/api/sprint-planning.ts`).
+- **Budget:** Der Autopilot selbst prüft kein Budget; die Läufe, die er anstößt, halten aber die Budget-Limits ein (Abschnitt 4, „Budget“). Eine eigene Prüfung im Autopiloten gehört in `autopilotGuard` (`src/api/sprint-planning.ts`, eigener Auftrag).
 - Die Kapazität vergleicht gemessene Agent-Laufzeit mit geschätzten Stunden der Kandidaten. Bei wenig Historie ist der Median ungenau. Sprints ohne gemessene Laufzeit (z. B. von Hand erledigt) zählen nicht als Historie.
 - Die Roadmap rechnet mit der heutigen Kapazität und nimmt an, dass alle eingeplanten Aufträge erledigt werden.
 - Bereits geplante, noch nicht gestartete Sprints und ihre Aufträge fliessen nicht in Vorschlag und Roadmap ein.
@@ -84,7 +84,11 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 - **Abbruch:** Der Nutzer kann einen Lauf abbrechen (Status Blockiert). Beim Herunterfahren des Workers wird der Auftrag zurück auf „Geplant“ gesetzt und läuft beim nächsten Start weiter.
 - **Sofortstart:** Wird ein Auftrag eingeplant (neu, „Erneut versuchen“, Bugfix, Sprint gestartet), meldet die Datenbank das per `NOTIFY devlog_work`; der Worker startet den nächsten Durchgang sofort statt nach bis zu 30 s. Ein frei werdender Platz weckt ihn ebenfalls. Das Intervall bleibt als Absicherung.
 - **Kurze Ausfälle:** Scheitert ein Schritt vorübergehend (Modell nicht erreichbar, überlastet, Rate-Limit, Verbindung abgebrochen, Zeitlimit), wird er nach 30 s einmal wiederholt. Erst wenn auch das scheitert, gilt der Schritt als fehlgeschlagen. Im Verlauf steht „Vorübergehender Fehler – neuer Versuch“.
-- **Kostenbremse:** In den Projekteinstellungen lässt sich eine Grenze je Auftrag setzen (Tokens und/oder USD). Vor jedem Agent prüft der Worker den Verbrauch des Auftrags seit dem letzten „Erneut versuchen“; ist die Grenze erreicht, startet kein weiterer Agent. Der Auftrag wird blockiert mit „Aktion notwendig: Kostengrenze erreicht …“ – ohne Bug und ohne Bugfix. „Erneut versuchen“ gibt ihm ein neues Budget (`budget_since`).
+- **Budget:** Unter Einstellungen → Budget lassen sich je Projekt Limits für Tag, Sprint und Auftrag setzen (Tokens und/oder USD, Tabelle `budgets`; leer = unbegrenzt, ohne Limit keine Prüfung). Verbrauch = `agent_run_steps` + `agent_usage` im Zeitraum (Tag ab Mitternacht, Sprint ab Sprintbeginn, Auftrag seit dem letzten „Erneut versuchen“, `budget_since`); Ollama zählt mit 0 USD, aber mit seinen Tokens. Vor jedem Agent-Schritt (`budgetGate`, `src/runner/budget.ts`) und vor jedem Lauf von Chat, Auftragsautor, Visionär usw. (`runAuthorAgent`) wird geprüft:
+  - **ab 80 %:** genau eine Push-Warnung je Projekt, Zeitraum und Periode (gemerkt in `budget_warnings`);
+  - **ab 100 %:** kein neuer Schritt; ein laufender Schritt endet regulär (das Limit kann um einen Schritt überschritten werden). Der Auftrag wird `blocked` mit „Aktion notwendig: Budget erreicht: erhöhen oder warten (…)“ – ohne Bug und ohne Bugfix; `budget_blocked` merkt den Zeitraum. Ist das Tages- oder Sprintbudget schon vor dem nächsten Auftrag erreicht, wartet genau ein Auftrag sichtbar, die übrigen bleiben eingeplant.
+  - **Freigabe:** Zu Beginn jedes Durchgangs und nach dem Speichern der Limits (`releaseBudgetBlocks`) laufen Aufträge weiter, deren Zeitraum wieder Luft hat – das Tageslimit am Folgetag, sonst nach Erhöhen oder Entfernen des Limits; die Aktion verschwindet. „Erneut versuchen“ gibt einem Auftrag weiterhin ein neues Auftragsbudget.
+- **Modell-Routing:** Regeln je Projekt (`routing_rules`, Reihenfolge = Priorität; ohne eigene Regeln die Standardregeln) wählen je Schritt die Stufe „lokal“ (Ollama-Modell) oder „stark“ (CLI-Befehl, z. B. Claude): `docs` → lokal, Schätzung < 1 h → lokal, `backend` und Schätzung > 4 h → stark, `retry_count ≥ 1` → eine Stufe höher, Budget > 80 % → eine Stufe tiefer. Die erste Regel mit fester Stufe bestimmt die Grundstufe, danach verschieben alle zutreffenden „höher/tiefer“-Regeln sie. Ist für die Stufe kein Modell konfiguriert, bleibt die Modellwahl je Rolle; der Tester wird nie umgeleitet. Jeder Schritt speichert `model` und `routing_rule`; das Lauf-Detail zeigt z. B. „Modell: qwen3.5:9b (Regel: docs → lokal)“ (`src/agent/model-routing.ts`).
 - **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 
@@ -105,7 +109,7 @@ dahin gilt dieser auch im Worker. API: `GET /api/projects/:slug/workflow`, `POST
 | Vor dem Auftrag | `pre_task` | für jeden Auftrag, vor der Umsetzung |
 | Während | `while_task` | Umsetzung |
 | Danach | `after_task` | Tests, Review, Doku |
-| Bei abgelehnt | `on_rejected` | am Ende eines gescheiterten Auftrags (nicht bei Unterbrechung oder Kostenbremse) |
+| Bei abgelehnt | `on_rejected` | am Ende eines gescheiterten Auftrags (nicht bei Unterbrechung oder erreichtem Budget) |
 | Bei abgeschlossen | `on_done` | am Ende eines erfolgreichen Auftrags |
 
 „Bei abgelehnt/abgeschlossen“ laufen noch vor dem Abschluss des Auftrags (ihre Änderungen landen im Commit), ändern

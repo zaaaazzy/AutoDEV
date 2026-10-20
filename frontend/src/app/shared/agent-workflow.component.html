@@ -11,6 +11,11 @@
         <article class="step-output" [innerHTML]="attached.content | markdown"></article>
       </details>
     }
+    @if (step?.model) {
+      <p class="muted step-model">
+        Modell: {{ step?.model }}{{ step?.routingRule ? ' (Regel: ' + step?.routingRule + ')' : '' }}
+      </p>
+    }
     @if (step) {
       <app-step-result [events]="step.events" [output]="step.output" [running]="step.status === 'running'" />
     } @else {

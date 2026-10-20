@@ -21,8 +21,6 @@ export interface Project {
   reviewCommand?: string[] | null;
   reviewUrl?: string | null;
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
-  orderTokenLimit?: number | null;
-  orderCostLimit?: number | null;
   /** AIdeation nach dem Sprint-Abschluss automatisch neu starten (AIdeation-Projekt). */
   restartAfterSprint?: boolean;
   /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
@@ -310,6 +308,10 @@ export interface RunStep {
   progress?: string | null;
   events?: StepEvent[];
   tokens?: number | string | null;
+  costUsd?: number | null;
+  /** Verwendetes Modell (z. B. qwen3.5:9b oder claude (opus)) und die greifende Routing-Regel. */
+  model?: string | null;
+  routingRule?: string | null;
 }
 
 export interface AgentRun {
@@ -593,4 +595,50 @@ export interface SprintCommit {
   date: string;
   developmentId: string | null;
   merged: boolean;
+}
+
+export type BudgetPeriod = 'day' | 'sprint' | 'order';
+export type RuleEffect = 'local' | 'strong' | 'up' | 'down';
+
+export interface BudgetLimit {
+  maxTokens: number | null;
+  maxCostUsd: number | null;
+}
+
+export interface RoutingCondition {
+  categories?: string[];
+  minHours?: number;
+  maxHours?: number;
+  minRetries?: number;
+  minBudgetPercent?: number;
+}
+
+export interface RoutingRule {
+  condition: RoutingCondition;
+  tier: RuleEffect;
+  label?: string;
+}
+
+export interface BudgetStatus {
+  period: BudgetPeriod;
+  spend: { tokens: number; costUsd: number };
+  limit: BudgetLimit & { period: BudgetPeriod };
+  percent: number;
+}
+
+/** Budget eines Projekts: Limits, Anzeigewährung, Stand (Tag/Sprint) und Modell-Routing. */
+export interface BudgetOverview {
+  limits: Record<BudgetPeriod, BudgetLimit>;
+  currency: 'USD' | 'CHF';
+  chfPerUsd: number;
+  warnPercent: number;
+  status: BudgetStatus[];
+  routing: {
+    rules: RoutingRule[];
+    customized: boolean;
+    defaults: RoutingRule[];
+    localModel: string | null;
+    strongCommand: string[] | null;
+  };
+  ollamaModels: string[];
 }

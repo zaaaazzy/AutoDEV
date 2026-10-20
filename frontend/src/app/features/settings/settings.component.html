@@ -99,31 +99,8 @@
           der Source-Ordner unter <code>/source</code> eingebunden, gearbeitet wird im gewählten Stand (Ports und
           Datenbank-Kopie stellt der Container). In der Sprint-Ansicht lässt sich so jeder Stand mit ▶ starten.
         </p>
-        <label
-          >Kostengrenze je Auftrag (Tokens)
-          <input
-            type="number"
-            name="orderTokenLimit"
-            min="1000"
-            step="1000"
-            placeholder="keine Grenze"
-            [(ngModel)]="settings.orderTokenLimit"
-          />
-        </label>
-        <label
-          >Kostengrenze je Auftrag (USD)
-          <input
-            type="number"
-            name="orderCostLimit"
-            min="0.01"
-            step="0.5"
-            placeholder="keine Grenze"
-            [(ngModel)]="settings.orderCostLimit"
-          />
-        </label>
         <p class="muted wide">
-          Ist eine Grenze erreicht, startet für den Auftrag kein weiterer Agent; er wartet mit „Aktion notwendig“ auf
-          dich. „Erneut versuchen“ gibt ihm ein neues Budget. Leer lassen für keine Grenze.
+          Kostengrenzen je Tag, Sprint und Auftrag sowie das Modell-Routing stehen unten unter „Budget“.
         </p>
         <label class="wide check">
           <input type="checkbox" name="restartAfterSprint" [(ngModel)]="settings.restartAfterSprint" /> Nach dem
@@ -281,6 +258,7 @@
     </section>
   }
   @if (auth.can('admin') && store.currentProject()) {
+    <app-budget-settings />
     <app-production-settings />
     <app-permission-groups-settings />
   }

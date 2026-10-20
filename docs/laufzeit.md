@@ -93,10 +93,10 @@ stateDiagram-v2
   backlog --> planned : Sprint aktiv (Arbeitszyklus) oder Play-Knopf
   planned --> inprog : Worker übernimmt (max. 3 je Zyklus)
   inprog --> done : alle Agents bestanden und Merge ok
-  inprog --> blocked : Agent scheitert, Merge-Konflikt oder Kostengrenze
+  inprog --> blocked : Agent scheitert, Merge-Konflikt oder Budget erreicht
   inprog --> rejected : Agent meldet Verstoss gegen Projektregel
   inprog --> planned : Worker beendet (Unterbrechung)
-  blocked --> planned : Erneut versuchen, Bugfix erfolgreich (max. 2), Ordner wieder da
+  blocked --> planned : Erneut versuchen, Bugfix erfolgreich (max. 2), Ordner wieder da, Budget wieder frei
   done --> [*]
   rejected --> [*]
 ```
@@ -182,7 +182,8 @@ flowchart TB
 - Vorbereitung und Doku-Agents laufen parallel zur Umsetzung eines anderen Auftrags.
 - Erneuter Versuch: bereits bestandene Agents werden übersprungen, ihre Ausgabe geht weiter.
 - Zeitlimit je Schritt 30 min (Standard).
-- Kostenbremse: Vor jedem Agent wird der Verbrauch des Auftrags mit der Grenze des Projekts verglichen; erreicht → blocked mit „Aktion notwendig“, kein Bug.
+- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
+- Modell-Routing: Die Regeln des Projekts wählen je Schritt lokal (Ollama) oder stark (CLI); Modell und Regel stehen am Schritt.
 
 ## 6 · Fehler, Problemanalyse und Bugfix
 
@@ -342,9 +343,9 @@ Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitli
 
 Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. Das 30-s-Intervall bleibt als Absicherung.
 
-### Kostenbremse
+### Budget und Modell-Routing
 
-Grenze je Auftrag (Tokens/USD) in den Projekteinstellungen. „Erneut versuchen“ startet ein neues Budget.
+Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
 
 ### Zeitleiste und Rückfragen im Auftrag
 

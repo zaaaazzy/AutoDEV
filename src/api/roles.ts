@@ -61,6 +61,8 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/setup\/jobs$/, 'admin'],
   ['PATCH', /^\/api\/projects\/[^/]+$/, 'admin'],
   ['PUT', /^\/api\/projects\/[^/]+\/permissions$/, 'admin'],
+  // Budget-Limits, Währung/Kurs und Modell-Routing (inkl. CLI-Befehl der starken Stufe): Administration.
+  ['PUT', /^\/api\/projects\/[^/]+\/budget$/, 'admin'],
   // Ingest-Token des Produktions-Rückkanals erzeugen, rotieren, entfernen. Der Ingest-Endpunkt selbst
   // (POST /api/ingest/<projekt>/<token>) liegt vor dem Login und braucht weder Anmeldung noch Rolle.
   ['*', /^\/api\/projects\/[^/]+\/ingest-token$/, 'admin'],

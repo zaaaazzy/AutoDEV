@@ -42,6 +42,17 @@ export function formatTokens(value: number | null | undefined): string {
   return value === null || value === undefined ? '–' : `${Number(value).toLocaleString('de-DE')} Tokens`;
 }
 
+/** Betrag in der Anzeigewährung des Budgets (USD oder CHF zum festen Kurs aus den Einstellungen). */
+export function formatMoney(
+  usd: number | null | undefined,
+  display: { currency: 'USD' | 'CHF'; chfPerUsd: number } | null | undefined,
+): string {
+  if (usd === null || usd === undefined) return '–';
+  const chf = display?.currency === 'CHF';
+  const value = chf ? usd * display.chfPerUsd : usd;
+  return `${value.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${chf ? 'CHF' : 'USD'}`;
+}
+
 export function formatUsd(value: number | null | undefined): string {
   return value === null || value === undefined
     ? '–'

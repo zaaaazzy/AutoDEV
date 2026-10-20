@@ -126,8 +126,8 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
 /**
  * Was den Autopilot anhält: gescheiterte Git-Sicherung des letzten abgeschlossenen Sprints (bis zur Freigabe),
  * ein noch laufender Abschluss und die Arbeitszeiten (nur für das Starten neuer Sprints).
- * Budget: AIdeation hat noch kein Budget-Feature (Idee 04) – bis dahin gibt es bewusst keine Budgetprüfung,
- * die Arbeitszeiten sind die einzige Kostengrenze.
+ * Budget: Der Autopilot prüft es (noch) nicht selbst; die Agent-Läufe, die er anstößt, halten die Budget-Limits
+ * ein (src/runner/budget.ts). Eine eigene Prüfung hier ist ein eigener Auftrag.
  */
 export async function autopilotGuard(pool: Pool, project: string, now = new Date()): Promise<AutopilotGuard | null> {
   const settings = (

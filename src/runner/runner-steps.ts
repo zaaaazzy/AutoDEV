@@ -28,7 +28,9 @@ import {
   roleDefaultCommands,
   withAgentPermissions,
 } from '../agent/tool-permissions.js';
-import { runOllamaAgent } from '../agent/ollama-agent.js';
+import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
+import { describeCommand, loadRouting, type ProjectRouting, routable, routeModel } from '../agent/model-routing.js';
+import { type BudgetState, checkBudget } from './budget.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
 import type { BuiltinAgent, StepSummary, WorkItem, WorkflowAgent, WorkItemOptions } from './runner-types.js';
@@ -48,6 +50,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
   timeoutMs,
   signal,
   onProgress,
+  model,
 }) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
@@ -97,7 +100,18 @@ export const runBuiltinAgent: BuiltinAgent = async ({
     edit: commands.includes(FILES_EDIT),
     scopes: agent.fileScope ?? [],
   };
-  return runOllamaAgent({ prompt, role: agent.role, cwd, timeoutMs, signal, databaseUrl, onProgress, files, commands });
+  return runOllamaAgent({
+    prompt,
+    role: agent.role,
+    cwd,
+    timeoutMs,
+    signal,
+    databaseUrl,
+    onProgress,
+    files,
+    commands,
+    model,
+  });
 };
 
 async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
@@ -153,6 +167,66 @@ export interface RunContext {
   messages?: { toId: string; from: string; text: string }[];
   /** Ergebnis von „Vor dem Sprint“ für alle Aufträge des Sprints. */
   sprintNotes?: string | null;
+  /** Höchster Budgetanteil (Prozent) aus der letzten Prüfung vor dem Schritt – für den Sparmodus im Routing. */
+  budgetPercent?: number;
+  /** Routing-Regeln und Stufen-Modelle des Projekts (einmal je Lauf geladen). */
+  routing?: ProjectRouting | null;
+  /** Grund, warum der Lauf angehalten wurde (z. B. Budget), für die Push-Nachricht. */
+  stopReason?: string | null;
+}
+
+/** Vom Routing gewähltes Modell eines Schritts: Ollama-Modell oder CLI-Befehl samt greifender Regel. */
+export interface RoutedModel {
+  model?: string;
+  command?: string[];
+  rule: string | null;
+}
+
+/**
+ * Budget-Prüfpunkt vor jedem Agent-Schritt (Tag, Sprint, Auftrag): liefert den erreichten Zeitraum oder null. Ein
+ * bereits laufender Schritt wird nie abgebrochen; das Limit kann daher um höchstens einen Schritt überschritten werden.
+ */
+export async function budgetGate(ctx: RunContext): Promise<BudgetState | null> {
+  const check = await checkBudget(ctx.pool, ctx.item.projectSlug, {
+    itemId: ctx.item.id,
+    sprintId: ctx.item.sprintId ?? null,
+  });
+  ctx.budgetPercent = check.percent;
+  return check.exceeded;
+}
+
+/** Modell-Routing: Stufe nach den Regeln des Projekts; ohne konfiguriertes Modell der Stufe bleibt die Wahl je Rolle. */
+export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<RoutedModel> {
+  if (!routable(agent.role)) return { rule: null };
+  if (ctx.routing === undefined) ctx.routing = await loadRouting(ctx.pool, ctx.item.projectSlug).catch(() => null);
+  if (!ctx.routing) return { rule: null };
+  const decision = routeModel(ctx.routing.rules, {
+    category: ctx.item.category ?? null,
+    effortHours: ctx.item.effortHours ?? null,
+    retryCount: ctx.item.retryCount ?? 0,
+    budgetPercent: ctx.budgetPercent ?? 0,
+  });
+  const { local, strong } = ctx.routing.models;
+  if (decision.tier === 'local' && local) return { model: local, rule: decision.rule };
+  if (decision.tier === 'strong' && strong) return { command: strong, rule: decision.rule };
+  return { rule: null };
+}
+
+/** CLI-Befehl eines Schritts: vom Routing, eigener Befehl des Agents oder Standardbefehl; null = eingebautes Modell. */
+function configuredCommand(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string[] | null {
+  if (routed.model) return null;
+  if (routed.command) return routed.command;
+  return agent.command?.length ? agent.command : agent.role === 'tester' ? null : ctx.fallbackCommand;
+}
+
+/** Anzeige des verwendeten Modells, z. B. „qwen3.5:9b“ oder „claude (opus)“. */
+export function stepModel(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string {
+  if (routed.model) return routed.model;
+  const command = configuredCommand(ctx, agent, routed);
+  if (command) return describeCommand(command);
+  if (agent.role === 'tester')
+    return ctx.fallbackCommand ? `${describeCommand(ctx.fallbackCommand)} + Testlauf` : 'Testlauf';
+  return resolveModel(agent.role);
 }
 
 interface StepOutcome {
@@ -267,6 +341,7 @@ async function invokeAgent(
   agent: WorkflowAgent,
   prompt: string,
   hooks: StepHooks,
+  routed: RoutedModel = { rule: null },
 ): Promise<CommandResult> {
   const { pool, item, options, execute, builtin, fallbackCommand } = ctx;
   const builtinRun = (): Promise<CommandResult> =>
@@ -279,8 +354,9 @@ async function invokeAgent(
       timeoutMs: options.timeoutMs,
       signal: hooks.signal,
       onProgress: hooks.onAction,
+      ...(routed.model ? { model: routed.model } : {}),
     });
-  const configured = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
+  const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
   const command =
     configured &&
@@ -376,14 +452,26 @@ export async function runStep(
 ): Promise<StepOutcome> {
   const { pool, item, runId, done, options, execute } = ctx;
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
+  const routed = await routeStep(ctx, agent);
+  const model = stepModel(ctx, agent, routed);
   const stepId = (
     await pool.query<{ id: string }>(
-      `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status, workflow_step_id)
-     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}', $6) RETURNING id`,
-      [runId, stepOptions.stepPosition ?? position, agent.id, agent.name, agent.phase, agent.stepId ?? null],
+      `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status, workflow_step_id, model, routing_rule)
+     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}', $6, $7, $8) RETURNING id`,
+      [
+        runId,
+        stepOptions.stepPosition ?? position,
+        agent.id,
+        agent.name,
+        agent.phase,
+        agent.stepId ?? null,
+        model,
+        routed.rule,
+      ],
     )
   ).rows[0]?.id;
   await logEvent(pool, stepId, 'Schritt gestartet');
+  await logEvent(pool, stepId, routed.rule ? `Modell: ${model} (Regel: ${routed.rule})` : `Modell: ${model}`);
   const manual =
     agent.role === 'manual_writer' || agent.role === 'user_manual_writer'
       ? await readManual(
@@ -481,7 +569,7 @@ export async function runStep(
   // Nur ein Ordner, der beim Start da war, kann „weggefallen“ sein (sonst ist es ein Konfigurationsfehler).
   const folderAtStart = folderAvailable(ctx.options.cwd);
   const attempt = (): Promise<CommandResult> =>
-    invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
+    invokeAgent(ctx, agent, prompt, hooks, routed).catch((error: unknown): CommandResult => ({
       exitCode: 1,
       durationMs: 0,
       output: error instanceof Error ? error.message : String(error),
@@ -713,7 +801,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
         WHERE id = $1`,
       [item.id, succeeded],
     );
-    await notifySettled(pool, item, succeeded, mergeProblem);
+    await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);
     return;
   }
   // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“.
@@ -722,7 +810,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
             status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status ELSE $2 END WHERE id = $1`,
     [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
-  await notifySettled(pool, item, succeeded, mergeProblem);
+  await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);
   if (!succeeded) return;
   if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('runner-steps'));
 }
