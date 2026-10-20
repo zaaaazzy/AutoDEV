@@ -29,7 +29,7 @@ import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions 
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
-import { completeRestart, processRestart, readRestart } from './system-restart.js';
+import { completeRestart, processRestart } from './system-restart.js';
 import { sendPush } from '../core/push.js';
 import { listenForWork, WorkSignal } from './work-signal.js';
 import { runDueJobs } from './scheduler.js';
@@ -485,16 +485,8 @@ async function main(): Promise<void> {
         setupActive +
         (schedulerActive ? 1 : 0);
       void processRestart(pool, INSTALL_ROOT, busy)
-        .then(async (result) => {
-          if (result === 'failed') {
-            const state = await readRestart(pool).catch(logged('runner-cli', null));
-            await sendPush(pool, {
-              title: '⚠ AIdeation Neustart fehlgeschlagen',
-              body: state?.message ?? 'Details unter Assistent → Aktionen → System.',
-              url: '#dashboard',
-              tag: 'system-restart',
-            });
-          }
+        .then((result) => {
+          // Ein gescheiterter Neustart meldet sich selbst per Push (writeRestart → notifyRestart).
           if (result !== 'restart') return;
           console.info('Container neu gebaut – Worker beendet sich und startet mit dem neuen Code neu.');
           stop();

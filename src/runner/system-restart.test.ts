@@ -153,3 +153,18 @@ test('Neustart: baut nur einen sauberen Stand des erlaubten Branches', async () 
   assert.equal((await run(gitState('fix/irgendwas', ''), '*')).result, 'restart', '„*“ erlaubt jeden Branch');
   assert.equal((await run(gitState('release', ''), 'release')).result, 'restart');
 });
+
+test('Neustart scheitert schon vor dem Bau (falscher Branch): genau eine Benachrichtigung', async () => {
+  const pool = memoryPool();
+  const seen: string[] = [];
+  const notify = async (_pool: unknown, state: { status: string }) => {
+    seen.push(state.status);
+  };
+  await requestRestart(pool, 'Patrick');
+  const feature: CommandExecutor = async (command, cwd) =>
+    command[0] === 'git' && command[1] === 'rev-parse'
+      ? { exitCode: 0, durationMs: 1, output: 'fix/irgendwas\n' }
+      : ok(command, cwd);
+  assert.equal(await processRestart(pool, '/x', () => 0, feature, undefined, { notify, branch: 'main' }), 'failed');
+  assert.deepEqual(seen, ['failed']);
+});

@@ -261,12 +261,16 @@ export async function processRestart(
     (error: unknown) => `Git-Stand nicht lesbar: ${error instanceof Error ? error.message : String(error)}`,
   );
   if (problem) {
-    await writeRestart(pool, {
-      ...current,
-      status: 'failed',
-      finishedAt: now().toISOString(),
-      message: `Nicht neu gebaut: ${problem} AIdeation läuft unverändert weiter.`,
-    });
+    await writeRestart(
+      pool,
+      {
+        ...current,
+        status: 'failed',
+        finishedAt: now().toISOString(),
+        message: `Nicht neu gebaut: ${problem} AIdeation läuft unverändert weiter.`,
+      },
+      options.notify,
+    );
     return 'failed';
   }
   const building = await writeRestart(pool, {
