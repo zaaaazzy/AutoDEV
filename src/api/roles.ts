@@ -106,6 +106,8 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/projects\/[^/]+\/test-requests$/, 'run'],
   // AIdeation neu starten (Container neu bauen, Worker neu starten): betrifft alle Projekte.
   ['POST', /^\/api\/system\/restart$/, 'admin'],
+  // Wartungs-Jobs des Workers (Zeitplan, Konfiguration): nur Administration; GET prüft die Route selbst.
+  ['*', /^\/api\/scheduled-jobs(?:\/[^/]+)?$/, 'admin'],
 ];
 
 export function requiredRole(method: string, path: string, body: unknown): Role | null {
