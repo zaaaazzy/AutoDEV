@@ -68,3 +68,40 @@ test('PATCH /development: Zuordnung zu abgeschlossenem Sprint wird mit 409 abgel
     assert.ok(!result.queries.some((sql) => /^\s*UPDATE development_items/i.test(sql)));
   }
 });
+
+/** Folgeauftrag zu einem erledigten Auftrag, Ziel-Sprint im Status `sprintStatus`. */
+async function followUp(sprintStatus: string) {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      if (/FROM sprints/.test(sql)) return { rows: [{ status: sprintStatus }], rowCount: 1 };
+      return { rows: [{ id: ID, status: 'done', projectSlug: 'dev-log', title: 'Login' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/development/${ID}/follow-up`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'Nachtrag', description: 'Rest', sprintId: SPRINT }),
+    });
+    return { status: response.status, queries };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('Folgeauftrag: abgeschlossener Sprint wird mit 409 abgelehnt und nichts angelegt', async () => {
+  const result = await followUp('completed');
+  assert.equal(result.status, 409);
+  assert.ok(!result.queries.some((sql) => /INSERT INTO development_items/i.test(sql)));
+});
+
+test('Folgeauftrag: aktiver Sprint bleibt erlaubt', async () => {
+  const result = await followUp('active');
+  assert.notEqual(result.status, 409);
+  assert.ok(result.queries.some((sql) => /INSERT INTO development_items/i.test(sql)));
+});

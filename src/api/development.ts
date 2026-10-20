@@ -155,12 +155,21 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       return;
     }
     const sprintId = typeof body.sprintId === 'string' ? body.sprintId : null;
-    if (
-      sprintId &&
-      !(await pool.query('SELECT 1 FROM sprints WHERE id = $1 AND project_slug = $2', [sprintId, source.projectSlug]))
-        .rows[0]
-    ) {
+    const sprint = sprintId
+      ? (
+          await pool.query<{ status: string }>('SELECT status FROM sprints WHERE id = $1 AND project_slug = $2', [
+            sprintId,
+            source.projectSlug,
+          ])
+        ).rows[0]
+      : undefined;
+    if (sprintId && !sprint) {
       response.status(400).json({ message: 'Sprint gehört nicht zum Projekt.' });
+      return;
+    }
+    // Wie beim Zuordnen per PATCH: nur in geplante oder aktive Sprints, nicht in abgeschlossene oder solche im Review.
+    if (sprint && !isAssignableSprintStatus(sprint.status)) {
+      response.status(409).json({ message: 'Folgeaufträge nur in geplante oder aktive Sprints.' });
       return;
     }
     const result = await pool.query(
