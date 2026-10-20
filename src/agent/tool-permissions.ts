@@ -338,6 +338,16 @@ function prefixInside(raw: string | undefined, root: string | undefined): boolea
 }
 
 /**
+ * Schaltet die Option --ignore-scripts wieder ab? Bei npm gewinnt die letzte Angabe: --no-ignore-scripts,
+ * --ignore-scripts=false oder „--ignore-scripts false“, auch abgekürzt (--ignore-s=false, --no-ig).
+ */
+function disablesIgnoreScripts(name: string, inline: string | undefined, next: string | undefined): boolean {
+  if (name.startsWith('no-') && 'ignore-scripts'.startsWith(name.slice(3))) return true;
+  if (!'ignore-scripts'.startsWith(name)) return false;
+  return inline === undefined ? next === 'false' : inline !== 'true';
+}
+
+/**
  * Prüft die Optionen eines npm-Befehls (für Wächter und lokales Modell); liefert den Grund der Sperre oder null.
  * Ohne Projektordner (root) ist --prefix nur mit einem einfachen relativen Ordner erlaubt. Nach „--“ gehören die
  * Argumente dem Skript, nicht npm.
@@ -351,6 +361,9 @@ export function npmOptionProblem(command: string, root?: string): string | null 
     if (!word.startsWith('-')) continue;
     const [flag = '', inline] = word.split(/=(.*)/s);
     const prefixValue = (): string | undefined => inline ?? words[++index];
+    if (disablesIgnoreScripts(flag.replace(/^-+/, ''), inline, words[index + 1]?.replace(/['"\\]/g, ''))) {
+      return `„${command}“: --ignore-scripts lässt sich nicht abschalten.`;
+    }
     if (flag.startsWith('--')) {
       const name = flag.slice(2);
       if (name === 'prefix') {
@@ -368,6 +381,42 @@ export function npmOptionProblem(command: string, root?: string): string | null 
     }
   }
   return null;
+}
+
+/** Git-Optionen, mit denen erlaubte Befehle Programme starten oder Dateien schreiben würden (lange Form ohne „--“). */
+const DANGEROUS_GIT_OPTIONS = [
+  'upload-pack',
+  'receive-pack',
+  'exec',
+  'output',
+  'output-directory',
+  'ext-diff',
+  'textconv',
+  'no-index',
+  'config',
+  'template',
+  'separate-git-dir',
+  'work-tree',
+  'git-dir',
+  'open-files-in-pager',
+];
+/** Eigene Optionen, die zugleich Anfang einer gesperrten sind (git diff --text ≠ --textconv). */
+const SAFE_GIT_OPTIONS = new Set(['text']);
+
+/**
+ * Gefährliche Option in einem git-Befehl? Git akzeptiert eindeutige Abkürzungen (--outp = --output, --upload-pa =
+ * --upload-pack), darum ist jede lange Option gesperrt, deren Name der Anfang einer gesperrten ist. Dazu -c, -u und
+ * -O (Pager bzw. Reihenfolge-Datei). Anführungszeichen und Backslashes werden wie in Bash entfernt.
+ */
+export function gitOptionProblem(command: string): boolean {
+  const words = shellWords(command);
+  if (words[0] !== 'git') return false;
+  return words.slice(1).some((word) => {
+    if (/^-[cu](?:=|$)/.test(word) || word.startsWith('-O')) return true;
+    if (!word.startsWith('--') || word === '--') return false;
+    const name = word.slice(2).split('=')[0] ?? '';
+    return !SAFE_GIT_OPTIONS.has(name) && DANGEROUS_GIT_OPTIONS.some((option) => option.startsWith(name));
+  });
 }
 
 /**
@@ -615,8 +664,56 @@ const FORBIDDEN_SUBCOMMANDS = new RegExp(
  * npm --prefix) sind ebenfalls gesperrt, damit sie die Prüfung nicht umgehen.
  */
 export function forbiddenSubcommand(command: string): boolean {
-  const normalized = command.trim().replace(/\s+/g, ' ');
-  return FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized);
+  // Bash entfernt Anführungszeichen und Backslashes: git "push", git pu\sh und npm 'install' sind dieselben Befehle.
+  const words = shellWords(command);
+  const normalized = words.join(' ');
+  if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized)) return true;
+  // Befehlsname und Unterbefehl nur wörtlich: Variablen, Globs, Klammer-Erweiterung oder $'…' (git $X, git pus?,
+  // git {push,}) setzt erst die Shell zusammen – und alle übrigen Prüfungen sähen den Befehl nicht.
+  if (!CHECKED_PROGRAMS.has(words[0] ?? '')) return false;
+  const raw = command.trim().split(/\s+/);
+  const literal = raw.slice(0, words[0] === 'docker' && words[1] === 'compose' ? 3 : 2);
+  return literal.some((word) => !/^[\w.:@/=+,-]+$/.test(word));
+}
+
+/** Programme, deren Unterbefehle der Wächter prüft. */
+const CHECKED_PROGRAMS = new Set(['git', 'docker', 'docker-compose', 'npm', 'npx']);
+
+/**
+ * Zerlegt einen einfachen Shell-Befehl wie Bash in Wörter: Anführungszeichen und Backslashes werden entfernt,
+ * Leerzeichen in Anführungszeichen trennen nicht. Bei einem offenen Anführungszeichen (der Wächter trennt Befehlsketten
+ * auch innerhalb von Anführungszeichen) werden Anführungszeichen und Backslashes einfach entfernt.
+ */
+export function shellWords(command: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let started = false;
+  let quote = '';
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index] ?? '';
+    if (quote) {
+      if (char === quote) quote = '';
+      else if (quote === '"' && char === '\\' && /["\\$`]/.test(command[index + 1] ?? '')) word += command[++index];
+      else word += char;
+    } else if (/\s/.test(char)) {
+      if (started) words.push(word);
+      word = '';
+      started = false;
+    } else {
+      started = true;
+      if (char === "'" || char === '"') quote = char;
+      else if (char === '\\') word += command[++index] ?? '';
+      else word += char;
+    }
+  }
+  if (quote)
+    return command
+      .replace(/['"\\]/g, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  if (started) words.push(word);
+  return words;
 }
 
 /** Deckt ein Präfix (Regel „Bash(<präfix>:*)“) einen gesperrten Unterbefehl ab, z. B. „git“ oder „docker compose“? */

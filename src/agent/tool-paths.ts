@@ -1,4 +1,5 @@
-import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 export const BACKUP_DIRECTORY = '.dev-log-backups';
@@ -73,6 +74,35 @@ export async function resolveInside(cwd: string, requested: unknown, forWrite = 
     }
   }
   return target;
+}
+
+/**
+ * Liest eine Datei im Projekt, ohne symbolischen Links zu folgen – weder bei der Datei noch bei einem Ordner dazwischen
+ * (sonst landete z. B. favicon.png -> ~/.ssh/id_ed25519 in der Datenbank). Liefert null für Links, Dateien ausserhalb,
+ * Nicht-Dateien und Dateien über maxBytes.
+ */
+export async function readProjectFile(
+  root: string,
+  path: string,
+  maxBytes = Infinity,
+): Promise<{ content: Buffer; mtimeMs: number } | null> {
+  try {
+    const realRoot = await realpath(root);
+    const absolute = resolve(root, path);
+    const rel = relative(resolve(root), absolute);
+    if (!rel || rel.startsWith('..') || (await realpath(absolute)) !== resolve(realRoot, rel)) return null;
+    // O_NOFOLLOW: wird die Datei nach der Prüfung durch einen Link ersetzt, schlägt das Öffnen fehl.
+    const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.size > maxBytes) return null;
+      return { content: await handle.readFile(), mtimeMs: info.mtimeMs };
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return null;
+  }
 }
 
 export async function walkText(directory: string, root: string, query: string, matches: string[]): Promise<void> {

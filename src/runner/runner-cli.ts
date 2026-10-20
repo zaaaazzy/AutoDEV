@@ -164,7 +164,7 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
         body: back
           ? 'Die Agents arbeiten weiter; unterbrochene Aufträge und wartende Anfragen laufen erneut.'
           : 'Die Agents pausieren, bis der Projektordner wieder erreichbar ist. Kabel und Stromversorgung prüfen.',
-        url: '#dashboard',
+        url: `#dashboard?project=${encodeURIComponent(target.options.project)}`,
         tag: `${FOLDER_NOTICE_KEY}-${volume}`,
       },
       { project: target.options.project },

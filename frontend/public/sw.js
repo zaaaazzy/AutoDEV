@@ -29,7 +29,11 @@ self.addEventListener('notificationclick', (event) => {
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
       for (const client of windows) {
         if ('focus' in client) {
-          if ('navigate' in client) client.navigate(target).catch(() => undefined);
+          // Offene App: Link per Nachricht übergeben – sie wechselt Projekt und Seite auch dann, wenn der Hash schon
+          // stimmt (reines Setzen des Hashes löst dann nichts aus). Andere Seiten im Scope werden umgeleitet.
+          if (new URL(client.url).pathname === new URL(target).pathname)
+            client.postMessage({ type: 'open', url: target });
+          else if ('navigate' in client) client.navigate(target).catch(() => undefined);
           return client.focus();
         }
       }

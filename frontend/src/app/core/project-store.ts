@@ -46,6 +46,8 @@ export class ProjectStore {
   private requestVersion = 0;
   /** Projekt, zu dem `data` aktuell gehört. */
   private loadedSlug = '';
+  /** Projekt, zu dem `worker` gehört (Entwürfe nur innerhalb desselben Projekts vergleichen). */
+  private workerSlug = '';
 
   readonly projects = signal<Project[]>([]);
   readonly activeProject = signal(projectFromHash() ?? readStoredProject());
@@ -87,17 +89,30 @@ export class ProjectStore {
     const onVisibilityChange = (): void => {
       if (!document.hidden) this.refreshActiveProject();
     };
+    // Angetippte Push-Nachricht: Der Service Worker schickt den Link, statt nur den Hash zu setzen (gleicher Hash
+    // löst sonst kein „hashchange“ aus).
+    const onWorkerMessage = (event: MessageEvent): void => {
+      const data = event.data as { type?: string; url?: unknown } | null;
+      if (data?.type === 'open' && typeof data.url === 'string') this.openLink(data.url);
+    };
     globalThis.addEventListener('hashchange', onHashChange);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    globalThis.navigator?.serviceWorker?.addEventListener('message', onWorkerMessage);
     void this.loadProjects();
     const refreshTimer = globalThis.setInterval(() => void this.refreshWorker(), WORKER_REFRESH_MS);
     const liveTimer = globalThis.setInterval(() => void this.refreshLiveRuns(), LIVE_RUNS_REFRESH_MS);
     inject(DestroyRef).onDestroy(() => {
       globalThis.removeEventListener('hashchange', onHashChange);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      globalThis.navigator?.serviceWorker?.removeEventListener('message', onWorkerMessage);
       globalThis.clearInterval(refreshTimer);
       globalThis.clearInterval(liveTimer);
     });
+  }
+
+  /** Ist `slug` noch das aktive Projekt? Nach jedem `await` prüfen, sonst landen Antworten im falschen Projekt. */
+  isActive(slug: string): boolean {
+    return !!slug && slug === this.activeProject();
   }
 
   sprintOf(item: DevelopmentItem | null): Sprint | null {
@@ -211,8 +226,10 @@ export class ProjectStore {
       if (slug === this.activeProject()) {
         // Ist ein Auftrag fertig geschrieben, sofort nachladen, damit er in der Liste erscheint.
         const current = new Set((status.drafts ?? []).map((draft) => draft.id));
-        const finished = (this.worker().drafts ?? []).some((draft) => !current.has(draft.id));
+        const previous = this.workerSlug === slug ? (this.worker().drafts ?? []) : [];
+        const finished = previous.some((draft) => !current.has(draft.id));
         this.worker.set(status);
+        this.workerSlug = slug;
         if (finished) this.refreshActiveProject();
         this.workerFailure.set(false);
       }
@@ -222,6 +239,14 @@ export class ProjectStore {
         this.worker.update((worker) => ({ ...worker, online: false }));
       }
     }
+  }
+
+  /** Link aus einer Push-Nachricht öffnen (Projekt im Link wird über `onHashChange` gewählt). */
+  private openLink(url: string): void {
+    const hash = new URL(url, globalThis.location.href).hash;
+    if (!hash) return;
+    if (hash === globalThis.location.hash) this.onHashChange();
+    else globalThis.location.hash = hash;
   }
 
   private onHashChange(): void {

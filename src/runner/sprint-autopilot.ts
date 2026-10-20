@@ -42,7 +42,7 @@ async function notifyPause(pool: Pool, project: string, sprintId: string, messag
     {
       title: `⏸ Autopilot pausiert · ${project}`,
       body: message.slice(0, 200),
-      url: '#sprints',
+      url: `#sprints?project=${encodeURIComponent(project)}`,
       tag: `autopilot-${project}`,
     },
     { project },
@@ -76,7 +76,7 @@ export async function markSprintReady(pool: Pool, project: string): Promise<bool
       {
         title: `🚀 Sprint fertig · ${project}`,
         body: `${active.name}: Alle Aufträge sind durch. Vorschau ansehen und „Live schalten“.`,
-        url: '#sprints',
+        url: `#sprints?project=${encodeURIComponent(project)}`,
         tag: `sprint-ready-${active.id}`,
       },
       { project },
@@ -138,7 +138,7 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
     {
       title: `▶ Sprint gestartet · ${project}`,
       body: `${proposal.name}: ${ids.length} Aufträge (${proposal.totals.hours} h) vom Autopilot eingeplant.`,
-      url: '#sprints',
+      url: `#sprints?project=${encodeURIComponent(project)}`,
       tag: `autopilot-${project}`,
     },
     { project: project },

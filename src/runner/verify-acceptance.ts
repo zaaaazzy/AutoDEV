@@ -50,6 +50,25 @@ export async function verifyAcceptance(
   ).rows.sort((a, b) => a.kind.localeCompare(b.kind) || a.position - b.position);
   const developmentId = claimed[0]?.developmentId;
   if (!developmentId) return 0;
+  try {
+    return await checkClaimed(pool, options, developmentId, claimed, execute);
+  } finally {
+    // Was noch auf „checking“ steht (Fehler, Herunterfahren), geht zurück in die Warteschlange; sonst bliebe es gesperrt.
+    await pool
+      .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE development_id = $1 AND status = 'checking'`, [
+        developmentId,
+      ])
+      .catch(logged('verify-acceptance'));
+  }
+}
+
+async function checkClaimed(
+  pool: Pool,
+  options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
+  developmentId: string,
+  claimed: Point[],
+  execute?: CommandExecutor,
+): Promise<number> {
   const item = (
     await pool.query<{ title: string; description: string }>(
       'SELECT title, description FROM development_items WHERE id = $1',
@@ -72,13 +91,8 @@ export async function verifyAcceptance(
     undefined,
     tester?.id ?? null,
   );
-  if (isShuttingDown()) {
-    await pool.query(
-      `UPDATE acceptance_checks SET status = 'verifying' WHERE development_id = $1 AND status = 'checking'`,
-      [developmentId],
-    );
-    return 0;
-  }
+  // Beim Herunterfahren setzt der finally-Block in verifyAcceptance die Punkte zurück.
+  if (isShuttingDown()) return 0;
   const results = exitCode === 0 ? parseChecks(output) : [];
   for (const [index, point] of claimed.entries()) {
     const result = results.find((entry) => entry.nr === index + 1);

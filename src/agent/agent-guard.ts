@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   COMPOSE_STARTING,
   composeViolation,
   forbiddenSubcommand,
+  gitOptionProblem,
   gitPathProblem,
   npmOptionProblem,
   SECRET_IN_COMMAND,
@@ -40,9 +41,6 @@ const PROTECTED_PATH =
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-/** Optionen, mit denen erlaubte Git-Befehle Programme starten oder Dateien schreiben würden. */
-const DANGEROUS_GIT_OPTION =
-  /(?:^|\s)(?:--upload-pack|--receive-pack|--exec|--output|--ext-diff|--textconv|--no-index|--config|-c|-u|--template|--separate-git-dir|--work-tree|--git-dir)(?:[=\s]|$)/;
 /**
  * Shell-Konstrukte, die weitere Befehle verstecken oder im Hintergrund starten: Befehlsersetzung, Prozessersetzung,
  * Subshells und ein einzelnes „&“. Die CLI-Freigaben prüfen nur den Anfang; was dahinter steckt, sähe niemand.
@@ -56,14 +54,21 @@ const COMPOSE_START_FORMS = [
   /^docker compose (?:start|restart|build)(?: [a-zA-Z0-9][\w.-]*)*$/,
 ];
 
-/** Ausgabe in Dateien umleiten (ausser nach /dev/null bzw. 2>&1) – Schreiben läuft nur über die Datei-Werkzeuge. */
-const FILE_REDIRECT = /(?:^|[^<>&\d])\d?>>?(?!&\d)(?!\s*\/dev\/null)/;
+/**
+ * Ausgabe in Dateien umleiten (ausser nach /dev/null bzw. 2>&1) – Schreiben läuft nur über die Datei-Werkzeuge.
+ * Auch mehrstellige File-Deskriptoren (10>datei) und „<>“ (öffnet zum Lesen und Schreiben, legt die Datei an).
+ */
+const FILE_REDIRECT = /(?:^|[^<>&\d])\d*(?:<>|>>?)(?!&\d)(?!\s*\/dev\/null)/;
 
-/** Pfad samt symbolischer Links auflösen (für noch nicht vorhandene Dateien über den nächsten vorhandenen Ordner). */
-function realTarget(path: string): string {
+/**
+ * Pfad samt symbolischer Links auflösen (für noch nicht vorhandene Dateien über den nächsten vorhandenen Ordner).
+ * null bei einem Link ins Leere: Schreiben legte sein (ungeprüftes) Ziel an, womöglich ausserhalb des Projekts.
+ */
+function realTarget(path: string): string | null {
   let current = path;
   const rest: string[] = [];
   while (!existsSync(current) && dirname(current) !== current) {
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) return null;
     rest.unshift(current.slice(dirname(current).length + 1));
     current = dirname(current);
   }
@@ -78,6 +83,7 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   if (typeof raw !== 'string' || !raw) return 'Kein Dateipfad angegeben.';
   const root = realpathSync(projectRoot);
   const target = realTarget(isAbsolute(raw) ? raw : resolve(input.cwd ?? root, raw));
+  if (!target) return `${raw} ist ein symbolischer Link ins Leere.`;
   if (!inside(target, root)) return `${raw} liegt ausserhalb des Projektordners.`;
   const relative = target.slice(root.length + 1);
   if (PROTECTED_PATH.test(relative)) return `${relative} ist geschützt (Git, Agent-Einstellungen oder Geheimnisse).`;
@@ -107,7 +113,7 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
     }
     if (/^git\s+-/.test(part)) return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
-    if (/^git\s/.test(part) && DANGEROUS_GIT_OPTION.test(part)) {
+    if (gitOptionProblem(part)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
     // Auch bei breiten eigenen Freigaben (Bash(git:*), Bash(docker:*)): diese Unterbefehle gibt keine Gruppe frei.

@@ -80,7 +80,7 @@ export async function holdForReview(
     {
       title: `👀 Wartet auf Freigabe · ${item.projectSlug}`,
       body: `${item.title}\nIn der Review-Instanz ansehen und im Auftrag freigeben oder zurückweisen.`,
-      url: '#development',
+      url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
       tag: `order-${item.id}`,
     },
     { project: item.projectSlug },
@@ -132,7 +132,7 @@ export async function retryAfterConflict(
     {
       title: `↻ Merge-Konflikt wird gelöst · ${item.projectSlug}`,
       body: `${item.title}\nDer Auftrag startet neu, der Entwickler führt die Änderungen zusammen.`,
-      url: '#development',
+      url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
       tag: `order-${item.id}`,
     },
     { project: item.projectSlug },
@@ -176,7 +176,7 @@ export async function processApprovals(
         {
           title: `⚠ Freigabe nicht gemergt · ${project}`,
           body: `${item.title}\n${result.message}`,
-          url: '#development',
+          url: `#development/${item.id}?project=${encodeURIComponent(project)}`,
         },
         { project },
       );
@@ -191,7 +191,12 @@ export async function processApprovals(
     );
     await sendPush(
       pool,
-      { title: `✓ Auftrag freigegeben · ${project}`, body: item.title, url: '#development', tag: `order-${item.id}` },
+      {
+        title: `✓ Auftrag freigegeben · ${project}`,
+        body: item.title,
+        url: `#development/${item.id}?project=${encodeURIComponent(project)}`,
+        tag: `order-${item.id}`,
+      },
       { project },
     );
     if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('review-gate'));

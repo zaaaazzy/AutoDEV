@@ -20,6 +20,11 @@ import {
   TITLE_MAX,
 } from '../core/validation.js';
 
+/**
+ * Spalten eines Auftrags. fixStatus: Die innere Tabelle ist auf bug_id/status/created_at beschränkt, damit
+ * failure_bug_id die Spalte der äusseren Zeile meint – mit vollem Alias löste Postgres sie auf die innere auf.
+ * Funktioniert so mit und ohne Alias der äusseren Abfrage (z. B. `UPDATE development_items d … RETURNING`).
+ */
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
   title, description, status, priority, created_at AS "createdAt",
   effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
@@ -27,7 +32,8 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
   failure, failure_bug_id AS "failureBugId", action_todo AS "actionTodo",
   follow_up_of AS "followUpOf",
-  (SELECT f.status FROM development_items f WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus",
+  (SELECT f.status FROM (SELECT bug_id, status, created_at FROM development_items) f
+    WHERE f.bug_id = failure_bug_id ORDER BY f.created_at DESC LIMIT 1) AS "fixStatus",
   removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt",
   sprint_rank AS "sprintRank", review_branch AS "reviewBranch", review_since AS "reviewSince",
   review_approved_at AS "reviewApprovedAt", visual_approved_at AS "visualApprovedAt",

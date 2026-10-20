@@ -32,6 +32,7 @@ import {
   roleDefaultCommands,
   rulesAllow,
   SECRET_IN_COMMAND,
+  shellWords,
   withAgentPermissions,
   withIgnoreScripts,
 } from './tool-permissions.js';
@@ -644,5 +645,84 @@ test('forbiddenSubcommand: npm i verhält sich wie npm install, Optionen vor dem
     'npm ls',
   ]) {
     assert.equal(forbiddenSubcommand(command), false, command);
+  }
+});
+
+test('forbiddenSubcommand: Anführungszeichen, Backslashes und Shell-Erweiterungen umgehen die Sperre nicht', () => {
+  for (const command of [
+    'git "push" origin main',
+    "git 'push'",
+    'git pu\\sh',
+    'git p"u"sh',
+    '"git" push',
+    'g\\it push',
+    "git $'push'",
+    'git $X',
+    'git pus?',
+    'git {push,}',
+    'docker "run" alpine',
+    'docker compose "run" app sh',
+    '"docker" compose up -d',
+    'docker "compose" up -d',
+    'npm "install" left-pad',
+    "npm 'i' left-pad",
+    'npm "-C" /tmp i',
+    'git "-C" /tmp status',
+  ]) {
+    assert.ok(forbiddenSubcommand(command), command);
+  }
+  for (const command of [
+    'git status',
+    'git log --grep "a > b"',
+    'git commit -m "push it; fix"',
+    'git diff HEAD~1 -- src',
+    'npm test',
+    'npm run build',
+    'npm run test:unit -- --grep "a b"',
+    'npm install --ignore-scripts left-pad',
+    'docker compose up -d --build',
+    'ls "my dir"',
+  ]) {
+    assert.equal(forbiddenSubcommand(command), false, command);
+  }
+});
+
+test('shellWords: zerlegt wie Bash, offene Anführungszeichen werden entfernt', () => {
+  assert.deepEqual(shellWords(`git log --grep "a > b" 'c d' e\\ f ""`), [
+    'git',
+    'log',
+    '--grep',
+    'a > b',
+    'c d',
+    'e f',
+    '',
+  ]);
+  assert.deepEqual(shellWords('echo "a \\" b"'), ['echo', 'a " b']);
+  assert.deepEqual(shellWords('git commit -m "fix'), ['git', 'commit', '-m', 'fix']);
+  assert.deepEqual(shellWords('  '), []);
+});
+
+test('npmOptionProblem: --ignore-scripts lässt sich nicht wieder abschalten', () => {
+  for (const command of [
+    'npm install --ignore-scripts x --ignore-scripts=false',
+    'npm install --ignore-scripts x --no-ignore-scripts',
+    'npm install --ignore-scripts x --ignore-s=false',
+    'npm install --ignore-scripts x --no-ig',
+    'npm install --ignore-scripts x --ignore-scripts false',
+    'npm ci --ignore-scripts --ignore-scripts=0',
+    'npm install --ignore-scripts x "--ignore-scripts=false"',
+    'npm install --ignore-scripts x -ignore-scripts=false',
+  ]) {
+    assert.ok(npmOptionProblem(command), command);
+    assert.ok(!isAllowedCommand(command), command);
+  }
+  for (const command of [
+    'npm install --ignore-scripts left-pad',
+    'npm ci --ignore-scripts --no-audit --no-fund',
+    'npm install --ignore-scripts=true left-pad',
+    'npm test',
+    'npm run build',
+  ]) {
+    assert.equal(npmOptionProblem(command), null, command);
   }
 });

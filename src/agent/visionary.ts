@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
@@ -8,6 +8,7 @@ import { isShuttingDown } from '../core/shutdown.js';
 import { CATEGORIES, shortTitle, TITLE_MAX } from '../core/validation.js';
 import type { RunnerOptions } from '../runner/runner.js';
 import { runAuthorAgent } from './requirements.js';
+import { readProjectFile } from './tool-paths.js';
 
 /**
  * Visionär: liest das Projekt (nur lesend), schlägt begründete Erweiterungsideen vor und legt sie in Ideation an.
@@ -417,6 +418,8 @@ export async function fileTree(root: string): Promise<string[]> {
   return result;
 }
 
+const MAX_DOC_BYTES = 1_000_000;
+
 async function readDocs(root: string): Promise<VisionaryContext['docs']> {
   const paths = [
     'README.md',
@@ -429,8 +432,10 @@ async function readDocs(root: string): Promise<VisionaryContext['docs']> {
   let budget = 24_000;
   for (const path of paths) {
     if (budget <= 0) break;
-    const content = await readFile(join(root, path), 'utf8').catch(() => null);
-    if (content === null) continue;
+    // Ohne Links zu folgen: docs/x.md -> ~/.zsh_history landete sonst im Prompt (ggf. bei einem Cloud-Modell).
+    const file = await readProjectFile(root, path, MAX_DOC_BYTES);
+    if (!file) continue;
+    const content = file.content.toString('utf8');
     const text = clip(content.trim(), Math.min(4_000, budget));
     budget -= text.length;
     docs.push({ path, text });
@@ -721,7 +726,7 @@ export async function processVisionaryRun(
         body: count
           ? stored.created.map((idea) => idea.title).join(' · ')
           : `Keine neuen Ideen (${stored.discarded} verworfen).`,
-        url: '#ideation',
+        url: `#ideation?project=${encodeURIComponent(options.project)}`,
         tag: `visionary-${run.id}`,
       },
       { project: options.project },

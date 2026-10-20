@@ -13,6 +13,10 @@ test('every write maps to the right role; reads and own-account actions need non
   assert.equal(requiredRole('POST', '/api/projects/x/agents/1/cancel', {}), 'run');
   assert.equal(requiredRole('PATCH', '/api/development/1', { agentId: 'a' }), 'run');
   assert.equal(requiredRole('PATCH', '/api/development/1', { title: 'x' }), 'plan');
+  // agentId allein startet einen Agent; zusammen mit anderen Feldern braucht es auch Planung, null startet nichts.
+  assert.deepEqual(requiredRole('PATCH', '/api/development/1', { agentId: 'a', title: 'x' }), ['plan', 'run']);
+  assert.equal(requiredRole('PATCH', '/api/development/1', { agentId: null, title: 'x', status: 'done' }), 'plan');
+  assert.equal(requiredRole('PATCH', '/api/development/1', { agentId: null }), 'plan');
   assert.equal(requiredRole('POST', '/api/projects/x/ideation', {}), 'plan');
   assert.equal(requiredRole('POST', '/api/docs/1/revisions', {}), 'docs');
   assert.equal(requiredRole('POST', '/api/doc-revisions/1/approve', {}), 'editor');

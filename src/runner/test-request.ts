@@ -93,6 +93,7 @@ export async function processTestRequest(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd'>,
   execute: CommandExecutor = runCommand,
+  runAgent: typeof runTestAgent = runTestAgent,
 ): Promise<boolean> {
   const request = (
     await pool.query<Claimed>(
@@ -136,11 +137,20 @@ export async function processTestRequest(
             [options.project],
           )
         ).rows[0]?.commands ?? DEFAULT_COMMANDS;
-      const runId = await runTestAgent(
-        { project: options.project, cwd: options.cwd, commands, existingProject: true, timeoutMs: TEST_TIMEOUT_MS },
+      const runId = await runAgent(
+        {
+          project: options.project,
+          cwd: options.cwd,
+          commands,
+          existingProject: true,
+          timeoutMs: TEST_TIMEOUT_MS,
+          // Sofort verknüpfen: bei Neustart oder Fehler während der Befehle findet recoverTestRequests den Lauf.
+          onRunCreated: async (created) => {
+            await pool.query('UPDATE test_requests SET run_id = $2 WHERE id = $1', [request.id, created]);
+          },
+        },
         pool,
       );
-      await pool.query('UPDATE test_requests SET run_id = $2 WHERE id = $1', [request.id, runId]);
       const failed = (
         await pool.query<{ command: string; output: string }>(
           `SELECT command, output FROM test_run_steps WHERE run_id = $1 AND status = 'failed' ORDER BY position`,
@@ -171,13 +181,21 @@ export async function processTestRequest(
         body: result.passed
           ? 'Alle Prüfungen bestanden.'
           : `Mit Befunden${row?.bugs ? ` – ${row.bugs} neue Bugs angelegt` : ''}.`,
-        url: row?.runId ? `#runs/${row.runId}` : '#runs',
+        url: `${row?.runId ? `#runs/${row.runId}` : '#runs'}?project=${encodeURIComponent(options.project)}`,
         tag: `test-${request.id}`,
       },
       { project: options.project },
     ).catch(logged('test-request'));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Ein schon verknüpfter Lauf darf nicht auf „running“ stehen bleiben.
+    await pool
+      .query(
+        `UPDATE test_runs SET status = 'failed', completed_at = NOW()
+          WHERE status = 'running' AND id = (SELECT run_id FROM test_requests WHERE id = $1)`,
+        [request.id],
+      )
+      .catch(logged('test-request'));
     await pool.query(`UPDATE test_requests SET status = 'failed', finished_at = NOW(), error = $2 WHERE id = $1`, [
       request.id,
       message.slice(0, 2000),

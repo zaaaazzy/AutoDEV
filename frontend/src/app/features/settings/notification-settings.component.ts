@@ -1,10 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
-
-interface InstallPromptEvent extends Event {
-  prompt(): Promise<void>;
-}
+import { installPrompt } from '../../core/install-prompt.js';
 
 function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   const padded = (value + '='.repeat((4 - (value.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
@@ -32,7 +29,8 @@ export class NotificationSettingsComponent {
   protected readonly permission = signal<NotificationPermission | 'unsupported'>(
     'Notification' in globalThis ? Notification.permission : 'unsupported',
   );
-  protected readonly installPrompt = signal<InstallPromptEvent | null>(null);
+  /** Früh beim Start abgefangen (siehe `listenForInstallPrompt`). */
+  protected readonly installPrompt = installPrompt;
   protected readonly busy = signal(false);
   protected readonly message = signal('');
   protected readonly error = signal('');
@@ -45,10 +43,6 @@ export class NotificationSettingsComponent {
     !/Chrome|Edg/.test(navigator.userAgent);
 
   constructor() {
-    globalThis.addEventListener('beforeinstallprompt', (event) => {
-      event.preventDefault();
-      this.installPrompt.set(event as InstallPromptEvent);
-    });
     void this.refresh();
   }
 
