@@ -203,6 +203,42 @@ export function orderBranch(item: { id: string; title: string }): string {
 export interface OrderBranch {
   branch: string;
   base: string;
+  /** Offene Merge-Konflikte mit der Basis (Dateien): Der nächste Agent, der Dateien ändert, löst sie. */
+  conflicts?: string[];
+}
+
+const CONFLICT_MARKER = /^(?:<{7}|>{7}) |^={7}$/m;
+
+/**
+ * Dateien mit ungelöstem Merge-Konflikt, die noch Konfliktmarker enthalten. Ohne laufenden Merge: leer.
+ * Gelöste, aber noch nicht gestagte Dateien zählen nicht (der Commit nach dem Agent schliesst den Merge ab).
+ */
+export async function unresolvedConflicts(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<string[]> {
+  const { git } = gitHelpers(rawExecute, cwd);
+  const unmerged = (await git('diff', '--name-only', '--diff-filter=U')).output
+    .split('\n')
+    .map((file) => file.trim())
+    .filter(Boolean);
+  const open: string[] = [];
+  for (const file of unmerged) {
+    const content = await readFile(join(cwd, file), 'utf8').catch(() => '');
+    if (CONFLICT_MARKER.test(content)) open.push(file);
+  }
+  return open;
+}
+
+/** Erste Aufgabe für den Agent, wenn der Auftrags-Branch beim Nachziehen der Basis Konflikte bekam. */
+export function conflictPrompt(branch: OrderBranch): string {
+  return [
+    '## Zuerst: Merge-Konflikte lösen',
+    `Beim Nachziehen von \`${branch.base}\` in den Auftrags-Branch \`${branch.branch}\` gab es Konflikte. Der Merge ist`,
+    'noch offen, die Dateien enthalten Konfliktmarker (<<<<<<<, =======, >>>>>>>):',
+    ...(branch.conflicts ?? []).map((file) => `- \`${file}\``),
+    '',
+    'Löse jeden Konflikt so, dass die Absicht beider Seiten erhalten bleibt (beide Ergänzungen übernehmen, doppelte',
+    'Felder oder Importe nur einmal). Entferne alle Konfliktmarker und prüfe danach Typen und Tests. Führe selbst',
+    'keine git-Befehle aus: AIdeation committet den Merge nach deinem Schritt. Danach erst die eigentliche Aufgabe.',
+  ].join('\n');
 }
 
 /**
@@ -234,7 +270,12 @@ export async function enterOrderBranch(
       if (await branchExists(git, branch)) {
         await must('checkout', branch);
         const merged = await git('merge', '--no-edit', base);
-        if (merged.exitCode !== 0) await git('merge', '--abort');
+        if (merged.exitCode !== 0) {
+          // Konflikte bleiben stehen: Der Entwickler löst sie (statt den Branch erneut am Merge scheitern zu lassen).
+          const conflicts = await unresolvedConflicts(cwd, execute);
+          if (conflicts.length) return { branch, base, conflicts };
+          await git('merge', '--abort');
+        }
       } else {
         await must('checkout', '-b', branch);
       }
@@ -269,6 +310,9 @@ export async function finishOrderBranch(
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
   try {
+    // Konflikte nicht gelöst: offenen Merge verwerfen, damit kein Konfliktmarker committet wird und der nächste
+    // Auftrag auf einem sauberen Stand beginnt (der Branch behält seine bisherigen Commits).
+    if ((await unresolvedConflicts(cwd, execute)).length) await git('merge', '--abort');
     // Wie bei allen Auftrags-Commits: Dateien, die nach Zugangsdaten aussehen, bleiben außen vor.
     await stageAll(git, must);
     const dirty = Boolean(await must('diff', '--cached', '--name-only'));
@@ -348,6 +392,12 @@ export async function commitAgentStep(
   const { git, must } = gitHelpers(execute, cwd);
   if (!existsSync(join(cwd, '.git'))) return null;
   try {
+    // Nie Konfliktmarker committen: Der offene Merge bleibt bestehen, bis ein Agent die Konflikte gelöst hat.
+    const pending = await unresolvedConflicts(cwd, execute);
+    if (pending.length) {
+      console.error(`Kein Commit nach ${agentName}: Merge-Konflikte offen in ${pending.join(', ')}`);
+      return null;
+    }
     await stageAll(git, must);
     if (!(await must('diff', '--cached', '--name-only'))) return null;
     const title = item.title.slice(0, 60);

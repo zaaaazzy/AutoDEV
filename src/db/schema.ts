@@ -807,6 +807,8 @@ export const SCHEMA = `
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_base TEXT;
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_since TIMESTAMPTZ;
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_approved_at TIMESTAMPTZ;
+  -- Automatische Neuversuche nach einem Merge-Konflikt (der Entwickler löst ihn im nächsten Lauf), höchstens zwei.
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS conflict_retries SMALLINT NOT NULL DEFAULT 0;
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_mode TEXT NOT NULL DEFAULT 'off'
     CHECK (review_mode IN ('off', 'ui', 'always'));
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_command JSONB;
