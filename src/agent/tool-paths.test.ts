@@ -6,6 +6,7 @@ import { after, before, test } from 'node:test';
 import {
   BACKUP_DIRECTORY,
   MAX_FILE_BYTES,
+  readProjectFile,
   resolveInside,
   SECRET_NAME,
   SKIPPED_DIRECTORIES,
@@ -149,4 +150,33 @@ test('Konstanten: übersprungene Ordner und Geheimnis-Muster', () => {
   }
   for (const name of ['.env', '.env.production', 'a.pem', 'b.KEY', 'id_ecdsa']) assert.ok(SECRET_NAME.test(name), name);
   for (const name of ['env.ts', 'keys.ts', 'readme.md']) assert.ok(!SECRET_NAME.test(name), name);
+});
+
+test('readProjectFile: liest Dateien im Projekt, folgt aber keinen Links', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'project-file-'));
+  const outside = await mkdtemp(join(tmpdir(), 'project-file-outside-'));
+  await writeFile(join(outside, 'geheim'), 'GEHEIM');
+  await mkdir(join(root, 'docs'));
+  await writeFile(join(root, 'docs', 'a.md'), 'Doku');
+  await symlink(join(outside, 'geheim'), join(root, 'link.md'));
+  await symlink(join(root, 'docs', 'a.md'), join(root, 'intern.md'));
+  await symlink(outside, join(root, 'raus'));
+  await symlink(join(outside, 'fehlt'), join(root, 'leer.md'));
+  assert.equal((await readProjectFile(root, 'docs/a.md'))?.content.toString(), 'Doku');
+  assert.equal((await readProjectFile(root, join(root, 'docs/a.md')))?.content.toString(), 'Doku');
+  for (const path of [
+    'link.md',
+    'intern.md',
+    'raus/geheim',
+    'leer.md',
+    '../x',
+    'docs',
+    'fehlt.md',
+    join(outside, 'geheim'),
+  ]) {
+    assert.equal(await readProjectFile(root, path), null, path);
+  }
+  assert.equal(await readProjectFile(root, 'docs/a.md', 3), null, 'zu gross');
+  await rm(root, { recursive: true, force: true });
+  await rm(outside, { recursive: true, force: true });
 });
