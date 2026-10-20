@@ -7,6 +7,8 @@ COPY tsconfig.json angular.json ./
 COPY frontend ./frontend
 # Gemeinsame Messung der Überbreite (Diagnose im Browser und visuelle Prüfung des Workers).
 COPY src/core/layout-measure.ts ./src/core/layout-measure.ts
+# Zeitpläne der Routinen (Cron lesen und beschreiben) – dieselbe Logik wie im Planer des Servers.
+COPY src/core/cron.ts ./src/core/cron.ts
 RUN npm run build:ui
 
 FROM nginx:1.27.3-alpine
