@@ -770,7 +770,7 @@ export async function loadProjectPermissions(
   // Prüfung (z. B. „Bash(docker:*)“, das auch docker kill freigäbe) dürfen nicht weiter gelten: beim Laden aussortieren.
   const checked = custom.map((group) => ({
     ...group,
-    rules: group.rules.filter((rule) => customRuleProblem(rule) === null),
+    rules: Array.isArray(group.rules) ? group.rules.filter((rule) => customRuleProblem(rule) === null) : group.rules,
   }));
   return { enabled, custom: checked };
 }
