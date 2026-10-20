@@ -1,4 +1,4 @@
-import { Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { ConfirmService } from '../core/confirm.service.js';
 
 /** Eigener Bestätigungsdialog mit optionalem Kommentar; einmal in der App eingebunden, gesteuert vom ConfirmService. */
@@ -34,6 +34,7 @@ import { ConfirmService } from '../core/confirm.service.js';
               rows="3"
               maxlength="2000"
               [placeholder]="pending.options.commentPlaceholder ?? ''"
+              [required]="!!pending.options.commentRequired"
               [value]="comment()"
               (input)="comment.set($any($event.target).value)"
               (keydown.control.enter)="accept()"
@@ -44,7 +45,9 @@ import { ConfirmService } from '../core/confirm.service.js';
             }
             <div class="confirm-actions">
               <button class="button secondary" type="button" (click)="cancel()">Abbrechen</button>
-              <button class="button primary" type="submit">{{ pending.options.confirmLabel }}</button>
+              <button class="button primary" type="submit" [disabled]="missingComment()">
+                {{ pending.options.confirmLabel }}
+              </button>
             </div>
           </form>
         </section>
@@ -66,7 +69,13 @@ export class ConfirmDialogComponent {
     });
   }
 
+  /** Pflichtkommentar fehlt: Bestätigen ist gesperrt (auch per Strg/Cmd+Enter). */
+  protected readonly missingComment = computed(
+    () => !!this.confirm.pending()?.options.commentRequired && !this.comment().trim(),
+  );
+
   protected accept(): void {
+    if (this.missingComment()) return;
     this.confirm.settle({ comment: this.comment().trim() });
   }
 

@@ -106,6 +106,7 @@ export class OrderService {
       details: ['Danach wartet er wieder auf deine Freigabe.'],
       confirmLabel: 'Zurückweisen',
       commentLabel: 'Was passt nicht? (Pflicht)',
+      commentRequired: true,
       commentPlaceholder: 'z. B. „Der Speichern-Knopf ist auf dem Handy abgeschnitten.“',
       commentHint: 'Wird mit Datum an die Beschreibung des Auftrags angehängt und so allen Agents mitgegeben.',
     });
