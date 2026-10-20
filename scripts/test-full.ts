@@ -12,7 +12,7 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
@@ -439,4 +439,46 @@ async function main(): Promise<void> {
   process.exitCode = allOk ? 0 : 1;
 }
 
-await main();
+/**
+ * Nur ein Komplettlauf zugleich auf dieser Maschine: E2E- und Oberflächentest nutzen feste Testdatenbanken
+ * (dev_log_e2e, dev_log_full) und Ports. Zwei Läufe nebeneinander (Worker-Gate und Handlauf, oder zwei Projekte)
+ * löschten sich gegenseitig die Datenbank unter dem Server weg (ECONNREFUSED, „deadlock detected“). Die Sperre ist
+ * ein Ordner im Temp-Verzeichnis; ein liegen gebliebener (Absturz) gilt nach 45 Minuten als verwaist.
+ */
+const LOCK = join(tmpdir(), 'dev-log-test-full.lock');
+const LOCK_STALE_MS = 45 * 60_000;
+const LOCK_WAIT_MS = 10_000;
+async function withSingleRun<T>(task: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  for (;;) {
+    try {
+      await mkdir(LOCK);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const age =
+        Date.now() -
+        (await stat(LOCK)
+          .then((info) => info.mtimeMs)
+          .catch(() => Date.now()));
+      if (age > LOCK_STALE_MS) {
+        console.log('Verwaiste Sperre eines früheren Komplettlaufs entfernt.');
+        await rm(LOCK, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() - started > LOCK_STALE_MS)
+        throw new Error('Ein anderer Komplettlauf blockiert seit über 45 Minuten.', { cause: error });
+      if (Date.now() - started < LOCK_WAIT_MS)
+        console.log('Ein anderer Komplettlauf läuft gerade – warte, bis er fertig ist …');
+      await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_MS));
+    }
+  }
+  try {
+    await writeFile(join(LOCK, 'pid'), String(process.pid));
+    return await task();
+  } finally {
+    await rm(LOCK, { recursive: true, force: true });
+  }
+}
+
+await withSingleRun(main);

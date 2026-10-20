@@ -76,6 +76,8 @@ export class OrderTableComponent {
   /** Spalten ersetzen (gleiche id) bzw. vorne ergänzen; `hiddenColumns` blendet Standardspalten aus. */
   readonly extraColumns = input<DataColumn<DevelopmentItem>[]>([]);
   readonly hiddenColumns = input<string[]>([]);
+  /** false: keine Spalte sortierbar – für Listen, deren Reihenfolge selbst die Aussage ist (Abarbeitung im Sprint). */
+  readonly sortable = input<boolean>(true);
   /** Mehrfachauswahl wie in der Datentabelle; ohne Funktion keine Häkchen. */
   readonly selectable = input<((item: DevelopmentItem) => boolean) | null>(null);
   readonly selection = model<ReadonlySet<string>>(new Set());
@@ -123,7 +125,8 @@ export class OrderTableComponent {
       .filter((column) => !hidden.has(column.id))
       .map((column) => (replaced.has(column.id) ? extra.find((entry) => entry.id === column.id)! : column));
     const known = new Set(this.baseColumns.map((column) => column.id));
-    return [...extra.filter((column) => !known.has(column.id)), ...base];
+    const columns = [...extra.filter((column) => !known.has(column.id)), ...base];
+    return this.sortable() ? columns : columns.map((column) => ({ ...column, sortable: false }));
   });
   protected readonly selectLabel = (item: DevelopmentItem): string => `Auswählen: ${this.displayTitle(item)}`;
 

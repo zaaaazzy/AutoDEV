@@ -921,22 +921,26 @@ test('Sprint abbrechen: Auftrag geht zurück ins Backlog und wartet unter „Akt
   const item = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
   await request.patch(`/api/development/${item.id}`, { headers, data: { sprintId: sprint.id } });
 
-  await login(page);
-  await page.goto('/#sprints');
-  const detail = await sprintDetail(page, name);
-  page.once('dialog', (dialog) => void dialog.accept());
-  await detail.getByRole('button', { name: 'Abbrechen' }).click();
-  // Der Sprint steht jetzt bei den abgeschlossenen und abgebrochenen Sprints mit Status „Abgebrochen“.
-  const toggle = page.locator('#done-sprints .collapse-toggle');
-  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
-  const row = page.locator('#done-sprints .dt-table tbody tr').filter({ hasText: name });
-  await expect(row).toContainText('Abgebrochen');
-  // Der Auftrag ist nicht mehr geplant, sondern wartet unter „Aktionen“ mit dem Vermerk des Sprints.
-  await page.goto('/#actions');
-  const card = page.locator('.attention-card').filter({ hasText: title });
-  await expect(card).toContainText(`Aus Sprint „${name}“ genommen`);
-  await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
-  // Abgebrochene Sprints lassen sich löschen.
-  await request.delete(`/api/development/${item.id}`, { headers });
-  expect((await request.delete(`/api/sprints/${sprint.id}`, { headers })).status()).toBe(204);
+  try {
+    await login(page);
+    await page.goto('/#sprints');
+    const detail = await sprintDetail(page, name);
+    page.once('dialog', (dialog) => void dialog.accept());
+    await detail.getByRole('button', { name: 'Abbrechen' }).click();
+    // Der Sprint steht jetzt bei den abgeschlossenen und abgebrochenen Sprints mit Status „Abgebrochen“.
+    const toggle = page.locator('#done-sprints .collapse-toggle');
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    // Die Zeile kann noch aufgeklappt sein (Detailzeile mit demselben Namen): die Tabellenzeile selbst zählt.
+    const row = page.locator('#done-sprints .dt-table tbody tr').filter({ hasText: name }).first();
+    await expect(row).toContainText('Abgebrochen');
+    // Der Auftrag ist nicht mehr geplant, sondern wartet unter „Aktionen“ mit dem Vermerk des Sprints.
+    await page.goto('/#actions');
+    const card = page.locator('.attention-card').filter({ hasText: title });
+    await expect(card).toContainText(`Aus Sprint „${name}“ genommen`);
+    await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
+  } finally {
+    // Aufräumen auch nach einem Fehlschlag, damit kein Rest den nächsten Test stört. Abgebrochene Sprints sind löschbar.
+    await request.delete(`/api/development/${item.id}`, { headers });
+    expect((await request.delete(`/api/sprints/${sprint.id}`, { headers })).status()).toBe(204);
+  }
 });

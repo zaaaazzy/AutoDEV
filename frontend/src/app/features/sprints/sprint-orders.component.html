@@ -5,6 +5,7 @@
   [extraColumns]="columns"
   [hiddenColumns]="['sprint']"
   [initialSort]="sort"
+  [sortable]="false"
   emptyText="Noch keine Aufträge in diesem Sprint."
 >
   <ng-template appOrderActions let-item>
@@ -45,39 +46,42 @@
   </ng-template>
 </app-order-table>
 @if (canTakeIn()) {
-  <details class="sprint-pool" [open]="!orders().length">
+  <details class="sprint-pool" [open]="poolOpen()" (toggle)="poolOpen.set($any($event.target).open)">
     <summary>
       Aufträge hinzufügen <span class="muted">({{ free().length }} verfügbar)</span>
     </summary>
-    @if (selection().length) {
-      <div class="sprint-pool-bar" role="status">
-        <strong>{{ selection().length }} ausgewählt</strong>
-        <button class="button primary small" type="button" [disabled]="store.busy()" (click)="takeSelected()">
-          → In den Sprint ({{ selection().length }})
-        </button>
-        <button class="button secondary small" type="button" (click)="clearSelection()">Auswahl aufheben</button>
-      </div>
+    @if (poolOpen()) {
+      @if (selection().length) {
+        <div class="sprint-pool-bar" role="status">
+          <strong>{{ selection().length }} ausgewählt</strong>
+          <button class="button primary small" type="button" [disabled]="store.busy()" (click)="takeSelected()">
+            → In den Sprint ({{ selection().length }})
+          </button>
+          <button class="button secondary small" type="button" (click)="clearSelection()">Auswahl aufheben</button>
+        </div>
+      }
+      <app-order-table
+        [items]="free()"
+        groupBy="sprint"
+        [extraColumns]="poolColumns"
+        [sortable]="false"
+        [selectable]="anyRow"
+        [(selection)]="selectedIds"
+        emptyText="Keine offenen oder abgebrochenen Aufträge."
+      >
+        <ng-template appOrderActions let-item>
+          <button
+            type="button"
+            class="button secondary icon-button"
+            [disabled]="store.busy()"
+            (click)="take(item)"
+            [attr.aria-label]="'In den Sprint nehmen: ' + title(item)"
+            title="In den Sprint nehmen"
+          >
+            →
+          </button>
+        </ng-template>
+      </app-order-table>
     }
-    <app-order-table
-      [items]="free()"
-      groupBy="sprint"
-      [extraColumns]="poolColumns"
-      [selectable]="anyRow"
-      [(selection)]="selectedIds"
-      emptyText="Keine offenen oder abgebrochenen Aufträge."
-    >
-      <ng-template appOrderActions let-item>
-        <button
-          type="button"
-          class="button secondary icon-button"
-          [disabled]="store.busy()"
-          (click)="take(item)"
-          [attr.aria-label]="'In den Sprint nehmen: ' + title(item)"
-          title="In den Sprint nehmen"
-        >
-          →
-        </button>
-      </ng-template>
-    </app-order-table>
   </details>
 }
