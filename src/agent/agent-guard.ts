@@ -97,14 +97,70 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   return policy.edit ? null : 'Dateien ändern ist für diesen Agent nicht freigegeben.';
 }
 
+/**
+ * Zerlegt einen Befehl wie Bash in Quote-Bereiche: „unquoted“ ist der Text ausserhalb aller Anführungszeichen,
+ * „expanding“ zusätzlich der Inhalt von "…" (dort wirken $(…) und Backticks weiter). Backslash-Escapes, $'…' und
+ * Anführungszeichen in Anführungszeichen werden wie in Bash behandelt; escapte Zeichen werden durch „_“ ersetzt.
+ * null (fail-closed) bei einem offenen Anführungszeichen oder einem escapten Anführungszeichen ausserhalb von '…' –
+ * beides braucht ein Agent nicht, und beides verschleiert, wo ein Argument endet.
+ */
+function quoteLayers(command: string): { unquoted: string; expanding: string } | null {
+  let unquoted = '';
+  let expanding = '';
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index] ?? '';
+    if (char === '\\') {
+      const next = command[index + 1];
+      if (next === undefined || next === "'" || next === '"') return null;
+      unquoted += '_';
+      expanding += '_';
+      index += 2;
+    } else if (char === '$' && command[index + 1] === "'") {
+      // ANSI-C-Quoting: Backslash-Escapes (auch \') gelten innerhalb.
+      index += 2;
+      while (index < command.length && command[index] !== "'") index += command[index] === '\\' ? 2 : 1;
+      if (index >= command.length) return null;
+      index += 1;
+    } else if (char === "'") {
+      const end = command.indexOf("'", index + 1);
+      if (end < 0) return null;
+      index = end + 1;
+    } else if (char === '"') {
+      index += 1;
+      while (index < command.length && command[index] !== '"') {
+        if (command[index] === '\\') {
+          const next = command[index + 1];
+          if (next === undefined || next === '"' || next === "'") return null;
+          expanding += '_';
+          index += 2;
+        } else {
+          expanding += command[index];
+          index += 1;
+        }
+      }
+      if (index >= command.length) return null;
+      index += 1;
+    } else {
+      unquoted += char;
+      expanding += char;
+      index += 1;
+    }
+  }
+  return { unquoted, expanding };
+}
+
 /** Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). */
 export function bashProblem(command: string, projectRoot: string, run = spawnSync): string | null {
   if (SECRET_IN_COMMAND.test(command)) return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.';
-  if (FILE_REDIRECT.test(command.replace(/'[^']*'|"[^"]*"/g, ''))) {
+  const layers = quoteLayers(command);
+  if (!layers) {
+    return 'Offene Anführungszeichen und escapte Anführungszeichen (\\\' bzw. \\") sind gesperrt – Argumente einfach quoten.';
+  }
+  if (FILE_REDIRECT.test(layers.unquoted)) {
     return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
   }
-  const unquoted = command.replace(/'[^']*'|"[^"]*"/g, '');
-  if (SHELL_CONSTRUCT.test(unquoted) || /\$\(|`/.test(command.replace(/'[^']*'/g, ''))) {
+  if (SHELL_CONSTRUCT.test(layers.unquoted) || /\$\(|`/.test(layers.expanding)) {
     return 'Befehlsersetzung, Subshells und Hintergrund-Befehle („$(…)“, Backticks, „(…)“, „&“) sind gesperrt – Befehle einzeln ausführen.';
   }
   const root = realpathSync(projectRoot);
