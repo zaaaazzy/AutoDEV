@@ -67,13 +67,14 @@ export function severityLabel(severity: string): string {
   return SEVERITY_LABELS[severity] ?? severity;
 }
 
-export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs'] as const;
+export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'] as const;
 const CATEGORY_LABELS: Record<string, string> = {
   frontend: 'Frontend',
   backend: 'Backend',
   fullstack: 'Fullstack',
   infrastructure: 'Infrastruktur',
   docs: 'Dokumentation',
+  security: 'Sicherheit',
   mixed: 'Gemischt',
 };
 

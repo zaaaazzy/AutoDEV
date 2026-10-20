@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
+import { scheduleRoutines } from '../agent/routine.js';
 import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
@@ -31,6 +32,7 @@ import { processTestRequest, recoverTestRequests } from './test-request.js';
 import { completeRestart, processRestart, readRestart } from './system-restart.js';
 import { sendPush } from '../core/push.js';
 import { listenForWork, WorkSignal } from './work-signal.js';
+import { runDueJobs } from './scheduler.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
@@ -351,6 +353,22 @@ async function main(): Promise<void> {
         .catch((error: unknown) => logOnce('review', `Review-Container fehlgeschlagen: ${describeError(error)}`))
         .finally(() => (reviewActive = false));
     }, 5_000);
+    // Planer für zeitgesteuerte Routinen: jede Minute fällige Agent-Aufgaben als Chat-Nachricht einreihen (der Chat
+    // führt sie dann aus). Gesperrte Projekte (laufender Auftrag) bleiben fällig, bis die Sperre frei ist.
+    let routineActive = false;
+    const routineTimer = setInterval(() => {
+      if (routineActive || stopping) return;
+      const projects = chatTargets.filter((target) => !target.problem).map((target) => target.options.project);
+      if (!projects.length) return;
+      routineActive = true;
+      void scheduleRoutines(pool, projects)
+        .then((result) => {
+          loggedErrors.delete('routines');
+          if (result.queued.length) console.info(`Routinen eingereiht: ${result.queued.length}`);
+        })
+        .catch((error: unknown) => logOnce('routines', `Routinen-Planer fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (routineActive = false));
+    }, 60_000);
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -442,6 +460,20 @@ async function main(): Promise<void> {
     // „AIdeation neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
     // launchd startet ihn mit dem neuen Code wieder.
     let restartActive = false;
+    // Wartungs-Jobs (scheduled_jobs): im Arbeitszyklus angestossen, aber im Hintergrund – jeder Job hat sein
+    // Zeitlimit, der Zyklus wartet nie darauf. Höchstens ein Durchgang gleichzeitig je Worker.
+    let schedulerActive = false;
+    const runScheduledJobs = (): void => {
+      if (schedulerActive || stopping) return;
+      schedulerActive = true;
+      void runDueJobs(pool, { installRoot: INSTALL_ROOT }, () => stopping)
+        .then((runs) => {
+          loggedErrors.delete('scheduler');
+          for (const run of runs) console.info(`[Job ${run.key}] ${run.status}: ${run.message}`);
+        })
+        .catch((error: unknown) => logOnce('scheduler', `Wartungs-Jobs fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (schedulerActive = false));
+    };
     const restartTimer = setInterval(() => {
       if (restartActive || stopping) return;
       restartActive = true;
@@ -453,7 +485,8 @@ async function main(): Promise<void> {
         commentActive.size +
         visionaryActive.size +
         testActive.size +
-        setupActive;
+        setupActive +
+        (schedulerActive ? 1 : 0);
       void processRestart(pool, INSTALL_ROOT, busy)
         .then(async (result) => {
           if (result === 'failed') {
@@ -503,6 +536,8 @@ async function main(): Promise<void> {
         } catch (error) {
           console.error('Worker-Zyklus fehlgeschlagen:', error instanceof Error ? error.message : error);
         }
+        // Projektübergreifend, deshalb ausserhalb von runWorkflow (das je Projekt läuft).
+        runScheduledJobs();
         beat();
         await signal.wait(options.intervalMs, () => stopping);
       }
@@ -513,7 +548,9 @@ async function main(): Promise<void> {
         authorActive.size ||
         estimateActive.size ||
         commentActive.size ||
-        visionaryActive.size
+        visionaryActive.size ||
+        routineActive ||
+        schedulerActive
       )
         await sleep(200);
     } finally {
@@ -522,6 +559,7 @@ async function main(): Promise<void> {
       stopFolderWatch();
       clearInterval(restartTimer);
       clearInterval(chatTimer);
+      clearInterval(routineTimer);
       clearInterval(reviewTimer);
       clearInterval(setupTimer);
     }

@@ -364,7 +364,7 @@ export const SCHEMA = `
     WHERE kind IN ('manual', 'sprint', 'repo');
   CREATE UNIQUE INDEX IF NOT EXISTS docs_order_idx ON docs (development_id) WHERE kind = 'order';
 
-  -- Kategorie (Frontend, Backend, Fullstack, Infrastruktur, Dokumentation) für Ideen, Aufträge und Bugs.
+  -- Kategorie (Frontend, Backend, Fullstack, Infrastruktur, Dokumentation, Sicherheit) für Ideen, Aufträge und Bugs.
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS category TEXT
     CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs'));
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS category TEXT
@@ -387,6 +387,17 @@ export const SCHEMA = `
   DROP TRIGGER IF EXISTS development_items_inherit_category ON development_items;
   CREATE TRIGGER development_items_inherit_category BEFORE INSERT ON development_items
     FOR EACH ROW EXECUTE FUNCTION development_items_inherit_category();
+
+  -- Kategorie Sicherheit (für Ideen, Aufträge und Bugs).
+  ALTER TABLE ideation_items DROP CONSTRAINT IF EXISTS ideation_items_category_check;
+  ALTER TABLE ideation_items ADD CONSTRAINT ideation_items_category_check
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'));
+  ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_category_check;
+  ALTER TABLE development_items ADD CONSTRAINT development_items_category_check
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'));
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_category_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_category_check
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'));
 
   -- Testabdeckung, die der Tester nach einem Auftrag meldet (pro Bereich wie Frontend/Backend).
   CREATE TABLE IF NOT EXISTS test_coverage_reports (
@@ -1064,4 +1075,93 @@ export const SCHEMA = `
     CHECK (order_test_commands IS NULL OR jsonb_typeof(order_test_commands) = 'array');
   -- Vom Auftrag geänderte Dateien (gegenüber der Basis), nach jedem Agent-Schritt aktualisiert.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS changed_files TEXT[] NOT NULL DEFAULT '{}';
+
+  -- Zeitgesteuerte Routinen: Agent-Aufgaben nach Zeitplan (Cron mit 5 Feldern, Europe/Zurich), optional nur in einem
+  -- Zeitfenster („22:00-06:00“), mit Ziel für das Ergebnis. next_run_at berechnet der Server (API und Planer).
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS schedule TEXT CHECK (schedule IS NULL OR char_length(schedule) <= 120);
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE;
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ;
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS output_target TEXT NOT NULL DEFAULT 'chat'
+    CHECK (output_target IN ('chat', 'push', 'bug', 'idea', 'order'));
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS last_status TEXT
+    CHECK (last_status IN ('queued', 'running', 'ok', 'failed'));
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS last_error TEXT;
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS run_window TEXT
+    CHECK (run_window IS NULL OR run_window ~ '^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$');
+  -- Fehlschläge in Folge (Umgebungsfehler und Abbrüche zählen nicht); bei 3 wird die Routine pausiert.
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS failure_streak INTEGER NOT NULL DEFAULT 0;
+  -- Vorlage, aus der die Aufgabe stammt (nur lesend gedacht, beim Anlegen deaktiviert).
+  ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS template TEXT;
+  -- Ohne Zeitplan oder pausiert gibt es keinen nächsten Lauf – gilt für jeden Weg (API, Worker, Vorlagen).
+  CREATE OR REPLACE FUNCTION agent_tasks_clear_next_run() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.schedule IS NULL OR NOT NEW.enabled THEN
+      NEW.next_run_at := NULL;
+    END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER agent_tasks_clear_next_run
+    BEFORE INSERT OR UPDATE ON agent_tasks
+    FOR EACH ROW EXECUTE FUNCTION agent_tasks_clear_next_run();
+  CREATE INDEX IF NOT EXISTS agent_tasks_due_idx ON agent_tasks (next_run_at) WHERE next_run_at IS NOT NULL;
+  -- Läufe einer Agent-Aufgabe (Zeitplan oder Klick): Start, Dauer, Ergebnis, Tokens, Chat-Nachrichten, Marker.
+  CREATE TABLE IF NOT EXISTS agent_task_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id UUID NOT NULL REFERENCES agent_tasks(id) ON DELETE CASCADE,
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    trigger TEXT NOT NULL DEFAULT 'schedule' CHECK (trigger IN ('schedule', 'manual')),
+    status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'ok', 'failed', 'cancelled')),
+    -- Umgebungsfehler (Befehl fehlt, Ordner weg, Budget): gemeldet, aber nicht als Fehlschlag der Routine gezählt.
+    environment_error BOOLEAN NOT NULL DEFAULT FALSE,
+    message_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL,
+    answer_id UUID REFERENCES chat_messages(id) ON DELETE SET NULL,
+    queued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    duration_ms INTEGER,
+    tokens BIGINT NOT NULL DEFAULT 0,
+    error TEXT,
+    -- Hinweise zu verworfenen Markern (ungültiges JSON, fehlender Titel, Dublette).
+    notes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    -- Aus Markern angelegte Einträge: [{ kind: bug|idea|order, id, title }].
+    created_items JSONB NOT NULL DEFAULT '[]'::jsonb
+  );
+  CREATE INDEX IF NOT EXISTS agent_task_runs_task_idx ON agent_task_runs (task_id, queued_at DESC);
+  -- Herkunft einer Chat-Nachricht: Nutzer oder Routine (Planer), samt Lauf.
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'user'
+    CHECK (origin IN ('user', 'routine'));
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS task_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
+  -- Einträge aus Routine-Markern: Quelle „routine“ und Verweis auf den Lauf (dieser kennt Aufgabe und Chat-Nachricht).
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check
+    CHECK (source IN ('manual', 'agent', 'test', 'production', 'github', 'routine'));
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS routine_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
+  ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS routine_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS routine_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
+  -- Zeitgesteuerte Wartungs-Jobs im Worker: nur Job-Arten aus der festen Registry (src/runner/scheduler.ts), keine
+  -- Skripte oder Befehle aus der Datenbank. locked_until sperrt einen beanspruchten Lauf gegen andere Worker.
+  CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    key TEXT PRIMARY KEY CHECK (key ~ '^[a-z0-9_-]{1,64}$'),
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    start_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    interval_seconds INTEGER NOT NULL CHECK (interval_seconds BETWEEN 60 AND 2592000),
+    job_kind TEXT NOT NULL CHECK (char_length(job_kind) BETWEEN 1 AND 64),
+    config JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(config) = 'object'),
+    next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_run_at TIMESTAMPTZ,
+    last_status TEXT CHECK (last_status IN ('running', 'ok', 'warning', 'failed')),
+    last_message TEXT,
+    state JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(state) = 'object'),
+    locked_until TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs (next_run_at) WHERE enabled;
+  -- Standardjobs (idempotent über den Schlüssel); der Sprint-Abschluss ändert Status und ist deshalb aus.
+  INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config) VALUES
+    ('backup_check', TRUE, 21600, 'backup_check', '{"dir": "backups", "maxAgeHours": 26, "minBytes": 1024}'),
+    ('watchdog_logs', TRUE, 900, 'watchdog_logs', '{}'),
+    ('close_old_sprints', FALSE, 86400, 'close_old_sprints', '{"inactiveDays": 14}'),
+    ('push_alert', TRUE, 3600, 'push_alert', '{}')
+  ON CONFLICT (key) DO NOTHING;
 `;

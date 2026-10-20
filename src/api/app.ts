@@ -36,6 +36,7 @@ import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
 import { FailureLimiter, sameOriginWrites, securityHeaders } from './security.js';
 import { registerStatsRoutes } from './stats.js';
+import { registerScheduledJobRoutes } from './scheduled-jobs.js';
 import { registerSystemRestartRoutes } from './system-restart.js';
 import { registerTestRunRoutes } from './test-runs.js';
 import { registerTimelineRoutes } from './timeline.js';
@@ -124,6 +125,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerAgentTaskRoutes(api, pool);
   registerTestRequestRoutes(api, pool);
   registerSystemRestartRoutes(api, pool);
+  registerScheduledJobRoutes(api, pool);
   registerWorkerRoutes(api, pool);
   registerPushRoutes(api, pool);
   registerUserRoutes(api, pool, auth);

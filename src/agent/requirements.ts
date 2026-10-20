@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { restrictedSystemCommand, systemCommand } from './system-agents.js';
+import { readOnlyCommand, restrictedSystemCommand, systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -8,7 +8,7 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
-import { loadProjectPermissions, withAgentPermissions } from './tool-permissions.js';
+import { loadProjectPermissions, READ_ONLY_PERMISSION_ROLE, withAgentPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
@@ -103,6 +103,11 @@ export function buildRequirementPrompt(
  * unless full tool access was allowed for it in the dashboard.
  */
 async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
+  // Routinen laufen über die CLI des Assistenten, aber ohne dessen Vollzugriffs-Schalter (nur lesen, Wächter aktiv).
+  if (role === 'routine') {
+    const command = await systemCommand(pool, 'assistant');
+    return command && readOnlyCommand(command);
+  }
   if (role !== 'assistant' && role !== 'analyst') return null;
   return role === 'analyst' ? restrictedSystemCommand(pool, role) : systemCommand(pool, role);
 }
@@ -121,7 +126,9 @@ export async function runAuthorAgent(
   agentId?: string | null,
   /** Bricht den Lauf ab (z. B. „Abbrechen“ beim Visionär): beendet die CLI bzw. das lokale Modell. */
   signal?: AbortSignal,
-): Promise<{ exitCode: number; output: string; sessionId?: string }> {
+  /** Nur lesen, unabhängig von der Rolle (z. B. Assistent, während ein Auftrag im selben Ordner arbeitet). */
+  readOnly = false,
+): Promise<{ exitCode: number; output: string; sessionId?: string; tokens?: number }> {
   const author = (
     agentId
       ? await pool.query<AgentRights>(
@@ -154,7 +161,14 @@ export async function runAuthorAgent(
   const permissions = await loadProjectPermissions(pool, options.project);
   const command =
     configured &&
-    withAgentPermissions(configured, role, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
+    withAgentPermissions(
+      configured,
+      // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
+      readOnly ? READ_ONLY_PERMISSION_ROLE : role,
+      permissions,
+      author?.allowedCommands ?? null,
+      author?.fileScope ?? [],
+    );
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =
@@ -185,7 +199,15 @@ export async function runAuthorAgent(
             if (signal?.aborted) kill();
           },
         })
-      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress, signal });
+      : await runOllamaAgent({
+          prompt,
+          role,
+          cwd: options.cwd,
+          timeoutMs: options.timeoutMs,
+          onProgress,
+          signal,
+          readOnly,
+        });
     await pool
       .query(
         `INSERT INTO agent_usage (project_slug, role, tokens, duration_ms, cost_usd, success, prompt)
@@ -208,6 +230,7 @@ export async function runAuthorAgent(
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
       sessionId: 'sessionId' in result ? (result.sessionId as string | undefined) : undefined,
+      tokens: result.tokens ?? 0,
     };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };

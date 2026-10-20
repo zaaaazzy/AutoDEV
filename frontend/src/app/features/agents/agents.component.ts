@@ -31,6 +31,7 @@ import {
 } from './agent-options.js';
 import { OrderTableComponent } from '../development/order-table.component.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
+import { AgentRoleTextComponent } from './agent-role-text.component.js';
 import { AgentSettingsComponent } from './agent-settings.component.js';
 import { WorkflowStepsComponent } from './workflow-steps.component.js';
 
@@ -78,6 +79,7 @@ interface AgentListRow extends AgentTableRow {
     AgentDetailComponent,
     AgentSettingsComponent,
     WorkflowStepsComponent,
+    AgentRoleTextComponent,
     ModelIconComponent,
     DataTableComponent,
     DataCellDirective,

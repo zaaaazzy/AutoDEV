@@ -138,9 +138,9 @@ test('Zusammenfassung einer Testausgabe: Zahlen, fehlgeschlagene Tests mit Stell
   assert.match(summary, /4 Tests · 1 bestanden · 2 fehlgeschlagen · 1 übersprungen/);
   assert.match(
     summary,
-    /\*\*e2e\/app\.spec\.ts\*\* \(`e2e\/app\.spec\.ts:48`\)\n  Error: Playwright Test did not expect/,
+    /\*\*e2e\/app\.spec\.ts\*\* \(`e2e\/app\.spec\.ts:48`\)\n {2}Error: Playwright Test did not expect/,
   );
-  assert.match(summary, /\*\*zählt richtig\*\*\n  Expected values to be strictly equal: 2 !== 3/);
+  assert.match(summary, /\*\*zählt richtig\*\*\n {2}Expected values to be strictly equal: 2 !== 3/);
   assert.match(summary, /Hinweis:.*npx playwright test/);
   assert.equal(summarizeTestFailure('npm ERR! missing script: test'), null);
 });

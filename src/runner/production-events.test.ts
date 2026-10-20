@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { FakeProductionDb } from './production-fake-db.test.js';
 import {
+  BUG_THRESHOLD,
+  BUG_WINDOW_MS,
   categoryFor,
   decideBugAction,
   fingerprint,
   isDeploySuspect,
   normalizeMessage,
+  reachesBugThreshold,
   recordEvent,
   sampleOf,
   severityFor,
@@ -62,27 +65,92 @@ test('Kategorie aus Dienst bzw. Pfad', () => {
   assert.equal(categoryFor({ source: 'logs', message: 'x', origin: 'api' }), 'backend');
 });
 
-test('Neuer Fingerabdruck ergibt einen Bug mit Quelle „Betrieb“, weitere Vorkommen erhöhen nur den Zähler', async () => {
+test('Schwelle: neue Bugs ab drei Vorkommen in 24 Stunden, kritische sofort', () => {
+  assert.equal(BUG_THRESHOLD, 3);
+  assert.equal(BUG_WINDOW_MS, 24 * 3600_000);
+  assert.ok(!reachesBugThreshold(2));
+  assert.ok(reachesBugThreshold(3));
+  assert.ok(reachesBugThreshold(1, true));
+});
+
+test('Unter der Schwelle wird nur gezählt: zwei Vorkommen in 24 Stunden ergeben keinen Bug', async () => {
   const db = new FakeProductionDb();
-  const now = new Date();
-  const first = await recordEvent(
+  const now = new Date('2026-10-20T12:00:00Z');
+  const first = await recordEvent(db.pool, 'shop', { source: 'logs', message: 'ERROR db timeout 1' }, now);
+  const second = await recordEvent(
     db.pool,
     'shop',
-    { source: 'logs', message: 'ERROR db timeout 1', origin: 'api' },
+    { source: 'logs', message: 'ERROR db timeout 2' },
+    new Date('2026-10-21T09:00:00Z'),
+  );
+  for (const result of [first, second]) {
+    assert.equal(result.action, 'count');
+    assert.equal(result.bugId, null);
+  }
+  assert.equal(db.bugs.length, 0);
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0]!.bugId, null);
+  assert.equal(db.events[0]!.count, 2);
+});
+
+test('Vorkommen ausserhalb des 24-Stunden-Fensters zählen nicht zur Schwelle', async () => {
+  const db = new FakeProductionDb();
+  await recordEvent(db.pool, 'shop', { source: 'ingest', message: 'Alt', count: 2 }, new Date('2026-10-18T08:00:00Z'));
+  const later = await recordEvent(
+    db.pool,
+    'shop',
+    { source: 'ingest', message: 'Alt' },
+    new Date('2026-10-20T08:00:00Z'),
+  );
+  assert.equal(later.bugId, null);
+  assert.equal(db.bugs.length, 0);
+  assert.equal(db.events[0]!.count, 3);
+});
+
+test('Ab drei Vorkommen entsteht genau ein Bug mit Quelle „Betrieb“, weitere erhöhen nur den Zähler', async () => {
+  const db = new FakeProductionDb();
+  const now = new Date();
+  for (let index = 1; index <= 2; index += 1) {
+    await recordEvent(db.pool, 'shop', { source: 'logs', message: `ERROR db timeout ${index}`, origin: 'api' }, now);
+  }
+  const third = await recordEvent(
+    db.pool,
+    'shop',
+    { source: 'logs', message: 'ERROR db timeout 3', origin: 'api' },
     now,
   );
-  assert.equal(first.action, 'create');
-  for (let index = 2; index <= 10; index += 1) {
+  assert.equal(third.action, 'create');
+  assert.ok(third.bugId);
+  assert.equal(db.events[0]!.bugId, third.bugId);
+  for (let index = 4; index <= 10; index += 1) {
     const next = await recordEvent(db.pool, 'shop', { source: 'logs', message: `ERROR db timeout ${index}` }, now);
     assert.equal(next.action, 'count');
-    assert.equal(next.bugId, first.bugId);
+    assert.equal(next.bugId, third.bugId);
   }
   assert.equal(db.bugs.length, 1);
   assert.equal(db.bugs[0]!.source, 'production');
+  assert.equal(db.bugs[0]!.status, 'open');
   assert.equal(db.bugs[0]!.category, 'backend');
   assert.equal(db.events[0]!.count, 10);
   assert.equal(db.bugs[0]!.severity, 'high', '10 pro Stunde');
-  assert.match(db.bugs[0]!.description, /```text\nERROR db timeout 1\n```/);
+  assert.match(db.bugs[0]!.description, /```text\nERROR db timeout 3\n```/);
+});
+
+test('Ein gebündeltes Ereignis mit count ≥ 3 erreicht die Schwelle sofort', async () => {
+  const db = new FakeProductionDb();
+  const result = await recordEvent(db.pool, 'shop', { source: 'logs', message: 'ERROR Bündel', count: 3 });
+  assert.equal(result.action, 'create');
+  assert.equal(db.bugs.length, 1);
+});
+
+test('Kritisches Ereignis umgeht die Schwelle und wird beim ersten Vorkommen Bug', async () => {
+  const db = new FakeProductionDb();
+  const result = await recordEvent(db.pool, 'shop', { source: 'ingest', message: 'Ausfall', critical: true });
+  assert.equal(result.action, 'create');
+  assert.ok(result.bugId);
+  assert.equal(db.bugs.length, 1);
+  assert.equal(db.bugs[0]!.severity, 'critical');
+  assert.equal(db.bugs[0]!.status, 'open');
 });
 
 test('Ab 50 Ereignissen pro Stunde wird der Bug kritisch', async () => {
@@ -97,8 +165,9 @@ test('Ab 50 Ereignissen pro Stunde wird der Bug kritisch', async () => {
 
 test('Behobener Bug wird als Regression wieder geöffnet, es entsteht kein neuer', async () => {
   const db = new FakeProductionDb();
-  const first = await recordEvent(db.pool, 'shop', { source: 'logs', message: 'ERROR payment 42 failed' });
+  const first = await recordEvent(db.pool, 'shop', { source: 'logs', message: 'ERROR payment 42 failed', count: 3 });
   db.bugs[0]!.status = 'fixed';
+  // Ein einzelnes Wiederauftreten genügt: Regressionen umgehen die Schwelle.
   const again = await recordEvent(db.pool, 'shop', { source: 'logs', message: 'ERROR payment 43 failed' });
   assert.equal(again.action, 'reopen');
   assert.equal(again.bugId, first.bugId);
@@ -110,11 +179,11 @@ test('Behobener Bug wird als Regression wieder geöffnet, es entsteht kein neuer
 
 test('Mit Auto-Bugfix entsteht für einen neuen Betriebs-Bug ein Bug-Auftrag, ohne nicht', async () => {
   const without = new FakeProductionDb({ autoBugfix: false });
-  await recordEvent(without.pool, 'shop', { source: 'ingest', message: 'Kaputt' });
+  await recordEvent(without.pool, 'shop', { source: 'ingest', message: 'Kaputt', count: 3 });
   assert.equal(without.orders.length, 0);
 
   const withFix = new FakeProductionDb({ autoBugfix: true });
-  const result = await recordEvent(withFix.pool, 'shop', { source: 'ingest', message: 'Kaputt' });
+  const result = await recordEvent(withFix.pool, 'shop', { source: 'ingest', message: 'Kaputt', count: 3 });
   assert.equal(withFix.orders.length, 1);
   assert.equal(withFix.orders[0]!.bugId, result.bugId);
   assert.equal(withFix.orders[0]!.autoRun, true);
@@ -145,7 +214,7 @@ test('Ereignisse bis 30 min nach einem Deploy verlinken dessen Aufträge und Spr
   await recordEvent(
     db.pool,
     'shop',
-    { source: 'logs', message: 'ERROR nach Deploy' },
+    { source: 'logs', message: 'ERROR nach Deploy', count: 3 },
     new Date('2026-10-18T10:12:00Z'),
   );
   assert.deepEqual(db.events[0]!.deploySuspect, {
@@ -156,7 +225,7 @@ test('Ereignisse bis 30 min nach einem Deploy verlinken dessen Aufträge und Spr
   await recordEvent(
     db.pool,
     'shop',
-    { source: 'logs', message: 'ERROR viel später' },
+    { source: 'logs', message: 'ERROR viel später', count: 3 },
     new Date('2026-10-18T11:00:00Z'),
   );
   assert.equal(db.events[1]!.deploySuspect, null);

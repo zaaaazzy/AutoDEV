@@ -11,6 +11,7 @@ import { AgentsComponent } from './features/agents/agents.component.js';
 import { ActionsComponent } from './features/actions/actions.component.js';
 import { BugsComponent } from './features/bugs/bugs.component.js';
 import { DashboardComponent } from './features/dashboard/dashboard.component.js';
+import { ChatBubbleComponent } from './features/chat/chat-bubble.component.js';
 import { DevelopmentComponent } from './features/development/development.component.js';
 import { DocsComponent } from './features/docs/docs.component.js';
 import { HelpDialogComponent } from './features/help/help-dialog.component.js';
@@ -58,6 +59,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     ProjectSwitcherComponent,
     HelpDialogComponent,
     DashboardComponent,
+    ChatBubbleComponent,
     ActionsComponent,
     DevelopmentComponent,
     SprintsComponent,

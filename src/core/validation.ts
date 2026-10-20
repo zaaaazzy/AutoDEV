@@ -1,5 +1,5 @@
 export const PRIORITIES = new Set(['low', 'medium', 'high']);
-export const CATEGORIES = new Set(['frontend', 'backend', 'fullstack', 'infrastructure', 'docs']);
+export const CATEGORIES = new Set(['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security']);
 export const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /** Macht aus einer Eingabe wie „KeyGuard 1“ eine gültige Projekt-ID („keyguard-1“). */

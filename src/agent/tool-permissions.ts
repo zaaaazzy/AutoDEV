@@ -214,8 +214,10 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     id: 'git',
     label: 'Git lesen und aktualisieren',
     // Kein „git clone“: mit -u/--upload-pack führt es beliebige Befehle aus und schreibt ausserhalb des Projekts.
-    description: 'status, diff, log, fetch, pull --ff-only, checkout – kein Push, kein Clone.',
-    rules: prefixRules(['git status', 'git diff', 'git log', 'git fetch', 'git pull --ff-only', 'git checkout']),
+    // Kein „git checkout“: Branch und Commits eines Auftrags verwaltet AIdeation; ein Checkout würde dem laufenden
+    // Auftrag den Branch wechseln oder seine offenen Änderungen verwerfen.
+    description: 'status, diff, log, fetch, pull --ff-only – kein Checkout, kein Push, kein Clone.',
+    rules: prefixRules(['git status', 'git diff', 'git log', 'git fetch', 'git pull --ff-only']),
   },
   {
     id: 'docker',
@@ -248,13 +250,20 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 export const DEFAULT_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => group.id);
 
 /** Rollen mit erweiterten Rechten: Assistent, Entwickler, Tester (Tests, Coverage) und Reviewer (git diff). */
-const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
+const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer', 'routine']);
+/**
+ * Rollen mit Shell (unter dem Wächter), aber ohne Datei-Werkzeuge: zeitgesteuerte Routinen führen z. B. `npm audit`
+ * aus, ändern aber nichts. Ergebnisse gehen nur über die Marker (@@BUG, @@IDEA, @@ORDER) weiter.
+ */
+export const NO_FILE_WRITE_ROLES = new Set(['routine']);
 /**
  * Rollen, die nur lesen (Werkzeugumfang der Problemanalyse beim lokalen Modell): keine Datei-Werkzeuge, keine Shell –
  * auch nicht über eine eigene Zuweisung am Agent oder eigene Werkzeug-Regeln im Befehl.
  */
 // pre_sprint: Agents „Vor dem Sprint“ planen und prüfen nur (ihre Änderungen würden sonst im ersten Auftrag landen).
 export const READ_ONLY_ROLES = new Set(['visionary', 'analyst', 'pre_sprint']);
+/** Rolle, deren (lesende) Rechte ein Agent bekommt, der vorübergehend nur lesen darf. */
+export const READ_ONLY_PERMISSION_ROLE = 'analyst';
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -520,6 +529,9 @@ export async function materializeAgentCommands(
 /** Standardrechte einer Rolle, solange dem Agent keine Befehle einzeln zugewiesen sind (null). */
 export function roleDefaultCommands(role: string, permissions: ProjectPermissions): string[] {
   if (READ_ONLY_ROLES.has(role)) return [];
+  if (NO_FILE_WRITE_ROLES.has(role)) {
+    return [...availableCommands(permissions)].filter((rule) => rule !== FILES_CREATE && rule !== FILES_EDIT);
+  }
   return TRUSTED_ROLES.has(role) ? [...availableCommands(permissions)] : [FILES_CREATE, FILES_EDIT];
 }
 
@@ -586,19 +598,24 @@ export function withAgentPermissions(
   // dann weder Wächter noch Sperrlisten – der Assistent arbeitet mit allen Rechten des Workers.
   if (hasFullAccess(command, role)) return command;
   const readOnly = READ_ONLY_ROLES.has(role);
-  const custom = !readOnly && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
+  const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
+  const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
   const available = availableCommands(permissions);
   const chosen = readOnly
     ? []
     : normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
-        (rule) => available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT,
+        (rule) =>
+          (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
+          !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
       );
   // Selbst gesetzte Werkzeug-Regeln im Befehl bleiben (Entscheid des Admins); der Wächter prüft trotzdem.
   const policy = readOnly
     ? { create: false, edit: false, scopes: [], shell: false }
-    : custom
-      ? { create: true, edit: true, scopes: [] }
-      : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
+    : noFileWrite
+      ? { create: false, edit: false, scopes: [] }
+      : custom
+        ? { create: true, edit: true, scopes: [] }
+        : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
   const hook = guardHookCommand(policy);
   const blocked = [
     ...(policy.create && hook ? [] : CREATE_TOOLS),

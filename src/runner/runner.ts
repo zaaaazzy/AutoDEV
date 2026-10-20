@@ -12,10 +12,10 @@ import { loadFollowUpContext } from './follow-up.js';
 import { markSprintReady, sprintAutopilot } from './sprint-autopilot.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
-import { enterOrderBranch, syncSprintToGit } from './git-sync.js';
+import { enterOrderBranch, OrderBranchError, syncSprintToGit } from './git-sync.js';
 import { extractCriteria, loadDefinitions } from './acceptance.js';
 import { deployProject } from './deploy.js';
-import { Mutex } from '../core/mutex.js';
+import { acquireTree } from '../core/project-lock.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
 import { selectItems, loadWorkflow, defaultAgentCommand } from './runner-selection.js';
@@ -259,7 +259,7 @@ export async function runWorkItem(
         break;
       }
       if (!releaseTree && changesWorkingTree(agent)) {
-        releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
+        releaseTree = await acquireTree(options.cwd);
         // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
         ctx.sprintName = await sprintNameOf(pool, item);
         ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
@@ -302,7 +302,7 @@ export async function runWorkItem(
         // Auch „Bei abgeschlossen/abgelehnt“ starten nicht mehr, wenn das Budget erreicht ist (ohne Blockade).
         if (await budgetGate(ctx).catch(logged('runner', null))) break;
         if (!releaseTree && changesWorkingTree(agent)) {
-          releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
+          releaseTree = await acquireTree(options.cwd);
           ctx.sprintName = await sprintNameOf(pool, item);
           ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
         }
@@ -317,6 +317,14 @@ export async function runWorkItem(
     passed = false;
     // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
     if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
+    else if (error instanceof OrderBranchError) {
+      // Kein eigener Branch: der Auftrag wartet auf einen Menschen, statt auf einem fremden Branch zu committen.
+      ctx.stopReason = error.message;
+      await setActionTodo(pool, item.id, 'Arbeitsordner aufräumen (Git)').catch(logged('runner'));
+      await pool
+        .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, error.message])
+        .catch(logged('runner'));
+    }
     console.error(`Run ${runId} aborted:`, error);
   } finally {
     await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
@@ -399,7 +407,6 @@ export async function runWorkflow(
     return results;
   }
   // Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent).
-  const implementationLock = new Mutex();
   for (const item of items) {
     if (isShuttingDown()) break;
     // Angeforderte Live-Schaltungen (Git-Sicherung) nicht hinter dem ganzen Durchlauf warten lassen: zwischen zwei
@@ -411,7 +418,7 @@ export async function runWorkflow(
     }
     results.push({
       itemId: item.id,
-      result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),
+      result: await runWorkItem(pool, item, agents, { ...options, execute, builtin }),
     });
   }
   await syncRepoDocs(pool, options.project, options.cwd);

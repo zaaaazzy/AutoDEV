@@ -40,6 +40,7 @@ const BUG_SOURCE_LABEL: Record<string, string> = {
   test: 'Testlauf',
   github: 'GitHub',
   production: 'Betrieb',
+  routine: 'Routine',
 };
 @Component({
   selector: 'app-bugs',

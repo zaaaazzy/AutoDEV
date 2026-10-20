@@ -265,6 +265,7 @@ test('merges a finished sprint into main checked out elsewhere only when that fo
     const execute: CommandExecutor = async (command) => {
       calls.push(command.join(' '));
       if (command.includes('--abbrev-ref')) return { exitCode: 0, durationMs: 1, output: 'main\n' };
+      if (command.join(' ') === 'git rev-parse HEAD') return { exitCode: 0, durationMs: 1, output: 'abc1234\n' };
       if (command.includes('--porcelain')) return { exitCode: 0, durationMs: 1, output: dirty };
       if (command[0] === 'npm') return { exitCode: gateFails ? 1 : 0, durationMs: 1, output: 'rot' };
       return { exitCode: 0, durationMs: 1, output: '' };
@@ -281,7 +282,8 @@ test('merges a finished sprint into main checked out elsewhere only when that fo
 
   const red = run('', true);
   assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), false);
-  assert.ok(red.calls.includes('git reset --keep ORIG_HEAD'));
+  // Zurück auf den Stand vor dem Merge (nicht ORIG_HEAD, den das Test-Gate verschoben haben kann).
+  assert.ok(red.calls.includes('git reset --keep abc1234'));
 });
 
 /** Projekt mit main (gepusht auf ein lokales Bare-Repository als „GitHub“) und einem Sprint-Branch mit einem Auftrag. */

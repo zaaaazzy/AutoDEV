@@ -27,6 +27,9 @@ export interface WatchdogState {
 
 export const REMIND_MS = 6 * 3600 * 1000;
 
+/** Dateien von deploy/backup.sh (früher dev_log-…). */
+export const BACKUP_FILE = /^(?:aideation|dev_log)-.*\.dump$/;
+
 /** Texte der Meldungen; der Betriebs-Rückkanal nutzt dieselbe Logik mit eigenen Texten. */
 export interface AlertLabels {
   fresh: string;
@@ -178,7 +181,7 @@ export async function collectProblems(options: WatchdogOptions): Promise<{ probl
     if (dirty) problems.push(dirty);
   }
   const backups = await readdir(options.backupDir).catch(() => [] as string[]);
-  const dumps = backups.filter((name) => /^(?:aideation|dev_log)-.*\.dump$/.test(name));
+  const dumps = backups.filter((name) => BACKUP_FILE.test(name));
   const newest = (
     await Promise.all(dumps.map(async (name) => (await stat(join(options.backupDir, name))).mtimeMs))
   ).reduce((max, value) => Math.max(max, value), 0);

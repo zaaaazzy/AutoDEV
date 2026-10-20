@@ -293,6 +293,10 @@
   background: #f3e9ef;
   color: #8b3f6a;
 }
+.tag.category-security {
+  background: #f8e6e3;
+  color: #9a3b2e;
+}
 .tag.category-mixed {
   background: #eef0ec;
   color: #4b554e;

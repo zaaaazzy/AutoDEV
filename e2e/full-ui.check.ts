@@ -348,7 +348,27 @@ test('Dashboard: Kennzahlen, Links und Agent-Aktionen', async ({ page, isMobile 
   await button(page, 'Aktionen').click();
   await expect(page.getByRole('combobox', { name: 'Aktion suchen' })).toBeFocused();
   await snap(page, info, 'Agent-Aktionen', false);
+  // Routine-Vorlagen: deaktiviert (Pausen-Symbol), Verlauf als Tabelle mit umkehrbarer Sortierung.
+  const template = page.locator('.agent-task', { hasText: 'Nächtlicher Sicherheits-Check' });
+  await expect.soft(template, 'Vorlage „Nächtlicher Sicherheits-Check“ vorhanden').toHaveCount(1);
+  if (await template.count()) {
+    await expect.soft(template.locator('.agent-task-clock.paused')).toBeVisible();
+    await template.hover();
+    await template.getByRole('button', { name: 'Verlauf' }).click();
+    await expect(page.getByRole('region', { name: 'Verlauf der Aufgabe' })).toBeVisible();
+    await snap(page, info, 'Agent-Aktion Verlauf', false);
+    await button(page, 'Zurück').click();
+  }
+  // Zeitplan im Formular: Vorschau des nächsten Laufs, ohne zu speichern.
+  await page.locator('.agent-tasks-new').first().click();
+  await page.getByRole('combobox', { name: 'Zeitplan' }).selectOption('weekly');
+  await expect(page.locator('.agent-task-preview')).toContainText('nächster Lauf:');
+  await page.getByRole('combobox', { name: 'Zeitplan' }).selectOption('custom');
+  await page.getByRole('textbox', { name: 'Cron-Ausdruck' }).fill('0 7 * *');
+  await expect(page.locator('.agent-task-preview')).toContainText('5 Felder');
+  await snap(page, info, 'Agent-Aktion Zeitplan', false);
   await page.keyboard.press('Escape');
+  await expect(page.locator('.agent-tasks-menu')).toHaveCount(0);
 });
 
 test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen', async ({ page, isMobile }, info) => {
@@ -546,6 +566,26 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   await expect.soft(page.getByText(/Sprint Sprint/), 'Kein doppeltes „Sprint Sprint“').toHaveCount(0);
   await page.goBack();
   await expect.soft(page, 'Zurück-Button führt zur Agent-Liste').toHaveURL(/#agents/);
+});
+
+test('Agents: „Was machen die Rollen?“ auf- und zuklappen', async ({ page }, info) => {
+  const errors = watchConsole(page);
+  await login(page);
+  await open(page, 'agents');
+  const panel = page.locator('details.role-texts-panel');
+  await expect(panel.locator('summary')).toContainText('Was machen die Rollen?');
+  expect(await panel.getAttribute('open'), 'Bereich startet zugeklappt').toBeNull();
+  await panel.locator('summary').click();
+  const author = panel.locator('.role-text').filter({ hasText: 'Auftragsautor' });
+  await expect(author).toContainText(/Anforderungen/);
+  await expect(panel.locator('.role-text')).toHaveCount(10);
+  await expect.soft(page, 'Aufklappen erzeugt keinen Verlaufseintrag').toHaveURL(/#agents$/);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect.soft(overflow, 'Rollentexte ohne horizontales Scrollen').toBeLessThanOrEqual(1);
+  await snap(page, info, 'Was machen die Rollen', false);
+  await panel.locator('summary').click();
+  await expect(author).toBeHidden();
+  expect.soft(errors, 'Keine Konsolenfehler').toEqual([]);
 });
 
 test('Einstellungen: Validierungen, Benutzer anlegen, Projekt löschen gesperrt', async ({ page, isMobile }, info) => {

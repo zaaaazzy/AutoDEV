@@ -186,7 +186,12 @@ test('Nach erfolgreichem Deploy wird der Deploy festgehalten und ein Log-Scan an
   const commands: string[] = [];
   const execute: CommandExecutor = async (command) => (
     commands.push(command.join(' ')),
-    { exitCode: 0, durationMs: 1, output: command.includes('logs') ? 'api-1  | ERROR boom after deploy' : '' }
+    {
+      exitCode: 0,
+      durationMs: 1,
+      // Dreimal derselbe Fehler: erreicht die Schwelle für einen Bug.
+      output: command.includes('logs') ? 'api-1  | ERROR boom after deploy\n'.repeat(3) : '',
+    }
   );
   assert.equal(await deployProject(db.pool, 'shop', '/projects/shop', execute), true);
   assert.deepEqual(commands, ['docker compose up -d', 'docker compose logs --since 15m --no-color api']);

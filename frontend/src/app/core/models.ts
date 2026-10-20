@@ -100,7 +100,7 @@ export interface VisualApproval {
   approvedBy: string | null;
 }
 
-export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
+export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs' | 'security';
 
 export interface Estimate {
   /** Bereich der Arbeit; Aufträge erben ihn von Idee bzw. Bug. */
@@ -249,7 +249,7 @@ export interface Bug {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: BugStatus;
-  source: 'agent' | 'manual' | 'test' | 'github' | 'production';
+  source: 'agent' | 'manual' | 'test' | 'github' | 'production' | 'routine';
   sprintId: string | null;
   fixNotes: string | null;
   createdAt: string;

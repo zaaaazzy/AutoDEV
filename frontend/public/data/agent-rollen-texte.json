@@ -1,0 +1,52 @@
+{
+  "author": {
+    "rolle": "Auftragsautor",
+    "beschreibung": "Erstellt aus Ideen und kurzen Notizen vollständige Anforderungen: Ziel, prüfbare Akzeptanzkriterien, betroffene Dateien, Diagramme und Abgrenzung.",
+    "nutzen": "Jeder Auftrag startet mit einem klaren Ziel. Die folgenden Agents wissen, was zu tun ist und woran der Erfolg gemessen wird."
+  },
+  "developer": {
+    "rolle": "Entwickler",
+    "beschreibung": "Setzt den Auftrag im Projektordner um, ändert Dateien mit Backup und führt freigegebene Befehle wie npm test oder git status aus. Bei Bug-Aufträgen hält er eine Fix-Notiz am Bug fest.",
+    "nutzen": "Aus der Anforderung wird lauffähiger Code, nachvollziehbar dokumentiert und innerhalb der Projektregeln."
+  },
+  "tester": {
+    "rolle": "Tester",
+    "beschreibung": "Schreibt Tests zu den Akzeptanzkriterien. Danach führt der Runner Build und Projekttests aus, und der Tester nimmt die Kriterien ab.",
+    "nutzen": "Fehler fallen vor dem Abschluss auf, nicht erst im Betrieb. Jede Änderung ist durch Tests abgesichert."
+  },
+  "visual_tester": {
+    "rolle": "Visueller Tester",
+    "beschreibung": "Prüft bei Frontend- und Fullstack-Projekten die Vorschau mit Screenshots auf Desktop und Handy, vergleicht Pixel und kontrolliert das Layout. Ohne Vorschau-Adresse wird er übersprungen.",
+    "nutzen": "Verrutschte Elemente, abgeschnittene Texte und Darstellungsfehler werden sichtbar, bevor Nutzer sie sehen."
+  },
+  "reviewer": {
+    "rolle": "Reviewer",
+    "beschreibung": "Liest die Änderungen gegen Auftrag und Leitlinien und gibt sie nur mit einer ausdrücklichen Freigabe weiter.",
+    "nutzen": "Ein zweiter Blick sichert Qualität und Wartbarkeit. Nichts geht ohne bewusste Freigabe durch."
+  },
+  "documenter": {
+    "rolle": "Dokumentierer",
+    "beschreibung": "Fasst das Ergebnis eines Auftrags zusammen und legt es als Auftragsdoku ab.",
+    "nutzen": "Entscheidungen und Änderungen bleiben auffindbar, auch Wochen später und für neue Teammitglieder."
+  },
+  "bug_reviewer": {
+    "rolle": "Bug-Wächter",
+    "beschreibung": "Prüft vor dem Auftrag die bekannten Bugs und hält passende Risiken am Auftrag fest.",
+    "nutzen": "Bekannte Fehler wiederholen sich nicht. Der Entwickler kennt die Stolperstellen, bevor er beginnt."
+  },
+  "manual_writer": {
+    "rolle": "Handbuch-Autor",
+    "beschreibung": "Pflegt das technische Handbuch mit Aufbau, Abläufen und Schnittstellen des Projekts.",
+    "nutzen": "Das technische Wissen bleibt aktuell und muss nicht aus dem Code zusammengesucht werden."
+  },
+  "user_manual_writer": {
+    "rolle": "Benutzerhandbuch-Autor",
+    "beschreibung": "Pflegt das Benutzerhandbuch und beschreibt neue oder geänderte Funktionen aus Sicht der Anwender.",
+    "nutzen": "Anwender finden schnell heraus, wie eine Funktion zu bedienen ist, ohne nachfragen zu müssen."
+  },
+  "custom": {
+    "rolle": "Eigene Rolle",
+    "beschreibung": "Eine frei definierbare Zusatzrolle. Was sie tut, legt ihre Anweisung fest.",
+    "nutzen": "Der Workflow lässt sich um eigene Prüfungen oder Schritte erweitern, die zum Projekt passen."
+  }
+}
