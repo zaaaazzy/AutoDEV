@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { sendPush } from '../core/push.js';
+import { gitEnvironment } from './project-command.js';
 
 /**
  * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
@@ -51,7 +52,11 @@ export type RestartNotifier = (pool: Queryable, state: RestartState) => Promise<
 
 function currentVersion(): string | null {
   try {
-    const head = execFileSync('git', ['log', '-1', '--format=%h %s'], { encoding: 'utf8', timeout: 5_000 }).trim();
+    const head = execFileSync('git', ['log', '-1', '--format=%h %s'], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      env: gitEnvironment(),
+    }).trim();
     return head ? `Stand: ${head}` : null;
   } catch {
     return null;
@@ -183,7 +188,8 @@ export async function deployProblem(
   execute: CommandExecutor,
   branch = process.env.DEV_LOG_RESTART_BRANCH?.trim() || 'main',
 ): Promise<string | null> {
-  const git = (...args: string[]) => execute(['git', ...args], installRoot, { timeoutMs: 30_000 });
+  const git = (...args: string[]) =>
+    execute(['git', ...args], installRoot, { timeoutMs: 30_000, env: gitEnvironment() });
   const head = await git('rev-parse', '--abbrev-ref', 'HEAD');
   if (head.exitCode !== 0) return `Git-Stand nicht lesbar: ${head.output.trim().slice(-200)}`;
   const current = head.output.trim();

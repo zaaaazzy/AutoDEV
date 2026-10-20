@@ -10,6 +10,7 @@ import { SECRET_PATTERNS } from '../core/secret-mask.js';
 import { loadTestCommands } from './runner-selection.js';
 import { requestRestart } from './system-restart.js';
 import { BACKUP_DIRECTORY } from '../agent/tool-paths.js';
+import { gitEnvironment, runProjectCommand } from './project-command.js';
 
 const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -116,13 +117,13 @@ export const BOT_IDENTITY = {
 };
 
 function gitHelpers(execute: CommandExecutor, cwd: string) {
-  const env = {
-    ...process.env,
+  // Gefiltert und ohne Hooks: Agents können im Projekt Hooks oder fsmonitor setzen, die sonst beim Commit liefen.
+  const env = gitEnvironment({
     ...BOT_IDENTITY,
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
     GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
-  };
+  });
   const git = async (...args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
     return { ...result, output: redactOutput(result.output, process.env).trim() };
@@ -445,7 +446,7 @@ export async function finishOrderBranch(
     if (passed) {
       if (dirty) {
         const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
-        await must('commit', '-m', subject, '-m', body);
+        await must('commit', '--no-verify', '-m', subject, '-m', body);
       }
       // Review-Freigabe: Branch bleibt bestehen und wird erst nach der Freigabe gemergt (mergeApprovedBranch).
       if (hold) {
@@ -772,6 +773,7 @@ async function ensureCiWorkflow(cwd: string, commands: string[][], helpers: GitH
   await helpers.must('add', CI_WORKFLOW, ...(node ? ['.nvmrc'] : []));
   await helpers.must(
     'commit',
+    '--no-verify',
     '-m',
     'ci: GitHub-Actions-Workflow für Build und Tests',
     '-m',
@@ -806,14 +808,14 @@ export async function waitForCi(
   log: string[],
   pollMs = 10_000,
 ): Promise<void> {
-  const env = { ...process.env, GH_PROMPT_DISABLED: '1' };
+  const env = gitEnvironment({ GH_PROMPT_DISABLED: '1' });
   const gh = async (timeoutMs: number, ...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs, env });
   const auth = await gh(GIT_TIMEOUT_MS, 'auth', 'status', '--hostname', 'github.com').catch(() => null);
   if (!auth || auth.exitCode !== 0) {
     log.push('CI-Status nicht prüfbar (GitHub CLI fehlt oder ist nicht angemeldet) – das lokale Test-Gate gilt.');
     return;
   }
-  const sha = (await execute(['git', 'rev-parse', 'HEAD'], cwd, { timeoutMs: GIT_TIMEOUT_MS })).output.trim();
+  const sha = (await execute(['git', 'rev-parse', 'HEAD'], cwd, { timeoutMs: GIT_TIMEOUT_MS, env })).output.trim();
   let runId = '';
   for (let attempt = 0; attempt < 24 && !runId; attempt += 1) {
     const list = await gh(
@@ -864,10 +866,9 @@ export async function waitForCi(
 /** Führt die Testbefehle des Projekts aus; wirft mit dem Ausgabe-Ende, sobald einer fehlschlägt. */
 async function runTestGate(execute: CommandExecutor, cwd: string, commands: string[][], log: string[]): Promise<void> {
   for (const command of commands) {
-    // Ohne die internen Variablen des Workers (DEV_LOG_*): Projekttests sollen weder AIdeation-Zugänge sehen noch
-    // vom Projektbereich des Workers abhängen.
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_')));
-    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS, env });
+    // Nur mit dem gefilterten Environment: Projekttests sollen weder AIdeation-Zugänge sehen noch vom Projektbereich
+    // des Workers abhängen.
+    const result = await runProjectCommand(command, cwd, { timeoutMs: TEST_TIMEOUT_MS }, execute);
     if (result.exitCode !== 0) {
       throw new Error(
         `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${redactOutput(result.output, process.env).slice(-600)}`,
@@ -917,7 +918,7 @@ export async function commitTaskToGit(
     await stageAll(git, must);
     if (!(await must('diff', '--cached', '--name-only'))) return null;
     const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
-    await must('commit', '-m', subject, '-m', body);
+    await must('commit', '--no-verify', '-m', subject, '-m', body);
     return await must('rev-parse', '--short', 'HEAD');
   } catch (error) {
     console.error(
@@ -944,6 +945,7 @@ export async function commitProjectSetup(
   if (!staged && hasCommit) return { initialized, committed: false, held };
   await must(
     'commit',
+    '--no-verify',
     '--allow-empty',
     '-m',
     hasCommit ? 'chore: Projekt mit AIdeation verbunden' : 'chore: Initial-Commit',
@@ -1014,6 +1016,7 @@ async function pushSprint(
   if (await must('diff', '--cached', '--name-only')) {
     await must(
       'commit',
+      '--no-verify',
       '-m',
       `chore(${sprint.name}): Sprint-Stand sichern`,
       '-m',
@@ -1067,6 +1070,7 @@ async function pushSprint(
       if (mergedMain && sprint.remote) {
         const pushed = await ci.execute(['git', 'push', '-u', 'origin', MAIN_BRANCH], elsewhere, {
           timeoutMs: 120_000,
+          env: gitEnvironment({ GIT_TERMINAL_PROMPT: '0' }),
         });
         log.push(
           pushed.exitCode === 0 ? `${MAIN_BRANCH} nach GitHub gepusht.` : `Push von ${MAIN_BRANCH} fehlgeschlagen.`,
@@ -1138,7 +1142,7 @@ export async function mergeIntoCheckedOutMain(
   log: string[],
 ): Promise<boolean> {
   const git = (...args: string[]) =>
-    execute(['git', ...args], folder, { timeoutMs: 120_000, env: { ...process.env, ...BOT_IDENTITY } });
+    execute(['git', ...args], folder, { timeoutMs: 120_000, env: gitEnvironment(BOT_IDENTITY) });
   const head = await git('rev-parse', '--abbrev-ref', 'HEAD');
   const status = await git('status', '--porcelain', '--untracked-files=no');
   if (head.exitCode !== 0 || head.output.trim() !== MAIN_BRANCH || status.exitCode !== 0 || status.output.trim()) {

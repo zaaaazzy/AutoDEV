@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandExecutor } from '../core/command.js';
 import type { CoverageArea, CoverageReport } from './coverage.js';
+import { runProjectCommand } from './project-command.js';
 
 /**
  * Eigene Abdeckungsmessung von AIdeation: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
@@ -57,6 +58,24 @@ export interface TestRunner {
 }
 
 const MAX_SCRIPT_DEPTH = 3;
+
+/**
+ * Vorbereitende Schritte, die die Messung selbst startet: nur npm-Skripte und bekannte Build-Werkzeuge. Beliebige
+ * Befehle aus dem `test`-Skript (`node -e …`, `curl …`, `sh -c …`) führt AIdeation nicht aus.
+ */
+const SETUP_COMMANDS: ((step: string[]) => boolean)[] = [
+  (step) => step[0] === 'npm' && (step[1] === 'run' || step[1] === 'run-script') && /^[\w:.-]+$/.test(step[2] ?? ''),
+  (step) => step[0] === 'npm' && step[1] === 'ci' && step.length === 2,
+  (step) => step[0] === 'tsc',
+  (step) => step[0] === 'ng' && step[1] === 'build',
+  (step) => step[0] === 'vite' && step[1] === 'build',
+];
+
+export function allowedSetupStep(step: string[]): boolean {
+  // Keine Shell-Zeichen: Die Schritte laufen ohne Shell; Verkettungen oder Ersetzungen gehören nicht hinein.
+  if (step.some((part) => /[;|&<>`$()]/.test(part))) return false;
+  return SETUP_COMMANDS.some((allowed) => allowed(step));
+}
 
 /**
  * Findet den Node-Test-Runner in einem npm-Skript: auch hinter `&&` (z. B. `npm run build:ui && tsx --test …`)
@@ -119,14 +138,21 @@ export async function measureCoverage(
       console.warn(`[coverage] Abdeckung nicht messbar: Testskript in ${dir} nicht erkannt (kein tsx/node --test).`);
       continue;
     }
+    const refused = runner.setup.find((step) => !allowedSetupStep(step));
+    if (refused) {
+      console.warn(
+        `[coverage] Abdeckung nicht gemessen: Vorbereitungsschritt „${refused.join(' ')}“ in ${dir} ist nicht erlaubt (nur npm run, npm ci, tsc, ng build, vite build).`,
+      );
+      continue;
+    }
     // Vorbereitende Schritte des Skripts (z. B. Oberfläche bauen) wie beim normalen Testlauf zuerst ausführen.
     let prepared = true;
     for (const step of runner.setup) {
-      const done = await execute(step, dir, { timeoutMs: TIMEOUT_MS }).catch(() => null);
+      const done = await runProjectCommand(step, dir, { timeoutMs: TIMEOUT_MS }, execute).catch(() => null);
       if (done?.exitCode !== 0) prepared = false;
     }
     if (!prepared) continue;
-    const result = await execute(
+    const result = await runProjectCommand(
       [
         'npm',
         'exec',
@@ -142,6 +168,7 @@ export async function measureCoverage(
       ],
       dir,
       { timeoutMs: TIMEOUT_MS },
+      execute,
     ).catch(() => null);
     const measured = result && parseNodeCoverage(result.output);
     if (!measured) continue;

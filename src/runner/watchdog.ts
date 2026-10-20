@@ -4,6 +4,7 @@ import { mkdir, readdir, readFile, stat, statfs, writeFile } from 'node:fs/promi
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
+import { gitEnvironment } from './project-command.js';
 import {
   deliverPush,
   loadSubscriptions,
@@ -141,7 +142,7 @@ async function uncommittedCode(installRoot: string): Promise<string | null> {
     execFile(
       'git',
       ['status', '--porcelain', '--', 'src', 'frontend/src', 'package.json', 'scripts'],
-      { cwd: installRoot, timeout: 15_000 },
+      { cwd: installRoot, timeout: 15_000, env: gitEnvironment() },
       (error, stdout) => resolve(error ? '' : stdout),
     );
   });

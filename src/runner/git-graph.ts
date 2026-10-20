@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Pool } from 'pg';
+import { gitEnvironment } from './project-command.js';
 
 const exec = promisify(execFile);
 const MAX_COMMITS = 80;
@@ -56,7 +57,12 @@ export function parseGitLog(output: string): GitCommit[] {
 }
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
-  const { stdout } = await exec('git', args, { cwd, timeout: 15_000, maxBuffer: 4 * 1024 * 1024 });
+  const { stdout } = await exec('git', args, {
+    cwd,
+    timeout: 15_000,
+    maxBuffer: 4 * 1024 * 1024,
+    env: gitEnvironment(),
+  });
   return stdout;
 }
 

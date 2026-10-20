@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { gitEnvironment } from './project-command.js';
 
 /**
  * Eigener Arbeitsbaum für die Agents (Git-Worktree; Branches und Historie sind dieselben). Projekte liegen in
@@ -113,7 +114,7 @@ export function linkDependencies(folder: string, workspace: string): void {
  * WIP-Commits würde sie einchecken. Deshalb lokal (info/exclude, gilt für alle Worktrees) ausschliessen.
  */
 export async function excludeLinkedDependencies(workspace: string, execute: CommandExecutor): Promise<void> {
-  const result = await execute(['git', 'rev-parse', '--git-common-dir'], workspace);
+  const result = await execute(['git', 'rev-parse', '--git-common-dir'], workspace, { env: gitEnvironment() });
   if (result.exitCode !== 0) return;
   const common = result.output.trim().split('\n').pop() ?? '';
   const file = join(isAbsolute(common) ? common : join(workspace, common), 'info', 'exclude');
@@ -131,11 +132,13 @@ export async function ensureWorktree(
 ): Promise<string | null> {
   if (!existsSync(join(workspace, '.git'))) {
     const hasMain =
-      (await execute(['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/main'], folder)).exitCode === 0;
+      (await execute(['git', 'rev-parse', '--verify', '--quiet', 'refs/heads/main'], folder, { env: gitEnvironment() }))
+        .exitCode === 0;
+    // Ohne Hooks: „worktree add“ startet sonst den post-checkout-Hook des Projekts.
     const created = await execute(
       ['git', 'worktree', 'add', '--detach', workspace, ...(hasMain ? ['main'] : [])],
       folder,
-      { timeoutMs: 120_000 },
+      { timeoutMs: 120_000, env: gitEnvironment() },
     );
     if (created.exitCode !== 0) return created.output.slice(-300) || 'git worktree add fehlgeschlagen';
   }
