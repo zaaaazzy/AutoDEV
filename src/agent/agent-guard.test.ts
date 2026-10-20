@@ -1,12 +1,22 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
-import { bashProblem, encodePolicy, fileProblem, GUARD_SCRIPT, type GuardPolicy } from './agent-guard.js';
+import { after, test } from 'node:test';
+import {
+  bashProblem,
+  decodePolicy,
+  encodePolicy,
+  fileProblem,
+  GUARD_SCRIPT,
+  type GuardPolicy,
+  guardProblem,
+  SCOPE_PATTERN,
+} from './agent-guard.js';
 
 const root = mkdtempSync(join(tmpdir(), 'guard-'));
+after(() => rmSync(root, { recursive: true, force: true }));
 mkdirSync(join(root, 'docs'));
 mkdirSync(join(root, 'src'));
 writeFileSync(join(root, 'docs', 'alt.md'), 'x');
@@ -80,6 +90,100 @@ test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtli
   assert.equal(run(encodePolicy(all), write('src/x.ts')).status, 0);
   assert.equal(run('kaputt', write('src/x.ts')).status, 2);
   assert.equal(run(encodePolicy(all), { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } }).status, 0);
+});
+
+test('Wächter: ohne Dateipfad gesperrt; Notebook-Pfade und relative Pfade ohne cwd', () => {
+  assert.match(fileProblem({ tool_name: 'Write', tool_input: {} }, all, root) ?? '', /Kein Dateipfad/);
+  assert.match(fileProblem({ tool_name: 'Write', tool_input: { file_path: '' } }, all, root) ?? '', /Kein Dateipfad/);
+  assert.match(fileProblem({ tool_name: 'Write' }, all, root) ?? '', /Kein Dateipfad/);
+  const notebook = { tool_name: 'NotebookEdit', tool_input: { notebook_path: 'docs/a.ipynb' } };
+  assert.equal(fileProblem(notebook, all, root), null);
+  assert.match(fileProblem(notebook, { create: true, edit: false, scopes: [] }, root) ?? '', /ändern/);
+  // Ohne cwd gilt der Projektordner als Ausgangspunkt.
+  assert.equal(fileProblem({ tool_name: 'Write', tool_input: { file_path: 'docs/x.md' } }, all, root), null);
+  assert.match(fileProblem(write('../ausserhalb.md'), all, root) ?? '', /ausserhalb des Projektordners/);
+});
+
+test('Wächter: Gesamtentscheidung je Werkzeug', () => {
+  const readOnly: GuardPolicy = { create: false, edit: false, scopes: [], shell: false };
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit']) {
+    assert.match(guardProblem(write('docs/alt.md', tool), readOnly, root) ?? '', /nicht freigegeben/, tool);
+    assert.equal(guardProblem(write('docs/alt.md', tool), all, root), null, tool);
+  }
+  const bash = (command: unknown) => ({ tool_name: 'Bash', tool_input: { command }, cwd: root });
+  assert.match(guardProblem(bash('git status'), readOnly, root) ?? '', /nur lesen/);
+  assert.equal(guardProblem(bash('git status'), all, root), null);
+  assert.match(guardProblem(bash('git status > x'), all, root) ?? '', /umleiten/);
+  assert.equal(guardProblem(bash(undefined), all, root), null, 'ohne Befehl entscheidet die CLI');
+  assert.equal(guardProblem({ tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } }, readOnly, root), null);
+  assert.equal(guardProblem({}, readOnly, root), null);
+});
+
+test('Wächter: Umleitungen in Anführungszeichen und Befehlsketten', () => {
+  assert.equal(bashProblem('git log --grep "a > b"', root), null, 'Text in Anführungszeichen ist keine Umleitung');
+  assert.equal(bashProblem("git log --format='%h > %s'", root), null);
+  assert.ok(bashProblem('git status || npx eslint', root));
+  assert.ok(bashProblem('git status\ngit log --exec=x', root));
+  assert.match(bashProblem('cat id_rsa', root) ?? '', /Geheimnisse/);
+  const noCheck = () => assert.fail('docker compose ps braucht keine Prüfung');
+  assert.equal(bashProblem('docker compose ps', root, noCheck as never), null);
+});
+
+test('Wächter: docker compose up wird abgelehnt, wenn die Konfiguration nicht lesbar ist', () => {
+  const calls: unknown[][] = [];
+  const failing = (...args: unknown[]) => {
+    calls.push(args);
+    return { status: 1, stdout: '', stderr: 'no configuration file provided' };
+  };
+  assert.match(
+    bashProblem('git status && docker compose up -d', root, failing as never) ?? '',
+    /^Start abgelehnt: docker compose config schlug fehl: no configuration file provided/,
+  );
+  assert.deepEqual(calls[0]?.slice(0, 2), ['docker', ['compose', 'config', '--format', 'json']]);
+  assert.equal((calls[0]?.[2] as { cwd: string }).cwd, root);
+});
+
+test('Richtlinie: kodieren, dekodieren und sicherer Standard', () => {
+  const policy: GuardPolicy = { create: true, edit: false, scopes: ['docs', 'src/app'], shell: false };
+  assert.deepEqual(decodePolicy(encodePolicy(policy)), policy);
+  assert.deepEqual(decodePolicy(encodePolicy({ create: true, edit: true, scopes: [], shell: true })), {
+    create: true,
+    edit: true,
+    scopes: [],
+  });
+  for (const value of [undefined, '', 'kaputt', encodePolicy(null as never)]) {
+    assert.deepEqual(decodePolicy(value), { create: false, edit: false, scopes: [] }, String(value));
+  }
+  // Nur echte Wahrheitswerte und gültige Ordner zählen.
+  const sloppy = Buffer.from(
+    JSON.stringify({ create: 'ja', edit: 1, scopes: ['docs', '../x', '/abs', 'a;b', 'ok/sub'] }),
+  ).toString('base64url');
+  assert.deepEqual(decodePolicy(sloppy), { create: false, edit: false, scopes: ['docs', 'ok/sub'] });
+  const noScopes = Buffer.from(JSON.stringify({ create: true, scopes: 'docs' })).toString('base64url');
+  assert.deepEqual(decodePolicy(noScopes), { create: true, edit: false, scopes: [] });
+  assert.ok(SCOPE_PATTERN.test('@scope/pkg'));
+  assert.ok(!SCOPE_PATTERN.test('a/../b'));
+});
+
+test('Wächter als Hook: ungültige Eingabe, scheiternde Prüfung und Projektordner aus cwd', () => {
+  const run = (policy: string, input: string, projectDir: string) =>
+    spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), GUARD_SCRIPT, policy], {
+      input,
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir },
+    });
+  const invalid = run(encodePolicy(all), 'kein json', root);
+  assert.equal(invalid.status, 2);
+  assert.match(invalid.stderr, /AIdeation-Wächter: ungültige Eingabe/);
+
+  const broken = run(encodePolicy(all), JSON.stringify(write('docs/x.md')), join(root, 'gibt-es-nicht'));
+  assert.equal(broken.status, 2);
+  assert.match(broken.stderr, /AIdeation-Wächter: Prüfung fehlgeschlagen: .*ENOENT/);
+
+  // Ohne CLAUDE_PROJECT_DIR gilt das cwd der Eingabe als Projektordner.
+  const scoped = encodePolicy({ create: true, edit: true, scopes: ['docs'] });
+  assert.equal(run(scoped, JSON.stringify(write('docs/x.md')), '').status, 0);
+  assert.equal(run(scoped, JSON.stringify(write('src/x.ts')), '').status, 2);
 });
 
 test('Lokales Modell: dieselben Datei- und Befehlsrechte wie die Claude-CLI', async () => {
