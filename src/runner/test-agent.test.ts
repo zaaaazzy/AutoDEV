@@ -106,3 +106,29 @@ test('Playwright-Dateien laufen mit playwright test statt im Node-Testrunner', a
   ];
   assert.deepEqual((await routePlaywrightSpecs(untouched, cwd)).commands, untouched);
 });
+
+test('Node-Test mit „@playwright/test“ nur als Text im String bleibt im Node-Testrunner', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'route-pw-'));
+  mkdirSync(join(cwd, 'src'));
+  mkdirSync(join(cwd, 'e2e'));
+  writeFileSync(join(cwd, 'e2e', 'playwright.config.ts'), 'export default {};');
+  writeFileSync(
+    join(cwd, 'src', 'routing.test.ts'),
+    [
+      "import test from 'node:test';",
+      'test(\'x\', () => writeFileSync(\'a.spec.ts\', "import { test } from \'@playwright/test\';"));',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(cwd, 'e2e', 'multi.spec.ts'),
+    ["import {\n  test,\n  expect,\n} from '@playwright/test';", "const pw = require('@playwright/test');"].join('\n'),
+  );
+  const command = ['npx', 'tsx', '--test', 'src/routing.test.ts'];
+  assert.deepEqual((await routePlaywrightSpecs([command], cwd)).commands, [command]);
+  assert.deepEqual((await routePlaywrightSpecs([['npx', 'tsx', '--test', 'e2e/multi.spec.ts']], cwd)).commands, [
+    ['npx', 'playwright', 'test', '-c', 'e2e/playwright.config.ts', 'e2e/multi.spec.ts'],
+  ]);
+  // Die eigene Testdatei (enthält genau so einen String) wird nicht als Playwright-Datei erkannt.
+  const own = ['npx', 'tsx', '--test', 'src/runner/test-agent.test.ts'];
+  assert.deepEqual((await routePlaywrightSpecs([own], process.cwd())).commands, [own]);
+});
