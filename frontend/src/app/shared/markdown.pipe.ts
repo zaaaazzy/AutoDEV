@@ -1,12 +1,20 @@
 import { Pipe, type PipeTransform } from '@angular/core';
 
+interface ListItem {
+  text: string[];
+  sub: { type: 'ol' | 'ul'; items: string[] } | null;
+}
+
 @Pipe({ name: 'markdown', standalone: true })
 export class MarkdownPipe implements PipeTransform {
   transform(markdown: string | null | undefined): string {
     const blocks: string[] = [];
     let paragraph: string[] = [];
     let listType: 'ol' | 'ul' | '' = '';
-    let listItems: string[] = [];
+    let listItems: ListItem[] = [];
+    let listStart = 1;
+    // Leerzeile innerhalb einer Liste: Die Liste endet erst, wenn danach kein Listenpunkt folgt.
+    let blankInList = false;
     let codeLines: string[] = [];
     let tableRows: string[][] = [];
     let inCode = false;
@@ -17,10 +25,20 @@ export class MarkdownPipe implements PipeTransform {
       paragraph = [];
     };
     const flushList = (): void => {
-      if (listItems.length)
-        blocks.push(`<${listType}>${listItems.map((item) => `<li>${this.inline(item)}</li>`).join('')}</${listType}>`);
+      if (listItems.length) {
+        const start = listType === 'ol' && listStart !== 1 ? ` start="${listStart}"` : '';
+        const items = listItems.map((item) => {
+          const sub = item.sub
+            ? `<${item.sub.type}>${item.sub.items.map((entry) => `<li>${this.inline(entry)}</li>`).join('')}</${item.sub.type}>`
+            : '';
+          return `<li>${this.inline(item.text.join(' '))}${sub}</li>`;
+        });
+        blocks.push(`<${listType}${start}>${items.join('')}</${listType}>`);
+      }
       listItems = [];
       listType = '';
+      listStart = 1;
+      blankInList = false;
     };
     // Tabellen (GFM): erste Zeile Kopf, Trennzeile „|---|“ entfällt.
     const flushTable = (): void => {
@@ -59,6 +77,23 @@ export class MarkdownPipe implements PipeTransform {
       }
       if (inCode) {
         codeLines.push(line);
+        continue;
+      }
+      // Eingerückte Zeilen gehören zum aktuellen Listenpunkt: Unterpunkt oder Fortsetzung.
+      const current = listItems[listItems.length - 1];
+      if (current && /^(?: {2,}|\t)\s*\S/.test(line)) {
+        const nested = line.match(/^\s+(?:([-*])|\d+\.)\s+(.*)$/);
+        if (nested) {
+          const type = nested[1] ? 'ul' : 'ol';
+          current.sub ??= { type, items: [] };
+          current.sub.items.push(nested[2] ?? '');
+        } else if (current.sub) {
+          const last = current.sub.items.length - 1;
+          current.sub.items[last] = `${current.sub.items[last]} ${line.trim()}`;
+        } else {
+          current.text.push(line.trim());
+        }
+        blankInList = false;
         continue;
       }
       if (/^\s*\|.*\|\s*$/.test(line)) {
@@ -103,21 +138,28 @@ export class MarkdownPipe implements PipeTransform {
         continue;
       }
       const unordered = line.match(/^[-*]\s+(.*)$/);
-      const ordered = line.match(/^\d+\.\s+(.*)$/);
-      const listItem = unordered ?? ordered;
-      if (listItem) {
+      const ordered = line.match(/^(\d+)\.\s+(.*)$/);
+      if (unordered || ordered) {
         flushParagraph();
         const nextType = unordered ? 'ul' : 'ol';
         if (listType && listType !== nextType) flushList();
+        if (!listItems.length && ordered) listStart = Number(ordered[1]);
         listType = nextType;
-        listItems.push(listItem[1]!);
+        listItems.push({ text: [unordered?.[1] ?? ordered?.[2] ?? ''], sub: null });
+        blankInList = false;
         continue;
       }
       if (!line.trim()) {
         flushParagraph();
-        flushList();
+        if (listItems.length) blankInList = true;
         continue;
       }
+      // Zeile direkt unter einem Listenpunkt (ohne Leerzeile) setzt ihn fort, nach einer Leerzeile endet die Liste.
+      if (current && !blankInList) {
+        current.text.push(line.trim());
+        continue;
+      }
+      flushList();
       paragraph.push(line.trim());
     }
     flushParagraph();
