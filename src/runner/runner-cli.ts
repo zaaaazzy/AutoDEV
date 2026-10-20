@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,12 +12,15 @@ import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
 import { projectFolderError } from '../core/validation.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
+import { ReviewSlots } from './review-slots.js';
+import { syncSprintCommits } from './sprint-commits.js';
 
 const SETUP_PARALLEL = 4;
 import { draftRequirements } from '../agent/requirements.js';
 import { commentSprintProposal } from '../agent/sprint-comment.js';
 import { processVisionaryRun } from '../agent/visionary.js';
 import { syncFavicon } from './favicon.js';
+import { ProductionMonitor } from './production-monitor.js';
 import { syncGitGraph } from './git-graph.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
@@ -30,7 +34,7 @@ import { listenForWork, WorkSignal } from './work-signal.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
- * Dev Log selbst liegt (z. B. /Volumes/External). Ausserhalb davon legt der Worker nichts an und startet keine Agents.
+ * AIdeation selbst liegt (z. B. /Volumes/External). Ausserhalb davon legt der Worker nichts an und startet keine Agents.
  */
 export function resolveProjectScope(environment: NodeJS.ProcessEnv, installDir: string): string {
   const configured = environment.DEV_LOG_PROJECT_ROOTS?.trim();
@@ -107,18 +111,19 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
   if (!options.all) {
     return [{ options, problem: null, repository: options.cwd, transient: false }];
   }
-  const projects = await pool.query<{ slug: string; repository: string }>(
-    'SELECT slug, repository FROM projects ORDER BY slug',
+  const projects = await pool.query<{ slug: string; repository: string; separate: boolean }>(
+    'SELECT slug, repository, agent_workspace AS separate FROM projects ORDER BY slug',
   );
   return Promise.all(
-    projects.rows.map(async ({ slug, repository }) => {
+    projects.rows.map(async ({ slug, repository, separate }) => {
       const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
       const folder =
         !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
           ? repository
           : null;
-      // Der Dev-Log-Ordner selbst: Agents arbeiten in einem eigenen Worktree, nie im Arbeitsordner der Menschen.
-      const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT) : null;
+      // Der AIdeation-Ordner selbst (oder ein Projekt mit eigenem Arbeitsordner): Agents arbeiten in einem eigenen
+      // Worktree, nie im Arbeitsordner der Menschen bzw. des laufenden Entwicklungsservers.
+      const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT, undefined, separate) : null;
       const transient = !outside && !folder && isAbsolute(repository) && volumeOf(repository) !== null;
       return {
         options: { ...options, project: slug, cwd: workspace?.cwd ?? folder ?? options.cwd },
@@ -127,7 +132,7 @@ async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Targe
           : transient
             ? missingFolderMessage(repository)
             : !folder
-              ? `Projektordner nicht gefunden: ${repository} (im Dev Log unter „Projekt“ den absoluten Pfad angeben)`
+              ? `Projektordner nicht gefunden: ${repository} (im AIdeation unter „Projekt“ den absoluten Pfad angeben)`
               : (workspace?.problem ?? null),
         repository,
         transient,
@@ -161,18 +166,18 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
         tag: `${FOLDER_NOTICE_KEY}-${volume}`,
       },
       { project: target.options.project },
-    ).catch(() => undefined);
+    ).catch(logged('runner-cli'));
   }
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
 async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
-  await recoverTestRequests(pool).catch(() => undefined);
+  await recoverTestRequests(pool).catch(logged('runner-cli'));
   // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
   await pool
     .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
-    .catch(() => undefined);
+    .catch(logged('runner-cli'));
   const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
     `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`,
   );
@@ -197,7 +202,7 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     .query(
       `UPDATE visionary_runs SET status = 'requested', started_at = NULL, progress = NULL WHERE status = 'running'`,
     )
-    .catch(() => undefined);
+    .catch(logged('runner-cli'));
   await pool.query(
     `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
   );
@@ -205,7 +210,7 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
 }
 
-/** Ordner, aus dem dieser Worker läuft (die Dev-Log-Installation). */
+/** Ordner, aus dem dieser Worker läuft (die AIdeation-Installation). */
 const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function main(): Promise<void> {
@@ -236,7 +241,7 @@ async function main(): Promise<void> {
       return;
     }
     await recoverInterruptedRuns(pool);
-    // Ein angeforderter Neustart („Dev Log neu starten“) ist mit diesem Start abgeschlossen.
+    // Ein angeforderter Neustart („AIdeation neu starten“) ist mit diesem Start abgeschlossen.
     await completeRestart(pool).catch((error: unknown) =>
       console.error('Neustart-Status konnte nicht gesetzt werden:', describeError(error)),
     );
@@ -249,11 +254,13 @@ async function main(): Promise<void> {
     let startup = true;
     const beat = (): void => {
       for (const slug of known) {
-        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(() => undefined);
+        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(logged('runner-cli'));
       }
       if (known.length) startup = false;
     };
-    void publishSystemAgents(pool).catch(() => undefined);
+    void publishSystemAgents(pool).catch(logged('runner-cli'));
+    // Produktions-Rückkanal: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten, Aufbewahrung stündlich.
+    const production = new ProductionMonitor(pool);
     // Favicons der Projekte alle 5 Minuten abgleichen (nur bei Änderung wird gespeichert).
     let faviconCheck = 0;
     // Git-Verlauf fürs Dashboard jede Minute.
@@ -261,12 +268,20 @@ async function main(): Promise<void> {
     const githubActive = new Set<string>();
     const heartbeat = setInterval(() => {
       beat();
-      void publishSystemAgents(pool).catch(() => undefined);
+      void publishSystemAgents(pool).catch(logged('runner-cli'));
+      if (!stopping) {
+        production.tick(
+          chatTargets
+            .filter((target) => !target.problem)
+            .map((target) => ({ slug: target.options.project, cwd: target.options.cwd })),
+        );
+      }
       if (Date.now() - gitCheck > 60_000) {
         gitCheck = Date.now();
         for (const target of chatTargets) {
           if (target.problem) continue;
-          void syncGitGraph(pool, target.options.project, target.options.cwd).catch(() => undefined);
+          void syncGitGraph(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
+          void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
           // GitHub-Brücke: Issue-Import, Rückmeldung und Sprints im Review (Intervalle begrenzt das Modul selbst).
           const slug = target.options.project;
           if (githubActive.has(slug) || stopping) continue;
@@ -283,11 +298,11 @@ async function main(): Promise<void> {
         faviconCheck = Date.now();
         for (const target of chatTargets) {
           if (target.problem) continue;
-          void syncFavicon(pool, target.options.project, target.options.cwd).catch(() => undefined);
+          void syncFavicon(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
         }
       }
     }, 15_000);
-    // Projektordner und Dev-Log-Ordner überwachen: Ausfälle (z. B. externes Laufwerk) melden und für Agent-Läufe merken,
+    // Projektordner und AIdeation-Ordner überwachen: Ausfälle (z. B. externes Laufwerk) melden und für Agent-Läufe merken,
     // damit ein Abbruch in dieser Zeit als Unterbrechung gilt statt als Fehler im Auftrag.
     const stopFolderWatch = watchFolders(
       () => [
@@ -324,6 +339,18 @@ async function main(): Promise<void> {
     const commentActive = new Set<string>();
     const visionaryActive = new Set<string>();
     const testActive = new Set<string>();
+    // Review-Container (projektübergreifend): angeforderte Stände starten, Freigaben zuweisen, Zustand prüfen.
+    const reviewSlots = new ReviewSlots(pool, INSTALL_ROOT);
+    let reviewActive = false;
+    const reviewTimer = setInterval(() => {
+      if (reviewActive || stopping) return;
+      reviewActive = true;
+      void reviewSlots
+        .sync()
+        .then(() => loggedErrors.delete('review'))
+        .catch((error: unknown) => logOnce('review', `Review-Container fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (reviewActive = false));
+    }, 5_000);
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -339,7 +366,7 @@ async function main(): Promise<void> {
         if (chatActive.has(slug) || stopping) continue;
         if (target.problem) {
           // Laufwerk nur kurz weg: Anfragen bleiben wartend und laufen, sobald der Ordner wieder da ist.
-          if (!target.transient) void rejectChat(pool, slug, target.problem).catch(() => undefined);
+          if (!target.transient) void rejectChat(pool, slug, target.problem).catch(logged('runner-cli'));
           continue;
         }
         if (!estimateActive.has(slug)) {
@@ -412,7 +439,7 @@ async function main(): Promise<void> {
         console.error(`[${slug}] Runner-Zyklus fehlgeschlagen:`, errors.get(slug));
       }
     };
-    // „Dev Log neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
+    // „AIdeation neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
     // launchd startet ihn mit dem neuen Code wieder.
     let restartActive = false;
     const restartTimer = setInterval(() => {
@@ -430,9 +457,9 @@ async function main(): Promise<void> {
       void processRestart(pool, INSTALL_ROOT, busy)
         .then(async (result) => {
           if (result === 'failed') {
-            const state = await readRestart(pool).catch(() => null);
+            const state = await readRestart(pool).catch(logged('runner-cli', null));
             await sendPush(pool, {
-              title: '⚠ Dev Log Neustart fehlgeschlagen',
+              title: '⚠ AIdeation Neustart fehlgeschlagen',
               body: state?.message ?? 'Details unter Assistent → Aktionen → System.',
               url: '#dashboard',
               tag: 'system-restart',
@@ -495,6 +522,7 @@ async function main(): Promise<void> {
       stopFolderWatch();
       clearInterval(restartTimer);
       clearInterval(chatTimer);
+      clearInterval(reviewTimer);
       clearInterval(setupTimer);
     }
   } finally {

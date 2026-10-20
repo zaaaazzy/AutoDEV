@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -25,14 +25,55 @@ function repository(): string {
   return folder;
 }
 
+test('Projekt in <Projekt>/source: Agents arbeiten in <Projekt>/agent', () => {
+  assert.equal(agentWorkspacePath('/Coding/Mainty/source'), '/Coding/Mainty/agent');
+  assert.equal(agentWorkspacePath('/Coding/Mainty'), '/Coding/Mainty-agents');
+});
+
 test('Fremde Projektordner bleiben der Arbeitsordner der Agents', async () => {
   const folder = repository();
   assert.deepEqual(await resolveAgentWorkspace(folder, '/somewhere/else'), { cwd: folder, problem: null });
 });
 
-test('Dev-Log-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {
+test('Projekt mit eigenem Arbeitsordner: Agents arbeiten im Worktree daneben', async () => {
   const folder = repository();
-  // Offene Arbeit eines Menschen im Dev-Log-Ordner.
+  const { cwd, problem } = await resolveAgentWorkspace(folder, '/somewhere/else', undefined, true);
+  assert.equal(problem, null);
+  assert.equal(cwd, agentWorkspacePath(folder));
+  assert.ok(lstatSync(join(cwd!, 'frontend', 'node_modules')).isSymbolicLink());
+  assert.equal(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  // Auch mit `node_modules/` in .gitignore (greift nicht für Symlinks) bleiben die Links unsichtbar für git.
+  writeFileSync(join(cwd!, '.gitignore'), 'node_modules/\n');
+  assert.equal(git(cwd!, 'status', '--short', '--untracked-files=all'), 'M .gitignore');
+});
+
+test('npm-Workspaces: Workspace-Pakete zeigen auf den Code im Arbeitsordner, nicht in den Hauptordner', async () => {
+  const folder = repository();
+  mkdirSync(join(folder, 'contracts'));
+  writeFileSync(join(folder, 'contracts', 'index.js'), 'haupt\n');
+  mkdirSync(join(folder, 'node_modules', '@app'));
+  symlinkSync('../../contracts', join(folder, 'node_modules', '@app', 'contracts'));
+  mkdirSync(join(folder, 'node_modules', 'lib'));
+  git(folder, 'add', '-A');
+  git(folder, 'commit', '-q', '-m', 'contracts');
+  // Alter Stand: node_modules als ein einziger Link.
+  const workspace = agentWorkspacePath(folder);
+  git(folder, 'worktree', 'add', '--detach', workspace, 'main');
+  symlinkSync(join(folder, 'node_modules'), join(workspace, 'node_modules'));
+
+  const { cwd } = await resolveAgentWorkspace(folder, '/somewhere/else', undefined, true);
+  assert.equal(cwd, workspace);
+  assert.ok(!lstatSync(join(workspace, 'node_modules')).isSymbolicLink());
+  assert.equal(
+    realpathSync(join(workspace, 'node_modules', '@app', 'contracts')),
+    realpathSync(join(workspace, 'contracts')),
+  );
+  assert.equal(realpathSync(join(workspace, 'node_modules', 'lib')), realpathSync(join(folder, 'node_modules', 'lib')));
+});
+
+test('AIdeation-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {
+  const folder = repository();
+  // Offene Arbeit eines Menschen im AIdeation-Ordner.
   writeFileSync(join(folder, 'a.txt'), 'meine offene Arbeit\n');
   const { cwd, problem } = await resolveAgentWorkspace(folder, folder);
   assert.equal(problem, null);

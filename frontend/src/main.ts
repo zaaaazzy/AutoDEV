@@ -8,7 +8,7 @@ bootstrapApplication(AppComponent, {
 })
   .then(() => startLayoutCheck())
   .catch((error: unknown) => {
-    console.error('Dev Log UI failed to start:', error);
+    console.error('AIdeation UI failed to start:', error);
   });
 
 // Service Worker für Push-Nachrichten und Installation als App (nur über HTTPS bzw. localhost verfügbar).

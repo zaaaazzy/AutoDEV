@@ -5,6 +5,9 @@ import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
 import { currentStep, hotp } from './totp.js';
 
+// Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
+delete process.env.DEV_LOG_PROJECT_ROOTS;
+
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
 
 async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {
@@ -34,6 +37,30 @@ test('protects the API; basic auth works for scripts while no second factor is s
     });
     assert.equal(authorized.status, 200);
     assert.deepEqual(await authorized.json(), { projects: [] });
+  });
+});
+
+test('API paths are case-sensitive, so other spellings never reach a route past the login', async () => {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    for (const path of ['/API/projects', '/Api/users', '/API/session']) {
+      const response = await fetch(`${baseUrl}${path}`);
+      assert.equal(response.status, 404, path);
+    }
+    // Unter /api laufen die Wächter vor jeder Route, auch wenn der Rest anders geschrieben ist.
+    assert.equal((await fetch(`${baseUrl}/api/Projects`)).status, 401);
+    const restart = await fetch(`${baseUrl}/API/system/restart`, { method: 'POST' });
+    assert.ok(restart.status >= 400, `POST /API/system/restart: ${restart.status}`);
+    assert.deepEqual(queries, []);
+
+    // Die richtige Schreibweise bleibt geschützt.
+    assert.equal((await fetch(`${baseUrl}/api/users`)).status, 401);
   });
 });
 
@@ -366,7 +393,8 @@ test('defines agents per workflow phase and persists their order', async () => {
 
     const list = await fetch(`${baseUrl}/api/projects/mainty/agents`, { headers: jsonHeaders() });
     assert.equal(list.status, 200);
-    assert.match(queries.at(-1)?.sql ?? '', /pre_task' THEN 0 WHEN 'while_task' THEN 1/);
+    // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
+    assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
   });
 });
 

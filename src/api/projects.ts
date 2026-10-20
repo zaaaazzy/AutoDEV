@@ -1,11 +1,13 @@
+import { encryptSecret, isEncrypted } from '../core/secrets.js';
 import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
 import { targetsDevLogDatabase } from '../agent/tool-sql.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
 import { GITHUB_MODES, type GithubMode, githubRepo } from '../runner/github.js';
+import { healthUrlError, SERVICE_NAME } from '../runner/production-monitor.js';
 import {
   isRecord,
   normalizeProjectSlug,
@@ -14,15 +16,80 @@ import {
   projectFolderError,
   validText,
 } from '../core/validation.js';
+import { REVIEW_MODES } from '../core/status.js';
+
+/** With DEV_LOG_SECRET_KEY set, database access stored before encryption existed is encrypted once at start. */
+export async function encryptProjectSecrets(pool: Pool): Promise<number> {
+  if (!process.env.DEV_LOG_SECRET_KEY?.trim()) return 0;
+  const rows = (
+    await pool.query<{ slug: string; url: string }>(
+      'SELECT slug, database_url AS url FROM projects WHERE database_url IS NOT NULL',
+    )
+  ).rows.filter((row) => !isEncrypted(row.url));
+  for (const row of rows) {
+    await pool.query('UPDATE projects SET database_url = $2 WHERE slug = $1 AND database_url = $3', [
+      row.slug,
+      encryptSecret(row.url),
+      row.url,
+    ]);
+  }
+  return rows.length;
+}
+
+/** Einstellungen des Produktions-Rückkanals; vom Ingest-Token nur, ob eines hinterlegt ist. */
+const PRODUCTION_COLUMNS = `health_url AS "healthUrl", log_services AS "logServices", production_ignore AS "productionIgnore", production_retention_days AS "productionRetentionDays", ingest_token_hash IS NOT NULL AS "ingestConfigured"`;
+
+function lines(value: unknown, split: RegExp): string[] | null {
+  if (typeof value === 'string')
+    return value
+      .split(split)
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  if (Array.isArray(value) && value.every((entry) => typeof entry === 'string'))
+    return value.map((entry: string) => entry.trim()).filter(Boolean);
+  return null;
+}
+
+/** Prüft Health-URL, Log-Dienste, Ausschlussmuster und Aufbewahrung; liefert Spalten und Werte oder den Fehler. */
+export function parseProductionSettings(body: Record<string, unknown>): [string, unknown][] | string {
+  const sets: [string, unknown][] = [];
+  if (body.healthUrl !== undefined) {
+    const url = typeof body.healthUrl === 'string' ? body.healthUrl.trim() : body.healthUrl === null ? '' : null;
+    if (url === null) return 'Ungültige Health-URL.';
+    const error = url ? healthUrlError(url) : null;
+    if (error) return error;
+    sets.push(['health_url', url || null]);
+  }
+  if (body.logServices !== undefined) {
+    const services = lines(body.logServices, /[\s,]+/);
+    if (!services || services.length > 20 || services.some((service) => !SERVICE_NAME.test(service))) {
+      return 'Log-Dienste: bis zu 20 Compose-Dienstnamen (Buchstaben, Ziffern, „-“, „_“, „.“), mit Komma getrennt.';
+    }
+    sets.push(['log_services', [...new Set(services)]]);
+  }
+  if (body.productionIgnore !== undefined) {
+    const patterns = lines(body.productionIgnore, /\r?\n/);
+    if (!patterns || patterns.length > 50 || patterns.some((pattern) => pattern.length > 200)) {
+      return 'Ausschlussmuster: höchstens 50 Zeilen mit je bis zu 200 Zeichen.';
+    }
+    sets.push(['production_ignore', patterns]);
+  }
+  if (body.productionRetentionDays !== undefined) {
+    const days = Number(body.productionRetentionDays);
+    if (!Number.isInteger(days) || days < 1 || days > 365) return 'Aufbewahrung: 1 bis 365 Tage.';
+    sets.push(['production_retention_days', days]);
+  }
+  return sets;
+}
 
 /** GitHub-Brücke: Modus, Freigabe-Option und der vom Worker geprüfte Anmeldestatus (kein Token). */
 const GITHUB_COLUMNS = `github_mode AS "githubMode", github_require_approval AS "githubRequireApproval",
   github_synced_at AS "githubSyncedAt", github_auth AS "githubAuth", github_auth_message AS "githubAuthMessage",
   github_auth_checked_at AS "githubAuthCheckedAt"`;
 
-export function registerProjectRoutes(app: Express, pool: Pool): void {
+export function registerProjectRoutes(app: Router, pool: Pool): void {
   // „Anmeldung prüfen“: Der Worker fragt `gh auth status` beim nächsten Takt erneut ab (nur bei aktivem Modus).
-  app.post('/api/projects/:slug/github/check', async (request, response, next) => {
+  app.post('/projects/:slug/github/check', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const result = slug
@@ -38,11 +105,11 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/projects', async (_request, response) => {
+  app.get('/projects', async (_request, response) => {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${GITHUB_COLUMNS}, created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${GITHUB_COLUMNS}, created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -53,7 +120,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
   });
 
   // Projekt löschen: Name zur Bestätigung; der Ordner auf dem Rechner wird auf Wunsch vom Worker gelöscht.
-  app.delete('/api/projects/:slug', async (request, response, next) => {
+  app.delete('/projects/:slug', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const body = (isRecord(request.body) ? request.body : {}) as { confirm?: unknown; deleteFolder?: unknown };
@@ -97,7 +164,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
   });
 
   // Git-Verlauf (Commits, Branches) fürs Dashboard, vom Worker erfasst.
-  app.get('/api/projects/:slug/git-graph', async (request, response, next) => {
+  app.get('/projects/:slug/git-graph', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const row = slug
@@ -115,7 +182,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
   });
 
   // Favicon der Anwendung; strenge CSP, damit ein SVG aus dem Projekt nie als Seite mit Skripten läuft.
-  app.get('/api/projects/:slug/favicon', async (request, response, next) => {
+  app.get('/projects/:slug/favicon', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const row = slug
@@ -143,7 +210,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.patch('/api/projects/:slug', async (request, response) => {
+  app.patch('/projects/:slug', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body: Record<string, unknown> = isRecord(request.body) ? request.body : {};
     const sets: string[] = [];
@@ -170,9 +237,9 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
         return fail('Ungültiger Datenbank-Zugang. Erlaubt: postgresql://user:passwort@host:port/datenbank');
       }
       if (url && targetsDevLogDatabase(url)) {
-        return fail('Der Zugang darf nicht auf die Dev-Log-Datenbank zeigen.');
+        return fail('Der Zugang darf nicht auf die AIdeation-Datenbank zeigen.');
       }
-      values.push(url || null);
+      values.push(url ? encryptSecret(url) : null);
       sets.push(`database_url = $${values.length}`);
     }
     if (body.repository !== undefined) {
@@ -233,6 +300,25 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       values.push(lines.length ? JSON.stringify(lines.map((line) => line.split(/\s+/))) : null);
       sets.push(`deploy_commands = $${values.length}::jsonb`);
     }
+    if (body.reviewMode !== undefined) {
+      if (typeof body.reviewMode !== 'string' || !REVIEW_MODES.has(body.reviewMode))
+        return fail('Review-Freigabe: nie, nur bei Oberflächen-Änderungen oder immer.');
+      values.push(body.reviewMode);
+      sets.push(`review_mode = $${values.length}`);
+    }
+    if (body.reviewCommand !== undefined) {
+      const line = typeof body.reviewCommand === 'string' ? body.reviewCommand.trim() : null;
+      if (line === null || line.length > 500) return fail('Review-Befehl: ein Befehl, höchstens 500 Zeichen.');
+      values.push(line ? JSON.stringify(line.split(/\s+/)) : null);
+      sets.push(`review_command = $${values.length}::jsonb`);
+    }
+    if (body.reviewUrl !== undefined) {
+      const url = typeof body.reviewUrl === 'string' ? body.reviewUrl.trim() : null;
+      if (url === null || (url && !/^https?:\/\/\S{1,300}$/.test(url)))
+        return fail('Review-Adresse: leer lassen oder eine http(s)-Adresse angeben.');
+      values.push(url || null);
+      sets.push(`review_url = $${values.length}`);
+    }
     for (const key of ['description', 'guidelines'] as const) {
       if (body[key] === undefined) continue;
       if (typeof body[key] !== 'string' || body[key].length > 10_000) {
@@ -270,11 +356,22 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
         `autopilot_days = $${values.length}::smallint[]`,
       );
     }
+    const production = parseProductionSettings(body);
+    if (typeof production === 'string') return fail(production);
+    for (const [column, value] of production) {
+      values.push(value);
+      sets.push(`${column} = $${values.length}`);
+    }
     if (body.autoBugfix !== undefined) {
       if (typeof body.autoBugfix !== 'boolean')
         return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
       values.push(body.autoBugfix);
       sets.push(`auto_bugfix = $${values.length}`);
+    }
+    if (body.agentWorkspace !== undefined) {
+      if (typeof body.agentWorkspace !== 'boolean') return fail('Eigener Arbeitsordner: ein oder aus.');
+      values.push(body.agentWorkspace);
+      sets.push(`agent_workspace = $${values.length}`);
     }
     // Kostenbremse je Auftrag: leer/null = keine Grenze.
     for (const [key, column, max] of [
@@ -323,7 +420,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${GITHUB_COLUMNS}`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", order_token_limit::float AS "orderTokenLimit", order_cost_limit::float AS "orderCostLimit", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${GITHUB_COLUMNS}`,
       values,
     );
     if (!result.rows[0]) {
@@ -333,7 +430,7 @@ export function registerProjectRoutes(app: Express, pool: Pool): void {
     response.json({ project: result.rows[0] });
   });
 
-  app.post('/api/projects', async (request, response) => {
+  app.post('/projects', async (request, response) => {
     const body = request.body as unknown;
     if (isRecord(body) && typeof body.slug === 'string') body.slug = normalizeProjectSlug(body.slug);
     const invalid = !isRecord(body)

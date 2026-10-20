@@ -47,6 +47,7 @@
         <button
           type="button"
           class="mobile-chip agents-chip"
+          [class.busy]="store.activeAgentCount() > 0"
           [class.online]="worker().online"
           [class.offline]="!worker().online"
           [attr.aria-expanded]="mobileAgents()"
@@ -98,7 +99,7 @@
         }
       </div>
       <p class="nav-label">Arbeitsbereich</p>
-      <nav id="main-navigation" aria-label="Dev-Log-Navigation">
+      <nav id="main-navigation" aria-label="AIdeation-Navigation">
         <div class="nav-brand"><span class="brand-mark">m</span><span>mainty</span><small>dev log</small></div>
         @for (item of navigation; track item.id) {
           <a
@@ -156,12 +157,13 @@
 
     <main class="main">
       <header class="topbar">
-        <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>Dev Log</strong></div>
+        <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>AIdeation</strong></div>
         <app-project-switcher (create)="showProjectForm.set(true)" />
         <div class="topbar-status">
           <div class="agent-indicator">
             <a
               class="worker-status"
+              [class.busy]="store.activeAgentCount() > 0"
               [class.online]="worker().online"
               [class.offline]="!worker().online"
               href="#agents"
@@ -250,7 +252,7 @@
             class="help-pill"
             type="button"
             aria-label="Hilfe"
-            title="So funktioniert Dev Log"
+            title="So funktioniert AIdeation"
             (click)="showHelp.set(true)"
           >
             ?
@@ -283,7 +285,7 @@
           <app-project-wizard (closed)="showProjectForm.set(false)" (projectCreated)="afterProject.set(true)" />
         }
         @if (loading()) {
-          <p class="loading" role="status">Dev Log wird geladen …</p>
+          <p class="loading" role="status">AIdeation wird geladen …</p>
         } @else if (!projects().length) {
           <section class="panel empty-state">
             @if (auth.can('admin')) {
@@ -350,7 +352,7 @@
             }
           }
         }
-        <footer class="footer">{{ store.currentProject()?.name ?? 'Dev Log' }} <span>/</span> DEV LOG</footer>
+        <footer class="footer">{{ store.currentProject()?.name ?? 'AIdeation' }} <span>/</span> DEV LOG</footer>
       </div>
     </main>
   </div>

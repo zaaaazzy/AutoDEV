@@ -2,7 +2,7 @@
 
 Erstellt mit `npm run test:full`. Gesamtergebnis: ❌ mit Befunden.
 Der Oberflächentest läuft auf einer eigenen Testdatenbank (dev_log_full) ohne Worker: Agents, Chat-Antworten und der Projekt-Assistent starten dort nicht.
-In Dev Log abgelegt: Projekt `dev-log`, Testlauf `a68b8cf9-e482-4503-aa5d-ae6417e0de15`.
+In AIdeation abgelegt: Projekt `dev-log`, Testlauf `a68b8cf9-e482-4503-aa5d-ae6417e0de15`.
 
 ## Übersicht
 

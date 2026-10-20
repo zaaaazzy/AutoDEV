@@ -114,7 +114,9 @@
             }
             <div class="attention-block attention-task">
               <h3>Das musst du tun</h3>
-              @if (item.status === 'blocked') {
+              @if (item.status === 'approval') {
+                <app-order-approval [order]="item" />
+              } @else if (item.status === 'blocked') {
                 @if (analysisRunning(item)) {
                   <p>
                     Warte kurz: Der Assistent analysiert den Auftrag. Die Schritte erscheinen hier, sobald er fertig

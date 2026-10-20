@@ -1,4 +1,4 @@
-import type { Express, Response } from 'express';
+import type { Router, Response } from 'express';
 import type { Pool } from 'pg';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import type { Principal } from './roles.js';
@@ -62,7 +62,7 @@ export async function seedDefaultActions(pool: Pool, project: string): Promise<n
   if (!tester) return 0;
   const inserted = await pool.query(
     `INSERT INTO agent_tasks (project_slug, title, prompt, agent_id, created_by)
-     SELECT $1, a.title, a.prompt, $2, 'Dev Log'
+     SELECT $1, a.title, a.prompt, $2, 'AIdeation'
        FROM unnest($3::text[], $4::text[]) AS a(title, prompt)
       WHERE NOT EXISTS (SELECT 1 FROM agent_tasks t WHERE t.project_slug = $1 AND lower(t.title) = lower(a.title))`,
     [project, tester.id, DEFAULT_ACTIONS.map((action) => action.title), DEFAULT_ACTIONS.map((action) => action.prompt)],
@@ -93,10 +93,10 @@ export function taskMessage(task: { title: string; prompt: string }, comment = '
   return `Aufgabe „${task.title}“:\n${task.prompt}${note ? `\n\nHinweis dazu: ${note}` : ''}`;
 }
 
-export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
+export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
   const me = (response: Response) => response.locals.principal as Principal | undefined;
 
-  app.get('/api/projects/:slug/agent-tasks', async (request, response, next) => {
+  app.get('/projects/:slug/agent-tasks', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -113,7 +113,7 @@ export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/agent-tasks', async (request, response, next) => {
+  app.post('/projects/:slug/agent-tasks', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const task = parseTask(request.body);
@@ -137,7 +137,7 @@ export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.patch('/api/agent-tasks/:id', async (request, response, next) => {
+  app.patch('/agent-tasks/:id', async (request, response, next) => {
     try {
       const task = parseTask(request.body);
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Aufgabe nicht gefunden.' });
@@ -165,7 +165,7 @@ export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.delete('/api/agent-tasks/:id', async (request, response, next) => {
+  app.delete('/agent-tasks/:id', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Aufgabe nicht gefunden.' });
       await pool.query('DELETE FROM agent_tasks WHERE id = $1', [request.params.id]);
@@ -176,7 +176,7 @@ export function registerAgentTaskRoutes(app: Express, pool: Pool): void {
   });
 
   // Ein Klick: Aufgabe als Nachricht an den Assistenten des Projekts übergeben.
-  app.post('/api/agent-tasks/:id/run', async (request, response, next) => {
+  app.post('/agent-tasks/:id/run', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Aufgabe nicht gefunden.' });
       const task = (

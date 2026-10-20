@@ -8,7 +8,8 @@ const COMMAND_PATTERN =
 const SERVICE_NAME = '[a-zA-Z0-9][\\w.-]*';
 const ASSISTANT_SERVICE_PATTERNS = [
   new RegExp(`^docker compose (?:ps|config --services)$`),
-  new RegExp(`^docker compose logs(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
+  // Auch der Log-Scan des Produktions-Rückkanals: docker compose logs --since 15m --no-color <dienste>.
+  new RegExp(`^docker compose logs(?: --since \\d+[smh])?(?: --no-color)?(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
   new RegExp(`^docker compose up -d(?: --build| --wait| --force-recreate)*(?: ${SERVICE_NAME})*$`),
   new RegExp(`^docker compose (?:stop|start|restart|down|build|pull)(?: ${SERVICE_NAME})*$`),
   /^docker compose down --remove-orphans$/,
@@ -96,7 +97,8 @@ const COMMAND_HELP: Record<string, string> = {
   [FILES_CREATE]:
     'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“.',
   [FILES_EDIT]: 'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten oder überschreiben.',
-  [SERVICES_COMMAND]: 'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht Dev Log selbst (com.devlog.*).',
+  [SERVICES_COMMAND]:
+    'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht AIdeation selbst (com.aideation.*).',
   [DATABASE_COMMAND]:
     'Liest und ändert die Projekt-Datenbank per SQL (Werkzeug run_sql des lokalen Modells; braucht eine hinterlegte Datenbank-URL).',
   [LOGS_COMMAND]: 'Liest Dienst-Logs unter ~/Library/Logs, z. B. das Log des Live-Modus (nur lesen).',
@@ -237,7 +239,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
   {
     id: 'services',
     label: 'Projekt-Dienste neu starten',
-    description: 'Live-Dienste der Projekte (ch.*) per launchctl neu starten – nicht DevLog selbst.',
+    description: 'Live-Dienste der Projekte (ch.*) per launchctl neu starten – nicht AIdeation selbst.',
     // Beim Start: Bash(launchctl kickstart -k gui/<uid>/ch.*) – Wildcard statt Präfix, weil „:*“ nur an Wortgrenzen greift.
     rules: [SERVICES_COMMAND],
   },
@@ -251,7 +253,8 @@ const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
  * Rollen, die nur lesen (Werkzeugumfang der Problemanalyse beim lokalen Modell): keine Datei-Werkzeuge, keine Shell –
  * auch nicht über eine eigene Zuweisung am Agent oder eigene Werkzeug-Regeln im Befehl.
  */
-export const READ_ONLY_ROLES = new Set(['visionary', 'analyst']);
+// pre_sprint: Agents „Vor dem Sprint“ planen und prüfen nur (ihre Änderungen würden sonst im ersten Auftrag landen).
+export const READ_ONLY_ROLES = new Set(['visionary', 'analyst', 'pre_sprint']);
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -344,7 +347,7 @@ export function composeViolation(configJson: string, root: string): string | nul
 /** Gruppen-IDs eigener Gruppen: Kleinbuchstaben, Ziffern und Bindestriche. */
 export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
-/** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, Dev Log und Daten). */
+/** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMANDS =
   /^(?:sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\d*|gem|cargo|go)\b/;
 const FORBIDDEN_SUBCOMMANDS =
@@ -366,8 +369,11 @@ export function customRuleProblem(rule: string): string | null {
   if (command.length > 120) return `„${rule}“: Befehl zu lang.`;
   if (FORBIDDEN_COMMANDS.test(command) || FORBIDDEN_SUBCOMMANDS.test(command))
     return `„${rule}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
-  if (/(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|DevLog)(?:[\s/]|$)/i.test(command) || /\.\./.test(command))
-    return `„${rule}“: Zugriff auf Geheimnisse, Dev Log selbst oder übergeordnete Ordner ist gesperrt.`;
+  if (
+    /(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|com\.aideation|DevLog|AIdeation)(?:[\s/]|$)/i.test(command) ||
+    /\.\./.test(command)
+  )
+    return `„${rule}“: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.`;
   return null;
 }
 
@@ -377,6 +383,7 @@ export interface ProjectPermissions {
   custom: PermissionGroup[];
 }
 
+/** A database error fails the caller: without the project's choice every group would count as enabled. */
 export async function loadProjectPermissions(
   pool: { query: <R>(sql: string, values: unknown[]) => Promise<{ rows: R[] }> },
   project: string,
@@ -384,15 +391,13 @@ export async function loadProjectPermissions(
   const [enabled, custom] = await Promise.all([
     pool
       .query<{ groups: string[] | null }>('SELECT agent_permissions AS groups FROM projects WHERE slug = $1', [project])
-      .then((result) => result.rows[0]?.groups ?? null)
-      .catch(() => null),
+      .then((result) => result.rows[0]?.groups ?? null),
     pool
       .query<PermissionGroup>(
         'SELECT id, label, description, rules FROM project_permission_groups WHERE project_slug = $1 ORDER BY label',
         [project],
       )
-      .then((result) => result.rows)
-      .catch(() => [] as PermissionGroup[]),
+      .then((result) => result.rows),
   ]);
   return { enabled, custom };
 }

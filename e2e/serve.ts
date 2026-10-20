@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pg from 'pg';
 
-/** Startet Dev Log für die Oberflächentests auf einer frisch angelegten Datenbank mit einem Beispielprojekt. */
+/** Startet AIdeation für die Oberflächentests auf einer frisch angelegten Datenbank mit einem Beispielprojekt. */
 const DATABASE = process.env.E2E_DATABASE ?? 'dev_log_e2e';
 const adminUrl = process.env.E2E_ADMIN_DATABASE_URL!;
 const admin = new pg.Pool({ connectionString: adminUrl, max: 1 });

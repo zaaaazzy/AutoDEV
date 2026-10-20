@@ -1,4 +1,4 @@
-# Dev-Log-Datenbank
+# AIdeation-Datenbank
 
 Eigene Datenbank, getrennt von `mainty`: `projects` (slug) 1:n `test_runs` 1:n `test_run_steps`; `projects` 1:n `ideation_items` 1:n `ideation_attachments` (Bilder bis 5 MB als BYTEA; Aufträge erreichen sie über `ideation_id`, der Runner legt sie unter `.dev-log/attachments/<auftrag>/` im Projektordner ab und nennt sie im Prompt); `projects` 1:n `development_items`, optional verknüpft mit einer Idee, einem Testlauf und einem Sprint desselben Projekts. `ideation_items` und `development_items` tragen `effort_hours`, `token_estimate`, `benefit` und `cost` (0–10). `projects` 1:n `sprints` (1:n `development_items`) und `projects` 1:n `agents` (`phase` pre_task/while_task/after_task, `position` = Reihenfolge). Das Schema wird beim Start von Dienst bzw. Agent automatisch angelegt.
 
@@ -20,3 +20,13 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `ideation_items.rejection_reason` (TEXT): Grund aus „Ablehnen mit Grund“ (`POST /api/ideation/:id/reject`, setzt `status='rejected'`, zusätzlich als Kommentar). Der nächste Visionär-Lauf bekommt Titel und Grund aller abgelehnten Ideen im Prompt.
 - `visionary_runs` (`id`, `project_slug` → `projects`, `status` requested/running/done/failed/cancelled, `progress`, `created_count`, `discarded_count`, `error`, `requested_by`, `requested_at`, `started_at`, `finished_at`): ein Lauf je Anfrage „Ideen vorschlagen lassen“. Ein eindeutiger Teilindex (`visionary_runs_open_idx`) erlaubt je Projekt höchstens einen angefragten oder laufenden Lauf.
 - `app_settings.visionary_max_ideas`: höchstens so viele Ideen je Lauf (Standard 5, Maximum 8).
+
+## Erweiterung: Produktions-Rückkanal (Fehler aus dem Betrieb)
+
+- `projects`: `health_url` (nur http(s) auf localhost, LAN oder eigener Domain), `log_services` (TEXT[], Compose-Dienste für den Log-Scan), `ingest_token_hash` (SHA-256 des Ingest-Tokens; der Klartext wird nie gespeichert), `production_ignore` (TEXT[], Ausschlussmuster), `production_retention_days` (1–365, Standard 30).
+- `bugs.source` zusätzlich `production` (Quelle „Betrieb“); `bugs.regressed_at`: Zeitpunkt, zu dem ein behobener Betriebs-Bug wieder auftrat und als Regression geöffnet wurde.
+- `production_events` (`project_slug`, `fingerprint` – eindeutig je Projekt, `source` health/logs/ingest, `origin` Dienst bzw. Pfad, `first_seen`, `last_seen`, `count`, `sample` maskiert und auf 2000 Zeichen gekürzt, `bug_id` → `bugs`, `deploy_suspect` JSONB mit Deploy-Zeitpunkt, Aufträgen und Sprints) – n:1 zu `bugs`.
+- `production_event_buckets` (`event_id`, `hour`, `count`): Verlauf je Stunde für „seit gestern“, die Schwere (≥ 50/h = kritisch) und das Diagramm im Bug-Detail.
+- `production_deploys` (`project_slug`, `deployed_at`, `order_ids` UUID[]): erfolgreiche Deploys mit den seit dem vorigen Deploy erledigten Aufträgen; Grundlage des Deploy-Verdachts (30 min).
+- `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des Log-Scans und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
+- Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.

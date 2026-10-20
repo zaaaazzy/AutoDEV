@@ -15,11 +15,11 @@
 
 ## Beschreibung für Ideation (kopierfertig)
 
-Dev Log verbindet sich (per `gh`-CLI-Anmeldung des Workers oder fein eingeschränktem Token) mit dem GitHub-Repository des Projekts. Eingang: Issues mit Label `idea` werden zu Ideen, mit Label `bug` zu Bugs (mit Link zurück); Status-Änderungen in Dev Log werden als Kommentar ins Issue geschrieben und beim Erledigen wird das Issue geschlossen. Ausgang: Statt beim Sprint-Abschluss direkt nach `main` zu mergen, kann Dev Log einen Pull Request vom Sprint-Branch öffnen (Beschreibung = Sprintbericht), den CI-Status der Checks am Sprint anzeigen und erst nach grüner CI (und optional Freigabe eines Menschen) mergen. Rote CI erzeugt einen Bug mit dem Log-Auszug.
+AIdeation verbindet sich (per `gh`-CLI-Anmeldung des Workers oder fein eingeschränktem Token) mit dem GitHub-Repository des Projekts. Eingang: Issues mit Label `idea` werden zu Ideen, mit Label `bug` zu Bugs (mit Link zurück); Status-Änderungen in AIdeation werden als Kommentar ins Issue geschrieben und beim Erledigen wird das Issue geschlossen. Ausgang: Statt beim Sprint-Abschluss direkt nach `main` zu mergen, kann AIdeation einen Pull Request vom Sprint-Branch öffnen (Beschreibung = Sprintbericht), den CI-Status der Checks am Sprint anzeigen und erst nach grüner CI (und optional Freigabe eines Menschen) mergen. Rote CI erzeugt einen Bug mit dem Log-Auszug.
 
 ## Problem heute
 
-Git-Sync (`src/runner/git-sync.ts`) pusht und mergt direkt; die CI-Vorlage wird ins Projekt gelegt, ihr Ergebnis kommt aber nicht zurück. Wer Dev Log mit anderen nutzt, hat Anliegen meist schon als Issues – die müssen von Hand übertragen werden. Ein direkter Merge nach `main` ohne Review-Möglichkeit ist für Team-Projekte zu hart.
+Git-Sync (`src/runner/git-sync.ts`) pusht und mergt direkt; die CI-Vorlage wird ins Projekt gelegt, ihr Ergebnis kommt aber nicht zurück. Wer AIdeation mit anderen nutzt, hat Anliegen meist schon als Issues – die müssen von Hand übertragen werden. Ein direkter Merge nach `main` ohne Review-Möglichkeit ist für Team-Projekte zu hart.
 
 ## Vorschlag
 
@@ -38,7 +38,7 @@ flowchart LR
     PR[Pull Request]
     CI[CI Checks]
   end
-  IS -->|Import| DL[Dev Log: Idee/Bug]
+  IS -->|Import| DL[AIdeation: Idee/Bug]
   DL -->|Kommentar / schließen| IS
   SP[Sprint abgeschlossen] -->|gh pr create| PR
   PR --> CI

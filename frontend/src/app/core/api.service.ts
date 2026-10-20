@@ -60,7 +60,7 @@ export class ApiService {
           typeof error.error.message === 'string'
             ? error.error.message
             : error.status === 0
-              ? 'Dev Log ist nicht erreichbar. Prüfe, ob der Server läuft, und lade die Seite neu.'
+              ? 'AIdeation ist nicht erreichbar. Prüfe, ob der Server läuft, und lade die Seite neu.'
               : `Anfrage fehlgeschlagen (${error.status}).`;
         throw new Error(message, { cause: error });
       }

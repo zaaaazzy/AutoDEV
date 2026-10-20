@@ -5,7 +5,7 @@ import { runWatchdog } from './watchdog.js';
 /** Einmaliger Wächter-Durchlauf; launchd startet ihn alle zwei Minuten (scripts/install-watchdog.sh). */
 const root = join(import.meta.dirname, '..', '..');
 const pool = new pg.Pool({
-  connectionString: process.env.DEV_LOG_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/dev_log',
+  connectionString: process.env.DEV_LOG_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation',
   connectionTimeoutMillis: 5_000,
   max: 2,
 });

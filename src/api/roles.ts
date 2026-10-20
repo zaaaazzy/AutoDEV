@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import { fullPath } from './security.js';
 
 /**
  * Rollen: Jede schreibende Aktion gehört zu genau einer Rolle. Lesen dürfen alle angemeldeten Benutzer.
@@ -51,18 +52,29 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/push\//, null],
   ['*', /^\/api\/users/, 'admin'],
   ['PUT', /^\/api\/settings$/, 'admin'],
+  // Review-Container freigeben ist Administration, einen Stand starten oder beenden ist Ausführen.
+  ['PUT', /^\/api\/review-slots\/\d+$/, 'admin'],
+  ['POST', /^\/api\/review-slots\/\d+\/stop$/, 'run'],
+  ['POST', /^\/api\/projects\/[^/]+\/review-slots\/start$/, 'run'],
   ['POST', /^\/api\/projects$/, 'admin'],
   ['POST', /^\/api\/projects\/setup$/, 'admin'],
   ['POST', /^\/api\/setup\/jobs$/, 'admin'],
   ['PATCH', /^\/api\/projects\/[^/]+$/, 'admin'],
   ['PUT', /^\/api\/projects\/[^/]+\/permissions$/, 'admin'],
+  // Ingest-Token des Produktions-Rückkanals erzeugen, rotieren, entfernen. Der Ingest-Endpunkt selbst
+  // (POST /api/ingest/<projekt>/<token>) liegt vor dem Login und braucht weder Anmeldung noch Rolle.
+  ['*', /^\/api\/projects\/[^/]+\/ingest-token$/, 'admin'],
   // Eigene Rechte-Gruppen anlegen, ändern, löschen: nur Administration.
   ['*', /^\/api\/projects\/[^/]+\/permission-groups(?:\/[^/]+)?$/, 'admin'],
   ['PUT', /^\/api\/system-agents\//, 'admin'],
   ['POST', /^\/api\/projects\/[^/]+\/agents\/[^/]+\/cancel$/, 'run'],
   ['POST', /^\/api\/projects\/[^/]+\/agents(\/(defaults|order))?$/, 'agents'],
   ['*', /^\/api\/agents\//, 'agents'],
-  ['POST', /^\/api\/development\/[^/]+\/(retry|analyze)$/, 'run'],
+  // Workflow-Schritte (welcher Agent wann läuft) gehören zur Agent-Verwaltung.
+  ['*', /^\/api\/projects\/[^/]+\/workflow\/(steps|order)$/, 'agents'],
+  ['*', /^\/api\/workflow-steps\//, 'agents'],
+  // Review-Freigabe: freigeben, zurückweisen oder in der Review-Instanz anzeigen gehört zum Ausführen.
+  ['POST', /^\/api\/development\/[^/]+\/(retry|analyze|approve|review-reject|show-review)$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
   [
@@ -86,7 +98,7 @@ const RULES: Rule[] = [
   // Agent-Aufgaben definieren und starten gehört zum Arbeiten mit dem Assistenten.
   ['*', /^\/api\/(projects\/[^/]+\/agent-tasks$|agent-tasks\/[^/]+(\/run)?$)/, 'chat'],
   ['POST', /^\/api\/projects\/[^/]+\/test-requests$/, 'run'],
-  // Dev Log neu starten (Container neu bauen, Worker neu starten): betrifft alle Projekte.
+  // AIdeation neu starten (Container neu bauen, Worker neu starten): betrifft alle Projekte.
   ['POST', /^\/api\/system\/restart$/, 'admin'],
 ];
 
@@ -101,11 +113,12 @@ export function requiredRole(method: string, path: string, body: unknown): Role 
 
 /** Prüft schreibende Anfragen gegen die Rollen des angemeldeten Benutzers (res.locals.principal). */
 export const authorize: RequestHandler = (request, response, next) => {
-  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method) || !request.path.startsWith('/api/')) {
+  const path = fullPath(request);
+  if (['GET', 'HEAD', 'OPTIONS'].includes(request.method) || !path.startsWith('/api/')) {
     next();
     return;
   }
-  const role = requiredRole(request.method, request.path, request.body);
+  const role = requiredRole(request.method, path, request.body);
   const principal = response.locals.principal as Principal | undefined;
   if (role === null || hasRole(principal, role)) {
     next();

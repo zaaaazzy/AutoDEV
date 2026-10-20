@@ -56,7 +56,7 @@ export function sqlViolation(sql: string): string | null {
   return null;
 }
 
-/** Der Zugang eines Projekts darf nie auf die Dev-Log-Datenbank selbst zeigen. */
+/** Der Zugang eines Projekts darf nie auf die AIdeation-Datenbank selbst zeigen. */
 export function targetsDevLogDatabase(databaseUrl: string, environment: NodeJS.ProcessEnv = process.env): boolean {
   const name = (value: string): string => {
     try {
@@ -65,7 +65,7 @@ export function targetsDevLogDatabase(databaseUrl: string, environment: NodeJS.P
       return '';
     }
   };
-  const devLogName = name(environment.DEV_LOG_DATABASE_URL ?? '') || 'dev_log';
+  const devLogName = name(environment.DEV_LOG_DATABASE_URL ?? '') || 'aideation';
   return name(databaseUrl) === devLogName;
 }
 
@@ -94,7 +94,7 @@ export async function runProjectSql(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string> {
   if (targetsDevLogDatabase(databaseUrl, environment)) {
-    return 'Der hinterlegte Datenbank-Zugang zeigt auf die Dev-Log-Datenbank und wird nicht verwendet.';
+    return 'Der hinterlegte Datenbank-Zugang zeigt auf die AIdeation-Datenbank und wird nicht verwendet.';
   }
   const violation = sqlViolation(sql);
   if (violation) return violation;

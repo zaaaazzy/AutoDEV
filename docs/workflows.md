@@ -1,4 +1,4 @@
-# Workflows im Dev Log
+# Workflows im AIdeation
 
 Ergänzt [agents-und-rechte.md](./agents-und-rechte.md) (Worker, Trigger, Rechte) um den **logischen Ablauf** der Workflows.
 
@@ -88,6 +88,34 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 - **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 
+## 4a. Workflow (Agents → Workflow)
+
+Unter „Agents“ legt die aufklappbare Karte „Workflow“ fest, wann welcher Agent läuft. Gespeichert sind Einsätze in
+`workflow_steps` (Phase, Position, Agent, eigene Anweisung, aktiv). Derselbe Agent kann mehrfach vorkommen, z. B.
+der Tester einmal „Danach“ für die API und einmal für die Oberfläche; die Anweisung des Einsatzes kommt zusätzlich
+zur Anweisung des Agents in den Prompt und hat Vorrang. „+ Agent“ fügt einen bestehenden oder neuen Agent an das
+Ende einer Phase, ↑↓ ordnet, „Pausieren“ nimmt einen Einsatz aus dem Ablauf, „Entfernen“ löscht nur den Einsatz.
+Projekte ohne Schritte übernehmen beim ersten Öffnen ihren bisherigen Ablauf (Phase und Position am Agent); bis
+dahin gilt dieser auch im Worker. API: `GET /api/projects/:slug/workflow`, `POST …/workflow/steps`,
+`POST …/workflow/order`, `PATCH|DELETE /api/workflow-steps/:id` (Recht „Agents verwalten“).
+
+| Zeitpunkt | Phase | Wann |
+|---|---|---|
+| Vor dem Sprint | `pre_sprint` | einmal, wenn ein Sprint aktiv wird, bevor sein erster Auftrag startet; nur lesend (Rolle `pre_sprint` in `READ_ONLY_ROLES`). Das Ergebnis steht in `sprints.pre_sprint_notes` und steht in jeder Agent-Anweisung der Aufträge dieses Sprints. |
+| Vor dem Auftrag | `pre_task` | für jeden Auftrag, vor der Umsetzung |
+| Während | `while_task` | Umsetzung |
+| Danach | `after_task` | Tests, Review, Doku |
+| Bei abgelehnt | `on_rejected` | am Ende eines gescheiterten Auftrags (nicht bei Unterbrechung oder Kostenbremse) |
+| Bei abgeschlossen | `on_done` | am Ende eines erfolgreichen Auftrags |
+
+„Bei abgelehnt/abgeschlossen“ laufen noch vor dem Abschluss des Auftrags (ihre Änderungen landen im Commit), ändern
+aber sein Ergebnis nicht: kein Bug, keine Abnahme, kein Statuswechsel.
+
+**Nachrichten zwischen Agents:** Ein Agent schreibt `@@NACHRICHT: …` (an den nächsten Agent) oder
+`@@NACHRICHT an <Name>: …`. Ist beim Absender „Nachricht geht an“ (`agents.handoff_to`) gesetzt, geht eine Nachricht
+ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
+`agent_run_steps.handoffs`. Implementierung: `src/core/workflow-phases.ts`, `src/runner/pre-sprint.ts`.
+
 ## 5. Fehlerbehandlung und Auto-Bugfix
 
 0. **Nachbesserung im selben Lauf:** Sind die Tests rot oder lehnt der Reviewer ab, geht der Auftrag zuerst einmal direkt zurück an den Entwickler – mit der Ausgabe von Tester bzw. Reviewer als Rückmeldung. Danach laufen Entwickler, Tester und Reviewer erneut. Erst wenn auch dieser Versuch scheitert, greift der folgende Ablauf. Die erste Rückmeldung bleibt als fehlgeschlagener Schritt im Lauf sichtbar („Zurück an den Entwickler zur Nachbesserung“). Bei einem einzelnen Agent (Play-Knopf) gibt es keine Nachbesserung.
@@ -103,7 +131,7 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 
 **Rückfragen bei Chat-Aufträgen:** Braucht der Assistent bei einem Express-Auftrag aus dem Chat eine Antwort, zeigt der Auftrag (Liste und Detailansicht) die offene Frage samt Antwortoptionen. Die Antwort lässt sich direkt dort geben; sie wird als Antwort auf die Frage in den Chat gestellt (`GET /api/development/:id/question`, danach `POST …/chat` mit `replyTo`).
 
-**Bestätigung mit Kommentar:** „Erneut versuchen“, „Sprintvorschlag übernehmen“ und alle Schnellaktionen des Assistenten (Aktionen, Tests, Visionär, Dev Log neu starten) öffnen zuerst ein eigenes Modal. Der optionale Kommentar wird mitgegeben: beim Sprintvorschlag als Sprintziel, bei Aktionen als „Hinweis dazu“ im Auftrag an den Assistenten, beim Visionär als Fokus, bei Testläufen und Neustarts gespeichert.
+**Bestätigung mit Kommentar:** „Erneut versuchen“, „Sprintvorschlag übernehmen“ und alle Schnellaktionen des Assistenten (Aktionen, Tests, Visionär, AIdeation neu starten) öffnen zuerst ein eigenes Modal. Der optionale Kommentar wird mitgegeben: beim Sprintvorschlag als Sprintziel, bei Aktionen als „Hinweis dazu“ im Auftrag an den Assistenten, beim Visionär als Fokus, bei Testläufen und Neustarts gespeichert.
 
 **Rückfrage per Push:** Die Push-Nachricht einer Rückfrage zu einem Auftrag öffnet direkt diesen Auftrag im richtigen Projekt und setzt den Cursor ins Antwortfeld (`#development/<id>?project=<slug>&answer=1`).
 
@@ -123,7 +151,7 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 | Sprint abgeschlossen                              | Zusätzlich Merge des Sprint-Branches nach `main` (`--no-ff`), erneutes Test-Gate, Push von `main` und Tag `sprint-<name>-<id>`. Bei Merge-Konflikten Abbruch mit Meldung.                     |
 | Git Download (Pfeil-runter)                       | `git pull --ff-only origin <Branch>` im Projektordner; lokale Änderungen oder abweichende Historie brechen mit Meldung am Sprint ab.                                                          |
 
-**Dev Log entwickelt sich selbst:** Arbeiten die Agents in einem eigenen Worktree, ist `main` im Arbeitsordner der Menschen ausgecheckt und wird dort normalerweise nicht angefasst. Mit der Projekteinstellung „Nach dem Sprint-Abschluss Dev Log neu starten“ (`restart_after_sprint`) übernimmt der Worker den abgeschlossenen Sprint dort selbst – aber nur, wenn im Ordner keine Änderungen offen sind und `main` ausgecheckt ist. Danach läuft das Test-Gate in diesem Ordner; ist es rot, wird der Merge mit `git reset --keep ORIG_HEAD` zurückgenommen. Klappt alles, wird `main` gepusht (falls ein Repository hinterlegt ist) und „Dev Log neu starten“ angefordert.
+**AIdeation entwickelt sich selbst:** Arbeiten die Agents in einem eigenen Worktree, ist `main` im Arbeitsordner der Menschen ausgecheckt und wird dort normalerweise nicht angefasst. Mit der Projekteinstellung „Nach dem Sprint-Abschluss AIdeation neu starten“ (`restart_after_sprint`) übernimmt der Worker den abgeschlossenen Sprint dort selbst – aber nur, wenn im Ordner keine Änderungen offen sind und `main` ausgecheckt ist. Danach läuft das Test-Gate in diesem Ordner; ist es rot, wird der Merge mit `git reset --keep ORIG_HEAD` zurückgenommen. Klappt alles, wird `main` gepusht (falls ein Repository hinterlegt ist) und „AIdeation neu starten“ angefordert.
 
 ### GitHub-Brücke (`github_mode`)
 
@@ -160,3 +188,18 @@ Repo-Dokumentation spiegeln (`syncRepoDocs`), Sprint-Bericht für den aktiven Sp
 ## Deploy nach Aufträgen
 
 Pro Projekt lassen sich in den Einstellungen Deploy-Befehle hinterlegen (z. B. `docker compose up -d --build`). Der Worker führt sie im Projektordner aus, sobald ein Zyklus mindestens einen erfolgreichen Auftrag hatte. So laufen Container mit dem Code der Agents. Das Ergebnis steht in den Einstellungen.
+
+## Sprint-Ablauf: vom Start bis Live
+
+1. **Sprint starten:** Aufträge laufen auf dem Sprint-Branch `sprint/<name>`.
+2. **Ein Auftrag nach dem anderen:** Jeder Auftrag zweigt auf seinen eigenen Branch `auftrag/<id>-…` ab; je Projekt
+   läuft immer nur ein Auftrag.
+3. **Commit nach jedem Agent:** Was ein Agent ändert, wird sofort committet („Entwickler: Titel“, bei einem
+   gescheiterten Schritt „wip(Tester): Titel“). Bricht etwas ab, setzt der Agent dort und in seiner Sitzung fort.
+4. **Auftrag fertig:** Der Auftrags-Branch wird in den Sprint-Branch gemergt.
+5. **Vorschau:** In der Sprint-Ansicht jeden Stand wählen und mit ▶ im Review-Container starten (eigener Port,
+   eigene Datenbank-Kopie).
+6. **Sprint-Review:** Sind alle Aufträge durch, wartet der Sprint auf dein Go (Push-Nachricht, Hinweis im Sprint).
+   Der Autopilot schaltet nie selbst live.
+7. **Live schalten:** Tests und CI laufen, der Sprint wird nach `main` gemergt, der Projektordner (z. B. mit dev-live)
+   auf `main` nachgezogen und die Deploy-Befehle laufen. Live ist damit immer der freigegebene Stand von `main`.

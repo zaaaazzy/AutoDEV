@@ -1,10 +1,10 @@
-# Dev Log installieren
+# AIdeation installieren
 
-Dev Log besteht aus drei Teilen:
+AIdeation besteht aus drei Teilen:
 
 | Teil | Läuft | Aufgabe |
 |---|---|---|
-| **Dev Log** (Oberfläche + API) | in Docker | Projekte, Ideen, Aufträge, Sprints, Dokumentation |
+| **AIdeation** (Oberfläche + API) | in Docker | Projekte, Ideen, Aufträge, Sprints, Dokumentation |
 | **Datenbank** (PostgreSQL) + tägliche Backups | in Docker | alle Daten, Backups unter `backups/` |
 | **Worker** | direkt auf deinem Rechner | startet die Agents in deinen Projektordnern |
 
@@ -20,8 +20,8 @@ Dev Log besteht aus drei Teilen:
 ## 1. Herunterladen
 
 ```bash
-git clone <repository-url> DevLog
-cd DevLog
+git clone <repository-url> AIdeation/source
+cd AIdeation/source
 ```
 
 ## 2. Starten
@@ -39,10 +39,10 @@ Beim **ersten Start** installiert das Skript die Abhängigkeiten und öffnet den
 4. **Installation** – schreibt die `.env`, baut und startet die Container, richtet den Worker ein
    (macOS: launchd, Linux: systemd-Benutzerdienst, Windows: Aufgabenplanung). Das Protokoll läuft live mit.
 
-Danach öffnet sich Dev Log unter `http://localhost:3100`. Nach der Anmeldung begrüßt dich Dev Log und bietet an,
+Danach öffnet sich AIdeation unter `http://localhost:3100`. Nach der Anmeldung begrüßt dich AIdeation und bietet an,
 das erste Projekt anzulegen.
 
-Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet Dev Log.
+Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet AIdeation.
 Mit `./start.sh --setup` (Windows: `start.cmd --setup`) öffnest du den Assistenten erneut – die bisherige `.env`
 wird vorher gesichert.
 
@@ -50,7 +50,7 @@ wird vorher gesichert.
 
 1. **Projekt erstellen** – der Projekt-Assistent prüft den Ordner, richtet Git/GitHub und auf Wunsch eine Vorlage ein,
    testet die Agent-Verbindung und legt die Rechte der Agents fest.
-2. **Tour starten** – danach (oder jederzeit unter **Hilfe → Interaktive Tour**) führt dich Dev Log Schritt für Schritt:
+2. **Tour starten** – danach (oder jederzeit unter **Hilfe → Interaktive Tour**) führt dich AIdeation Schritt für Schritt:
    - **Ideation**: Idee erfassen, Auftrag vom Auftragsautor erstellen lassen
    - **Auftrag**: Aufträge direkt anlegen, „In Entstehung“ und „Besondere Aufmerksamkeit“
    - **Sprint**: Sprint anlegen, im **Board** Aufträge von „Offen“ nach „Geplant“ ziehen –
@@ -64,17 +64,26 @@ Ordner auf deinem Rechner.
 
 Mit eigener Domain im Assistenten startet zusätzlich der Dienst `https` (Caddy) und holt automatisch ein
 Let's-Encrypt-Zertifikat. Dafür muss dein Router **Port 443** (TCP) an diesen Rechner weiterleiten und die Domain
-auf deine öffentliche IP zeigen. Dev Log ist dann installierbar als App (Handy: „Zum Home-Bildschirm“) und schickt
+auf deine öffentliche IP zeigen. AIdeation ist dann installierbar als App (Handy: „Zum Home-Bildschirm“) und schickt
 Push-Nachrichten.
 
 ## Nützliche Befehle
 
 ```bash
 docker compose ps                 # Zustand der Dienste
-docker compose logs -f dev-log    # Protokoll von Dev Log
+docker compose logs -f dev-log    # Protokoll der API (Oberfläche: frontend)
 npm run worker                    # Worker im Vordergrund starten (ohne Autostart)
 ./start.sh --setup                # Einrichtung wiederholen
 ```
+
+Jedes Projekt liegt in einem eigenen Ordner mit `source` (Code, z. B. mit laufendem Entwicklungsserver) und
+`agent` (Arbeitsordner der Agents, Git-Worktree) – AIdeation selbst ebenso: `AIdeation/source` und `AIdeation/agent`.
+
+Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `/api` weiter), `aideation_backend_nodejs`
+(API), `aideation_database_postgres` (Datenbank), `aideation_backup_postgres` (tägliche Sicherung) und
+`aideation_proxy_caddy` (HTTPS, optional). In den Befehlen oben stehen die Dienstnamen (`frontend`, `dev-log`, `db`,
+`backup`, `https`); `docker exec` braucht den Containernamen, z. B.
+`docker exec -it aideation_database_postgres psql -U devlog aideation`.
 
 ## Fehlerbehebung
 
@@ -82,6 +91,6 @@ npm run worker                    # Worker im Vordergrund starten (ohne Autostar
 |---|---|
 | „Docker läuft nicht“ | Docker Desktop starten, dann erneut `./start.sh` |
 | Seite lädt nicht | `docker compose logs dev-log` – meist fehlt `DEV_LOG_PASSWORD` (mind. 16 Zeichen) in `.env` |
-| Agents starten nicht | Worker-Status oben in Dev Log prüfen; `npm run worker` zeigt Fehler direkt |
+| Agents starten nicht | Worker-Status oben in AIdeation prüfen; `npm run worker` zeigt Fehler direkt |
 | Zwei-Faktor-Gerät verloren | siehe README, Abschnitt Sicherheit |
 | Zu viele Fehlversuche | 15 Minuten warten – gesperrt wird nur das betroffene Konto |

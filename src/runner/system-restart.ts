@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 
 /**
- * „Dev Log neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
+ * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
  * baut die Container mit `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive)
  * startet ihn sofort wieder – mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
  */
@@ -134,7 +134,8 @@ export interface PreviousImage {
   tag: string;
 }
 
-export function parseComposeImages(output: string): PreviousImage | null {
+export function parseComposeImages(output: string): PreviousImage[] {
+  const images: PreviousImage[] = [];
   try {
     const parsed = JSON.parse(output.trim()) as unknown;
     const list = Array.isArray(parsed) ? parsed : [parsed];
@@ -145,13 +146,16 @@ export function parseComposeImages(output: string): PreviousImage | null {
       const repository = typeof record.Repository === 'string' ? record.Repository : null;
       const tag = typeof record.Tag === 'string' && record.Tag ? record.Tag : 'latest';
       if (id && repository && /^[\w./:-]+$/.test(repository) && /^[\w:.-]+$/.test(id) && /^[\w.-]+$/.test(tag))
-        return { id, repository, tag };
+        images.push({ id, repository, tag });
     }
   } catch {
     // Ältere Compose-Versionen ohne JSON-Ausgabe: dann ohne Zurücksetzen.
   }
-  return null;
+  return images;
 }
+
+/** Selbst gebaute Dienste: Backend (API) und Frontend (Oberfläche) – beide werden bei Bedarf zurückgesetzt. */
+export const BUILT_SERVICES = ['dev-log', 'frontend'];
 
 /**
  * Arbeitet einen angeforderten Neustart ab. `busy` liefert die Zahl laufender Aufgaben des Workers; solange welche
@@ -182,7 +186,7 @@ export async function processRestart(
   });
   const previous = parseComposeImages(
     (
-      await execute(['docker', 'compose', 'images', 'dev-log', '--format', 'json'], installRoot, {
+      await execute(['docker', 'compose', 'images', ...BUILT_SERVICES, '--format', 'json'], installRoot, {
         timeoutMs: 30_000,
       }).catch(() => ({ exitCode: 1, durationMs: 0, output: '' }))
     ).output,
@@ -201,32 +205,31 @@ export async function processRestart(
   }
   // Gesundheitsprüfung: Antwortet die Oberfläche nicht, zurück auf das vorherige Abbild; der Worker bleibt auf dem
   // bisherigen Stand und startet nicht neu.
-  await writeRestart(pool, { ...building, message: 'Container gebaut – prüft, ob Dev Log antwortet …', log });
+  await writeRestart(pool, { ...building, message: 'Container gebaut – prüft, ob AIdeation antwortet …', log });
   if (!(await waitHealthy(options))) {
     let rolledBack = false;
-    if (previous) {
-      const tagged = await execute(
-        ['docker', 'tag', previous.id, `${previous.repository}:${previous.tag}`],
-        installRoot,
-        {
+    if (previous.length) {
+      let tagged = true;
+      for (const image of previous) {
+        const result = await execute(['docker', 'tag', image.id, `${image.repository}:${image.tag}`], installRoot, {
           timeoutMs: 30_000,
-        },
-      );
-      const restarted =
-        tagged.exitCode === 0
-          ? await execute(['docker', 'compose', 'up', '-d', '--no-build', 'dev-log'], installRoot, {
-              timeoutMs: 5 * 60_000,
-            })
-          : tagged;
-      rolledBack = restarted.exitCode === 0 && (await waitHealthy(options));
+        });
+        tagged &&= result.exitCode === 0;
+      }
+      const restarted = tagged
+        ? await execute(['docker', 'compose', 'up', '-d', '--no-build', ...BUILT_SERVICES], installRoot, {
+            timeoutMs: 5 * 60_000,
+          })
+        : null;
+      rolledBack = restarted?.exitCode === 0 && (await waitHealthy(options));
     }
     await writeRestart(pool, {
       ...building,
       status: 'failed',
       finishedAt: now().toISOString(),
       message: rolledBack
-        ? 'Der neue Stand antwortete nicht – Dev Log läuft wieder mit dem vorherigen Abbild. Der Worker wurde nicht neu gestartet.'
-        : 'Der neue Stand antwortet nicht, Zurücksetzen war nicht möglich. Bitte auf dem Mac „docker compose logs dev-log“ prüfen.',
+        ? 'Der neue Stand antwortete nicht – AIdeation läuft wieder mit dem vorherigen Abbild. Der Worker wurde nicht neu gestartet.'
+        : 'Der neue Stand antwortet nicht, Zurücksetzen war nicht möglich. Bitte auf dem Mac „docker compose logs dev-log frontend“ prüfen.',
       log,
     });
     return 'failed';

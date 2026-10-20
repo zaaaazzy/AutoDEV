@@ -8,7 +8,7 @@ import { Component, output } from '@angular/core';
     <div class="modal-backdrop welcome-backdrop">
       <section class="welcome-card" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
         <span class="brand-mark welcome-mark">m</span>
-        <h2 id="welcome-title">{{ afterProject ? 'Dein Projekt ist bereit' : 'Hallo! Willkommen bei Dev Log' }}</h2>
+        <h2 id="welcome-title">{{ afterProject ? 'Dein Projekt ist bereit' : 'Hallo! Willkommen bei AIdeation' }}</h2>
         <p>
           {{
             afterProject

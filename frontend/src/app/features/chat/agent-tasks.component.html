@@ -77,7 +77,13 @@
             (keydown)="keydown($event)"
           />
         </label>
-        <ul class="agent-tasks-list" role="listbox" aria-label="Aktionen nach Agent" (pointerleave)="leave($event)">
+        <ul
+          class="agent-tasks-list"
+          role="listbox"
+          aria-label="Aktionen nach Agent"
+          (pointerleave)="leave($event)"
+          (pointermove)="moved()"
+        >
           @for (group of groups(); track group.id) {
             <li class="agent-tasks-group" role="presentation">{{ group.name }}</li>
             @for (entry of group.entries; track entry.key) {

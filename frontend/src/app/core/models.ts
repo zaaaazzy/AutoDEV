@@ -2,9 +2,10 @@ export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
 export type SprintStatus = 'planned' | 'active' | 'review' | 'completed';
 export type GithubMode = 'aus' | 'issues' | 'issues+pr';
-export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'done' | 'rejected';
+export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'approval' | 'done' | 'rejected';
 export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
-export type AgentPhase = 'pre_task' | 'while_task' | 'after_task';
+/** Workflow-Phasen (Spalten im Workflow-Board); siehe src/core/workflow-phases.ts. */
+export type AgentPhase = 'pre_sprint' | 'pre_task' | 'while_task' | 'after_task' | 'on_rejected' | 'on_done';
 
 export interface Project {
   slug: string;
@@ -17,10 +18,14 @@ export interface Project {
   description?: string;
   guidelines?: string;
   autoBugfix?: boolean;
+  agentWorkspace?: boolean;
+  reviewMode?: 'off' | 'ui' | 'always';
+  reviewCommand?: string[] | null;
+  reviewUrl?: string | null;
   /** Kostenbremse je Auftrag (leer = keine Grenze). */
   orderTokenLimit?: number | null;
   orderCostLimit?: number | null;
-  /** Dev Log nach dem Sprint-Abschluss automatisch neu starten (Dev-Log-Projekt). */
+  /** AIdeation nach dem Sprint-Abschluss automatisch neu starten (AIdeation-Projekt). */
   restartAfterSprint?: boolean;
   /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
   sprintMode?: 'manual' | 'suggest' | 'autopilot';
@@ -44,6 +49,12 @@ export interface Project {
   githubAuth?: 'ok' | 'missing' | null;
   githubAuthMessage?: string | null;
   githubAuthCheckedAt?: string | null;
+  /** Produktions-Rückkanal: Health-URL, Compose-Dienste, Ausschlussmuster, Aufbewahrung, Ingest-Token hinterlegt. */
+  healthUrl?: string | null;
+  logServices?: string[];
+  productionIgnore?: string[];
+  productionRetentionDays?: number;
+  ingestConfigured?: boolean;
 }
 
 export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
@@ -144,6 +155,10 @@ export interface DevelopmentItem extends Estimate {
   failureBugId?: string | null;
   /** Aktion notwendig: in wenigen Worten, was ein Mensch tun muss (sonst leer). */
   actionTodo?: string | null;
+  /** Review-Freigabe: Branch, seit wann er wartet, wann freigegeben. */
+  reviewBranch?: string | null;
+  reviewSince?: string | null;
+  reviewApprovedAt?: string | null;
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
   fixStatus?: string | null;
@@ -172,6 +187,8 @@ export interface Sprint {
   /** PR-Modus: Link des Pull Requests und CI-Ampel. */
   prUrl?: string | null;
   ciStatus?: 'pending' | 'success' | 'failure' | null;
+  /** Alle Aufträge durch: wartet auf das Go („Live schalten“). */
+  reviewReadyAt?: string | null;
 }
 
 export interface Bug {
@@ -181,13 +198,58 @@ export interface Bug {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: BugStatus;
-  source: 'agent' | 'manual' | 'test' | 'github';
+  source: 'agent' | 'manual' | 'test' | 'github' | 'production';
   sprintId: string | null;
   fixNotes: string | null;
   createdAt: string;
   fixedAt: string | null;
   /** Herkunft aus GitHub: owner/repo#123. */
   externalRef?: string | null;
+  /** Betriebs-Bug, der nach dem Beheben wieder auftrat. */
+  regressedAt?: string | null;
+  /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
+  productionCount?: number | null;
+}
+
+/** Produktions-Rückkanal: Zustand fürs Dashboard und die Einstellungen. */
+export interface ProductionStatus {
+  healthUrl: string | null;
+  configured: boolean;
+  healthy: boolean;
+  down: boolean;
+  failures: number;
+  lastError: string | null;
+  checkedAt: string | null;
+  downSince: string | null;
+  logsScannedAt: string | null;
+  logError: string | null;
+  openBugs: number;
+  criticalBugs: number;
+  last24h: number;
+}
+
+export interface ProductionSnippets {
+  endpoint: string;
+  browser: string;
+  node: string;
+}
+
+export interface DeploySuspect {
+  deployedAt: string;
+  orders: { id: string; title: string }[];
+  sprints: { id: string; name: string }[];
+}
+
+export interface ProductionEvent {
+  id: string;
+  source: 'health' | 'logs' | 'ingest';
+  origin: string;
+  fingerprint: string;
+  firstSeen: string;
+  lastSeen: string;
+  count: number;
+  sample: string;
+  deploySuspect: DeploySuspect | null;
 }
 
 /** Link zum GitHub-Issue aus owner/repo#123 (null bei ungültigem Verweis). */
@@ -199,7 +261,7 @@ export function githubIssueLink(ref: string | null | undefined): { url: string; 
 export interface DocumentEntry {
   id: string;
   /**
-   * test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht, workflow = Arbeitsweise von Dev Log
+   * test = Testberichte, settings = Agent-Einstellungen und Benutzerübersicht, workflow = Arbeitsweise von AIdeation
    * (alle erzeugt, schreibgeschützt).
    */
   kind: 'manual' | 'sprint' | 'order' | 'repo' | 'request' | 'test' | 'settings' | 'workflow';
@@ -240,6 +302,18 @@ export interface Agent {
   allowedCommands?: string[] | null;
   /** Erlaubte Ordner für Dateirechte (leer = ganzes Projekt). */
   fileScope?: string[];
+  /** Empfänger der Nachrichten dieses Agents (null = nächster Agent im Workflow). */
+  handoffTo?: string | null;
+}
+
+/** Ein Einsatz im Workflow: welcher Agent bei welcher Phase an welcher Stelle läuft, mit eigener Anweisung. */
+export interface WorkflowStep {
+  id: string;
+  phase: AgentPhase;
+  position: number;
+  agentId: string;
+  instructions: string;
+  enabled: boolean;
 }
 
 export interface StepEvent {
@@ -511,4 +585,36 @@ export interface ChatMessage {
   answered?: boolean;
   /** Antwort auf diese Rückfrage. */
   replyTo?: string | null;
+}
+
+/** Review-Container (projektübergreifend geteilt): was er gerade zeigt und unter welcher Adresse. */
+export interface ReviewSlot {
+  slot: number;
+  enabled: boolean;
+  url: string;
+  status: 'idle' | 'requested' | 'starting' | 'running' | 'failed' | 'stopping';
+  message: string | null;
+  projectSlug: string | null;
+  label: string | null;
+  commit: string | null;
+  developmentId: string | null;
+  kind: 'manual' | 'approval' | null;
+  startedAt: string | null;
+}
+
+/** Review-Freigabe eines Projekts: Einstellung, Review-Container und wartende Aufträge. */
+export interface ReviewState {
+  mode: 'off' | 'ui' | 'always';
+  configured: boolean;
+  slots: ReviewSlot[];
+  waiting: { id: string; title: string; reviewSince: string | null; reviewApprovedAt: string | null }[];
+}
+
+/** Startbarer Stand eines Sprints (gemergter Auftrag oder offener Auftrags-Branch). */
+export interface SprintCommit {
+  hash: string;
+  subject: string;
+  date: string;
+  developmentId: string | null;
+  merged: boolean;
 }

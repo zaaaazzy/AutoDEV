@@ -2,6 +2,7 @@
   @if (store.selectedAgent(); as agent) {
     <app-agent-detail [selected]="agent" />
   } @else {
+    <app-workflow-steps id="workflow" [groups]="permissionGroups()" />
     <section class="panel">
       <div class="section-heading">
         <div>
@@ -19,13 +20,6 @@
             >Rolle<select name="role" [(ngModel)]="agentForm.role">
               @for (role of agentRoles; track role.value) {
                 <option [value]="role.value">{{ role.label }}</option>
-              }
-            </select>
-          </label>
-          <label
-            >Phase<select name="phase" [(ngModel)]="agentForm.phase">
-              @for (phase of phases; track phase.id) {
-                <option [value]="phase.id">{{ phase.label }}</option>
               }
             </select>
           </label>
@@ -79,90 +73,25 @@
         <ng-template appDataDetail let-row>
           @if (row.agent) {
             @let agent = row.agent;
-            @if (agentEditing() === agent.id) {
-              <form class="form-grid" (ngSubmit)="saveAgentEdit(agent)">
-                <label class="wide"
-                  >Name<input name="name" [(ngModel)]="agentEdit.name" maxlength="80" required />
-                </label>
-                <label class="wide"
-                  >Verhalten (Anweisung)<textarea
-                    name="instructions"
-                    [(ngModel)]="agentEdit.instructions"
-                    rows="6"
-                    maxlength="10000"
-                  ></textarea>
-                </label>
-                <label
-                  >Modell<select
-                    name="preset"
-                    [ngModel]="presetOf(agentEdit.command)"
-                    (ngModelChange)="applyPreset(agentEdit, $event)"
-                  >
-                    @for (preset of presets; track preset.id) {
-                      <option [value]="preset.id">{{ presetLabel(preset) }}</option>
-                    }
-                    <option value="custom">Eigener Befehl …</option>
-                  </select>
-                </label>
-                <label
-                  >Befehl (leer = eingebauter Agent)<input
-                    name="command"
-                    [(ngModel)]="agentEdit.command"
-                    maxlength="1000"
-                    placeholder="claude -p"
-                  />
-                </label>
-                <app-permission-picker
-                  class="wide"
-                  [groups]="permissionGroups()"
-                  [(selected)]="editCommands"
-                  [(scopes)]="editScopes"
-                />
-                <app-agent-actions-editor class="wide" [agentId]="agent.id" />
-                <div class="actions wide form-actions">
-                  <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-                  <button class="button secondary" type="button" (click)="agentEditing.set(null)">Abbrechen</button>
-                </div>
-              </form>
-            } @else {
-              <div class="agent-detail-body">
-                <details class="run-step" open>
-                  <summary>Anweisung</summary>
-                  <p class="detail-text">{{ agent.instructions || 'Keine Anweisung hinterlegt.' }}</p>
-                </details>
-                <p class="muted">
-                  Befehl: <code>{{ agent.command?.join(' ') || 'Eingebauter Agent (lokales Modell)' }}</code>
-                </p>
-                <div class="actions">
-                  <button class="button secondary" type="button" (click)="startAgentEdit(agent)">✎ Bearbeiten</button>
-                  <button class="button secondary" type="button" (click)="activity.show(agent.id)">Aktivität</button>
-                  <button class="button secondary" (click)="moveAgent(agent, -1)" [disabled]="row.index === 0">
-                    ↑
-                  </button>
-                  <button class="button secondary" (click)="moveAgent(agent, 1)" [disabled]="row.last">↓</button>
-                  <select
-                    [ngModel]="agent.phase"
-                    (ngModelChange)="updateAgent(agent.id, { phase: $event })"
-                    [name]="'agent-phase-' + agent.id"
-                    aria-label="Workflow-Phase"
-                  >
-                    @for (entry of phases; track entry.id) {
-                      <option [value]="entry.id">{{ entry.label }}</option>
-                    }
-                  </select>
-                  <button class="button secondary" (click)="updateAgent(agent.id, { enabled: !agent.enabled })">
-                    {{ agent.enabled ? 'Deaktivieren' : 'Aktivieren' }}
-                  </button>
-                  <button class="button danger" (click)="deleteAgent(agent.id)">Löschen</button>
-                </div>
+            <app-agent-settings [agent]="agent" [groups]="permissionGroups()" />
+            <div class="agent-detail-body">
+              <div class="actions">
+                <button class="button secondary" type="button" (click)="activity.show(agent.id)">Aktivität</button>
+                <button class="button secondary" (click)="updateAgent(agent.id, { enabled: !agent.enabled })">
+                  {{ agent.enabled ? 'Deaktivieren' : 'Aktivieren' }}
+                </button>
+                <button class="button danger" (click)="deleteAgent(agent.id)">Löschen</button>
               </div>
-            }
+            </div>
           } @else if (row.system) {
             @let system = row.system;
             <p class="muted">{{ system.description }}</p>
             <label class="system-model"
               >Modell / Dienst
               <select [ngModel]="systemChoice(system)" (ngModelChange)="setSystemChoice(system.role, $event)">
+                @if (systemChoice(system) === 'custom:') {
+                  <option value="custom:">Eigener Befehl: {{ system.command?.join(' ') }}</option>
+                }
                 <optgroup label="Lokal (Ollama, kostenlos)">
                   @if (system.command?.length === 0 || !system.command) {
                     @if (!installedModels().includes(system.model)) {
@@ -180,6 +109,26 @@
                 </optgroup>
               </select>
             </label>
+            @if (system.restricted && system.command?.length) {
+              <label class="system-tools">
+                <input
+                  type="checkbox"
+                  [ngModel]="system.allowTools"
+                  (ngModelChange)="setAllowTools(system.role, $event)"
+                  [name]="'allow-tools-' + system.role"
+                />
+                Volle Werkzeugrechte der CLI erlauben (z. B. <code>--allow-all-tools</code>)
+              </label>
+              <p class="muted">
+                @if (system.allowTools) {
+                  Die CLI kann Dateien ändern und Befehle ausführen{{
+                    system.role === 'author' ? ' – im leeren, danach gelöschten Temp-Ordner' : ' – im Projektordner'
+                  }}. Die Regeln für Agents sind dann nur eine Bitte im Prompt.
+                } @else {
+                  Rechte-Flags werden entfernt: die CLI darf nur lesen bzw. antworten.
+                }
+              </p>
+            }
           }
         </ng-template>
       </app-data-table>

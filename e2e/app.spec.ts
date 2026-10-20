@@ -38,7 +38,7 @@ async function login(page: Page, welcome = false): Promise<void> {
   // Die Begrüßung erscheint sonst in jedem frischen Browser und überdeckt die Seite.
   if (!welcome) await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Dev Log' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AIdeation' })).toBeVisible();
   await page.getByLabel('Benutzername').fill(username);
   await page.getByLabel('Passwort').fill(password);
   await page.getByRole('button', { name: 'Anmelden' }).click();
@@ -263,11 +263,11 @@ test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint 
 
 test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async ({ page }) => {
   await login(page, true);
-  const welcome = page.getByRole('dialog', { name: /Willkommen bei Dev Log/ });
+  const welcome = page.getByRole('dialog', { name: /Willkommen bei AIdeation/ });
   await expect(welcome).toBeVisible();
   await welcome.getByRole('button', { name: 'Tour starten' }).click();
   const card = page.locator('.tour-card');
-  await expect(card.locator('h3')).toHaveText('Willkommen in Dev Log');
+  await expect(card.locator('h3')).toHaveText('Willkommen in AIdeation');
   await card.getByRole('button', { name: 'Weiter' }).click();
   await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
   await expect(page).toHaveURL(/#ideation/);
@@ -368,7 +368,8 @@ test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details
   await expect(detail).toContainText('Noch nie gestartet');
   await expect(menu).toBeVisible();
   // Suche filtert über alle Gruppen; Pfeiltaste zeigt die Details per Tastatur.
-  // „Docker-Dienste“ statt nur „docker“: „Dev Log neu starten“ erwähnt docker compose ebenfalls.
+  // „Docker-Dienste“ statt nur „docker“: „AIdeation neu starten“ erwähnt docker compose ebenfalls.
+  await page.mouse.move(0, 0);
   await search.fill('docker-dienste');
   await expect(menu.locator('.agent-task')).toHaveCount(1);
   await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
@@ -555,6 +556,56 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
   } finally {
     await request.delete(`/api/agents/${agent.id}`, { headers });
   }
+});
+
+test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und Verlauf am Bug', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  for (const healthUrl of ['ftp://localhost/health', 'https://example.com/health']) {
+    expect((await request.patch('/api/projects/e2e', { headers, data: { healthUrl } })).status()).toBe(400);
+  }
+  // Zahlen fallen im Fingerabdruck weg: je Gerät ein eigener Text, damit jeder Lauf einen eigenen Bug anlegt.
+  const title = `E2E-Fehler im Betrieb ${isMobile ? 'Handy' : 'Desktop'}`;
+  await login(page);
+  await page.goto('/#settings');
+  const settings = page.locator('#production-settings');
+  // Ab dem zweiten Lauf ist ein Token hinterlegt: Rotieren fragt nach.
+  page.once('dialog', (dialog) => void dialog.accept());
+  await settings.getByRole('button', { name: /Token (erzeugen|rotieren)/ }).click();
+  const token = (await settings.getByTestId('ingest-token').textContent())!.trim();
+  await expect(settings.getByText(`/api/ingest/e2e/${token}`).first()).toBeAttached();
+
+  const anonymous = await request.post(`/api/ingest/e2e/${token}`, {
+    headers: { 'Content-Type': 'text/plain' },
+    data: JSON.stringify({ message: title, stack: '    at checkout (/app/src/kasse.js:1:1)', source: 'browser' }),
+  });
+  expect(anonymous.status()).toBe(202);
+  expect((await request.post('/api/ingest/e2e/falsches-token-1234567890', { data: '{}' })).status()).toBe(401);
+  expect((await request.get('/api/projects')).status()).toBe(401);
+
+  await page.goto('/#bugs');
+  const row = page.getByText(title).first();
+  await expect(row).toBeVisible();
+  await expect(page.getByText('Betrieb · 1× seit gestern').first()).toBeVisible();
+  await row.click();
+  await expect(page.getByText('Vorkommen je Stunde (48 h)').first()).toBeVisible();
+  await expect(page.getByText(/Kein Deploy-Verdacht|Deploy-Verdacht:/).first()).toBeVisible();
+
+  await page.goto('/#dashboard');
+  await expect(page.getByTestId('production-tile')).toContainText('Betrieb');
+
+  // Aufräumen: Mit Auto-Bugfix entstand ein Bug-Auftrag, der sonst in den Sprint-Tests des nächsten Geräts liegt.
+  const bug = (await (await request.get('/api/projects/e2e/bugs', { headers })).json()).bugs.find(
+    (entry: { title: string }) => entry.title.endsWith(title),
+  );
+  const board = await (await request.get('/api/projects/e2e/board', { headers })).json();
+  for (const item of board.development.filter((entry: { bugId: string | null }) => entry.bugId === bug.id)) {
+    await request.delete(`/api/development/${item.id}`, { headers });
+  }
+  await request.delete(`/api/bugs/${bug.id}`, { headers });
 });
 
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {

@@ -1,5 +1,5 @@
 import { NgClass } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
@@ -17,6 +17,8 @@ import { CATEGORIES, severityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { type BugStatRow, type BugStats, bugStats, isBuried } from './bug-stats.js';
+import { ProductionDetailComponent } from './production-detail.component.js';
 import {
   CategoryLabelPipe,
   SeverityLabelPipe,
@@ -29,11 +31,15 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
 const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 
+/** Pro Statistik-Karte höchstens so viele Zeilen, der Rest wird zusammengefasst. */
+const STAT_ROWS = 10;
+
 const BUG_SOURCE_LABEL: Record<string, string> = {
   agent: 'Agent',
   manual: 'Manuell',
   test: 'Testlauf',
   github: 'GitHub',
+  production: 'Betrieb',
 };
 @Component({
   selector: 'app-bugs',
@@ -46,6 +52,7 @@ const BUG_SOURCE_LABEL: Record<string, string> = {
     DataCellDirective,
     DataDetailDirective,
     GalleryComponent,
+    ProductionDetailComponent,
     MarkdownPipe,
     SeverityLabelPipe,
     ShortTextPipe,
@@ -92,6 +99,48 @@ export class BugsComponent {
       sortValue: (bug) => bug.createdAt,
     },
   ];
+  /** Auf dem Friedhof: wann begraben statt Sprint. */
+  protected readonly buriedColumns: DataColumn<Bug>[] = [
+    ...this.bugColumns.filter((column) => column.id !== 'sprint' && column.id !== 'createdAt'),
+    {
+      id: 'buriedAt',
+      header: 'Begraben',
+      value: (bug) => (bug.fixedAt ? formatIsoDate(bug.fixedAt) : '–'),
+      sortValue: (bug) => bug.fixedAt ?? bug.createdAt,
+    },
+  ];
+  protected readonly isBuried = isBuried;
+  /** Oben nur offene Bugs (ist sonst deprimierend), darunter der Bug-Friedhof. */
+  protected readonly lists = computed(() => {
+    const bugs = this.data().bugs;
+    return [
+      {
+        id: 'open',
+        buried: false,
+        rows: bugs.filter((bug) => !isBuried(bug)),
+        empty: 'Keine offenen Bugs – alles ruht in Frieden.',
+      },
+      { id: 'buried', buried: true, rows: bugs.filter(isBuried), empty: 'Der Friedhof ist noch leer.' },
+    ];
+  });
+  protected readonly statistics = computed(() => bugStats(this.data().bugs));
+
+  protected statGroups(stats: BugStats) {
+    const group = (title: string, column: string, rows: BugStatRow[], empty: string) => ({
+      title,
+      column,
+      rows: rows.slice(0, STAT_ROWS),
+      more: Math.max(0, rows.length - STAT_ROWS),
+      max: Math.max(1, ...rows.map((row) => row.total)),
+      empty,
+    });
+    return [
+      group('Gefunden von', 'Wer', stats.finders, 'Noch keine Bugs.'),
+      group('Wo', 'Seite / Bereich', stats.places, 'Noch keine Zuordnung.'),
+      group('In welchen Tests', 'Test', stats.tests, 'In den Berichten wird kein Test genannt.'),
+    ];
+  }
+
   protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
   protected readonly categories = CATEGORIES;
   protected pendingImages: File[] = [];

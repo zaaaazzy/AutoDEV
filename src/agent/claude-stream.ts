@@ -82,7 +82,11 @@ export interface StreamParser {
   sessionId(): string | undefined;
 }
 
-export function createStreamParser(cwd: string, onAction: (message: string) => void): StreamParser {
+export function createStreamParser(
+  cwd: string,
+  onAction: (message: string) => void,
+  onSession?: (sessionId: string) => void,
+): StreamParser {
   let buffer = '';
   // Live output reads like documentation: only the agent's own Markdown text; tool calls go to the history.
   const paragraphs: string[] = [];
@@ -99,7 +103,11 @@ export function createStreamParser(cwd: string, onAction: (message: string) => v
       if (line.trim()) paragraphs.push(line.trim());
       return;
     }
-    if (typeof event.session_id === 'string') session = event.session_id;
+    if (typeof event.session_id === 'string' && event.session_id !== session) {
+      session = event.session_id;
+      // Sofort melden (erstes Ereignis): so ist die Sitzung auch nach einem harten Abbruch bekannt.
+      onSession?.(session);
+    }
     if (event.type === 'assistant') {
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use') action(describeToolUse(block, cwd));
@@ -148,11 +156,13 @@ export async function executeAgentCommand(
     onAction?: (message: string) => void;
     /** Claude-Sitzung, die fortgesetzt werden soll. */
     resumeSession?: string;
+    /** Meldet die Sitzung, sobald Claude sie nennt (zum späteren Fortsetzen). */
+    onSession?: (sessionId: string) => void;
   },
 ): Promise<CommandResult> {
-  const { onAction, resumeSession, ...executeOptions } = options;
+  const { onAction, resumeSession, onSession, ...executeOptions } = options;
   if (!isClaudeCommand(command)) return execute(command, cwd, executeOptions);
-  const parser = createStreamParser(cwd, (message) => onAction?.(message));
+  const parser = createStreamParser(cwd, (message) => onAction?.(message), onSession);
   const result = await execute(withStreamJson(withResume(command, resumeSession)), cwd, {
     ...executeOptions,
     onOutput: undefined,
@@ -172,4 +182,9 @@ export async function executeAgentCommand(
     tokens: final.tokens || result.tokens,
     costUsd: final.costUsd || result.costUsd,
   };
+}
+
+/** Liess sich die Sitzung nicht fortsetzen (gelöscht, anderer Ordner)? Dann frisch starten. */
+export function resumeFailed(output: string): boolean {
+  return /No conversation found|session .*not found|Invalid session/i.test(output);
 }

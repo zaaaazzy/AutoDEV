@@ -20,3 +20,9 @@ test('parseEstimate reads a bare JSON answer', () => {
   assert.equal(parseEstimate('{"effortHours": 2, "tokenEstimate": 5000}')?.effortHours, 2);
   assert.equal(parseEstimate('kein json'), null);
 });
+
+test('parseEstimate ignores braces in CLI banners and logs', () => {
+  const output = 'warn {deprecated} flag\n{"effortHours": 3, "benefit": 7}\nlog: {done}';
+  assert.equal(parseEstimate(output)?.effortHours, 3);
+  assert.equal(parseEstimate(output)?.benefit, 7);
+});

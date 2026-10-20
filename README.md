@@ -1,21 +1,21 @@
-# Dev Log
+# AIdeation
 
 Eigenständiges Projekt mit Angular-Oberfläche und TypeScript-/Express-API: Sprints, Ideen, Aufträge, Bugs, Dokumentation, Statistik und automatisch arbeitende Agents. Unabhängig von den Anwendungen, die es betreut (z. B. Mainty).
 
 ## Schnellstart
 
 ```bash
-git clone <repository-url> DevLog && cd DevLog
+git clone <repository-url> AIdeation/source && cd AIdeation/source
 ./start.sh          # Windows: start.cmd
 ```
 
 Beim ersten Start führt ein Einrichtungs-Assistent im Browser durch Docker, Zugang und Worker; danach begrüßt dich
-Dev Log mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich: [Installation](docs/installation.md).
+AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich: [Installation](docs/installation.md).
 
 ## Starten (manuell)
 
 1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche lokal `http://localhost:3100`, von aussen optional `https://<DEV_LOG_DOMAIN>` (siehe Sicherheit). Datenbank `127.0.0.1:5433`, eigenes Volume.
-2. Worker (arbeitet alle Projekte automatisch ab, Autostart per launchd): `./scripts/install-worker.sh`. Log: `~/Library/Logs/dev-log-worker.log`. Ohne Autostart: `npm run worker`.
+2. Worker (arbeitet alle Projekte automatisch ab, Autostart per launchd): `./scripts/install-worker.sh`. Log: `~/Library/Logs/aideation-worker.log`. Ohne Autostart: `npm run worker`.
 3. Lokales Modell: Ollama (`DEV_LOG_OLLAMA_MODEL`, Standard `qwen3.5:9b`). Optional pro Rolle: `DEV_LOG_OLLAMA_MODEL_<ROLLE>` (z. B. `_DEVELOPER`) und Kontext `DEV_LOG_OLLAMA_CTX[_<ROLLE>]` (Standard 16384, Entwickler 32768); `DEV_LOG_OLLAMA_KEEP_ALIVE` (Standard `30m`) hält das Modell geladen. Ollama-Einstellungen (Modell dauerhaft geladen, Flash Attention, KV-Cache q8_0, ein Modell gleichzeitig) setzt `./scripts/configure-ollama.sh` und startet die Ollama-App neu. Bei Verbindungsfehlern wird bis zu zweimal mit wachsender Wartezeit wiederholt.
 
 ## Entwicklung
@@ -29,18 +29,19 @@ Dev Log mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich: [
 
 ### Sicherheit
 
-Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Der Dev-Log-Container ist nur an `127.0.0.1:3100` gebunden und läuft als Nicht-Root. Von aussen geht der Zugriff ausschließlich über HTTPS: Der Dienst `https` (Caddy, `deploy/Caddyfile`) lauscht auf 80/443, holt das Zertifikat für `DEV_LOG_DOMAIN` automatisch bei Let's Encrypt und leitet an Dev Log weiter (Router: Port 443 auf diesen Rechner weiterleiten). Dev Log übernimmt Protokoll und Client-IP vom Proxy (`DEV_LOG_TRUST_PROXY`). Die API setzt Security-Header (CSP), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Mit `DEV_LOG_AUTH=off` lauscht der Server nur auf `127.0.0.1` (`DEV_LOG_HOST` überschreibt das).
+Login ist standardmäßig an (`DEV_LOG_USERNAME`, `DEV_LOG_PASSWORD` ≥ 16 Zeichen in `.env`). Die Oberfläche (`aideation_frontend_angular`, nginx) ist nur an `127.0.0.1:3100` gebunden und leitet `/api` an das Backend (`aideation_backend_nodejs`, Nicht-Root, ohne eigenen Port nach aussen) weiter. Von aussen geht der Zugriff ausschließlich über HTTPS: Der Dienst `https` (Caddy, `deploy/Caddyfile`) lauscht auf 80/443, holt das Zertifikat für `DEV_LOG_DOMAIN` automatisch bei Let's Encrypt und leitet an die Oberfläche weiter (Router: Port 443 auf diesen Rechner weiterleiten). AIdeation übernimmt Protokoll und Client-IP vom Proxy (`DEV_LOG_TRUST_PROXY`). API und Oberfläche setzen dieselben Security-Header (CSP; nginx: `deploy/frontend/security-headers.conf`), weist schreibende Cross-Origin-Anfragen ab und sperrt Clients nach 10 Fehlversuchen für 15 Minuten. Ohne Container (`npm start`, `npm run dev`) lauscht der Server nur auf `127.0.0.1`; `DEV_LOG_HOST` überschreibt das (im Container `0.0.0.0`). API-Pfade unterscheiden Groß-/Kleinschreibung, Anmeldung, Rollen und Mandantenprüfung hängen am Router unter `/api`.
 
-Anmeldung über die Login-Seite (Sitzungs-Cookie, 30 Tage). Unter Einstellungen → Sicherheit lässt sich die Zwei-Faktor-Anmeldung mit einer Authenticator-App einrichten; danach gilt Basic Auth (für Skripte) nicht mehr. Code verloren: `docker compose exec db psql -U devlog dev_log -c "DELETE FROM app_settings WHERE key = 'auth_totp_secret'"` und `docker compose restart dev-log`.
+Anmeldung über die Login-Seite (Sitzungs-Cookie, 30 Tage). Unter Einstellungen → Sicherheit lässt sich die Zwei-Faktor-Anmeldung mit einer Authenticator-App einrichten; danach gilt Basic Auth (für Skripte) nicht mehr. Code verloren: `docker compose exec db psql -U devlog aideation -c "DELETE FROM app_settings WHERE key = 'auth_totp_secret'"` und `docker compose restart dev-log`.
 
 ### Betrieb
 
-- **App & Push:** Dev Log ist als App installierbar (Manifest, Service Worker). Unter Einstellungen → App & Benachrichtigungen pro Gerät Push einschalten (iPhone: erst „Zum Home-Bildschirm“). Meldungen: Auftrag erledigt/blockiert, Antwort/Rückfrage des Assistenten, Ausfall.
-- **Backups:** Dienst `backup` schreibt täglich `backups/dev_log-*.dump` (14 Tage, `DEV_LOG_BACKUP_KEEP_DAYS`). Wiederherstellen: `docker compose exec -T db pg_restore -U devlog -d dev_log --clean < backups/<datei>.dump`.
-- **Wächter:** `./scripts/install-watchdog.sh` prüft alle zwei Minuten Dienst, HTTPS, Datenbank, Worker, Backup-Alter und Speicherplatz und meldet Probleme per Push (Log: `~/Library/Logs/dev-log-watchdog.log`). Fällt der ganze Rechner oder die Internetleitung aus, kann er nichts melden – dafür einen externen Monitor auf `https://<DEV_LOG_DOMAIN>/health` setzen.
-- **Oberflächentests:** `npm run test:e2e` (Playwright, Desktop und Handy) startet Dev Log auf einer eigenen Datenbank `dev_log_e2e`; einmalig `npx playwright install chromium`.
+- **App & Push:** AIdeation ist als App installierbar (Manifest, Service Worker). Unter Einstellungen → App & Benachrichtigungen pro Gerät Push einschalten (iPhone: erst „Zum Home-Bildschirm“). Meldungen: Auftrag erledigt/blockiert, Antwort/Rückfrage des Assistenten, Ausfall.
+- **Backups:** Dienst `backup` schreibt täglich `backups/aideation-*.dump` (14 Tage, `DEV_LOG_BACKUP_KEEP_DAYS`). Wiederherstellen: `docker compose exec -T db pg_restore -U devlog -d aideation --clean < backups/<datei>.dump`.
+- **Wächter:** `./scripts/install-watchdog.sh` prüft alle zwei Minuten Dienst, HTTPS, Datenbank, Worker, Backup-Alter und Speicherplatz und meldet Probleme per Push (Log: `~/Library/Logs/aideation-watchdog.log`). Fällt der ganze Rechner oder die Internetleitung aus, kann er nichts melden – dafür einen externen Monitor auf `https://<DEV_LOG_DOMAIN>/health` setzen.
+- **Produktions-Rückkanal:** Unter Einstellungen → Betrieb je Projekt Health-URL (nur http(s) auf localhost, LAN oder eigener Domain: `DEV_LOG_DOMAIN`, `DEV_LOG_OWN_DOMAINS`), Compose-Dienste für den Log-Scan, Ausschlussmuster, Aufbewahrung (Standard 30 Tage) und das Ingest-Token (nur der Hash wird gespeichert). Der Worker prüft die Health-URL alle 2 Minuten (zwei Fehlschläge in Folge = kritischer Bug „Anwendung nicht erreichbar“ und Push, Erholung = Entwarnung) und liest alle 15 Minuten sowie nach jedem Deploy `docker compose logs --since 15m --no-color`. Die Anwendung kann Fehler selbst an `POST /api/ingest/<projekt>/<token>` melden (ohne Login, 16 KB, Rate-Limit). Gleiche Fehler werden über einen Fingerabdruck gebündelt, maskiert und als Bug mit Quelle „Betrieb“ erfasst; ein behobener Bug wird bei erneutem Auftreten als Regression geöffnet. Snippets für Browser und Node: Dokumentation → „Betrieb: Fehler an AIdeation melden“.
+- **Oberflächentests:** `npm run test:e2e` (Playwright, Desktop und Handy) startet AIdeation auf einer eigenen Datenbank `dev_log_e2e`; einmalig `npx playwright install chromium`.
 
-Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Deshalb ein starkes Passwort verwenden und Dev Log nie per HTTP ins Netz stellen.
+Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Deshalb ein starkes Passwort verwenden und AIdeation nie per HTTP ins Netz stellen.
 
 **Grenzen der Agent-Rechte:** Die Werkzeugregeln (Projektordner, gesperrte Dateien, erlaubte Befehle) schützen vor Fehlgriffen des Modells, sind aber keine Sandbox. Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen mit den Rechten des Workers auf dem Host. Installationen laufen immer mit `--ignore-scripts`. Für die Projekt-Datenbank einen eigenen Benutzer ohne `DROP`-/Superuser-Rechte hinterlegen.
 
@@ -72,7 +73,7 @@ Der Worker bedient jedes registrierte Projekt in dessen Ordner. Fehlt der Ordner
 
 ## Konfiguration
 
-`DEV_LOG_DATABASE_URL`, `DEV_LOG_ADMIN_DATABASE_URL`, `DEV_LOG_AUTH` (`off` = kein Login, nur in vertrauenswürdigen Netzen), `DEV_LOG_PROJECT_ROOTS` (Doppelpunkt-getrennte Ordner, unter denen Projektordner liegen müssen), `DEV_LOG_USERNAME` / `DEV_LOG_PASSWORD`, `DEV_LOG_AGENT_COMMAND`, `DEV_LOG_MAX_TURNS`, `DEV_LOG_TEST_COMMANDS` (Fallback, JSON), `DEV_LOG_OLLAMA_URL`.
+`DEV_LOG_DATABASE_URL`, `DEV_LOG_ADMIN_DATABASE_URL`, `DEV_LOG_AUTH` (`off` = kein Login, nur in vertrauenswürdigen Netzen), `DEV_LOG_PROJECT_ROOTS` (Doppelpunkt-getrennte Ordner, unter denen Projektordner liegen müssen), `DEV_LOG_USERNAME` / `DEV_LOG_PASSWORD`, `DEV_LOG_AGENT_COMMAND`, `DEV_LOG_MAX_TURNS`, `DEV_LOG_TEST_COMMANDS` (Fallback, JSON), `DEV_LOG_OLLAMA_URL`, `DEV_LOG_SECRET_KEY` (≥ 16 Zeichen: verschlüsselt die Datenbank-Zugänge der Projekte mit AES-256-GCM, damit sie auch in Backups nicht im Klartext stehen; beim Start werden bestehende Klartext-Zugänge umgestellt. Derselbe Wert muss in `.env` für den Container und beim Installieren des Workers gesetzt sein, z. B. `DEV_LOG_SECRET_KEY=… ./scripts/install-worker.sh`; geht er verloren, müssen die Zugänge neu eingetragen werden).
 
 Datenmodell: [docs/erm.md](docs/erm.md).
 

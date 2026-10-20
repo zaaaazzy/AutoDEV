@@ -1,9 +1,10 @@
+import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
 import { seedDefaultActions } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
-import { SYSTEM_ROLES, systemAgents } from '../agent/system-agents.js';
-import type { Express } from 'express';
+import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import {
   buildUpdate,
@@ -14,10 +15,12 @@ import {
   parseCommand,
   parseFields,
   parseLongText,
+  parseNullableUuid,
   parseOption,
   parseProjectSlug,
   parseTitle,
 } from '../core/validation.js';
+import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 
 const ROLES = new Set([
   'author',
@@ -30,9 +33,9 @@ const ROLES = new Set([
   'user_manual_writer',
   'custom',
 ]);
-const PHASES = new Set(['pre_task', 'while_task', 'after_task']);
+const PHASES = PHASE_SET;
 const AGENT_COLUMNS = `id, project_slug AS "projectSlug", name, role, phase, position, instructions, enabled, command,
-  allowed_commands AS "allowedCommands", file_scope AS "fileScope"`;
+  allowed_commands AS "allowedCommands", file_scope AS "fileScope", handoff_to AS "handoffTo"`;
 const AGENT_FIELDS = {
   name: { column: 'name', parse: parseTitle(80) },
   role: { column: 'role', parse: parseOption(ROLES) },
@@ -41,6 +44,7 @@ const AGENT_FIELDS = {
   enabled: { column: 'enabled', parse: parseBoolean },
   command: { column: 'command', parse: parseCommand },
   fileScope: { column: 'file_scope', parse: parseFileScope },
+  handoffTo: { column: 'handoff_to', parse: parseNullableUuid },
 };
 
 /** Erlaubte Ordner für Dateirechte: relativ zum Projekt, ohne „..“, höchstens 20; leer = ganzes Projekt. */
@@ -134,75 +138,72 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
     ],
   );
   // Neue Projekte bekommen mit den Agents auch die Standard-Aktionen des Testers.
-  await seedDefaultActions(pool, slug).catch(() => undefined);
-  await materializeAgentCommands(pool, slug).catch(() => undefined);
+  await seedDefaultActions(pool, slug).catch(logged('agents'));
+  await materializeAgentCommands(pool, slug).catch(logged('agents'));
 }
 
-export function registerAgentRoutes(app: Express, pool: Pool): void {
-  app.get('/api/system-agents', async (_request, response) => {
+export function registerAgentRoutes(app: Router, pool: Pool): void {
+  app.get('/system-agents', async (_request, response) => {
     const row = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'system_agents'`))
       .rows[0];
     const models = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ollama_models'`))
       .rows[0];
-    const chosen = await pool.query<{ key: string; value: string }>(
-      `SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`,
-    );
     // Neue Rollen erscheinen sofort, auch wenn der Worker noch die ältere Liste veröffentlicht hat.
     const published = (row ? JSON.parse(row.value) : []) as { role: string; model: string }[];
     const agents = systemAgents().map((agent) => published.find((item) => item.role === agent.role) ?? agent);
-    const commands = await pool.query<{ key: string; value: string }>(
-      `SELECT key, value FROM app_settings WHERE key LIKE 'command:%'`,
-    );
+    const settings = await loadSystemSettings(pool);
     response.json({
       agents: agents.map((agent) => ({
         ...agent,
-        model: chosen.rows.find((item) => item.key === `model:${agent.role}`)?.value ?? agent.model,
-        command: JSON.parse(commands.rows.find((item) => item.key === `command:${agent.role}`)?.value ?? 'null'),
+        model: settings.get(agent.role)?.model ?? agent.model,
+        command: settings.get(agent.role)?.command ?? null,
+        restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
+        allowTools: settings.get(agent.role)?.allowTools ?? false,
       })),
       models: models ? JSON.parse(models.value) : [],
     });
   });
 
-  app.put('/api/system-agents/:role', async (request, response) => {
+  app.put('/system-agents/:role', async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
-    const body = (request.body ?? {}) as { model?: unknown; command?: unknown };
-    const model = body.model ?? '';
+    const body = (request.body ?? {}) as { model?: unknown; command?: unknown; allowTools?: unknown };
+    const model = body.model;
+    const allowTools = body.allowTools;
     const command = body.command === undefined ? undefined : parseCommand(body.command);
     if (
       !role ||
-      typeof model !== 'string' ||
-      model.length > 200 ||
-      !/^[\w./:@+-]*$/.test(model) ||
+      (model === undefined && command === undefined && allowTools === undefined) ||
+      (allowTools !== undefined &&
+        (typeof allowTools !== 'boolean' || !(RESTRICTED_ROLES as readonly string[]).includes(role))) ||
+      (model !== undefined && (typeof model !== 'string' || model.length > 200 || !/^[\w./:@+-]*$/.test(model))) ||
       command === INVALID
     ) {
       response.status(400).json({ message: 'Ungültige Rolle, ungültiges Modell oder ungültiger Befehl.' });
       return;
     }
-    if (command !== undefined) {
-      if (command === null) await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`command:${role}`]);
-      else
-        await pool.query(
-          `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-          [`command:${role}`, JSON.stringify(command)],
-        );
-    }
-    if (!model && command !== undefined) {
-      response.json({ role, command });
-      return;
-    }
-    if (model) {
-      await pool.query(
-        `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-        [`model:${role}`, model],
-      );
-    } else {
-      await pool.query(`DELETE FROM app_settings WHERE key = $1`, [`model:${role}`]);
-    }
-    response.json({ role, model });
+    // Only the given fields change; an empty model resets the choice to the worker default.
+    const saved = await pool.query<{ model: string | null; command: string[] | null; allowTools: boolean }>(
+      `INSERT INTO system_agent_settings (role, model, command, allow_tools)
+       VALUES ($1, NULLIF($2, ''), $3::jsonb, COALESCE($4, FALSE))
+       ON CONFLICT (role) DO UPDATE SET
+         model = CASE WHEN $5 THEN EXCLUDED.model ELSE system_agent_settings.model END,
+         command = CASE WHEN $6 THEN EXCLUDED.command ELSE system_agent_settings.command END,
+         allow_tools = COALESCE($4, system_agent_settings.allow_tools)
+       RETURNING model, command, allow_tools AS "allowTools"`,
+      [
+        role,
+        model ?? null,
+        command ? JSON.stringify(command) : null,
+        allowTools ?? null,
+        model !== undefined,
+        command !== undefined,
+      ],
+    );
+    response.json({ role, ...saved.rows[0] });
   });
 
   // Workflow order: phase (pre, while, after), then position.
-  app.get('/api/projects/:slug/agents', async (request, response) => {
+  app.get('/projects/:slug/agents', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -210,13 +211,13 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     }
     const result = await pool.query(
       `SELECT ${AGENT_COLUMNS} FROM agents WHERE project_slug = $1
-        ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,
+        ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
       [slug],
     );
     response.json({ agents: result.rows });
   });
 
-  app.post('/api/projects/:slug/agents', async (request, response) => {
+  app.post('/projects/:slug/agents', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, AGENT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -226,7 +227,9 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     }
     // Rechte: jeder Befehl wird einzeln gesetzt, nur aus Kategorien dieses Projekts (Mandantentrennung).
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
-    const groups = await validAgentCommands(pool, slug, requested === undefined ? [] : requested);
+    // null = Projektstandard der Rolle (z. B. beim Einsetzen eines bestehenden Agents an weiterer Stelle).
+    const groups =
+      requested === null ? null : await validAgentCommands(pool, slug, requested === undefined ? [] : requested);
     if (typeof groups === 'string') return void response.status(400).json({ message: groups });
     const result = await pool.query(
       `INSERT INTO agents (project_slug, name, role, phase, position, instructions, enabled, command, allowed_commands,
@@ -250,7 +253,7 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ agent: result.rows[0] });
   });
 
-  app.post('/api/projects/:slug/agents/defaults', async (request, response) => {
+  app.post('/projects/:slug/agents/defaults', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -271,13 +274,21 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       ],
     );
     if (result.rows.length) {
-      await seedDefaultActions(pool, slug).catch(() => undefined);
-      await materializeAgentCommands(pool, slug).catch(() => undefined);
+      await seedDefaultActions(pool, slug).catch(logged('agents'));
+      await materializeAgentCommands(pool, slug).catch(logged('agents'));
     }
+    // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
+    await pool.query(
+      `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
+       SELECT a.project_slug, a.phase, a.position, a.id FROM agents a
+        WHERE a.project_slug = $1 AND a.id = ANY($2::uuid[])
+          AND EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)`,
+      [slug, result.rows.map((row: { id: string }) => row.id)],
+    );
     response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
   });
 
-  app.post('/api/projects/:slug/agents/order', async (request, response) => {
+  app.post('/projects/:slug/agents/order', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     if (
@@ -293,15 +304,16 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
       return;
     }
     await pool.query(
-      `UPDATE agents a SET position = o.ord, updated_at = NOW()
+      // Reihenfolge einer Spalte im Workflow-Board; Agents aus anderen Spalten wechseln dabei in diese Phase.
+      `UPDATE agents a SET position = o.ord, phase = $2, updated_at = NOW()
          FROM unnest($3::uuid[]) WITH ORDINALITY AS o(id, ord)
-        WHERE a.id = o.id AND a.project_slug = $1 AND a.phase = $2`,
+        WHERE a.id = o.id AND a.project_slug = $1`,
       [slug, body.phase, body.ids],
     );
     response.status(204).end();
   });
 
-  app.patch('/api/agents/:id', async (request, response) => {
+  app.patch('/agents/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -330,7 +342,7 @@ export function registerAgentRoutes(app: Express, pool: Pool): void {
     response.json({ agent: result.rows[0] });
   });
 
-  app.delete('/api/agents/:id', async (request, response) => {
+  app.delete('/agents/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

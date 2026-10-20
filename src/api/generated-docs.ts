@@ -1,5 +1,8 @@
+import { logged } from '../core/log.js';
+import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import type { Pool } from 'pg';
-import { systemAgents, systemCommand } from '../agent/system-agents.js';
+import { loadSystemSettings, systemAgents, systemCommand } from '../agent/system-agents.js';
+import { productionGuide } from './production-snippets.js';
 import { ROLE_INFO, type Role } from './roles.js';
 import { workflowDocs } from './workflow-docs.js';
 
@@ -20,9 +23,12 @@ export interface GeneratedDoc {
 }
 
 const PHASE_LABEL: Record<string, string> = {
-  pre_task: 'Vorbereitung',
-  while_task: 'Umsetzung',
-  after_task: 'Abschluss',
+  pre_sprint: 'Vor dem Sprint',
+  pre_task: 'Vor dem Auftrag',
+  while_task: 'Während',
+  after_task: 'Danach',
+  on_rejected: 'Bei abgelehnt',
+  on_done: 'Bei abgeschlossen',
 };
 const ROLE_LABEL: Record<string, string> = {
   author: 'Auftragsautor',
@@ -91,16 +97,13 @@ async function agentSettings(pool: Pool, slug: string): Promise<GeneratedDoc> {
     `SELECT name, role, phase, position, enabled, instructions, command, allowed_commands AS "allowedCommands",
             updated_at AS "updatedAt"
        FROM agents WHERE project_slug = $1
-      ORDER BY CASE phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, position, created_at`,
+      ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
     [slug],
   );
   const rows = agents.rows;
   // Im Dashboard gewählte Modelle der Systemagents gehen der Umgebung vor (wie beim Worker)
-  const chosen = (
-    await pool.query<{ key: string; value: string }>(`SELECT key, value FROM app_settings WHERE key LIKE 'model:%'`)
-  ).rows;
-  const systemModel = (role: string, fallback: string) =>
-    chosen.find((row) => row.key === `model:${role}`)?.value.trim() || fallback;
+  const chosen = await loadSystemSettings(pool);
+  const systemModel = (role: string, fallback: string) => chosen.get(role)?.model || fallback;
   const lines = [
     '# Agent-Einstellungen',
     '',
@@ -218,12 +221,25 @@ function settingsDoc(slug: string, key: string, title: string, content: string, 
 }
 
 /** Alle erzeugten Dokumente eines Projekts; die Benutzerübersicht nur für Administratoren. */
-export async function generatedDocs(pool: Pool, slug: string, isAdmin: boolean): Promise<GeneratedDoc[]> {
+export async function generatedDocs(
+  pool: Pool,
+  slug: string,
+  isAdmin: boolean,
+  baseUrl = 'http://localhost:3100',
+): Promise<GeneratedDoc[]> {
   const [reports, agents, users, workflow] = await Promise.all([
     testReports(pool, slug),
     agentSettings(pool, slug),
     isAdmin ? userOverview(pool, slug) : Promise.resolve(null),
-    workflowDocs(slug).catch(() => []),
+    workflowDocs(slug).catch(logged('generated-docs', [])),
   ]);
-  return [...workflow, ...reports, agents, ...(users ? [users] : [])];
+  // Anleitung mit kopierbaren Snippets für Browser und Node (Produktions-Rückkanal).
+  const production = settingsDoc(
+    slug,
+    'betrieb',
+    'Betrieb: Fehler an Dev Log melden',
+    productionGuide(baseUrl, slug),
+    null,
+  );
+  return [...workflow, ...reports, agents, production, ...(users ? [users] : [])];
 }

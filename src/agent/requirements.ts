@@ -1,4 +1,5 @@
-import { systemCommand } from './system-agents.js';
+import { logged } from '../core/log.js';
+import { restrictedSystemCommand, systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -90,6 +91,16 @@ export function buildRequirementPrompt(
   ].join('\n\n');
 }
 
+/**
+ * CLI chosen in the dashboard for the chat assistant or the analysis. "author" is left out on purpose: its
+ * dashboard choice belongs to the quick estimation only, not to writing requirements. The analysis stays read-only
+ * unless full tool access was allowed for it in the dashboard.
+ */
+async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
+  if (role !== 'assistant' && role !== 'analyst') return null;
+  return role === 'analyst' ? restrictedSystemCommand(pool, role) : systemCommand(pool, role);
+}
+
 /** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */
 export async function runAuthorAgent(
   pool: Pool,
@@ -124,7 +135,7 @@ export async function runAuthorAgent(
   );
   const configured = author?.command?.length
     ? author.command
-    : ((await systemCommand(pool, role)) ?? defaultAgentCommand());
+    : ((await dashboardCommand(pool, role)) ?? defaultAgentCommand());
   // Rechte: die des gewählten bzw. zuständigen Agents (eigene Zuweisung), sonst der Projektstandard der Rolle.
   const permissions = await loadProjectPermissions(pool, options.project);
   const command =
@@ -152,7 +163,7 @@ export async function runAuthorAgent(
     const result = command
       ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {
           timeoutMs: options.timeoutMs,
-          env: agentEnvironment(),
+          env: agentEnvironment(options.cwd),
           onAction: onProgress,
           resumeSession: resuming?.sessionId,
           onSpawn: (spawned) => {
@@ -174,7 +185,7 @@ export async function runAuthorAgent(
           result.exitCode === 0,
         ],
       )
-      .catch(() => undefined);
+      .catch(logged('requirements'));
     return {
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
@@ -196,7 +207,7 @@ async function assessRisks(
   execute: CommandExecutor,
   onProgress?: (message: string) => void,
 ): Promise<string> {
-  const bugs = await loadKnownBugs(pool, options.project, 60).catch(() => []);
+  const bugs = await loadKnownBugs(pool, options.project, 60).catch(logged('requirements', []));
   if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
   const list = bugs.map(
     (bug) =>
@@ -230,7 +241,7 @@ async function draftProgress(pool: Pool, ideaId: string, agent: string, message:
       agent,
       message.slice(0, 300),
     ])
-    .catch(() => undefined);
+    .catch(logged('requirements'));
 }
 
 /** Turns one requested idea into a backlog order. Sprint assignment stays a manual decision. */

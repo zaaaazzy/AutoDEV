@@ -4,7 +4,7 @@ import type { CommandExecutor } from '../core/command.js';
 import type { CoverageArea, CoverageReport } from './coverage.js';
 
 /**
- * Eigene Abdeckungsmessung von Dev Log: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
+ * Eigene Abdeckungsmessung von AIdeation: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
  * (`tsx --test …` bzw. `node --test …`), startet der Worker denselben Lauf mit `--experimental-test-coverage`.
  * So gibt es Prozentwerte, auch wenn der Tester selbst nicht messen durfte oder konnte.
  */
@@ -173,7 +173,7 @@ export function mergeCoverage(report: CoverageReport | null, measured: CoverageA
       });
     } else areas.push(entry);
   }
-  const note = `**Gemessen von Dev Log:** ${measured
+  const note = `**Gemessen von AIdeation:** ${measured
     .map(
       (area) => `${area.area} ${area.lines} % Zeilen, ${area.branches} % Verzweigungen, ${area.functions} % Funktionen`,
     )

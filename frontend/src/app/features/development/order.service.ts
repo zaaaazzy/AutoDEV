@@ -90,6 +90,41 @@ export class OrderService {
     );
   }
 
+  /** Review-Freigabe: Auftrag freigeben – der Worker mergt ihn in den Sprint-Branch und zieht die Vorschau nach. */
+  async approve(item: DevelopmentItem): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/approve`),
+      'Freigegeben – wird gleich gemergt.',
+    );
+  }
+
+  /** Review-Freigabe: zurück an die Agents, mit Rückmeldung (Pflicht). */
+  async rejectReview(item: DevelopmentItem): Promise<void> {
+    const answer = await this.confirm.ask({
+      title: 'Auftrag zurückweisen?',
+      message: `„${item.title}“ geht zurück an die Agents und wird auf seinem Branch nachgebessert.`,
+      details: ['Danach wartet er wieder auf deine Freigabe.'],
+      confirmLabel: 'Zurückweisen',
+      commentLabel: 'Was passt nicht? (Pflicht)',
+      commentPlaceholder: 'z. B. „Der Speichern-Knopf ist auf dem Handy abgeschnitten.“',
+      commentHint: 'Wird mit Datum an die Beschreibung des Auftrags angehängt und so allen Agents mitgegeben.',
+    });
+    if (!answer) return;
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/review-reject`, { comment: answer.comment }),
+      'Zurückgewiesen – die Agents bessern nach.',
+    );
+  }
+
+  /** Diesen Auftrag in der Review-Instanz zeigen (bzw. nach einem Fehlstart neu starten). */
+  async showReview(item: DevelopmentItem): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/show-review`),
+      'Review-Instanz wechselt – das dauert einen Moment.',
+      false,
+    );
+  }
+
   async removeFromSprint(item: DevelopmentItem): Promise<void> {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`),

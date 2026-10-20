@@ -18,11 +18,14 @@ export function buildWorkflow(data: BoardData, item: DevelopmentItem): WorkflowR
     .sort((left, right) => left.startedAt.localeCompare(right.startedAt))
     .flatMap((run) => run.steps);
   const latest = (agent: Agent): RunStep | undefined => steps.filter((step) => step.agentId === agent.id).at(-1);
-  const phases = ['pre_task', 'while_task', 'after_task'];
+  const phases = ['pre_task', 'while_task', 'after_task', 'on_rejected', 'on_done'];
   const agents = data.agents
     .filter(
       (agent) =>
         agent.enabled &&
+        // „Vor dem Sprint“ gehört nicht zum Auftrag; „Bei abgelehnt/abgeschlossen“ nur, wenn sie gelaufen sind.
+        agent.phase !== 'pre_sprint' &&
+        (!['on_rejected', 'on_done'].includes(agent.phase) || latest(agent) !== undefined) &&
         !(agent.role === 'author' && item.ideationId) &&
         !(agent.role === 'bug_reviewer' && item.risks?.trim()),
     )

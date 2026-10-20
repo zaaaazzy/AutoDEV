@@ -18,7 +18,7 @@ Neue Systemrolle „Visionär“ (`visionary`), die das Projekt nur lesend analy
 
 ## Problem heute
 
-Der Trichter beginnt bei einem Menschen: Ideen entstehen nur, wenn jemand sie eintippt. Genau die Analyse, die hier von Hand gemacht wurde („Lies meine Anwendung, was fehlt?“), ist wiederholbar und lässt sich automatisieren. Die Daten dafür liegen bereits in Dev Log: Bugs nach Kategorie, blockierte Aufträge, „Aktion notwendig“, Coverage-Lücken, Schätzabweichungen, Review-Befunde.
+Der Trichter beginnt bei einem Menschen: Ideen entstehen nur, wenn jemand sie eintippt. Genau die Analyse, die hier von Hand gemacht wurde („Lies meine Anwendung, was fehlt?“), ist wiederholbar und lässt sich automatisieren. Die Daten dafür liegen bereits in AIdeation: Bugs nach Kategorie, blockierte Aufträge, „Aktion notwendig“, Coverage-Lücken, Schätzabweichungen, Review-Befunde.
 
 ## Vorschlag
 
@@ -37,7 +37,7 @@ sequenceDiagram
   participant U as Nutzer / Zeitplan
   participant W as Worker
   participant V as Visionär (nur lesen)
-  participant DB as Dev-Log-DB
+  participant DB as AIdeation-DB
   U->>DB: Visionär-Lauf anfordern
   W->>DB: Kontext sammeln (Bugs, Berichte, Ideen, Statistik)
   W->>V: Prompt + Lese-Werkzeuge im Projektordner

@@ -90,7 +90,7 @@ test('Neustart: antwortet der neue Stand nicht, wird auf das vorherige Abbild zu
   };
   await requestRestart(pool, 'Patrick');
   let checks = 0;
-  // Erst nach dem Zurücksetzen antwortet Dev Log wieder.
+  // Erst nach dem Zurücksetzen antwortet AIdeation wieder.
   const health = async (): Promise<boolean> => calls.some((call) => call.includes('--no-build')) && ++checks > 0;
   const result = await processRestart(pool, '/srv', () => 0, execute, undefined, {
     health,

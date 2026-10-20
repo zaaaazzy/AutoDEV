@@ -14,12 +14,14 @@ import { OrderTableComponent } from './order-table.component.js';
 import { failureParts, orderGuide } from '../../shared/order-problem.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
+import { OrderApprovalComponent } from './order-approval.component.js';
 
 @Component({
   selector: 'app-development',
   standalone: true,
   imports: [
     OrderTableComponent,
+    OrderApprovalComponent,
     BugIconComponent,
     MarkdownPipe,
     NgClass,
@@ -71,7 +73,8 @@ export class DevelopmentComponent {
       .development.map((item) => {
         const reasons: { label: string; tone: 'error' | 'warn' | 'info' }[] = [];
         // Wartet der Auftrag auf einen Menschen, ist er nicht gescheitert, sondern braucht eine Aktion.
-        if (item.status === 'rejected')
+        if (item.status === 'approval') reasons.push({ label: 'Wartet auf Freigabe', tone: 'info' });
+        else if (item.status === 'rejected')
           reasons.push({ label: 'Abgelehnt – verstösst gegen Projektregel', tone: 'error' });
         else if (item.status === 'blocked' || (item.actionTodo && !isFinished(item.status)))
           reasons.push({ label: 'Aktion notwendig', tone: 'warn' });

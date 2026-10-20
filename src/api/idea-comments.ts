@@ -1,4 +1,4 @@
-import type { Express, Response } from 'express';
+import type { Router, Response } from 'express';
 import type { Pool } from 'pg';
 import { sendPush } from '../core/push.js';
 import { isRecord, isUuid } from '../core/validation.js';
@@ -78,11 +78,11 @@ async function resolveMentions(pool: Pool, slug: string, mentions: Mention[]): P
   return resolved;
 }
 
-export function registerIdeaCommentRoutes(app: Express, pool: Pool): void {
+export function registerIdeaCommentRoutes(app: Router, pool: Pool): void {
   const me = (response: Response) => response.locals.principal as Principal | undefined;
 
   /** Personen, die in Kommentaren erwähnt werden können: Administratoren und freigeschaltete Benutzer. */
-  app.get('/api/projects/:slug/people', async (request, response, next) => {
+  app.get('/projects/:slug/people', async (request, response, next) => {
     try {
       const people = (
         await pool.query<{ id: string; name: string }>(
@@ -99,7 +99,7 @@ export function registerIdeaCommentRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/ideation/:id/comments', async (request, response, next) => {
+  app.post('/ideation/:id/comments', async (request, response, next) => {
     try {
       const parsed = parseComment(request.body);
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Idee nicht gefunden.' });

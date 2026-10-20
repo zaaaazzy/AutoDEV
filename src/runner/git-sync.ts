@@ -6,6 +6,7 @@ import { withProjectLock } from '../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { createGithubAdapter, githubRepo } from './github.js';
 import type { CiStatus, HosterAdapter } from './hoster.js';
+import { SECRET_PATTERNS } from '../core/secret-mask.js';
 import { loadTestCommands } from './runner-selection.js';
 import { requestRestart } from './system-restart.js';
 
@@ -66,17 +67,8 @@ const INTERNAL_EXCLUDES = [
   '*service-account*.json',
 ];
 
-/** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens). */
-const SECRET_CONTENT = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\bAKIA[0-9A-Z]{16}\b/,
-  /\bgh[pousr]_[A-Za-z0-9]{36}\b/,
-  /\bgithub_pat_[A-Za-z0-9_]{40,}/,
-  /\bsk-ant-[A-Za-z0-9_-]{20,}/,
-  /\bsk-(?:proj-)?[A-Za-z0-9]{32,}/,
-  /\bxox[baprs]-[A-Za-z0-9-]{10,}/,
-  /\bAIza[0-9A-Za-z_-]{35}\b/,
-];
+/** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens); gemeinsam mit der Maskierung. */
+const SECRET_CONTENT = SECRET_PATTERNS;
 
 /** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
 export function filesWithSecrets(diff: string): string[] {
@@ -154,7 +146,7 @@ async function ensureRepository(git: GitHelpers['git'], must: GitHelpers['must']
     initialized = true;
   }
   if (!(await git('config', 'user.email')).output) {
-    await must('config', 'user.name', 'Mainty Dev Log');
+    await must('config', 'user.name', 'AIdeation');
     await must('config', 'user.email', 'dev-log@mainty.local');
   }
   await excludeInternalFolders(cwd);
@@ -273,7 +265,8 @@ export async function finishOrderBranch(
   sprintName: string,
   passed: boolean,
   rawExecute: CommandExecutor = runCommand,
-): Promise<{ merged: boolean; commit: string | null; message: string }> {
+  hold?: (files: string[]) => boolean,
+): Promise<{ merged: boolean; held?: boolean; commit: string | null; message: string }> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
@@ -285,6 +278,19 @@ export async function finishOrderBranch(
       if (dirty) {
         const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
         await must('commit', '-m', subject, '-m', body);
+      }
+      // Review-Freigabe: Branch bleibt bestehen und wird erst nach der Freigabe gemergt (mergeApprovedBranch).
+      if (hold) {
+        const changed = await git('diff', '--name-only', `${target.base}...${target.branch}`);
+        if (hold(changed.exitCode === 0 ? changed.output.split('\n').filter(Boolean) : [])) {
+          await must('checkout', target.base);
+          return {
+            merged: false,
+            held: true,
+            commit: null,
+            message: `Wartet auf Freigabe – ${target.branch} wird danach in ${target.base} gemergt.`,
+          };
+        }
       }
       await must('checkout', target.base);
       const merged = await git(
@@ -326,6 +332,87 @@ export async function finishOrderBranch(
   }
 }
 
+/**
+ * Commit nach jedem Agent: was der Agent im Arbeitsordner geändert hat, landet sofort als eigener Commit auf dem
+ * Auftrags-Branch („Entwickler: Titel“, bei einem gescheiterten Schritt „wip(Tester): Titel“). Ohne Änderungen
+ * passiert nichts. Liefert den Kurz-Hash oder null.
+ */
+export async function commitAgentStep(
+  cwd: string,
+  item: { id: string; title: string },
+  agentName: string,
+  sprintName: string | null,
+  passed: boolean,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  if (!existsSync(join(cwd, '.git'))) return null;
+  try {
+    await stageAll(git, must);
+    if (!(await must('diff', '--cached', '--name-only'))) return null;
+    const title = item.title.slice(0, 60);
+    const subject = passed ? `${agentName}: ${title}` : `wip(${agentName}): ${title}`;
+    const body = `Auftrag: ${item.id}${sprintName ? `\nSprint: ${sprintName}` : ''}\nCommit nach dem Agent „${agentName}“.`;
+    await must('commit', '--no-verify', '-m', subject, '-m', body);
+    return await must('rev-parse', '--short', 'HEAD');
+  } catch (error) {
+    console.error(`Commit nach ${agentName} fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/** Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch) mergen und löschen. */
+export async function mergeApprovedBranch(
+  cwd: string,
+  item: { title: string },
+  branch: string,
+  base: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<{ merged: boolean; message: string }> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  try {
+    if (!(await branchExists(git, branch))) return { merged: false, message: `Branch ${branch} gibt es nicht mehr.` };
+    if (!(await branchExists(git, base))) return { merged: false, message: `Basis-Branch ${base} gibt es nicht mehr.` };
+    if ((await git('status', '--porcelain', '--untracked-files=no')).output)
+      return { merged: false, message: `Offene Änderungen im Arbeitsordner – ${branch} nicht gemergt.` };
+    if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output !== base) await must('checkout', base);
+    const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: ${item.title.slice(0, 72)}`);
+    if (merged.exitCode !== 0) {
+      await git('merge', '--abort');
+      return { merged: false, message: `Merge-Konflikt mit ${base} – Branch ${branch} bleibt bestehen.` };
+    }
+    await git('branch', '-d', branch);
+    return { merged: true, message: `Freigegeben und in ${base} gemergt.` };
+  } catch (error) {
+    return { merged: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Vorschau nachziehen: Arbeiten die Agents in einem eigenen Ordner, zeigt der Projektordner (z. B. mit laufendem
+ * Entwicklungsserver) den Sprint-Stand. Nur wenn er losgelöst (detached) und ohne offene Änderungen ist – ein
+ * ausgecheckter Branch oder eigene Arbeit eines Menschen bleibt unberührt. Liefert eine Meldung oder null.
+ */
+export async function followPreview(
+  folder: string,
+  base: string,
+  execute: CommandExecutor = runCommand,
+): Promise<string | null> {
+  const { git } = gitHelpers(execute, folder);
+  if (!existsSync(join(folder, '.git'))) return null;
+  if ((await git('symbolic-ref', '-q', 'HEAD')).exitCode === 0) return null;
+  if ((await git('status', '--porcelain', '--untracked-files=no')).output)
+    return `Vorschau nicht nachgezogen: offene Änderungen in ${folder}.`;
+  const moved = await git('checkout', '-q', '--detach', base);
+  return moved.exitCode === 0
+    ? `Vorschau in ${folder} auf ${base} nachgezogen.`
+    : `Vorschau nicht nachgezogen: ${moved.output.slice(-200)}`;
+}
+
 const CI_WORKFLOW = join('.github', 'workflows', 'devlog-ci.yml');
 const CI_WAIT_MS = 30 * 60_000;
 
@@ -357,7 +444,7 @@ export function ciWorkflowYaml(
       : []),
     ...commands.map((command) => `      - run: ${command.map(shellArg).join(' ')}`),
   ];
-  return `# Automatisch von Dev Log angelegt: Build und Tests als Quality Gate für Pull Requests und main.
+  return `# Automatisch von AIdeation angelegt: Build und Tests als Quality Gate für Pull Requests und main.
 name: CI
 on:
   push:
@@ -393,19 +480,40 @@ async function ensureCiWorkflow(cwd: string, commands: string[][], helpers: GitH
     '-m',
     'ci: GitHub-Actions-Workflow für Build und Tests',
     '-m',
-    'Automatisch angelegt vom Mainty Dev Log.',
+    'Automatisch angelegt vom AIdeation.',
   );
   log.push('CI-Workflow (GitHub Actions) angelegt.');
 }
 
+/** Status und Ergebnis eines GitHub-Actions-Laufs aus `gh run view --json status,conclusion`. */
+export function parseRunState(output: string): { status: string; conclusion: string } | null {
+  const json = /\{[^{}]*\}/.exec(output);
+  if (!json) return null;
+  try {
+    const value = JSON.parse(json[0]) as { status?: unknown; conclusion?: unknown };
+    return typeof value.status === 'string'
+      ? { status: value.status, conclusion: typeof value.conclusion === 'string' ? value.conclusion : '' }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Wartet auf den GitHub-Actions-Lauf für den gepushten Stand (über die gh CLI). Ohne gh bleibt das lokale Test-Gate
- * maßgeblich; ein roter CI-Lauf verhindert den Merge nach main.
+ * maßgeblich; ein roter CI-Lauf verhindert den Merge nach main. Das Urteil kommt aus dem Lauf selbst: `gh run watch`
+ * endet bei Netz- oder API-Fehlern auch vorzeitig mit Fehlercode, während der Lauf noch läuft.
  */
-async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, log: string[]): Promise<void> {
+export async function waitForCi(
+  execute: CommandExecutor,
+  cwd: string,
+  branch: string,
+  log: string[],
+  pollMs = 10_000,
+): Promise<void> {
   const env = { ...process.env, GH_PROMPT_DISABLED: '1' };
-  const gh = async (...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs: CI_WAIT_MS, env });
-  const auth = await gh('auth', 'status', '--hostname', 'github.com').catch(() => null);
+  const gh = async (timeoutMs: number, ...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs, env });
+  const auth = await gh(GIT_TIMEOUT_MS, 'auth', 'status', '--hostname', 'github.com').catch(() => null);
   if (!auth || auth.exitCode !== 0) {
     log.push('CI-Status nicht prüfbar (GitHub CLI fehlt oder ist nicht angemeldet) – das lokale Test-Gate gilt.');
     return;
@@ -414,6 +522,7 @@ async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, 
   let runId = '';
   for (let attempt = 0; attempt < 24 && !runId; attempt += 1) {
     const list = await gh(
+      GIT_TIMEOUT_MS,
       'run',
       'list',
       '--branch',
@@ -434,10 +543,24 @@ async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, 
     log.push('Kein CI-Lauf gefunden (Workflow fehlt oder GitHub Actions ist aus) – das lokale Test-Gate gilt.');
     return;
   }
-  const watched = await gh('run', 'watch', runId, '--exit-status');
-  if (watched.exitCode !== 0) {
+  const deadline = Date.now() + CI_WAIT_MS;
+  let state: { status: string; conclusion: string } | null;
+  let watched = '';
+  for (;;) {
+    const remaining = deadline - Date.now();
+    if (remaining > 0) watched = (await gh(remaining, 'run', 'watch', runId)).output;
+    state = parseRunState((await gh(GIT_TIMEOUT_MS, 'run', 'view', runId, '--json', 'status,conclusion')).output);
+    if (state?.status === 'completed' || Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  if (state?.status !== 'completed') {
     throw new Error(
-      `Merge nach main abgelehnt: CI-Lauf ${runId} auf ${branch} ist rot. ${redactOutput(watched.output, process.env).slice(-400)}`,
+      `Merge nach main zurückgestellt: CI-Lauf ${runId} auf ${branch} ist nach ${CI_WAIT_MS / 60_000} Minuten noch nicht fertig (Status: ${state?.status ?? 'unbekannt'}).`,
+    );
+  }
+  if (state.conclusion !== 'success') {
+    throw new Error(
+      `Merge nach main abgelehnt: CI-Lauf ${runId} auf ${branch} ist rot (${state.conclusion || 'ohne Ergebnis'}). ${redactOutput(watched, process.env).slice(-400)}`,
     );
   }
   log.push(`CI grün (Lauf ${runId}).`);
@@ -446,7 +569,10 @@ async function waitForCi(execute: CommandExecutor, cwd: string, branch: string, 
 /** Führt die Testbefehle des Projekts aus; wirft mit dem Ausgabe-Ende, sobald einer fehlschlägt. */
 async function runTestGate(execute: CommandExecutor, cwd: string, commands: string[][], log: string[]): Promise<void> {
   for (const command of commands) {
-    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS });
+    // Ohne die internen Variablen des Workers (DEV_LOG_*): Projekttests sollen weder AIdeation-Zugänge sehen noch
+    // vom Projektbereich des Workers abhängen.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_')));
+    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS, env });
     if (result.exitCode !== 0) {
       throw new Error(
         `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${redactOutput(result.output, process.env).slice(-600)}`,
@@ -477,7 +603,7 @@ export function taskCommitMessage(
   const subject = title.replace(/\s+/g, ' ').trim().slice(0, 72) || 'Auftrag';
   return [
     `${type}(${scope}): ${subject}`,
-    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom Mainty Dev Log.`,
+    `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom AIdeation.`,
   ];
 }
 
@@ -572,9 +698,24 @@ async function pushSprint(
       '-m',
       `chore(${sprint.name}): Sprint-Stand sichern`,
       '-m',
-      'Automatisch gesichert vom Mainty Dev Log.',
+      'Automatisch gesichert vom AIdeation.',
     );
     log.push('Reständerungen committet.');
+  }
+  // Geprüft wird der Stand, der live geht: aktuellen main in den Sprint-Branch übernehmen (z. B. Korrekturen, die
+  // nach dem Sprintstart auf main kamen). Konflikte brechen ab, statt etwas Ungeprüftes zu mergen.
+  if (sprint.status === 'completed' && (await branchExists(git, MAIN_BRANCH))) {
+    const head = await must('rev-parse', '--abbrev-ref', 'HEAD');
+    if (head !== MAIN_BRANCH && (await git('merge-base', '--is-ancestor', MAIN_BRANCH, 'HEAD')).exitCode !== 0) {
+      const merged = await git('merge', '--no-edit', MAIN_BRANCH, '-m', `Merge ${MAIN_BRANCH} in ${head}`);
+      if (merged.exitCode !== 0) {
+        await git('merge', '--abort');
+        throw new Error(
+          `${MAIN_BRANCH} lässt sich nicht konfliktfrei in ${head} übernehmen – bitte zusammenführen. ${merged.output.slice(-300)}`,
+        );
+      }
+      log.push(`Aktuellen ${MAIN_BRANCH} in ${head} übernommen.`);
+    }
   }
   if (sprint.remote && /github\.com/.test(sprint.remote)) await ensureCiWorkflow(ci.cwd, ci.commands, helpers, log);
   await gate(log);
@@ -708,6 +849,8 @@ export async function syncSprintToGit(
   project: string,
   cwd: string,
   rawExecute: CommandExecutor = runCommand,
+  /** Nach dem Merge nach main („Live schalten“): Live-Ordner nachziehen und deployen. */
+  onMergedMain?: () => Promise<void>,
 ): Promise<number> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
@@ -767,6 +910,12 @@ export async function syncSprintToGit(
       );
       return 1;
     }
+    if (result.mergedMain && onMergedMain) {
+      await onMergedMain().catch((error: unknown) =>
+        result.log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`),
+      );
+      result.log.push('Live geschaltet: Projektordner auf main nachgezogen und deployt.');
+    }
     if (result.mergedMain && restartAfterSprint) {
       const { created } = await requestRestart(
         pool,
@@ -774,7 +923,7 @@ export async function syncSprintToGit(
         new Date(),
         `Automatisch nach dem Sprint „${sprint.name}“ (in main übernommen).`,
       );
-      result.log.push(created ? 'Neustart von Dev Log angefordert.' : 'Ein Neustart läuft bereits.');
+      result.log.push(created ? 'Neustart von AIdeation angefordert.' : 'Ein Neustart läuft bereits.');
     }
     await pool.query(
       `UPDATE sprints SET git_sync = 'done', git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,

@@ -14,11 +14,11 @@
 
 ## Beschreibung für Ideation (kopierfertig)
 
-Dev Log überwacht nicht nur sich selbst (Wächter), sondern auch die betreuten Anwendungen. Drei Quellen: (1) Health-URL des Projekts wird regelmäßig abgefragt, (2) nach jedem Deploy und periodisch werden `docker compose logs --since` nach Fehlermustern (Stacktraces, `ERROR`, HTTP 5xx) durchsucht, (3) ein Fehler-Endpunkt `POST /api/ingest/<projekt>/<token>` nimmt Frontend- und Backend-Fehler direkt aus der Anwendung an (kleines Snippet in der Doku). Gleiche Fehler werden über einen Fingerabdruck (Meldung + oberster Stack-Frame) gebündelt und zählen hoch statt neue Bugs zu erzeugen. Neue Fehler werden zu Bugs mit Quelle „Betrieb“, Schwere nach Häufigkeit; mit aktivem Auto-Bugfix entsteht direkt ein Bug-Auftrag. Fällt ein Fehler direkt nach einem Deploy neu auf, wird der letzte Sprint/Auftrag als Verdacht verlinkt.
+AIdeation überwacht nicht nur sich selbst (Wächter), sondern auch die betreuten Anwendungen. Drei Quellen: (1) Health-URL des Projekts wird regelmäßig abgefragt, (2) nach jedem Deploy und periodisch werden `docker compose logs --since` nach Fehlermustern (Stacktraces, `ERROR`, HTTP 5xx) durchsucht, (3) ein Fehler-Endpunkt `POST /api/ingest/<projekt>/<token>` nimmt Frontend- und Backend-Fehler direkt aus der Anwendung an (kleines Snippet in der Doku). Gleiche Fehler werden über einen Fingerabdruck (Meldung + oberster Stack-Frame) gebündelt und zählen hoch statt neue Bugs zu erzeugen. Neue Fehler werden zu Bugs mit Quelle „Betrieb“, Schwere nach Häufigkeit; mit aktivem Auto-Bugfix entsteht direkt ein Bug-Auftrag. Fällt ein Fehler direkt nach einem Deploy neu auf, wird der letzte Sprint/Auftrag als Verdacht verlinkt.
 
 ## Problem heute
 
-Die Kette endet beim Deploy (`src/runner/deploy.ts`): „Aktualisiert um 14:05“. Ob die Anwendung danach funktioniert, weiß Dev Log nicht. Der Wächter (`src/runner/watchdog.ts`) prüft nur Dev Log selbst. Fehler im Betrieb müssen heute von Hand als Bug eingetragen werden – dabei ist der Bug-Workflow inklusive Auto-Bugfix und Bug-Wächter schon vollständig da.
+Die Kette endet beim Deploy (`src/runner/deploy.ts`): „Aktualisiert um 14:05“. Ob die Anwendung danach funktioniert, weiß AIdeation nicht. Der Wächter (`src/runner/watchdog.ts`) prüft nur AIdeation selbst. Fehler im Betrieb müssen heute von Hand als Bug eingetragen werden – dabei ist der Bug-Workflow inklusive Auto-Bugfix und Bug-Wächter schon vollständig da.
 
 ## Vorschlag
 

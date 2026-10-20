@@ -12,11 +12,19 @@ export const AGENT_ROLES = [
   { value: 'custom', label: 'Eigene Rolle' },
 ];
 
+/** Spalten des Workflow-Boards in Ablauf-Reihenfolge. */
 export const AGENT_PHASES: { id: AgentPhase; label: string; hint: string }[] = [
-  { id: 'pre_task', label: 'Vorbereitung', hint: 'Kontext prüfen und Auftrag vorbereiten' },
-  { id: 'while_task', label: 'Umsetzung', hint: 'Auftrag bearbeiten' },
-  { id: 'after_task', label: 'Abschluss', hint: 'Tests, Review und Dokumentation' },
+  { id: 'pre_sprint', label: 'Vor dem Sprint', hint: 'Einmal beim Sprintstart · nur lesend (Planung, Prüfung)' },
+  { id: 'pre_task', label: 'Vor dem Auftrag', hint: 'Kontext prüfen und Auftrag vorbereiten' },
+  { id: 'while_task', label: 'Während', hint: 'Auftrag umsetzen' },
+  { id: 'after_task', label: 'Danach', hint: 'Tests, Review und Dokumentation' },
+  { id: 'on_rejected', label: 'Bei abgelehnt', hint: 'Wenn der Auftrag scheitert · ändert das Ergebnis nicht' },
+  { id: 'on_done', label: 'Bei abgeschlossen', hint: 'Wenn der Auftrag erledigt ist · ändert das Ergebnis nicht' },
 ];
+
+export function phaseLabel(phase: string): string {
+  return AGENT_PHASES.find((item) => item.id === phase)?.label ?? phase;
+}
 
 export function roleLabel(role: string): string {
   return AGENT_ROLES.find((item) => item.value === role)?.label ?? role;

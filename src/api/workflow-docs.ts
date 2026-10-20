@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { GeneratedDoc } from './generated-docs.js';
 
 /**
- * Register „Workflow“ in der Dokumentation: wie Dev Log selbst arbeitet. Die Inhalte kommen aus den Markdown-Dateien
+ * Register „Workflow“ in der Dokumentation: wie AIdeation selbst arbeitet. Die Inhalte kommen aus den Markdown-Dateien
  * im docs-Ordner der Installation (im Container /app/docs), damit Doku im Repository und Anzeige gleich bleiben.
  */
 export const WORKFLOW_DOCS: readonly { file: string; title: string }[] = [

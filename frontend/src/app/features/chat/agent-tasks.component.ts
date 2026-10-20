@@ -28,11 +28,11 @@ export interface MenuEntry {
   scope?: 'full' | 'ui';
   /** Startet einen Visionär-Lauf (wie „Ideen vorschlagen lassen“ in Ideation). */
   visionary?: boolean;
-  /** Startet Dev Log neu (Container neu bauen, Worker neu starten). */
+  /** Startet AIdeation neu (Container neu bauen, Worker neu starten). */
   restart?: boolean;
 }
 
-/** Stand des Neustarts von Dev Log (GET/POST /api/system/restart). */
+/** Stand des Neustarts von AIdeation (GET/POST /api/system/restart). */
 export interface RestartState {
   status: 'requested' | 'building' | 'restarting' | 'done' | 'failed';
   requestedAt: string;
@@ -44,14 +44,14 @@ export interface RestartState {
 
 const RESTART_OPEN = ['requested', 'building', 'restarting'];
 
-/** Dev Log neu starten: neuer Code und neue Agents werden geladen (nur Administration). */
+/** AIdeation neu starten: neuer Code und neue Agents werden geladen (nur Administration). */
 const RESTART_ENTRY: MenuEntry = {
   key: 'system:restart',
   restart: true,
-  title: 'Dev Log neu starten',
+  title: 'AIdeation neu starten',
   summary: 'Container neu bauen und Worker neu starten – lädt neuen Code und neue Agents',
   detail:
-    'Baut alle Dev-Log-Container mit dem aktuellen Code neu (docker compose up -d --build) und startet danach den Worker neu, damit auch er den neuen Code und die neuen Agents lädt. Laufende Aufgaben werden abgewartet (höchstens 15 Minuten); was dann noch läuft, wird nach dem Neustart fortgesetzt.',
+    'Baut alle AIdeation-Container mit dem aktuellen Code neu (docker compose up -d --build) und startet danach den Worker neu, damit auch er den neuen Code und die neuen Agents lädt. Laufende Aufgaben werden abgewartet (höchstens 15 Minuten); was dann noch läuft, wird nach dem Neustart fortgesetzt.',
   runner: 'Worker (auf dem Rechner)',
   effect:
     'Das Dashboard ist während des Neustarts kurz nicht erreichbar und verbindet sich danach selbst neu. Der Stand steht hier im Menü.',
@@ -146,6 +146,8 @@ export class AgentTasksComponent {
   protected readonly active = signal(0);
   /** Details nur, solange die Maus auf einem Eintrag ist oder mit der Tastatur gewählt wurde. */
   protected readonly showDetail = signal(false);
+  /** Details wurden per Pfeiltaste geöffnet (Maus-Verlassen schliesst sie dann nicht). */
+  private keyboardDetail = false;
   protected readonly busy = this.actions.busy;
   /** Letzter angeforderter Testlauf des Projekts. */
   protected readonly latestTest = signal<TestRequest | null>(null);
@@ -157,7 +159,7 @@ export class AgentTasksComponent {
   protected readonly visionaryOpen = computed(() =>
     ['requested', 'running'].includes(this.latestVisionary()?.status ?? ''),
   );
-  /** Letzter Neustart von Dev Log; solange er läuft, ist der Eintrag gesperrt. */
+  /** Letzter Neustart von AIdeation; solange er läuft, ist der Eintrag gesperrt. */
   protected readonly latestRestart = signal<RestartState | null>(null);
   protected readonly restartOpen = computed(() => RESTART_OPEN.includes(this.latestRestart()?.status ?? ''));
   /** Formular: null = geschlossen, id null = neue Aktion. */
@@ -266,13 +268,19 @@ export class AgentTasksComponent {
 
   /** Hover nur mit der Maus: auf Touch-Geräten öffnet der Info-Knopf die Details. */
   protected hover(index: number, event: PointerEvent): void {
-    if (event.pointerType !== 'mouse') return;
+    if (event.pointerType !== 'mouse' || this.keyboardDetail) return;
     this.active.set(index);
     this.showDetail.set(true);
   }
 
   protected leave(event: PointerEvent): void {
-    if (event.pointerType === 'mouse') this.showDetail.set(false);
+    // Per Tastatur geöffnete Details nicht schliessen, nur weil sich die Liste unter der stehenden Maus verschoben hat.
+    if (event.pointerType === 'mouse' && !this.keyboardDetail) this.showDetail.set(false);
+  }
+
+  /** Erst eine echte Mausbewegung über der Liste übergibt die Details wieder an die Maus. */
+  protected moved(): void {
+    this.keyboardDetail = false;
   }
 
   /** Details per Knopf: auf Touch-Geräten gibt es kein Hover, ein Tippen auf den Eintrag startet ihn. */
@@ -290,6 +298,7 @@ export class AgentTasksComponent {
       // Erster Pfeil zeigt die Details des markierten Eintrags, weitere wandern durch die Liste.
       if (this.showDetail()) this.active.set((this.active() + (event.key === 'ArrowDown' ? 1 : count - 1)) % count);
       this.showDetail.set(true);
+      this.keyboardDetail = true;
       setTimeout(() =>
         this.host.nativeElement.querySelector('.agent-task.active')?.scrollIntoView?.({ block: 'nearest' }),
       );
