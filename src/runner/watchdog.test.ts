@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
-import { evaluate, failureCause, failureProblem } from './watchdog.js';
+import type { Pool } from 'pg';
+import { collectProblems, evaluate, failureCause, failureProblem, problemKey } from './watchdog.js';
 
 const calm = { problems: [], notifiedAt: null };
 
@@ -44,4 +48,54 @@ test('Wächter: viele gescheiterte Agent-Schritte mit der häufigsten Ursache me
     failureProblem([failed(drive), failed(drive), failed(drive), failed('Tests rot'), failed('y'), passed]),
     'Auffällig viele Agent-Schritte scheitern (mehr als die Hälfte in 6 h, meist: Laufwerk getrennt).',
   );
+});
+
+test('Wächter: wechselnde Zahlen und Fehlermeldungen lösen keine neue Meldung aus', () => {
+  const first = evaluate(
+    calm,
+    [
+      'Worker meldet sich seit 6 Minuten nicht.',
+      'Datenbank nicht erreichbar (connect ECONNREFUSED 127.0.0.1:5432).',
+      'Letztes Datenbank-Backup ist 27 Stunden alt.',
+      'Nur noch 4.2 GB frei auf dem Projektlaufwerk.',
+    ],
+    1_000,
+  );
+  assert.equal(first.message?.title, '⚠ AIdeation: Problem erkannt');
+  const later = evaluate(
+    first.state,
+    [
+      'Worker meldet sich seit 8 Minuten nicht.',
+      'Datenbank nicht erreichbar (timeout exceeded when trying to connect).',
+      'Letztes Datenbank-Backup ist 28 Stunden alt.',
+      'Nur noch 3.9 GB frei auf dem Projektlaufwerk.',
+    ],
+    121_000,
+  );
+  assert.equal(later.message, null);
+  assert.match(later.state.problems[0] ?? '', /8 Minuten/, 'angezeigt wird der aktuelle Text');
+  assert.equal(
+    evaluate(later.state, ['Noch kein automatisches Datenbank-Backup vorhanden.'], 200_000).message?.title,
+    '⚠ AIdeation: Problem erkannt',
+  );
+  assert.equal(problemKey('Nur noch 4.2 GB frei.'), problemKey('Nur noch 12,5 GB frei.'));
+});
+
+test('Wächter: ein verschwundener Backup-Dump bricht die Prüfung nicht ab', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'watchdog-'));
+  try {
+    // Verwaister Link: readdir listet ihn, stat scheitert (wie ein zwischendurch gelöschter Dump).
+    await symlink(join(dir, 'fehlt'), join(dir, 'aideation-2026-10-20.dump'));
+    const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+    const { problems } = await collectProblems({
+      pool,
+      localUrl: 'http://127.0.0.1:1',
+      publicUrl: null,
+      backupDir: dir,
+      dataDir: dir,
+    });
+    assert.ok(problems.includes('Noch kein automatisches Datenbank-Backup vorhanden.'));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

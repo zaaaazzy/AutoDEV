@@ -4,7 +4,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { type PushMessage, sendPush } from '../core/push.js';
 import { fingerprint, isExcluded, type ProductionError, recordEvent } from './production-events.js';
 import { agentEnvironment } from './runner-prompts.js';
-import { type AlertLabels, evaluate, type WatchdogState } from './watchdog.js';
+import { type AlertLabels, evaluate, problemKey, type WatchdogState } from './watchdog.js';
 
 /**
  * Sammler des Produktions-Rückkanals im Worker: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten und direkt
@@ -307,7 +307,8 @@ export function evaluateAlerts(
   const labels = alertLabels(name);
   const result = evaluate(previous, problems, now, labels);
   if (result.message || !problems.length) return result;
-  const resolved = previous.problems.filter((problem) => !problems.includes(problem));
+  const current = new Set(problems.map(problemKey));
+  const resolved = previous.problems.filter((problem) => !current.has(problemKey(problem)));
   if (!resolved.length) return result;
   return {
     message: {
