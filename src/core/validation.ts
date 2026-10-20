@@ -182,16 +182,22 @@ export function parseFields(body: unknown, spec: FieldSpec): { column: string; v
   return fields.length ? fields : null;
 }
 
-/** Builds a parameterised UPDATE. Table and columns come from code constants, never from input. */
+/**
+ * Builds a parameterised UPDATE. Table and columns come from code constants, never from input.
+ * `onlyIf` limits the update to rows whose column still has one of the given values (atomic status check).
+ */
 export function buildUpdate(
   table: string,
   id: string,
   fields: { column: string; value: unknown }[],
   returning: string,
+  onlyIf?: { column: string; values: readonly unknown[] },
 ): { sql: string; values: unknown[] } {
   const assignments = fields.map((field, index) => `${field.column} = $${index + 2}`);
+  const values = [id, ...fields.map((field) => field.value)];
+  const condition = onlyIf ? ` AND ${onlyIf.column} = ANY($${values.push([...onlyIf.values])})` : '';
   return {
-    sql: `UPDATE ${table} SET ${assignments.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING ${returning}`,
-    values: [id, ...fields.map((field) => field.value)],
+    sql: `UPDATE ${table} SET ${assignments.join(', ')}, updated_at = NOW() WHERE id = $1${condition} RETURNING ${returning}`,
+    values,
   };
 }

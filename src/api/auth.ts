@@ -147,6 +147,25 @@ async function sessionPrincipal(pool: Pool, auth: DevLogAuth, token: string): Pr
 }
 
 /**
+ * Erneute Prüfung für lange offene Verbindungen (Chat-Stream): Sitzung noch gültig (kein Logout, nicht abgelaufen),
+ * Benutzer aktiv und das Projekt weiterhin freigegeben (Administrator oder Mitglied).
+ */
+export async function sessionStillAllowed(pool: Pool, token: string, project: string): Promise<boolean> {
+  const session = (
+    await pool.query<{ user_id: string | null; active: boolean | null; roles: string[] | null; member: boolean }>(
+      `SELECT s.user_id, u.active, u.roles,
+              EXISTS (SELECT 1 FROM project_members m WHERE m.user_id = s.user_id AND m.project_slug = $2) AS member
+         FROM auth_sessions s LEFT JOIN users u ON u.id = s.user_id
+        WHERE s.token_hash = $1 AND s.expires_at > NOW()`,
+      [hashToken(token), project],
+    )
+  ).rows[0];
+  if (!session) return false;
+  if (!session.user_id) return true; // Systemadministrator aus der .env
+  return Boolean(session.active) && (roleList(session.roles).includes('admin') || session.member);
+}
+
+/**
  * Anmeldung: Sitzungs-Cookie aus der Login-Seite. Basic Auth (für Skripte) gilt nur für den Systemadministrator und
  * nur, solange dort kein zweiter Faktor eingerichtet ist. Oberfläche und Dateien bleiben öffentlich, geschützt ist
  * die API. Der angemeldete Benutzer steht danach in res.locals.principal.
@@ -164,6 +183,8 @@ export function requireCredentials(auth: DevLogAuth, pool: Pool, limiter = new F
       const principal = token ? await sessionPrincipal(pool, auth, token) : null;
       if (principal) {
         response.locals.principal = principal;
+        // Für lange offene Verbindungen (Chat-Stream), die die Sitzung später erneut prüfen.
+        response.locals.sessionToken = token;
         next();
         return;
       }

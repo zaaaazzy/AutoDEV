@@ -110,26 +110,42 @@ export function registerDocRevisionRoutes(app: Router, pool: Pool): void {
             .status(403)
             .json({ message: 'Eigene Änderungen muss jemand anderes aus der Redaktion freigeben.' });
         }
-        const note = (request.body as { note?: unknown } | undefined)?.note;
-        if (decision === 'approved') {
-          const updated = await pool
-            .query('UPDATE docs SET title = $2, content = $3, updated_at = NOW() WHERE id = $1', [
-              revision.doc_id,
-              revision.title,
-              revision.content,
-            ])
-            .catch((error: { code?: string }) => {
-              if (error.code === '23505') return null;
-              throw error;
-            });
-          if (!updated) {
-            return void response.status(409).json({ message: 'Ein anderes Dokument trägt schon diesen Titel.' });
-          }
+        const rawNote = (request.body as { note?: unknown } | undefined)?.note;
+        const note = typeof rawNote === 'string' ? rawNote.slice(0, 500) : null;
+        const values = [request.params.id, decision, principal.displayName, note];
+        const mark = `UPDATE doc_revisions SET status = $2, reviewer_name = $3, review_note = $4, reviewed_at = NOW()
+                       WHERE id = $1 AND status = 'pending'`;
+        // Freigabe in einer Anweisung: Das Dokument ändert sich nur, wenn es noch dem Stand bei der Einreichung
+        // entspricht (sonst würde eine ältere Revision neuere Änderungen überschreiben), und die Revision wird nur
+        // dann freigegeben. Bei gleichzeitigen Freigaben gewinnt genau eine.
+        const sql =
+          decision === 'approved'
+            ? `WITH doc AS (
+                 UPDATE docs d SET title = r.title, content = r.content, updated_at = NOW()
+                   FROM doc_revisions r
+                  WHERE r.id = $1 AND r.status = 'pending' AND d.id = r.doc_id
+                    AND d.title = r.base_title AND d.content = r.base_content
+                 RETURNING d.id)
+               ${mark} AND EXISTS (SELECT 1 FROM doc) RETURNING id`
+            : `${mark} RETURNING id`;
+        const updated = await pool.query(sql, values).catch((error: { code?: string }) => {
+          if (error.code === '23505') return null;
+          throw error;
+        });
+        if (!updated) {
+          return void response.status(409).json({ message: 'Ein anderes Dokument trägt schon diesen Titel.' });
         }
-        await pool.query(
-          `UPDATE doc_revisions SET status = $2, reviewer_name = $3, review_note = $4, reviewed_at = NOW() WHERE id = $1`,
-          [request.params.id, decision, principal.displayName, typeof note === 'string' ? note.slice(0, 500) : null],
-        );
+        if (!updated.rows[0]) {
+          const status = (
+            await pool.query<{ status: string }>('SELECT status FROM doc_revisions WHERE id = $1', [request.params.id])
+          ).rows[0]?.status;
+          return void response.status(409).json({
+            message:
+              status === 'pending'
+                ? 'Das Dokument wurde seit dieser Änderung geändert – die Änderung ist veraltet, bitte neu einreichen.'
+                : 'Diese Änderung wurde bereits geprüft.',
+          });
+        }
         response.json({ status: decision, editor: hasRole(principal, 'editor') });
       } catch (error) {
         next(error);

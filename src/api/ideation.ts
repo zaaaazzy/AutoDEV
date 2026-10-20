@@ -84,14 +84,25 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Invalid ideation update.' });
       return;
     }
+    // Solange der Auftragsautor schreibt (requested, drafting) oder der Auftrag steht (accepted), bleibt die Idee
+    // unverändert; die Statusbedingung im UPDATE verhindert ein Überschreiben mitten im Lauf.
     const update = buildUpdate(
       'ideation_items',
       request.params.id,
       fields,
       `${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
+      { column: 'status', values: [...EDITABLE_IDEATION_STATUSES, IDEATION_STATUS.rejected] },
     );
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
+      const exists = (await pool.query('SELECT 1 FROM ideation_items WHERE id = $1', [request.params.id])).rows[0];
+      if (exists) {
+        response.status(409).json({
+          message:
+            'Die Idee wird gerade vom Auftragsautor bearbeitet oder ist schon angenommen und bleibt unverändert.',
+        });
+        return;
+      }
       response.status(404).json({ message: 'Ideation item not found.' });
       return;
     }

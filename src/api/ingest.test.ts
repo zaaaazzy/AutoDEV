@@ -3,7 +3,9 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import { FakeProductionDb } from '../runner/production-fake-db.test.js';
 import { createDevLogApp } from './app.js';
-import { hashIngestToken, parseIngestBody, tokenMatches } from './ingest.js';
+import express from 'express';
+import { hashIngestToken, parseIngestBody, registerIngestRoutes, tokenMatches } from './ingest.js';
+import { RateLimiter } from './security.js';
 
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
 const basic = `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`;
@@ -131,6 +133,33 @@ test('Oberhalb des Rate-Limits antwortet der Endpunkt mit 429', async () => {
     assert.equal(statuses[60], 429);
     assert.equal(db.events[0]!.count, 60);
   });
+});
+
+test('Ungültige Tokens verbrauchen das Projektlimit nicht, nur das Limit je Absender', async () => {
+  const db = new FakeProductionDb({ tokenHash: hashIngestToken(TOKEN) });
+  const app = express();
+  registerIngestRoutes(app, db.pool, {
+    perClient: new RateLimiter(20, 60_000),
+    perProject: new RateLimiter(2, 60_000),
+  });
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    for (let index = 0; index < 5; index += 1) {
+      assert.equal((await report(url, 'falsches-token-0123456789')).status, 401);
+    }
+    assert.equal((await report(url)).status, 202);
+    assert.equal((await report(url)).status, 202);
+    assert.equal((await report(url)).status, 429, 'Projektlimit greift für gültige Meldungen');
+    // Das Limit je Absender zählt weiterhin alles (5 ungültige + 3 gültige bisher).
+    const statuses: number[] = [];
+    for (let index = 0; index < 13; index += 1) statuses.push((await report(url, 'falsches-token-0123456789')).status);
+    assert.equal(statuses.at(-2), 401);
+    assert.equal(statuses.at(-1), 429);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test('Meldung als JSON oder Text; ohne Meldung ungültig', () => {
