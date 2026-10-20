@@ -108,6 +108,12 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'npm run build -C /tmp',
     'npm run build --prefix "/tmp"',
     'npm run build --prefix=$HOME',
+    'git diff /dev/null /etc/hosts',
+    'git diff /dev/null "/etc/hosts"',
+    'git diff /dev/null $HOME/.zshrc',
+    'git diff /dev/null ~/.zshrc',
+    'git diff -O/etc/hosts',
+    'git status && git diff ../x README.md',
   ]) {
     assert.ok(bashProblem(command, root, safe as never), command);
   }
@@ -121,6 +127,8 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'docker compose up -d --build app',
     'docker compose restart',
     'docker compose logs --tail=50 app',
+    'git diff HEAD~1 -- src 2>/dev/null',
+    'git diff main...HEAD --stat',
   ]) {
     assert.equal(bashProblem(command, root, safe as never), null, command);
   }

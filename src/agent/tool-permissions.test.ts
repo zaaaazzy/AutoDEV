@@ -16,6 +16,7 @@ import {
   DEFAULT_PERMISSION_GROUPS,
   extraReadDirectories,
   FULL_ACCESS_ROLES,
+  gitPathProblem,
   guardHookCommand,
   hasFullAccess,
   isAllowedCommand,
@@ -553,4 +554,28 @@ test('isAllowedCommand: npm-Optionen für fremde Projekte, Shells und Einstellun
   assert.ok(!isAllowedCommand('npm run --prefix=../x build'));
   assert.ok(!isAllowedCommand('npm run --prefix=$HOME build'));
   assert.equal(npmOptionProblem('git diff --cache'), null, 'nur npm');
+});
+
+test('git diff: Pfade ausserhalb des Projekts (No-Index-Modus) sind gesperrt', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'git-paths-')));
+  mkdirSync(join(root, 'src'));
+  symlinkSync(tmpdir(), join(root, 'raus'));
+  for (const command of [
+    'git diff /dev/null /Users/x/.zshrc',
+    'git diff /etc/hosts src/app.ts',
+    'git diff ../other/file src/app.ts',
+    'git diff src/../../x',
+    'git diff raus/datei src/app.ts',
+    'git diff HEAD -- /etc/hosts',
+  ]) {
+    assert.ok(gitPathProblem(command, root), command);
+    assert.ok(!isAllowedCommand(command, root), command);
+    // Ohne Projektordner lassen sich Links nicht auflösen – darum übergibt run_command ihn immer.
+    if (!command.includes('raus/')) assert.ok(!isAllowedCommand(command), `${command} (ohne Projektordner)`);
+  }
+  for (const command of ['git diff', 'git diff HEAD~1', 'git diff main..feature src', `git diff ${root}/src`]) {
+    assert.equal(gitPathProblem(command, root), null, command);
+    assert.ok(isAllowedCommand(command, root), command);
+  }
+  assert.equal(gitPathProblem('git log /etc/hosts', root), null, 'nur git diff schaltet in den No-Index-Modus');
 });

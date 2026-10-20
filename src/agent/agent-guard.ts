@@ -2,7 +2,13 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMPOSE_STARTING, composeViolation, npmOptionProblem, SECRET_IN_COMMAND } from './tool-permissions.js';
+import {
+  COMPOSE_STARTING,
+  composeViolation,
+  gitPathProblem,
+  npmOptionProblem,
+  SECRET_IN_COMMAND,
+} from './tool-permissions.js';
 
 /**
  * Wächter für Claude-Agents (PreToolUse-Hook): prüft jeden Datei- und Shell-Zugriff, bevor die CLI ihn ausführt.
@@ -103,6 +109,8 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
     if (/^git\s/.test(part) && DANGEROUS_GIT_OPTION.test(part)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
+    const gitProblem = gitPathProblem(part, root);
+    if (gitProblem) return gitProblem;
     if (/^npm\s/.test(part)) {
       const npmProblem = npmOptionProblem(part, root);
       if (npmProblem) return npmProblem;

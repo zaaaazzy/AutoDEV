@@ -371,11 +371,37 @@ export function npmOptionProblem(command: string, root?: string): string | null 
 }
 
 /**
+ * Pfadangaben von „git diff“: Liegt ein Pfad ausserhalb des Arbeitsbaums, schaltet Git von selbst in den
+ * No-Index-Modus und gibt beliebige Dateien aus (git diff /dev/null ~/.zshrc). Darum muss jedes Argument – samt
+ * aufgelöster Links – im Projekt liegen; Shell-Ersetzungen ($, ~) und Ordner-Dateien (-O) sind gesperrt.
+ * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt.
+ */
+export function gitPathProblem(command: string, root?: string): string | null {
+  // Umleitungen nach /dev/null bzw. 2>&1 sind keine Argumente (andere Umleitungen sperrt der Wächter vorher).
+  const words = command
+    .replace(/\d*>>?\s*(?:&\d+|\/dev\/null)/g, ' ')
+    .trim()
+    .split(/\s+/);
+  if (words[0] !== 'git' || words[1] !== 'diff') return null;
+  for (const raw of words.slice(2)) {
+    const word = raw.replace(/['"\\]/g, '');
+    if (/^(?:-O|--orderfile)/.test(word)) return `„${command}“: -O/--orderfile ist gesperrt.`;
+    if (!word || word.startsWith('-')) continue;
+    if (word.startsWith('~') || word.includes('$')) return `„${command}“: nur Pfade im Projektordner.`;
+    const outside = root
+      ? ((real) => real !== root && !real.startsWith(root + sep))(realPath(resolve(root, word)))
+      : isAbsolute(word) || word.split('/').includes('..');
+    if (outside) return `„${command}“: nur Pfade im Projektordner (Git liest sonst fremde Dateien).`;
+  }
+  return null;
+}
+
+/**
  * Allow safe fixed commands and validated package names/options for npm installs. Mit Projektordner (root) wird ein
  * --prefix samt symbolischer Links aufgelöst; ohne ist er nur als einfacher relativer Ordner erlaubt.
  */
 export function isAllowedCommand(command: string, root?: string): boolean {
-  if (npmOptionProblem(command, root)) return false;
+  if (npmOptionProblem(command, root) || gitPathProblem(command, root)) return false;
   if (COMMAND_PATTERN.test(command) || READ_COMMAND.test(command)) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'npm' && ['install', 'i', 'uninstall'].includes(parts[1] ?? '') && parts.length > 2) {
