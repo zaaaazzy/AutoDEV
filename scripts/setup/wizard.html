@@ -403,7 +403,7 @@
             ${item(c ? c.claude.ok : null, 'Claude Code (optional)', c ? (c.claude.ok ? escape(c.claude.version) : 'Für die besten Ergebnisse: https://claude.com/claude-code') : '…', true)}
             ${item(c ? c.ollama.ok : null, 'Ollama (optional, kostenlos)', c ? (c.ollama.ok ? escape(c.ollama.version) : 'Lokales Modell: https://ollama.com') : '…', true)}
           </ul>
-          ${c && c.envExists ? '<p class="hint">Es gibt bereits eine Konfiguration (.env). Sie wird vor dem Überschreiben gesichert.</p>' : ''}`;
+          ${c && c.envExists ? '<p class="hint">Es gibt bereits eine Konfiguration (.env). Sie wird gesichert (<code>.env.bak-…</code>) und ergänzt: Zugang und ausgefüllte Optionen werden gesetzt, alle anderen Werte – auch der Secret Key – bleiben erhalten.</p>' : ''}`;
         $('next').disabled = !c || !c.node.ok || !c.docker.ok || !c.compose.ok;
       }
 
