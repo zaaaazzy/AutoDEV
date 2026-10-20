@@ -10,7 +10,7 @@ import {
   type WorkerStatus,
 } from './models.js';
 import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Section } from './navigation.js';
-import { fetchProjectData } from './project-loader.js';
+import { fetchProjectData, keepFailedSections } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
 
@@ -44,6 +44,8 @@ const NOTICE_MS = 5000;
 export class ProjectStore {
   private readonly api = inject(ApiService);
   private requestVersion = 0;
+  /** Projekt, zu dem `data` aktuell gehört. */
+  private loadedSlug = '';
 
   readonly projects = signal<Project[]>([]);
   readonly activeProject = signal(projectFromHash() ?? readStoredProject());
@@ -137,6 +139,7 @@ export class ProjectStore {
       this.projects.set(projects);
       if (!projects.length) {
         this.activeProject.set('');
+        this.loadedSlug = '';
         this.data.set(emptyProjectData());
         return;
       }
@@ -161,14 +164,19 @@ export class ProjectStore {
       this.foregroundLoads.update((count) => count + 1);
     }
     if (!slug) {
+      this.loadedSlug = '';
       this.data.set(emptyProjectData());
       this.loading.set(false);
       return;
     }
-    const { data, errors } = await fetchProjectData(this.api, slug);
+    const loaded = await fetchProjectData(this.api, slug);
     if (version !== this.requestVersion) return;
+    const { errors } = loaded;
 
-    this.data.set(data);
+    // Im Hintergrund (gleiches Projekt) behalten fehlgeschlagene Bereiche ihre bisherigen Daten.
+    const sameProject = background && this.loadedSlug === slug;
+    this.data.set(sameProject ? keepFailedSections(this.data(), loaded) : loaded.data);
+    this.loadedSlug = slug;
     this.errors.set(errors);
     this.loading.set(false);
     if (!background && Object.keys(errors).length) {
