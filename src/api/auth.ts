@@ -48,6 +48,12 @@ export async function verifyPassword(password: string, stored: string): Promise<
 /** Ein fester Dummy-Hash, damit unbekannte Benutzernamen genauso lange brauchen wie falsche Passwörter. */
 let dummyHash: Promise<string> | null = null;
 
+/** Ein scrypt-Vergleich ohne Ergebnis – nur für gleiche Antwortzeiten. */
+async function dummyVerify(password: string): Promise<void> {
+  dummyHash ??= hashPassword('dummy-password-for-timing');
+  await verifyPassword(password, await dummyHash);
+}
+
 export function systemAdmin(auth: DevLogAuth): Principal {
   return { id: null, username: auth.username, displayName: 'Systemadministrator', roles: ['admin'] };
 }
@@ -229,6 +235,9 @@ async function findAccount(
 ): Promise<Account | null> {
   if (typeof username !== 'string' || typeof password !== 'string') return null;
   if (equalSecret(username, auth.username)) {
+    // Das .env-Passwort wird direkt verglichen; der scrypt-Lauf sorgt dafür, dass der Name des Systemadministrators
+    // nicht an einer schnelleren Antwort zu erkennen ist.
+    await dummyVerify(password);
     return equalSecret(password, auth.password)
       ? { principal: systemAdmin(auth), key: 'system', totpSecret: auth.totpSecret ?? null }
       : null;
@@ -250,8 +259,7 @@ async function findAccount(
       .catch(logged('auth', { rows: [] }))
   ).rows[0];
   if (!user) {
-    dummyHash ??= hashPassword('dummy-password-for-timing');
-    await verifyPassword(password, await dummyHash);
+    await dummyVerify(password);
     return null;
   }
   if (!(await verifyPassword(password, user.password_hash))) return null;
@@ -343,7 +351,12 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
 }
 
 /** Zwei-Faktor einrichten/abschalten und andere Geräte abmelden – jeweils für das eigene Konto. */
-export function registerSecurityRoutes(app: Router, pool: Pool, auth: DevLogAuth): void {
+export function registerSecurityRoutes(
+  app: Router,
+  pool: Pool,
+  auth: DevLogAuth,
+  limiter = new FailureLimiter(),
+): void {
   const principalOf = (response: Response): Principal => response.locals.principal as Principal;
   const totpOf = async (principal: Principal): Promise<string | null> =>
     principal.id
@@ -353,6 +366,60 @@ export function registerSecurityRoutes(app: Router, pool: Pool, auth: DevLogAuth
           ])
         ).rows[0]?.secret ?? null)
       : (auth.totpSecret ?? null);
+
+  /**
+   * Einen Schlüssel einrichten oder ersetzen verlangt das aktuelle Passwort und – ist der zweite Faktor schon aktiv –
+   * einen gültigen Code des bisherigen Schlüssels. Ein gestohlenes Sitzungs-Cookie allein reicht so nicht, um den
+   * Besitzer mit einem eigenen Schlüssel auszusperren. Antwortet selbst und gibt false zurück, wenn etwas fehlt.
+   * consumeCode: Beim Einrichten gilt der Code nur einmal; beim Bestätigen kurz danach darf derselbe Code noch einmal
+   * kommen, sonst müsste man auf den nächsten Code der App warten.
+   */
+  const confirmIdentity = async (
+    principal: Principal,
+    body: unknown,
+    response: Response,
+    consumeCode: boolean,
+  ): Promise<boolean> => {
+    const { password, currentCode } = (body ?? {}) as { password?: unknown; currentCode?: unknown };
+    const key = `totp|${principal.id ?? 'system'}`;
+    if (limiter.isBlocked(key)) {
+      response.status(429).json({ message: 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.' });
+      return false;
+    }
+    let passwordOk = false;
+    if (typeof password === 'string') {
+      if (principal.id) {
+        const stored = (
+          await pool.query<{ hash: string }>('SELECT password_hash AS hash FROM users WHERE id = $1', [principal.id])
+        ).rows[0]?.hash;
+        passwordOk = Boolean(stored) && (await verifyPassword(password, stored ?? ''));
+      } else {
+        await dummyVerify(password);
+        passwordOk = equalSecret(password, auth.password);
+      }
+    }
+    if (!passwordOk) {
+      limiter.recordFailure(key);
+      response.status(400).json({ message: 'Das Passwort stimmt nicht.', field: 'password' });
+      return false;
+    }
+    const secret = await totpOf(principal);
+    const codeOk =
+      !secret ||
+      (consumeCode
+        ? acceptCode(principal.id ?? 'system', secret, currentCode)
+        : typeof currentCode === 'string' && verifyTotp(secret, currentCode) !== null);
+    if (!codeOk) {
+      limiter.recordFailure(key);
+      response.status(400).json({
+        message: 'Bitte den aktuellen Code des bisherigen Schlüssels aus der Authenticator-App eingeben.',
+        field: 'currentCode',
+      });
+      return false;
+    }
+    limiter.reset(key);
+    return true;
+  };
 
   app.get('/auth/status', async (request, response, next) => {
     try {
@@ -372,9 +439,10 @@ export function registerSecurityRoutes(app: Router, pool: Pool, auth: DevLogAuth
     }
   });
 
-  app.post('/auth/totp/setup', async (_request, response, next) => {
+  app.post('/auth/totp/setup', async (request, response, next) => {
     try {
       const principal = principalOf(response);
+      if (!(await confirmIdentity(principal, request.body, response, true))) return;
       const secret = generateSecret();
       if (principal.id) {
         await pool.query('UPDATE users SET totp_pending = $2 WHERE id = $1', [principal.id, secret]);
@@ -396,6 +464,7 @@ export function registerSecurityRoutes(app: Router, pool: Pool, auth: DevLogAuth
   app.post('/auth/totp/enable', async (request, response, next) => {
     try {
       const principal = principalOf(response);
+      if (!(await confirmIdentity(principal, request.body, response, false))) return;
       const pending = principal.id
         ? (
             await pool.query<{ value: string | null }>('SELECT totp_pending AS value FROM users WHERE id = $1', [
