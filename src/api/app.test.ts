@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
+import { hashPassword, verifyPassword } from './auth.js';
 import { DEV_COLUMNS } from './development.js';
 import { currentStep, hotp } from './totp.js';
 
@@ -748,6 +749,33 @@ test('blocks a client after repeated failed logins', async () => {
     }
     assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: wrong })).status, 429);
     assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: { Authorization: basicAuth() } })).status, 429);
+  });
+});
+
+test('Login: falsches Passwort des Systemadministrators dauert so lange wie ein scrypt-Vergleich', async () => {
+  const stored = await hashPassword('x');
+  let scryptMs = Infinity;
+  for (let run = 0; run < 3; run += 1) {
+    const start = performance.now();
+    await verifyPassword('y', stored);
+    scryptMs = Math.min(scryptMs, performance.now() - start);
+  }
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const login = async (username: string) => {
+      const start = performance.now();
+      const response = await fetch(`${baseUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: 'wrong-password' }),
+      });
+      assert.equal(response.status, 401);
+      return performance.now() - start;
+    };
+    await login('unbekannt'); // erzeugt den Dummy-Hash
+    const elapsed = await login(auth.username);
+    // Vorher antwortete der Server für den .env-Namen ohne scrypt sofort.
+    assert.ok(elapsed >= scryptMs * 0.5, `${elapsed.toFixed(1)} ms < halber scrypt (${scryptMs.toFixed(1)} ms)`);
   });
 });
 

@@ -48,6 +48,12 @@ export async function verifyPassword(password: string, stored: string): Promise<
 /** Ein fester Dummy-Hash, damit unbekannte Benutzernamen genauso lange brauchen wie falsche Passwörter. */
 let dummyHash: Promise<string> | null = null;
 
+/** Ein scrypt-Vergleich ohne Ergebnis – nur für gleiche Antwortzeiten. */
+async function dummyVerify(password: string): Promise<void> {
+  dummyHash ??= hashPassword('dummy-password-for-timing');
+  await verifyPassword(password, await dummyHash);
+}
+
 export function systemAdmin(auth: DevLogAuth): Principal {
   return { id: null, username: auth.username, displayName: 'Systemadministrator', roles: ['admin'] };
 }
@@ -229,6 +235,9 @@ async function findAccount(
 ): Promise<Account | null> {
   if (typeof username !== 'string' || typeof password !== 'string') return null;
   if (equalSecret(username, auth.username)) {
+    // Das .env-Passwort wird direkt verglichen; der scrypt-Lauf sorgt dafür, dass der Name des Systemadministrators
+    // nicht an einer schnelleren Antwort zu erkennen ist.
+    await dummyVerify(password);
     return equalSecret(password, auth.password)
       ? { principal: systemAdmin(auth), key: 'system', totpSecret: auth.totpSecret ?? null }
       : null;
@@ -250,8 +259,7 @@ async function findAccount(
       .catch(logged('auth', { rows: [] }))
   ).rows[0];
   if (!user) {
-    dummyHash ??= hashPassword('dummy-password-for-timing');
-    await verifyPassword(password, await dummyHash);
+    await dummyVerify(password);
     return null;
   }
   if (!(await verifyPassword(password, user.password_hash))) return null;
