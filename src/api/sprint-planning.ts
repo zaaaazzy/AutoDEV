@@ -56,7 +56,9 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
   const settings = (
     await pool.query<{ mode: SprintMode; capacity: number | null; sprints: string }>(
       `SELECT sprint_mode AS mode, sprint_capacity_hours AS capacity,
-              (SELECT COUNT(*) FROM sprints WHERE project_slug = p.slug) AS sprints
+              -- Höchste Sprint-Nummer statt Anzahl: nach gelöschten Sprints entstanden sonst doppelte Namen (und Branches).
+              (SELECT GREATEST(COUNT(*), COALESCE(MAX(substring(name FROM '^Sprint ([0-9]+)$')::int), 0))
+                 FROM sprints WHERE project_slug = p.slug) AS sprints
          FROM projects p WHERE slug = $1`,
       [project],
     )
