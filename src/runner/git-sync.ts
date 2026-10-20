@@ -150,11 +150,14 @@ async function stageAll(
   options: { orderOnly?: boolean } = {},
 ): Promise<string[]> {
   // Auftrags-Commits: Testberichte und Agent-Ablage gehören nicht zum Auftrag (sie kommen mit der Sprint-Sicherung).
-  await must(
-    'add',
-    '-A',
-    ...(options.orderOnly ? ['--', '.', ...CHANGED_FILES_IGNORED.map((path) => `:(exclude)${path}`)] : []),
-  );
+  // Nur Pfade ausschliessen, die Git nicht ohnehin ignoriert: Ein ignorierter Pfad im Pathspec (z. B. .dev-log/ aus
+  // info/exclude) lässt „git add“ mit Exit 1 abbrechen – der Stand bliebe dann gestagt liegen und blockierte jeden
+  // weiteren Auftrag als „fremde Änderung“.
+  const excluded: string[] = [];
+  for (const path of options.orderOnly ? CHANGED_FILES_IGNORED : []) {
+    if ((await git('check-ignore', '-q', '--no-index', path)).exitCode !== 0) excluded.push(`:(exclude)${path}`);
+  }
+  await must('add', '-A', ...(options.orderOnly ? ['--', '.', ...excluded] : []));
   const diff = await git('diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
   const held = diff.exitCode === 0 ? filesWithSecrets(diff.output) : [];
   if (!held.length) return held;
