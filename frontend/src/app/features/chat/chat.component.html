@@ -31,9 +31,11 @@
         <span class="chat-clear-label">Verlauf leeren</span>
       </button>
     }
+    <!-- Sprechblase angedockt: kein zweites, kleines Fenster – nur Schließen. -->
     <button
       type="button"
       class="chat-icon-button chat-zoom"
+      [hidden]="bubble() && zoom() === 'docked'"
       (click)="toggleZoom()"
       [attr.aria-pressed]="!!zoom()"
       [title]="zoom() ? 'Verkleinern' : 'Chat vergrößern'"
