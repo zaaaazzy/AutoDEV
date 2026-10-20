@@ -24,6 +24,7 @@ cat > "$PLIST" <<P
 <key>EnvironmentVariables</key><dict>
 <key>PATH</key><string>$WORKER_PATH</string>
 <key>DEV_LOG_DATABASE_URL</key><string>${DEV_LOG_DATABASE_URL:-postgresql://devlog:devlog_local_dev@localhost:5433/aideation}</string>
+<key>DEV_LOG_REVIEW_DATABASE_URL</key><string>${DEV_LOG_REVIEW_DATABASE_URL:-}</string>
 <key>DEV_LOG_OLLAMA_MODEL</key><string>${DEV_LOG_OLLAMA_MODEL:-qwen3.5:9b}</string>
 <key>DEV_LOG_SECRET_KEY</key><string>${DEV_LOG_SECRET_KEY:-}</string>
 </dict>

@@ -13,6 +13,7 @@ import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
 import { projectFolderError } from '../core/validation.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
+import { runCommand } from '../core/command.js';
 import { ReviewSlots } from './review-slots.js';
 import { syncSprintCommits } from './sprint-commits.js';
 
@@ -339,7 +340,10 @@ async function main(): Promise<void> {
     const visionaryActive = new Set<string>();
     const testActive = new Set<string>();
     // Review-Container (projektübergreifend): angeforderte Stände starten, Freigaben zuweisen, Zustand prüfen.
-    const reviewSlots = new ReviewSlots(pool, INSTALL_ROOT);
+    const reviewSlots = new ReviewSlots(pool, INSTALL_ROOT, runCommand, undefined, {
+      reviewUrl: process.env.DEV_LOG_REVIEW_DATABASE_URL?.trim() || null,
+      mainUrl: process.env.DEV_LOG_DATABASE_URL?.trim() || null,
+    });
     let reviewActive = false;
     const reviewTimer = setInterval(() => {
       if (reviewActive || stopping) return;
