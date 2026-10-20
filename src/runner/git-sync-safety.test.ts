@@ -166,3 +166,19 @@ test('Arbeitsordner-Sperre: belegt, solange sie gehalten wird, und nacheinander 
   assert.equal(second, true);
   assert.equal(treeBusy(folder), false);
 });
+
+test('Auftrag ohne Sprint im losgelösten Worktree landet in main, während main im Hauptordner ausgecheckt ist', async () => {
+  const { cwd, git } = await project();
+  const agent = `${cwd}-agent-nosprint`;
+  git('worktree', 'add', '-q', '--detach', agent, 'main');
+  const mainBefore = git('rev-parse', 'main');
+  const branch = await enterOrderBranch(agent, item, null);
+  assert.ok(branch);
+  assert.notEqual(branch.base, 'HEAD');
+  assert.equal(branch.base, 'main');
+  await writeFile(join(agent, 'fix.ts'), 'export {};\n');
+  const result = await finishOrderBranch(agent, item, branch, 'Betrieb', true);
+  assert.equal(result.merged, true);
+  assert.notEqual(git('rev-parse', 'main'), mainBefore);
+  assert.match(git('ls-tree', '-r', '--name-only', 'main'), /fix\.ts/);
+});

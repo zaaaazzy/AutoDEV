@@ -336,3 +336,31 @@ test('Wächter: Links ins Leere werden nicht beschrieben (Ziel läge ungeprüft 
   assert.match(fileProblem(write('leer/x.md'), all, root) ?? '', /Link ins Leere/);
   assert.equal(fileProblem(write('docs/neu2.md'), all, root), null);
 });
+
+test('Wächter: escapte Anführungszeichen verstecken keine Umleitung, Ersetzung oder Hintergrund-Befehle', () => {
+  for (const command of [
+    "npm test \\' > /tmp/x \\'",
+    "npm test \\'$(id)\\'",
+    "git status \\' & touch x \\'",
+    'npm test \\" > /tmp/x \\"',
+    "npm test \\'`id`\\'",
+    "npm test $'a' > /tmp/x",
+    "npm test $'\\'' > /tmp/x",
+    `npm test "a 'b' \\" > /tmp/x"`,
+    `npm test "it's" > /tmp/x`,
+    `npm test 'a' "$(id)"`,
+  ]) {
+    assert.ok(bashProblem(command, root), command);
+  }
+});
+
+test('Wächter: gewöhnliche Quotes bleiben erlaubt', () => {
+  for (const command of [
+    'git log --grep "a > b"',
+    `git log --format='%h > %s'`,
+    `git log --grep "it's"`,
+    `git log --grep 'say "hi" > you'`,
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
