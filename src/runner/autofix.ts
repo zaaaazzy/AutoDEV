@@ -1,4 +1,5 @@
 import { logged } from '../core/log.js';
+import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
@@ -65,12 +66,15 @@ export function isAgentFailure(output: string): boolean {
   return AGENT_FAILURE_PATTERNS.some((pattern) => pattern.test(tail));
 }
 
-/** Projektordner bzw. Laufwerk war nicht erreichbar – kein Code-Fehler, der Auftrag startet wieder, sobald er da ist. */
+/**
+ * Projektordner bzw. Laufwerk war nicht erreichbar – kein Code-Fehler, der Auftrag startet wieder, sobald er da ist.
+ * Nur Meldungen, die das Arbeitsverzeichnis selbst betreffen: ein ENOENT in einem Test (fehlendes Fixture, `scandir`,
+ * „Path … does not exist“) ist ein normaler Fehler mit Bug-Bericht – sonst liefe der Auftrag endlos erneut an.
+ */
 const ENVIRONMENT_PATTERNS = [
   /Can't access working directory/i,
-  /Path "[^"]+" does not exist/i,
   /Projektordner nicht gefunden/,
-  /no such file or directory, (?:chdir|uv_cwd|scandir) /i,
+  /no such file or directory, (?:chdir|uv_cwd)\b/i,
 ];
 export const ENVIRONMENT_TODO =
   'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen, der Auftrag startet dann neu';
@@ -200,12 +204,16 @@ export async function delegateAfterAnalysis(
   if (auto) await queueBugFix(pool, item, item.failureBugId);
 }
 
-/** Ist der Projektordner wieder erreichbar, starten Aufträge, die nur darauf gewartet haben, erneut. */
-export async function resumeAfterEnvironment(pool: Pool, project: string): Promise<void> {
+/**
+ * Ist der Projektordner wieder erreichbar, starten Aufträge, die nur darauf gewartet haben, erneut – höchstens
+ * MAX_AUTO_RETRIES-mal (retry_count), damit ein falsch erkannter Umgebungsfehler keine Endlosschleife auslöst.
+ */
+export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: string): Promise<void> {
+  if (cwd !== undefined && !folderAvailable(cwd)) return;
   await pool.query(
-    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, updated_at = NOW()
-      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = $2`,
-    [project, ENVIRONMENT_TODO],
+    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
+      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = $2 AND retry_count < $3`,
+    [project, ENVIRONMENT_TODO, MAX_AUTO_RETRIES],
   );
 }
 
