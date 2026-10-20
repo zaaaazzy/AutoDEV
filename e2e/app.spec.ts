@@ -171,6 +171,57 @@ test('Dokumentation: Lesen statt Bearbeiten, Suche mit Ausschnitten, Inhaltsverz
   }
 });
 
+test('Dokumentation → Marketing: Agent-Rechte nur mit Docs-Recht, „Zurück“ verlässt die Seite', async ({
+  page,
+  browser,
+  request,
+}) => {
+  await login(page);
+  // Erst nach der Anmeldung mitschreiben: vorher meldet die Sitzungsprüfung erwartungsgemäß 401.
+  const errors: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text());
+  });
+  await page.goto('/#docs');
+  await expect(page.locator('.doc-group summary', { hasText: 'Handbücher' })).toBeVisible();
+  await page.locator('.doc-group', { hasText: 'Marketing' }).getByRole('link', { name: 'Agents, Aufgaben und Rechte' }).click();
+  await expect(page).toHaveURL(/#docs\/marketing\/agent-permissions$/);
+  const rows = page.locator('.ap-table tbody tr');
+  await expect(rows).toHaveCount(10);
+  await expect(rows.filter({ hasText: '(visual_tester)' })).toHaveCount(1);
+  await expect(page.locator('.ap-table tr[data-role="developer"] [data-column="files"]')).toContainText('ja, mit Backup');
+  await expect(page.locator('.ap-table tr[data-role="reviewer"] [data-column="files"]')).toContainText('nur lesen');
+  await expect(page.locator('.ap-diagram svg')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('.ap-table')).toHaveCount(0);
+  expect(errors).toEqual([]);
+
+  // Ohne Docs-Recht: kein Marketing-Eintrag, und die Adresse zeigt die Seite nicht.
+  const admin = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const planner = `planer${Date.now() % 100000}`;
+  const plannerPassword = 'planer-passwort-123';
+  const created = await request.post('/api/users', {
+    headers: admin,
+    data: { username: planner, displayName: 'Paul Planer', password: plannerPassword, roles: ['plan'], projects: ['e2e'] },
+  });
+  expect(created.ok(), await created.text()).toBeTruthy();
+  const context = await browser.newContext();
+  const plannerPage = await context.newPage();
+  await plannerPage.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
+  await plannerPage.goto('/');
+  await plannerPage.getByLabel('Benutzername').fill(planner);
+  await plannerPage.getByLabel('Passwort').fill(plannerPassword);
+  await plannerPage.getByRole('button', { name: 'Anmelden' }).click();
+  await plannerPage.goto('/#docs');
+  await expect(plannerPage.locator('.doc-group summary', { hasText: 'Handbücher' })).toBeVisible();
+  await expect(plannerPage.locator('.doc-group summary', { hasText: 'Marketing' })).toHaveCount(0);
+  await plannerPage.goto('/#docs/marketing/agent-permissions');
+  await plannerPage.reload();
+  await expect(plannerPage.locator('.doc-reader')).toContainText('braucht das Recht „Dokumentation bearbeiten“');
+  await expect(plannerPage.locator('.ap-table')).toHaveCount(0);
+  await context.close();
+});
+
 test('Rollen: Autorin reicht Dokumentänderung ein, Redaktion gibt frei', async ({ page, browser, request }) => {
   const admin = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const author = `autorin${Date.now() % 100000}`;

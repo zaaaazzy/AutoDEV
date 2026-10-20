@@ -1,0 +1,62 @@
+/* Dokumentation → Marketing: „Agents, Aufgaben und Rechte“ */
+a.doc-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+.agent-permissions section {
+  margin-top: 22px;
+}
+.ap-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+.ap-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+.ap-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+.ap-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.ap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ap-table caption {
+  padding-bottom: 6px;
+  text-align: left;
+}
+.ap-table th,
+.ap-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.ap-table thead th {
+  background: #eef2ec;
+}
+.ap-table tbody th {
+  min-width: 170px;
+  font-weight: 600;
+}
+.ap-table tbody th .ap-icon {
+  margin-right: 4px;
+  font-size: 1.1rem;
+}
+.ap-diagram {
+  overflow-x: auto;
+}
