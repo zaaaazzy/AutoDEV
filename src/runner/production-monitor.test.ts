@@ -227,3 +227,37 @@ test('Aufbewahrung: Ereignisse, Verlauf und Deploys älter als die Frist des Pro
     assert.match(statement!, /make_interval\(days => p\.production_retention_days\)/);
   }
 });
+
+/** Wie Postgres: NUL-Bytes in Text werden abgelehnt; zusätzlich scheitert ein Ereignis mit „kaputt“. */
+function strictPool(db: FakeProductionDb) {
+  const base = db.pool;
+  const query = async (sql: string, values: unknown[] = []) => {
+    if (values.some((value) => typeof value === 'string' && value.includes('\u0000')))
+      throw new Error('invalid byte sequence for encoding "UTF8": 0x00');
+    if (sql.includes('INSERT INTO production_events') && values.some((value) => String(value).includes('kaputt')))
+      throw new Error('Speichern gescheitert');
+    return base.query(sql, values);
+  };
+  return { query, connect: async () => ({ query, release: () => undefined }) } as unknown as typeof base;
+}
+
+test('Log-Scan: NUL-Bytes werden entfernt, der Zeitstempel rückt nach erfolgreicher Verarbeitung vor', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const output = 'api-1  | ERROR binär \u0000 Daten\napi-1  | ERROR anderer Fehler';
+  const execute: CommandExecutor = async () => ({ exitCode: 0, durationMs: 1, output });
+  const now = new Date('2026-10-20T10:00:00Z');
+  assert.deepEqual(await scanLogs(strictPool(db), 'shop', '/x', execute, now), { events: 2, occurrences: 2 });
+  assert.equal(db.events.length, 2);
+  assert.equal(db.status.get('shop')?.logsScannedAt, now);
+  assert.equal(db.status.get('shop')?.logError, null);
+});
+
+test('Log-Scan: ein gescheitertes Ereignis verwirft die übrigen nicht und hält den Zeitstempel an', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const output = 'api-1  | ERROR kaputt\napi-1  | ERROR gut';
+  const execute: CommandExecutor = async () => ({ exitCode: 0, durationMs: 1, output });
+  await assert.rejects(scanLogs(strictPool(db), 'shop', '/x', execute), /Speichern gescheitert/);
+  assert.equal(db.events.length, 1);
+  assert.equal(db.status.get('shop')?.logsScannedAt ?? null, null);
+  assert.match(db.status.get('shop')?.logError ?? '', /^Verarbeitung: Speichern gescheitert/);
+});

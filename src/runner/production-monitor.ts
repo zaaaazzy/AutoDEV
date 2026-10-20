@@ -246,14 +246,18 @@ export async function scanLogs(
       output: error instanceof Error ? error.message : String(error),
     }),
   );
-  const failed = result.exitCode !== 0 ? result.output.trim().split('\n').slice(-2).join(' ').slice(0, 300) : null;
-  await pool.query(
-    `INSERT INTO production_status (project_slug, logs_scanned_at, log_error) VALUES ($1, $2, $3)
-     ON CONFLICT (project_slug) DO UPDATE
-       SET logs_scanned_at = CASE WHEN $3::text IS NULL THEN $2 ELSE production_status.logs_scanned_at END, log_error = $3`,
-    [project, now, failed],
-  );
-  if (failed) return null;
+  // Ohne Fehler rückt der Zeitstempel vor; mit Fehler bleibt er, damit der nächste Scan die Zeilen erneut liest.
+  const saveScan = (failed: string | null) =>
+    pool.query(
+      `INSERT INTO production_status (project_slug, logs_scanned_at, log_error) VALUES ($1, $2, $3)
+       ON CONFLICT (project_slug) DO UPDATE
+         SET logs_scanned_at = CASE WHEN $3::text IS NULL THEN $2 ELSE production_status.logs_scanned_at END, log_error = $3`,
+      [project, now, failed],
+    );
+  if (result.exitCode !== 0) {
+    await saveScan(result.output.trim().split('\n').slice(-2).join(' ').slice(0, 300));
+    return null;
+  }
   const grouped = new Map<string, ProductionError & { count: number }>();
   for (const error of parseComposeLogs(result.output, row?.ignore ?? [])) {
     const key = fingerprint(error.message, error.stack);
@@ -262,11 +266,21 @@ export async function scanLogs(
     else grouped.set(key, { ...error, count: 1 });
   }
   let occurrences = 0;
+  let failure: unknown = null;
   for (const error of grouped.values()) {
-    await recordEvent(pool, project, error, now);
-    occurrences += error.count;
+    // Ein gescheitertes Ereignis darf die übrigen dieses Durchgangs nicht verwerfen.
+    try {
+      await recordEvent(pool, project, error, now);
+      occurrences += error.count;
+    } catch (caught) {
+      failure ??= caught;
+    }
   }
+  // Erst nach der Verarbeitung vorrücken: sonst wären nicht gespeicherte Fehler endgültig verloren.
+  const message = failure instanceof Error ? failure.message : failure === null ? null : String(failure);
+  await saveScan(message === null ? null : `Verarbeitung: ${message}`.slice(0, 300));
   if (grouped.size) await updateAlerts(pool, project, now);
+  if (failure !== null) throw failure;
   return { events: grouped.size, occurrences };
 }
 
