@@ -364,7 +364,7 @@ export const SCHEMA = `
     WHERE kind IN ('manual', 'sprint', 'repo');
   CREATE UNIQUE INDEX IF NOT EXISTS docs_order_idx ON docs (development_id) WHERE kind = 'order';
 
-  -- Kategorie (Frontend, Backend, Fullstack, Infrastruktur, Dokumentation) für Ideen, Aufträge und Bugs.
+  -- Kategorie (Frontend, Backend, Fullstack, Infrastruktur, Dokumentation, Sicherheit) für Ideen, Aufträge und Bugs.
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS category TEXT
     CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs'));
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS category TEXT
@@ -387,6 +387,17 @@ export const SCHEMA = `
   DROP TRIGGER IF EXISTS development_items_inherit_category ON development_items;
   CREATE TRIGGER development_items_inherit_category BEFORE INSERT ON development_items
     FOR EACH ROW EXECUTE FUNCTION development_items_inherit_category();
+
+  -- Kategorie Sicherheit (für Ideen, Aufträge und Bugs).
+  ALTER TABLE ideation_items DROP CONSTRAINT IF EXISTS ideation_items_category_check;
+  ALTER TABLE ideation_items ADD CONSTRAINT ideation_items_category_check
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'));
+  ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_category_check;
+  ALTER TABLE development_items ADD CONSTRAINT development_items_category_check
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'));
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_category_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_category_check
+    CHECK (category IN ('frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'));
 
   -- Testabdeckung, die der Tester nach einem Auftrag meldet (pro Bereich wie Frontend/Backend).
   CREATE TABLE IF NOT EXISTS test_coverage_reports (

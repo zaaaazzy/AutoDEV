@@ -50,6 +50,8 @@ const CATEGORY_ALIASES: Record<string, string> = {
   doku: 'docs',
   dokumentation: 'docs',
   documentation: 'docs',
+  sicherheit: 'security',
+  sec: 'security',
 };
 
 export interface VisionaryIdea {
@@ -319,7 +321,7 @@ export function buildVisionaryPrompt(
     [
       '## Ausgabeformat',
       `Gib je Idee genau eine Zeile aus, höchstens ${limit} Zeilen, ohne Codeblock:`,
-      `${IDEA_MARKER} {"title": "...", "category": "frontend|backend|fullstack|infrastructure|docs", "benefit": 0-10, ` +
+      `${IDEA_MARKER} {"title": "...", "category": "frontend|backend|fullstack|infrastructure|docs|security", "benefit": 0-10, ` +
         '"cost": 0-10, "priority": "low|medium|high", "reason": "Stützt sich auf …", "description": "..."}',
       'title: höchstens 60 Zeichen, sagt knapp, was entsteht. description: was umgesetzt wird (2–5 Sätze).',
       'reason: beginnt mit „Stützt sich auf“ und nennt konkrete Belege aus den Daten oben (Bug, Sprintbericht, ' +

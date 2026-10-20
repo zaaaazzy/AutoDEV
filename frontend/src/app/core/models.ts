@@ -100,7 +100,7 @@ export interface VisualApproval {
   approvedBy: string | null;
 }
 
-export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs';
+export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs' | 'security';
 
 export interface Estimate {
   /** Bereich der Arbeit; Aufträge erben ihn von Idee bzw. Bug. */

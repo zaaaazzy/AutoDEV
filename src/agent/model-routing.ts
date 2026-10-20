@@ -8,7 +8,7 @@ export type ModelTier = (typeof MODEL_TIERS)[number];
 export const RULE_EFFECTS = ['local', 'strong', 'up', 'down'] as const;
 export type RuleEffect = (typeof RULE_EFFECTS)[number];
 
-export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs'] as const;
+export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'] as const;
 
 /** Alle angegebenen Teile müssen zutreffen; eine leere Bedingung trifft immer zu. */
 export interface RoutingCondition {
@@ -45,6 +45,7 @@ export interface RoutingDecision {
 
 /** Standardregeln (Reihenfolge = Priorität), solange ein Projekt keine eigenen gespeichert hat. */
 export const DEFAULT_RULES: RoutingRule[] = [
+  { condition: { categories: ['security'] }, tier: 'strong' },
   { condition: { categories: ['docs'] }, tier: 'local' },
   { condition: { maxHours: 1 }, tier: 'local' },
   { condition: { categories: ['backend'], minHours: 4 }, tier: 'strong' },
