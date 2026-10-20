@@ -413,6 +413,9 @@
       (dismiss)="dismissWelcome()"
     />
   }
+  @if (activeProject()) {
+    <app-chat-bubble />
+  }
   <app-tour-overlay />
   <app-confirm-dialog />
 }
