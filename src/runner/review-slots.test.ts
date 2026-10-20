@@ -171,7 +171,9 @@ test('Review-Container: keine .env, kein Projektordner, keine Haupt-Zugänge und
   assert.ok(run.includes('no-new-privileges'));
   const env = run.flatMap((arg, index) => (run[index - 1] === '-e' ? [arg] : []));
   assert.ok(
-    env.includes('REVIEW_DATABASE_URL=postgresql://aideation_review:review-pw@host.docker.internal:5433/aideation_review_1'),
+    env.includes(
+      'REVIEW_DATABASE_URL=postgresql://aideation_review:review-pw@host.docker.internal:5433/aideation_review_1',
+    ),
   );
   assert.ok(env.includes('REVIEW_COMMAND=sh /work/deploy/review/aideation-review.sh'));
   // Die Slot-Datenbank legt der Review-User in seiner Basis-Datenbank an, nicht über „postgres“.
