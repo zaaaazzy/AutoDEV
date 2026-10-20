@@ -439,6 +439,26 @@ test('seeds the default agent workflow when a project is created', async () => {
   });
 });
 
+test('refuses an existing project ID with 409 and changes nothing', async () => {
+  // ON CONFLICT DO NOTHING liefert keine Zeile zurück.
+  const { pool, queries } = recordingPool([]);
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ slug: 'mainty', name: 'Fremd', repository: '/other/repo' }),
+    });
+    assert.equal(response.status, 409);
+    const insert = queries.find((query) => /INSERT INTO projects/.test(query.sql));
+    assert.match(insert?.sql ?? '', /ON CONFLICT \(slug\) DO NOTHING/);
+    assert.doesNotMatch(insert?.sql ?? '', /DO UPDATE/);
+    assert.equal(
+      queries.some((query) => /INSERT INTO agents|UPDATE projects/.test(query.sql)),
+      false,
+    );
+  });
+});
+
 test('stores an agent command as an argument array and rejects strings', async () => {
   const { pool, queries } = recordingPool([{ id: ID }]);
   await withServer(pool, async (baseUrl) => {

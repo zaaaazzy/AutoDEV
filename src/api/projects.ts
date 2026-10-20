@@ -465,11 +465,15 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
     const result = await pool.query(
       `INSERT INTO projects (slug, name, repository)
        VALUES ($1, $2, $3)
-       ON CONFLICT (slug) DO UPDATE
-         SET name = EXCLUDED.name, repository = EXCLUDED.repository
+       ON CONFLICT (slug) DO NOTHING
        RETURNING slug, name, repository, created_at AS "createdAt"`,
       [body.slug, body.name.trim(), body.repository.trim()],
     );
+    // Vergebene ID: nie Name und Ordner eines bestehenden Projekts überschreiben (wie in der Einrichtung).
+    if (!result.rows[0]) {
+      response.status(409).json({ message: `Die Projekt-ID „${body.slug}“ ist schon vergeben.` });
+      return;
+    }
     await ensureDefaultAgents(pool, body.slug);
     response.status(201).json({ project: result.rows[0] });
   });
