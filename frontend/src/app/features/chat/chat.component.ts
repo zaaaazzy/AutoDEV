@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { ChatMessage } from '../../core/models.js';
@@ -10,18 +10,34 @@ import { ChatComposerComponent, type ComposedMessage } from './chat-composer.com
 
 /** Nachladen per GET, solange die Live-Verbindung (noch) nichts geliefert hat. */
 const FALLBACK_POLL_MS = 3_000;
+/** Ab dieser Fensterbreite dockt der vergrößerte Chat rechts an, darunter öffnet er als Modal. */
+const DOCK_MIN_WIDTH = 1200;
+
+/** Vergrößerte Darstellung: rechts angedockt (großer Bildschirm) oder als Modal. */
+export type ChatZoom = 'docked' | 'modal' | null;
 
 @Component({
   selector: 'app-chat',
   standalone: true,
   imports: [StepResultComponent, AgentTasksComponent, ChatComposerComponent, NavIconComponent],
   templateUrl: './chat.component.html',
-  host: { style: 'display: contents' },
+  host: {
+    style: 'display: contents',
+    '(document:keydown.escape)': 'zoom.set(null)',
+    '(window:resize)': 'fitZoom()',
+  },
 })
 export class ChatComponent {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+
+  /** Kompakte Variante in der Sprechblase unten rechts: Zoom öffnet dort immer das Modal. */
+  readonly bubble = input(false);
+  /** Schließen-Knopf der Sprechblase. */
+  readonly closed = output<void>();
+  protected readonly zoom = signal<ChatZoom>(null);
 
   protected readonly chat = signal<ChatMessage[]>([]);
   protected readonly chatWaiting = computed(() =>
@@ -53,6 +69,12 @@ export class ChatComponent {
   private reconnectNow: (() => void) | null = null;
 
   constructor() {
+    // Angedockt: der Hauptbereich macht rechts Platz, damit nichts verdeckt wird.
+    effect((onCleanup) => {
+      if (this.zoom() !== 'docked') return;
+      document.body.classList.add('chat-docked');
+      onCleanup(() => document.body.classList.remove('chat-docked'));
+    });
     effect((onCleanup) => {
       const slug = this.store.activeProject();
       if (!slug) return;
@@ -67,10 +89,7 @@ export class ChatComponent {
         if (snapshot === shown) return;
         shown = snapshot;
         this.chat.set(messages);
-        globalThis.setTimeout(() => {
-          const log = document.querySelector('.chat-log');
-          if (log) log.scrollTop = log.scrollHeight;
-        });
+        this.scrollToEnd();
       };
       // Der Verlauf wird sofort per GET geladen und nicht erst mit der ersten Nachricht der Live-Verbindung:
       // Hängt diese (Proxy puffert, Browser-Verbindungslimit, Seitenwechsel), bliebe der Chat sonst leer.
@@ -135,6 +154,29 @@ export class ChatComponent {
     });
   }
 
+  /** Zoom-Knopf: vergrößern bzw. zurück zur normalen Ansicht. */
+  protected toggleZoom(): void {
+    if (this.zoom()) {
+      this.zoom.set(null);
+    } else {
+      this.zoom.set(this.bubble() || globalThis.innerWidth < DOCK_MIN_WIDTH ? 'modal' : 'docked');
+    }
+    this.scrollToEnd();
+  }
+
+  /** Wird das Fenster zu schmal zum Andocken, als Modal weiterzeigen. */
+  protected fitZoom(): void {
+    if (this.zoom() === 'docked' && globalThis.innerWidth < DOCK_MIN_WIDTH) this.zoom.set('modal');
+  }
+
+  private scrollToEnd(): void {
+    globalThis.setTimeout(() => {
+      // Mehrere Chats (Dashboard und Sprechblase) möglich: nur den eigenen Verlauf scrollen.
+      const log = this.host.nativeElement.querySelector('.chat-log');
+      if (log) log.scrollTop = log.scrollHeight;
+    });
+  }
+
   protected reconnect(): void {
     this.reconnectNow?.();
   }
@@ -165,7 +207,9 @@ export class ChatComponent {
   protected replyTo(question: ChatMessage): void {
     this.chosenReply.set(question.id);
     this.dismissedReply.set(null);
-    globalThis.setTimeout(() => document.querySelector<HTMLInputElement>('app-chat-composer input')?.focus());
+    globalThis.setTimeout(() =>
+      this.host.nativeElement.querySelector<HTMLInputElement>('app-chat-composer input')?.focus(),
+    );
   }
 
   /** ✕ am Antwort-Hinweis: nächste Nachricht ist eine neue Anfrage. */
