@@ -240,17 +240,21 @@ export async function resumeBlockedByBug(pool: Pool, bugId: string): Promise<voi
   );
 }
 
-/** Holt bei blockierten Aufträgen ohne Bug-Bericht (ältere Fehler) den Bericht und die Behebung nach. */
+/**
+ * Holt bei blockierten Aufträgen ohne Bug-Bericht (ältere Fehler) den Bericht und die Behebung nach. Läufe, die der
+ * Benutzer abgebrochen hat („Abbrechen“, cancel_requested), sind kein Fehler und bekommen keinen Bericht.
+ */
 export async function backfillFailures(pool: Pool, project: string): Promise<void> {
   const blocked = await pool.query<FailedItem & { agentName: string | null; output: string | null }>(
     `SELECT d.id, d.project_slug AS "projectSlug", d.title, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId",
             last.agent_name AS "agentName", last.output
        FROM development_items d
        LEFT JOIN LATERAL (
-         SELECT st.agent_name, st.output FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
+         SELECT st.agent_name, st.output, st.run_id FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
           WHERE r.development_id = d.id AND st.status = 'failed' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
        ) last ON TRUE
-      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL`,
+      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM agent_run_steps c WHERE c.run_id = last.run_id AND c.cancel_requested)`,
     [project],
   );
   for (const item of blocked.rows) {
