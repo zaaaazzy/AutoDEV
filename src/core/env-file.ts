@@ -61,7 +61,7 @@ export function parseEnv(text: string): Map<string, string> {
 /** Schreibt einen Wert so, dass Compose, Node und die Shell ihn gleich lesen (sonst in einfachen Anführungszeichen). */
 export function formatEnvValue(value: string): string {
   if (CONTROL.test(value) || value.includes("'"))
-    throw new Error('Werte in der .env dürfen keine Zeilenumbrüche, Steuerzeichen oder \' enthalten.');
+    throw new Error("Werte in der .env dürfen keine Zeilenumbrüche, Steuerzeichen oder ' enthalten.");
   return PLAIN_VALUE.test(value) ? value : `'${value}'`;
 }
 
@@ -103,7 +103,7 @@ export function validateInstall(body: unknown): string | null {
     return 'Die Domain sieht ungültig aus (z. B. devlog.example.com).';
   if (projectRoots !== undefined && typeof projectRoots !== 'string') return 'Der Projektbereich muss ein Text sein.';
   if (projectRoots && (CONTROL.test(projectRoots) || projectRoots.includes("'")))
-    return 'Der Projektbereich darf keine Zeilenumbrüche, Steuerzeichen oder \' enthalten.';
+    return "Der Projektbereich darf keine Zeilenumbrüche, Steuerzeichen oder ' enthalten.";
   if (projectRoots && projectRoots.length > 4000) return 'Der Projektbereich ist zu lang.';
   if (installWorker !== undefined && typeof installWorker !== 'boolean')
     return 'Die Worker-Auswahl muss ja oder nein sein.';
