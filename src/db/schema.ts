@@ -933,4 +933,34 @@ export const SCHEMA = `
     logs_scanned_at TIMESTAMPTZ,
     log_error TEXT
   );
+
+  -- Visuelle Abnahme: Rolle „visual_tester“, Vorschau-Adresse und -Seiten am Projekt, Prüfpunkte der Art „visual“,
+  -- optische Freigabe am Auftrag und Screenshots (Aufnahme bzw. Diff) je Seite und Gerät, höchstens 2 MB je Bild.
+  ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_role_check;
+  ALTER TABLE agents ADD CONSTRAINT agents_role_check CHECK (role IN
+    ('author', 'developer', 'tester', 'visual_tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer',
+     'user_manual_writer', 'custom'));
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS preview_url TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS preview_pages JSONB NOT NULL DEFAULT '[]'::jsonb;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS visual_settings JSONB NOT NULL DEFAULT '{}'::jsonb;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS visual_approved_at TIMESTAMPTZ;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS visual_approved_by TEXT;
+  ALTER TABLE acceptance_checks DROP CONSTRAINT IF EXISTS acceptance_checks_kind_check;
+  ALTER TABLE acceptance_checks ADD CONSTRAINT acceptance_checks_kind_check
+    CHECK (kind IN ('criterion', 'done', 'visual'));
+  CREATE TABLE IF NOT EXISTS visual_snapshots (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    development_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    page TEXT NOT NULL CHECK (char_length(page) BETWEEN 1 AND 300),
+    device TEXT NOT NULL CHECK (device IN ('desktop', 'mobile')),
+    kind TEXT NOT NULL CHECK (kind IN ('shot', 'diff')),
+    data BYTEA NOT NULL CHECK (octet_length(data) <= 2097152),
+    diff_percent REAL,
+    base_id UUID REFERENCES visual_snapshots(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS visual_snapshots_latest_idx
+    ON visual_snapshots (project_slug, page, device, kind, created_at DESC);
+  CREATE INDEX IF NOT EXISTS visual_snapshots_order_idx ON visual_snapshots (development_id);
 `;

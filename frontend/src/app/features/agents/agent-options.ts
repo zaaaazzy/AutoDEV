@@ -4,6 +4,7 @@ export const AGENT_ROLES = [
   { value: 'author', label: 'Auftragsautor' },
   { value: 'developer', label: 'Entwickler' },
   { value: 'tester', label: 'Tester' },
+  { value: 'visual_tester', label: 'Visueller Tester' },
   { value: 'reviewer', label: 'Reviewer' },
   { value: 'documenter', label: 'Dokumentierer' },
   { value: 'bug_reviewer', label: 'Bug-Wächter' },

@@ -6,6 +6,7 @@ import express, { type Express } from 'express';
 import type { Pool } from 'pg';
 import { registerAgentRoutes } from './agents.js';
 import { registerAttachmentRoutes } from './attachments.js';
+import { registerVisualRoutes } from './visual.js';
 import { type DevLogAuth, registerLoginRoutes, registerSecurityRoutes, requireCredentials } from './auth.js';
 import { registerBoardRoutes } from './board.js';
 import { registerBugRoutes } from './bugs.js';
@@ -109,6 +110,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerBugRoutes(api, pool);
   registerProductionRoutes(api, pool);
   registerAttachmentRoutes(api, pool);
+  registerVisualRoutes(api, pool);
   registerDocRoutes(api, pool);
   registerCoverageRoutes(api, pool);
   registerSetupRoutes(api, pool);

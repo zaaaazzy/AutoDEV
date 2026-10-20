@@ -33,6 +33,7 @@ import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
 import type { BuiltinAgent, StepSummary, WorkItem, WorkflowAgent, WorkItemOptions } from './runner-types.js';
 import { loadTestCommands } from './runner-selection.js';
+import { runVisualStep, VISUAL_CATEGORIES } from './visual-check.js';
 
 const MANUAL_TITLE = 'Anwendungshandbuch';
 const USER_MANUAL_TITLE = 'Benutzerhandbuch';
@@ -191,14 +192,19 @@ export async function claimRun(pool: Pool, item: WorkItem): Promise<string | nul
   return claim.rows[0]?.id ?? null;
 }
 
-/** Select agents in phase and position order, or only the assigned agent for a manual run. */
+/**
+ * Select agents in phase and position order, or only the assigned agent for a manual run. Die visuelle Prüfung
+ * entfällt bei Aufträgen, die weder Frontend noch Fullstack sind.
+ */
 export function selectWorkflowAgents(agents: WorkflowAgent[], item: WorkItem): WorkflowAgent[] {
   return agents
     .filter((agent) => (ORDER_PHASES as readonly string[]).includes(agent.phase))
     .filter((agent) =>
       item.agentId
         ? agent.id === item.agentId
-        : !(agent.role === 'author' && item.ideationId) && !(agent.role === 'bug_reviewer' && item.risks?.trim()),
+        : !(agent.role === 'author' && item.ideationId) &&
+          !(agent.role === 'bug_reviewer' && item.risks?.trim()) &&
+          !(agent.role === 'visual_tester' && !VISUAL_CATEGORIES.has(item.category ?? '')),
     )
     .sort(
       (left, right) =>
@@ -282,6 +288,21 @@ async function invokeAgent(
     });
   const configured = agent.command?.length ? agent.command : agent.role === 'tester' ? null : fallbackCommand;
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
+  // Visuelle Prüfung: Screenshots, Pixel-Vergleich und Browser-Prüfungen; der Befehl des Agents dient nur dem KI-Urteil.
+  if (agent.role === 'visual_tester') {
+    return runVisualStep({
+      pool,
+      item,
+      cwd: options.cwd,
+      criteria: ctx.criteria ?? [],
+      signal: hooks.signal,
+      onProgress: hooks.onAction,
+      judgeCommand:
+        configured &&
+        withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
+      execute,
+    });
+  }
   const command =
     configured &&
     withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope);

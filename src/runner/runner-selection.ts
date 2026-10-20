@@ -91,7 +91,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
 
 /** Planned items of the active sprint or assigned directly to an agent, most important first. */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.category, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d WHERE d.id = $1 AND d.project_slug = $2`,

@@ -20,6 +20,7 @@ const ENTITY_PROJECT: Record<string, string> = {
   'agent-tasks': 'SELECT project_slug AS slug FROM agent_tasks WHERE id = $1',
   'workflow-steps': 'SELECT project_slug AS slug FROM workflow_steps WHERE id = $1',
   'doc-revisions': 'SELECT d.project_slug AS slug FROM doc_revisions r JOIN docs d ON d.id = r.doc_id WHERE r.id = $1',
+  'visual-snapshots': 'SELECT project_slug AS slug FROM visual_snapshots WHERE id = $1',
   'test-media': 'SELECT r.project_slug AS slug FROM test_media m JOIN test_runs r ON r.id = m.run_id WHERE m.id = $1',
   attachments: `SELECT COALESCE(i.project_slug, b.project_slug) AS slug FROM ideation_attachments a
                   LEFT JOIN ideation_items i ON i.id = a.ideation_id LEFT JOIN bugs b ON b.id = a.bug_id WHERE a.id = $1`,

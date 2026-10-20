@@ -282,6 +282,7 @@
   }
   @if (auth.can('admin') && store.currentProject()) {
     <app-production-settings />
+    <app-visual-settings />
     <app-permission-groups-settings />
   }
   @if (auth.can('admin')) {
