@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -305,9 +306,35 @@ test('compose configuration may not escape the project folder', () => {
     { build: { context: '/other' } },
     { volumes: [{ type: 'bind', source: '/var/run/docker.sock' }] },
     { volumes: [{ type: 'bind', source: '/proj-evil' }] },
+    { volumes: [{ type: 'bind', source: '/proj/../etc' }] },
+    { network_mode: 'container:fremd' },
+    { uts: 'host' },
+    { security_opt: ['seccomp:unconfined'] },
+    { volumes_from: ['container:fremd'] },
+    { env_file: ['/home/me/.secrets'] },
+    { env_file: [{ path: '/other/app.env', required: true }] },
+    { build: { context: '/proj/app', dockerfile: '../../other/Dockerfile' } },
+    { build: { context: '/proj/app', additional_contexts: { extra: '/other' } } },
   ]) {
     assert.ok(composeViolation(config(service), '/proj'), JSON.stringify(service));
   }
+  assert.equal(
+    composeViolation(config({ security_opt: ['no-new-privileges:true'], env_file: ['/proj/.env.app'] }), '/proj'),
+    null,
+  );
+  const top = (extra: object): string => JSON.stringify({ services: { app: { image: 'x' } }, ...extra });
+  assert.ok(composeViolation(top({ secrets: { key: { file: '/home/me/.ssh/id_rsa' } } }), '/proj'));
+  assert.ok(composeViolation(top({ configs: { conf: { file: '/etc/passwd' } } }), '/proj'));
+  assert.ok(
+    composeViolation(top({ volumes: { data: { driver_opts: { type: 'none', o: 'bind', device: '/' } } } }), '/proj'),
+  );
+  assert.equal(composeViolation(top({ secrets: { key: { file: '/proj/secret.txt' } } }), '/proj'), null);
+  // Ein Link im Projekt, der nach draussen zeigt, zählt als draussen.
+  const project = mkdtempSync(join(tmpdir(), 'compose-link-'));
+  symlinkSync(tmpdir(), join(project, 'raus'));
+  const real = realpathSync(project);
+  assert.ok(composeViolation(config({ volumes: [{ type: 'bind', source: join(real, 'raus') }] }), real));
+  assert.equal(composeViolation(config({ volumes: [{ type: 'bind', source: join(real, 'daten') }] }), real), null);
   assert.ok(composeViolation('kein json', '/proj'));
 });
 

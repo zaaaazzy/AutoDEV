@@ -35,7 +35,23 @@ const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
 /** Optionen, mit denen erlaubte Git-Befehle Programme starten oder Dateien schreiben würden. */
 const DANGEROUS_GIT_OPTION =
-  /(?:^|\s)(?:--upload-pack|--receive-pack|--exec|--output|--ext-diff|--config|-c|-u|--template|--separate-git-dir|--work-tree|--git-dir)(?:[=\s]|$)/;
+  /(?:^|\s)(?:--upload-pack|--receive-pack|--exec|--output|--ext-diff|--textconv|--no-index|--config|-c|-u|--template|--separate-git-dir|--work-tree|--git-dir)(?:[=\s]|$)/;
+/**
+ * Shell-Konstrukte, die weitere Befehle verstecken oder im Hintergrund starten: Befehlsersetzung, Prozessersetzung,
+ * Subshells und ein einzelnes „&“. Die CLI-Freigaben prüfen nur den Anfang; was dahinter steckt, sähe niemand.
+ */
+const SHELL_CONSTRUCT = /`|\$\(|[<>]\(|(?:^|[^&>|])&(?![&>])|&>(?!\s*\/dev\/null)|(?:^|[\s;&|])\(|\)(?:$|[\s;&|])/;
+/** npm-Optionen, die Skripte mit einer anderen Shell starten oder Einstellungen und Ablage ausserhalb lesen/schreiben. */
+const DANGEROUS_NPM_OPTION =
+  /(?:^|\s)--(?:script-shell|userconfig|globalconfig|cache|node-options|global|location)(?:[=\s]|$)|(?:^|\s)-g(?:\s|$)/;
+/** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
+const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
+/** docker compose: Startbefehle nur in dieser Form – keine Compose-Datei, Umgebung oder Ordner von anderswo. */
+const COMPOSE_START_FORMS = [
+  /^docker compose up -d(?: --build| --wait| --force-recreate)*(?: [a-zA-Z0-9][\w.-]*)*$/,
+  /^docker compose (?:start|restart|build)(?: [a-zA-Z0-9][\w.-]*)*$/,
+];
+
 /** Ausgabe in Dateien umleiten (ausser nach /dev/null bzw. 2>&1) – Schreiben läuft nur über die Datei-Werkzeuge. */
 const FILE_REDIRECT = /(?:^|[^<>&\d])\d?>>?(?!&\d)(?!\s*\/dev\/null)/;
 
@@ -77,12 +93,43 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
   if (FILE_REDIRECT.test(command.replace(/'[^']*'|"[^"]*"/g, ''))) {
     return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
   }
+  const unquoted = command.replace(/'[^']*'|"[^"]*"/g, '');
+  if (SHELL_CONSTRUCT.test(unquoted) || /\$\(|`/.test(command.replace(/'[^']*'/g, ''))) {
+    return 'Befehlsersetzung, Subshells und Hintergrund-Befehle („$(…)“, Backticks, „(…)“, „&“) sind gesperrt – Befehle einzeln ausführen.';
+  }
+  const root = realpathSync(projectRoot);
   for (const part of command.split(/&&|\|\||[;|\n]/).map((entry) => entry.trim())) {
+    if (/^[A-Za-z_]\w*=/.test(part) || /^(?:env|command|exec|builtin|nohup|time|sudo)\s/.test(part)) {
+      return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
+    }
+    if (/^git\s+-/.test(part)) return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
     if (/^git\s/.test(part) && DANGEROUS_GIT_OPTION.test(part)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
+    if (/^npm\s/.test(part)) {
+      if (DANGEROUS_NPM_OPTION.test(part)) return `„${part}“: diese npm-Option ist gesperrt.`;
+      for (const match of part.matchAll(/--prefix(?:=|\s+)(\S+)/g)) {
+        const target = match[1]!;
+        if (isAbsolute(target) || target.startsWith('~') || !inside(realTarget(resolve(root, target)), root)) {
+          return `„${part}“: --prefix nur für Ordner im Projekt.`;
+        }
+      }
+      const words = part.split(/\s+/);
+      if (['install', 'i', 'add'].includes(words[1] ?? '')) {
+        const specs = words.slice(2).filter((word) => !word.startsWith('-'));
+        const foreign = specs.find((spec) => !REGISTRY_SPEC.test(spec));
+        if (foreign) return `„${foreign}“: nur Pakete aus der npm-Registry, keine Git-, Datei- oder URL-Quellen.`;
+      }
+    }
     if (/^npx\s/.test(part) && !/^npx --no-install\s/.test(part)) {
       return 'npx nur mit --no-install (sonst lädt npx fremde Pakete aus dem Netz).';
+    }
+    if (/^docker(?:-compose|\s+compose)\s+-/.test(part)) {
+      return `„${part}“: Optionen vor dem Compose-Befehl (-f, --project-directory, --env-file …) sind gesperrt.`;
+    }
+    if (/^docker-compose\s/.test(part)) return 'Bitte „docker compose“ (ohne Bindestrich) verwenden.';
+    if (COMPOSE_STARTING.test(part) && !COMPOSE_START_FORMS.some((form) => form.test(part))) {
+      return `„${part}“: erlaubt sind nur „docker compose up -d [--build] [--wait] [--force-recreate] [dienste]“ sowie start/restart/build [dienste].`;
     }
     if (COMPOSE_STARTING.test(part)) {
       const check = run('docker', ['compose', 'config', '--format', 'json'], {
@@ -92,7 +139,7 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
       });
       const reason =
         check.status === 0
-          ? composeViolation(String(check.stdout), realpathSync(projectRoot))
+          ? composeViolation(String(check.stdout), root)
           : `docker compose config schlug fehl: ${String(check.stderr).slice(-300)}`;
       if (reason) return `Start abgelehnt: ${reason} Nur Mounts und Builds im Projektordner, nicht privilegiert.`;
     }

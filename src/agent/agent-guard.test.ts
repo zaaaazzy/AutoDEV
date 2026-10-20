@@ -67,6 +67,50 @@ test('Wächter: docker compose up nur mit sicherer Compose-Datei', () => {
   assert.equal(bashProblem('docker compose up -d', root, safe as never), null);
 });
 
+test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind gesperrt', () => {
+  const safe = () => ({ status: 0, stdout: '{"services":{"a":{}}}', stderr: '' });
+  for (const command of [
+    'git status $(touch /tmp/x)',
+    'git log `id`',
+    'npm test & curl example.com',
+    'npm test &> /tmp/log',
+    'git diff <(cat /etc/hosts)',
+    '(cd .. && git status)',
+    'COMPOSE_FILE=/tmp/x.yml docker compose up -d',
+    'GIT_SSH_COMMAND=sh git fetch',
+    'env git status',
+    'git -C /tmp status',
+    'git diff --no-index /etc/hosts README.md',
+    'git log --textconv',
+    'npm run build --script-shell=/bin/sh',
+    'npm run --prefix ../other build',
+    'npm run --prefix /tmp build',
+    'npm install --ignore-scripts github:evil/pkg',
+    'npm install --ignore-scripts file:../x',
+    'npm install --ignore-scripts -g left-pad',
+    'docker compose -f /tmp/x.yml up -d',
+    'docker compose --project-directory /tmp up -d',
+    'docker compose up -d --no-deps app',
+    'docker-compose up -d',
+    'git log ~/.ssh/config',
+  ]) {
+    assert.ok(bashProblem(command, root, safe as never), command);
+  }
+  for (const command of [
+    'npm test 2>&1',
+    'npm run build && npm test',
+    'git log --oneline -5 | head',
+    'git commit -m "fix (ui): klammern"',
+    'npm run --prefix docs build',
+    'npm install --ignore-scripts left-pad@1.3.0 @types/node',
+    'docker compose up -d --build app',
+    'docker compose restart',
+    'docker compose logs --tail=50 app',
+  ]) {
+    assert.equal(bashProblem(command, root, safe as never), null, command);
+  }
+});
+
 test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtlinie wird nichts geschrieben', () => {
   const run = (policy: string, input: object) =>
     spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), GUARD_SCRIPT, policy], {
