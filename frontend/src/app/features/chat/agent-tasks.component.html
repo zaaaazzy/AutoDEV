@@ -44,6 +44,84 @@
             </select>
             <small class="muted">Die Do's and Don'ts aus den Projekt-Einstellungen gelten für jeden Agent.</small>
           </label>
+          <fieldset class="agent-task-schedule">
+            <legend><span aria-hidden="true">🕒</span> Zeitplan (Europe/Zurich)</legend>
+            <label
+              >Ausführen
+              <select
+                aria-label="Zeitplan"
+                [value]="scheduleKind()"
+                (change)="scheduleKind.set($any($event.target).value)"
+              >
+                <option value="none" [selected]="scheduleKind() === 'none'">Nur per Klick</option>
+                <option value="daily" [selected]="scheduleKind() === 'daily'">Täglich um…</option>
+                <option value="weekly" [selected]="scheduleKind() === 'weekly'">Wöchentlich am…</option>
+                <option value="custom" [selected]="scheduleKind() === 'custom'">Eigener Cron</option>
+              </select>
+            </label>
+            @if (scheduleKind() === 'weekly') {
+              <label
+                >Wochentag
+                <select aria-label="Wochentag" (change)="scheduleWeekday.set(+$any($event.target).value)">
+                  @for (day of weekdays; track day.value) {
+                    <option [value]="day.value" [selected]="day.value === scheduleWeekday()">{{ day.label }}</option>
+                  }
+                </select>
+              </label>
+            }
+            @if (scheduleKind() === 'daily' || scheduleKind() === 'weekly') {
+              <label
+                >Uhrzeit<input
+                  type="time"
+                  aria-label="Uhrzeit"
+                  [value]="scheduleTime()"
+                  (input)="scheduleTime.set($any($event.target).value)"
+              /></label>
+            }
+            @if (scheduleKind() === 'custom') {
+              <label
+                >Cron (Minute Stunde Tag Monat Wochentag)<input
+                  aria-label="Cron-Ausdruck"
+                  maxlength="120"
+                  placeholder="0 7 * * 1-5"
+                  [value]="scheduleCron()"
+                  (input)="scheduleCron.set($any($event.target).value)"
+              /></label>
+            }
+            @if (scheduleKind() !== 'none') {
+              <label
+                >Nur im Zeitfenster (optional)<input
+                  aria-label="Zeitfenster"
+                  maxlength="11"
+                  placeholder="22:00-06:00"
+                  [value]="runWindow()"
+                  (input)="runWindow.set($any($event.target).value)"
+              /></label>
+              <label
+                >Ergebnis als
+                <select aria-label="Ziel des Ergebnisses" (change)="outputTarget.set($any($event.target).value)">
+                  @for (target of targets; track target[0]) {
+                    <option [value]="target[0]" [selected]="target[0] === outputTarget()">{{ target[1] }}</option>
+                  }
+                </select>
+              </label>
+              <label class="agent-task-check"
+                ><input
+                  type="checkbox"
+                  [checked]="scheduleEnabled()"
+                  (change)="scheduleEnabled.set($any($event.target).checked)"
+                />
+                Zeitplan aktiv</label
+              >
+            }
+            <small class="agent-task-preview muted" role="status">{{ preview() }}</small>
+            @if (scheduleKind() !== 'none') {
+              <small class="muted"
+                >Routinen laufen nur lesend über den Assistenten, nie während ein Auftrag die Projektsperre hält. Nach 3
+                Fehlschlägen in Folge wird pausiert.</small
+              >
+            }
+          </fieldset>
           <div class="agent-task-actions">
             <button
               class="button primary small"
@@ -57,6 +135,61 @@
             <button class="button secondary small" type="button" (click)="editing.set(null)">Abbrechen</button>
           </div>
         </form>
+      } @else if (history(); as view) {
+        <section class="agent-task-history" aria-label="Verlauf der Aufgabe">
+          <header class="agent-task-history-head">
+            <strong>Verlauf: {{ view.action.title }}</strong>
+            <button type="button" class="button secondary small" (click)="history.set(null)">Zurück</button>
+          </header>
+          @if (view.action.schedule) {
+            <p class="muted">
+              <span aria-hidden="true">🕒</span> {{ scheduleLabel(view.action) }} · Ergebnis als
+              {{ targetLabels[view.action.outputTarget ?? 'chat'] }}
+            </p>
+          }
+          @if (sortedRuns().length) {
+            <table class="agent-task-runs">
+              <thead>
+                <tr>
+                  <th scope="col" [attr.aria-sort]="view.newestFirst ? 'descending' : 'ascending'">
+                    <button type="button" class="agent-task-sort" (click)="toggleSort()">
+                      Start {{ view.newestFirst ? '▼' : '▲' }}
+                    </button>
+                  </th>
+                  <th scope="col">Ergebnis</th>
+                  <th scope="col">Dauer</th>
+                  <th scope="col">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (run of sortedRuns(); track run.id) {
+                  <tr [class.failed]="run.status === 'failed'">
+                    <td>
+                      {{ run.startedAt ?? run.queuedAt | date: 'dd.MM. HH:mm' }}
+                      <small class="muted">{{ run.trigger === 'schedule' ? 'Zeitplan' : 'Klick' }}</small>
+                    </td>
+                    <td>
+                      {{ runStatusLabels[run.status] }}{{ run.environmentError ? ' (Umgebung)' : '' }}
+                      @if (run.error) {
+                        <small class="agent-task-run-error">{{ run.error }}</small>
+                      }
+                      @for (item of run.createdItems; track item.id) {
+                        <small class="muted">+ {{ targetLabels[item.kind] }}: {{ item.title }}</small>
+                      }
+                      @for (note of run.notes; track $index) {
+                        <small class="muted">Hinweis: {{ note }}</small>
+                      }
+                    </td>
+                    <td>{{ formatDuration(run.durationMs) }}</td>
+                    <td>{{ run.tokens }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="muted">Noch keine Läufe protokolliert.</p>
+          }
+        </section>
       } @else {
         <label class="agent-tasks-search">
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
@@ -105,6 +238,16 @@
                   <strong>{{ entry.title }}</strong>
                   <small class="muted">{{ entry.summary }}</small>
                 </span>
+                @if (entry.action?.schedule) {
+                  <span
+                    class="agent-task-clock"
+                    [class.paused]="!entry.action?.enabled"
+                    [title]="scheduleLabel(entry.action!)"
+                    role="img"
+                    [attr.aria-label]="scheduleLabel(entry.action!)"
+                    >{{ entry.action?.enabled ? '🕒' : '⏸' }}</span
+                  >
+                }
                 @if (entry.action?.runCount) {
                   <span class="agent-task-count muted" title="So oft gestartet">{{ entry.action?.runCount }}×</span>
                 }
@@ -119,6 +262,27 @@
                   ⓘ
                 </button>
                 @if (entry.action; as action) {
+                  @if (action.schedule) {
+                    <button
+                      type="button"
+                      class="agent-task-icon"
+                      [title]="action.enabled ? 'Zeitplan pausieren' : 'Zeitplan fortsetzen'"
+                      [attr.aria-label]="action.enabled ? 'Zeitplan pausieren' : 'Zeitplan fortsetzen'"
+                      [disabled]="busy()"
+                      (click)="togglePause(action, $event)"
+                    >
+                      {{ action.enabled ? '⏸' : '⏵' }}
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="agent-task-icon"
+                    title="Verlauf"
+                    aria-label="Verlauf"
+                    (click)="showHistory(action, $event)"
+                  >
+                    ☰
+                  </button>
                   <button
                     type="button"
                     class="agent-task-icon"
@@ -160,6 +324,24 @@
                   @for (command of entry.commands; track command) {
                     <code>{{ command }}</code>
                   }
+                </dd>
+              }
+              @if (entry.action?.schedule) {
+                <dt>Zeitplan</dt>
+                <dd>
+                  <code>{{ entry.action?.schedule }}</code> · {{ scheduleLabel(entry.action!) }}
+                  {{ entry.action?.runWindow ? '· nur ' + entry.action?.runWindow : '' }} · Ergebnis als
+                  {{ targetLabels[entry.action?.outputTarget ?? 'chat'] }}
+                  @if (entry.action?.template) {
+                    <br /><small class="muted">Vorlage – nur lesen.</small>
+                  }
+                </dd>
+              }
+              @if (entry.action?.lastRun; as last) {
+                <dt>Letzter Lauf</dt>
+                <dd>
+                  {{ last.startedAt | date: 'dd.MM. HH:mm' }} · {{ runStatusLabels[last.status] }} ·
+                  {{ formatDuration(last.durationMs) }} · {{ last.tokens }} Tokens
                 </dd>
               }
               <dt>Bisher</dt>

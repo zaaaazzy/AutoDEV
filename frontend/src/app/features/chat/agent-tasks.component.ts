@@ -1,6 +1,22 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, DestroyRef, ElementRef, inject, input, signal, viewChild } from '@angular/core';
-import { type ActionForm, type AgentAction, AgentActionsService } from '../../core/agent-actions.service.js';
+import {
+  type ActionForm,
+  type AgentAction,
+  AgentActionsService,
+  OUTPUT_TARGET_LABELS,
+  type OutputTarget,
+  type TaskRun,
+} from '../../core/agent-actions.service.js';
+import { describeCron, formatRun } from '../../../../../src/core/cron.js';
+import {
+  formatDuration,
+  previewText,
+  RUN_STATUS_LABELS,
+  type ScheduleKind,
+  scheduleFrom,
+  WEEKDAYS,
+} from './agent-task-schedule.js';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { TestRequest, VisionaryRun } from '../../core/models.js';
@@ -165,6 +181,33 @@ export class AgentTasksComponent {
   protected readonly restartOpen = computed(() => RESTART_OPEN.includes(this.latestRestart()?.status ?? ''));
   /** Formular: null = geschlossen, id null = neue Aktion. */
   protected readonly editing = signal<ActionForm | null>(null);
+  /** Zeitplan im Formular: Auswahl, Uhrzeit, Wochentag, eigener Cron, Zeitfenster, Ziel und aktiv. */
+  protected readonly scheduleKind = signal<ScheduleKind>('none');
+  protected readonly scheduleTime = signal('07:00');
+  protected readonly scheduleWeekday = signal(1);
+  protected readonly scheduleCron = signal('0 7 * * 1-5');
+  protected readonly runWindow = signal('');
+  protected readonly outputTarget = signal<OutputTarget>('chat');
+  protected readonly scheduleEnabled = signal(true);
+  protected readonly weekdays = WEEKDAYS;
+  protected readonly targets = Object.entries(OUTPUT_TARGET_LABELS) as [OutputTarget, string][];
+  protected readonly formSchedule = computed(() =>
+    scheduleFrom(this.scheduleKind(), this.scheduleTime(), this.scheduleWeekday(), this.scheduleCron()),
+  );
+  protected readonly preview = computed(() => {
+    const { schedule, error } = this.formSchedule();
+    return error ?? previewText(schedule, this.runWindow());
+  });
+  /** Verlauf einer Aufgabe (Läufe) im Menü; newestFirst = Sortierung nach Start. */
+  protected readonly history = signal<{ action: AgentAction; runs: TaskRun[]; newestFirst: boolean } | null>(null);
+  protected readonly sortedRuns = computed(() => {
+    const view = this.history();
+    if (!view) return [];
+    return view.newestFirst ? view.runs : [...view.runs].reverse();
+  });
+  protected readonly runStatusLabels = RUN_STATUS_LABELS;
+  protected readonly targetLabels = OUTPUT_TARGET_LABELS;
+  protected readonly formatDuration = formatDuration;
   /** Im Chat gewählter Agent: Vorgabe für neue Aktionen. */
   readonly agentId = input<string | null>(null);
   /** Agents des Projekts, denen eine Aktion gehören kann. */
@@ -181,7 +224,8 @@ export class AgentTasksComponent {
     const toEntry = (action: AgentAction, runner: string): MenuEntry => ({
       key: action.id,
       title: action.title,
-      summary: action.prompt,
+      // Pausierte Routine: der Grund steht sichtbar in der Liste (z. B. nach drei Fehlschlägen in Folge).
+      summary: action.schedule && !action.enabled && action.lastError ? `⏸ ${action.lastError}` : action.prompt,
       detail: action.prompt,
       runner,
       effect: `Geht als Anfrage an ${runner}. Ergebnis und Rückfragen erscheinen im Chat und unter Dokumentation → Anfragen; die Do's and Don'ts des Projekts gelten.`,
@@ -255,6 +299,7 @@ export class AgentTasksComponent {
   protected close(): void {
     this.open.set(false);
     this.editing.set(null);
+    this.history.set(null);
   }
 
   protected outside(event: MouseEvent): void {
@@ -347,18 +392,46 @@ export class AgentTasksComponent {
   }
 
   protected startNew(): void {
+    this.history.set(null);
+    this.loadSchedule(null);
     this.editing.set({ id: null, title: this.query().trim(), prompt: '', agentId: this.agentId() });
   }
 
   protected edit(action: AgentAction, event: Event): void {
     event.stopPropagation();
+    this.history.set(null);
+    this.loadSchedule(action);
     this.editing.set({ id: action.id, title: action.title, prompt: action.prompt, agentId: action.agentId });
+  }
+
+  /** Zeitplan-Felder aus einer Aufgabe übernehmen (täglich/wöchentlich erkennen, sonst eigener Cron). */
+  private loadSchedule(action: AgentAction | null): void {
+    const schedule = action?.schedule ?? null;
+    const described = schedule ? describeCron(schedule) : null;
+    this.scheduleKind.set(described ? described.kind : 'none');
+    if (described && described.kind !== 'custom') this.scheduleTime.set(described.time);
+    if (described?.kind === 'weekly') this.scheduleWeekday.set(described.weekday);
+    if (schedule) this.scheduleCron.set(schedule);
+    this.runWindow.set(action?.runWindow ?? '');
+    this.outputTarget.set(action?.outputTarget ?? 'chat');
+    this.scheduleEnabled.set(action?.enabled ?? true);
   }
 
   protected async save(title: string, prompt: string, agentId: string, andRun: boolean): Promise<void> {
     const form = this.editing();
     if (!form) return;
-    const saved = await this.actions.save({ ...form, title, prompt, agentId: agentId || null });
+    const { schedule, error } = this.formSchedule();
+    if (error) return void this.store.notice.set(error);
+    const saved = await this.actions.save({
+      ...form,
+      title,
+      prompt,
+      agentId: agentId || null,
+      schedule,
+      runWindow: this.runWindow().trim() || null,
+      outputTarget: this.outputTarget(),
+      enabled: this.scheduleEnabled(),
+    });
     if (!saved) return;
     this.editing.set(null);
     if (andRun) {
@@ -381,6 +454,31 @@ export class AgentTasksComponent {
   protected async remove(action: AgentAction, event: Event): Promise<void> {
     event.stopPropagation();
     await this.actions.remove(action);
+  }
+
+  /** „nächster Lauf: Mo 07:00“ bzw. „pausiert“ für das Uhr-Symbol in der Liste. */
+  protected scheduleLabel(action: AgentAction): string {
+    if (!action.schedule) return '';
+    if (!action.enabled) return `Zeitplan pausiert${action.lastError ? `: ${action.lastError}` : ''}`;
+    return action.nextRunAt ? `nächster Lauf: ${formatRun(new Date(action.nextRunAt))}` : 'Zeitplan aktiv';
+  }
+
+  protected async togglePause(action: AgentAction, event: Event): Promise<void> {
+    event.stopPropagation();
+    await this.actions.setPaused(action, action.enabled !== false);
+  }
+
+  /** Verlauf der Läufe anzeigen (neueste zuerst). */
+  protected async showHistory(action: AgentAction, event: Event): Promise<void> {
+    event.stopPropagation();
+    this.editing.set(null);
+    this.history.set({ action, runs: [], newestFirst: true });
+    const runs = await this.actions.runs(action);
+    if (this.history()?.action.id === action.id) this.history.update((view) => view && { ...view, runs });
+  }
+
+  protected toggleSort(): void {
+    this.history.update((view) => view && { ...view, newestFirst: !view.newestFirst });
   }
 
   protected manage(): void {
