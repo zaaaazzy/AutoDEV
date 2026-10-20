@@ -24,6 +24,7 @@ async function project(): Promise<string> {
 const context = (cwd: string, canWrite: boolean): ToolContext => ({
   cwd,
   canWrite,
+  files: { create: true, edit: true, scopes: [] },
   changed: new Set(),
   backupRoot: join(cwd, BACKUP_DIRECTORY, 't'),
   timeoutMs: 1000,
@@ -85,7 +86,8 @@ test('the developer may write with backup, but only run allowed commands', async
     'npx evil',
     'npm install --prefix /tmp x',
   ]) {
-    assert.match(await executeTool(dev, call('run_command', { command })), /nicht erlaubt/);
+    // Abgelehnt (vom Wächter oder der festen Liste), also nie ausgeführt.
+    assert.doesNotMatch(await executeTool(dev, call('run_command', { command })), /Exit-Code|ran /, command);
   }
   for (const command of [
     'npm install',
@@ -141,7 +143,7 @@ test('the developer may write with backup, but only run allowed commands', async
     /nicht erlaubt/,
   );
   for (const command of ['npm ci --global', 'npm install --prefix /tmp', 'git show HEAD:.env', 'git log -p -- .env']) {
-    assert.match(await executeTool(assistant, call('run_command', { command })), /nicht erlaubt/);
+    assert.doesNotMatch(await executeTool(assistant, call('run_command', { command })), /Exit-Code/, command);
   }
   for (const command of [
     'git log --output=x',
@@ -155,7 +157,7 @@ test('the developer may write with backup, but only run allowed commands', async
     'git clone https://github.com/a/b /tmp/x',
     'git clone --upload-pack=x https://github.com/a/b',
   ]) {
-    assert.match(await executeTool(assistant, call('run_command', { command })), /nicht erlaubt/);
+    assert.doesNotMatch(await executeTool(assistant, call('run_command', { command })), /Exit-Code/, command);
   }
   for (const command of ['npm install express', 'npm run build', 'npm test']) {
     assert.match(await executeTool(assistant, call('run_command', { command })), /Exit-Code/);
