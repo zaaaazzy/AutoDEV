@@ -151,6 +151,17 @@ async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> 
   return sprint?.rows[0]?.name ?? null;
 }
 
+/** Ist der Sprint des Auftrags pausiert? Ein von Hand gestarteter einzelner Agent läuft trotzdem. */
+export async function sprintPaused(pool: Pool, item: Pick<WorkItem, 'sprintId' | 'agentId'>): Promise<boolean> {
+  if (!item.sprintId || item.agentId) return false;
+  const row = (
+    await pool.query<{ paused: boolean }>('SELECT paused_at IS NOT NULL AS paused FROM sprints WHERE id = $1', [
+      item.sprintId,
+    ])
+  ).rows[0];
+  return row?.paused === true;
+}
+
 /** Rollen, deren Ablehnung den Auftrag zurück zum Entwickler schickt. */
 const LOOP_BACK_ROLES = new Set(['tester', 'reviewer']);
 
@@ -233,6 +244,14 @@ export async function runWorkItem(
     while (position < ordered.length) {
       const agent = ordered[position];
       if (!agent) break;
+      // Sprint pausiert: der vorige Agent hat seinen Schritt beendet, der nächste startet erst nach dem Fortsetzen.
+      // Der Auftrag gilt als unterbrochen (wieder „Geplant“); der nächste Lauf überspringt die erfolgreichen Agents.
+      if (await sprintPaused(pool, item).catch(logged('runner', false))) {
+        console.info(`[${item.id}] Sprint pausiert – „${agent.name}“ startet nach dem Fortsetzen.`);
+        passed = false;
+        interrupted = true;
+        break;
+      }
       // Budget: Ist ein Limit (Tag, Sprint, Auftrag) erreicht, startet kein weiterer Agent.
       budgetStop = await budgetGate(ctx).catch(logged('runner', null));
       if (budgetStop) {

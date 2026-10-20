@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import type { Principal } from './roles.js';
 import { completeSprint } from './sprint-planning.js';
 import {
   buildUpdate,
@@ -18,7 +19,7 @@ const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(end_date, 'YYYY-MM-DD') AS "endDate",
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
   git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt", pr_url AS "prUrl", ci_status AS "ciStatus",
-  review_ready_at AS "reviewReadyAt"`;
+  review_ready_at AS "reviewReadyAt", paused_at AS "pausedAt", paused_by AS "pausedBy"`;
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },
@@ -141,6 +142,42 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     );
     if (!result.rows[0]) {
       response.status(409).json({ message: 'Die Git-Sicherung dieses Sprints läuft bereits.' });
+      return;
+    }
+    response.json({ sprint: result.rows[0] });
+  });
+
+  // Sprint pausieren: laufende Agents beenden ihren Schritt, danach startet kein weiterer Schritt und kein Auftrag.
+  // Angefangene Aufträge bleiben „Geplant“ und machen nach dem Fortsetzen beim nächsten Agent weiter.
+  app.post('/sprints/:id/pause', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Not found.' });
+      return;
+    }
+    const principal = response.locals.principal as Principal | undefined;
+    const result = await pool.query(
+      `UPDATE sprints SET paused_at = COALESCE(paused_at, NOW()), paused_by = COALESCE(paused_by, $2)
+        WHERE id = $1 AND status = 'active' RETURNING ${SPRINT_COLUMNS}`,
+      [request.params.id, principal?.displayName ?? null],
+    );
+    if (!result.rows[0]) {
+      response.status(409).json({ message: 'Nur ein aktiver Sprint lässt sich pausieren.' });
+      return;
+    }
+    response.json({ sprint: result.rows[0] });
+  });
+
+  app.post('/sprints/:id/resume', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Not found.' });
+      return;
+    }
+    const result = await pool.query(
+      `UPDATE sprints SET paused_at = NULL, paused_by = NULL WHERE id = $1 RETURNING ${SPRINT_COLUMNS}`,
+      [request.params.id],
+    );
+    if (!result.rows[0]) {
+      response.status(404).json({ message: 'Sprint not found.' });
       return;
     }
     response.json({ sprint: result.rows[0] });

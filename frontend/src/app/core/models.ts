@@ -237,6 +237,9 @@ export interface Sprint {
   ciStatus?: 'pending' | 'success' | 'failure' | null;
   /** Alle Aufträge durch: wartet auf das Go („Live schalten“). */
   reviewReadyAt?: string | null;
+  /** Pausiert: laufende Agents beenden ihren Schritt, danach startet nichts Neues. */
+  pausedAt?: string | null;
+  pausedBy?: string | null;
 }
 
 export interface Bug {

@@ -255,6 +255,20 @@ export class SprintsComponent {
     return [branchNode(sprint), ...orders, commitNode(sprint)];
   }
 
+  protected async pauseSprint(id: string): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/pause`),
+      'Sprint pausiert: Laufende Agents beenden ihren Schritt, danach startet nichts Neues.',
+    );
+  }
+
+  protected async resumeSprint(id: string): Promise<void> {
+    await this.store.perform(
+      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/resume`),
+      'Sprint läuft weiter.',
+    );
+  }
+
   protected async syncGit(id: string, action: 'push' | 'pull'): Promise<void> {
     await this.store.perform(
       () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`, { action }),

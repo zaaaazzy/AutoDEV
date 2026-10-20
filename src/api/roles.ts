@@ -80,6 +80,7 @@ const RULES: Rule[] = [
   // Optische Freigabe im Reiter „Ansicht“ ist wie die Review-Freigabe Ausführen.
   ['POST', /^\/api\/development\/[^/]+\/visual\/approve$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
+  ['POST', /^\/api\/sprints\/[^/]+\/(pause|resume)$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
   [
     'PATCH',

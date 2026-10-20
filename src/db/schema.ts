@@ -951,6 +951,9 @@ export const SCHEMA = `
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS ci_status TEXT CHECK (ci_status IN ('pending', 'success', 'failure'));
   -- CI-Lauf, zu dem schon ein Bug angelegt wurde (höchstens ein Bug je Lauf).
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS ci_bug_run TEXT;
+  -- Sprint pausiert: laufende Agents beenden ihren Schritt, danach startet weder ein weiterer Schritt noch ein Auftrag.
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ;
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS paused_by TEXT;
   -- Review → abgeschlossen (Merge auf GitHub) stößt keine zweite Git-Sicherung an.
   CREATE OR REPLACE FUNCTION sprints_queue_git_sync() RETURNS trigger AS $fn$
   BEGIN

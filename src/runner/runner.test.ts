@@ -634,3 +634,48 @@ test('Entwickler: geänderte Dateien landen am Auftrag und als Abschnitt in sein
   assert.match(String(developerStep?.values[4]), /## Geänderte Dateien\n- neu\.ts/);
   assert.deepEqual(testerFiles, ['neu.ts']);
 });
+
+test('Sprint pausiert: der Entwickler beendet seinen Schritt, der Tester startet erst nach dem Fortsetzen', async () => {
+  let paused = false;
+  let previousSteps: object[] = [];
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: `run-${queries.length}` }] };
+      if (sql.includes('paused_at IS NOT NULL AS paused')) return { rows: [{ paused }] };
+      if (sql.includes('FROM agent_runs WHERE development_id'))
+        return { rows: previousSteps.length ? [{ id: 'run-old', status: 'failed' }] : [] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) return { rows: previousSteps };
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    // Während der Entwickler arbeitet, pausiert jemand den Sprint.
+    if (command[0] === 'dev') paused = true;
+    return { exitCode: 0, durationMs: 1, output: 'erledigt' };
+  };
+  const agents = [agent('dev', 'while_task', 1, ['dev']), agent('tester', 'after_task', 1, ['tester'])];
+  const sprintItem = { ...item, sprintId: 'sprint-1' };
+  const options = { cwd: '/r', timeoutMs: 1, execute };
+
+  assert.equal(await runWorkItem(pool, sprintItem, agents, options), 'failed');
+  assert.deepEqual(calls, ['dev'], 'der Tester startet nicht mehr');
+  assert.ok(
+    queries.some((query) => /SET status = 'planned'/.test(query.sql)),
+    'Auftrag wieder „Geplant“',
+  );
+  assert.ok(!queries.some((query) => query.values.includes('blocked') || query.values.includes('done')));
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug');
+
+  // Fortsetzen: der nächste Lauf überspringt den erfolgreichen Entwickler und startet beim Tester.
+  paused = false;
+  previousSteps = [
+    { agent_id: 'dev-id', agent_name: 'dev', phase: 'while_task', status: 'passed', output: 'erledigt' },
+  ];
+  calls.length = 0;
+  assert.equal(await runWorkItem(pool, sprintItem, agents, options), 'passed');
+  assert.deepEqual(calls, ['tester']);
+});

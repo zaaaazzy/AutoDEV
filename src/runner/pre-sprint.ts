@@ -56,7 +56,7 @@ export async function runPreSprint(
 ): Promise<boolean> {
   const sprint = (
     await pool.query<ActiveSprint>(
-      `SELECT id, name, goal FROM sprints WHERE project_slug = $1 AND status = 'active' AND pre_sprint_at IS NULL
+      `SELECT id, name, goal FROM sprints WHERE project_slug = $1 AND status = 'active' AND pre_sprint_at IS NULL AND paused_at IS NULL
         ORDER BY created_at LIMIT 1`,
       [options.project],
     )

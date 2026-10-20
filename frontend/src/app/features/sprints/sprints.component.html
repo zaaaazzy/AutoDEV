@@ -30,6 +30,9 @@
       </ng-template>
       <ng-template appDataCell="status" let-sprint>
         <span class="status" [ngClass]="sprint.status | statusClass">{{ sprint.status | statusLabel }}</span>
+        @if (sprint.status === 'active' && sprint.pausedAt) {
+          <span class="status paused">Pausiert</span>
+        }
         @if (sprint.status === 'review' && sprint.ciStatus) {
           <span class="ci-light" [ngClass]="sprint.ciStatus" [title]="'CI: ' + ciLabel(sprint)"></span>
         }
@@ -44,6 +47,18 @@
       </ng-template>
       <ng-template appDataDetail let-sprint>
         <article class="sprint-card">
+          @if (sprint.status === 'active' && sprint.pausedAt) {
+            <div class="sprint-go paused">
+              <strong>⏸ Sprint pausiert{{ sprint.pausedBy ? ' von ' + sprint.pausedBy : '' }}.</strong>
+              <span
+                >Laufende Agents beenden ihren Schritt, danach startet kein weiterer Agent und kein neuer Auftrag.
+                Angefangene Aufträge machen nach dem Fortsetzen beim nächsten Agent weiter.</span
+              >
+              <button class="button primary" type="button" (click)="resumeSprint(sprint.id)">
+                <app-nav-icon name="play" />Fortsetzen
+              </button>
+            </div>
+          }
           @if (sprint.status === 'active' && sprint.reviewReadyAt) {
             <div class="sprint-go">
               <strong>🚀 Alle Aufträge sind durch – der Sprint wartet auf dein Go.</strong>
@@ -284,6 +299,15 @@
                     </button>
                   }
                   @if (sprint.status === 'active') {
+                    @if (sprint.pausedAt) {
+                      <button class="button primary" type="button" (click)="resumeSprint(sprint.id)">
+                        <app-nav-icon name="play" />Fortsetzen
+                      </button>
+                    } @else {
+                      <button class="button secondary" type="button" (click)="pauseSprint(sprint.id)">
+                        <app-nav-icon name="pause" />Pausieren
+                      </button>
+                    }
                     <button
                       [class]="sprint.reviewReadyAt ? 'button primary' : 'button secondary'"
                       type="button"

@@ -220,3 +220,13 @@
   border-left-color: #c0392b;
   background: #fdf1ef;
 }
+.sprint-go.paused {
+  border-color: #e3cf9b;
+  border-left-color: #b98a1f;
+  background: #fdf8ea;
+}
+.status.paused {
+  margin-left: 6px;
+  color: #7a5a10;
+  background: #f6ead0;
+}
