@@ -250,7 +250,12 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 export const DEFAULT_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => group.id);
 
 /** Rollen mit erweiterten Rechten: Assistent, Entwickler, Tester (Tests, Coverage) und Reviewer (git diff). */
-const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer']);
+const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer', 'routine']);
+/**
+ * Rollen mit Shell (unter dem Wächter), aber ohne Datei-Werkzeuge: zeitgesteuerte Routinen führen z. B. `npm audit`
+ * aus, ändern aber nichts. Ergebnisse gehen nur über die Marker (@@BUG, @@IDEA, @@ORDER) weiter.
+ */
+export const NO_FILE_WRITE_ROLES = new Set(['routine']);
 /**
  * Rollen, die nur lesen (Werkzeugumfang der Problemanalyse beim lokalen Modell): keine Datei-Werkzeuge, keine Shell –
  * auch nicht über eine eigene Zuweisung am Agent oder eigene Werkzeug-Regeln im Befehl.
@@ -524,6 +529,9 @@ export async function materializeAgentCommands(
 /** Standardrechte einer Rolle, solange dem Agent keine Befehle einzeln zugewiesen sind (null). */
 export function roleDefaultCommands(role: string, permissions: ProjectPermissions): string[] {
   if (READ_ONLY_ROLES.has(role)) return [];
+  if (NO_FILE_WRITE_ROLES.has(role)) {
+    return [...availableCommands(permissions)].filter((rule) => rule !== FILES_CREATE && rule !== FILES_EDIT);
+  }
   return TRUSTED_ROLES.has(role) ? [...availableCommands(permissions)] : [FILES_CREATE, FILES_EDIT];
 }
 
@@ -590,19 +598,24 @@ export function withAgentPermissions(
   // dann weder Wächter noch Sperrlisten – der Assistent arbeitet mit allen Rechten des Workers.
   if (hasFullAccess(command, role)) return command;
   const readOnly = READ_ONLY_ROLES.has(role);
-  const custom = !readOnly && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
+  const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
+  const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
   const available = availableCommands(permissions);
   const chosen = readOnly
     ? []
     : normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
-        (rule) => available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT,
+        (rule) =>
+          (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
+          !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
       );
   // Selbst gesetzte Werkzeug-Regeln im Befehl bleiben (Entscheid des Admins); der Wächter prüft trotzdem.
   const policy = readOnly
     ? { create: false, edit: false, scopes: [], shell: false }
-    : custom
-      ? { create: true, edit: true, scopes: [] }
-      : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
+    : noFileWrite
+      ? { create: false, edit: false, scopes: [] }
+      : custom
+        ? { create: true, edit: true, scopes: [] }
+        : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
   const hook = guardHookCommand(policy);
   const blocked = [
     ...(policy.create && hook ? [] : CREATE_TOOLS),

@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { restrictedSystemCommand, systemCommand } from './system-agents.js';
+import { readOnlyCommand, restrictedSystemCommand, systemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -103,6 +103,11 @@ export function buildRequirementPrompt(
  * unless full tool access was allowed for it in the dashboard.
  */
 async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
+  // Routinen laufen über die CLI des Assistenten, aber ohne dessen Vollzugriffs-Schalter (nur lesen, Wächter aktiv).
+  if (role === 'routine') {
+    const command = await systemCommand(pool, 'assistant');
+    return command && readOnlyCommand(command);
+  }
   if (role !== 'assistant' && role !== 'analyst') return null;
   return role === 'analyst' ? restrictedSystemCommand(pool, role) : systemCommand(pool, role);
 }
@@ -123,7 +128,7 @@ export async function runAuthorAgent(
   signal?: AbortSignal,
   /** Nur lesen, unabhängig von der Rolle (z. B. Assistent, während ein Auftrag im selben Ordner arbeitet). */
   readOnly = false,
-): Promise<{ exitCode: number; output: string; sessionId?: string }> {
+): Promise<{ exitCode: number; output: string; sessionId?: string; tokens?: number }> {
   const author = (
     agentId
       ? await pool.query<AgentRights>(
@@ -225,6 +230,7 @@ export async function runAuthorAgent(
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
       sessionId: 'sessionId' in result ? (result.sessionId as string | undefined) : undefined,
+      tokens: result.tokens ?? 0,
     };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };

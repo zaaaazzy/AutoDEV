@@ -100,8 +100,9 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/doc-revisions\/[^/]+\/(approve|reject)$/, 'editor'],
   ['*', /^\/api\/docs\//, 'editor'],
   ['*', /^\/api\/projects\/[^/]+\/chat$/, 'chat'],
-  // Agent-Aufgaben definieren und starten gehört zum Arbeiten mit dem Assistenten.
-  ['*', /^\/api\/(projects\/[^/]+\/agent-tasks$|agent-tasks\/[^/]+(\/run)?$)/, 'chat'],
+  // Agent-Aufgaben definieren, starten, nach Zeitplan pausieren/fortsetzen und ihren Verlauf ansehen gehört zum
+  // Arbeiten mit dem Assistenten.
+  ['*', /^\/api\/(projects\/[^/]+\/agent-tasks$|agent-tasks\/[^/]+(\/(run|runs|pause|resume))?$)/, 'chat'],
   ['POST', /^\/api\/projects\/[^/]+\/test-requests$/, 'run'],
   // AIdeation neu starten (Container neu bauen, Worker neu starten): betrifft alle Projekte.
   ['POST', /^\/api\/system\/restart$/, 'admin'],

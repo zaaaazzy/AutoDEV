@@ -348,7 +348,27 @@ test('Dashboard: Kennzahlen, Links und Agent-Aktionen', async ({ page, isMobile 
   await button(page, 'Aktionen').click();
   await expect(page.getByRole('combobox', { name: 'Aktion suchen' })).toBeFocused();
   await snap(page, info, 'Agent-Aktionen', false);
+  // Routine-Vorlagen: deaktiviert (Pausen-Symbol), Verlauf als Tabelle mit umkehrbarer Sortierung.
+  const template = page.locator('.agent-task', { hasText: 'Nächtlicher Sicherheits-Check' });
+  await expect.soft(template, 'Vorlage „Nächtlicher Sicherheits-Check“ vorhanden').toHaveCount(1);
+  if (await template.count()) {
+    await expect.soft(template.locator('.agent-task-clock.paused')).toBeVisible();
+    await template.hover();
+    await template.getByRole('button', { name: 'Verlauf' }).click();
+    await expect(page.getByRole('region', { name: 'Verlauf der Aufgabe' })).toBeVisible();
+    await snap(page, info, 'Agent-Aktion Verlauf', false);
+    await button(page, 'Zurück').click();
+  }
+  // Zeitplan im Formular: Vorschau des nächsten Laufs, ohne zu speichern.
+  await page.locator('.agent-tasks-new').first().click();
+  await page.getByRole('combobox', { name: 'Zeitplan' }).selectOption('weekly');
+  await expect(page.locator('.agent-task-preview')).toContainText('nächster Lauf:');
+  await page.getByRole('combobox', { name: 'Zeitplan' }).selectOption('custom');
+  await page.getByRole('textbox', { name: 'Cron-Ausdruck' }).fill('0 7 * *');
+  await expect(page.locator('.agent-task-preview')).toContainText('5 Felder');
+  await snap(page, info, 'Agent-Aktion Zeitplan', false);
   await page.keyboard.press('Escape');
+  await expect(page.locator('.agent-tasks-menu')).toHaveCount(0);
 });
 
 test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen', async ({ page, isMobile }, info) => {

@@ -115,7 +115,11 @@
                   {{ group.label }} <span class="muted">({{ docsOfKind(group.kind).length }})</span>
                 </summary>
                 @for (doc of docsOfKind(group.kind); track doc.id) {
-                  <button class="doc-link" [class.selected]="selectedDoc()?.id === doc.id" (click)="select(doc)">
+                  <button
+                    class="doc-link"
+                    [class.selected]="!marketingOpen() && selectedDoc()?.id === doc.id"
+                    (click)="select(doc)"
+                  >
                     {{ doc.title }}
                     @if (pendingOf(doc).length) {
                       <span class="pending-dot" title="Änderung wartet auf die Redaktion"></span>
@@ -126,12 +130,35 @@
                 }
               </details>
             }
+            @if (auth.can('docs')) {
+              <details class="doc-group" open>
+                <summary>
+                  Marketing <span class="muted">({{ marketingPages.length }})</span>
+                </summary>
+                @for (page of marketingPages; track page.hash) {
+                  <a
+                    class="doc-link"
+                    [class.selected]="marketingOpen()"
+                    [href]="page.hash"
+                    [attr.aria-current]="marketingOpen() ? 'page' : null"
+                    (click)="openMarketing()"
+                    >{{ page.label }}</a
+                  >
+                }
+              </details>
+            }
           }
         </div>
       </aside>
 
       <div class="doc-reader">
-        @if (selectedDoc(); as doc) {
+        @if (marketingOpen()) {
+          @if (auth.can('docs')) {
+            <app-agent-permissions />
+          } @else {
+            <p class="empty-state">Diese Seite braucht das Recht „Dokumentation bearbeiten“.</p>
+          }
+        } @else if (selectedDoc(); as doc) {
           <!-- Kopf: Titel links; Kategorie, Datum und Bearbeiten (bzw. Einreichen/Abbrechen) rechts auf derselben Zeile. -->
           <header class="doc-head">
             <h3 class="doc-title">{{ doc.title }}</h3>

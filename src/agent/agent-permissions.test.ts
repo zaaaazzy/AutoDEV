@@ -152,6 +152,23 @@ test('voller Zugriff ohne Wächter nur für den Dashboard-Assistenten und nur au
   assert.ok(withAgentPermissions(CLAUDE, 'assistant', project, null).includes('--settings'));
 });
 
+test('Routinen: Shell unter dem Wächter, aber keine Datei-Werkzeuge und nie Vollzugriff', () => {
+  const full = ['claude', '--dangerously-skip-permissions', '-p', '{prompt}'];
+  for (const base of [CLAUDE, full]) {
+    const command = withAgentPermissions(base, 'routine', project, null);
+    const disallowed = (option(command, '--disallowedTools') ?? '').split(',');
+    for (const tool of ['Write', 'Edit']) assert.ok(disallowed.includes(tool), tool);
+    assert.ok(!disallowed.includes('Bash'), 'Shell bleibt (z. B. npm audit)');
+    const policy = policyOf(command);
+    assert.equal(policy.create, false);
+    assert.equal(policy.edit, false);
+  }
+  assert.ok(!hasFullAccess(full, 'routine'));
+  // Auch eine Zuweisung „Dateien ändern“ am Agent gibt einer Routine keine Schreibrechte.
+  const assigned = withAgentPermissions(CLAUDE, 'routine', project, ['files:create', 'files:edit']);
+  assert.equal(policyOf(assigned).edit, false);
+});
+
 test('die Problemanalyse (analyst) arbeitet nur lesend: keine Datei-Werkzeuge, keine Shell', () => {
   const command = withAgentPermissions(CLAUDE, 'analyst', project, null);
   const disallowed = command[command.indexOf('--disallowedTools') + 1] ?? '';

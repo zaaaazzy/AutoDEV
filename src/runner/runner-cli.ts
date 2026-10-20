@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
+import { scheduleRoutines } from '../agent/routine.js';
 import { beginShutdown, killOrphan } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
@@ -351,6 +352,22 @@ async function main(): Promise<void> {
         .catch((error: unknown) => logOnce('review', `Review-Container fehlgeschlagen: ${describeError(error)}`))
         .finally(() => (reviewActive = false));
     }, 5_000);
+    // Planer für zeitgesteuerte Routinen: jede Minute fällige Agent-Aufgaben als Chat-Nachricht einreihen (der Chat
+    // führt sie dann aus). Gesperrte Projekte (laufender Auftrag) bleiben fällig, bis die Sperre frei ist.
+    let routineActive = false;
+    const routineTimer = setInterval(() => {
+      if (routineActive || stopping) return;
+      const projects = chatTargets.filter((target) => !target.problem).map((target) => target.options.project);
+      if (!projects.length) return;
+      routineActive = true;
+      void scheduleRoutines(pool, projects)
+        .then((result) => {
+          loggedErrors.delete('routines');
+          if (result.queued.length) console.info(`Routinen eingereiht: ${result.queued.length}`);
+        })
+        .catch((error: unknown) => logOnce('routines', `Routinen-Planer fehlgeschlagen: ${describeError(error)}`))
+        .finally(() => (routineActive = false));
+    }, 60_000);
     const chatTimer = setInterval(() => {
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -513,7 +530,8 @@ async function main(): Promise<void> {
         authorActive.size ||
         estimateActive.size ||
         commentActive.size ||
-        visionaryActive.size
+        visionaryActive.size ||
+        routineActive
       )
         await sleep(200);
     } finally {
@@ -522,6 +540,7 @@ async function main(): Promise<void> {
       stopFolderWatch();
       clearInterval(restartTimer);
       clearInterval(chatTimer);
+      clearInterval(routineTimer);
       clearInterval(reviewTimer);
       clearInterval(setupTimer);
     }

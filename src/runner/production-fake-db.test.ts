@@ -167,6 +167,16 @@ export class FakeProductionDb {
       this.buckets.set(key, (this.buckets.get(key) ?? 0) + count);
       return rows([{ count: this.buckets.get(key) }]);
     }
+    if (text.startsWith('SELECT SUM(count) AS total FROM production_event_buckets')) {
+      const [eventId, at, windowMs] = v as [string, Date, number];
+      const from = this.bucketHour(new Date(at.getTime() - windowMs));
+      let total = 0;
+      for (const [key, count] of this.buckets) {
+        const [id, hour] = key.split('|');
+        if (id === eventId && Number(hour) >= from) total += count;
+      }
+      return rows([{ total: total ? String(total) : null }]);
+    }
     if (text.startsWith('SELECT status, severity FROM bugs WHERE id = $1')) {
       const bug = this.bugs.find((entry) => entry.id === v[0]);
       return rows(bug ? [{ status: bug.status, severity: bug.severity }] : []);

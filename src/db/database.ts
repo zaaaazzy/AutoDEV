@@ -2,7 +2,7 @@ import { logged } from '../core/log.js';
 import { Pool } from 'pg';
 import { ensureDefaultAgents, ensureReviewer } from '../api/agents.js';
 import { SCHEMA } from './schema.js';
-import { seedDefaultActions } from '../api/agent-tasks.js';
+import { seedDefaultActions, seedRoutineTemplates } from '../api/agent-tasks.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
 
 export interface DatabaseConfig {
@@ -65,6 +65,8 @@ export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> 
     // Standard-Aktionen (Quick Actions) einmalig je Projekt anlegen und dem Tester zuweisen.
     for (const project of (await pool.query<{ slug: string }>('SELECT slug FROM projects')).rows) {
       await seedDefaultActions(pool, project.slug).catch(logged('database'));
+      // Routine-Vorlagen (deaktiviert) einmalig je Projekt.
+      await seedRoutineTemplates(pool, project.slug).catch(logged('database'));
       await materializeAgentCommands(pool, project.slug).catch(logged('database'));
     }
     const withoutReviewer = await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE NOT reviewer_seeded');

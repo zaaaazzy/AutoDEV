@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -10,6 +10,8 @@ import { MermaidDirective } from '../../shared/mermaid.directive.js';
 import { DateTimePipe } from '../../shared/pipes.js';
 import { searchDocs } from './doc-search.js';
 import { compactDiff, lineDiff } from './line-diff.js';
+import { AgentPermissionsComponent } from './marketing/agent-permissions.component.js';
+import { AGENT_PERMISSIONS_HASH, isAgentPermissionsHash } from './marketing/agent-permissions.js';
 
 const COLLAPSED_KEY = 'devlog.docs.collapsed';
 
@@ -24,7 +26,7 @@ function readCollapsed(): boolean {
 @Component({
   selector: 'app-docs',
   standalone: true,
-  imports: [FormsModule, MarkdownPipe, MermaidDirective, DateTimePipe],
+  imports: [FormsModule, MarkdownPipe, MermaidDirective, DateTimePipe, AgentPermissionsComponent],
   templateUrl: './docs.component.html',
   host: { style: 'display: contents' },
 })
@@ -67,8 +69,15 @@ export class DocsComponent {
     { kind: 'test', label: 'Testberichte' },
     { kind: 'settings', label: 'Agents & Benutzer' },
   ];
+  /** Gruppe „Marketing“: statische Seiten statt Dokumente, nur mit dem Recht „Dokumentation bearbeiten“. */
+  protected readonly marketingPages = [{ hash: AGENT_PERMISSIONS_HASH, label: 'Agents, Aufgaben und Rechte' }];
+  /** Marketing-Seite laut Adresse (#docs/marketing/…); eigener Verlaufseintrag, „Zurück“ verlässt sie wieder. */
+  protected readonly marketingOpen = signal(isAgentPermissionsHash(globalThis.location.hash));
 
   constructor() {
+    const onHashChange = (): void => this.marketingOpen.set(isAgentPermissionsHash(globalThis.location.hash));
+    globalThis.addEventListener('hashchange', onHashChange);
+    inject(DestroyRef).onDestroy(() => globalThis.removeEventListener('hashchange', onHashChange));
     // Link auf ein Dokument (#docs/<id>, z. B. „ToDo im Sprintbericht“): dieses Dokument öffnen.
     effect(() => {
       const id = this.store.focusId();
@@ -97,10 +106,20 @@ export class DocsComponent {
   }
 
   protected select(doc: DocumentEntry): void {
+    // Von der Marketing-Seite zu einem Dokument: Adresse ohne Unterseite, damit Neuladen das Dokument zeigt.
+    if (this.marketingOpen()) {
+      globalThis.history.replaceState(null, '', '#docs');
+      this.marketingOpen.set(false);
+    }
     this.selectedDoc.set(doc);
     this.editing.set(null);
     // Gruppe des gewählten Dokuments aufklappen, damit die Auswahl sichtbar bleibt.
     this.toggleGroup(doc.kind, true);
+    if (globalThis.matchMedia?.('(max-width: 720px)').matches) this.setCollapsed(true);
+  }
+
+  /** Der Link setzt die Adresse (eigener Verlaufseintrag); auf dem Handy wie bei Dokumenten das Inhaltsverzeichnis zuklappen. */
+  protected openMarketing(): void {
     if (globalThis.matchMedia?.('(max-width: 720px)').matches) this.setCollapsed(true);
   }
 
