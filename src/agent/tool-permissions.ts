@@ -305,8 +305,152 @@ export function withIgnoreScripts(parts: readonly string[]): string[] {
   return [...parts, '--ignore-scripts'];
 }
 
-/** Allow safe fixed commands and validated package names/options for npm installs. */
-export function isAllowedCommand(command: string): boolean {
+/**
+ * npm-Optionen, die Skripte mit einer anderen Shell starten, Einstellungen und Ablage ausserhalb lesen/schreiben oder
+ * global installieren. npm akzeptiert eindeutige Abkürzungen (--scr = --script-shell), darum gilt jede Option als
+ * gefährlich, deren Name der Anfang eines dieser Namen ist.
+ */
+const DANGEROUS_NPM_OPTIONS = [
+  'script-shell',
+  'userconfig',
+  'globalconfig',
+  'cache',
+  'node-options',
+  'global',
+  'location',
+  'shell',
+  'call',
+  'init-module',
+  'editor',
+  'git',
+];
+/** Kurzoptionen: -g (global), -L (location); -C (prefix) wird wie --prefix geprüft. */
+const DANGEROUS_NPM_SHORT = /[gL]/;
+
+/** --prefix bzw. -C: nur ein relativer Ordner im Projekt (samt aufgelöster Links), ohne Shell-Ersetzungen. */
+function prefixInside(raw: string | undefined, root: string | undefined): boolean {
+  const value = (raw ?? '').replace(/['"\\]/g, '');
+  if (!value || value.startsWith('-') || value.startsWith('~') || value.includes('$') || isAbsolute(value))
+    return false;
+  if (!root) return RELATIVE_DIRECTORY.test(value);
+  const real = realPath(resolve(root, value));
+  return real === root || real.startsWith(root + sep);
+}
+
+/**
+ * Schaltet die Option --ignore-scripts wieder ab? Bei npm gewinnt die letzte Angabe: --no-ignore-scripts,
+ * --ignore-scripts=false oder „--ignore-scripts false“, auch abgekürzt (--ignore-s=false, --no-ig).
+ */
+function disablesIgnoreScripts(name: string, inline: string | undefined, next: string | undefined): boolean {
+  if (name.startsWith('no-') && 'ignore-scripts'.startsWith(name.slice(3))) return true;
+  if (!'ignore-scripts'.startsWith(name)) return false;
+  return inline === undefined ? next === 'false' : inline !== 'true';
+}
+
+/**
+ * Prüft die Optionen eines npm-Befehls (für Wächter und lokales Modell); liefert den Grund der Sperre oder null.
+ * Ohne Projektordner (root) ist --prefix nur mit einem einfachen relativen Ordner erlaubt. Nach „--“ gehören die
+ * Argumente dem Skript, nicht npm.
+ */
+export function npmOptionProblem(command: string, root?: string): string | null {
+  const words = command.trim().split(/\s+/);
+  if (words[0] !== 'npm') return null;
+  for (let index = 1; index < words.length; index++) {
+    const word = (words[index] ?? '').replace(/['"\\]/g, '');
+    if (word === '--') break;
+    if (!word.startsWith('-')) continue;
+    const [flag = '', inline] = word.split(/=(.*)/s);
+    const prefixValue = (): string | undefined => inline ?? words[++index];
+    if (disablesIgnoreScripts(flag.replace(/^-+/, ''), inline, words[index + 1]?.replace(/['"\\]/g, ''))) {
+      return `„${command}“: --ignore-scripts lässt sich nicht abschalten.`;
+    }
+    if (flag.startsWith('--')) {
+      const name = flag.slice(2);
+      if (name === 'prefix') {
+        if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
+      } else if (
+        name &&
+        ('prefix'.startsWith(name) || DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)))
+      ) {
+        return `„${command}“: diese npm-Option ist gesperrt.`;
+      }
+    } else if (flag === '-C') {
+      if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
+    } else if (flag.includes('C') || DANGEROUS_NPM_SHORT.test(flag)) {
+      return `„${command}“: diese npm-Option ist gesperrt.`;
+    }
+  }
+  return null;
+}
+
+/** Git-Optionen, mit denen erlaubte Befehle Programme starten oder Dateien schreiben würden (lange Form ohne „--“). */
+const DANGEROUS_GIT_OPTIONS = [
+  'upload-pack',
+  'receive-pack',
+  'exec',
+  'output',
+  'output-directory',
+  'ext-diff',
+  'textconv',
+  'no-index',
+  'config',
+  'template',
+  'separate-git-dir',
+  'work-tree',
+  'git-dir',
+  'open-files-in-pager',
+];
+/** Eigene Optionen, die zugleich Anfang einer gesperrten sind (git diff --text ≠ --textconv). */
+const SAFE_GIT_OPTIONS = new Set(['text']);
+
+/**
+ * Gefährliche Option in einem git-Befehl? Git akzeptiert eindeutige Abkürzungen (--outp = --output, --upload-pa =
+ * --upload-pack), darum ist jede lange Option gesperrt, deren Name der Anfang einer gesperrten ist. Dazu -c, -u und
+ * -O (Pager bzw. Reihenfolge-Datei). Anführungszeichen und Backslashes werden wie in Bash entfernt.
+ */
+export function gitOptionProblem(command: string): boolean {
+  const words = shellWords(command);
+  if (words[0] !== 'git') return false;
+  return words.slice(1).some((word) => {
+    if (/^-[cu](?:=|$)/.test(word) || word.startsWith('-O')) return true;
+    if (!word.startsWith('--') || word === '--') return false;
+    const name = word.slice(2).split('=')[0] ?? '';
+    return !SAFE_GIT_OPTIONS.has(name) && DANGEROUS_GIT_OPTIONS.some((option) => option.startsWith(name));
+  });
+}
+
+/**
+ * Pfadangaben von „git diff“: Liegt ein Pfad ausserhalb des Arbeitsbaums, schaltet Git von selbst in den
+ * No-Index-Modus und gibt beliebige Dateien aus (git diff /dev/null ~/.zshrc). Darum muss jedes Argument – samt
+ * aufgelöster Links – im Projekt liegen; Shell-Ersetzungen ($, ~) und Ordner-Dateien (-O) sind gesperrt.
+ * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt.
+ */
+export function gitPathProblem(command: string, root?: string): string | null {
+  // Umleitungen nach /dev/null bzw. 2>&1 sind keine Argumente (andere Umleitungen sperrt der Wächter vorher).
+  const words = command
+    .replace(/\d*>>?\s*(?:&\d+|\/dev\/null)/g, ' ')
+    .trim()
+    .split(/\s+/);
+  if (words[0] !== 'git' || words[1] !== 'diff') return null;
+  for (const raw of words.slice(2)) {
+    const word = raw.replace(/['"\\]/g, '');
+    if (/^(?:-O|--orderfile)/.test(word)) return `„${command}“: -O/--orderfile ist gesperrt.`;
+    if (!word || word.startsWith('-')) continue;
+    if (word.startsWith('~') || word.includes('$')) return `„${command}“: nur Pfade im Projektordner.`;
+    const outside = root
+      ? ((real) => real !== root && !real.startsWith(root + sep))(realPath(resolve(root, word)))
+      : isAbsolute(word) || word.split('/').includes('..');
+    if (outside) return `„${command}“: nur Pfade im Projektordner (Git liest sonst fremde Dateien).`;
+  }
+  return null;
+}
+
+/**
+ * Allow safe fixed commands and validated package names/options for npm installs. Mit Projektordner (root) wird ein
+ * --prefix samt symbolischer Links aufgelöst; ohne ist er nur als einfacher relativer Ordner erlaubt.
+ */
+export function isAllowedCommand(command: string, root?: string): boolean {
+  if (npmOptionProblem(command, root) || gitPathProblem(command, root)) return false;
   if (COMMAND_PATTERN.test(command) || READ_COMMAND.test(command)) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'npm' && ['install', 'i', 'uninstall'].includes(parts[1] ?? '') && parts.length > 2) {
@@ -435,8 +579,146 @@ export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMANDS =
   /^(?:sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\d*|gem|cargo|go)\b/;
-const FORBIDDEN_SUBCOMMANDS =
-  /^(?:git (?:push|reset|clean|config|remote|rebase|filter-branch|update-ref|gc|clone|submodule)|docker (?:run|exec|rm|rmi|system|volume|network|image|container|cp|login)|docker compose (?:exec|run|cp|rm)|npm (?:publish|exec|x|login|adduser|token|config|cache|--prefix)|npm install(?! --ignore-scripts))\b/;
+/** Unterbefehle, die keine Gruppe freigeben darf; der Wächter sperrt sie zusätzlich bei jedem Shell-Befehl. */
+const FORBIDDEN_SUBCOMMAND_LIST = [
+  ...[
+    'push',
+    'reset',
+    'clean',
+    'config',
+    'remote',
+    'rebase',
+    'filter-branch',
+    'update-ref',
+    'gc',
+    'clone',
+    'submodule',
+  ].map((sub) => `git ${sub}`),
+  ...[
+    'run',
+    'exec',
+    'create',
+    'rm',
+    'rmi',
+    'system',
+    'volume',
+    'network',
+    'image',
+    'container',
+    'cp',
+    'login',
+    'build',
+    'buildx',
+    'builder',
+    'plugin',
+    'context',
+    'swarm',
+    'service',
+    'stack',
+    'secret',
+    'config',
+    'commit',
+    'export',
+    'import',
+    'load',
+    'save',
+    'update',
+    'attach',
+  ].map((sub) => `docker ${sub}`),
+  ...['exec', 'run', 'cp', 'rm', 'attach'].map((sub) => `docker compose ${sub}`),
+  ...[
+    'publish',
+    'unpublish',
+    'deprecate',
+    'dist-tag',
+    'owner',
+    'access',
+    'exec',
+    'x',
+    'explore',
+    'edit',
+    'login',
+    'adduser',
+    'token',
+    'config',
+    'c',
+    'set',
+    'cache',
+    '--prefix',
+    '-C',
+  ].map((sub) => `npm ${sub}`),
+];
+/** npm-Unterbefehle (samt Aliassen), die Installationsskripte ausführen – erlaubt nur direkt mit --ignore-scripts. */
+const NPM_SCRIPT_SUBCOMMANDS = [
+  ...['install', 'i', 'in', 'ins', 'inst', 'insta', 'instal', 'isnt', 'isnta', 'isntal', 'isntall', 'add'],
+  ...['ci', 'clean-install', 'ic', 'install-clean', 'isntall-clean', 'install-test', 'it', 'install-ci-test', 'cit'],
+  ...['update', 'up', 'upgrade', 'udpate', 'rebuild', 'rb', 'link', 'ln', 'dedupe', 'ddp'],
+].map((sub) => `npm ${sub}`);
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const FORBIDDEN_SUBCOMMANDS = new RegExp(
+  `^(?:(?:${FORBIDDEN_SUBCOMMAND_LIST.map(escapeRegExp).join('|')})(?![\\w-])|(?:${NPM_SCRIPT_SUBCOMMANDS.map(escapeRegExp).join('|')})(?![\\w-])(?! --ignore-scripts(?:\\s|$)))`,
+);
+
+/**
+ * Gesperrter Unterbefehl in einem Shell-Befehl (für den Wächter). Optionen vor dem Unterbefehl (git -C, docker -H,
+ * npm --prefix) sind ebenfalls gesperrt, damit sie die Prüfung nicht umgehen.
+ */
+export function forbiddenSubcommand(command: string): boolean {
+  // Bash entfernt Anführungszeichen und Backslashes: git "push", git pu\sh und npm 'install' sind dieselben Befehle.
+  const words = shellWords(command);
+  const normalized = words.join(' ');
+  if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized)) return true;
+  // Befehlsname und Unterbefehl nur wörtlich: Variablen, Globs, Klammer-Erweiterung oder $'…' (git $X, git pus?,
+  // git {push,}) setzt erst die Shell zusammen – und alle übrigen Prüfungen sähen den Befehl nicht.
+  if (!CHECKED_PROGRAMS.has(words[0] ?? '')) return false;
+  const raw = command.trim().split(/\s+/);
+  const literal = raw.slice(0, words[0] === 'docker' && words[1] === 'compose' ? 3 : 2);
+  return literal.some((word) => !/^[\w.:@/=+,-]+$/.test(word));
+}
+
+/** Programme, deren Unterbefehle der Wächter prüft. */
+const CHECKED_PROGRAMS = new Set(['git', 'docker', 'docker-compose', 'npm', 'npx']);
+
+/**
+ * Zerlegt einen einfachen Shell-Befehl wie Bash in Wörter: Anführungszeichen und Backslashes werden entfernt,
+ * Leerzeichen in Anführungszeichen trennen nicht. Bei einem offenen Anführungszeichen (der Wächter trennt Befehlsketten
+ * auch innerhalb von Anführungszeichen) werden Anführungszeichen und Backslashes einfach entfernt.
+ */
+export function shellWords(command: string): string[] {
+  const words: string[] = [];
+  let word = '';
+  let started = false;
+  let quote = '';
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index] ?? '';
+    if (quote) {
+      if (char === quote) quote = '';
+      else if (quote === '"' && char === '\\' && /["\\$`]/.test(command[index + 1] ?? '')) word += command[++index];
+      else word += char;
+    } else if (/\s/.test(char)) {
+      if (started) words.push(word);
+      word = '';
+      started = false;
+    } else {
+      started = true;
+      if (char === "'" || char === '"') quote = char;
+      else if (char === '\\') word += command[++index] ?? '';
+      else word += char;
+    }
+  }
+  if (quote)
+    return command
+      .replace(/['"\\]/g, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+  if (started) words.push(word);
+  return words;
+}
+
+/** Deckt ein Präfix (Regel „Bash(<präfix>:*)“) einen gesperrten Unterbefehl ab, z. B. „git“ oder „docker compose“? */
+const coversForbidden = (prefix: string): boolean =>
+  [...FORBIDDEN_SUBCOMMAND_LIST, ...NPM_SCRIPT_SUBCOMMANDS].some((forbidden) => forbidden.startsWith(`${prefix} `));
 const SAFE_PREFIX = /^[\w@./=:,+-]+(?: [\w@./=:,+-]+)*$/;
 
 /**
@@ -452,7 +734,7 @@ export function customRuleProblem(rule: string): string | null {
   if (!SAFE_PREFIX.test(command))
     return `„${rule}“: keine Shell-Sonderzeichen (; & | $ \` > < * ? Klammern, Anführungszeichen).`;
   if (command.length > 120) return `„${rule}“: Befehl zu lang.`;
-  if (FORBIDDEN_COMMANDS.test(command) || FORBIDDEN_SUBCOMMANDS.test(command))
+  if (FORBIDDEN_COMMANDS.test(command) || forbiddenSubcommand(command) || (match[2] && coversForbidden(command)))
     return `„${rule}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
   if (
     /(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|com\.aideation|DevLog|AIdeation)(?:[\s/]|$)/i.test(command) ||
@@ -579,6 +861,38 @@ export function hasFullAccess(command: readonly string[], role: string): boolean
 }
 
 /**
+ * Freigaben eines Agents: eigene Zuweisung, sonst der Projektstandard der Rolle – nur Befehle aus freigeschalteten
+ * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln.
+ */
+function chosenRules(role: string, permissions: ProjectPermissions, agentCommands: string[] | null): string[] {
+  if (READ_ONLY_ROLES.has(role)) return [];
+  const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
+  const available = availableCommands(permissions);
+  return normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
+    (rule) =>
+      (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
+      !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
+  );
+}
+
+/**
+ * Rechte-Kontext für den eingebauten Ollama-Agent: dieselben Datei- und Befehlsrechte, die bei der Claude-CLI über
+ * withAgentPermissions und den Wächter gelten.
+ */
+export function agentRights(
+  role: string,
+  permissions: ProjectPermissions,
+  agentCommands: string[] | null,
+  fileScopes: readonly string[] = [],
+): { files: { create: boolean; edit: boolean; scopes: string[] }; commands: string[] } {
+  const commands = chosenRules(role, permissions, agentCommands);
+  return {
+    files: { create: commands.includes(FILES_CREATE), edit: commands.includes(FILES_EDIT), scopes: [...fileScopes] },
+    commands,
+  };
+}
+
+/**
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
  * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern.
@@ -600,14 +914,7 @@ export function withAgentPermissions(
   const readOnly = READ_ONLY_ROLES.has(role);
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
   const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
-  const available = availableCommands(permissions);
-  const chosen = readOnly
-    ? []
-    : normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
-        (rule) =>
-          (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
-          !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
-      );
+  const chosen = chosenRules(role, permissions, agentCommands);
   // Selbst gesetzte Werkzeug-Regeln im Befehl bleiben (Entscheid des Admins); der Wächter prüft trotzdem.
   const policy = readOnly
     ? { create: false, edit: false, scopes: [], shell: false }

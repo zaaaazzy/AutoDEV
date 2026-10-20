@@ -20,6 +20,13 @@ const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
   git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt", pr_url AS "prUrl", ci_status AS "ciStatus",
   review_ready_at AS "reviewReadyAt", paused_at AS "pausedAt", paused_by AS "pausedBy"`;
+// Erlaubte Statuswechsel per PATCH. Review → abgeschlossen übernimmt der Worker (Merge nach grüner CI).
+// Abgeschlossen → aktiv ist „Wieder öffnen“ in der Oberfläche.
+const SPRINT_TRANSITIONS: Record<string, readonly string[]> = {
+  planned: ['active'],
+  active: ['planned', 'completed'],
+  completed: ['active'],
+};
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },
@@ -53,7 +60,8 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, SPRINT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
-    if (!slug || !fields || !values.get('name') || values.get('status') === 'active') {
+    // Neue Sprints starten immer als geplant: aktiv und abgeschlossen gibt es nur über die Statuswechsel.
+    if (!slug || !fields || !values.get('name') || (values.get('status') ?? 'planned') !== 'planned') {
       response.status(400).json({ message: 'Invalid sprint.' });
       return;
     }
@@ -91,26 +99,54 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Invalid sprint update.' });
       return;
     }
-    const update = buildUpdate('sprints', request.params.id, fields, SPRINT_COLUMNS);
+    const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
     try {
-      if (fields.some((field) => field.column === 'status')) {
+      let from: string | undefined;
+      if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string }>('SELECT status FROM sprints WHERE id = $1', [
-          request.params.id,
-        ]);
-        if (current.rows[0]?.status === 'review') {
+        const current = await pool.query<{ status: string; running: number }>(
+          `SELECT status, (SELECT COUNT(*)::int FROM development_items
+                            WHERE sprint_id = s.id AND status = 'in_progress') AS running
+             FROM sprints s WHERE id = $1`,
+          [request.params.id],
+        );
+        from = current.rows[0]?.status;
+        if (from === 'review') {
           response.status(409).json({
             message: 'Der Sprint ist im Review: Merge und Abschluss folgen nach grüner CI im Pull Request.',
           });
           return;
         }
+        const conflict = !from
+          ? null
+          : !SPRINT_TRANSITIONS[from]?.includes(target)
+            ? `Statuswechsel ${from} → ${target} ist für Sprints nicht erlaubt.`
+            : target === 'completed' && Number(current.rows[0]?.running) > 0
+              ? 'Im Sprint laufen noch Aufträge – erst abwarten oder stoppen, dann abschließen.'
+              : null;
+        if (conflict) {
+          response.status(409).json({ message: conflict });
+          return;
+        }
       }
+      // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein TOCTOU mit Worker oder zweitem Klick).
+      const update = buildUpdate(
+        'sprints',
+        request.params.id,
+        fields,
+        SPRINT_COLUMNS,
+        from ? { column: 'status', values: [from] } : undefined,
+      );
       const result = await pool.query(update.sql, update.values);
       if (!result.rows[0]) {
-        response.status(404).json({ message: 'Sprint not found.' });
+        response
+          .status(from ? 409 : 404)
+          .json({ message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint not found.' });
         return;
       }
-      if (result.rows[0].status === 'completed') {
+      // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
+      // Merge und Push nicht erneut auslösen. Das UPDATE oben war an den gelesenen Status gebunden, der Wechsel also echt.
+      if (target === 'completed' && from !== undefined && from !== 'completed') {
         // Sprintende: Bericht, dann Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
         await completeSprint(pool, request.params.id);
       }
@@ -208,8 +244,24 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Not found.' });
       return;
     }
-    const result = await pool.query('DELETE FROM sprints WHERE id = $1 RETURNING id', [request.params.id]);
+    // Nur geplante oder abgeschlossene Sprints ohne laufende Aufträge und ohne laufende Git-Sicherung:
+    // sonst verlieren laufende Aufträge ihren Sprint bzw. ein offener PR bleibt ohne Sprint zurück.
+    const result = await pool.query(
+      `DELETE FROM sprints s WHERE id = $1 AND status IN ('planned', 'completed')
+          AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))
+          AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status = 'in_progress')
+        RETURNING id`,
+      [request.params.id],
+    );
     if (!result.rows[0]) {
+      const exists = (await pool.query('SELECT 1 FROM sprints WHERE id = $1', [request.params.id])).rows[0];
+      if (exists) {
+        response.status(409).json({
+          message:
+            'Nur geplante oder abgeschlossene Sprints ohne laufende Aufträge und Git-Sicherung lassen sich löschen.',
+        });
+        return;
+      }
       response.status(404).json({ message: 'Sprint not found.' });
       return;
     }

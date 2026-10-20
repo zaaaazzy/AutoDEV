@@ -413,7 +413,8 @@
       (dismiss)="dismissWelcome()"
     />
   }
-  @if (activeProject()) {
+  <!-- Auf dem Dashboard ist der Chat schon eingebettet: keine zweite Chat-Instanz über die Sprechblase. -->
+  @if (activeProject() && section() !== 'dashboard') {
     <app-chat-bubble />
   }
   <app-tour-overlay />

@@ -229,23 +229,24 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
     }
-    const item = await pool.query<{ slug: string }>(
-      `SELECT project_slug AS slug FROM development_items WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.approval}'`,
-      [request.params.id],
-    );
-    const slug = item.rows[0]?.slug;
-    if (!slug) {
-      response.status(409).json({ message: 'Der Auftrag wartet nicht auf eine Freigabe.' });
+    const item = (
+      await pool.query<{ slug: string; title: string; status: string }>(
+        'SELECT project_slug AS slug, title, status FROM development_items WHERE id = $1',
+        [request.params.id],
+      )
+    ).rows[0];
+    // Freigabe: Stand des Auftrags-Branches. Abnahme (Seite „Aktionen“): Stand, in dem der Auftrag steckt – den
+    // Commit bestimmt der Worker beim Start (Sprint-Branch bzw. main), weil nur er das Repository sieht.
+    const approval = item?.status === DEVELOPMENT_STATUS.approval;
+    if (!item || (!approval && item.status === DEVELOPMENT_STATUS.inProgress)) {
+      response.status(409).json({ message: 'Der Auftrag läuft gerade – erst danach im Review-Container prüfbar.' });
       return;
     }
-    const title = (
-      await pool.query<{ title: string }>('SELECT title FROM development_items WHERE id = $1', [request.params.id])
-    ).rows[0]?.title;
-    const slot = await requestSlot(pool, slug, {
+    const slot = await requestSlot(pool, item.slug, {
       commit: null,
-      label: `Freigabe: ${title ?? ''}`.slice(0, 200),
+      label: `${approval ? 'Freigabe' : 'Abnahme'}: ${item.title}`.slice(0, 200),
       developmentId: request.params.id,
-      kind: 'approval',
+      kind: approval ? 'approval' : 'manual',
     });
     if (!slot) {
       response.status(409).json({

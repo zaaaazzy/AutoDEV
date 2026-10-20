@@ -26,6 +26,10 @@ test('splits script arguments and names areas', () => {
   assert.equal(areaName('mainty-backend'), 'Backend');
   assert.equal(areaName('@mainty/contracts'), 'Contracts');
   assert.equal(areaName('tools'), 'tools');
+  assert.equal(areaName('builder'), 'builder', '„ui“ nur als ganzer Namensteil');
+  assert.equal(areaName('rapid'), 'rapid', '„api“ nur als ganzer Namensteil');
+  assert.equal(areaName('@shop/api'), 'Backend');
+  assert.equal(areaName('shop-ui'), 'Frontend');
 });
 
 test('measured percentages fill the tester report', () => {

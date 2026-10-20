@@ -5,6 +5,8 @@ import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { errorMessage } from '../../core/errors.js';
+import { assertImageSizes } from '../../shared/image-upload.js';
 import type { FormValues } from '../../shared/forms.js';
 import {
   type DataColumn,
@@ -27,7 +29,6 @@ import {
   StatusLabelPipe,
 } from '../../shared/pipes.js';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const SEVERITY_RANK = ['low', 'medium', 'high', 'critical'];
 const BUG_STATUS_RANK = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
 
@@ -157,16 +158,24 @@ export class BugsComponent {
   protected async createBug(): Promise<void> {
     const body = { ...this.bugForm, sprintId: this.bugForm.sprintId || null };
     const files = this.pendingImages;
+    let uploadError = '';
     await this.store.perform(async () => {
+      // Größe vorher prüfen: Ein zu großes Bild darf keinen Bug ohne Bild anlegen.
+      assertImageSizes(files);
       const created = await this.api.post<{ bug: Bug }>(
         `${this.api.projectPath(this.store.activeProject())}/bugs`,
         body,
       );
+      // Angelegt ist angelegt: Formular sofort leeren, damit ein zweiter Klick keinen doppelten Bug erzeugt.
       this.pendingImages = [];
-      await this.uploadImages(created.bug.id, files);
       this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
       this.store.showCreate.set(false);
+      uploadError = await this.uploadImages(created.bug.id, files).then(
+        () => '',
+        (error: unknown) => errorMessage(error, 'Upload fehlgeschlagen.'),
+      );
     }, 'Bug wurde gemeldet.');
+    if (uploadError) this.store.notice.set(`Bug wurde gemeldet, Bilder aber nicht: ${uploadError}`);
   }
 
   protected pendingImageNames(): string {
@@ -189,8 +198,8 @@ export class BugsComponent {
   }
 
   private async uploadImages(bugId: string, files: File[]): Promise<void> {
+    assertImageSizes(files);
     for (const file of files) {
-      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} ist größer als 5 MB.`);
       await this.api.upload(`/api/bugs/${encodeURIComponent(bugId)}/attachments`, file);
     }
   }

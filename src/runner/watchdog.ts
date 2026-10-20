@@ -49,6 +49,14 @@ const WATCHDOG_LABELS: AlertLabels = {
   url: '#dashboard',
 };
 
+/**
+ * Stabiler Schlüssel je Problemart: Zahlen (Minuten, Stunden, GB) und Angaben in Klammern (Fehlermeldungen)
+ * wechseln von Prüfung zu Prüfung und gehören nur in die Anzeige, nicht in den Vergleich.
+ */
+export function problemKey(problem: string): string {
+  return problem.replace(/\([^)]*\)/g, '()').replace(/\d+(?:[.,]\d+)?/g, '#');
+}
+
 /** Entscheidet, ob und was gemeldet wird: neue Probleme sofort, anhaltende alle 6 Stunden, Erholung einmal. */
 export function evaluate(
   previous: WatchdogState,
@@ -56,8 +64,8 @@ export function evaluate(
   now = Date.now(),
   labels: AlertLabels = WATCHDOG_LABELS,
 ): { message: PushMessage | null; state: WatchdogState } {
-  const before = new Set(previous.problems);
-  const fresh = problems.filter((problem) => !before.has(problem));
+  const before = new Set(previous.problems.map(problemKey));
+  const fresh = problems.filter((problem) => !before.has(problemKey(problem)));
   const state: WatchdogState = { ...previous, problems };
   if (!problems.length) {
     if (!previous.problems.length) return { message: null, state };
@@ -182,8 +190,16 @@ export async function collectProblems(options: WatchdogOptions): Promise<{ probl
   }
   const backups = await readdir(options.backupDir).catch(() => [] as string[]);
   const dumps = backups.filter((name) => BACKUP_FILE.test(name));
+  // Einzeln abfangen: die Backup-Rotation kann einen Dump zwischen readdir und stat löschen.
   const newest = (
-    await Promise.all(dumps.map(async (name) => (await stat(join(options.backupDir, name))).mtimeMs))
+    await Promise.all(
+      dumps.map((name) =>
+        stat(join(options.backupDir, name)).then(
+          (info) => info.mtimeMs,
+          () => 0,
+        ),
+      ),
+    )
   ).reduce((max, value) => Math.max(max, value), 0);
   if (!newest) problems.push('Noch kein automatisches Datenbank-Backup vorhanden.');
   else if (Date.now() - newest > 26 * 3600 * 1000) {

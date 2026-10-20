@@ -24,6 +24,8 @@ export class SecuritySettingsComponent {
   protected readonly error = signal('');
   protected readonly busy = signal(false);
   protected code = '';
+  /** Aktuelles Passwort: Einrichten und Bestätigen der Zwei-Faktor-Anmeldung verlangen es (bis dahin nur im Speicher). */
+  protected password = '';
 
   constructor() {
     void this.load();
@@ -31,15 +33,24 @@ export class SecuritySettingsComponent {
 
   protected async startSetup(): Promise<void> {
     await this.run(async () => {
-      this.setup.set(await this.api.post<{ secret: string; qr: string }>('/api/auth/totp/setup'));
+      this.setup.set(
+        await this.api.post<{ secret: string; qr: string }>('/api/auth/totp/setup', { password: this.password }),
+      );
       this.code = '';
     });
   }
 
+  protected cancelSetup(): void {
+    this.setup.set(null);
+    this.password = '';
+    this.code = '';
+  }
+
   protected async enable(): Promise<void> {
     await this.run(async () => {
-      await this.api.post('/api/auth/totp/enable', { code: this.code });
+      await this.api.post('/api/auth/totp/enable', { password: this.password, code: this.code });
       this.setup.set(null);
+      this.password = '';
       this.code = '';
       this.message.set('Zwei-Faktor-Anmeldung ist aktiv. Andere Geräte müssen sich neu anmelden.');
       await this.load();

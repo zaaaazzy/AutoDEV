@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree, treeBusy } from '../core/project-lock.js';
 import {
   BOT_IDENTITY,
@@ -54,6 +55,23 @@ test('Testberichte zählen nicht als fremde Änderung und landen nicht im Auftra
   );
 });
 
+test('gescheiterter Auftrag mit vorhandenem .dev-log: Stand wird gesichert, nichts bleibt gestagt liegen', async () => {
+  const { cwd, git } = await project();
+  const branch = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.ok(branch);
+  // Agent-Ablage (von Git über info/exclude ignoriert) und ein Test des Testers, der noch fehlschlägt.
+  await mkdir(join(cwd, '.dev-log'), { recursive: true });
+  await writeFile(join(cwd, '.dev-log', 'anhang.txt'), 'intern\n');
+  await writeFile(join(cwd, 'login.test.ts'), 'export {};\n');
+  const result = await finishOrderBranch(cwd, item, branch, 'Sprint 1', false);
+  assert.equal(result.merged, false);
+  assert.match(result.message, /Zwischenstand auf .* gesichert/);
+  assert.equal(git('status', '--porcelain', '--untracked-files=no'), '');
+  assert.match(git('show', '--name-only', '--format=', branch.branch), /login\.test\.ts/);
+  // Der nächste Auftrag startet, statt an „fremden Änderungen“ zu scheitern.
+  assert.ok(await enterOrderBranch(cwd, { id: '5e6f7a8b-0000', title: 'Profil' }, 'Sprint 1'));
+});
+
 test('kein Commit und kein Merge, wenn jemand den Branch gewechselt hat', async () => {
   const { cwd, git } = await project();
   const branch = await enterOrderBranch(cwd, item, 'Sprint 1');
@@ -79,6 +97,18 @@ test('losgelöster Stand ohne Sprint: der Auftrag arbeitet auf main auf statt au
   git('checkout', '-q', '--detach', 'main');
   const branch = await enterOrderBranch(cwd, item, null);
   assert.equal(branch?.base, 'main');
+});
+
+test('scheitert der Wechsel auf den Sprint-Branch, startet der Auftrag nicht (kein Merge direkt in main)', async () => {
+  const { cwd, git } = await project();
+  // Z. B. blockieren lokale Änderungen den Checkout: jeder Wechsel auf den Sprint-Branch scheitert.
+  const execute: CommandExecutor = (command, directory, options) =>
+    command[1] === 'checkout' && command.includes('sprint/sprint-1')
+      ? Promise.resolve({ exitCode: 1, durationMs: 1, output: 'error: checkout blockiert' })
+      : runCommand(command, directory, options);
+  await assert.rejects(enterOrderBranch(cwd, item, 'Sprint 1', execute), /Sprint-Branch sprint\/sprint-1/);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('branch', '--list', 'auftrag/*'), '');
 });
 
 test('scheitert ein Commit-Hook, bleibt nichts Gestagtes für den nächsten Auftrag liegen', async () => {
@@ -135,4 +165,20 @@ test('Arbeitsordner-Sperre: belegt, solange sie gehalten wird, und nacheinander 
   (await waiting)();
   assert.equal(second, true);
   assert.equal(treeBusy(folder), false);
+});
+
+test('Auftrag ohne Sprint im losgelösten Worktree landet in main, während main im Hauptordner ausgecheckt ist', async () => {
+  const { cwd, git } = await project();
+  const agent = `${cwd}-agent-nosprint`;
+  git('worktree', 'add', '-q', '--detach', agent, 'main');
+  const mainBefore = git('rev-parse', 'main');
+  const branch = await enterOrderBranch(agent, item, null);
+  assert.ok(branch);
+  assert.notEqual(branch.base, 'HEAD');
+  assert.equal(branch.base, 'main');
+  await writeFile(join(agent, 'fix.ts'), 'export {};\n');
+  const result = await finishOrderBranch(agent, item, branch, 'Betrieb', true);
+  assert.equal(result.merged, true);
+  assert.notEqual(git('rev-parse', 'main'), mainBefore);
+  assert.match(git('ls-tree', '-r', '--name-only', 'main'), /fix\.ts/);
 });

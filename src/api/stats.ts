@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
 
 type CountRow = { key: string; count: string };
@@ -7,28 +8,31 @@ const counts = (rows: CountRow[]): Record<string, number> =>
   Object.fromEntries(rows.map((row) => [row.key, Number(row.count)]));
 
 async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unknown> | null> {
+  const timeZone = localTimeZone();
   const active = (
     await pool.query<{ id: string; name: string; startDate: string; endDate: string | null }>(
-      `SELECT id, name, to_char(COALESCE(start_date, created_at::date), 'YYYY-MM-DD') AS "startDate",
+      `SELECT id, name, to_char(COALESCE(start_date, (created_at AT TIME ZONE $2::text)::date), 'YYYY-MM-DD') AS "startDate",
             to_char(end_date, 'YYYY-MM-DD') AS "endDate"
        FROM sprints WHERE project_slug = $1 AND status = 'active'`,
-      [slug],
+      [slug, timeZone],
     )
   ).rows[0];
   if (!active) {
     return null;
   }
+  // Tage in Ortszeit (DEV_LOG_TIMEZONE): ein Auftrag, der um 01:30 vor Ort fertig wird, zählt zu diesem Tag.
   const burn = await pool.query<{ day: string; remaining: string }>(
     `WITH totals AS (SELECT COUNT(*) AS total FROM development_items WHERE sprint_id = $1),
           days AS (
             SELECT d::date AS day
-              FROM generate_series($2::date, GREATEST($2::date, LEAST(COALESCE($3::date, $2::date + 13), CURRENT_DATE)), '1 day') d
+              FROM generate_series($2::date, GREATEST($2::date, LEAST(COALESCE($3::date, $2::date + 13), (NOW() AT TIME ZONE $4::text)::date)), '1 day') d
           )
      SELECT to_char(days.day, 'YYYY-MM-DD') AS day,
             (totals.total - (SELECT COUNT(*) FROM development_items
-                              WHERE sprint_id = $1 AND completed_at IS NOT NULL AND completed_at::date <= days.day)) AS remaining
+                              WHERE sprint_id = $1 AND completed_at IS NOT NULL
+                                AND (completed_at AT TIME ZONE $4::text)::date <= days.day)) AS remaining
        FROM days, totals ORDER BY days.day`,
-    [active.id, active.startDate, active.endDate],
+    [active.id, active.startDate, active.endDate, timeZone],
   );
   const progress = (
     await pool.query<{ total: string; done: string }>(

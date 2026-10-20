@@ -86,6 +86,8 @@ export class BudgetSettingsComponent {
   protected display = { currency: 'USD' as 'USD' | 'CHF', chfPerUsd: 0.8 };
   protected routing = { localModel: '', strongCommand: '', customized: false };
   protected rules: RuleForm[] = [];
+  /** Projekt, dessen Werte im Formular stehen. */
+  private loadedSlug = '';
 
   constructor() {
     effect(() => {
@@ -97,10 +99,15 @@ export class BudgetSettingsComponent {
 
   private async load(slug: string): Promise<void> {
     if (!slug) return;
+    // Projektwechsel: Formular des alten Projekts ausblenden, damit „Speichern“ es nicht ins neue schreibt.
+    if (this.loadedSlug !== slug) this.overview.set(null);
     try {
-      this.fill(await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`));
+      const overview = await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`);
+      if (!this.store.isActive(slug)) return;
+      this.fill(overview);
+      this.loadedSlug = slug;
     } catch {
-      this.overview.set(null);
+      if (this.store.isActive(slug)) this.overview.set(null);
     }
   }
 
@@ -149,25 +156,25 @@ export class BudgetSettingsComponent {
 
   protected async save(): Promise<void> {
     const slug = this.store.activeProject();
+    if (slug !== this.loadedSlug) return;
     const number = (value: number | null) => (value === null || (value as unknown) === '' ? null : Number(value));
     await this.store.perform(
       async () => {
-        this.fill(
-          await this.api.put<BudgetOverview>(`${this.api.projectPath(slug)}/budget`, {
-            limits: Object.fromEntries(
-              PERIODS.map(({ key }) => [
-                key,
-                { maxTokens: number(this.limits[key].maxTokens), maxCostUsd: number(this.limits[key].maxCostUsd) },
-              ]),
-            ),
-            currency: this.display.currency,
-            chfPerUsd: Number(this.display.chfPerUsd),
-            // Unverändert die Standardregeln: nicht als eigene Regeln speichern (so gelten spätere Standards weiter).
-            rules: this.routing.customized ? this.rules.map(fromForm) : null,
-            localModel: this.routing.localModel.trim() || null,
-            strongCommand: this.routing.strongCommand.trim() ? this.routing.strongCommand.trim().split(/\s+/) : null,
-          }),
-        );
+        const saved = await this.api.put<BudgetOverview>(`${this.api.projectPath(slug)}/budget`, {
+          limits: Object.fromEntries(
+            PERIODS.map(({ key }) => [
+              key,
+              { maxTokens: number(this.limits[key].maxTokens), maxCostUsd: number(this.limits[key].maxCostUsd) },
+            ]),
+          ),
+          currency: this.display.currency,
+          chfPerUsd: Number(this.display.chfPerUsd),
+          // Unverändert die Standardregeln: nicht als eigene Regeln speichern (so gelten spätere Standards weiter).
+          rules: this.routing.customized ? this.rules.map(fromForm) : null,
+          localModel: this.routing.localModel.trim() || null,
+          strongCommand: this.routing.strongCommand.trim() ? this.routing.strongCommand.trim().split(/\s+/) : null,
+        });
+        if (this.store.isActive(slug)) this.fill(saved);
       },
       'Budget gespeichert.',
       false,

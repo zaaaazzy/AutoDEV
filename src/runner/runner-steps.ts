@@ -448,16 +448,19 @@ async function invokeAgent(
         onSpawn: hooks.onSpawn,
         onAction: hooks.onAction,
       },
-    ).catch((error: unknown) => ({
+    ).catch((error: unknown): CommandResult => ({
       exitCode: 1,
       durationMs: 0,
       output: error instanceof Error ? error.message : String(error),
     }));
     if (hooks.signal.aborted) return written;
     const run = await builtinRun();
+    // Tokens und Kosten des Testschreibens zählen fürs Budget mit (zusätzlich zu denen des Testlaufs).
     return {
       ...run,
       durationMs: run.durationMs + written.durationMs,
+      tokens: (written.tokens ?? 0) + (run.tokens ?? 0),
+      costUsd: (written.costUsd ?? 0) + (run.costUsd ?? 0),
       output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}`,
     };
   }
@@ -490,6 +493,9 @@ async function invokeAgent(
     return {
       exitCode: run.exitCode,
       durationMs: result.durationMs + run.durationMs,
+      // Tokens und Kosten des CLI-Laufs gehören zum Schritt und zählen fürs Budget.
+      tokens: (result.tokens ?? 0) + (run.tokens ?? 0),
+      costUsd: (result.costUsd ?? 0) + (run.costUsd ?? 0),
       output: `${result.output}\n\n## Testlauf (Projekttests)\n${run.output}`,
     };
   }
@@ -715,7 +721,7 @@ export async function runStep(
           {
             title: `👤 Bitte selbst prüfen · ${item.projectSlug}`,
             body: `${item.title}\n${manual.join('\n')}`,
-            url: '#development',
+            url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
             tag: `manual-${item.id}`,
           },
           { project: item.projectSlug },
@@ -854,7 +860,7 @@ async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, pro
     {
       title: succeeded ? `✓ Auftrag erledigt · ${item.projectSlug}` : `⚠ Auftrag blockiert · ${item.projectSlug}`,
       body: succeeded ? item.title : `${item.title}\n${problem ?? 'Ein Agent ist gescheitert – Details im Auftrag.'}`,
-      url: '#development',
+      url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
       tag: `order-${item.id}`,
     },
     { project: item.projectSlug },

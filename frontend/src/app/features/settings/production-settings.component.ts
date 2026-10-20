@@ -57,10 +57,11 @@ export class ProductionSettingsComponent {
       const result = await this.api.get<{ production: ProductionStatus; snippets: ProductionSnippets }>(
         `${this.api.projectPath(slug)}/production`,
       );
+      if (!this.store.isActive(slug)) return;
       this.status.set(result.production);
       this.snippets.set(result.snippets);
     } catch {
-      this.status.set(null);
+      if (this.store.isActive(slug)) this.status.set(null);
     }
   }
 

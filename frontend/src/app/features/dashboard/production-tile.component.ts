@@ -57,9 +57,9 @@ export class ProductionTileComponent {
     if (!slug) return;
     try {
       const result = await this.api.get<{ production: ProductionStatus }>(`${this.api.projectPath(slug)}/production`);
-      this.status.set(result.production);
+      if (this.store.isActive(slug)) this.status.set(result.production);
     } catch {
-      this.status.set(null);
+      if (this.store.isActive(slug)) this.status.set(null);
     }
   }
 

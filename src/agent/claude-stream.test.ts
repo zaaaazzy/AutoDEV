@@ -41,6 +41,20 @@ test('parses split lines into readable actions and the final answer', () => {
   assert.deepEqual(parser.result(), { text: 'Fertig umgesetzt.', isError: false, tokens: 15, costUsd: 0 });
 });
 
+test('counts cache tokens of the result event', () => {
+  const parser = createStreamParser('/repo', () => undefined);
+  parser.push(
+    line({
+      type: 'result',
+      result: 'ok',
+      is_error: false,
+      total_cost_usd: 0.12,
+      usage: { input_tokens: 4, cache_creation_input_tokens: 1200, cache_read_input_tokens: 35000, output_tokens: 800 },
+    }),
+  );
+  assert.deepEqual(parser.result(), { text: 'ok', isError: false, tokens: 37004, costUsd: 0.12 });
+});
+
 test('executeAgentCommand streams actions for claude and returns the plain answer', async () => {
   const calls: string[][] = [];
   const live: string[] = [];

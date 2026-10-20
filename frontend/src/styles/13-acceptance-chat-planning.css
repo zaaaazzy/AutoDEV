@@ -265,6 +265,12 @@
   gap: 12px;
 }
 
+/* min-width: 0 – sonst wächst die Auswahl auf die Breite aller Karten statt horizontal zu scrollen (Handy) */
+.kanban-pool,
+.kanban-pool-group {
+  min-width: 0;
+}
+
 .kanban-pool {
   display: grid;
   gap: 10px;
@@ -296,6 +302,34 @@
 
 .kanban-pool-card {
   flex: 0 0 220px;
+}
+
+/* Mehrfachauswahl: angehakte Aufträge auf einmal in den Sprint */
+.kanban-select {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+
+.kanban-pool-card.selected {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green) inset;
+}
+
+.kanban-pool-bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #e8f2ec;
 }
 
 /* Sprint-Hover: Handlungsbedarf, Vorschau der nächsten Aufträge und Review-Start; Klick öffnet den Auftrag */
@@ -462,7 +496,50 @@
 }
 
 .sprint-proposal h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
   margin: 0 0 2px;
+}
+
+/* Zugeklappt: eine Zeile mit Summen statt Tabelle */
+.sprint-proposal.collapsed {
+  gap: 6px;
+  padding: 8px 14px;
+}
+
+.sprint-proposal.collapsed h3 {
+  margin: 0;
+}
+
+.proposal-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.proposal-toggle:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.proposal-caret {
+  display: inline-block;
+  width: 1em;
+  color: var(--muted);
+}
+
+.proposal-summary {
+  font-size: 0.82rem;
+  font-weight: 400;
 }
 
 .sprint-proposal p {

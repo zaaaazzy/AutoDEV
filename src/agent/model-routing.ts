@@ -43,7 +43,11 @@ export interface RoutingDecision {
   rule: string | null;
 }
 
-/** Standardregeln (Reihenfolge = Priorität), solange ein Projekt keine eigenen gespeichert hat. */
+/**
+ * Standardregeln, solange ein Projekt keine eigenen gespeichert hat. Reihenfolge = Priorität für die festen Stufen
+ * (erste zutreffende gewinnt); bei „höher/tiefer“ gewinnt die letzte zutreffende – hier die Budget-Bremse vor der
+ * Eskalation nach einem Retry.
+ */
 export const DEFAULT_RULES: RoutingRule[] = [
   { condition: { categories: ['security'] }, tier: 'strong' },
   { condition: { categories: ['docs'] }, tier: 'local' },
@@ -91,6 +95,8 @@ const shift = (effect: 'up' | 'down'): ModelTier => (effect === 'up' ? 'strong' 
 /**
  * Wählt die Modellstufe: Die erste zutreffende Regel mit fester Stufe (lokal/stark) bestimmt die Grundstufe; danach
  * verschieben alle zutreffenden Regeln „eine Stufe höher/tiefer“ sie in ihrer Reihenfolge (Eskalation, Sparmodus).
+ * Bei nur zwei Stufen heißt das: Von den Verschiebungen gewinnt die letzte zutreffende Regel (bewusst, damit eine
+ * spätere Budget-Bremse eine frühere Eskalation übersteuert).
  * Ohne Grundstufe gilt die Modellwahl je Rolle als Ausgangspunkt: höher = stark, tiefer = lokal.
  */
 export function routeModel(rules: RoutingRule[], input: RoutingInput): RoutingDecision {

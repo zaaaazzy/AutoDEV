@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Pool } from 'pg';
+import express from 'express';
 import { createDevLogApp } from './app.js';
+import { registerReviewRoutes } from './review-routes.js';
 
 /** Nummern der Platzhalter ($1, $2, …), die eine Abfrage verwendet. */
 function placeholders(sql: string): number[] {
@@ -42,4 +44,99 @@ test('Version starten (Sprint-Ansicht): die Abfrage nutzt genau die übergebenen
   assert.match(update.sql, /project_slug = \$1\b/);
   assert.match(update.sql, /commit_sha = \$2\b/);
   assert.deepEqual(update.values.slice(0, 3), ['dev-log', 'a'.repeat(40), 'Sprint 2']);
+});
+
+test('Review-Container: Nicht-Admins sehen nur Slots ihrer Projekte und stoppen nur diese', async () => {
+  const slots = [
+    { slot: 1, enabled: true, status: 'running', projectSlug: 'alpha', label: 'Sprint 1', commit: 'a'.repeat(40) },
+    { slot: 2, enabled: true, status: 'running', projectSlug: 'beta', label: 'Geheim', commit: 'b'.repeat(40) },
+  ];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('FROM review_slots')) return { rows: slots.map((slot) => ({ ...slot })) };
+      if (sql.startsWith('UPDATE review_slots')) {
+        const allowed = values[1] as string[] | null;
+        const hit = slots.find((slot) => slot.slot === values[0] && (!allowed || allowed.includes(slot.projectSlug)));
+        return { rows: [], rowCount: hit ? 1 : 0 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const app = express();
+  app.use(express.json());
+  // Wie der Mandantenwächter: freigeschaltete Projekte des Benutzers.
+  app.use((_request, response, next) => {
+    response.locals.allowedProjects = new Set(['alpha']);
+    next();
+  });
+  const router = express.Router();
+  registerReviewRoutes(router, pool);
+  app.use('/api', router);
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const list = (await (await fetch(`${url}/api/review-slots`)).json()) as {
+      slots: { slot: number; projectSlug: string | null; label: string }[];
+    };
+    assert.equal(list.slots[0]?.projectSlug, 'alpha');
+    assert.equal(list.slots[1]?.projectSlug, null);
+    assert.notEqual(list.slots[1]?.label, 'Geheim');
+    assert.equal((await fetch(`${url}/api/review-slots/1/stop`, { method: 'POST' })).status, 200);
+    assert.equal((await fetch(`${url}/api/review-slots/2/stop`, { method: 'POST' })).status, 409);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+/** „Im Review-Container prüfen“ für einen Auftrag im Status `status`; liefert Antwort und Slot-Anfrage. */
+async function showReview(status: string) {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.startsWith('UPDATE review_slots')) return { rows: [{ slot: 2 }], rowCount: 1 };
+      if (sql.includes('FROM development_items'))
+        return { rows: [{ slug: 'dev-log', title: 'Login', status }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(
+      `http://127.0.0.1:${port}/api/development/11111111-1111-4111-8111-111111111111/show-review`,
+      { method: 'POST' },
+    );
+    return { status: response.status, update: queries.find((query) => query.sql.startsWith('UPDATE review_slots')) };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('Review-Container für die Abnahme: erledigter Auftrag startet ohne festen Stand (Worker wählt ihn)', async () => {
+  const result = await showReview('done');
+  assert.equal(result.status, 200);
+  assert.ok(result.update);
+  assert.deepEqual(result.update.values, [
+    'dev-log',
+    null,
+    'Abnahme: Login',
+    '11111111-1111-4111-8111-111111111111',
+    'manual',
+  ]);
+});
+
+test('Review-Container: Auftrag in Freigabe bleibt eine Freigabe', async () => {
+  const result = await showReview('approval');
+  assert.equal(result.status, 200);
+  assert.equal(result.update?.values[4], 'approval');
+  assert.equal(result.update?.values[2], 'Freigabe: Login');
+});
+
+test('Review-Container: laufender Auftrag wird abgelehnt', async () => {
+  const result = await showReview('in_progress');
+  assert.equal(result.status, 409);
+  assert.equal(result.update, undefined);
 });

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { pollSprintReviews, sprintTag } from './git-sync.js';
+import { goLive } from './go-live.js';
 import { createGithubAdapter, githubRepo, type GithubMode } from './github.js';
 import { type HosterAdapter, HosterError, type HosterIssue, UNTRUSTED_END, UNTRUSTED_START } from './hoster.js';
 
@@ -273,7 +274,9 @@ export async function syncGitHub(
     if (authDue && !(await checkGithubAuth(pool, project, adapter))) return { ...result, skipped: 'nicht angemeldet' };
     if (reviewsDue) {
       state.reviewsAt = now.getTime();
-      result.finished = await pollSprintReviews(pool, project, cwd, adapter, settings.requireApproval, execute);
+      result.finished = await pollSprintReviews(pool, project, cwd, adapter, settings.requireApproval, execute, () =>
+        goLive(pool, project, cwd, execute),
+      );
     }
     if (issuesDue) {
       const since = settings.syncedAt ? new Date(new Date(settings.syncedAt).getTime() - SINCE_OVERLAP_MS) : null;

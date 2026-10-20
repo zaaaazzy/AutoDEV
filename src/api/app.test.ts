@@ -3,6 +3,8 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
+import { hashPassword, verifyPassword } from './auth.js';
+import { DEV_COLUMNS } from './development.js';
 import { currentStep, hotp } from './totp.js';
 
 // Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
@@ -131,6 +133,58 @@ test('login creates a session cookie; with a second factor basic auth and code-l
   }
 });
 
+test('2FA einrichten verlangt das Passwort und bei aktivem zweitem Faktor einen Code des bisherigen Schlüssels', async () => {
+  const totpAuth = { ...auth, totpSecret: null as string | null };
+  const server = createDevLogApp(sessionPool(), totpAuth).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const login = await fetch(`${baseUrl}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: auth.username, password: auth.password }),
+    });
+    const headers = {
+      'Content-Type': 'application/json',
+      Cookie: (login.headers.get('set-cookie') ?? '').split(';')[0] ?? '',
+    };
+    const post = (path: string, body: unknown) =>
+      fetch(`${baseUrl}/api/auth/totp/${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+
+    // Ohne zweiten Faktor: das Passwort genügt, ohne oder mit falschem Passwort gibt es keinen Schlüssel.
+    for (const body of [{}, { password: 'wrong-password' }]) {
+      const denied = await post('setup', body);
+      assert.equal(denied.status, 400);
+      assert.equal((await denied.json()).field, 'password');
+    }
+    const first = await post('setup', { password: auth.password });
+    assert.equal(first.status, 200);
+    const firstSecret = ((await first.json()) as { secret: string }).secret;
+    const code = hotp(firstSecret, currentStep());
+    assert.equal((await post('enable', { code })).status, 400, 'enable needs the password as well');
+    assert.equal((await post('enable', { password: auth.password, code })).status, 200);
+    assert.equal(totpAuth.totpSecret, firstSecret);
+
+    // Aktiver zweiter Faktor: Ersetzen nur mit Passwort und Code des bisherigen Schlüssels.
+    const withoutCode = await post('setup', { password: auth.password });
+    assert.equal(withoutCode.status, 400);
+    assert.equal((await withoutCode.json()).field, 'currentCode');
+    assert.equal((await post('setup', { password: auth.password, currentCode: '000000' })).status, 400);
+    const currentCode = hotp(firstSecret, currentStep() + 1);
+    const second = await post('setup', { password: auth.password, currentCode });
+    assert.equal(second.status, 200);
+    const secondSecret = ((await second.json()) as { secret: string }).secret;
+    const newCode = hotp(secondSecret, currentStep());
+    assert.equal((await post('enable', { password: auth.password, code: newCode })).status, 400);
+    assert.equal(totpAuth.totpSecret, firstSecret, 'without the old code the key stays');
+    // Derselbe alte Code wie beim Einrichten gilt beim Bestätigen noch – sonst müsste man auf den nächsten warten.
+    assert.equal((await post('enable', { password: auth.password, currentCode, code: newCode })).status, 200);
+    assert.equal(totpAuth.totpSecret, secondSecret);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test('serves the Angular application shell', async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
@@ -237,7 +291,42 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
     assert.equal(patched.status, 200);
     const update = queries.at(-1);
     assert.match(update?.sql ?? '', /SET benefit = \$2, cost = \$3/);
-    assert.deepEqual(update?.values, [ID, null, 4]);
+    assert.deepEqual(update?.values.slice(0, 3), [ID, null, 4]);
+  });
+});
+
+test('ideas cannot be patched while the author agent drafts them or once accepted', async () => {
+  for (const status of ['requested', 'drafting', 'accepted']) {
+    const queries: { sql: string; values: unknown[] }[] = [];
+    const pool = {
+      query: async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.startsWith('UPDATE ideation_items')) {
+          return { rows: (values.at(-1) as string[]).includes(status) ? [{ id: ID, status }] : [] };
+        }
+        return { rows: sql.startsWith('SELECT 1 FROM ideation_items') ? [{}] : [] };
+      },
+    } as unknown as Pool;
+    await withServer(pool, async (baseUrl) => {
+      for (const body of [{ status: 'idea' }, { title: 'Neu' }]) {
+        const response = await fetch(`${baseUrl}/api/ideation/${ID}`, {
+          method: 'PATCH',
+          headers: jsonHeaders(),
+          body: JSON.stringify(body),
+        });
+        assert.equal(response.status, 409, `${status}: ${JSON.stringify(body)}`);
+      }
+    });
+    assert.match(queries[0]?.sql ?? '', /WHERE id = \$1 AND status = ANY\(\$3\)/);
+  }
+  const missing = recordingPool([]);
+  await withServer(missing.pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/ideation/${ID}`, {
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: 'Neu' }),
+    });
+    assert.equal(response.status, 404);
   });
 });
 
@@ -335,6 +424,151 @@ test('manages sprints with validation and a single active sprint', async () => {
   });
 });
 
+/** Sprint-Speicher für Statuswechsel: SELECT liefert Status und laufende Aufträge, UPDATE prüft den Status atomar. */
+function sprintPool(sprint: { status: string; running?: number } | null) {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (!sprint) return { rows: [] };
+      if (sql.includes('FROM sprints s WHERE id'))
+        return { rows: [{ status: sprint.status, running: sprint.running ?? 0 }] };
+      if (sql.startsWith('UPDATE sprints SET') && sql.includes('= ANY(')) {
+        const allowed = values.at(-1) as string[];
+        if (!allowed.includes(sprint.status)) return { rows: [] };
+        const status = sql.includes('status = $2') ? (values[1] as string) : sprint.status;
+        return { rows: [{ id: SPRINT_ID, status }] };
+      }
+      if (sql.startsWith('UPDATE sprints SET')) return { rows: [{ id: SPRINT_ID, status: sprint.status }] };
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  return { pool, queries };
+}
+
+async function patchSprint(baseUrl: string, body: Record<string, unknown>): Promise<Response> {
+  return fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, {
+    method: 'PATCH',
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+  });
+}
+
+test('sprint status changes follow the transition table and are checked atomically', async () => {
+  for (const [from, to] of [
+    ['completed', 'planned'],
+    ['planned', 'completed'],
+    ['planned', 'planned'],
+    ['completed', 'completed'],
+    ['review', 'active'],
+  ] as const) {
+    const { pool, queries } = sprintPool({ status: from });
+    await withServer(pool, async (baseUrl) => {
+      const response = await patchSprint(baseUrl, { status: to });
+      assert.equal(response.status, 409, `${from} → ${to}`);
+      assert.equal(queries.filter((query) => query.sql.startsWith('UPDATE')).length, 0, `${from} → ${to}`);
+    });
+  }
+
+  // Abschluss nur ohne laufende Aufträge.
+  const running = sprintPool({ status: 'active', running: 1 });
+  await withServer(running.pool, async (baseUrl) => {
+    assert.equal((await patchSprint(baseUrl, { status: 'completed' })).status, 409);
+    assert.equal(running.queries.filter((query) => query.sql.startsWith('UPDATE')).length, 0);
+  });
+
+  // Erlaubter Wechsel: Statusbedingung im UPDATE.
+  const start = sprintPool({ status: 'planned' });
+  await withServer(start.pool, async (baseUrl) => {
+    assert.equal((await patchSprint(baseUrl, { status: 'active' })).status, 200);
+    const update = start.queries.find((query) => query.sql.startsWith('UPDATE sprints'));
+    assert.match(update?.sql ?? '', /WHERE id = \$1 AND status = ANY\(\$3\)/);
+    assert.deepEqual(update?.values, [SPRINT_ID, 'active', ['planned']]);
+  });
+
+  // Wieder öffnen bleibt möglich.
+  const reopen = sprintPool({ status: 'completed' });
+  await withServer(reopen.pool, async (baseUrl) => {
+    assert.equal((await patchSprint(baseUrl, { status: 'active' })).status, 200);
+  });
+
+  // Status zwischen Prüfung und UPDATE geändert (z. B. vom Worker) → 409 statt Überschreiben.
+  const raced = sprintPool({ status: 'planned' });
+  const racedQuery = raced.pool.query.bind(raced.pool);
+  (raced.pool as unknown as { query: unknown }).query = async (sql: string, values: unknown[] = []) => {
+    const result = await racedQuery(sql, values);
+    if (sql.includes('FROM sprints s WHERE id')) return { rows: [{ status: 'active', running: 0 }] };
+    return result;
+  };
+  await withServer(raced.pool, async (baseUrl) => {
+    assert.equal((await patchSprint(baseUrl, { status: 'completed' })).status, 409);
+  });
+
+  // Ohne Statuswechsel bleibt das UPDATE wie bisher.
+  const rename = sprintPool({ status: 'completed' });
+  await withServer(rename.pool, async (baseUrl) => {
+    assert.equal((await patchSprint(baseUrl, { name: 'Neu' })).status, 200);
+    const update = rename.queries.find((query) => query.sql.startsWith('UPDATE sprints'));
+    assert.doesNotMatch(update?.sql ?? '', /ANY/);
+  });
+
+  const missing = sprintPool(null);
+  await withServer(missing.pool, async (baseUrl) => {
+    assert.equal((await patchSprint(baseUrl, { status: 'active' })).status, 404);
+  });
+});
+
+test('deletes only planned or completed sprints without running work', async () => {
+  // DELETE trifft keine Zeile (aktiv, Review, laufende Aufträge oder Git-Sicherung), der Sprint existiert aber.
+  const blocked: { sql: string; values: unknown[] }[] = [];
+  const blockedPool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      blocked.push({ sql, values });
+      return { rows: sql.startsWith('SELECT 1 FROM sprints') ? [{ '?column?': 1 }] : [] };
+    },
+  } as unknown as Pool;
+  await withServer(blockedPool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
+    assert.equal(response.status, 409);
+    assert.match(blocked[0]?.sql ?? '', /status IN \('planned', 'completed'\)/);
+    assert.match(blocked[0]?.sql ?? '', /in_progress/);
+    assert.match(blocked[0]?.sql ?? '', /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+  });
+
+  const missing = recordingPool([]);
+  await withServer(missing.pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
+    assert.equal(response.status, 404);
+  });
+
+  const deletable = recordingPool([{ id: SPRINT_ID }]);
+  await withServer(deletable.pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
+    assert.equal(response.status, 204);
+  });
+});
+
+test('new sprints can only be created as planned', async () => {
+  const { pool, queries } = recordingPool([{ id: SPRINT_ID }]);
+  await withServer(pool, async (baseUrl) => {
+    for (const status of ['active', 'completed', 'review']) {
+      const response = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ name: 'S', status }),
+      });
+      assert.equal(response.status, 400, status);
+    }
+    assert.equal(queries.length, 0);
+    const planned = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'S', status: 'planned' }),
+    });
+    assert.equal(planned.status, 201);
+  });
+});
+
 test('assigns development orders to sprints only within the same project', async () => {
   const { pool, queries } = recordingPool([]);
   await withServer(pool, async (baseUrl) => {
@@ -347,6 +581,18 @@ test('assigns development orders to sprints only within the same project', async
     assert.equal(queries.length, 1);
     assert.match(queries[0]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
   });
+});
+
+test('fixStatus vergleicht mit failure_bug_id des äusseren Auftrags, nicht des Behebungsauftrags', () => {
+  // Hätte die innere Tabelle eine Spalte failure_bug_id, löste Postgres das unqualifizierte failure_bug_id auf sie
+  // auf (f.bug_id = f.failure_bug_id) und fixStatus bliebe immer leer. Gegen Postgres 16 geprüft: Board-SELECT und
+  // `UPDATE development_items d … RETURNING` liefern den Status des Behebungsauftrags.
+  const subselect = /\(SELECT f\.status FROM ([\s\S]*?) AS "fixStatus"/.exec(DEV_COLUMNS)?.[1] ?? '';
+  assert.match(
+    subselect,
+    /^\(SELECT bug_id, status, created_at FROM development_items\) f\s+WHERE f\.bug_id = failure_bug_id/,
+  );
+  assert.doesNotMatch(subselect, /f\.failure_bug_id|development_items f\b/);
 });
 
 test('defines agents per workflow phase and persists their order', async () => {
@@ -436,6 +682,26 @@ test('seeds the default agent workflow when a project is created', async () => {
     ]);
     // Der visuelle Tester steht direkt nach dem Tester.
     assert.deepEqual((seed?.values[2] as string[]).slice(3, 5), ['tester', 'visual_tester']);
+  });
+});
+
+test('refuses an existing project ID with 409 and changes nothing', async () => {
+  // ON CONFLICT DO NOTHING liefert keine Zeile zurück.
+  const { pool, queries } = recordingPool([]);
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ slug: 'mainty', name: 'Fremd', repository: '/other/repo' }),
+    });
+    assert.equal(response.status, 409);
+    const insert = queries.find((query) => /INSERT INTO projects/.test(query.sql));
+    assert.match(insert?.sql ?? '', /ON CONFLICT \(slug\) DO NOTHING/);
+    assert.doesNotMatch(insert?.sql ?? '', /DO UPDATE/);
+    assert.equal(
+      queries.some((query) => /INSERT INTO agents|UPDATE projects/.test(query.sql)),
+      false,
+    );
   });
 });
 
@@ -538,6 +804,33 @@ test('blocks a client after repeated failed logins', async () => {
   });
 });
 
+test('Login: falsches Passwort des Systemadministrators dauert so lange wie ein scrypt-Vergleich', async () => {
+  const stored = await hashPassword('x');
+  let scryptMs = Infinity;
+  for (let run = 0; run < 3; run += 1) {
+    const start = performance.now();
+    await verifyPassword('y', stored);
+    scryptMs = Math.min(scryptMs, performance.now() - start);
+  }
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const login = async (username: string) => {
+      const start = performance.now();
+      const response = await fetch(`${baseUrl}/api/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password: 'wrong-password' }),
+      });
+      assert.equal(response.status, 401);
+      return performance.now() - start;
+    };
+    await login('unbekannt'); // erzeugt den Dummy-Hash
+    const elapsed = await login(auth.username);
+    // Vorher antwortete der Server für den .env-Namen ohne scrypt sofort.
+    assert.ok(elapsed >= scryptMs * 0.5, `${elapsed.toFixed(1)} ms < halber scrypt (${scryptMs.toFixed(1)} ms)`);
+  });
+});
+
 test('project ids are normalized and errors name the field', async () => {
   const { pool, queries } = recordingPool([
     { slug: 'kg1', name: 'KeyGuard', repository: '/Volumes/External/KeyGuard' },
@@ -609,6 +902,42 @@ function memberPool(roles: string[], answer: (sql: string, values: unknown[]) =>
 
 const IDEA_ID = '11111111-1111-4111-8111-111111111111';
 const sessionHeaders = { Cookie: 'devlog_session=abc', 'Content-Type': 'application/json' };
+
+test('Rolle „Ausführen“ darf über agentId nur einen Agent starten, nicht den Auftrag ändern', async () => {
+  const writes: string[] = [];
+  const pool = memberPool(['run'], (sql) => {
+    if (sql.startsWith('UPDATE')) writes.push(sql);
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const patch = (body: unknown) =>
+      fetch(`${baseUrl}/api/development/${IDEA_ID}`, {
+        method: 'PATCH',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+    for (const body of [
+      { agentId: null, title: 'Gekapert', status: 'done' },
+      { agentId: IDEA_ID, priority: 'high' },
+      { agentId: null },
+    ]) {
+      const denied = await patch(body);
+      assert.equal(denied.status, 403, JSON.stringify(body));
+      assert.match((await denied.json()).message, /Planung/);
+    }
+    assert.deepEqual(writes, []);
+    assert.notEqual((await patch({ agentId: IDEA_ID })).status, 403, 'Agent starten bleibt erlaubt');
+  });
+  await withServer(memberPool(['plan']), async (baseUrl) => {
+    const denied = await fetch(`${baseUrl}/api/development/${IDEA_ID}`, {
+      method: 'PATCH',
+      headers: sessionHeaders,
+      body: JSON.stringify({ agentId: IDEA_ID, title: 'x' }),
+    });
+    assert.equal(denied.status, 403, 'Planung allein startet keinen Agent');
+    assert.match((await denied.json()).message, /Agents ausführen/);
+  });
+});
 
 test('Visionär-Lauf: ohne Rolle „Planung“ 403, mit Planung angefragt, je Projekt nur einer, abbrechbar', async () => {
   await withServer(memberPool(['chat']), async (baseUrl) => {

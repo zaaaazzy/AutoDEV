@@ -8,16 +8,19 @@ export type AutopilotStep =
 
 /**
  * Offen = noch zu bearbeiten. Blockierte Aufträge halten den Sprint nur dann nicht auf, wenn sie „Aktion notwendig“
- * haben (warten auf einen Menschen); andere Blockierte sind Fehler, die noch behoben werden.
+ * haben (warten auf einen Menschen); andere Blockierte sind Fehler, die noch behoben werden. Wegen Budget blockierte
+ * Aufträge (budget_blocked) laufen von selbst weiter, sobald das Budget wieder reicht: Sie sind noch offen.
  */
-export function sprintSettled(items: { status: string; actionTodo: string | null }[]): boolean {
+export function sprintSettled(
+  items: { status: string; actionTodo: string | null; budgetBlocked?: string | null }[],
+): boolean {
   return (
     items.length > 0 &&
     !items.some(
       (item) =>
         // Wartet ein Auftrag auf die Review-Freigabe, ist er noch nicht im Sprint-Branch: der Sprint wartet mit.
         ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
-        (item.status === 'blocked' && !item.actionTodo),
+        (item.status === 'blocked' && (!item.actionTodo || Boolean(item.budgetBlocked))),
     )
   );
 }
@@ -39,7 +42,7 @@ async function notifyPause(pool: Pool, project: string, sprintId: string, messag
     {
       title: `⏸ Autopilot pausiert · ${project}`,
       body: message.slice(0, 200),
-      url: '#sprints',
+      url: `#sprints?project=${encodeURIComponent(project)}`,
       tag: `autopilot-${project}`,
     },
     { project },
@@ -59,8 +62,8 @@ export async function markSprintReady(pool: Pool, project: string): Promise<bool
   ).rows[0];
   if (!active) return false;
   const items = (
-    await pool.query<{ status: string; actionTodo: string | null }>(
-      `SELECT status, action_todo AS "actionTodo" FROM development_items
+    await pool.query<{ status: string; actionTodo: string | null; budgetBlocked: string | null }>(
+      `SELECT status, action_todo AS "actionTodo", budget_blocked AS "budgetBlocked" FROM development_items
         WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
       [active.id],
     )
@@ -73,7 +76,7 @@ export async function markSprintReady(pool: Pool, project: string): Promise<bool
       {
         title: `🚀 Sprint fertig · ${project}`,
         body: `${active.name}: Alle Aufträge sind durch. Vorschau ansehen und „Live schalten“.`,
-        url: '#sprints',
+        url: `#sprints?project=${encodeURIComponent(project)}`,
         tag: `sprint-ready-${active.id}`,
       },
       { project },
@@ -109,9 +112,9 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
   ).rows[0];
   if (active) {
     const items = (
-      await pool.query<{ status: string; actionTodo: string | null }>(
+      await pool.query<{ status: string; actionTodo: string | null; budgetBlocked: string | null }>(
         // Express-Anfragen sind ungeplant: Eine offene Rückfrage im Chat hält den Sprintabschluss nicht auf.
-        `SELECT status, action_todo AS "actionTodo" FROM development_items
+        `SELECT status, action_todo AS "actionTodo", budget_blocked AS "budgetBlocked" FROM development_items
           WHERE sprint_id = $1 AND status <> 'rejected' AND kind <> 'express'`,
         [active.id],
       )
@@ -135,7 +138,7 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
     {
       title: `▶ Sprint gestartet · ${project}`,
       body: `${proposal.name}: ${ids.length} Aufträge (${proposal.totals.hours} h) vom Autopilot eingeplant.`,
-      url: '#sprints',
+      url: `#sprints?project=${encodeURIComponent(project)}`,
       tag: `autopilot-${project}`,
     },
     { project: project },

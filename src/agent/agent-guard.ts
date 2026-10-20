@@ -1,8 +1,16 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMPOSE_STARTING, composeViolation, SECRET_IN_COMMAND } from './tool-permissions.js';
+import {
+  COMPOSE_STARTING,
+  composeViolation,
+  forbiddenSubcommand,
+  gitOptionProblem,
+  gitPathProblem,
+  npmOptionProblem,
+  SECRET_IN_COMMAND,
+} from './tool-permissions.js';
 
 /**
  * Wächter für Claude-Agents (PreToolUse-Hook): prüft jeden Datei- und Shell-Zugriff, bevor die CLI ihn ausführt.
@@ -33,17 +41,11 @@ const PROTECTED_PATH =
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-/** Optionen, mit denen erlaubte Git-Befehle Programme starten oder Dateien schreiben würden. */
-const DANGEROUS_GIT_OPTION =
-  /(?:^|\s)(?:--upload-pack|--receive-pack|--exec|--output|--ext-diff|--textconv|--no-index|--config|-c|-u|--template|--separate-git-dir|--work-tree|--git-dir)(?:[=\s]|$)/;
 /**
  * Shell-Konstrukte, die weitere Befehle verstecken oder im Hintergrund starten: Befehlsersetzung, Prozessersetzung,
  * Subshells und ein einzelnes „&“. Die CLI-Freigaben prüfen nur den Anfang; was dahinter steckt, sähe niemand.
  */
 const SHELL_CONSTRUCT = /`|\$\(|[<>]\(|(?:^|[^&>|])&(?![&>])|&>(?!\s*\/dev\/null)|(?:^|[\s;&|])\(|\)(?:$|[\s;&|])/;
-/** npm-Optionen, die Skripte mit einer anderen Shell starten oder Einstellungen und Ablage ausserhalb lesen/schreiben. */
-const DANGEROUS_NPM_OPTION =
-  /(?:^|\s)--(?:script-shell|userconfig|globalconfig|cache|node-options|global|location)(?:[=\s]|$)|(?:^|\s)-g(?:\s|$)/;
 /** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
 const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
 /** docker compose: Startbefehle nur in dieser Form – keine Compose-Datei, Umgebung oder Ordner von anderswo. */
@@ -52,14 +54,21 @@ const COMPOSE_START_FORMS = [
   /^docker compose (?:start|restart|build)(?: [a-zA-Z0-9][\w.-]*)*$/,
 ];
 
-/** Ausgabe in Dateien umleiten (ausser nach /dev/null bzw. 2>&1) – Schreiben läuft nur über die Datei-Werkzeuge. */
-const FILE_REDIRECT = /(?:^|[^<>&\d])\d?>>?(?!&\d)(?!\s*\/dev\/null)/;
+/**
+ * Ausgabe in Dateien umleiten (ausser nach /dev/null bzw. 2>&1) – Schreiben läuft nur über die Datei-Werkzeuge.
+ * Auch mehrstellige File-Deskriptoren (10>datei) und „<>“ (öffnet zum Lesen und Schreiben, legt die Datei an).
+ */
+const FILE_REDIRECT = /(?:^|[^<>&\d])\d*(?:<>|>>?)(?!&\d)(?!\s*\/dev\/null)/;
 
-/** Pfad samt symbolischer Links auflösen (für noch nicht vorhandene Dateien über den nächsten vorhandenen Ordner). */
-function realTarget(path: string): string {
+/**
+ * Pfad samt symbolischer Links auflösen (für noch nicht vorhandene Dateien über den nächsten vorhandenen Ordner).
+ * null bei einem Link ins Leere: Schreiben legte sein (ungeprüftes) Ziel an, womöglich ausserhalb des Projekts.
+ */
+function realTarget(path: string): string | null {
   let current = path;
   const rest: string[] = [];
   while (!existsSync(current) && dirname(current) !== current) {
+    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) return null;
     rest.unshift(current.slice(dirname(current).length + 1));
     current = dirname(current);
   }
@@ -74,6 +83,7 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   if (typeof raw !== 'string' || !raw) return 'Kein Dateipfad angegeben.';
   const root = realpathSync(projectRoot);
   const target = realTarget(isAbsolute(raw) ? raw : resolve(input.cwd ?? root, raw));
+  if (!target) return `${raw} ist ein symbolischer Link ins Leere.`;
   if (!inside(target, root)) return `${raw} liegt ausserhalb des Projektordners.`;
   const relative = target.slice(root.length + 1);
   if (PROTECTED_PATH.test(relative)) return `${relative} ist geschützt (Git, Agent-Einstellungen oder Geheimnisse).`;
@@ -87,14 +97,70 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   return policy.edit ? null : 'Dateien ändern ist für diesen Agent nicht freigegeben.';
 }
 
+/**
+ * Zerlegt einen Befehl wie Bash in Quote-Bereiche: „unquoted“ ist der Text ausserhalb aller Anführungszeichen,
+ * „expanding“ zusätzlich der Inhalt von "…" (dort wirken $(…) und Backticks weiter). Backslash-Escapes, $'…' und
+ * Anführungszeichen in Anführungszeichen werden wie in Bash behandelt; escapte Zeichen werden durch „_“ ersetzt.
+ * null (fail-closed) bei einem offenen Anführungszeichen oder einem escapten Anführungszeichen ausserhalb von '…' –
+ * beides braucht ein Agent nicht, und beides verschleiert, wo ein Argument endet.
+ */
+function quoteLayers(command: string): { unquoted: string; expanding: string } | null {
+  let unquoted = '';
+  let expanding = '';
+  let index = 0;
+  while (index < command.length) {
+    const char = command[index] ?? '';
+    if (char === '\\') {
+      const next = command[index + 1];
+      if (next === undefined || next === "'" || next === '"') return null;
+      unquoted += '_';
+      expanding += '_';
+      index += 2;
+    } else if (char === '$' && command[index + 1] === "'") {
+      // ANSI-C-Quoting: Backslash-Escapes (auch \') gelten innerhalb.
+      index += 2;
+      while (index < command.length && command[index] !== "'") index += command[index] === '\\' ? 2 : 1;
+      if (index >= command.length) return null;
+      index += 1;
+    } else if (char === "'") {
+      const end = command.indexOf("'", index + 1);
+      if (end < 0) return null;
+      index = end + 1;
+    } else if (char === '"') {
+      index += 1;
+      while (index < command.length && command[index] !== '"') {
+        if (command[index] === '\\') {
+          const next = command[index + 1];
+          if (next === undefined || next === '"' || next === "'") return null;
+          expanding += '_';
+          index += 2;
+        } else {
+          expanding += command[index];
+          index += 1;
+        }
+      }
+      if (index >= command.length) return null;
+      index += 1;
+    } else {
+      unquoted += char;
+      expanding += char;
+      index += 1;
+    }
+  }
+  return { unquoted, expanding };
+}
+
 /** Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). */
 export function bashProblem(command: string, projectRoot: string, run = spawnSync): string | null {
   if (SECRET_IN_COMMAND.test(command)) return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.';
-  if (FILE_REDIRECT.test(command.replace(/'[^']*'|"[^"]*"/g, ''))) {
+  const layers = quoteLayers(command);
+  if (!layers) {
+    return 'Offene Anführungszeichen und escapte Anführungszeichen (\\\' bzw. \\") sind gesperrt – Argumente einfach quoten.';
+  }
+  if (FILE_REDIRECT.test(layers.unquoted)) {
     return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
   }
-  const unquoted = command.replace(/'[^']*'|"[^"]*"/g, '');
-  if (SHELL_CONSTRUCT.test(unquoted) || /\$\(|`/.test(command.replace(/'[^']*'/g, ''))) {
+  if (SHELL_CONSTRUCT.test(layers.unquoted) || /\$\(|`/.test(layers.expanding)) {
     return 'Befehlsersetzung, Subshells und Hintergrund-Befehle („$(…)“, Backticks, „(…)“, „&“) sind gesperrt – Befehle einzeln ausführen.';
   }
   const root = realpathSync(projectRoot);
@@ -103,17 +169,16 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
     }
     if (/^git\s+-/.test(part)) return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
-    if (/^git\s/.test(part) && DANGEROUS_GIT_OPTION.test(part)) {
+    if (gitOptionProblem(part)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
+    // Auch bei breiten eigenen Freigaben (Bash(git:*), Bash(docker:*)): diese Unterbefehle gibt keine Gruppe frei.
+    if (forbiddenSubcommand(part)) return `„${part}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
+    const gitProblem = gitPathProblem(part, root);
+    if (gitProblem) return gitProblem;
     if (/^npm\s/.test(part)) {
-      if (DANGEROUS_NPM_OPTION.test(part)) return `„${part}“: diese npm-Option ist gesperrt.`;
-      for (const match of part.matchAll(/--prefix(?:=|\s+)(\S+)/g)) {
-        const target = match[1]!;
-        if (isAbsolute(target) || target.startsWith('~') || !inside(realTarget(resolve(root, target)), root)) {
-          return `„${part}“: --prefix nur für Ordner im Projekt.`;
-        }
-      }
+      const npmProblem = npmOptionProblem(part, root);
+      if (npmProblem) return npmProblem;
       const words = part.split(/\s+/);
       if (['install', 'i', 'add'].includes(words[1] ?? '')) {
         const specs = words.slice(2).filter((word) => !word.startsWith('-'));

@@ -9,6 +9,11 @@ import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
+import {
+  MANUAL_DEVELOPMENT_TRANSITIONS,
+  canSetDevelopmentStatus,
+  isAssignableSprintStatus,
+} from '../../../../../src/core/development-transitions.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { parseRisks } from '../../shared/risk-list.js';
@@ -43,11 +48,27 @@ export class OrderDetailComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
-  protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
   protected readonly categories = CATEGORIES;
+  protected readonly isAssignableSprintStatus = isAssignableSprintStatus;
   protected readonly manualAgent: Record<string, string> = {};
 
   readonly order = input.required<DevelopmentItem>();
+
+  /**
+   * Status-Auswahl: aktueller Status plus die von Hand erlaubten Ziele (dieselbe Tabelle wie der Server).
+   * In Arbeit, Freigabe und Erledigt setzt nur der Worker – dort bleibt die Auswahl gesperrt.
+   */
+  protected readonly statusOptions = computed(() => {
+    const current = this.order().status;
+    return DEVELOPMENT_STATUSES.filter((status) => canSetDevelopmentStatus(current, status));
+  });
+  protected readonly statusLocked = computed(() => !MANUAL_DEVELOPMENT_TRANSITIONS[this.order().status]);
+
+  /** Sprint-Auswahl: nur geplante und aktive Sprints; der aktuell zugeordnete bleibt sichtbar. */
+  protected readonly sprintOptions = computed(() => {
+    const current = this.order().sprintId;
+    return this.data().sprints.filter((sprint) => sprint.id === current || isAssignableSprintStatus(sprint.status));
+  });
   readonly editing = input(false);
   /** Agent-Ansicht gleich aufgeklappt zeigen (z. B. auf der Agents-Seite). */
   readonly agentsOpen = input(false);
@@ -85,10 +106,16 @@ export class OrderDetailComponent {
     );
   });
 
+  /**
+   * Eigener Wahrheitswert: `acceptance()` liefert bei jedem Live-Refresh ein neues Objekt; hinge der Poll daran,
+   * startete der Timer alle 3 s neu und feuerte nie.
+   */
+  private readonly verifying = computed(() => this.acceptance().verifying);
+
   constructor() {
     // Während der Tester prüft, den Stand regelmässig nachladen.
     effect((onCleanup) => {
-      if (!this.acceptance().verifying) return;
+      if (!this.verifying()) return;
       const timer = setInterval(() => void this.store.loadProject(this.store.activeProject(), true), 5000);
       onCleanup(() => clearInterval(timer));
     });

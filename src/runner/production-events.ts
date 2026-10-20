@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import { logged } from '../core/log.js';
 import { BUG_STATUS } from '../core/status.js';
 import { maskSecrets } from '../core/secret-mask.js';
 import { shortTitle } from '../core/validation.js';
@@ -233,6 +234,7 @@ export async function recordEvent(
   error: ProductionError,
   now = new Date(),
 ): Promise<RecordResult> {
+  error = withoutNul(error);
   const count = Math.max(1, Math.floor(error.count ?? 1));
   const print = fingerprint(error.title ?? error.message, error.stack);
   const sample = sampleOf(error);
@@ -335,8 +337,20 @@ export async function recordEvent(
   } finally {
     client.release();
   }
-  if (autoFix && result.bugId) await startBugFix(pool, project, result.bugId, autoFix === 'regression');
+  // Das Ereignis ist schon gespeichert: ein Fehler beim Einplanen darf recordEvent nicht scheitern lassen.
+  if (autoFix && result.bugId)
+    await startBugFix(pool, project, result.bugId, autoFix === 'regression').catch(logged('production-events'));
   return result;
+}
+
+/** Postgres lehnt NUL-Bytes in Text und JSON ab; eine einzige solche Logzeile liesse sonst recordEvent scheitern. */
+function withoutNul(error: ProductionError): ProductionError {
+  const clean = { ...error };
+  for (const key of ['message', 'stack', 'origin', 'detail', 'title'] as const) {
+    const value = error[key];
+    if (typeof value === 'string') clean[key] = value.replaceAll('\u0000', '');
+  }
+  return clean;
 }
 
 const PRODUCTION_INTRO =

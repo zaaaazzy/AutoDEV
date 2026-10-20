@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, mock, test } from 'node:test';
@@ -692,4 +692,23 @@ test('Visionär-Lauf: Statusabfrage „running“ bricht nicht ab, Fehler der Ab
   } finally {
     mock.timers.reset();
   }
+});
+
+test('Kontextpaket: README und docs/*.md werden nicht über symbolische Links gelesen', async () => {
+  const cwd = tempDir('visionary-links-');
+  const outside = tempDir('visionary-outside-');
+  writeFileSync(join(outside, 'history'), 'GEHEIMER-VERLAUF');
+  mkdirSync(join(outside, 'docs'));
+  writeFileSync(join(outside, 'docs', 'fremd.md'), 'GEHEIMER-ORDNER');
+  symlinkSync(join(outside, 'history'), join(cwd, 'README.md'));
+  mkdirSync(join(cwd, 'docs'));
+  writeFileSync(join(cwd, 'docs', 'echt.md'), 'Echte Doku');
+  symlinkSync(join(outside, 'history'), join(cwd, 'docs', 'x.md'));
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  const context = await loadVisionaryContext(pool, 'p', cwd);
+  assert.deepEqual(context.docs, [{ path: 'docs/echt.md', text: 'Echte Doku' }]);
+  // Auch ein verlinkter docs-Ordner wird nicht gelesen.
+  rmSync(join(cwd, 'docs'), { recursive: true });
+  symlinkSync(join(outside, 'docs'), join(cwd, 'docs'));
+  assert.deepEqual((await loadVisionaryContext(pool, 'p', cwd)).docs, []);
 });

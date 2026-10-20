@@ -150,11 +150,14 @@ async function stageAll(
   options: { orderOnly?: boolean } = {},
 ): Promise<string[]> {
   // Auftrags-Commits: Testberichte und Agent-Ablage gehören nicht zum Auftrag (sie kommen mit der Sprint-Sicherung).
-  await must(
-    'add',
-    '-A',
-    ...(options.orderOnly ? ['--', '.', ...CHANGED_FILES_IGNORED.map((path) => `:(exclude)${path}`)] : []),
-  );
+  // Nur Pfade ausschliessen, die Git nicht ohnehin ignoriert: Ein ignorierter Pfad im Pathspec (z. B. .dev-log/ aus
+  // info/exclude) lässt „git add“ mit Exit 1 abbrechen – der Stand bliebe dann gestagt liegen und blockierte jeden
+  // weiteren Auftrag als „fremde Änderung“.
+  const excluded: string[] = [];
+  for (const path of options.orderOnly ? CHANGED_FILES_IGNORED : []) {
+    if ((await git('check-ignore', '-q', '--no-index', path)).exitCode !== 0) excluded.push(`:(exclude)${path}`);
+  }
+  await must('add', '-A', ...(options.orderOnly ? ['--', '.', ...excluded] : []));
   const diff = await git('diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
   const held = diff.exitCode === 0 ? filesWithSecrets(diff.output) : [];
   if (!held.length) return held;
@@ -335,19 +338,23 @@ export async function enterOrderBranch(
         `Im Arbeitsordner ${cwd} liegen fremde, nicht committete Änderungen (${foreign.slice(0, 8).join(', ')}${foreign.length > 8 ? ', …' : ''}) – bitte committen oder verwerfen.`,
       );
     }
+    // Losgelöster Agent-Worktree, main ist im Ordner der Menschen ausgecheckt: Der Auftrag ohne Sprint zweigt direkt
+    // von main ab (ohne main hier auszuchecken); finishOrderBranch mergt am Ende in den anderen Ordner.
+    let detachedBase: string | null = null;
     if (sprintName) {
       if (!(await checkoutSprintBranch(cwd, sprintName, rawExecute))) {
         throw new OrderBranchError(`Sprint-Branch ${sprintBranch(sprintName)} lässt sich nicht auschecken.`);
       }
-    } else if (
-      (await currentBranch(git)) === 'HEAD' &&
-      (await branchExists(git, MAIN_BRANCH)) &&
-      !(await checkedOutElsewhere(git, MAIN_BRANCH, cwd))
-    ) {
-      // Losgelöst (z. B. nach dem kompletten Test) und main ist frei: der Auftrag ohne Sprint arbeitet auf main auf.
-      await must('checkout', MAIN_BRANCH);
+    } else if ((await currentBranch(git)) === 'HEAD' && (await branchExists(git, MAIN_BRANCH))) {
+      // Losgelöst (z. B. nach dem kompletten Test): der Auftrag ohne Sprint arbeitet auf main auf.
+      if (await checkedOutElsewhere(git, MAIN_BRANCH, cwd)) detachedBase = MAIN_BRANCH;
+      else await must('checkout', MAIN_BRANCH);
     }
-    const base = await currentBranch(git);
+    const base = detachedBase ?? (await currentBranch(git));
+    // Sprint-Aufträge zweigen nur vom Sprint-Branch ab: sonst landete der Merge am Ende z. B. direkt in main.
+    if (sprintName && base !== sprintBranch(sprintName)) {
+      throw new OrderBranchError(`Arbeitsordner ${cwd} steht auf ${base} statt auf ${sprintBranch(sprintName)}.`);
+    }
     // Nie von einem losgelösten Stand oder vom Branch eines anderen Auftrags abzweigen: der Merge am Ende ginge ins Leere
     // bzw. in den fremden Auftrag statt in den Sprint.
     if (base === 'HEAD' || base.startsWith('auftrag/')) {
@@ -357,7 +364,19 @@ export async function enterOrderBranch(
           : `Arbeitsordner ${cwd} steht noch auf dem fremden Auftrags-Branch ${base}.`,
       );
     }
-    if (!(await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode) {
+    if (detachedBase) {
+      if (await branchExists(git, branch)) {
+        await must('checkout', branch);
+        const merged = await git('merge', '--no-edit', detachedBase);
+        if (merged.exitCode !== 0) {
+          const conflicts = await unresolvedConflicts(cwd, execute);
+          if (conflicts.length) return { branch, base: detachedBase, conflicts };
+          await git('merge', '--abort');
+        }
+      } else {
+        await must('checkout', '-b', branch, detachedBase);
+      }
+    } else if (!(await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode) {
       if (await branchExists(git, branch)) {
         await must('checkout', branch);
         const merged = await git('merge', '--no-edit', base);
@@ -409,12 +428,14 @@ export async function finishOrderBranch(
       message: `Arbeitsordner steht auf ${head} statt auf ${target.branch} – nichts committet und nichts gemergt.`,
     };
   }
+  // Patch des Arbeitsstands vor einem verworfenen Merge (siehe unten).
+  let backup: string | null = null;
   try {
     // Konflikte nicht gelöst: offenen Merge verwerfen, damit kein Konfliktmarker committet wird und der nächste
     // Auftrag auf einem sauberen Stand beginnt (der Branch behält seine bisherigen Commits). Was der Agent bis dahin
     // gelöst oder geändert hat, bleibt als Patch erhalten.
     if ((await unresolvedConflicts(cwd, execute)).length) {
-      const backup = await backupWorkingTree(git, cwd, `merge-abbruch-${item.id.slice(0, 8)}`).catch(() => null);
+      backup = await backupWorkingTree(git, cwd, `merge-abbruch-${item.id.slice(0, 8)}`).catch(() => null);
       if (backup) console.warn(`Offener Merge von ${target.branch} verworfen, Arbeitsstand gesichert in ${backup}`);
       await git('merge', '--abort');
     }
@@ -430,7 +451,7 @@ export async function finishOrderBranch(
       if (hold) {
         const changed = await git('diff', '--name-only', `${target.base}...${target.branch}`);
         if (hold(changed.exitCode === 0 ? changed.output.split('\n').filter(Boolean) : [])) {
-          await must('checkout', target.base);
+          await leaveOrderBranch({ git, must }, target.base, cwd);
           return {
             merged: false,
             held: true,
@@ -439,14 +460,23 @@ export async function finishOrderBranch(
           };
         }
       }
+      const mergeMessage = `Merge ${target.branch}: ${item.title.slice(0, 72)}`;
+      // Basis im Ordner eines anderen Worktrees ausgecheckt (losgelöster Agent-Worktree, main beim Menschen): dort mergen.
+      const elsewhere = await checkedOutElsewhere(git, target.base, cwd);
+      if (elsewhere) {
+        return await mergeIntoOtherWorktree({ git, must }, rawExecute, elsewhere, target, mergeMessage);
+      }
       await must('checkout', target.base);
-      const merged = await git(
-        'merge',
-        '--no-ff',
-        target.branch,
-        '-m',
-        `Merge ${target.branch}: ${item.title.slice(0, 72)}`,
-      );
+      // Nie in einen losgelösten Stand oder den Auftrags-Branch selbst „mergen“ (No-op, der als Erfolg gälte).
+      const head = await currentBranch(git);
+      if (head !== target.base) {
+        return {
+          merged: false,
+          commit: null,
+          message: `Arbeitsordner steht nach dem Wechsel auf ${head} statt auf ${target.base} – ${target.branch} bleibt bestehen.`,
+        };
+      }
+      const merged = await git('merge', '--no-ff', target.branch, '-m', mergeMessage);
       if (merged.exitCode !== 0) {
         await git('merge', '--abort');
         return {
@@ -455,11 +485,10 @@ export async function finishOrderBranch(
           message: `Merge-Konflikt mit ${target.base} – Branch ${target.branch} bleibt bestehen.`,
         };
       }
-      await git('branch', '-d', target.branch);
       return {
         merged: true,
         commit: await must('rev-parse', '--short', 'HEAD'),
-        message: `In ${target.base} gemergt.`,
+        message: `In ${target.base} gemergt.${await deleteOrderBranch(git, target.branch)}`,
       };
     }
     if (dirty) {
@@ -472,13 +501,20 @@ export async function finishOrderBranch(
         `Auftrag: ${item.id}\nZwischenstand eines fehlgeschlagenen Versuchs.`,
       );
     }
-    await must('checkout', target.base);
-    return { merged: false, commit: null, message: `Zwischenstand auf ${target.branch} gesichert.` };
+    await leaveOrderBranch({ git, must }, target.base, cwd);
+    // Nur melden, was wirklich gesichert ist: nach einem verworfenen Merge steckt der Stand oft nur im Patch.
+    const saved = [
+      dirty ? `Zwischenstand auf ${target.branch} gesichert.` : '',
+      backup ? `Offener Merge verworfen, Arbeitsstand als Patch gesichert in ${backup}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return { merged: false, commit: null, message: saved || 'Keine Änderungen zu sichern.' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Z. B. ein Commit-Hook lehnt ab: Gestagtes darf nicht liegen bleiben, sonst wandert es beim nächsten Checkout in
     // den Branch des nächsten Auftrags. Zwischenstand auf dem eigenen Branch sichern und zur Basis zurück.
-    const rescued = await rescueOrderBranch({ git, must }, item, target, sprintName).catch(() => false);
+    const rescued = await rescueOrderBranch({ git, must }, item, target, sprintName, cwd).catch(() => false);
     return { merged: false, commit: null, message: rescued ? `${message} (Zwischenstand gesichert)` : message };
   }
 }
@@ -489,6 +525,7 @@ async function rescueOrderBranch(
   item: { id: string; title: string },
   target: OrderBranch,
   sprintName: string,
+  cwd: string,
 ): Promise<boolean> {
   if ((await currentBranch(git)) !== target.branch) return false;
   if ((await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0) await git('merge', '--abort');
@@ -504,7 +541,75 @@ async function rescueOrderBranch(
     );
     if (committed.exitCode !== 0) return false;
   }
-  return (await git('checkout', target.base)).exitCode === 0;
+  return leaveOrderBranch({ git, must }, target.base, cwd).then(
+    () => true,
+    () => false,
+  );
+}
+
+/**
+ * Zurück zur Basis: Ist sie in einem anderen Worktree ausgecheckt (losgelöster Agent-Worktree), bleibt dieser Ordner
+ * losgelöst auf ihrem Stand – ein Checkout des Branches selbst scheiterte dort.
+ */
+async function leaveOrderBranch({ git, must }: GitHelpers, base: string, cwd: string): Promise<void> {
+  if (await checkedOutElsewhere(git, base, cwd)) await must('checkout', '--detach', base);
+  else await must('checkout', base);
+}
+
+/** Löscht den gemergten Auftrags-Branch; scheitert das, steht es in der Meldung statt still unterzugehen. */
+async function deleteOrderBranch(git: GitHelpers['git'], branch: string): Promise<string> {
+  const deleted = await git('branch', '-d', branch);
+  return deleted.exitCode === 0 ? '' : ` Branch ${branch} konnte nicht gelöscht werden: ${deleted.output.slice(-200)}`;
+}
+
+/**
+ * Mergt den Auftrags-Branch in die Basis, die in einem anderen Worktree ausgecheckt ist (z. B. main im Ordner der
+ * Menschen, der Agent arbeitet im losgelösten Worktree). Gemergt wird dort selbst, damit Index und Arbeitsordner zum
+ * Branch passen – aber nur, wenn dort die Basis ausgecheckt ist und keine offenen Änderungen an versionierten Dateien
+ * liegen; sonst bleibt der Auftrags-Branch ungemergt bestehen. Konflikte werden sofort zurückgenommen (`merge --abort`).
+ */
+async function mergeIntoOtherWorktree(
+  own: GitHelpers,
+  rawExecute: CommandExecutor,
+  folder: string,
+  target: OrderBranch,
+  mergeMessage: string,
+): Promise<{ merged: boolean; commit: string | null; message: string }> {
+  const other = gitHelpers(
+    (command, directory, options) => withProjectLock(folder, () => rawExecute(command, directory, options)),
+    folder,
+  );
+  // Der Agent-Ordner verlässt den Auftrags-Branch (losgelöst auf der Basis), damit er danach gelöscht werden kann.
+  await own.must('checkout', '--detach', target.base);
+  const unmerged = (reason: string) => ({
+    merged: false,
+    commit: null,
+    message: `${reason} – ${target.branch} bleibt bestehen; dort mit „git merge ${target.branch}“ übernehmen.`,
+  });
+  const head = await currentBranch(other.git);
+  const status = await other.git('status', '--porcelain', '--untracked-files=no');
+  if (head !== target.base || status.exitCode !== 0 || status.output) {
+    return unmerged(`In ${folder} sind Änderungen offen oder nicht ${target.base} ausgecheckt`);
+  }
+  if (await other.git('rev-parse', '-q', '--verify', 'MERGE_HEAD').then((result) => result.exitCode === 0)) {
+    return unmerged(`In ${folder} läuft ein Merge`);
+  }
+  const merged = await other.git('merge', '--no-ff', target.branch, '-m', mergeMessage);
+  if (merged.exitCode !== 0) {
+    await other.git('merge', '--abort');
+    return unmerged(`Merge-Konflikt mit ${target.base} in ${folder}`);
+  }
+  // Nur als Erfolg melden, was nachweislich in der Basis steckt.
+  const contained = await own.git('merge-base', '--is-ancestor', target.branch, target.base);
+  if (contained.exitCode !== 0)
+    return unmerged(`${target.branch} ist nach dem Merge nicht in ${target.base} enthalten`);
+  // Der Agent-Ordner folgt der Basis (weiterhin losgelöst), damit der nächste Auftrag vom neuen Stand ausgeht.
+  await own.git('checkout', '--detach', target.base);
+  return {
+    merged: true,
+    commit: await other.must('rev-parse', '--short', 'HEAD'),
+    message: `In ${target.base} (Ordner ${folder}) gemergt.${await deleteOrderBranch(own.git, target.branch)}`,
+  };
 }
 
 /**
@@ -1128,14 +1233,33 @@ export function changedFilesSection(files: ChangedFile[]): string {
   return `## Geänderte Dateien\n${lines.length ? lines.join('\n') : 'Keine Dateien geändert.'}`;
 }
 
+/**
+ * Live schalten nach dem Merge nach main und das Ergebnis protokollieren. Erfolg nur, wenn der Deploy nicht
+ * gescheitert ist (deployProject meldet das mit false statt zu werfen).
+ */
+async function goLiveLogged(onMergedMain: () => Promise<boolean | null | void>, log: string[]): Promise<void> {
+  try {
+    const deployed = await onMergedMain();
+    log.push(
+      deployed === false
+        ? 'Live schalten unvollständig: Deploy fehlgeschlagen (Details im Deploy-Status des Projekts).'
+        : deployed === null
+          ? 'Live geschaltet: Projektordner auf main nachgezogen (keine Deploy-Befehle hinterlegt).'
+          : 'Live geschaltet: Projektordner auf main nachgezogen und deployt.',
+    );
+  } catch (error) {
+    log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 /** Works through the next queued Git request (push or pull) of the project's sprints. */
 export async function syncSprintToGit(
   pool: Pool,
   project: string,
   cwd: string,
   rawExecute: CommandExecutor = runCommand,
-  /** Nach dem Merge nach main („Live schalten“): Live-Ordner nachziehen und deployen. */
-  onMergedMain?: () => Promise<void>,
+  /** Nach dem Merge nach main („Live schalten“): Live-Ordner nachziehen und deployen (Ergebnis wie goLive). */
+  onMergedMain?: () => Promise<boolean | null | void>,
 ): Promise<number> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
@@ -1201,12 +1325,7 @@ export async function syncSprintToGit(
       );
       return 1;
     }
-    if (result.mergedMain && onMergedMain) {
-      await onMergedMain().catch((error: unknown) =>
-        result.log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`),
-      );
-      result.log.push('Live geschaltet: Projektordner auf main nachgezogen und deployt.');
-    }
+    if (result.mergedMain && onMergedMain) await goLiveLogged(onMergedMain, result.log);
     if (result.mergedMain && restartAfterSprint) {
       const { created } = await requestRestart(
         pool,
@@ -1346,11 +1465,12 @@ export async function tagMergedSprint(
   cwd: string,
   sprint: { id: string; name: string },
   rawExecute: CommandExecutor = runCommand,
-): Promise<{ commit: string; log: string[] }> {
+): Promise<{ commit: string; log: string[]; mainUpdated: boolean }> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
   const log: string[] = [];
+  let mainUpdated = false;
   const remoteMain = `refs/remotes/origin/${MAIN_BRANCH}`;
   await must('fetch', 'origin', `+refs/heads/${MAIN_BRANCH}:${remoteMain}`);
   const tag = sprintTag(sprint.name, sprint.id);
@@ -1367,13 +1487,14 @@ export async function tagMergedSprint(
       head === MAIN_BRANCH
         ? await git('merge', '--ff-only', remoteMain)
         : await git('fetch', 'origin', `${MAIN_BRANCH}:${MAIN_BRANCH}`);
+    mainUpdated = updated.exitCode === 0;
     log.push(
-      updated.exitCode === 0
+      mainUpdated
         ? `Lokales ${MAIN_BRANCH} aktualisiert.`
         : `Lokales ${MAIN_BRANCH} weicht ab – bitte mit „git pull“ übernehmen.`,
     );
   }
-  return { commit: await must('rev-parse', '--short', remoteMain), log };
+  return { commit: await must('rev-parse', '--short', remoteMain), log, mainUpdated };
 }
 
 /**
@@ -1388,6 +1509,8 @@ export async function pollSprintReviews(
   adapter: HosterAdapter,
   requireApproval: boolean,
   rawExecute: CommandExecutor = runCommand,
+  /** Nach dem Merge des Pull Requests „Live schalten“ wie beim direkten Merge (goLive). */
+  onMergedMain?: () => Promise<boolean | null | void>,
 ): Promise<number> {
   const sprints = (
     await pool.query<ReviewSprint>(
@@ -1435,6 +1558,8 @@ export async function pollSprintReviews(
       await adapter.mergePullRequest(sprint.prUrl);
     }
     const tagged = await tagMergedSprint(cwd, sprint, rawExecute);
+    // Nur mit nachgezogenem lokalem main: sonst würde der alte Stand deployt.
+    if (tagged.mainUpdated && onMergedMain) await goLiveLogged(onMergedMain, tagged.log);
     await pool.query(
       `UPDATE sprints SET status = 'completed', ci_status = $5, git_sync = 'done', git_message = $2, git_commit = $3,
               git_branch = $4, git_synced_at = NOW() WHERE id = $1`,

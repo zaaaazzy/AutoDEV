@@ -33,9 +33,25 @@ type StreamEvent = {
   message?: { content?: ContentBlock[] };
   result?: string;
   is_error?: boolean;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
   total_cost_usd?: number;
 };
+
+/** Alle verarbeiteten Tokens: mit Prompt-Caching steckt der Grossteil der Eingabe in den Cache-Feldern. */
+function usageTokens(usage: StreamEvent['usage']): number {
+  const count = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+  return (
+    count(usage?.input_tokens) +
+    count(usage?.cache_creation_input_tokens) +
+    count(usage?.cache_read_input_tokens) +
+    count(usage?.output_tokens)
+  );
+}
 
 function shorten(text: string): string {
   const line = text.replace(/\s+/g, ' ').trim();
@@ -120,7 +136,7 @@ export function createStreamParser(
       final = {
         text: event.result ?? '',
         isError: event.is_error === true,
-        tokens: (event.usage?.input_tokens ?? 0) + (event.usage?.output_tokens ?? 0),
+        tokens: usageTokens(event.usage),
         costUsd: typeof event.total_cost_usd === 'number' ? event.total_cost_usd : 0,
       };
     }

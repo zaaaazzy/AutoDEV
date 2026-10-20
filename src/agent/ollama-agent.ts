@@ -31,7 +31,7 @@ export interface OllamaAgentOptions {
   onProgress?: (message: string) => void;
   /** Datenbank-Zugang des Projekts; aktiviert das Werkzeug run_sql für schreibende Rollen. */
   databaseUrl?: string | null;
-  /** Dateirechte des Agents (Anlegen, Ändern, Ordner); ohne Angabe gelten die Rechte der Rolle. */
+  /** Dateirechte des Agents (Anlegen, Ändern, Ordner); ohne Angabe (oder ohne commands) darf der Agent nur lesen. */
   files?: GuardPolicy;
   /** Freigegebene Befehle des Agents (Shell und Datenbank). */
   commands?: string[];
@@ -52,7 +52,13 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const baseUrl = (options.baseUrl ?? process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl ?? patientFetch;
   // Nur lesende Rollen (z. B. Visionär) bekommen nie Schreib-, Befehls- oder Datenbank-Werkzeuge.
-  const canWrite = WRITE_ROLES.has(options.role) && !READ_ONLY_ROLES.has(options.role) && !options.readOnly;
+  // Ohne Rechte-Kontext (Dateirechte und Befehle) fail-closed: nur lesen – sonst griffe kein Wächter.
+  const canWrite =
+    WRITE_ROLES.has(options.role) &&
+    !READ_ONLY_ROLES.has(options.role) &&
+    !options.readOnly &&
+    options.files !== undefined &&
+    options.commands !== undefined;
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns =
     options.maxTurns ??

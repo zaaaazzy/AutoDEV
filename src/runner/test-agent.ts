@@ -26,6 +26,8 @@ export interface TestAgentOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
+  /** Gleich nach dem Anlegen des Testlaufs (vor dem ersten Befehl), damit Aufrufer ihn sofort verknüpfen können. */
+  onRunCreated?: (runId: string) => Promise<void>;
 }
 
 export function parseTestAgentOptions(args: string[], cwd = process.env.INIT_CWD ?? process.cwd()): TestAgentOptions {
@@ -180,6 +182,7 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
     branch,
     commitSha,
   });
+  await options.onRunCreated?.(runId);
   let allPassed = true;
 
   for (const [position, command] of options.commands.entries()) {

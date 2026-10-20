@@ -1,6 +1,7 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import type { Pool } from 'pg';
+import { readProjectFile } from '../agent/tool-paths.js';
 
 /** Favicon eines Projekts: Der Worker sieht die Projektordner, der Server-Container nicht – daher in der Datenbank. */
 const CANDIDATES = [
@@ -48,7 +49,8 @@ async function search(dir: string, depth: number): Promise<string | null> {
 export async function findFavicon(cwd: string): Promise<string | null> {
   for (const candidate of CANDIDATES) {
     const path = join(cwd, candidate);
-    if ((await stat(path).catch(() => null))?.isFile()) return path;
+    // lstat: ein Link (auch ins Projekt) zählt nicht als Favicon; Links in Ordnern prüft readProjectFile.
+    if ((await lstat(path).catch(() => null))?.isFile()) return path;
   }
   return search(cwd, 3);
 }
@@ -56,13 +58,14 @@ export async function findFavicon(cwd: string): Promise<string | null> {
 /** Speichert das Favicon, wenn es sich seit dem letzten Abgleich geändert hat (oder entfernt es). */
 export async function syncFavicon(pool: Pool, project: string, cwd: string): Promise<void> {
   const path = await findFavicon(cwd);
-  const info = path ? await stat(path).catch(() => null) : null;
   const type = path ? TYPES[extname(path).toLowerCase()] : undefined;
+  // Ohne Links zu folgen: sonst landete z. B. favicon.png -> ~/.ssh/id_ed25519 in der Datenbank.
+  const file = path && type ? await readProjectFile(cwd, path, MAX_BYTES) : null;
   const stored = (
     await pool.query<{ mtime: Date | null }>('SELECT favicon_mtime AS mtime FROM projects WHERE slug = $1', [project])
   ).rows[0];
   if (!stored) return;
-  if (!path || !info || !type || info.size > MAX_BYTES) {
+  if (!file || !type) {
     if (stored.mtime) {
       await pool.query(
         'UPDATE projects SET favicon = NULL, favicon_type = NULL, favicon_mtime = NULL WHERE slug = $1',
@@ -71,11 +74,11 @@ export async function syncFavicon(pool: Pool, project: string, cwd: string): Pro
     }
     return;
   }
-  if (stored.mtime && stored.mtime.getTime() === Math.floor(info.mtimeMs)) return;
+  if (stored.mtime && stored.mtime.getTime() === Math.floor(file.mtimeMs)) return;
   await pool.query('UPDATE projects SET favicon = $2, favicon_type = $3, favicon_mtime = $4 WHERE slug = $1', [
     project,
-    await readFile(path),
+    file.content,
     type,
-    new Date(Math.floor(info.mtimeMs)),
+    new Date(Math.floor(file.mtimeMs)),
   ]);
 }

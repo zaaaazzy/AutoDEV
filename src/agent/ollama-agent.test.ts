@@ -176,6 +176,9 @@ test('agent loop executes tool calls and returns the final answer with changed f
     cwd,
     timeoutMs: 5000,
     fetchImpl,
+    // Schreiben nur mit Rechte-Kontext (ohne ihn arbeitet der Agent fail-closed nur lesend).
+    files: { create: true, edit: true, scopes: [] },
+    commands: [],
   });
   assert.equal(result.exitCode, 0);
   assert.match(result.output, /Datei angelegt\.[\s\S]*- neu\.txt/);
@@ -210,6 +213,8 @@ test('dashboard assistant can make a scoped fix and answer without changes', asy
     cwd,
     timeoutMs: 5000,
     fetchImpl,
+    files: { create: true, edit: true, scopes: [] },
+    commands: [],
   });
   assert.equal(fixed.exitCode, 0);
   assert.equal(await readFile(join(cwd, 'fix.txt'), 'utf8'), 'behoben');

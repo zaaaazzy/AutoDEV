@@ -5,6 +5,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import { ConfirmService } from '../../core/confirm.service.js';
 import { formatHours, formatUsd, USD_PER_MILLION_TOKENS } from '../../shared/format.js';
 import { LocaleNumberPipe } from '../../shared/pipes.js';
+import { proposalSelection } from './proposal-selection.js';
 
 interface ProposalItem {
   id: string;
@@ -83,7 +84,17 @@ export class SprintProposalComponent {
   protected readonly comment = signal<ProposalComment | null>(null);
   protected readonly roadmap = signal<Roadmap | null>(null);
   protected readonly roadmapOpen = signal(false);
+  /** Platzsparend: standardmässig nur Kopfzeile mit Summen; aufgeklappt Tabelle und Aktionen (je Gerät gemerkt). */
+  protected readonly expanded = signal(this.readExpanded());
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Projekt, zu dem `proposal` gehört (Auswahl nur bei Projektwechsel zurücksetzen). */
+  private loadedSlug = '';
+  /**
+   * Auslöser zum Neuladen: nur Aufträge und Sprints. Der Live-Refresh der Agent-Läufe ersetzt `data()` alle 3 s,
+   * lässt diese Listen aber unverändert – dann soll der Vorschlag nicht neu laden.
+   */
+  private readonly development = computed(() => this.store.data().development);
+  private readonly sprints = computed(() => this.store.data().sprints);
 
   /** Preis je Token: gemessen aus den Kosten der Agents, sonst Referenzpreis. */
   protected readonly price = computed(() => {
@@ -120,8 +131,9 @@ export class SprintProposalComponent {
     // Neu laden, wenn sich Projekt oder Aufträge ändern (z. B. nach dem Übernehmen).
     effect(() => {
       const slug = this.store.activeProject();
-      const data = this.store.data();
-      if (slug && this.visible() && data) void this.load(slug);
+      this.development();
+      this.sprints();
+      if (slug && this.visible()) void this.load(slug);
     });
     inject(DestroyRef).onDestroy(() => this.stopPolling());
   }
@@ -133,8 +145,16 @@ export class SprintProposalComponent {
       this.api.get<{ comment: ProposalComment | null }>(`${base}/proposal/comment`).catch(() => null),
     ]);
     if (!result || slug !== this.store.activeProject()) return;
+    const previous = this.proposal();
+    this.picked.set(
+      proposalSelection(
+        previous && { slug: this.loadedSlug, ids: previous.items.map((item) => item.id), picked: this.picked() },
+        slug,
+        result.proposal.items,
+      ),
+    );
     this.proposal.set(result.proposal);
-    this.picked.set(new Set(result.proposal.items.filter((item) => item.selected).map((item) => item.id)));
+    this.loadedSlug = slug;
     this.comment.set(comment?.comment ?? null);
     if (this.commentPending()) this.pollComment(slug);
     if (this.roadmapOpen()) void this.loadRoadmap(slug);
@@ -223,7 +243,26 @@ export class SprintProposalComponent {
     await this.load(slug);
   }
 
+  protected toggleExpanded(): void {
+    const open = !this.expanded();
+    this.expanded.set(open);
+    try {
+      globalThis.localStorage?.setItem('devlog.proposal.open', open ? '1' : '0');
+    } catch {
+      /* ohne Speicher bleibt es beim Standard */
+    }
+  }
+
+  private readExpanded(): boolean {
+    try {
+      return globalThis.localStorage?.getItem('devlog.proposal.open') === '1';
+    } catch {
+      return false;
+    }
+  }
+
   protected async toggleRoadmap(): Promise<void> {
+    if (!this.expanded()) this.toggleExpanded();
     this.roadmapOpen.update((open) => !open);
     if (this.roadmapOpen()) await this.loadRoadmap(this.store.activeProject());
   }

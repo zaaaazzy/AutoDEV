@@ -35,10 +35,12 @@ export function parseNodeCoverage(
 /** Lesbarer Bereichsname aus dem Workspace-Namen („mainty-backend“ → „Backend“). */
 export function areaName(workspace: string): string {
   const name = workspace.replace(/^@[^/]+\//, '');
+  // Nur ganze Namensteile (getrennt durch -, _, / usw.): „builder“ ist kein „ui“, „rapid“ keine „api“.
+  const word = (words: string) => new RegExp(`(?:^|[^a-z0-9])(?:${words})s?(?=$|[^a-z0-9])`, 'i');
   for (const [pattern, label] of [
-    [/backend|server|api/i, 'Backend'],
-    [/frontend|web|ui|client/i, 'Frontend'],
-    [/contract|shared|common/i, 'Contracts'],
+    [word('backend|server|api'), 'Backend'],
+    [word('frontend|web|ui|client'), 'Frontend'],
+    [word('contract|shared|common'), 'Contracts'],
   ] as const) {
     if (pattern.test(name)) return label;
   }

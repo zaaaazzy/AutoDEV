@@ -43,7 +43,20 @@ export function hasRole(principal: Principal | undefined, role: Role): boolean {
   return Boolean(principal && (principal.roles.includes('admin') || principal.roles.includes(role)));
 }
 
-type Rule = [method: string, pattern: RegExp, role: Role | null | ((body: unknown) => Role)];
+/** Eine Rolle oder mehrere, die alle vorhanden sein müssen. */
+export type RoleRequirement = Role | readonly Role[];
+type Rule = [method: string, pattern: RegExp, role: Role | null | ((body: unknown) => RoleRequirement)];
+
+/**
+ * PATCH eines Auftrags: Einen Agent starten ({ agentId: "<id>" } allein) ist Ausführen. Jede andere Änderung ist
+ * Planung – auch agentId: null, das nichts startet. Kommen ein Agent und weitere Felder zusammen, braucht es beide
+ * Rollen, sonst änderte „Ausführen“ über agentId den ganzen Auftrag (oder „Planung“ startete einen Agent).
+ */
+function developmentPatchRole(body: unknown): RoleRequirement {
+  if (typeof body !== 'object' || body === null || !('agentId' in body)) return 'plan';
+  if (typeof (body as { agentId: unknown }).agentId !== 'string') return 'plan';
+  return Object.keys(body).length === 1 ? 'run' : ['plan', 'run'];
+}
 
 /** null = jeder angemeldete Benutzer (eigenes Konto, eigene Geräte). Unbekannte Routen verlangen Administration. */
 const RULES: Rule[] = [
@@ -82,11 +95,7 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/(pause|resume)$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
-  [
-    'PATCH',
-    /^\/api\/development\/[^/]+$/,
-    (body) => (typeof body === 'object' && body !== null && 'agentId' in body ? 'run' : 'plan'),
-  ],
+  ['PATCH', /^\/api\/development\/[^/]+$/, developmentPatchRole],
   ['*', /^\/api\/development\//, 'plan'],
   ['POST', /^\/api\/projects\/[^/]+\/(development|ideation|bugs|sprints)$/, 'plan'],
   // Visionär-Lauf starten bzw. abbrechen: legt Ideen an, gehört also zur Planung.
@@ -110,7 +119,7 @@ const RULES: Rule[] = [
   ['*', /^\/api\/scheduled-jobs(?:\/[^/]+)?$/, 'admin'],
 ];
 
-export function requiredRole(method: string, path: string, body: unknown): Role | null {
+export function requiredRole(method: string, path: string, body: unknown): RoleRequirement | null {
   for (const [ruleMethod, pattern, role] of RULES) {
     if ((ruleMethod === '*' || ruleMethod === method) && pattern.test(path)) {
       return typeof role === 'function' ? role(body) : role;
@@ -126,9 +135,12 @@ export const authorize: RequestHandler = (request, response, next) => {
     next();
     return;
   }
-  const role = requiredRole(request.method, path, request.body);
+  const required = requiredRole(request.method, path, request.body);
   const principal = response.locals.principal as Principal | undefined;
-  if (role === null || hasRole(principal, role)) {
+  const role = (typeof required === 'string' ? [required] : (required ?? [])).find(
+    (candidate) => !hasRole(principal, candidate),
+  );
+  if (!role) {
     next();
     return;
   }

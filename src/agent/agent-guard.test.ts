@@ -103,6 +103,22 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'docker compose up -d --no-deps app',
     'docker-compose up -d',
     'git log ~/.ssh/config',
+    'npm run build --scr=/tmp/evil.sh',
+    'npm run build --script-shell /bin/sh',
+    'npm run build -C /tmp',
+    'npm run build --prefix "/tmp"',
+    'npm run build --prefix=$HOME',
+    'git diff /dev/null /etc/hosts',
+    'git diff /dev/null "/etc/hosts"',
+    'git diff /dev/null $HOME/.zshrc',
+    'git diff /dev/null ~/.zshrc',
+    'git diff -O/etc/hosts',
+    'git status && git diff ../x README.md',
+    'git push origin main',
+    'git status && git push',
+    'docker run -v /:/host alpine',
+    'npm i left-pad',
+    'npm ci',
   ]) {
     assert.ok(bashProblem(command, root, safe as never), command);
   }
@@ -116,6 +132,8 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'docker compose up -d --build app',
     'docker compose restart',
     'docker compose logs --tail=50 app',
+    'git diff HEAD~1 -- src 2>/dev/null',
+    'git diff main...HEAD --stat',
   ]) {
     assert.equal(bashProblem(command, root, safe as never), null, command);
   }
@@ -255,4 +273,94 @@ test('Lokales Modell: dieselben Datei- und Befehlsrechte wie die Claude-CLI', as
   assert.match(await call('run_command', { command: 'git diff' }), /nicht freigegeben/);
   assert.match(await call('run_sql', { sql: 'select 1' }), /nicht freigegeben/);
   assert.equal(executed, false);
+});
+
+test('Wächter: gesperrte Unterbefehle auch in Anführungszeichen, mit Backslash und abschaltbarem --ignore-scripts', () => {
+  for (const command of [
+    'git "push" origin main',
+    "git 'push'",
+    'git pu\\sh',
+    'docker "run" alpine',
+    'npm "install" left-pad',
+    'npm install --ignore-scripts left-pad --ignore-scripts=false',
+    'npm install --ignore-scripts left-pad --no-ignore-scripts',
+  ]) {
+    assert.ok(bashProblem(command, root), command);
+  }
+  for (const command of ['git status', 'git log --oneline', 'git diff', 'npm test', 'npm run build']) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
+test('Wächter: abgekürzte Git-Optionen, mehrstellige File-Deskriptoren und „<>“ sind gesperrt', () => {
+  for (const command of [
+    "git fetch --upload-pa='sh -c id' .",
+    'git log --outp=/tmp/x',
+    'git diff --no-ind /etc/hosts x',
+    'git log "--output=/tmp/x"',
+    'git log --ext-d',
+    'git diff --textc',
+    'git grep -Ovim foo',
+    'git grep --open-files=vim foo',
+    'git format-patch --output-directory /tmp/x',
+    'git status 10>~/.bashrc',
+    'git status 99>>notes.txt',
+    'git status <>notes.txt',
+    'git status 0<>notes.txt',
+    'npm run build -C /tmp/anderer-ordner',
+  ]) {
+    assert.ok(bashProblem(command, root), command);
+  }
+  for (const command of [
+    'git status',
+    'git log --oneline --stat',
+    'git diff --text',
+    'git diff --stat HEAD~1',
+    'git log --grep "a > b"',
+    'git commit -m "neue Option --output dokumentiert"',
+    'npm test',
+    'npm run build',
+    'npm test 2>&1',
+    'npm test 10>&1',
+    'git status 2>/dev/null',
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
+test('Wächter: Links ins Leere werden nicht beschrieben (Ziel läge ungeprüft ausserhalb)', () => {
+  symlinkSync(join(tmpdir(), `fehlt-${process.pid}`, 'zprofile'), join(root, 'out.txt'));
+  symlinkSync(join(tmpdir(), `fehlt-${process.pid}`), join(root, 'leer'));
+  assert.match(fileProblem(write('out.txt'), all, root) ?? '', /Link ins Leere/);
+  assert.match(fileProblem(write('out.txt', 'Edit'), all, root) ?? '', /Link ins Leere/);
+  assert.match(fileProblem(write('leer/x.md'), all, root) ?? '', /Link ins Leere/);
+  assert.equal(fileProblem(write('docs/neu2.md'), all, root), null);
+});
+
+test('Wächter: escapte Anführungszeichen verstecken keine Umleitung, Ersetzung oder Hintergrund-Befehle', () => {
+  for (const command of [
+    "npm test \\' > /tmp/x \\'",
+    "npm test \\'$(id)\\'",
+    "git status \\' & touch x \\'",
+    'npm test \\" > /tmp/x \\"',
+    "npm test \\'`id`\\'",
+    "npm test $'a' > /tmp/x",
+    "npm test $'\\'' > /tmp/x",
+    `npm test "a 'b' \\" > /tmp/x"`,
+    `npm test "it's" > /tmp/x`,
+    `npm test 'a' "$(id)"`,
+  ]) {
+    assert.ok(bashProblem(command, root), command);
+  }
+});
+
+test('Wächter: gewöhnliche Quotes bleiben erlaubt', () => {
+  for (const command of [
+    'git log --grep "a > b"',
+    `git log --format='%h > %s'`,
+    `git log --grep "it's"`,
+    `git log --grep 'say "hi" > you'`,
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
 });

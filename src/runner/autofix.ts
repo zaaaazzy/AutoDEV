@@ -1,4 +1,5 @@
 import { logged } from '../core/log.js';
+import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
@@ -65,12 +66,15 @@ export function isAgentFailure(output: string): boolean {
   return AGENT_FAILURE_PATTERNS.some((pattern) => pattern.test(tail));
 }
 
-/** Projektordner bzw. Laufwerk war nicht erreichbar – kein Code-Fehler, der Auftrag startet wieder, sobald er da ist. */
+/**
+ * Projektordner bzw. Laufwerk war nicht erreichbar – kein Code-Fehler, der Auftrag startet wieder, sobald er da ist.
+ * Nur Meldungen, die das Arbeitsverzeichnis selbst betreffen: ein ENOENT in einem Test (fehlendes Fixture, `scandir`,
+ * „Path … does not exist“) ist ein normaler Fehler mit Bug-Bericht – sonst liefe der Auftrag endlos erneut an.
+ */
 const ENVIRONMENT_PATTERNS = [
   /Can't access working directory/i,
-  /Path "[^"]+" does not exist/i,
   /Projektordner nicht gefunden/,
-  /no such file or directory, (?:chdir|uv_cwd|scandir) /i,
+  /no such file or directory, (?:chdir|uv_cwd)\b/i,
 ];
 export const ENVIRONMENT_TODO =
   'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen, der Auftrag startet dann neu';
@@ -200,12 +204,16 @@ export async function delegateAfterAnalysis(
   if (auto) await queueBugFix(pool, item, item.failureBugId);
 }
 
-/** Ist der Projektordner wieder erreichbar, starten Aufträge, die nur darauf gewartet haben, erneut. */
-export async function resumeAfterEnvironment(pool: Pool, project: string): Promise<void> {
+/**
+ * Ist der Projektordner wieder erreichbar, starten Aufträge, die nur darauf gewartet haben, erneut – höchstens
+ * MAX_AUTO_RETRIES-mal (retry_count), damit ein falsch erkannter Umgebungsfehler keine Endlosschleife auslöst.
+ */
+export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: string): Promise<void> {
+  if (cwd !== undefined && !folderAvailable(cwd)) return;
   await pool.query(
-    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, updated_at = NOW()
-      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = $2`,
-    [project, ENVIRONMENT_TODO],
+    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
+      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = $2 AND retry_count < $3`,
+    [project, ENVIRONMENT_TODO, MAX_AUTO_RETRIES],
   );
 }
 
@@ -240,17 +248,21 @@ export async function resumeBlockedByBug(pool: Pool, bugId: string): Promise<voi
   );
 }
 
-/** Holt bei blockierten Aufträgen ohne Bug-Bericht (ältere Fehler) den Bericht und die Behebung nach. */
+/**
+ * Holt bei blockierten Aufträgen ohne Bug-Bericht (ältere Fehler) den Bericht und die Behebung nach. Läufe, die der
+ * Benutzer abgebrochen hat („Abbrechen“, cancel_requested), sind kein Fehler und bekommen keinen Bericht.
+ */
 export async function backfillFailures(pool: Pool, project: string): Promise<void> {
   const blocked = await pool.query<FailedItem & { agentName: string | null; output: string | null }>(
     `SELECT d.id, d.project_slug AS "projectSlug", d.title, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId",
             last.agent_name AS "agentName", last.output
        FROM development_items d
        LEFT JOIN LATERAL (
-         SELECT st.agent_name, st.output FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
+         SELECT st.agent_name, st.output, st.run_id FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
           WHERE r.development_id = d.id AND st.status = 'failed' ORDER BY r.started_at DESC, st.position DESC LIMIT 1
        ) last ON TRUE
-      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL`,
+      WHERE d.project_slug = $1 AND d.status = 'blocked' AND d.failure IS NULL AND d.kind <> 'bug' AND last.agent_name IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM agent_run_steps c WHERE c.run_id = last.run_id AND c.cancel_requested)`,
     [project],
   );
   for (const item of blocked.rows) {
