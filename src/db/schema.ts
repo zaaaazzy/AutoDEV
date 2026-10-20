@@ -10,7 +10,7 @@ export const SCHEMA = `
     test_commands JSONB,
     deploy_commands JSONB,
     deploy_status TEXT,
-    auto_bugfix BOOLEAN NOT NULL DEFAULT TRUE,
+    auto_bugfix BOOLEAN NOT NULL DEFAULT FALSE,
     agents_seeded BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
@@ -1144,6 +1144,11 @@ export const SCHEMA = `
   ALTER TABLE bugs ADD COLUMN IF NOT EXISTS routine_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
   ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS routine_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS routine_run_id UUID REFERENCES agent_task_runs(id) ON DELETE SET NULL;
+  -- Auto-Bugfix ist für neue Projekte aus. Bugs aus fremden Quellen (Betrieb, GitHub) laufen unabhängig davon erst
+  -- nach Freigabe durch einen Menschen (approved_at); Altdaten haben keine Freigabe und bleiben gesperrt.
+  ALTER TABLE projects ALTER COLUMN auto_bugfix SET DEFAULT FALSE;
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS approved_by TEXT;
   -- Zeitgesteuerte Wartungs-Jobs im Worker: nur Job-Arten aus der festen Registry (src/runner/scheduler.ts), keine
   -- Skripte oder Befehle aus der Datenbank. locked_until sperrt einen beanspruchten Lauf gegen andere Worker.
   CREATE TABLE IF NOT EXISTS scheduled_jobs (

@@ -2,6 +2,9 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
 import { relatedResourceBelongsToProject } from './resource.js';
+import { isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
+import { startProductionFix } from '../runner/production-events.js';
+import type { Principal } from './roles.js';
 import {
   buildUpdate,
   isUuid,
@@ -20,7 +23,7 @@ const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
   sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
   external_ref AS "externalRef",
-  regressed_at AS "regressedAt"`;
+  regressed_at AS "regressedAt", approved_at AS "approvedAt", approved_by AS "approvedBy"`;
 /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden („seit gestern“) über alle gebündelten Ereignisse. */
 const PRODUCTION_COUNT = `CASE WHEN source = 'production' THEN (
     SELECT COALESCE(SUM(k.count), 0)::int FROM production_events e JOIN production_event_buckets k ON k.event_id = e.id
@@ -96,11 +99,13 @@ export interface KnownBug {
   fixNotes: string;
 }
 
+/** Bekannte Bugs für den Prompt; fremde, nicht freigegebene Bugs (Betrieb, GitHub) kommen nicht in den Prompt. */
 export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40): Promise<KnownBug[]> {
   const result = await pool.query<KnownBug>(
     `SELECT title, description, severity, status, fix_notes AS "fixNotes"
        FROM bugs
       WHERE project_slug = $1 AND status NOT IN ('${BUG_STATUS.wontfix}', '${BUG_STATUS.rejected}')
+        AND NOT ${unapprovedBugSql('bugs')}
       ORDER BY CASE status WHEN '${BUG_STATUS.open}' THEN 0 WHEN '${BUG_STATUS.inProgress}' THEN 0 ELSE 1 END, updated_at DESC
       LIMIT $2`,
     [projectSlug, limit],
@@ -196,6 +201,39 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     if (fields.some((field) => field.column === 'sprint_id' || field.column === 'status')) {
       await syncBugOrder(pool, request.params.id);
     }
+    response.json({ bug: result.rows[0] });
+  });
+
+  // Freigabe eines Bugs aus fremder Quelle (Betrieb, GitHub) durch einen Menschen mit Recht „Ausführen“: erst danach
+  // nimmt der Runner Aufträge dazu auf. Betriebs-Bugs bekommen dabei ihren Behebungsauftrag. Per PATCH nicht setzbar.
+  app.post('/bugs/:id/approve', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Not found.' });
+      return;
+    }
+    const bug = (
+      await pool.query<{ source: string; status: BugStatus }>('SELECT source, status FROM bugs WHERE id = $1', [
+        request.params.id,
+      ])
+    ).rows[0];
+    if (!bug) {
+      response.status(404).json({ message: 'Bug not found.' });
+      return;
+    }
+    if (!isUntrustedBugSource(bug.source)) {
+      response.status(400).json({ message: 'Nur Bugs aus Betrieb oder GitHub brauchen eine Freigabe.' });
+      return;
+    }
+    if (bug.status !== BUG_STATUS.open && bug.status !== BUG_STATUS.inProgress) {
+      response.status(409).json({ message: 'Nur offene Bugs können freigegeben werden.' });
+      return;
+    }
+    const principal = response.locals.principal as Principal | undefined;
+    const result = await pool.query(
+      `UPDATE bugs SET approved_at = NOW(), approved_by = $2, updated_at = NOW() WHERE id = $1 RETURNING ${BUG_COLUMNS}`,
+      [request.params.id, (principal?.displayName || principal?.username || 'Nutzer').slice(0, 80)],
+    );
+    if (bug.source === 'production') await startProductionFix(pool, request.params.id);
     response.json({ bug: result.rows[0] });
   });
 

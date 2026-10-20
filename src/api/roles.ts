@@ -92,6 +92,8 @@ const RULES: Rule[] = [
   ['POST', /^\/api\/development\/[^/]+\/(retry|analyze|approve|review-reject|show-review)$/, 'run'],
   // Optische Freigabe im Reiter „Ansicht“ ist wie die Review-Freigabe Ausführen.
   ['POST', /^\/api\/development\/[^/]+\/visual\/approve$/, 'run'],
+  // Bug aus fremder Quelle (Betrieb, GitHub) für Agents freigeben: startet Agents, also Ausführen.
+  ['POST', /^\/api\/bugs\/[^/]+\/approve$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/git-sync$/, 'run'],
   ['POST', /^\/api\/sprints\/[^/]+\/(pause|resume)$/, 'run'],
   // Einen Agent für einen Auftrag starten ist Ausführen, alles andere am Auftrag ist Planung.
