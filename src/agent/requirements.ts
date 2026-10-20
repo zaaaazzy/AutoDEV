@@ -5,7 +5,8 @@ import { loadProjectContext, loadProjectRules, withProjectContext } from '../cor
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../api/bugs.js';
-import { splitEstimate } from './estimation.js';
+import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
+import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import { loadProjectPermissions, withAgentPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
@@ -14,6 +15,7 @@ import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
+const PROMPT_LOG_CHARS = 30_000;
 const STALE_DRAFT_MINUTES = 45;
 
 interface Idea {
@@ -22,6 +24,7 @@ interface Idea {
   title: string;
   description: string;
   priority: string;
+  category?: string | null;
   comments: string[];
 }
 
@@ -67,6 +70,8 @@ export function buildRequirementPrompt(
   idea: Idea,
   current?: string,
   definitionOfReady: string[] = DEFAULT_DEFINITION_OF_READY,
+  /** Ist-Werte erledigter Aufträge derselben Kategorie (lernende Schätzung). */
+  reference: ActualReference | null = null,
 ): string {
   return [
     'Du bist der Agent "Auftragsautor" und machst aus einer Idee eine umsetzbare Anforderung für einen Entwicklungsauftrag.',
@@ -81,6 +86,7 @@ export function buildRequirementPrompt(
         ]
       : []),
     FORMAT,
+    ...(reference ? [referenceSection(reference)] : []),
     `## Definition of Ready (vor der Abgabe prüfen)\n${definitionOfReady.map((item) => `- ${item}`).join('\n')}\n` +
       'Schreibe die Akzeptanzkriterien als Liste mit genau einem prüfbaren Satz je Punkt – der Tester hakt sie einzeln ab.',
   ].join('\n\n');
@@ -128,6 +134,14 @@ export async function runAuthorAgent(
     await loadProjectContext(pool, options.project),
     buildPrompt(author?.instructions ?? ''),
   );
+  // Budget-Prüfpunkt auch für Chat, Auftragsautor, Visionär & Co.: ist Tag oder Sprint erreicht, startet kein Lauf.
+  const budget = await checkBudget(pool, options.project).catch(logged('requirements', null));
+  if (budget?.exceeded) {
+    return {
+      exitCode: 1,
+      output: `${budgetTodo(budget.exceeded)}. Das Limit lässt sich unter Einstellungen → Budget ändern.`,
+    };
+  }
   const configured = author?.command?.length
     ? author.command
     : ((await dashboardCommand(pool, role)) ?? defaultAgentCommand());
@@ -169,8 +183,8 @@ export async function runAuthorAgent(
       : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress, signal });
     await pool
       .query(
-        `INSERT INTO agent_usage (project_slug, role, tokens, duration_ms, cost_usd, success)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
+        `INSERT INTO agent_usage (project_slug, role, tokens, duration_ms, cost_usd, success, prompt)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [
           options.project,
           role,
@@ -178,9 +192,13 @@ export async function runAuthorAgent(
           Math.round(result.durationMs ?? 0),
           'costUsd' in result ? (result.costUsd ?? 0) : 0,
           result.exitCode === 0,
+          // Prompt-Protokoll (z. B. mit den Ist-Werten ähnlicher Aufträge im Autor-Prompt), maskiert und gekürzt.
+          redactOutput(resuming?.prompt ?? prompt, process.env).slice(0, PROMPT_LOG_CHARS),
         ],
       )
       .catch(logged('requirements'));
+    // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
+    if (budget?.states.length) await checkBudget(pool, options.project).catch(logged('requirements', null));
     return {
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
@@ -255,7 +273,7 @@ export async function draftRequirements(
              progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
       WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, project_slug AS "projectSlug", title, description, priority`,
+      RETURNING id, project_slug AS "projectSlug", title, description, priority, category`,
     [options.project],
   );
   const claimedIdea = claimed.rows[0];
@@ -278,11 +296,14 @@ export async function draftRequirements(
     )
   ).rows[0];
   const definitions = await loadDefinitions(pool, options.project);
+  const reference = await loadActualReference(pool, options.project, idea.category ?? null).catch(
+    logged('requirements', null),
+  );
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,
     options,
-    (instructions) => buildRequirementPrompt(instructions, idea, existing?.description, definitions.ready),
+    (instructions) => buildRequirementPrompt(instructions, idea, existing?.description, definitions.ready, reference),
     execute,
     'author',
     (message) => void draftProgress(pool, idea.id, 'author', message),

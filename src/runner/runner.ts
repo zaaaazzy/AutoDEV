@@ -19,9 +19,16 @@ import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
 import { selectItems, loadWorkflow, defaultAgentCommand } from './runner-selection.js';
-import { budgetExceeded, BUDGET_TODO_SUFFIX, loadOrderLimits, loadOrderSpend } from './budget.js';
+import {
+  blockForBudget,
+  type BudgetState,
+  holdForBudget,
+  projectBudgetExceeded,
+  releaseBudgetBlocks,
+} from './budget.js';
 import { setActionTodo } from './action-todo.js';
 import {
+  budgetGate,
   claimRun,
   runStep,
   selectWorkflowAgents,
@@ -158,8 +165,10 @@ export async function runWorkItem(
     console.info(`Skipping ${item.id}: a run is already in progress.`);
     return 'skipped';
   }
+  // Ein neuer Lauf hebt eine frühere Budget-Blockade auf; reicht das Budget nicht, setzt die Prüfung sie neu.
   await pool.query(
-    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', updated_at = NOW() WHERE id = $1`,
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
+      WHERE id = $1`,
     [item.id],
   );
 
@@ -181,7 +190,7 @@ export async function runWorkItem(
   let interrupted = false;
   const startedAt = Date.now();
   const folderAtStart = folderAvailable(options.cwd);
-  let budgetStop: string | null = null;
+  let budgetStop: BudgetState | null = null;
   // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
   // order is settled, so no other order edits files while this one is tested and committed.
   let releaseTree: (() => void) | undefined;
@@ -221,18 +230,14 @@ export async function runWorkItem(
     let stepPosition = position;
     let corrected = false;
     const developerAt = ordered.findIndex((agent) => agent.phase === 'while_task');
-    const limits = await loadOrderLimits(pool, item.projectSlug).catch(() => ({ tokens: null, costUsd: null }));
-    const limited = limits.tokens !== null || limits.costUsd !== null;
     while (position < ordered.length) {
       const agent = ordered[position];
       if (!agent) break;
-      // Kostenbremse: Ist die Grenze des Auftrags erreicht, startet kein weiterer Agent.
-      if (limited) {
-        budgetStop = budgetExceeded(await loadOrderSpend(pool, item.id), limits);
-        if (budgetStop) {
-          passed = false;
-          break;
-        }
+      // Budget: Ist ein Limit (Tag, Sprint, Auftrag) erreicht, startet kein weiterer Agent.
+      budgetStop = await budgetGate(ctx).catch(logged('runner', null));
+      if (budgetStop) {
+        passed = false;
+        break;
       }
       if (!releaseTree && changesWorkingTree(agent)) {
         releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
@@ -275,6 +280,8 @@ export async function runWorkItem(
         ? 'Erledigt: Alle Schritte des Workflows waren erfolgreich.'
         : `Gescheitert bei „${last?.agentName ?? 'einem Agent'}“:\n${last?.output.slice(-1500) ?? ''}`;
       for (const [index, agent] of observers.entries()) {
+        // Auch „Bei abgeschlossen/abgelehnt“ starten nicht mehr, wenn das Budget erreicht ist (ohne Blockade).
+        if (await budgetGate(ctx).catch(logged('runner', null))) break;
         if (!releaseTree && changesWorkingTree(agent)) {
           releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
           ctx.sprintName = await sprintNameOf(pool, item);
@@ -298,11 +305,10 @@ export async function runWorkItem(
       passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
     ]);
     if (budgetStop) {
-      console.info(`[${item.id}] ${budgetStop}`);
-      await pool
-        .query(`UPDATE development_items SET failure = $2, auto_run = FALSE WHERE id = $1`, [item.id, budgetStop])
-        .catch(logged('runner'));
-      await setActionTodo(pool, item.id, `${budgetStop} ${BUDGET_TODO_SUFFIX}`.slice(0, 160)).catch(logged('runner'));
+      const todo = await blockForBudget(pool, item.id, budgetStop).catch(logged('runner', null));
+      console.info(`[${item.id}] ${todo ?? 'Budget erreicht'}`);
+      if (todo) await setActionTodo(pool, item.id, todo).catch(logged('runner'));
+      ctx.stopReason = todo;
     }
     try {
       await settleItem(ctx, passed, interrupted);
@@ -340,6 +346,8 @@ export async function runWorkflow(
     [options.project],
   );
   await resumeAfterEnvironment(pool, options.project).catch(logged('runner'));
+  // Budget wieder frei (Folgetag, Limit erhöht oder entfernt): wegen Budget blockierte Aufträge laufen weiter.
+  await releaseBudgetBlocks(pool, options.project).catch(logged('runner', []));
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
   await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
     console.error('Freigabe fehlgeschlagen:', error);
@@ -364,6 +372,12 @@ export async function runWorkflow(
   }
   if (!agents.length) {
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
+  }
+  // Tages- oder Sprintbudget erreicht: kein neuer Lauf. Der nächste Auftrag zeigt „Aktion notwendig: Budget“.
+  const exhausted = await projectBudgetExceeded(pool, options.project).catch(logged('runner', null));
+  if (exhausted && items[0]) {
+    await holdForBudget(pool, items[0], exhausted).catch(logged('runner'));
+    return results;
   }
   // Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent).
   const implementationLock = new Mutex();

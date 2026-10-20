@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ConfirmDialogComponent } from './shared/confirm-dialog.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './core/api.service.js';
@@ -26,7 +26,9 @@ import { TourOverlayComponent } from './features/tour/tour-overlay.component.js'
 import { TourService } from './features/tour/tour.service.js';
 import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
 import type { DevelopmentItem } from './core/models.js';
-import { isFinished } from './shared/labels.js';
+import { isFinished, sprintLabel } from './shared/labels.js';
+import { nextOpenOrders } from './features/sprints/review-launch.js';
+import { SprintReviewComponent } from './features/sprints/sprint-review.component.js';
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
@@ -55,6 +57,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     DashboardComponent,
     DevelopmentComponent,
     SprintsComponent,
+    SprintReviewComponent,
     IdeationComponent,
     BugsComponent,
     DocsComponent,
@@ -154,8 +157,39 @@ export class AppComponent {
     const agentBusy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
     // Alles erledigt und kein Agent mehr am Sprint: Haken statt blinkendem Punkt.
     const finished = items.length > 0 && done === items.length && running === 0 && !agentBusy;
-    return { name: sprint.name, done, total: items.length, running, finished };
+    return { id: sprint.id, name: sprint.name, done, total: items.length, running, finished };
   });
+  /** Sprint-Popover: höchstens fünf nächste offene Aufträge des laufenden Sprints. */
+  protected readonly sprintPreview = computed(() => {
+    const sprint = this.activeSprint();
+    return sprint ? nextOpenOrders(this.store.data().development, sprint.id) : [];
+  });
+  protected readonly sprintLabel = sprintLabel;
+  /** Sprint-Popover offen (Maus darüber oder Fokus darin); Escape und ein Wechsel des Bereichs schliessen es. */
+  protected readonly sprintHover = signal(false);
+  protected readonly sprintFocus = signal(false);
+  protected readonly sprintPopover = computed(() => this.sprintHover() || this.sprintFocus());
+  private readonly closeSprintPopoverOnNavigation = effect(() => {
+    this.section();
+    untracked(() => this.closeSprintPopover());
+  });
+
+  protected closeSprintPopover(): void {
+    this.sprintHover.set(false);
+    this.sprintFocus.set(false);
+  }
+
+  /** Escape schliesst das Popover und nimmt den Fokus heraus, damit es nicht offen hängen bleibt. */
+  protected escapeSprintPopover(): void {
+    const active = globalThis.document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+    this.closeSprintPopover();
+  }
+
+  protected sprintFocusOut(event: FocusEvent): void {
+    const indicator = event.currentTarget as HTMLElement;
+    if (!indicator.contains(event.relatedTarget as Node | null)) this.sprintFocus.set(false);
+  }
   /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, rot gestoppt. */
   protected readonly sprintHealth = computed(() => {
     const data = this.store.data();

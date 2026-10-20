@@ -10,13 +10,18 @@ export interface WorkItem {
   title: string;
   description: string;
   kind?: string;
-  /** Kategorie (frontend, backend, fullstack …): die visuelle Prüfung läuft nur bei Frontend und Fullstack. */
-  category?: string | null;
   bugId?: string | null;
   sprintId?: string | null;
   ideationId?: string | null;
   agentId?: string | null;
   risks?: string;
+  /**
+   * Kategorie (frontend, backend, fullstack …): Modell-Routing; die visuelle Prüfung läuft nur bei Frontend und
+   * Fullstack. Dazu Schätzung (Stunden) und Anzahl automatischer Wiederholungen fürs Modell-Routing.
+   */
+  category?: string | null;
+  effortHours?: number | null;
+  retryCount?: number;
 }
 
 export interface PromptExtras {
@@ -47,6 +52,8 @@ export type BuiltinAgent = (context: {
   signal?: AbortSignal;
   /** Meldet jede Aktion des Agents (z. B. Dateizugriff) für die Live-Ausgabe. */
   onProgress?: (message: string) => void;
+  /** Vom Modell-Routing gewähltes Ollama-Modell (sonst das Modell der Rolle). */
+  model?: string;
 }) => Promise<CommandResult>;
 
 export interface WorkflowAgent {

@@ -963,4 +963,53 @@ export const SCHEMA = `
   CREATE INDEX IF NOT EXISTS visual_snapshots_latest_idx
     ON visual_snapshots (project_slug, page, device, kind, created_at DESC);
   CREATE INDEX IF NOT EXISTS visual_snapshots_order_idx ON visual_snapshots (development_id);
+  -- Budget je Projekt und Zeitraum (Tag, Sprint, Auftrag); leere Grenze = unbegrenzt, keine Zeile = keine Prüfung.
+  CREATE TABLE IF NOT EXISTS budgets (
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    period TEXT NOT NULL CHECK (period IN ('day', 'sprint', 'order')),
+    max_tokens BIGINT CHECK (max_tokens > 0),
+    max_cost_usd NUMERIC(10, 2) CHECK (max_cost_usd > 0),
+    PRIMARY KEY (project_slug, period)
+  );
+  -- Die bisherige Kostenbremse je Auftrag (Spalten an projects) wandert einmalig in budgets.
+  INSERT INTO budgets (project_slug, period, max_tokens, max_cost_usd)
+  SELECT slug, 'order', order_token_limit, order_cost_limit FROM projects
+   WHERE order_token_limit IS NOT NULL OR order_cost_limit IS NOT NULL
+  ON CONFLICT (project_slug, period) DO NOTHING;
+  UPDATE projects SET order_token_limit = NULL, order_cost_limit = NULL
+   WHERE order_token_limit IS NOT NULL OR order_cost_limit IS NOT NULL;
+  -- Gemeldete Schwellen (80 %) je Zeitraum und Periode (Tag, Sprint-ID, Auftrag): genau eine Push-Warnung.
+  CREATE TABLE IF NOT EXISTS budget_warnings (
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    period TEXT NOT NULL CHECK (period IN ('day', 'sprint', 'order')),
+    period_key TEXT NOT NULL,
+    threshold SMALLINT NOT NULL,
+    warned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (project_slug, period, period_key, threshold)
+  );
+  -- Wegen Budget blockierter Auftrag: Zeitraum, der ihn blockiert (wird frei, sobald das Budget wieder reicht).
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_blocked TEXT
+    CHECK (budget_blocked IN ('day', 'sprint', 'order'));
+  -- Beginn je Schritt, damit der Verbrauch dem richtigen Tag zufällt (ältere Schritte: Beginn des Laufs).
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+  ALTER TABLE agent_run_steps ALTER COLUMN started_at SET DEFAULT NOW();
+  -- Modell-Routing: verwendetes Modell und greifende Regel je Schritt.
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS model TEXT;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS routing_rule TEXT;
+  -- Regeln je Projekt nach Priorität (position): Bedingung (Kategorie, Schätzung, retry_count, Budgetstand) → Stufe.
+  CREATE TABLE IF NOT EXISTS routing_rules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    position INTEGER NOT NULL DEFAULT 0,
+    condition JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(condition) = 'object'),
+    tier TEXT NOT NULL CHECK (tier IN ('local', 'strong', 'up', 'down'))
+  );
+  CREATE INDEX IF NOT EXISTS routing_rules_project_idx ON routing_rules (project_slug, position);
+  -- Ohne gespeicherte Regeln gelten die Standardregeln; Stufen ohne Modell lassen die Modellwahl je Rolle unverändert.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS routing_customized BOOLEAN NOT NULL DEFAULT FALSE;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS routing_local_model TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS routing_strong_command JSONB
+    CHECK (routing_strong_command IS NULL OR jsonb_typeof(routing_strong_command) = 'array');
+  -- Prompt-Protokoll der Systemagents (Auftragsautor, Chat, Visionär …), gekürzt.
+  ALTER TABLE agent_usage ADD COLUMN IF NOT EXISTS prompt TEXT;
 `;

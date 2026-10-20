@@ -51,7 +51,8 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
     );
     const steps = await pool.query(
       `SELECT run_id AS "runId", agent_id AS "agentId", position, agent_name AS "agentName", phase, status,
-              exit_code AS "exitCode", duration_ms AS "durationMs", output, progress, events, tokens
+              exit_code AS "exitCode", duration_ms AS "durationMs", output, progress, events, tokens,
+              cost_usd::float AS "costUsd", model, routing_rule AS "routingRule"
          FROM agent_run_steps WHERE run_id = ANY($1::uuid[]) ORDER BY run_id, position`,
       [runs.rows.map((run) => run.id)],
     );
