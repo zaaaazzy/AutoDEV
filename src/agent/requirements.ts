@@ -8,7 +8,7 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
-import { loadProjectPermissions, withAgentPermissions } from './tool-permissions.js';
+import { loadProjectPermissions, READ_ONLY_PERMISSION_ROLE, withAgentPermissions } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
@@ -121,6 +121,8 @@ export async function runAuthorAgent(
   agentId?: string | null,
   /** Bricht den Lauf ab (z. B. „Abbrechen“ beim Visionär): beendet die CLI bzw. das lokale Modell. */
   signal?: AbortSignal,
+  /** Nur lesen, unabhängig von der Rolle (z. B. Assistent, während ein Auftrag im selben Ordner arbeitet). */
+  readOnly = false,
 ): Promise<{ exitCode: number; output: string; sessionId?: string }> {
   const author = (
     agentId
@@ -154,7 +156,14 @@ export async function runAuthorAgent(
   const permissions = await loadProjectPermissions(pool, options.project);
   const command =
     configured &&
-    withAgentPermissions(configured, role, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
+    withAgentPermissions(
+      configured,
+      // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
+      readOnly ? READ_ONLY_PERMISSION_ROLE : role,
+      permissions,
+      author?.allowedCommands ?? null,
+      author?.fileScope ?? [],
+    );
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =
@@ -185,7 +194,15 @@ export async function runAuthorAgent(
             if (signal?.aborted) kill();
           },
         })
-      : await runOllamaAgent({ prompt, role, cwd: options.cwd, timeoutMs: options.timeoutMs, onProgress, signal });
+      : await runOllamaAgent({
+          prompt,
+          role,
+          cwd: options.cwd,
+          timeoutMs: options.timeoutMs,
+          onProgress,
+          signal,
+          readOnly,
+        });
     await pool
       .query(
         `INSERT INTO agent_usage (project_slug, role, tokens, duration_ms, cost_usd, success, prompt)

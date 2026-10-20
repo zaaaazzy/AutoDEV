@@ -1,9 +1,9 @@
 import { logged } from '../core/log.js';
 import { readFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
-import { withProjectLock } from '../core/project-lock.js';
+import { acquireTree, withProjectLock } from '../core/project-lock.js';
 import { sendPush } from '../core/push.js';
 import { fileBugs, stepBug } from '../core/test-bugs.js';
 import { agentEnvironment } from './runner-prompts.js';
@@ -23,15 +23,30 @@ interface Claimed {
 }
 
 /**
- * Im eigenen Agenten-Worktree (…-agents, siehe agent-workspace.ts) steht oft noch der Stand des letzten Auftrags.
+ * Im eigenen Agenten-Worktree (siehe agent-workspace.ts) steht oft noch der Stand des letzten Auftrags.
  * Getestet werden soll der aktuelle Stand: ist der Worktree sauber, wird main ausgecheckt (losgelöst, ohne Branch).
+ * Liefert den Branch, auf dem der Worktree vorher stand (für restoreBranch), sonst null.
  */
-export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<void> {
-  if (!basename(cwd).endsWith('-agents')) return;
+export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<string | null> {
+  const git = (...args: string[]) => execute(['git', ...args], cwd, { timeoutMs: 60_000 });
+  // Nur in einem verknüpften Worktree (eigenes Git-Verzeichnis ≠ gemeinsames), unabhängig vom Ordnernamen.
+  const dirs = await git('rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir');
+  const [own, common] = dirs.output.trim().split('\n');
+  if (dirs.exitCode !== 0 || !own || own === common) return null;
   // Nicht versionierte Dateien stören den Checkout nicht; nur echte Änderungen verhindern ihn.
-  const status = await execute(['git', 'status', '--porcelain', '--untracked-files=no'], cwd, { timeoutMs: 30_000 });
-  if (status.exitCode !== 0 || status.output.trim()) return;
-  await execute(['git', 'checkout', '-q', '--detach', 'main'], cwd, { timeoutMs: 60_000 });
+  const status = await git('status', '--porcelain', '--untracked-files=no');
+  if (status.exitCode !== 0 || status.output.trim()) return null;
+  const branch = await git('symbolic-ref', '--short', '-q', 'HEAD');
+  const moved = await git('checkout', '-q', '--detach', 'main');
+  return moved.exitCode === 0 && branch.exitCode === 0 ? branch.output.trim() || null : null;
+}
+
+/** Nach dem Test zurück auf den Branch von vorher, damit der nächste Auftrag nicht von einem losgelösten Stand startet. */
+export async function restoreBranch(cwd: string, branch: string | null, execute: CommandExecutor): Promise<void> {
+  if (!branch) return;
+  const restored = await execute(['git', 'checkout', '-q', branch], cwd, { timeoutMs: 60_000 });
+  if (restored.exitCode !== 0)
+    console.error(`Nach dem Test nicht zurück auf ${branch}: ${restored.output.slice(-300)}`);
 }
 
 /** Projekte mit eigenem Komplettlauf (Skript „test:full“, wie AIdeation selbst) nutzen ihn, sonst die Testbefehle. */
@@ -95,8 +110,11 @@ export async function processTestRequest(
   console.info(`[${options.project}] Kompletter Test (${request.scope}) startet`);
   try {
     // Unter der Projektsperre: kein Agent und kein Git-Sync arbeitet währenddessen im Ordner.
+    // Exklusiv im Arbeitsordner: kein Auftrag wechselt währenddessen den Branch, kein Assistent schreibt hinein.
+    const releaseTree = await acquireTree(options.cwd);
+    let previous: string | null = null;
     const result = await withProjectLock(options.cwd, async () => {
-      await useLatestMain(options.cwd, execute);
+      previous = await useLatestMain(options.cwd, execute);
       if (await hasFullTestScript(options.cwd)) {
         const outcome = await execute(fullTestCommand(options.project, request), options.cwd, {
           timeoutMs: TEST_TIMEOUT_MS,
@@ -136,7 +154,9 @@ export async function processTestRequest(
       );
       await pool.query('UPDATE test_requests SET bug_count = $2 WHERE id = $1', [request.id, bugs]);
       return { passed: failed.length === 0, output: '' };
-    });
+    }).finally(() =>
+      withProjectLock(options.cwd, () => restoreBranch(options.cwd, previous, execute)).finally(releaseTree),
+    );
     const row = (
       await pool.query<{ bugs: number; runId: string | null }>(
         `UPDATE test_requests SET status = 'done', finished_at = NOW() WHERE id = $1

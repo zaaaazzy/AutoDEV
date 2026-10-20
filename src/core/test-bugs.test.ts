@@ -61,18 +61,29 @@ test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüf
 
 test('Kompletter Test: im Agenten-Worktree wird bei sauberem Stand main ausgecheckt, sonst nichts', async () => {
   const calls: string[] = [];
-  const execute = (output: string) => async (command: string[]) => {
-    calls.push(command.join(' '));
-    return { exitCode: 0, output, durationMs: 0 };
-  };
-  await useLatestMain('/x/DevLog-agents', execute(''));
-  assert.deepEqual(calls, ['git status --porcelain --untracked-files=no', 'git checkout -q --detach main']);
+  const execute =
+    (status: string, dirs = '/repo/.git/worktrees/agent\n/repo/.git\n') =>
+    async (command: string[]) => {
+      calls.push(command.join(' '));
+      const output = command.includes('--git-common-dir')
+        ? dirs
+        : command.includes('symbolic-ref')
+          ? 'sprint/sprint-7\n'
+          : command.includes('--porcelain')
+            ? status
+            : '';
+      return { exitCode: 0, output, durationMs: 0 };
+    };
+  // Verknüpfter Worktree (unabhängig vom Ordnernamen): main losgelöst auschecken, vorherigen Branch zurückgeben.
+  assert.equal(await useLatestMain('/x/agent', execute('')), 'sprint/sprint-7');
+  assert.ok(calls.includes('git checkout -q --detach main'));
   calls.length = 0;
-  await useLatestMain('/x/DevLog-agents', execute(' M datei.ts'));
-  assert.deepEqual(calls, ['git status --porcelain --untracked-files=no']);
+  assert.equal(await useLatestMain('/x/agent', execute(' M datei.ts')), null);
+  assert.ok(!calls.some((call) => call.startsWith('git checkout')));
   calls.length = 0;
-  await useLatestMain('/x/Mainty', execute(''));
-  assert.deepEqual(calls, []);
+  // Hauptordner (eigenes = gemeinsames Git-Verzeichnis): nichts tun.
+  assert.equal(await useLatestMain('/x/Mainty', execute('', '/x/Mainty/.git\n/x/Mainty/.git\n')), null);
+  assert.ok(!calls.some((call) => call.startsWith('git checkout') || call.startsWith('git status')));
 });
 
 test('Kompletter Test: früh gescheiterter Befehl liefert die Fehlerzeile', () => {

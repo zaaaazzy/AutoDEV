@@ -1,4 +1,3 @@
-import type { Mutex } from '../core/mutex.js';
 import type { Pool } from 'pg';
 import type { CommandExecutor, CommandResult } from '../core/command.js';
 import type { KnownBug } from '../api/bugs.js';
@@ -97,8 +96,6 @@ export interface RunnerOptions {
 }
 
 export interface WorkItemOptions {
-  /** Shared by the orders of one cycle: only one order may run its implementation phase at a time. */
-  implementationLock?: Mutex;
   cwd: string;
   timeoutMs: number;
   execute?: CommandExecutor;

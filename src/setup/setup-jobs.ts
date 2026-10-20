@@ -5,7 +5,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
-import { isValidGitRemote, pushRemote } from '../runner/git-sync.js';
+import { commitProjectSetup, isValidGitRemote, pushRemote } from '../runner/git-sync.js';
 import { projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
 import { listFolders } from './folders.js';
@@ -210,25 +210,13 @@ async function gitSetup(params: Params, execute: CommandExecutor, log: Log) {
     if (!result.ok) throw new Error(`git ${args[0]} fehlgeschlagen: ${result.output.slice(-400)}`);
     return result.output;
   };
-  if (!existsSync(join(folder, '.git'))) {
-    await git('init', '-b', 'main');
-    await log('Git-Repository angelegt (Branch main).');
+  // Wie bei den Auftrags-Commits: .env, Schlüssel und interne Ordner bleiben draussen, bevor gepusht wird.
+  const setup = await commitProjectSetup(folder, execute);
+  if (setup.initialized) await log('Git-Repository angelegt (Branch main).');
+  if (setup.held.length) {
+    await log(`Nicht committet, weil sie nach Zugangsdaten aussehen: ${setup.held.join(', ')}`);
   }
-  if (!(await run(execute, ['git', 'config', 'user.email'], folder)).output) {
-    await git('config', 'user.name', 'AIdeation');
-    await git('config', 'user.email', 'dev-log@mainty.local');
-  }
-  const hasCommit = (await run(execute, ['git', 'rev-parse', '--verify', 'HEAD'], folder)).ok;
-  await git('add', '-A');
-  if ((await git('status', '--porcelain')) || !hasCommit) {
-    await git(
-      'commit',
-      '--allow-empty',
-      '-m',
-      hasCommit ? 'chore: Projekt mit AIdeation verbunden' : 'chore: Initial-Commit',
-    );
-    await log('Commit erstellt.');
-  }
+  if (setup.committed) await log('Commit erstellt.');
   let remote: string | null = null;
   if (mode === 'github-new') {
     const name = text(params.repoName, 100);

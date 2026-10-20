@@ -2,6 +2,7 @@ import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
+import { acquireTree, treeBusy } from '../core/project-lock.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
@@ -77,6 +78,10 @@ export function buildChatPrompt(
 }
 
 /** Answers the oldest pending chat message of a project; returns false when nothing was waiting. */
+const READ_ONLY_NOTE =
+  'Hinweis: Gerade arbeitet ein Auftrag im Projektordner. Du kannst nur lesen und antworten, aber keine Dateien ' +
+  'ändern und keine Befehle ausführen. Was geändert werden soll, beschreibe als Vorschlag.';
+
 export async function processChat(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
@@ -150,16 +155,25 @@ export async function processChat(
   ]);
   const startedAt = Date.now();
   const folderAtStart = folderAvailable(options.cwd);
+  // Arbeitet gerade ein Auftrag (oder ein Testlauf) im selben Ordner, antwortet der Assistent nur lesend: seine
+  // Änderungen landeten sonst im Commit des Auftrags. Sonst hält er den Ordner, bis er fertig ist.
+  const readOnly = treeBusy(options.cwd);
+  const releaseTree = readOnly ? undefined : await acquireTree(options.cwd);
   const { exitCode, output, sessionId } = await runAuthorAgent(
     pool,
     options,
-    () => buildChatPrompt(history.rows, agent, references),
+    () => `${buildChatPrompt(history.rows, agent, references)}${readOnly ? `\n\n${READ_ONLY_NOTE}` : ''}`,
     execute,
     'assistant',
     progress.update,
     resume,
     claimed.agentId,
-  ).finally(progress.stop);
+    undefined,
+    readOnly,
+  ).finally(() => {
+    progress.stop();
+    releaseTree?.();
+  });
   // Worker beendet oder Projektordner zwischendurch weg (Laufwerk getrennt): Anfrage bleibt wartend und läuft erneut,
   // statt mit einer irreführenden Fehlermeldung zu scheitern.
   if (isShuttingDown() || (exitCode !== 0 && folderAtStart && hadOutage(options.cwd, startedAt))) {
