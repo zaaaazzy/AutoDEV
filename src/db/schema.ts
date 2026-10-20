@@ -690,8 +690,12 @@ export const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS test_requests_open_idx ON test_requests (project_slug)
     WHERE status IN ('requested', 'running');
   -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen; aus dem Betrieb (Quelle „production“).
+  -- Das Schema läuft bei jedem Start als ein Aufruf: jede Fassung dieser Prüfung muss alle Quellen erlauben, die
+  -- der Code schreibt (auch die später ergänzten 'github' und 'routine'), sonst scheitert ADD CONSTRAINT an
+  -- bestehenden Zeilen und der Start bricht ab.
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
-  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test', 'production'));
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check
+    CHECK (source IN ('manual', 'agent', 'test', 'production', 'github', 'routine'));
 
   -- Sprint starten (Knopf oder Autopilot): ohne Startdatum gilt der Starttag (höchstens das Enddatum).
   CREATE OR REPLACE FUNCTION sprint_default_start_date() RETURNS trigger AS $$
@@ -985,7 +989,8 @@ export const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS bugs_external_ref_idx ON bugs (project_slug, external_ref)
     WHERE external_ref IS NOT NULL;
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
-  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test', 'production', 'github'));
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check
+    CHECK (source IN ('manual', 'agent', 'test', 'production', 'github', 'routine'));
   ALTER TABLE ideation_items DROP CONSTRAINT IF EXISTS ideation_items_source_check;
   ALTER TABLE ideation_items ADD CONSTRAINT ideation_items_source_check
     CHECK (source IN ('human', 'visionary', 'routine', 'production', 'github'));

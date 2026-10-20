@@ -144,7 +144,9 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
           .json({ message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint not found.' });
         return;
       }
-      if (result.rows[0].status === 'completed') {
+      // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
+      // Merge und Push nicht erneut auslösen. Das UPDATE oben war an den gelesenen Status gebunden, der Wechsel also echt.
+      if (target === 'completed' && from !== undefined && from !== 'completed') {
         // Sprintende: Bericht, dann Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
         await completeSprint(pool, request.params.id);
       }

@@ -3,7 +3,7 @@ import { setActionTodo } from '../runner/action-todo.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
-import { relatedResourceBelongsToProject } from './resource.js';
+import { canSetDevelopmentStatus, isAssignableSprintStatus } from '../core/development-transitions.js';
 import { IDEA_FIELDS } from './ideation.js';
 import {
   buildUpdate,
@@ -308,11 +308,37 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Invalid development update.' });
       return;
     }
+    const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+    let from: string | undefined;
+    if (target) {
+      const current = await pool.query<{ status: string }>(`SELECT status FROM development_items WHERE id = $1`, [
+        request.params.id,
+      ]);
+      from = current.rows[0]?.status;
+      if (!from) {
+        response.status(404).json({ message: 'Development item not found.' });
+        return;
+      }
+      if (!canSetDevelopmentStatus(from, target)) {
+        response.status(409).json({
+          message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
+        });
+        return;
+      }
+    }
     const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
     if (typeof sprintId === 'string') {
-      const sameProject = await relatedResourceBelongsToProject(pool, 'development_items', sprintId, request.params.id);
-      if (!sameProject) {
+      const sprint = await pool.query<{ sprintStatus: string }>(
+        `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
+          WHERE s.id = $1 AND e.id = $2`,
+        [sprintId, request.params.id],
+      );
+      if (!sprint.rows[0]) {
         response.status(400).json({ message: 'Sprint does not belong to the project of this item.' });
+        return;
+      }
+      if (!isAssignableSprintStatus(sprint.rows[0].sprintStatus)) {
+        response.status(409).json({ message: 'Orders can only be assigned to planned or active sprints.' });
         return;
       }
     }
@@ -334,11 +360,13 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     }
     const sprintField = fields.find((field) => field.column === 'sprint_id');
     const agentField = fields.find((field) => field.column === 'agent_id');
+    // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
     const update = buildUpdate(
       'development_items',
       request.params.id,
       fields,
       `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
+      from ? { column: 'status', values: [from] } : undefined,
     );
     const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
     if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
@@ -366,7 +394,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     }
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Development item not found.' });
+      response.status(from ? 409 : 404).json({
+        message: from ? 'The order has changed in the meantime – please reload.' : 'Development item not found.',
+      });
       return;
     }
     response.json({ item: result.rows[0] });

@@ -80,7 +80,7 @@
       </section>
     }
   </div>
-  @if (editable()) {
+  @if (canTakeIn()) {
     <section class="kanban-pool" aria-label="Für den Sprint verfügbar">
       @for (pool of pools(); track pool.id) {
         <div class="kanban-pool-group">
