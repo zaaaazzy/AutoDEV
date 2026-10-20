@@ -227,6 +227,140 @@ test('Rollen: Autorin reicht Dokumentänderung ein, Redaktion gibt frei', async 
   expect(history.revisions.find((revision: { docId: string }) => revision.docId === doc.id).status).toBe('approved');
 });
 
+test('Sprint-Popover: Vorschau, Stand im Review-Container starten, Fehler und fehlendes Recht', async ({
+  page,
+  browser,
+  request,
+  isMobile,
+  baseURL,
+}) => {
+  test.skip(isMobile, 'Auf dem Handy führt der Sprint-Chip zu den Sprints, ein Popover gibt es dort nicht.');
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const stamp = Date.now() % 100000;
+  const sprint = (
+    await (await request.post('/api/projects/e2e/sprints', { headers, data: { name: `Sprint R${stamp}` } })).json()
+  ).sprint;
+  const orders: string[] = [];
+  for (let index = 1; index <= 6; index++) {
+    const created = await request.post('/api/projects/e2e/development', {
+      headers,
+      data: { title: `Popover-Auftrag ${index} ${stamp}` },
+    });
+    const id = (await created.json()).item.id;
+    orders.push(id);
+    await request.patch(`/api/development/${id}`, { headers, data: { sprintId: sprint.id, sprintRank: index } });
+  }
+  const activated = await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'active' } });
+  expect(activated.ok(), await activated.text()).toBeTruthy();
+  await request.patch('/api/projects/e2e', { headers, data: { reviewCommand: 'npm run review' } });
+  const merged = { hash: 'a'.repeat(40), subject: 'feat: Warenkorb', date: '2026-10-19', developmentId: null };
+  const open = { hash: 'b'.repeat(40), subject: 'wip: Checkout', date: '2026-10-20', developmentId: null };
+  const commits = {
+    branch: 'sprint',
+    commits: [
+      { ...merged, merged: true },
+      { ...open, merged: false },
+    ],
+  };
+  const reviewUrl = new URL('/health', baseURL).href;
+  const slot = (status: string, message: string | null = null) => ({
+    slot: 1,
+    enabled: true,
+    url: reviewUrl,
+    status,
+    message,
+    projectSlug: 'e2e',
+    label: open.subject,
+    commit: status === 'idle' ? null : open.hash,
+    developmentId: null,
+    kind: status === 'idle' ? null : 'manual',
+    startedAt: null,
+  });
+  try {
+    // Commits und Review-Container nachbilden: ohne Git-Synchronisierung und Docker gibt es beides im Test nicht.
+    await page.route('**/api/sprints/*/commits', (route) => route.fulfill({ json: commits }));
+    const states: string[] = [];
+    await page.route('**/api/review-slots', (route) =>
+      route.fulfill({ json: { slots: [slot(states.length > 1 ? states.shift()! : (states[0] ?? 'idle'))] } }),
+    );
+    const starts: unknown[] = [];
+    await page.route('**/api/projects/e2e/review-slots/start', async (route) => {
+      starts.push(route.request().postDataJSON());
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      states.push('requested', 'starting', 'running');
+      await route.fulfill({ json: { slot: 1 } });
+    });
+    await login(page);
+    await page.locator('.sprint-pill').hover();
+    const popover = page.locator('.sprint-popover');
+    await expect(popover).toBeVisible();
+    await expect(popover.locator('.popover-title').last()).toHaveText(`Sprint R${stamp} · 0/6 erledigt`);
+    await expect(popover.getByRole('list', { name: 'Nächste offene Aufträge' }).locator('li')).toHaveCount(5);
+    await expect(popover.locator('.dt-table, .git-tree')).toHaveCount(0);
+    const select = popover.locator('select');
+    await expect(select.locator('option')).toHaveText([
+      'feat: Warenkorb · aaaaaaa · 19.10.2026',
+      '◌ wip: Checkout · bbbbbbb · 20.10.2026',
+    ]);
+    await select.selectOption(open.hash);
+    const play = popover.getByRole('button', { name: 'Im Review-Container starten' });
+    const opened = page.context().waitForEvent('page');
+    await play.click();
+    await expect(popover.locator('.review-spinner')).toBeVisible();
+    await expect(play).toBeDisabled();
+    await expect(popover.getByRole('status')).toContainText(/Stand wird ausgecheckt|Container startet|Review läuft/);
+    await expect(popover.getByRole('status')).toContainText('Review läuft', { timeout: 10_000 });
+    await expect(popover.locator('.review-spinner')).toHaveCount(0);
+    const tab = await opened;
+    await expect.poll(() => tab.url(), { timeout: 10_000 }).toBe(reviewUrl);
+    expect(starts).toEqual([{ commit: open.hash, label: open.subject, developmentId: null }]);
+    await tab.close();
+
+    // Fehler des Servers: Meldung statt Ladeanimation.
+    await page.unroute('**/api/projects/e2e/review-slots/start');
+    await page.route('**/api/projects/e2e/review-slots/start', (route) =>
+      route.fulfill({ status: 409, json: { message: 'Kein Review-Container freigegeben.' } }),
+    );
+    await play.click();
+    await expect(popover.getByRole('alert')).toHaveText('Fehler: Kein Review-Container freigegeben.');
+    await expect(popover.locator('.review-spinner')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await page.mouse.move(0, 0);
+    await expect(popover).toHaveCount(0);
+
+    // Ohne Recht „run“: Auswahl und Start bleiben gesperrt.
+    const planner = `planer${stamp}`;
+    await request.post('/api/users', {
+      headers,
+      data: {
+        username: planner,
+        displayName: 'Paul Planer',
+        password: 'planer-passwort-123',
+        roles: ['plan'],
+        projects: ['e2e'],
+      },
+    });
+    const context = await browser.newContext();
+    const plannerPage = await context.newPage();
+    await plannerPage.route('**/api/sprints/*/commits', (route) => route.fulfill({ json: commits }));
+    await plannerPage.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
+    await plannerPage.goto('/');
+    await plannerPage.getByLabel('Benutzername').fill(planner);
+    await plannerPage.getByLabel('Passwort').fill('planer-passwort-123');
+    await plannerPage.getByRole('button', { name: 'Anmelden' }).click();
+    await plannerPage.locator('.sprint-pill').hover();
+    const plannerPopover = plannerPage.locator('.sprint-popover');
+    await expect(plannerPopover.locator('select option')).toHaveCount(2);
+    await expect(plannerPopover.locator('select')).toBeDisabled();
+    await expect(plannerPopover.getByRole('button', { name: 'Im Review-Container starten' })).toBeDisabled();
+    await context.close();
+  } finally {
+    await request.patch('/api/projects/e2e', { headers, data: { reviewCommand: '' } });
+    for (const id of orders) await request.delete(`/api/development/${id}`, { headers });
+    await request.delete(`/api/sprints/${sprint.id}`, { headers });
+  }
+});
+
 test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint nehmen und wieder herausnehmen', async ({
   page,
   request,
