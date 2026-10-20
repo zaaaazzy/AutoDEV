@@ -1,0 +1,19 @@
+@if (failed()) {
+  <p class="muted" role="alert">{{ loadError }}</p>
+} @else if (texts()) {
+  <dl class="role-texts">
+    @for (view of views(); track view.key) {
+      <div class="role-text">
+        <dt>{{ view.label }}</dt>
+        @if (view.text; as text) {
+          <dd>{{ text.beschreibung }}</dd>
+          <dd class="muted"><strong>Nutzen:</strong> {{ text.nutzen }}</dd>
+        } @else {
+          <dd class="muted">{{ fallback }}</dd>
+        }
+      </div>
+    }
+  </dl>
+} @else {
+  <p class="muted">Rollenbeschreibungen werden geladen …</p>
+}
