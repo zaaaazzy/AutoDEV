@@ -89,14 +89,22 @@ export class ProjectStore {
     const onVisibilityChange = (): void => {
       if (!document.hidden) this.refreshActiveProject();
     };
+    // Angetippte Push-Nachricht: Der Service Worker schickt den Link, statt nur den Hash zu setzen (gleicher Hash
+    // löst sonst kein „hashchange“ aus).
+    const onWorkerMessage = (event: MessageEvent): void => {
+      const data = event.data as { type?: string; url?: unknown } | null;
+      if (data?.type === 'open' && typeof data.url === 'string') this.openLink(data.url);
+    };
     globalThis.addEventListener('hashchange', onHashChange);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    globalThis.navigator?.serviceWorker?.addEventListener('message', onWorkerMessage);
     void this.loadProjects();
     const refreshTimer = globalThis.setInterval(() => void this.refreshWorker(), WORKER_REFRESH_MS);
     const liveTimer = globalThis.setInterval(() => void this.refreshLiveRuns(), LIVE_RUNS_REFRESH_MS);
     inject(DestroyRef).onDestroy(() => {
       globalThis.removeEventListener('hashchange', onHashChange);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      globalThis.navigator?.serviceWorker?.removeEventListener('message', onWorkerMessage);
       globalThis.clearInterval(refreshTimer);
       globalThis.clearInterval(liveTimer);
     });
@@ -231,6 +239,14 @@ export class ProjectStore {
         this.worker.update((worker) => ({ ...worker, online: false }));
       }
     }
+  }
+
+  /** Link aus einer Push-Nachricht öffnen (Projekt im Link wird über `onHashChange` gewählt). */
+  private openLink(url: string): void {
+    const hash = new URL(url, globalThis.location.href).hash;
+    if (!hash) return;
+    if (hash === globalThis.location.hash) this.onHashChange();
+    else globalThis.location.hash = hash;
   }
 
   private onHashChange(): void {

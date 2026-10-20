@@ -211,7 +211,7 @@ export async function warnThresholds(
       {
         title: `💰 Budget zu ${Math.min(Math.round(state.percent), 999)} % verbraucht · ${project}`,
         body: `${describeState(state)}. Ab 100 % starten keine neuen Agent-Schritte mehr.`,
-        url: '#settings',
+        url: `#settings?project=${encodeURIComponent(project)}`,
         tag: `budget-${project}-${state.period}`,
       },
       { project },
@@ -289,7 +289,7 @@ export async function holdForBudget(
     {
       title: `⚠ Budget erreicht · ${item.projectSlug}`,
       body: `${item.title}\n${todo}`,
-      url: '#development',
+      url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
       tag: `order-${item.id}`,
     },
     { project: item.projectSlug },

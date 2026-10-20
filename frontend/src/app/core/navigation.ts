@@ -31,7 +31,8 @@ export function isSection(section: string): section is Section {
 
 /** „#development/<id>“: Seite und optional der Eintrag, der geöffnet werden soll (z. B. aus Dokumenten verlinkt). */
 export function sectionFromHash(): Section {
-  const section = globalThis.location.hash.slice(1).split('/')[0] ?? '';
+  // „#sprints?project=demo“ (Push-Links ohne Ziel): Parameter gehören nicht zum Seitennamen.
+  const section = globalThis.location.hash.slice(1).split(/[/?]/)[0] ?? '';
   return isSection(section) ? section : 'dashboard';
 }
 

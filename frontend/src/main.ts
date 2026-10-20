@@ -1,7 +1,10 @@
 import { provideHttpClient } from '@angular/common/http';
 import { bootstrapApplication } from '@angular/platform-browser';
 import { AppComponent } from './app/app.component.js';
+import { listenForInstallPrompt } from './app/core/install-prompt.js';
 import { startLayoutCheck } from './app/core/layout-check.js';
+
+listenForInstallPrompt();
 
 bootstrapApplication(AppComponent, {
   providers: [provideHttpClient()],

@@ -356,7 +356,7 @@ export async function updateAlerts(
      ON CONFLICT (project_slug) DO UPDATE SET problems = $2, notified_at = $3`,
     [project, state.problems, state.notifiedAt === null ? null : new Date(state.notifiedAt)],
   );
-  if (message) await notify(pool, message, { project });
+  if (message) await notify(pool, { ...message, url: `#bugs?project=${encodeURIComponent(project)}` }, { project });
   return message;
 }
 
