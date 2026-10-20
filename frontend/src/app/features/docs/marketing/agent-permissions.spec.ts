@@ -17,8 +17,9 @@ function documentedRoles(): Map<string, { phase: string; files: string }> {
   const rows = new Map<string, { phase: string; files: string }>();
   for (const line of read('docs/agents-und-rechte.md').split('\n')) {
     const cells = line.split('|').map((cell) => cell.trim());
-    const role = cells[2]?.match(/^`([a-z_]+)`$/)?.[1];
-    if (role && cells.length >= 7) rows.set(role, { phase: cells[3]!, files: cells[5]!.replaceAll('**', '') });
+    const [, , key = '', phase = '', , files = ''] = cells;
+    const role = key.match(/^`([a-z_]+)`$/)?.[1];
+    if (role && cells.length >= 7) rows.set(role, { phase, files: files.replaceAll('**', '') });
   }
   return rows;
 }
