@@ -36,7 +36,11 @@ export type CommandExecutor = (
 export function redactOutput(output: string, environment: NodeJS.ProcessEnv): string {
   let safeOutput = output;
   for (const [key, value] of Object.entries(environment)) {
-    if (value && /(?:PASSWORD|SECRET|TOKEN|DATABASE_URL)/i.test(key) && value.length >= 4) {
+    if (
+      value &&
+      /(?:PASSWORD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY|ACCESS_KEY|DATABASE_URL)/i.test(key) &&
+      value.length >= 4
+    ) {
       safeOutput = safeOutput.replaceAll(value, '[REDACTED]');
     }
   }
