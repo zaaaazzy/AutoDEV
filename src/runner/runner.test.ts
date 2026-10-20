@@ -7,6 +7,7 @@ import {
   buildInvocation,
   buildPrompt,
   parseRunnerOptions,
+  runSelectedItems,
   runWorkItem,
   type WorkflowAgent,
 } from './runner.js';
@@ -723,4 +724,60 @@ test('Fortsetzung nach Nachbesserung und frühem Abbruch: der Entwickler bekommt
   assert.equal(calls[0]?.[0], 'dev');
   assert.match(calls[0]?.at(-1) ?? '', /zweite Rückmeldung/);
   assert.doesNotMatch(calls[0]?.at(-1) ?? '', /erste Rückmeldung/);
+});
+
+test('ausgewählter Auftrag inzwischen abgelehnt oder aus dem Sprint genommen: er startet nicht, der Lauf wird verworfen', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }], rowCount: 1 };
+      // Der bedingte Start trifft nichts mehr: Status ist nicht mehr „Geplant“.
+      if (sql.includes("SET status = 'in_progress'")) return { rows: [], rowCount: 0 };
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.equal(result, 'skipped');
+  assert.deepEqual(calls, []);
+  const start = queries.find((query) => query.sql.includes("SET status = 'in_progress'"));
+  assert.match(start?.sql ?? '', /d\.status = 'planned'/);
+  assert.deepEqual(start?.values, ['item-1', false]);
+  assert.ok(queries.some((query) => query.sql.includes('DELETE FROM agent_runs') && query.values[0] === 'run-1'));
+  assert.ok(
+    !queries.some((query) => query.sql.includes('UPDATE agent_runs SET status = $2')),
+    'kein gescheiterter Lauf',
+  );
+});
+
+test('ein Auftrag scheitert unerwartet (z. B. gelöscht): die übrigen ausgewählten Aufträge laufen weiter', async () => {
+  const items = ['a', 'b', 'c'].map((id) => ({ ...item, id }));
+  const ran: string[] = [];
+  let between = 0;
+  const results = await runSelectedItems(
+    items,
+    async (current) => {
+      ran.push(current.id);
+      if (current.id === 'b') throw new Error('insert or update on table "agent_runs" violates foreign key constraint');
+      return 'passed';
+    },
+    async () => {
+      between += 1;
+    },
+  );
+  assert.deepEqual(ran, ['a', 'b', 'c']);
+  assert.deepEqual(
+    results.map((entry) => entry.result),
+    ['passed', 'failed', 'passed'],
+  );
+  assert.equal(between, 2);
 });

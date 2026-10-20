@@ -183,11 +183,22 @@ export async function runWorkItem(
     return 'skipped';
   }
   // Ein neuer Lauf hebt eine frühere Budget-Blockade auf; reicht das Budget nicht, setzt die Prüfung sie neu.
-  await pool.query(
-    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
-      WHERE id = $1`,
-    [item.id],
+  // Der Worker wählt mehrere Aufträge auf einmal und arbeitet sie nacheinander ab: Wurde dieser inzwischen
+  // abgelehnt, zurückgestellt, aus dem Sprint genommen oder der Sprint pausiert, startet er nicht (wie selectItems).
+  // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon.
+  const started = await pool.query(
+    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
+      WHERE d.id = $1 AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express' AND (
+        d.agent_id IS NOT NULL OR (
+          NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
+          AND (d.auto_run OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
+    [item.id, Boolean(options.itemId)],
   );
+  if (started.rowCount === 0) {
+    await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
+    console.info(`Skipping ${item.id}: der Auftrag ist nicht mehr eingeplant.`);
+    return 'skipped';
+  }
 
   const ordered = selectWorkflowAgents(agents, item);
   const ctx: RunContext = {
@@ -363,6 +374,28 @@ async function goLive(pool: Pool, project: string, cwd: string, execute?: Comman
   await deployProject(pool, project, live ?? cwd, execute);
 }
 
+/**
+ * Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent). Scheitert
+ * einer unerwartet (z. B. inzwischen gelöscht), laufen die übrigen trotzdem.
+ */
+export async function runSelectedItems(
+  items: WorkItem[],
+  run: (item: WorkItem) => Promise<string>,
+  between: () => Promise<unknown> = async () => undefined,
+): Promise<{ itemId: string; result: string }[]> {
+  const results: { itemId: string; result: string }[] = [];
+  for (const item of items) {
+    if (isShuttingDown()) break;
+    if (results.length) await between().catch(logged('runner'));
+    const result = await run(item).catch((error: unknown) => {
+      console.error(`Auftrag ${item.id} abgebrochen:`, error);
+      return AGENT_RUN_STATUS.failed;
+    });
+    results.push({ itemId: item.id, result });
+  }
+  return results;
+}
+
 export async function runWorkflow(
   pool: Pool,
   options: RunnerOptions,
@@ -412,21 +445,18 @@ export async function runWorkflow(
     await holdForBudget(pool, items[0], exhausted).catch(logged('runner'));
     return results;
   }
-  // Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent).
-  for (const item of items) {
-    if (isShuttingDown()) break;
-    // Angeforderte Live-Schaltungen (Git-Sicherung) nicht hinter dem ganzen Durchlauf warten lassen: zwischen zwei
-    // Aufträgen erledigen, der Ordner ist dann sauber. Vor dem ersten Auftrag lief sie oben schon.
-    if (results.length) {
-      await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
-        goLive(pool, options.project, options.cwd, execute),
-      ).catch(logged('runner'));
-    }
-    results.push({
-      itemId: item.id,
-      result: await runWorkItem(pool, item, agents, { ...options, execute, builtin }),
-    });
-  }
+  results.push(
+    ...(await runSelectedItems(
+      items,
+      (item) => runWorkItem(pool, item, agents, { ...options, execute, builtin }),
+      // Angeforderte Live-Schaltungen (Git-Sicherung) nicht hinter dem ganzen Durchlauf warten lassen: zwischen zwei
+      // Aufträgen erledigen, der Ordner ist dann sauber. Vor dem ersten Auftrag lief sie oben schon.
+      () =>
+        syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+          goLive(pool, options.project, options.cwd, execute),
+        ),
+    )),
+  );
   await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,
