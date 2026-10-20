@@ -38,6 +38,8 @@ services:
       DEV_LOG_BIND: 127.0.0.1
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
+      # Erzeugt der Einrichtungs-Assistent einmalig. Nie ändern oder löschen: sonst sind verschlüsselte Werte
+      # (Zugangsdaten der Projekte) nicht mehr lesbar. Leer = Werte werden im Klartext gespeichert.
       DEV_LOG_SECRET_KEY: ${DEV_LOG_SECRET_KEY:-}
     depends_on:
       db:
