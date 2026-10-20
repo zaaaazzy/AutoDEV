@@ -1,8 +1,8 @@
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
-import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, ReviewSlot, ReviewState } from '../../core/models.js';
+import { Component, DestroyRef, computed, inject, input } from '@angular/core';
+import type { DevelopmentItem, ReviewSlot } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from './order.service.js';
+import { ReviewStateService } from './review-state.service.js';
 
 /**
  * Review-Freigabe eines Auftrags: Er ist fertig und getestet, aber noch nicht im Sprint-Branch. In der Review-Instanz
@@ -65,13 +65,13 @@ import { OrderService } from './order.service.js';
   `,
 })
 export class OrderApprovalComponent {
-  private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
   private readonly orders = inject(OrderService);
+  private readonly review = inject(ReviewStateService);
   protected readonly busy = this.store.busy;
 
   readonly order = input.required<DevelopmentItem>();
-  protected readonly state = signal<ReviewState | null>(null);
+  protected readonly state = this.review.state;
   /** Review-Container, der diesen Auftrag zeigt (bzw. für ihn angefordert ist). */
   protected readonly shown = computed(
     () => this.state()?.slots.find((slot) => slot.developmentId === this.order().id && slot.status !== 'idle') ?? null,
@@ -92,22 +92,8 @@ export class OrderApprovalComponent {
   });
 
   constructor() {
-    // Solange der Auftrag wartet, den Stand der Review-Instanz regelmässig nachladen.
-    effect((onCleanup) => {
-      const project = this.store.activeProject();
-      if (!project) return;
-      void this.load(project);
-      const timer = setInterval(() => void this.load(project), 5000);
-      onCleanup(() => clearInterval(timer));
-    });
-  }
-
-  private async load(project: string): Promise<void> {
-    try {
-      this.state.set(await this.api.get<ReviewState>(`/api/projects/${encodeURIComponent(project)}/review`));
-    } catch {
-      // Nächster Versuch beim nächsten Intervall.
-    }
+    // Solange der Auftrag wartet, den Stand der Review-Instanz nachladen – ein gemeinsamer Poll für alle Boxen.
+    inject(DestroyRef).onDestroy(this.review.subscribe());
   }
 
   protected approve(item: DevelopmentItem): Promise<void> {
@@ -120,6 +106,6 @@ export class OrderApprovalComponent {
 
   protected async show(item: DevelopmentItem): Promise<void> {
     await this.orders.showReview(item);
-    await this.load(this.store.activeProject());
+    await this.review.refresh();
   }
 }
