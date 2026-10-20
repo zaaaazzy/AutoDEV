@@ -1,0 +1,131 @@
+<article class="markdown agent-permissions">
+  <h2>Agents, Aufgaben und Rechte</h2>
+  <p>
+    AIdeation arbeitet einen Auftrag mit mehreren Agents ab. Jeder Agent hat eine Rolle mit fester Aufgabe und eigenen
+    Rechten. Die Angaben stammen aus <code>docs/agents-und-rechte.md</code>.
+  </p>
+
+  <section aria-labelledby="ap-roles">
+    <h3 id="ap-roles">Die Rollen im Überblick</h3>
+    <ul class="ap-cards">
+      @for (role of roles; track role.role) {
+        <li class="ap-card">
+          <span class="ap-icon" role="img" [attr.aria-label]="role.iconLabel">{{ role.icon }}</span>
+          <div>
+            <strong>{{ role.name }}</strong> <code>({{ role.role }})</code>
+            <p>{{ role.summary }}</p>
+          </div>
+        </li>
+      }
+    </ul>
+  </section>
+
+  <section aria-labelledby="ap-table">
+    <h3 id="ap-table">Aufgaben und Rechte je Rolle</h3>
+    <div class="table-wrap">
+      <table class="ap-table">
+        <caption class="muted">
+          Eine Zeile je Rolle aus
+          <code>agents.role</code>
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Rolle</th>
+            <th scope="col">Phase</th>
+            <th scope="col">Aufgabe</th>
+            <th scope="col">Dateirechte</th>
+            <th scope="col">Befehlsrechte</th>
+            <th scope="col">Typische Einsatzszenarien</th>
+            <th scope="col">Marketing-Argument</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (role of roles; track role.role) {
+            <tr [attr.data-role]="role.role">
+              <th scope="row">
+                <span class="ap-icon" role="img" [attr.aria-label]="role.iconLabel">{{ role.icon }}</span>
+                {{ role.name }} <code>({{ role.role }})</code>
+              </th>
+              <td data-column="phase">
+                <code>{{ role.phase }}</code> <span class="muted">{{ phaseLabels[role.phase] }}</span>
+              </td>
+              <td>{{ role.task }}</td>
+              <td data-column="files">{{ role.files }}</td>
+              <td>{{ role.commands }}</td>
+              <td>{{ role.scenarios }}</td>
+              <td>{{ role.argument }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="ap-cli">
+    <h3 id="ap-cli">Sonderregel für die Claude-CLI</h3>
+    <p>
+      Mit der Claude-CLI bekommen Assistent, Entwickler, Tester und Reviewer alle freigeschalteten Rechte-Gruppen
+      (<code>TRUSTED_ROLES</code>). Alle anderen Rollen bekommen nur „Dateien anlegen“ und „Dateien ändern“. Visionär
+      und Problemanalyse bekommen gar nichts (<code>READ_ONLY_ROLES</code>).
+    </p>
+    <p>
+      Beim lokalen Modell schreibt nur der Entwickler. Ohne Schreibrecht erhalten Agents nur Lese-Werkzeuge
+      (Verzeichnis, Datei lesen, Suche) mit etwa 25 Werkzeugschritten; der Entwickler hat bis zu 80 Schritte.
+    </p>
+  </section>
+
+  <section aria-labelledby="ap-flow">
+    <h3 id="ap-flow">Ablauf eines Auftrags</h3>
+    <p>
+      Ein Auftrag durchläuft die aktivierten Agents nach Phase und Position: <code>pre_task</code> →
+      <code>while_task</code> → <code>after_task</code>. Eigene Rollen (<code>custom</code>) lassen sich frei einer
+      Phase zuordnen.
+    </p>
+    <div class="ap-diagram" [appMermaid]="diagram">
+      <div class="mermaid-diagram">
+        <pre class="mermaid-source">{{ diagram }}</pre>
+      </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="ap-system">
+    <h3 id="ap-system">System-Agents außerhalb der Tabelle</h3>
+    <p>
+      Visionär (<code>visionary</code>) und Problemanalyse (<code>analyst</code>) sind keine Workflow-Agents und stehen
+      nicht in <code>agents.role</code>. Sie dürfen nur lesen. Der Dashboard-Assistent bedient den Chat und die
+      Problemanalyse und hat höhere Rechte als alle anderen, bleibt aber im Projektordner.
+    </p>
+  </section>
+
+  <section aria-labelledby="ap-limits">
+    <h3 id="ap-limits">Sicherheitsgrenzen</h3>
+    <p>Für alle Agents gilt: nicht erlaubt sind</p>
+    <ul>
+      <li>
+        Dateien außerhalb des Projektordners, <code>.env</code>, Schlüssel, <code>.git</code>,
+        <code>node_modules</code>, Backup-Ordner und Symlink-Ausbrüche,
+      </li>
+      <li><code>git push</code>, <code>rm</code>, <code>docker run</code> und <code>docker compose down -v</code>,</li>
+      <li>verkettete Befehle (<code>;</code>, <code>&amp;&amp;</code>, Pipes) – Befehle laufen ohne Shell,</li>
+      <li><code>git clone</code> mit <code>file://</code>, Optionen oder Zielen außerhalb des Projekts.</li>
+    </ul>
+    <p>
+      <strong>Projektsperre:</strong> Befehle (git, npm, docker) des Assistenten, der Agents und des Git-Syncs laufen
+      pro Projektordner nacheinander, nie gleichzeitig. Dateischreibzugriffe sind davon nicht betroffen.
+    </p>
+    <p>
+      <strong>Grenze – keine Sandbox:</strong> Diese Regeln verhindern Fehlgriffe, sind aber keine Sandbox. Tests und
+      npm-Skripte führen von Agents geschriebenen Code mit den Rechten des Workers auf dem Host aus.
+    </p>
+    <p>
+      <strong>Eigene Befehle:</strong> Ist <code>DEV_LOG_AGENT_COMMAND</code> oder ein eigener Agent-Befehl gesetzt,
+      läuft dieser statt des lokalen Modells, und die Werkzeugregeln oben greifen dafür nicht.
+    </p>
+    <p>
+      <strong>Voller Zugriff (optional):</strong> Enthält der Befehl des Dashboard-Assistenten
+      <code>--dangerously-skip-permissions</code> oder <code>--permission-mode bypassPermissions</code>, startet
+      AIdeation ihn ohne Wächter und ohne Sperrlisten – mit den Rechten des Workers, auch außerhalb des Projektordners.
+      Das gilt nur für den Assistenten. Wer sich im Dashboard anmelden kann, steuert damit den Rechner.
+    </p>
+  </section>
+</article>
