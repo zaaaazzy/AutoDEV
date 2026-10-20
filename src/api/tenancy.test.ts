@@ -63,3 +63,11 @@ test('Mandantentrennung: eigenes Projekt ja, fremdes nein (404), Unzuordenbares 
   assert.equal(await call(member, 'GET', '/api/projects'), 200);
   assert.equal(await call(admin, 'GET', '/api/projects/beta/board'), 200);
 });
+
+test('Review-Container: Nicht-Admins kommen durch den Mandantenwächter, Freigeben bleibt Administration', async () => {
+  const runner: Principal = { ...member, roles: ['run'] };
+  assert.equal(await call(runner, 'GET', '/api/review-slots'), 200);
+  assert.equal(await call(runner, 'POST', '/api/review-slots/2/stop'), 200);
+  assert.equal(await call(runner, 'PUT', '/api/review-slots/2'), 403);
+  assert.equal(await call(runner, 'GET', '/api/review-slots/2'), 403);
+});

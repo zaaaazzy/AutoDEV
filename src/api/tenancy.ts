@@ -36,6 +36,9 @@ const GLOBAL_ROUTES: [string, RegExp][] = [
   ['GET', /^\/api\/setup\/(templates|permissions|scope)$/],
   ['GET', /^\/api\/system-agents$/],
   ['GET', /^\/api\/settings$/],
+  // Review-Container sind projektübergreifend; die Routen filtern selbst nach allowedProjects.
+  ['GET', /^\/api\/review-slots$/],
+  ['POST', /^\/api\/review-slots\/\d+\/stop$/],
 ];
 
 export function isAdmin(principal: Principal | undefined): boolean {
