@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { MAX_PROMPT, parseTask, taskMessage } from './agent-tasks.js';
+import { computeNextRun, MAX_PROMPT, parseTask, taskMessage } from './agent-tasks.js';
 import { requiredRole } from './roles.js';
 
 test('Agent-Aufgabe: Titel und Anweisung werden geprüft', () => {
@@ -25,7 +25,39 @@ test('Agent-Aufgaben verlangen die Rolle „Assistent nutzen“', () => {
   assert.equal(requiredRole('POST', '/api/projects/mainty/agent-tasks', {}), 'chat');
   assert.equal(requiredRole('PATCH', '/api/agent-tasks/abc', {}), 'chat');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/run', {}), 'chat');
+  assert.equal(requiredRole('GET', '/api/agent-tasks/abc/runs', {}), 'chat');
+  assert.equal(requiredRole('POST', '/api/agent-tasks/abc/pause', {}), 'chat');
+  assert.equal(requiredRole('POST', '/api/agent-tasks/abc/resume', {}), 'chat');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/other', {}), 'admin');
+});
+
+test('Agent-Aufgabe: Zeitplan, Ziel und Zeitfenster werden geprüft', () => {
+  const base = { title: 'Audit', prompt: 'npm audit' };
+  assert.deepEqual(parseTask({ ...base, schedule: ' 0  3 * * * ', outputTarget: 'bug', runWindow: '22:00 - 06:00' }), {
+    ...base,
+    agentId: null,
+    schedule: '0 3 * * *',
+    outputTarget: 'bug',
+    runWindow: '22:00-06:00',
+  });
+  assert.equal((parseTask({ ...base, schedule: '' }) as { schedule: unknown }).schedule, null);
+  assert.equal((parseTask({ ...base, runWindow: '' }) as { runWindow: unknown }).runWindow, null);
+  assert.equal((parseTask({ ...base, enabled: false }) as { enabled: unknown }).enabled, false);
+  assert.match(parseTask({ ...base, schedule: '0 3 * *' }) as string, /5 Felder/);
+  assert.equal(parseTask({ ...base, schedule: '0 0 30 2 *' }), 'Der Zeitplan trifft nie zu.');
+  assert.equal(parseTask({ ...base, outputTarget: 'mail' }), 'Ungültiges Ziel für das Ergebnis.');
+  assert.match(parseTask({ ...base, runWindow: '22-6' }) as string, /HH:MM/);
+  assert.equal(parseTask({ ...base, enabled: 'ja' }), 'Ungültiger Wert für „aktiv“.');
+});
+
+test('Agent-Aufgabe: nächster Lauf nur mit Zeitplan und aktiv', () => {
+  const now = new Date('2026-10-20T10:00:00Z');
+  assert.equal(computeNextRun({ schedule: null, runWindow: null, enabled: true }, now), null);
+  assert.equal(computeNextRun({ schedule: '0 7 * * 1', runWindow: null, enabled: false }, now), null);
+  assert.equal(
+    computeNextRun({ schedule: '0 7 * * 1', runWindow: null, enabled: true }, now)?.toISOString(),
+    '2026-10-26T06:00:00.000Z',
+  );
 });
 
 test('der Kommentar aus der Bestätigung wird an die Aufgabe angehängt', () => {

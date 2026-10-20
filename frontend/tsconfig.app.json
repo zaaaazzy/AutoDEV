@@ -15,6 +15,6 @@
     "strictTemplates": true,
     "strictInjectionParameters": true
   },
-  "include": ["src/**/*.ts", "../src/core/layout-measure.ts"],
+  "include": ["src/**/*.ts", "../src/core/layout-measure.ts", "../src/core/cron.ts"],
   "exclude": ["src/**/*.spec.ts"]
 }
