@@ -4,7 +4,9 @@ import { chmod, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { DATABASE_COPY_SCRIPT, reviewDatabase, reviewPort, reviewUrl } from './review-slots.js';
+import type { Pool } from 'pg';
+import type { CommandExecutor } from '../core/command.js';
+import { DATABASE_COPY_SCRIPT, ReviewSlots, reviewDatabase, reviewPort, reviewUrl } from './review-slots.js';
 import { orderOf, parseSprintLog } from './sprint-commits.js';
 
 test('Review-Container: Port und Adresse je Nummer', () => {
@@ -59,4 +61,26 @@ test('Datenbank-Kopie: gescheiterter pg_dump lässt die Kopie scheitern statt ei
   const ok = await runCopyScript(0);
   assert.equal(ok.status, 0);
   assert.match(ok.psql, /-d ziel -f /);
+});
+
+/** Abnahme-Stand mit den Branches `branches` (Name → Commit) und optional einem laufenden Sprint. */
+async function acceptance(sprint: string | null, branches: Record<string, string>): Promise<string | null> {
+  const pool = {
+    query: async () => ({ rows: sprint ? [{ name: sprint }] : [] }),
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => {
+    const ref = String(command.at(-1)).replace('refs/heads/', '');
+    const hash = branches[ref];
+    return { exitCode: hash ? 0 : 1, durationMs: 1, output: hash ?? '' };
+  };
+  return new ReviewSlots(pool, '/install', execute).acceptanceCommit('auftrag', '/projekt');
+}
+
+test('Abnahme im Review-Container: Sprint-Branch des laufenden Sprints, sonst main', async () => {
+  const main = 'm'.repeat(40);
+  const sprint = 's'.repeat(40);
+  assert.equal(await acceptance('Sprint 8', { 'sprint/sprint-8': sprint, main }), sprint);
+  assert.equal(await acceptance('Sprint 8', { main }), main, 'Sprint-Branch fehlt: main');
+  assert.equal(await acceptance(null, { main }), main, 'ohne laufenden Sprint: main');
+  assert.equal(await acceptance(null, {}), null);
 });

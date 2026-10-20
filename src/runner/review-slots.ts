@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { sprintBranch } from './git-sync.js';
 
 /**
  * Review-Container: projektübergreifend geteilte Docker-Container, die der Administrator freigibt (einer ist
@@ -195,6 +196,25 @@ export class ReviewSlots {
     return head.exitCode === 0 ? head.output.trim() : null;
   }
 
+  /**
+   * Stand für die Abnahme eines Auftrags: Sprint-Branch, solange der Sprint läuft (dort steckt der Auftrag schon),
+   * sonst main. Null, wenn keiner der Branches existiert.
+   */
+  async acceptanceCommit(developmentId: string, folder: string): Promise<string | null> {
+    const sprint = (
+      await this.pool.query<{ name: string }>(
+        `SELECT s.name FROM development_items d JOIN sprints s ON s.id = d.sprint_id
+          WHERE d.id = $1 AND s.status IN ('planned', 'active')`,
+        [developmentId],
+      )
+    ).rows[0];
+    for (const branch of [...(sprint ? [sprintBranch(sprint.name)] : []), 'main']) {
+      const head = await this.execute(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], folder);
+      if (head.exitCode === 0 && head.output.trim()) return head.output.trim();
+    }
+    return null;
+  }
+
   private async syncSlot(slot: ReviewSlot): Promise<void> {
     const name = reviewContainer(slot.slot);
     if (!slot.enabled || slot.status === 'stopping') {
@@ -224,6 +244,10 @@ export class ReviewSlots {
         slot.status = 'requested';
       }
       slot.commit = commit;
+    }
+    // Abnahme aus „Aktionen“: Stand erst jetzt bestimmen (der Server sieht das Repository nicht).
+    if (slot.kind === 'manual' && !slot.commit && slot.developmentId && slot.status === 'requested') {
+      slot.commit = await this.acceptanceCommit(slot.developmentId, project.folder);
     }
     if (slot.status === 'requested') {
       await this.start(slot, project);

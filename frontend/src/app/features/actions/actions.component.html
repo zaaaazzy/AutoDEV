@@ -224,6 +224,9 @@
                     → Oder bestätige alle auf einmal mit <strong>„Geprüft – alles in Ordnung“</strong>.
                   </p>
                 }
+                @if (item.status !== 'approval' && item.status !== 'in_progress') {
+                  <app-acceptance-review [order]="item" />
+                }
               }
             </div>
             @if (entry.failure; as failure) {

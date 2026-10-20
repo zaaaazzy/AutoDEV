@@ -11,6 +11,7 @@ import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { OrderApprovalComponent } from '../development/order-approval.component.js';
 import { OrderDetailComponent } from '../development/order-detail.component.js';
 import { OrderService } from '../development/order.service.js';
+import { AcceptanceReviewComponent } from './acceptance-review.component.js';
 
 /**
  * Seite „Aktionen“: Rückmeldungen der Agents und alles, was auf dich wartet – Rückfragen, blockierte oder
@@ -21,6 +22,7 @@ import { OrderService } from '../development/order.service.js';
   selector: 'app-actions',
   standalone: true,
   imports: [
+    AcceptanceReviewComponent,
     NgClass,
     BugIconComponent,
     MarkdownPipe,
