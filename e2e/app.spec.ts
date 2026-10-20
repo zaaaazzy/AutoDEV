@@ -435,6 +435,47 @@ test('Statistik zeigt Verbrauch nach Bereich, Art, Auftrag und Agent', async ({ 
   await expect(page.locator('.stats-table').first()).toContainText('Login-Seite modernisieren');
 });
 
+test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf Dashboard und in der Statistik', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const invalid = await request.put('/api/projects/e2e/budget', { headers, data: { limits: { day: { maxTokens: -1 } } } });
+  expect(invalid.status()).toBe(400);
+  await login(page);
+  await page.goto('/#settings');
+  const budget = page.locator('#budget-settings');
+  await expect(budget.getByRole('heading', { name: 'Budget' })).toBeVisible();
+  // Standardregeln sind sichtbar, solange keine eigenen gespeichert sind.
+  await expect(budget.locator('.routing-rule').first()).toBeVisible();
+  await budget.getByLabel('Je Tag: Tokens').fill('5000000');
+  await budget.getByLabel('Je Sprint: Kosten in USD').fill('25');
+  await budget.getByLabel('Je Auftrag: Tokens').fill('800000');
+  await budget.getByRole('button', { name: 'Budget speichern' }).click();
+  await expect(page.getByText('Budget gespeichert.')).toBeVisible();
+
+  await page.reload();
+  await page.goto('/#settings');
+  await expect(budget.getByLabel('Je Tag: Tokens')).toHaveValue('5000000');
+  await expect(budget.getByLabel('Je Sprint: Kosten in USD')).toHaveValue('25');
+  await expect(budget.getByLabel('Je Auftrag: Tokens')).toHaveValue('800000');
+
+  await page.goto('/#dashboard');
+  await expect(page.getByTestId('budget-panel')).toContainText('Heute');
+  await page.goto('/#stats');
+  await expect(page.getByTestId('stats-budget').getByRole('progressbar').first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Modell-Routing' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Prompt-Protokoll (Auftragsautor)' })).toBeVisible();
+
+  // Aufräumen: ohne Limits verhält sich der Worker wie bisher.
+  const empty = { maxTokens: null, maxCostUsd: null };
+  const cleared = await request.put('/api/projects/e2e/budget', {
+    headers,
+    data: { limits: { day: empty, sprint: empty, order: empty } },
+  });
+  expect((await cleared.json()).status).toEqual([]);
+});
+
 test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden und löschen', async ({
   page,
   request,

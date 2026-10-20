@@ -144,6 +144,7 @@ export async function collectUsage(pool: Pool, slug: string): Promise<Record<str
 
   const estimated = orderRows.filter((row) => row.estimate.tokens && row.actual.tokens);
   return {
+    routing: await routingSavings(pool, slug),
     totals: {
       tokens: totalTokens,
       hours: Math.round(agentRows.reduce((sum, row) => sum + row.actual.hours, 0) * 100) / 100,
@@ -211,6 +212,55 @@ export function costOfTokens(tokens: number, pricePerToken: number | null): numb
   return pricePerToken === null ? null : Math.round(tokens * pricePerToken * 100) / 100;
 }
 
+/**
+ * Verbrauch je Modell und geschätzte Ersparnis durch das Routing: Tokens, die das Routing lokal (0 USD) statt über
+ * ein kostenpflichtiges Modell laufen ließ, bewertet mit dem gemessenen Durchschnittspreis je Token.
+ */
+export async function routingSavings(pool: Pool, slug: string): Promise<Record<string, unknown>> {
+  const [models, routed, price] = await Promise.all([
+    pool.query<{ model: string; count: string; tokens: string; cost: string; routed: string }>(
+      `SELECT COALESCE(st.model, 'unbekannt') AS model, COUNT(*) AS count, COALESCE(SUM(st.tokens), 0) AS tokens,
+              COALESCE(SUM(st.cost_usd), 0) AS cost, COUNT(*) FILTER (WHERE st.routing_rule IS NOT NULL) AS routed
+         FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
+        WHERE r.project_slug = $1 AND st.status IN ('passed', 'failed')
+        GROUP BY 1 ORDER BY SUM(st.tokens) DESC NULLS LAST LIMIT 20`,
+      [slug],
+    ),
+    pool.query<{ steps: string; localTokens: string }>(
+      `SELECT COUNT(*) AS steps, COALESCE(SUM(st.tokens) FILTER (WHERE st.cost_usd = 0), 0) AS "localTokens"
+         FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
+        WHERE r.project_slug = $1 AND st.routing_rule IS NOT NULL`,
+      [slug],
+    ),
+    tokenPriceUsd(pool, slug),
+  ]);
+  const localTokens = Number(routed.rows[0]?.localTokens ?? 0);
+  return {
+    routedSteps: Number(routed.rows[0]?.steps ?? 0),
+    localTokens,
+    savedUsd: costOfTokens(localTokens, price),
+    byModel: models.rows.map((row) => ({
+      model: row.model,
+      count: Number(row.count),
+      routed: Number(row.routed),
+      tokens: Number(row.tokens),
+      costUsd: Math.round(Number(row.cost) * 100) / 100,
+    })),
+  };
+}
+
+/** Prompt-Protokoll der Systemagents (neueste zuerst), optional nur einer Rolle. */
+export async function loadPromptLog(pool: Pool, slug: string, role: string | null, limit = 20) {
+  return (
+    await pool.query<{ id: string; role: string; prompt: string; tokens: string; createdAt: string; success: boolean }>(
+      `SELECT id::text, role, prompt, tokens::text, created_at AS "createdAt", success FROM agent_usage
+        WHERE project_slug = $1 AND prompt IS NOT NULL AND ($2::text IS NULL OR role = $2)
+        ORDER BY created_at DESC LIMIT $3`,
+      [slug, role, limit],
+    )
+  ).rows.map((row) => ({ ...row, agent: SYSTEM_ROLES[row.role] ?? row.role, tokens: Number(row.tokens) }));
+}
+
 export function registerUsageRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/usage', async (request, response, next) => {
     try {
@@ -220,5 +270,13 @@ export function registerUsageRoutes(app: Router, pool: Pool): void {
     } catch (error) {
       next(error);
     }
+  });
+
+  app.get('/projects/:slug/usage/prompts', async (request, response) => {
+    const slug = parseProjectSlug(request.params.slug ?? '');
+    if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+    const role =
+      typeof request.query.role === 'string' && /^[a-z_]{1,40}$/.test(request.query.role) ? request.query.role : null;
+    response.json({ prompts: await loadPromptLog(pool, slug, role) });
   });
 }

@@ -376,8 +376,8 @@ test('the cost brake stops an order before the next agent once its limit is reac
       queries.push({ sql, values });
       if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
       if (sql.includes('INSERT INTO agent_run_steps')) return { rows: [{ id: 'step-1' }] };
-      if (sql.includes('order_token_limit')) return { rows: [{ tokens: '1000', cost: null }] };
-      if (sql.includes('SUM(s.tokens)')) return { rows: [{ tokens: queries.length > 0 ? '1500' : '0', cost: '0' }] };
+      if (sql.includes('FROM budgets')) return { rows: [{ period: 'order', maxTokens: '1000', maxCostUsd: null }] };
+      if (sql.includes('SUM(s.tokens)')) return { rows: [{ tokens: '1500', cost: '0', since: null }] };
       return { rows: [], rowCount: 1 };
     },
   } as unknown as Pool;
@@ -394,9 +394,59 @@ test('the cost brake stops an order before the next agent once its limit is reac
   assert.equal(result, 'failed');
   assert.deepEqual(calls, []);
   assert.ok(
-    queries.some((query) => query.sql.includes('action_todo') && String(query.values[1]).includes('Kostengrenze')),
+    queries.some(
+      (query) => query.sql.includes('SET action_todo') && String(query.values[1]).startsWith('Budget erreicht'),
+    ),
   );
+  // Der Zeitraum, der blockiert, wird gemerkt – so gibt ein höheres Limit den Auftrag wieder frei.
+  assert.ok(queries.some((query) => query.sql.includes('budget_blocked = $3') && query.values[2] === 'order'));
+  assert.ok(queries.some((query) => query.sql.includes('status = CASE') && query.values[1] === 'blocked'));
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+});
+
+test('Modell-Routing: ein docs-Auftrag läuft lokal, nach einem Fehlschlag mit dem starken Modell', async () => {
+  const run = async (retryCount: number) => {
+    const queries: { sql: string; values: unknown[] }[] = [];
+    const pool = {
+      query: async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+        if (sql.includes('INSERT INTO agent_run_steps')) return { rows: [{ id: 'step-1' }] };
+        if (sql.includes('routing_local_model'))
+          return { rows: [{ customized: false, local: 'qwen3.5:9b', strong: ['claude', '-p', '--model', 'opus'] }] };
+        return { rows: [], rowCount: 1 };
+      },
+    } as unknown as Pool;
+    const commands: string[][] = [];
+    const models: (string | undefined)[] = [];
+    const execute: CommandExecutor = async (command) => {
+      commands.push(command);
+      return { exitCode: 0, durationMs: 1, output: 'ok' };
+    };
+    const builtin: BuiltinAgent = async ({ model }) => {
+      models.push(model);
+      return { exitCode: 0, durationMs: 1, output: 'ok', tokens: 10 };
+    };
+    const developer = { ...agent('Entwickler', 'while_task', 1, ['dev']), role: 'developer' };
+    await runWorkItem(pool, { ...item, category: 'docs', effortHours: 2, retryCount }, [developer], {
+      cwd: '/r',
+      timeoutMs: 1,
+      execute,
+      builtin,
+    });
+    const step = queries.find((query) => query.sql.includes('INSERT INTO agent_run_steps'));
+    return { commands, models, model: step?.values[6], rule: step?.values[7] };
+  };
+  const local = await run(0);
+  assert.deepEqual(local.models, ['qwen3.5:9b']);
+  assert.deepEqual(local.commands, []);
+  assert.deepEqual([local.model, local.rule], ['qwen3.5:9b', 'docs → lokal']);
+
+  const escalated = await run(1);
+  assert.deepEqual(escalated.models, []);
+  assert.equal(escalated.commands[0]?.[0], 'claude');
+  assert.ok(escalated.commands[0]?.join(' ').includes('--model opus'));
+  assert.deepEqual([escalated.model, escalated.rule], ['claude (opus)', 'docs → lokal · retry ≥ 1 → eine Stufe höher']);
 });
 
 test('Workflow-Reihenfolge: der Auftrag läuft genau wie im Board – Spalte für Spalte, darin nach Position', async () => {

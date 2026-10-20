@@ -30,6 +30,7 @@ import { registerDocRevisionRoutes } from './doc-revisions.js';
 import { authorize } from './roles.js';
 import { registerUserRoutes } from './users.js';
 import { registerUsageRoutes } from './usage.js';
+import { registerBudgetRoutes } from './budget.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
 import { FailureLimiter, sameOriginWrites, securityHeaders } from './security.js';
@@ -126,6 +127,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerUserRoutes(api, pool, auth);
   registerDocRevisionRoutes(api, pool);
   registerUsageRoutes(api, pool);
+  registerBudgetRoutes(api, pool);
 
   app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));
   return app;

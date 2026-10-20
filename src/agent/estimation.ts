@@ -60,6 +60,60 @@ export function parseEstimate(output: string): Estimate | null {
   return json ? toEstimate(json[0]) : null;
 }
 
+/** Ist-Werte erledigter Aufträge einer Kategorie: Median der Agent-Laufzeit (Stunden) und der Tokens. */
+export interface ActualReference {
+  category: string | null;
+  count: number;
+  medianHours: number;
+  medianTokens: number;
+}
+
+/**
+ * Lernende Schätzung: Median-Ist-Werte erledigter Aufträge derselben Kategorie (ohne Kategorie: Aufträge ohne
+ * Kategorie). null, solange es keine solchen Aufträge mit gemessenem Verbrauch gibt.
+ */
+export async function loadActualReference(
+  pool: Pool,
+  project: string,
+  category: string | null,
+): Promise<ActualReference | null> {
+  const row = (
+    await pool.query<{ count: string; hours: string | null; tokens: string | null }>(
+      `SELECT COUNT(*) AS count,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY hours) AS hours,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY tokens) AS tokens
+         FROM (SELECT SUM(st.duration_ms) / 3600000.0 AS hours, SUM(st.tokens) AS tokens
+                 FROM development_items d
+                 JOIN agent_runs r ON r.development_id = d.id
+                 JOIN agent_run_steps st ON st.run_id = r.id
+                WHERE d.project_slug = $1 AND d.status = 'done' AND d.category IS NOT DISTINCT FROM $2
+                GROUP BY d.id
+               HAVING SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0) done`,
+      [project, category],
+    )
+  ).rows[0];
+  const count = Number(row?.count ?? 0);
+  if (!count) return null;
+  return {
+    category,
+    count,
+    medianHours: Math.round(Number(row?.hours ?? 0) * 10) / 10,
+    medianTokens: Math.round(Number(row?.tokens ?? 0)),
+  };
+}
+
+/** Abschnitt für den Autor-Prompt: die Schätzung an echten Ist-Werten ausrichten. */
+export function referenceSection(reference: ActualReference): string {
+  const scope = reference.category ? `der Kategorie „${reference.category}“` : 'ohne Kategorie';
+  return [
+    '## Ist-Werte ähnlicher erledigter Aufträge (für die Schätzung)',
+    `${reference.count} erledigte Aufträge ${scope}: Median ${String(reference.medianHours).replace('.', ',')} h ` +
+      `Agent-Laufzeit und ${reference.medianTokens} Tokens je Auftrag.`,
+    'Richte effortHours und tokenEstimate an diesen Werten aus; weiche nur ab, wenn der Auftrag deutlich größer ' +
+      'oder kleiner ist, und begründe das kurz in den technischen Hinweisen.',
+  ].join('\n');
+}
+
 const ESTIMATE_TIMEOUT_MS = 90_000;
 
 /** One tool-free model call: far faster than a full agent run, so new ideas get their estimate within seconds. */
