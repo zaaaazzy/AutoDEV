@@ -331,12 +331,13 @@ test('Visionär-Parser: Grenzwerte und ungültige Felder', () => {
   );
   assert.deepEqual(
     parsed.discarded.map((entry) => entry.problem),
+    // Erst die Zeilen ohne gültiges JSON (parseMarkerLines), dann die inhaltlich verworfenen.
     [
+      'Kein gültiges JSON.',
+      'Kein gültiges JSON.',
+      'Kein gültiges JSON.',
       'Titel fehlt.',
       'Begründung ohne konkreten Datenbezug („stützt sich auf …“).',
-      'Kein gültiges JSON.',
-      'Kein gültiges JSON.',
-      'Kein gültiges JSON.',
     ],
   );
   assert.deepEqual(parseIdeaLines(''), { ideas: [], discarded: [] });

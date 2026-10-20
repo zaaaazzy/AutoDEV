@@ -153,7 +153,7 @@ test('runAuthorAgent: Claude-Agent mit Projektkontext, Rechten, Protokoll und Si
       'author',
       (message) => progress.push(message),
     );
-    assert.deepEqual(result, { exitCode: 0, output: 'Antwort mit [REDACTED]', sessionId: 'sitzung-1' });
+    assert.deepEqual(result, { exitCode: 0, output: 'Antwort mit [REDACTED]', sessionId: 'sitzung-1', tokens: 120 });
   } finally {
     delete process.env.REQUIREMENTS_TEST_TOKEN;
   }
@@ -192,7 +192,7 @@ test('runAuthorAgent: gewählter Agent per ID, eigene CLI ohne Streaming, Fehlsc
     undefined,
     'agent-7',
   );
-  assert.deepEqual(result, { exitCode: 2, output: 'kaputt', sessionId: undefined });
+  assert.deepEqual(result, { exitCode: 2, output: 'kaputt', sessionId: undefined, tokens: 0 });
   assert.deepEqual(calls[0]!.command, ['my-cli', '--prompt', 'Prompt'], 'andere CLIs bleiben unverändert');
   assert.deepEqual(find(/FROM agents/)[0]?.values, ['p', 'agent-7']);
   const [usage] = find(/INSERT INTO agent_usage/);
