@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type APIRequestContext, type Browser, expect, type Page, test, type TestInfo } from '@playwright/test';
+import pg from 'pg';
 
 /**
  * Kompletter Oberflächentest: jede Seite, jede Tabelle (Sortieren, Filtern, Suchen, Zurücksetzen) und die
@@ -27,6 +28,25 @@ const SECTIONS = [
 ] as const;
 const AUTHOR = { username: 'anna', password: 'autorin-passwort-123' };
 const IGNORED_CONSOLE = [/Service ?Worker/i, /status of 401/, /fetching the script/];
+
+/** Testdatenbank des Oberflächentests (dieselbe wie im Webserver von full.config.ts). */
+function testDatabaseUrl(): string {
+  const url = new URL(
+    process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
+  );
+  url.pathname = `/${process.env.FULL_UI_DATABASE ?? 'dev_log_full'}`;
+  return url.toString();
+}
+
+/** Status, den nur der Worker setzt, für Beispieldaten direkt schreiben. */
+async function setStatus(id: string, status: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: testDatabaseUrl(), max: 1 });
+  try {
+    await pool.query('UPDATE development_items SET status = $2 WHERE id = $1', [id, status]);
+  } finally {
+    await pool.end();
+  }
+}
 
 /** Beispieldaten: zwei Projekte, Ideen, Aufträge in allen Status, Bugs aller Schweregrade, Sprints, Doku, Autorin. */
 async function seed(request: APIRequestContext): Promise<void> {
@@ -67,7 +87,10 @@ async function seed(request: APIRequestContext): Promise<void> {
         })
       ).item;
       const sprintId = status === 'backlog' ? {} : { sprintId: sprint.id };
-      await call('patch', `/api/development/${item.id}`, { status, ...sprintId });
+      // In Arbeit, Blockiert und Erledigt setzt nur der Worker (die API lehnt sie ab): direkt in der Testdatenbank.
+      const manual = status === 'backlog' || status === 'planned';
+      await call('patch', `/api/development/${item.id}`, { status: manual ? status : 'planned', ...sprintId });
+      if (!manual) await setStatus(item.id, status);
     }
   }
   for (const [title, severity] of [

@@ -120,6 +120,9 @@ test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
   await expect(page.getByRole('dialog', { name: 'Benachrichtigungen erlauben' })).toBeVisible();
   await page.getByRole('button', { name: 'Später' }).click();
+  // Einrichten verlangt das aktuelle Passwort.
+  await expect(page.getByRole('button', { name: 'Einrichten' })).toBeDisabled();
+  await page.getByLabel('Aktuelles Passwort').fill(password);
   await page.getByRole('button', { name: 'Einrichten' }).click();
   await expect(page.getByAltText('QR-Code für die Authenticator-App')).toBeVisible();
   await page.getByRole('button', { name: 'Abbrechen' }).click();
@@ -184,12 +187,17 @@ test('Dokumentation → Marketing: Agent-Rechte nur mit Docs-Recht, „Zurück�
   });
   await page.goto('/#docs');
   await expect(page.locator('.doc-group summary', { hasText: 'Handbücher' })).toBeVisible();
-  await page.locator('.doc-group', { hasText: 'Marketing' }).getByRole('link', { name: 'Agents, Aufgaben und Rechte' }).click();
+  await page
+    .locator('.doc-group', { hasText: 'Marketing' })
+    .getByRole('link', { name: 'Agents, Aufgaben und Rechte' })
+    .click();
   await expect(page).toHaveURL(/#docs\/marketing\/agent-permissions$/);
   const rows = page.locator('.ap-table tbody tr');
   await expect(rows).toHaveCount(10);
   await expect(rows.filter({ hasText: '(visual_tester)' })).toHaveCount(1);
-  await expect(page.locator('.ap-table tr[data-role="developer"] [data-column="files"]')).toContainText('ja, mit Backup');
+  await expect(page.locator('.ap-table tr[data-role="developer"] [data-column="files"]')).toContainText(
+    'ja, mit Backup',
+  );
   await expect(page.locator('.ap-table tr[data-role="reviewer"] [data-column="files"]')).toContainText('nur lesen');
   await expect(page.locator('.ap-diagram svg')).toBeVisible();
   await page.goBack();
@@ -202,7 +210,13 @@ test('Dokumentation → Marketing: Agent-Rechte nur mit Docs-Recht, „Zurück�
   const plannerPassword = 'planer-passwort-123';
   const created = await request.post('/api/users', {
     headers: admin,
-    data: { username: planner, displayName: 'Paul Planer', password: plannerPassword, roles: ['plan'], projects: ['e2e'] },
+    data: {
+      username: planner,
+      displayName: 'Paul Planer',
+      password: plannerPassword,
+      roles: ['plan'],
+      projects: ['e2e'],
+    },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const context = await browser.newContext();
@@ -653,6 +667,10 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await page.getByRole('button', { name: /Nächsten Sprint vorschlagen/ }).click();
   const card = page.locator('.sprint-proposal');
   await expect(card.getByRole('heading', { name: /Vorschlag für Sprint/ })).toBeVisible();
+  // Platzsparend: zugeklappt nur eine Zeile mit Summen; ein Klick auf den Titel zeigt Tabelle und Aktionen.
+  await expect(card.locator('.proposal-summary')).toContainText('Aufträge');
+  await expect(card.locator('tbody tr')).toHaveCount(0);
+  await card.getByRole('button', { name: /Vorschlag für Sprint/ }).click();
   const row = card.locator('tbody tr', { hasText: title });
   await expect(row).toContainText('Priorität hoch');
   const box = row.getByRole('checkbox');
