@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { categoryOfCommand, parsePlaywrightCases, parseTapCases, playwrightHeadline } from './test-results.js';
+import {
+  categoryOfCommand,
+  parsePlaywrightCases,
+  parseTapCases,
+  playwrightHeadline,
+  summarizeTestFailure,
+} from './test-results.js';
 
 test('Kategorie ergibt sich aus dem Befehl', () => {
   assert.equal(categoryOfCommand('npm run lint'), 'quality');
@@ -107,4 +113,34 @@ test('Kurzfassung allgemeiner Meldungen nennt den Locator', () => {
     playwrightHeadline("Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Hallo')\nExpected: visible"),
     "expect(locator).toBeVisible() failed – Locator: getByText('Hallo')",
   );
+});
+
+test('Zusammenfassung einer Testausgabe: Zahlen, fehlgeschlagene Tests mit Stelle und Hinweis', () => {
+  const output = [
+    'TAP version 13',
+    '# Error: Playwright Test did not expect test.beforeAll() to be called here.',
+    '#     at _TestTypeImpl._hook (/x/node_modules/playwright/lib/common/index.js:2323:24)',
+    '#     at <anonymous> (/Volumes/D/Coding/AIdeation/agent/e2e/app.spec.ts:48:6)',
+    '# Subtest: e2e/app.spec.ts',
+    'not ok 1 - e2e/app.spec.ts',
+    '  ---',
+    "  error: 'test failed'",
+    '  ...',
+    'ok 2 - Rollen',
+    'not ok 3 - zählt richtig',
+    '  ---',
+    "  error: 'Expected values to be strictly equal: 2 !== 3'",
+    '  ...',
+    'ok 4 - später # SKIP',
+    '# tests 4',
+  ].join('\n');
+  const summary = summarizeTestFailure(output) ?? '';
+  assert.match(summary, /4 Tests · 1 bestanden · 2 fehlgeschlagen · 1 übersprungen/);
+  assert.match(
+    summary,
+    /\*\*e2e\/app\.spec\.ts\*\* \(`e2e\/app\.spec\.ts:48`\)\n  Error: Playwright Test did not expect/,
+  );
+  assert.match(summary, /\*\*zählt richtig\*\*\n  Expected values to be strictly equal: 2 !== 3/);
+  assert.match(summary, /Hinweis:.*npx playwright test/);
+  assert.equal(summarizeTestFailure('npm ERR! missing script: test'), null);
 });

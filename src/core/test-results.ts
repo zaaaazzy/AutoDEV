@@ -169,3 +169,77 @@ export function parsePlaywrightCases(report: PlaywrightReport, category: CaseCat
     }),
   );
 }
+
+const ERROR_LINE = /^(?:\w*Error\b|Error:|AssertionError|TypeError|ReferenceError|SyntaxError|Expected|Received)/;
+
+/** Stelle im Projekt aus einem Stacktrace (ohne node_modules und Node-Interna), z. B. „e2e/app.spec.ts:48“. */
+function projectLocation(lines: string[]): string | null {
+  for (const line of lines) {
+    const match = /\(?((?:\/|[A-Za-z]:\\)[^():]+):(\d+)(?::\d+)?\)?\s*$/.exec(line);
+    if (!match || match[1]!.includes('node_modules') || match[1]!.startsWith('node:')) continue;
+    const parts = match[1]!.split(/[\\/]/);
+    const anchor = parts.findIndex((part) =>
+      ['src', 'e2e', 'frontend', 'tests', 'test', 'backend', 'scripts'].includes(part),
+    );
+    return `${(anchor >= 0 ? parts.slice(anchor) : parts.slice(-2)).join('/')}:${match[2]}`;
+  }
+  return null;
+}
+
+/** Bekannte Ursachen mit einem Satz, was zu tun ist. */
+const FAILURE_HINTS: [RegExp, string][] = [
+  [
+    /Playwright Test did not expect test\.\w+\(\) to be called here/,
+    'Eine Playwright-Datei wurde mit dem Node-Testrunner (tsx/node --test) gestartet. Playwright-Tests mit `npx playwright test -c <konfiguration>` ausführen.',
+  ],
+  [
+    /Cannot find module|ERR_MODULE_NOT_FOUND/,
+    'Ein Modul fehlt: Pfad prüfen oder Abhängigkeiten installieren (`npm ci`).',
+  ],
+];
+
+/**
+ * Lesbare Zusammenfassung einer Node-Testausgabe (TAP) für Fehlermeldungen in der Oberfläche: Zahlen, die
+ * fehlgeschlagenen Tests mit erster Fehlerzeile und Stelle, bekannte Ursachen mit Hinweis. Ohne TAP: null.
+ */
+export function summarizeTestFailure(output: string): string | null {
+  const clean = output.replace(ANSI, '');
+  const cases = parseTapCases(clean);
+  if (!cases.length) return null;
+  const lines = clean.split('\n');
+  const failed: string[] = [];
+  let block: string[] = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index]!;
+    const match = /^(not ok|ok) \d+ - (.+?)(?:\s+#\s*(?:SKIP|TODO)\b.*)?$/.exec(line);
+    if (!match) {
+      if (/^#\s/.test(line) && !/^# Subtest:/.test(line)) block.push(line.replace(/^#\s?/, ''));
+      continue;
+    }
+    if (match[1] === 'not ok') {
+      const yaml: string[] = [];
+      for (let inner = index + 1; inner < lines.length && lines[inner]!.trim() !== '...'; inner++)
+        yaml.push(lines[inner]!);
+      const context = [...block, ...yaml];
+      const error =
+        context.map((entry) => entry.trim()).find((entry) => ERROR_LINE.test(entry)) ??
+        yaml
+          .map((entry) => /^\s+error:\s*['"|>-]*\s*(.*?)['"]?$/.exec(entry)?.[1])
+          .find((entry) => entry && entry !== 'test failed');
+      const where = projectLocation(context);
+      failed.push(
+        `- **${match[2]!.trim()}**${where ? ` (\`${where}\`)` : ''}${error ? `\n  ${error.slice(0, 300)}` : ''}`,
+      );
+    }
+    block = [];
+  }
+  const count = (status: TestCaseResult['status']) => cases.filter((entry) => entry.status === status).length;
+  const parts = [`${cases.length} Tests`, `${count('passed')} bestanden`, `${count('failed')} fehlgeschlagen`];
+  if (count('skipped')) parts.push(`${count('skipped')} übersprungen`);
+  const hints = FAILURE_HINTS.filter(([pattern]) => pattern.test(clean)).map(([, hint]) => `**Hinweis:** ${hint}`);
+  return [
+    `**Testergebnis:** ${parts.join(' · ')}`,
+    ...(failed.length ? [`**Fehlgeschlagen:**\n${failed.join('\n')}`] : []),
+    ...hints,
+  ].join('\n\n');
+}

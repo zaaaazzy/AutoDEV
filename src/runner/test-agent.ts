@@ -1,6 +1,7 @@
 import { execFile as nodeExecFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { basename, dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
@@ -105,7 +106,67 @@ async function getProjectName(cwd: string): Promise<string> {
   }
 }
 
+const NODE_TEST_RUNNERS = new Set(['tsx', 'node']);
+const PLAYWRIGHT_IMPORT = /(?:from\s+|require\(\s*|import\(\s*)['"]@playwright\/test['"]/;
+const PLAYWRIGHT_CONFIGS = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.mjs'];
+
+/** Nächste Playwright-Konfiguration vom Ordner der Datei aufwärts bis zum Projektordner (relativ zu diesem). */
+function playwrightConfig(cwd: string, file: string): string | null {
+  for (let dir = dirname(resolve(cwd, file)); ; dir = dirname(dir)) {
+    const found = PLAYWRIGHT_CONFIGS.map((name) => resolve(dir, name)).find((path) => existsSync(path));
+    if (found) return relative(cwd, found);
+    if (dir === cwd || dirname(dir) === dir || !resolve(dir).startsWith(resolve(cwd))) return null;
+  }
+}
+
+/**
+ * Playwright-Dateien gehören nicht in den Node-Testrunner: „tsx --test e2e/app.spec.ts“ scheitert mit „Playwright
+ * Test did not expect test.beforeAll() to be called here“. Solche Dateien werden aus tsx/node --test herausgenommen
+ * und als eigener Schritt mit „npx playwright test -c <Konfiguration>“ ausgeführt; der Rest bleibt, wie er war.
+ */
+export async function routePlaywrightSpecs(
+  commands: string[][],
+  cwd: string,
+  skipped: boolean[] = [],
+): Promise<{ commands: string[][]; skipped: boolean[] }> {
+  const routed: string[][] = [];
+  const routedSkipped: boolean[] = [];
+  for (const [index, command] of commands.entries()) {
+    const runner = command.findIndex((part) => NODE_TEST_RUNNERS.has(basename(part)));
+    const isNodeTest = runner >= 0 && command.includes('--test');
+    const playwright: string[] = [];
+    if (isNodeTest) {
+      for (const part of command.slice(runner + 1)) {
+        if (part.startsWith('-') || !/\.(?:[cm]?[jt]s)$/.test(part) || part.includes('*')) continue;
+        const source = await readFile(resolve(cwd, part), 'utf8').catch(() => '');
+        if (PLAYWRIGHT_IMPORT.test(source)) playwright.push(part);
+      }
+    }
+    if (!playwright.length) {
+      routed.push(command);
+      routedSkipped.push(skipped[index] ?? false);
+      continue;
+    }
+    const rest = command.filter((part) => !playwright.includes(part));
+    if (rest.slice(runner + 1).some((part) => !part.startsWith('-'))) {
+      routed.push(rest);
+      routedSkipped.push(skipped[index] ?? false);
+    }
+    const byConfig = new Map<string, string[]>();
+    for (const file of playwright) {
+      const config = playwrightConfig(cwd, file) ?? '';
+      byConfig.set(config, [...(byConfig.get(config) ?? []), file]);
+    }
+    for (const [config, files] of byConfig) {
+      routed.push(['npx', 'playwright', 'test', ...(config ? ['-c', config] : []), ...files]);
+      routedSkipped.push(skipped[index] ?? false);
+    }
+  }
+  return { commands: routed, skipped: routedSkipped };
+}
+
 export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promise<string> {
+  options = { ...options, ...(await routePlaywrightSpecs(options.commands, options.cwd, options.skipped)) };
   const branch = await getGitValue(options.cwd, '--abbrev-ref=HEAD');
   const commitSha = await getGitValue(options.cwd, 'HEAD');
   const projectName = await getProjectName(options.cwd);

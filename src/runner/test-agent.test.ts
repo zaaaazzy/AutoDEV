@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { parseTestAgentOptions, runTestAgent } from './test-agent.js';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { parseTestAgentOptions, routePlaywrightSpecs, runTestAgent } from './test-agent.js';
 
 test('parses project, working directory, and explicit argument-array commands', () => {
   const options = parseTestAgentOptions([
@@ -68,4 +71,37 @@ test('runs a command and persists a sanitized test run and result', async () => 
       process.env.DEV_LOG_TEST_SECRET = previousSecret;
     }
   }
+});
+
+test('Playwright-Dateien laufen mit playwright test statt im Node-Testrunner', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'route-pw-'));
+  mkdirSync(join(cwd, 'e2e'));
+  mkdirSync(join(cwd, 'src'));
+  writeFileSync(join(cwd, 'e2e', 'playwright.config.ts'), 'export default {};');
+  writeFileSync(join(cwd, 'e2e', 'app.spec.ts'), "import { test } from '@playwright/test';");
+  writeFileSync(join(cwd, 'src', 'a.spec.ts'), "import test from 'node:test';");
+  const mixed = await routePlaywrightSpecs([['npx', 'tsx', '--test', 'e2e/app.spec.ts', 'src/a.spec.ts']], cwd);
+  assert.deepEqual(mixed.commands, [
+    ['npx', 'tsx', '--test', 'src/a.spec.ts'],
+    ['npx', 'playwright', 'test', '-c', 'e2e/playwright.config.ts', 'e2e/app.spec.ts'],
+  ]);
+  assert.deepEqual(mixed.skipped, [false, false]);
+  const only = await routePlaywrightSpecs(
+    [
+      ['npm', 'run', 'lint'],
+      ['npx', 'tsx', '--test', 'e2e/app.spec.ts'],
+    ],
+    cwd,
+    [true, false],
+  );
+  assert.deepEqual(only.commands, [
+    ['npm', 'run', 'lint'],
+    ['npx', 'playwright', 'test', '-c', 'e2e/playwright.config.ts', 'e2e/app.spec.ts'],
+  ]);
+  assert.deepEqual(only.skipped, [true, false]);
+  const untouched = [
+    ['npx', 'tsx', '--test', 'src/**/*.test.ts'],
+    ['npm', 'test'],
+  ];
+  assert.deepEqual((await routePlaywrightSpecs(untouched, cwd)).commands, untouched);
 });

@@ -1,4 +1,5 @@
 import { logged } from '../core/log.js';
+import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
@@ -88,11 +89,24 @@ export function isEnvironmentFailure(output: string): boolean {
  * Hält den Fehler am Auftrag fest, legt einen Bug-Bericht an und – bei aktivem automatischen Bugfixing –
  * erzeugt sofort einen Behebungsauftrag, der ohne Sprint-Zuweisung vom Worker aufgenommen wird.
  */
+/**
+ * Testausgaben (TAP) lesbar machen: Zusammenfassung mit Zahlen, fehlgeschlagenen Tests und Hinweis, darunter das Ende
+ * der Ausgabe als Codeblock ab einer ganzen Zeile. Andere Ausgaben (z. B. die Antwort eines Agents) bleiben, wie sie sind.
+ */
+export function failureDetail(output: string): string | null {
+  const summary = summarizeTestFailure(output.slice(-50_000));
+  if (!summary) return null;
+  const tail = output.trim().slice(-1500);
+  const lines = tail.slice(tail.indexOf('\n') + 1).replaceAll('```', "'''");
+  return `${summary}\n\n**Ausgabe (Ende):**\n\n\`\`\`text\n${lines}\n\`\`\``;
+}
+
 export async function registerFailure(pool: Pool, item: FailedItem, agentName: string, output: string): Promise<void> {
-  const detail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
+  const tail = output.trim().slice(-3000) || 'Keine Ausgabe vorhanden.';
+  const detail = failureDetail(output) ?? tail;
   // Umgebung (Laufwerk weg) und Projektregeln sind keine Code-Fehler: kein Bug-Auftrag, sondern „Aktion notwendig“.
   const rule = ruleRefusal(output);
-  if (rule || isEnvironmentFailure(detail)) {
+  if (rule || isEnvironmentFailure(tail)) {
     const todo = rule
       ? `Projektregel verhindert den Auftrag: ${rule} – Auftrag anpassen oder verwerfen`
       : ENVIRONMENT_TODO;
@@ -108,7 +122,7 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     return;
   }
   // Wartet der Auftrag auf einen Menschen, heisst er „Aktion notwendig“ statt „fehlgeschlagen“.
-  const todo = humanActionFor(detail);
+  const todo = humanActionFor(tail);
   if (todo) await setActionTodo(pool, item.id, todo).catch(logged('autofix'));
   const auto =
     (
@@ -119,7 +133,7 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
   if (item.bugId) {
     await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [
       item.bugId,
-      `Letzter Behebungsversuch scheiterte bei „${agentName}“: ${detail.slice(-1500)}`,
+      `Letzter Behebungsversuch scheiterte bei „${agentName}“: ${(summarizeTestFailure(output) ?? tail).slice(-1500)}`,
     ]);
     await pool.query(
       `UPDATE development_items SET failure = $2, failure_bug_id = $3, auto_run = FALSE,
@@ -129,7 +143,7 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     );
     return;
   }
-  if (isAgentFailure(detail)) {
+  if (isAgentFailure(tail)) {
     // Kein Bug-Bericht: Auftrag bleibt blockiert, die Problemanalyse schlägt das weitere Vorgehen vor.
     await pool.query(
       `UPDATE development_items SET failure = $2, auto_run = FALSE,
