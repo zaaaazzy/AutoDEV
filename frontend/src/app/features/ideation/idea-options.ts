@@ -19,7 +19,7 @@ export const OPEN_IDEA_STATUSES = ['idea', 'considering', 'review', 'requested',
 export function isOpenIdea(idea: Pick<Idea, 'status'>): boolean {
   return OPEN_IDEA_STATUSES.includes(idea.status);
 }
-export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export { MAX_IMAGE_BYTES } from '../../shared/image-upload.js';
 
 /** Anzeigestatus: Eine angenommene Idee gilt als umgesetzt, sobald ihr Auftrag erledigt ist. */
 export function ideaDisplayStatus(idea: Idea, order: DevelopmentItem | null | undefined): string {
