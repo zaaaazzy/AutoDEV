@@ -21,17 +21,8 @@ import { ShareBarComponent, type ShareSegment } from '../../shared/share-bar.com
 import { AgentListComponent } from '../agents/agent-list.component.js';
 import { ChatComponent } from '../chat/chat.component.js';
 import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-options.js';
+import { newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
 
-/** Farbton je Status, überall gleich: grün erledigt, blau in Arbeit, orange wartet/Warnung, rot Fehler. */
-const ORDER_TONES: Record<string, string> = {
-  backlog: 'neutral',
-  planned: 'info',
-  in_progress: 'active',
-  blocked: 'warn',
-  done: 'ok',
-  rejected: 'neutral',
-};
-const ORDER_STATUSES = ['done', 'in_progress', 'planned', 'backlog', 'rejected', 'blocked'] as const;
 const RECENT_RUNS = 20;
 
 /**
@@ -233,20 +224,18 @@ export class DashboardComponent {
 
   /** Je Sprint ein Balken mit den Aufträgen nach Status (neueste Sprints zuerst, max. 8). */
   protected readonly sprintRows = computed(() =>
-    this.data()
-      .sprints.slice(0, 8)
-      .map((sprint) => ({
-        sprint,
-        segments: this.orderSegments(
-          this.data().development.filter((item) => item.sprintId === sprint.id),
-          sprint.name,
-        ),
-      })),
+    newestSprints(this.data().sprints, 8).map((sprint) => ({
+      sprint,
+      segments: this.orderSegments(
+        this.data().development.filter((item) => item.sprintId === sprint.id),
+        sprint.name,
+      ),
+    })),
   );
 
   protected readonly legend = ORDER_STATUSES.map((status) => ({
     label: statusLabel(status),
-    tone: ORDER_TONES[status]!,
+    tone: ORDER_TONES[status],
   }));
 
   private orderSegments(items: DevelopmentItem[], sprint?: string): ShareSegment[] {
@@ -256,12 +245,11 @@ export class DashboardComponent {
       return {
         label: statusLabel(status),
         value: items.filter((item) => item.status === status).length,
-        tone: ORDER_TONES[status]!,
-        // Blockierte Aufträge warten auf dich und stehen unter „Aktionen“.
-        link:
-          status === 'blocked'
-            ? { section: 'actions' }
-            : { section: 'development', filters, anchor: status === 'done' ? 'done-orders' : undefined },
+        tone: ORDER_TONES[status],
+        // Freigabe, abgelehnte und blockierte Aufträge warten auf dich und stehen unter „Aktionen“.
+        link: opensActions(status)
+          ? { section: 'actions' }
+          : { section: 'development', filters, anchor: status === 'done' ? 'done-orders' : undefined },
       };
     });
   }
