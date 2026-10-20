@@ -185,15 +185,21 @@ export async function runWorkItem(
   // Ein neuer Lauf hebt eine frühere Budget-Blockade auf; reicht das Budget nicht, setzt die Prüfung sie neu.
   // Der Worker wählt mehrere Aufträge auf einmal und arbeitet sie nacheinander ab: Wurde dieser inzwischen
   // abgelehnt, zurückgestellt, aus dem Sprint genommen oder der Sprint pausiert, startet er nicht (wie selectItems).
-  // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon.
-  const started = await pool.query(
-    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
+  // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon. Scheitert schon der Start (z. B. Datenbank kurz
+  // weg), den Lauf verwerfen: sonst hält er claimRun stundenlang auf.
+  const started = await pool
+    .query(
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
       WHERE d.id = $1 AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express' AND (
         d.agent_id IS NOT NULL OR (
           NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
           AND (d.auto_run OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
-    [item.id, Boolean(options.itemId)],
-  );
+      [item.id, Boolean(options.itemId)],
+    )
+    .catch(async (error: unknown) => {
+      await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
+      throw error;
+    });
   if (started.rowCount === 0) {
     await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
     console.info(`Skipping ${item.id}: der Auftrag ist nicht mehr eingeplant.`);
@@ -344,23 +350,61 @@ export async function runWorkItem(
     }
     console.error(`Run ${runId} aborted:`, error);
   } finally {
-    await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
-      runId,
-      passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
-    ]);
     if (budgetStop) {
       const todo = await blockForBudget(pool, item.id, budgetStop).catch(logged('runner', null));
       console.info(`[${item.id}] ${todo ?? 'Budget erreicht'}`);
       if (todo) await setActionTodo(pool, item.id, todo).catch(logged('runner'));
       ctx.stopReason = todo;
     }
+    // Erst den Auftrag abschliessen, dann den Lauf: Stirbt der Worker dazwischen, gilt der Lauf als unterbrochen und
+    // recoverInterruptedRuns plant den Auftrag wieder ein. Jeder Schritt ist einzeln abgesichert, damit ein kurzer
+    // Datenbank-Aussetzer den Auftrag nicht „In Arbeit“ hängen lässt.
     try {
       await settleItem(ctx, passed, interrupted);
+    } catch (error) {
+      passed = false;
+      console.error(`[${item.id}] Abschluss fehlgeschlagen:`, error);
+      await blockStuckItem(pool, item.id).catch(logged('runner'));
     } finally {
       releaseTree?.();
     }
+    await pool
+      .query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
+        runId,
+        passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
+      ])
+      .catch(logged('runner'));
   }
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
+}
+
+/** Hinweis an Aufträgen, deren Abschluss nicht durchlief (kein Code-Fehler, daher kein Bug-Bericht). */
+export const STUCK_FAILURE =
+  'Der Abschluss des Auftrags wurde unterbrochen (z. B. Datenbank kurz nicht erreichbar). Bitte erneut starten.';
+
+/** Auftrag, dessen Abschluss scheiterte: blockiert statt dauerhaft „In Arbeit“. */
+async function blockStuckItem(pool: Pool, itemId: string): Promise<void> {
+  await pool.query(
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.blocked}', failure = COALESCE(failure, $2), updated_at = NOW()
+      WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.inProgress}'`,
+    [itemId, STUCK_FAILURE],
+  );
+}
+
+/**
+ * Aufträge „In Arbeit“ ohne laufenden Lauf hängen (Abschluss scheiterte, Worker starb zwischen Lauf und Abschluss):
+ * blockieren, damit sie sichtbar sind und erneut gestartet werden können. Läuft am Anfang jedes Zyklus (je Projekt)
+ * und beim Start des Workers (alle Projekte). Express-Aufträge aus dem Chat haben keine Läufe und bleiben unberührt.
+ */
+export async function recoverStuckItems(pool: Pool, project: string | null): Promise<number> {
+  const result = await pool.query(
+    `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.blocked}', failure = COALESCE(d.failure, $2), updated_at = NOW()
+      WHERE d.status = '${DEVELOPMENT_STATUS.inProgress}' AND ($1::text IS NULL OR d.project_slug = $1)
+        AND EXISTS (SELECT 1 FROM agent_runs r WHERE r.development_id = d.id)
+        AND NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.development_id = d.id AND r.status = '${AGENT_RUN_STATUS.running}')`,
+    [project, STUCK_FAILURE],
+  );
+  return result.rowCount ?? 0;
 }
 
 /**
@@ -430,6 +474,8 @@ export async function runWorkflow(
     [options.project],
   );
   await resumeAfterEnvironment(pool, options.project).catch(logged('runner'));
+  // Hängengebliebene Aufträge (Abschluss scheiterte) nicht erst beim nächsten Worker-Start aufräumen.
+  await recoverStuckItems(pool, options.project).catch(logged('runner', 0));
   // Budget wieder frei (Folgetag, Limit erhöht oder entfernt): wegen Budget blockierte Aufträge laufen weiter.
   await releaseBudgetBlocks(pool, options.project).catch(logged('runner', []));
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.

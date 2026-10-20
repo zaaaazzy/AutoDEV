@@ -25,7 +25,7 @@ import { ProductionMonitor } from './production-monitor.js';
 import { syncGitGraph } from './git-graph.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
-import { parseRunnerOptions, runWorkflow, type RunnerOptions } from './runner.js';
+import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
@@ -190,12 +190,9 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     `UPDATE development_items SET status = 'planned', updated_at = NOW()
       WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`,
   );
-  // Orders left "in progress" without any running run would be stuck; a failed last run makes them retryable.
-  await pool.query(
-    `UPDATE development_items d SET status = 'blocked', updated_at = NOW()
-      WHERE d.status = 'in_progress' AND NOT EXISTS (SELECT 1 FROM agent_runs r WHERE r.development_id = d.id AND r.status = 'running')
-        AND (SELECT r.status FROM agent_runs r WHERE r.development_id = d.id ORDER BY r.started_at DESC LIMIT 1) = 'failed'`,
-  );
+  // Aufträge „In Arbeit“ ohne laufenden Lauf hängen (auch nach einem erfolgreichen Lauf ohne Abschluss): blockieren,
+  // damit sie erneut gestartet werden können.
+  await recoverStuckItems(pool, null);
   await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
   await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
   await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);

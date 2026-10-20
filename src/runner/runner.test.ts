@@ -8,6 +8,7 @@ import {
   buildInvocation,
   buildPrompt,
   parseRunnerOptions,
+  recoverStuckItems,
   runSelectedItems,
   runWorkItem,
   type WorkflowAgent,
@@ -815,4 +816,58 @@ test('Budget mitten im Zyklus erreicht: ein Auftrag wartet sichtbar, die übrige
     .filter((query) => query.sql.includes("SET status = 'blocked'"))
     .map((query) => query.values[0]);
   assert.deepEqual(blocked, ['b'], 'nur der nächste Auftrag wartet, c bleibt eingeplant');
+});
+
+test('Datenbank-Aussetzer beim Abschluss: der Auftrag bleibt nicht „In Arbeit“ hängen, der Lauf endet erst danach', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  let outage = false;
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }], rowCount: 1 };
+      // Abschluss (settleItem) und Lauf-Status scheitern: die Datenbank ist kurz weg.
+      if (outage && (sql.includes('status = CASE') || sql.includes('UPDATE agent_runs SET status = $2')))
+        throw new Error('Connection terminated unexpectedly');
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => {
+    outage = true;
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.equal(result, 'failed');
+  const stuck = queries.findIndex(
+    (query) => query.sql.includes("SET status = 'blocked', failure = COALESCE") && query.values[0] === 'item-1',
+  );
+  assert.ok(stuck >= 0, 'Auftrag wird blockiert statt in Arbeit zu bleiben');
+  const run = queries.findIndex((query) => query.sql.includes('UPDATE agent_runs SET status = $2'));
+  assert.ok(run > stuck, 'der Lauf wird erst nach dem Abschluss beendet');
+  assert.equal(queries[run]?.values[1], 'failed');
+});
+
+test('Hängende Aufträge (In Arbeit ohne laufenden Lauf) werden je Projekt und beim Start blockiert', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: [], rowCount: 2 };
+    },
+  } as unknown as Pool;
+  assert.equal(await recoverStuckItems(pool, 'mainty'), 2);
+  await recoverStuckItems(pool, null);
+  const [project, all] = queries;
+  assert.match(project?.sql ?? '', /d\.status = 'in_progress'/);
+  assert.match(
+    project?.sql ?? '',
+    /NOT EXISTS \(SELECT 1 FROM agent_runs r WHERE r\.development_id = d\.id AND r\.status = 'running'\)/,
+  );
+  // Nur Aufträge mit Läufen: Express-Aufträge aus dem Chat sind ohne Lauf „In Arbeit“.
+  assert.match(project?.sql ?? '', /AND EXISTS \(SELECT 1 FROM agent_runs r WHERE r\.development_id = d\.id\)/);
+  assert.equal(project?.values[0], 'mainty');
+  assert.equal(all?.values[0], null);
 });
