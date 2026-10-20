@@ -101,6 +101,45 @@ interface Approved {
  * nachziehen. Scheitert der Merge (z. B. Konflikt), wird der Auftrag blockiert – wie ein Merge-Problem im normalen Lauf.
  * Liefert die Zahl der gemergten Aufträge.
  */
+/** Höchstens so oft wird ein Auftrag nach einem Merge-Konflikt automatisch neu eingeplant. */
+export const MAX_CONFLICT_RETRIES = 2;
+
+export function isMergeConflict(message: string): boolean {
+  return /Merge-Konflikt/.test(message);
+}
+
+/**
+ * Merge-Konflikt mit der Basis: Auftrag statt „blockiert“ neu einplanen. Der nächste Lauf zieht die Basis in den
+ * Auftrags-Branch nach, lässt die Konflikte stehen und der Entwickler löst sie. Liefert false, wenn die Neuversuche
+ * aufgebraucht sind – dann bleibt es bei „Aktion notwendig“.
+ */
+export async function retryAfterConflict(
+  pool: Pool,
+  item: { id: string; projectSlug: string; title: string },
+  message: string,
+): Promise<boolean> {
+  const result = await pool.query(
+    `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE,
+            conflict_retries = conflict_retries + 1, review_approved_at = NULL, action_todo = NULL, agent_id = NULL,
+            return_status = NULL, failure = $3, updated_at = NOW()
+      WHERE id = $1 AND conflict_retries < $2 RETURNING id`,
+    [item.id, MAX_CONFLICT_RETRIES, `${message}\n\nWird automatisch neu gestartet: Der Entwickler löst die Konflikte.`],
+  );
+  if (!result.rowCount) return false;
+  console.info(`[${item.id}] Merge-Konflikt – neu eingeplant, der Entwickler löst die Konflikte.`);
+  await sendPush(
+    pool,
+    {
+      title: `↻ Merge-Konflikt wird gelöst · ${item.projectSlug}`,
+      body: `${item.title}\nDer Auftrag startet neu, der Entwickler führt die Änderungen zusammen.`,
+      url: '#development',
+      tag: `order-${item.id}`,
+    },
+    { project: item.projectSlug },
+  );
+  return true;
+}
+
 export async function processApprovals(
   pool: Pool,
   project: string,
@@ -121,6 +160,10 @@ export async function processApprovals(
         ? await mergeApprovedBranch(cwd, item, item.branch, item.base, execute)
         : { merged: false, message: 'Auftrags-Branch unbekannt – bitte erneut ausführen.' };
     console.info(`[${item.id}] ${result.message}`);
+    if (!result.merged && isMergeConflict(result.message)) {
+      const retried = await retryAfterConflict(pool, item, result.message).catch(logged('review-gate', false));
+      if (retried) continue;
+    }
     if (!result.merged) {
       await pool.query(
         `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.blocked}', failure = $2, review_approved_at = NULL,

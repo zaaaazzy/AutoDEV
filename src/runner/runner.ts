@@ -383,6 +383,13 @@ export async function runWorkflow(
   const implementationLock = new Mutex();
   for (const item of items) {
     if (isShuttingDown()) break;
+    // Angeforderte Live-Schaltungen (Git-Sicherung) nicht hinter dem ganzen Durchlauf warten lassen: zwischen zwei
+    // Aufträgen erledigen, der Ordner ist dann sauber. Vor dem ersten Auftrag lief sie oben schon.
+    if (results.length) {
+      await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+        goLive(pool, options.project, options.cwd, execute),
+      ).catch(logged('runner'));
+    }
     results.push({
       itemId: item.id,
       result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),

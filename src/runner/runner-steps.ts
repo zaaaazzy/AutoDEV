@@ -13,12 +13,26 @@ import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { commitAgentStep, commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
+import {
+  commitAgentStep,
+  commitTaskToGit,
+  conflictPrompt,
+  finishOrderBranch,
+  type OrderBranch,
+  unresolvedConflicts,
+} from './git-sync.js';
 import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
-import { holdForReview, loadReviewMode, needsApproval, type ReviewMode } from './review-gate.js';
+import {
+  holdForReview,
+  isMergeConflict,
+  loadReviewMode,
+  needsApproval,
+  retryAfterConflict,
+  type ReviewMode,
+} from './review-gate.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import {
   FILES_CREATE,
@@ -501,19 +515,22 @@ export async function runStep(
           agent.role === 'manual_writer' ? MANUAL_TITLE : USER_MANUAL_TITLE,
         ).catch(() => '')
       : undefined;
+  // Offene Merge-Konflikte des Auftrags-Branchs löst der erste Agent danach (der Entwickler), vor seiner Aufgabe.
+  const conflicts = ctx.branch?.conflicts?.length ? ctx.branch : null;
   const prompt = withProjectContext(
     ctx.projectContext,
-    buildPrompt(agent, item, done, {
-      bugs: ctx.bugs,
-      manual,
-      images: ctx.images,
-      baseBranch: ctx.branch?.base,
-      criteria: ctx.criteria,
-      definitionOfDone: ctx.definitionOfDone,
-      messages: (ctx.messages ?? []).filter((message) => message.toId === (agent.stepId ?? agent.id)),
-      sprintNotes: ctx.sprintNotes,
-      outcome: stepOptions.observer?.outcome,
-    }),
+    (conflicts ? `${conflictPrompt(conflicts)}\n\n` : '') +
+      buildPrompt(agent, item, done, {
+        bugs: ctx.bugs,
+        manual,
+        images: ctx.images,
+        baseBranch: ctx.branch?.base,
+        criteria: ctx.criteria,
+        definitionOfDone: ctx.definitionOfDone,
+        messages: (ctx.messages ?? []).filter((message) => message.toId === (agent.stepId ?? agent.id)),
+        sprintNotes: ctx.sprintNotes,
+        outcome: stepOptions.observer?.outcome,
+      }),
   );
 
   const stepAbort = new AbortController();
@@ -685,7 +702,17 @@ export async function runStep(
   // Lehnt ein Agent wegen einer Projektregel ab (@@REGEL), endet der Ablauf: „Aktion notwendig“ statt „Erledigt“.
   const refusedByRule = ruleRefusal(output) !== null;
   if (refusedByRule) await logEvent(pool, stepId, 'Abgelehnt wegen Projektregel');
-  const passed = result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule;
+  // Sollte der Agent Konflikte lösen und sind noch Marker übrig, gilt der Schritt als nicht bestanden.
+  const unresolved = conflicts && !cancelled ? await unresolvedConflicts(options.cwd, execute).catch(() => []) : [];
+  if (unresolved.length) {
+    output += `\n\nMerge-Konflikte nicht gelöst: ${unresolved.join(', ')}`;
+    await logEvent(pool, stepId, `Merge-Konflikte offen: ${unresolved.join(', ')}`);
+  } else if (conflicts && ctx.branch) {
+    ctx.branch.conflicts = [];
+    await logEvent(pool, stepId, 'Merge-Konflikte gelöst');
+  }
+  const passed =
+    result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule && !unresolved.length;
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
   const reported = agent.role === 'tester' ? parseCoverage(output) : null;
   // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
@@ -807,6 +834,11 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     if (passed && !result.merged) mergeProblem = result.message;
   } else if (passed && ctx.sprintName) {
     await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
+  }
+  // Merge-Konflikt mit der Basis: automatisch neu einplanen; der nächste Lauf zieht die Basis nach und der Entwickler
+  // löst die Konflikte (höchstens zweimal, danach „Aktion notwendig“ wie bisher).
+  if (mergeProblem && isMergeConflict(mergeProblem) && !item.agentId) {
+    if (await retryAfterConflict(pool, item, mergeProblem).catch(logged('runner-steps', false))) return;
   }
   const succeeded = passed && !mergeProblem;
   if (mergeProblem) {

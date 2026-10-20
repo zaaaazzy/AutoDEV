@@ -16,10 +16,11 @@ function alive(pid: number): boolean {
 test('Zeitlimit beendet die ganze Prozessgruppe, auch Kindprozesse, die stdout offen halten', async () => {
   const startedAt = Date.now();
   // Ohne Gruppen-Kill lebten die beiden sleep weiter, hielten die Pipe offen, und runCommand käme erst nach 30 s zurück.
+  // Grenze 15 s: weit darunter, aber mit Luft, wenn die ganze Suite parallel läuft.
   const result = await runCommand(['sh', '-c', 'sleep 30 & echo "child $!"; sleep 30'], process.cwd(), {
     timeoutMs: 300,
   });
-  assert.ok(Date.now() - startedAt < 5_000, `dauerte ${Date.now() - startedAt} ms`);
+  assert.ok(Date.now() - startedAt < 15_000, `dauerte ${Date.now() - startedAt} ms`);
   assert.notEqual(result.exitCode, 0);
   assert.match(result.output, /Process ended by SIGKILL \(timeout or kill\)/);
   const child = Number(/child (\d+)/.exec(result.output)?.[1]);

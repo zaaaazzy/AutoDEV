@@ -102,3 +102,24 @@ test('Neustart: antwortet der neue Stand nicht, wird auf das vorherige Abbild zu
   const state = await readRestart(pool);
   assert.match(state?.message ?? '', /vorherigen Abbild/);
 });
+
+test('Neustart: meldet das Ende per Benachrichtigung, Erfolg wie Fehlschlag, Zwischenstände nicht', async () => {
+  const pool = memoryPool();
+  const seen: string[] = [];
+  const notify = async (_pool: unknown, state: { status: string }) => {
+    seen.push(state.status);
+  };
+  await requestRestart(pool, 'Patrick');
+  await processRestart(pool, '/x', () => 0, ok, undefined, { health: async () => true, notify });
+  assert.deepEqual(seen, [], 'building und restarting melden nichts');
+  await completeRestart(pool, new Date(), notify);
+  assert.deepEqual(seen, ['done']);
+
+  await requestRestart(pool, null);
+  const failing: CommandExecutor = async () => ({ exitCode: 1, durationMs: 1, output: 'failed to solve' });
+  await processRestart(pool, '/x', () => 0, failing, undefined, { notify });
+  assert.deepEqual(seen, ['done', 'failed']);
+  // Ohne laufenden Neustart meldet ein Worker-Start nichts.
+  await completeRestart(pool, new Date(), notify);
+  assert.deepEqual(seen, ['done', 'failed']);
+});
