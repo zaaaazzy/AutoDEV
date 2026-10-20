@@ -47,6 +47,9 @@ export interface RecordResult {
 export const SAMPLE_MAX = 2000;
 export const CRITICAL_RATE = 50;
 export const DEPLOY_WINDOW_MS = 30 * 60_000;
+/** Ein neuer Fingerabdruck wird erst Bug, wenn er im Zeitfenster so oft aufgetreten ist (Ausfälle sofort). */
+export const BUG_THRESHOLD = 3;
+export const BUG_WINDOW_MS = 24 * 3600_000;
 const SEVERITY_RANK: Severity[] = ['low', 'medium', 'high', 'critical'];
 
 const TIMESTAMP = /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g;
@@ -125,6 +128,11 @@ export function higherSeverity(a: string, b: Severity): Severity {
 export function decideBugAction(bugStatus: string | null | undefined): BugAction {
   if (!bugStatus) return 'create';
   return bugStatus === BUG_STATUS.fixed ? 'reopen' : 'count';
+}
+
+/** Schwelle für neue Bugs: kritische Ereignisse sofort, sonst ab BUG_THRESHOLD Vorkommen im Zeitfenster. */
+export function reachesBugThreshold(recent: number, critical = false): boolean {
+  return critical || recent >= BUG_THRESHOLD;
 }
 
 const FRONTEND =
@@ -215,7 +223,8 @@ export async function recordDeploy(pool: Pick<Pool, 'query'>, project: string): 
 
 /**
  * Erfasst ein (gebündeltes) Ereignis und hält den zugehörigen Bug aktuell: neu anlegen, zählen oder als Regression
- * wieder öffnen. Läuft in einer Transaktion; die Zeile des Ereignisses bleibt bis zum Ende gesperrt, damit
+ * wieder öffnen. Ein neuer Bug entsteht erst ab BUG_THRESHOLD Vorkommen in BUG_WINDOW_MS (kritisch: sofort);
+ * darunter bleibt `bugId` null. Läuft in einer Transaktion; die Zeile des Ereignisses bleibt bis zum Ende gesperrt, damit
  * gleichzeitige Meldungen desselben Fehlers nicht zwei Bugs anlegen.
  */
 export async function recordEvent(
@@ -262,7 +271,21 @@ export async function recordEvent(
           )
         ).rows[0]
       : undefined;
-    const action = decideBugAction(bug?.status);
+    let action = decideBugAction(bug?.status);
+    if (action === 'create' && !error.critical) {
+      // Vorkommen der letzten 24 h aus den Stunden-Buckets (stundengenau, inklusive des angebrochenen ersten Buckets).
+      const recent = Number(
+        (
+          await client.query<{ total: string | number | null }>(
+            `SELECT SUM(count) AS total FROM production_event_buckets
+              WHERE event_id = $1 AND hour >= date_trunc('hour', $2::timestamptz - $3 * INTERVAL '1 millisecond')`,
+            [event.id, now, BUG_WINDOW_MS],
+          )
+        ).rows[0]?.total ?? 0,
+      );
+      // Unter der Schwelle: Ereignis ist gespeichert und gezählt, aber noch ohne Bug.
+      if (!reachesBugThreshold(recent)) action = 'count';
+    }
     let bugId = bug ? event.bugId : null;
     if (action === 'create') {
       bugId = (

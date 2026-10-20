@@ -14,7 +14,7 @@
 
 ## Beschreibung für Ideation (kopierfertig)
 
-AIdeation überwacht nicht nur sich selbst (Wächter), sondern auch die betreuten Anwendungen. Drei Quellen: (1) Health-URL des Projekts wird regelmäßig abgefragt, (2) nach jedem Deploy und periodisch werden `docker compose logs --since` nach Fehlermustern (Stacktraces, `ERROR`, HTTP 5xx) durchsucht, (3) ein Fehler-Endpunkt `POST /api/ingest/<projekt>/<token>` nimmt Frontend- und Backend-Fehler direkt aus der Anwendung an (kleines Snippet in der Doku). Gleiche Fehler werden über einen Fingerabdruck (Meldung + oberster Stack-Frame) gebündelt und zählen hoch statt neue Bugs zu erzeugen. Neue Fehler werden zu Bugs mit Quelle „Betrieb“, Schwere nach Häufigkeit; mit aktivem Auto-Bugfix entsteht direkt ein Bug-Auftrag. Fällt ein Fehler direkt nach einem Deploy neu auf, wird der letzte Sprint/Auftrag als Verdacht verlinkt.
+AIdeation überwacht nicht nur sich selbst (Wächter), sondern auch die betreuten Anwendungen. Drei Quellen: (1) Health-URL des Projekts wird regelmäßig abgefragt, (2) nach jedem Deploy und periodisch werden `docker compose logs --since` nach Fehlermustern (Stacktraces, `ERROR`, HTTP 5xx) durchsucht, (3) ein Fehler-Endpunkt `POST /api/ingest/<projekt>/<token>` nimmt Frontend- und Backend-Fehler direkt aus der Anwendung an (kleines Snippet in der Doku). Gleiche Fehler werden über einen Fingerabdruck (Meldung + oberster Stack-Frame) gebündelt und zählen hoch statt neue Bugs zu erzeugen. Neue Fehler werden ab drei Vorkommen in 24 Stunden (Ausfälle sofort) zu Bugs mit Quelle „Betrieb“, Schwere nach Häufigkeit; mit aktivem Auto-Bugfix entsteht direkt ein Bug-Auftrag. Fällt ein Fehler direkt nach einem Deploy neu auf, wird der letzte Sprint/Auftrag als Verdacht verlinkt.
 
 ## Problem heute
 
@@ -26,7 +26,7 @@ Die Kette endet beim Deploy (`src/runner/deploy.ts`): „Aktualisiert um 14:05�
 2. **Tabelle `production_events`:** Projekt, Fingerabdruck, Quelle (`health|logs|ingest`), erste/letzte Sichtung, Anzahl, Beispiel (gekürzt, maskiert), `bug_id`.
 3. **Sammler im Worker:** Health alle 2 min (2 Fehlschläge in Folge = Ereignis), Log-Scan nach Deploy und alle 15 min (`docker compose logs --since 15m --no-color` – bereits erlaubter Befehl), Ingest über die API mit Rate-Limit.
 4. **Maskierung:** vor dem Speichern Tokens, Passwörter, E-Mails, IPs maskieren (Muster wie im Git-Secret-Scan in `git-sync.ts`).
-5. **Bug-Erzeugung:** neuer Fingerabdruck → Bug (Quelle `production`, Kategorie aus Pfad/Dienst geraten), Schwere: ≥ 50/h oder Health down = `critical`. Bekannter Fingerabdruck eines behobenen Bugs taucht wieder auf → Bug wieder öffnen („Regression“).
+5. **Bug-Erzeugung:** Ein Fingerabdruck ohne Bug wird erst dann Bug (Quelle `production`, Status `open`, Kategorie aus Pfad/Dienst geraten), wenn er innerhalb von 24 Stunden mindestens dreimal aufgetreten ist (Summe der Stunden-Buckets; Konstanten `BUG_THRESHOLD` und `BUG_WINDOW_MS` in `src/runner/production-events.ts`). Darunter wird das Ereignis nur gespeichert und gezählt, ohne `bug_id`. Kritische Ereignisse (`critical: true`, z. B. Health-Ausfall) werden sofort Bug. Schwere: ≥ 50/h oder Health down = `critical`. Bekannter Fingerabdruck eines behobenen Bugs taucht wieder auf → Bug wieder öffnen („Regression“).
 6. **Deploy-Verdacht:** Ereignisse in den 30 min nach einem Deploy verlinken die seitdem committeten Aufträge.
 7. **Oberfläche:** Bugs zeigen Badge „Betrieb · 37× seit gestern“, Detail mit Verlauf; Dashboard-Kachel „Betrieb“ grün/rot; Push bei kritisch.
 
@@ -40,7 +40,9 @@ flowchart LR
   F --> K{bekannt?}
   K -- ja, offen --> Z[Zähler +1]
   K -- ja, behoben --> R[Bug wieder öffnen: Regression]
-  K -- nein --> B[neuer Bug, Quelle Betrieb]
+  K -- nein --> S{kritisch oder ≥ 3× in 24 h?}
+  S -- nein --> N[nur zählen, bug_id leer]
+  S -- ja --> B[neuer Bug, Quelle Betrieb]
   B --> A{Auto-Bugfix?}
   A -- ja --> O[Bug-Auftrag, auto_run]
   B --> D[Verdacht: letzter Deploy / Auftrag]
@@ -61,6 +63,7 @@ flowchart LR
 
 - Mit gesetzter Health-URL erscheint nach 2 fehlgeschlagenen Abfragen ein Bug „Anwendung nicht erreichbar“ (kritisch) und eine Push-Meldung; nach Erholung eine Entwarnung.
 - Ein Fehler, der 10× in den Logs auftaucht, erzeugt genau einen Bug mit Zähler 10.
+- Ein Fehler, der innerhalb von 24 Stunden nur ein- oder zweimal auftritt, erzeugt keinen Bug; erst das dritte Vorkommen legt genau einen an.
 - Taucht der Fingerabdruck eines behobenen Bugs wieder auf, wird dieser Bug als Regression wieder geöffnet.
 - Der Ingest-Endpunkt nimmt nur Anfragen mit gültigem Token an, ist rate-limitiert und speichert keine Geheimnisse im Klartext.
 - Ereignisse innerhalb von 30 min nach einem Deploy verlinken die Aufträge dieses Deploys.

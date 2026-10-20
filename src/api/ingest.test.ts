@@ -41,7 +41,10 @@ test('Ingest ohne Login mit gültigem Token; alle anderen Routen bleiben geschü
     assert.equal(db.events.length, 1);
     assert.equal(db.events[0]!.origin, '/kasse');
     assert.ok(!db.events[0]!.sample.includes('anna@example.ch'), 'E-Mail maskiert');
-    assert.equal(db.bugs[0]!.source, 'production');
+    // Unter der Schwelle: gültige Antwort ohne Bug-Verweis, nur gezählt.
+    assert.deepEqual(JSON.parse(text), { accepted: true });
+    assert.equal(db.events[0]!.bugId, null);
+    assert.equal(db.bugs.length, 0);
 
     for (const [method, path] of [
       ['GET', '/api/projects'],
@@ -52,6 +55,22 @@ test('Ingest ohne Login mit gültigem Token; alle anderen Routen bleiben geschü
     ] as const) {
       assert.equal((await fetch(`${url}${path}`, { method })).status, 401, `${method} ${path}`);
     }
+  });
+});
+
+test('Ingest: erst die dritte gleiche Meldung legt einen Bug an', async () => {
+  const db = new FakeProductionDb({ tokenHash: hashIngestToken(TOKEN) });
+  await withApp(db, async (url) => {
+    for (let index = 1; index <= 3; index += 1) {
+      const response = await report(url);
+      assert.equal(response.status, 202);
+      assert.deepEqual(await response.json(), { accepted: true });
+      assert.equal(db.bugs.length, index < 3 ? 0 : 1, `nach ${index} Meldungen`);
+    }
+    assert.equal(db.events[0]!.count, 3);
+    assert.equal(db.events[0]!.bugId, db.bugs[0]!.id);
+    assert.equal(db.bugs[0]!.source, 'production');
+    assert.equal(db.bugs[0]!.status, 'open');
   });
 });
 
