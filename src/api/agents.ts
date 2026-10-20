@@ -4,7 +4,7 @@ import { seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
 import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
-import type { Router } from 'express';
+import type { Response, Router } from 'express';
 import type { Pool } from 'pg';
 import {
   buildUpdate,
@@ -21,6 +21,7 @@ import {
   parseTitle,
 } from '../core/validation.js';
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { hasRole, type Principal } from './roles.js';
 
 const ROLES = new Set([
   'author',
