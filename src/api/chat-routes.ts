@@ -2,6 +2,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { parseReferences, resolveReferences } from '../agent/chat-references.js';
+import { sessionStillAllowed } from './auth.js';
 import { CHAT_TARGETS, chatTargetsFor } from './chat-targets.js';
 import { hasRole, type Principal } from './roles.js';
 
@@ -28,7 +29,11 @@ async function loadMessages(pool: Pool, slug: string): Promise<unknown[]> {
   ).rows;
 }
 
-export function registerChatRoutes(app: Router, pool: Pool): void {
+/** Wie oft ein offener Chat-Stream Sitzung und Projektfreigabe erneut prüft. */
+const STREAM_RECHECK_MS = 15_000;
+
+export function registerChatRoutes(app: Router, pool: Pool, options: { recheckMs?: number } = {}): void {
+  const recheckMs = options.recheckMs ?? STREAM_RECHECK_MS;
   app.get('/projects/:slug/chat', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
@@ -73,10 +78,22 @@ export function registerChatRoutes(app: Router, pool: Pool): void {
     response.flushHeaders();
     let last = '';
     let busy = false;
+    // Sitzung aus dem Login (Basic Auth und Betrieb ohne Login haben keine, die später enden könnte).
+    const token = response.locals.sessionToken as string | undefined;
+    let checkedAt = Date.now();
     const push = async (): Promise<void> => {
       if (busy) return;
       busy = true;
       try {
+        // Logout, Deaktivierung oder entzogene Projektfreigabe beenden den Stream.
+        if (token && Date.now() - checkedAt >= recheckMs) {
+          checkedAt = Date.now();
+          if (!(await sessionStillAllowed(pool, token, slug))) {
+            clearInterval(timer);
+            response.end();
+            return;
+          }
+        }
         const messages = await loadMessages(pool, slug);
         const snapshot = JSON.stringify(messages);
         if (snapshot !== last) {
@@ -86,6 +103,7 @@ export function registerChatRoutes(app: Router, pool: Pool): void {
           response.write(': ping\n\n');
         }
       } catch {
+        clearInterval(timer);
         response.end();
       } finally {
         busy = false;
