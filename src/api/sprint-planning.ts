@@ -166,6 +166,16 @@ export async function autopilotGuard(pool: Pool, project: string, now = new Date
   if (last?.sync === 'pending' || last?.sync === 'running') {
     return guard('finishing', `Abschluss von „${last.name}“ läuft (Test-Gate, Merge, Push).`);
   }
+  // PR-Modus: Der nächste Sprint startet erst, wenn der Pull Request gemergt ist (sonst fehlt der Stand in main).
+  const review = (
+    await pool.query<{ name: string }>(
+      `SELECT name FROM sprints WHERE project_slug = $1 AND status = 'review' ORDER BY updated_at LIMIT 1`,
+      [project],
+    )
+  ).rows[0];
+  if (review) {
+    return guard('finishing', `Pull Request von „${review.name}“ wartet auf grüne CI bzw. Freigabe.`);
+  }
   if (!withinWorkingHours(now, workingHours)) {
     return guard(
       'outside_hours',

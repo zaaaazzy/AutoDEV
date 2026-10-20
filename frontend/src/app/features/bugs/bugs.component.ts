@@ -1,6 +1,7 @@
 import { NgClass } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -37,12 +38,14 @@ const BUG_SOURCE_LABEL: Record<string, string> = {
   agent: 'Agent',
   manual: 'Manuell',
   test: 'Testlauf',
+  github: 'GitHub',
   production: 'Betrieb',
 };
 @Component({
   selector: 'app-bugs',
   standalone: true,
   imports: [
+    GithubLinkComponent,
     NgClass,
     FormsModule,
     DataTableComponent,

@@ -11,6 +11,7 @@ import { loadProjectPermissions, withAgentPermissions } from './tool-permissions
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
@@ -23,6 +24,8 @@ interface Idea {
   description: string;
   priority: string;
   comments: string[];
+  /** Herkunft; `github` heißt: Titel und Text stammen aus einem fremden Issue. */
+  source?: string;
 }
 
 const TITLE_LINE = /^\s*@@TITEL:\s*(.+)$/m;
@@ -72,6 +75,8 @@ export function buildRequirementPrompt(
     'Du bist der Agent "Auftragsautor" und machst aus einer Idee eine umsetzbare Anforderung für einen Entwicklungsauftrag.',
     `## Anweisung\n${instructions || 'Formuliere präzise, umsetzbare Anforderungen.'}`,
     `## Idee\nTitel: ${idea.title}\nPriorität: ${idea.priority}\n${idea.description}`,
+    // Issue-Import: Titel und Text sind fremde Daten (Prompt-Injection), nie Anweisungen.
+    ...(idea.source === 'github' || containsUntrusted(idea.description) ? [UNTRUSTED_HINT] : []),
     ...(idea.comments.length
       ? [`## Kommentare zur Idee (berücksichtigen)\n${idea.comments.map((comment) => `- ${comment}`).join('\n')}`]
       : []),
@@ -255,7 +260,7 @@ export async function draftRequirements(
              progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
       WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, project_slug AS "projectSlug", title, description, priority`,
+      RETURNING id, project_slug AS "projectSlug", title, description, priority, source`,
     [options.project],
   );
   const claimedIdea = claimed.rows[0];

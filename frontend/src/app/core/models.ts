@@ -1,5 +1,7 @@
 export type Priority = 'low' | 'medium' | 'high';
-export type SprintStatus = 'planned' | 'active' | 'completed';
+/** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
+export type SprintStatus = 'planned' | 'active' | 'review' | 'completed';
+export type GithubMode = 'aus' | 'issues' | 'issues+pr';
 export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'approval' | 'done' | 'rejected';
 export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
 /** Workflow-Phasen (Spalten im Workflow-Board); siehe src/core/workflow-phases.ts. */
@@ -38,6 +40,15 @@ export interface Project {
   definitionOfDone?: string[] | null;
   /** Stand des Favicons der Anwendung (null = keines gefunden). */
   faviconVersion?: number | null;
+  /** GitHub-Brücke: Issue-Import und Rückmeldung, optional Pull Request beim Sprint-Abschluss. */
+  githubMode?: GithubMode;
+  /** PR-Modus: erst nach Approve eines Menschen mergen. */
+  githubRequireApproval?: boolean;
+  githubSyncedAt?: string | null;
+  /** Ergebnis von „gh auth status“ auf dem Worker (null = noch nicht geprüft). */
+  githubAuth?: 'ok' | 'missing' | null;
+  githubAuthMessage?: string | null;
+  githubAuthCheckedAt?: string | null;
   /** Produktions-Rückkanal: Health-URL, Compose-Dienste, Ausschlussmuster, Aufbewahrung, Ingest-Token hinterlegt. */
   healthUrl?: string | null;
   logServices?: string[];
@@ -68,6 +79,8 @@ export interface Idea extends Estimate {
   /** Herkunft: von Hand erfasst oder vom Visionär vorgeschlagen (weitere Quellen folgen). */
   source?: IdeaSource;
   rejectionReason?: string | null;
+  /** Herkunft aus GitHub: owner/repo#123. */
+  externalRef?: string | null;
 }
 
 export type IdeaSource = 'human' | 'visionary' | 'routine' | 'production' | 'github';
@@ -171,6 +184,9 @@ export interface Sprint {
   gitCommit?: string | null;
   gitBranch?: string | null;
   gitSyncedAt?: string | null;
+  /** PR-Modus: Link des Pull Requests und CI-Ampel. */
+  prUrl?: string | null;
+  ciStatus?: 'pending' | 'success' | 'failure' | null;
   /** Alle Aufträge durch: wartet auf das Go („Live schalten“). */
   reviewReadyAt?: string | null;
 }
@@ -182,11 +198,13 @@ export interface Bug {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: BugStatus;
-  source: 'agent' | 'manual' | 'test' | 'production';
+  source: 'agent' | 'manual' | 'test' | 'github' | 'production';
   sprintId: string | null;
   fixNotes: string | null;
   createdAt: string;
   fixedAt: string | null;
+  /** Herkunft aus GitHub: owner/repo#123. */
+  externalRef?: string | null;
   /** Betriebs-Bug, der nach dem Beheben wieder auftrat. */
   regressedAt?: string | null;
   /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
@@ -232,6 +250,12 @@ export interface ProductionEvent {
   count: number;
   sample: string;
   deploySuspect: DeploySuspect | null;
+}
+
+/** Link zum GitHub-Issue aus owner/repo#123 (null bei ungültigem Verweis). */
+export function githubIssueLink(ref: string | null | undefined): { url: string; label: string } | null {
+  const match = /^([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100})#(\d{1,10})$/.exec(ref ?? '');
+  return match ? { url: `https://github.com/${match[1]}/issues/${match[2]}`, label: `GitHub #${match[2]}` } : null;
 }
 
 export interface DocumentEntry {

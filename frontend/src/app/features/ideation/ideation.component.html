@@ -168,6 +168,7 @@
       @if (idea.source === 'visionary') {
         <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">Visionär</span>
       }
+      <app-github-link [ref]="idea.externalRef" />
       @if (idea.description) {
         <span
           class="summary-hint"

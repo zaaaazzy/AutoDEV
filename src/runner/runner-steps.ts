@@ -711,6 +711,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   }
   // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
   let mergeProblem: string | null = null;
+  let commit: string | null = null;
   if (ctx.branch) {
     // Review-Freigabe (Projekteinstellung): nur ganze Abläufe, nicht das Ausführen eines einzelnen Agents.
     const review =
@@ -723,8 +724,16 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
       return;
     }
     if (passed && !result.merged) mergeProblem = result.message;
+    commit = result.commit;
   } else if (passed && ctx.sprintName) {
-    await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
+    commit = await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
+  }
+  if (commit) {
+    // Verweis für die GitHub-Rückmeldung (Issue schließen mit Commit). Nur ein Zusatz: Fehlt er, nennt der
+    // Kommentar keinen Commit – der Abschluss des Auftrags darf daran nicht scheitern.
+    await pool
+      .query(`UPDATE development_items SET git_commit = $2 WHERE id = $1`, [item.id, commit])
+      .catch((error: unknown) => console.warn(`[${item.id}] Commit-Verweis nicht gespeichert: ${String(error)}`));
   }
   // Merge-Konflikt mit der Basis: automatisch neu einplanen; der nächste Lauf zieht die Basis nach und der Entwickler
   // löst die Konflikte (höchstens zweimal, danach „Aktion notwendig“ wie bisher).

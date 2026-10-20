@@ -1,10 +1,11 @@
 import { PermissionGroupsSettingsComponent } from './permission-groups-settings.component.js';
 import { Component, effect, inject, untracked } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { ReviewSlotsSettingsComponent } from './review-slots-settings.component.js';
 import { FolderPickerComponent } from '../../shared/folder-picker.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { AgentStatus, Project } from '../../core/models.js';
+import type { AgentStatus, GithubMode, Project } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
 import { ProductionSettingsComponent } from './production-settings.component.js';
@@ -20,6 +21,7 @@ import { AuthService } from '../../core/auth.service.js';
     FolderPickerComponent,
     ProductionSettingsComponent,
     PermissionGroupsSettingsComponent,
+    DatePipe,
     FormsModule,
     NotificationSettingsComponent,
     SecuritySettingsComponent,
@@ -56,6 +58,8 @@ export class SettingsComponent {
     autopilotDays: [1, 2, 3, 4, 5] as number[],
     databaseUrl: '',
     clearDatabase: false,
+    githubMode: 'aus' as GithubMode,
+    githubRequireApproval: false,
   };
   /** Wochentage der Arbeitszeiten (ISO: 1 = Montag). */
   protected readonly weekdays = [
@@ -132,6 +136,8 @@ export class SettingsComponent {
           autopilotStart: this.settings.autopilotStart,
           autopilotEnd: this.settings.autopilotEnd,
           autopilotDays: this.settings.autopilotDays,
+          githubMode: this.settings.githubMode,
+          githubRequireApproval: this.settings.githubRequireApproval,
           ...(this.settings.clearDatabase
             ? { databaseUrl: '' }
             : this.settings.databaseUrl.trim()
@@ -144,6 +150,26 @@ export class SettingsComponent {
         await this.store.loadProject(slug);
       },
       'Projekteinstellungen gespeichert.',
+      false,
+    );
+  }
+
+  /** Die Brücke braucht ein GitHub-Repository (wie im Backend über githubRepo geprüft). */
+  protected githubRemote(): boolean {
+    return /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)[^/\s]+\/[^/\s]+$/.test(
+      this.settings.gitRemote.trim(),
+    );
+  }
+
+  /** „Anmeldung erneut prüfen“: der Worker fragt `gh auth status` beim nächsten Takt ab. */
+  protected async checkGithub(): Promise<void> {
+    const slug = this.store.activeProject();
+    await this.store.perform(
+      async () => {
+        await this.api.post(`/api/projects/${encodeURIComponent(slug)}/github/check`, {});
+        await this.store.loadProject(slug);
+      },
+      'Anmeldung wird beim nächsten Worker-Takt (spätestens in einer Minute) geprüft.',
       false,
     );
   }
@@ -182,6 +208,8 @@ export class SettingsComponent {
       autopilotDays: [...(project?.autopilotDays ?? [1, 2, 3, 4, 5])],
       databaseUrl: '',
       clearDatabase: false,
+      githubMode: project?.githubMode ?? 'aus',
+      githubRequireApproval: project?.githubRequireApproval ?? false,
       deployCommands: (project?.deployCommands ?? []).map((command) => command.join(' ')).join('\n'),
       testCommands: (project?.testCommands ?? []).map((command) => command.join(' ')).join('\n'),
     };

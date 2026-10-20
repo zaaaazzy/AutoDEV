@@ -83,6 +83,7 @@
         <ng-template appDataCell="title" let-bug>
           <div class="title-with-hint">
             <button type="button" class="link-button clamp" (click)="toggleBug(bug.id)">{{ bug.title }}</button>
+            <app-github-link [ref]="bug.externalRef" />
             @if (bug.source === 'production') {
               <span class="tag production-badge" [attr.title]="'Vorkommen der letzten 24 Stunden'"
                 >Betrieb · {{ bug.productionCount ?? 0 }}× seit gestern</span

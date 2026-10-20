@@ -1,6 +1,7 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, HostListener, inject, input, model, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
 import type { Idea } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -17,6 +18,7 @@ import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './
   selector: 'app-idea-detail',
   standalone: true,
   imports: [
+    GithubLinkComponent,
     CommentThreadComponent,
     DatePipe,
     DecimalPipe,

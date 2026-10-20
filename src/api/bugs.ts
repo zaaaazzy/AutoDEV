@@ -19,6 +19,7 @@ import {
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
   sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
+  external_ref AS "externalRef",
   regressed_at AS "regressedAt"`;
 /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden („seit gestern“) über alle gebündelten Ereignisse. */
 const PRODUCTION_COUNT = `CASE WHEN source = 'production' THEN (

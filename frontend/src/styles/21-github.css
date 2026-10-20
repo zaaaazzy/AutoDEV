@@ -1,0 +1,51 @@
+/* GitHub-Brücke: Link zum Issue, Einstellungen und CI-Ampel am Sprint. */
+a.github-link {
+  background: #eef1f4;
+  color: #24292f;
+  text-decoration: none;
+}
+a.github-link:hover {
+  text-decoration: underline;
+}
+.github-bridge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.github-auth {
+  flex-basis: 100%;
+  margin: 0;
+}
+.github-auth.ok {
+  color: var(--green);
+}
+.github-auth.missing {
+  color: #b54708;
+}
+.ci-light {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+}
+.ci-light::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #c4c8c2;
+}
+.ci-light.success::before {
+  background: #2f9e5b;
+}
+.ci-light.pending::before {
+  background: #e3a008;
+}
+.ci-light.failure::before {
+  background: #d1453b;
+}

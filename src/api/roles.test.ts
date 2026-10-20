@@ -6,6 +6,9 @@ import { hasRole, requiredRole } from './roles.js';
 test('every write maps to the right role; reads and own-account actions need none', () => {
   assert.equal(requiredRole('POST', '/api/users', {}), 'admin');
   assert.equal(requiredRole('POST', '/api/projects', {}), 'admin');
+  // GitHub-Brücke: Modus und Anmeldeprüfung nur für Administratoren (wie die übrigen Projekteinstellungen).
+  assert.equal(requiredRole('PATCH', '/api/projects/p', { githubMode: 'issues+pr' }), 'admin');
+  assert.equal(requiredRole('POST', '/api/projects/p/github/check', {}), 'admin');
   assert.equal(requiredRole('PATCH', '/api/agents/1', {}), 'agents');
   assert.equal(requiredRole('POST', '/api/projects/x/agents/1/cancel', {}), 'run');
   assert.equal(requiredRole('PATCH', '/api/development/1', { agentId: 'a' }), 'run');

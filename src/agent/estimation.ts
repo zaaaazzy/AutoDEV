@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCommand } from '../core/command.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
 import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';
@@ -129,6 +130,8 @@ export async function estimateNewIdeas(
       '{"effortHours": Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',
       context ? `Projekt: ${context}` : '',
       `Titel: ${idea.title}\n${idea.description.slice(0, 1500)}`,
+      // Aus GitHub übernommene Ideen: fremder Text, nur Daten.
+      containsUntrusted(idea.description) ? UNTRUSTED_HINT : '',
     ]
       .filter(Boolean)
       .join('\n\n');

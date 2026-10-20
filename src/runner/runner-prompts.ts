@@ -3,6 +3,7 @@ import { HANDOFF_RULE } from '../core/workflow-phases.js';
 import { acceptanceInstructions } from './acceptance.js';
 import { reviewInstructions } from './review.js';
 import { COVERAGE_INSTRUCTIONS } from './coverage.js';
+import { containsUntrusted, UNTRUSTED_HINT } from './hoster.js';
 import type { PromptExtras, StepSummary, WorkItem, WorkflowAgent } from './runner-types.js';
 
 export const PHASE_ORDER = ['pre_task', 'while_task', 'after_task'] as const;
@@ -35,6 +36,7 @@ export function buildPrompt(
       ? `## Anweisung für diesen Schritt (hat Vorrang)\n${agent.stepInstructions.trim()}`
       : '',
     `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
+    containsUntrusted(item.description) ? UNTRUSTED_HINT : '',
     item.risks?.trim() ? `## Risiken (vom Bug-Wächter geprüft)\n${item.risks.trim()}` : '',
     extras.images?.length
       ? `## Angehängte Bilder (aus Idee bzw. Bug-Meldung, relativ zum Projektordner)\n${extras.images.map((path) => `- ${path}`).join('\n')}`

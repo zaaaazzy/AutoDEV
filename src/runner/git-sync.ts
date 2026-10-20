@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import type { Pool } from 'pg';
 import { withProjectLock } from '../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
+import { createGithubAdapter, githubRepo } from './github.js';
+import type { CiStatus, HosterAdapter } from './hoster.js';
 import { SECRET_PATTERNS } from '../core/secret-mask.js';
 import { loadTestCommands } from './runner-selection.js';
 import { requestRestart } from './system-restart.js';
@@ -686,6 +688,14 @@ interface PendingSprint {
   action: 'push' | 'pull' | null;
   remote: string | null;
   status: string;
+  prUrl?: string | null;
+}
+
+/** PR-Modus beim Sprint-Abschluss: Adapter des Hosters, Sprintbericht als Text und ein schon offener Pull Request. */
+interface PullRequestPlan {
+  adapter: HosterAdapter;
+  body: string;
+  existing: string | null;
 }
 
 async function configureOrigin(git: GitHelpers['git'], must: GitHelpers['must'], remote: string): Promise<void> {
@@ -702,6 +712,8 @@ interface SyncResult {
   log: string[];
   /** Der Sprint wurde in diesem Lauf nach main gemergt. */
   mergedMain?: boolean;
+  /** PR-Modus: Link des geöffneten Pull Requests; Merge und Tag folgen nach grüner CI. */
+  pullRequest?: string;
 }
 
 /**
@@ -713,7 +725,13 @@ async function pushSprint(
   sprint: PendingSprint,
   log: string[],
   gate: (log: string[]) => Promise<void>,
-  ci: { cwd: string; commands: string[][]; execute: CommandExecutor; mergeElsewhere?: boolean },
+  ci: {
+    cwd: string;
+    commands: string[][];
+    execute: CommandExecutor;
+    mergeElsewhere?: boolean;
+    pullRequest?: PullRequestPlan | null;
+  },
 ): Promise<SyncResult> {
   const { git, must } = helpers;
   const branch = sprintBranch(sprint.name);
@@ -755,6 +773,21 @@ async function pushSprint(
   if (sprint.remote) {
     await must('push', '-u', 'origin', current);
     log.push(`${current} nach GitHub gepusht.`);
+  }
+  if (sprint.status === 'review') {
+    // Nachbesserung im Review: der Push aktualisiert den Pull Request; der Tag folgt erst nach dem Merge.
+    log.push('Sprint im Review: Pull Request aktualisiert, Merge und Tag folgen nach grüner CI.');
+    return { commit: await must('rev-parse', '--short', 'HEAD'), branch: current, log };
+  }
+  if (sprint.status === 'completed' && current === branch && ci.pullRequest && sprint.remote) {
+    // PR-Modus: statt direkt zu mergen einen Pull Request öffnen; den Merge übernimmt pollSprintReviews.
+    const { adapter, body, existing } = ci.pullRequest;
+    const url =
+      existing ??
+      (await adapter.findPullRequest(branch)) ??
+      (await adapter.createPullRequest({ head: branch, base: MAIN_BRANCH, title: `Sprint: ${sprint.name}`, body }));
+    log.push(`Pull Request ${url} geöffnet – Merge nach ${MAIN_BRANCH} und Tag folgen nach grüner CI.`);
+    return { commit: await must('rev-parse', '--short', 'HEAD'), branch: current, log, pullRequest: url };
   }
   if (sprint.status === 'completed' && current === branch) {
     if (sprint.remote) await waitForCi(ci.execute, ci.cwd, branch, log);
@@ -893,7 +926,7 @@ export async function syncSprintToGit(
     `UPDATE sprints s SET git_sync = 'running'
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING s.id, s.name, s.status, s.git_action AS action,
+      RETURNING s.id, s.name, s.status, s.git_action AS action, s.pr_url AS "prUrl",
                 (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
   );
@@ -920,6 +953,8 @@ export async function syncSprintToGit(
           .catch(() => ({ rows: [] as { restart: boolean }[] }))
       ).rows[0]?.restart === true;
     const gate = (entries: string[]) => runTestGate(rawExecute, cwd, commands, entries);
+    const pullRequest =
+      sprint.action === 'pull' ? null : await planPullRequest(pool, project, sprint, cwd, rawExecute, log);
     const result =
       sprint.action === 'pull'
         ? await pullSprint(helpers, sprint, log)
@@ -928,7 +963,16 @@ export async function syncSprintToGit(
             commands,
             execute: rawExecute,
             mergeElsewhere: restartAfterSprint,
+            pullRequest,
           });
+    if (result.pullRequest) {
+      await pool.query(
+        `UPDATE sprints SET status = 'review', pr_url = $5, ci_status = 'pending', ci_bug_run = NULL, git_sync = 'done',
+                git_message = $2, git_commit = $3, git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
+        [sprint.id, result.log.join(' '), result.commit, result.branch, result.pullRequest],
+      );
+      return 1;
+    }
     if (result.mergedMain && onMergedMain) {
       await onMergedMain().catch((error: unknown) =>
         result.log.push(`Live schalten unvollständig: ${error instanceof Error ? error.message : String(error)}`),
@@ -958,4 +1002,215 @@ export async function syncSprintToGit(
     console.error(`Git-Sicherung für Sprint ${sprint.id} fehlgeschlagen: ${message}`);
     return 0;
   }
+}
+
+/**
+ * Entscheidet über den PR-Modus beim Sprint-Abschluss: nur bei `github_mode = 'issues+pr'`, GitHub-Remote und
+ * angemeldeter gh CLI. Sonst null – dann läuft der Abschluss wie bisher (direkter Merge).
+ */
+async function planPullRequest(
+  pool: Pool,
+  project: string,
+  sprint: PendingSprint,
+  cwd: string,
+  execute: CommandExecutor,
+  log: string[],
+): Promise<PullRequestPlan | null> {
+  if (sprint.status !== 'completed') return null;
+  const settings = (
+    await pool
+      .query<{ mode: string }>('SELECT github_mode AS mode FROM projects WHERE slug = $1', [project])
+      .catch(() => ({ rows: [] as { mode: string }[] }))
+  ).rows[0];
+  const repo = githubRepo(sprint.remote);
+  if (settings?.mode !== 'issues+pr' || !repo) return null;
+  const adapter = createGithubAdapter(repo, execute, cwd);
+  const auth = await adapter.authStatus();
+  if (!auth.ok) {
+    log.push(`PR-Modus übersprungen (${auth.message}) – Abschluss wie bisher.`);
+    return null;
+  }
+  const report = (
+    await pool.query<{ content: string }>(
+      `SELECT content FROM docs WHERE project_slug = $1 AND kind = 'sprint' AND sprint_id = $2
+        ORDER BY updated_at DESC LIMIT 1`,
+      [project, sprint.id],
+    )
+  ).rows[0]?.content;
+  return {
+    adapter,
+    body: `${report || `Sprint ${sprint.name}`}\n\n---\n_Automatisch geöffnet vom Mainty Dev Log._`,
+    existing: sprint.prUrl ?? null,
+  };
+}
+
+const CI_LOG_LINES = 60;
+const CI_LOG_CHARS = 3_000;
+const SECRET_ASSIGNMENT =
+  /\b([A-Za-z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_KEY)[A-Za-z0-9_]*)(\s*[=:]\s*)("?)[^\s"']{4,}\3/gi;
+
+/** Maskiert Zugangsdaten: Werte geheimer Umgebungsvariablen, bekannte Token-Formate und „TOKEN=…“-Zuweisungen. */
+export function maskSecrets(text: string, environment: NodeJS.ProcessEnv = process.env): string {
+  let masked = redactOutput(text, environment);
+  for (const pattern of SECRET_CONTENT) {
+    masked = masked.replace(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`), '[REDACTED]');
+  }
+  return masked.replace(SECRET_ASSIGNMENT, '$1$2[REDACTED]');
+}
+
+/** Gekürzter, maskierter Auszug aus dem Log eines roten CI-Laufs: die letzten Zeilen, höchstens 3000 Zeichen. */
+export function ciLogExcerpt(log: string, environment: NodeJS.ProcessEnv = process.env): string {
+  const lines = maskSecrets(log, environment)
+    .replace(/\r/g, '')
+    .split('\n')
+    .filter((line) => line.trim());
+  const tail = lines.slice(-CI_LOG_LINES).join('\n');
+  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-CI_LOG_CHARS)}` : tail;
+}
+
+interface ReviewSprint {
+  id: string;
+  name: string;
+  prUrl: string;
+  ciStatus: CiStatus | null;
+  ciBugRun: string | null;
+}
+
+/** Legt für einen roten CI-Lauf genau einen Bug an (der Lauf wird am Sprint vermerkt, bevor der Bug entsteht). */
+async function reportCiFailure(
+  pool: Pool,
+  project: string,
+  sprint: ReviewSprint,
+  run: string,
+  adapter: HosterAdapter,
+): Promise<void> {
+  const claimed = await pool.query(
+    `UPDATE sprints SET ci_bug_run = $2 WHERE id = $1 AND ci_bug_run IS DISTINCT FROM $2 RETURNING id`,
+    [sprint.id, run],
+  );
+  if (!claimed.rows[0]) return;
+  const log = await adapter
+    .failedRunLog(run)
+    .catch((error: unknown) => `Log nicht abrufbar: ${error instanceof Error ? error.message : String(error)}`);
+  const excerpt = ciLogExcerpt(log);
+  await pool.query(
+    `INSERT INTO bugs (project_slug, title, description, severity, source) VALUES ($1, $2, $3, 'high', 'github')`,
+    [
+      project,
+      `CI rot im Pull Request von „${sprint.name}“`.slice(0, 180),
+      [
+        `Der CI-Lauf ${run} für den Pull Request ${sprint.prUrl} ist fehlgeschlagen. Der Sprint bleibt im Review und ` +
+          `wird nicht gemergt; nach einem grünen Lauf übernimmt Dev Log Merge und Tag.`,
+        'Auszug aus `gh run view --log-failed` (gekürzt, Zugangsdaten maskiert):',
+        `\`\`\`text\n${excerpt.replace(/```/g, "'''") || '(kein Log)'}\n\`\`\``,
+      ].join('\n\n'),
+    ],
+  );
+}
+
+/**
+ * Nach dem Merge auf GitHub: main holen, den Sprint-Tag wie bisher setzen und pushen und das lokale main nachziehen,
+ * sofern es nicht in einem anderen Ordner ausgecheckt ist (dort bleibt es beim Hinweis).
+ */
+export async function tagMergedSprint(
+  cwd: string,
+  sprint: { id: string; name: string },
+  rawExecute: CommandExecutor = runCommand,
+): Promise<{ commit: string; log: string[] }> {
+  const execute: CommandExecutor = (command, directory, options) =>
+    withProjectLock(cwd, () => rawExecute(command, directory, options));
+  const { git, must } = gitHelpers(execute, cwd);
+  const log: string[] = [];
+  const remoteMain = `refs/remotes/origin/${MAIN_BRANCH}`;
+  await must('fetch', 'origin', `+refs/heads/${MAIN_BRANCH}:${remoteMain}`);
+  const tag = sprintTag(sprint.name, sprint.id);
+  await must('tag', '-f', tag, remoteMain);
+  await must('push', '--force', 'origin', `refs/tags/${tag}`);
+  log.push(`Pull Request gemergt, Tag ${tag} gepusht.`);
+  const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).output;
+  const elsewhere = head === MAIN_BRANCH ? null : await checkedOutElsewhere(git, MAIN_BRANCH, cwd);
+  if (elsewhere) {
+    log.push(`${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt – dort mit „git pull“ übernehmen.`);
+  } else {
+    // Nur Fast-Forward: lokale Commits auf main gehen nie verloren.
+    const updated =
+      head === MAIN_BRANCH
+        ? await git('merge', '--ff-only', remoteMain)
+        : await git('fetch', 'origin', `${MAIN_BRANCH}:${MAIN_BRANCH}`);
+    log.push(
+      updated.exitCode === 0
+        ? `Lokales ${MAIN_BRANCH} aktualisiert.`
+        : `Lokales ${MAIN_BRANCH} weicht ab – bitte mit „git pull“ übernehmen.`,
+    );
+  }
+  return { commit: await must('rev-parse', '--short', remoteMain), log };
+}
+
+/**
+ * Verfolgt Sprints im Review (PR-Modus): CI-Status speichern, bei roter CI einen Bug je Lauf anlegen, bei grüner CI
+ * (und, falls gefordert, nach Approve) mergen und taggen. Wurde der Pull Request von Hand gemergt, wird nur getaggt.
+ * Gibt die Zahl der abgeschlossenen Sprints zurück.
+ */
+export async function pollSprintReviews(
+  pool: Pool,
+  project: string,
+  cwd: string,
+  adapter: HosterAdapter,
+  requireApproval: boolean,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<number> {
+  const sprints = (
+    await pool.query<ReviewSprint>(
+      `SELECT id, name, pr_url AS "prUrl", ci_status AS "ciStatus", ci_bug_run AS "ciBugRun" FROM sprints
+        WHERE project_slug = $1 AND status = 'review' AND pr_url IS NOT NULL ORDER BY updated_at`,
+      [project],
+    )
+  ).rows;
+  let finished = 0;
+  for (const sprint of sprints) {
+    const pr = await adapter.pullRequestState(sprint.prUrl);
+    if (pr.state === 'closed') {
+      await pool.query(
+        `UPDATE sprints SET status = 'completed', git_sync = 'failed', git_message = $2, git_synced_at = NOW()
+          WHERE id = $1 AND status = 'review'`,
+        [
+          sprint.id,
+          `Pull Request ${sprint.prUrl} wurde ohne Merge geschlossen – ${MAIN_BRANCH} bleibt unverändert. ` +
+            'Sprint-Branch manuell übernehmen oder die Git-Sicherung erneut starten.',
+        ],
+      );
+      continue;
+    }
+    let ciStatus = sprint.ciStatus;
+    if (pr.state === 'open') {
+      const checks = await adapter.pullRequestChecks(sprint.prUrl);
+      ciStatus = checks.status;
+      if (checks.status !== sprint.ciStatus) {
+        await pool.query(`UPDATE sprints SET ci_status = $2 WHERE id = $1`, [sprint.id, checks.status]);
+      }
+      if (checks.status === 'failure') {
+        if (checks.failedRun && checks.failedRun !== sprint.ciBugRun) {
+          await reportCiFailure(pool, project, sprint, checks.failedRun, adapter);
+        }
+        continue;
+      }
+      if (checks.status === 'pending') continue;
+      if (requireApproval && !pr.approved) {
+        await pool.query(`UPDATE sprints SET git_message = $2 WHERE id = $1`, [
+          sprint.id,
+          `CI grün – wartet auf Freigabe (Approve) im Pull Request ${sprint.prUrl}.`,
+        ]);
+        continue;
+      }
+      await adapter.mergePullRequest(sprint.prUrl);
+    }
+    const tagged = await tagMergedSprint(cwd, sprint, rawExecute);
+    await pool.query(
+      `UPDATE sprints SET status = 'completed', ci_status = $5, git_sync = 'done', git_message = $2, git_commit = $3,
+              git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
+      [sprint.id, tagged.log.join(' '), tagged.commit, MAIN_BRANCH, ciStatus],
+    );
+    finished += 1;
+  }
+  return finished;
 }

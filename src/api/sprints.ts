@@ -17,7 +17,7 @@ const SPRINT_STATUSES = new Set(['planned', 'active', 'completed']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(end_date, 'YYYY-MM-DD') AS "endDate",
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
-  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt",
+  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt", pr_url AS "prUrl", ci_status AS "ciStatus",
   review_ready_at AS "reviewReadyAt"`;
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
@@ -42,7 +42,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     }
     const result = await pool.query(
       `SELECT ${SPRINT_COLUMNS} FROM sprints WHERE project_slug = $1
-        ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'planned' THEN 1 ELSE 2 END, start_date NULLS LAST, created_at`,
+        ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'review' THEN 1 WHEN 'planned' THEN 2 ELSE 3 END, start_date NULLS LAST, created_at`,
       [slug],
     );
     response.json({ sprints: result.rows });
@@ -92,6 +92,18 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     }
     const update = buildUpdate('sprints', request.params.id, fields, SPRINT_COLUMNS);
     try {
+      if (fields.some((field) => field.column === 'status')) {
+        // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
+        const current = await pool.query<{ status: string }>('SELECT status FROM sprints WHERE id = $1', [
+          request.params.id,
+        ]);
+        if (current.rows[0]?.status === 'review') {
+          response.status(409).json({
+            message: 'Der Sprint ist im Review: Merge und Abschluss folgen nach grüner CI im Pull Request.',
+          });
+          return;
+        }
+      }
       const result = await pool.query(update.sql, update.values);
       if (!result.rows[0]) {
         response.status(404).json({ message: 'Sprint not found.' });
