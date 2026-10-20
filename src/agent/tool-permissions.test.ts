@@ -15,6 +15,7 @@ import {
   CUSTOM_GROUP_ID,
   DEFAULT_PERMISSION_GROUPS,
   extraReadDirectories,
+  forbiddenSubcommand,
   FULL_ACCESS_ROLES,
   gitPathProblem,
   guardHookCommand,
@@ -578,4 +579,70 @@ test('git diff: Pfade ausserhalb des Projekts (No-Index-Modus) sind gesperrt', (
     assert.ok(isAllowedCommand(command, root), command);
   }
   assert.equal(gitPathProblem('git log /etc/hosts', root), null, 'nur git diff schaltet in den No-Index-Modus');
+});
+
+test('customRuleProblem: breite Präfixe, die gesperrte Unterbefehle umfassen, sind gesperrt', () => {
+  for (const rule of [
+    'Bash(git:*)',
+    'Bash(docker:*)',
+    'Bash(docker compose:*)',
+    'Bash(npm:*)',
+    'Bash(npm i:*)',
+    'Bash(npm ci:*)',
+    'Bash(npm update:*)',
+    'Bash(npm set script-shell=x)',
+    'Bash(docker build:*)',
+    'Bash(docker -H tcp://x ps:*)',
+  ]) {
+    assert.match(customRuleProblem(rule) ?? '', /grundsätzlich gesperrt/, rule);
+  }
+  for (const rule of [
+    'Bash(git log:*)',
+    'Bash(docker compose logs:*)',
+    'Bash(npm run:*)',
+    'Bash(npm ci --ignore-scripts:*)',
+    'Bash(npm i --ignore-scripts:*)',
+    'Bash(git)',
+  ]) {
+    assert.equal(customRuleProblem(rule), null, rule);
+  }
+});
+
+test('forbiddenSubcommand: npm i verhält sich wie npm install, Optionen vor dem Unterbefehl sind gesperrt', () => {
+  for (const command of [
+    'git push',
+    'git  push origin main',
+    'docker run -v /:/host alpine',
+    'docker container run alpine',
+    'docker --context x run alpine',
+    'docker compose run app sh',
+    'npm i',
+    'npm i left-pad',
+    'npm install left-pad --ignore-scripts',
+    'npm ci',
+    'npm add left-pad',
+    'npm isntall left-pad',
+    'npm rebuild',
+    'npm --prefix docs install',
+    'npm -C docs i',
+    'npm set script-shell=/tmp/x',
+  ]) {
+    assert.ok(forbiddenSubcommand(command), command);
+  }
+  for (const command of [
+    'git status',
+    'git log --oneline',
+    'docker ps',
+    'docker logs app',
+    'docker compose up -d --build',
+    'docker compose build',
+    'npm test',
+    'npm run build',
+    'npm i --ignore-scripts',
+    'npm install --ignore-scripts left-pad',
+    'npm ci --ignore-scripts',
+    'npm ls',
+  ]) {
+    assert.equal(forbiddenSubcommand(command), false, command);
+  }
 });

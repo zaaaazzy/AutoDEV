@@ -114,6 +114,11 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'git diff /dev/null ~/.zshrc',
     'git diff -O/etc/hosts',
     'git status && git diff ../x README.md',
+    'git push origin main',
+    'git status && git push',
+    'docker run -v /:/host alpine',
+    'npm i left-pad',
+    'npm ci',
   ]) {
     assert.ok(bashProblem(command, root, safe as never), command);
   }

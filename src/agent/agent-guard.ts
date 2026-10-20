@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   COMPOSE_STARTING,
   composeViolation,
+  forbiddenSubcommand,
   gitPathProblem,
   npmOptionProblem,
   SECRET_IN_COMMAND,
@@ -109,6 +110,8 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
     if (/^git\s/.test(part) && DANGEROUS_GIT_OPTION.test(part)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
+    // Auch bei breiten eigenen Freigaben (Bash(git:*), Bash(docker:*)): diese Unterbefehle gibt keine Gruppe frei.
+    if (forbiddenSubcommand(part)) return `„${part}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
     const gitProblem = gitPathProblem(part, root);
     if (gitProblem) return gitProblem;
     if (/^npm\s/.test(part)) {

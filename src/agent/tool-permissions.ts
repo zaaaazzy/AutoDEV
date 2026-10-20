@@ -530,8 +530,98 @@ export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMANDS =
   /^(?:sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\d*|gem|cargo|go)\b/;
-const FORBIDDEN_SUBCOMMANDS =
-  /^(?:git (?:push|reset|clean|config|remote|rebase|filter-branch|update-ref|gc|clone|submodule)|docker (?:run|exec|rm|rmi|system|volume|network|image|container|cp|login)|docker compose (?:exec|run|cp|rm)|npm (?:publish|exec|x|login|adduser|token|config|cache|--prefix)|npm install(?! --ignore-scripts))\b/;
+/** Unterbefehle, die keine Gruppe freigeben darf; der Wächter sperrt sie zusätzlich bei jedem Shell-Befehl. */
+const FORBIDDEN_SUBCOMMAND_LIST = [
+  ...[
+    'push',
+    'reset',
+    'clean',
+    'config',
+    'remote',
+    'rebase',
+    'filter-branch',
+    'update-ref',
+    'gc',
+    'clone',
+    'submodule',
+  ].map((sub) => `git ${sub}`),
+  ...[
+    'run',
+    'exec',
+    'create',
+    'rm',
+    'rmi',
+    'system',
+    'volume',
+    'network',
+    'image',
+    'container',
+    'cp',
+    'login',
+    'build',
+    'buildx',
+    'builder',
+    'plugin',
+    'context',
+    'swarm',
+    'service',
+    'stack',
+    'secret',
+    'config',
+    'commit',
+    'export',
+    'import',
+    'load',
+    'save',
+    'update',
+    'attach',
+  ].map((sub) => `docker ${sub}`),
+  ...['exec', 'run', 'cp', 'rm', 'attach'].map((sub) => `docker compose ${sub}`),
+  ...[
+    'publish',
+    'unpublish',
+    'deprecate',
+    'dist-tag',
+    'owner',
+    'access',
+    'exec',
+    'x',
+    'explore',
+    'edit',
+    'login',
+    'adduser',
+    'token',
+    'config',
+    'c',
+    'set',
+    'cache',
+    '--prefix',
+    '-C',
+  ].map((sub) => `npm ${sub}`),
+];
+/** npm-Unterbefehle (samt Aliassen), die Installationsskripte ausführen – erlaubt nur direkt mit --ignore-scripts. */
+const NPM_SCRIPT_SUBCOMMANDS = [
+  ...['install', 'i', 'in', 'ins', 'inst', 'insta', 'instal', 'isnt', 'isnta', 'isntal', 'isntall', 'add'],
+  ...['ci', 'clean-install', 'ic', 'install-clean', 'isntall-clean', 'install-test', 'it', 'install-ci-test', 'cit'],
+  ...['update', 'up', 'upgrade', 'udpate', 'rebuild', 'rb', 'link', 'ln', 'dedupe', 'ddp'],
+].map((sub) => `npm ${sub}`);
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const FORBIDDEN_SUBCOMMANDS = new RegExp(
+  `^(?:(?:${FORBIDDEN_SUBCOMMAND_LIST.map(escapeRegExp).join('|')})(?![\\w-])|(?:${NPM_SCRIPT_SUBCOMMANDS.map(escapeRegExp).join('|')})(?![\\w-])(?! --ignore-scripts(?:\\s|$)))`,
+);
+
+/**
+ * Gesperrter Unterbefehl in einem Shell-Befehl (für den Wächter). Optionen vor dem Unterbefehl (git -C, docker -H,
+ * npm --prefix) sind ebenfalls gesperrt, damit sie die Prüfung nicht umgehen.
+ */
+export function forbiddenSubcommand(command: string): boolean {
+  const normalized = command.trim().replace(/\s+/g, ' ');
+  return FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized);
+}
+
+/** Deckt ein Präfix (Regel „Bash(<präfix>:*)“) einen gesperrten Unterbefehl ab, z. B. „git“ oder „docker compose“? */
+const coversForbidden = (prefix: string): boolean =>
+  [...FORBIDDEN_SUBCOMMAND_LIST, ...NPM_SCRIPT_SUBCOMMANDS].some((forbidden) => forbidden.startsWith(`${prefix} `));
 const SAFE_PREFIX = /^[\w@./=:,+-]+(?: [\w@./=:,+-]+)*$/;
 
 /**
@@ -547,7 +637,7 @@ export function customRuleProblem(rule: string): string | null {
   if (!SAFE_PREFIX.test(command))
     return `„${rule}“: keine Shell-Sonderzeichen (; & | $ \` > < * ? Klammern, Anführungszeichen).`;
   if (command.length > 120) return `„${rule}“: Befehl zu lang.`;
-  if (FORBIDDEN_COMMANDS.test(command) || FORBIDDEN_SUBCOMMANDS.test(command))
+  if (FORBIDDEN_COMMANDS.test(command) || forbiddenSubcommand(command) || (match[2] && coversForbidden(command)))
     return `„${rule}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
   if (
     /(?:^|[\s/])(?:\.env|\.ssh|\.aws|\.gnupg|com\.devlog|com\.aideation|DevLog|AIdeation)(?:[\s/]|$)/i.test(command) ||
