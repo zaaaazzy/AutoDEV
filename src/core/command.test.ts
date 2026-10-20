@@ -64,3 +64,18 @@ test('runCommand still points to the PATH when the command itself is missing', a
   assert.notEqual(result.exitCode, 0);
   assert.match(result.output, /im PATH des Workers nicht gefunden/);
 });
+
+test('ein Umlaut, der über eine Chunk-Grenze fällt, bleibt erhalten', async () => {
+  // „ä“ = 0xC3 0xA4: erstes Byte, Pause, zweites Byte – landet in zwei getrennten Chunks.
+  const script =
+    'process.stdout.write(Buffer.from([0x47, 0xc3]));' +
+    'setTimeout(() => process.stdout.write(Buffer.from([0xa4, 0x72, 0x74, 0x0a])), 150);';
+  const chunks: string[] = [];
+  const result = await runCommand([process.execPath, '-e', script], process.cwd(), {
+    onChunk: (chunk) => chunks.push(chunk),
+  });
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.output, 'Gärt\n');
+  assert.equal(chunks.join(''), 'Gärt\n');
+  assert.ok(!chunks.join('').includes('�'));
+});
