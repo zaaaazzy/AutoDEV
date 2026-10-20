@@ -81,6 +81,28 @@ test('resolveInside: Git, Abhängigkeiten, Sicherungen und Geheimnisse sind gesp
   }
 });
 
+test('resolveInside: gesperrte Namen gelten auch am Ziel symbolischer Links', async () => {
+  await mkdir(join(root, '.git', 'hooks'), { recursive: true });
+  await writeFile(join(root, '.git', 'config'), '[core]');
+  await symlink('.env', join(root, 'notes.txt'));
+  await symlink('.git/hooks/pre-commit', join(root, 'hook'));
+  await symlink('.git', join(root, 'gitdir'));
+  await symlink('node_modules/x', join(root, 'dep'));
+  await symlink('fehlt/nirgends.txt', join(root, 'dangling.txt'));
+  await rejectsWith(resolveInside(root, 'notes.txt'), /nicht erlaubt/);
+  await rejectsWith(resolveInside(root, 'notes.txt', true), /nicht erlaubt/);
+  // Ziel existiert (noch) nicht: der Link selbst darf nicht beschrieben werden.
+  await rejectsWith(resolveInside(root, 'hook', true), /nicht erlaubt/);
+  await rejectsWith(resolveInside(root, 'dangling.txt', true), /nicht erlaubt/);
+  await rejectsWith(resolveInside(root, 'gitdir/hooks/pre-commit', true), /nicht erlaubt/);
+  await rejectsWith(resolveInside(root, 'gitdir/config'), /nicht erlaubt/);
+  await rejectsWith(resolveInside(root, 'dep/index.js'), /nicht erlaubt/);
+  // Harmlose Links im Projekt bleiben nutzbar.
+  await symlink('src', join(root, 'quellen'));
+  assert.equal(await resolveInside(root, 'quellen/app.ts'), join(root, 'quellen', 'app.ts'));
+  assert.equal(await resolveInside(root, 'quellen/neu.ts', true), join(root, 'quellen', 'neu.ts'));
+});
+
 test('resolveInside: Lesen verlangt eine vorhandene Datei, Schreiben nur einen Ordner im Projekt', async () => {
   await rejectsWith(resolveInside(root, 'fehlt.txt'), /existiert nicht/);
   assert.equal(await resolveInside(root, 'neu/tief/datei.txt', true), join(root, 'neu', 'tief', 'datei.txt'));
