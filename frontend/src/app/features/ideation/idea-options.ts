@@ -13,6 +13,8 @@ export const IDEA_STATUSES = [
   'rejected',
 ];
 export const IDEA_SELECTABLE_STATUSES = ['idea', 'considering', 'review'];
+/** Bearbeitbar wie auf dem Server: nicht während der Auftragsautor schreibt und nicht nach der Annahme. */
+export const IDEA_EDITABLE_STATUSES = [...IDEA_SELECTABLE_STATUSES, 'rejected'];
 /** Noch nicht abgeschlossene Ideen: weder angenommen (bzw. umgesetzt) noch abgelehnt. */
 export const OPEN_IDEA_STATUSES = ['idea', 'considering', 'review', 'requested', 'drafting'];
 
