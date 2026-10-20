@@ -454,10 +454,9 @@ test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint 
   await expect(board.locator('.kanban-pool-card', { hasText: title })).toBeVisible();
   // Der Titel verlinkt auf den Auftrag.
   await board.locator('.kanban-pool-card', { hasText: title }).getByRole('link', { name: title }).click();
-  // Aus dem Sprint genommen wartet er auf eine Entscheidung: Der Link führt zu „Aktionen“ und öffnet seine Karte.
-  await expect(page).toHaveURL(new RegExp(`#actions/${order.id}$`));
-  await expect(page.locator('.page-heading h1')).toHaveText('Aktionen');
-  await expect(page.locator(`#order-${order.id}`)).toContainText(title);
+  // Aus einem geplanten Sprint genommen ist reine Planung: keine Karte unter „Aktionen“, der Link öffnet den Auftrag.
+  await expect(page).toHaveURL(new RegExp(`#development/${order.id}$`));
+  await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
   await request.delete(`/api/development/${order.id}`, { headers });
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
@@ -549,15 +548,30 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
 test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Sprint-Aufgabe ${Date.now()}`;
-  const sprint = (
-    await (await request.post('/api/projects/e2e/sprints', { headers, data: { name: 'E2E-Sprint' } })).json()
-  ).sprint;
+  // Nur aus einem laufenden Sprint genommen wartet ein Auftrag unter „Aktionen“: den aktiven Sprint nutzen bzw. starten.
+  const sprints = (
+    (await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
+      sprints: { id: string; name: string; status: string }[];
+    }
+  ).sprints;
+  let sprint = sprints.find((entry) => entry.status === 'active');
+  const started = !sprint;
+  if (!sprint) {
+    sprint = (await (await request.post('/api/projects/e2e/sprints', { headers, data: { name: 'E2E-Sprint' } })).json())
+      .sprint as { id: string; name: string; status: string };
+    expect((await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'active' } })).ok()).toBe(true);
+  }
   const item = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
   await request.patch(`/api/development/${item.id}`, { headers, data: { sprintId: sprint.id } });
 
   await login(page);
   await page.goto('/#sprints');
-  await page.locator('.dt-table tbody tr').filter({ hasText: 'E2E-Sprint' }).locator('.dt-expand').first().click();
+  // Der aktive Sprint ist schon aufgeklappt; nur sonst aufklappen.
+  await expect(page.locator('.dt-table tbody tr').filter({ hasText: sprint.name }).first()).toBeVisible();
+  const planned = page.locator('.kanban-board .col-planned .kanban-card').filter({ hasText: title });
+  if (!(await planned.isVisible())) {
+    await page.locator('.dt-table tbody tr').filter({ hasText: sprint.name }).locator('.dt-expand').first().click();
+  }
   await page
     .locator('.kanban-board .col-planned .kanban-card')
     .filter({ hasText: title })
@@ -570,12 +584,15 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
   await page.goto('/#actions');
   const card = page.locator('.attention-card').filter({ hasText: title });
-  await expect(card).toContainText('Aus Sprint „E2E-Sprint“ genommen');
+  await expect(card).toContainText(`Aus Sprint „${sprint.name}“ genommen`);
   await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
   page.once('dialog', (dialog) => void dialog.accept());
   await card.getByRole('button', { name: 'Löschen' }).click();
   await expect(card).toHaveCount(0);
-  await request.delete(`/api/sprints/${sprint.id}`, { headers });
+  if (started) {
+    await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'planned' } });
+    await request.delete(`/api/sprints/${sprint.id}`, { headers });
+  }
 });
 
 test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details beim Hover, eigene Aktion anlegen', async ({
