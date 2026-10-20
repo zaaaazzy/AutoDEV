@@ -189,7 +189,8 @@ Pro Projekt lassen sich in den Einstellungen Deploy-Befehle hinterlegen (z. B. `
    gescheiterten Schritt „wip(Tester): Titel“). Bricht etwas ab, setzt der Agent dort und in seiner Sitzung fort.
 4. **Auftrag fertig:** Der Auftrags-Branch wird in den Sprint-Branch gemergt.
 5. **Vorschau:** In der Sprint-Ansicht jeden Stand wählen und mit ▶ im Review-Container starten (eigener Port,
-   eigene Datenbank-Kopie).
+   eigene Datenbank-Kopie). Dasselbe geht im Sprint-Popover der Kopfzeile (Desktop): Es zeigt Fortschritt und die
+   nächsten offenen Aufträge, startet den gewählten Stand und öffnet den Container in einem neuen Tab, sobald er läuft.
 6. **Sprint-Review:** Sind alle Aufträge durch, wartet der Sprint auf dein Go (Push-Nachricht, Hinweis im Sprint).
    Der Autopilot schaltet nie selbst live.
 7. **Live schalten:** Tests und CI laufen, der Sprint wird nach `main` gemergt, der Projektordner (z. B. mit dev-live)

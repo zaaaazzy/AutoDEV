@@ -15,6 +15,11 @@ export function isFinished(status: string): boolean {
   return status === 'done' || status === 'rejected';
 }
 
+/** „Sprint 1“ statt „Sprint Sprint 1“, wenn der Name schon mit „Sprint“ beginnt. */
+export function sprintLabel(name: string): string {
+  return /^sprint\b/i.test(name) ? name : `Sprint ${name}`;
+}
+
 const STATUS_LABELS: Record<string, string> = {
   running: 'Läuft',
   passed: 'Bestanden',

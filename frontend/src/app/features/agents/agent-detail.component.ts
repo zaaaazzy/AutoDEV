@@ -5,6 +5,7 @@ import { Component, inject, input } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import type { Agent } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { sprintLabel } from '../../shared/labels.js';
 import { DateTimePipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { roleLabel } from './agent-options.js';
 
@@ -26,10 +27,7 @@ import { roleLabel } from './agent-options.js';
 export class AgentDetailComponent {
   private readonly store = inject(ProjectStore);
   private readonly activity = inject(AgentActivityService);
-  /** „Sprint 1“ statt „Sprint Sprint 1“, wenn der Name schon mit „Sprint“ beginnt. */
-  protected sprintLabel(name: string): string {
-    return /^sprint\b/i.test(name) ? name : `Sprint ${name}`;
-  }
+  protected readonly sprintLabel = sprintLabel;
 
   protected readonly agentActivityLoading = this.activity.loading;
   protected readonly agentActive = this.activity.active;
