@@ -1,5 +1,6 @@
 import type { ConfirmOptions } from '../../core/confirm.service.js';
 import type { DevelopmentItem, Idea } from '../../core/models.js';
+import { isFinished } from '../../shared/labels.js';
 
 export const IDEA_STATUSES = [
   'idea',
@@ -23,6 +24,26 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /** Anzeigestatus: Eine angenommene Idee gilt als umgesetzt, sobald ihr Auftrag erledigt ist. */
 export function ideaDisplayStatus(idea: Idea, order: DevelopmentItem | null | undefined): string {
   return idea.status === 'accepted' && order?.status === 'done' ? 'implemented' : idea.status;
+}
+
+/**
+ * Einordnung einer Idee – gleich für Ideenseite und Dashboard:
+ * offen, in Umsetzung (angenommen mit vorhandenem, nicht abgeschlossenem Auftrag),
+ * umgesetzt (Auftrag erledigt) oder verworfen (abgelehnt bzw. angenommen ohne laufenden Auftrag).
+ */
+export type IdeaPhase = 'open' | 'in_progress' | 'implemented' | 'discarded';
+
+export function ideaPhase(
+  idea: Pick<Idea, 'status'>,
+  order: Pick<DevelopmentItem, 'status'> | null | undefined,
+): IdeaPhase {
+  if (isOpenIdea(idea)) return 'open';
+  if (idea.status === 'implemented') return 'implemented';
+  if (idea.status === 'accepted' && order) {
+    if (order.status === 'done') return 'implemented';
+    if (!isFinished(order.status)) return 'in_progress';
+  }
+  return 'discarded';
 }
 
 const SOURCE_LABELS: Record<string, string> = {

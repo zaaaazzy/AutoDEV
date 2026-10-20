@@ -20,6 +20,7 @@ import { DateTimePipe, HoursPipe, LocaleNumberPipe, StatusClassPipe, StatusLabel
 import { ShareBarComponent, type ShareSegment } from '../../shared/share-bar.component.js';
 import { AgentListComponent } from '../agents/agent-list.component.js';
 import { ChatComponent } from '../chat/chat.component.js';
+import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-options.js';
 
 /** Farbton je Status, überall gleich: grün erledigt, blau in Arbeit, orange wartet/Warnung, rot Fehler. */
 const ORDER_TONES: Record<string, string> = {
@@ -31,7 +32,6 @@ const ORDER_TONES: Record<string, string> = {
   rejected: 'neutral',
 };
 const ORDER_STATUSES = ['done', 'in_progress', 'planned', 'backlog', 'rejected', 'blocked'] as const;
-const OPEN_IDEA_STATUSES = ['idea', 'considering', 'review', 'requested', 'drafting'];
 const RECENT_RUNS = 20;
 
 /**
@@ -100,40 +100,23 @@ export class DashboardComponent {
 
   protected readonly ideaShares = computed<ShareSegment[]>(() => {
     const ideas = this.data().ideas;
-    const orderOf = new Map(
-      this.data()
-        .development.filter((item) => item.ideationId)
-        .map((item) => [item.ideationId!, item]),
-    );
+    // Wie auf der Ideenseite: der erste Auftrag zur Idee zählt.
+    const orderOf = new Map<string, DevelopmentItem>();
+    for (const item of this.data().development)
+      if (item.ideationId && !orderOf.has(item.ideationId)) orderOf.set(item.ideationId, item);
+    const count = (phase: IdeaPhase): number =>
+      ideas.filter((idea) => ideaPhase(idea, orderOf.get(idea.id)) === phase).length;
     const openLabels = [...new Set(OPEN_IDEA_STATUSES.map(statusLabel))];
-    const accepted = ideas.filter((idea) => idea.status === 'accepted');
     return [
       {
         label: 'Offen',
-        value: ideas.filter((idea) => OPEN_IDEA_STATUSES.includes(idea.status)).length,
+        value: count('open'),
         tone: 'wait',
         link: { section: 'ideation', filters: { status: openLabels } },
       },
-      {
-        label: 'In Umsetzung',
-        value: accepted.filter((idea) => orderOf.get(idea.id)?.status !== 'done').length,
-        tone: 'active',
-        link: { section: 'ideation' },
-      },
-      {
-        label: 'Umgesetzt',
-        value:
-          accepted.filter((idea) => orderOf.get(idea.id)?.status === 'done').length +
-          ideas.filter((idea) => idea.status === 'implemented').length,
-        tone: 'ok',
-        link: { section: 'ideation' },
-      },
-      {
-        label: 'Verworfen',
-        value: ideas.filter((idea) => idea.status === 'rejected').length,
-        tone: 'neutral',
-        link: { section: 'ideation' },
-      },
+      { label: 'In Umsetzung', value: count('in_progress'), tone: 'active', link: { section: 'ideation' } },
+      { label: 'Umgesetzt', value: count('implemented'), tone: 'ok', link: { section: 'ideation' } },
+      { label: 'Verworfen', value: count('discarded'), tone: 'neutral', link: { section: 'ideation' } },
     ];
   });
 

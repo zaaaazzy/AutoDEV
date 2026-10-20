@@ -18,7 +18,7 @@ import {
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { formatHours, formatIsoDate } from '../../shared/format.js';
-import { CATEGORIES, priorityLabel, statusLabel, isFinished } from '../../shared/labels.js';
+import { CATEGORIES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   HoursPipe,
@@ -37,6 +37,7 @@ import {
   IDEA_SELECTABLE_STATUSES,
   IDEA_STATUSES,
   ideaDisplayStatus,
+  ideaPhase,
   isOpenIdea,
   VISIONARY_CONFIRM,
   MAX_IMAGE_BYTES,
@@ -316,16 +317,12 @@ export class IdeationComponent {
 
   private isInProgress(idea: Idea): boolean {
     // Nur mit vorhandenem, noch nicht abgeschlossenen Auftrag gilt eine Idee als „in Bearbeitung“.
-    const order = this.closedIdeaOrder(idea);
-    return idea.status === 'accepted' && !!order && !isFinished(order.status);
+    return ideaPhase(idea, this.closedIdeaOrder(idea)) === 'in_progress';
   }
 
   private isClosedIdea(idea: Idea): boolean {
-    return (
-      idea.status === 'rejected' ||
-      idea.status === 'implemented' ||
-      (idea.status === 'accepted' && !this.isInProgress(idea))
-    );
+    const phase = ideaPhase(idea, this.closedIdeaOrder(idea));
+    return phase === 'implemented' || phase === 'discarded';
   }
 
   private async uploadImages(ideationId: string, files: File[]): Promise<void> {
