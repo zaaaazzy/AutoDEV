@@ -14,6 +14,9 @@ import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
 import {
+  changedFiles,
+  type ChangedFile,
+  changedFilesSection,
   commitAgentStep,
   commitTaskToGit,
   conflictPrompt,
@@ -48,7 +51,7 @@ import { type BudgetState, checkBudget } from './budget.js';
 import { runTestAgent } from './test-agent.js';
 import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
 import type { BuiltinAgent, StepSummary, WorkItem, WorkflowAgent, WorkItemOptions } from './runner-types.js';
-import { loadTestCommands } from './runner-selection.js';
+import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
 import { runVisualStep, VISUAL_CATEGORIES } from './visual-check.js';
 
 const MANUAL_TITLE = 'Anwendungshandbuch';
@@ -66,14 +69,18 @@ export const runBuiltinAgent: BuiltinAgent = async ({
   signal,
   onProgress,
   model,
+  changedFiles: changed,
 }) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
+    // Nur die Tests zu den geänderten Dateien (Testbefehle je Auftrag); der volle Lauf bleibt dem Live schalten.
+    const plan = await testerPlan(pool, item.projectSlug, cwd, changed);
     const runId = await runTestAgent(
       {
         project: item.projectSlug,
         cwd,
-        commands: await loadTestCommands(pool, item.projectSlug),
+        commands: plan.commands.map((entry) => entry.command),
+        skipped: plan.commands.map((entry) => entry.skipped),
         existingProject: true,
         timeoutMs,
         signal,
@@ -87,12 +94,18 @@ export const runBuiltinAgent: BuiltinAgent = async ({
     );
     const failed = steps.rows.some((step) => step.status !== 'passed');
     const output = steps.rows
-      .map(
-        (step) =>
-          `$ ${step.command} → ${step.status}\n${step.status === 'passed' ? step.output.slice(-400) : step.output.slice(-3000)}`,
+      .map((step) =>
+        step.output === SKIPPED_NOTE
+          ? `$ ${step.command} → ${SKIPPED_NOTE}`
+          : `$ ${step.command} → ${step.status}\n${step.status === 'passed' ? step.output.slice(-400) : step.output.slice(-3000)}`,
       )
       .join('\n\n');
-    return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
+    const summary = planSummary(plan);
+    return {
+      exitCode: failed ? 1 : 0,
+      durationMs: Date.now() - startedAt,
+      output: `Testlauf ${runId}\n\n${summary ? `${summary}\n\n` : ''}${output}`,
+    };
   }
   const stored = (
     await pool.query<{ url: string | null }>('SELECT database_url AS url FROM projects WHERE slug = $1', [
@@ -186,6 +199,8 @@ export interface RunContext {
   budgetPercent?: number;
   /** Routing-Regeln und Stufen-Modelle des Projekts (einmal je Lauf geladen). */
   routing?: ProjectRouting | null;
+  /** Zuletzt ermittelte geänderte Dateien des Auftrags (für den Abschnitt „Geänderte Dateien“). */
+  changedFiles?: string[];
   /** Grund, warum der Lauf angehalten wurde (z. B. Budget), für die Push-Nachricht. */
   stopReason?: string | null;
 }
@@ -355,6 +370,24 @@ ${why} Du kennst den Verlauf dieser Sitzung; dein bisheriger Stand liegt im Arbe
 ${prompt}`;
 }
 
+/** Vom Auftrag geänderte Dateien (nur mit Auftrags-Branch; sonst undefined = unbekannt). */
+async function orderChangedFiles(ctx: RunContext): Promise<ChangedFile[] | undefined> {
+  if (!ctx.branch) return undefined;
+  return (
+    (await changedFiles(ctx.options.cwd, ctx.branch.base, ctx.execute).catch(logged('runner-steps', null))) ?? undefined
+  );
+}
+
+async function orderFilePaths(ctx: RunContext): Promise<string[] | undefined> {
+  return (await orderChangedFiles(ctx))?.map((file) => file.path);
+}
+
+/** Befehle für die eigene Abdeckungsmessung: dieselben wie im Tester-Schritt (nie der volle Lauf fürs Live schalten). */
+async function coverageCommands(ctx: RunContext): Promise<string[][]> {
+  const plan = await testerPlan(ctx.pool, ctx.item.projectSlug, ctx.options.cwd, await orderFilePaths(ctx));
+  return plan.commands.filter((entry) => !entry.skipped).map((entry) => entry.command);
+}
+
 /** Run an agent command, the tester workflow, or the built-in local model. */
 async function invokeAgent(
   ctx: RunContext,
@@ -364,7 +397,7 @@ async function invokeAgent(
   routed: RoutedModel = { rule: null },
 ): Promise<CommandResult> {
   const { pool, item, options, execute, builtin, fallbackCommand } = ctx;
-  const builtinRun = (): Promise<CommandResult> =>
+  const builtinRun = async (): Promise<CommandResult> =>
     builtin({
       pool,
       item,
@@ -375,6 +408,7 @@ async function invokeAgent(
       signal: hooks.signal,
       onProgress: hooks.onAction,
       ...(routed.model ? { model: routed.model } : {}),
+      ...(agent.role === 'tester' ? { changedFiles: await orderFilePaths(ctx) } : {}),
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
@@ -451,12 +485,7 @@ async function invokeAgent(
   }
   // Ein Tester mit eigenem CLI prüft selbst; danach laufen die hinterlegten Projekttests zusätzlich als
   // gespeicherter Testlauf – objektiv, sichtbar unter „Testläufe“ und in der Erfolgsquote des Dashboards.
-  if (
-    agent.role === 'tester' &&
-    result.exitCode === 0 &&
-    !hooks.signal?.aborted &&
-    (await loadTestCommands(pool, item.projectSlug)).length
-  ) {
+  if (agent.role === 'tester' && result.exitCode === 0 && !hooks.signal?.aborted) {
     const run = await builtinRun();
     return {
       exitCode: run.exitCode,
@@ -506,6 +535,8 @@ export async function runStep(
     )
   ).rows[0]?.id;
   await logEvent(pool, stepId, 'Schritt gestartet');
+  // Stand vor dem ersten Schritt dieses Laufs, damit erkennbar ist, welcher Agent Dateien geändert hat.
+  if (ctx.branch && ctx.changedFiles === undefined) ctx.changedFiles = await orderFilePaths(ctx);
   await logEvent(pool, stepId, routed.rule ? `Modell: ${model} (Regel: ${routed.rule})` : `Modell: ${model}`);
   const manual =
     agent.role === 'manual_writer' || agent.role === 'user_manual_writer'
@@ -718,9 +749,7 @@ export async function runStep(
   // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
   const measured =
     agent.role === 'tester' && !cancelled
-      ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(
-          logged('runner-steps', []),
-        )
+      ? await measureCoverage(options.cwd, await coverageCommands(ctx), execute).catch(logged('runner-steps', []))
       : [];
   const coverage = mergeCoverage(reported, measured);
   if (coverage) {
@@ -744,6 +773,23 @@ export async function runStep(
   for (const handoff of handoffs) {
     ctx.messages = [...(ctx.messages ?? []), { toId: handoff.toId, from: agent.name, text: handoff.text }];
     await logEvent(pool, stepId, `Nachricht an ${handoff.to}: ${handoff.text.slice(0, 120)}`);
+  }
+  // Geänderte Dateien des Auftrags: am Auftrag speichern und in der Ausgabe jedes Agents auflisten, der Dateien
+  // geändert hat (der Entwickler immer, auch bei Nachbesserungen).
+  if (ctx.branch && !cancelled) {
+    const files = await orderChangedFiles(ctx);
+    if (files) {
+      const paths = files.map((file) => file.path);
+      const before = ctx.changedFiles ?? [];
+      ctx.changedFiles = paths;
+      await pool
+        .query('UPDATE development_items SET changed_files = $2 WHERE id = $1', [item.id, paths])
+        .catch(logged('runner-steps'));
+      if (agent.role === 'developer' || paths.join('\n') !== before.join('\n')) {
+        output = `${output.trimEnd()}\n\n${changedFilesSection(files)}`;
+        await logEvent(pool, stepId, `Geänderte Dateien: ${paths.length}`);
+      }
+    }
   }
   await pool.query(
     `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6, cost_usd = $7,

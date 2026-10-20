@@ -111,7 +111,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${GITHUB_COLUMNS}, ${VISUAL_COLUMNS}, created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", order_test_commands AS "orderTestCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${GITHUB_COLUMNS}, ${VISUAL_COLUMNS}, created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -274,19 +274,25 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
       values.push(items.length ? items : null);
       sets.push(`${column} = $${values.length}`);
     }
-    if (body.testCommands !== undefined) {
+    // Testbefehle (Live schalten) und Testbefehle je Auftrag (Tester-Schritt): ein Befehl pro Zeile.
+    for (const [field, column, label] of [
+      ['testCommands', 'test_commands', 'Testbefehle'],
+      ['orderTestCommands', 'order_test_commands', 'Testbefehle je Auftrag'],
+    ] as const) {
+      const raw = body[field];
+      if (raw === undefined) continue;
       let commands: string[][] | null = null;
-      if (typeof body.testCommands === 'string' && body.testCommands.trim()) {
-        commands = body.testCommands
+      if (typeof raw === 'string' && raw.trim()) {
+        commands = raw
           .trim()
           .split('\n')
           .filter((line) => line.trim())
           .map((line) => line.trim().split(/\s+/));
-      } else if (body.testCommands !== null && body.testCommands !== '') {
-        return fail('Testbefehle: ein Befehl pro Zeile, z. B. „npm test“.');
+      } else if (raw !== null && raw !== '') {
+        return fail(`${label}: ein Befehl pro Zeile, z. B. „npm test“.`);
       }
       values.push(commands ? JSON.stringify(commands) : null);
-      sets.push(`test_commands = $${values.length}::jsonb`);
+      sets.push(`${column} = $${values.length}::jsonb`);
     }
     if (body.deployCommands !== undefined) {
       const lines =
@@ -415,7 +421,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${GITHUB_COLUMNS}, ${VISUAL_COLUMNS}`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", order_test_commands AS "orderTestCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${GITHUB_COLUMNS}, ${VISUAL_COLUMNS}`,
       values,
     );
     if (!result.rows[0]) {

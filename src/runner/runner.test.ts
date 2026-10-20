@@ -591,3 +591,46 @@ test('Tester schreibt Tests: der Prozess wird als PID des Schritts gemeldet, dam
     'PID des Testschreibers wird gespeichert',
   );
 });
+
+test('Entwickler: geänderte Dateien landen am Auftrag und als Abschnitt in seiner Ausgabe; der Tester bekommt sie', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { runCommand } = await import('../core/command.js');
+  const cwd = mkdtempSync(join(tmpdir(), 'changed-run-'));
+  const run = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+  run('init', '-b', 'main');
+  run('config', 'user.email', 'a@b.c');
+  run('config', 'user.name', 'a');
+  writeFileSync(join(cwd, 'base.txt'), 'base');
+  run('add', '-A');
+  run('commit', '-m', 'base');
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command, directory, options) => {
+    if (command[0] !== 'dev') return runCommand(command, directory, options);
+    writeFileSync(join(cwd, 'neu.ts'), 'export {}');
+    return { exitCode: 0, durationMs: 1, output: 'Fertig.' };
+  };
+  let testerFiles: string[] | undefined;
+  const builtin: BuiltinAgent = async ({ changedFiles }) => {
+    testerFiles = changedFiles;
+    return { exitCode: 0, durationMs: 1, output: 'Tests grün' };
+  };
+  const developer = { ...agent('Entwickler', 'while_task', 1, ['dev']), role: 'developer' };
+  const tester = { ...agent('Tester', 'while_task', 2, null), role: 'tester' };
+  const result = await runWorkItem(pool, item, [developer, tester], { cwd, timeoutMs: 5000, execute, builtin });
+  assert.equal(result, 'passed');
+  assert.ok(
+    queries.some(
+      (query) =>
+        query.sql.includes('SET changed_files') && JSON.stringify(query.values[1]) === JSON.stringify(['neu.ts']),
+    ),
+    'geänderte Dateien am Auftrag gespeichert',
+  );
+  const developerStep = queries.find(
+    (query) => query.sql.includes('UPDATE agent_run_steps SET status') && String(query.values[4]).startsWith('Fertig.'),
+  );
+  assert.match(String(developerStep?.values[4]), /## Geänderte Dateien\n- neu\.ts/);
+  assert.deepEqual(testerFiles, ['neu.ts']);
+});

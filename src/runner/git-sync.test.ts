@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -13,6 +13,8 @@ import {
   maskSecrets,
   pollSprintReviews,
   checkoutSprintBranch,
+  changedFiles,
+  changedFilesSection,
   orderWorkInProgress,
   commitAgentStep,
   conflictPrompt,
@@ -663,4 +665,40 @@ test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderunge
   // Committet oder auf einem anderen Branch: die Sicherung läuft wieder.
   git('commit', '-am', 'wip');
   assert.equal(await orderWorkInProgress(cwd), false);
+});
+
+test('geänderte Dateien eines Auftrags: Commits seit der Basis plus offene, neue und gelöschte Dateien', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-changed-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  await writeFile(join(cwd, 'alt.txt'), 'alt');
+  await writeFile(join(cwd, 'unberührt.txt'), 'bleibt');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  const branch = await enterOrderBranch(cwd, { id: '22222222-0000', title: 'Dateien' }, null);
+  assert.ok(branch);
+  assert.deepEqual(await changedFiles(cwd, branch.base), []);
+  assert.equal(changedFilesSection([]), '## Geänderte Dateien\nKeine Dateien geändert.');
+  // Committet: geänderte und gelöschte Datei; offen: geänderte, neue und interne Dateien.
+  await writeFile(join(cwd, 'base.txt'), 'neu');
+  git('rm', '-q', 'alt.txt');
+  git('add', '-A');
+  git('commit', '-m', 'schritt');
+  await writeFile(join(cwd, 'base.txt'), 'noch neuer');
+  await writeFile(join(cwd, 'zäh.ts'), 'export {}');
+  await mkdir(join(cwd, '.dev-log'), { recursive: true });
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, '.dev-log', 'notiz.md'), 'intern');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'intern');
+  const files = await changedFiles(cwd, branch.base);
+  assert.deepEqual(files, [
+    { path: 'alt.txt', deleted: true },
+    { path: 'base.txt', deleted: false },
+    { path: 'zäh.ts', deleted: false },
+  ]);
+  assert.equal(changedFilesSection(files), '## Geänderte Dateien\n- alt.txt (gelöscht)\n- base.txt\n- zäh.ts');
+  assert.deepEqual(await changedFiles(await mkdtemp(join(tmpdir(), 'git-nogit-')), 'main'), []);
 });

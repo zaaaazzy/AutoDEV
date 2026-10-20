@@ -902,6 +902,47 @@ export async function orderWorkInProgress(cwd: string, rawExecute: CommandExecut
   return Boolean((await git('status', '--porcelain', '--untracked-files=no')).output.trim());
 }
 
+/** Interne Ordner, die nie als geänderte Datei eines Auftrags zählen (Agent-Ablage, Testberichte). */
+const CHANGED_FILES_IGNORED = ['.dev-log/', 'docs/tests/'];
+
+export interface ChangedFile {
+  path: string;
+  /** Datei existiert im Arbeitsordner nicht mehr (vom Auftrag gelöscht). */
+  deleted: boolean;
+}
+
+/**
+ * Vom Auftrag geänderte Dateien: Commits seit der Basis (`git diff <base>...HEAD`) plus noch nicht committete und
+ * neue Dateien im Arbeitsordner. Sortiert, ohne Doppelte, ohne interne Ordner; gelöschte Dateien sind markiert.
+ */
+export async function changedFiles(
+  cwd: string,
+  base: string,
+  rawExecute: CommandExecutor = runCommand,
+): Promise<ChangedFile[]> {
+  if (!existsSync(join(cwd, '.git'))) return [];
+  const { git } = gitHelpers(rawExecute, cwd);
+  const list = async (...args: string[]): Promise<string[]> => {
+    const result = await git('-c', 'core.quotePath=false', ...args);
+    return result.exitCode === 0 ? result.output.split('\n').map((line) => line.trim()) : [];
+  };
+  const paths = new Set(
+    [
+      ...(await list('diff', '--name-only', `${base}...HEAD`)),
+      ...(await list('diff', '--name-only', 'HEAD')),
+      ...(await list('diff', '--name-only', '--cached')),
+      ...(await list('ls-files', '--others', '--exclude-standard')),
+    ].filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix))),
+  );
+  return [...paths].sort().map((path) => ({ path, deleted: !existsSync(join(cwd, path)) }));
+}
+
+/** Abschnitt „## Geänderte Dateien“ für die Ausgabe eines Agent-Schritts. */
+export function changedFilesSection(files: ChangedFile[]): string {
+  const lines = files.map((file) => `- ${file.path}${file.deleted ? ' (gelöscht)' : ''}`);
+  return `## Geänderte Dateien\n${lines.length ? lines.join('\n') : 'Keine Dateien geändert.'}`;
+}
+
 /** Works through the next queued Git request (push or pull) of the project's sprints. */
 export async function syncSprintToGit(
   pool: Pool,

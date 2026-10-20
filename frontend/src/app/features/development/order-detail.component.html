@@ -358,6 +358,17 @@
       <summary>Agents</summary>
       <app-agent-workflow [order]="item" />
     </details>
+    @let files = item.changedFiles ?? [];
+    @if (files.length) {
+      <details class="run-step order-brief changed-files" [open]="files.length <= 15">
+        <summary>Geänderte Dateien ({{ files.length }})</summary>
+        <ul class="changed-file-list">
+          @for (file of files; track file) {
+            <li>{{ file }}</li>
+          }
+        </ul>
+      </details>
+    }
     @if (item.analysis) {
       <details class="run-step order-brief">
         <summary>Analyse des Assistenten</summary>

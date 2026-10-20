@@ -10,6 +10,7 @@ import { createTestRun, createTestRunStep, finishTestRun, finishTestRunStep, sav
 import type { Pool } from 'pg';
 import { redactOutput, runCommand } from '../core/command.js';
 import { killGroup } from '../core/shutdown.js';
+import { SKIPPED_NOTE } from './order-tests.js';
 
 const execFile = promisify(nodeExecFile);
 
@@ -17,6 +18,8 @@ export interface TestAgentOptions {
   project: string;
   cwd: string;
   commands: string[][];
+  /** Je Befehl: übersprungen (Testbefehle je Auftrag ohne passende Dateien); wird nur als Schritt vermerkt. */
+  skipped?: boolean[];
   /** Vom Worker aufgerufen: Projekt nicht neu registrieren (sonst würde der gespeicherte Projektordner überschrieben). */
   existingProject?: boolean;
   timeoutMs?: number;
@@ -128,6 +131,11 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       output: '',
       category: categoryOfCommand(label),
     });
+    if (options.skipped?.[position]) {
+      await finishTestRunStep(pool, { runId, position, exitCode: 0, durationMs: 0, output: SKIPPED_NOTE });
+      console.info(`SKIP ${label}`);
+      continue;
+    }
     let pid = 0;
     const abort = (): void => {
       if (pid) killGroup(pid);
