@@ -22,6 +22,7 @@ import { CATEGORIES, priorityLabel, statusLabel, isFinished } from '../../shared
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   HoursPipe,
+  IsoDatePipe,
   PriorityLabelPipe,
   StatusClassPipe,
   StatusLabelPipe,
@@ -68,6 +69,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     ChangedFilesComponent,
     MarkdownPipe,
     HoursPipe,
+    IsoDatePipe,
     PriorityLabelPipe,
     StatusClassPipe,
     StatusLabelPipe,

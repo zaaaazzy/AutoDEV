@@ -236,9 +236,7 @@
                       {{ order.effortHours | hours }}
                     </p>
                     @if (order.completedAt) {
-                      <p class="muted">
-                        Erledigt am {{ order.completedAt.slice(0, 10).split('-').reverse().join('.') }}
-                      </p>
+                      <p class="muted">Erledigt am {{ order.completedAt | isoDate }}</p>
                     }
                     <h4 class="sub-heading">Agents</h4>
                     <app-agent-workflow [order]="order" />
