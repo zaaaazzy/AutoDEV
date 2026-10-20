@@ -1064,4 +1064,29 @@ export const SCHEMA = `
     CHECK (order_test_commands IS NULL OR jsonb_typeof(order_test_commands) = 'array');
   -- Vom Auftrag geänderte Dateien (gegenüber der Basis), nach jedem Agent-Schritt aktualisiert.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS changed_files TEXT[] NOT NULL DEFAULT '{}';
+  -- Zeitgesteuerte Wartungs-Jobs im Worker: nur Job-Arten aus der festen Registry (src/runner/scheduler.ts), keine
+  -- Skripte oder Befehle aus der Datenbank. locked_until sperrt einen beanspruchten Lauf gegen andere Worker.
+  CREATE TABLE IF NOT EXISTS scheduled_jobs (
+    key TEXT PRIMARY KEY CHECK (key ~ '^[a-z0-9_-]{1,64}$'),
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    start_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    interval_seconds INTEGER NOT NULL CHECK (interval_seconds BETWEEN 60 AND 2592000),
+    job_kind TEXT NOT NULL CHECK (char_length(job_kind) BETWEEN 1 AND 64),
+    config JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(config) = 'object'),
+    next_run_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_run_at TIMESTAMPTZ,
+    last_status TEXT CHECK (last_status IN ('running', 'ok', 'warning', 'failed')),
+    last_message TEXT,
+    state JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(state) = 'object'),
+    locked_until TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS scheduled_jobs_due_idx ON scheduled_jobs (next_run_at) WHERE enabled;
+  -- Standardjobs (idempotent über den Schlüssel); der Sprint-Abschluss ändert Status und ist deshalb aus.
+  INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config) VALUES
+    ('backup_check', TRUE, 21600, 'backup_check', '{"dir": "backups", "maxAgeHours": 26, "minBytes": 1024}'),
+    ('watchdog_logs', TRUE, 900, 'watchdog_logs', '{}'),
+    ('close_old_sprints', FALSE, 86400, 'close_old_sprints', '{"inactiveDays": 14}'),
+    ('push_alert', TRUE, 3600, 'push_alert', '{}')
+  ON CONFLICT (key) DO NOTHING;
 `;
