@@ -9,10 +9,13 @@
       </div>
       <form class="form-grid" (ngSubmit)="saveSettings()">
         <label class="wide"
-          >Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
+          >Projektordner
+          <div class="path-row">
+            <input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
+            <app-folder-picker [value]="settings.repository" (picked)="settings.repository = $event" />
+          </div>
         </label>
         <div class="wide folder-picker-row">
-          <app-folder-picker [value]="settings.repository" (picked)="settings.repository = $event" />
           @if (settings.repository !== (store.currentProject()?.repository ?? '')) {
             <span class="muted"
               >Neuer Ordner – mit „Speichern“ übernehmen. Die Agents arbeiten danach dort (bzw. in „…-agents“).</span

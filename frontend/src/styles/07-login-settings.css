@@ -367,3 +367,25 @@
   }
 }
 
+
+/* Projektordner: Ordner-Knopf rechts neben dem Pfad auf derselben Höhe, die Auswahl klappt darunter auf. */
+.path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+.path-row > input {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.path-row > app-folder-picker {
+  display: contents;
+}
+.path-row > app-folder-picker > .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.path-row > app-folder-picker > .folder-picker {
+  flex-basis: 100%;
+}
