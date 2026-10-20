@@ -102,9 +102,15 @@ async function resumePosition(
   // Schlüssel je Einsatz: derselbe Agent kann im Workflow mehrfach vorkommen.
   const keyOf = (row: { agent_id: string; workflow_step_id: string | null }) => row.workflow_step_id ?? row.agent_id;
   const keyOfAgent = (agent: WorkflowAgent) => agent.stepId ?? agent.id;
-  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt.
+  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt – auch wenn der Lauf danach früh
+  // abbrach und daher nicht mehr Zeilen als Agents hat. Erkannt wird sie daran, dass ein Einsatz öfter vorkommt als
+  // im Ablauf; sonst gilt die Position (derselbe Agent ohne eigenen Workflow-Schritt kann mehrfach vorkommen).
   const latest = new Map(rows.map((row) => [keyOf(row), row]));
-  const steps = rows.length > ordered.length ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
+  const count = <T>(keys: T[]) =>
+    keys.reduce((map, key) => map.set(key, (map.get(key) ?? 0) + 1), new Map<T, number>());
+  const planned = count(ordered.map(keyOfAgent));
+  const corrected = [...count(rows.map(keyOf))].some(([key, times]) => times > (planned.get(key) ?? times));
+  const steps = corrected ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
   while (
     position < ordered.length &&

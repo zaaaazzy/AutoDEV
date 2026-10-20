@@ -679,3 +679,48 @@ test('Sprint pausiert: der Entwickler beendet seinen Schritt, der Tester startet
   assert.equal(await runWorkItem(pool, sprintItem, agents, options), 'passed');
   assert.deepEqual(calls, ['tester']);
 });
+
+test('Fortsetzung nach Nachbesserung und frühem Abbruch: der Entwickler bekommt die letzte Rückmeldung des Testers', async () => {
+  // Vorheriger Lauf: Entwickler, Tester ✗ (Nachbesserung), Entwickler, Tester ✗ – danach abgebrochen, also nicht mehr
+  // Zeilen als Agents im Ablauf (4).
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-2' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [{ id: 'run-1', status: 'failed' }] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) {
+        const step = (id: string, name: string, phase: string, status: string, output: string) => ({
+          agent_id: id,
+          workflow_step_id: null,
+          agent_name: name,
+          phase,
+          status,
+          output,
+        });
+        return {
+          rows: [
+            step('dev-id', 'dev', 'while_task', 'passed', 'gebaut'),
+            step('tester-id', 'tester', 'after_task', 'failed', 'erste Rückmeldung'),
+            step('dev-id', 'dev', 'while_task', 'passed', 'nachgebessert'),
+            step('tester-id', 'tester', 'after_task', 'failed', 'zweite Rückmeldung'),
+          ],
+        };
+      }
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const agents = [
+    { ...agent('dev', 'while_task', 1, ['dev']), role: 'developer' },
+    { ...agent('tester', 'after_task', 1, ['tester']), role: 'tester' },
+    agent('doc', 'after_task', 2, ['doc']),
+    agent('check', 'after_task', 3, ['check']),
+  ];
+  await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+  assert.equal(calls[0]?.[0], 'dev');
+  assert.match(calls[0]?.at(-1) ?? '', /zweite Rückmeldung/);
+  assert.doesNotMatch(calls[0]?.at(-1) ?? '', /erste Rückmeldung/);
+});
