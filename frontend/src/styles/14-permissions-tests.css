@@ -505,3 +505,33 @@
   gap: 6px;
 }
 
+/* „Was machen die Rollen?“ (Agents): aufklappbar, Texte brechen auch auf dem Handy um */
+.role-texts-panel > summary {
+  cursor: pointer;
+}
+.role-texts-panel > summary h2 {
+  display: inline;
+  margin: 0;
+}
+.role-texts-panel > summary .muted {
+  display: block;
+  margin-top: 2px;
+}
+.role-texts {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 0;
+}
+.role-text {
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.role-text dt {
+  font-weight: 700;
+}
+.role-text dd {
+  margin: 4px 0 0;
+}
+
