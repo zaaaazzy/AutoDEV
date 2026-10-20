@@ -411,6 +411,41 @@ gh auth login   # GitHub.com → SSH → im Browser bestätigen</code></pre>
                     }
                   </div>
                 }
+                <div class="wizard-action" data-testid="chromium-check">
+                  <app-check-state [state]="chromiumState()" />
+                  @switch (chromiumState()) {
+                    @case ('loading') {
+                      <span>Chromium für die visuelle Prüfung wird geprüft …</span>
+                    }
+                    @case ('ok') {
+                      <span>Chromium ist vorhanden – Screenshots für die visuelle Prüfung möglich.</span>
+                    }
+                    @case ('warn') {
+                      <span>Chromium fehlt (optional, für Screenshots der visuellen Prüfung).</span>
+                      <button class="button secondary small" type="button" (click)="installChromium()">
+                        Chromium installieren
+                      </button>
+                    }
+                    @case ('error') {
+                      <span>Chromium konnte nicht geprüft oder installiert werden.</span>
+                      <button class="button secondary small" type="button" (click)="checkChromium()">
+                        Erneut prüfen
+                      </button>
+                    }
+                  }
+                </div>
+                @if (chromiumState() === 'warn' || chromiumState() === 'error') {
+                  <div class="wizard-hint">
+                    <p>Alternativ im AIdeation-Ordner im Terminal:</p>
+                    <pre><code>{{ chromiumCommand() }}</code></pre>
+                    @if (chromiumLog()) {
+                      <details>
+                        <summary>Ausgabe der Installation</summary>
+                        <pre class="wizard-log">{{ chromiumLog() }}</pre>
+                      </details>
+                    }
+                  </div>
+                }
               }
 
               @case (3) {

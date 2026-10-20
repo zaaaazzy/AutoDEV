@@ -3,7 +3,9 @@ import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
-import { ensureDefaultAgents } from './agents.js';
+import { ensureDefaultAgents, ensureVisualTester } from './agents.js';
+import { parsePreviewSettings, VISUAL_COLUMNS } from './visual.js';
+import { logged } from '../core/log.js';
 import { targetsDevLogDatabase } from '../agent/tool-sql.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
 import { healthUrlError, SERVICE_NAME } from '../runner/production-monitor.js';
@@ -86,7 +88,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
-      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, created_at AS "createdAt",
+      `SELECT slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", agent_permissions AS "agentPermissions", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${VISUAL_COLUMNS}, created_at AS "createdAt",
               EXTRACT(EPOCH FROM favicon_mtime)::bigint AS "faviconVersion"
          FROM projects
         WHERE $1::text[] IS NULL OR slug = ANY($1)
@@ -339,6 +341,12 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
       values.push(value);
       sets.push(`${column} = $${values.length}`);
     }
+    const preview = parsePreviewSettings(body);
+    if (typeof preview === 'string') return fail(preview);
+    for (const [column, value] of preview) {
+      values.push(value);
+      sets.push(`${column} = $${values.length}${column === 'preview_url' ? '' : '::jsonb'}`);
+    }
     if (body.autoBugfix !== undefined) {
       if (typeof body.autoBugfix !== 'boolean')
         return fail('Automatisches Bugfixing muss ein- oder ausgeschaltet sein.');
@@ -359,12 +367,16 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
       return fail('Keine Änderung angegeben.');
     }
     const result = await pool.query(
-      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}`,
+      `UPDATE projects SET ${sets.join(', ')} WHERE slug = $1 RETURNING slug, name, repository, git_remote AS "gitRemote", database_url IS NOT NULL AS "databaseConfigured", test_commands AS "testCommands", deploy_commands AS "deployCommands", deploy_status AS "deployStatus", description, guidelines, auto_bugfix AS "autoBugfix", agent_workspace AS "agentWorkspace", review_mode AS "reviewMode", review_command AS "reviewCommand", review_url AS "reviewUrl", restart_after_sprint AS "restartAfterSprint", definition_of_ready AS "definitionOfReady", definition_of_done AS "definitionOfDone", sprint_mode AS "sprintMode", sprint_capacity_hours AS "sprintCapacityHours", autopilot_start AS "autopilotStart", autopilot_end AS "autopilotEnd", autopilot_days AS "autopilotDays", ${PRODUCTION_COLUMNS}, ${VISUAL_COLUMNS}`,
       values,
     );
     if (!result.rows[0]) {
       response.status(404).json({ message: 'Projekt nicht gefunden.' });
       return;
+    }
+    // Mit einer Vorschau-Adresse braucht der Workflow den visuellen Tester (einmalig nach dem Tester angelegt).
+    if (preview.some(([column, value]) => column === 'preview_url' && value)) {
+      await ensureVisualTester(pool, slug).catch(logged('projects'));
     }
     response.json({ project: result.rows[0] });
   });

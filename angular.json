@@ -44,6 +44,7 @@
               "frontend/src/styles/17-workflow-board.css",
               "frontend/src/styles/18-folders-bugs-sprint.css",
               "frontend/src/styles/19-production.css",
+              "frontend/src/styles/20-visual.css",
               "frontend/src/styles/20-budget.css"
             ],
             "allowedCommonJsDependencies": [

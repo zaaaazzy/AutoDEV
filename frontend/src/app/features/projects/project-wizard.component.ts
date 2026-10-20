@@ -169,6 +169,10 @@ export class ProjectWizardComponent implements OnDestroy {
     model?: string;
   } | null>(null);
   private agentCheck = 0;
+  /** Chromium für die visuelle Prüfung (Screenshots); optional, „warn“ = fehlt. */
+  protected readonly chromiumState = signal<CheckState>('idle');
+  protected readonly chromiumCommand = signal('npx --no-install playwright install chromium');
+  protected readonly chromiumLog = signal('');
 
   // Schritt 4: Rechte
   protected readonly permissionGroups = signal<PermissionInfo[]>([]);
@@ -319,6 +323,26 @@ export class ProjectWizardComponent implements OnDestroy {
     this.step.set(step);
     if (step === 1) this.enterGitStep();
     if (step === 2 && this.agentState() === 'idle') void this.testAgent();
+    if (step === 2 && this.chromiumState() === 'idle') void this.checkChromium();
+  }
+
+  /** Prüft, ob der Chromium-Browser für die visuelle Prüfung vorhanden ist. */
+  protected async checkChromium(): Promise<void> {
+    this.chromiumState.set('loading');
+    const job = await this.setup.run<{ installed: boolean; command?: string }>('check_chromium').catch(() => null);
+    if (job?.result?.command) this.chromiumCommand.set(job.result.command);
+    this.chromiumState.set(job?.status === 'done' ? (job.result?.installed ? 'ok' : 'warn') : 'error');
+  }
+
+  /** Lädt Chromium über den Worker (npx playwright install chromium). */
+  protected async installChromium(): Promise<void> {
+    this.chromiumState.set('loading');
+    this.chromiumLog.set('');
+    const job = await this.setup
+      .run<{ installed: boolean }>('install_chromium', {}, (update) => this.chromiumLog.set(update.log))
+      .catch(() => null);
+    this.chromiumLog.set(job?.log ?? '');
+    this.chromiumState.set(job?.status === 'done' && job.result?.installed ? 'ok' : 'error');
   }
 
   private enterGitStep(): void {

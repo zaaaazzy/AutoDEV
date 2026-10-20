@@ -6,6 +6,8 @@ import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { refreshAcceptanceTodo } from '../runner/action-todo.js';
 
 const OPEN_STATUSES = ['open', 'unmet', 'manual'];
+/** Akzeptanzkriterien, DoD-Punkte und Befunde der visuellen Prüfung. */
+const CHECK_KINDS = ['criterion', 'done', 'visual'];
 
 /** Abnahme je Auftrag (Akzeptanzkriterien und DoD-Punkte mit Status) sowie die Standard-Definitionen. */
 export function registerAcceptanceRoutes(app: Router, pool: Pool): void {
@@ -37,7 +39,7 @@ export function registerAcceptanceRoutes(app: Router, pool: Pool): void {
       if (
         !isUuid(request.params.id) ||
         !isRecord(body) ||
-        !['criterion', 'done'].includes(String(body.kind)) ||
+        !CHECK_KINDS.includes(String(body.kind)) ||
         !Number.isInteger(body.position) ||
         typeof body.checked !== 'boolean'
       ) {
@@ -66,7 +68,7 @@ export function registerAcceptanceRoutes(app: Router, pool: Pool): void {
     try {
       const body = (isRecord(request.body) ? request.body : {}) as Record<string, unknown>;
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
-      const single = ['criterion', 'done'].includes(String(body.kind)) && Number.isInteger(body.position);
+      const single = CHECK_KINDS.includes(String(body.kind)) && Number.isInteger(body.position);
       const result = await pool.query(
         `UPDATE acceptance_checks SET status = 'verifying', checked_at = NOW()
           WHERE development_id = $1 AND status = ANY($2)

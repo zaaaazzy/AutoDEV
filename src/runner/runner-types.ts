@@ -15,7 +15,10 @@ export interface WorkItem {
   ideationId?: string | null;
   agentId?: string | null;
   risks?: string;
-  /** Für das Modell-Routing: Kategorie, Schätzung (Stunden) und Anzahl automatischer Wiederholungen. */
+  /**
+   * Kategorie (frontend, backend, fullstack …): Modell-Routing; die visuelle Prüfung läuft nur bei Frontend und
+   * Fullstack. Dazu Schätzung (Stunden) und Anzahl automatischer Wiederholungen fürs Modell-Routing.
+   */
   category?: string | null;
   effortHours?: number | null;
   retryCount?: number;

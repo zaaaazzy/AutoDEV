@@ -42,6 +42,37 @@ export interface Checked {
 
 const MARKER = /^@@ACCEPTANCE\s+(\{.*\})\s*$/m;
 
+/** Ergebnis je Prüfpunkt als @@CHECK-Zeile (Agent-Prüfung offener Punkte, visuelle Prüfung, KI-Urteil). */
+export interface CheckResult {
+  nr: number;
+  met: boolean;
+  manual: boolean;
+  note: string;
+}
+
+export function formatCheck(result: CheckResult): string {
+  return `@@CHECK ${JSON.stringify({ nr: result.nr, met: result.met, manual: result.manual, note: result.note })}`;
+}
+
+export function parseChecks(output: string): CheckResult[] {
+  const results: CheckResult[] = [];
+  for (const match of output.matchAll(/^\s*@@CHECK\s+(\{.*\})\s*$/gm)) {
+    try {
+      const entry = JSON.parse(match[1]!) as Partial<CheckResult>;
+      if (!Number.isInteger(entry.nr)) continue;
+      results.push({
+        nr: entry.nr!,
+        met: entry.met === true,
+        manual: entry.met !== true && entry.manual === true,
+        note: String(entry.note ?? '').slice(0, 500),
+      });
+    } catch {
+      // unlesbare Zeile überspringen
+    }
+  }
+  return results;
+}
+
 /** Anweisung an den Tester: Kriterien und Definition of Done einzeln prüfen und maschinenlesbar melden. */
 export function acceptanceInstructions(criteria: string[], definitionOfDone: string[]): string {
   const list = (items: string[]) => items.map((item, index) => `${index + 1}. ${item}`).join('\n');
@@ -156,7 +187,8 @@ export async function saveAcceptance(
     ...rows(criteria, result?.criteria ?? null, 'criterion'),
     ...rows(definitionOfDone, result?.done ?? null, 'done'),
   ];
-  await pool.query('DELETE FROM acceptance_checks WHERE development_id = $1', [developmentId]);
+  // Die Punkte der visuellen Prüfung (Art „visual“) verwaltet deren eigener Schritt.
+  await pool.query(`DELETE FROM acceptance_checks WHERE development_id = $1 AND kind <> 'visual'`, [developmentId]);
   for (const row of all) {
     await pool.query(
       `INSERT INTO acceptance_checks (development_id, kind, position, text, status, note) VALUES ($1, $2, $3, $4, $5, $6)`,
