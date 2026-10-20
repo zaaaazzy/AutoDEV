@@ -21,9 +21,21 @@ export function formatDuration(value: number | null | undefined): string {
   return `${milliseconds} ms`;
 }
 
-/** ISO-Zeitstempel als `TT.MM.JJJJ`. */
+/**
+ * ISO-Datum oder -Zeitstempel als `TT.MM.JJJJ`. Zeitstempel zählen nach dem Kalendertag der Ortszeit
+ * (01:30 MESZ am 21.10. = 23:30 UTC am 20.10. → „21.10.“); reine Daten („2026-10-21“) bleiben unverändert.
+ */
 export function formatIsoDate(value: string): string {
-  return value.slice(0, 10).split('-').reverse().join('.');
+  return localDateKey(value).split('-').reverse().join('.');
+}
+
+/** Kalendertag `JJJJ-MM-TT` in Ortszeit; reine Daten werden nicht verschoben. */
+export function localDateKey(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  const pad = (part: number): string => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
 export function shortText(text: string | null | undefined, limit = 200): string {

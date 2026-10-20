@@ -18,10 +18,11 @@ import {
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
 import { formatHours, formatIsoDate } from '../../shared/format.js';
-import { CATEGORIES, priorityLabel, statusLabel, isFinished } from '../../shared/labels.js';
+import { CATEGORIES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   HoursPipe,
+  IsoDatePipe,
   PriorityLabelPipe,
   StatusClassPipe,
   StatusLabelPipe,
@@ -32,13 +33,15 @@ import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { assertImageSizes } from '../../shared/image-upload.js';
+import { errorMessage } from '../../core/errors.js';
 import {
   IDEA_SELECTABLE_STATUSES,
   IDEA_STATUSES,
   ideaDisplayStatus,
+  ideaPhase,
   isOpenIdea,
   VISIONARY_CONFIRM,
-  MAX_IMAGE_BYTES,
   sourceLabel,
 } from './idea-options.js';
 
@@ -68,6 +71,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     ChangedFilesComponent,
     MarkdownPipe,
     HoursPipe,
+    IsoDatePipe,
     PriorityLabelPipe,
     StatusClassPipe,
     StatusLabelPipe,
@@ -295,7 +299,10 @@ export class IdeationComponent {
   protected async createIdea(): Promise<void> {
     const { title, description, priority, category } = this.ideaForm;
     const files = this.pendingImages;
+    let uploadError = '';
     await this.store.perform(async () => {
+      // Größe vorher prüfen: Ein zu großes Bild darf keine Idee ohne Bild anlegen.
+      assertImageSizes(files);
       const created = await this.api.post<{ item: Idea }>(
         `${this.api.projectPath(this.store.activeProject())}/ideation`,
         {
@@ -305,30 +312,31 @@ export class IdeationComponent {
           category: category || null,
         },
       );
+      // Angelegt ist angelegt: Formular sofort leeren, damit ein zweiter Klick keine doppelte Idee erzeugt.
       this.pendingImages = [];
-      await this.uploadImages(created.item.id, files);
       this.ideaForm = { title: '', description: '', priority: 'medium', category: '' };
       this.store.showCreate.set(false);
+      uploadError = await this.uploadImages(created.item.id, files).then(
+        () => '',
+        (error: unknown) => errorMessage(error, 'Upload fehlgeschlagen.'),
+      );
     }, 'Idee wurde hinzugefügt.');
+    if (uploadError) this.store.notice.set(`Idee wurde hinzugefügt, Bilder aber nicht: ${uploadError}`);
   }
 
   private isInProgress(idea: Idea): boolean {
     // Nur mit vorhandenem, noch nicht abgeschlossenen Auftrag gilt eine Idee als „in Bearbeitung“.
-    const order = this.closedIdeaOrder(idea);
-    return idea.status === 'accepted' && !!order && !isFinished(order.status);
+    return ideaPhase(idea, this.closedIdeaOrder(idea)) === 'in_progress';
   }
 
   private isClosedIdea(idea: Idea): boolean {
-    return (
-      idea.status === 'rejected' ||
-      idea.status === 'implemented' ||
-      (idea.status === 'accepted' && !this.isInProgress(idea))
-    );
+    const phase = ideaPhase(idea, this.closedIdeaOrder(idea));
+    return phase === 'implemented' || phase === 'discarded';
   }
 
   private async uploadImages(ideationId: string, files: File[]): Promise<void> {
+    assertImageSizes(files);
     for (const file of files) {
-      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} ist größer als 5 MB.`);
       await this.api.upload(`/api/ideation/${encodeURIComponent(ideationId)}/attachments`, file);
     }
   }

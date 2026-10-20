@@ -121,7 +121,7 @@ export class SprintsComponent {
 
   protected sprintItems(sprintId: string): DevelopmentItem[] {
     const rank = (status: string): number => {
-      const order = ['in_progress', 'planned', 'backlog', 'blocked', 'done', 'rejected'];
+      const order = ['in_progress', 'approval', 'planned', 'backlog', 'blocked', 'done', 'rejected'];
       const index = order.indexOf(status);
       return index < 0 ? order.length : index;
     };

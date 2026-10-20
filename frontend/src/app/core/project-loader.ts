@@ -23,6 +23,8 @@ import {
 export interface LoadedProject {
   data: ProjectData;
   errors: Record<string, string>;
+  /** Felder, deren Ressource nicht geladen werden konnte (auch ohne Meldung in `errors`). */
+  failed: (keyof ProjectData)[];
 }
 
 /** Lädt alle Ressourcen eines Projekts; fehlgeschlagene Ressourcen bleiben leer und landen in `errors`. */
@@ -46,6 +48,7 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
 
   const data = emptyProjectData();
   const errors: Record<string, string> = {};
+  const failed: (keyof ProjectData)[] = [];
   const [
     board,
     sprints,
@@ -62,11 +65,13 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     revisions,
   ] = results;
   if (revisions.status === 'fulfilled') data.docRevisions = revisions.value.revisions ?? [];
+  else failed.push('docRevisions');
   if (acceptance.status === 'fulfilled') {
     data.acceptance = acceptance.value.checks ?? [];
     data.acceptanceDefaults = acceptance.value.defaults ?? null;
-  }
+  } else failed.push('acceptance', 'acceptanceDefaults');
   if (coverage.status === 'fulfilled') data.coverage = coverage.value.report ?? null;
+  else failed.push('coverage');
   if (attachments.status === 'fulfilled') data.attachments = attachments.value.attachments ?? [];
   else errors.attachments = errorMessage(attachments.reason, 'Bilder konnten nicht geladen werden.');
   if (board.status === 'fulfilled') {
@@ -91,7 +96,34 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
   if (reports.status === 'fulfilled') data.reports = reports.value.reports ?? [];
   else errors.reports = errorMessage(reports.reason, 'Sprintberichte konnten nicht geladen werden.');
 
-  return { data: withoutOrphanedBugOrders(data), errors };
+  for (const [key, fields] of Object.entries(ERROR_FIELDS)) if (errors[key]) failed.push(...fields);
+
+  // Ohne geladene Bugs lässt sich nicht erkennen, welche Bugfix-Aufträge verwaist sind – dann nichts ausblenden.
+  return { data: errors.bugs ? data : withoutOrphanedBugOrders(data), errors, failed };
+}
+
+/** Welche Datenfelder zu einem Eintrag in `errors` gehören. */
+const ERROR_FIELDS: Record<string, (keyof ProjectData)[]> = {
+  attachments: ['attachments'],
+  board: ['ideas', 'development', 'comments'],
+  sprints: ['sprints'],
+  agents: ['agents'],
+  agentRuns: ['agentRuns'],
+  runs: ['runs'],
+  stats: ['stats'],
+  bugs: ['bugs'],
+  docs: ['docs'],
+  reports: ['reports'],
+};
+
+/**
+ * Für das Nachladen im Hintergrund: Bereiche, die diesmal nicht geladen werden konnten,
+ * behalten ihren bisherigen Stand statt still leer zu werden.
+ */
+export function keepFailedSections(previous: ProjectData, loaded: LoadedProject): ProjectData {
+  const data = { ...loaded.data };
+  for (const field of loaded.failed) (data as Record<string, unknown>)[field] = previous[field];
+  return data;
 }
 
 function withoutOrphanedBugOrders(data: ProjectData): ProjectData {

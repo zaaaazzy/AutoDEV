@@ -8,8 +8,10 @@ export interface ConfirmOptions {
   /** Optionale Einzelheiten, z. B. die betroffenen Aufträge oder Befehle. */
   details?: string[];
   confirmLabel: string;
-  /** Beschriftung des Kommentarfelds; der Kommentar ist immer optional. */
+  /** Beschriftung des Kommentarfelds; der Kommentar ist optional, ausser `commentRequired` ist gesetzt. */
   commentLabel?: string;
+  /** Bestätigen erst möglich, wenn ein Kommentar eingegeben ist. */
+  commentRequired?: boolean;
   commentPlaceholder?: string;
   /** Kurzer Hinweis unter dem Feld, wofür der Kommentar verwendet wird. */
   commentHint?: string;
