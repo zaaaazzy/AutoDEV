@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
+import { type APIRequestContext, expect, type Locator, type Page, test } from '@playwright/test';
 
 const username = process.env.E2E_USERNAME!;
 const password = process.env.E2E_PASSWORD!;
@@ -43,6 +43,16 @@ async function login(page: Page, welcome = false): Promise<void> {
   await page.getByLabel('Passwort').fill(password);
   await page.getByRole('button', { name: 'Anmelden' }).click();
   await expect(page.locator('.app-shell')).toBeVisible();
+}
+
+/** Sprint-Details: Der aktuelle Sprint steht oben offen, andere klappt ihre Zeile in der Liste auf. */
+async function sprintDetail(page: Page, name: string): Promise<Locator> {
+  const title = page.locator('.sprint-title h3', { hasText: new RegExp(`^${name}$`) });
+  await expect(page.locator('.sprint-current')).toBeVisible();
+  const current = page.locator('.sprint-current app-sprint-detail').filter({ has: title });
+  if (await current.count()) return current;
+  await page.locator('.dt-table tbody tr').filter({ hasText: name }).locator('.dt-expand').first().click();
+  return page.locator('.closed-detail app-sprint-detail').filter({ has: title });
 }
 
 test.beforeAll(async ({ request }) => seed(request));
@@ -184,12 +194,17 @@ test('Dokumentation → Marketing: Agent-Rechte nur mit Docs-Recht, „Zurück�
   });
   await page.goto('/#docs');
   await expect(page.locator('.doc-group summary', { hasText: 'Handbücher' })).toBeVisible();
-  await page.locator('.doc-group', { hasText: 'Marketing' }).getByRole('link', { name: 'Agents, Aufgaben und Rechte' }).click();
+  await page
+    .locator('.doc-group', { hasText: 'Marketing' })
+    .getByRole('link', { name: 'Agents, Aufgaben und Rechte' })
+    .click();
   await expect(page).toHaveURL(/#docs\/marketing\/agent-permissions$/);
   const rows = page.locator('.ap-table tbody tr');
   await expect(rows).toHaveCount(10);
   await expect(rows.filter({ hasText: '(visual_tester)' })).toHaveCount(1);
-  await expect(page.locator('.ap-table tr[data-role="developer"] [data-column="files"]')).toContainText('ja, mit Backup');
+  await expect(page.locator('.ap-table tr[data-role="developer"] [data-column="files"]')).toContainText(
+    'ja, mit Backup',
+  );
   await expect(page.locator('.ap-table tr[data-role="reviewer"] [data-column="files"]')).toContainText('nur lesen');
   await expect(page.locator('.ap-diagram svg')).toBeVisible();
   await page.goBack();
@@ -202,7 +217,13 @@ test('Dokumentation → Marketing: Agent-Rechte nur mit Docs-Recht, „Zurück�
   const plannerPassword = 'planer-passwort-123';
   const created = await request.post('/api/users', {
     headers: admin,
-    data: { username: planner, displayName: 'Paul Planer', password: plannerPassword, roles: ['plan'], projects: ['e2e'] },
+    data: {
+      username: planner,
+      displayName: 'Paul Planer',
+      password: plannerPassword,
+      roles: ['plan'],
+      projects: ['e2e'],
+    },
   });
   expect(created.ok(), await created.text()).toBeTruthy();
   const context = await browser.newContext();
@@ -412,38 +433,32 @@ test('Sprint-Popover: Vorschau, Stand im Review-Container starten, Fehler und fe
   }
 });
 
-test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint nehmen und wieder herausnehmen', async ({
+test('Sprint: offenen Auftrag unter „Aufträge hinzufügen“ in den Sprint nehmen und wieder herausnehmen', async ({
   page,
   request,
 }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
-  const title = `Board-Auftrag ${Date.now()}`;
+  const title = `Sprint-Liste-Auftrag ${Date.now()}`;
   const sprint = (
     await (
-      await request.post('/api/projects/e2e/sprints', { headers, data: { name: `Board ${Date.now() % 10000}` } })
+      await request.post('/api/projects/e2e/sprints', { headers, data: { name: `Liste ${Date.now() % 10000}` } })
     ).json()
   ).sprint;
   const order = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
   await login(page);
   await page.goto('/#sprints');
-  await page.locator('.dt-table tbody tr').filter({ hasText: sprint.name }).locator('.dt-expand').first().click();
-  const board = page.locator('.kanban-board').first();
-  // Keine Spalte „Offen“ mehr: offene Aufträge stehen unter dem Board.
-  await expect(board.locator('.col-open')).toHaveCount(0);
-  const open = board.locator('.kanban-pool-card', { hasText: title });
-  await expect(open).toBeVisible();
-  await open.getByRole('button', { name: 'In den Sprint nehmen' }).click();
-  const planned = board.locator('.col-planned .kanban-card', { hasText: title });
-  await expect(planned).toBeVisible();
-  await expect(planned.locator('.kanban-rank')).toHaveText('1');
+  const detail = await sprintDetail(page, sprint.name);
+  // Ein leerer Sprint zeigt die Auswahl gleich offen.
+  const pool = detail.locator('.sprint-pool');
+  await expect(pool.locator('.dt-group').first()).toContainText('Offen');
+  await pool.locator('tbody tr', { hasText: title }).getByRole('button', { name: 'In den Sprint nehmen' }).click();
+  const planned = detail.locator('.sprint-orders tbody tr', { hasText: title });
+  await expect(detail.locator('.sprint-orders .dt-group').first()).toContainText('Geplant');
+  await expect(planned.locator('.rank-cell')).toHaveText('1');
   await planned.getByRole('button', { name: 'Aus dem Sprint nehmen' }).click();
-  await expect(board.locator('.kanban-pool-card', { hasText: title })).toBeVisible();
-  // Der Titel verlinkt auf den Auftrag.
-  await board.locator('.kanban-pool-card', { hasText: title }).getByRole('link', { name: title }).click();
-  // Aus dem Sprint genommen wartet er auf eine Entscheidung: Der Link führt zu „Aktionen“ und öffnet seine Karte.
-  await expect(page).toHaveURL(new RegExp(`#actions/${order.id}$`));
-  await expect(page.locator('.page-heading h1')).toHaveText('Aktionen');
-  await expect(page.locator(`#order-${order.id}`)).toContainText(title);
+  // Herausgenommen gilt er als abgebrochen und steht wieder zur Auswahl.
+  await expect(pool.locator('.dt-group', { hasText: 'Abgebrochen' })).toBeVisible();
+  await expect(pool.locator('tbody tr', { hasText: title })).toBeVisible();
   await request.delete(`/api/development/${order.id}`, { headers });
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
@@ -543,13 +558,13 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
 
   await login(page);
   await page.goto('/#sprints');
-  await page.locator('.dt-table tbody tr').filter({ hasText: 'E2E-Sprint' }).locator('.dt-expand').first().click();
-  await page
-    .locator('.kanban-board .col-planned .kanban-card')
+  const detail = await sprintDetail(page, sprint.name);
+  await detail
+    .locator('.sprint-orders tbody tr')
     .filter({ hasText: title })
     .getByRole('button', { name: 'Aus dem Sprint nehmen' })
     .click();
-  await expect(page.locator('.kanban-pool-card').filter({ hasText: title })).toBeVisible();
+  await expect(detail.locator('.sprint-pool tbody tr').filter({ hasText: title })).toBeVisible();
 
   // Der Auftrag steht nicht mehr in der Auftragsliste, sondern unter „Aktionen“ (mit Zahl im Menü).
   await page.goto('/#development');

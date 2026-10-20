@@ -1,7 +1,15 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type APIRequestContext, type Browser, expect, type Page, test, type TestInfo } from '@playwright/test';
+import {
+  type APIRequestContext,
+  type Browser,
+  expect,
+  type Locator,
+  type Page,
+  test,
+  type TestInfo,
+} from '@playwright/test';
 
 /**
  * Kompletter Oberflächentest: jede Seite, jede Tabelle (Sortieren, Filtern, Suchen, Zurücksetzen) und die
@@ -133,6 +141,16 @@ async function snap(page: Page, info: TestInfo, name: string, fullPage = true): 
 }
 
 /** Klickt den Button mit genau diesem Text im angegebenen Bereich. */
+/** Sprint-Details: Der aktuelle Sprint steht oben offen, andere klappt ihre Zeile in der Liste auf. */
+async function sprintDetail(page: Page, name: string): Promise<Locator> {
+  const title = page.locator('.sprint-title h3', { hasText: new RegExp(`^${name}$`) });
+  await expect(page.locator('.sprint-current')).toBeVisible();
+  const current = page.locator('.sprint-current app-sprint-detail').filter({ has: title });
+  if (await current.count()) return current;
+  await page.locator('.dt-table tbody tr').filter({ hasText: name }).locator('.dt-expand').first().click();
+  return page.locator('.closed-detail app-sprint-detail').filter({ has: title });
+}
+
 function button(scope: Page | ReturnType<Page['locator']>, name: string | RegExp) {
   return scope.getByRole('button', { name, exact: typeof name === 'string' }).first();
 }
@@ -284,7 +302,7 @@ test('Alle Seiten laden ohne Fehler und ohne seitliches Überlaufen', async ({ p
     await open(page, section);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect.soft(overflow, `Seite ${section} ragt über den Rand`).toBeLessThanOrEqual(1);
-    // Elemente, die über den rechten Rand hinausragen (Tabellen und Boards dürfen waagrecht scrollen)
+    // Elemente, die über den rechten Rand hinausragen (Tabellen dürfen waagrecht scrollen)
     const outside = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('main *')]
         .filter((element) => {
@@ -294,7 +312,7 @@ test('Alle Seiten laden ohne Fehler und ohne seitliches Überlaufen', async ({ p
             box.width > 0 &&
             box.right > innerWidth + 2 &&
             (!parent || parent.right <= innerWidth + 2) &&
-            !element.closest('.table-wrap, .kanban, pre, .dt-filter-menu')
+            !element.closest('.table-wrap, pre, .dt-filter-menu')
           );
         })
         .slice(0, 3)
@@ -474,7 +492,7 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
 });
 
-test('Sprints: Datum prüfen, anlegen, Board öffnen, starten', async ({ page, isMobile }, info) => {
+test('Sprints: Datum prüfen, anlegen, Aufträge zeigen, starten', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop-Ablauf');
   await login(page);
   await open(page, 'sprints');
@@ -487,24 +505,20 @@ test('Sprints: Datum prüfen, anlegen, Board öffnen, starten', async ({ page, i
   await expect(page.getByText('Das Enddatum darf nicht vor dem Startdatum liegen.')).toBeVisible();
   await page.locator('input[name=endDate]').fill('2026-10-31');
   await button(page, 'Sprint anlegen').click();
-  await expect(page.locator('.dt-table tbody tr').filter({ hasText: name })).toBeVisible();
+  // Neu angelegt steht er oben als aktueller Sprint oder unter „Geplante Sprints“.
+  await expect(page.getByText(name).first()).toBeVisible();
 
-  const sprint = page.locator('.dt-table tbody tr').filter({ hasText: 'Sprint 1' }).first();
-  await sprint.locator('.dt-expand').click();
-  const board = page.locator('.kanban').first();
-  await expect(board).toBeVisible();
-  await snap(page, info, 'Sprint-Board');
-  const cut = await board.evaluate(
-    (element) =>
-      [...element.querySelectorAll<HTMLElement>('.kanban-card *')].filter(
-        (child) => child.scrollWidth > child.clientWidth + 1 && child.children.length === 0,
-      ).length,
-  );
-  expect.soft(cut, 'Titel auf Kanban-Karten werden nicht abgeschnitten').toBe(0);
-  const detail = page.locator('.closed-detail').first();
+  const detail = await sprintDetail(page, 'Sprint 1');
+  await expect(detail.locator('.sprint-orders')).toBeVisible();
+  await snap(page, info, 'Sprint-Aufträge');
   await button(detail, 'Sprint starten').click();
-  await expect(sprint).toContainText('Aktiv');
-  await expect.soft(sprint, '„Sprint starten“ setzt das Startdatum').not.toContainText('– –');
+  // Gestartet ist er der aktuelle Sprint und steht oben.
+  const current = page.locator('.sprint-current');
+  await expect(current.locator('.sprint-title h3')).toHaveText('Sprint 1');
+  await expect(current.locator('.sprint-title .status').first()).toContainText('Aktiv');
+  await expect
+    .soft(current.locator('.detail-list > div').first().locator('dd'), '„Sprint starten“ setzt das Startdatum')
+    .not.toHaveText('–');
 });
 
 test('Dokumentation: Markdown, bearbeiten, einreichen, freigeben, neues Handbuch', async ({ page, isMobile }, info) => {

@@ -1,14 +1,11 @@
-import { NgClass } from '@angular/common';
-import { SprintProposalComponent } from './sprint-proposal.component.js';
-import { NavIconComponent } from '../../shared/nav-icon.component.js';
-import { Component, inject, signal } from '@angular/core';
-import { SprintReviewComponent } from './sprint-review.component.js';
+import { NgClass, NgTemplateOutlet } from '@angular/common';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
+import type { SortingState } from '@tanstack/angular-table';
+import type { Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { SprintBoardComponent } from './sprint-board.component.js';
-import { branchNode, commitNode, type GitNode, GitTreeComponent } from '../../shared/git-tree.component.js';
+import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   type DataColumn,
   DataCellDirective,
@@ -17,41 +14,31 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
 import { combinedCategory, statusLabel } from '../../shared/labels.js';
-import { categoryColumn } from '../../shared/data-table/columns.js';
-import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
-import {
-  DurationPipe,
-  HoursPipe,
-  IsoDatePipe,
-  StatusClassPipe,
-  StatusLabelPipe,
-  TokensPipe,
-  UsdPipe,
-} from '../../shared/pipes.js';
+import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { SprintDetailComponent } from './sprint-detail.component.js';
+import { SprintProposalComponent } from './sprint-proposal.component.js';
 
-const SPRINT_STATUS_RANK = ['active', 'review', 'planned', 'completed'];
+/** Welcher Sprint oben als „aktueller“ steht: der laufende, sonst der im Review, sonst der nächste geplante. */
+const CURRENT_RANK = ['active', 'review', 'planned'];
 
+/**
+ * Sprint-Seite wie die Auftragsseite: oben der aktuelle Sprint mit allen Aufträgen, darunter die geplanten
+ * und die abgeschlossenen Sprints als Listen; jede Zeile klappt die Sprint-Details auf.
+ */
 @Component({
   selector: 'app-sprints',
   standalone: true,
   imports: [
-    SprintReviewComponent,
-    SprintProposalComponent,
-    NavIconComponent,
-    SprintBoardComponent,
     NgClass,
+    NgTemplateOutlet,
     FormsModule,
-    DurationPipe,
-    GitTreeComponent,
-    HoursPipe,
-    IsoDatePipe,
+    SprintDetailComponent,
+    SprintProposalComponent,
     StatusClassPipe,
     StatusLabelPipe,
     DataTableComponent,
     DataCellDirective,
     DataDetailDirective,
-    TokensPipe,
-    UsdPipe,
   ],
   templateUrl: './sprints.component.html',
   host: { style: 'display: contents' },
@@ -61,12 +48,29 @@ export class SprintsComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
-  protected readonly usdRate = USD_PER_MILLION_TOKENS;
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
-  protected readonly editingId = signal<string | null>(null);
-  protected readonly openSprint = signal<string | null>(
-    this.store.data().sprints.find((sprint) => sprint.status === 'active')?.id ?? null,
+
+  protected readonly current = computed(() => {
+    const candidates = this.data().sprints.filter((sprint) => CURRENT_RANK.includes(sprint.status));
+    return (
+      [...candidates].sort(
+        (a, b) =>
+          CURRENT_RANK.indexOf(a.status) - CURRENT_RANK.indexOf(b.status) ||
+          (a.startDate ?? '9999').localeCompare(b.startDate ?? '9999'),
+      )[0] ?? null
+    );
+  });
+  protected readonly upcoming = computed(() =>
+    this.data().sprints.filter((sprint) => sprint.status !== 'completed' && sprint.id !== this.current()?.id),
   );
+  protected readonly completed = computed(() => this.data().sprints.filter((sprint) => sprint.status === 'completed'));
+  /** Über einen gefilterten Link geöffnet oder noch kein laufender Sprint: abgeschlossene gleich zeigen. */
+  protected readonly showDone = signal(
+    Object.values(this.store.filtersFor('sprints')).some((values) => values.length) || !this.current(),
+  );
+  protected readonly upcomingSort: SortingState = [{ id: 'start', desc: false }];
+  protected readonly completedSort: SortingState = [{ id: 'end', desc: true }];
+  protected readonly openSprint = signal<string | null>(null);
   protected readonly sprintId = (sprint: Sprint): string => sprint.id;
   protected readonly sprintColumns: DataColumn<Sprint>[] = [
     { id: 'name', header: 'Sprint', value: (sprint) => sprint.name, filter: 'text', className: 'title-cell' },
@@ -74,7 +78,6 @@ export class SprintsComponent {
       id: 'status',
       header: 'Status',
       value: (sprint) => statusLabel(sprint.status),
-      sortValue: (sprint) => SPRINT_STATUS_RANK.indexOf(sprint.status),
     },
     categoryColumn<Sprint>((sprint) =>
       combinedCategory(
@@ -111,82 +114,18 @@ export class SprintsComponent {
     return { done: orders.filter((item) => item.status === 'done').length, total: orders.length };
   }
 
+  protected ciLabel(sprint: Sprint): string {
+    return sprint.ciStatus === 'success'
+      ? 'grün'
+      : sprint.ciStatus === 'failure'
+        ? 'rot'
+        : sprint.ciStatus === 'pending'
+          ? 'läuft'
+          : 'unbekannt';
+  }
+
   protected toggleSprint(id: string): void {
     this.openSprint.update((current) => (current === id ? null : id));
-  }
-
-  protected reportFor(sprintId: string): SprintReport | undefined {
-    return this.data().reports.find((report) => report.sprintId === sprintId);
-  }
-
-  protected sprintItems(sprintId: string): DevelopmentItem[] {
-    const rank = (status: string): number => {
-      const order = ['in_progress', 'approval', 'planned', 'backlog', 'blocked', 'done', 'rejected'];
-      const index = order.indexOf(status);
-      return index < 0 ? order.length : index;
-    };
-    return this.data()
-      .development.filter((item) => item.sprintId === sprintId)
-      .sort((left, right) => rank(left.status) - rank(right.status));
-  }
-
-  protected sprintProgress(sprintId: string): string {
-    const orders = this.sprintItems(sprintId);
-    const done = orders.filter((item) => item.status === 'done').length;
-    return `${done} / ${orders.length} Aufträge erledigt`;
-  }
-
-  protected sprintEstimate(sprintId: string): number | null {
-    const efforts = this.sprintItems(sprintId).flatMap((item) =>
-      typeof item.effortHours === 'number' ? [item.effortHours] : [],
-    );
-    return efforts.length ? efforts.reduce((sum, hours) => sum + hours, 0) : null;
-  }
-
-  protected sprintTokensEstimate(sprintId: string): number | null {
-    const tokens = this.sprintItems(sprintId).flatMap((item) =>
-      item.tokenEstimate === null || item.tokenEstimate === undefined ? [] : [Number(item.tokenEstimate)],
-    );
-    return tokens.length ? tokens.reduce((sum, value) => sum + value, 0) : null;
-  }
-
-  protected sprintTokensSpent(sprintId: string): number | null {
-    const ids = new Set(this.sprintItems(sprintId).map((item) => item.id));
-    const total = this.data()
-      .agentRuns.filter((run) => run.developmentId && ids.has(run.developmentId))
-      .flatMap((run) => run.steps)
-      .reduce((sum, step) => sum + Number(step.tokens ?? 0), 0);
-    return total || null;
-  }
-
-  protected sprintSpent(sprintId: string): number | null {
-    const ids = new Set(this.sprintItems(sprintId).map((item) => item.id));
-    const total = this.data()
-      .agentRuns.filter((run) => run.developmentId && ids.has(run.developmentId))
-      .flatMap((run) => run.steps)
-      .reduce((sum, step) => sum + (step.durationMs ?? 0), 0);
-    return total || null;
-  }
-
-  protected async saveSprint(id: string, values: Partial<Sprint>): Promise<void> {
-    await this.updateSprint(id, values);
-    this.editingId.set(null);
-  }
-
-  /** ZIP des Sprint-Stands direkt von GitHub (Commit, sonst Branch); ändert nichts am lokalen Repository. */
-  protected zipUrl(sprint: Sprint): string | null {
-    const base = this.githubBase();
-    if (!base) return null;
-    const ref = sprint.gitCommit || (sprint.gitBranch ? `refs/heads/${sprint.gitBranch}` : 'HEAD');
-    return `${base}/archive/${ref.split('/').map(encodeURIComponent).join('/')}.zip`;
-  }
-
-  protected githubBase(): string | null {
-    const remote = this.store.currentProject()?.gitRemote?.trim();
-    const match = remote?.match(
-      /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+\/[^\s]+?)(?:\.git)?\/?$/,
-    );
-    return match ? `https://github.com/${match[1]}` : null;
   }
 
   protected async createSprint(): Promise<void> {
@@ -201,92 +140,5 @@ export class SprintsComponent {
       this.sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
       this.store.showCreate.set(false);
     }, 'Sprint angelegt.');
-  }
-
-  protected async updateSprint(id: string, values: Partial<Sprint>): Promise<void> {
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}`, values),
-      'Sprint aktualisiert.',
-    );
-  }
-
-  /** Go zum Sprint: Tests, CI, Merge nach main, dann zieht der Projektordner nach und es wird deployt. */
-  protected async goLive(sprint: Sprint): Promise<void> {
-    const open = sprint.reviewReadyAt ? '' : '\n\nAchtung: Es sind noch nicht alle Aufträge durch.';
-    if (
-      !globalThis.confirm(
-        `„${sprint.name}“ live schalten?\n\nTests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.${open}`,
-      )
-    )
-      return;
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed' }),
-      'Wird live geschaltet – Tests, CI und Merge laufen im Hintergrund.',
-    );
-  }
-
-  protected async deleteSprint(id: string): Promise<void> {
-    if (!globalThis.confirm('Sprint löschen? Die Aufträge bleiben im Backlog erhalten.')) return;
-    await this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.');
-  }
-
-  /** Pull Request des Sprints (PR-Modus); nur echte GitHub-PR-Links werden verlinkt. */
-  protected pullRequest(sprint: Sprint): { url: string; number: string } | null {
-    const match = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)$/.exec(sprint.prUrl ?? '');
-    return match ? { url: sprint.prUrl!, number: match[1]! } : null;
-  }
-
-  protected ciLabel(sprint: Sprint): string {
-    return sprint.ciStatus === 'success'
-      ? 'grün'
-      : sprint.ciStatus === 'failure'
-        ? 'rot'
-        : sprint.ciStatus === 'pending'
-          ? 'läuft'
-          : 'unbekannt';
-  }
-
-  protected gitBusy(sprint: Sprint): boolean {
-    return sprint.gitSync === 'pending' || sprint.gitSync === 'running';
-  }
-
-  protected gitNodes(sprint: Sprint): GitNode[] {
-    const orders = this.sprintItems(sprint.id).map((item): GitNode => ({ kind: 'step', text: item.title }));
-    return [branchNode(sprint), ...orders, commitNode(sprint)];
-  }
-
-  protected async pauseSprint(id: string): Promise<void> {
-    await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/pause`),
-      'Sprint pausiert: Laufende Agents beenden ihren Schritt, danach startet nichts Neues.',
-    );
-  }
-
-  protected async resumeSprint(id: string): Promise<void> {
-    await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/resume`),
-      'Sprint läuft weiter.',
-    );
-  }
-
-  protected async syncGit(id: string, action: 'push' | 'pull'): Promise<void> {
-    await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/git-sync`, { action }),
-      action === 'push' ? 'Git Push wird ausgeführt.' : 'Git Pull wird ausgeführt.',
-    );
-  }
-
-  protected async refreshReport(id: string): Promise<void> {
-    await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/report`),
-      'Sprintbericht aktualisiert.',
-    );
-  }
-
-  protected async saveReportNotes(id: string, notes: string): Promise<void> {
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}/report`, { notes }),
-      'Sprintbericht-Notizen gespeichert.',
-    );
   }
 }
