@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { buildVerifyPrompt, parseChecks } from './verify-acceptance.js';
+import type { Pool } from 'pg';
+import { buildVerifyPrompt, parseChecks, verifyAcceptance } from './verify-acceptance.js';
 
 test('Agent-Prüfung: Antwortzeilen je Punkt werden gelesen', () => {
   const output = [
@@ -23,4 +24,19 @@ test('Agent-Prüfung: Anweisung nummeriert die offenen Punkte', () => {
   ]);
   assert.match(prompt, /1\. Login über HTTPS\n {3}Bisher: offen/);
   assert.match(prompt, /Ändere keine Dateien/);
+});
+
+test('Agent-Prüfung: nach einem Fehler gehen die Punkte von „checking“ zurück auf „verifying“', async () => {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes("SET status = 'checking'"))
+        return { rows: [{ developmentId: 'dev-1', kind: 'criterion', position: 0, text: 'x', note: '' }] };
+      if (sql.includes('FROM development_items')) throw new Error('Datenbank weg');
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  await assert.rejects(verifyAcceptance(pool, { project: 'demo', cwd: '/tmp', timeoutMs: 1000 }), /Datenbank weg/);
+  assert.match(queries.at(-1) ?? '', /SET status = 'verifying'.*status = 'checking'/s);
 });

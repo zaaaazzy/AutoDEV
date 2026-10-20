@@ -74,37 +74,55 @@ export function stripCoverage(output: string): string {
   return output.replace(MARKER, '').trimEnd();
 }
 
+/** Speichert den Bericht in einer Transaktion; doppelt gemeldete Bereiche zählen einmal (der erste gilt). */
 export async function saveCoverage(
   pool: Pool,
   project: string,
   developmentId: string | null,
   report: CoverageReport,
 ): Promise<void> {
-  const id = (
-    await pool.query<{ id: string }>(
-      `INSERT INTO test_coverage_reports (project_slug, development_id, summary) VALUES ($1, $2, $3) RETURNING id`,
-      [project, developmentId, report.summary],
-    )
-  ).rows[0]?.id;
-  for (const area of report.areas) {
-    await pool.query(
-      `INSERT INTO test_coverage_areas (report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
-                                        passed, failed, lines, statements, branches, functions)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-      [
-        id,
-        area.area,
-        area.unit,
-        area.component,
-        area.integration,
-        area.e2e,
-        area.passed,
-        area.failed,
-        area.lines,
-        area.statements,
-        area.branches,
-        area.functions,
-      ],
-    );
+  const seen = new Set<string>();
+  const areas = report.areas.filter((area) => {
+    const key = area.area.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const id = (
+      await client.query<{ id: string }>(
+        `INSERT INTO test_coverage_reports (project_slug, development_id, summary) VALUES ($1, $2, $3) RETURNING id`,
+        [project, developmentId, report.summary],
+      )
+    ).rows[0]?.id;
+    for (const area of areas) {
+      await client.query(
+        `INSERT INTO test_coverage_areas (report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+                                          passed, failed, lines, statements, branches, functions)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+        [
+          id,
+          area.area,
+          area.unit,
+          area.component,
+          area.integration,
+          area.e2e,
+          area.passed,
+          area.failed,
+          area.lines,
+          area.statements,
+          area.branches,
+          area.functions,
+        ],
+      );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
   }
 }
