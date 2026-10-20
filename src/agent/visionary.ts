@@ -726,7 +726,7 @@ export async function processVisionaryRun(
         body: count
           ? stored.created.map((idea) => idea.title).join(' · ')
           : `Keine neuen Ideen (${stored.discarded} verworfen).`,
-        url: '#ideation',
+        url: `#ideation?project=${encodeURIComponent(options.project)}`,
         tag: `visionary-${run.id}`,
       },
       { project: options.project },

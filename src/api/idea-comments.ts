@@ -146,7 +146,7 @@ export function registerIdeaCommentRoutes(app: Router, pool: Pool): void {
           {
             title: `💬 ${author} hat dich erwähnt · ${idea.slug}`,
             body: `${idea.title}: ${parsed.text.slice(0, 140)}`,
-            url: `#ideation/${request.params.id}`,
+            url: `#ideation/${request.params.id}?project=${encodeURIComponent(idea.slug)}`,
             tag: `mention-${comment.id}`,
           },
           { self: { id: person.id === SYSTEM_PERSON ? null : person.id } },

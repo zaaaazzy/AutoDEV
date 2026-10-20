@@ -715,7 +715,7 @@ export async function runStep(
           {
             title: `👤 Bitte selbst prüfen · ${item.projectSlug}`,
             body: `${item.title}\n${manual.join('\n')}`,
-            url: '#development',
+            url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
             tag: `manual-${item.id}`,
           },
           { project: item.projectSlug },
@@ -854,7 +854,7 @@ async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, pro
     {
       title: succeeded ? `✓ Auftrag erledigt · ${item.projectSlug}` : `⚠ Auftrag blockiert · ${item.projectSlug}`,
       body: succeeded ? item.title : `${item.title}\n${problem ?? 'Ein Agent ist gescheitert – Details im Auftrag.'}`,
-      url: '#development',
+      url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
       tag: `order-${item.id}`,
     },
     { project: item.projectSlug },

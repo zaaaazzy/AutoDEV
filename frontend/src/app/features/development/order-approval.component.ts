@@ -105,7 +105,8 @@ export class OrderApprovalComponent {
   }
 
   protected async show(item: DevelopmentItem): Promise<void> {
+    const slug = this.store.activeProject();
     await this.orders.showReview(item);
-    await this.review.refresh();
+    if (this.store.isActive(slug)) await this.review.refresh();
   }
 }

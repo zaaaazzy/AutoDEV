@@ -258,7 +258,7 @@ async function closeOldSprints({ pool, job, deps, signal }: JobContext): Promise
       {
         title: `🏁 Sprint abgeschlossen · ${sprint.project}`,
         body: `${sprint.name}: alle Aufträge erledigt, seit ${days} Tagen ohne Bewegung – automatisch abgeschlossen.`,
-        url: '#sprints',
+        url: `#sprints?project=${encodeURIComponent(sprint.project)}`,
         tag: `sprint-closed-${sprint.id}`,
       },
       { project: sprint.project },

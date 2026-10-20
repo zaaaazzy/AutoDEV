@@ -181,7 +181,7 @@ export async function processTestRequest(
         body: result.passed
           ? 'Alle Prüfungen bestanden.'
           : `Mit Befunden${row?.bugs ? ` – ${row.bugs} neue Bugs angelegt` : ''}.`,
-        url: row?.runId ? `#runs/${row.runId}` : '#runs',
+        url: `${row?.runId ? `#runs/${row.runId}` : '#runs'}?project=${encodeURIComponent(options.project)}`,
         tag: `test-${request.id}`,
       },
       { project: options.project },

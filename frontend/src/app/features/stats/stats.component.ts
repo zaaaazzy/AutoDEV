@@ -229,18 +229,20 @@ export class StatsComponent {
   private async load(slug: string): Promise<void> {
     try {
       this.error.set('');
-      this.usage.set(await this.api.get<ProjectUsage>(`${this.api.projectPath(slug)}/usage`));
+      const usage = await this.api.get<ProjectUsage>(`${this.api.projectPath(slug)}/usage`);
+      if (!this.store.isActive(slug)) return;
+      this.usage.set(usage);
     } catch (error) {
+      if (!this.store.isActive(slug)) return;
       this.error.set(errorMessage(error, 'Statistik konnte nicht geladen werden.'));
     }
     // Budget und Prompt-Protokoll sind Zusatz: ohne sie bleibt die Statistik vollständig.
-    this.budget.set(await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`).catch(() => null));
-    this.prompts.set(
-      (
-        await this.api
-          .get<{ prompts: PromptEntry[] }>(`${this.api.projectPath(slug)}/usage/prompts?role=author`)
-          .catch(() => ({ prompts: [] }))
-      ).prompts,
-    );
+    const budget = await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`).catch(() => null);
+    if (!this.store.isActive(slug)) return;
+    this.budget.set(budget);
+    const { prompts } = await this.api
+      .get<{ prompts: PromptEntry[] }>(`${this.api.projectPath(slug)}/usage/prompts?role=author`)
+      .catch(() => ({ prompts: [] }));
+    if (this.store.isActive(slug)) this.prompts.set(prompts);
   }
 }

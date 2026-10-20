@@ -85,10 +85,16 @@ export class OrderDetailComponent {
     );
   });
 
+  /**
+   * Eigener Wahrheitswert: `acceptance()` liefert bei jedem Live-Refresh ein neues Objekt; hinge der Poll daran,
+   * startete der Timer alle 3 s neu und feuerte nie.
+   */
+  private readonly verifying = computed(() => this.acceptance().verifying);
+
   constructor() {
     // Während der Tester prüft, den Stand regelmässig nachladen.
     effect((onCleanup) => {
-      if (!this.acceptance().verifying) return;
+      if (!this.verifying()) return;
       const timer = setInterval(() => void this.store.loadProject(this.store.activeProject(), true), 5000);
       onCleanup(() => clearInterval(timer));
     });
