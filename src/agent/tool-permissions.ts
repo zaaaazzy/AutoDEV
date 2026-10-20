@@ -383,6 +383,42 @@ export function npmOptionProblem(command: string, root?: string): string | null 
   return null;
 }
 
+/** Git-Optionen, mit denen erlaubte Befehle Programme starten oder Dateien schreiben würden (lange Form ohne „--“). */
+const DANGEROUS_GIT_OPTIONS = [
+  'upload-pack',
+  'receive-pack',
+  'exec',
+  'output',
+  'output-directory',
+  'ext-diff',
+  'textconv',
+  'no-index',
+  'config',
+  'template',
+  'separate-git-dir',
+  'work-tree',
+  'git-dir',
+  'open-files-in-pager',
+];
+/** Eigene Optionen, die zugleich Anfang einer gesperrten sind (git diff --text ≠ --textconv). */
+const SAFE_GIT_OPTIONS = new Set(['text']);
+
+/**
+ * Gefährliche Option in einem git-Befehl? Git akzeptiert eindeutige Abkürzungen (--outp = --output, --upload-pa =
+ * --upload-pack), darum ist jede lange Option gesperrt, deren Name der Anfang einer gesperrten ist. Dazu -c, -u und
+ * -O (Pager bzw. Reihenfolge-Datei). Anführungszeichen und Backslashes werden wie in Bash entfernt.
+ */
+export function gitOptionProblem(command: string): boolean {
+  const words = shellWords(command);
+  if (words[0] !== 'git') return false;
+  return words.slice(1).some((word) => {
+    if (/^-[cu](?:=|$)/.test(word) || word.startsWith('-O')) return true;
+    if (!word.startsWith('--') || word === '--') return false;
+    const name = word.slice(2).split('=')[0] ?? '';
+    return !SAFE_GIT_OPTIONS.has(name) && DANGEROUS_GIT_OPTIONS.some((option) => option.startsWith(name));
+  });
+}
+
 /**
  * Pfadangaben von „git diff“: Liegt ein Pfad ausserhalb des Arbeitsbaums, schaltet Git von selbst in den
  * No-Index-Modus und gibt beliebige Dateien aus (git diff /dev/null ~/.zshrc). Darum muss jedes Argument – samt
