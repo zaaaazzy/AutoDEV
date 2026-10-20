@@ -754,18 +754,22 @@ test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und 
   const token = (await settings.getByTestId('ingest-token').textContent())!.trim();
   await expect(settings.getByText(`/api/ingest/e2e/${token}`).first()).toBeAttached();
 
-  const anonymous = await request.post(`/api/ingest/e2e/${token}`, {
-    headers: { 'Content-Type': 'text/plain' },
-    data: JSON.stringify({ message: title, stack: '    at checkout (/app/src/kasse.js:1:1)', source: 'browser' }),
-  });
-  expect(anonymous.status()).toBe(202);
+  // Ein Bug entsteht erst ab drei Vorkommen in 24 Stunden (BUG_THRESHOLD): dreimal melden.
+  for (let index = 0; index < 3; index += 1) {
+    const anonymous = await request.post(`/api/ingest/e2e/${token}`, {
+      headers: { 'Content-Type': 'text/plain' },
+      data: JSON.stringify({ message: title, stack: '    at checkout (/app/src/kasse.js:1:1)', source: 'browser' }),
+    });
+    expect(anonymous.status()).toBe(202);
+  }
   expect((await request.post('/api/ingest/e2e/falsches-token-1234567890', { data: '{}' })).status()).toBe(401);
   expect((await request.get('/api/projects')).status()).toBe(401);
 
   await page.goto('/#bugs');
   const row = page.getByText(title).first();
   await expect(row).toBeVisible();
-  await expect(page.getByText('Betrieb · 1× seit gestern').first()).toBeVisible();
+  // Ereignis und Verlauf bleiben nach dem Aufräumen des Bugs: ein zweiter Lauf am selben Tag zählt mehr.
+  await expect(page.getByText(/Betrieb · \d+× seit gestern/).first()).toBeVisible();
   await row.click();
   await expect(page.getByText('Vorkommen je Stunde (48 h)').first()).toBeVisible();
   await expect(page.getByText(/Kein Deploy-Verdacht|Deploy-Verdacht:/).first()).toBeVisible();
