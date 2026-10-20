@@ -19,7 +19,12 @@ function memoryPool() {
   } as unknown as Parameters<typeof readRestart>[0] & { rows: Map<string, string> };
 }
 
-const ok: CommandExecutor = async () => ({ exitCode: 0, durationMs: 1, output: 'Container dev-log Started' });
+/** Git im Arbeitsordner: Branch main, nichts geändert – sonst die Ausgabe von docker compose. */
+const ok: CommandExecutor = async (command) => ({
+  exitCode: 0,
+  durationMs: 1,
+  output: command[0] === 'git' ? (command[1] === 'rev-parse' ? 'main\n' : '') : 'Container dev-log Started',
+});
 
 test('Neustart: anfordern, Container neu bauen, nach dem Worker-Start abschließen', async () => {
   const pool = memoryPool();
@@ -59,7 +64,8 @@ test('Neustart: wartet auf laufende Aufgaben, aber nicht unbegrenzt', async () =
 test('Neustart: fehlgeschlagener Build lässt den Worker weiterlaufen und meldet die Ausgabe', async () => {
   const pool = memoryPool();
   await requestRestart(pool, null);
-  const failing: CommandExecutor = async () => ({ exitCode: 1, durationMs: 1, output: 'failed to solve: npm ci' });
+  const failing: CommandExecutor = async (command, cwd) =>
+    command[0] === 'git' ? ok(command, cwd) : { exitCode: 1, durationMs: 1, output: 'failed to solve: npm ci' };
   assert.equal(await processRestart(pool, '/x', () => 0, failing), 'failed');
   const state = await readRestart(pool);
   assert.equal(state?.status, 'failed');
@@ -86,7 +92,7 @@ test('Neustart: antwortet der neue Stand nicht, wird auf das vorherige Abbild zu
         durationMs: 1,
         output: '[{"ID":"sha256:abc","Repository":"devlog-dev-log","Tag":"latest"}]',
       };
-    return { exitCode: 0, durationMs: 1, output: '' };
+    return ok(command, '/x');
   };
   await requestRestart(pool, 'Patrick');
   let checks = 0;
@@ -116,10 +122,34 @@ test('Neustart: meldet das Ende per Benachrichtigung, Erfolg wie Fehlschlag, Zwi
   assert.deepEqual(seen, ['done']);
 
   await requestRestart(pool, null);
-  const failing: CommandExecutor = async () => ({ exitCode: 1, durationMs: 1, output: 'failed to solve' });
+  const failing: CommandExecutor = async (command, cwd) =>
+    command[0] === 'git' ? ok(command, cwd) : { exitCode: 1, durationMs: 1, output: 'failed to solve' };
   await processRestart(pool, '/x', () => 0, failing, undefined, { notify });
   assert.deepEqual(seen, ['done', 'failed']);
   // Ohne laufenden Neustart meldet ein Worker-Start nichts.
   await completeRestart(pool, new Date(), notify);
   assert.deepEqual(seen, ['done', 'failed']);
+});
+
+test('Neustart: baut nur einen sauberen Stand des erlaubten Branches', async () => {
+  const gitState =
+    (branch: string, status: string): CommandExecutor =>
+    async (command, cwd) =>
+      command[0] === 'git'
+        ? { exitCode: 0, durationMs: 1, output: command[1] === 'rev-parse' ? `${branch}\n` : status }
+        : ok(command, cwd);
+  const run = async (execute: CommandExecutor, branch?: string) => {
+    const pool = memoryPool();
+    await requestRestart(pool, 'Patrick');
+    const result = await processRestart(pool, '/x', () => 0, execute, undefined, { health: async () => true, branch });
+    return { result, message: (await readRestart(pool))?.message ?? '' };
+  };
+  const feature = await run(gitState('fix/irgendwas', ''));
+  assert.equal(feature.result, 'failed');
+  assert.match(feature.message, /„fix\/irgendwas“ ausgecheckt, live gehen darf nur „main“/);
+  const dirty = await run(gitState('main', ' M src/server.ts\n'));
+  assert.equal(dirty.result, 'failed');
+  assert.match(dirty.message, /Nicht committete Änderungen im AIdeation-Ordner \(src\/server\.ts\)/);
+  assert.equal((await run(gitState('fix/irgendwas', ''), '*')).result, 'restart', '„*“ erlaubt jeden Branch');
+  assert.equal((await run(gitState('release', ''), 'release')).result, 'restart');
 });

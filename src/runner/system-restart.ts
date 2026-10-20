@@ -143,6 +143,12 @@ export const HEALTH_URL = 'http://127.0.0.1:3100/health';
 const HEALTH_TIMEOUT_MS = 120_000;
 
 export interface RestartOptions {
+  /**
+   * Nur dieser Branch darf live gehen (Standard: DEV_LOG_RESTART_BRANCH bzw. „main“; „*“ erlaubt jeden Branch).
+   * Gebaut wird der Arbeitsordner, wie er ist – ohne Prüfung ginge ein zufällig ausgecheckter Branch oder eine
+   * halbfertige Änderung live.
+   */
+  branch?: string;
   /** Antwortet die Oberfläche? Standard: GET HEALTH_URL. */
   health?: () => Promise<boolean>;
   /** Wie lange nach dem Neubau auf eine Antwort gewartet wird. */
@@ -169,6 +175,35 @@ async function waitHealthy(options: RestartOptions): Promise<boolean> {
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, options.healthIntervalMs ?? 3_000));
   }
+}
+
+/** Darf der Arbeitsordner so live gehen? Liefert den Grund, wenn nicht (falscher Branch, nicht committete Änderungen). */
+export async function deployProblem(
+  installRoot: string,
+  execute: CommandExecutor,
+  branch = process.env.DEV_LOG_RESTART_BRANCH?.trim() || 'main',
+): Promise<string | null> {
+  const git = (...args: string[]) => execute(['git', ...args], installRoot, { timeoutMs: 30_000 });
+  const head = await git('rev-parse', '--abbrev-ref', 'HEAD');
+  if (head.exitCode !== 0) return `Git-Stand nicht lesbar: ${head.output.trim().slice(-200)}`;
+  const current = head.output.trim();
+  if (branch !== '*' && current !== branch) {
+    return `Im AIdeation-Ordner ist „${current}“ ausgecheckt, live gehen darf nur „${branch}“. Bitte „git switch ${branch}“ (oder DEV_LOG_RESTART_BRANCH anpassen).`;
+  }
+  const status = await git('status', '--porcelain', '--untracked-files=no');
+  if (status.exitCode !== 0) return `Git-Stand nicht lesbar: ${status.output.trim().slice(-200)}`;
+  const changed = status.output
+    .trimEnd()
+    .split('\n')
+    .filter((line) => line.trim());
+  if (changed.length) {
+    const files = changed
+      .slice(0, 5)
+      .map((line) => line.slice(3))
+      .join(', ');
+    return `Nicht committete Änderungen im AIdeation-Ordner (${files}${changed.length > 5 ? ' …' : ''}). Erst committen oder verwerfen.`;
+  }
+  return null;
 }
 
 /** Abbild des laufenden Dienstes „dev-log“ vor dem Neubau – zum Zurücksetzen, falls der neue Stand nicht startet. */
@@ -221,6 +256,18 @@ export async function processRestart(
     const message = `Wartet auf ${running} laufende Aufgabe${running === 1 ? '' : 'n'} (höchstens ${MAX_WAIT_MS / 60_000} Minuten).`;
     if (current.message !== message) await writeRestart(pool, { ...current, message });
     return 'waiting';
+  }
+  const problem = await deployProblem(installRoot, execute, options.branch).catch(
+    (error: unknown) => `Git-Stand nicht lesbar: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  if (problem) {
+    await writeRestart(pool, {
+      ...current,
+      status: 'failed',
+      finishedAt: now().toISOString(),
+      message: `Nicht neu gebaut: ${problem} AIdeation läuft unverändert weiter.`,
+    });
+    return 'failed';
   }
   const building = await writeRestart(pool, {
     ...current,
