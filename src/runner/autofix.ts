@@ -18,6 +18,12 @@ interface FailedItem {
   sprintId?: string | null;
 }
 
+/** Nutzungslimit des Agent-Kontos (Claude-CLI): „You've hit your session limit · resets 12:40am (Europe/Zurich)“. */
+const USAGE_LIMIT = /hit your (?:session|usage|weekly|daily|monthly|\w+) limit/i;
+const LIMIT_RESET =
+  /resets?\s+(?:(?:on\s+)?([A-Z][a-z]{2})\s+(\d{1,2}),?\s+)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+
 /**
  * Fehler des Agents selbst (Zeitlimit, Schleife, Modell nicht erreichbar, Befehl fehlt …) sind keine Fehler im Code.
  * Ein Bug-Auftrag dafür kann nichts beheben und würde nur weitere Fehlschläge und Prompt-Ballast erzeugen.
@@ -33,10 +39,37 @@ const AGENT_FAILURE_PATTERNS = [
   /Ollama lieferte keine Nachricht/,
   /Das Modell lieferte keine Antwort/,
   /im PATH des Workers nicht gefunden/,
-  /\bENOENT\b/,
+  // Nur der Agent-Befehl selbst fehlt („spawn claude ENOENT“); ein ENOENT in einem Test (fehlendes Fixture) ist ein
+  // normaler Fehler mit Bug-Bericht.
+  /\bspawn \S+ ENOENT\b/,
   /Process ended by SIG\w+ \(timeout or kill\)/,
   /Unterbrochen: Der Worker wurde beendet/,
+  USAGE_LIMIT,
 ];
+
+/**
+ * Nutzungslimit des Agent-Kontos erreicht: kein Fehler im Code und nichts, was eine Wiederholung in Minuten löst.
+ * Liefert den Zeitpunkt, ab dem der Auftrag wieder starten darf (Reset laut Meldung plus kleine Reserve, in der
+ * Zeitzone des Workers); ohne lesbare Zeit eine Stunde später. Null, wenn die Ausgabe kein Limit meldet.
+ */
+export function usageLimitReset(output: string, now = new Date()): Date | null {
+  const tail = output.slice(-3000);
+  if (!USAGE_LIMIT.test(tail)) return null;
+  const match = tail.match(LIMIT_RESET);
+  if (!match) return new Date(now.getTime() + 60 * 60_000);
+  const [, month, day, hour, minute, meridiem] = match;
+  const hours = (Number(hour) % 12) + (meridiem!.toLowerCase() === 'pm' ? 12 : 0);
+  const reset = new Date(now);
+  reset.setHours(hours, Number(minute ?? 0), 0, 0);
+  const monthIndex = month ? MONTHS.indexOf(month.toLowerCase()) : -1;
+  if (monthIndex >= 0 && day) {
+    reset.setMonth(monthIndex, Number(day));
+    if (reset.getTime() <= now.getTime()) reset.setFullYear(reset.getFullYear() + 1);
+  } else if (reset.getTime() <= now.getTime()) {
+    reset.setDate(reset.getDate() + 1);
+  }
+  return new Date(reset.getTime() + 3 * 60_000);
+}
 
 /**
  * Vorübergehende Fehler: Modell oder Dienst kurz nicht erreichbar, überlastet, Verbindung abgebrochen, Zeitlimit.
