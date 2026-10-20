@@ -242,7 +242,7 @@ export interface Bug {
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: BugStatus;
-  source: 'agent' | 'manual' | 'test' | 'github' | 'production';
+  source: 'agent' | 'manual' | 'test' | 'github' | 'production' | 'routine';
   sprintId: string | null;
   fixNotes: string | null;
   createdAt: string;

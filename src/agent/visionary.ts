@@ -21,7 +21,7 @@ export const MAX_VISIONARY_LIMIT = 8;
 /** Offene Läufe (angefragt oder laufend); je Projekt höchstens einer. */
 export const OPEN_RUN_STATUSES = ['requested', 'running'] as const;
 
-const IDEA_MARKER = '@@IDEA';
+const IDEA_MARKER = '@@IDEA' as const;
 /** Datenbezug der Begründung: „stützt sich auf …“ mit einer konkreten Angabe danach. */
 const DATA_REFERENCE = /stützt sich auf\s+(.{12,})/i;
 /** Floskeln ohne Bezug auf Daten des Projekts. */
@@ -88,14 +88,34 @@ export function hasDataReference(reason: string): boolean {
   return Boolean(match && !VAGUE_REFERENCE.test(match[1]!.trim()));
 }
 
-/** Liest die @@IDEA-Zeilen aus der Antwort; Fliesstext dazwischen wird ignoriert. */
-export function parseIdeaLines(output: string): ParsedIdeas {
-  const ideas: VisionaryIdea[] = [];
-  const discarded: ParsedIdeas['discarded'] = [];
+/** Marker-Zeilen mit JSON am Ende einer Antwort: Ideen (Visionär, Routinen), Bugs und Aufträge (Routinen). */
+export const RESULT_MARKERS = ['@@IDEA', '@@BUG', '@@ORDER'] as const;
+export type ResultMarker = (typeof RESULT_MARKERS)[number];
+
+export interface MarkerLine {
+  marker: ResultMarker;
+  line: string;
+  record: Record<string, unknown>;
+}
+
+/**
+ * Liest Marker-Zeilen (`@@IDEA {…}`, `@@BUG {…}`, `@@ORDER {…}`) aus der Antwort; Fliesstext dazwischen wird
+ * ignoriert. Zeilen mit kaputtem JSON landen mit Grund unter `discarded`.
+ */
+export function parseMarkerLines(
+  output: string,
+  markers: readonly ResultMarker[] = RESULT_MARKERS,
+): { lines: MarkerLine[]; discarded: { line: string; problem: string }[] } {
+  const lines: MarkerLine[] = [];
+  const discarded: { line: string; problem: string }[] = [];
   for (const raw of output.split(/\r?\n/)) {
-    const at = raw.indexOf(IDEA_MARKER);
-    if (at < 0) continue;
-    const line = raw.slice(at).trim();
+    // Frühester Marker der Zeile; „@@IDEA“ trifft nicht „@@IDEAS“ o. ä.
+    const found = markers
+      .map((marker) => ({ marker, at: raw.search(new RegExp(`${marker}(?![A-Z_])`)) }))
+      .filter((entry) => entry.at >= 0)
+      .sort((a, b) => a.at - b.at)[0];
+    if (!found) continue;
+    const line = raw.slice(found.at).trim();
     const start = line.indexOf('{');
     const end = line.lastIndexOf('}');
     let data: unknown;
@@ -108,8 +128,32 @@ export function parseIdeaLines(output: string): ParsedIdeas {
       discarded.push({ line, problem: 'Kein gültiges JSON.' });
       continue;
     }
-    const record = data as Record<string, unknown>;
-    const title = shortTitle(text(record.title, 300).replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
+    lines.push({ marker: found.marker, line, record: data as Record<string, unknown> });
+  }
+  return { lines, discarded };
+}
+
+/** Titel aus einer Marker-Zeile (ohne Anführungszeichen, gekürzt). */
+export function markerTitle(record: Record<string, unknown>): string {
+  return shortTitle(text(record.title, 300).replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
+}
+
+/** Priorität aus einer Marker-Zeile (auch deutsch: niedrig, mittel, hoch); Standard mittel. */
+export function markerPriority(value: unknown): 'low' | 'medium' | 'high' {
+  return (PRIORITY_ALIASES[text(value, 20).toLowerCase()] ?? 'medium') as 'low' | 'medium' | 'high';
+}
+
+/** Kategorie, Nutzen und Kosten einer Marker-Zeile wie beim Visionär. */
+export const markerCategory = category;
+export const markerScore = score;
+
+/** Liest die @@IDEA-Zeilen aus der Antwort; Fliesstext dazwischen wird ignoriert. */
+export function parseIdeaLines(output: string): ParsedIdeas {
+  const ideas: VisionaryIdea[] = [];
+  const parsed = parseMarkerLines(output, [IDEA_MARKER]);
+  const discarded: ParsedIdeas['discarded'] = [...parsed.discarded];
+  for (const { line, record } of parsed.lines) {
+    const title = markerTitle(record);
     const reason = text(record.reason, 1500);
     if (title.length < 3) {
       discarded.push({ line, problem: 'Titel fehlt.' });
@@ -124,7 +168,7 @@ export function parseIdeaLines(output: string): ParsedIdeas {
       category: category(record.category),
       benefit: score(record.benefit),
       cost: score(record.cost),
-      priority: (PRIORITY_ALIASES[text(record.priority, 20).toLowerCase()] ?? 'medium') as VisionaryIdea['priority'],
+      priority: markerPriority(record.priority),
       reason,
       description: typeof record.description === 'string' ? record.description.trim().slice(0, 4000) : '',
     });

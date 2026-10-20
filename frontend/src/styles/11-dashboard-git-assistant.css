@@ -376,6 +376,91 @@ a.git-commit[href]:hover {
   gap: 6px;
 }
 
+/* Zeitplan einer Aufgabe (Routine): Uhr-Symbol in der Liste, Auswahl im Formular, Verlauf der Läufe. */
+.agent-task-clock {
+  flex: none;
+  font-size: 0.8rem;
+}
+
+.agent-task-clock.paused {
+  color: var(--muted);
+}
+
+.agent-task-schedule {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.agent-task-schedule legend {
+  padding: 0 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.agent-task-form .agent-task-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.agent-task-preview {
+  font-weight: 600;
+}
+
+.agent-task-history {
+  display: grid;
+  gap: 8px;
+  max-height: min(520px, 70vh);
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+
+.agent-task-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-task-runs {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.agent-task-runs th,
+.agent-task-runs td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.agent-task-runs td small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.agent-task-runs tr.failed td {
+  background: #fff4f2;
+}
+
+.agent-task-run-error {
+  color: #a3341f;
+}
+
+.agent-task-sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 @media (hover: none) {
   .agent-task-icon {
     opacity: 1;

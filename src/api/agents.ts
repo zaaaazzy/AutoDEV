@@ -1,6 +1,6 @@
 import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
-import { seedDefaultActions } from './agent-tasks.js';
+import { seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
 import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
@@ -149,6 +149,8 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
   );
   // Neue Projekte bekommen mit den Agents auch die Standard-Aktionen des Testers.
   await seedDefaultActions(pool, slug).catch(logged('agents'));
+  // Dazu die Routine-Vorlagen (Sicherheits-Check, Doku-Abgleich …), deaktiviert.
+  await seedRoutineTemplates(pool, slug).catch(logged('agents'));
   await materializeAgentCommands(pool, slug).catch(logged('agents'));
 }
 

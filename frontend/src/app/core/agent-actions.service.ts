@@ -12,6 +12,45 @@ export interface AgentAction {
   agentName: string | null;
   runCount: number;
   lastRunAt: string | null;
+  /** Zeitplan (Cron, 5 Felder, Europe/Zurich); null = nur per Klick. */
+  schedule?: string | null;
+  enabled?: boolean;
+  nextRunAt?: string | null;
+  outputTarget?: OutputTarget;
+  runWindow?: string | null;
+  lastStatus?: 'queued' | 'running' | 'ok' | 'failed' | null;
+  /** Letzter Fehler bzw. Pausengrund. */
+  lastError?: string | null;
+  failureStreak?: number;
+  /** Aus einer Routine-Vorlage (nur lesend gedacht). */
+  template?: string | null;
+  lastRun?: { status: TaskRun['status']; startedAt: string; durationMs: number | null; tokens: number } | null;
+}
+
+export type OutputTarget = 'chat' | 'push' | 'bug' | 'idea' | 'order';
+
+export const OUTPUT_TARGET_LABELS: Record<OutputTarget, string> = {
+  chat: 'nur Chat',
+  push: 'Push-Meldung',
+  bug: 'Bug',
+  idea: 'Idee',
+  order: 'Auftrag im Backlog',
+};
+
+/** Ein Lauf einer Agent-Aufgabe (Zeitplan oder Klick). */
+export interface TaskRun {
+  id: string;
+  trigger: 'schedule' | 'manual';
+  status: 'queued' | 'running' | 'ok' | 'failed' | 'cancelled';
+  environmentError: boolean;
+  queuedAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationMs: number | null;
+  tokens: number;
+  error: string | null;
+  notes: string[];
+  createdItems: { kind: 'bug' | 'idea' | 'order'; id: string; title: string }[];
 }
 
 export interface ActionForm {
@@ -19,6 +58,11 @@ export interface ActionForm {
   title: string;
   prompt: string;
   agentId: string | null;
+  /** Nur mitgeschickt, wenn das Formular den Zeitplan bearbeitet; sonst bleibt er unverändert. */
+  schedule?: string | null;
+  outputTarget?: OutputTarget;
+  runWindow?: string | null;
+  enabled?: boolean;
 }
 
 /**
@@ -77,7 +121,15 @@ export class AgentActionsService {
     if (this.busy()) return null;
     this.busy.set(true);
     try {
-      const body = { title: form.title.trim(), prompt: form.prompt.trim(), agentId: form.agentId || null };
+      const body: Record<string, unknown> = {
+        title: form.title.trim(),
+        prompt: form.prompt.trim(),
+        agentId: form.agentId || null,
+      };
+      if (form.schedule !== undefined) body['schedule'] = form.schedule;
+      if (form.outputTarget !== undefined) body['outputTarget'] = form.outputTarget;
+      if (form.runWindow !== undefined) body['runWindow'] = form.runWindow;
+      if (form.enabled !== undefined) body['enabled'] = form.enabled;
       const saved = form.id
         ? await this.api.patch<AgentAction>(`/api/agent-tasks/${encodeURIComponent(form.id)}`, body)
         : await this.api.post<AgentAction>(`${this.api.projectPath(this.store.activeProject())}/agent-tasks`, body);
@@ -86,6 +138,29 @@ export class AgentActionsService {
     } catch (error) {
       this.store.notice.set(errorMessage(error, 'Aktion konnte nicht gespeichert werden.'));
       return null;
+    } finally {
+      this.busy.set(false);
+    }
+  }
+
+  /** Verlauf einer Aufgabe: die letzten Läufe (neueste zuerst). */
+  async runs(action: AgentAction): Promise<TaskRun[]> {
+    const result = await this.api
+      .get<{ runs: TaskRun[] }>(`/api/agent-tasks/${encodeURIComponent(action.id)}/runs`)
+      .catch(() => null);
+    return result?.runs ?? [];
+  }
+
+  /** Routine pausieren bzw. fortsetzen (Fortsetzen setzt die Fehlerzählung zurück). */
+  async setPaused(action: AgentAction, paused: boolean): Promise<void> {
+    if (this.busy()) return;
+    this.busy.set(true);
+    try {
+      await this.api.post(`/api/agent-tasks/${encodeURIComponent(action.id)}/${paused ? 'pause' : 'resume'}`, {});
+      this.store.notice.set(paused ? `„${action.title}“ pausiert.` : `„${action.title}“ läuft wieder nach Zeitplan.`);
+      await this.load();
+    } catch (error) {
+      this.store.notice.set(errorMessage(error, 'Zeitplan konnte nicht geändert werden.'));
     } finally {
       this.busy.set(false);
     }
