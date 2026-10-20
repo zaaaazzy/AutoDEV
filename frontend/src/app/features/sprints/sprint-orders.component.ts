@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, signal } from '@angular/core';
+import { Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
 import type { SortingState } from '@tanstack/angular-table';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -72,6 +72,12 @@ export class SprintOrdersComponent {
     },
   ];
   protected readonly anyRow = (): boolean => true;
+  /**
+   * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu. Die Liste wird nur gerendert, wenn sie offen ist:
+   * In einem zugeklappten <details> hätte sie eine Höhe, wäre aber nicht fokussierbar (Chrome rendert den Inhalt
+   * mit content-visibility) – Filter und Prüfungen hielten sie für sichtbar.
+   */
+  protected readonly poolOpen = linkedSignal(() => !this.orders().length);
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
   protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));

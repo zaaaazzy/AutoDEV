@@ -186,7 +186,11 @@ async function checkTables(page: Page): Promise<TableCheck[]> {
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const checks: { name: string; ok: boolean; detail: string }[] = [];
     const add = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail });
-    const tables = () => [...document.querySelectorAll<HTMLElement>('.dt')].filter((table) => table.offsetHeight > 0);
+    // Zugeklappte <details> haben in Chrome eine Höhe (content-visibility), sind aber weder sichtbar noch fokussierbar.
+    const tables = () =>
+      [...document.querySelectorAll<HTMLElement>('.dt')].filter(
+        (table) => table.offsetHeight > 0 && !table.closest('details:not([open])'),
+      );
     const text = (element: Element | null | undefined) => element?.textContent?.trim().replace(/\s+/g, ' ') ?? '';
     const unique = (values: string[]) => values.filter((value, index) => values.indexOf(value) === index);
     const fire = (input: HTMLInputElement, value: string) => {
