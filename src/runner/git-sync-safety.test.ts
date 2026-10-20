@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree, treeBusy } from '../core/project-lock.js';
 import {
   BOT_IDENTITY,
@@ -79,6 +80,18 @@ test('losgelöster Stand ohne Sprint: der Auftrag arbeitet auf main auf statt au
   git('checkout', '-q', '--detach', 'main');
   const branch = await enterOrderBranch(cwd, item, null);
   assert.equal(branch?.base, 'main');
+});
+
+test('scheitert der Wechsel auf den Sprint-Branch, startet der Auftrag nicht (kein Merge direkt in main)', async () => {
+  const { cwd, git } = await project();
+  // Z. B. blockieren lokale Änderungen den Checkout: jeder Wechsel auf den Sprint-Branch scheitert.
+  const execute: CommandExecutor = (command, directory, options) =>
+    command[1] === 'checkout' && command.includes('sprint/sprint-1')
+      ? Promise.resolve({ exitCode: 1, durationMs: 1, output: 'error: checkout blockiert' })
+      : runCommand(command, directory, options);
+  await assert.rejects(enterOrderBranch(cwd, item, 'Sprint 1', execute), /Sprint-Branch sprint\/sprint-1/);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('branch', '--list', 'auftrag/*'), '');
 });
 
 test('scheitert ein Commit-Hook, bleibt nichts Gestagtes für den nächsten Auftrag liegen', async () => {

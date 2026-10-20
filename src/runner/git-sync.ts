@@ -348,6 +348,10 @@ export async function enterOrderBranch(
       await must('checkout', MAIN_BRANCH);
     }
     const base = await currentBranch(git);
+    // Sprint-Aufträge zweigen nur vom Sprint-Branch ab: sonst landete der Merge am Ende z. B. direkt in main.
+    if (sprintName && base !== sprintBranch(sprintName)) {
+      throw new OrderBranchError(`Arbeitsordner ${cwd} steht auf ${base} statt auf ${sprintBranch(sprintName)}.`);
+    }
     // Nie von einem losgelösten Stand oder vom Branch eines anderen Auftrags abzweigen: der Merge am Ende ginge ins Leere
     // bzw. in den fremden Auftrag statt in den Sprint.
     if (base === 'HEAD' || base.startsWith('auftrag/')) {
