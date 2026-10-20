@@ -130,6 +130,20 @@ test('routeModel: „tiefer“ ohne Grundstufe heißt lokal; mehrere Verschiebun
   assert.equal(decision.tier, 'strong', 'die letzte Verschiebung gewinnt');
 });
 
+test('routeModel: zwei passende feste Regeln – die erste gewinnt; bei Verschiebungen die Budget-Bremse', () => {
+  const fixed = routeModel(
+    [
+      { condition: { categories: ['security'] }, tier: 'strong' },
+      { condition: { maxHours: 1 }, tier: 'local' },
+    ],
+    input({ category: 'security', effortHours: 0.5 }),
+  );
+  assert.equal(fixed.tier, 'strong');
+  assert.equal(fixed.rule, 'security → stark');
+  const shifted = routeModel(DEFAULT_RULES, input({ retryCount: 1, budgetPercent: 90 }));
+  assert.equal(shifted.tier, 'local');
+});
+
 test('ruleLabel: alle Teile mit Komma-Dezimalzahl', () => {
   assert.equal(
     ruleLabel({
