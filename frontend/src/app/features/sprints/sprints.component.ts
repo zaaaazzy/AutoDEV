@@ -20,6 +20,7 @@ import { SprintProposalComponent } from './sprint-proposal.component.js';
 
 /** Welcher Sprint oben als „aktueller“ steht: der laufende, sonst der im Review, sonst der nächste geplante. */
 const CURRENT_RANK = ['active', 'review', 'planned'];
+const CLOSED_STATUSES: string[] = ['completed', 'cancelled'];
 
 /**
  * Sprint-Seite wie die Auftragsseite: oben der aktuelle Sprint mit allen Aufträgen, darunter die geplanten
@@ -61,9 +62,14 @@ export class SprintsComponent {
     );
   });
   protected readonly upcoming = computed(() =>
-    this.data().sprints.filter((sprint) => sprint.status !== 'completed' && sprint.id !== this.current()?.id),
+    this.data().sprints.filter(
+      (sprint) => !CLOSED_STATUSES.includes(sprint.status) && sprint.id !== this.current()?.id,
+    ),
   );
-  protected readonly completed = computed(() => this.data().sprints.filter((sprint) => sprint.status === 'completed'));
+  /** Abgeschlossene und abgebrochene Sprints: beide sind vorbei und stehen in derselben Liste. */
+  protected readonly completed = computed(() =>
+    this.data().sprints.filter((sprint) => CLOSED_STATUSES.includes(sprint.status)),
+  );
   /** Über einen gefilterten Link geöffnet oder noch kein laufender Sprint: abgeschlossene gleich zeigen. */
   protected readonly showDone = signal(
     Object.values(this.store.filtersFor('sprints')).some((values) => values.length) || !this.current(),

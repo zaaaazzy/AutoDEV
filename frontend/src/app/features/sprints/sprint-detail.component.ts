@@ -140,6 +140,20 @@ export class SprintDetailComponent {
     );
   }
 
+  /** Abbrechen: laufende Agents enden, offene Aufträge gehen zurück ins Backlog (unter „Aktionen“ wieder einplanbar). */
+  protected async cancelSprint(sprint: Sprint): Promise<void> {
+    if (
+      !globalThis.confirm(
+        `„${sprint.name}“ abbrechen?\n\nLaufende Agents werden beendet. Offene Aufträge gehen zurück ins Backlog und lassen sich unter „Aktionen“ wieder einplanen. Erledigtes bleibt erhalten, gemergt wird nichts.`,
+      )
+    )
+      return;
+    await this.store.perform(
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'cancelled' }),
+      'Sprint abgebrochen.',
+    );
+  }
+
   protected async deleteSprint(id: string): Promise<void> {
     if (!globalThis.confirm('Sprint löschen? Die Aufträge bleiben im Backlog erhalten.')) return;
     await this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.');

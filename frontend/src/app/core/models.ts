@@ -1,6 +1,6 @@
 export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
-export type SprintStatus = 'planned' | 'active' | 'review' | 'completed';
+export type SprintStatus = 'planned' | 'active' | 'review' | 'completed' | 'cancelled';
 export type GithubMode = 'aus' | 'issues' | 'issues+pr';
 export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'approval' | 'done' | 'rejected';
 export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';

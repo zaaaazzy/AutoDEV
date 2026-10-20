@@ -67,3 +67,32 @@ test('Sprint-PATCH: Abschluss eines aktiven Sprints startet Bericht und Git-Sync
   assert.equal(completed(queries), true);
   assert.equal(startedSync(queries), true);
 });
+
+const stoppedAgents = (queries: string[]) => queries.some((sql) => sql.includes('cancel_requested = TRUE'));
+const releasedOrders = (queries: string[]) =>
+  queries.some(
+    (sql) =>
+      sql.includes('removed_from_sprint_at = NOW(), sprint_id = NULL') &&
+      sql.includes("status = CASE WHEN status = 'planned' THEN 'backlog' ELSE status END") &&
+      sql.includes("status NOT IN ('done', 'rejected')"),
+  );
+
+test('Sprint-PATCH: Abbrechen beendet laufende Agents und gibt offene Aufträge frei – ohne Git-Sync', async () => {
+  for (const previous of ['planned', 'active']) {
+    const { status, queries } = await patchSprint(previous, { status: 'cancelled' });
+    assert.equal(status, 200, `aus ${previous}`);
+    assert.equal(stoppedAgents(queries), true, 'laufende Schritte bekommen cancel_requested');
+    assert.equal(releasedOrders(queries), true, 'offene Aufträge verlassen den Sprint mit Vermerk');
+    assert.equal(startedSync(queries), false, 'kein git_sync = pending');
+    assert.equal(completed(queries), false, 'kein Sprintabschluss');
+  }
+});
+
+test('Sprint-PATCH: Abgeschlossene lassen sich nicht abbrechen, abgebrochene nur wieder planen', async () => {
+  assert.equal((await patchSprint('completed', { status: 'cancelled' })).status, 409);
+  assert.equal((await patchSprint('cancelled', { status: 'active' })).status, 409);
+  assert.equal((await patchSprint('cancelled', { status: 'cancelled' })).status, 409);
+  const { status, queries } = await patchSprint('cancelled', { status: 'planned' });
+  assert.equal(status, 200);
+  assert.equal(stoppedAgents(queries), false, 'Wieder planen bricht nichts ab');
+});

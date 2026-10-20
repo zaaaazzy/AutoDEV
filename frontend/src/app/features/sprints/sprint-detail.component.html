@@ -25,6 +25,15 @@
       <span>{{ sprint.gitMessage }}</span>
     </div>
   }
+  @if (sprint.status === 'cancelled') {
+    <div class="sprint-go failed">
+      <strong>⏹ Sprint abgebrochen.</strong>
+      <span
+        >Laufende Agents wurden beendet. Offene Aufträge sind zurück im Backlog und warten unter „Aktionen“ auf eine
+        Entscheidung; Erledigtes bleibt beim Sprint, gemergt wurde nichts.</span
+      >
+    </div>
+  }
   @if (store.currentProject()?.reviewCommand?.length) {
     <app-sprint-review [sprint]="sprint" />
   }
@@ -261,6 +270,14 @@
           @if (sprint.status === 'completed') {
             <button class="button secondary" type="button" (click)="updateSprint(sprint.id, { status: 'active' })">
               <app-nav-icon name="undo" />Wieder öffnen
+            </button>
+          }
+          @if (sprint.status === 'planned' || sprint.status === 'active') {
+            <button class="button secondary" type="button" (click)="cancelSprint(sprint)">⏹ Abbrechen</button>
+          }
+          @if (sprint.status === 'cancelled') {
+            <button class="button secondary" type="button" (click)="updateSprint(sprint.id, { status: 'planned' })">
+              <app-nav-icon name="undo" />Wieder planen
             </button>
           }
           <button class="button danger" type="button" (click)="deleteSprint(sprint.id)">

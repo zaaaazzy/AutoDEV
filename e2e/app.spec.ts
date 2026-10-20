@@ -889,3 +889,34 @@ test('Ideen vorschlagen lassen: Richtung im Dialog vorgeben, Abbrechen startet k
   await bar.getByRole('button', { name: 'Abbrechen' }).click();
   await expect(bar).toHaveCount(0);
 });
+
+test('Sprint abbrechen: Auftrag geht zurück ins Backlog und wartet unter „Aktionen“, der Sprint steht bei den abgebrochenen', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `Abbruch-Auftrag ${Date.now()}`;
+  const name = `Abbruch ${Date.now() % 10000}`;
+  const sprint = (await (await request.post('/api/projects/e2e/sprints', { headers, data: { name } })).json()).sprint;
+  const item = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
+  await request.patch(`/api/development/${item.id}`, { headers, data: { sprintId: sprint.id } });
+
+  await login(page);
+  await page.goto('/#sprints');
+  const detail = await sprintDetail(page, name);
+  page.once('dialog', (dialog) => void dialog.accept());
+  await detail.getByRole('button', { name: 'Abbrechen' }).click();
+  // Der Sprint steht jetzt bei den abgeschlossenen und abgebrochenen Sprints mit Status „Abgebrochen“.
+  const toggle = page.locator('#done-sprints .collapse-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  const row = page.locator('#done-sprints .dt-table tbody tr').filter({ hasText: name });
+  await expect(row).toContainText('Abgebrochen');
+  // Der Auftrag ist nicht mehr geplant, sondern wartet unter „Aktionen“ mit dem Vermerk des Sprints.
+  await page.goto('/#actions');
+  const card = page.locator('.attention-card').filter({ hasText: title });
+  await expect(card).toContainText(`Aus Sprint „${name}“ genommen`);
+  await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
+  // Abgebrochene Sprints lassen sich löschen.
+  await request.delete(`/api/development/${item.id}`, { headers });
+  expect((await request.delete(`/api/sprints/${sprint.id}`, { headers })).status()).toBe(204);
+});
