@@ -548,6 +548,26 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   await expect.soft(page, 'Zurück-Button führt zur Agent-Liste').toHaveURL(/#agents/);
 });
 
+test('Agents: „Was machen die Rollen?“ auf- und zuklappen', async ({ page }, info) => {
+  const errors = watchConsole(page);
+  await login(page);
+  await open(page, 'agents');
+  const panel = page.locator('details.role-texts-panel');
+  await expect(panel.locator('summary')).toContainText('Was machen die Rollen?');
+  expect(await panel.getAttribute('open'), 'Bereich startet zugeklappt').toBeNull();
+  await panel.locator('summary').click();
+  const author = panel.locator('.role-text').filter({ hasText: 'Auftragsautor' });
+  await expect(author).toContainText(/Anforderungen/);
+  await expect(panel.locator('.role-text')).toHaveCount(10);
+  await expect.soft(page, 'Aufklappen erzeugt keinen Verlaufseintrag').toHaveURL(/#agents$/);
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect.soft(overflow, 'Rollentexte ohne horizontales Scrollen').toBeLessThanOrEqual(1);
+  await snap(page, info, 'Was machen die Rollen', false);
+  await panel.locator('summary').click();
+  await expect(author).toBeHidden();
+  expect.soft(errors, 'Keine Konsolenfehler').toEqual([]);
+});
+
 test('Einstellungen: Validierungen, Benutzer anlegen, Projekt löschen gesperrt', async ({ page, isMobile }, info) => {
   await login(page);
   await open(page, 'settings');

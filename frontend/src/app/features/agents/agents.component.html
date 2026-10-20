@@ -3,6 +3,13 @@
     <app-agent-detail [selected]="agent" />
   } @else {
     <app-workflow-steps id="workflow" [groups]="permissionGroups()" />
+    <details class="panel role-texts-panel">
+      <summary>
+        <h2>Was machen die Rollen?</h2>
+        <span class="muted">Aufgabe und Nutzen jeder Agent-Rolle für das Projekt</span>
+      </summary>
+      <app-agent-role-text />
+    </details>
     <section class="panel">
       <div class="section-heading">
         <div>
