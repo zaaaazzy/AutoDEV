@@ -9,8 +9,10 @@
           [ngModel]="item.status"
           (ngModelChange)="update(item.id, { status: $event })"
           [name]="'status-' + item.id"
+          [disabled]="statusLocked()"
+          [title]="statusLocked() ? 'Diesen Status setzt der Worker – ändern über die Aktionen des Auftrags.' : ''"
         >
-          @for (status of developmentStatuses; track status) {
+          @for (status of statusOptions(); track status) {
             <option [value]="status">{{ status | statusLabel }}</option>
           }
         </select>
@@ -23,7 +25,7 @@
           [name]="'sprint-' + item.id"
         >
           <option [ngValue]="null">Kein Sprint</option>
-          @for (sprint of data().sprints; track sprint.id) {
+          @for (sprint of sprintOptions(); track sprint.id) {
             <option [value]="sprint.id">{{ sprint.name }}</option>
           }
         </select>
@@ -202,7 +204,7 @@
               <select #fuSprint>
                 <option value="">Kein Sprint (Backlog) – später zuweisen</option>
                 @for (sprint of data().sprints; track sprint.id) {
-                  @if (sprint.status !== 'completed') {
+                  @if (isAssignableSprintStatus(sprint.status)) {
                     <option [value]="sprint.id" [selected]="sprint.id === activeSprintId()">
                       {{ sprint.name }}{{ sprint.status === 'active' ? ' (aktiv)' : '' }}
                     </option>

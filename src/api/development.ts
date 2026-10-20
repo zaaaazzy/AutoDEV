@@ -3,6 +3,7 @@ import { setActionTodo } from '../runner/action-todo.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
+import { canSetDevelopmentStatus, isAssignableSprintStatus } from '../core/development-transitions.js';
 import { IDEA_FIELDS } from './ideation.js';
 import {
   buildUpdate,
@@ -44,20 +45,6 @@ const DEV_FIELDS = {
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   agentId: { column: 'agent_id', parse: parseNullableUuid },
 };
-
-/**
- * Erlaubte manuelle Statuswechsel per PATCH. `in_progress`, `approval` und `done` setzt nur der Worker (Agent-Lauf,
- * Tester, Review, Merge); einen laufenden oder fertigen Auftrag ändert die Oberfläche über eigene Routen
- * (Erneut versuchen, Freigeben, Ablehnen, aus dem Sprint nehmen).
- */
-const MANUAL_DEVELOPMENT_TRANSITIONS: Record<string, readonly string[]> = {
-  [DEVELOPMENT_STATUS.backlog]: [DEVELOPMENT_STATUS.planned, DEVELOPMENT_STATUS.rejected],
-  [DEVELOPMENT_STATUS.planned]: [DEVELOPMENT_STATUS.backlog, DEVELOPMENT_STATUS.rejected],
-  [DEVELOPMENT_STATUS.blocked]: [DEVELOPMENT_STATUS.planned, DEVELOPMENT_STATUS.backlog, DEVELOPMENT_STATUS.rejected],
-  [DEVELOPMENT_STATUS.rejected]: [DEVELOPMENT_STATUS.backlog, DEVELOPMENT_STATUS.planned],
-};
-/** Aufträge lassen sich nur Sprints zuordnen, die noch laufen können. */
-const ASSIGNABLE_SPRINT_STATUSES = new Set(['planned', 'active']);
 
 /** Kommentar beim erneuten Versuch: geht als Hinweis an die Agents (wird an die Beschreibung angehängt). */
 export function retryComment(body: unknown): string | null {
@@ -332,7 +319,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         response.status(404).json({ message: 'Development item not found.' });
         return;
       }
-      if (from !== target && !MANUAL_DEVELOPMENT_TRANSITIONS[from]?.includes(target)) {
+      if (!canSetDevelopmentStatus(from, target)) {
         response.status(409).json({
           message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
         });
@@ -350,7 +337,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         response.status(400).json({ message: 'Sprint does not belong to the project of this item.' });
         return;
       }
-      if (!ASSIGNABLE_SPRINT_STATUSES.has(sprint.rows[0].sprintStatus)) {
+      if (!isAssignableSprintStatus(sprint.rows[0].sprintStatus)) {
         response.status(409).json({ message: 'Orders can only be assigned to planned or active sprints.' });
         return;
       }
