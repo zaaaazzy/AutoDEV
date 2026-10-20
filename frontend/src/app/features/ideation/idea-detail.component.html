@@ -27,7 +27,7 @@
         }
       </div>
       <div class="idea-hero-actions">
-        @if (!editing()) {
+        @if (!editing() && editable(idea)) {
           <button
             class="icon-button"
             type="button"

@@ -43,8 +43,23 @@ Danach öffnet sich AIdeation unter `http://localhost:3100`. Nach der Anmeldung 
 das erste Projekt anzulegen.
 
 Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet AIdeation.
-Mit `./start.sh --setup` (Windows: `start.cmd --setup`) öffnest du den Assistenten erneut – die bisherige `.env`
-wird vorher gesichert.
+Mit `./start.sh --setup` (Windows: `start.cmd --setup`) öffnest du den Assistenten erneut. Die bisherige `.env`
+wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**:
+
+- Gesetzt werden nur Benutzername, Passwort und die ausgefüllten Optionen. Leere Felder (Domain, Projektbereich)
+  lassen bestehende Werte stehen. Eigene Einträge, Kommentare und die Reihenfolge bleiben erhalten.
+- **Secret Key** (`DEV_LOG_SECRET_KEY`): Fehlt er oder ist er leer, erzeugt der Assistent einen zufälligen Schlüssel.
+  Ein vorhandener Schlüssel wird nie ersetzt. Mit ihm werden die Zugangsdaten der Projekte verschlüsselt.
+  **Sichere die `.env` (oder wenigstens diesen Schlüssel) in deinem Passwort-Manager.** Geht er verloren, sind die
+  verschlüsselten Werte nicht mehr lesbar.
+- **Datenbank-Passwort** (`DEV_LOG_DB_PASSWORD`): Fehlt es, wird ein zufälliges erzeugt (früher galt der Standard
+  `devlog_local_dev`). Weil Postgres das Passwort nur beim ersten Anlegen übernimmt, setzt der Assistent es in einer
+  schon vorhandenen Datenbank per `ALTER USER`, bevor die übrigen Container starten.
+- Die `.env` und ihre Sicherungen sind nur für dich lesbar (Modus `600`) und stehen in `.gitignore`.
+- Der Worker bekommt den Secret Key mit (macOS: LaunchAgent, Linux: systemd-Dienst, Windows: Startdatei
+  `%LOCALAPPDATA%\AIdeation\worker.cmd` der Aufgabe `AIdeationWorker`).
+- Läuft die Einrichtung schon in einem anderen Fenster, lehnt der Assistent einen zweiten Start ab. Nach einem
+  Fehler bleibt er offen, ein neuer Versuch ist mit „Zurück“ möglich.
 
 ## 3. Erstes Projekt und Tour
 

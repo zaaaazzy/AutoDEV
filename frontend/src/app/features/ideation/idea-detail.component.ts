@@ -11,7 +11,12 @@ import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { CATEGORIES } from '../../shared/labels.js';
 import { CommentThreadComponent } from './comment-thread.component.js';
-import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './idea-options.js';
+import {
+  IDEA_EDITABLE_STATUSES,
+  IDEA_SELECTABLE_STATUSES,
+  ideaDisplayStatus,
+  MAX_IMAGE_BYTES,
+} from './idea-options.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
 @Component({
@@ -58,6 +63,10 @@ export class IdeaDetailComponent {
 
   protected displayStatus(idea: Idea): string {
     return ideaDisplayStatus(idea, this.linkedOrder(idea.id));
+  }
+
+  protected editable(idea: Idea): boolean {
+    return IDEA_EDITABLE_STATUSES.includes(idea.status);
   }
 
   protected canPromote(idea: Idea): boolean {

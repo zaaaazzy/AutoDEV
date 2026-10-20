@@ -6,10 +6,17 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { platform } from 'node:os';
 import { join, resolve } from 'node:path';
+import {
+  DEFAULT_DB_USER,
+  type EnvPlan,
+  type InstallInput,
+  validateInstall,
+  writeEnvFile,
+} from '../../src/core/env-file.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const ENV_FILE = join(ROOT, '.env');
@@ -17,16 +24,21 @@ const PORT = Number(process.env.DEV_LOG_SETUP_PORT ?? 3999);
 const TOKEN = randomBytes(18).toString('base64url');
 const APP_URL = 'http://localhost:3100';
 const IS_WINDOWS = platform() === 'win32';
+let installing = false;
+let dbPasswordPending = false;
 
 function run(
   command: string,
   args: string[],
   onLine?: (line: string) => void,
   timeoutMs = 20 * 60_000,
+  input?: string,
 ): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
     const child = spawn(command, args, { cwd: ROOT, shell: IS_WINDOWS, env: process.env });
+    child.stdin.on('error', () => undefined);
+    child.stdin.end(input ?? '');
     const timer = setTimeout(() => child.kill(), timeoutMs);
     const collect = (chunk: Buffer): void => {
       const text = chunk.toString();
@@ -74,66 +86,37 @@ async function checks() {
   };
 }
 
-async function readEnv(): Promise<Map<string, string>> {
-  const values = new Map<string, string>();
-  if (!existsSync(ENV_FILE)) return values;
-  for (const line of (await readFile(ENV_FILE, 'utf8')).split(/\r?\n/)) {
-    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
-    if (match) values.set(match[1]!, match[2]!);
-  }
-  return values;
+/** Schreibt die .env zusammengeführt (Logik in src/core/env-file.ts); Schlüssel und Passwörter nie ins Protokoll. */
+async function writeEnv(body: InstallInput, log: (line: string) => void): Promise<EnvPlan> {
+  const result = await writeEnvFile(ENV_FILE, body);
+  if (result.backup) log(`Bisherige .env gesichert: ${result.backup}`);
+  if (result.secretKeyCreated)
+    log('Neuer Secret Key (DEV_LOG_SECRET_KEY) erzeugt – bitte die .env sicher aufbewahren.');
+  if (result.dbPasswordCreated) log('Neues Datenbank-Passwort erzeugt.');
+  log('Konfiguration (.env) geschrieben, bestehende Werte übernommen.');
+  return result;
 }
 
-interface InstallRequest {
-  username: string;
-  password: string;
-  domain: string;
-  projectRoots: string;
-  installWorker: boolean;
-}
-
-function validate(body: Partial<InstallRequest>): string | null {
-  if (!/^[a-zA-Z0-9._-]{3,40}$/.test(body.username ?? ''))
-    return 'Benutzername: 3–40 Zeichen (Buchstaben, Ziffern, . _ -).';
-  if ((body.password ?? '').length < 16) return 'Das Passwort braucht mindestens 16 Zeichen.';
-  if (/[\s#"'$`\\]/.test(body.password ?? ''))
-    return 'Bitte im Passwort keine Leerzeichen, Anführungszeichen, # $ ` oder \\ verwenden.';
-  if (body.domain && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(body.domain))
-    return 'Die Domain sieht ungültig aus (z. B. devlog.example.com).';
-  return null;
-}
-
-/** Schreibt die .env (vorhandene wird gesichert, Datenbank-Passwort bleibt erhalten). */
-async function writeEnv(body: InstallRequest, log: (line: string) => void): Promise<Map<string, string>> {
-  const current = await readEnv();
-  if (existsSync(ENV_FILE)) {
-    const backup = `${ENV_FILE}.bak-${Date.now()}`;
-    await copyFile(ENV_FILE, backup);
-    log(`Bisherige .env gesichert: ${backup}`);
+/**
+ * Postgres übernimmt POSTGRES_PASSWORD nur beim ersten Anlegen der Datenbank. Wurde das DB-Passwort neu erzeugt,
+ * kennt eine schon vorhandene Datenbank (früher mit dem Standard „devlog_local_dev“) es noch nicht. Im Container
+ * gilt für den lokalen Socket „trust“, deshalb lässt sich das Passwort dort ohne das alte setzen.
+ */
+async function applyDbPassword(env: Map<string, string>, log: (line: string) => void): Promise<boolean> {
+  const user = env.get('DEV_LOG_DB_USER') || DEFAULT_DB_USER;
+  const password = env.get('DEV_LOG_DB_PASSWORD')!;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(user) || !/^[0-9a-f]+$/.test(password)) {
+    log('Datenbank-Passwort nicht gesetzt: DEV_LOG_DB_USER oder DEV_LOG_DB_PASSWORD hat ein unerwartetes Format.');
+    return false;
   }
-  const dbPassword =
-    current.get('DEV_LOG_DB_PASSWORD') ?? (current.size ? 'devlog_local_dev' : randomBytes(18).toString('hex'));
-  const values = new Map<string, string>([
-    ['DEV_LOG_AUTH', 'on'],
-    ['DEV_LOG_USERNAME', body.username],
-    ['DEV_LOG_PASSWORD', body.password],
-    ['DEV_LOG_DB_PASSWORD', dbPassword],
-    ['DEV_LOG_DATABASE_URL', `postgresql://devlog:${dbPassword}@localhost:5433/aideation`],
-  ]);
-  if (body.projectRoots.trim()) values.set('DEV_LOG_PROJECT_ROOTS', body.projectRoots.trim());
-  if (body.domain.trim()) {
-    values.set('DEV_LOG_DOMAIN', body.domain.trim());
-    values.set('DEV_LOG_PUBLIC_URL', `https://${body.domain.trim()}`);
-    values.set('COMPOSE_PROFILES', 'https');
-  }
-  const content = [
-    '# AIdeation – erzeugt vom Einrichtungs-Assistenten',
-    ...[...values].map(([key, value]) => `${key}=${value}`),
-    '',
-  ].join('\n');
-  await writeFile(ENV_FILE, content, { mode: 0o600 });
-  log('Konfiguration (.env) geschrieben.');
-  return values;
+  log('Starte die Datenbank und setze das neue Passwort …');
+  const db = await run('docker', ['compose', 'up', '-d', '--wait', 'db'], log);
+  if (!db.ok) return false;
+  // Das Passwort geht über stdin, damit es weder im Protokoll noch in der Prozessliste steht.
+  const sql = `ALTER USER "${user}" WITH PASSWORD '${password}';\n`;
+  const psql = ['compose', 'exec', '-T', 'db', 'psql', '-v', 'ON_ERROR_STOP=1', '-U', user, '-d', 'aideation'];
+  const alter = await run('docker', psql, log, 60_000, sql);
+  return alter.ok;
 }
 
 async function waitForHealth(log: (line: string) => void): Promise<boolean> {
@@ -150,22 +133,40 @@ async function waitForHealth(log: (line: string) => void): Promise<boolean> {
   return false;
 }
 
-async function install(body: InstallRequest, send: (event: Record<string, unknown>) => void): Promise<void> {
+async function install(body: InstallInput, send: (event: Record<string, unknown>) => void): Promise<boolean> {
   const log = (line: string) => send({ type: 'log', line });
   const step = (id: string, status: 'running' | 'ok' | 'error' | 'skipped', note = '') =>
     send({ type: 'step', id, status, note });
 
   step('env', 'running');
-  const env = await writeEnv(body, log);
+  let plan: EnvPlan;
+  try {
+    plan = await writeEnv(body, log);
+  } catch (error) {
+    step('env', 'error', `Die .env konnte nicht geschrieben werden: ${(error as Error).message}`);
+    send({ type: 'done', ok: false });
+    return false;
+  }
+  const env = plan.values;
   step('env', 'ok');
 
   step('docker', 'running');
+  // Ist das Setzen fehlgeschlagen, steht das neue Passwort schon in der .env – der nächste Versuch setzt es erneut.
+  if (plan.dbPasswordCreated) dbPasswordPending = true;
+  if (dbPasswordPending) {
+    if (!(await applyDbPassword(env, log))) {
+      step('docker', 'error', 'Das neue Datenbank-Passwort konnte nicht gesetzt werden – Details im Protokoll.');
+      send({ type: 'done', ok: false });
+      return false;
+    }
+    dbPasswordPending = false;
+  }
   log('Baue und starte die Container (beim ersten Mal einige Minuten) …');
   const up = await run('docker', ['compose', 'up', '-d', '--build'], log);
   if (!up.ok) {
     step('docker', 'error', 'docker compose up ist fehlgeschlagen – Details im Protokoll.');
     send({ type: 'done', ok: false });
-    return;
+    return false;
   }
   step('docker', 'ok');
 
@@ -178,15 +179,17 @@ async function install(body: InstallRequest, send: (event: Record<string, unknow
   );
   if (!healthy) {
     send({ type: 'done', ok: false });
-    return;
+    return false;
   }
 
   if (!body.installWorker) {
     step('worker', 'skipped', 'Den Worker startest du später mit „npm run worker“.');
   } else {
     step('worker', 'running');
-    const workerEnv = { ...process.env, DEV_LOG_DATABASE_URL: env.get('DEV_LOG_DATABASE_URL')! };
-    Object.assign(process.env, workerEnv);
+    // Die Installationsskripte (launchd, systemd, Aufgabenplanung) lesen URL und Schlüssel aus der Umgebung.
+    // PATH bleibt unverändert, sonst findet der Worker die Agent-CLIs nicht (spawn claude ENOENT).
+    process.env.DEV_LOG_DATABASE_URL = env.get('DEV_LOG_DATABASE_URL')!;
+    process.env.DEV_LOG_SECRET_KEY = env.get('DEV_LOG_SECRET_KEY')!;
     const os = platform();
     const result =
       os === 'darwin'
@@ -205,6 +208,7 @@ async function install(body: InstallRequest, send: (event: Record<string, unknow
     }
   }
   send({ type: 'done', ok: true, url: APP_URL });
+  return true;
 }
 
 function json(response: ServerResponse, status: number, body: unknown): void {
@@ -240,23 +244,37 @@ const server = createServer(async (request, response) => {
       return json(response, 403, { message: 'Ungültiger Schlüssel – bitte den Link aus dem Terminal öffnen.' });
     if (request.method === 'GET' && url.pathname === '/api/check') return json(response, 200, await checks());
     if (request.method === 'POST' && url.pathname === '/api/install') {
-      const payload = (await body(request)) as Partial<InstallRequest>;
-      const problem = validate(payload);
-      if (problem) return json(response, 400, { message: problem });
-      response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' });
-      await install(
-        {
-          username: payload.username!,
-          password: payload.password!,
-          domain: payload.domain ?? '',
-          projectRoots: payload.projectRoots ?? '',
-          installWorker: payload.installWorker !== false,
-        },
-        (event) => response.write(`${JSON.stringify(event)}\n`),
-      );
-      response.end();
-      setTimeout(() => process.exit(0), 3000);
-      return;
+      // Sperre: zwei gleichzeitige Läufe würden die .env und die Container gegenseitig überschreiben.
+      if (installing)
+        return json(response, 409, { message: 'Die Einrichtung läuft bereits – bitte das andere Fenster abwarten.' });
+      installing = true;
+      try {
+        const payload = (await body(request)) as Partial<InstallInput>;
+        const problem = validateInstall(payload);
+        if (problem) return json(response, 400, { message: problem });
+        response.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store' });
+        const send = (event: Record<string, unknown>) => response.write(`${JSON.stringify(event)}\n`);
+        const ok = await install(
+          {
+            username: payload.username!,
+            password: payload.password!,
+            domain: payload.domain ?? '',
+            projectRoots: payload.projectRoots ?? '',
+            installWorker: payload.installWorker !== false,
+          },
+          send,
+        ).catch((error: unknown) => {
+          send({ type: 'log', line: `Fehler: ${(error as Error).message}` });
+          send({ type: 'done', ok: false });
+          return false;
+        });
+        response.end();
+        // Nach einem Fehler bleibt der Assistent offen, damit ein neuer Versuch möglich ist.
+        if (ok) setTimeout(() => process.exit(0), 3000);
+        return;
+      } finally {
+        installing = false;
+      }
     }
     json(response, 404, { message: 'Nicht gefunden.' });
   } catch (error) {

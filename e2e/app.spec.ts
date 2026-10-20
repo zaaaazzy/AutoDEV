@@ -130,6 +130,9 @@ test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
   await expect(page.getByRole('dialog', { name: 'Benachrichtigungen erlauben' })).toBeVisible();
   await page.getByRole('button', { name: 'Später' }).click();
+  // Einrichten verlangt das aktuelle Passwort.
+  await expect(page.getByRole('button', { name: 'Einrichten' })).toBeDisabled();
+  await page.getByLabel('Aktuelles Passwort').fill(password);
   await page.getByRole('button', { name: 'Einrichten' }).click();
   await expect(page.getByAltText('QR-Code für die Authenticator-App')).toBeVisible();
   await page.getByRole('button', { name: 'Abbrechen' }).click();
@@ -456,9 +459,9 @@ test('Sprint: offenen Auftrag unter „Aufträge hinzufügen“ in den Sprint ne
   await expect(detail.locator('.sprint-orders .dt-group').first()).toContainText('Geplant');
   await expect(planned.locator('.rank-cell')).toHaveText('1');
   await planned.getByRole('button', { name: 'Aus dem Sprint nehmen' }).click();
-  // Herausgenommen gilt er als abgebrochen und steht wieder zur Auswahl.
-  await expect(pool.locator('.dt-group', { hasText: 'Abgebrochen' })).toBeVisible();
+  // Aus einem geplanten Sprint genommen ist reine Planung: kein Vermerk, er steht wieder als offener Auftrag zur Wahl.
   await expect(pool.locator('tbody tr', { hasText: title })).toBeVisible();
+  await expect(pool.locator('.dt-group', { hasText: 'Abgebrochen' })).toHaveCount(0);
   await request.delete(`/api/development/${order.id}`, { headers });
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
@@ -550,9 +553,19 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
 test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Sprint-Aufgabe ${Date.now()}`;
-  const sprint = (
-    await (await request.post('/api/projects/e2e/sprints', { headers, data: { name: 'E2E-Sprint' } })).json()
-  ).sprint;
+  // Nur aus einem laufenden Sprint genommen wartet ein Auftrag unter „Aktionen“: den aktiven Sprint nutzen bzw. starten.
+  const sprints = (
+    (await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
+      sprints: { id: string; name: string; status: string }[];
+    }
+  ).sprints;
+  let sprint = sprints.find((entry) => entry.status === 'active');
+  const started = !sprint;
+  if (!sprint) {
+    sprint = (await (await request.post('/api/projects/e2e/sprints', { headers, data: { name: 'E2E-Sprint' } })).json())
+      .sprint as { id: string; name: string; status: string };
+    expect((await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'active' } })).ok()).toBe(true);
+  }
   const item = (await (await request.post('/api/projects/e2e/development', { headers, data: { title } })).json()).item;
   await request.patch(`/api/development/${item.id}`, { headers, data: { sprintId: sprint.id } });
 
@@ -571,12 +584,15 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
   await page.goto('/#actions');
   const card = page.locator('.attention-card').filter({ hasText: title });
-  await expect(card).toContainText('Aus Sprint „E2E-Sprint“ genommen');
+  await expect(card).toContainText(`Aus Sprint „${sprint.name}“ genommen`);
   await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
   page.once('dialog', (dialog) => void dialog.accept());
   await card.getByRole('button', { name: 'Löschen' }).click();
   await expect(card).toHaveCount(0);
-  await request.delete(`/api/sprints/${sprint.id}`, { headers });
+  if (started) {
+    await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'planned' } });
+    await request.delete(`/api/sprints/${sprint.id}`, { headers });
+  }
 });
 
 test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details beim Hover, eigene Aktion anlegen', async ({
@@ -668,6 +684,10 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await page.getByRole('button', { name: /Nächsten Sprint vorschlagen/ }).click();
   const card = page.locator('.sprint-proposal');
   await expect(card.getByRole('heading', { name: /Vorschlag für Sprint/ })).toBeVisible();
+  // Platzsparend: zugeklappt nur eine Zeile mit Summen; ein Klick auf den Titel zeigt Tabelle und Aktionen.
+  await expect(card.locator('.proposal-summary')).toContainText('Aufträge');
+  await expect(card.locator('tbody tr')).toHaveCount(0);
+  await card.getByRole('button', { name: /Vorschlag für Sprint/ }).click();
   const row = card.locator('tbody tr', { hasText: title });
   await expect(row).toContainText('Priorität hoch');
   const box = row.getByRole('checkbox');
