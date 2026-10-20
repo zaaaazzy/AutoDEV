@@ -14,7 +14,9 @@ async function patchSprint(previous: string, body: unknown) {
     query: async (sql: string) => {
       queries.push(sql);
       if (sql.startsWith('SELECT status')) return { rows: [{ status: previous }] };
-      if (sql.includes('UPDATE sprints SET status')) return { rows: [] };
+      // completeSprint setzt den Status per eigenem UPDATE; das PATCH-UPDATE selbst (`SET status = $2 … WHERE status = ANY`)
+      // fällt in den nächsten Zweig und liefert den neuen Stand.
+      if (sql.includes("UPDATE sprints SET status = 'completed'")) return { rows: [] };
       if (sql.startsWith('UPDATE sprints SET')) {
         const status = (body as { status?: string }).status ?? previous;
         return { rows: [{ id: SPRINT_ID, status }] };
