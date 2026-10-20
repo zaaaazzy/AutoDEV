@@ -15,6 +15,19 @@ test('readOnlyCommand strips permission flags of the CLI presets', () => {
   ]);
 });
 
+test('readOnlyCommand strips --settings and --add-dir', () => {
+  assert.deepEqual(readOnlyCommand(['claude', '--settings', 'perm.json', '--add-dir', '/a', '/b', '-p', '{prompt}']), [
+    'claude',
+    '-p',
+    '{prompt}',
+  ]);
+  assert.deepEqual(readOnlyCommand(['claude', '--settings={"a":1}', '--add-dir=/x', '--model', 'opus']), [
+    'claude',
+    '--model',
+    'opus',
+  ]);
+});
+
 test('asCommand accepts only non-empty string arrays', () => {
   assert.deepEqual(asCommand(['copilot', '-p']), ['copilot', '-p']);
   assert.equal(asCommand('kein array'), null);

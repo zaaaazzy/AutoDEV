@@ -89,6 +89,25 @@ export function buildChatPrompt(
     .join('\n\n');
 }
 
+/**
+ * Gesprächsverlauf bis einschließlich der übernommenen Nachricht. Später eingegangene und noch wartende bzw. gerade
+ * bearbeitete Nutzernachrichten bleiben draussen – sonst beantwortet der Lauf für Nachricht 1 schon Nachricht 2.
+ */
+export async function loadChatHistory(
+  pool: Pick<Pool, 'query'>,
+  project: string,
+  claimedId: string,
+): Promise<{ rows: { role: string; content: string }[] }> {
+  return pool.query<{ role: string; content: string }>(
+    `SELECT role, content FROM (SELECT role, content, created_at FROM chat_messages
+      WHERE project_slug = $1 AND status <> 'failed' AND NOT (role = 'assistant' AND status = 'processing')
+        AND created_at <= (SELECT created_at FROM chat_messages WHERE id = $3)
+        AND (role <> 'user' OR status NOT IN ('pending', 'processing') OR id = $3)
+      ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
+    [project, HISTORY_LIMIT, claimedId],
+  );
+}
+
 /** Answers the oldest pending chat message of a project; returns false when nothing was waiting. */
 const READ_ONLY_NOTE =
   'Hinweis: Gerade arbeitet ein Auftrag im Projektordner. Du kannst nur lesen und antworten, aber keine Dateien ' +
@@ -128,11 +147,7 @@ export async function processChat(
     : null;
   const history = routine
     ? { rows: [{ role: 'user', content: claimed.content }] }
-    : await pool.query<{ role: string; content: string }>(
-        `SELECT role, content FROM (SELECT role, content, created_at FROM chat_messages
-          WHERE project_slug = $1 AND status <> 'failed' AND NOT (role = 'assistant' AND status = 'processing') ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
-        [options.project, HISTORY_LIMIT],
-      );
+    : await loadChatHistory(pool, options.project, claimed.id);
   // Antwort auf eine Rückfrage: dieselbe Claude-Sitzung fortsetzen, damit der Agent den Kontext behält. Verweist die
   // Antwort ausdrücklich auf eine Rückfrage, gilt diese – auch wenn inzwischen anderes im Chat stand.
   const openQuestion = routine

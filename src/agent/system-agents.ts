@@ -125,6 +125,9 @@ const PERMISSION_FLAGS = new Set([
   '--yolo',
   '-y',
   '--approval-mode',
+  // Erweitern Zugriff bzw. Einstellungen (eigene Berechtigungen in einer Settings-Datei, weitere Ordner).
+  '--settings',
+  '--add-dir',
 ]);
 const VALUE_FLAGS = new Set([
   '--permission-mode',
@@ -132,16 +135,23 @@ const VALUE_FLAGS = new Set([
   '--allowed-tools',
   '--allow-tool',
   '--approval-mode',
+  '--settings',
 ]);
+/** Flags, die mehrere Werte nehmen (`--add-dir a b`): alle folgenden Teile bis zum nächsten Flag fallen weg. */
+const MULTI_VALUE_FLAGS = new Set(['--add-dir']);
 
 /** Removes permission-granting flags so a read-only system role (analysis, estimation) cannot edit or run commands. */
 export function readOnlyCommand(command: string[]): string[] {
   const result: string[] = [];
   let skipValue = false;
+  let skipValues = false;
   for (const part of command) {
     const [flag = part] = part.split('=');
+    if (skipValues && !part.startsWith('-')) continue;
+    skipValues = false;
     if (skipValue) skipValue = false;
     else if (!PERMISSION_FLAGS.has(flag)) result.push(part);
+    else if (MULTI_VALUE_FLAGS.has(flag)) skipValues = !part.includes('=');
     else skipValue = VALUE_FLAGS.has(flag) && !part.includes('=');
   }
   return result;

@@ -31,3 +31,12 @@ test('ignores missing or broken coverage blocks', () => {
   assert.equal(parseCoverage('@@COVERAGE {kaputt}'), null);
   assert.equal(parseCoverage('@@COVERAGE {"areas":[]}'), null);
 });
+
+test('the last coverage block wins over an interim measurement', () => {
+  const first = '@@COVERAGE {"summary":"vorher","areas":[{"area":"Backend","lines":40}]}';
+  const last = '@@COVERAGE {"summary":"nachher","areas":[{"area":"Backend","lines":80}]}';
+  const report = parseCoverage(`${first}\nTests ergänzt.\n${last}`);
+  assert.equal(report?.summary, 'nachher');
+  assert.equal(report?.areas[0]?.lines, 80);
+  assert.equal(stripCoverage(`${first}\nTests ergänzt.\n${last}`), '\nTests ergänzt.');
+});

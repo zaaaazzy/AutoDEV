@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { decodePolicy } from './agent-guard.js';
 import {
   availableCommands,
@@ -12,7 +15,9 @@ import {
   CUSTOM_GROUP_ID,
   DEFAULT_PERMISSION_GROUPS,
   extraReadDirectories,
+  forbiddenSubcommand,
   FULL_ACCESS_ROLES,
+  gitPathProblem,
   guardHookCommand,
   hasFullAccess,
   isAllowedCommand,
@@ -20,6 +25,7 @@ import {
   loadProjectPermissions,
   materializeAgentCommands,
   normalizeCommands,
+  npmOptionProblem,
   PERMISSION_GROUPS,
   type ProjectPermissions,
   READ_ONLY_ROLES,
@@ -512,4 +518,131 @@ test('withAgentPermissions: Rollenstandard ohne Zuweisung (null), übrige Rollen
   const documenter = withAgentPermissions(CLAUDE, 'documenter', all, null, ['docs']);
   assert.equal(documenter.includes('--allowedTools'), false);
   assert.deepEqual(policyOf(documenter), { create: true, edit: true, scopes: ['docs'] });
+});
+
+test('isAllowedCommand: npm-Optionen für fremde Projekte, Shells und Einstellungen sind gesperrt (auch abgekürzt)', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'npm-options-')));
+  mkdirSync(join(root, 'docs'));
+  symlinkSync(tmpdir(), join(root, 'raus'));
+  for (const command of [
+    'npm run build --prefix=/tmp/other',
+    'npm run build --prefix=..',
+    'npm run --prefix ../other build',
+    'npm run --prefix raus build',
+    'npm run build -C /tmp/other',
+    'npm run build -sC /tmp/other',
+    'npm run build --pref=/tmp/other',
+    'npm run build --script-shell=/bin/sh',
+    'npm run build --scr=/tmp/evil.sh',
+    'npm test --userconfig=/tmp/npmrc',
+    'npm test --globalconfig=/tmp/npmrc',
+    'npm test --cache=/tmp/cache',
+    'npm test --node-options=--require=/tmp/x.js',
+    'npm test --location=global',
+    'npm test -g',
+    'npm test -L global',
+  ]) {
+    assert.ok(!isAllowedCommand(command, root), command);
+    assert.ok(npmOptionProblem(command, root), command);
+  }
+  for (const command of ['npm run build', 'npm run --prefix docs build', 'npm run test:unit -- --watch=false']) {
+    assert.ok(isAllowedCommand(command, root), command);
+  }
+  // Nach „--“ gehören die Argumente dem Skript (z. B. mocha -g).
+  assert.equal(npmOptionProblem('npm test -- -g muster --cache', root), null);
+  // Ohne Projektordner nur einfache relative Ordner.
+  assert.ok(isAllowedCommand('npm run --prefix docs build'));
+  assert.ok(!isAllowedCommand('npm run --prefix=../x build'));
+  assert.ok(!isAllowedCommand('npm run --prefix=$HOME build'));
+  assert.equal(npmOptionProblem('git diff --cache'), null, 'nur npm');
+});
+
+test('git diff: Pfade ausserhalb des Projekts (No-Index-Modus) sind gesperrt', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'git-paths-')));
+  mkdirSync(join(root, 'src'));
+  symlinkSync(tmpdir(), join(root, 'raus'));
+  for (const command of [
+    'git diff /dev/null /Users/x/.zshrc',
+    'git diff /etc/hosts src/app.ts',
+    'git diff ../other/file src/app.ts',
+    'git diff src/../../x',
+    'git diff raus/datei src/app.ts',
+    'git diff HEAD -- /etc/hosts',
+  ]) {
+    assert.ok(gitPathProblem(command, root), command);
+    assert.ok(!isAllowedCommand(command, root), command);
+    // Ohne Projektordner lassen sich Links nicht auflösen – darum übergibt run_command ihn immer.
+    if (!command.includes('raus/')) assert.ok(!isAllowedCommand(command), `${command} (ohne Projektordner)`);
+  }
+  for (const command of ['git diff', 'git diff HEAD~1', 'git diff main..feature src', `git diff ${root}/src`]) {
+    assert.equal(gitPathProblem(command, root), null, command);
+    assert.ok(isAllowedCommand(command, root), command);
+  }
+  assert.equal(gitPathProblem('git log /etc/hosts', root), null, 'nur git diff schaltet in den No-Index-Modus');
+});
+
+test('customRuleProblem: breite Präfixe, die gesperrte Unterbefehle umfassen, sind gesperrt', () => {
+  for (const rule of [
+    'Bash(git:*)',
+    'Bash(docker:*)',
+    'Bash(docker compose:*)',
+    'Bash(npm:*)',
+    'Bash(npm i:*)',
+    'Bash(npm ci:*)',
+    'Bash(npm update:*)',
+    'Bash(npm set script-shell=x)',
+    'Bash(docker build:*)',
+    'Bash(docker -H tcp://x ps:*)',
+  ]) {
+    assert.match(customRuleProblem(rule) ?? '', /grundsätzlich gesperrt/, rule);
+  }
+  for (const rule of [
+    'Bash(git log:*)',
+    'Bash(docker compose logs:*)',
+    'Bash(npm run:*)',
+    'Bash(npm ci --ignore-scripts:*)',
+    'Bash(npm i --ignore-scripts:*)',
+    'Bash(git)',
+  ]) {
+    assert.equal(customRuleProblem(rule), null, rule);
+  }
+});
+
+test('forbiddenSubcommand: npm i verhält sich wie npm install, Optionen vor dem Unterbefehl sind gesperrt', () => {
+  for (const command of [
+    'git push',
+    'git  push origin main',
+    'docker run -v /:/host alpine',
+    'docker container run alpine',
+    'docker --context x run alpine',
+    'docker compose run app sh',
+    'npm i',
+    'npm i left-pad',
+    'npm install left-pad --ignore-scripts',
+    'npm ci',
+    'npm add left-pad',
+    'npm isntall left-pad',
+    'npm rebuild',
+    'npm --prefix docs install',
+    'npm -C docs i',
+    'npm set script-shell=/tmp/x',
+  ]) {
+    assert.ok(forbiddenSubcommand(command), command);
+  }
+  for (const command of [
+    'git status',
+    'git log --oneline',
+    'docker ps',
+    'docker logs app',
+    'docker compose up -d --build',
+    'docker compose build',
+    'npm test',
+    'npm run build',
+    'npm i --ignore-scripts',
+    'npm install --ignore-scripts left-pad',
+    'npm ci --ignore-scripts',
+    'npm ls',
+  ]) {
+    assert.equal(forbiddenSubcommand(command), false, command);
+  }
 });

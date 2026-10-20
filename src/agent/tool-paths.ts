@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 
 export const BACKUP_DIRECTORY = '.dev-log-backups';
@@ -16,6 +16,17 @@ export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)/i;
 
 export class ToolError extends Error {}
 
+/** Gesperrte Pfadteile: Git, Abhängigkeiten, Sicherungen und Geheimnisse (Pfad relativ zum Projekt). */
+function blockedPath(rel: string): boolean {
+  return rel
+    .split(sep)
+    .filter(Boolean)
+    .some((part) => {
+      const lower = part.toLowerCase();
+      return lower === '.git' || lower === 'node_modules' || lower === BACKUP_DIRECTORY || SECRET_NAME.test(part);
+    });
+}
+
 export async function resolveInside(cwd: string, requested: unknown, forWrite = false): Promise<string> {
   if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
     throw new ToolError('Ungültiger Pfad.');
@@ -26,22 +37,11 @@ export async function resolveInside(cwd: string, requested: unknown, forWrite = 
   if (rel.startsWith('..') || resolve(root, rel) !== target) {
     throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
   }
-  const parts = rel.split(sep).filter(Boolean);
-  if (
-    parts.some(
-      (part) =>
-        part === '.git' ||
-        part === 'node_modules' ||
-        part === BACKUP_DIRECTORY ||
-        part.toLowerCase() === '.git' ||
-        part.toLowerCase() === BACKUP_DIRECTORY ||
-        part.toLowerCase() === 'node_modules' ||
-        SECRET_NAME.test(part),
-    )
-  ) {
+  if (blockedPath(rel)) {
     throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
   }
-  // Resolve symlinks of the nearest existing ancestor so they cannot point outside the project.
+  // Resolve symlinks of the nearest existing ancestor so they cannot point outside the project or at a blocked path
+  // (z. B. notes.txt -> .env oder hook -> .git/hooks/pre-commit).
   let existing = target;
   for (;;) {
     try {
@@ -49,10 +49,22 @@ export async function resolveInside(cwd: string, requested: unknown, forWrite = 
       if (real !== root && !real.startsWith(root + sep)) {
         throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
       }
+      if (blockedPath(join(relative(root, real), relative(existing, target)))) {
+        throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
+      }
       break;
     } catch (error) {
       if (error instanceof ToolError) {
         throw error;
+      }
+      // Ein Link ins Leere würde beim Schreiben sein (ungeprüftes) Ziel anlegen.
+      if (
+        await lstat(existing).then(
+          (info) => info.isSymbolicLink(),
+          () => false,
+        )
+      ) {
+        throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
       }
       if (!forWrite && existing === target) {
         throw new ToolError('Pfad existiert nicht.');

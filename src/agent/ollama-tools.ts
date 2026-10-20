@@ -139,14 +139,14 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         if (context.commands && !rulesAllow(context.commands, command)) {
           return `„${command}“ ist für diesen Agent nicht freigegeben (Rechte des Agents).`;
         }
-        if (!isAllowedCommand(command) && !(context.canManageServices && isAssistantServiceCommand(command))) {
+        const root = await realpath(context.cwd);
+        if (!isAllowedCommand(command, root) && !(context.canManageServices && isAssistantServiceCommand(command))) {
           return (
             'Befehl nicht erlaubt. Für den Assistenten sind git status/diff/log/show/branch, npm ls/outdated, ' +
             'docker compose ps/logs/up -d/stop/start/restart/down/build, git clone ' +
             '(https/ssh)/pull/fetch/checkout und npm install erlaubt.'
           );
         }
-        const root = await realpath(context.cwd);
         return withProjectLock(root, async () => {
           if (COMPOSE_STARTING.test(command)) {
             const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, {
