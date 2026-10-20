@@ -120,16 +120,20 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Invalid document.' });
       return;
     }
-    await upsertDoc(pool, {
-      projectSlug: slug,
-      kind: 'manual',
-      title: values.get('title') as string,
-      content: (values.get('content') as string) ?? '',
-    });
+    // Nur anlegen: ein bestehendes Handbuch gleichen Titels bleibt unverändert. Änderungen laufen über
+    // Revisionen (Vier-Augen-Prinzip), nicht über diesen Endpunkt.
     const result = await pool.query(
-      `SELECT ${DOC_COLUMNS} FROM docs WHERE project_slug = $1 AND kind = 'manual' AND title = $2`,
-      [slug, values.get('title')],
+      `INSERT INTO docs (project_slug, kind, title, content) VALUES ($1, 'manual', $2, $3)
+       ON CONFLICT (project_slug, kind, title) WHERE kind IN ('manual', 'sprint', 'repo') DO NOTHING
+       RETURNING ${DOC_COLUMNS}`,
+      [slug, values.get('title'), clip((values.get('content') as string) ?? '')],
     );
+    if (!result.rows[0]) {
+      response
+        .status(409)
+        .json({ message: 'A document with this title already exists. Submit a revision to change it.' });
+      return;
+    }
     response.status(201).json({ doc: result.rows[0] });
   });
 

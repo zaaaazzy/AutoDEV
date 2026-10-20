@@ -40,17 +40,118 @@ const FORBIDDEN_SQL: [RegExp, string][] = [
 const TRIVIAL_WHERE =
   /\bwhere\s+(?:true|not\s+false|(\d+)\s*=\s*\1|'([^']*)'\s*=\s*'\2'|([a-z_][\w.]*)\s*=\s*\3)\s*(?:returning\b[\s\S]*)?$/i;
 
-export function sqlViolation(sql: string): string | null {
-  const withoutComments = sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
-  for (const [pattern, label] of FORBIDDEN_SQL) {
-    if (pattern.test(withoutComments)) return `Nicht erlaubt: ${label}.`;
-  }
-  for (const statement of withoutComments.split(';')) {
-    if (/^\s*(?:update|delete)\b/i.test(statement) && !/\bwhere\b/i.test(statement)) {
-      return 'UPDATE und DELETE brauchen eine WHERE-Bedingung.';
+/**
+ * Zerlegt SQL wie PostgreSQL in Code ohne Kommentare und String-Inhalte: '…' (mit ''), E'…' (mit Backslash-Escapes)
+ * und $tag$…$tag$ werden zu '', Kommentare (-- und verschachtelte /* … *\/) zu Leerzeichen. Bezeichner in "…" bleiben
+ * als Wort sichtbar (sonst versteckte "pg_read_file"(…) eine Server-Funktion). null bei offenem String oder Kommentar.
+ */
+function sqlCode(sql: string): string | null {
+  let code = '';
+  let index = 0;
+  while (index < sql.length) {
+    const char = sql[index] ?? '';
+    const next = sql[index + 1];
+    if (char === '-' && next === '-') {
+      const end = sql.indexOf('\n', index);
+      index = end < 0 ? sql.length : end;
+      code += ' ';
+    } else if (char === '/' && next === '*') {
+      let depth = 1;
+      index += 2;
+      while (index < sql.length && depth > 0) {
+        if (sql.startsWith('/*', index)) {
+          depth += 1;
+          index += 2;
+        } else if (sql.startsWith('*/', index)) {
+          depth -= 1;
+          index += 2;
+        } else index += 1;
+      }
+      if (depth > 0) return null;
+      code += ' ';
+    } else if (char === "'") {
+      const escapes = /[eE]/.test(code.at(-1) ?? '') && !/\w/.test(code.at(-2) ?? '');
+      index += 1;
+      for (;;) {
+        if (index >= sql.length) return null;
+        if (escapes && sql[index] === '\\') index += 2;
+        else if (sql[index] === "'" && sql[index + 1] === "'") index += 2;
+        else if (sql[index] === "'") break;
+        else index += 1;
+      }
+      index += 1;
+      code += "''";
+    } else if (char === '"') {
+      const end = sql.indexOf('"', index + 1);
+      if (end < 0) return null;
+      code += ` ${sql.slice(index + 1, end).replace(/\W/g, '_')} `;
+      index = end + 1;
+    } else if (char === '$' && !/\w/.test(code.at(-1) ?? '') && /^\$(?:[A-Za-z_]\w*)?\$/.test(sql.slice(index))) {
+      const tag = /^\$(?:[A-Za-z_]\w*)?\$/.exec(sql.slice(index))?.[0] ?? '$$';
+      const end = sql.indexOf(tag, index + tag.length);
+      if (end < 0) return null;
+      index = end + tag.length;
+      code += "''";
+    } else {
+      code += char;
+      index += 1;
     }
-    if (/^\s*(?:update|delete)\b/i.test(statement) && TRIVIAL_WHERE.test(statement.trim())) {
-      return 'UPDATE und DELETE brauchen eine echte WHERE-Bedingung (nicht „WHERE true“ o. ä.).';
+  }
+  return code;
+}
+
+/** Steuert Transaktion oder Laufzeit – der Rahmen aus BEGIN und statement_timeout in runProjectSql muss gelten. */
+const SESSION_CONTROL = /^\s*(?:begin|start|commit|end|rollback|abort|savepoint|release|prepare|set|reset|discard)\b/i;
+
+/** Wörter vor UPDATE/DELETE, die keine schreibende Anweisung einleiten (FOR UPDATE, ON DELETE, DO UPDATE …). */
+const NOT_DML_BEFORE = new Set(['for', 'key', 'on', 'of', 'or', 'before', 'after', 'instead', 'do']);
+
+/** Inhalt verschachtelter Klammern ausblenden: aus „a (b (c)) d“ wird „a () d“. */
+function flatten(text: string): string {
+  let depth = 0;
+  let flat = '';
+  for (const char of text) {
+    if (char === ')') depth -= 1;
+    if (depth === 0) flat += char;
+    if (char === '(') depth += 1;
+  }
+  return flat;
+}
+
+/** Jede UPDATE/DELETE-Anweisung – auch in CTEs und hinter EXPLAIN – samt ihrem Text bis zum Ende ihrer Klammer. */
+function dmlStatements(statement: string): string[] {
+  const found: string[] = [];
+  for (const match of statement.matchAll(/\b(?:update|delete)\b/gi)) {
+    const before = /(\w+)\W*$/.exec(statement.slice(0, match.index))?.[1]?.toLowerCase() ?? '';
+    if (NOT_DML_BEFORE.has(before)) continue;
+    let depth = 0;
+    let end = match.index;
+    while (end < statement.length && depth >= 0) {
+      if (statement[end] === '(') depth += 1;
+      if (statement[end] === ')') depth -= 1;
+      end += 1;
+    }
+    found.push(flatten(statement.slice(match.index, depth < 0 ? end - 1 : end)).trim());
+  }
+  return found;
+}
+
+export function sqlViolation(sql: string): string | null {
+  const code = sqlCode(sql);
+  if (code === null) return 'Nicht erlaubt: offener String, Bezeichner oder Kommentar.';
+  for (const [pattern, label] of FORBIDDEN_SQL) {
+    if (pattern.test(code)) return `Nicht erlaubt: ${label}.`;
+  }
+  if (/\bset_config\b/i.test(code)) return 'Nicht erlaubt: Einstellungen ändern (set_config).';
+  for (const statement of code.split(';')) {
+    if (SESSION_CONTROL.test(statement)) {
+      return 'Nicht erlaubt: Transaktions-, Timeout- und Sitzungssteuerung (BEGIN, COMMIT, ROLLBACK, SET, RESET …).';
+    }
+    for (const dml of dmlStatements(statement)) {
+      if (!/\bwhere\b/i.test(dml)) return 'UPDATE und DELETE brauchen eine WHERE-Bedingung.';
+      if (TRIVIAL_WHERE.test(dml)) {
+        return 'UPDATE und DELETE brauchen eine echte WHERE-Bedingung (nicht „WHERE true“ o. ä.).';
+      }
     }
   }
   return null;

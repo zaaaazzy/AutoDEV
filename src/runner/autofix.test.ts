@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { backfillFailures, failureDetail, isAgentFailure } from './autofix.js';
+import { backfillFailures, failureDetail, isAgentFailure, isEnvironmentFailure } from './autofix.js';
 import { changesWorkingTree } from './runner.js';
 
 test('agent failures without code cause are recognised', () => {
@@ -74,4 +74,10 @@ test('Fehler-Nachtrag: ein vom Benutzer abgebrochener Lauf erzeugt keinen Bug-Be
     .map((query) => query.values[0]);
   assert.ok(failed.includes('kaputt'), 'echter Fehler bekommt den Bericht');
   assert.ok(!failed.includes('abgebrochen'), 'Abbruch bekommt keinen Bericht');
+});
+
+test('ENOENT in einem Test ist kein Umgebungsfehler (Auftrag ea3a49b1)', () => {
+  const out = "not ok 3 - liest Fixture\n  Error: ENOENT: no such file or directory, scandir '/tmp/fixtures/missing'";
+  assert.equal(isEnvironmentFailure(out), false);
+  assert.equal(isEnvironmentFailure('Path "/x/fixtures" does not exist'), false);
 });

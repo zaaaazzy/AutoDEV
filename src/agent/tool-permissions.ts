@@ -861,6 +861,38 @@ export function hasFullAccess(command: readonly string[], role: string): boolean
 }
 
 /**
+ * Freigaben eines Agents: eigene Zuweisung, sonst der Projektstandard der Rolle – nur Befehle aus freigeschalteten
+ * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln.
+ */
+function chosenRules(role: string, permissions: ProjectPermissions, agentCommands: string[] | null): string[] {
+  if (READ_ONLY_ROLES.has(role)) return [];
+  const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
+  const available = availableCommands(permissions);
+  return normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
+    (rule) =>
+      (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
+      !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
+  );
+}
+
+/**
+ * Rechte-Kontext für den eingebauten Ollama-Agent: dieselben Datei- und Befehlsrechte, die bei der Claude-CLI über
+ * withAgentPermissions und den Wächter gelten.
+ */
+export function agentRights(
+  role: string,
+  permissions: ProjectPermissions,
+  agentCommands: string[] | null,
+  fileScopes: readonly string[] = [],
+): { files: { create: boolean; edit: boolean; scopes: string[] }; commands: string[] } {
+  const commands = chosenRules(role, permissions, agentCommands);
+  return {
+    files: { create: commands.includes(FILES_CREATE), edit: commands.includes(FILES_EDIT), scopes: [...fileScopes] },
+    commands,
+  };
+}
+
+/**
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
  * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern.
@@ -882,14 +914,7 @@ export function withAgentPermissions(
   const readOnly = READ_ONLY_ROLES.has(role);
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
   const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
-  const available = availableCommands(permissions);
-  const chosen = readOnly
-    ? []
-    : normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
-        (rule) =>
-          (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
-          !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
-      );
+  const chosen = chosenRules(role, permissions, agentCommands);
   // Selbst gesetzte Werkzeug-Regeln im Befehl bleiben (Entscheid des Admins); der Wächter prüft trotzdem.
   const policy = readOnly
     ? { create: false, edit: false, scopes: [], shell: false }

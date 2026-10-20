@@ -462,7 +462,7 @@ export async function runWorkflow(
       WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.backlog}' AND sprint_id IN (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active')`,
     [options.project],
   );
-  await resumeAfterEnvironment(pool, options.project).catch(logged('runner'));
+  await resumeAfterEnvironment(pool, options.project, options.cwd).catch(logged('runner'));
   // Hängengebliebene Aufträge (Abschluss scheiterte) nicht erst beim nächsten Worker-Start aufräumen.
   await recoverStuckItems(pool, options.project).catch(logged('runner', 0));
   // Budget wieder frei (Folgetag, Limit erhöht oder entfernt): wegen Budget blockierte Aufträge laufen weiter.

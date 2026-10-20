@@ -14,6 +14,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { formatHours } from '../../shared/format.js';
 import { categoryLabel, isFinished, priorityLabel, statusLabel } from '../../shared/labels.js';
+import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
 
 const PRIORITY = { high: 0, medium: 1, low: 2 } as const;
 
@@ -91,6 +92,8 @@ export class SprintBoardComponent {
   });
 
   protected readonly editable = computed(() => this.sprint().status !== 'completed' && this.auth.can('plan'));
+  /** Hineinnehmen nur in geplante oder aktive Sprints (dieselbe Regel wie der Server); im Review und danach nicht. */
+  protected readonly canTakeIn = computed(() => this.editable() && isAssignableSprintStatus(this.sprint().status));
 
   protected link(item: DevelopmentItem): string {
     return `#development/${item.id}`;
@@ -148,6 +151,8 @@ export class SprintBoardComponent {
 
   /** Offene kommen direkt in den Sprint; abgebrochene werden dabei neu eingeplant (Fehler und Vermerk zurückgesetzt). */
   private async takeIntoSprint(item: DevelopmentItem): Promise<void> {
+    // Erst prüfen, dann /retry: sonst wäre ein abgebrochener Auftrag neu eingeplant, aber in keinem Sprint.
+    if (!this.canTakeIn()) throw new Error('Aufträge lassen sich nur geplanten oder aktiven Sprints zuordnen.');
     if (item.removedFromSprintAt || item.status === 'blocked') {
       await this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`);
     }

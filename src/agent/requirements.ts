@@ -8,7 +8,12 @@ import { loadKnownBugs } from '../api/bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
-import { loadProjectPermissions, READ_ONLY_PERMISSION_ROLE, withAgentPermissions } from './tool-permissions.js';
+import {
+  agentRights,
+  loadProjectPermissions,
+  READ_ONLY_PERMISSION_ROLE,
+  withAgentPermissions,
+} from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
@@ -207,6 +212,13 @@ export async function runAuthorAgent(
           onProgress,
           signal,
           readOnly,
+          // Dieselben Datei- und Befehlsrechte wie bei der Claude-CLI (sonst liefe der Chat ohne Wächter).
+          ...agentRights(
+            readOnly ? READ_ONLY_PERMISSION_ROLE : role,
+            permissions,
+            author?.allowedCommands ?? null,
+            author?.fileScope ?? [],
+          ),
         });
     await pool
       .query(

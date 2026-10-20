@@ -871,3 +871,45 @@ test('Hängende Aufträge (In Arbeit ohne laufenden Lauf) werden je Projekt und 
   assert.equal(project?.values[0], 'mainty');
   assert.equal(all?.values[0], null);
 });
+
+test('Tester-Schritt speichert Tokens und Kosten des LLM-Laufs (Testschreiben + Testlauf)', async () => {
+  process.env.DEV_LOG_AGENT_COMMAND = '["fake-agent"]';
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async () => ({
+    exitCode: 0,
+    durationMs: 1,
+    output: 'Tests geschrieben',
+    tokens: 1200,
+    costUsd: 0.5,
+  });
+  const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün', tokens: 30, costUsd: 0.25 });
+  const tester = { ...agent('Tester', 'after_task', 1, null), role: 'tester' as const };
+  try {
+    assert.equal(await runWorkItem(pool, item, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin }), 'passed');
+  } finally {
+    delete process.env.DEV_LOG_AGENT_COMMAND;
+  }
+  const saved = queries.find((query) => query.sql.includes('cost_usd = $7'));
+  assert.ok(saved, 'Ergebnis wird gespeichert');
+  assert.equal(saved.values[5], 1230);
+  assert.equal(saved.values[6], 0.75);
+});
+
+test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speichern erhalten', async () => {
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async () => ({
+    exitCode: 0,
+    durationMs: 1,
+    // Ein Tester mit eigenem CLI muss die Abnahme melden, sonst gilt der Schritt als nicht bestanden.
+    output: `geprüft\n@@ACCEPTANCE {"criteria":[],"done":${JSON.stringify([1, 2, 3, 4, 5].map((nr) => ({ nr, met: true })))}}`,
+    tokens: 800,
+    costUsd: 0.4,
+  });
+  const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
+  const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
+  assert.equal(await runWorkItem(pool, item, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin }), 'passed');
+  const saved = queries.find((query) => query.sql.includes('cost_usd = $7'));
+  assert.ok(saved);
+  assert.equal(saved.values[5], 800);
+  assert.equal(saved.values[6], 0.4);
+});
