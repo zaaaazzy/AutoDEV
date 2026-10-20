@@ -305,8 +305,77 @@ export function withIgnoreScripts(parts: readonly string[]): string[] {
   return [...parts, '--ignore-scripts'];
 }
 
-/** Allow safe fixed commands and validated package names/options for npm installs. */
-export function isAllowedCommand(command: string): boolean {
+/**
+ * npm-Optionen, die Skripte mit einer anderen Shell starten, Einstellungen und Ablage ausserhalb lesen/schreiben oder
+ * global installieren. npm akzeptiert eindeutige Abkürzungen (--scr = --script-shell), darum gilt jede Option als
+ * gefährlich, deren Name der Anfang eines dieser Namen ist.
+ */
+const DANGEROUS_NPM_OPTIONS = [
+  'script-shell',
+  'userconfig',
+  'globalconfig',
+  'cache',
+  'node-options',
+  'global',
+  'location',
+  'shell',
+  'call',
+  'init-module',
+  'editor',
+  'git',
+];
+/** Kurzoptionen: -g (global), -L (location); -C (prefix) wird wie --prefix geprüft. */
+const DANGEROUS_NPM_SHORT = /[gL]/;
+
+/** --prefix bzw. -C: nur ein relativer Ordner im Projekt (samt aufgelöster Links), ohne Shell-Ersetzungen. */
+function prefixInside(raw: string | undefined, root: string | undefined): boolean {
+  const value = (raw ?? '').replace(/['"\\]/g, '');
+  if (!value || value.startsWith('-') || value.startsWith('~') || value.includes('$') || isAbsolute(value))
+    return false;
+  if (!root) return RELATIVE_DIRECTORY.test(value);
+  const real = realPath(resolve(root, value));
+  return real === root || real.startsWith(root + sep);
+}
+
+/**
+ * Prüft die Optionen eines npm-Befehls (für Wächter und lokales Modell); liefert den Grund der Sperre oder null.
+ * Ohne Projektordner (root) ist --prefix nur mit einem einfachen relativen Ordner erlaubt. Nach „--“ gehören die
+ * Argumente dem Skript, nicht npm.
+ */
+export function npmOptionProblem(command: string, root?: string): string | null {
+  const words = command.trim().split(/\s+/);
+  if (words[0] !== 'npm') return null;
+  for (let index = 1; index < words.length; index++) {
+    const word = (words[index] ?? '').replace(/['"\\]/g, '');
+    if (word === '--') break;
+    if (!word.startsWith('-')) continue;
+    const [flag = '', inline] = word.split(/=(.*)/s);
+    const prefixValue = (): string | undefined => inline ?? words[++index];
+    if (flag.startsWith('--')) {
+      const name = flag.slice(2);
+      if (name === 'prefix') {
+        if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
+      } else if (
+        name &&
+        ('prefix'.startsWith(name) || DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)))
+      ) {
+        return `„${command}“: diese npm-Option ist gesperrt.`;
+      }
+    } else if (flag === '-C') {
+      if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
+    } else if (flag.includes('C') || DANGEROUS_NPM_SHORT.test(flag)) {
+      return `„${command}“: diese npm-Option ist gesperrt.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Allow safe fixed commands and validated package names/options for npm installs. Mit Projektordner (root) wird ein
+ * --prefix samt symbolischer Links aufgelöst; ohne ist er nur als einfacher relativer Ordner erlaubt.
+ */
+export function isAllowedCommand(command: string, root?: string): boolean {
+  if (npmOptionProblem(command, root)) return false;
   if (COMMAND_PATTERN.test(command) || READ_COMMAND.test(command)) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'npm' && ['install', 'i', 'uninstall'].includes(parts[1] ?? '') && parts.length > 2) {

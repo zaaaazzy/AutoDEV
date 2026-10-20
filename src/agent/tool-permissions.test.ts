@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { decodePolicy } from './agent-guard.js';
 import {
   availableCommands,
@@ -20,6 +23,7 @@ import {
   loadProjectPermissions,
   materializeAgentCommands,
   normalizeCommands,
+  npmOptionProblem,
   PERMISSION_GROUPS,
   type ProjectPermissions,
   READ_ONLY_ROLES,
@@ -512,4 +516,41 @@ test('withAgentPermissions: Rollenstandard ohne Zuweisung (null), übrige Rollen
   const documenter = withAgentPermissions(CLAUDE, 'documenter', all, null, ['docs']);
   assert.equal(documenter.includes('--allowedTools'), false);
   assert.deepEqual(policyOf(documenter), { create: true, edit: true, scopes: ['docs'] });
+});
+
+test('isAllowedCommand: npm-Optionen für fremde Projekte, Shells und Einstellungen sind gesperrt (auch abgekürzt)', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'npm-options-')));
+  mkdirSync(join(root, 'docs'));
+  symlinkSync(tmpdir(), join(root, 'raus'));
+  for (const command of [
+    'npm run build --prefix=/tmp/other',
+    'npm run build --prefix=..',
+    'npm run --prefix ../other build',
+    'npm run --prefix raus build',
+    'npm run build -C /tmp/other',
+    'npm run build -sC /tmp/other',
+    'npm run build --pref=/tmp/other',
+    'npm run build --script-shell=/bin/sh',
+    'npm run build --scr=/tmp/evil.sh',
+    'npm test --userconfig=/tmp/npmrc',
+    'npm test --globalconfig=/tmp/npmrc',
+    'npm test --cache=/tmp/cache',
+    'npm test --node-options=--require=/tmp/x.js',
+    'npm test --location=global',
+    'npm test -g',
+    'npm test -L global',
+  ]) {
+    assert.ok(!isAllowedCommand(command, root), command);
+    assert.ok(npmOptionProblem(command, root), command);
+  }
+  for (const command of ['npm run build', 'npm run --prefix docs build', 'npm run test:unit -- --watch=false']) {
+    assert.ok(isAllowedCommand(command, root), command);
+  }
+  // Nach „--“ gehören die Argumente dem Skript (z. B. mocha -g).
+  assert.equal(npmOptionProblem('npm test -- -g muster --cache', root), null);
+  // Ohne Projektordner nur einfache relative Ordner.
+  assert.ok(isAllowedCommand('npm run --prefix docs build'));
+  assert.ok(!isAllowedCommand('npm run --prefix=../x build'));
+  assert.ok(!isAllowedCommand('npm run --prefix=$HOME build'));
+  assert.equal(npmOptionProblem('git diff --cache'), null, 'nur npm');
 });

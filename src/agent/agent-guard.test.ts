@@ -103,6 +103,11 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'docker compose up -d --no-deps app',
     'docker-compose up -d',
     'git log ~/.ssh/config',
+    'npm run build --scr=/tmp/evil.sh',
+    'npm run build --script-shell /bin/sh',
+    'npm run build -C /tmp',
+    'npm run build --prefix "/tmp"',
+    'npm run build --prefix=$HOME',
   ]) {
     assert.ok(bashProblem(command, root, safe as never), command);
   }
