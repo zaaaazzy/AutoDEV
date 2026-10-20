@@ -65,7 +65,12 @@ export class ChatComposerComponent {
   /** Personen im Projekt (wie bei den Erwähnungen in Kommentaren). */
   private readonly people = signal<MentionItem[]>([]);
 
-  protected readonly agents = computed(() => this.store.data().agents.filter((agent) => agent.enabled));
+  /** System-Agents, die der Server für den Chat anbietet (z. B. Visionär); je nach Recht des Benutzers. */
+  private readonly systemTargets = signal<{ id: string; name: string; description: string }[]>([]);
+  protected readonly agents = computed(() => [
+    ...this.store.data().agents.filter((agent) => agent.enabled),
+    ...this.systemTargets().map((target) => ({ id: target.id, name: target.name, description: target.description })),
+  ]);
   protected readonly agentName = computed(
     () => this.agents().find((agent) => agent.id === this.agentId())?.name ?? null,
   );
@@ -73,7 +78,11 @@ export class ChatComposerComponent {
   private readonly source = computed<MentionSource>(() => {
     const data = this.store.data();
     return {
-      agents: this.agents().map((agent) => ({ id: agent.id, label: agent.name })),
+      agents: this.agents().map((agent) => ({
+        id: agent.id,
+        label: agent.name,
+        hint: 'description' in agent ? agent.description : undefined,
+      })),
       people: this.people(),
       items: {
         order: data.development.map((item) => ({ id: item.id, label: item.title, hint: statusLabel(item.status) })),
@@ -113,6 +122,12 @@ export class ChatComposerComponent {
         .get<{ people?: { id: string; name: string }[] }>(`${this.api.projectPath(slug)}/people`)
         .then((result) => this.people.set((result.people ?? []).map(({ id, name }) => ({ id, label: name }))))
         .catch(() => this.people.set([]));
+      this.api
+        .get<{ targets?: { id: string; name: string; description: string }[] }>(
+          `${this.api.projectPath(slug)}/chat/targets`,
+        )
+        .then((result) => this.systemTargets.set(result.targets ?? []))
+        .catch(() => this.systemTargets.set([]));
     });
   }
 
@@ -179,7 +194,7 @@ export class ChatComposerComponent {
 
   protected icon(reference: ChatReference): string {
     if (reference.type === 'user') return PERSON_ICON;
-    return MENTION_CATEGORIES.find((category) => category.type === reference.type)?.icon ?? '/';
+    return MENTION_CATEGORIES.find((category) => category.type === reference.type)?.icon ?? 'docs';
   }
 
   protected submit(): void {

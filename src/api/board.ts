@@ -1,22 +1,25 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEV_COLUMNS } from './development.js';
 import { COMMENT_COLUMNS } from './idea-comments.js';
-import { IDEA_COLUMNS } from './ideation.js';
+import { IDEA_COLUMNS, IDEA_SOURCES } from './ideation.js';
 import { parseProjectSlug } from '../core/validation.js';
 
-export function registerBoardRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/board', async (request, response) => {
+export function registerBoardRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/board', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
       return;
     }
+    // Optionaler Filter „Herkunft“ (?source=visionary); unbekannte Werte zeigen alle Ideen.
+    const source =
+      typeof request.query.source === 'string' && IDEA_SOURCES.has(request.query.source) ? request.query.source : null;
     const [ideas, development, comments] = await Promise.all([
       pool.query(
-        `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1
+        `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1 AND ($2::text IS NULL OR source = $2)
           ORDER BY created_at DESC LIMIT 200`,
-        [slug],
+        [slug, source],
       ),
       pool.query(
         `SELECT ${DEV_COLUMNS} FROM development_items WHERE project_slug = $1
@@ -33,7 +36,7 @@ export function registerBoardRoutes(app: Express, pool: Pool): void {
     response.json({ ideas: ideas.rows, development: development.rows, comments: comments.rows });
   });
 
-  app.get('/api/projects/:slug/agent-runs', async (request, response) => {
+  app.get('/projects/:slug/agent-runs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });

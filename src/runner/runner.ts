@@ -1,10 +1,15 @@
+import { logged } from '../core/log.js';
+import { isShuttingDown } from '../core/shutdown.js';
+import { runPreSprint } from './pre-sprint.js';
+import { followProjectPreview, processApprovals } from './review-gate.js';
+import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { loadFollowUpContext } from './follow-up.js';
-import { sprintAutopilot } from './sprint-autopilot.js';
+import { markSprintReady, sprintAutopilot } from './sprint-autopilot.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { enterOrderBranch, syncSprintToGit } from './git-sync.js';
@@ -14,6 +19,8 @@ import { Mutex } from '../core/mutex.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
 import { selectItems, loadWorkflow, defaultAgentCommand } from './runner-selection.js';
+import { budgetExceeded, BUDGET_TODO_SUFFIX, loadOrderLimits, loadOrderSpend } from './budget.js';
+import { setActionTodo } from './action-todo.js';
 import {
   claimRun,
   runStep,
@@ -71,15 +78,35 @@ async function resumePosition(
     )
   ).rows[0];
   if (previous?.status !== AGENT_RUN_STATUS.failed) return 0;
-  const steps = (
-    await pool.query<{ agent_id: string; agent_name: string; phase: string; status: string; output: string }>(
-      `SELECT agent_id, agent_name, phase, status, output FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
+  const rows = (
+    await pool.query<{
+      agent_id: string;
+      workflow_step_id: string | null;
+      agent_name: string;
+      phase: string;
+      status: string;
+      output: string;
+    }>(
+      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output
+         FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
       [previous.id],
     )
   ).rows;
+  // Schlüssel je Einsatz: derselbe Agent kann im Workflow mehrfach vorkommen.
+  const keyOf = (row: { agent_id: string; workflow_step_id: string | null }) => row.workflow_step_id ?? row.agent_id;
+  const keyOfAgent = (agent: WorkflowAgent) => agent.stepId ?? agent.id;
+  // Nach einer Nachbesserung im Lauf zählt je Einsatz nur sein letzter Schritt.
+  const latest = new Map(rows.map((row) => [keyOf(row), row]));
+  const steps = rows.length > ordered.length ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
-  while (position < ordered.length && steps[position]?.agent_id === ordered[position]?.id) {
-    const step = steps[position]!;
+  while (
+    position < ordered.length &&
+    steps[position] &&
+    ordered[position] &&
+    keyOf(steps[position]!) === keyOfAgent(ordered[position]!)
+  ) {
+    const step = steps[position];
+    if (!step) break;
     if (step.status !== AGENT_STEP_STATUS.passed) break;
     done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
     position += 1;
@@ -113,7 +140,7 @@ async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> 
   if (!item.sprintId) return null;
   const sprint = await pool
     .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
-    .catch(() => null);
+    .catch(logged('runner', null));
   return sprint?.rows[0]?.name ?? null;
 }
 
@@ -152,19 +179,24 @@ export async function runWorkItem(
   };
   let passed = true;
   let interrupted = false;
+  const startedAt = Date.now();
+  const folderAtStart = folderAvailable(options.cwd);
+  let budgetStop: string | null = null;
   // Agents that change the working tree (developer, tester) hold the project lock from their first step until the
   // order is settled, so no other order edits files while this one is tested and committed.
   let releaseTree: (() => void) | undefined;
   try {
     if (!ordered.length) throw new Error('Der zugewiesene Agent ist nicht mehr aktiviert oder vorhanden.');
     // Risks were already filtered by the bug reviewer; otherwise only a short list of known bugs is passed on.
-    ctx.bugs = item.risks?.trim() ? [] : await loadKnownBugs(pool, item.projectSlug, PROMPT_BUG_LIMIT).catch(() => []);
+    ctx.bugs = item.risks?.trim()
+      ? []
+      : await loadKnownBugs(pool, item.projectSlug, PROMPT_BUG_LIMIT).catch(logged('runner', []));
     ctx.images = await materializeAttachments(
       pool,
       { ideationId: item.ideationId, bugId: item.bugId },
       item.id,
       options.cwd,
-    ).catch(() => []);
+    ).catch(logged('runner', []));
     // Folgeauftrag: der Kontext des abgeschlossenen Vorgängers gehört zu jeder Agent-Anweisung.
     ctx.projectContext = [
       await loadProjectContext(pool, item.projectSlug),
@@ -173,31 +205,105 @@ export async function runWorkItem(
       .filter(Boolean)
       .join('\n\n');
     ctx.definitionOfDone = (await loadDefinitions(pool, item.projectSlug)).done;
+    ctx.ordered = ordered;
+    ctx.messages = [];
+    ctx.sprintNotes = item.sprintId
+      ? ((
+          await pool
+            .query<{ notes: string | null }>(`SELECT pre_sprint_notes AS notes FROM sprints WHERE id = $1`, [
+              item.sprintId,
+            ])
+            .catch(logged('runner', { rows: [] }))
+        ).rows[0]?.notes ?? null)
+      : null;
     ctx.criteria = extractCriteria(item.description ?? '');
-    const resumeFrom = await resumePosition(pool, item.id, runId, ordered, ctx.done);
-    for (const [position, agent] of ordered.entries()) {
-      if (position < resumeFrom) continue;
+    let position = await resumePosition(pool, item.id, runId, ordered, ctx.done);
+    let stepPosition = position;
+    let corrected = false;
+    const developerAt = ordered.findIndex((agent) => agent.phase === 'while_task');
+    const limits = await loadOrderLimits(pool, item.projectSlug).catch(() => ({ tokens: null, costUsd: null }));
+    const limited = limits.tokens !== null || limits.costUsd !== null;
+    while (position < ordered.length) {
+      const agent = ordered[position];
+      if (!agent) break;
+      // Kostenbremse: Ist die Grenze des Auftrags erreicht, startet kein weiterer Agent.
+      if (limited) {
+        budgetStop = budgetExceeded(await loadOrderSpend(pool, item.id), limits);
+        if (budgetStop) {
+          passed = false;
+          break;
+        }
+      }
       if (!releaseTree && changesWorkingTree(agent)) {
         releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
         // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
         ctx.sprintName = await sprintNameOf(pool, item);
         ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
       }
-      const outcome = await runStep(ctx, agent, position, ordered.length);
+      const canCorrect =
+        !corrected && !item.agentId && LOOP_BACK_ROLES.has(agent.role) && developerAt >= 0 && developerAt < position;
+      const outcome = await runStep(ctx, agent, position, ordered.length, { stepPosition, canCorrect });
+      stepPosition += 1;
       if (outcome.interrupted) interrupted = true;
+      if (!outcome.passed && outcome.correctable && !interrupted) {
+        // Einmalige Nachbesserung: ab dem Entwickler erneut, mit der Rückmeldung von Tester oder Reviewer.
+        corrected = true;
+        const feedback = ctx.done.at(-1);
+        ctx.done.splice(developerAt);
+        ctx.done.push({
+          agentName: agent.name,
+          phase: agent.phase,
+          status: 'failed',
+          output: `Rückmeldung von ${agent.name} – bitte beheben:\n${feedback?.output ?? ''}`,
+        });
+        position = developerAt;
+        continue;
+      }
       if (!outcome.passed) {
         passed = false;
         break;
       }
+      position += 1;
+    }
+    // Ende des Auftrags: „Bei abgeschlossen“ bzw. „Bei abgelehnt“ – noch vor dem Abschluss, damit ihre Änderungen im
+    // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung oder Kostenbremse.
+    if (!interrupted && !budgetStop && !item.agentId) {
+      const phase = passed ? 'on_done' : 'on_rejected';
+      const observers = agents.filter((agent) => agent.phase === phase);
+      const last = ctx.done.at(-1);
+      const outcome = passed
+        ? 'Erledigt: Alle Schritte des Workflows waren erfolgreich.'
+        : `Gescheitert bei „${last?.agentName ?? 'einem Agent'}“:\n${last?.output.slice(-1500) ?? ''}`;
+      for (const [index, agent] of observers.entries()) {
+        if (!releaseTree && changesWorkingTree(agent)) {
+          releaseTree = (await options.implementationLock?.acquire()) ?? (() => undefined);
+          ctx.sprintName = await sprintNameOf(pool, item);
+          ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
+        }
+        await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
+          stepPosition,
+          observer: { outcome },
+        });
+        stepPosition += 1;
+      }
     }
   } catch (error) {
     passed = false;
+    // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
+    if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
     console.error(`Run ${runId} aborted:`, error);
   } finally {
     await pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
       runId,
       passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
     ]);
+    if (budgetStop) {
+      console.info(`[${item.id}] ${budgetStop}`);
+      await pool
+        .query(`UPDATE development_items SET failure = $2, auto_run = FALSE WHERE id = $1`, [item.id, budgetStop])
+        .catch(logged('runner'));
+      await setActionTodo(pool, item.id, `${budgetStop} ${BUDGET_TODO_SUFFIX}`.slice(0, 160)).catch(logged('runner'));
+    }
     try {
       await settleItem(ctx, passed, interrupted);
     } finally {
@@ -207,51 +313,68 @@ export async function runWorkItem(
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
 }
 
+/**
+ * Live schalten (nach dem Go zum Sprint, wenn er in main gemergt ist): Projektordner (z. B. mit dev-live) auf main
+ * nachziehen und die Deploy-Befehle des Projekts dort ausführen. Vorher sieht man den Sprint nur in der Vorschau.
+ */
+async function goLive(pool: Pool, project: string, cwd: string, execute?: CommandExecutor): Promise<void> {
+  await followProjectPreview(pool, project, cwd, 'main', execute);
+  const live = (await pool.query<{ repository: string }>('SELECT repository FROM projects WHERE slug = $1', [project]))
+    .rows[0]?.repository;
+  await deployProject(pool, project, live ?? cwd, execute);
+}
+
 export async function runWorkflow(
   pool: Pool,
   options: RunnerOptions,
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
-  await syncSprintToGit(pool, options.project, options.cwd, execute);
+  await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+    goLive(pool, options.project, options.cwd, execute),
+  );
   // Orders in the active sprint run automatically, even when they are still in the backlog.
   await pool.query(
     `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', updated_at = NOW()
       WHERE project_slug = $1 AND status = '${DEVELOPMENT_STATUS.backlog}' AND sprint_id IN (SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active')`,
     [options.project],
   );
-  await resumeAfterEnvironment(pool, options.project).catch(() => undefined);
-  // Autopilot: abgeschlossenen Sprint beenden bzw. den nächsten vorschlagen und starten.
+  await resumeAfterEnvironment(pool, options.project).catch(logged('runner'));
+  // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
+  await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
+    console.error('Freigabe fehlgeschlagen:', error);
+    return 0;
+  });
+  // Sprint fertig? Dann wartet er auf das Go (Vorschau ansehen, „Live schalten“).
+  await markSprintReady(pool, options.project).catch((error) => console.error('Sprint-Review fehlgeschlagen:', error));
+  // Autopilot: nach dem Go den nächsten Sprint vorschlagen und starten.
   await sprintAutopilot(pool, options.project).catch((error) =>
     console.error('Sprint-Autopilot fehlgeschlagen:', error),
   );
   await backfillFailures(pool, options.project).catch((error) =>
     console.error('Fehler-Nachtrag fehlgeschlagen:', error),
   );
-  const items = await selectItems(pool, options);
   const results: { itemId: string; result: string }[] = [];
+  const agents = await loadWorkflow(pool, options.project);
+  // „Vor dem Sprint“: einmal je Sprint, bevor dessen Aufträge starten (diese laufen dann im nächsten Zyklus).
+  if (await runPreSprint(pool, options, agents, execute)) return results;
+  const items = await selectItems(pool, options);
   if (!items.length) {
     return results;
   }
-  const agents = await loadWorkflow(pool, options.project);
   if (!agents.length) {
     throw new Error('Kein aktivierter Agent vorhanden. Im Agents-Menü Agents anlegen oder aktivieren.');
   }
+  // Streng nacheinander: ein Auftrag nach dem anderen (jeder auf seinem Branch, Commit nach jedem Agent).
   const implementationLock = new Mutex();
-  results.push(
-    ...(await Promise.all(
-      items.map(async (item) => ({
-        itemId: item.id,
-        result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),
-      })),
-    )),
-  );
-  await syncRepoDocs(pool, options.project, options.cwd);
-  if (results.some(({ result }) => result === 'passed')) {
-    await deployProject(pool, options.project, options.cwd, execute).catch((error) =>
-      console.error('Deploy fehlgeschlagen:', error),
-    );
+  for (const item of items) {
+    if (isShuttingDown()) break;
+    results.push({
+      itemId: item.id,
+      result: await runWorkItem(pool, item, agents, { ...options, execute, builtin, implementationLock }),
+    });
   }
+  await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,
     [options.project],
@@ -259,6 +382,8 @@ export async function runWorkflow(
   if (active.rows[0]) {
     await generateSprintReport(pool, active.rows[0].id);
   }
-  await syncSprintToGit(pool, options.project, options.cwd, execute);
+  await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
+    goLive(pool, options.project, options.cwd, execute),
+  );
   return results;
 }

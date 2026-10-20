@@ -5,10 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends git \
 COPY package*.json ./
 RUN npm ci
 COPY tsconfig.json ./
-COPY angular.json ./
-COPY frontend ./frontend
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+# Register „Workflow“ der Dokumentation: liest docs/*.md zur Laufzeit.
+COPY docs ./docs
+# Nur die API: die Oberfläche baut und liefert der Container aideation_frontend_angular (deploy/frontend).
+RUN npx tsc -p tsconfig.json && npm prune --omit=dev
 ENV NODE_ENV=production
 USER node
 EXPOSE 3100

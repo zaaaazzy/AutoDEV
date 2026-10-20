@@ -1,5 +1,7 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { recordDeploy } from './production-events.js';
+import { scanLogs } from './production-monitor.js';
 import { agentEnvironment } from './runner-prompts.js';
 
 const DEPLOY_TIMEOUT_MS = 20 * 60_000;
@@ -35,5 +37,12 @@ export async function deployProject(
     }
   }
   await pool.query(`UPDATE projects SET deploy_status = $2 WHERE slug = $1`, [project, `Aktualisiert um ${stamp()}`]);
+  // Produktions-Rückkanal: Deploy-Zeitpunkt (für den Deploy-Verdacht) festhalten und sofort die Logs prüfen.
+  await recordDeploy(pool, project).catch((error: unknown) =>
+    console.error(`[${project}] Deploy konnte nicht festgehalten werden:`, error),
+  );
+  await scanLogs(pool, project, cwd, execute).catch((error: unknown) =>
+    console.error(`[${project}] Log-Scan nach dem Deploy fehlgeschlagen:`, error),
+  );
   return true;
 }

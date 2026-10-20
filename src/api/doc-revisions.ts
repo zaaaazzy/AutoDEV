@@ -1,4 +1,4 @@
-import type { Express, NextFunction, Request, Response } from 'express';
+import type { Router, NextFunction, Request, Response } from 'express';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { hasRole, type Principal } from './roles.js';
@@ -12,10 +12,10 @@ const COLUMNS = `r.id, r.doc_id AS "docId", r.title, r.content, r.base_title AS 
   r.note, r.status, r.author_id AS "authorId", r.author_name AS "authorName", r.reviewer_name AS "reviewerName",
   r.review_note AS "reviewNote", r.reviewed_at AS "reviewedAt", r.created_at AS "createdAt"`;
 
-export function registerDocRevisionRoutes(app: Express, pool: Pool): void {
+export function registerDocRevisionRoutes(app: Router, pool: Pool): void {
   const me = (response: Response) => response.locals.principal as Principal;
 
-  app.get('/api/projects/:slug/doc-revisions', async (request, response, next) => {
+  app.get('/projects/:slug/doc-revisions', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -32,7 +32,7 @@ export function registerDocRevisionRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/docs/:id/revisions', async (request, response, next) => {
+  app.post('/docs/:id/revisions', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Dokument nicht gefunden.' });
       const body = (request.body ?? {}) as Record<string, unknown>;
@@ -135,6 +135,6 @@ export function registerDocRevisionRoutes(app: Express, pool: Pool): void {
         next(error);
       }
     };
-  app.post('/api/doc-revisions/:id/approve', review('approved'));
-  app.post('/api/doc-revisions/:id/reject', review('rejected'));
+  app.post('/doc-revisions/:id/approve', review('approved'));
+  app.post('/doc-revisions/:id/reject', review('rejected'));
 }

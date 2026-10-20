@@ -19,6 +19,8 @@ export const DEVELOPMENT_STATUS = {
   planned: 'planned',
   inProgress: 'in_progress',
   blocked: 'blocked',
+  /** Fertig und getestet, wartet auf die Freigabe (Review-Instanz); erst dann wird gemergt. */
+  approval: 'approval',
   done: 'done',
   /** Verstösst gegen die Projektregeln (Do's and Don'ts): wird nicht umgesetzt. */
   rejected: 'rejected',
@@ -56,3 +58,6 @@ export const AGENT_STEP_STATUS = {
   skipped: 'skipped',
 } as const;
 export type AgentStepStatus = (typeof AGENT_STEP_STATUS)[keyof typeof AGENT_STEP_STATUS];
+
+/** Review-Freigabe je Projekt: nie, nur bei Änderungen an der Oberfläche, immer. */
+export const REVIEW_MODES = new Set<string>(['off', 'ui', 'always']);

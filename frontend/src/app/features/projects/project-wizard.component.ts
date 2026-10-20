@@ -133,7 +133,7 @@ export class ProjectWizardComponent implements OnDestroy {
   protected readonly folder = signal('');
   /** Bis der Ordner von Hand geändert wird, folgt er dem Projektbereich + Projekt-ID. */
   protected readonly folderTouched = signal(false);
-  /** Projektbereich (DEV_LOG_PROJECT_ROOTS): nur hier legt Dev Log Ordner an. */
+  /** Projektbereich (DEV_LOG_PROJECT_ROOTS): nur hier legt AIdeation Ordner an. */
   protected readonly scopeRoots = signal<string[]>([]);
   protected readonly folderState = signal<CheckState>('idle');
   protected readonly folderInfo = signal<FolderInfo | null>(null);
@@ -237,7 +237,7 @@ export class ProjectWizardComponent implements OnDestroy {
     effect(() => {
       const root = this.scopeRoots()[0];
       const slug = this.slug();
-      if (root && !untracked(() => this.folderTouched())) this.folder.set(slug ? `${root}/${slug}` : `${root}/`);
+      if (root && !untracked(() => this.folderTouched())) this.folder.set(slug ? `${root}/${slug}/source` : `${root}/`);
     });
     // Ordner in Echtzeit prüfen (verzögert, damit nicht jeder Tastendruck einen Job startet).
     effect(() => {

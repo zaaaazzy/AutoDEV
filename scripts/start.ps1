@@ -1,4 +1,4 @@
-# Dev Log starten (Windows): prüft Node und Docker, richtet beim ersten Start alles über den Browser-Assistenten ein.
+# AIdeation starten (Windows): prüft Node und Docker, richtet beim ersten Start alles über den Browser-Assistenten ein.
 param([switch]$Setup)
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
@@ -19,10 +19,10 @@ if (-not (Test-Path .env) -or $Setup -or $args -contains '--setup') {
   exit $LASTEXITCODE
 }
 
-Write-Host '-> Starte Dev Log ...'
+Write-Host '-> Starte AIdeation ...'
 docker compose up -d --build
 for ($i = 0; $i -lt 60; $i++) {
   try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3100/health -TimeoutSec 2 | Out-Null; break } catch { Start-Sleep 2 }
 }
-Write-Host 'OK Dev Log laeuft: http://localhost:3100'
+Write-Host 'OK AIdeation laeuft: http://localhost:3100'
 Start-Process 'http://localhost:3100'

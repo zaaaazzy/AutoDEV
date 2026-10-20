@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Dev Log starten (macOS und Linux).
+# AIdeation starten (macOS und Linux).
 #   Erster Start: richtet Abhängigkeiten ein und öffnet den Einrichtungs-Assistenten im Browser.
-#   Danach: startet die Dienste und öffnet Dev Log.  ./start.sh --setup  öffnet den Assistenten erneut.
+#   Danach: startet die Dienste und öffnet AIdeation.  ./start.sh --setup  öffnet den Assistenten erneut.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -31,12 +31,12 @@ if [ ! -f .env ] || [ "${1:-}" = "--setup" ]; then
   exec npx tsx scripts/setup/server.ts
 fi
 
-echo "→ Starte Dev Log …"
+echo "→ Starte AIdeation …"
 docker compose up -d --build
 for _ in $(seq 1 60); do
   curl -fsS http://127.0.0.1:3100/health >/dev/null 2>&1 && break
   sleep 2
 done
 URL="http://localhost:3100"
-echo "✓ Dev Log läuft: $URL"
+echo "✓ AIdeation läuft: $URL"
 if command -v open >/dev/null 2>&1; then open "$URL"; elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL" >/dev/null 2>&1 || true; fi

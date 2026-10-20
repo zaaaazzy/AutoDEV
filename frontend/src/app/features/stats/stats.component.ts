@@ -11,6 +11,7 @@ import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatNumber } from '../../shared/format.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
+import { QualityPanelComponent } from './quality-panel.component.js';
 
 interface Usage {
   tokens: number;
@@ -80,7 +81,7 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
 @Component({
   selector: 'app-stats',
   standalone: true,
-  imports: [DataTableComponent, DataCellDirective, HoursPipe, LocaleNumberPipe],
+  imports: [DataTableComponent, DataCellDirective, HoursPipe, LocaleNumberPipe, QualityPanelComponent],
   templateUrl: './stats.component.html',
   host: { style: 'display: contents' },
 })
@@ -95,7 +96,12 @@ export class StatsComponent {
 
   protected readonly orderColumns: DataColumn<OrderUsage>[] = [
     { id: 'title', header: 'Auftrag', value: (row) => row.title, className: 'title-cell', filter: 'text' },
-    { id: 'kind', header: 'Art', value: (row) => (row.kind === 'bug' ? 'Bug' : 'Auftrag'), filter: 'select' },
+    {
+      id: 'kind',
+      header: 'Art',
+      value: (row) => (row.kind === 'bug' ? 'Bug' : row.kind === 'express' ? 'Express' : 'Auftrag'),
+      filter: 'select',
+    },
     categoryColumn((row) => row.category),
     {
       id: 'estTokens',

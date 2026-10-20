@@ -17,22 +17,32 @@ export class AgentListComponent {
   protected readonly worker = this.store.worker;
   /** Der Dashboard-Assistent hat keine Agent-Aktivität, sondern arbeitet im Chat des Dashboards. */
   protected readonly assistantId = 'assistant';
+  /** Der Visionär arbeitet in Ideation (Fortschritt, Abbrechen, neue Ideen). */
+  protected readonly visionaryId = 'visionary';
 
   protected open(id: string): void {
     if (id === this.assistantId) this.store.navigate('dashboard');
+    else if (id === this.visionaryId) this.store.navigate('ideation');
     else this.activity.show(id);
   }
 
   protected async cancel(id: string, name: string): Promise<void> {
     if (
       !globalThis.confirm(
-        `„${name}“ abbrechen? Der Auftrag wird danach als blockiert markiert und lässt sich erneut starten.`,
+        id === this.visionaryId
+          ? 'Visionär-Lauf abbrechen? Aus diesem Lauf werden dann keine Ideen angelegt.'
+          : `„${name}“ abbrechen? Der Auftrag wird danach als blockiert markiert und lässt sich erneut starten.`,
       )
     )
       return;
+    const project = this.api.projectPath(this.store.activeProject());
     await this.store.perform(
       () =>
-        this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/${encodeURIComponent(id)}/cancel`),
+        this.api.post(
+          id === this.visionaryId
+            ? `${project}/ideation/visionary/cancel`
+            : `${project}/agents/${encodeURIComponent(id)}/cancel`,
+        ),
       `„${name}“ wird abgebrochen.`,
       false,
     );

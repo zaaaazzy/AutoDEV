@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { parseProjectSlug } from '../core/validation.js';
 
@@ -150,8 +150,8 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
   };
 }
 
-export function registerStatsRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/stats', async (request, response) => {
+export function registerStatsRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/stats', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });

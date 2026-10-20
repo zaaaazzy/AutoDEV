@@ -41,6 +41,22 @@
       </ng-template>
       <ng-template appDataDetail let-sprint>
         <article class="sprint-card">
+          @if (sprint.status === 'active' && sprint.reviewReadyAt) {
+            <div class="sprint-go">
+              <strong>🚀 Alle Aufträge sind durch – der Sprint wartet auf dein Go.</strong>
+              <span>Sieh dir den Stand in der Vorschau an und schalte ihn dann live (Merge nach main und Deploy).</span>
+              <button class="button primary" type="button" (click)="goLive(sprint)">Live schalten</button>
+            </div>
+          }
+          @if (sprint.status === 'completed' && sprint.gitSync === 'failed') {
+            <div class="sprint-go failed">
+              <strong>Live schalten ist gescheitert.</strong>
+              <span>{{ sprint.gitMessage }}</span>
+            </div>
+          }
+          @if (store.currentProject()?.reviewCommand?.length) {
+            <app-sprint-review [sprint]="sprint" />
+          }
           <details class="sprint-board-section" [open]="sprint.status !== 'completed'">
             <summary>Board</summary>
             <app-sprint-board [sprint]="sprint" />
@@ -256,11 +272,11 @@
                   }
                   @if (sprint.status === 'active') {
                     <button
-                      class="button secondary"
+                      [class]="sprint.reviewReadyAt ? 'button primary' : 'button secondary'"
                       type="button"
-                      (click)="updateSprint(sprint.id, { status: 'completed' })"
+                      (click)="goLive(sprint)"
                     >
-                      <app-nav-icon name="check" />Abschließen
+                      🚀 Live schalten
                     </button>
                   }
                   @if (sprint.status === 'completed') {

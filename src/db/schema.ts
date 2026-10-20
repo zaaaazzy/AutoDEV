@@ -97,6 +97,10 @@ export const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS test_media_run_idx ON test_media (run_id);
   CREATE INDEX IF NOT EXISTS test_media_case_idx ON test_media (case_id);
+  -- Testbericht (Markdown) eines Laufs, erscheint in der Dokumentation unter „Testberichte“.
+  ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS report TEXT;
+  -- Betriebssystem des Rechners, auf dem der Lauf lief (darwin, win32, linux).
+  ALTER TABLE test_runs ADD COLUMN IF NOT EXISTS platform TEXT;
 
   CREATE TABLE IF NOT EXISTS ideation_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -535,7 +539,7 @@ export const SCHEMA = `
   -- Abgelehnt: Auftrag bzw. Bug verstösst gegen die Projektregeln (Do's and Don'ts) und wird nicht umgesetzt.
   ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_status_check;
   ALTER TABLE development_items ADD CONSTRAINT development_items_status_check
-    CHECK (status IN ('backlog', 'planned', 'in_progress', 'blocked', 'done', 'rejected'));
+    CHECK (status IN ('backlog', 'planned', 'in_progress', 'blocked', 'approval', 'done', 'rejected'));
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_status_check;
   ALTER TABLE bugs ADD CONSTRAINT bugs_status_check CHECK (status IN ('open', 'in_progress', 'fixed', 'wontfix', 'rejected'));
   -- Sprintplanung je Projekt: manuell (Standard), vorschlagen oder Autopilot; Kapazität ohne Sprint-Historie.
@@ -656,5 +660,277 @@ export const SCHEMA = `
     comment TEXT,
     requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     finished_at TIMESTAMPTZ
+  );
+
+  -- Kompletter Test auf Knopfdruck (Dashboard, Testläufe): der Worker führt ihn im Projektordner aus.
+  CREATE TABLE IF NOT EXISTS test_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    scope TEXT NOT NULL DEFAULT 'full' CHECK (scope IN ('full', 'ui')),
+    status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'running', 'done', 'failed')),
+    requested_by TEXT,
+    run_id UUID REFERENCES test_runs(id) ON DELETE SET NULL,
+    bug_count INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS test_requests_open_idx ON test_requests (project_slug)
+    WHERE status IN ('requested', 'running');
+  -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen; aus dem Betrieb (Quelle „production“).
+  ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
+  ALTER TABLE bugs ADD CONSTRAINT bugs_source_check CHECK (source IN ('manual', 'agent', 'test', 'production'));
+
+  -- Sprint starten (Knopf oder Autopilot): ohne Startdatum gilt der Starttag (höchstens das Enddatum).
+  CREATE OR REPLACE FUNCTION sprint_default_start_date() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'active' AND NEW.start_date IS NULL THEN
+      NEW.start_date := LEAST(CURRENT_DATE, COALESCE(NEW.end_date, CURRENT_DATE));
+    END IF;
+    RETURN NEW;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER sprints_default_start_date
+    BEFORE INSERT OR UPDATE OF status ON sprints
+    FOR EACH ROW EXECUTE FUNCTION sprint_default_start_date();
+
+  -- Express-Anfragen: Anfragen im Dashboard-Chat erscheinen als ungeplanter Auftrag im aktiven Sprint.
+  ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_kind_check;
+  ALTER TABLE development_items ADD CONSTRAINT development_items_kind_check
+    CHECK (kind IN ('feature', 'bug', 'express'));
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS development_id UUID REFERENCES development_items(id) ON DELETE SET NULL;
+  CREATE INDEX IF NOT EXISTS chat_messages_development_idx ON chat_messages (development_id) WHERE development_id IS NOT NULL;
+  -- Visionär aus dem Chat (@Visionär …): Schwerpunkt des Nutzers und Rückmeldung des Ergebnisses im Chat.
+  ALTER TABLE visionary_runs ADD COLUMN IF NOT EXISTS focus TEXT;
+  -- Kommentar aus der Bestätigung beim Anfordern eines Testlaufs.
+  ALTER TABLE test_requests ADD COLUMN IF NOT EXISTS comment TEXT;
+  ALTER TABLE visionary_runs ADD COLUMN IF NOT EXISTS reply_in_chat BOOLEAN NOT NULL DEFAULT FALSE;
+  -- Rückfragen: Antwortmöglichkeiten des Agents und feste Verknüpfung der Antwort mit ihrer Rückfrage.
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS question_options JSONB NOT NULL DEFAULT '[]'::jsonb;
+  ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS reply_to UUID REFERENCES chat_messages(id) ON DELETE SET NULL;
+
+  -- Sofortstart: neue oder wieder eingeplante Aufträge und gestartete Sprints wecken den Worker (LISTEN devlog_work).
+  CREATE OR REPLACE FUNCTION development_items_notify_work() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'planned' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status
+        OR OLD.auto_run IS DISTINCT FROM NEW.auto_run OR OLD.sprint_id IS DISTINCT FROM NEW.sprint_id) THEN
+      PERFORM pg_notify('devlog_work', NEW.project_slug);
+    END IF;
+    RETURN NULL;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER development_items_notify_work
+    AFTER INSERT OR UPDATE OF status, auto_run, sprint_id ON development_items
+    FOR EACH ROW EXECUTE FUNCTION development_items_notify_work();
+  CREATE OR REPLACE FUNCTION sprints_notify_work() RETURNS trigger AS $$
+  BEGIN
+    IF NEW.status = 'active' AND OLD.status IS DISTINCT FROM NEW.status THEN
+      PERFORM pg_notify('devlog_work', NEW.project_slug);
+    END IF;
+    RETURN NULL;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER sprints_notify_work
+    AFTER UPDATE OF status ON sprints
+    FOR EACH ROW EXECUTE FUNCTION sprints_notify_work();
+
+  -- Zeitleiste im Auftrag: Statuswechsel und Problemanalyse werden mit Zeitpunkt festgehalten.
+  CREATE TABLE IF NOT EXISTS development_events (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    development_id UUID NOT NULL REFERENCES development_items(id) ON DELETE CASCADE,
+    at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    kind TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS development_events_item_idx ON development_events (development_id, at);
+  CREATE OR REPLACE FUNCTION development_items_log_event() RETURNS trigger AS $$
+  BEGIN
+    IF TG_OP = 'INSERT' THEN
+      INSERT INTO development_events (development_id, kind, detail) VALUES (NEW.id, 'created', NEW.status);
+    ELSE
+      IF OLD.status IS DISTINCT FROM NEW.status THEN
+        INSERT INTO development_events (development_id, kind, detail)
+          VALUES (NEW.id, 'status', COALESCE(OLD.status, '') || '>' || NEW.status);
+      END IF;
+      IF OLD.analysis_status IS DISTINCT FROM NEW.analysis_status AND NEW.analysis_status IS NOT NULL THEN
+        INSERT INTO development_events (development_id, kind, detail) VALUES (NEW.id, 'analysis', NEW.analysis_status);
+      END IF;
+    END IF;
+    RETURN NULL;
+  END;
+  $$ LANGUAGE plpgsql;
+  CREATE OR REPLACE TRIGGER development_items_log_event
+    AFTER INSERT OR UPDATE OF status, analysis_status ON development_items
+    FOR EACH ROW EXECUTE FUNCTION development_items_log_event();
+
+  -- Kostenbremse: Grenze je Auftrag (Tokens bzw. USD) ab dem letzten manuellen Start (budget_since).
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_token_limit BIGINT CHECK (order_token_limit > 0);
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS order_cost_limit NUMERIC(10, 2) CHECK (order_cost_limit > 0);
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_since TIMESTAMPTZ;
+  -- Nach dem Sprint-Abschluss (Merge nach main) AIdeation selbst neu starten – nur für das AIdeation-Projekt sinnvoll.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS restart_after_sprint BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Workflow-Board: Phasen vor dem Sprint und am Ende eines Auftrags, Nachrichten zwischen Agents.
+  ALTER TABLE agents DROP CONSTRAINT IF EXISTS agents_phase_check;
+  ALTER TABLE agents ADD CONSTRAINT agents_phase_check
+    CHECK (phase IN ('pre_sprint', 'pre_task', 'while_task', 'after_task', 'on_rejected', 'on_done'));
+  -- Empfänger der Nachrichten dieses Agents (leer = nächster Agent in der Reihenfolge).
+  ALTER TABLE agents ADD COLUMN IF NOT EXISTS handoff_to UUID REFERENCES agents(id) ON DELETE SET NULL;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS handoffs JSONB NOT NULL DEFAULT '[]'::jsonb;
+  -- „Vor dem Sprint“: einmal je Sprint; Ergebnis fliesst in die Aufträge des Sprints.
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_at TIMESTAMPTZ;
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_notes TEXT;
+
+  -- Workflow-Schritte: welcher Agent bei welcher Phase an welcher Stelle läuft, mit eigener Anweisung für diesen
+  -- Einsatz. Derselbe Agent kann mehrfach vorkommen. Ohne Schritte gilt noch die Phase am Agent (ältere Projekte).
+  CREATE TABLE IF NOT EXISTS workflow_steps (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    phase TEXT NOT NULL
+      CHECK (phase IN ('pre_sprint', 'pre_task', 'while_task', 'after_task', 'on_rejected', 'on_done')),
+    position INTEGER NOT NULL DEFAULT 0,
+    agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    instructions TEXT NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS workflow_steps_project_idx ON workflow_steps (project_slug, phase, position);
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS workflow_step_id UUID REFERENCES workflow_steps(id) ON DELETE SET NULL;
+
+  -- Eigener Arbeitsordner (Worktree <Ordner>-agents) für die Agents, z. B. wenn im Projektordner ein Entwicklungsserver läuft.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_workspace BOOLEAN NOT NULL DEFAULT FALSE;
+
+  -- Review-Freigabe: fertige Aufträge warten (Status approval) auf die Freigabe; erst dann wird gemergt.
+  -- (Status approval steht in development_items_status_check weiter oben.)
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_branch TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_base TEXT;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_since TIMESTAMPTZ;
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS review_approved_at TIMESTAMPTZ;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_mode TEXT NOT NULL DEFAULT 'off'
+    CHECK (review_mode IN ('off', 'ui', 'always'));
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_command JSONB;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS review_url TEXT;
+  -- Laufende Review-Instanz je Projekt (vom Worker auf dem Host gestartet).
+  CREATE TABLE IF NOT EXISTS review_instances (
+    project_slug TEXT PRIMARY KEY REFERENCES projects(slug) ON DELETE CASCADE,
+    development_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    requested_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    commit_sha TEXT,
+    pid INTEGER,
+    status TEXT NOT NULL DEFAULT 'stopped' CHECK (status IN ('starting', 'running', 'failed', 'stopped')),
+    message TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Claude-Sitzung je Schritt: nach Abbruch oder Nachbesserung setzt derselbe Einsatz sie fort (claude --resume).
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS session_id TEXT;
+  ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS session_at TIMESTAMPTZ;
+
+  -- Review-Container: projektübergreifend geteilte Docker-Container (Administrator gibt sie frei, einer ist Standard).
+  -- Jeder zeigt einen Commit eines Projekts auf eigenem Port (4200 + Nummer) mit eigener Datenbank-Kopie.
+  CREATE TABLE IF NOT EXISTS review_slots (
+    slot SMALLINT PRIMARY KEY CHECK (slot BETWEEN 1 AND 9),
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    project_slug TEXT REFERENCES projects(slug) ON DELETE SET NULL,
+    commit_sha TEXT,
+    label TEXT,
+    development_id UUID REFERENCES development_items(id) ON DELETE SET NULL,
+    kind TEXT CHECK (kind IN ('manual', 'approval')),
+    status TEXT NOT NULL DEFAULT 'idle' CHECK (status IN ('idle', 'requested', 'starting', 'running', 'failed', 'stopping')),
+    message TEXT,
+    requested_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  INSERT INTO review_slots (slot, enabled) VALUES (1, TRUE), (2, FALSE), (3, FALSE) ON CONFLICT (slot) DO NOTHING;
+  -- Abgelöst durch review_slots (vorher ein Review-Prozess je Projekt auf dem Mac).
+  DROP TABLE IF EXISTS review_instances;
+  -- Commits je Sprint (vom Worker aus Git gelesen) für die Auswahl „Version starten“ in der Sprint-Ansicht.
+  CREATE TABLE IF NOT EXISTS sprint_commits (
+    sprint_id UUID PRIMARY KEY REFERENCES sprints(id) ON DELETE CASCADE,
+    branch TEXT,
+    commits JSONB NOT NULL DEFAULT '[]'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+
+  -- Sprint-Review: alle Aufträge durch → wartet auf das Go („Live schalten“ = nach main mergen und deployen).
+  ALTER TABLE sprints ADD COLUMN IF NOT EXISTS review_ready_at TIMESTAMPTZ;
+
+  -- Dashboard-Wahl der Systemagents (Modell, externe CLI, volle Werkzeugrechte) statt loser app_settings-Schlüssel.
+  -- Die Übernahme alter Schlüssel ist idempotent: Danach sind sie gelöscht, ein späterer Start findet nichts mehr.
+  CREATE TABLE IF NOT EXISTS system_agent_settings (
+    role TEXT PRIMARY KEY,
+    model TEXT,
+    command JSONB CHECK (command IS NULL OR jsonb_typeof(command) = 'array'),
+    allow_tools BOOLEAN NOT NULL DEFAULT FALSE
+  );
+  INSERT INTO system_agent_settings (role, model, command, allow_tools)
+  SELECT r.role,
+         (SELECT NULLIF(btrim(value), '') FROM app_settings WHERE key = 'model:' || r.role),
+         (SELECT CASE WHEN pg_input_is_valid(value, 'jsonb') THEN
+                   CASE WHEN jsonb_typeof(value::jsonb) = 'array' THEN value::jsonb END END
+            FROM app_settings WHERE key = 'command:' || r.role),
+         COALESCE((SELECT value = 'true' FROM app_settings WHERE key = 'allow_tools:' || r.role), FALSE)
+    FROM (SELECT DISTINCT split_part(key, ':', 2) AS role FROM app_settings
+           WHERE key ~ '^(model|command|allow_tools):') r
+  ON CONFLICT (role) DO NOTHING;
+  DELETE FROM app_settings WHERE key ~ '^(model|command|allow_tools):';
+
+  -- Produktions-Rückkanal: Health-URL, Compose-Dienste für den Log-Scan, Ingest-Token (nur der SHA-256-Hash),
+  -- Ausschlussmuster und Aufbewahrung der Fehlerbeispiele.
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS health_url TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS log_services TEXT[] NOT NULL DEFAULT '{}';
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS ingest_token_hash TEXT;
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS production_ignore TEXT[] NOT NULL DEFAULT '{}';
+  ALTER TABLE projects ADD COLUMN IF NOT EXISTS production_retention_days INTEGER NOT NULL DEFAULT 30
+    CHECK (production_retention_days BETWEEN 1 AND 365);
+  -- Wieder aufgetretene behobene Betriebs-Bugs tragen den Zeitpunkt der Regression.
+  ALTER TABLE bugs ADD COLUMN IF NOT EXISTS regressed_at TIMESTAMPTZ;
+  -- Gebündelte Fehler: ein Datensatz je Fingerabdruck und Projekt, Beispiel gekürzt und maskiert.
+  CREATE TABLE IF NOT EXISTS production_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    fingerprint TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('health', 'logs', 'ingest')),
+    origin TEXT NOT NULL DEFAULT '',
+    first_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    count BIGINT NOT NULL DEFAULT 0,
+    sample TEXT NOT NULL DEFAULT '',
+    bug_id UUID REFERENCES bugs(id) ON DELETE SET NULL,
+    deploy_suspect JSONB,
+    UNIQUE (project_slug, fingerprint)
+  );
+  CREATE INDEX IF NOT EXISTS production_events_bug_idx ON production_events (bug_id);
+  CREATE INDEX IF NOT EXISTS production_events_seen_idx ON production_events (project_slug, last_seen);
+  -- Verlauf: Zähler je Stunde (für „seit gestern“, Schwere und das Diagramm im Bug-Detail).
+  CREATE TABLE IF NOT EXISTS production_event_buckets (
+    event_id UUID NOT NULL REFERENCES production_events(id) ON DELETE CASCADE,
+    hour TIMESTAMPTZ NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (event_id, hour)
+  );
+  CREATE INDEX IF NOT EXISTS production_event_buckets_hour_idx ON production_event_buckets (hour);
+  -- Erfolgreiche Deploys mit den Aufträgen, die seit dem vorigen Deploy erledigt (committet) wurden.
+  CREATE TABLE IF NOT EXISTS production_deploys (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    deployed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    order_ids UUID[] NOT NULL DEFAULT '{}'
+  );
+  CREATE INDEX IF NOT EXISTS production_deploys_project_idx ON production_deploys (project_slug, deployed_at DESC);
+  -- Zustand der Sammler je Projekt: Health-Fehlschläge in Folge, Ausfall, gemeldete Probleme (wie der Wächter).
+  CREATE TABLE IF NOT EXISTS production_status (
+    project_slug TEXT PRIMARY KEY REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    failures INTEGER NOT NULL DEFAULT 0,
+    down BOOLEAN NOT NULL DEFAULT FALSE,
+    last_error TEXT,
+    checked_at TIMESTAMPTZ,
+    down_since TIMESTAMPTZ,
+    problems TEXT[] NOT NULL DEFAULT '{}',
+    notified_at TIMESTAMPTZ,
+    logs_scanned_at TIMESTAMPTZ,
+    log_error TEXT
   );
 `;

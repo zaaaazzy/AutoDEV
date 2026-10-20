@@ -1,4 +1,5 @@
 import { Component, computed, effect, inject, signal } from '@angular/core';
+import { ConfirmDialogComponent } from './shared/confirm-dialog.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from './core/api.service.js';
 import { AuthService } from './core/auth.service.js';
@@ -42,6 +43,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   standalone: true,
   imports: [
     FormsModule,
+    ConfirmDialogComponent,
     LoginComponent,
     TourOverlayComponent,
     WelcomeDialogComponent,
@@ -67,7 +69,7 @@ export class AppComponent {
   /** Browser-Tab zeigt das aktive Projekt (statt fest „Mainty“). */
   private readonly tabTitle = effect(() => {
     const name = this.store.currentProject()?.name;
-    globalThis.document.title = name ? `Dev Log | ${name}` : 'Dev Log';
+    globalThis.document.title = name ? `AIdeation | ${name}` : 'AIdeation';
   });
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
@@ -100,7 +102,7 @@ export class AppComponent {
     this.welcomeDismissed.set(true);
   }
   /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
-  /** Favicon-Adresse, die nicht geladen werden konnte – dann erscheint wieder das Dev-Log-Logo. */
+  /** Favicon-Adresse, die nicht geladen werden konnte – dann erscheint wieder das AIdeation-Logo. */
   protected readonly failedFavicon = signal<string | null>(null);
   protected readonly visibleFavicon = computed(() => {
     const icon = this.favicon();

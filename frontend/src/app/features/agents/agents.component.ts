@@ -5,6 +5,7 @@ import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
+import { AuthService } from '../../core/auth.service.js';
 import { errorMessage } from '../../core/errors.js';
 import type { Agent, AgentPhase } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -30,6 +31,8 @@ import {
 } from './agent-options.js';
 import { OrderTableComponent } from '../development/order-table.component.js';
 import { AgentDetailComponent } from './agent-detail.component.js';
+import { AgentSettingsComponent } from './agent-settings.component.js';
+import { WorkflowStepsComponent } from './workflow-steps.component.js';
 
 interface SystemAgent {
   name: string;
@@ -37,6 +40,8 @@ interface SystemAgent {
   role: string;
   model: string;
   command?: string[] | null;
+  restricted?: boolean;
+  allowTools?: boolean;
   envKey: string;
 }
 
@@ -71,6 +76,8 @@ interface AgentListRow extends AgentTableRow {
     NgClass,
     FormsModule,
     AgentDetailComponent,
+    AgentSettingsComponent,
+    WorkflowStepsComponent,
     ModelIconComponent,
     DataTableComponent,
     DataCellDirective,
@@ -95,6 +102,7 @@ export class AgentsComponent {
   }
 
   protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   protected readonly activity = inject(AgentActivityService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
@@ -113,12 +121,20 @@ export class AgentsComponent {
   protected readonly installedModels = signal<string[]>([]);
   protected readonly externalPresets = MODEL_PRESETS.filter((preset) => preset.command);
 
+  /** A stored command that matches no preset stays visible as "custom" so the UI never hides an active CLI. */
   protected systemChoice(system: SystemAgent): string {
-    const preset = system.command?.length ? presetOf(system.command.join(' ')) : null;
-    return preset && preset !== 'custom' ? `preset:${preset}` : `ollama:${system.model}`;
+    if (!system.command?.length) return `ollama:${system.model}`;
+    const preset = presetOf(system.command.join(' '));
+    return preset === 'custom' ? 'custom:' : `preset:${preset}`;
+  }
+
+  protected async setAllowTools(role: string, allowTools: boolean): Promise<void> {
+    await this.api.put(`/api/system-agents/${role}`, { allowTools });
+    this.systemAgents.update((list) => list.map((item) => (item.role === role ? { ...item, allowTools } : item)));
   }
 
   protected async setSystemChoice(role: string, choice: string): Promise<void> {
+    if (choice === 'custom:') return;
     const [kind, value = ''] = [choice.slice(0, choice.indexOf(':')), choice.slice(choice.indexOf(':') + 1)];
     const preset = kind === 'preset' ? MODEL_PRESETS.find((item) => item.id === value) : undefined;
     const command = preset ? parseCommand(preset.command) : null;
@@ -129,15 +145,11 @@ export class AgentsComponent {
       ),
     );
   }
-  protected readonly agentEditing = signal<string | null>(null);
-  protected agentEdit = { name: '', instructions: '', command: '' };
   /** Kategorien des Projekts (eingebaute und eigene) mit ihren einzelnen Befehlen. */
   protected readonly permissionGroups = signal<PermissionGroupInfo[]>([]);
   /** Neue Agents starten ohne Befehle: jeder wird einzeln freigegeben. */
   protected formCommands: string[] = [];
-  protected editCommands: string[] = [];
   protected formScopes: string[] = [];
-  protected editScopes: string[] = [];
   private readonly loadGroups = effect(() => {
     const slug = this.store.activeProject();
     if (!slug) return;
@@ -146,17 +158,6 @@ export class AgentsComponent {
       .then((result) => this.permissionGroups.set(result.groups))
       .catch(() => undefined);
   });
-
-  /** Noch nicht festgelegt (null): so, wie der Agent heute läuft – vertraute Rollen mit allen Projektbefehlen. */
-  private effectiveCommands(agent: Agent): string[] {
-    if (agent.allowedCommands) return [...agent.allowedCommands];
-    const available = this.permissionGroups()
-      .filter((group) => group.available)
-      .flatMap((group) => group.rules);
-    return ['assistant', 'developer', 'tester', 'reviewer'].includes(agent.role)
-      ? available
-      : ['files:create', 'files:edit'];
-  }
 
   protected agentForm = {
     name: '',
@@ -193,20 +194,18 @@ export class AgentsComponent {
     return rows;
   });
 
-  /** Alle Agents in einer Tabelle, gruppiert nach Kategorie (Workflow-Phase bzw. System). */
+  /** Alle Agents in einer Tabelle: Workflow-Agents (wann sie laufen, legt der Workflow fest) und System-Agents. */
   protected readonly agentRows = computed<AgentListRow[]>(() => [
-    ...AGENT_PHASES.flatMap((phase, rank) =>
-      (this.phaseRows()[phase.id] ?? []).map((row) => ({
-        ...row,
-        category: phase.label,
-        categoryRank: rank,
-        role: roleLabel(row.agent.role),
-      })),
-    ),
+    ...AGENT_PHASES.flatMap((phase) => this.phaseRows()[phase.id] ?? []).map((row) => ({
+      ...row,
+      category: 'Workflow-Agent',
+      categoryRank: 0,
+      role: roleLabel(row.agent.role),
+    })),
     ...this.systemRows().map((row) => ({
       ...row,
       category: 'System',
-      categoryRank: AGENT_PHASES.length,
+      categoryRank: 1,
       role: row.system.description,
     })),
   ]);
@@ -237,22 +236,14 @@ export class AgentsComponent {
       key: system.role,
       name: system.name,
       command: system.command,
-      status:
-        system.role === 'assistant' &&
-        this.store.worker().agents.some((agent) => agent.id === 'assistant' && agent.active)
-          ? 'running'
-          : 'active',
+      // Assistent und Visionär stehen in der Worker-Liste unter ihrer Rolle (id „assistant“ bzw. „visionary“).
+      status: this.store.worker().agents.some((agent) => agent.id === system.role && agent.active)
+        ? 'running'
+        : 'active',
       hint: null,
       system,
     })),
   );
-
-  protected startAgentEdit(agent: Agent): void {
-    this.agentEdit = { name: agent.name, instructions: agent.instructions, command: agent.command?.join(' ') ?? '' };
-    this.editCommands = this.effectiveCommands(agent);
-    this.editScopes = [...(agent.fileScope ?? [])];
-    this.agentEditing.set(agent.id);
-  }
 
   protected async createAgent(): Promise<void> {
     let command: string[] | null;
@@ -290,44 +281,8 @@ export class AgentsComponent {
     );
   }
 
-  protected async saveAgentEdit(agent: Agent): Promise<void> {
-    let command: string[] | null;
-    try {
-      command = parseCommand(this.agentEdit.command);
-    } catch (error) {
-      this.store.notice.set(errorMessage(error, 'Der Agent-Befehl ist ungültig.'));
-      return;
-    }
-    await this.updateAgent(agent.id, {
-      name: this.agentEdit.name,
-      instructions: this.agentEdit.instructions,
-      command,
-      allowedCommands: this.editCommands,
-      fileScope: this.editScopes,
-    });
-    this.agentEditing.set(null);
-  }
-
   protected async deleteAgent(id: string): Promise<void> {
     if (!globalThis.confirm('Agent löschen?')) return;
     await this.store.perform(() => this.api.delete(`/api/agents/${encodeURIComponent(id)}`), 'Agent gelöscht.');
-  }
-
-  protected async moveAgent(agent: Agent, direction: -1 | 1): Promise<void> {
-    const ids = this.data()
-      .agents.filter((item) => item.phase === agent.phase)
-      .map((item) => item.id);
-    const index = ids.indexOf(agent.id);
-    const nextIndex = index + direction;
-    if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return;
-    [ids[index], ids[nextIndex]] = [ids[nextIndex]!, ids[index]!];
-    await this.store.perform(
-      () =>
-        this.api.post(`${this.api.projectPath(this.store.activeProject())}/agents/order`, {
-          phase: agent.phase,
-          ids,
-        }),
-      'Reihenfolge gespeichert.',
-    );
   }
 }

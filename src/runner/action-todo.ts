@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { generateSprintReport } from '../api/reports.js';
 
@@ -63,7 +64,7 @@ export async function setActionTodo(pool: Pool, itemId: string, todo: string | n
       [itemId, todo],
     )
   ).rows[0];
-  if (changed?.sprintId) await generateSprintReport(pool, changed.sprintId).catch(() => undefined);
+  if (changed?.sprintId) await generateSprintReport(pool, changed.sprintId).catch(logged('action-todo'));
 }
 
 /** Nach Abhaken oder Agent-Prüfung: Aktion aus den noch offenen Abnahmepunkten neu bestimmen. */

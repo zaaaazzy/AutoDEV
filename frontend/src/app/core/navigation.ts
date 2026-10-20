@@ -28,3 +28,15 @@ export function targetFromHash(): string | null {
   const target = globalThis.location.hash.slice(1).split('/')[1]?.split('?')[0] ?? '';
   return /^[0-9a-f-]{36}$/i.test(target) ? target : null;
 }
+
+/** Parameter hinter dem Ziel, z. B. „#development/<id>?project=demo&answer=1“ (Links aus Push-Nachrichten). */
+export function hashParameter(name: string): string | null {
+  const query = globalThis.location.hash.split('?')[1] ?? '';
+  return new URLSearchParams(query).get(name);
+}
+
+/** Projekt aus dem Link, falls angegeben (nur gültige Kürzel). */
+export function projectFromHash(): string | null {
+  const project = hashParameter('project');
+  return project && /^[a-z0-9][a-z0-9-]{0,62}$/.test(project) ? project : null;
+}

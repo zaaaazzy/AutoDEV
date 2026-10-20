@@ -17,7 +17,7 @@ export function buildSprintCommentPrompt(
   items: Pick<PlannedItem, 'title' | 'score' | 'reason' | 'hours' | 'tokens'>[],
 ): string {
   return [
-    'Du bist der Agent "Auftragsautor" und kommentierst einen Sprintvorschlag, den Dev Log berechnet hat.',
+    'Du bist der Agent "Auftragsautor" und kommentierst einen Sprintvorschlag, den AIdeation berechnet hat.',
     `## Anweisung\n${instructions || 'Formuliere knapp und sachlich.'}`,
     `## ${sprint.name}\nKapazität ${sprint.capacityHours} h · geplant ${sprint.hours} h, ${sprint.tokens} Tokens`,
     `## Aufträge in dieser Reihenfolge\n${items

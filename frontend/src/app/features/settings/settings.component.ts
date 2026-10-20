@@ -1,10 +1,13 @@
 import { PermissionGroupsSettingsComponent } from './permission-groups-settings.component.js';
 import { Component, effect, inject, untracked } from '@angular/core';
+import { ReviewSlotsSettingsComponent } from './review-slots-settings.component.js';
+import { FolderPickerComponent } from '../../shared/folder-picker.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { AgentStatus, Project } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { NotificationSettingsComponent } from './notification-settings.component.js';
+import { ProductionSettingsComponent } from './production-settings.component.js';
 import { SecuritySettingsComponent } from './security-settings.component.js';
 import { UsersSettingsComponent } from './users-settings.component.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -13,6 +16,9 @@ import { AuthService } from '../../core/auth.service.js';
   selector: 'app-settings',
   standalone: true,
   imports: [
+    ReviewSlotsSettingsComponent,
+    FolderPickerComponent,
+    ProductionSettingsComponent,
     PermissionGroupsSettingsComponent,
     FormsModule,
     NotificationSettingsComponent,
@@ -37,6 +43,12 @@ export class SettingsComponent {
     definitionOfReady: '',
     definitionOfDone: '',
     autoBugfix: true,
+    agentWorkspace: false,
+    reviewMode: 'off' as 'off' | 'ui' | 'always',
+    reviewCommand: '',
+    orderTokenLimit: null as number | null,
+    orderCostLimit: null as number | null,
+    restartAfterSprint: false,
     sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
     sprintCapacityHours: 40,
     autopilotStart: '08:00',
@@ -109,6 +121,12 @@ export class SettingsComponent {
           definitionOfReady: this.settings.definitionOfReady,
           definitionOfDone: this.settings.definitionOfDone,
           autoBugfix: this.settings.autoBugfix,
+          agentWorkspace: this.settings.agentWorkspace,
+          reviewMode: this.settings.reviewMode,
+          reviewCommand: this.settings.reviewCommand.trim(),
+          orderTokenLimit: this.settings.orderTokenLimit || null,
+          orderCostLimit: this.settings.orderCostLimit || null,
+          restartAfterSprint: this.settings.restartAfterSprint,
           sprintMode: this.settings.sprintMode,
           sprintCapacityHours: this.settings.sprintCapacityHours,
           autopilotStart: this.settings.autopilotStart,
@@ -151,6 +169,12 @@ export class SettingsComponent {
       definitionOfReady: (project?.definitionOfReady ?? []).join('\n'),
       definitionOfDone: (project?.definitionOfDone ?? []).join('\n'),
       autoBugfix: project?.autoBugfix ?? true,
+      agentWorkspace: project?.agentWorkspace ?? false,
+      reviewMode: project?.reviewMode ?? 'off',
+      reviewCommand: (project?.reviewCommand ?? []).join(' '),
+      orderTokenLimit: project?.orderTokenLimit ?? null,
+      orderCostLimit: project?.orderCostLimit ?? null,
+      restartAfterSprint: project?.restartAfterSprint ?? false,
       sprintMode: project?.sprintMode ?? 'manual',
       sprintCapacityHours: project?.sprintCapacityHours ?? 40,
       autopilotStart: project?.autopilotStart ?? '08:00',

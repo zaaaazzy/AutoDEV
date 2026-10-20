@@ -1,4 +1,4 @@
-# Visionär: Erweiterungsvorschläge für Dev Log
+# Visionär: Erweiterungsvorschläge für AIdeation
 
 Stand: 18.10.2026 · Rolle: Visionär · Grundlage: Code (`src/`, `frontend/src/`), `docs/*.md`, Datenmodell (`src/db/schema.ts`), inkl. der noch nicht committeten Arbeit (Agent-Aufgaben, Folgeaufträge, „Aktion notwendig“, automatische Abnahmeprüfung, Git-Graph).
 
@@ -22,7 +22,7 @@ Zu jedem Vorschlag gibt es einen Foliensatz (je 6 Folien: Titel, Heute, Vorschla
 | 07 | https://claude.ai/artifact/QMxDzAZJ7LHsYi74hM1zy6 |
 | 08 | https://claude.ai/artifact/6ZMaSmcsjMF5iVuo9bikWy |
 
-## Was Dev Log heute schon kann (Kurzbild)
+## Was AIdeation heute schon kann (Kurzbild)
 
 Idee → Schätzung → Auftragsautor (Anforderung + Akzeptanzkriterien) → Bug-Wächter (Risiken) → manuelle Sprint-Zuordnung → Worker: Entwickler → Tester → Reviewer → Dokumentierer → Handbücher → Abnahme (DoR/DoD, automatische Prüfung offener Punkte) → Commit auf Sprint-Branch → Sprint-Abschluss mit Test-Gate, Merge, Tag, Push → optional Deploy. Fehlschläge erzeugen Bugs und Bug-Aufträge (max. 2 Wiederholungen), Problemanalyse, „Aktion notwendig“. Dazu Chat-Assistent mit Werkzeugen, Agent-Aufgaben per Klick, Verbrauchs- und Schätzstatistik, Coverage, Push, Wächter, Rollen, Doku-Redaktion.
 

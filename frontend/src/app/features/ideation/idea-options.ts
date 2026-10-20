@@ -17,3 +17,16 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 export function ideaDisplayStatus(idea: Idea, order: DevelopmentItem | null | undefined): string {
   return idea.status === 'accepted' && order?.status === 'done' ? 'implemented' : idea.status;
 }
+
+const SOURCE_LABELS: Record<string, string> = {
+  human: 'Mensch',
+  visionary: 'Visionär',
+  routine: 'Routine',
+  production: 'Produktion',
+  github: 'GitHub',
+};
+
+/** Bezeichnung der Herkunft einer Idee (ältere Ideen ohne Angabe gelten als von Hand erfasst). */
+export function sourceLabel(source: string | null | undefined): string {
+  return SOURCE_LABELS[source ?? 'human'] ?? source ?? 'Mensch';
+}

@@ -14,6 +14,11 @@
         <app-bug-icon />
       }
       {{ displayTitle(item) }}
+      @if (item.kind === 'express') {
+        <span class="express-badge" title="Express-Anfrage aus dem Dashboard – ungeplant in den Sprint aufgenommen"
+          >⚡ Express</span
+        >
+      }
     </button>
   </ng-template>
   <ng-template appDataCell="status" let-item>

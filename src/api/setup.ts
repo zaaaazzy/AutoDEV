@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { ensureDefaultAgents } from './agents.js';
 import { DEFAULT_PERMISSION_GROUPS, PERMISSION_GROUPS } from '../agent/tool-permissions.js';
@@ -39,8 +39,8 @@ function validGroups(value: unknown): string[] | null {
 }
 
 /** Einrichtungsassistent: Vorlagen, Rechte-Gruppen, Host-Jobs (vom Worker ausgeführt) und Projekt anlegen. */
-export function registerSetupRoutes(app: Express, pool: Pool): void {
-  app.get('/api/setup/templates', (_request, response) => {
+export function registerSetupRoutes(app: Router, pool: Pool): void {
+  app.get('/setup/templates', (_request, response) => {
     response.json({
       groups: TEMPLATE_GROUP_LABELS,
       templates: TEMPLATES.map(({ id, label, description, group, stack }) => ({
@@ -54,11 +54,11 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
   });
 
   // Projektbereich, damit der Assistent den Ordner vorschlagen und ausserhalb liegende Pfade erklären kann.
-  app.get('/api/setup/scope', (_request, response) => {
+  app.get('/setup/scope', (_request, response) => {
     response.json({ roots: projectRoots() });
   });
 
-  app.get('/api/setup/permissions', (_request, response) => {
+  app.get('/setup/permissions', (_request, response) => {
     response.json({
       // „Dateien“ ist eine Agent-Gruppe (immer verfügbar) und gehört nicht zur Projektfreigabe.
       groups: PERMISSION_GROUPS.filter((group) => group.id !== 'files').map(({ id, label, description }) => ({
@@ -70,7 +70,7 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
     });
   });
 
-  app.post('/api/setup/jobs', async (request, response, next) => {
+  app.post('/setup/jobs', async (request, response, next) => {
     try {
       const body = isRecord(request.body) ? request.body : {};
       const kind = typeof body.kind === 'string' ? body.kind : '';
@@ -90,7 +90,7 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/setup/jobs/:id', async (request, response, next) => {
+  app.get('/setup/jobs/:id', async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
       const job = (
@@ -103,7 +103,7 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/setup', async (request, response, next) => {
+  app.post('/projects/setup', async (request, response, next) => {
     try {
       const body = isRecord(request.body) ? request.body : {};
       const slug = normalizeProjectSlug(typeof body.slug === 'string' ? body.slug : '');
@@ -145,7 +145,7 @@ export function registerSetupRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.put('/api/projects/:slug/permissions', async (request, response, next) => {
+  app.put('/projects/:slug/permissions', async (request, response, next) => {
     try {
       const slug =
         typeof request.params.slug === 'string' && PROJECT_SLUG.test(request.params.slug) ? request.params.slug : '';

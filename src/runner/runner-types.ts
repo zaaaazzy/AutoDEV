@@ -26,6 +26,12 @@ export interface PromptExtras {
   /** Akzeptanzkriterien aus dem Auftragstext und Definition of Done des Projekts (für den Tester). */
   criteria?: string[];
   definitionOfDone?: string[];
+  /** Nachrichten anderer Agents an diesen Agent (@@NACHRICHT). */
+  messages?: { from: string; text: string }[];
+  /** Ergebnis von „Vor dem Sprint“. */
+  sprintNotes?: string | null;
+  /** Nur „Bei abgelehnt“ / „Bei abgeschlossen“: wie der Auftrag ausgegangen ist. */
+  outcome?: string;
 }
 
 /** Runs an agent that has no command of its own (built-in tester or local model). */
@@ -53,6 +59,12 @@ export interface WorkflowAgent {
   allowedCommands?: string[] | null;
   /** Erlaubte Ordner für Dateirechte (leer = ganzes Projekt). */
   fileScope?: string[];
+  /** Empfänger der Nachrichten dieses Agents (null = nächster Agent). */
+  handoffTo?: string | null;
+  /** Workflow-Schritt, aus dem dieser Einsatz stammt (derselbe Agent kann mehrfach vorkommen). */
+  stepId?: string | null;
+  /** Anweisung nur für diesen Einsatz, zusätzlich zur Anweisung des Agents. */
+  stepInstructions?: string | null;
 }
 
 export interface StepSummary {
@@ -80,4 +92,6 @@ export interface WorkItemOptions {
   timeoutMs: number;
   execute?: CommandExecutor;
   builtin?: BuiltinAgent;
+  /** Pause vor dem einmaligen Wiederholen eines Schritts nach einem vorübergehenden Fehler (Standard 30 s). */
+  transientRetryDelayMs?: number;
 }

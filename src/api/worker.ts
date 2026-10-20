@@ -1,4 +1,6 @@
-import type { Express } from 'express';
+import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { ANSWERED } from './chat-routes.js';
+import type { Router } from 'express';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
@@ -34,9 +36,11 @@ export async function readMaxAgents(pool: Pool): Promise<number> {
 
 /** Kennung des Dashboard-Assistenten in der Agent-Liste der Kopfzeile. */
 export const ASSISTANT_AGENT_ID = 'assistant';
+/** Der Visionär ist ebenfalls kein Workflow-Agent; aktiv, solange ein Lauf angefragt ist oder läuft. */
+export const VISIONARY_AGENT_ID = 'visionary';
 
-export function registerWorkerRoutes(app: Express, pool: Pool): void {
-  app.get('/api/settings', async (_request, response, next) => {
+export function registerWorkerRoutes(app: Router, pool: Pool): void {
+  app.get('/settings', async (_request, response, next) => {
     try {
       response.json({ maxConcurrentAgents: await readMaxAgents(pool), limit: MAX_AGENTS_LIMIT });
     } catch (error) {
@@ -44,7 +48,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.put('/api/settings', async (request, response, next) => {
+  app.put('/settings', async (request, response, next) => {
     try {
       const value = Number((request.body as { maxConcurrentAgents?: unknown } | undefined)?.maxConcurrentAgents);
       if (!Number.isInteger(value) || value < 1 || value > MAX_AGENTS_LIMIT) {
@@ -62,7 +66,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/agent-status', async (_request, response, next) => {
+  app.get('/agent-status', async (_request, response, next) => {
     try {
       const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
       const visible = allowed ? [...allowed] : null;
@@ -91,7 +95,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/projects/:slug/agents/:id/activity', async (request, response, next) => {
+  app.get('/projects/:slug/agents/:id/activity', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug);
       const id = String(request.params.id);
@@ -134,7 +138,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/agents/:id/cancel', async (request, response, next) => {
+  app.post('/projects/:slug/agents/:id/cancel', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug);
       if (!slug) {
@@ -158,7 +162,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/projects/:slug/worker', async (request, response, next) => {
+  app.get('/projects/:slug/worker', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug);
       if (!slug) {
@@ -195,7 +199,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
            LEFT JOIN development_items d ON d.id = st.development_id
            LEFT JOIN sprints s ON s.id = d.sprint_id
           WHERE a.project_slug = $1 AND a.enabled
-          ORDER BY CASE a.phase WHEN 'pre_task' THEN 0 WHEN 'while_task' THEN 1 ELSE 2 END, a.position`,
+          ORDER BY ${PHASE_SQL_ORDER.replace('CASE phase', 'CASE a.phase')}, a.position`,
           [slug],
         )
       ).rows;
@@ -233,9 +237,7 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
         : (
             await pool.query<{ question: string }>(
               `SELECT question FROM chat_messages m
-                WHERE m.project_slug = $1 AND m.role = 'assistant' AND m.question IS NOT NULL
-                  AND NOT EXISTS (SELECT 1 FROM chat_messages u
-                                   WHERE u.project_slug = $1 AND u.role = 'user' AND u.created_at > m.created_at)
+                WHERE m.project_slug = $1 AND m.role = 'assistant' AND m.question IS NOT NULL AND NOT ${ANSWERED}
                 ORDER BY m.created_at DESC LIMIT 1`,
               [slug],
             )
@@ -252,6 +254,25 @@ export function registerWorkerRoutes(app: Express, pool: Pool): void {
             : null,
         active: Boolean(chat),
         waiting: Boolean(question),
+      });
+      const visionary = (
+        await pool.query<{ status: string; progress: string | null }>(
+          `SELECT status, progress FROM visionary_runs
+            WHERE project_slug = $1 AND status IN ('requested', 'running') ORDER BY requested_at DESC LIMIT 1`,
+          [slug],
+        )
+      ).rows[0];
+      agents.push({
+        id: VISIONARY_AGENT_ID,
+        name: 'Visionär',
+        phase: 'system',
+        sprintName: null,
+        orderTitle: visionary
+          ? visionary.status === 'running'
+            ? `Ideen sammeln: ${visionary.progress ?? 'läuft …'}`.slice(0, 100)
+            : 'Lauf angefragt – wartet auf den Worker'
+          : null,
+        active: Boolean(visionary),
       });
       const online = Boolean(beat) && beat.ageSeconds <= 60;
       response

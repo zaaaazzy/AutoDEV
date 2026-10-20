@@ -2,23 +2,31 @@
   <div class="section-heading">
     <h2>Assistent</h2>
     <app-agent-tasks [agentId]="agentId() || null" />
-    <button type="button" class="chat-clear" (click)="clear()" [disabled]="!chat().length" title="Verlauf leeren">
-      <svg
-        viewBox="0 0 24 24"
-        width="15"
-        height="15"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
-      </svg>
-      <span class="chat-clear-label">Verlauf leeren</span>
-    </button>
+    @if (auth.can('chat')) {
+      <button type="button" class="chat-clear" (click)="clear()" [disabled]="!chat().length" title="Verlauf leeren">
+        <svg
+          viewBox="0 0 24 24"
+          width="15"
+          height="15"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+        </svg>
+        <span class="chat-clear-label">Verlauf leeren</span>
+      </button>
+    }
   </div>
+  @if (!connected()) {
+    <p class="chat-offline" role="status">
+      Verbindung zum Assistenten unterbrochen – wird automatisch neu aufgebaut.
+      <button type="button" class="link-button" (click)="reconnect()">Jetzt neu verbinden</button>
+    </p>
+  }
   <div class="chat-log">
     @for (message of chat(); track message.id) {
       @if (message.role === 'assistant') {
@@ -26,7 +34,7 @@
         <div
           class="chat-msg assistant"
           [class.failed]="message.status === 'failed'"
-          [class.asking]="message.question && message.id === openQuestionId()"
+          [class.asking]="message.question && !message.answered"
         >
           @if (message.agentName) {
             <span class="chat-agent-name"
@@ -39,13 +47,31 @@
             [output]="running ? '' : message.content"
             [progress]="running ? message.content : null"
             [running]="running"
+            [compact]="true"
           />
           @if (message.question) {
             <div class="chat-question">
               <span class="chat-question-label">{{
-                message.id === openQuestionId() ? 'Rückfrage – wartet auf deine Antwort' : 'Rückfrage'
+                message.answered ? 'Rückfrage – beantwortet' : 'Rückfrage – wartet auf deine Antwort'
               }}</span>
               <p>{{ message.question }}</p>
+              @if (!message.answered) {
+                <div class="chat-answers" role="group" aria-label="Antwort wählen">
+                  @for (option of message.questionOptions ?? []; track option) {
+                    <button type="button" class="chat-answer" (click)="answerWith(message, option)">
+                      {{ option }}
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="chat-answer own"
+                    [class.selected]="replyTarget()?.id === message.id"
+                    (click)="replyTo(message)"
+                  >
+                    ✎ Eigene Antwort …
+                  </button>
+                </div>
+              }
             </div>
           }
         </div>
@@ -74,10 +100,21 @@
       <div class="chat-msg typing">Assistent arbeitet …</div>
     }
   </div>
+  @if (replyTarget(); as reply) {
+    <div class="chat-reply-to" role="status">
+      <span
+        >↩ Antwort an <strong>{{ reply.agentName ?? 'Assistent' }}</strong
+        >: {{ reply.question }}</span
+      >
+      <button type="button" class="link-button" (click)="newRequest()" title="Stattdessen eine neue Anfrage stellen">
+        ✕ Neue Anfrage
+      </button>
+    </div>
+  }
   <app-chat-composer
     #composer
     [(agentId)]="agentId"
-    [placeholder]="openQuestionId() ? 'Antwort auf die Rückfrage …' : 'Nachricht – / Agent, @ Verweis …'"
+    [placeholder]="replyTarget() ? 'Antwort auf die Rückfrage …' : 'Nachricht – @ Agent, / Verweis …'"
     (sent)="send($event, composer)"
   />
 </section>

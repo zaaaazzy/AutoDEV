@@ -76,7 +76,7 @@ test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtli
     });
   const denied = run(encodePolicy({ create: true, edit: true, scopes: ['docs'] }), write('src/x.ts'));
   assert.equal(denied.status, 2);
-  assert.match(denied.stderr, /Dev-Log-Wächter: .*erlaubten Ordner/);
+  assert.match(denied.stderr, /AIdeation-Wächter: .*erlaubten Ordner/);
   assert.equal(run(encodePolicy(all), write('src/x.ts')).status, 0);
   assert.equal(run('kaputt', write('src/x.ts')).status, 2);
   assert.equal(run(encodePolicy(all), { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } }).status, 0);

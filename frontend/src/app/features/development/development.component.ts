@@ -1,28 +1,33 @@
 import { NgClass } from '@angular/common';
+import { OrderQuestionComponent } from '../../shared/order-question.component.js';
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, Idea, Priority } from '../../core/models.js';
+import { AuthService } from '../../core/auth.service.js';
+import type { AcceptanceCheck, DevelopmentItem, Idea, Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES, isFinished, statusLabel } from '../../shared/labels.js';
 import { CategoryLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderTableComponent } from './order-table.component.js';
-import { orderProblem } from '../../shared/order-problem.js';
+import { failureParts, orderGuide } from '../../shared/order-problem.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { OrderService } from './order.service.js';
+import { OrderApprovalComponent } from './order-approval.component.js';
 
 @Component({
   selector: 'app-development',
   standalone: true,
   imports: [
     OrderTableComponent,
+    OrderApprovalComponent,
     BugIconComponent,
     MarkdownPipe,
     NgClass,
     FormsModule,
     OrderDetailComponent,
+    OrderQuestionComponent,
     StatusClassPipe,
     StatusLabelPipe,
     CategoryLabelPipe,
@@ -34,9 +39,11 @@ export class DevelopmentComponent {
   private readonly api = inject(ApiService);
   private readonly orders = inject(OrderService);
   protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly developmentStatuses = DEVELOPMENT_STATUSES;
+  protected readonly isFinished = isFinished;
 
   /** Laufzeit eines Entwurfs, z. B. „2 min“. */
   protected elapsed(startedAt: string): string {
@@ -57,33 +64,64 @@ export class DevelopmentComponent {
 
   /** Aufträge, die eine Entscheidung brauchen: fehlgeschlagen, aus dem Sprint genommen oder mit Punkten zum Prüfen. */
   protected readonly attention = computed(() => {
-    const manual = new Map<string, number>();
+    const manual = new Map<string, AcceptanceCheck[]>();
     for (const check of this.data().acceptance) {
-      if (check.status === 'manual') manual.set(check.developmentId, (manual.get(check.developmentId) ?? 0) + 1);
+      if (check.status === 'manual')
+        manual.set(check.developmentId, [...(manual.get(check.developmentId) ?? []), check]);
     }
     return this.data()
       .development.map((item) => {
         const reasons: { label: string; tone: 'error' | 'warn' | 'info' }[] = [];
         // Wartet der Auftrag auf einen Menschen, ist er nicht gescheitert, sondern braucht eine Aktion.
-        if (item.status === 'rejected')
+        if (item.status === 'approval') reasons.push({ label: 'Wartet auf Freigabe', tone: 'info' });
+        else if (item.status === 'rejected')
           reasons.push({ label: 'Abgelehnt – verstösst gegen Projektregel', tone: 'error' });
         else if (item.status === 'blocked' || (item.actionTodo && !isFinished(item.status)))
           reasons.push({ label: 'Aktion notwendig', tone: 'warn' });
         if (item.removedFromSprintAt && !isFinished(item.status)) {
           reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
         }
-        const open = manual.get(item.id) ?? 0;
-        if (open && !item.actionTodo) {
+        const checks = manual.get(item.id) ?? [];
+        if (checks.length && !item.actionTodo) {
+          const open = checks.length;
           reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });
         }
-        return { item, reasons, manual: open };
+        // Das Etikett neben dem Titel nennt den Status schon; dieselbe Angabe nicht noch einmal darunter zeigen.
+        const badges = reasons.filter((reason) => reason.label !== statusLabel(item.status));
+        return {
+          item,
+          reasons,
+          badges,
+          checks: item.actionTodo ? [] : checks,
+          guide: orderGuide(item),
+          failure: item.failure ? failureParts(item.failure) : null,
+        };
       })
       .filter((entry) => entry.reasons.length);
   });
+  /** Regel, gegen die ein abgelehnter Auftrag verstösst (aus dem Vermerk des Agents). */
+  protected rule(item: DevelopmentItem): string {
+    const vermerk = /\*\*Vermerk[^*]*:\*\*\s*([^\n]+)/.exec(item.failure ?? '')?.[1] ?? '';
+    return vermerk.replace(/^Projektregel\s*–\s*/, '').trim();
+  }
+
+  protected analysisRunning(item: DevelopmentItem): boolean {
+    return item.analysisStatus === 'requested' || item.analysisStatus === 'running';
+  }
+
   private readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   protected readonly openAttention = signal<string | null>(null);
 
   constructor() {
+    // „+ Neuer Auftrag“: Das Formular steht unter „Besondere Aufmerksamkeit“ – hinscrollen und Titel fokussieren.
+    effect(() => {
+      if (!this.store.showCreate()) return;
+      globalThis.setTimeout(() => {
+        const form = document.querySelector<HTMLFormElement>('form.dev-create');
+        form?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        form?.querySelector<HTMLInputElement>('input[name="title"]')?.focus({ preventScroll: true });
+      });
+    });
     // Aus einem Link (#development/<id>, z. B. im Sprintbericht): Auftrag aufklappen und hinscrollen.
     effect(() => {
       const id = this.store.focusId();
@@ -107,9 +145,6 @@ export class DevelopmentComponent {
     this.data().development.filter((item) => !isFinished(item.status) && !this.attentionIds().has(item.id)),
   );
 
-  /** Problem und Lösung in wenigen Worten (dieselbe Kurzfassung wie im Sprint-Hover der Kopfzeile). */
-  protected readonly problem = orderProblem;
-
   /** Sprintbericht mit dem ToDo-Kapitel des Auftrags (falls der Sprint schon dokumentiert ist). */
   protected sprintDoc(item: DevelopmentItem): string | null {
     const sprintId = item.sprintId;
@@ -122,14 +157,13 @@ export class DevelopmentComponent {
     this.store.navigate('docs', { focus: id });
   }
 
-  /** Kurzfassung des Fehlers: bevorzugt die nicht bestandenen Abnahmepunkte, sonst ein sauber beginnender Auszug. */
-  protected failureSummary(failure: string): string {
-    const acceptance = /## Abnahme nicht bestanden\n([\s\S]*?)(?:\n## |$)/.exec(failure)?.[1]?.trim();
-    if (acceptance) return `**Abnahme nicht bestanden**\n${acceptance}`;
-    const [head, ...rest] = failure.split('\n\n');
-    let body = rest.join('\n\n').trim();
-    if (/^[a-zäöüß`]/.test(body)) body = `…${body.replace(/^\S*\s*/, ' ')}`;
-    return [head, body].filter(Boolean).join('\n\n');
+  /** Ohne gestarteten Behebungsauftrag stimmt „an einen Behebungsauftrag delegiert“ nicht: weglassen. */
+  protected noteText(item: DevelopmentItem, note: string): string {
+    return item.fixStatus ? note : note.replace(/\s*–\s*an einen Behebungsauftrag delegiert\.?$/, '.');
+  }
+
+  protected openBug(id: string): void {
+    this.store.navigate('bugs', { focus: id });
   }
 
   protected retryOrder(item: DevelopmentItem): Promise<void> {
@@ -146,6 +180,10 @@ export class DevelopmentComponent {
 
   protected confirmOrder(item: DevelopmentItem): Promise<void> {
     return this.orders.confirmChecks(item);
+  }
+
+  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
+    return this.orders.checkPoint(item, check, true);
   }
 
   protected ideaOf(item: DevelopmentItem): Idea | null {

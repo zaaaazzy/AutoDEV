@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
+import type { CommandExecutor } from '../core/command.js';
 import {
   checkoutSprintBranch,
+  mergeIntoCheckedOutMain,
   ciWorkflowYaml,
   commitTaskToGit,
   filesWithSecrets,
@@ -120,7 +122,7 @@ test('pushes GitHub HTTPS remotes over SSH', () => {
   assert.equal(pushRemote('git@github.com:a/b.git'), 'git@github.com:a/b.git');
 });
 
-import { taskCommitMessage } from './git-sync.js';
+import { taskCommitMessage, parseRunState, waitForCi } from './git-sync.js';
 import test2 from 'node:test';
 import assert2 from 'node:assert/strict';
 
@@ -244,4 +246,69 @@ test('the CI workflow runs the same test commands as the local gate', () => {
   assert.match(yaml, /- run: npm run build/);
   assert.match(yaml, /- run: npm test -- --grep 'login page'/);
   assert.match(yaml, /branches: \[main, 'sprint\/\*\*'\]/);
+});
+
+test('merges a finished sprint into main checked out elsewhere only when that folder is clean', async () => {
+  const run = (dirty: string, gateFails = false) => {
+    const calls: string[] = [];
+    const execute: CommandExecutor = async (command) => {
+      calls.push(command.join(' '));
+      if (command.includes('--abbrev-ref')) return { exitCode: 0, durationMs: 1, output: 'main\n' };
+      if (command.includes('--porcelain')) return { exitCode: 0, durationMs: 1, output: dirty };
+      if (command[0] === 'npm') return { exitCode: gateFails ? 1 : 0, durationMs: 1, output: 'rot' };
+      return { exitCode: 0, durationMs: 1, output: '' };
+    };
+    return { calls, execute };
+  };
+  const clean = run('');
+  assert.equal(await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), true);
+  assert.ok(clean.calls.some((call) => call.startsWith('git merge --no-ff sprint/s1')));
+
+  const busy = run(' M src/app.ts\n');
+  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), false);
+  assert.ok(!busy.calls.some((call) => call.startsWith('git merge')));
+
+  const red = run('', true);
+  assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), false);
+  assert.ok(red.calls.includes('git reset --keep ORIG_HEAD'));
+});
+
+function fakeGh(views: string[], watchExit = 1) {
+  const calls: string[] = [];
+  const execute = (async (command: string[]) => {
+    calls.push(command.slice(0, 3).join(' '));
+    const [tool, verb, sub] = command;
+    const ok = (output: string, exitCode = 0) => ({ exitCode, durationMs: 0, output });
+    if (tool === 'git') return ok('abc123\n');
+    if (verb === 'auth') return ok('Logged in');
+    if (verb === 'run' && sub === 'list') return ok('39306468551\n');
+    if (verb === 'run' && sub === 'watch') return ok('Triggered via push less than a minute ago\n* verify', watchExit);
+    if (verb === 'run' && sub === 'view') return ok(views.shift() ?? views.at(-1) ?? '');
+    return ok('', 1);
+  }) as unknown as Parameters<typeof waitForCi>[0];
+  return { execute, calls };
+}
+
+test('a CI run that is still going is not reported as red', async () => {
+  const log: string[] = [];
+  const { execute, calls } = fakeGh([
+    '{"conclusion":"","status":"in_progress"}',
+    '{"conclusion":"success","status":"completed"}',
+  ]);
+  await waitForCi(execute, '/repo', 'sprint/sprint-5', log, 1);
+  assert.deepEqual(log, ['CI grün (Lauf 39306468551).']);
+  assert.equal(calls.filter((call) => call === 'gh run watch').length, 2, 'keeps watching after an early exit');
+});
+
+test('a failed CI run blocks the merge with its conclusion', async () => {
+  const { execute } = fakeGh(['{"conclusion":"failure","status":"completed"}'], 1);
+  await assert.rejects(waitForCi(execute, '/repo', 'sprint/sprint-5', [], 1), /ist rot \(failure\)/);
+});
+
+test('parseRunState reads the JSON of gh run view', () => {
+  assert.deepEqual(parseRunState('Warnung\n{"conclusion":"","status":"queued"}\n'), {
+    status: 'queued',
+    conclusion: '',
+  });
+  assert.equal(parseRunState('kein json'), null);
 });

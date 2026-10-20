@@ -248,20 +248,66 @@ export class DataTableComponent<T> {
     this.expanded.update((current) => (current === id ? null : id));
   }
 
+  /** Klick irgendwo in die Zeile öffnet die Details – außer auf Bedienelemente oder beim Markieren von Text. */
+  protected rowClick(id: string, event: MouseEvent): void {
+    if (!this.detail()) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('button, a, input, select, textarea, label, summary, [role="button"], [contenteditable]'))
+      return;
+    if (globalThis.getSelection?.()?.toString()) return;
+    this.toggleRow(id);
+  }
+
+  /** Knopf, der das Filtermenü geöffnet hat: nach Escape erhält er den Fokus zurück. */
+  private filterOpener: HTMLElement | null = null;
+
   protected toggleFilterMenu(id: string, event: Event): void {
     event.stopPropagation();
-    const box = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    this.filterOpener = event.currentTarget as HTMLElement;
+    const box = this.filterOpener.getBoundingClientRect();
     this.menuPosition.set({
       top: box.bottom + 6,
       left: Math.max(8, Math.min(box.left, globalThis.innerWidth - 228)),
     });
     this.openFilter.update((current) => (current === id ? null : id));
+    // Textfilter: direkt lostippen können.
+    if (this.openFilter() === id)
+      setTimeout(() =>
+        this.host.nativeElement.querySelector<HTMLInputElement>('.dt-filter-menu input[type="search"]')?.focus(),
+      );
   }
+
+  /**
+   * Sortieren per Klick: aufsteigend → absteigend → ohne. Ist die Spalte nur durch die Voreinstellung sortiert,
+   * beginnt der erste Klick trotzdem aufsteigend (bzw. dreht eine aufsteigende Voreinstellung um).
+   */
+  protected sortBy(id: string, event: Event): void {
+    const preset = this.sorting() === null ? this.initialSort().find((entry) => entry.id === id) : undefined;
+    if (preset) {
+      this.sorting.set([{ id, desc: !preset.desc }]);
+      return;
+    }
+    this.table.getColumn(id)?.getToggleSortingHandler()?.(event);
+  }
+
+  /** Leertext: spricht nur von Filtern, wenn es Einträge gibt und wirklich gefiltert oder gesucht wird. */
+  protected readonly emptyMessage = computed(() =>
+    this.rows().length && (this.activeFilters().length || this.search())
+      ? this.emptyText()
+      : this.emptyText().replace(/\s+(für|mit|bei)\s+(diese[nmr]?|den gewählten|dem gewählten)\s+Filtern?/i, ''),
+  );
 
   @HostListener('window:scroll')
   @HostListener('window:resize')
   protected closeOnMove(): void {
     if (this.openFilter()) this.openFilter.set(null);
+  }
+
+  @HostListener('document:keydown.escape')
+  protected closeOnEscape(): void {
+    if (!this.openFilter()) return;
+    this.openFilter.set(null);
+    this.filterOpener?.focus();
   }
 
   @HostListener('document:click', ['$event'])

@@ -106,6 +106,32 @@ test('stops at the first failing agent and blocks the order', async () => {
   ]);
 });
 
+test('Laufwerk fällt während eines Agents weg: Auftrag wird neu eingeplant statt blockiert, kein Bug', async () => {
+  const { mkdtempSync, renameSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const folder = mkdtempSync(join(tmpdir(), 'drive-'));
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => {
+    // Agent b arbeitet, als das Laufwerk wegfällt (Ordner verschwindet): Befehl scheitert mit ENOENT.
+    if (command[0] === 'b') renameSync(folder, `${folder}-weg`);
+    return { exitCode: command[0] === 'b' ? 1 : 0, durationMs: 1, output: command[0] === 'b' ? 'spawn x ENOENT' : '' };
+  };
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  const result = await runWorkItem(pool, item, agents, { cwd: folder, timeoutMs: 1000, execute });
+  renameSync(`${folder}-weg`, folder);
+  assert.equal(result, 'failed');
+  const settled = queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1);
+  assert.doesNotMatch(settled?.sql ?? '', /'blocked'/);
+  assert.notDeepEqual(settled?.values, ['item-1', 'blocked']);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  const step = queries.find(
+    (query) =>
+      query.sql.includes('UPDATE agent_run_steps SET status') && String(query.values[3]).includes('Unterbrochen'),
+  );
+  assert.match(String(step?.values[3]), /ist nicht erreichbar|Ordner nicht erreichbar/);
+});
+
 test('uses the built-in agent for agents without command, hides DEV_LOG secrets and never double-runs an item', async () => {
   process.env.DEV_LOG_PASSWORD = 'secret-secret-secret';
   const { pool, queries } = fakePool();
@@ -239,4 +265,279 @@ test('after a failed run only the failed agent and the following ones run again'
     ['b'],
   );
   assert.match(calls[0]?.at(-1) ?? '', /fertig A/);
+});
+
+test('a failing reviewer (after_task) reports a bug; a failing documenter does not', async () => {
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'bad' ? 1 : 0,
+    durationMs: 1,
+    output: 'Änderungen nötig',
+  });
+  const roleAgent = (name: string, role: string, command: string[]): WorkflowAgent => ({
+    ...agent(name, 'after_task', 1, command),
+    role,
+  });
+  const reviewer = fakePool();
+  await runWorkItem(reviewer.pool, item, [roleAgent('Reviewer', 'reviewer', ['bad'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.ok(
+    reviewer.queries.some(
+      (query) => query.sql.includes('INSERT INTO bugs') && String(query.values[1]).includes('Reviewer'),
+    ),
+  );
+
+  const documenter = fakePool();
+  await runWorkItem(documenter.pool, item, [roleAgent('Doku', 'documenter', ['bad'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.ok(!documenter.queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+});
+
+test('a rejecting reviewer first sends the order back to the developer once within the same run', async () => {
+  const roleAgent = (name: string, role: string, phase: string, command: string[]): WorkflowAgent => ({
+    ...agent(name, phase, 1, command),
+    role,
+  });
+  const agents = [
+    roleAgent('Dev', 'developer', 'while_task', ['dev']),
+    roleAgent('Review', 'reviewer', 'after_task', ['test']),
+  ];
+  // Erstes Review lehnt ab, nach der Nachbesserung Freigabe: kein Bug, Auftrag erledigt.
+  const fixed = fakePool();
+  const calls: string[][] = [];
+  let testRuns = 0;
+  const flaky: CommandExecutor = async (command) => {
+    calls.push(command);
+    if (command[0] !== 'test') return { exitCode: 0, durationMs: 1, output: `ok ${command[0]}` };
+    testRuns += 1;
+    return {
+      exitCode: testRuns === 1 ? 1 : 0,
+      durationMs: 1,
+      output: testRuns === 1 ? '@@REVIEW: ÄNDERUNGEN NÖTIG\nTest X rot' : '@@REVIEW: FREIGEGEBEN',
+    };
+  };
+  assert.equal(await runWorkItem(fixed.pool, item, agents, { cwd: '/r', timeoutMs: 1, execute: flaky }), 'passed');
+  assert.deepEqual(
+    calls.map((call) => call[0]),
+    ['dev', 'test', 'dev', 'test'],
+  );
+  assert.match(calls[2]?.at(-1) ?? '', /Rückmeldung von Review[\s\S]*Test X rot/);
+  assert.ok(!fixed.queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+  const positions = fixed.queries
+    .filter((query) => query.sql.includes('INSERT INTO agent_run_steps'))
+    .map((query) => query.values[1]);
+  assert.deepEqual(positions, [0, 1, 2, 3]);
+
+  // Lehnt der Reviewer erneut ab, gibt es genau eine Nachbesserung und danach den Bug-Bericht.
+  const broken = fakePool();
+  const brokenCalls: string[] = [];
+  const failing: CommandExecutor = async (command) => {
+    brokenCalls.push(command[0] ?? '');
+    return { exitCode: command[0] === 'test' ? 1 : 0, durationMs: 1, output: 'rot' };
+  };
+  assert.equal(await runWorkItem(broken.pool, item, agents, { cwd: '/r', timeoutMs: 1, execute: failing }), 'failed');
+  assert.deepEqual(brokenCalls, ['dev', 'test', 'dev', 'test']);
+  assert.equal(broken.queries.filter((query) => query.sql.includes('INSERT INTO bugs')).length, 1);
+});
+
+test('a transient failure (model unreachable) is retried once before the order blocks', async () => {
+  const flaky = fakePool();
+  let calls = 0;
+  const execute: CommandExecutor = async () => {
+    calls += 1;
+    return calls === 1
+      ? { exitCode: 1, durationMs: 1, output: 'Fehler: Ollama nicht erreichbar' }
+      : { exitCode: 0, durationMs: 1, output: 'fertig' };
+  };
+  const options = { cwd: '/r', timeoutMs: 1, execute, transientRetryDelayMs: 0 };
+  assert.equal(await runWorkItem(flaky.pool, item, [agent('dev', 'while_task', 1, ['x'])], options), 'passed');
+  assert.equal(calls, 2);
+
+  // Ein echter Fehler (kein vorübergehender) wird nicht wiederholt.
+  const broken = fakePool();
+  let brokenCalls = 0;
+  const failing: CommandExecutor = async () => {
+    brokenCalls += 1;
+    return { exitCode: 1, durationMs: 1, output: 'TypeError: x is undefined' };
+  };
+  await runWorkItem(broken.pool, item, [agent('dev', 'while_task', 1, ['x'])], { ...options, execute: failing });
+  assert.equal(brokenCalls, 1);
+});
+
+test('the cost brake stops an order before the next agent once its limit is reached', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('INSERT INTO agent_run_steps')) return { rows: [{ id: 'step-1' }] };
+      if (sql.includes('order_token_limit')) return { rows: [{ tokens: '1000', cost: null }] };
+      if (sql.includes('SUM(s.tokens)')) return { rows: [{ tokens: queries.length > 0 ? '1500' : '0', cost: '0' }] };
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+  });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, []);
+  assert.ok(
+    queries.some((query) => query.sql.includes('action_todo') && String(query.values[1]).includes('Kostengrenze')),
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
+});
+
+test('Workflow-Reihenfolge: der Auftrag läuft genau wie im Board – Spalte für Spalte, darin nach Position', async () => {
+  const { pool } = fakePool();
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  // Absichtlich durcheinander geliefert; dieselbe Karte darf an mehreren Stellen stehen (Tester zweimal).
+  const agents = [
+    agent('test-2', 'on_done', 1, ['test-2']),
+    agent('doc', 'after_task', 2, ['doc']),
+    agent('test', 'after_task', 1, ['test']),
+    agent('dev', 'while_task', 1, ['dev']),
+    agent('prep', 'pre_task', 1, ['prep']),
+    agent('plan', 'pre_sprint', 1, ['plan']),
+  ];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'passed');
+  assert.deepEqual(calls, ['prep', 'dev', 'test', 'doc', 'test-2']);
+});
+
+test('Workflow-Schritte: derselbe Agent zweimal, je mit eigener Anweisung; Nachricht erreicht den richtigen Einsatz', async () => {
+  const { pool, queries } = fakePool();
+  const prompts: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    prompts.push(command.at(-1) ?? '');
+    return {
+      exitCode: 0,
+      durationMs: 1,
+      output: prompts.length === 2 ? 'Getestet.\n@@NACHRICHT: Nur noch die Doku prüfen.' : 'ok',
+    };
+  };
+  const tester = agent('Tester', 'after_task', 1, ['tester']);
+  const agents = [
+    agent('Entwickler', 'while_task', 1, ['dev']),
+    { ...tester, stepId: 'step-1', stepInstructions: 'Teste nur die API.' },
+    { ...tester, position: 2, stepId: 'step-2', stepInstructions: 'Teste jetzt die Oberfläche.' },
+  ];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute }), 'passed');
+  assert.equal(prompts.length, 3);
+  assert.match(prompts[1]!, /## Anweisung für diesen Schritt \(hat Vorrang\)\nTeste nur die API\./);
+  assert.match(prompts[2]!, /Teste jetzt die Oberfläche\./);
+  assert.doesNotMatch(prompts[2]!, /Teste nur die API/);
+  assert.match(prompts[2]!, /## Nachrichten an dich\n- Von Tester: Nur noch die Doku prüfen\./);
+  // Jeder Einsatz wird mit seinem Workflow-Schritt protokolliert.
+  const inserted = queries.filter((query) => query.sql.includes('INSERT INTO agent_run_steps')).map((q) => q.values[5]);
+  assert.deepEqual(inserted, [null, 'step-1', 'step-2']);
+});
+
+test('Nachbesserung: der Entwickler setzt seine Claude-Sitzung fort statt neu zu beginnen', async () => {
+  const sessions: string[] = [];
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push(sql);
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('SET session_id')) {
+        sessions.push(String(values[1]));
+        return { rows: [] };
+      }
+      if (sql.includes('s.session_id AS "sessionId"'))
+        return { rows: sessions.length ? [{ sessionId: sessions.at(-1), status: 'passed' }] : [] };
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const agents: WorkflowAgent[] = [
+    { ...agent('Dev', 'while_task', 1, ['claude', '-p']), role: 'developer' },
+    { ...agent('Review', 'after_task', 1, ['review']), role: 'reviewer' },
+  ];
+  const calls: string[][] = [];
+  let reviews = 0;
+  const execute: CommandExecutor = async (command, _cwd, options) => {
+    calls.push(command);
+    if (command[0] === 'review') {
+      reviews += 1;
+      return reviews === 1
+        ? { exitCode: 1, durationMs: 1, output: '@@REVIEW: ÄNDERUNGEN NÖTIG\nKnopf fehlt' }
+        : { exitCode: 0, durationMs: 1, output: '@@REVIEW: FREIGEGEBEN' };
+    }
+    const raw = [
+      JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sitzung-1' }),
+      JSON.stringify({ type: 'result', result: 'fertig', usage: {} }),
+      '',
+    ].join('\n');
+    options?.onChunk?.(raw);
+    return { exitCode: 0, durationMs: 1, output: raw };
+  };
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/r', timeoutMs: 1, execute }), 'passed');
+  const developer = calls.filter((call) => call[0] === 'claude');
+  assert.equal(developer.length, 2);
+  // Erster Lauf frisch, die Sitzung wird sofort gespeichert; die Nachbesserung setzt sie fort.
+  assert.ok(!developer[0]!.includes('--resume'));
+  assert.equal(sessions[0], 'sitzung-1');
+  assert.deepEqual(developer[1]!.slice(developer[1]!.indexOf('--resume'), developer[1]!.indexOf('--resume') + 2), [
+    '--resume',
+    'sitzung-1',
+  ]);
+  assert.match(developer[1]!.at(-1) ?? '', /Fortsetzung deiner früheren Sitzung[\s\S]*Knopf fehlt/);
+});
+
+test('Fortsetzen scheitert (Sitzung weg): derselbe Schritt startet frisch mit dem vollen Auftrag', async () => {
+  const pool = {
+    query: async (sql: string) => {
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('s.session_id AS "sessionId"')) return { rows: [{ sessionId: 'alt', status: 'failed' }] };
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    return command.includes('--resume')
+      ? { exitCode: 1, durationMs: 1, output: 'No conversation found with session ID: alt' }
+      : { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const agents = [{ ...agent('Dev', 'while_task', 1, ['claude', '-p']), role: 'developer' }];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd: '/r', timeoutMs: 1, execute }), 'passed');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[0]!.includes('--resume'));
+  assert.match(calls[0]!.at(-1) ?? '', /abgebrochen/);
+  assert.ok(!calls[1]!.includes('--resume'));
+  assert.doesNotMatch(calls[1]!.at(-1) ?? '', /Fortsetzung/);
+});
+
+test('Tester schreibt Tests: der Prozess wird als PID des Schritts gemeldet, damit ein Abbruch ihn beendet', async () => {
+  process.env.DEV_LOG_AGENT_COMMAND = '["fake-agent"]';
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onSpawn?.(4242);
+    return { exitCode: 0, durationMs: 1, output: 'Tests geschrieben' };
+  };
+  const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'Tests grün' });
+  const tester = { ...agent('Tester', 'after_task', 1, null), role: 'tester' as const };
+  try {
+    assert.equal(await runWorkItem(pool, item, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin }), 'passed');
+  } finally {
+    delete process.env.DEV_LOG_AGENT_COMMAND;
+  }
+  assert.ok(
+    queries.some((query) => query.sql.includes('SET pid = $2') && query.values[1] === 4242),
+    'PID des Testschreibers wird gespeichert',
+  );
 });

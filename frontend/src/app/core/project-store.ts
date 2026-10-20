@@ -9,7 +9,7 @@ import {
   type Sprint,
   type WorkerStatus,
 } from './models.js';
-import { isSection, sectionFromHash, targetFromHash, type Section } from './navigation.js';
+import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Section } from './navigation.js';
 import { fetchProjectData } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 
@@ -45,7 +45,7 @@ export class ProjectStore {
   private requestVersion = 0;
 
   readonly projects = signal<Project[]>([]);
-  readonly activeProject = signal(readStoredProject());
+  readonly activeProject = signal(projectFromHash() ?? readStoredProject());
   readonly data = signal<ProjectData>(emptyProjectData());
   readonly errors = signal<Record<string, string>>({});
   readonly section = signal<Section>(sectionFromHash());
@@ -178,7 +178,8 @@ export class ProjectStore {
     this.notice.set('');
     try {
       await action();
-      if (refresh && this.activeProject()) await this.loadProject(this.activeProject());
+      // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
+      if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
       this.notice.set(success);
       setTimeout(() => {
         if (this.notice() === success) this.notice.set('');
@@ -214,6 +215,15 @@ export class ProjectStore {
   private onHashChange(): void {
     const section = sectionFromHash();
     this.focusId.set(targetFromHash());
+    // Zurück aus der Agent-Detailansicht (#agents/<id> → #agents): Detail schließen.
+    if (this.openAgent() && targetFromHash() !== this.openAgent()) this.openAgent.set(null);
+    // Link aus einer Push-Nachricht eines anderen Projekts: dorthin wechseln.
+    const project = projectFromHash();
+    if (project && project !== this.activeProject() && this.projects().some((entry) => entry.slug === project)) {
+      this.section.set(section);
+      void this.loadProject(project);
+      return;
+    }
     if (section === this.section()) return;
     this.section.set(section);
     this.refreshActiveProject();

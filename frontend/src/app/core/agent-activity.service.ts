@@ -26,6 +26,8 @@ export class AgentActivityService {
   async show(id: string): Promise<void> {
     this.store.navigate('agents');
     this.store.openAgent.set(id);
+    // Eigener Verlaufseintrag: „Zurück“ im Browser führt wieder zur Agent-Liste.
+    globalThis.history.pushState(null, '', `#agents/${id}`);
     this.activity.set([]);
     this.upcoming.set([]);
     this.loading.set(true);

@@ -55,7 +55,7 @@
           <strong>{{ task.title }}</strong>
           <span class="status" [ngClass]="task.status | statusClass">{{ task.status | statusLabel }}</span>
           <span class="muted"
-            >{{ task.sprintName ? 'Sprint ' + task.sprintName : 'Manuell gestartet' }} · Priorität
+            >{{ task.sprintName ? sprintLabel(task.sprintName) : 'Manuell gestartet' }} · Priorität
             {{ task.priority | priorityLabel }}</span
           >
         </div>

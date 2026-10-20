@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { upsertDoc } from './docs.js';
 import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
@@ -43,7 +43,9 @@ function toMarkdown(name: string, goal: string, report: SprintReport): string {
     ),
     '## Umgesetzt (Featureliste)',
     list(
-      report.implemented.map((item) => `- ${item.kind === 'bug' ? '🐞 ' : ''}${item.title}`),
+      report.implemented.map(
+        (item) => `- ${item.kind === 'bug' ? '🐞 ' : item.kind === 'express' ? '⚡ ' : ''}${item.title}`,
+      ),
       '_Nichts umgesetzt._',
     ),
     '## Offen / nicht umgesetzt',
@@ -125,9 +127,14 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
     });
   }
   const percent = orders.rows.length ? Math.round((done.length / orders.rows.length) * 100) : 0;
+  const express = orders.rows.filter((order) => order.kind === 'express').length;
   const report: SprintReport = {
     sprintId,
-    summary: `${done.length} von ${orders.rows.length} Aufträgen umgesetzt (${percent} %). ${open.length} offen, ${problems.length} Problem(e) dokumentiert.`,
+    summary: `${done.length} von ${orders.rows.length} Aufträgen umgesetzt (${percent} %). ${open.length} offen, ${problems.length} Problem(e) dokumentiert.${
+      express
+        ? ` Davon ${express} Express-${express === 1 ? 'Anfrage' : 'Anfragen'} aus dem Dashboard (ungeplant).`
+        : ''
+    }`,
     implemented: done.map(({ id, title, kind, effortHours }) => ({ id, title, kind, effortHours })),
     missing: open.map(({ id, title, status }) => ({ id, title, status })),
     problems,
@@ -160,8 +167,8 @@ export async function generateSprintReport(pool: Pool, sprintId: string): Promis
   return report;
 }
 
-export function registerReportRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/sprint-reports', async (request, response) => {
+export function registerReportRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/sprint-reports', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -177,7 +184,7 @@ export function registerReportRoutes(app: Express, pool: Pool): void {
     response.json({ reports: result.rows });
   });
 
-  app.post('/api/sprints/:id/report', async (request, response) => {
+  app.post('/sprints/:id/report', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -190,7 +197,7 @@ export function registerReportRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ report });
   });
 
-  app.patch('/api/sprints/:id/report', async (request, response) => {
+  app.patch('/sprints/:id/report', async (request, response) => {
     const body = request.body as unknown;
     if (!isUuid(request.params.id) || !isRecord(body) || typeof body.notes !== 'string' || body.notes.length > 10_000) {
       response.status(400).json({ message: 'Invalid report notes.' });

@@ -8,6 +8,7 @@ import {
   PERMISSION_GROUPS,
   type ProjectPermissions,
   rulesAllow,
+  hasFullAccess,
   withAgentPermissions,
 } from './tool-permissions.js';
 import { decodePolicy } from './agent-guard.js';
@@ -134,4 +135,26 @@ test('Dienste-Freigabe wird erst beim Start mit der Benutzer-ID aufgelöst', () 
   const agent = withAgentPermissions(CLAUDE, 'developer', project, ['services']);
   assert.match(option(agent, '--allowedTools') ?? '', /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/);
   assert.equal(commandLabel('services'), 'launchctl kickstart -k ch.*');
+});
+
+test('voller Zugriff ohne Wächter nur für den Dashboard-Assistenten und nur auf ausdrücklichen Wunsch', () => {
+  const full = ['claude', '--model', 'sonnet', '--dangerously-skip-permissions', '-p', '{prompt}'];
+  assert.deepEqual(withAgentPermissions(full, 'assistant', project, null), full);
+  const bypass = ['claude', '--permission-mode', 'bypassPermissions', '-p', '{prompt}'];
+  assert.deepEqual(withAgentPermissions(bypass, 'assistant', project, null), bypass);
+  assert.ok(hasFullAccess(['claude', '--permission-mode=bypassPermissions'], 'assistant'));
+  // Andere Rollen behalten Wächter und Regeln, auch wenn der Befehl dasselbe verlangt.
+  const developer = withAgentPermissions(full, 'developer', project, null);
+  assert.ok(developer.includes('--settings'));
+  assert.ok(developer.includes('--allowedTools'));
+  assert.ok(!hasFullAccess(full, 'developer'));
+  // Ohne die Option bleibt auch der Assistent beim Wächter.
+  assert.ok(withAgentPermissions(CLAUDE, 'assistant', project, null).includes('--settings'));
+});
+
+test('die Problemanalyse (analyst) arbeitet nur lesend: keine Datei-Werkzeuge, keine Shell', () => {
+  const command = withAgentPermissions(CLAUDE, 'analyst', project, null);
+  const disallowed = command[command.indexOf('--disallowedTools') + 1] ?? '';
+  for (const tool of ['Write', 'Edit', 'Bash']) assert.ok(disallowed.split(',').includes(tool), tool);
+  assert.ok(!command.includes('--allowedTools'));
 });

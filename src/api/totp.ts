@@ -67,7 +67,7 @@ export function verifyTotp(secret: string, code: string, now = Date.now()): numb
   return null;
 }
 
-export function otpauthUri(secret: string, account: string, issuer = 'Dev Log'): string {
+export function otpauthUri(secret: string, account: string, issuer = 'AIdeation'): string {
   const label = encodeURIComponent(`${issuer}:${account}`);
   return `otpauth://totp/${label}?secret=${secret}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=${DIGITS}&period=${STEP_SECONDS}`;
 }

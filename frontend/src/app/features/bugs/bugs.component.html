@@ -1,190 +1,272 @@
 @if (store.ready()) {
-  <section class="panel">
-    <div class="section-heading">
-      <div>
-        <h2>Bugs</h2>
-        <p class="muted">Fehler erfassen und priorisieren</p>
-      </div>
-    </div>
-    @if (store.showCreate()) {
-      <form class="form-grid create-form" (ngSubmit)="createBug()">
-        <label class="wide"
-          >Titel<input
-            name="title"
-            [(ngModel)]="bugForm.title"
-            maxlength="80"
-            required
-            placeholder="Kurz: was ist kaputt (max. 80 Zeichen)"
-        /></label>
-        <label
-          >Schweregrad<select name="severity" [(ngModel)]="bugForm.severity">
-            <option value="medium">Mittel</option>
-            <option value="high">Hoch</option>
-            <option value="critical">Kritisch</option>
-            <option value="low">Niedrig</option>
-          </select>
-        </label>
-        <label
-          >Kategorie<select name="category" [(ngModel)]="bugForm.category">
-            <option value="">Ohne Kategorie</option>
-            @for (category of categories; track category) {
-              <option [value]="category">{{ category | categoryLabel }}</option>
-            }
-          </select>
-        </label>
-        <label
-          >Sprint<select name="sprintId" [(ngModel)]="bugForm.sprintId">
-            <option value="">Kein Sprint</option>
-            @for (sprint of availableSprints(); track sprint.id) {
-              <option [value]="sprint.id">{{ sprint.name }}</option>
-            }
-          </select>
-        </label>
-        <label class="wide"
-          >Beschreibung<textarea name="description" [(ngModel)]="bugForm.description" maxlength="10000"></textarea>
-        </label>
-        <label class="wide"
-          >Bilder (PNG, JPEG, WebP, GIF · max. 5 MB)
-          <input
-            type="file"
-            name="images"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            #bugImages
-            (change)="selectPendingImages(bugImages)"
-          />
-        </label>
-        @if (pendingImages.length) {
-          <p class="muted wide">{{ pendingImages.length }} Bild(er) ausgewählt: {{ pendingImageNames() }}</p>
-        }
-        <button class="button primary" type="submit" [disabled]="busy()">Bug melden</button>
-      </form>
-    }
-    <app-data-table
-      [rows]="data().bugs"
-      [initialFilters]="store.filtersFor('bugs')"
-      [columns]="bugColumns"
-      [rowId]="bugId"
-      [initialSort]="[{ id: 'createdAt', desc: true }]"
-      [(expanded)]="openBug"
-      emptyText="Keine Bugs für diese Filter."
-    >
-      <ng-template appDataCell="title" let-bug>
-        <div class="title-with-hint">
-          <button type="button" class="link-button clamp" (click)="toggleBug(bug.id)">{{ bug.title }}</button>
-          @if (bug.description) {
-            <span
-              class="summary-hint"
-              tabindex="0"
-              [attr.data-tip]="bug.description | shortText: 400"
-              [attr.aria-label]="'Kurzfassung: ' + (bug.description | shortText: 400)"
-              >i</span
-            >
-          }
+  @for (list of lists(); track list.id) {
+    <section class="panel" [class.graveyard]="list.buried">
+      @if (!list.buried) {
+        <div class="section-heading">
+          <div>
+            <h2>Bugs</h2>
+            <p class="muted">Offene Fehler erfassen und priorisieren – behobene liegen auf dem Bug-Friedhof.</p>
+          </div>
         </div>
-      </ng-template>
-      <ng-template appDataCell="status" let-bug>
-        <span class="status" [ngClass]="bug.status | statusClass">{{ bug.status | statusLabel }}</span>
-      </ng-template>
-      <ng-template appDataCell="severity" let-bug>
-        <span class="tag">{{ bug.severity | severityLabel }}</span>
-      </ng-template>
-      <ng-template appDataDetail let-bug>
-        <div class="order-panel">
-          <div class="order-controls">
-            <label class="control"
-              ><span>Status</span
-              ><select
-                [ngModel]="bug.status"
-                (ngModelChange)="updateBug(bug.id, { status: $event })"
-                [name]="'bug-status-' + bug.id"
-              >
-                @for (status of bugStatuses; track status) {
-                  <option [value]="status">{{ status | statusLabel }}</option>
+        @if (store.showCreate()) {
+          <form class="form-grid create-form" (ngSubmit)="createBug()">
+            <label class="wide"
+              >Titel<input
+                name="title"
+                [(ngModel)]="bugForm.title"
+                maxlength="80"
+                required
+                placeholder="Kurz: was ist kaputt (max. 80 Zeichen)"
+            /></label>
+            <label
+              >Schweregrad<select name="severity" [(ngModel)]="bugForm.severity">
+                <option value="medium">Mittel</option>
+                <option value="high">Hoch</option>
+                <option value="critical">Kritisch</option>
+                <option value="low">Niedrig</option>
+              </select>
+            </label>
+            <label
+              >Kategorie<select name="category" [(ngModel)]="bugForm.category">
+                <option value="">Ohne Kategorie</option>
+                @for (category of categories; track category) {
+                  <option [value]="category">{{ category | categoryLabel }}</option>
                 }
               </select>
             </label>
-            <label class="control"
-              ><span>Sprint</span
-              ><select
-                [ngModel]="bug.sprintId"
-                (ngModelChange)="updateBug(bug.id, { sprintId: $event || null })"
-                [name]="'bug-sprint-' + bug.id"
-              >
-                <option [ngValue]="null">Kein Sprint</option>
-                @for (sprint of data().sprints; track sprint.id) {
+            <label
+              >Sprint<select name="sprintId" [(ngModel)]="bugForm.sprintId">
+                <option value="">Kein Sprint</option>
+                @for (sprint of availableSprints(); track sprint.id) {
                   <option [value]="sprint.id">{{ sprint.name }}</option>
                 }
               </select>
             </label>
-            <button class="button danger" type="button" (click)="deleteBug(bug.id)">Löschen</button>
-          </div>
-          <details class="run-step order-brief" open>
-            <summary>Beschreibung</summary>
-            @if (bug.description) {
-              <article class="markdown" [innerHTML]="bug.description | markdown"></article>
-            } @else {
-              <p class="muted">Keine Beschreibung.</p>
+            <label class="wide"
+              >Beschreibung<textarea name="description" [(ngModel)]="bugForm.description" maxlength="10000"></textarea>
+            </label>
+            <label class="wide"
+              >Bilder (PNG, JPEG, WebP, GIF · max. 5 MB)
+              <input
+                type="file"
+                name="images"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                multiple
+                #bugImages
+                (change)="selectPendingImages(bugImages)"
+              />
+            </label>
+            @if (pendingImages.length) {
+              <p class="muted wide">{{ pendingImages.length }} Bild(er) ausgewählt: {{ pendingImageNames() }}</p>
             }
-            <app-gallery [bugId]="bug.id" />
-          </details>
-          @if (bug.fixNotes) {
-            <details class="run-step order-brief">
-              <summary>Fix-Notizen</summary>
-              <article class="markdown" [innerHTML]="bug.fixNotes | markdown"></article>
-            </details>
-          }
-          <details class="run-step order-brief">
-            <summary>Bug bearbeiten</summary>
-            <form class="form-grid" (ngSubmit)="saveBug(bug, bugEdit.value)" #bugEdit="ngForm">
-              <label class="wide">Titel<input name="title" [ngModel]="bug.title" maxlength="180" required /> </label>
-              <label class="wide"
-                >Beschreibung<textarea name="description" [ngModel]="bug.description" maxlength="10000"></textarea>
-              </label>
-              <label
-                >Schweregrad<select name="severity" [ngModel]="bug.severity">
-                  <option value="low">Niedrig</option>
-                  <option value="medium">Mittel</option>
-                  <option value="high">Hoch</option>
-                  <option value="critical">Kritisch</option>
-                </select>
-              </label>
-              <label
-                >Kategorie<select name="category" [ngModel]="bug.category ?? ''">
-                  <option value="">Ohne Kategorie</option>
-                  @for (category of categories; track category) {
-                    <option [value]="category">{{ category | categoryLabel }}</option>
-                  }
-                </select>
-              </label>
-              <label
-                >Sprint<select name="sprintId" [ngModel]="bug.sprintId">
-                  <option value="">Kein Sprint</option>
+            <button class="button primary" type="submit" [disabled]="busy()">Bug melden</button>
+          </form>
+        }
+      } @else {
+        <div class="graveyard-heading" id="bug-graveyard">
+          <h2><span class="graveyard-cross" aria-hidden="true">✝</span> Bug-Friedhof</h2>
+          <p class="muted">
+            Keine Wiederauferstehung · {{ list.rows.length }}
+            {{ list.rows.length === 1 ? 'Bug ruht' : 'Bugs ruhen' }} hier in Frieden.
+          </p>
+        </div>
+      }
+      <app-data-table
+        [rows]="list.rows"
+        [initialFilters]="list.buried ? {} : store.filtersFor('bugs')"
+        [columns]="list.buried ? buriedColumns : bugColumns"
+        [rowId]="bugId"
+        [initialSort]="[{ id: list.buried ? 'buriedAt' : 'createdAt', desc: true }]"
+        [(expanded)]="openBug"
+        [emptyText]="list.empty"
+      >
+        <ng-template appDataCell="title" let-bug>
+          <div class="title-with-hint">
+            <button type="button" class="link-button clamp" (click)="toggleBug(bug.id)">{{ bug.title }}</button>
+            @if (bug.source === 'production') {
+              <span class="tag production-badge" [attr.title]="'Vorkommen der letzten 24 Stunden'"
+                >Betrieb · {{ bug.productionCount ?? 0 }}× seit gestern</span
+              >
+              @if (bug.regressedAt && (bug.status === 'open' || bug.status === 'in_progress')) {
+                <span class="tag regression-badge">Regression</span>
+              }
+            }
+            @if (bug.description) {
+              <span
+                class="summary-hint"
+                tabindex="0"
+                [attr.data-tip]="bug.description | shortText: 400"
+                [attr.aria-label]="'Kurzfassung: ' + (bug.description | shortText: 400)"
+                >i</span
+              >
+            }
+          </div>
+        </ng-template>
+        <ng-template appDataCell="status" let-bug>
+          <span class="status" [ngClass]="bug.status | statusClass">{{ bug.status | statusLabel }}</span>
+        </ng-template>
+        <ng-template appDataCell="severity" let-bug>
+          <span class="tag">{{ bug.severity | severityLabel }}</span>
+        </ng-template>
+        <ng-template appDataDetail let-bug>
+          <div class="order-panel">
+            <div class="order-controls">
+              @if (isBuried(bug)) {
+                <span class="control graveyard-note"
+                  ><span>Status</span>✝ {{ bug.status | statusLabel }} – taucht er wieder auf, als neuen Bug
+                  melden.</span
+                >
+              } @else {
+                <label class="control"
+                  ><span>Status</span
+                  ><select
+                    [ngModel]="bug.status"
+                    (ngModelChange)="updateBug(bug.id, { status: $event })"
+                    [name]="'bug-status-' + bug.id"
+                  >
+                    @for (status of bugStatuses; track status) {
+                      <option [value]="status">{{ status | statusLabel }}</option>
+                    }
+                  </select>
+                </label>
+              }
+              <label class="control"
+                ><span>Sprint</span
+                ><select
+                  [ngModel]="bug.sprintId"
+                  (ngModelChange)="updateBug(bug.id, { sprintId: $event || null })"
+                  [name]="'bug-sprint-' + bug.id"
+                >
+                  <option [ngValue]="null">Kein Sprint</option>
                   @for (sprint of data().sprints; track sprint.id) {
                     <option [value]="sprint.id">{{ sprint.name }}</option>
                   }
                 </select>
               </label>
-              <label class="wide"
-                >Fix-Notizen<textarea name="fixNotes" [ngModel]="bug.fixNotes" maxlength="10000"></textarea>
-              </label>
-              <label class="wide"
-                >Bilder anhängen (PNG, JPEG, WebP, GIF · max. 5 MB)
-                <input
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  multiple
-                  #editImages
-                  [disabled]="busy()"
-                  (change)="addImages(bug.id, editImages)"
-                />
-              </label>
-              <div class="wide"><app-gallery [bugId]="bug.id" [removable]="true" /></div>
-              <button class="button secondary" type="submit">Änderungen speichern</button>
-            </form>
-          </details>
+              <button class="button danger" type="button" (click)="deleteBug(bug.id)">Löschen</button>
+            </div>
+            <details class="run-step order-brief" open>
+              <summary>Beschreibung</summary>
+              @if (bug.description) {
+                <article class="markdown" [innerHTML]="bug.description | markdown"></article>
+              } @else {
+                <p class="muted">Keine Beschreibung.</p>
+              }
+              <app-gallery [bugId]="bug.id" />
+            </details>
+            @if (bug.source === 'production') {
+              <app-production-detail [bugId]="bug.id" />
+            }
+            @if (bug.fixNotes) {
+              <details class="run-step order-brief">
+                <summary>Fix-Notizen</summary>
+                <article class="markdown" [innerHTML]="bug.fixNotes | markdown"></article>
+              </details>
+            }
+            <details class="run-step order-brief">
+              <summary>Bug bearbeiten</summary>
+              <form class="form-grid" (ngSubmit)="saveBug(bug, bugEdit.value)" #bugEdit="ngForm">
+                <label class="wide">Titel<input name="title" [ngModel]="bug.title" maxlength="180" required /> </label>
+                <label class="wide"
+                  >Beschreibung<textarea name="description" [ngModel]="bug.description" maxlength="10000"></textarea>
+                </label>
+                <label
+                  >Schweregrad<select name="severity" [ngModel]="bug.severity">
+                    <option value="low">Niedrig</option>
+                    <option value="medium">Mittel</option>
+                    <option value="high">Hoch</option>
+                    <option value="critical">Kritisch</option>
+                  </select>
+                </label>
+                <label
+                  >Kategorie<select name="category" [ngModel]="bug.category ?? ''">
+                    <option value="">Ohne Kategorie</option>
+                    @for (category of categories; track category) {
+                      <option [value]="category">{{ category | categoryLabel }}</option>
+                    }
+                  </select>
+                </label>
+                <label
+                  >Sprint<select name="sprintId" [ngModel]="bug.sprintId">
+                    <option value="">Kein Sprint</option>
+                    @for (sprint of data().sprints; track sprint.id) {
+                      <option [value]="sprint.id">{{ sprint.name }}</option>
+                    }
+                  </select>
+                </label>
+                <label class="wide"
+                  >Fix-Notizen<textarea name="fixNotes" [ngModel]="bug.fixNotes" maxlength="10000"></textarea>
+                </label>
+                <label class="wide"
+                  >Bilder anhängen (PNG, JPEG, WebP, GIF · max. 5 MB)
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    multiple
+                    #editImages
+                    [disabled]="busy()"
+                    (change)="addImages(bug.id, editImages)"
+                  />
+                </label>
+                <div class="wide"><app-gallery [bugId]="bug.id" [removable]="true" /></div>
+                <button class="button secondary" type="submit">Änderungen speichern</button>
+              </form>
+            </details>
+          </div>
+        </ng-template>
+      </app-data-table>
+    </section>
+  }
+  @let stats = statistics();
+  @if (stats.open + stats.buried) {
+    <section class="panel bug-stats">
+      <div class="section-heading">
+        <div>
+          <h2>Bug-Statistik</h2>
+          <p class="muted">
+            {{ stats.open }} offen · {{ stats.buried }} begraben – wer sie gefunden hat, wo sie stecken und in welchen
+            Tests sie auffielen.
+          </p>
         </div>
-      </ng-template>
-    </app-data-table>
-  </section>
+      </div>
+      <div class="bug-stats-grid">
+        @for (group of statGroups(stats); track group.title) {
+          <div class="bug-stats-card">
+            <h3>{{ group.title }}</h3>
+            @if (group.rows.length) {
+              <table class="bug-stats-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{{ group.column }}</th>
+                    <th scope="col" class="num">Offen</th>
+                    <th scope="col" class="num">✝</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of group.rows; track row.label) {
+                    <tr>
+                      <td>
+                        <span class="bug-stats-label" [title]="row.label">{{ row.label }}</span>
+                        <span class="bug-stats-bar" aria-hidden="true">
+                          <span class="open" [style.width.%]="(row.open / group.max) * 100"></span>
+                          <span class="buried" [style.width.%]="(row.buried / group.max) * 100"></span>
+                        </span>
+                      </td>
+                      <td class="num">{{ row.open || '–' }}</td>
+                      <td class="num">{{ row.buried || '–' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              @if (group.more) {
+                <p class="muted">… und {{ group.more }} weitere</p>
+              }
+            } @else {
+              <p class="muted">{{ group.empty }}</p>
+            }
+          </div>
+        }
+      </div>
+    </section>
+  }
 }

@@ -2,4 +2,4 @@ dist
 .angular
 node_modules
 package-lock.json
-frontend/src/styles.css
+frontend/src/styles/

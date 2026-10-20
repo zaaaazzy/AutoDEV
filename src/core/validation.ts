@@ -37,7 +37,7 @@ const BLOCKED_FOLDERS = [
   '/proc',
 ];
 
-/** Projektbereich: Ordner, in denen Dev Log Projekte anlegen, löschen und bearbeiten darf (DEV_LOG_PROJECT_ROOTS, mit „:“ getrennt). */
+/** Projektbereich: Ordner, in denen AIdeation Projekte anlegen, löschen und bearbeiten darf (DEV_LOG_PROJECT_ROOTS, mit „:“ getrennt). */
 export function projectRoots(environment: NodeJS.ProcessEnv = process.env): string[] {
   return (environment.DEV_LOG_PROJECT_ROOTS ?? '')
     .split(':')

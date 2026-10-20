@@ -1,0 +1,104 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import type { CommandExecutor } from '../core/command.js';
+import { completeRestart, processRestart, readRestart, requestRestart, RESTART_COMMAND } from './system-restart.js';
+
+/** app_settings im Speicher: genug für SELECT value … WHERE key und INSERT … ON CONFLICT. */
+function memoryPool() {
+  const rows = new Map<string, string>();
+  return {
+    rows,
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.startsWith('SELECT')) {
+        const value = rows.get(String(values[0]));
+        return { rows: value === undefined ? [] : [{ value }] };
+      }
+      rows.set(String(values[0]), String(values[1]));
+      return { rows: [] };
+    },
+  } as unknown as Parameters<typeof readRestart>[0] & { rows: Map<string, string> };
+}
+
+const ok: CommandExecutor = async () => ({ exitCode: 0, durationMs: 1, output: 'Container dev-log Started' });
+
+test('Neustart: anfordern, Container neu bauen, nach dem Worker-Start abschließen', async () => {
+  const pool = memoryPool();
+  const calls: { command: string[]; cwd: string }[] = [];
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push({ command, cwd });
+    return ok(command, cwd);
+  };
+  assert.equal(await processRestart(pool, '/srv/devlog', () => 0, execute), 'idle');
+  const first = await requestRestart(pool, 'Patrick');
+  assert.equal(first.created, true);
+  assert.equal((await requestRestart(pool, 'jemand')).created, false, 'kein zweiter Neustart parallel');
+  assert.equal(
+    await processRestart(pool, '/srv/devlog', () => 0, execute, undefined, { health: async () => true }),
+    'restart',
+  );
+  assert.deepEqual(
+    calls.filter((call) => call.command.includes('--build')),
+    [{ command: RESTART_COMMAND, cwd: '/srv/devlog' }],
+  );
+  assert.equal((await readRestart(pool))?.status, 'restarting');
+  assert.equal((await completeRestart(pool))?.status, 'done');
+  assert.equal((await requestRestart(pool, 'Patrick')).created, true, 'nach Abschluss wieder möglich');
+});
+
+test('Neustart: wartet auf laufende Aufgaben, aber nicht unbegrenzt', async () => {
+  const pool = memoryPool();
+  const requested = new Date('2026-10-19T10:00:00Z');
+  await requestRestart(pool, null, requested);
+  const soon = () => new Date(requested.getTime() + 60_000);
+  assert.equal(await processRestart(pool, '/x', () => 2, ok, soon), 'waiting');
+  assert.match((await readRestart(pool))?.message ?? '', /Wartet auf 2 laufende Aufgaben/);
+  const late = () => new Date(requested.getTime() + 16 * 60_000);
+  assert.equal(await processRestart(pool, '/x', () => 2, ok, late, { health: async () => true }), 'restart');
+});
+
+test('Neustart: fehlgeschlagener Build lässt den Worker weiterlaufen und meldet die Ausgabe', async () => {
+  const pool = memoryPool();
+  await requestRestart(pool, null);
+  const failing: CommandExecutor = async () => ({ exitCode: 1, durationMs: 1, output: 'failed to solve: npm ci' });
+  assert.equal(await processRestart(pool, '/x', () => 0, failing), 'failed');
+  const state = await readRestart(pool);
+  assert.equal(state?.status, 'failed');
+  assert.match(state?.log ?? '', /npm ci/);
+  // Ein Worker-Start nach einem abgebrochenen Build markiert diesen als fehlgeschlagen.
+  pool.rows.set('system:restart', JSON.stringify({ ...state, status: 'building' }));
+  assert.equal((await completeRestart(pool))?.status, 'failed');
+});
+
+test('Neustart: Kommentar aus der Bestätigung wird gespeichert', async () => {
+  const pool = memoryPool();
+  const { state } = await requestRestart(pool, 'Patrick', new Date(), '  neue Agents laden ');
+  assert.equal(state.comment, 'neue Agents laden');
+});
+
+test('Neustart: antwortet der neue Stand nicht, wird auf das vorherige Abbild zurückgesetzt', async () => {
+  const pool = memoryPool();
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    if (command.includes('images'))
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        output: '[{"ID":"sha256:abc","Repository":"devlog-dev-log","Tag":"latest"}]',
+      };
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  await requestRestart(pool, 'Patrick');
+  let checks = 0;
+  // Erst nach dem Zurücksetzen antwortet AIdeation wieder.
+  const health = async (): Promise<boolean> => calls.some((call) => call.includes('--no-build')) && ++checks > 0;
+  const result = await processRestart(pool, '/srv', () => 0, execute, undefined, {
+    health,
+    healthTimeoutMs: 0,
+    healthIntervalMs: 0,
+  });
+  assert.equal(result, 'failed');
+  assert.ok(calls.some((call) => call.join(' ') === 'docker tag sha256:abc devlog-dev-log:latest'));
+  const state = await readRestart(pool);
+  assert.match(state?.message ?? '', /vorherigen Abbild/);
+});

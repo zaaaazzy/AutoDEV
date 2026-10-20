@@ -26,6 +26,11 @@ import { roleLabel } from './agent-options.js';
 export class AgentDetailComponent {
   private readonly store = inject(ProjectStore);
   private readonly activity = inject(AgentActivityService);
+  /** „Sprint 1“ statt „Sprint Sprint 1“, wenn der Name schon mit „Sprint“ beginnt. */
+  protected sprintLabel(name: string): string {
+    return /^sprint\b/i.test(name) ? name : `Sprint ${name}`;
+  }
+
   protected readonly agentActivityLoading = this.activity.loading;
   protected readonly agentActive = this.activity.active;
   protected readonly agentDone = this.activity.done;

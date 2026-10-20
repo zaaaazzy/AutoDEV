@@ -57,6 +57,7 @@ export class SprintBoardComponent {
       planned: this.byRank(mine.filter((item) => item.status === 'planned' || item.status === 'backlog')),
       running: mine.filter((item) => item.status === 'in_progress'),
       blocked: mine.filter((item) => item.status === 'blocked'),
+      approval: mine.filter((item) => item.status === 'approval'),
       done: mine.filter((item) => item.status === 'done'),
       rejected: mine.filter((item) => item.status === 'rejected'),
     };
@@ -68,6 +69,13 @@ export class SprintBoardComponent {
       { id: 'planned', title: 'Geplant', hint: 'Reihenfolge = Abarbeitung', items: board.planned, drop: true },
       { id: 'running', title: 'In Arbeit', hint: '', items: board.running, drop: false },
       { id: 'blocked', title: statusLabel('blocked'), hint: '', items: board.blocked, drop: false },
+      {
+        id: 'approval',
+        title: statusLabel('approval'),
+        hint: 'ansehen und freigeben',
+        items: board.approval,
+        drop: false,
+      },
       { id: 'done', title: 'Erledigt', hint: '', items: board.done, drop: false },
       { id: 'rejected', title: 'Abgelehnt', hint: 'verstösst gegen Projektregel', items: board.rejected, drop: false },
     ];

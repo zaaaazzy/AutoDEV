@@ -23,8 +23,9 @@
               class="kanban-card"
               cdkDrag
               [cdkDragData]="item"
-              [cdkDragDisabled]="!column.drop || !editable()"
-              [class.draggable]="column.drop && editable()"
+              [cdkDragDisabled]="!column.drop || !editable() || item.kind === 'express'"
+              [class.draggable]="column.drop && editable() && item.kind !== 'express'"
+              [class.express]="item.kind === 'express'"
             >
               <div class="kanban-card-head">
                 @if (column.id === 'planned') {
@@ -34,11 +35,21 @@
                   <app-bug-icon />
                 }
                 <a class="kanban-title" [href]="link(item)" [title]="item.title">{{ title(item) }}</a>
+                @if (item.kind === 'express') {
+                  <span
+                    class="express-badge"
+                    title="Express-Anfrage aus dem Dashboard – ungeplant in den Sprint aufgenommen"
+                    >⚡ Express</span
+                  >
+                }
                 @if (column.id === 'running') {
                   <span class="live-dot" aria-label="Agent arbeitet"></span>
                 }
               </div>
               <div class="kanban-meta">
+                @if (item.kind === 'express') {
+                  <span class="tag express-unplanned">ungeplant</span>
+                }
                 <span [class]="'kanban-priority prio-' + item.priority">{{ priorityLabel(item.priority) }}</span>
                 @if (item.category) {
                   <span [class]="'tag category category-' + item.category">{{ categoryLabel(item.category) }}</span>
@@ -94,6 +105,13 @@
                     <app-bug-icon />
                   }
                   <a class="kanban-title" [href]="link(item)" [title]="item.title">{{ title(item) }}</a>
+                  @if (item.kind === 'express') {
+                    <span
+                      class="express-badge"
+                      title="Express-Anfrage aus dem Dashboard – ungeplant in den Sprint aufgenommen"
+                      >⚡ Express</span
+                    >
+                  }
                   <button
                     type="button"
                     class="kanban-move"

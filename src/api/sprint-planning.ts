@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import {
   affectedFiles,
@@ -83,7 +83,7 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
               (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = 'blocked') AS troubled,
               d.action_todo AS "actionTodo"
          FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
-        WHERE d.project_slug = $1 AND d.status IN ('backlog', 'planned', 'blocked')
+        WHERE d.project_slug = $1 AND d.status IN ('backlog', 'planned', 'blocked') AND d.kind <> 'express'
           AND (d.sprint_id IS NULL OR s.status = 'completed')
         ORDER BY d.created_at, d.id`,
       [project],
@@ -126,7 +126,7 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
 /**
  * Was den Autopilot anhält: gescheiterte Git-Sicherung des letzten abgeschlossenen Sprints (bis zur Freigabe),
  * ein noch laufender Abschluss und die Arbeitszeiten (nur für das Starten neuer Sprints).
- * Budget: Dev Log hat noch kein Budget-Feature (Idee 04) – bis dahin gibt es bewusst keine Budgetprüfung,
+ * Budget: AIdeation hat noch kein Budget-Feature (Idee 04) – bis dahin gibt es bewusst keine Budgetprüfung,
  * die Arbeitszeiten sind die einzige Kostengrenze.
  */
 export async function autopilotGuard(pool: Pool, project: string, now = new Date()): Promise<AutopilotGuard | null> {
@@ -225,6 +225,8 @@ export async function applyProposal(
   project: string,
   ids: string[],
   start: boolean,
+  /** Kommentar beim Übernehmen: wird das Sprintziel. */
+  comment = '',
 ): Promise<{ sprintId: string; started: boolean } | string> {
   const proposal = await loadProposal(pool, project);
   if (!proposal) return 'Projekt nicht gefunden.';
@@ -244,7 +246,9 @@ export async function applyProposal(
         [
           project,
           proposal.name,
-          `Vorschlag der Sprintplanung: ${ids.length} Aufträge`,
+          comment.trim()
+            ? `${comment.trim().slice(0, 2000)}\n\n(Vorschlag der Sprintplanung: ${ids.length} Aufträge)`
+            : `Vorschlag der Sprintplanung: ${ids.length} Aufträge`,
           shouldStart ? 'active' : 'planned',
         ],
       )
@@ -292,8 +296,8 @@ const parseIds = (body: unknown): string[] | null =>
     ? (body.ids as string[])
     : null;
 
-export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/sprints/proposal', async (request, response, next) => {
+export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/sprints/proposal', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const proposal = slug ? await loadProposal(pool, slug) : null;
@@ -304,12 +308,14 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/sprints/proposal/apply', async (request, response, next) => {
+  app.post('/projects/:slug/sprints/proposal/apply', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const ids = parseIds(request.body);
       if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
-      const result = await applyProposal(pool, slug, ids, isRecord(request.body) && request.body.start === true);
+      const body = isRecord(request.body) ? request.body : {};
+      const comment = typeof body.comment === 'string' ? body.comment : '';
+      const result = await applyProposal(pool, slug, ids, body.start === true, comment);
       if (typeof result === 'string') return void response.status(400).json({ message: result });
       response.status(201).json(result);
     } catch (error) {
@@ -317,7 +323,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.get('/api/projects/:slug/sprints/roadmap', async (request, response, next) => {
+  app.get('/projects/:slug/sprints/roadmap', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const roadmap = slug ? await loadRoadmap(pool, slug) : null;
@@ -329,7 +335,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
   });
 
   // KI-Kommentar: der Worker lässt den Auftragsautor den Vorschlag kommentieren (nur Text, ändert die Auswahl nicht).
-  app.get('/api/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
+  app.get('/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -346,7 +352,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
+  app.post('/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const ids = parseIds(request.body);
@@ -375,7 +381,7 @@ export function registerSprintPlanningRoutes(app: Express, pool: Pool): void {
   });
 
   // Manuelle Freigabe nach gescheitertem Abschluss: der Fehler dieses Sprints hält den Autopilot nicht mehr an.
-  app.post('/api/projects/:slug/sprints/autopilot/resume', async (request, response, next) => {
+  app.post('/projects/:slug/sprints/autopilot/resume', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const guard = slug ? await autopilotGuard(pool, slug) : null;

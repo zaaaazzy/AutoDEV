@@ -2,6 +2,7 @@ import { NgClass } from '@angular/common';
 import { SprintProposalComponent } from './sprint-proposal.component.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { Component, inject, signal } from '@angular/core';
+import { SprintReviewComponent } from './sprint-review.component.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
@@ -34,6 +35,7 @@ const SPRINT_STATUS_RANK = ['active', 'planned', 'completed'];
   selector: 'app-sprints',
   standalone: true,
   imports: [
+    SprintReviewComponent,
     SprintProposalComponent,
     NavIconComponent,
     SprintBoardComponent,
@@ -205,6 +207,21 @@ export class SprintsComponent {
     await this.store.perform(
       () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}`, values),
       'Sprint aktualisiert.',
+    );
+  }
+
+  /** Go zum Sprint: Tests, CI, Merge nach main, dann zieht der Projektordner nach und es wird deployt. */
+  protected async goLive(sprint: Sprint): Promise<void> {
+    const open = sprint.reviewReadyAt ? '' : '\n\nAchtung: Es sind noch nicht alle Aufträge durch.';
+    if (
+      !globalThis.confirm(
+        `„${sprint.name}“ live schalten?\n\nTests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.${open}`,
+      )
+    )
+      return;
+    await this.store.perform(
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed' }),
+      'Wird live geschaltet – Tests, CI und Merge laufen im Hintergrund.',
     );
   }
 

@@ -1,4 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
+import { OrderTimelineComponent } from '../../shared/order-timeline.component.js';
+import { OrderQuestionComponent } from '../../shared/order-question.component.js';
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
@@ -10,6 +12,7 @@ import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { OrderService } from './order.service.js';
+import { OrderApprovalComponent } from './order-approval.component.js';
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -17,6 +20,9 @@ import { OrderService } from './order.service.js';
   standalone: true,
   imports: [
     OrderBriefComponent,
+    OrderApprovalComponent,
+    OrderQuestionComponent,
+    OrderTimelineComponent,
     AgentWorkflowComponent,
     FormsModule,
     NgTemplateOutlet,

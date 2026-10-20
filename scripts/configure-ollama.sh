@@ -2,7 +2,7 @@
 # Setzt Ollama-Einstellungen für die macOS-App (jetzt und bei jedem Login) und startet Ollama neu.
 # Werte lassen sich per Umgebungsvariable überschreiben, z. B. OLLAMA_MAX_LOADED_MODELS=2 ./scripts/configure-ollama.sh
 set -euo pipefail
-LABEL="com.devlog.ollama-env"
+LABEL="com.aideation.ollama-env"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:--1}"
 FLASH="${OLLAMA_FLASH_ATTENTION:-1}"
@@ -27,6 +27,9 @@ launchctl setenv OLLAMA_KEEP_ALIVE "$KEEP_ALIVE"
 launchctl setenv OLLAMA_FLASH_ATTENTION "$FLASH"
 launchctl setenv OLLAMA_KV_CACHE_TYPE "$KV"
 launchctl setenv OLLAMA_MAX_LOADED_MODELS "$MAX_MODELS"
+# Frühere Bezeichnung (Dev Log) abräumen.
+launchctl bootout "gui/$(id -u)/com.devlog.ollama-env" 2>/dev/null || true
+rm -f "$HOME/Library/LaunchAgents/com.devlog.ollama-env.plist"
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 

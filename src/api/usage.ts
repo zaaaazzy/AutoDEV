@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { parseProjectSlug } from '../core/validation.js';
 
@@ -211,8 +211,8 @@ export function costOfTokens(tokens: number, pricePerToken: number | null): numb
   return pricePerToken === null ? null : Math.round(tokens * pricePerToken * 100) / 100;
 }
 
-export function registerUsageRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/usage', async (request, response, next) => {
+export function registerUsageRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/usage', async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });

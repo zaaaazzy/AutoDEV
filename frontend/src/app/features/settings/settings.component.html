@@ -11,6 +11,14 @@
         <label class="wide"
           >Projektordner<input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
         </label>
+        <div class="wide folder-picker-row">
+          <app-folder-picker [value]="settings.repository" (picked)="settings.repository = $event" />
+          @if (settings.repository !== (store.currentProject()?.repository ?? '')) {
+            <span class="muted"
+              >Neuer Ordner – mit „Speichern“ übernehmen. Die Agents arbeiten danach dort (bzw. in „…-agents“).</span
+            >
+          }
+        </div>
         <label class="wide"
           >Testbefehle (ein Befehl pro Zeile)<textarea
             name="testCommands"
@@ -64,11 +72,70 @@
           Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung
           gestartet.</label
         >
+        <label class="wide check">
+          <input type="checkbox" name="agentWorkspace" [(ngModel)]="settings.agentWorkspace" /> Eigener Arbeitsordner
+          für die Agents: Aufträge laufen in „{{ settings.repository || 'Projektordner' }}-agents“ (Git-Worktree), der
+          Projektordner und ein dort laufender Entwicklungsserver bleiben unberührt.</label
+        >
+        <label
+          >Review-Freigabe
+          <select name="reviewMode" [(ngModel)]="settings.reviewMode">
+            <option value="off">Nie – fertige Aufträge werden sofort gemergt</option>
+            <option value="ui">Nur bei Oberflächen-Änderungen</option>
+            <option value="always">Immer</option>
+          </select>
+        </label>
+        <label class="wide"
+          >Review-Befehl
+          <input
+            name="reviewCommand"
+            [(ngModel)]="settings.reviewCommand"
+            placeholder="sh /source/scripts/review-live.sh"
+          />
+        </label>
+        <p class="muted wide">
+          Mit Review-Freigabe wartet ein fertiger Auftrag, bis du ihn freigibst; erst dann wird er in den Sprint gemergt
+          (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl läuft in einem Review-Container: dort ist
+          der Source-Ordner unter <code>/source</code> eingebunden, gearbeitet wird im gewählten Stand (Ports und
+          Datenbank-Kopie stellt der Container). In der Sprint-Ansicht lässt sich so jeder Stand mit ▶ starten.
+        </p>
+        <label
+          >Kostengrenze je Auftrag (Tokens)
+          <input
+            type="number"
+            name="orderTokenLimit"
+            min="1000"
+            step="1000"
+            placeholder="keine Grenze"
+            [(ngModel)]="settings.orderTokenLimit"
+          />
+        </label>
+        <label
+          >Kostengrenze je Auftrag (USD)
+          <input
+            type="number"
+            name="orderCostLimit"
+            min="0.01"
+            step="0.5"
+            placeholder="keine Grenze"
+            [(ngModel)]="settings.orderCostLimit"
+          />
+        </label>
+        <p class="muted wide">
+          Ist eine Grenze erreicht, startet für den Auftrag kein weiterer Agent; er wartet mit „Aktion notwendig“ auf
+          dich. „Erneut versuchen“ gibt ihm ein neues Budget. Leer lassen für keine Grenze.
+        </p>
+        <label class="wide check">
+          <input type="checkbox" name="restartAfterSprint" [(ngModel)]="settings.restartAfterSprint" /> Nach dem
+          Sprint-Abschluss AIdeation neu starten: Ist der Sprint nach <code>main</code> gemergt, baut AIdeation die
+          Container neu und startet den Worker neu – nur für das Projekt, in dem AIdeation selbst entwickelt
+          wird.</label
+        >
         <label
           >Sprintplanung
           <select name="sprintMode" [(ngModel)]="settings.sprintMode">
             <option value="manual">Manuell – Sprints selbst zusammenstellen</option>
-            <option value="suggest">Vorschlagen – Dev Log schlägt vor, du übernimmst</option>
+            <option value="suggest">Vorschlagen – AIdeation schlägt vor, du übernimmst</option>
             <option value="autopilot">Autopilot – vorschlagen, starten und abschliessen</option>
           </select>
         </label>
@@ -153,7 +220,7 @@
         }
         <p class="muted wide">
           Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
-          Dev-Log-Datenbank).
+          AIdeation-Datenbank).
         </p>
         <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
       </form>
@@ -190,7 +257,9 @@
       <div class="section-heading">
         <div>
           <h2>Projekt löschen</h2>
-          <p class="muted">Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus Dev Log.</p>
+          <p class="muted">
+            Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus AIdeation.
+          </p>
         </div>
       </div>
       <form class="form-grid" (ngSubmit)="deleteProject()">
@@ -212,9 +281,11 @@
     </section>
   }
   @if (auth.can('admin') && store.currentProject()) {
+    <app-production-settings />
     <app-permission-groups-settings />
   }
   @if (auth.can('admin')) {
+    <app-review-slots-settings />
     <app-users-settings />
   }
   <app-notification-settings />

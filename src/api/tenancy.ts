@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import type { Principal } from './roles.js';
+import { fullPath } from './security.js';
 
 /**
  * Mandantentrennung: Ein Mandant ist ein Projekt. Administratoren sehen alle Projekte, alle anderen nur die, für
@@ -17,6 +18,7 @@ const ENTITY_PROJECT: Record<string, string> = {
   docs: 'SELECT project_slug AS slug FROM docs WHERE id = $1',
   agents: 'SELECT project_slug AS slug FROM agents WHERE id = $1',
   'agent-tasks': 'SELECT project_slug AS slug FROM agent_tasks WHERE id = $1',
+  'workflow-steps': 'SELECT project_slug AS slug FROM workflow_steps WHERE id = $1',
   'doc-revisions': 'SELECT d.project_slug AS slug FROM doc_revisions r JOIN docs d ON d.id = r.doc_id WHERE r.id = $1',
   'test-media': 'SELECT r.project_slug AS slug FROM test_media m JOIN test_runs r ON r.id = m.run_id WHERE m.id = $1',
   attachments: `SELECT COALESCE(i.project_slug, b.project_slug) AS slug FROM ideation_attachments a
@@ -66,18 +68,17 @@ export async function projectOfRequest(pool: Pool, path: string): Promise<string
 export function tenantGuard(pool: Pool): RequestHandler {
   return async (request, response, next) => {
     try {
-      if (!request.path.startsWith('/api/')) return next();
+      const path = fullPath(request);
+      if (!path.startsWith('/api/')) return next();
       const principal = response.locals.principal as Principal | undefined;
       const allowed = await allowedProjects(pool, principal);
       response.locals.allowedProjects = allowed;
       if (allowed === null) return next();
       if (
-        GLOBAL_ROUTES.some(
-          ([method, pattern]) => (method === '*' || method === request.method) && pattern.test(request.path),
-        )
+        GLOBAL_ROUTES.some(([method, pattern]) => (method === '*' || method === request.method) && pattern.test(path))
       )
         return next();
-      const project = await projectOfRequest(pool, request.path);
+      const project = await projectOfRequest(pool, path);
       if (project === undefined) {
         // Nicht zuordenbar und nicht ausdrücklich global: nur für Administratoren.
         return void response.status(403).json({ message: 'Dafür braucht es Administrationsrechte.' });

@@ -38,7 +38,7 @@ async function login(page: Page, welcome = false): Promise<void> {
   // Die Begrüßung erscheint sonst in jedem frischen Browser und überdeckt die Seite.
   if (!welcome) await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: 'Dev Log' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AIdeation' })).toBeVisible();
   await page.getByLabel('Benutzername').fill(username);
   await page.getByLabel('Passwort').fill(password);
   await page.getByRole('button', { name: 'Anmelden' }).click();
@@ -263,11 +263,11 @@ test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint 
 
 test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async ({ page }) => {
   await login(page, true);
-  const welcome = page.getByRole('dialog', { name: /Willkommen bei Dev Log/ });
+  const welcome = page.getByRole('dialog', { name: /Willkommen bei AIdeation/ });
   await expect(welcome).toBeVisible();
   await welcome.getByRole('button', { name: 'Tour starten' }).click();
   const card = page.locator('.tour-card');
-  await expect(card.locator('h3')).toHaveText('Willkommen in Dev Log');
+  await expect(card.locator('h3')).toHaveText('Willkommen in AIdeation');
   await card.getByRole('button', { name: 'Weiter' }).click();
   await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
   await expect(page).toHaveURL(/#ideation/);
@@ -333,31 +333,61 @@ test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
 
-test('Agent-Aktionen: Tester hat die Standard-Aktionen, Quick Actions im Dashboard, eigene Aktion anlegen', async ({
+test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details beim Hover, eigene Aktion anlegen', async ({
   page,
 }) => {
   const title = `Build prüfen ${test.info().project.name}`;
   await login(page);
   await page.goto('/#dashboard');
-  // Quick Actions: die Standard-Aktionen gehören dem Tester.
-  const quick = page.locator('.quick-actions .quick-group', { hasText: 'Tester' });
-  await expect(quick.getByRole('button', { name: /Tests ausführen/ })).toBeVisible();
+  // Keine eigene Quick-Actions-Karte mehr: alles steckt im Menü „Aktionen“ des Assistenten.
+  await expect(page.locator('.quick-actions')).toHaveCount(0);
   await page.getByRole('button', { name: 'Aktionen' }).click();
-  const search = page.getByRole('searchbox', { name: 'Aktion suchen' });
+  const menu = page.getByRole('dialog', { name: 'Agent-Aktionen' });
+  const search = menu.getByRole('combobox', { name: 'Aktion suchen' });
   await expect(search).toBeFocused();
-  await search.fill('docker');
-  await expect(page.locator('.agent-task')).toHaveCount(1);
-  await expect(page.locator('.agent-task')).toContainText('Docker-Dienste starten');
+  // Gruppen: Testläufe und die Standard-Aktionen des Testers.
+  const groups = menu.locator('.agent-tasks-group');
+  await expect(groups.filter({ hasText: /^Tests$/ })).toHaveCount(1);
+  await expect(groups.filter({ hasText: /^Tester$/ })).toHaveCount(1);
+  await expect(menu.locator('.agent-task', { hasText: 'Kompletter Test' })).toBeVisible();
+  // Hover zeigt die ausführliche Beschreibung mit vollständiger Anweisung, Agent und Befehlen.
+  await menu.locator('.agent-task', { hasText: 'Abhängigkeiten prüfen' }).hover();
+  const detail = menu.locator('.agent-task-detail');
+  await expect(detail).toContainText('Ausgeführt von');
+  await expect(detail).toContainText('Tester');
+  await expect(detail).toContainText('schlage Updates mit Risiko vor. Nichts installieren.');
+  await expect(detail.locator('code', { hasText: 'npm audit' })).toBeVisible();
+  // Auch auf dem Handy läuft nichts seitlich aus der Seite.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.mouse.move(0, 0);
+  await expect(detail).toHaveCount(0);
+  // Ohne Hover (Handy): der Info-Knopf zeigt die Details, ohne die Aktion zu starten.
+  const git = menu.locator('.agent-task', { hasText: 'Git-Status zusammenfassen' });
+  await git.getByRole('button', { name: 'Details' }).click();
+  await expect(detail).toContainText('Nichts ändern.');
+  await expect(detail).toContainText('Noch nie gestartet');
+  await expect(menu).toBeVisible();
+  // Suche filtert über alle Gruppen; Pfeiltaste zeigt die Details per Tastatur.
+  // „Docker-Dienste“ statt nur „docker“: „AIdeation neu starten“ erwähnt docker compose ebenfalls.
+  await page.mouse.move(0, 0);
+  await search.fill('docker-dienste');
+  await expect(menu.locator('.agent-task')).toHaveCount(1);
+  await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
+  await expect(groups).toHaveText(['Tester']);
+  await search.press('ArrowDown');
+  await expect(detail).toContainText('docker compose up -d');
   await search.fill(title);
-  await page.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();
+  await expect(menu.getByText('Keine Aktion gefunden.')).toBeVisible();
+  await menu.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();
   await page.getByLabel('Anweisung an den Assistenten').fill('Führe npm run build aus und melde Fehler.');
   await page.getByRole('button', { name: 'Speichern', exact: true }).click();
-  const own = page.locator('.agent-task', { hasText: title });
+  const own = menu.locator('.agent-task', { hasText: title });
   await expect(own).toBeVisible();
   page.once('dialog', (dialog) => void dialog.accept());
   await own.hover();
   await own.getByRole('button', { name: 'Löschen' }).click();
   await expect(own).toHaveCount(0);
+  await expect(menu.getByRole('link', { name: 'Aktionen verwalten' })).toBeVisible();
 });
 
 test('Chat: „@“ wählt den Agent, „/“ verweist mit Bubbles, beim Tippen eingeschränkt', async ({ page }) => {
@@ -409,9 +439,11 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
 
   // Roadmap: 3 vorausberechnete Sprints, ohne dass etwas angelegt wird.
   const sprintList = async () =>
-    ((await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
-      sprints: { id: string; status: string }[];
-    }).sprints;
+    (
+      (await (await request.get('/api/projects/e2e/sprints', { headers })).json()) as {
+        sprints: { id: string; status: string }[];
+      }
+    ).sprints;
   const sprintsBefore = (await sprintList()).length;
   await card.getByRole('button', { name: /Roadmap/ }).click();
   const roadmap = card.locator('.sprint-roadmap');
@@ -420,7 +452,10 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   expect((await sprintList()).length).toBe(sprintsBefore);
 
   // KI-Kommentar wird beim Worker angefragt; die Auswahl bleibt unverändert. Ohne Pause gibt es nichts freizugeben.
-  const asked = await request.post('/api/projects/e2e/sprints/proposal/comment', { headers, data: { ids: [order.id] } });
+  const asked = await request.post('/api/projects/e2e/sprints/proposal/comment', {
+    headers,
+    data: { ids: [order.id] },
+  });
   expect(asked.status()).toBe(202);
   expect((await asked.json()).comment.status).toBe('requested');
   const resumed = await request.post('/api/projects/e2e/sprints/autopilot/resume', { headers, data: {} });
@@ -520,6 +555,56 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
   } finally {
     await request.delete(`/api/agents/${agent.id}`, { headers });
   }
+});
+
+test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und Verlauf am Bug', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  for (const healthUrl of ['ftp://localhost/health', 'https://example.com/health']) {
+    expect((await request.patch('/api/projects/e2e', { headers, data: { healthUrl } })).status()).toBe(400);
+  }
+  // Zahlen fallen im Fingerabdruck weg: je Gerät ein eigener Text, damit jeder Lauf einen eigenen Bug anlegt.
+  const title = `E2E-Fehler im Betrieb ${isMobile ? 'Handy' : 'Desktop'}`;
+  await login(page);
+  await page.goto('/#settings');
+  const settings = page.locator('#production-settings');
+  // Ab dem zweiten Lauf ist ein Token hinterlegt: Rotieren fragt nach.
+  page.once('dialog', (dialog) => void dialog.accept());
+  await settings.getByRole('button', { name: /Token (erzeugen|rotieren)/ }).click();
+  const token = (await settings.getByTestId('ingest-token').textContent())!.trim();
+  await expect(settings.getByText(`/api/ingest/e2e/${token}`).first()).toBeAttached();
+
+  const anonymous = await request.post(`/api/ingest/e2e/${token}`, {
+    headers: { 'Content-Type': 'text/plain' },
+    data: JSON.stringify({ message: title, stack: '    at checkout (/app/src/kasse.js:1:1)', source: 'browser' }),
+  });
+  expect(anonymous.status()).toBe(202);
+  expect((await request.post('/api/ingest/e2e/falsches-token-1234567890', { data: '{}' })).status()).toBe(401);
+  expect((await request.get('/api/projects')).status()).toBe(401);
+
+  await page.goto('/#bugs');
+  const row = page.getByText(title).first();
+  await expect(row).toBeVisible();
+  await expect(page.getByText('Betrieb · 1× seit gestern').first()).toBeVisible();
+  await row.click();
+  await expect(page.getByText('Vorkommen je Stunde (48 h)').first()).toBeVisible();
+  await expect(page.getByText(/Kein Deploy-Verdacht|Deploy-Verdacht:/).first()).toBeVisible();
+
+  await page.goto('/#dashboard');
+  await expect(page.getByTestId('production-tile')).toContainText('Betrieb');
+
+  // Aufräumen: Mit Auto-Bugfix entstand ein Bug-Auftrag, der sonst in den Sprint-Tests des nächsten Geräts liegt.
+  const bug = (await (await request.get('/api/projects/e2e/bugs', { headers })).json()).bugs.find(
+    (entry: { title: string }) => entry.title.endsWith(title),
+  );
+  const board = await (await request.get('/api/projects/e2e/board', { headers })).json();
+  for (const item of board.development.filter((entry: { bugId: string | null }) => entry.bugId === bug.id)) {
+    await request.delete(`/api/development/${item.id}`, { headers });
+  }
+  await request.delete(`/api/bugs/${bug.id}`, { headers });
 });
 
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {

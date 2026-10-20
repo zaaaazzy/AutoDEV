@@ -18,15 +18,47 @@
             "polyfills": ["zone.js"],
             "tsConfig": "frontend/tsconfig.app.json",
             "inlineStyleLanguage": "css",
-            "assets": [{ "glob": "**/*", "input": "frontend/public" }],
-            "styles": ["frontend/src/styles.css"]
+            "assets": [
+              {
+                "glob": "**/*",
+                "input": "frontend/public"
+              }
+            ],
+            "styles": [
+              "frontend/src/styles/01-base.css",
+              "frontend/src/styles/02-components.css",
+              "frontend/src/styles/03-git-lists-orders.css",
+              "frontend/src/styles/04-tables.css",
+              "frontend/src/styles/05-setup-wizard.css",
+              "frontend/src/styles/06-mobile-tables.css",
+              "frontend/src/styles/07-login-settings.css",
+              "frontend/src/styles/08-dashboard.css",
+              "frontend/src/styles/09-docs-header.css",
+              "frontend/src/styles/10-users-sprints-tour.css",
+              "frontend/src/styles/11-dashboard-git-assistant.css",
+              "frontend/src/styles/12-layout-guards.css",
+              "frontend/src/styles/13-acceptance-chat-planning.css",
+              "frontend/src/styles/14-permissions-tests.css",
+              "frontend/src/styles/15-ideas-comments.css",
+              "frontend/src/styles/16-visionary-chat.css",
+              "frontend/src/styles/17-workflow-board.css",
+              "frontend/src/styles/18-folders-bugs-sprint.css",
+              "frontend/src/styles/19-production.css"
+            ],
+            "allowedCommonJsDependencies": [
+              "cytoscape-fcose",
+              "cytoscape-cose-bilkent",
+              "@braintree/sanitize-url",
+              "dayjs",
+              "fastdom"
+            ]
           },
           "configurations": {
             "production": {
               "budgets": [
                 {
                   "type": "initial",
-                  "maximumWarning": "900kB",
+                  "maximumWarning": "950kB",
                   "maximumError": "1MB"
                 },
                 {
@@ -38,7 +70,10 @@
               "outputHashing": "all",
               "optimization": {
                 "scripts": true,
-                "styles": { "minify": true, "inlineCritical": false },
+                "styles": {
+                  "minify": true,
+                  "inlineCritical": false
+                },
                 "fonts": true
               }
             },

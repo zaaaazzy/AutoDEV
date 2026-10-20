@@ -1,7 +1,10 @@
+import { logged } from '../core/log.js';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runCommand } from '../core/command.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
-import { systemCommand } from './system-agents.js';
+import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
@@ -41,10 +44,20 @@ export function splitEstimate(output: string): { requirement: string; estimate: 
   }
 }
 
-/** Reads a bare JSON object (the quick estimation answer has no "Schätzung" heading). */
+const toEstimate = (json: string): Estimate | null => splitEstimate(`\n## Schätzung\n${json}`).estimate;
+
+/**
+ * Reads a bare JSON object (the quick estimation answer has no "Schätzung" heading). CLI output may carry
+ * banners or log lines with braces, so flat objects are tried from the last one backwards first.
+ */
 export function parseEstimate(output: string): Estimate | null {
+  const flat = output.match(/\{[^{}]*\}/g) ?? [];
+  for (const candidate of flat.reverse()) {
+    const estimate = toEstimate(candidate);
+    if (estimate) return estimate;
+  }
   const json = /\{[\s\S]*\}/.exec(output);
-  return json ? splitEstimate(`\n## Schätzung\n${json[0]}`).estimate : null;
+  return json ? toEstimate(json[0]) : null;
 }
 
 const ESTIMATE_TIMEOUT_MS = 90_000;
@@ -71,17 +84,32 @@ export async function quickEstimate(prompt: string, fetchImpl: typeof fetch = pa
   return parseEstimate(body.message?.content ?? '');
 }
 
-/** Uses the external CLI chosen for the author role; it runs in a temp folder because it only has to answer. */
+/**
+ * Uses the external CLI chosen for the author role. It only has to answer, so by default it gets no permission flags,
+ * and it always runs in its own empty temp folder: idea texts come from users and must not be able to touch files.
+ */
 async function estimateWithCommand(command: string[], prompt: string): Promise<Estimate | null> {
-  const result = await runCommand(buildInvocation(command, prompt), tmpdir(), {
-    timeoutMs: ESTIMATE_TIMEOUT_MS * 2,
-    env: agentEnvironment(),
-  });
-  return result.exitCode === 0 ? parseEstimate(result.output) : null;
+  const cwd = await mkdtemp(join(tmpdir(), 'dev-log-estimate-'));
+  try {
+    const result = await runCommand(buildInvocation(command, prompt), cwd, {
+      timeoutMs: ESTIMATE_TIMEOUT_MS * 2,
+      env: agentEnvironment(),
+    });
+    return result.exitCode === 0 ? parseEstimate(result.output) : null;
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 }
 
-/** Estimates ideas that have no values yet; values entered by users are kept. Failures are noted once, not retried. */
-export async function estimateNewIdeas(pool: Pool, project: string, estimate = quickEstimate): Promise<number> {
+/**
+ * Estimates ideas that have no values yet; values entered by users are kept. Failures are noted once, not retried.
+ * A passed estimator always wins; otherwise the CLI chosen in the dashboard or the local model is used.
+ */
+export async function estimateNewIdeas(
+  pool: Pool,
+  project: string,
+  estimate?: (prompt: string) => Promise<Estimate | null>,
+): Promise<number> {
   const ideas = (
     await pool.query<{ id: string; title: string; description: string }>(
       `SELECT id, title, description FROM ideation_items
@@ -93,7 +121,8 @@ export async function estimateNewIdeas(pool: Pool, project: string, estimate = q
   ).rows;
   if (!ideas.length) return 0;
   const context = (await loadProjectContext(pool, project)).slice(0, 600);
-  const external = await systemCommand(pool, 'author');
+  const external = estimate ? null : await restrictedSystemCommand(pool, 'author');
+  const run = estimate ?? (external ? (prompt: string) => estimateWithCommand(external, prompt) : quickEstimate);
   for (const idea of ideas) {
     const prompt = [
       'Schätze Aufwand eines Entwicklungsauftrags. Antworte nur mit einem JSON-Objekt:',
@@ -103,7 +132,7 @@ export async function estimateNewIdeas(pool: Pool, project: string, estimate = q
     ]
       .filter(Boolean)
       .join('\n\n');
-    const result = await (external ? estimateWithCommand(external, prompt) : estimate(prompt)).catch(() => null);
+    const result = await run(prompt).catch(logged('estimation', null));
     if (!result) {
       await pool.query(
         `UPDATE ideation_items SET agent_note = 'Aufwand konnte nicht geschätzt werden – bitte manuell ergänzen.' WHERE id = $1 AND agent_note IS NULL`,

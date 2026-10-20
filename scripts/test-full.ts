@@ -4,8 +4,9 @@
  * mit --projekt, den Lauf samt Einzeltests, Screenshots und Videos in die Ansicht „Testläufe“ dieses Projekts.
  *
  *   npm run test:full                          alles
- *   npm run test:full -- --projekt devlog      zusätzlich in Dev Log unter Testläufe ablegen
+ *   npm run test:full -- --projekt devlog      zusätzlich in AIdeation unter Testläufe ablegen
  *   npm run test:full -- --nur-oberflaeche     nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
+ *   npm run test:full -- --projekt devlog --bugs   Befunde zusätzlich als Bugs anlegen (Quelle „Testlauf“)
  *
  * Datenbank für --projekt: DEV_LOG_DATABASE_URL, sonst die lokale aus docker-compose (127.0.0.1:5433).
  */
@@ -25,6 +26,7 @@ import {
   type TestCaseResult,
   type TestCategory,
 } from '../src/core/test-results.js';
+import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
 import { createDatabasePool, readDatabaseConfig } from '../src/db/database.js';
 import {
   createTestRun,
@@ -32,6 +34,7 @@ import {
   finishTestRun,
   finishTestRunStep,
   saveTestCases,
+  saveTestReport,
 } from '../src/db/test-runs.js';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -41,6 +44,10 @@ const argument = (name: string) => {
 };
 const onlyUi = process.argv.includes('--nur-oberflaeche');
 const project = argument('--projekt') ?? process.env.DEV_LOG_TEST_PROJECT;
+/** Testanforderung aus AIdeation (Dashboard, Testläufe): der Lauf wird ihr zugeordnet. */
+const requestId = argument('--anfrage');
+/** Befunde als Bugs anlegen (je fehlgeschlagenem Test einer, ohne Dubletten zu offenen Bugs). */
+const fileFindings = process.argv.includes('--bugs');
 const started = new Date();
 const two = (value: number) => String(value).padStart(2, '0');
 const stamp = `${started.getFullYear()}-${two(started.getMonth() + 1)}-${two(started.getDate())}_${two(started.getHours())}-${two(started.getMinutes())}`;
@@ -49,7 +56,7 @@ const TEMP = join(tmpdir(), `dev-log-test-full-${stamp}`);
 const OUT = join(ROOT, 'docs', 'tests', stamp);
 const MEDIA = join(OUT, 'media');
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-const LOCAL_DATABASE = 'postgresql://devlog:devlog_local_dev@127.0.0.1:5433/dev_log';
+const LOCAL_DATABASE = 'postgresql://devlog:devlog_local_dev@127.0.0.1:5433/aideation';
 
 type Step = {
   name: string;
@@ -128,6 +135,13 @@ const STEPS: Step[] = [
     cases: () => playwrightCases(E2E_JSON, 'e2e'),
   },
 ];
+const UI_BUILD_STEP: Step = {
+  name: 'UI-Build',
+  command: 'npm',
+  args: ['run', 'build:ui'],
+  category: 'quality',
+  summary: (out) => (/bundle generation complete/i.test(out) ? 'Oberfläche gebaut' : 'Build fehlgeschlagen'),
+};
 const USER_STEP: Step = {
   name: 'Oberflächentest',
   command: 'npx',
@@ -163,7 +177,7 @@ function run(command: string, args: string[]): Promise<{ ok: boolean; output: st
   });
 }
 
-/** Optional: Lauf in Dev Log ablegen (Ansicht „Testläufe“), Schritt für Schritt, damit er live erscheint. */
+/** Optional: Lauf in AIdeation ablegen (Ansicht „Testläufe“), Schritt für Schritt, damit er live erscheint. */
 class Recorder {
   private constructor(
     private readonly pool: Pool,
@@ -176,7 +190,7 @@ class Recorder {
     const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
     if (!exists.rowCount) {
       await pool.end();
-      throw new Error(`Projekt „${slug}“ gibt es in Dev Log nicht – zuerst in der Oberfläche anlegen.`);
+      throw new Error(`Projekt „${slug}“ gibt es in AIdeation nicht – zuerst in der Oberfläche anlegen.`);
     }
     const git = async (args: string[]) =>
       (await promisify(execFile)('git', args, { cwd: ROOT }).catch(() => ({ stdout: '' }))).stdout.trim() || null;
@@ -186,7 +200,22 @@ class Recorder {
       branch: await git(['rev-parse', '--abbrev-ref', 'HEAD']),
       commitSha: await git(['rev-parse', 'HEAD']),
     });
+    if (requestId) await pool.query('UPDATE test_requests SET run_id = $2 WHERE id = $1', [requestId, runId]);
     return new Recorder(pool, runId);
+  }
+
+  /** Bugs aus allen Befunden dieses Laufs; mit Anfrage wird die Zahl dort vermerkt. */
+  async fileBugs(results: StepResult[], project: string): Promise<number> {
+    const drafts = results.flatMap((result) =>
+      result.cases.length
+        ? caseBugs(result.cases, this.runId)
+        : result.ok
+          ? []
+          : [stepBug(result.name, result.tail, this.runId)],
+    );
+    const created = await fileBugs(this.pool, project, drafts);
+    if (requestId) await this.pool.query('UPDATE test_requests SET bug_count = $2 WHERE id = $1', [requestId, created]);
+    return created;
   }
 
   async start(position: number, step: Step): Promise<void> {
@@ -210,7 +239,12 @@ class Recorder {
     return saveTestCases(this.pool, this.runId, result.cases);
   }
 
-  async close(passed: boolean): Promise<string> {
+  get id(): string {
+    return this.runId;
+  }
+
+  async close(passed: boolean, report: string): Promise<string> {
+    await saveTestReport(this.pool, this.runId, report);
     await finishTestRun(this.pool, this.runId, passed);
     await this.pool.end();
     return this.runId;
@@ -228,11 +262,11 @@ async function runStep(position: number, step: Step, recorder: Recorder | null):
     ok,
     seconds: Math.round((Date.now() - begin) / 1000),
     summary: step.summary(clean),
-    tail: clean.trim().split('\n').slice(-25).join('\n'),
+    tail: clean.trim().slice(-60_000),
     cases: (await step.cases?.(clean)) ?? [],
   };
   const media = await recorder?.finish(position, result);
-  if (media) console.log(`→ ${result.cases.length} Einzeltests und ${media} Screenshots/Videos in Dev Log abgelegt`);
+  if (media) console.log(`→ ${result.cases.length} Einzeltests und ${media} Screenshots/Videos in AIdeation abgelegt`);
   return result;
 }
 
@@ -257,10 +291,70 @@ const STATUS_ICON: Record<TestCaseResult['status'], string> = {
   flaky: '⚠️',
 };
 
+/**
+ * Bericht für die Dokumentation in AIdeation (Gruppe „Testberichte“): Übersicht je Kategorie und alle Befunde.
+ * Screenshots und Videos zeigt die Ansicht „Testläufe“, auf die der Bericht verlinkt.
+ */
+function documentReport(results: StepResult[], allOk: boolean, runId: string): string {
+  const cases = results.flatMap((result) => result.cases);
+  const count = (category: string, status: string) =>
+    cases.filter((testCase) => testCase.category === category && testCase.status === status).length;
+  const categories = (['unit', 'e2e', 'user'] as const)
+    .map((category) => ({
+      label: { unit: 'Unit', e2e: 'E2E', user: 'User' }[category],
+      passed: count(category, 'passed'),
+      failed: count(category, 'failed') + count(category, 'flaky'),
+      skipped: count(category, 'skipped'),
+    }))
+    .filter((category) => category.passed + category.failed + category.skipped);
+  const failed = cases.filter((testCase) => testCase.status === 'failed' || testCase.status === 'flaky');
+  const row = (text: string) => text.replace(/\|/g, '/').replace(/\s+/g, ' ');
+  return [
+    `# Testbericht ${started.toLocaleString('de-CH', { dateStyle: 'medium', timeStyle: 'short' })}`,
+    '',
+    `Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'} · erstellt mit \`npm run test:full\``,
+    '',
+    `[Screenshots, Videos und alle Einzeltests in den Testläufen ansehen](#runs/${runId})`,
+    '',
+    '## Prüfungen',
+    '',
+    '| Prüfung | Ergebnis | Dauer | Zusammenfassung |',
+    '|---|---|---|---|',
+    ...results.map(
+      (result) => `| ${result.name} | ${icon(result.ok)} | ${result.seconds} s | ${row(result.summary || '–')} |`,
+    ),
+    '',
+    '## Einzeltests je Kategorie',
+    '',
+    '| Kategorie | Bestanden | Fehlgeschlagen | Übersprungen |',
+    '|---|---|---|---|',
+    ...categories.map(
+      (category) => `| ${category.label} | ${category.passed} | ${category.failed} | ${category.skipped} |`,
+    ),
+    '',
+    '## Befunde',
+    '',
+    ...(failed.length
+      ? failed.flatMap((testCase) => [
+          `### ${STATUS_ICON[testCase.status]} ${testCase.title}`,
+          '',
+          `${{ unit: 'Unit', e2e: 'E2E', user: 'User' }[testCase.category]}${testCase.device ? ` · ${testCase.device}` : ''}${testCase.file ? ` · \`${testCase.file}\`` : ''}`,
+          '',
+          ...(testCase.errors.length ? testCase.errors.map((error) => `- ${row(error)}`) : ['- ohne Meldung']),
+          '',
+        ])
+      : ['Keine Befunde.']),
+    ...results
+      .filter((result) => !result.ok && !result.cases.length)
+      .flatMap((result) => [`### ❌ ${result.name}`, '', `- ${row(result.summary || 'fehlgeschlagen')}`, '']),
+  ].join('\n');
+}
+
 async function main(): Promise<void> {
   await mkdir(TEMP, { recursive: true });
   const recorder = project ? await Recorder.open(project) : null;
-  const steps = onlyUi ? [USER_STEP] : [...STEPS, USER_STEP];
+  // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
+  const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
   for (const [position, step] of steps.entries()) results.push(await runStep(position, step, recorder));
 
@@ -297,13 +391,13 @@ async function main(): Promise<void> {
   }
 
   const allOk = results.every((result) => result.ok);
-  const runId = await recorder?.close(allOk);
+  const runId = recorder?.id;
   const markdown = [
     `# Testbericht ${started.toLocaleString('de-CH')}`,
     '',
     `Erstellt mit \`npm run test:full\`. Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'}.`,
     'Der Oberflächentest läuft auf einer eigenen Testdatenbank (dev_log_full) ohne Worker: Agents, Chat-Antworten und der Projekt-Assistent starten dort nicht.',
-    runId ? `In Dev Log abgelegt: Projekt \`${project}\`, Testlauf \`${runId}\`.` : '',
+    runId ? `In AIdeation abgelegt: Projekt \`${project}\`, Testlauf \`${runId}\`.` : '',
     '',
     '## Übersicht',
     '',
@@ -326,16 +420,22 @@ async function main(): Promise<void> {
     ...results
       .filter((result) => !result.ok)
       .map(
-        (result) => `<details><summary>${result.name}</summary>\n\n\`\`\`text\n${result.tail}\n\`\`\`\n\n</details>\n`,
+        (result) =>
+          `<details><summary>${result.name}</summary>\n\n\`\`\`text\n${result.tail.split('\n').slice(-40).join('\n')}\n\`\`\`\n\n</details>\n`,
       ),
     '',
   ].join('\n');
   await writeFile(join(OUT, 'bericht.md'), markdown);
+  if (recorder && fileFindings && project) {
+    const bugs = await recorder.fileBugs(results, project);
+    console.log(`→ ${bugs} neue Bugs aus den Befunden angelegt`);
+  }
+  if (recorder) await recorder.close(allOk, documentReport(results, allOk, recorder.id));
   await rm(TEMP, { recursive: true, force: true });
   console.log(
     `\nBericht: ${relative(ROOT, join(OUT, 'bericht.md'))} (${mediaCount} Screenshots/Videos in ${basename(MEDIA)}/)`,
   );
-  if (runId) console.log(`Dev Log: Projekt „${project}“ → Testläufe`);
+  if (runId) console.log(`AIdeation: Projekt „${project}“ → Testläufe`);
   process.exitCode = allOk ? 0 : 1;
 }
 

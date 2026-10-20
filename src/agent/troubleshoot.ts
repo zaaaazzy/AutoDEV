@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { parseActionLine, setActionTodo } from '../runner/action-todo.js';
 import { delegateAfterAnalysis } from '../runner/autofix.js';
 import type { Pool } from 'pg';
@@ -16,7 +17,7 @@ export function buildTroubleshootPrompt(
   bugs: string[],
 ): string {
   return [
-    'Du bist der Problemanalyst im Dev Log (nur lesender Zugriff). Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Diese angeforderte Analyse dokumentiert den Befund, ohne den Auftrag ungefragt umzusetzen.',
+    'Du bist der Problemanalyst im AIdeation (nur lesender Zugriff). Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Diese angeforderte Analyse dokumentiert den Befund, ohne den Auftrag ungefragt umzusetzen.',
     `## Anweisung\n${instructions || 'Analysiere gründlich und nenne konkrete Schritte.'}`,
     `## Auftrag\nTitel: ${item.title}\n${item.description.slice(0, 3000)}`,
     `## Fehlgeschlagene Schritte (neueste zuerst)\n${failures.join('\n\n') || 'Keine Fehlerausgabe vorhanden.'}`,
@@ -78,7 +79,7 @@ export async function analyzeBlocked(
     )
     .catch(() => ({ rows: [] as { agent: string; output: string }[] }));
   const failures = steps.rows.map((step) => `### ${step.agent}\n${step.output.trim().slice(-2500)}`);
-  const known = (await loadKnownBugs(pool, options.project, 30).catch(() => [])).map(
+  const known = (await loadKnownBugs(pool, options.project, 30).catch(logged('troubleshoot', []))).map(
     (bug) => `- [${bug.status}] ${bug.title}`,
   );
   console.info(`[${item.id}] Problemanalyse`);
@@ -102,7 +103,7 @@ export async function analyzeBlocked(
   }
   const { title, body } = parseAnalysis(output, `Blockiert: ${item.title}`);
   const action = parseActionLine(output);
-  if (action !== undefined) await setActionTodo(pool, item.id, action).catch(() => undefined);
+  if (action !== undefined) await setActionTodo(pool, item.id, action).catch(logged('troubleshoot'));
   if (item.failureBugId) {
     // Bug-Bericht gibt es schon (vom gescheiterten Agent): die Analyse dort ergänzen statt einen zweiten anzulegen.
     await pool.query(`UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1`, [

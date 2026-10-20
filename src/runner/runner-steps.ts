@@ -1,19 +1,24 @@
+import { decryptSecret } from '../core/secrets.js';
+import { logged } from '../core/log.js';
+import { handoffTarget, ORDER_PHASES, parseHandoffs } from '../core/workflow-phases.js';
 import { manualTodo, setActionTodo } from './action-todo.js';
 import type { Pool } from 'pg';
 import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
-import { registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
+import { isTransientFailure, registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
+import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
-import { executeAgentCommand } from '../agent/claude-stream.js';
+import { commitAgentStep, commitTaskToGit, finishOrderBranch, type OrderBranch } from './git-sync.js';
+import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
+import { holdForReview, loadReviewMode, needsApproval, type ReviewMode } from './review-gate.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
 import {
   FILES_CREATE,
@@ -54,7 +59,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
         existingProject: true,
         timeoutMs,
         signal,
-        env: agentEnvironment(),
+        env: agentEnvironment(cwd),
       },
       pool,
     );
@@ -71,11 +76,18 @@ export const runBuiltinAgent: BuiltinAgent = async ({
       .join('\n\n');
     return { exitCode: failed ? 1 : 0, durationMs: Date.now() - startedAt, output: `Testlauf ${runId}\n\n${output}` };
   }
-  const databaseUrl = (
+  const stored = (
     await pool.query<{ url: string | null }>('SELECT database_url AS url FROM projects WHERE slug = $1', [
       item.projectSlug,
     ])
   ).rows[0]?.url;
+  // Without the key the agent runs without database access instead of failing the whole step.
+  let databaseUrl: string | undefined;
+  try {
+    databaseUrl = stored ? decryptSecret(stored) : undefined;
+  } catch (error) {
+    logged(`database-url:${item.projectSlug}`)(error);
+  }
   // Dieselben Dateirechte und Ordner wie bei der Claude-CLI, geprüft vom selben Wächter.
   const commands = normalizeCommands(
     agent.allowedCommands ?? roleDefaultCommands(agent.role, await loadProjectPermissions(pool, item.projectSlug)),
@@ -109,6 +121,11 @@ async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, outpu
 }
 
 const RUN_TIMEOUT_HOURS = 3;
+/** Rollen, die nur dokumentieren: ihr Scheitern ist kein Fehler im Code. */
+/** Pause vor dem Wiederholen nach einem vorübergehenden Fehler. */
+const TRANSIENT_RETRY_DELAY_MS = 30_000;
+
+export const DOC_ROLES = new Set(['documenter', 'manual_writer', 'user_manual_writer']);
 const CANCEL_POLL_MS = 1500;
 const LIVE_OUTPUT_INTERVAL_MS = 1500;
 
@@ -130,11 +147,31 @@ export interface RunContext {
   criteria?: string[];
   definitionOfDone?: string[];
   sprintName?: string | null;
+  /** Agents des Auftrags in Workflow-Reihenfolge (für Nachrichten an „den nächsten“ Agent). */
+  ordered?: WorkflowAgent[];
+  /** Nachrichten zwischen Agents (@@NACHRICHT), je Empfänger. */
+  messages?: { toId: string; from: string; text: string }[];
+  /** Ergebnis von „Vor dem Sprint“ für alle Aufträge des Sprints. */
+  sprintNotes?: string | null;
 }
 
 interface StepOutcome {
   passed: boolean;
   interrupted: boolean;
+  /** Gescheitert, aber noch im selben Lauf vom Entwickler nachbesserbar (kein Bug-Bericht angelegt). */
+  correctable?: boolean;
+}
+
+export interface StepOptions {
+  /** Zeile in agent_run_steps; weicht bei einer Nachbesserung von der Agent-Position ab. */
+  stepPosition?: number;
+  /** Tester/Reviewer dürfen den Auftrag einmal pro Lauf zur Nachbesserung zurückgeben, statt einen Bug auszulösen. */
+  canCorrect?: boolean;
+  /**
+   * „Bei abgelehnt“ / „Bei abgeschlossen“: läuft nach dem Ergebnis des Auftrags und ändert es nicht (kein Bug, keine
+   * Abnahme); `outcome` beschreibt das Ergebnis für den Agent.
+   */
+  observer?: { outcome: string };
 }
 
 /** Claim an order run; an existing run older than three hours is treated as abandoned. */
@@ -157,6 +194,7 @@ export async function claimRun(pool: Pool, item: WorkItem): Promise<string | nul
 /** Select agents in phase and position order, or only the assigned agent for a manual run. */
 export function selectWorkflowAgents(agents: WorkflowAgent[], item: WorkItem): WorkflowAgent[] {
   return agents
+    .filter((agent) => (ORDER_PHASES as readonly string[]).includes(agent.phase))
     .filter((agent) =>
       item.agentId
         ? agent.id === item.agentId
@@ -174,6 +212,53 @@ interface StepHooks {
   onOutput: (partial: string) => void;
   onSpawn: (pid: number) => void;
   onAction: (message: string) => void;
+  onSession?: (sessionId: string) => void;
+  /** Frühere Claude-Sitzung desselben Einsatzes, die fortgesetzt wird. */
+  resume?: ResumableSession | null;
+}
+
+export interface ResumableSession {
+  sessionId: string;
+  /** Der frühere Schritt war fertig (Nachbesserung) statt abgebrochen bzw. gescheitert. */
+  passed: boolean;
+}
+
+/** Wie lange eine frühere Sitzung fortgesetzt wird; danach ist ein frischer Start meist besser. */
+const RESUME_WINDOW = '24 hours';
+
+/**
+ * Letzte Claude-Sitzung desselben Einsatzes (Workflow-Schritt bzw. Agent) bei diesem Auftrag – aus einem
+ * abgebrochenen Lauf, einem früheren Versuch oder der Runde vor einer Nachbesserung im selben Lauf.
+ */
+export async function findResumableSession(
+  pool: Pool,
+  itemId: string,
+  agent: Pick<WorkflowAgent, 'id' | 'stepId'>,
+  currentStepId: string | undefined,
+): Promise<ResumableSession | null> {
+  const row = (
+    await pool.query<{ sessionId: string; status: string }>(
+      `SELECT s.session_id AS "sessionId", s.status
+         FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+        WHERE r.development_id = $1 AND s.id IS DISTINCT FROM $2::bigint AND s.session_id IS NOT NULL
+          AND COALESCE(s.workflow_step_id::text, s.agent_id::text) = $3
+          AND s.session_at > NOW() - INTERVAL '${RESUME_WINDOW}'
+        ORDER BY s.session_at DESC LIMIT 1`,
+      [itemId, currentStepId ?? null, agent.stepId ?? agent.id],
+    )
+  ).rows[0];
+  return row?.sessionId ? { sessionId: row.sessionId, passed: row.status === AGENT_STEP_STATUS.passed } : null;
+}
+
+/** Erste Nachricht in der fortgesetzten Sitzung: weitermachen statt neu beginnen, dann der aktuelle Auftrag. */
+export function resumePrompt(prompt: string, resume: ResumableSession): string {
+  const why = resume.passed
+    ? 'Du hast diesen Auftrag schon bearbeitet; jetzt gibt es Rückmeldungen, die du nachbessern sollst.'
+    : 'Dein letzter Lauf zu diesem Auftrag wurde unterbrochen oder abgebrochen.';
+  return `## Fortsetzung deiner früheren Sitzung
+${why} Du kennst den Verlauf dieser Sitzung; dein bisheriger Stand liegt im Arbeitsordner (auch noch nicht committete Änderungen). Prüfe kurz mit \`git status\` und \`git diff\`, was schon erledigt ist, und mach dort weiter – nicht von vorne beginnen. Es folgt der aktuelle Auftrag mit allen neuen Angaben; er hat Vorrang vor früheren Nachrichten.
+
+${prompt}`;
 }
 
 /** Run an agent command, the tester workflow, or the built-in local model. */
@@ -210,12 +295,20 @@ async function invokeAgent(
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
       options.cwd,
-      { timeoutMs: options.timeoutMs, env: agentEnvironment(), onOutput: hooks.onOutput, onAction: hooks.onAction },
+      {
+        timeoutMs: options.timeoutMs,
+        env: agentEnvironment(options.cwd),
+        onOutput: hooks.onOutput,
+        // Damit ein Abbruch aus der Oberfläche auch diesen Agenten samt Kindprozessen beendet.
+        onSpawn: hooks.onSpawn,
+        onAction: hooks.onAction,
+      },
     ).catch((error: unknown) => ({
       exitCode: 1,
       durationMs: 0,
       output: error instanceof Error ? error.message : String(error),
     }));
+    if (hooks.signal.aborted) return written;
     const run = await builtinRun();
     return {
       ...run,
@@ -224,13 +317,27 @@ async function invokeAgent(
     };
   }
   if (!command) return builtinRun();
-  const result = await executeAgentCommand(execute, buildInvocation(command, prompt), options.cwd, {
-    timeoutMs: options.timeoutMs,
-    env: agentEnvironment(),
-    onOutput: hooks.onOutput,
-    onSpawn: hooks.onSpawn,
-    onAction: hooks.onAction,
-  });
+  const run = (resume: ResumableSession | null | undefined): Promise<CommandResult> =>
+    executeAgentCommand(
+      execute,
+      buildInvocation(command, resume ? resumePrompt(prompt, resume) : prompt),
+      options.cwd,
+      {
+        timeoutMs: options.timeoutMs,
+        env: agentEnvironment(options.cwd),
+        onOutput: hooks.onOutput,
+        onSpawn: hooks.onSpawn,
+        onAction: hooks.onAction,
+        onSession: hooks.onSession,
+        resumeSession: resume?.sessionId,
+      },
+    );
+  let result = await run(hooks.resume);
+  // Sitzung nicht mehr vorhanden (z. B. anderer Ordner): frisch mit dem vollständigen Auftrag starten.
+  if (hooks.resume && result.exitCode !== 0 && !hooks.signal.aborted && resumeFailed(result.output)) {
+    hooks.onAction('Frühere Sitzung nicht mehr vorhanden – startet neu');
+    result = await run(null);
+  }
   // Ein Tester mit eigenem CLI prüft selbst; danach laufen die hinterlegten Projekttests zusätzlich als
   // gespeicherter Testlauf – objektiv, sichtbar unter „Testläufe“ und in der Erfolgsquote des Dashboards.
   if (
@@ -256,7 +363,7 @@ function logEvent(pool: Pool, stepId: string | undefined, text: string): Promise
       stepId,
       JSON.stringify([{ at: new Date().toISOString(), text: redactOutput(text, process.env) }]),
     ])
-    .catch(() => undefined);
+    .catch(logged('runner-steps'));
 }
 
 /** Execute a workflow step and persist its progress, cancellation state, and result. */
@@ -265,14 +372,15 @@ export async function runStep(
   agent: WorkflowAgent,
   position: number,
   total: number,
+  stepOptions: StepOptions = {},
 ): Promise<StepOutcome> {
   const { pool, item, runId, done, options, execute } = ctx;
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const stepId = (
     await pool.query<{ id: string }>(
-      `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status)
-     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}') RETURNING id`,
-      [runId, position, agent.id, agent.name, agent.phase],
+      `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status, workflow_step_id)
+     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}', $6) RETURNING id`,
+      [runId, stepOptions.stepPosition ?? position, agent.id, agent.name, agent.phase, agent.stepId ?? null],
     )
   ).rows[0]?.id;
   await logEvent(pool, stepId, 'Schritt gestartet');
@@ -293,6 +401,9 @@ export async function runStep(
       baseBranch: ctx.branch?.base,
       criteria: ctx.criteria,
       definitionOfDone: ctx.definitionOfDone,
+      messages: (ctx.messages ?? []).filter((message) => message.toId === (agent.stepId ?? agent.id)),
+      sprintNotes: ctx.sprintNotes,
+      outcome: stepOptions.observer?.outcome,
     }),
   );
 
@@ -312,7 +423,7 @@ export async function runStep(
           if (stepPid) killGroup(stepPid);
           resolveCancel({ exitCode: 130, durationMs: 0, output: 'Vom Benutzer abgebrochen.' });
         })
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     }, CANCEL_POLL_MS);
     stopWatching = () => clearInterval(watcher);
   });
@@ -329,7 +440,7 @@ export async function runStep(
           redactOutput(partial, process.env),
           AGENT_STEP_STATUS.running,
         ])
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     },
     onAction: (message) => {
       void logEvent(pool, stepId, message);
@@ -339,9 +450,22 @@ export async function runStep(
       stepPid = pid;
       void pool
         .query('UPDATE agent_run_steps SET pid = $2, pid_started_at = NOW() WHERE id = $1', [stepId, pid])
-        .catch(() => undefined);
+        .catch(logged('runner-steps'));
     },
+    onSession: (sessionId) => {
+      void pool
+        .query('UPDATE agent_run_steps SET session_id = $2, session_at = NOW() WHERE id = $1', [stepId, sessionId])
+        .catch(logged('runner-steps'));
+    },
+    resume: await findResumableSession(pool, item.id, agent, stepId).catch(logged('runner-steps', null)),
   };
+  if (hooks.resume) {
+    await logEvent(
+      pool,
+      stepId,
+      hooks.resume.passed ? 'Setzt frühere Sitzung fort (Nachbesserung)' : 'Setzt abgebrochene Sitzung fort',
+    );
+  }
   const progress = await startProgress(
     pool,
     item.projectSlug,
@@ -353,26 +477,59 @@ export async function runStep(
     { stepId, silent: true },
   );
   live.update = progress.update;
-  const work = invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
-    exitCode: 1,
-    durationMs: 0,
-    output: error instanceof Error ? error.message : String(error),
-  }));
-  const result = await Promise.race([work, cancelRequested]);
+  const stepStartedAt = Date.now();
+  // Nur ein Ordner, der beim Start da war, kann „weggefallen“ sein (sonst ist es ein Konfigurationsfehler).
+  const folderAtStart = folderAvailable(ctx.options.cwd);
+  const attempt = (): Promise<CommandResult> =>
+    invokeAgent(ctx, agent, prompt, hooks).catch((error: unknown): CommandResult => ({
+      exitCode: 1,
+      durationMs: 0,
+      output: error instanceof Error ? error.message : String(error),
+    }));
+  let result = await Promise.race([attempt(), cancelRequested]);
+  // Vorübergehender Fehler (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen.
+  if (result.exitCode !== 0 && !cancelled && !isShuttingDown() && isTransientFailure(result.output)) {
+    const delay = options.transientRetryDelayMs ?? TRANSIENT_RETRY_DELAY_MS;
+    await logEvent(pool, stepId, `Vorübergehender Fehler – neuer Versuch in ${Math.round(delay / 1000)} s`);
+    live.update?.(`${agent.name}: vorübergehender Fehler, neuer Versuch …`);
+    const first = result;
+    const paused = await Promise.race([
+      new Promise<null>((resolveDelay) => setTimeout(() => resolveDelay(null), delay)),
+      cancelRequested,
+    ]);
+    if (paused === null && !cancelled && !isShuttingDown()) {
+      const second = await Promise.race([attempt(), cancelRequested]);
+      result = {
+        ...second,
+        durationMs: first.durationMs + second.durationMs,
+        tokens: (first.tokens ?? 0) + (second.tokens ?? 0),
+        costUsd: (first.costUsd ?? 0) + (second.costUsd ?? 0),
+        output: `## Erster Versuch (vorübergehender Fehler)\n${first.output.slice(-1500)}\n\n## Zweiter Versuch\n${second.output}`,
+      };
+    } else if (paused) {
+      result = paused;
+    }
+  }
   stopWatching();
   await progress.stop();
 
   let output = redactOutput(result.output, process.env);
-  if (isShuttingDown()) {
+  // Worker beendet oder Projektordner zwischendurch weg (externes Laufwerk getrennt): kein Fehler im Auftrag, der Lauf
+  // wird erneut eingeplant – ohne Bug-Bericht und Problemanalyse.
+  const folderLost = result.exitCode !== 0 && folderAtStart && hadOutage(ctx.options.cwd, stepStartedAt);
+  if (isShuttingDown() || folderLost) {
+    const reason = folderLost
+      ? `Unterbrochen: ${missingFolderMessage(ctx.options.cwd)} Der Auftrag wird erneut eingeplant.`
+      : 'Unterbrochen: Der Worker wurde beendet.';
     await pool.query(
       `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-      [stepId, result.exitCode, result.durationMs, `${output}\nUnterbrochen: Der Worker wurde beendet.`],
+      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
     );
     return { passed: false, interrupted: true };
   }
   // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.
   let accepted = true;
-  if (agent.role === 'tester' && ctx.definitionOfDone) {
+  if (agent.role === 'tester' && ctx.definitionOfDone && !stepOptions.observer) {
     const criteria = ctx.criteria ?? [];
     const acceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
     await saveAcceptance(pool, item.id, criteria, ctx.definitionOfDone, acceptance).catch((error) =>
@@ -392,7 +549,7 @@ export async function runStep(
         await logEvent(pool, stepId, 'Abnahme: alle Kriterien und DoD-Punkte erfüllt');
       }
       const manual = manualChecks(acceptance, criteria);
-      await setActionTodo(pool, item.id, manualTodo(manual)).catch(() => undefined);
+      await setActionTodo(pool, item.id, manualTodo(manual)).catch(logged('runner-steps'));
       if (manual.length) {
         output += `\n\n## Von dir zu prüfen\n${manual.map((line) => `- ${line}`).join('\n')}`;
         await logEvent(pool, stepId, `Abnahme: ${manual.length} Punkt(e) nur manuell prüfbar`);
@@ -422,10 +579,12 @@ export async function runStep(
   const passed = result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule;
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
   const reported = agent.role === 'tester' ? parseCoverage(output) : null;
-  // Zusätzlich misst Dev Log selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
+  // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
   const measured =
     agent.role === 'tester' && !cancelled
-      ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(() => [])
+      ? await measureCoverage(options.cwd, await loadTestCommands(pool, item.projectSlug), execute).catch(
+          logged('runner-steps', []),
+        )
       : [];
   const coverage = mergeCoverage(reported, measured);
   if (coverage) {
@@ -440,8 +599,19 @@ export async function runStep(
     stepId,
     cancelled ? 'Abgebrochen' : passed ? 'Erfolgreich abgeschlossen' : `Fehlgeschlagen (Exit-Code ${result.exitCode})`,
   );
+  // Nachrichten an andere Agents (@@NACHRICHT): Empfänger bestimmen und für deren Anweisung merken.
+  const handoffs = parseHandoffs(output).flatMap((handoff) => {
+    const ordered = ctx.ordered ?? [];
+    const target = handoffTarget(handoff, agent, ordered, ordered.indexOf(agent));
+    return target ? [{ to: target.name, toId: target.stepId ?? target.id, text: handoff.text }] : [];
+  });
+  for (const handoff of handoffs) {
+    ctx.messages = [...(ctx.messages ?? []), { toId: handoff.toId, from: agent.name, text: handoff.text }];
+    await logEvent(pool, stepId, `Nachricht an ${handoff.to}: ${handoff.text.slice(0, 120)}`);
+  }
   await pool.query(
-    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6, cost_usd = $7 WHERE id = $1`,
+    `UPDATE agent_run_steps SET status = $2, exit_code = $3, duration_ms = $4, output = $5, tokens = $6, cost_usd = $7,
+            handoffs = $8::jsonb WHERE id = $1`,
     [
       stepId,
       passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
@@ -450,6 +620,7 @@ export async function runStep(
       output,
       result.tokens ?? 0,
       result.costUsd ?? 0,
+      JSON.stringify(handoffs.map(({ to, text }) => ({ to, text }))),
     ],
   );
   done.push({
@@ -458,16 +629,32 @@ export async function runStep(
     status: passed ? AGENT_STEP_STATUS.passed : AGENT_STEP_STATUS.failed,
     output,
   });
-  if (!passed) {
-    // Dokumentations-Agents nach der Umsetzung sollen keinen Bug-Bericht für fertigen Code erzeugen.
-    if (!cancelled && agent.phase !== 'after_task')
+  const commitStep = async (): Promise<void> => {
+    if (!ctx.branch || cancelled) return;
+    const commit = await commitAgentStep(options.cwd, item, agent.name, ctx.sprintName ?? null, passed, execute);
+    if (commit) await logEvent(pool, stepId, `Commit ${commit} (Änderungen von ${agent.name})`);
+  };
+  // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
+  if (stepOptions.observer) {
+    await commitStep();
+    return { passed, interrupted: false };
+  }
+  // Rote Tests oder eine Ablehnung im Review gehen zuerst einmal direkt zurück an den Entwickler.
+  const correctable = !passed && !cancelled && !refusedByRule && stepOptions.canCorrect === true;
+  if (correctable) {
+    await logEvent(pool, stepId, 'Zurück an den Entwickler zur Nachbesserung (im selben Lauf)');
+  } else if (!passed) {
+    // Dokumentations-Agents sollen keinen Bug-Bericht für fertigen Code erzeugen. Tester und Reviewer schon:
+    // rote Tests oder eine Ablehnung im Review führen zu Bug, Problemanalyse und (bei Code-Fehler) Behebung.
+    if (!cancelled && !DOC_ROLES.has(agent.role))
       await registerFailure(pool, item, agent.name, output).catch((error) =>
         console.error('Bug report failed:', error),
       );
   } else {
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
-  return { passed, interrupted: false };
+  await commitStep();
+  return { passed, interrupted: false, correctable };
 }
 
 /** Push-Nachricht aufs Handy, wenn ein Auftrag fertig ist oder hängen bleibt. */
@@ -498,8 +685,16 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
   let mergeProblem: string | null = null;
   if (ctx.branch) {
-    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute);
+    // Review-Freigabe (Projekteinstellung): nur ganze Abläufe, nicht das Ausführen eines einzelnen Agents.
+    const review =
+      passed && !item.agentId ? await loadReviewMode(pool, item.projectSlug).catch((): ReviewMode => 'off') : 'off';
+    const hold = review === 'off' ? undefined : (files: string[]) => needsApproval(review, files);
+    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute, hold);
     console.info(`[${item.id}] ${result.message}`);
+    if (result.held) {
+      await holdForReview(pool, item, ctx.branch);
+      return;
+    }
     if (passed && !result.merged) mergeProblem = result.message;
   } else if (passed && ctx.sprintName) {
     await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
@@ -508,7 +703,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   if (mergeProblem) {
     await pool
       .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, mergeProblem])
-      .catch(() => undefined);
+      .catch(logged('runner-steps'));
   }
   if (item.agentId) {
     // A one-agent play restores the previous status; a blocked order resumes normally after success.
@@ -529,5 +724,5 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   );
   await notifySettled(pool, item, succeeded, mergeProblem);
   if (!succeeded) return;
-  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(() => undefined);
+  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('runner-steps'));
 }

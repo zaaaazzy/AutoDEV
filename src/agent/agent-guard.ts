@@ -137,7 +137,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(GUARD_SCRI
   try {
     input = JSON.parse(readFileSync(0, 'utf8')) as GuardInput;
   } catch {
-    process.stderr.write('Dev-Log-Wächter: ungültige Eingabe.\n');
+    process.stderr.write('AIdeation-Wächter: ungültige Eingabe.\n');
     process.exit(2);
   }
   const root = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
@@ -148,7 +148,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(GUARD_SCRI
     problem = `Prüfung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`;
   }
   if (problem) {
-    process.stderr.write(`Dev-Log-Wächter: ${problem}\n`);
+    process.stderr.write(`AIdeation-Wächter: ${problem}\n`);
     process.exit(2);
   }
   process.exit(0);

@@ -1,3 +1,4 @@
+import { logged } from '../core/log.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
@@ -34,6 +35,29 @@ const AGENT_FAILURE_PATTERNS = [
   /Process ended by SIG\w+ \(timeout or kill\)/,
   /Unterbrochen: Der Worker wurde beendet/,
 ];
+
+/**
+ * Vorübergehende Fehler: Modell oder Dienst kurz nicht erreichbar, überlastet, Verbindung abgebrochen, Zeitlimit.
+ * Solche Schritte werden einmal nach kurzer Pause wiederholt, bevor der Auftrag blockiert.
+ */
+const TRANSIENT_PATTERNS = [
+  /Ollama nicht erreichbar/,
+  /Ollama antwortete mit (?:429|5\d\d)/,
+  /Ollama lieferte keine Nachricht/,
+  /Das Modell lieferte keine Antwort/,
+  /Zeitlimit erreicht/,
+  /Process ended by SIG\w+ \(timeout or kill\)/,
+  /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|socket hang up)\b/,
+  /\boverloaded(?:_error)?\b/i,
+  /\brate[ _-]?limit/i,
+  /API Error:? (?:429|5\d\d)\b/i,
+  /\b(?:502 Bad Gateway|503 Service Unavailable|529)\b/,
+];
+
+export function isTransientFailure(output: string): boolean {
+  const tail = output.slice(-1500);
+  return TRANSIENT_PATTERNS.some((pattern) => pattern.test(tail));
+}
 
 export function isAgentFailure(output: string): boolean {
   const tail = output.slice(-1500);
@@ -80,12 +104,12 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
         `Agent „${agentName}“ hat angehalten.\n\n**Vermerk:** ${rule ? 'Projektregel' : 'Umgebung'} – ${todo}.\n\n${detail}`,
       ],
     );
-    await setActionTodo(pool, item.id, todo.slice(0, 160)).catch(() => undefined);
+    await setActionTodo(pool, item.id, todo.slice(0, 160)).catch(logged('autofix'));
     return;
   }
   // Wartet der Auftrag auf einen Menschen, heisst er „Aktion notwendig“ statt „fehlgeschlagen“.
   const todo = humanActionFor(detail);
-  if (todo) await setActionTodo(pool, item.id, todo).catch(() => undefined);
+  if (todo) await setActionTodo(pool, item.id, todo).catch(logged('autofix'));
   const auto =
     (
       await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [
@@ -171,16 +195,24 @@ export async function resumeAfterEnvironment(pool: Pool, project: string): Promi
   );
 }
 
-/** Erzeugt (einmalig) den Behebungsauftrag zu einem Bug; er läuft automatisch, auch ohne Sprint. */
-export async function queueBugFix(pool: Pool, item: FailedItem, bugId: string): Promise<void> {
+/**
+ * Erzeugt (einmalig) den Behebungsauftrag zu einem Bug; er läuft automatisch, auch ohne Sprint. Ohne `intro`
+ * behebt er den Fehler, der den Auftrag `item` blockiert; Bugs aus dem Betrieb geben einen eigenen Einstieg mit.
+ */
+export async function queueBugFix(
+  pool: Pool,
+  item: Pick<FailedItem, 'title' | 'sprintId'>,
+  bugId: string,
+  intro?: string,
+): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
      SELECT b.project_slug, $2, 'Bug: ' || b.title,
-            'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.' || E'\n\n' || b.description,
+            COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' || b.description,
             'planned', 'high', 'bug', b.id, TRUE
        FROM bugs b WHERE b.id = $1
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO NOTHING`,
-    [bugId, item.sprintId ?? null, item.title],
+    [bugId, item.sprintId ?? null, item.title, intro ?? null],
   );
 }
 

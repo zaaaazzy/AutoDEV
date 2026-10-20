@@ -21,7 +21,7 @@ export class ProjectSwitcherComponent {
   readonly create = output<void>();
 
   protected readonly open = signal(false);
-  /** Favicons, die nicht geladen werden konnten – dann das Dev-Log-Zeichen. */
+  /** Favicons, die nicht geladen werden konnten – dann das AIdeation-Zeichen. */
   protected readonly failed = signal(new Set<string>());
   protected readonly current = computed(() => this.store.currentProject() ?? null);
 

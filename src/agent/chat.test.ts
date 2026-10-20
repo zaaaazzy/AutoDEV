@@ -33,12 +33,33 @@ test('splits a follow-up question from the assistant answer', () => {
   assert.deepEqual(splitQuestion('Ich habe X geprüft.\n@@FRAGE: Soll ich Y oder Z nehmen?'), {
     text: 'Ich habe X geprüft.',
     question: 'Soll ich Y oder Z nehmen?',
+    options: [],
   });
   assert.deepEqual(splitQuestion('Erledigt: Dienst neu gestartet.'), {
     text: 'Erledigt: Dienst neu gestartet.',
     question: null,
+    options: [],
   });
-  assert.deepEqual(splitQuestion('@@FRAGE: Welcher Port?'), { text: 'Welcher Port?', question: 'Welcher Port?' });
+  assert.deepEqual(splitQuestion('@@FRAGE: Welcher Port?'), {
+    text: 'Welcher Port?',
+    question: 'Welcher Port?',
+    options: [],
+  });
+});
+
+test('Rückfrage mit Antwortmöglichkeiten zum Anklicken (höchstens 4, ohne Dubletten)', () => {
+  assert.deepEqual(
+    splitQuestion(
+      'Ich brauche eine Freigabe.\n@@FRAGE: Darf ich npm audit ausführen?\n@@OPTIONEN: Ja | Nein, nur lesen | Ja | a | b | c',
+    ),
+    {
+      text: 'Ich brauche eine Freigabe.',
+      question: 'Darf ich npm audit ausführen?',
+      options: ['Ja', 'Nein, nur lesen', 'a', 'b'],
+    },
+  );
+  // Ohne Rückfrage keine Optionen.
+  assert.deepEqual(splitQuestion('Fertig.\n@@OPTIONEN: A | B').options, []);
 });
 
 test('Gewählter Agent übernimmt mit Bezeichnung und Beschreibung', () => {

@@ -26,30 +26,38 @@
         }
       </select>
     </label>
-    <label class="control control-agent"
-      ><span>Agent</span
-      ><select
-        [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
-        (ngModelChange)="manualAgent[item.id] = $event"
-        [name]="'agent-' + item.id"
-      >
-        <option value="">Einzeln starten …</option>
-        @for (agent of data().agents; track agent.id) {
-          <option [value]="agent.id">{{ agent.name }}</option>
-        }
-      </select>
-      <button
-        class="button primary run-agent"
-        type="button"
-        title="Mit gewähltem Agent starten"
-        aria-label="Agent starten"
-        [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
-        (click)="startWithAgent(item)"
-      >
-        ▶
-      </button>
-    </label>
+    @if (item.kind !== 'express') {
+      <label class="control control-agent"
+        ><span>Agent</span
+        ><select
+          [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+          (ngModelChange)="manualAgent[item.id] = $event"
+          [name]="'agent-' + item.id"
+        >
+          <option value="">Einzeln starten …</option>
+          @for (agent of data().agents; track agent.id) {
+            <option [value]="agent.id">{{ agent.name }}</option>
+          }
+        </select>
+        <button
+          class="button primary run-agent"
+          type="button"
+          title="Mit gewähltem Agent starten"
+          aria-label="Agent starten"
+          [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+          (click)="startWithAgent(item)"
+        >
+          ▶
+        </button>
+      </label>
+    }
   </div>
+  @if (item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
+    <app-order-question [order]="item" />
+  }
+  @if (item.status === 'approval') {
+    <app-order-approval [order]="item" />
+  }
   @if (item.status === 'blocked' || item.status === 'rejected') {
     <div class="blocked-box">
       <strong>{{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}</strong>
@@ -79,12 +87,14 @@
         </p>
       }
       <div class="actions">
-        <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
-          ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
-          @if (item.retryCount) {
-            ({{ item.retryCount }})
-          }
-        </button>
+        @if (item.kind !== 'express') {
+          <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
+            ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
+            @if (item.retryCount) {
+              ({{ item.retryCount }})
+            }
+          </button>
+        }
         <button
           class="button secondary"
           type="button"
@@ -297,6 +307,7 @@
       </details>
     }
   }
+  <app-order-timeline [order]="item" />
   <details class="run-step order-brief" [open]="agentsOpen()">
     <summary>Agents</summary>
     <app-agent-workflow [order]="item" />

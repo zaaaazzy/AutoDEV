@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
 import { relatedResourceBelongsToProject } from './resource.js';
@@ -18,7 +18,12 @@ import {
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
-  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category`;
+  sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
+  regressed_at AS "regressedAt"`;
+/** Betriebs-Bugs: Vorkommen der letzten 24 Stunden („seit gestern“) über alle gebündelten Ereignisse. */
+const PRODUCTION_COUNT = `CASE WHEN source = 'production' THEN (
+    SELECT COALESCE(SUM(k.count), 0)::int FROM production_events e JOIN production_event_buckets k ON k.event_id = e.id
+     WHERE e.bug_id = bugs.id AND k.hour >= date_trunc('hour', NOW() - INTERVAL '24 hours')) END AS "productionCount"`;
 const BUG_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },
@@ -102,21 +107,21 @@ export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40)
   return result.rows;
 }
 
-export function registerBugRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/bugs', async (request, response) => {
+export function registerBugRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/bugs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
       return;
     }
     const result = await pool.query(
-      `SELECT ${BUG_COLUMNS} FROM bugs WHERE project_slug = $1 ORDER BY created_at DESC LIMIT 500`,
+      `SELECT ${BUG_COLUMNS}, ${PRODUCTION_COUNT} FROM bugs WHERE project_slug = $1 ORDER BY created_at DESC LIMIT 500`,
       [slug],
     );
     response.json({ bugs: result.rows });
   });
 
-  app.post('/api/projects/:slug/bugs', async (request, response) => {
+  app.post('/projects/:slug/bugs', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, BUG_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -154,7 +159,7 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     response.status(201).json({ bug: result.rows[0] });
   });
 
-  app.patch('/api/bugs/:id', async (request, response) => {
+  app.patch('/bugs/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -193,7 +198,7 @@ export function registerBugRoutes(app: Express, pool: Pool): void {
     response.json({ bug: result.rows[0] });
   });
 
-  app.delete('/api/bugs/:id', async (request, response) => {
+  app.delete('/bugs/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

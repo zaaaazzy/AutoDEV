@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { completeSprint } from './sprint-planning.js';
 import {
@@ -17,7 +17,8 @@ const SPRINT_STATUSES = new Set(['planned', 'active', 'completed']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   to_char(start_date, 'YYYY-MM-DD') AS "startDate", to_char(end_date, 'YYYY-MM-DD') AS "endDate",
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
-  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt"`;
+  git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt",
+  review_ready_at AS "reviewReadyAt"`;
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },
@@ -32,8 +33,8 @@ function databaseCode(error: unknown): string | undefined {
     : undefined;
 }
 
-export function registerSprintRoutes(app: Express, pool: Pool): void {
-  app.get('/api/projects/:slug/sprints', async (request, response) => {
+export function registerSprintRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/sprints', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -47,7 +48,7 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
     response.json({ sprints: result.rows });
   });
 
-  app.post('/api/projects/:slug/sprints', async (request, response) => {
+  app.post('/projects/:slug/sprints', async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, SPRINT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -79,7 +80,7 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.patch('/api/sprints/:id', async (request, response) => {
+  app.patch('/sprints/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -115,7 +116,7 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.post('/api/sprints/:id/git-sync', async (request, response) => {
+  app.post('/sprints/:id/git-sync', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -134,7 +135,7 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
   });
 
   // Kanban: Reihenfolge der Aufträge im Sprint festlegen (oberste zuerst).
-  app.post('/api/sprints/:id/order', async (request, response, next) => {
+  app.post('/sprints/:id/order', async (request, response, next) => {
     try {
       const ids = (request.body as { ids?: unknown } | undefined)?.ids;
       if (!isUuid(request.params.id) || !Array.isArray(ids) || ids.length > 500 || !ids.every(isUuid)) {
@@ -153,7 +154,7 @@ export function registerSprintRoutes(app: Express, pool: Pool): void {
     }
   });
 
-  app.delete('/api/sprints/:id', async (request, response) => {
+  app.delete('/sprints/:id', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

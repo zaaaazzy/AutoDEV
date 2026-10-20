@@ -29,7 +29,7 @@ export default defineConfig({
     env: {
       ...(base.webServer as { env: Record<string, string> }).env,
       PORT: String(PORT),
-      E2E_DATABASE: 'dev_log_full',
+      E2E_DATABASE: process.env.FULL_UI_DATABASE ?? 'dev_log_full',
     },
   },
 });

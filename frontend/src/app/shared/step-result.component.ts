@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, effect, ElementRef, input, viewChild } from '@angular/core';
 import type { StepEvent } from '../core/models.js';
 import { AgentOutputPipe } from './agent-output.pipe.js';
@@ -10,7 +10,7 @@ import { describeStepEvent, summarizeFiles } from './step-event.js';
 @Component({
   selector: 'app-step-result',
   standalone: true,
-  imports: [DatePipe, AgentOutputPipe, EventIconComponent, FileLinkComponent],
+  imports: [DatePipe, NgTemplateOutlet, AgentOutputPipe, EventIconComponent, FileLinkComponent],
   templateUrl: './step-result.component.html',
 })
 export class StepResultComponent {
@@ -19,6 +19,8 @@ export class StepResultComponent {
   readonly progress = input<string | null | undefined>(null);
   readonly running = input(false);
   readonly eventsOpen = input(false);
+  /** Kompakte Ansicht (Chat): Ausgabe direkt, Verlauf und Dateien nur nach dem Aufklappen unter der Nachricht. */
+  readonly compact = input(false);
   protected readonly describe = describeStepEvent;
   protected readonly files = computed(() => summarizeFiles(this.events() ?? []));
   protected readonly fileGroups = computed(() => {

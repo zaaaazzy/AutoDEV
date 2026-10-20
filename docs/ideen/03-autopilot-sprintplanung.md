@@ -14,7 +14,7 @@
 
 ## Beschreibung für Ideation (kopierfertig)
 
-Dev Log schlägt den nächsten Sprint vor: Aus dem Backlog werden Aufträge nach Priorität, Nutzen/Kosten-Verhältnis, Abhängigkeiten (Folgeaufträge, gleiche Dateien), offenen Bugs und der gemessenen Kapazität (Velocity der letzten Sprints, Stunden und Tokens) ausgewählt. Der Vorschlag erscheint in Sprints mit Begründung je Auftrag und Summen (Stunden, Tokens, Kosten). Ein Klick übernimmt ihn (Sprint anlegen, Aufträge zuordnen, Reihenfolge `sprint_rank` setzen) und startet ihn optional. Im Modus „Autopilot“ läuft das ohne Klick: Sind alle Aufträge erledigt oder nur noch „Aktion notwendig“ offen, wird der Sprint abgeschlossen (Bericht, Test-Gate, Merge, Tag) und der nächste vorgeschlagen bzw. gestartet.
+AIdeation schlägt den nächsten Sprint vor: Aus dem Backlog werden Aufträge nach Priorität, Nutzen/Kosten-Verhältnis, Abhängigkeiten (Folgeaufträge, gleiche Dateien), offenen Bugs und der gemessenen Kapazität (Velocity der letzten Sprints, Stunden und Tokens) ausgewählt. Der Vorschlag erscheint in Sprints mit Begründung je Auftrag und Summen (Stunden, Tokens, Kosten). Ein Klick übernimmt ihn (Sprint anlegen, Aufträge zuordnen, Reihenfolge `sprint_rank` setzen) und startet ihn optional. Im Modus „Autopilot“ läuft das ohne Klick: Sind alle Aufträge erledigt oder nur noch „Aktion notwendig“ offen, wird der Sprint abgeschlossen (Bericht, Test-Gate, Merge, Tag) und der nächste vorgeschlagen bzw. gestartet.
 
 ## Problem heute
 

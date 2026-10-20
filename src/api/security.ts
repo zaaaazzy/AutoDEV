@@ -1,7 +1,15 @@
-import type { RequestHandler } from 'express';
+import type { Request, RequestHandler } from 'express';
 import helmet from 'helmet';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * Voller Pfad der Anfrage. Im unter /api eingehängten Router fehlt das Präfix in request.path, die Regeln für
+ * Rollen und Mandanten sind aber auf den vollen Pfad (/api/...) geschrieben.
+ */
+export function fullPath(request: Pick<Request, 'baseUrl' | 'path'>): string {
+  return `${request.baseUrl ?? ''}${request.path}`;
+}
 
 export const securityHeaders: RequestHandler = helmet({
   contentSecurityPolicy: {
@@ -30,6 +38,30 @@ export const sameOriginWrites: RequestHandler = (request, response, next) => {
   }
   next();
 };
+
+/** Feste Zeitfenster je Schlüssel (z. B. Client-IP): höchstens `limit` Anfragen pro `windowMs`. */
+export class RateLimiter {
+  private readonly hits = new Map<string, { count: number; since: number }>();
+
+  constructor(
+    private readonly limit: number,
+    private readonly windowMs: number,
+  ) {}
+
+  allow(key: string, now = Date.now()): boolean {
+    const entry = this.hits.get(key);
+    if (!entry || now - entry.since >= this.windowMs) {
+      // Abgelaufene Einträge aufräumen, damit viele verschiedene Absender den Speicher nicht füllen.
+      if (this.hits.size >= 10_000) {
+        for (const [other, value] of this.hits) if (now - value.since >= this.windowMs) this.hits.delete(other);
+      }
+      this.hits.set(key, { count: 1, since: now });
+      return true;
+    }
+    entry.count += 1;
+    return entry.count <= this.limit;
+  }
+}
 
 const MAX_FAILURES = 10;
 const WINDOW_MS = 15 * 60 * 1000;

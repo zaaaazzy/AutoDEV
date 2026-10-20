@@ -24,6 +24,6 @@ test('accepts the current and neighbouring time step only', () => {
 test('builds an otpauth link for authenticator apps', () => {
   assert.equal(
     otpauthUri('ABC', 'devlog'),
-    'otpauth://totp/Dev%20Log%3Adevlog?secret=ABC&issuer=Dev%20Log&algorithm=SHA1&digits=6&period=30',
+    'otpauth://totp/AIdeation%3Adevlog?secret=ABC&issuer=AIdeation&algorithm=SHA1&digits=6&period=30',
   );
 });
