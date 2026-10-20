@@ -38,9 +38,10 @@ export class BudgetPanelComponent {
   private async load(slug: string): Promise<void> {
     if (!slug) return;
     try {
-      this.overview.set(await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`));
+      const overview = await this.api.get<BudgetOverview>(`${this.api.projectPath(slug)}/budget`);
+      if (this.store.isActive(slug)) this.overview.set(overview);
     } catch {
-      this.overview.set(null);
+      if (this.store.isActive(slug)) this.overview.set(null);
     }
   }
 }

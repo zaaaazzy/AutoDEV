@@ -46,6 +46,8 @@ export class ProjectStore {
   private requestVersion = 0;
   /** Projekt, zu dem `data` aktuell gehört. */
   private loadedSlug = '';
+  /** Projekt, zu dem `worker` gehört (Entwürfe nur innerhalb desselben Projekts vergleichen). */
+  private workerSlug = '';
 
   readonly projects = signal<Project[]>([]);
   readonly activeProject = signal(projectFromHash() ?? readStoredProject());
@@ -98,6 +100,11 @@ export class ProjectStore {
       globalThis.clearInterval(refreshTimer);
       globalThis.clearInterval(liveTimer);
     });
+  }
+
+  /** Ist `slug` noch das aktive Projekt? Nach jedem `await` prüfen, sonst landen Antworten im falschen Projekt. */
+  isActive(slug: string): boolean {
+    return !!slug && slug === this.activeProject();
   }
 
   sprintOf(item: DevelopmentItem | null): Sprint | null {
@@ -211,8 +218,10 @@ export class ProjectStore {
       if (slug === this.activeProject()) {
         // Ist ein Auftrag fertig geschrieben, sofort nachladen, damit er in der Liste erscheint.
         const current = new Set((status.drafts ?? []).map((draft) => draft.id));
-        const finished = (this.worker().drafts ?? []).some((draft) => !current.has(draft.id));
+        const previous = this.workerSlug === slug ? (this.worker().drafts ?? []) : [];
+        const finished = previous.some((draft) => !current.has(draft.id));
         this.worker.set(status);
+        this.workerSlug = slug;
         if (finished) this.refreshActiveProject();
         this.workerFailure.set(false);
       }

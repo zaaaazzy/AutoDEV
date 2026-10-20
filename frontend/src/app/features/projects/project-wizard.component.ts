@@ -270,6 +270,8 @@ export class ProjectWizardComponent implements OnDestroy {
 
   private scheduleFolderCheck(path: string): void {
     clearTimeout(this.folderTimer);
+    // Laufende Prüfung des alten Pfads verwerfen, sonst setzt ihr Ergebnis den Status des neuen.
+    this.folderCheck++;
     this.folderInfo.set(null);
     this.folderError.set('');
     if (!path.trim() || path.trim().endsWith('/')) {
@@ -303,8 +305,10 @@ export class ProjectWizardComponent implements OnDestroy {
   }
 
   protected async createFolder(): Promise<void> {
+    const check = this.folderCheck;
     this.folderState.set('loading');
     const job = await this.setup.run('create_folder', { path: this.folder().trim() }).catch(() => null);
+    if (check !== this.folderCheck) return;
     if (job?.status === 'failed') {
       this.folderState.set('error');
       this.folderError.set(job.result?.error ?? 'Ordner konnte nicht angelegt werden.');
