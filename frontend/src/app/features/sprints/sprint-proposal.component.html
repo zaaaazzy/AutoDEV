@@ -5,11 +5,28 @@
     </button>
   }
 } @else if (proposal(); as plan) {
-  <section class="sprint-proposal" aria-label="Vorschlag für den nächsten Sprint">
+  <section class="sprint-proposal" [class.collapsed]="!expanded()" aria-label="Vorschlag für den nächsten Sprint">
     <header>
       <div>
-        <h3>Vorschlag für {{ plan.name }}</h3>
-        <p class="muted">
+        <h3>
+          <button
+            type="button"
+            class="proposal-toggle"
+            [attr.aria-expanded]="expanded()"
+            aria-controls="sprint-proposal-body"
+            (click)="toggleExpanded()"
+          >
+            <span class="proposal-caret" aria-hidden="true">{{ expanded() ? '▾' : '▸' }}</span>
+            Vorschlag für {{ plan.name }}
+          </button>
+          @if (!expanded() && plan.items.length) {
+            <small class="muted proposal-summary">
+              {{ chosen().length }} Aufträge · {{ formatHours(totals().hours) }} ·
+              {{ formatUsd(totals().costUsd) }}
+            </small>
+          }
+        </h3>
+        <p class="muted" [hidden]="!expanded()">
           Kapazität {{ formatHours(plan.capacity.hours) }}
           @if (plan.capacity.tokens !== null) {
             · {{ plan.capacity.tokens | localeNumber }} Tokens
@@ -54,8 +71,10 @@
         }
       </div>
     }
-    @if (plan.items.length) {
-      <div class="table-wrap">
+    @if (!expanded()) {
+      <!-- Zugeklappt: nur Kopfzeile mit Summen (Autopilot-Hinweis bleibt sichtbar). -->
+    } @else if (plan.items.length) {
+      <div class="table-wrap" id="sprint-proposal-body">
         <table class="idea-table proposal-table">
           <thead>
             <tr>
@@ -156,7 +175,7 @@
     } @else {
       <p class="empty-state">Keine offenen Aufträge im Backlog – nichts vorzuschlagen.</p>
     }
-    @if (roadmapOpen()) {
+    @if (expanded() && roadmapOpen()) {
       <section class="sprint-roadmap" aria-label="Roadmap der nächsten Sprints">
         <h4>Roadmap – die nächsten 3 Sprints (Vorschau, nichts wird angelegt)</h4>
         @if (roadmap(); as map) {

@@ -6,7 +6,7 @@ import {
   CdkDropListGroup,
   moveItemInArray,
 } from '@angular/cdk/drag-drop';
-import { Component, computed, inject, input } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint } from '../../core/models.js';
@@ -15,6 +15,7 @@ import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { formatHours } from '../../shared/format.js';
 import { categoryLabel, isFinished, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+import { groupState, pickInOrder, toggleGroup, toggleId } from './pool-selection.js';
 
 const PRIORITY = { high: 0, medium: 1, low: 2 } as const;
 
@@ -31,7 +32,7 @@ const PRIORITY = { high: 0, medium: 1, low: 2 } as const;
 })
 export class SprintBoardComponent {
   private readonly api = inject(ApiService);
-  private readonly store = inject(ProjectStore);
+  protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
   readonly sprint = input.required<Sprint>();
 
@@ -90,6 +91,60 @@ export class SprintBoardComponent {
       { id: 'aborted', title: 'Abgebrochen', hint: 'aus einem Sprint genommen oder gescheitert', items: board.aborted },
     ];
   });
+
+  /** Mehrfachauswahl unter dem Board: angehakte Aufträge auf einmal in den Sprint nehmen. */
+  private readonly selectedIds = signal<ReadonlySet<string>>(new Set());
+  /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
+  protected readonly selection = computed(() =>
+    pickInOrder([...this.columns().open, ...this.columns().aborted], this.selectedIds()),
+  );
+  protected readonly selectedSet = computed(() => new Set(this.selection().map((item) => item.id)));
+
+  protected toggleSelected(item: DevelopmentItem): void {
+    this.selectedIds.set(toggleId(this.selectedSet(), item.id));
+  }
+
+  protected toggleAll(items: DevelopmentItem[]): void {
+    this.selectedIds.set(
+      toggleGroup(
+        this.selectedSet(),
+        items.map((item) => item.id),
+      ),
+    );
+  }
+
+  protected allState(items: DevelopmentItem[]): 'none' | 'some' | 'all' {
+    return groupState(
+      this.selectedSet(),
+      items.map((item) => item.id),
+    );
+  }
+
+  protected clearSelection(): void {
+    this.selectedIds.set(new Set());
+  }
+
+  /** Alle angehakten nacheinander in den Sprint; scheitert einer, laufen die übrigen weiter. */
+  protected async takeSelected(): Promise<void> {
+    const items = this.selection();
+    if (!items.length) return;
+    const failed: string[] = [];
+    await this.store.perform(
+      async () => {
+        for (const item of items) {
+          await this.takeIntoSprint(item).catch(() => failed.push(this.title(item)));
+        }
+        this.clearSelection();
+      },
+      `${items.length} ${items.length === 1 ? 'Auftrag ist' : 'Aufträge sind'} im Sprint.`,
+    );
+    // Nachgeladen wird trotzdem; die Meldung nennt, was nicht übernommen wurde.
+    if (failed.length) {
+      this.store.notice.set(
+        `${items.length - failed.length} von ${items.length} im Sprint – nicht übernommen: ${failed.join(', ')}.`,
+      );
+    }
+  }
 
   protected readonly editable = computed(() => this.sprint().status !== 'completed' && this.auth.can('plan'));
   /** Hineinnehmen nur in geplante oder aktive Sprints (dieselbe Regel wie der Server); im Review und danach nicht. */

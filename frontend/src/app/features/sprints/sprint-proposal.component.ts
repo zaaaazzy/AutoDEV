@@ -84,6 +84,8 @@ export class SprintProposalComponent {
   protected readonly comment = signal<ProposalComment | null>(null);
   protected readonly roadmap = signal<Roadmap | null>(null);
   protected readonly roadmapOpen = signal(false);
+  /** Platzsparend: standardmässig nur Kopfzeile mit Summen; aufgeklappt Tabelle und Aktionen (je Gerät gemerkt). */
+  protected readonly expanded = signal(this.readExpanded());
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   /** Projekt, zu dem `proposal` gehört (Auswahl nur bei Projektwechsel zurücksetzen). */
   private loadedSlug = '';
@@ -241,7 +243,26 @@ export class SprintProposalComponent {
     await this.load(slug);
   }
 
+  protected toggleExpanded(): void {
+    const open = !this.expanded();
+    this.expanded.set(open);
+    try {
+      globalThis.localStorage?.setItem('devlog.proposal.open', open ? '1' : '0');
+    } catch {
+      /* ohne Speicher bleibt es beim Standard */
+    }
+  }
+
+  private readExpanded(): boolean {
+    try {
+      return globalThis.localStorage?.getItem('devlog.proposal.open') === '1';
+    } catch {
+      return false;
+    }
+  }
+
   protected async toggleRoadmap(): Promise<void> {
+    if (!this.expanded()) this.toggleExpanded();
     this.roadmapOpen.update((open) => !open);
     if (this.roadmapOpen()) await this.loadRoadmap(this.store.activeProject());
   }

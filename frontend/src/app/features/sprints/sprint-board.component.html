@@ -82,9 +82,28 @@
   </div>
   @if (canTakeIn()) {
     <section class="kanban-pool" aria-label="Für den Sprint verfügbar">
+      @if (selection().length) {
+        <div class="kanban-pool-bar" role="status">
+          <strong>{{ selection().length }} ausgewählt</strong>
+          <button class="button primary small" type="button" [disabled]="store.busy()" (click)="takeSelected()">
+            → In den Sprint ({{ selection().length }})
+          </button>
+          <button class="button secondary small" type="button" (click)="clearSelection()">Auswahl aufheben</button>
+        </div>
+      }
       @for (pool of pools(); track pool.id) {
         <div class="kanban-pool-group">
           <header>
+            @if (pool.items.length) {
+              <input
+                type="checkbox"
+                class="kanban-select"
+                [checked]="allState(pool.items) === 'all'"
+                [indeterminate]="allState(pool.items) === 'some'"
+                [attr.aria-label]="'Alle auswählen: ' + pool.title"
+                (change)="toggleAll(pool.items)"
+              />
+            }
             <strong>{{ pool.title }}</strong>
             <span class="kanban-count">{{ pool.items.length }}</span>
             <small class="muted">{{ pool.hint }}</small>
@@ -99,8 +118,20 @@
             (cdkDropListDropped)="drop($event)"
           >
             @for (item of pool.items; track item.id) {
-              <article class="kanban-card kanban-pool-card draggable" cdkDrag [cdkDragData]="item">
+              <article
+                class="kanban-card kanban-pool-card draggable"
+                [class.selected]="selectedSet().has(item.id)"
+                cdkDrag
+                [cdkDragData]="item"
+              >
                 <div class="kanban-card-head">
+                  <input
+                    type="checkbox"
+                    class="kanban-select"
+                    [checked]="selectedSet().has(item.id)"
+                    [attr.aria-label]="'Auswählen: ' + title(item)"
+                    (change)="toggleSelected(item)"
+                  />
                   @if (item.kind === 'bug') {
                     <app-bug-icon />
                   }
