@@ -1,7 +1,7 @@
 import { logged } from '../core/log.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { runPreSprint } from './pre-sprint.js';
-import { followProjectPreview, processApprovals } from './review-gate.js';
+import { processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
@@ -14,7 +14,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
 import { enterOrderBranch, OrderBranchError, syncSprintToGit } from './git-sync.js';
 import { extractCriteria, loadDefinitions } from './acceptance.js';
-import { deployProject } from './deploy.js';
+import { goLive } from './go-live.js';
 import { acquireTree } from '../core/project-lock.js';
 import { generateSprintReport } from '../api/reports.js';
 import { materializeAttachments } from '../api/attachments.js';
@@ -344,17 +344,6 @@ export async function runWorkItem(
     }
   }
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
-}
-
-/**
- * Live schalten (nach dem Go zum Sprint, wenn er in main gemergt ist): Projektordner (z. B. mit dev-live) auf main
- * nachziehen und die Deploy-Befehle des Projekts dort ausführen. Vorher sieht man den Sprint nur in der Vorschau.
- */
-async function goLive(pool: Pool, project: string, cwd: string, execute?: CommandExecutor): Promise<void> {
-  await followProjectPreview(pool, project, cwd, 'main', execute);
-  const live = (await pool.query<{ repository: string }>('SELECT repository FROM projects WHERE slug = $1', [project]))
-    .rows[0]?.repository;
-  await deployProject(pool, project, live ?? cwd, execute);
 }
 
 export async function runWorkflow(

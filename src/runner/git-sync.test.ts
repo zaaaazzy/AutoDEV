@@ -8,6 +8,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import type { HosterAdapter } from './hoster.js';
+import { goLive } from './go-live.js';
 import {
   ciLogExcerpt,
   maskSecrets,
@@ -209,6 +210,26 @@ test('each order works on its own branch and is merged into the sprint branch on
   assert.equal(git('show', 'sprint/sprint-1:login.txt'), 'fertig');
   assert.match(git('log', '-1', '--format=%s'), /^Merge auftrag\/11111111-login-seite/);
   assert.equal(git('branch', '--list', 'auftrag/*'), '');
+});
+
+test('ein gescheiterter Deploy wird nicht als „Live geschaltet“ gemeldet', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-live-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  await checkoutSprintBranch(cwd, 'Sprint 1: Äpfel');
+  await writeFile(join(cwd, 'feature.txt'), 'neu');
+  git('add', '-A');
+  git('commit', '-m', 'feat: Auftrag');
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, undefined, async () => false), 1);
+  const message = String(updates.at(-1)?.values[1]);
+  assert.match(message, /Live schalten unvollständig: Deploy fehlgeschlagen/);
+  assert.doesNotMatch(message, /Live geschaltet/);
 });
 
 test('projects without git get no order branch', async () => {
@@ -482,6 +503,28 @@ test('green CI without required approval merges the pull request and tags main',
   const final = updates.at(-1)!;
   assert.match(final.sql, /SET status = 'completed', ci_status = \$5, git_sync = 'done'/);
   assert.equal(final.values[4], 'success');
+});
+
+test('PR-Modus: nach dem Merge des Pull Requests wird live geschaltet (Deploy und production_deploys)', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const { pool: review, updates } = reviewPool({ ...REVIEW });
+  const deploys: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('deploy_commands')) return { rows: [{ commands: [['true']] }] };
+      if (sql.includes('INSERT INTO production_deploys')) deploys.push(values);
+      return review.query(sql, values);
+    },
+  } as unknown as Pool;
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, adapter, false, undefined, () => goLive(pool, 'p', cwd)), 1);
+  assert.deepEqual(deploys, [['p']]);
+  assert.ok(
+    updates.some((entry) => /SET deploy_status/.test(entry.sql) && /Aktualisiert/.test(String(entry.values[1]))),
+  );
+  assert.match(String(updates.at(-1)?.values[1]), /Live geschaltet: .*deployt/);
 });
 
 test('required approval: green CI waits until a human approves', async () => {
