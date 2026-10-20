@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
+import { DEV_COLUMNS } from './development.js';
 import { currentStep, hotp } from './totp.js';
 
 // Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
@@ -527,6 +528,18 @@ test('assigns development orders to sprints only within the same project', async
     assert.equal(queries.length, 1);
     assert.match(queries[0]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
   });
+});
+
+test('fixStatus vergleicht mit failure_bug_id des äusseren Auftrags, nicht des Behebungsauftrags', () => {
+  // Hätte die innere Tabelle eine Spalte failure_bug_id, löste Postgres das unqualifizierte failure_bug_id auf sie
+  // auf (f.bug_id = f.failure_bug_id) und fixStatus bliebe immer leer. Gegen Postgres 16 geprüft: Board-SELECT und
+  // `UPDATE development_items d … RETURNING` liefern den Status des Behebungsauftrags.
+  const subselect = /\(SELECT f\.status FROM ([\s\S]*?) AS "fixStatus"/.exec(DEV_COLUMNS)?.[1] ?? '';
+  assert.match(
+    subselect,
+    /^\(SELECT bug_id, status, created_at FROM development_items\) f\s+WHERE f\.bug_id = failure_bug_id/,
+  );
+  assert.doesNotMatch(subselect, /f\.failure_bug_id|development_items f\b/);
 });
 
 test('defines agents per workflow phase and persists their order', async () => {
