@@ -860,6 +860,15 @@ async function pullSprint(helpers: GitHelpers, sprint: PendingSprint, log: strin
   return { commit: await must('rev-parse', '--short', 'HEAD'), branch, log };
 }
 
+/** Steht der Ordner auf einem Auftrags-Branch mit nicht committeten Änderungen? */
+export async function orderWorkInProgress(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<boolean> {
+  if (!existsSync(join(cwd, '.git'))) return false;
+  const { git } = gitHelpers(rawExecute, cwd);
+  const branch = (await git('rev-parse', '--abbrev-ref', 'HEAD')).output.trim();
+  if (!branch.startsWith('auftrag/')) return false;
+  return Boolean((await git('status', '--porcelain', '--untracked-files=no')).output.trim());
+}
+
 /** Works through the next queued Git request (push or pull) of the project's sprints. */
 export async function syncSprintToGit(
   pool: Pool,
@@ -876,6 +885,10 @@ export async function syncSprintToGit(
         AND updated_at < NOW() - INTERVAL '30 minutes'`,
     [project],
   );
+  // Ein unterbrochener Auftrag (z. B. durch einen Neustart) steht noch mit offenen Änderungen auf seinem Branch und
+  // läuft gleich weiter. Die Git-Sicherung wartet (bleibt „pending“), statt am Checkout zu scheitern; sie läuft am
+  // Ende desselben Durchlaufs erneut.
+  if (await orderWorkInProgress(cwd, execute)) return 0;
   const claimed = await pool.query<PendingSprint>(
     `UPDATE sprints s SET git_sync = 'running'
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'

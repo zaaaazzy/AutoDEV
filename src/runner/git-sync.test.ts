@@ -8,6 +8,7 @@ import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import {
   checkoutSprintBranch,
+  orderWorkInProgress,
   commitAgentStep,
   conflictPrompt,
   unresolvedConflicts,
@@ -366,4 +367,29 @@ test('Ungelöste Konflikte werden am Ende verworfen statt mit Markern committet'
   assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1');
   assert.equal(git('status', '--porcelain'), '');
   assert.doesNotMatch(git('show', 'auftrag/99999999-liste:liste.txt'), /<<<<<<<|>>>>>>>/);
+});
+
+test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderungen im Ordner hat', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-halb-fertig');
+  await writeFile(join(cwd, 'a.txt'), 'halb fertig');
+  assert.equal(await orderWorkInProgress(cwd), true);
+  const { pool, updates } = fakePool(null);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
+  assert.equal(
+    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('30 minutes')),
+    false,
+    'nichts übernommen, Sprint bleibt pending',
+  );
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/12345678-halb-fertig');
+  // Committet oder auf einem anderen Branch: die Sicherung läuft wieder.
+  git('commit', '-am', 'wip');
+  assert.equal(await orderWorkInProgress(cwd), false);
 });
