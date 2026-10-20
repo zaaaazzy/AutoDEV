@@ -12,6 +12,7 @@ import {
   usagePercent,
   warnThresholds,
 } from './budget.js';
+import { localDay, localTimeZone } from '../core/time-zone.js';
 
 interface Query {
   sql: string;
@@ -60,7 +61,6 @@ test('ohne Limits keine Prüfung des Verbrauchs (Verhalten wie bisher)', async (
 test('Tageslimit: Verbrauch aus Agent-Schritten und Systemagents, erreicht bei 100 %', async () => {
   const { pool, queries } = fakePool((sql) => {
     if (sql.includes('FROM budgets')) return { rows: [{ period: 'day', maxTokens: '1000', maxCostUsd: null }] };
-    if (sql.includes('CURRENT_DATE')) return { rows: [{ key: '2026-10-20', since: '2026-10-20 00:00:00+02' }] };
     if (sql.includes('UNION ALL')) return { rows: [{ tokens: '1200', cost: '0' }] };
     return undefined;
   });
@@ -69,7 +69,10 @@ test('Tageslimit: Verbrauch aus Agent-Schritten und Systemagents, erreicht bei 1
   assert.equal(check.percent, 120);
   const spendQuery = queries.find((query) => query.sql.includes('UNION ALL'));
   assert.match(spendQuery?.sql ?? '', /agent_run_steps[\s\S]*agent_usage/);
-  assert.deepEqual(spendQuery?.values, ['mainty', '2026-10-20 00:00:00+02']);
+  // Budget-Tag in Ortszeit, berechnet im Worker (nicht CURRENT_DATE der UTC-Datenbank).
+  assert.deepEqual(spendQuery?.values, ['mainty', localDay().since]);
+  assert.equal(check.exceeded?.key, localDay().key);
+  assert.ok(!queries.some((query) => query.sql.includes('CURRENT_DATE')));
   assert.match(budgetTodo(check.exceeded!), /^Budget erreicht: erhöhen oder bis morgen warten \(Tageslimit: 1k Tokens/);
 });
 
@@ -166,4 +169,38 @@ test('Projektbudget erreicht: genau ein Auftrag wartet mit „Aktion notwendig�
   alreadyHeld = true;
   assert.equal(await holdForBudget(pool, { ...item, id: 'item-2' }, exceeded, send), false);
   assert.equal(pushes.length, 1);
+});
+
+test('Budget-Tag in Ortszeit: kurz nach Mitternacht zählt schon der neue Tag', () => {
+  // 21.10.2026 01:30 MESZ = 20.10.2026 23:30 UTC
+  assert.deepEqual(localDay(new Date('2026-10-20T23:30:00Z'), 'Europe/Zurich'), {
+    key: '2026-10-21',
+    since: '2026-10-20T22:00:00.000Z',
+  });
+  // Winterzeit: 01.12.2026 00:15 MEZ = 30.11.2026 23:15 UTC
+  assert.deepEqual(localDay(new Date('2026-11-30T23:15:00Z'), 'Europe/Zurich'), {
+    key: '2026-12-01',
+    since: '2026-11-30T23:00:00.000Z',
+  });
+  // Kurz vor Mitternacht Ortszeit bleibt es beim Vortag.
+  assert.equal(localDay(new Date('2026-10-20T21:59:00Z'), 'Europe/Zurich').key, '2026-10-20');
+  assert.equal(localDay(new Date('2026-10-20T23:30:00Z'), 'UTC').key, '2026-10-20');
+});
+
+test('Zeitzone aus DEV_LOG_TIMEZONE, Standard Europe/Zurich, Unbekanntes fällt zurück', () => {
+  assert.equal(localTimeZone({}), 'Europe/Zurich');
+  assert.equal(localTimeZone({ DEV_LOG_TIMEZONE: 'America/New_York' }), 'America/New_York');
+  assert.equal(localTimeZone({ DEV_LOG_TIMEZONE: 'Mars/Olympus' }), 'Europe/Zurich');
+});
+
+test('Sprintlimit: Sprintbeginn ist Mitternacht Ortszeit', async () => {
+  const { pool, queries } = fakePool((sql) => {
+    if (sql.includes('FROM budgets')) return { rows: [{ period: 'sprint', maxTokens: '1000', maxCostUsd: null }] };
+    if (sql.includes('FROM sprints')) return { rows: [{ id: 'sprint-1', since: '2026-10-19 00:00:00+02' }] };
+    return undefined;
+  });
+  await checkBudget(pool, 'mainty');
+  const sprint = queries.find((query) => query.sql.includes('FROM sprints'));
+  assert.match(sprint?.sql ?? '', /start_date::timestamp AT TIME ZONE \$3/);
+  assert.equal(sprint?.values[2], localTimeZone());
 });
