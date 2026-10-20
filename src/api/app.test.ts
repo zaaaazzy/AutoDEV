@@ -237,7 +237,42 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
     assert.equal(patched.status, 200);
     const update = queries.at(-1);
     assert.match(update?.sql ?? '', /SET benefit = \$2, cost = \$3/);
-    assert.deepEqual(update?.values, [ID, null, 4]);
+    assert.deepEqual(update?.values.slice(0, 3), [ID, null, 4]);
+  });
+});
+
+test('ideas cannot be patched while the author agent drafts them or once accepted', async () => {
+  for (const status of ['requested', 'drafting', 'accepted']) {
+    const queries: { sql: string; values: unknown[] }[] = [];
+    const pool = {
+      query: async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.startsWith('UPDATE ideation_items')) {
+          return { rows: (values.at(-1) as string[]).includes(status) ? [{ id: ID, status }] : [] };
+        }
+        return { rows: sql.startsWith('SELECT 1 FROM ideation_items') ? [{}] : [] };
+      },
+    } as unknown as Pool;
+    await withServer(pool, async (baseUrl) => {
+      for (const body of [{ status: 'idea' }, { title: 'Neu' }]) {
+        const response = await fetch(`${baseUrl}/api/ideation/${ID}`, {
+          method: 'PATCH',
+          headers: jsonHeaders(),
+          body: JSON.stringify(body),
+        });
+        assert.equal(response.status, 409, `${status}: ${JSON.stringify(body)}`);
+      }
+    });
+    assert.match(queries[0]?.sql ?? '', /WHERE id = \$1 AND status = ANY\(\$3\)/);
+  }
+  const missing = recordingPool([]);
+  await withServer(missing.pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/ideation/${ID}`, {
+      method: 'PATCH',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ title: 'Neu' }),
+    });
+    assert.equal(response.status, 404);
   });
 });
 
