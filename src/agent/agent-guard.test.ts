@@ -274,3 +274,20 @@ test('Lokales Modell: dieselben Datei- und Befehlsrechte wie die Claude-CLI', as
   assert.match(await call('run_sql', { sql: 'select 1' }), /nicht freigegeben/);
   assert.equal(executed, false);
 });
+
+test('Wächter: gesperrte Unterbefehle auch in Anführungszeichen, mit Backslash und abschaltbarem --ignore-scripts', () => {
+  for (const command of [
+    'git "push" origin main',
+    "git 'push'",
+    'git pu\\sh',
+    'docker "run" alpine',
+    'npm "install" left-pad',
+    'npm install --ignore-scripts left-pad --ignore-scripts=false',
+    'npm install --ignore-scripts left-pad --no-ignore-scripts',
+  ]) {
+    assert.ok(bashProblem(command, root), command);
+  }
+  for (const command of ['git status', 'git log --oneline', 'git diff', 'npm test', 'npm run build']) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
