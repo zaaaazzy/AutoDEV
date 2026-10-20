@@ -900,7 +900,8 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   const execute: CommandExecutor = async () => ({
     exitCode: 0,
     durationMs: 1,
-    output: 'geprüft',
+    // Ein Tester mit eigenem CLI muss die Abnahme melden, sonst gilt der Schritt als nicht bestanden.
+    output: `geprüft\n@@ACCEPTANCE {"criteria":[],"done":${JSON.stringify([1, 2, 3, 4, 5].map((nr) => ({ nr, met: true })))}}`,
     tokens: 800,
     costUsd: 0.4,
   });
