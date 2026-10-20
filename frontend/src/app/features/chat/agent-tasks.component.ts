@@ -6,6 +6,7 @@ import { AuthService } from '../../core/auth.service.js';
 import type { TestRequest, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ConfirmService } from '../../core/confirm.service.js';
+import { VISIONARY_DIRECTION } from '../ideation/idea-options.js';
 
 const normalize = (value: string) => value.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '');
 const POLL_MS = 10_000;
@@ -324,14 +325,14 @@ export class AgentTasksComponent {
       message: entry.effect,
       details: entry.commands.length ? entry.commands.map((command) => `$ ${command}`) : undefined,
       confirmLabel: 'Starten',
-      commentLabel: entry.visionary ? 'Schwerpunkt (optional)' : 'Kommentar (optional)',
+      commentLabel: entry.visionary ? VISIONARY_DIRECTION.commentLabel : 'Kommentar (optional)',
       commentPlaceholder: entry.visionary
-        ? 'z. B. „Ideen rund um Benachrichtigungen“'
+        ? VISIONARY_DIRECTION.commentPlaceholder
         : entry.action
           ? 'z. B. „Nur das Backend prüfen“'
           : '',
       commentHint: entry.visionary
-        ? 'Der Visionär richtet die Vorschläge dieses Laufs danach aus.'
+        ? VISIONARY_DIRECTION.commentHint
         : entry.action
           ? `Wird der Anweisung an ${entry.runner} als Hinweis angehängt.`
           : entry.restart

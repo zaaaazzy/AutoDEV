@@ -113,14 +113,9 @@
               <span class="nav-text">{{ item.label }}</span>
             </span>
             @if (navCount(item.id) > 0) {
-              <span
-                class="nav-count"
-                [class]="'nav-count ' + navTone(item.id)"
-                [attr.title]="
-                  item.id === 'sprints' ? sprintHealth()?.text : item.id === 'dashboard' ? store.openQuestion() : null
-                "
-                >{{ navCount(item.id) }}</span
-              >
+              <span class="nav-count" [class]="'nav-count ' + navTone(item.id)" [attr.title]="navTitle(item.id)">{{
+                navCount(item.id)
+              }}</span>
             }
           </a>
         }
@@ -303,6 +298,9 @@
         @switch (section()) {
           @case ('dashboard') {
             <app-dashboard />
+          }
+          @case ('actions') {
+            <app-actions />
           }
           @case ('development') {
             <app-development />

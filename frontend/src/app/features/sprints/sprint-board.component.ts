@@ -141,7 +141,7 @@ export class SprintBoardComponent {
     );
   }
 
-  /** Herausgenommene gelten als abgebrochen: unter dem Board und unter „Besondere Aufmerksamkeit“. */
+  /** Herausgenommene gelten als abgebrochen: unter dem Board und unter „Aktionen“. */
   private takeOutOfSprint(item: DevelopmentItem): Promise<unknown> {
     return this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`);
   }

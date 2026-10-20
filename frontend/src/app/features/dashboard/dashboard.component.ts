@@ -84,7 +84,7 @@ export class DashboardComponent {
       .sort((a, b) => (b.benefit ?? 0) - (b.cost ?? 0) - ((a.benefit ?? 0) - (a.cost ?? 0))),
   );
 
-  /** Aufträge nach Status; Blockierte stehen auf der Auftragsseite unter „Besondere Aufmerksamkeit“. */
+  /** Aufträge nach Status; Blockierte stehen auf der Seite „Aktionen“. */
   protected readonly orderShares = computed(() => this.orderSegments(this.data().development));
 
   protected readonly sprintShares = computed(() => {
@@ -272,11 +272,11 @@ export class DashboardComponent {
         label: statusLabel(status),
         value: items.filter((item) => item.status === status).length,
         tone: ORDER_TONES[status]!,
-        link: {
-          section: 'development',
-          filters,
-          anchor: status === 'blocked' ? 'attention-orders' : status === 'done' ? 'done-orders' : undefined,
-        },
+        // Blockierte Aufträge warten auf dich und stehen unter „Aktionen“.
+        link:
+          status === 'blocked'
+            ? { section: 'actions' }
+            : { section: 'development', filters, anchor: status === 'done' ? 'done-orders' : undefined },
       };
     });
   }

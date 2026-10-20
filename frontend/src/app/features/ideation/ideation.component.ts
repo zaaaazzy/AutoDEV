@@ -5,6 +5,7 @@ import { Component, computed, DestroyRef, effect, inject, signal, untracked } fr
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
+import { ConfirmService } from '../../core/confirm.service.js';
 import type { DevelopmentItem, Idea, Priority, Sprint, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
@@ -22,7 +23,6 @@ import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   HoursPipe,
   PriorityLabelPipe,
-  ShortTextPipe,
   StatusClassPipe,
   StatusLabelPipe,
   CategoryLabelPipe,
@@ -36,6 +36,8 @@ import {
   IDEA_SELECTABLE_STATUSES,
   IDEA_STATUSES,
   ideaDisplayStatus,
+  isOpenIdea,
+  VISIONARY_CONFIRM,
   MAX_IMAGE_BYTES,
   sourceLabel,
 } from './idea-options.js';
@@ -67,7 +69,6 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     MarkdownPipe,
     HoursPipe,
     PriorityLabelPipe,
-    ShortTextPipe,
     StatusClassPipe,
     StatusLabelPipe,
     CategoryLabelPipe,
@@ -81,6 +82,7 @@ export class IdeationComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly auth = inject(AuthService);
+  private readonly confirm = inject(ConfirmService);
   protected readonly defaultStatusFilter = DEFAULT_STATUS_FILTER;
   private readonly defaultFilters = { status: DEFAULT_STATUS_FILTER };
   /** Dashboard-Link mit Filter hat Vorrang vor dem Standardfilter. */
@@ -90,7 +92,6 @@ export class IdeationComponent {
   });
   protected readonly ideaId = (idea: Idea): string => idea.id;
   protected readonly ideaColumns: DataColumn<Idea>[] = [
-    { id: 'pick', header: '', value: () => '', filter: false, sortable: false, className: 'pick-cell' },
     { id: 'title', header: 'Titel', value: (idea) => idea.title, filter: 'text', className: 'title-cell' },
     {
       id: 'status',
@@ -179,10 +180,15 @@ export class IdeationComponent {
     if (wasOpen && !this.visionaryOpen()) await this.store.loadProject(slug, true);
   }
 
+  /** Vor dem Start fragen, ob der Visionär eine Richtung bekommen soll; leer = ohne Vorgabe, Abbrechen = kein Lauf. */
   protected async startVisionary(): Promise<void> {
+    const answer = await this.confirm.ask(VISIONARY_CONFIRM);
+    if (!answer) return;
     await this.store.perform(
       async () => {
-        const result = await this.api.post<{ run: VisionaryRun }>(this.visionaryPath());
+        const result = await this.api.post<{ run: VisionaryRun }>(this.visionaryPath(), {
+          comment: answer.comment.trim(),
+        });
         this.visionaryRun.set(result.run);
       },
       'Der Visionär sammelt Ideen – der Fortschritt erscheint hier.',
@@ -209,9 +215,8 @@ export class IdeationComponent {
   protected readonly selectedIdea = computed(
     () => this.data().ideas.find((idea) => idea.id === this.openIdea()) ?? null,
   );
-  protected readonly openIdeas = computed(() =>
-    this.data().ideas.filter((idea) => !this.isClosedIdea(idea) && !this.isInProgress(idea)),
-  );
+  /** Offene Ideen: weder angenommen noch abgelehnt – Abgeschlossene stehen nur unten in ihrer Gruppe. */
+  protected readonly openIdeas = computed(() => this.data().ideas.filter((idea) => isOpenIdea(idea)));
 
   protected gitNodes(idea: Idea, order: DevelopmentItem | null, sprint: Sprint | null): GitNode[] {
     return [
@@ -237,17 +242,9 @@ export class IdeationComponent {
     return IDEA_SELECTABLE_STATUSES.includes(idea.status) && !this.closedIdeaOrder(idea);
   }
 
-  protected togglePick(id: string): void {
-    this.picked.update((current) => {
-      const next = new Set(current);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
-  }
-
-  protected pickAll(): void {
-    this.picked.set(new Set(this.promotable().map((idea) => idea.id)));
-  }
+  /** Für die Tabelle: welche Zeilen ein Häkchen bekommen und wie es vorgelesen wird. */
+  protected readonly promotableRow = (idea: Idea): boolean => this.canPromote(idea);
+  protected readonly pickLabel = (idea: Idea): string => `Für Auftrag auswählen: ${idea.title}`;
 
   protected clearPicks(): void {
     this.picked.set(new Set());
@@ -322,7 +319,11 @@ export class IdeationComponent {
   }
 
   private isClosedIdea(idea: Idea): boolean {
-    return idea.status === 'rejected' || (idea.status === 'accepted' && !this.isInProgress(idea));
+    return (
+      idea.status === 'rejected' ||
+      idea.status === 'implemented' ||
+      (idea.status === 'accepted' && !this.isInProgress(idea))
+    );
   }
 
   private async uploadImages(ideationId: string, files: File[]): Promise<void> {

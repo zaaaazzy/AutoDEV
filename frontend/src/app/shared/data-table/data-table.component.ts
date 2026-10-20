@@ -25,6 +25,7 @@ import {
   type SortingState,
   type Updater,
 } from '@tanstack/angular-table';
+import { selectionState, toggleAll } from './selection.js';
 
 export interface DataColumn<T> {
   id: string;
@@ -89,6 +90,16 @@ export class DataTableComponent<T> {
   readonly groupBy = input<string | null>(null);
   /** Geöffnete Zeile; mit [(expanded)] von außen steuerbar. */
   readonly expanded = model<string | null>(null);
+  /** Aktive Filter als Chips über der Tabelle zeigen (der Filter selbst wirkt auch ohne Chips). */
+  readonly showFilterChips = input(true);
+  /**
+   * Mehrfachauswahl: Mit einer Funktion, die sagt, welche Zeilen wählbar sind, erscheint vorne eine Spalte mit
+   * Häkchen; das Häkchen im Spaltenkopf wählt alle sichtbaren Zeilen aus bzw. ab. Auswahl über [(selection)].
+   */
+  readonly selectable = input<((row: T) => boolean) | null>(null);
+  readonly selection = model<ReadonlySet<string>>(new Set());
+  /** VorleseText des Häkchens einer Zeile. */
+  readonly selectLabel = input<(row: T) => string>(() => 'Zeile auswählen');
 
   private readonly cellTemplates = contentChildren(DataCellDirective);
   protected readonly detail = contentChild(DataDetailDirective);
@@ -155,7 +166,39 @@ export class DataTableComponent<T> {
     getFacetedUniqueValues: getFacetedUniqueValues(),
   }));
 
-  protected readonly columnCount = computed(() => this.columns().length + 1);
+  protected readonly columnCount = computed(() => this.columns().length + (this.selectable() ? 2 : 1));
+
+  /** Sichtbare (gefilterte) Zeilen, die ausgewählt werden können. */
+  private readonly selectableIds = computed(() => {
+    const canSelect = this.selectable();
+    if (!canSelect) return [];
+    return this.table
+      .getRowModel()
+      .rows.filter((row) => canSelect(row.original))
+      .map((row) => row.id);
+  });
+
+  /** Zustand des Häkchens im Spaltenkopf: keine, einige oder alle sichtbaren Zeilen gewählt. */
+  protected readonly selectionState = computed<'none' | 'some' | 'all'>(() =>
+    selectionState(this.selectableIds(), this.selection()),
+  );
+
+  protected readonly hasSelectable = computed(() => this.selectableIds().length > 0);
+
+  protected canSelect(row: T): boolean {
+    return this.selectable()?.(row) ?? false;
+  }
+
+  protected toggleSelected(id: string): void {
+    const next = new Set(this.selection());
+    if (!next.delete(id)) next.add(id);
+    this.selection.set(next);
+  }
+
+  /** Häkchen im Kopf: alle sichtbaren wählbaren Zeilen auswählen oder (wenn schon alle gewählt) abwählen. */
+  protected toggleAllSelected(): void {
+    this.selection.set(toggleAll(this.selectableIds(), this.selection()));
+  }
 
   /** Sichtbare Zeilen, bei groupBy in Gruppen mit Überschrift zusammengefasst. */
   protected readonly groups = computed(() => {

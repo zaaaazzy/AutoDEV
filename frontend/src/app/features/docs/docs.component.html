@@ -132,15 +132,39 @@
 
       <div class="doc-reader">
         @if (selectedDoc(); as doc) {
-          <div class="meta">
-            <span class="tag">{{ documentKindLabel(doc.kind) }}</span>
-            <span>Aktualisiert {{ doc.updatedAt | dateTime }}</span>
-            @if (canEdit(doc) && editing() !== doc.id) {
-              <button class="button secondary small doc-edit" type="button" (click)="editing.set(doc.id)">
-                ✎ Bearbeiten
-              </button>
-            }
-          </div>
+          <!-- Kopf: Titel links; Kategorie, Datum und Bearbeiten (bzw. Einreichen/Abbrechen) rechts auf derselben Zeile. -->
+          <header class="doc-head">
+            <h3 class="doc-title">{{ doc.title }}</h3>
+            <div class="doc-head-meta">
+              <span class="tag">{{ documentKindLabel(doc.kind) }}</span>
+              <span class="muted doc-updated">Aktualisiert {{ doc.updatedAt | dateTime }}</span>
+              @if (editing() === doc.id) {
+                <button
+                  class="button primary small"
+                  type="submit"
+                  [attr.form]="'doc-editor-' + doc.id"
+                  [disabled]="store.busy()"
+                >
+                  Zur Prüfung einreichen
+                </button>
+                <button class="button secondary small" type="button" (click)="editing.set(null)">Abbrechen</button>
+                @if (auth.can('editor')) {
+                  <button class="button secondary small danger" type="button" (click)="deleteDocument(doc.id)">
+                    Löschen
+                  </button>
+                }
+              } @else if (canEdit(doc)) {
+                <button
+                  class="button secondary small doc-edit"
+                  type="button"
+                  title="Dokument bearbeiten"
+                  (click)="editing.set(doc.id)"
+                >
+                  ✎ Bearbeiten
+                </button>
+              }
+            </div>
+          </header>
 
           @for (revision of pendingOf(doc); track revision.id) {
             <section class="revision-card">
@@ -195,7 +219,12 @@
           }
 
           @if (editing() === doc.id) {
-            <form class="form-grid doc-editor" (ngSubmit)="submitRevision(doc, docEditor.value)" #docEditor="ngForm">
+            <form
+              class="form-grid doc-editor"
+              [id]="'doc-editor-' + doc.id"
+              (ngSubmit)="submitRevision(doc, docEditor.value)"
+              #docEditor="ngForm"
+            >
               <p class="muted wide">Änderungen werden nachverfolgt und gelten erst, wenn die Redaktion sie freigibt.</p>
               <label class="wide">Titel<input name="title" [ngModel]="doc.title" maxlength="180" required /> </label>
               <label class="wide"
@@ -209,16 +238,8 @@
                   placeholder="z. B. Abschnitt Login ergänzt"
                 />
               </label>
-              <div class="actions">
-                <button class="button primary" type="submit" [disabled]="store.busy()">Zur Prüfung einreichen</button>
-                <button class="button secondary" type="button" (click)="editing.set(null)">Abbrechen</button>
-                @if (auth.can('editor')) {
-                  <button class="button danger" type="button" (click)="deleteDocument(doc.id)">Löschen</button>
-                }
-              </div>
             </form>
           } @else {
-            <h3 class="doc-title">{{ doc.title }}</h3>
             <article class="markdown" [innerHTML]="doc.content | markdown" [appMermaid]="doc.content"></article>
             @if (doc.kind === 'workflow') {
               <p class="muted">

@@ -1,0 +1,345 @@
+@if (store.ready()) {
+  @if (attention().length) {
+    <section class="panel attention-panel" id="attention-orders">
+      <div class="section-heading">
+        <div>
+          <h2>Rückmeldungen der Agents</h2>
+          <p class="muted">Diese Aufträge warten auf dich. Jede Karte sagt, was passiert ist und was du tun musst.</p>
+        </div>
+      </div>
+      <ul class="attention-list">
+        @for (entry of attention(); track entry.item.id) {
+          @let item = entry.item;
+          <li class="attention-card" [id]="'order-' + item.id">
+            <div class="attention-head">
+              <button
+                type="button"
+                class="link-button attention-title"
+                [attr.aria-expanded]="openAttention() === item.id"
+                (click)="openAttention.set(openAttention() === item.id ? null : item.id)"
+              >
+                @if (item.kind === 'bug') {
+                  <app-bug-icon />
+                }
+                {{ item.kind === 'bug' ? item.title.replace('Bug: ', '') : item.title }}
+              </button>
+              @if (item.kind === 'express') {
+                <span
+                  class="express-badge"
+                  title="Express-Anfrage aus dem Dashboard – ungeplant in den Sprint aufgenommen"
+                  >⚡ Express</span
+                >
+              }
+              <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
+            </div>
+            @if (entry.badges.length || analysisRunning(item)) {
+              <div class="attention-reasons">
+                @for (reason of entry.badges; track reason.label) {
+                  <span [class]="'attention-reason ' + reason.tone">{{ reason.label }}</span>
+                }
+                @if (analysisRunning(item)) {
+                  <span class="attention-reason info">Analyse läuft …</span>
+                }
+              </div>
+            }
+            @if (entry.guide; as guide) {
+              <div class="attention-block attention-what">
+                <h3>Was ist passiert?</h3>
+                <p>{{ guide.problem }}</p>
+                @if (guide.causes.length) {
+                  <ol>
+                    @for (cause of guide.causes; track $index) {
+                      <li>{{ cause }}</li>
+                    }
+                  </ol>
+                }
+              </div>
+            } @else if (item.status === 'rejected') {
+              <div class="attention-block attention-what">
+                <h3>Was ist passiert?</h3>
+                <p>
+                  Der Auftrag wurde nicht umgesetzt, weil er gegen eine Projektregel verstösst{{
+                    rule(item) ? ':' : '.'
+                  }}
+                  @if (rule(item); as text) {
+                    <strong>{{ text }}</strong>
+                  }
+                </p>
+              </div>
+            } @else if (item.removedFromSprintAt) {
+              <div class="attention-block attention-what">
+                <h3>Was ist passiert?</h3>
+                <p>
+                  Der Auftrag wurde aus dem Sprint „{{ item.removedFromSprint ?? '?' }}“ genommen und ist in keinem
+                  Sprint mehr eingeplant.
+                </p>
+              </div>
+            }
+            <div class="attention-block attention-task">
+              <h3>Das musst du tun</h3>
+              @if (item.status === 'approval') {
+                <app-order-approval [order]="item" />
+              } @else if (item.status === 'blocked') {
+                @if (analysisRunning(item)) {
+                  <p>
+                    Warte kurz: Der Assistent analysiert den Auftrag. Die Schritte erscheinen hier, sobald er fertig
+                    ist.
+                  </p>
+                } @else if (item.kind === 'express') {
+                  <p>
+                    {{
+                      item.actionTodo
+                        ? 'Der Assistent wartet auf deine Antwort auf seine Rückfrage.'
+                        : 'Die Anfrage konnte nicht bearbeitet werden.'
+                    }}
+                  </p>
+                  @if (item.actionTodo) {
+                    <app-order-question [order]="item" />
+                  } @else {
+                    <p class="attention-next">
+                      → Stell die Anfrage im
+                      <a href="#dashboard" (click)="$event.preventDefault(); store.navigate('dashboard')"
+                        >Dashboard-Chat</a
+                      >
+                      neu.
+                    </p>
+                  }
+                } @else if (item.failureBugId) {
+                  @switch (item.fixStatus) {
+                    @case ('planned') {
+                      <p>
+                        <strong>Du musst nichts tun.</strong> Die Problemanalyse hat einen Code-Fehler gefunden. Ein
+                        Behebungsauftrag ist eingeplant; danach startet dieser Auftrag automatisch neu.
+                      </p>
+                    }
+                    @case ('in_progress') {
+                      <p>
+                        <strong>Du musst nichts tun.</strong> Ein Behebungsauftrag repariert gerade den gefundenen
+                        Code-Fehler; danach startet dieser Auftrag automatisch neu.
+                      </p>
+                    }
+                    @case ('done') {
+                      <p>Der Code-Fehler ist behoben, der Auftrag startet automatisch neu.</p>
+                      <p class="attention-next">→ Passiert nichts, klicke auf <strong>„Erneut versuchen“</strong>.</p>
+                    }
+                    @default {
+                      <p>
+                        Die Problemanalyse hat einen Code-Fehler gefunden und einen
+                        <a href="#bugs" (click)="$event.preventDefault(); openBug(item.failureBugId)">Bug-Bericht</a>
+                        angelegt.
+                        {{
+                          item.fixStatus === 'blocked'
+                            ? 'Die automatische Behebung ist gescheitert.'
+                            : 'Die automatische Behebung ist nicht aktiv (in den Einstellungen einschaltbar).'
+                        }}
+                        Damit es weitergeht, muss der Code geändert werden:
+                      </p>
+                      @if (entry.guide?.steps?.length) {
+                        <ol class="attention-steps">
+                          @for (step of entry.guide!.steps; track $index) {
+                            <li>{{ step }}</li>
+                          }
+                        </ol>
+                      }
+                      <p class="attention-next">
+                        → Sind die Änderungen drin, klicke auf <strong>„Erneut versuchen“</strong>.
+                      </p>
+                    }
+                  }
+                } @else if (entry.guide?.nothingToFix) {
+                  <ul class="attention-steps">
+                    @for (step of entry.guide!.steps; track $index) {
+                      <li>{{ step }}</li>
+                    }
+                  </ul>
+                  <p class="attention-next">→ Klicke auf <strong>„Erneut versuchen“</strong>.</p>
+                } @else if (entry.guide?.steps?.length) {
+                  @if (entry.guide!.steps.length === 1) {
+                    <p>{{ entry.guide!.steps[0] }}</p>
+                  } @else {
+                    <ol class="attention-steps">
+                      @for (step of entry.guide!.steps; track $index) {
+                        <li>{{ step }}</li>
+                      }
+                    </ol>
+                  }
+                  <p class="attention-next">
+                    → Wenn das erledigt ist, klicke auf <strong>„Erneut versuchen“</strong>.
+                    @if (sprintDoc(item); as docId) {
+                      <a href="#docs" (click)="$event.preventDefault(); openDoc(docId)">ToDo im Sprintbericht</a>
+                    }
+                  </p>
+                } @else {
+                  <p class="attention-next">
+                    → Ursache unklar? Klicke auf <strong>„Analysieren“</strong>, dann schlägt der Assistent die Schritte
+                    vor. War es nur ein vorübergehender Fehler, klicke direkt auf <strong>„Erneut versuchen“</strong>.
+                  </p>
+                }
+              } @else if (item.status === 'rejected') {
+                <ol class="attention-steps">
+                  <li>
+                    Ändere den Auftrag über <strong>„Details &amp; bearbeiten“</strong> so, dass er die Regel einhält.
+                  </li>
+                  <li>Klicke danach auf <strong>„Angepasst – erneut versuchen“</strong>.</li>
+                </ol>
+                <p class="muted small">Ist der Auftrag so nicht mehr gewollt, lösche ihn.</p>
+              } @else if (entry.guide?.steps?.length) {
+                <ol class="attention-steps">
+                  @for (step of entry.guide!.steps; track $index) {
+                    <li>{{ step }}</li>
+                  }
+                </ol>
+              }
+              @if (item.removedFromSprintAt && !isFinished(item.status)) {
+                <p class="attention-next">
+                  → Entscheide: <strong>„Wieder einplanen“</strong> nimmt ihn in den aktiven Sprint auf,
+                  <strong>„Löschen“</strong> verwirft ihn.
+                </p>
+              }
+              @if (entry.checks.length) {
+                <p>
+                  Diese Punkte kann nur ein Mensch prüfen. Probiere sie in der Anwendung aus und hake ab, was stimmt:
+                </p>
+                <ul class="todo-list">
+                  @for (check of entry.checks; track check.kind + check.position) {
+                    <li>
+                      <input
+                        type="checkbox"
+                        [checked]="false"
+                        [disabled]="busy()"
+                        [attr.aria-label]="'Abhaken: ' + check.text"
+                        (change)="checkPoint(item, check)"
+                      />
+                      <span class="todo-text"
+                        >{{ check.text }}
+                        @if (check.note) {
+                          <small class="muted">{{ check.note }}</small>
+                        }
+                      </span>
+                    </li>
+                  }
+                </ul>
+                @if (entry.checks.length > 1) {
+                  <p class="attention-next">
+                    → Oder bestätige alle auf einmal mit <strong>„Geprüft – alles in Ordnung“</strong>.
+                  </p>
+                }
+              }
+            </div>
+            @if (entry.failure; as failure) {
+              <details class="attention-failure-details">
+                <summary>Ausführliche Meldung{{ failure.agent ? ' des Agents „' + failure.agent + '“' : '' }}</summary>
+                <div class="attention-failure-body">
+                  @if (failure.unmet.length) {
+                    <h4>Diese Abnahmepunkte sind nicht erfüllt</h4>
+                    <ul class="attention-unmet">
+                      @for (point of failure.unmet; track $index) {
+                        <li>
+                          @if (point.label) {
+                            <strong>{{ point.label }}:</strong>
+                          }
+                          {{ point.criterion }}
+                          @if (point.reason) {
+                            <small>Grund: {{ point.reason }}</small>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                  @if (failure.report) {
+                    <h4>Bericht{{ failure.agent ? ' des Agents' : '' }}</h4>
+                    <article class="markdown attention-report" [innerHTML]="failure.report | markdown"></article>
+                  }
+                  @if (failure.note) {
+                    <h4>Ergebnis der Problemanalyse</h4>
+                    <p>{{ noteText(item, failure.note) }}</p>
+                  }
+                  @if (failure.log) {
+                    <details>
+                      <summary>Testprotokoll</summary>
+                      <pre class="attention-log">{{ failure.log }}</pre>
+                    </details>
+                  }
+                </div>
+              </details>
+            }
+            @if (item.analysis) {
+              <details class="attention-failure-details">
+                <summary>Vollständige Problemanalyse</summary>
+                <article class="markdown attention-analysis" [innerHTML]="item.analysis | markdown"></article>
+              </details>
+            }
+            <div class="attention-actions">
+              @if (item.kind === 'express') {
+                @if (!item.actionTodo) {
+                  <button class="button secondary" type="button" (click)="store.navigate('dashboard')">Zum Chat</button>
+                }
+              } @else if (
+                auth.can('run') && (item.status === 'blocked' || item.status === 'rejected' || item.removedFromSprintAt)
+              ) {
+                <button class="button primary" type="button" [disabled]="busy()" (click)="retryOrder(item)">
+                  {{
+                    item.status === 'blocked'
+                      ? 'Erneut versuchen'
+                      : item.status === 'rejected'
+                        ? 'Angepasst – erneut versuchen'
+                        : 'Wieder einplanen'
+                  }}
+                </button>
+              }
+              @if (entry.checks.length && auth.can('plan')) {
+                <button class="button primary" type="button" [disabled]="busy()" (click)="confirmOrder(item)">
+                  Geprüft – alles in Ordnung
+                </button>
+              }
+              @if (item.status === 'blocked' && auth.can('run') && item.kind !== 'express') {
+                <button
+                  class="button secondary"
+                  type="button"
+                  [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
+                  (click)="analyzeOrder(item)"
+                >
+                  Analysieren
+                </button>
+              }
+              <button
+                class="button secondary"
+                type="button"
+                (click)="openAttention.set(openAttention() === item.id ? null : item.id)"
+              >
+                {{ openAttention() === item.id ? 'Details schließen' : 'Details & bearbeiten' }}
+              </button>
+              @if (auth.can('plan')) {
+                <button
+                  class="button secondary danger"
+                  type="button"
+                  [disabled]="busy() || item.status === 'in_progress'"
+                  (click)="deleteOrder(item)"
+                >
+                  Löschen
+                </button>
+              }
+            </div>
+            @if (!auth.can('run') && item.kind !== 'express') {
+              <p class="muted small">
+                „Erneut versuchen“ und „Analysieren“ brauchen das Recht, Agents zu starten – frag dafür einen Admin.
+              </p>
+            }
+            @if (openAttention() === item.id) {
+              <div class="attention-detail">
+                <app-order-detail [order]="item" />
+              </div>
+            }
+          </li>
+        }
+      </ul>
+    </section>
+  } @else {
+    <section class="panel actions-empty">
+      <p class="empty-state">
+        <strong>Alles erledigt.</strong> Gerade wartet kein Auftrag auf dich – Rückfragen der Agents, blockierte
+        Aufträge und Punkte zum Prüfen erscheinen hier.
+      </p>
+    </section>
+  }
+}

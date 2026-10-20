@@ -35,7 +35,7 @@ import { IDEA_SELECTABLE_STATUSES, ideaDisplayStatus, MAX_IMAGE_BYTES } from './
 })
 export class IdeaDetailComponent {
   private readonly api = inject(ApiService);
-  private readonly store = inject(ProjectStore);
+  protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
 
@@ -66,6 +66,12 @@ export class IdeaDetailComponent {
 
   protected linkedOrder(ideationId: string) {
     return this.data().development.find((item) => item.ideationId === ideationId);
+  }
+
+  /** Auftrag öffnen: Dialog schliessen und zum Auftrag springen (wartet er auf dich, landet er unter „Aktionen“). */
+  protected openOrder(id: string): void {
+    this.closed.emit();
+    this.store.navigate('development', { focus: id });
   }
 
   protected commentCount(ideationId: string): number {

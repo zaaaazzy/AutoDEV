@@ -1,6 +1,6 @@
 @let model = table;
 <div class="dt">
-  @if (searchable() || activeFilters().length || changed()) {
+  @if (searchable() || (showFilterChips() && activeFilters().length) || changed()) {
     <div class="dt-toolbar">
       @if (searchable()) {
         <label class="dt-search">
@@ -17,7 +17,7 @@
           />
         </label>
       }
-      @for (filter of activeFilters(); track filter.id) {
+      @for (filter of showFilterChips() ? activeFilters() : []; track filter.id) {
         <span class="dt-chip"
           >{{ filter.label }}: <strong>{{ filter.text }}</strong>
           <button type="button" (click)="clearColumn(filter.id)" [attr.aria-label]="filter.label + '-Filter entfernen'">
@@ -34,6 +34,20 @@
     <table class="idea-table dt-table">
       <thead>
         <tr>
+          @if (selectable()) {
+            <th class="dt-select-cell">
+              <input
+                type="checkbox"
+                class="dt-select"
+                aria-label="Alle sichtbaren auswählen"
+                title="Alle sichtbaren auswählen"
+                [checked]="selectionState() === 'all'"
+                [indeterminate]="selectionState() === 'some'"
+                [disabled]="!hasSelectable()"
+                (change)="toggleAllSelected()"
+              />
+            </th>
+          }
           @for (header of model.getHeaderGroups()[0]!.headers; track header.id) {
             @let col = header.column;
             <th
@@ -124,6 +138,20 @@
           @for (row of group.rows; track row.id) {
             @let open = expanded() === row.id;
             <tr [class.row-open]="open" [class.dt-clickable]="!!detail()" (click)="rowClick(row.id, $event)">
+              @if (selectable()) {
+                <td class="dt-select-cell" data-label="Auswahl">
+                  @if (canSelect(row.original)) {
+                    <input
+                      type="checkbox"
+                      class="dt-select"
+                      [checked]="selection().has(row.id)"
+                      [attr.aria-label]="selectLabel()(row.original)"
+                      (click)="$event.stopPropagation()"
+                      (change)="toggleSelected(row.id)"
+                    />
+                  }
+                </td>
+              }
               @for (cell of row.getVisibleCells(); track cell.id) {
                 <td
                   [class]="column(cell.column.id)?.className ?? ''"

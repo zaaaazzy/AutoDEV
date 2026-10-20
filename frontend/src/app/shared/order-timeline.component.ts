@@ -2,19 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ApiService } from '../core/api.service.js';
 import type { DevelopmentItem } from '../core/models.js';
-
-export interface TimelineEntry {
-  at: string;
-  kind: 'created' | 'status' | 'step' | 'analysis' | 'question' | 'answer' | 'bugfix';
-  title: string;
-  detail?: string;
-  state?: 'passed' | 'failed' | 'running' | 'info';
-}
-
-export interface OrderTimeline {
-  waiting: { label: string; tone: 'ok' | 'wait' | 'you' | 'problem' };
-  entries: TimelineEntry[];
-}
+import { visibleTimelineEntries, type OrderTimeline, type TimelineEntry } from './timeline-entries.js';
 
 const KIND_LABEL: Record<TimelineEntry['kind'], string> = {
   created: 'Auftrag',
@@ -34,15 +22,23 @@ const KIND_LABEL: Record<TimelineEntry['kind'], string> = {
   selector: 'app-order-timeline',
   standalone: true,
   imports: [DatePipe],
+  // Der Inhalt zwischen den Tags (z. B. Status- und Sprintwahl) steht zwischen „Stand“ und Zeitleiste:
+  // So zeigt der Auftrag zuerst, worauf er wartet, ohne die Zeitleiste ein zweites Mal zu laden.
   template: `
     @if (timeline(); as current) {
       <p class="order-waiting" [attr.data-tone]="current.waiting.tone">
         <span class="order-waiting-label">Stand</span> {{ current.waiting.label }}
       </p>
+    }
+    <ng-content />
+    @if (timeline(); as current) {
+      @let entries = visible(current.entries);
       <details class="run-step order-brief order-timeline">
-        <summary>Zeitleiste ({{ current.entries.length }})</summary>
+        <summary>
+          Zeitleiste <span class="count">{{ entries.length }}</span>
+        </summary>
         <ol>
-          @for (entry of current.entries; track $index) {
+          @for (entry of entries; track $index) {
             <li [attr.data-state]="entry.state ?? 'info'">
               <time [attr.datetime]="entry.at">{{ entry.at | date: 'dd.MM. HH:mm' }}</time>
               <span class="order-timeline-kind">{{ kindLabel(entry.kind) }}</span>
@@ -56,6 +52,7 @@ const KIND_LABEL: Record<TimelineEntry['kind'], string> = {
       </details>
     }
   `,
+  host: { style: 'display: contents' },
 })
 export class OrderTimelineComponent {
   private readonly api = inject(ApiService);
@@ -76,6 +73,8 @@ export class OrderTimelineComponent {
       if (item.status === 'in_progress') this.timer = setInterval(() => void this.load(item.id), 10_000);
     });
   }
+
+  protected readonly visible = visibleTimelineEntries;
 
   protected kindLabel(kind: TimelineEntry['kind']): string {
     return KIND_LABEL[kind];

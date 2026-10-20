@@ -1,8 +1,19 @@
 export type Section =
-  'dashboard' | 'development' | 'sprints' | 'ideation' | 'bugs' | 'docs' | 'agents' | 'runs' | 'stats' | 'settings';
+  | 'dashboard'
+  | 'actions'
+  | 'development'
+  | 'sprints'
+  | 'ideation'
+  | 'bugs'
+  | 'docs'
+  | 'agents'
+  | 'runs'
+  | 'stats'
+  | 'settings';
 
 export const NAVIGATION: { id: Section; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
+  { id: 'actions', label: 'Aktionen' },
   { id: 'docs', label: 'Dokumentation' },
   { id: 'ideation', label: 'Ideation' },
   { id: 'development', label: 'Auftrag' },

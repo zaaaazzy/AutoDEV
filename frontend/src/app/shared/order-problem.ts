@@ -4,7 +4,7 @@ export interface OrderProblem {
   solution: string;
 }
 
-/** Was auf der Auftragsseite unter „Besondere Aufmerksamkeit“ steht: was passiert ist und was du tun musst. */
+/** Was auf der Seite „Aktionen“ steht: was passiert ist und was du tun musst. */
 export interface OrderGuide {
   /** Was passiert ist, in ein bis zwei Sätzen. */
   problem: string;
@@ -139,7 +139,7 @@ export function orderProblem(item: ProblemSource): OrderProblem | null {
   return { problem: shorten(finalProblem), solution: shorten(solution) };
 }
 
-/** Ausführlichere Fassung für die Karten unter „Besondere Aufmerksamkeit“: ganze Sätze und einzelne Schritte. */
+/** Ausführlichere Fassung für die Karten unter „Aktionen“: ganze Sätze und einzelne Schritte. */
 export function orderGuide(item: ProblemSource): OrderGuide | null {
   if (!needsAction(item)) return null;
   const analysis = item.analysis ?? '';

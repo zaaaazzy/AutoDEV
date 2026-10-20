@@ -14,6 +14,7 @@ const password = process.env.E2E_PASSWORD!;
 const auth = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
 const SECTIONS = [
   'dashboard',
+  'actions',
   'docs',
   'ideation',
   'development',
@@ -218,7 +219,8 @@ async function checkTables(page: Page): Promise<TableCheck[]> {
             `${label}: Filter „${names[position]}“ = „${value}“`,
             rows().length <= expected &&
               values.length <= 1 &&
-              [...table().querySelectorAll('.dt-chip')].some((chip) => text(chip).includes(names[position]!)),
+              ([...table().querySelectorAll('.dt-chip')].some((chip) => text(chip).includes(names[position]!)) ||
+                heads()[position]!.classList.contains('dt-filtered')),
             `erwartet ${expected}, gefunden ${rows().length}, Werte ${values.join(', ')}`,
           );
         } else if (search) {
@@ -365,6 +367,7 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect(row).toBeVisible();
   await expect(row.locator('b')).toHaveCount(0);
 
+  await open(page, 'actions');
   const blocked = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' });
   await expect(blocked.first()).toBeVisible();
   const first = blocked.first();
@@ -615,7 +618,7 @@ test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: B
   await open(page, 'dashboard');
   await expect.soft(button(page, /Verlauf leeren/), 'Ohne Chat-Rolle kein „Verlauf leeren“').toHaveCount(0);
   expect((await page.request.post('/api/projects/alpha/chat', { data: { message: 'Hallo' } })).status()).toBe(403);
-  await open(page, 'development');
+  await open(page, 'actions');
   await expect
     .soft(
       page.locator('.attention-card').getByRole('button', { name: 'Erneut versuchen' }),

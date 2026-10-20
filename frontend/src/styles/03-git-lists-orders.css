@@ -409,24 +409,6 @@
     grid-template-columns: 1fr;
   }
 }
-.blocked-box {
-  margin: 12px 0;
-  padding: 12px 14px;
-  border: 1px solid #e6b8b3;
-  border-left: 4px solid #c0392b;
-  border-radius: 8px;
-  background: #fdf1ef;
-}
-.blocked-box .actions {
-  margin: 8px 0;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.blocked-box p {
-  margin: 0;
-  font-size: 13px;
-}
 .approval-box {
   margin: 12px 0;
   padding: 12px 14px;

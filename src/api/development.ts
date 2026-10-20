@@ -204,7 +204,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  // Aus dem Sprint nehmen: Der Auftrag wartet danach unter „Besondere Aufmerksamkeit“ auf eine Entscheidung.
+  // Aus dem Sprint nehmen: Der Auftrag wartet danach unter „Aktionen“ auf eine Entscheidung.
   app.post('/development/:id/remove-from-sprint', async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });

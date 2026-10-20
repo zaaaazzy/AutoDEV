@@ -255,8 +255,10 @@ test('Sprint-Board: offenen Auftrag aus der Liste unter dem Board in den Sprint 
   await expect(board.locator('.kanban-pool-card', { hasText: title })).toBeVisible();
   // Der Titel verlinkt auf den Auftrag.
   await board.locator('.kanban-pool-card', { hasText: title }).getByRole('link', { name: title }).click();
-  await expect(page).toHaveURL(/#development\/[0-9a-f-]{36}$/);
-  await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+  // Aus dem Sprint genommen wartet er auf eine Entscheidung: Der Link führt zu „Aktionen“ und öffnet seine Karte.
+  await expect(page).toHaveURL(new RegExp(`#actions/${order.id}$`));
+  await expect(page.locator('.page-heading h1')).toHaveText('Aktionen');
+  await expect(page.locator(`#order-${order.id}`)).toContainText(title);
   await request.delete(`/api/development/${order.id}`, { headers });
   await request.delete(`/api/sprints/${sprint.id}`, { headers });
 });
@@ -301,10 +303,7 @@ test('Statistik zeigt Verbrauch nach Bereich, Art, Auftrag und Agent', async ({ 
   await expect(page.locator('.stats-table').first()).toContainText('Login-Seite modernisieren');
 });
 
-test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden und löschen', async ({
-  page,
-  request,
-}) => {
+test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Sprint-Aufgabe ${Date.now()}`;
   const sprint = (
@@ -323,7 +322,10 @@ test('Auftrag aus dem Sprint nehmen, unter „Besondere Aufmerksamkeit“ finden
     .click();
   await expect(page.locator('.kanban-pool-card').filter({ hasText: title })).toBeVisible();
 
+  // Der Auftrag steht nicht mehr in der Auftragsliste, sondern unter „Aktionen“ (mit Zahl im Menü).
   await page.goto('/#development');
+  await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
+  await page.goto('/#actions');
   const card = page.locator('.attention-card').filter({ hasText: title });
   await expect(card).toContainText('Aus Sprint „E2E-Sprint“ genommen');
   await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
@@ -615,4 +617,28 @@ test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, requ
   await login(page);
   const registered = await page.evaluate(async () => Boolean(await navigator.serviceWorker.getRegistration()));
   expect(registered).toBeTruthy();
+});
+
+test('Ideen vorschlagen lassen: Richtung im Dialog vorgeben, Abbrechen startet keinen Lauf', async ({ page }) => {
+  await login(page);
+  await page.goto('/#ideation');
+  const start = page.getByRole('button', { name: /Ideen vorschlagen lassen/ });
+  await start.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('Richtung (optional)')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('.visionary-bar .spinner')).toHaveCount(0);
+
+  await start.click();
+  await dialog.getByLabel('Richtung (optional)').fill('Fokus auf Onboarding');
+  const request = page.waitForRequest(
+    (candidate) => candidate.method() === 'POST' && candidate.url().endsWith('/ideation/visionary'),
+  );
+  await dialog.getByRole('button', { name: 'Ideen vorschlagen lassen' }).click();
+  expect((await request).postDataJSON()).toEqual({ comment: 'Fokus auf Onboarding' });
+  const bar = page.locator('.visionary-bar').filter({ has: page.locator('.spinner') });
+  await expect(bar).toBeVisible();
+  await bar.getByRole('button', { name: 'Abbrechen' }).click();
+  await expect(bar).toHaveCount(0);
 });

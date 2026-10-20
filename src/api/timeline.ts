@@ -9,6 +9,8 @@ export interface TimelineEntry {
   title: string;
   detail?: string;
   state?: 'passed' | 'failed' | 'running' | 'info';
+  /** Nur bei Rückfragen: schon beantwortet (die Oberfläche blendet erledigte Rückfragen aus). */
+  answered?: boolean;
 }
 
 export interface WaitingState {
@@ -184,7 +186,13 @@ export async function loadTimeline(
   for (const message of chat.rows) {
     entries.push(
       message.role === 'assistant'
-        ? { at: message.createdAt.toISOString(), kind: 'question', title: 'Rückfrage', detail: message.question ?? '' }
+        ? {
+            at: message.createdAt.toISOString(),
+            kind: 'question',
+            title: 'Rückfrage',
+            detail: message.question ?? '',
+            answered: !message.open,
+          }
         : {
             at: message.createdAt.toISOString(),
             kind: 'answer',

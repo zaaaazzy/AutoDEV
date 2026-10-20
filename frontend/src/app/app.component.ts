@@ -8,6 +8,7 @@ import { LoginComponent } from './features/auth/login.component.js';
 import { ProjectStore } from './core/project-store.js';
 import { AgentListComponent } from './features/agents/agent-list.component.js';
 import { AgentsComponent } from './features/agents/agents.component.js';
+import { ActionsComponent } from './features/actions/actions.component.js';
 import { BugsComponent } from './features/bugs/bugs.component.js';
 import { DashboardComponent } from './features/dashboard/dashboard.component.js';
 import { DevelopmentComponent } from './features/development/development.component.js';
@@ -27,6 +28,8 @@ import { TourService } from './features/tour/tour.service.js';
 import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
 import type { DevelopmentItem } from './core/models.js';
 import { isFinished } from './shared/labels.js';
+import { navCount } from './core/nav-counts.js';
+import { isOpenIdea } from './features/ideation/idea-options.js';
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
@@ -53,6 +56,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     ProjectSwitcherComponent,
     HelpDialogComponent,
     DashboardComponent,
+    ActionsComponent,
     DevelopmentComponent,
     SprintsComponent,
     IdeationComponent,
@@ -194,7 +198,7 @@ export class AppComponent {
   protected openSprintChip(): void {
     const attention = this.sprintAttention();
     if (attention.length === 1) this.openOrder(attention[0]!.item.id);
-    else if (attention.length) this.store.navigate('development', { anchor: 'attention-orders' });
+    else if (attention.length) this.store.navigate('actions');
     else this.store.navigate('sprints');
   }
 
@@ -214,9 +218,10 @@ export class AppComponent {
     return sprint.running || busy ? 'running' : 'idle';
   });
 
+  /** Farbe der Menü-Bubble: Aktionen warten auf dich, laufende Agents sind grün. */
   protected navTone(section: Section): string {
-    if (section === 'dashboard') return 'warn';
-    return section === 'sprints' ? (this.sprintHealth()?.tone ?? '') : '';
+    if (section === 'actions') return 'warn';
+    return section === 'agents' ? 'ok' : '';
   }
 
   protected readonly workerText = computed(() => {
@@ -227,30 +232,32 @@ export class AppComponent {
     return 'Worker bereit';
   });
 
-  protected navCount(section: Section): number {
-    const data = this.store.data();
+  /** Hover-Text der Menü-Bubble. */
+  protected navTitle(section: Section): string | null {
+    const count = this.navCount(section);
     switch (section) {
-      case 'development':
-        return this.store.openDevelopmentCount();
-      case 'sprints':
-        return this.sprintHealth()?.open ?? 0;
-      case 'ideation':
-        return data.ideas.filter((idea) => {
-          const order = data.development.find((item) => item.ideationId === idea.id);
-          return idea.status === 'accepted' && order?.status !== 'done';
-        }).length;
-      case 'bugs':
-        return this.store.openBugCount();
-      case 'docs':
-        return data.docs.length;
+      case 'actions':
+        return `${count} ${count === 1 ? 'Auftrag wartet' : 'Aufträge warten'} auf dich`;
       case 'agents':
-        return data.agents.length;
-      case 'runs':
-        return data.runs.length;
-      case 'dashboard':
-        return this.store.openQuestion() ? 1 : 0;
+        return `${count} ${count === 1 ? 'Agent arbeitet' : 'Agents arbeiten'} gerade`;
+      case 'ideation':
+        return `${count} offene ${count === 1 ? 'Idee' : 'Ideen'}`;
+      case 'bugs':
+        return `${count} offene ${count === 1 ? 'Bug' : 'Bugs'}`;
       default:
-        return 0;
+        return null;
     }
+  }
+
+  /** Offene Ideen: weder angenommen noch abgelehnt. */
+  private readonly openIdeaCount = computed(() => this.store.data().ideas.filter(isOpenIdea).length);
+
+  protected navCount(section: Section): number {
+    return navCount(section, {
+      openBugs: this.store.openBugCount(),
+      openIdeas: this.openIdeaCount(),
+      attention: this.store.attention().length,
+      runningAgents: this.store.activeAgentCount(),
+    });
   }
 }

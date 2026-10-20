@@ -1,333 +1,406 @@
 @let item = order();
 <div class="order-panel">
-  <div class="order-controls">
-    <label class="control"
-      ><span>Status</span
-      ><select
-        [ngModel]="item.status"
-        (ngModelChange)="update(item.id, { status: $event })"
-        [name]="'status-' + item.id"
-      >
-        @for (status of developmentStatuses; track status) {
-          <option [value]="status">{{ status | statusLabel }}</option>
-        }
-      </select>
-    </label>
-    <label class="control"
-      ><span>Sprint</span
-      ><select
-        [ngModel]="item.sprintId"
-        (ngModelChange)="update(item.id, { sprintId: $event || null })"
-        [name]="'sprint-' + item.id"
-      >
-        <option [ngValue]="null">Kein Sprint</option>
-        @for (sprint of data().sprints; track sprint.id) {
-          <option [value]="sprint.id">{{ sprint.name }}</option>
-        }
-      </select>
-    </label>
-    @if (item.kind !== 'express') {
-      <label class="control control-agent"
-        ><span>Agent</span
+  <!-- „Stand“ (worauf der Auftrag wartet) steht über der Status-/Sprint-/Agent-Zeile; die Zeitleiste ganz unten. -->
+  <app-order-timeline [order]="item">
+    <div class="order-controls">
+      <label class="control"
+        ><span>Status</span
         ><select
-          [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
-          (ngModelChange)="manualAgent[item.id] = $event"
-          [name]="'agent-' + item.id"
+          [ngModel]="item.status"
+          (ngModelChange)="update(item.id, { status: $event })"
+          [name]="'status-' + item.id"
         >
-          <option value="">Einzeln starten …</option>
-          @for (agent of data().agents; track agent.id) {
-            <option [value]="agent.id">{{ agent.name }}</option>
-          }
-        </select>
-        <button
-          class="button primary run-agent"
-          type="button"
-          title="Mit gewähltem Agent starten"
-          aria-label="Agent starten"
-          [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
-          (click)="startWithAgent(item)"
-        >
-          ▶
-        </button>
-      </label>
-    }
-  </div>
-  @if (item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
-    <app-order-question [order]="item" />
-  }
-  @if (item.status === 'approval') {
-    <app-order-approval [order]="item" />
-  }
-  @if (item.status === 'blocked' || item.status === 'rejected') {
-    <div class="blocked-box">
-      <strong>{{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}</strong>
-      @if (item.failure) {
-        <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article>
-      }
-      @if (item.failureBugId) {
-        <p class="bug-link">
-          🐞 <a href="#bugs" (click)="store.navigate('bugs')">Bug-Bericht ansehen</a> ·
-          @switch (item.fixStatus) {
-            @case ('planned') {
-              Behebung ist eingeplant und startet automatisch.
-            }
-            @case ('in_progress') {
-              Behebung läuft gerade …
-            }
-            @case ('blocked') {
-              Die automatische Behebung ist gescheitert – bitte Problem analysieren.
-            }
-            @case ('done') {
-              Bug behoben, der Auftrag wird erneut gestartet.
-            }
-            @default {
-              Keine automatische Behebung (in den Einstellungen aktivierbar).
-            }
-          }
-        </p>
-      }
-      <div class="actions">
-        @if (item.kind !== 'express') {
-          <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
-            ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
-            @if (item.retryCount) {
-              ({{ item.retryCount }})
-            }
-          </button>
-        }
-        <button
-          class="button secondary"
-          type="button"
-          [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
-          (click)="analyze(item)"
-        >
-          {{
-            item.analysisStatus === 'requested' || item.analysisStatus === 'running'
-              ? 'Assistent analysiert …'
-              : '🔎 Problem analysieren'
-          }}
-        </button>
-      </div>
-      <p class="muted">
-        Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und
-        erscheinen künftig bei den Risiken.
-      </p>
-    </div>
-  }
-  @if (editing()) {
-    <form class="form-grid" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
-      <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
-      <label class="wide"
-        >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
-      </label>
-      <label
-        >Kategorie<select name="category" [ngModel]="item.category ?? ''">
-          <option value="">Ohne Kategorie</option>
-          @for (category of categories; track category) {
-            <option [value]="category">{{ category | categoryLabel }}</option>
+          @for (status of developmentStatuses; track status) {
+            <option [value]="status">{{ status | statusLabel }}</option>
           }
         </select>
       </label>
-      <label
-        >Priorität<select name="priority" [ngModel]="item.priority">
-          <option value="low">Niedrig</option>
-          <option value="medium">Mittel</option>
-          <option value="high">Hoch</option>
+      <label class="control"
+        ><span>Sprint</span
+        ><select
+          [ngModel]="item.sprintId"
+          (ngModelChange)="update(item.id, { sprintId: $event || null })"
+          [name]="'sprint-' + item.id"
+        >
+          <option [ngValue]="null">Kein Sprint</option>
+          @for (sprint of data().sprints; track sprint.id) {
+            <option [value]="sprint.id">{{ sprint.name }}</option>
+          }
         </select>
       </label>
-      <label
-        >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
-      </label>
-      <label
-        >Token-Schätzung<input name="tokenEstimate" type="number" min="0" step="1000" [ngModel]="item.tokenEstimate" />
-      </label>
-      <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" [ngModel]="item.benefit" /> </label>
-      <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" [ngModel]="item.cost" /> </label>
-      <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-      <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
-    </form>
-  }
-  @if (item.followUpOf) {
-    <p class="follow-up-ref">
-      ↪ Folgeauftrag zu
-      @if (previous(); as prev) {
-        <a href="#development" (click)="$event.preventDefault(); openPrevious(prev.id)">„{{ prev.title }}“</a>
-      } @else {
-        einem früheren Auftrag
-      }
-      – der Entwickler bekommt dessen Beschreibung, Dokumentation und Git-Branch als Kontext.
-    </p>
-  }
-  @if (item.status === 'done') {
-    <div class="follow-up">
-      @if (!followUpOpen()) {
-        <button class="button secondary" type="button" (click)="followUpOpen.set(true)">
-          ↪ Folgeauftrag erstellen
-        </button>
-        <small class="muted">Neuer Auftrag, der auf diesem Ergebnis aufbaut.</small>
-      } @else {
-        <form
-          class="form-grid follow-up-form"
-          (submit)="$event.preventDefault(); createFollowUp(item, fuTitle.value, fuDescription.value, fuSprint.value)"
-        >
-          <strong class="wide">Folgeauftrag zu „{{ item.title }}“</strong>
-          <label class="wide"
-            >Titel<input #fuTitle required maxlength="80" placeholder="z. B. Login-Seite: Passwort vergessen ergänzen"
-          /></label>
-          <label class="wide"
-            >Was soll sich ändern oder dazukommen?<textarea
-              #fuDescription
-              rows="5"
-              maxlength="10000"
-              placeholder="Bezieht sich auf das Ergebnis des erledigten Auftrags – beschreibe nur, was neu ist."
-            ></textarea>
-          </label>
-          <label class="wide"
-            >Sprint
-            <select #fuSprint>
-              <option value="">Kein Sprint (Backlog) – später zuweisen</option>
-              @for (sprint of data().sprints; track sprint.id) {
-                @if (sprint.status !== 'completed') {
-                  <option [value]="sprint.id" [selected]="sprint.id === activeSprintId()">
-                    {{ sprint.name }}{{ sprint.status === 'active' ? ' (aktiv)' : '' }}
-                  </option>
-                }
-              }
-            </select>
-          </label>
-          <div class="actions wide">
-            <button class="button primary" type="submit" [disabled]="busy()">Folgeauftrag erstellen</button>
-            <button class="button secondary" type="button" (click)="followUpOpen.set(false)">Abbrechen</button>
-          </div>
-        </form>
-      }
-    </div>
-  }
-  <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
-  @if (acceptance().total) {
-    <ng-template #checkLine let-check>
-      <li [class]="'acceptance-' + check.status">
-        <span class="acceptance-mark" [attr.aria-label]="check.status">{{ mark(check) }}</span>
-        <span
-          >{{ check.text }}
-          @if (check.note) {
-            <small class="muted">{{ check.note }}</small>
-          }
-        </span>
-      </li>
-    </ng-template>
-    <details class="run-step order-brief acceptance">
-      <summary>
-        Abnahme
-        @if (acceptance().todo.length) {
-          <span class="acceptance-manual-hint"
-            >– {{ acceptance().todo.length }} von {{ acceptance().total }} offen</span
+      @if (item.kind !== 'express') {
+        <label class="control control-agent"
+          ><span>Agent</span
+          ><select
+            [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+            (ngModelChange)="manualAgent[item.id] = $event"
+            [name]="'agent-' + item.id"
           >
-        } @else {
-          <span class="muted">– alle Punkte erfüllt</span>
-        }
-      </summary>
-      @if (acceptance().criteria.length) {
-        <h4>Akzeptanzkriterien</h4>
-        <ul class="acceptance-list">
-          @for (check of acceptance().criteria; track check.position) {
-            <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
-          }
-        </ul>
+            <option value="">Einzeln starten …</option>
+            @for (agent of data().agents; track agent.id) {
+              <option [value]="agent.id">{{ agent.name }}</option>
+            }
+          </select>
+          <button
+            class="button primary run-agent"
+            type="button"
+            title="Mit gewähltem Agent starten"
+            aria-label="Agent starten"
+            [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+            (click)="startWithAgent(item)"
+          >
+            ▶
+          </button>
+        </label>
       }
-      @if (acceptance().done.length) {
-        <h4>Definition of Done</h4>
-        <ul class="acceptance-list">
-          @for (check of acceptance().done; track check.position) {
-            <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
-            @if (coversCriteria(check)) {
-              <li class="acceptance-nested">
-                @if (acceptance().criteria.length) {
-                  <ul class="acceptance-list">
-                    @for (criterion of acceptance().criteria; track criterion.position) {
-                      <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: criterion }" />
-                    }
-                  </ul>
-                } @else {
-                  <small class="muted">Der Auftrag nennt keine eigenen Akzeptanzkriterien.</small>
+    </div>
+    @if (item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
+      <app-order-question [order]="item" />
+    }
+    @if (item.status === 'approval') {
+      <app-order-approval [order]="item" />
+    }
+    @if (item.status === 'blocked' || item.status === 'rejected') {
+      <section class="detail-alert" [class.rejected]="item.status === 'rejected'">
+        <h3 class="detail-heading">
+          {{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}
+        </h3>
+        @if (item.failure) {
+          <article class="markdown failure-text" [innerHTML]="item.failure | markdown"></article>
+        }
+        @if (item.failureBugId) {
+          <p class="bug-link">
+            🐞 <a href="#bugs" (click)="store.navigate('bugs')">Bug-Bericht ansehen</a> ·
+            @switch (item.fixStatus) {
+              @case ('planned') {
+                Behebung ist eingeplant und startet automatisch.
+              }
+              @case ('in_progress') {
+                Behebung läuft gerade …
+              }
+              @case ('blocked') {
+                Die automatische Behebung ist gescheitert – bitte Problem analysieren.
+              }
+              @case ('done') {
+                Bug behoben, der Auftrag wird erneut gestartet.
+              }
+              @default {
+                Keine automatische Behebung (in den Einstellungen aktivierbar).
+              }
+            }
+          </p>
+        }
+        <div class="actions">
+          @if (item.kind !== 'express') {
+            <button class="button primary" type="button" [disabled]="busy()" (click)="retry(item)">
+              ↻ {{ item.status === 'rejected' ? 'Angepasst – erneut versuchen' : 'Erneut versuchen' }}
+              @if (item.retryCount) {
+                ({{ item.retryCount }})
+              }
+            </button>
+          }
+          <button
+            class="button secondary"
+            type="button"
+            [disabled]="busy() || item.analysisStatus === 'requested' || item.analysisStatus === 'running'"
+            (click)="analyze(item)"
+          >
+            {{
+              item.analysisStatus === 'requested' || item.analysisStatus === 'running'
+                ? 'Assistent analysiert …'
+                : '🔎 Problem analysieren'
+            }}
+          </button>
+        </div>
+        <p class="muted small">
+          Hilft ein weiterer Versuch nicht, analysiert der Assistent den Fehler. Die Erkenntnisse landen unter Bugs und
+          erscheinen künftig bei den Risiken.
+        </p>
+      </section>
+    }
+    @if (editing()) {
+      <form class="form-grid detail-card" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
+        <h3 class="detail-heading wide">Auftrag bearbeiten</h3>
+        <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
+        <label class="wide"
+          >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
+        </label>
+        <label
+          >Kategorie<select name="category" [ngModel]="item.category ?? ''">
+            <option value="">Ohne Kategorie</option>
+            @for (category of categories; track category) {
+              <option [value]="category">{{ category | categoryLabel }}</option>
+            }
+          </select>
+        </label>
+        <label
+          >Priorität<select name="priority" [ngModel]="item.priority">
+            <option value="low">Niedrig</option>
+            <option value="medium">Mittel</option>
+            <option value="high">Hoch</option>
+          </select>
+        </label>
+        <label
+          >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
+        </label>
+        <label
+          >Token-Schätzung<input
+            name="tokenEstimate"
+            type="number"
+            min="0"
+            step="1000"
+            [ngModel]="item.tokenEstimate"
+          />
+        </label>
+        <label>Nutzen (0–10)<input name="benefit" type="number" min="0" max="10" [ngModel]="item.benefit" /> </label>
+        <label>Kosten (0–10)<input name="cost" type="number" min="0" max="10" [ngModel]="item.cost" /> </label>
+        <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+        <button class="button secondary" type="button" (click)="editCancelled.emit()">Abbrechen</button>
+      </form>
+    }
+    @if (item.followUpOf) {
+      <p class="follow-up-ref">
+        ↪ Folgeauftrag zu
+        @if (previous(); as prev) {
+          <a href="#development" (click)="$event.preventDefault(); openPrevious(prev.id)">„{{ prev.title }}“</a>
+        } @else {
+          einem früheren Auftrag
+        }
+        – der Entwickler bekommt dessen Beschreibung, Dokumentation und Git-Branch als Kontext.
+      </p>
+    }
+    @if (item.status === 'done') {
+      <div class="follow-up">
+        @if (!followUpOpen()) {
+          <button class="button secondary" type="button" (click)="followUpOpen.set(true)">
+            ↪ Folgeauftrag erstellen
+          </button>
+          <small class="muted">Neuer Auftrag, der auf diesem Ergebnis aufbaut.</small>
+        } @else {
+          <form
+            class="form-grid follow-up-form"
+            (submit)="$event.preventDefault(); createFollowUp(item, fuTitle.value, fuDescription.value, fuSprint.value)"
+          >
+            <strong class="wide">Folgeauftrag zu „{{ item.title }}“</strong>
+            <label class="wide"
+              >Titel<input
+                #fuTitle
+                required
+                maxlength="80"
+                placeholder="z. B. Login-Seite: Passwort vergessen ergänzen"
+            /></label>
+            <label class="wide"
+              >Was soll sich ändern oder dazukommen?<textarea
+                #fuDescription
+                rows="5"
+                maxlength="10000"
+                placeholder="Bezieht sich auf das Ergebnis des erledigten Auftrags – beschreibe nur, was neu ist."
+              ></textarea>
+            </label>
+            <label class="wide"
+              >Sprint
+              <select #fuSprint>
+                <option value="">Kein Sprint (Backlog) – später zuweisen</option>
+                @for (sprint of data().sprints; track sprint.id) {
+                  @if (sprint.status !== 'completed') {
+                    <option [value]="sprint.id" [selected]="sprint.id === activeSprintId()">
+                      {{ sprint.name }}{{ sprint.status === 'active' ? ' (aktiv)' : '' }}
+                    </option>
+                  }
                 }
+              </select>
+            </label>
+            <div class="actions wide">
+              <button class="button primary" type="submit" [disabled]="busy()">Folgeauftrag erstellen</button>
+              <button class="button secondary" type="button" (click)="followUpOpen.set(false)">Abbrechen</button>
+            </div>
+          </form>
+        }
+      </div>
+    }
+    <dl class="detail-stats">
+      <div>
+        <dt>Priorität</dt>
+        <dd>{{ item.priority | priorityLabel }}</dd>
+      </div>
+      <div>
+        <dt>Kategorie</dt>
+        <dd>{{ item.category | categoryLabel }}</dd>
+      </div>
+      <div>
+        <dt>Sprint</dt>
+        <dd>{{ store.sprintOf(item)?.name ?? 'Kein Sprint' }}</dd>
+      </div>
+      <div>
+        <dt>Aufwand</dt>
+        <dd>{{ item.effortHours | hours }}</dd>
+      </div>
+      @if (item.benefit != null || item.cost != null) {
+        <div>
+          <dt>Nutzen / Kosten</dt>
+          <dd>{{ item.benefit ?? '–' }} / {{ item.cost ?? '–' }}</dd>
+        </div>
+      }
+    </dl>
+    <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
+    @if (acceptance().total) {
+      <ng-template #checkLine let-check>
+        <li [class]="'acceptance-' + check.status">
+          <span class="acceptance-mark" [attr.aria-label]="check.status">{{ mark(check) }}</span>
+          <span
+            >{{ check.text }}
+            @if (check.note) {
+              <small class="muted">{{ check.note }}</small>
+            }
+          </span>
+        </li>
+      </ng-template>
+      <details class="run-step order-brief acceptance">
+        <summary>
+          Abnahme
+          @if (acceptance().todo.length) {
+            <span class="acceptance-manual-hint"
+              >– {{ acceptance().todo.length }} von {{ acceptance().total }} offen</span
+            >
+          } @else {
+            <span class="muted">– alle Punkte erfüllt</span>
+          }
+        </summary>
+        @if (acceptance().criteria.length) {
+          <h4>Akzeptanzkriterien</h4>
+          <ul class="acceptance-list">
+            @for (check of acceptance().criteria; track check.position) {
+              <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
+            }
+          </ul>
+        }
+        @if (acceptance().done.length) {
+          <h4>Definition of Done</h4>
+          <ul class="acceptance-list">
+            @for (check of acceptance().done; track check.position) {
+              <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
+              @if (coversCriteria(check)) {
+                <li class="acceptance-nested">
+                  @if (acceptance().criteria.length) {
+                    <ul class="acceptance-list">
+                      @for (criterion of acceptance().criteria; track criterion.position) {
+                        <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: criterion }" />
+                      }
+                    </ul>
+                  } @else {
+                    <small class="muted">Der Auftrag nennt keine eigenen Akzeptanzkriterien.</small>
+                  }
+                </li>
+              }
+            }
+          </ul>
+        }
+      </details>
+      @if (acceptance().todo.length) {
+        <details class="run-step order-brief acceptance-todo" open>
+          <summary>
+            <span class="todo-bang" aria-hidden="true">!</span> Noch zu erledigen
+            <span class="muted">({{ acceptance().todo.length }})</span>
+          </summary>
+          <ul class="todo-list">
+            @for (check of acceptance().todo; track check.kind + check.position) {
+              <li [class.verifying]="isVerifying(check)">
+                <input
+                  type="checkbox"
+                  [checked]="false"
+                  [disabled]="busy() || isVerifying(check)"
+                  [attr.aria-label]="'Abhaken: ' + check.text"
+                  (change)="checkPoint(item, check, true)"
+                />
+                <span class="todo-text"
+                  >{{ check.text }}
+                  @if (isVerifying(check)) {
+                    <small class="todo-state">🤖 Tester prüft …</small>
+                  } @else if (check.note) {
+                    <small class="muted">{{ check.note }}</small>
+                  }
+                </span>
+                <button
+                  type="button"
+                  class="todo-verify"
+                  title="Vom Tester automatisch prüfen lassen"
+                  [disabled]="busy() || isVerifying(check)"
+                  (click)="verifyPoints(item, check)"
+                >
+                  🤖 Prüfen
+                </button>
               </li>
             }
+          </ul>
+          @if (acceptance().todo.length > 1) {
+            <button
+              class="button secondary small"
+              type="button"
+              [disabled]="busy() || acceptance().verifying"
+              (click)="verifyPoints(item)"
+            >
+              🤖 Alle automatisch prüfen
+            </button>
           }
-        </ul>
+          <p class="muted small">Offen, bis du den Punkt abhakst oder der Tester ihn als erfüllt bestätigt.</p>
+        </details>
       }
+    }
+    <details class="run-step order-brief" [open]="agentsOpen()">
+      <summary>Agents</summary>
+      <app-agent-workflow [order]="item" />
     </details>
-    @if (acceptance().todo.length) {
-      <details class="run-step order-brief acceptance-todo" open>
-        <summary>
-          <span class="todo-bang" aria-hidden="true">!</span> Noch zu erledigen
-          <span class="muted">({{ acceptance().todo.length }})</span>
-        </summary>
-        <ul class="todo-list">
-          @for (check of acceptance().todo; track check.kind + check.position) {
-            <li [class.verifying]="isVerifying(check)">
-              <input
-                type="checkbox"
-                [checked]="false"
-                [disabled]="busy() || isVerifying(check)"
-                [attr.aria-label]="'Abhaken: ' + check.text"
-                (change)="checkPoint(item, check, true)"
-              />
-              <span class="todo-text"
-                >{{ check.text }}
-                @if (isVerifying(check)) {
-                  <small class="todo-state">🤖 Tester prüft …</small>
-                } @else if (check.note) {
-                  <small class="muted">{{ check.note }}</small>
-                }
-              </span>
-              <button
-                type="button"
-                class="todo-verify"
-                title="Vom Tester automatisch prüfen lassen"
-                [disabled]="busy() || isVerifying(check)"
-                (click)="verifyPoints(item, check)"
-              >
-                🤖 Prüfen
-              </button>
-            </li>
-          }
-        </ul>
-        @if (acceptance().todo.length > 1) {
-          <button
-            class="button secondary small"
-            type="button"
-            [disabled]="busy() || acceptance().verifying"
-            (click)="verifyPoints(item)"
-          >
-            🤖 Alle automatisch prüfen
-          </button>
-        }
-        <p class="muted small">Offen, bis du den Punkt abhakst oder der Tester ihn als erfüllt bestätigt.</p>
+    @if (item.analysis) {
+      <details class="run-step order-brief">
+        <summary>Analyse des Assistenten</summary>
+        <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
       </details>
     }
-  }
-  <app-order-timeline [order]="item" />
-  <details class="run-step order-brief" [open]="agentsOpen()">
-    <summary>Agents</summary>
-    <app-agent-workflow [order]="item" />
-  </details>
-  @if (item.analysis) {
-    <details class="run-step order-brief">
-      <summary>🔎 Analyse des Assistenten</summary>
-      <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
-    </details>
-  }
-  @if (item.risks) {
-    <details class="run-step order-brief">
-      <summary>⚠ Risiken</summary>
-      <article class="markdown" [innerHTML]="item.risks | markdown"></article>
-    </details>
-  }
-  @if (item.projectContext) {
-    <details class="run-step order-brief">
-      <summary>Projektbeschreibung &amp; Leitlinien</summary>
-      <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
-    </details>
-  }
+    @if (item.risks?.trim()) {
+      @let parsed = risks();
+      <details class="run-step order-brief order-risks" [open]="parsed.items.length > 0">
+        <summary>
+          Risiken
+          @if (parsed.items.length) {
+            <span class="count">{{ parsed.items.length }}</span>
+          } @else if (parsed.none) {
+            <span class="muted">– keine bekannten</span>
+          }
+        </summary>
+        @if (parsed.intro && !parsed.none) {
+          <p class="muted small risk-intro">{{ parsed.intro }}</p>
+        }
+        @if (parsed.items.length) {
+          <ul class="risk-list">
+            @for (risk of parsed.items; track $index) {
+              <li class="risk-item">
+                <span class="risk-icon" aria-hidden="true">⚠</span>
+                <div class="risk-body">
+                  <p class="risk-title">
+                    <strong>{{ risk.title }}</strong>
+                    @if (risk.tag) {
+                      <span class="tag">{{ risk.tag }}</span>
+                    }
+                  </p>
+                  @for (detail of risk.details; track $index) {
+                    <div class="risk-detail markdown" [innerHTML]="detail | markdown"></div>
+                  }
+                </div>
+              </li>
+            }
+          </ul>
+        } @else if (parsed.none) {
+          <p class="muted">Der Bug-Wächter hat keine früheren Bugs gefunden, die diesen Auftrag betreffen.</p>
+        } @else {
+          <article class="markdown" [innerHTML]="item.risks | markdown"></article>
+        }
+      </details>
+    }
+    @if (item.projectContext) {
+      <details class="run-step order-brief">
+        <summary>Projektbeschreibung &amp; Leitlinien</summary>
+        <article class="markdown" [innerHTML]="item.projectContext | markdown"></article>
+      </details>
+    }
+  </app-order-timeline>
 </div>

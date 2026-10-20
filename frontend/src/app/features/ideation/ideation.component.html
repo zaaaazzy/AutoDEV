@@ -54,15 +54,10 @@
   <section class="panel">
     <div class="section-heading">
       <div>
-        <h2>Alle Ideen</h2>
-        <p class="muted">Offene Ideen · Spaltenkopf sortiert, Trichter filtert · Haken wählt Ideen für Aufträge</p>
+        <h2>Offene Ideen</h2>
+        <p class="muted">Spaltenkopf sortiert, Trichter filtert · Haken wählt Ideen für Aufträge</p>
       </div>
       <div class="actions">
-        @if (promotable().length && pickedIdeas().length < promotable().length) {
-          <button type="button" class="button secondary" (click)="pickAll()">
-            Alle {{ promotable().length }} auswählen
-          </button>
-        }
         @if (!visionaryOpen() && auth.can('plan')) {
           <button
             type="button"
@@ -117,20 +112,12 @@
       [initialFilters]="ideaFilters()"
       [initialSort]="[{ id: 'createdAt', desc: true }]"
       [(expanded)]="expandedIdea"
+      [showFilterChips]="false"
+      [selectable]="promotableRow"
+      [(selection)]="picked"
+      [selectLabel]="pickLabel"
       emptyText="Keine Ideen für diese Filter."
     >
-      <ng-template appDataCell="pick" let-idea>
-        @if (canPromote(idea)) {
-          <input
-            type="checkbox"
-            class="pick"
-            [checked]="picked().has(idea.id)"
-            (click)="$event.stopPropagation()"
-            (change)="togglePick(idea.id)"
-            [attr.aria-label]="'Für Auftrag auswählen: ' + idea.title"
-          />
-        }
-      </ng-template>
       <ng-template appDataCell="title" let-idea>
         <ng-container *ngTemplateOutlet="ideaTitle; context: { $implicit: idea }" />
       </ng-template>
@@ -169,15 +156,6 @@
         <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">Visionär</span>
       }
       <app-github-link [ref]="idea.externalRef" />
-      @if (idea.description) {
-        <span
-          class="summary-hint"
-          tabindex="0"
-          [attr.data-tip]="idea.description | shortText: 400"
-          [attr.aria-label]="'Kurzfassung: ' + (idea.description | shortText: 400)"
-          >i</span
-        >
-      }
     </div>
   </ng-template>
   <ng-template #ideaGroup let-group>

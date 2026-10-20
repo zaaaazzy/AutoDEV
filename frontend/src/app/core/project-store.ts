@@ -12,6 +12,7 @@ import {
 import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Section } from './navigation.js';
 import { fetchProjectData } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
+import { orderAttention } from '../shared/order-attention.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
@@ -72,6 +73,9 @@ export class ProjectStore {
   readonly openDevelopmentCount = computed(
     () => this.data().development.filter((item) => !isFinished(item.status)).length,
   );
+  /** Aufträge mit Handlungsbedarf (Seite „Aktionen“, Menü-Bubble). */
+  readonly attention = computed(() => orderAttention(this.data().development, this.data().acceptance));
+  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
   );

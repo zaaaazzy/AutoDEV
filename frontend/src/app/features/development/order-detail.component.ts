@@ -10,7 +10,8 @@ import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { CategoryLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import { parseRisks } from '../../shared/risk-list.js';
 import { OrderService } from './order.service.js';
 import { OrderApprovalComponent } from './order-approval.component.js';
 
@@ -29,6 +30,8 @@ import { OrderApprovalComponent } from './order-approval.component.js';
     MarkdownPipe,
     StatusLabelPipe,
     CategoryLabelPipe,
+    PriorityLabelPipe,
+    HoursPipe,
   ],
   templateUrl: './order-detail.component.html',
   host: { style: 'display: contents' },
@@ -69,6 +72,9 @@ export class OrderDetailComponent {
       onCleanup(() => clearInterval(timer));
     });
   }
+
+  /** Risiken des Bug-Wächters als einzelne Einträge. */
+  protected readonly risks = computed(() => parseRisks(this.order().risks));
 
   /** Formular für einen Folgeauftrag (nur bei erledigten Aufträgen). */
   protected readonly followUpOpen = signal(false);

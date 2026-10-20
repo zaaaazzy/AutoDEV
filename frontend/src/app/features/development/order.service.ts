@@ -128,7 +128,7 @@ export class OrderService {
   async removeFromSprint(item: DevelopmentItem): Promise<void> {
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`),
-      'Auftrag aus dem Sprint genommen – er steht jetzt unter „Besondere Aufmerksamkeit“.',
+      'Auftrag aus dem Sprint genommen – er steht jetzt unter „Aktionen“.',
     );
   }
 

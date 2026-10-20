@@ -50,7 +50,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       section: 'development',
       target: CREATE_BUTTON,
       title: '2 · Aufträge',
-      text: 'Aufträge kannst du auch direkt anlegen. Fehlgeschlagene oder aus dem Sprint genommene Aufträge landen oben unter „Besondere Aufmerksamkeit“.',
+      text: 'Aufträge kannst du auch direkt anlegen. Fehlgeschlagene oder aus dem Sprint genommene Aufträge landen im Menü unter „Aktionen“.',
     },
     {
       id: 'sprint-create',
