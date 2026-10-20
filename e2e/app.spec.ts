@@ -442,7 +442,10 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   request,
 }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
-  const invalid = await request.put('/api/projects/e2e/budget', { headers, data: { limits: { day: { maxTokens: -1 } } } });
+  const invalid = await request.put('/api/projects/e2e/budget', {
+    headers,
+    data: { limits: { day: { maxTokens: -1 } } },
+  });
   expect(invalid.status()).toBe(400);
   await login(page);
   await page.goto('/#settings');
