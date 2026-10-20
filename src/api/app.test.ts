@@ -823,6 +823,42 @@ function memberPool(roles: string[], answer: (sql: string, values: unknown[]) =>
 const IDEA_ID = '11111111-1111-4111-8111-111111111111';
 const sessionHeaders = { Cookie: 'devlog_session=abc', 'Content-Type': 'application/json' };
 
+test('Rolle „Ausführen“ darf über agentId nur einen Agent starten, nicht den Auftrag ändern', async () => {
+  const writes: string[] = [];
+  const pool = memberPool(['run'], (sql) => {
+    if (sql.startsWith('UPDATE')) writes.push(sql);
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const patch = (body: unknown) =>
+      fetch(`${baseUrl}/api/development/${IDEA_ID}`, {
+        method: 'PATCH',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      });
+    for (const body of [
+      { agentId: null, title: 'Gekapert', status: 'done' },
+      { agentId: IDEA_ID, priority: 'high' },
+      { agentId: null },
+    ]) {
+      const denied = await patch(body);
+      assert.equal(denied.status, 403, JSON.stringify(body));
+      assert.match((await denied.json()).message, /Planung/);
+    }
+    assert.deepEqual(writes, []);
+    assert.notEqual((await patch({ agentId: IDEA_ID })).status, 403, 'Agent starten bleibt erlaubt');
+  });
+  await withServer(memberPool(['plan']), async (baseUrl) => {
+    const denied = await fetch(`${baseUrl}/api/development/${IDEA_ID}`, {
+      method: 'PATCH',
+      headers: sessionHeaders,
+      body: JSON.stringify({ agentId: IDEA_ID, title: 'x' }),
+    });
+    assert.equal(denied.status, 403, 'Planung allein startet keinen Agent');
+    assert.match((await denied.json()).message, /Agents ausführen/);
+  });
+});
+
 test('Visionär-Lauf: ohne Rolle „Planung“ 403, mit Planung angefragt, je Projekt nur einer, abbrechbar', async () => {
   await withServer(memberPool(['chat']), async (baseUrl) => {
     const denied = await fetch(`${baseUrl}/api/projects/p/ideation/visionary`, {
