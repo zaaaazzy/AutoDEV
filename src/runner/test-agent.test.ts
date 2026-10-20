@@ -62,7 +62,8 @@ test('runs a command and persists a sanitized test run and result', async () => 
     assert.ok(stepWrite);
     assert.equal(stepWrite.values[0], runId);
     assert.equal(String(stepWrite.values[5]).includes('do-not-log-this-secret'), false);
-    assert.match(String(stepWrite.values[5]), /\[REDACTED\]/);
+    // Das Geheimnis erreicht den Kindprozess gar nicht (Allowlist): die Ausgabe ist „undefined“.
+    assert.match(String(stepWrite.values[5]), /undefined/);
     assert.ok(writes.some(({ sql }) => sql.includes('SET status = $2, completed_at = NOW()')));
   } finally {
     if (previousSecret === undefined) {
