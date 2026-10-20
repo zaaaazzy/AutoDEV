@@ -637,11 +637,19 @@ test('Ungelöste Konflikte werden am Ende verworfen statt mit Markern committet'
   const { cwd, git, item } = await conflictingOrder();
   const retry = await enterOrderBranch(cwd, item, 'Sprint 1');
   assert.deepEqual(retry?.conflicts, ['liste.txt']);
+  // Der Entwickler hat angefangen, aber die Marker nicht entfernt: seine Arbeit darf nicht verloren gehen.
+  const conflicted = await readFile(join(cwd, 'liste.txt'), 'utf8');
+  await writeFile(join(cwd, 'liste.txt'), `${conflicted}entwickler-arbeit\n`);
   const result = await finishOrderBranch(cwd, item, retry!, 'Sprint 1', false);
   assert.equal(result.merged, false);
   assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1');
   assert.equal(git('status', '--porcelain'), '');
   assert.doesNotMatch(git('show', 'auftrag/99999999-liste:liste.txt'), /<<<<<<<|>>>>>>>/);
+  // Kein WIP-Commit möglich: die Meldung nennt den Patch statt eines angeblich gesicherten Zwischenstands.
+  assert.doesNotMatch(result.message, /Zwischenstand auf/);
+  const patch = /Patch gesichert in (\S+\.patch)/.exec(result.message)?.[1];
+  assert.ok(patch, result.message);
+  assert.match(await readFile(patch, 'utf8'), /\+entwickler-arbeit/);
 });
 
 test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderungen im Ordner hat', async () => {

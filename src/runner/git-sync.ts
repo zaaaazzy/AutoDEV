@@ -413,12 +413,14 @@ export async function finishOrderBranch(
       message: `Arbeitsordner steht auf ${head} statt auf ${target.branch} – nichts committet und nichts gemergt.`,
     };
   }
+  // Patch des Arbeitsstands vor einem verworfenen Merge (siehe unten).
+  let backup: string | null = null;
   try {
     // Konflikte nicht gelöst: offenen Merge verwerfen, damit kein Konfliktmarker committet wird und der nächste
     // Auftrag auf einem sauberen Stand beginnt (der Branch behält seine bisherigen Commits). Was der Agent bis dahin
     // gelöst oder geändert hat, bleibt als Patch erhalten.
     if ((await unresolvedConflicts(cwd, execute)).length) {
-      const backup = await backupWorkingTree(git, cwd, `merge-abbruch-${item.id.slice(0, 8)}`).catch(() => null);
+      backup = await backupWorkingTree(git, cwd, `merge-abbruch-${item.id.slice(0, 8)}`).catch(() => null);
       if (backup) console.warn(`Offener Merge von ${target.branch} verworfen, Arbeitsstand gesichert in ${backup}`);
       await git('merge', '--abort');
     }
@@ -477,7 +479,14 @@ export async function finishOrderBranch(
       );
     }
     await must('checkout', target.base);
-    return { merged: false, commit: null, message: `Zwischenstand auf ${target.branch} gesichert.` };
+    // Nur melden, was wirklich gesichert ist: nach einem verworfenen Merge steckt der Stand oft nur im Patch.
+    const saved = [
+      dirty ? `Zwischenstand auf ${target.branch} gesichert.` : '',
+      backup ? `Offener Merge verworfen, Arbeitsstand als Patch gesichert in ${backup}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' ');
+    return { merged: false, commit: null, message: saved || 'Keine Änderungen zu sichern.' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Z. B. ein Commit-Hook lehnt ab: Gestagtes darf nicht liegen bleiben, sonst wandert es beim nächsten Checkout in
