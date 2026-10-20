@@ -45,6 +45,8 @@ Ein Auftrag durchläuft die aktivierten Agents nach Phase und Position: `pre_tas
 | Benutzerhandbuch-Autor | `user_manual_writer` | after_task | Benutzerhandbuch pflegen.                                                                                             | lokales Modell nein; Claude-CLI anlegen + ändern   | nein                                                       |
 | eigene                 | `custom`             | frei       | Beliebige Zusatzrolle.                                                                                                | nein                                               | nein                                                       |
 
+Die Marketing-Seite im Dashboard (Dokumentation → Marketing → „Agents, Aufgaben und Rechte“, `frontend/src/app/features/docs/marketing/agent-permissions.ts`) gibt diese Tabelle statisch wieder. Wer sie hier ändert, muss die Seite nachziehen; ein Test (`agent-permissions.spec.ts`) vergleicht Phase und Dateirechte mit diesem Abschnitt.
+
 Mit der Claude-CLI bekommen Assistent, Entwickler, Tester und Reviewer alle freigeschalteten Rechte-Gruppen (`TRUSTED_ROLES`); alle anderen Rollen nur „Dateien anlegen“ und „Dateien ändern“, Visionär und Problemanalyse gar nichts (`READ_ONLY_ROLES`). Zeitgesteuerte Routinen (`routine`) bekommen die Befehle der Rechte-Gruppen, aber keine Datei-Werkzeuge (`NO_FILE_WRITE_ROLES`, siehe Abschnitt 6). Beim lokalen Modell schreibt nur der Entwickler. Ohne Schreibrecht erhalten Agents nur Lese-Werkzeuge (Verzeichnis, Datei lesen, Suche) mit etwa 25 Werkzeugschritten; der Entwickler hat bis zu 80 Schritte.
 
 ## 4. Der Dashboard-Assistent (Problemlöser)
