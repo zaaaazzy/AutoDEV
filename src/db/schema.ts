@@ -1169,4 +1169,8 @@ export const SCHEMA = `
     ('close_old_sprints', FALSE, 86400, 'close_old_sprints', '{"inactiveDays": 14}'),
     ('push_alert', TRUE, 3600, 'push_alert', '{}')
   ON CONFLICT (key) DO NOTHING;
+  -- Sprint abgebrochen: laufende Agents werden beendet, offene Aufträge gehen zurück ins Backlog; kein Git-Sync.
+  ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_status_check;
+  ALTER TABLE sprints ADD CONSTRAINT sprints_status_check
+    CHECK (status IN ('planned', 'active', 'review', 'completed', 'cancelled'));
 `;

@@ -76,7 +76,9 @@ export class SprintOrdersComponent {
   /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
   protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));
 
-  protected readonly editable = computed(() => this.sprint().status !== 'completed' && this.auth.can('plan'));
+  protected readonly editable = computed(
+    () => !['completed', 'cancelled'].includes(this.sprint().status) && this.auth.can('plan'),
+  );
   /** Hineinnehmen nur in geplante oder aktive Sprints (dieselbe Regel wie der Server); im Review und danach nicht. */
   protected readonly canTakeIn = computed(() => this.editable() && isAssignableSprintStatus(this.sprint().status));
 

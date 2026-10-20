@@ -530,9 +530,14 @@ test('deletes only planned or completed sprints without running work', async () 
   await withServer(blockedPool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/sprints/${SPRINT_ID}`, { method: 'DELETE', headers: jsonHeaders() });
     assert.equal(response.status, 409);
-    assert.match(blocked[0]?.sql ?? '', /status IN \('planned', 'completed'\)/);
-    assert.match(blocked[0]?.sql ?? '', /in_progress/);
-    assert.match(blocked[0]?.sql ?? '', /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+    // Erst gehen geplante Aufträge ins Backlog (nur wenn der Sprint löschbar ist), dann wird gelöscht.
+    assert.match(blocked[0]?.sql ?? '', /^UPDATE development_items SET status = 'backlog'/);
+    assert.match(blocked[1]?.sql ?? '', /^DELETE FROM sprints/);
+    for (const query of blocked.slice(0, 2)) {
+      assert.match(query.sql, /status IN \('planned', 'completed', 'cancelled'\)/);
+      assert.match(query.sql, /in_progress/);
+      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+    }
   });
 
   const missing = recordingPool([]);

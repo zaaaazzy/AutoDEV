@@ -47,6 +47,7 @@ const STATUS_LABELS: Record<string, string> = {
   active: 'Aktiv',
   inactive: 'Inaktiv',
   completed: 'Abgeschlossen',
+  cancelled: 'Abgebrochen',
 };
 const PRIORITY_LABELS: Record<string, string> = { low: 'Niedrig', medium: 'Mittel', high: 'Hoch' };
 const SEVERITY_LABELS: Record<string, string> = { ...PRIORITY_LABELS, critical: 'Kritisch' };

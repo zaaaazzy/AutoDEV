@@ -46,7 +46,7 @@
         [attr.aria-expanded]="showDone()"
         (click)="showDone.set(!showDone())"
       >
-        <span class="chev" [class.open]="showDone()">▸</span> Abgeschlossene Sprints
+        <span class="chev" [class.open]="showDone()">▸</span> Abgeschlossene und abgebrochene Sprints
         <span class="muted">({{ completed().length }})</span>
       </button>
     </div>
