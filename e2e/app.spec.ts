@@ -587,7 +587,7 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
   await expect(card).toContainText(`Aus Sprint „${sprint.name}“ genommen`);
   await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
   // Seltenere Aktionen liegen unter „Mehr“.
-  await card.locator('.attention-more > summary').click();
+  await card.getByRole('button', { name: 'Mehr' }).click();
   page.once('dialog', (dialog) => void dialog.accept());
   await card.getByRole('button', { name: 'Löschen' }).click();
   await expect(card).toHaveCount(0);

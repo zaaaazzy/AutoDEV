@@ -441,8 +441,8 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect(first.locator('.attention-why')).not.toBeEmpty();
   await expect(first.locator('.attention-now')).toBeVisible();
   const more = async (card: ReturnType<Page['locator']>) => {
-    const menu = card.locator('.attention-more');
-    if ((await menu.getAttribute('open')) === null) await menu.locator('summary').click();
+    const toggle = card.getByRole('button', { name: 'Mehr' });
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   };
   await more(first);
   await button(first, 'Bearbeiten').click();

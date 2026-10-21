@@ -1,5 +1,5 @@
 import { NgClass } from '@angular/common';
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, effect, HostListener, inject, signal, untracked } from '@angular/core';
 import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -45,6 +45,8 @@ export class ActionsComponent {
   protected readonly isFinished = isFinished;
   protected readonly attention = this.store.attention;
   protected readonly openAttention = signal<string | null>(null);
+  /** Geöffnetes Menü „Mehr“ (Auftrags-ID); schliesst mit Escape, Klick daneben oder Wahl eines Eintrags. */
+  protected readonly moreOpen = signal<string | null>(null);
   /** Antwort bzw. Hinweis an die Agents je Auftrag, bis „Erneut versuchen“ ihn mitschickt. */
   private readonly notes = signal<Record<string, string>>({});
 
@@ -86,6 +88,12 @@ export class ActionsComponent {
 
   protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
     return this.orders.checkPoint(item, check, true);
+  }
+
+  @HostListener('document:keydown.escape')
+  @HostListener('document:click')
+  protected closeMore(): void {
+    if (this.moreOpen()) this.moreOpen.set(null);
   }
 
   protected toggle(id: string): void {

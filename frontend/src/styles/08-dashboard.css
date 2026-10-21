@@ -925,13 +925,8 @@ app-order-table {
 .attention-more {
   position: relative;
 }
-.attention-more > summary {
-  list-style: none;
-  cursor: pointer;
-}
-.attention-more > summary::-webkit-details-marker {
-  display: none;
-}
+>>>
+
 .attention-more-menu {
   position: absolute;
   z-index: 5;

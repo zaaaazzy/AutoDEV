@@ -110,34 +110,43 @@
                   {{ label }}
                 </button>
               }
-              <details class="attention-more">
-                <summary class="button secondary">Mehr</summary>
-                <div class="attention-more-menu">
-                  @if (item.status === 'blocked' && item.kind !== 'express' && auth.can('run')) {
-                    <button
-                      class="button secondary"
-                      type="button"
-                      [disabled]="busy() || card.step === 'analyzing'"
-                      (click)="analyzeOrder(item)"
-                    >
-                      Neu analysieren
+              <div class="attention-more">
+                <button
+                  class="button secondary"
+                  type="button"
+                  [attr.aria-expanded]="moreOpen() === item.id"
+                  (click)="$event.stopPropagation(); moreOpen.set(moreOpen() === item.id ? null : item.id)"
+                >
+                  Mehr
+                </button>
+                @if (moreOpen() === item.id) {
+                  <div class="attention-more-menu" (click)="moreOpen.set(null)">
+                    @if (item.status === 'blocked' && item.kind !== 'express' && auth.can('run')) {
+                      <button
+                        class="button secondary"
+                        type="button"
+                        [disabled]="busy() || card.step === 'analyzing'"
+                        (click)="analyzeOrder(item)"
+                      >
+                        Neu analysieren
+                      </button>
+                    }
+                    <button class="button secondary" type="button" (click)="toggle(item.id)">
+                      {{ openAttention() === item.id ? 'Bearbeiten schliessen' : 'Bearbeiten' }}
                     </button>
-                  }
-                  <button class="button secondary" type="button" (click)="toggle(item.id)">
-                    {{ openAttention() === item.id ? 'Bearbeiten schliessen' : 'Bearbeiten' }}
-                  </button>
-                  @if (auth.can('plan')) {
-                    <button
-                      class="button secondary danger"
-                      type="button"
-                      [disabled]="busy() || item.status === 'in_progress'"
-                      (click)="deleteOrder(item)"
-                    >
-                      Löschen
-                    </button>
-                  }
-                </div>
-              </details>
+                    @if (auth.can('plan')) {
+                      <button
+                        class="button secondary danger"
+                        type="button"
+                        [disabled]="busy() || item.status === 'in_progress'"
+                        (click)="deleteOrder(item)"
+                      >
+                        Löschen
+                      </button>
+                    }
+                  </div>
+                }
+              </div>
             </div>
             @if (!auth.can('run') && item.kind !== 'express' && item.status === 'blocked') {
               <p class="muted small">Erneut versuchen braucht das Recht, Agents zu starten – frag dafür einen Admin.</p>
