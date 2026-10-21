@@ -1,5 +1,6 @@
 import { decryptSecret } from '../core/secrets.js';
 import { logged } from '../core/log.js';
+import { maskSecrets } from '../core/secret-mask.js';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
@@ -10,7 +11,9 @@ import { gitEnvironment } from './project-command.js';
 /**
  * Review-Container: projektübergreifend geteilte Docker-Container, die der Administrator freigibt (einer ist
  * Standard). Jeder zeigt einen Commit eines Projekts – gewählt in der Sprint-Ansicht oder automatisch für einen
- * Auftrag, der auf die Freigabe wartet – auf eigenem Port mit eigener Kopie der Projektdatenbank.
+ * Auftrag, der auf die Freigabe wartet – auf eigenem Port mit eigener Kopie der Projektdatenbank. Der Container führt
+ * Code aus Agent-Commits aus: Er sieht nur die Git-Objekte (keine .env), läuft nicht als root, hat einen npm-Cache je
+ * Projekt und bekommt nur den eigenen Review-DB-User, nie die Haupt-Zugänge.
  */
 export const REVIEW_IMAGE = 'aideation-review:latest';
 const PORT_BASE = 4200;
@@ -42,13 +45,19 @@ interface ProjectInfo {
 const SLOT_COLUMNS = `slot, enabled, project_slug AS "projectSlug", commit_sha AS commit, label,
   development_id AS "developmentId", kind, status, started_at AS "startedAt"`;
 
+/** Adressen auf diesem Rechner sind aus Docker heraus nur über host.docker.internal erreichbar. */
+function fromDocker(url: URL): URL {
+  if (['localhost', '127.0.0.1', '::1', '[::1]'].includes(url.hostname)) url.hostname = 'host.docker.internal';
+  return url;
+}
+
 /** Projekt-Datenbank in eine eigene Kopie je Container: <db>_review_<n>, erreichbar aus Docker über host.docker.internal. */
 export function reviewDatabase(databaseUrl: string, slot: number): { source: URL; target: URL } | null {
   try {
     const source = new URL(databaseUrl);
     const name = source.pathname.replace(/^\//, '');
     if (!/^[\w-]+$/.test(name)) return null;
-    if (['localhost', '127.0.0.1', '::1', '[::1]'].includes(source.hostname)) source.hostname = 'host.docker.internal';
+    fromDocker(source);
     const target = new URL(source.toString());
     target.pathname = `/${name}_review_${slot}`;
     return { source, target };
@@ -56,6 +65,87 @@ export function reviewDatabase(databaseUrl: string, slot: number): { source: URL
     return null;
   }
 }
+
+/**
+ * Datenbank-Zugänge des Runners für Review-Container. Der Container läuft mit Code aus Agent-Commits und bekommt nie
+ * die Haupt-Zugänge, sondern nur einen eigenen User ohne Superuser-Rechte (scripts/setup-review-db.sh).
+ */
+export interface ReviewDatabaseConfig {
+  /** DEV_LOG_REVIEW_DATABASE_URL: Review-User, Pfad = seine Basis-Datenbank (z. B. …/aideation_review). */
+  reviewUrl: string | null;
+  /** DEV_LOG_DATABASE_URL des Runners: nur zum Abgleich, damit sie nie im Container landet. */
+  mainUrl: string | null;
+}
+
+const REVIEW_DB_NAME = /^[a-z_][a-z0-9_]{0,50}$/;
+
+const parseUrl = (value: string | null): URL | null => {
+  try {
+    return value ? new URL(value) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Eigene, leere Datenbank je Container (<basis>_<n>, z. B. aideation_review_1) für Projekte ohne eigene Datenbank.
+ * Liefert eine Fehlermeldung statt eines Rückfalls auf die Haupt-Datenbank, wenn kein eigener Review-User da ist.
+ */
+export function reviewSlotDatabase(config: ReviewDatabaseConfig, slot: number): { base: URL; target: URL } | string {
+  if (!config.reviewUrl?.trim()) {
+    return 'Kein Review-DB-User eingerichtet (DEV_LOG_REVIEW_DATABASE_URL, siehe scripts/setup-review-db.sh). Ohne ihn startet kein Review-Container – die Haupt-Zugänge kommen nie in die Vorschau.';
+  }
+  const base = parseUrl(config.reviewUrl.trim());
+  const name = base?.pathname.replace(/^\//, '') ?? '';
+  if (!base || !base.username || !REVIEW_DB_NAME.test(name) || name === 'postgres' || name.startsWith('template')) {
+    return 'DEV_LOG_REVIEW_DATABASE_URL braucht User, Passwort und eine eigene Basis-Datenbank (z. B. …/aideation_review).';
+  }
+  const main = parseUrl(config.mainUrl);
+  if (
+    main &&
+    (main.username === base.username ||
+      (main.password && main.password === base.password) ||
+      main.pathname === base.pathname)
+  ) {
+    return 'Der Review-DB-User muss ein eigener User mit eigenem Passwort und eigener Datenbank sein, nicht der der Haupt-Datenbank.';
+  }
+  fromDocker(base);
+  const target = new URL(base.toString());
+  target.pathname = `/${name}_${slot}`;
+  return { base, target };
+}
+
+/** Prüft das Env für den Container: kein Haupt-DB-Passwort, kein Haupt-User, keine Verbindung zur DB „postgres“. */
+export function containerEnvProblem(env: string[], mainUrl: string | null): string | null {
+  const main = parseUrl(mainUrl);
+  const password = main ? decodeURIComponent(main.password) : '';
+  const user = main ? decodeURIComponent(main.username) : '';
+  for (const entry of env) {
+    const value = entry.slice(entry.indexOf('=') + 1);
+    if (password && entry.includes(password)) return 'Das Env des Review-Containers enthielte das Haupt-DB-Passwort.';
+    const url = /^postgres(?:ql)?:\/\//.test(value) ? parseUrl(value) : null;
+    if (url && user && decodeURIComponent(url.username) === user) {
+      return 'Das Env des Review-Containers enthielte den Haupt-DB-User.';
+    }
+    if (url && /^\/(postgres|template\d)$/.test(url.pathname)) {
+      return 'Der Review-Container darf sich nicht mit der Datenbank „postgres“ verbinden.';
+    }
+  }
+  return null;
+}
+
+/** Docker-Volume für den npm-Cache, je Projekt getrennt (kein Cache, den Agent-Commits anderer Projekte füllen). */
+export const reviewNpmVolume = (projectSlug: string): string =>
+  `aideation_review_npm_${projectSlug.toLowerCase().replace(/[^a-z0-9_.-]/g, '_')}`;
+
+/**
+ * Legt die Slot-Datenbank mit dem Review-User an (im Postgres-Container unter `sh -c`). Verbindet sich nur mit der
+ * eigenen Basis-Datenbank, nie mit „postgres“; der Name ist vorher auf [a-z0-9_] geprüft.
+ */
+export const REVIEW_DATABASE_SCRIPT = [
+  'export PGHOST=$R_HOST PGPORT=$R_PORT PGUSER=$R_USER PGPASSWORD=$R_PASSWORD PGDATABASE=$R_BASE',
+  `{ [ "$(psql -tAq -v ON_ERROR_STOP=1 -c "SELECT 1 FROM pg_database WHERE datname = '$R_DB'")" = 1 ] || psql -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE $R_DB"; }`,
+].join(' && ');
 
 /**
  * Skript für die Datenbank-Kopie (im Postgres-Container unter `sh -c`). Erst in eine Datei dumpen, dann einspielen:
@@ -102,6 +192,7 @@ export class ReviewSlots {
       fetch(url, { signal: AbortSignal.timeout(3000) })
         .then((response) => response.status < 500)
         .catch(() => false),
+    private readonly databases: ReviewDatabaseConfig = { reviewUrl: null, mainUrl: null },
   ) {}
 
   private docker(args: string[], timeoutMs = 60_000) {
@@ -287,20 +378,16 @@ export class ReviewSlots {
       await update(this.pool, slot.slot, { status: 'failed', message: 'Kein Commit gewählt.' });
       return;
     }
-    const imageProblem = await this.ensureImage();
-    if (imageProblem) {
-      await update(this.pool, slot.slot, { status: 'failed', message: imageProblem });
-      return;
-    }
-    await update(this.pool, slot.slot, {
-      status: 'starting',
-      commit_sha: slot.commit,
-      message: 'Container wird vorbereitet …',
-    });
-    await this.docker(['rm', '-f', name]);
+    const fail = (message: string) => update(this.pool, slot.slot, { status: 'failed', message });
+    // Projekte ohne eigene Datenbank bekommen eine leere Slot-Datenbank des Review-Users – nie die Haupt-Datenbank.
+    const database = project.databaseUrl ? reviewDatabase(project.databaseUrl, slot.slot) : null;
+    const slotDatabase = database ? null : reviewSlotDatabase(this.databases, slot.slot);
+    if (typeof slotDatabase === 'string') return fail(slotDatabase);
+    const databaseUrl = (database ?? slotDatabase)?.target.toString();
     const env: string[] = [
       `REVIEW_COMMIT=${slot.commit}`,
-      `REVIEW_COMMAND=${project.command.join(' ')}`,
+      // Der Stand liegt im Container unter /work; ältere Befehle verweisen noch auf /source.
+      `REVIEW_COMMAND=${project.command.join(' ').replaceAll('/source/', '/work/')}`,
       `REVIEW_LABEL=${slot.label ?? ''}`,
       `REVIEW_PUBLIC_URL=${reviewUrl(slot.slot)}`,
       `REVIEW_FRONTEND_PORT=${INNER_PORT}`,
@@ -309,17 +396,33 @@ export class ReviewSlots {
       'REVIEW_TLS=off',
       'DEV_LOG_REVIEW=1',
       'DEV_LOG_REVIEW_CONTAINER=1',
-      'DEV_LOG_REVIEW_MAIN=/source',
+      ...(databaseUrl
+        ? [`REVIEW_DATABASE_URL=${databaseUrl}`, `DATABASE_URL=${databaseUrl}`, 'DEV_LOG_REVIEW_DATABASE_READY=1']
+        : []),
     ];
-    const database = project.databaseUrl ? reviewDatabase(project.databaseUrl, slot.slot) : null;
-    if (database) {
-      const copied = await this.copyDatabase(database.source, database.target);
-      if (copied) {
-        await update(this.pool, slot.slot, { status: 'failed', message: copied });
-        return;
-      }
-      env.push(`DATABASE_URL=${database.target.toString()}`, 'DEV_LOG_REVIEW_DATABASE_READY=1');
-    }
+    // Vor jedem Docker-Aufruf: weder Haupt-Zugänge noch die DB „postgres“ dürfen in den Container.
+    const leak = containerEnvProblem(env, this.databases.mainUrl);
+    if (leak) return fail(leak);
+    // Nur die Git-Objekte einbinden: kein Arbeitsordner, also weder .env noch andere ungetrackte Dateien.
+    const gitDir = await this.execute(
+      ['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      project.folder,
+    );
+    if (gitDir.exitCode !== 0 || !gitDir.output.trim()) return fail('Projektordner ist kein Git-Repository.');
+    const imageProblem = await this.ensureImage();
+    if (imageProblem) return fail(imageProblem);
+    await update(this.pool, slot.slot, {
+      status: 'starting',
+      commit_sha: slot.commit,
+      message: 'Container wird vorbereitet …',
+    });
+    await this.docker(['rm', '-f', name]);
+    const prepared = database
+      ? await this.copyDatabase(database.source, database.target)
+      : slotDatabase
+        ? await this.createSlotDatabase(slotDatabase.base, slotDatabase.target)
+        : null;
+    if (prepared) return fail(prepared);
     const run = await this.docker([
       'run',
       '-d',
@@ -327,15 +430,22 @@ export class ReviewSlots {
       name,
       '--label',
       `aideation.review=${slot.slot}`,
+      // Kein root, keine Zusatzrechte: Lifecycle-Skripte aus Agent-Commits laufen als Benutzer „node“.
+      '--user',
+      'node',
+      '--cap-drop',
+      'ALL',
+      '--security-opt',
+      'no-new-privileges',
       '-p',
       `127.0.0.1:${reviewPort(slot.slot)}:${INNER_PORT}`,
       '--add-host',
       'host.docker.internal:host-gateway',
       '-v',
-      `${project.folder}:/source:ro`,
+      `${join(gitDir.output.trim(), 'objects')}:/source/objects:ro`,
       '-v',
-      // Container läuft als node (deploy/review/Dockerfile); eigenes Volume, das alte gehört root.
-      'aideation_review_npm_node:/home/node/.npm',
+      // Container läuft als node (deploy/review/Dockerfile); eigenes Volume je Projekt, das alte gehört root.
+      `${reviewNpmVolume(slot.projectSlug ?? 'ohne-projekt')}:/home/node/.npm`,
       ...env.flatMap((entry) => ['-e', entry]),
       REVIEW_IMAGE,
     ]);
@@ -344,8 +454,34 @@ export class ReviewSlots {
       slot.slot,
       run.exitCode === 0
         ? { status: 'starting', started_at: new Date(), message: 'Installiert Abhängigkeiten und startet …' }
-        : { status: 'failed', message: `docker run fehlgeschlagen: ${run.output.slice(-400)}` },
+        : { status: 'failed', message: `docker run fehlgeschlagen: ${maskSecrets(run.output.slice(-400))}` },
     );
+  }
+
+  /** Slot-Datenbank des Review-Users anlegen (falls nötig) in einem kurzlebigen Postgres-Container. */
+  private async createSlotDatabase(base: URL, target: URL): Promise<string | null> {
+    const result = await this.docker(
+      [
+        'run',
+        '--rm',
+        '--add-host',
+        'host.docker.internal:host-gateway',
+        ...[
+          `R_HOST=${base.hostname}`,
+          `R_PORT=${base.port || '5432'}`,
+          `R_USER=${decodeURIComponent(base.username)}`,
+          `R_PASSWORD=${decodeURIComponent(base.password)}`,
+          `R_BASE=${base.pathname.slice(1)}`,
+          `R_DB=${target.pathname.slice(1)}`,
+        ].flatMap((entry) => ['-e', entry]),
+        'postgres:17-alpine',
+        'sh',
+        '-c',
+        REVIEW_DATABASE_SCRIPT,
+      ],
+      60_000,
+    );
+    return result.exitCode === 0 ? null : `Review-Datenbank nicht angelegt: ${maskSecrets(result.output.slice(-400))}`;
   }
 
   /** Kopie der Projektdatenbank (pg_dump | psql) in einem kurzlebigen Postgres-Container. */
@@ -371,6 +507,6 @@ export class ReviewSlots {
       ],
       5 * 60_000,
     );
-    return result.exitCode === 0 ? null : `Datenbank-Kopie fehlgeschlagen: ${result.output.slice(-400)}`;
+    return result.exitCode === 0 ? null : `Datenbank-Kopie fehlgeschlagen: ${maskSecrets(result.output.slice(-400))}`;
   }
 }

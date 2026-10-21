@@ -100,6 +100,7 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 - **Aktualisierung:** Die Daten folgen dem bestehenden Polling. Es gibt keine Live-Animation und kein Echtzeit-Streaming. Der Worker wird etwa alle 10 Sekunden abgefragt.
 - **Keine Auswertung von Aufwand, Tokens oder Kosten** pro Agent. Dafür gibt es die Verbrauchsansicht.
 - **Bestehende Funktionen bleiben:** Die Share-Bar der Prüfergebnisse, der Abbrechen-Button und der Klick auf die Agent-Aktivität funktionieren wie bisher.
+- **Review-Container (nur Administratoren):** Der Container sieht weder die `.env` noch die Haupt-Datenbank. Er bekommt nur einen eigenen Review-DB-User ohne Superuser-Rechte und einen Projekt-Cache. Für Projekte mit eigener Datenbank schlägt der Review-Slot derzeit fehl, statt auf die Haupt-Zugänge zurückzufallen. Eine Lösung ist noch offen.
 
 ---
 
@@ -110,6 +111,8 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 | Agent zeigt „Worker offline“ | Der Worker läuft nicht. Prüfe den Worker-Dienst auf dem Host (siehe [`laufzeit.md`](laufzeit.md)). |
 | Ein Agent fehlt in der Liste | Der Agent gehört zu einem anderen Projekt oder ist nicht angelegt. Prüfe, ob das richtige Projekt aktiv ist. |
 | Rechte-Chip zeigt „nein“, der Agent darf aber Befehle ausführen | Das Chip zeigt den Standardwert der Rolle. Der Befehl des Agents (Claude-CLI oder lokales Modell) kann abweichen. Der Hinweis „je nach Befehl“ weist darauf hin. |
+| Review-Slot zeigt „failed“ mit der Meldung „Kein Review-DB-User eingerichtet (DEV_LOG_REVIEW_DATABASE_URL …)“ | Nur für Administratoren. Der Review-Container bekommt keine Haupt-Zugänge. Ohne eigenen Review-DB-User startet er nicht. Lösung: `bash scripts/setup-review-db.sh` ausführen, den ausgegebenen Wert als `DEV_LOG_REVIEW_DATABASE_URL` setzen und den Worker neu installieren (siehe [`laufzeit.md`](laufzeit.md)). |
+| Review-Slot zeigt „failed“ mit „Der Review-DB-User muss ein eigener User …“ oder „DEV_LOG_REVIEW_DATABASE_URL braucht User, Passwort …“ | Nur für Administratoren. Die Review-URL zeigt auf die Haupt-Datenbank oder ist unvollständig. Eine eigene Basis-Datenbank (z. B. `aideation_review`) mit eigenem User und Passwort eintragen. |
 
 Offener Punkt: Ein Auftrag kann blockiert sein, ohne dass ein Schritt fehlgeschlagen ist. Die Aufgabenzeile liest den Zustand dann nur aus dem Worker-Status, nicht aus einem Schritt. Dieser Fall ist noch nicht behoben.
 
