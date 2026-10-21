@@ -67,6 +67,16 @@ sequenceDiagram
 - Pro Lauf höchstens die eingestellte Anzahl Ideen; Verbrauch erscheint in der Statistik unter „Visionär“.
 - Nach dem Lauf kommt eine Push-Meldung mit der Anzahl neuer Ideen.
 
+## Umsetzungsstand: Herkunft-Filter (Auftrag 937b94a4)
+
+Der Filter „Herkunft“ (Alle, Mensch, Visionär, Routine, Produktion, GitHub) sitzt im Trichter-Menü der Spalte „Herkunft“ in der Ideation-Liste „Offene Ideen“ und ist mit den anderen Spaltenfiltern kombinierbar (z. B. Visionär + Status). Reines Frontend, keine Schema- oder API-Änderung.
+
+- `idea-options.ts`: `IDEA_SOURCES` und `SOURCE_FILTER_OPTIONS` werden aus den Beschriftungen von `sourceLabel` abgeleitet; Spalte, Filter und Badge heißen dadurch gleich.
+- `data-table`: neue Spaltenoption `options` (feste Werte, auch ohne Treffer, plus „Alle“ zum Zurücksetzen); Logik in `shared/data-table/filter.ts` (`matchesSelection`, `filterFacets`). Andere Tabellen zeigen weiter nur vorhandene Werte.
+- Zustand und Zurücksetzen laufen über die gemeinsame `DataTableComponent`, also wie bei den übrigen Filtern.
+- Test: `frontend/src/app/features/ideation/source-filter.spec.ts` (alle Herkunftswerte, Kombination mit Status, feste Optionen).
+- Beachten: Die Anzeige im Browser wurde nicht geprüft. Zeitplan (Ausbaustufe 2) und Visionär-Lauf sind unverändert.
+
 ## Risiken & Grenzen
 
 - Kleine lokale Modelle liefern oft generische Ideen → Prompt verlangt Bezug auf konkrete Daten („stützt sich auf …“); ohne Bezug wird die Idee verworfen.

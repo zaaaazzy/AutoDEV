@@ -16,6 +16,7 @@ import {
   IDEA_SELECTABLE_STATUSES,
   ideaDisplayStatus,
   MAX_IMAGE_BYTES,
+  sourceLabel,
 } from './idea-options.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
@@ -48,6 +49,8 @@ export class IdeaDetailComponent {
   readonly editing = model(false);
   readonly closed = output<void>();
   protected readonly categories = CATEGORIES;
+  /** Badge-Text wie Spalte und Filter „Herkunft“. */
+  protected readonly sourceLabel = sourceLabel;
 
   /** Escape schließt den Dialog bzw. die Bearbeitung (die @-Auswahl im Kommentar fängt ihr Escape selbst ab). */
   @HostListener('document:keydown.escape')
