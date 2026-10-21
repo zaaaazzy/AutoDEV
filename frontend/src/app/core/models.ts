@@ -276,8 +276,14 @@ export interface ProductionStatus {
   lastError: string | null;
   checkedAt: string | null;
   downSince: string | null;
+  logsConfigured: boolean;
   logsScannedAt: string | null;
   logError: string | null;
+  /** Zuletzt vermerkte Lücke im Log-Scan (letzter erfolgreicher Scan zu lange her). */
+  logGap: string | null;
+  /** Gebündelte Log-Ereignisse (Fingerabdrücke) und ihre Vorkommen innerhalb der Aufbewahrung. */
+  logEvents: number;
+  logOccurrences: number;
   openBugs: number;
   criticalBugs: number;
   last24h: number;

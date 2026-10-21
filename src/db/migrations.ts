@@ -143,6 +143,12 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS production_rollbacks_bug_idx ON production_rollbacks (bug_id, created_at DESC);
     `,
   },
+  // Log-Scan: zuletzt vermerkte Lücke, wenn der letzte erfolgreiche Scan länger als das längste Fenster her war.
+  {
+    version: 6,
+    name: 'production-log-gap',
+    sql: 'ALTER TABLE production_status ADD COLUMN IF NOT EXISTS log_gap TEXT;',
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

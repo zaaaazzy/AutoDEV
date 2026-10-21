@@ -105,6 +105,11 @@ export function fingerprint(message: string, stack?: string): string {
   return createHash('sha256').update(key).digest('hex').slice(0, 32);
 }
 
+/** Schlüssel beim Speichern (Titel bzw. Meldung, oberster Frame); der Log-Scan gruppiert mit demselben Schlüssel. */
+export function errorFingerprint(error: Pick<ProductionError, 'title' | 'message' | 'stack'>): string {
+  return fingerprint(error.title ?? error.message, error.stack);
+}
+
 /** Beispiel zum Speichern: erst maskieren, dann kürzen. */
 export function sampleOf(error: ProductionError): string {
   const text = [error.message, error.stack, error.detail].filter(Boolean).join('\n');
@@ -248,7 +253,7 @@ export async function recordEvent(
 ): Promise<RecordResult> {
   error = withoutNul(error);
   const count = Math.max(1, Math.floor(error.count ?? 1));
-  const print = fingerprint(error.title ?? error.message, error.stack);
+  const print = errorFingerprint(error);
   const sample = sampleOf(error);
   const client = await pool.connect();
   let result: RecordResult;

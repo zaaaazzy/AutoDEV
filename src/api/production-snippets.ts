@@ -89,7 +89,7 @@ export function productionGuide(baseUrl: string, slug: string): string {
     '## Quellen',
     '',
     '- **Health-URL:** alle 2 Minuten. Zwei Fehlschläge in Folge ergeben den kritischen Bug „Anwendung nicht erreichbar“ und eine Push-Meldung, die Erholung eine Entwarnung. Erlaubt sind nur http(s) auf localhost, im lokalen Netz oder auf einer eigenen Domain (`DEV_LOG_DOMAIN`, `DEV_LOG_OWN_DOMAINS`).',
-    '- **Compose-Logs:** alle 15 Minuten und direkt nach jedem erfolgreichen Deploy `docker compose logs --since 15m --no-color <dienste>`. Erkannt werden Stacktraces, `ERROR`-Zeilen und HTTP-5xx.',
+    '- **Compose-Logs:** alle 15 Minuten und direkt nach jedem erfolgreichen Deploy `docker compose logs --timestamps --since <letzter Scan> --no-color <dienste>`. Jede Zeile zählt genau einmal (Zeitstempel nach dem letzten erfolgreichen Scan); liegt dieser über eine Stunde zurück, liest der Scan nur die letzte Stunde und vermerkt die Lücke in den Einstellungen „Betrieb“. Erkannt werden Stacktraces, `ERROR`-Zeilen und HTTP-5xx.',
     '- **Ingest-Endpunkt:** `POST ' +
       endpoint +
       '` mit JSON `{ "message": "…", "stack": "…", "url": "…" }`, höchstens 16 KB, Rate-Limit 60 Meldungen pro Minute und Absender. Das Token wird unter Einstellungen → Betrieb erzeugt und nur einmal angezeigt; gespeichert ist nur sein Hash.',

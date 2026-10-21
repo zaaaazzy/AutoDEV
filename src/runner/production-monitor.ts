@@ -3,13 +3,14 @@ import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { describeError } from '../core/log.js';
 import { type PushMessage, sendPush } from '../core/push.js';
-import { fingerprint, isExcluded, type ProductionError, recordEvent } from './production-events.js';
+import { maskSecrets } from '../core/secret-mask.js';
+import { errorFingerprint, isExcluded, type ProductionError, recordEvent } from './production-events.js';
 import { agentEnvironment } from './runner-prompts.js';
 import { type AlertLabels, evaluate, problemKey, type WatchdogState } from './watchdog.js';
 
 /**
- * Sammler des Produktions-Rückkanals im Worker: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten und direkt
- * nach jedem erfolgreichen Deploy, Aufbewahrung stündlich. Meldungen folgen dem Wächter (neu sofort, anhaltend alle
+ * Sammler des Produktions-Rückkanals im Worker: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten (lückenlos ab
+ * dem letzten erfolgreichen Scan) und direkt nach jedem erfolgreichen Deploy, Aufbewahrung stündlich. Meldungen folgen dem Wächter (neu sofort, anhaltend alle
  * 6 Stunden, Erholung einmal).
  */
 export const HEALTH_INTERVAL_MS = 2 * 60_000;
@@ -219,13 +220,90 @@ export function parseComposeLogs(output: string, ignore: readonly string[] = [])
   return found;
 }
 
-/** Ein Log-Scan: neue Zeilen seit dem letzten Scan (höchstens 15 Minuten) holen und als Ereignisse erfassen. */
-export async function scanLogs(
+/** Längstes Fenster eines Log-Scans: ein verspäteter Tick wird ganz nachgeholt, längere Lücken werden vermerkt. */
+export const LOG_MAX_WINDOW_MS = 4 * LOG_INTERVAL_MS;
+
+export interface LogWindow {
+  /** Untere Grenze (exklusiv): Zeilen mit Zeitstempel ≤ since hat ein früherer Scan schon gezählt. */
+  since: Date;
+  /** Hinweis auf nicht gelesene Zeilen, wenn der letzte erfolgreiche Scan zu lange her ist. */
+  gap: string | null;
+}
+
+const utc = (date: Date): string => `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+
+/** Fenster seit dem letzten erfolgreichen Scan; beim ersten Scan das Standardintervall, höchstens LOG_MAX_WINDOW_MS. */
+export function logWindow(scannedAt: Date | null, now: Date): LogWindow {
+  if (!scannedAt) return { since: new Date(now.getTime() - LOG_INTERVAL_MS), gap: null };
+  const earliest = new Date(now.getTime() - LOG_MAX_WINDOW_MS);
+  if (scannedAt >= earliest) return { since: new Date(Math.min(scannedAt.getTime(), now.getTime())), gap: null };
+  return {
+    since: earliest,
+    gap: `Logs von ${utc(scannedAt)} bis ${utc(earliest)} nicht gelesen (letzter erfolgreicher Scan zu lange her).`,
+  };
+}
+
+const LOG_TIMESTAMP = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:[.,](\d+))?(Z|[+-]\d{2}:?\d{2})\s?/;
+
+/** Zeitstempel von `--timestamps` (RFC 3339, auch Nanosekunden und Offsets) auf Millisekunden; null = keiner. */
+export function logTimestamp(text: string): { at: number; length: number } | null {
+  const match = LOG_TIMESTAMP.exec(text);
+  if (!match) return null;
+  const zone = match[3] === 'Z' ? 'Z' : `${match[3]!.slice(0, 3)}:${match[3]!.slice(-2)}`;
+  const at = Date.parse(`${match[1]}.${(match[2] ?? '').padEnd(3, '0').slice(0, 3)}${zone}`);
+  return Number.isNaN(at) ? null : { at, length: match[0].length };
+}
+
+/**
+ * Behält nur Zeilen im Fenster (since, until] und entfernt den Zeitstempel. Beide Grenzen sind millisekundengenau wie
+ * der gespeicherte Scan-Zeitpunkt, daher zählt jede Zeile in genau einem Scan. Zeilen ohne Zeitstempel folgen der
+ * vorigen Zeile desselben Dienstes.
+ */
+export function linesInWindow(output: string, since: Date, until: Date): string {
+  const inside = new Map<string, boolean>();
+  const kept: string[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const prefixed = raw.match(COMPOSE_PREFIX);
+    const service = prefixed?.[1] ?? '';
+    const text = prefixed ? prefixed[2]! : raw;
+    const prefix = raw.slice(0, raw.length - text.length);
+    const stamp = logTimestamp(text);
+    if (stamp) inside.set(service, stamp.at > since.getTime() && stamp.at <= until.getTime());
+    if (inside.get(service) ?? true) kept.push(prefix + (stamp ? text.slice(stamp.length) : text));
+  }
+  return kept.join('\n');
+}
+
+/** Läuft je Projekt nacheinander: Scan nach dem Deploy und periodischer Scan dürfen dasselbe Fenster nicht doppelt lesen. */
+const runningScans = new Map<string, Promise<unknown>>();
+
+/**
+ * Ein Log-Scan: Zeilen seit dem letzten erfolgreichen Scan holen, Ausschlussmuster anwenden, nach Fingerabdruck
+ * gruppieren und als Ereignisse erfassen. Gleiche Logik für den Takt im Worker und den Scan nach dem Deploy.
+ */
+export function scanLogs(
   pool: Pool,
   project: string,
   cwd: string,
   execute: CommandExecutor = runCommand,
-  now = new Date(),
+  now?: Date,
+): Promise<{ events: number; occurrences: number } | null> {
+  const previous = runningScans.get(project) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(() => scanOnce(pool, project, cwd, execute, now ?? new Date()));
+  runningScans.set(project, run);
+  const done = () => {
+    if (runningScans.get(project) === run) runningScans.delete(project);
+  };
+  run.then(done, done);
+  return run;
+}
+
+async function scanOnce(
+  pool: Pool,
+  project: string,
+  cwd: string,
+  execute: CommandExecutor,
+  now: Date,
 ): Promise<{ events: number; occurrences: number } | null> {
   const row = (
     await pool.query<{ services: string[]; ignore: string[]; scannedAt: Date | null }>(
@@ -234,12 +312,20 @@ export async function scanLogs(
       [project],
     )
   ).rows[0];
+  // Nur gültige Dienstnamen (kein führendes „-“, keine Leer- oder Sonderzeichen); der Befehl läuft ohne Shell.
   const services = (row?.services ?? []).filter((service) => SERVICE_NAME.test(service));
   if (!services.length) return null;
-  // Direkt nach einem Deploy nicht doppelt zählen, was der letzte Scan schon gesehen hat.
-  const elapsed = row?.scannedAt ? Math.ceil((now.getTime() - new Date(row.scannedAt).getTime()) / 1000) : Infinity;
-  const since = elapsed >= LOG_INTERVAL_MS / 1000 ? '15m' : `${Math.max(1, elapsed)}s`;
-  const command = ['docker', 'compose', 'logs', '--since', since, '--no-color', ...services];
+  const window = logWindow(row?.scannedAt ? new Date(row.scannedAt) : null, now);
+  const command = [
+    'docker',
+    'compose',
+    'logs',
+    '--timestamps',
+    '--since',
+    window.since.toISOString(),
+    '--no-color',
+    ...services,
+  ];
   const result = await execute(command, cwd, { timeoutMs: LOG_TIMEOUT_MS, env: agentEnvironment() }).catch(
     (error: unknown) => ({
       exitCode: 1,
@@ -248,20 +334,23 @@ export async function scanLogs(
     }),
   );
   // Ohne Fehler rückt der Zeitstempel vor; mit Fehler bleibt er, damit der nächste Scan die Zeilen erneut liest.
+  // Eine Lücke bleibt vermerkt, bis eine neue entsteht.
   const saveScan = (failed: string | null) =>
     pool.query(
-      `INSERT INTO production_status (project_slug, logs_scanned_at, log_error) VALUES ($1, $2, $3)
+      `INSERT INTO production_status (project_slug, logs_scanned_at, log_error, log_gap)
+       VALUES ($1, CASE WHEN $3::text IS NULL THEN $2::timestamptz END, $3, $4)
        ON CONFLICT (project_slug) DO UPDATE
-         SET logs_scanned_at = CASE WHEN $3::text IS NULL THEN $2 ELSE production_status.logs_scanned_at END, log_error = $3`,
-      [project, now, failed],
+         SET logs_scanned_at = CASE WHEN $3::text IS NULL THEN $2 ELSE production_status.logs_scanned_at END,
+             log_error = $3, log_gap = COALESCE($4, production_status.log_gap)`,
+      [project, now, failed === null ? null : maskSecrets(failed).slice(0, 300), failed === null ? window.gap : null],
     );
   if (result.exitCode !== 0) {
-    await saveScan(result.output.trim().split('\n').slice(-2).join(' ').slice(0, 300));
+    await saveScan(result.output.trim().split('\n').slice(-2).join(' ') || `Exit-Code ${result.exitCode}`);
     return null;
   }
   const grouped = new Map<string, ProductionError & { count: number }>();
-  for (const error of parseComposeLogs(result.output, row?.ignore ?? [])) {
-    const key = fingerprint(error.message, error.stack);
+  for (const error of parseComposeLogs(linesInWindow(result.output, window.since, now), row?.ignore ?? [])) {
+    const key = errorFingerprint(error);
     const entry = grouped.get(key);
     if (entry) entry.count += 1;
     else grouped.set(key, { ...error, count: 1 });
@@ -279,7 +368,7 @@ export async function scanLogs(
   }
   // Erst nach der Verarbeitung vorrücken: sonst wären nicht gespeicherte Fehler endgültig verloren.
   const message = failure instanceof Error ? failure.message : failure === null ? null : String(failure);
-  await saveScan(message === null ? null : `Verarbeitung: ${message}`.slice(0, 300));
+  await saveScan(message === null ? null : `Verarbeitung: ${message}`);
   if (grouped.size) await updateAlerts(pool, project, now);
   if (failure !== null) throw failure;
   return { events: grouped.size, occurrences };

@@ -37,6 +37,20 @@
   background: #fbeeea;
   color: #a8322b;
 }
+/* Zustand des Log-Scans in den Einstellungen: Bezeichnung über dem Wert, Probleme rot */
+.production-scan {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+.production-scan dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.production-scan dd.problem {
+  color: #a8322b;
+}
 .title-with-hint .tag {
   flex: none;
   margin-top: 2px;

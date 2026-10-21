@@ -37,7 +37,11 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
                   p.ingest_token_hash IS NOT NULL AS "ingestConfigured",
                   COALESCE(s.down, FALSE) AS down, COALESCE(s.failures, 0) AS failures, s.last_error AS "lastError",
                   s.checked_at AS "checkedAt", s.down_since AS "downSince", s.logs_scanned_at AS "logsScannedAt",
-                  s.log_error AS "logError",
+                  s.log_error AS "logError", s.log_gap AS "logGap",
+                  (SELECT COUNT(*)::int FROM production_events e
+                    WHERE e.project_slug = p.slug AND e.source = 'logs') AS "logEvents",
+                  (SELECT COALESCE(SUM(e.count), 0)::int FROM production_events e
+                    WHERE e.project_slug = p.slug AND e.source = 'logs') AS "logOccurrences",
                   (SELECT COUNT(*)::int FROM bugs b WHERE b.project_slug = p.slug AND b.source = 'production'
                       AND b.status IN ('open', 'in_progress')) AS "openBugs",
                   (SELECT COUNT(*)::int FROM bugs b WHERE b.project_slug = p.slug AND b.source = 'production'

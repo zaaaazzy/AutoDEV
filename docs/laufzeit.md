@@ -401,6 +401,18 @@ Der Auftrag zeigt, worauf er wartet, wer wann was gemacht hat, und nimmt Antwort
 
 Optional nach dem Sprint-Abschluss automatisch; nach dem Neubau Gesundheitsprüfung und bei Bedarf Rücksetzen auf das vorherige Abbild. Auswertung „Was klappt“ unter Verbrauch.
 
+### Log-Scan im Produktions-Rückkanal
+
+Für jedes Projekt mit `log_services` liest der Worker alle 15 min und nach jedem Deploy mit derselben Logik (`scanLogs` in `src/runner/production-monitor.ts`) `docker compose logs --timestamps --no-color` (ohne Shell, nur gültige Dienstnamen). Projekte ohne `log_services` lösen keinen Aufruf aus und bekommen keinen Eintrag in `production_status.logs_scanned_at`.
+
+- **Fenster:** vom letzten erfolgreichen Scan (`logs_scanned_at`) bis jetzt. Ein verspäteter Tick wird so vollständig abgedeckt; Zeilen mit Zeitstempel bis zur Grenze zählen nicht erneut. Beim ersten Scan gilt das Standardintervall.
+- **Begrenzung:** Liegt der letzte Scan länger als `LOG_MAX_WINDOW_MS` (1 h) zurück, wird das Fenster begrenzt und die Lücke in `production_status.log_gap` vermerkt, statt Zeilen still zu verwerfen.
+- **Fehler:** Schlägt der Aufruf fehl, wird `log_error` gesetzt (höchstens 300 Zeichen), es entstehen keine Ereignisse und der Scan-Zeitpunkt bleibt stehen. Der nächste erfolgreiche Scan setzt `log_error` zurück.
+- **Fingerabdruck:** `scanLogs` und `recordEvent` bilden den Schlüssel gleich (Meldung bzw. Titel, oberster Stack-Frame). Zehn gleiche Fehler ergeben einen Bug mit Zähler 10; nach einem behobenen Bug öffnet ein neues Ereignis ihn als Regression wieder. Ausschlussmuster (`production_ignore`) wirken vor der Gruppierung.
+- **Anzeige:** Die Einstellungen „Betrieb“ zeigen je Projekt letzten Scan, letzten Fehler, Lücke und Zahl erfasster Ereignisse. Aufbewahrung: `production_retention_days`.
+
+Worauf zu achten ist: Schlägt das Speichern einzelner Ereignisse teilweise fehl, bleibt der Scan-Zeitpunkt stehen; der nächste Scan zählt diese Zeilen dann doppelt (unverändertes Verhalten). Die Anzeige in den Einstellungen ist nur per `log-scan.spec.ts` getestet, nicht per E2E.
+
 ### Review-Container ohne echte Zugänge
 
 Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code aus Agent-Commits aus, inklusive `npm ci` mit Lifecycle-Skripten. Deshalb bekommt er nichts, was sich missbrauchen liesse:

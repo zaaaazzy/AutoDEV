@@ -1,9 +1,10 @@
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { Project, ProductionSnippets, ProductionStatus } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { DateTimePipe } from '../../shared/pipes.js';
+import { logScanSummary } from './log-scan.js';
 
 const TOKEN_PLACEHOLDER = '<TOKEN>';
 
@@ -25,6 +26,7 @@ export class ProductionSettingsComponent {
   protected form = { healthUrl: '', logServices: '', productionIgnore: '', productionRetentionDays: 30 };
   protected readonly status = signal<ProductionStatus | null>(null);
   protected readonly snippets = signal<ProductionSnippets | null>(null);
+  protected readonly logScan = computed(() => logScanSummary(this.status()));
   /** Frisch erzeugtes Token: nur bis zum Verlassen der Seite sichtbar. */
   protected readonly token = signal<string | null>(null);
   protected readonly copied = signal<string | null>(null);
