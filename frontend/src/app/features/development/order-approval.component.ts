@@ -50,10 +50,14 @@ import { ReviewStateService } from './review-state.service.js';
       }
       @if (!item.reviewApprovedAt) {
         <div class="actions">
-          <button class="button primary" type="button" [disabled]="busy()" (click)="approve(item)">✓ Freigeben</button>
-          <button class="button secondary" type="button" [disabled]="busy()" (click)="reject(item)">
-            ↩ Zurückweisen
-          </button>
+          @if (withActions()) {
+            <button class="button primary" type="button" [disabled]="busy()" (click)="approve(item)">
+              ✓ Freigeben
+            </button>
+            <button class="button secondary" type="button" [disabled]="busy()" (click)="reject(item)">
+              ↩ Zurückweisen
+            </button>
+          }
           @if (state()?.configured && (!shown() || shown()?.status === 'failed')) {
             <button class="button secondary" type="button" [disabled]="busy()" (click)="show(item)">
               {{ shown() ? '↻ Review-Container neu starten' : '👀 Im Review-Container anzeigen' }}
@@ -71,6 +75,8 @@ export class OrderApprovalComponent {
   protected readonly busy = this.store.busy;
 
   readonly order = input.required<DevelopmentItem>();
+  /** false: Freigeben/Zurückweisen stehen anderswo (Aktionszeile unter „Aktionen“). */
+  readonly withActions = input(true);
   protected readonly state = this.review.state;
   /** Review-Container, der diesen Auftrag zeigt (bzw. für ihn angefordert ist). */
   protected readonly shown = computed(

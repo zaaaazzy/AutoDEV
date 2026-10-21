@@ -25,6 +25,8 @@ export interface AttentionCard {
   next: string;
   /** Vorschlag des Assistenten (bei `suggestion`) bzw. die Aufgabe (bei `task`). */
   detail: string | null;
+  /** Agent, der die Meldung ausgelöst hat (z. B. „Tester“), falls bekannt. */
+  agent?: string | null;
 }
 
 type CardSource = Pick<
@@ -127,8 +129,14 @@ function ruleOf(failure: string | null | undefined): string {
   return clean(vermerk.replace(/^Projektregel\s*–\s*/, '').replace(/\s*–\s*Auftrag anpassen oder verwerfen\.?$/, ''));
 }
 
-/** Eine Karte unter „Aktionen“: ein Grund, ein nächster Schritt. */
+/** Eine Karte unter „Aktionen“: ein Grund, ein nächster Schritt, und welcher Agent die Meldung ausgelöst hat. */
 export function attentionCard(item: CardSource, manualChecks = 0): AttentionCard {
+  const card = buildCard(item, manualChecks);
+  const agent = item.status === 'blocked' && item.failure ? failureParts(item.failure).agent || null : null;
+  return { ...card, agent };
+}
+
+function buildCard(item: CardSource, manualChecks: number): AttentionCard {
   if (item.status === 'approval') {
     return { why: 'Fertig – wartet auf deine Freigabe.', step: 'approve', next: '', detail: null };
   }
@@ -224,4 +232,13 @@ export function attentionCard(item: CardSource, manualChecks = 0): AttentionCard
     next: 'Versuch es erneut – wenn du weisst, was fehlt, schreib es den Agents dazu.',
     detail: null,
   };
+}
+
+/** Hinweis für die Agents beim erneuten Versuch: Vorschlag der Analyse (falls umgesetzt werden soll) und Ergänzung. */
+export function retryComment(card: Pick<AttentionCard, 'step' | 'detail'>, note: string): string | null {
+  const parts = [
+    card.step === 'suggestion' && card.detail ? `Bitte so umsetzen (Vorschlag der Analyse): ${card.detail}` : '',
+    note.trim() ? `Ergänzung: ${note.trim()}` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join('\n') : null;
 }

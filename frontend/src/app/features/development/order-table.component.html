@@ -32,23 +32,29 @@
     @if (extraActions(); as extra) {
       <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: item }" />
     }
-    <button
-      type="button"
-      class="button secondary icon-button"
-      (click)="editOrder(item.id)"
-      [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
-      title="Bearbeiten"
-    >
-      ✎
-    </button>
+    @if (editable()) {
+      <button
+        type="button"
+        class="button secondary icon-button"
+        (click)="editOrder(item.id)"
+        [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
+        title="Bearbeiten"
+      >
+        ✎
+      </button>
+    }
   </ng-template>
   <ng-template appDataDetail let-item>
-    <app-order-detail
-      [order]="item"
-      [editing]="orderEditing() === item.id"
-      [agentsOpen]="agentsOpen()"
-      (editCancelled)="orderEditing.set(null)"
-      (saved)="saveOrder(item, $event)"
-    />
+    @if (customDetail(); as custom) {
+      <ng-container *ngTemplateOutlet="custom.template; context: { $implicit: item }" />
+    } @else {
+      <app-order-detail
+        [order]="item"
+        [editing]="orderEditing() === item.id"
+        [agentsOpen]="agentsOpen()"
+        (editCancelled)="orderEditing.set(null)"
+        (saved)="saveOrder(item, $event)"
+      />
+    }
   </ng-template>
 </app-data-table>

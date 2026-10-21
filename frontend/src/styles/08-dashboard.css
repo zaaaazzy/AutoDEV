@@ -922,28 +922,6 @@ app-order-table {
   min-height: 44px;
   resize: vertical;
 }
-.attention-more {
-  position: relative;
-}
-.attention-more-menu {
-  position: absolute;
-  z-index: 5;
-  display: grid;
-  gap: 6px;
-  min-width: 200px;
-  margin-top: 6px;
-  padding: 8px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
-}
-@media (max-width: 600px) {
-  .attention-more-menu {
-    right: 0;
-  }
-}
-
 /* Live-Anzeige eines laufenden Testlaufs (Testläufe, Test-Gate der Sprint-Sicherung). */
 .test-live {
   border-color: #b9d6c7;
@@ -1011,4 +989,39 @@ app-order-table {
   color: #e7ede9;
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+/* „Aktionen“ als Auftragstabelle wie unter „Aufträge“; aufgeklappt Warum, Lösungsvorschlag, Ergänzung, Aktionen
+   und – erst über „Details“ – die Auftragsdetails. */
+.attention-body {
+  display: grid;
+  gap: 12px;
+  padding: 4px 4px 8px;
+}
+.attention-section h3,
+.attention-detail > h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.attention-section p {
+  margin: 0;
+}
+.attention-solution .attention-suggestion {
+  padding: 8px 12px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 8px;
+  background: #fdf6ec;
+}
+.attention-solution .small {
+  margin-top: 4px;
+}
+.attention-details-toggle[aria-expanded='true'] {
+  border-color: #2f6f4f;
+}
+.attention-tech {
+  margin-top: 10px;
 }

@@ -39,6 +39,12 @@ export class OrderActionsDirective {
   readonly template = inject<TemplateRef<{ $implicit: DevelopmentItem }>>(TemplateRef);
 }
 
+/** Eigener Inhalt der aufgeklappten Zeile statt der Auftragsdetails: `<ng-template appOrderDetail let-item>`. */
+@Directive({ selector: 'ng-template[appOrderDetail]', standalone: true })
+export class OrderDetailSlotDirective {
+  readonly template = inject<TemplateRef<{ $implicit: DevelopmentItem }>>(TemplateRef);
+}
+
 /**
  * Auftragsliste mit aufklappbarer Detail- und Agent-Ansicht. Dieselbe Komponente nutzen die Auftragsseite
  * und die Agents-Seite („Letzte Aufträge“) – eine Änderung gilt überall.
@@ -64,7 +70,7 @@ export class OrderTableComponent {
   private readonly orders = inject(OrderService);
   private readonly store = inject(ProjectStore);
   /** Filter aus einem Dashboard-Link (z. B. Status „Blockiert“). */
-  protected readonly linkFilters = computed(() => this.store.filtersFor('development'));
+  protected readonly linkFilters = computed(() => (this.linkFiltered() ? this.store.filtersFor('development') : {}));
 
   readonly items = input.required<DevelopmentItem[]>();
   readonly emptyText = input('Keine Aufträge.');
@@ -81,7 +87,12 @@ export class OrderTableComponent {
   /** Mehrfachauswahl wie in der Datentabelle; ohne Funktion keine Häkchen. */
   readonly selectable = input<((item: DevelopmentItem) => boolean) | null>(null);
   readonly selection = model<ReadonlySet<string>>(new Set());
+  /** false: kein Bearbeiten-Stift in der Zeile (z. B. unter „Aktionen“). */
+  readonly editable = input(true);
+  /** Filter aus Dashboard-Links (#development?status=…) anwenden; unter „Aktionen“ aus. */
+  readonly linkFiltered = input(true);
   protected readonly extraActions = contentChild(OrderActionsDirective);
+  protected readonly customDetail = contentChild(OrderDetailSlotDirective);
 
   protected readonly openOrder = signal<string | null>(null);
 
