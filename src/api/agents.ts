@@ -50,6 +50,29 @@ const AGENT_FIELDS = {
   handoffTo: { column: 'handoff_to', parse: parseNullableUuid },
 };
 
+/** Felder, die nur Administration setzen darf: command läuft als Prozess auf dem Worker, role steuert den Ablauf. */
+const ADMIN_COLUMNS = new Set(['command', 'role']);
+const ADMIN_ONLY = 'Befehl (command) und Rolle eines Agents darf nur die Administration ändern.';
+
+/**
+ * Gemeinsame Schreibprüfung für command und role (POST und PATCH). Ohne Admin-Rolle (auch ohne Benutzer) ist nur
+ * erlaubt, was exakt dem Bestand entspricht (beim Anlegen: kein Befehl, Rolle „custom“). Gibt die Felder ohne die
+ * unveränderten Admin-Felder zurück, damit nichts geschrieben wird, oder null = verboten (403).
+ */
+export function adminFieldsCheck(
+  principal: Principal | undefined,
+  fields: { column: string; value: unknown }[],
+  current: { command: unknown; role: unknown },
+): { column: string; value: unknown }[] | null {
+  if (principal && hasRole(principal, 'admin')) return fields;
+  const stored: Record<string, unknown> = current;
+  const changed = fields.some(
+    (field) =>
+      ADMIN_COLUMNS.has(field.column) && JSON.stringify(field.value) !== JSON.stringify(stored[field.column] ?? null),
+  );
+  return changed ? null : fields.filter((field) => !ADMIN_COLUMNS.has(field.column));
+}
+
 /** Erlaubte Ordner für Dateirechte: relativ zum Projekt, ohne „..“, höchstens 20; leer = ganzes Projekt. */
 function parseFileScope(value: unknown): string[] | typeof INVALID {
   const raw: unknown = typeof value === 'string' ? value.split(/[\n,]/) : value;
@@ -157,6 +180,7 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
 }
 
 export function registerAgentRoutes(app: Router, pool: Pool): void {
+  const principalOf = (response: Response) => response.locals.principal as Principal | undefined;
   app.get('/system-agents', access({ tenant: 'global' }), async (_request, response) => {
     const row = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'system_agents'`))
       .rows[0];
@@ -238,6 +262,9 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     if (!slug || !fields || !values.get('name') || !values.get('phase')) {
       response.status(400).json({ message: 'Invalid agent.' });
       return;
+    }
+    if (!adminFieldsCheck(principalOf(response), fields, { command: null, role: 'custom' })) {
+      return void response.status(403).json({ message: ADMIN_ONLY });
     }
     // Rechte: jeder Befehl wird einzeln gesetzt, nur aus Kategorien dieses Projekts (Mandantentrennung).
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
@@ -342,17 +369,29 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Invalid agent update.' });
       return;
     }
-    if (requested !== undefined) {
-      const project = (
-        await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM agents WHERE id = $1', [request.params.id])
-      ).rows[0]?.slug;
-      if (!project) return void response.status(404).json({ message: 'Agent not found.' });
-      const commands = await validAgentCommands(pool, project, requested);
-      if (typeof commands === 'string') return void response.status(400).json({ message: commands });
-      fields.push({ column: 'allowed_commands', value: commands });
+    let allowed = fields;
+    if (requested !== undefined || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
+      const current = (
+        await pool.query<{ slug: string; command: string[] | null; role: string }>(
+          'SELECT project_slug AS slug, command, role FROM agents WHERE id = $1',
+          [request.params.id],
+        )
+      ).rows[0];
+      if (!current) return void response.status(404).json({ message: 'Agent not found.' });
+      const checked = adminFieldsCheck(principalOf(response), fields, current);
+      if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
+      allowed = checked;
+      if (requested !== undefined) {
+        const commands = await validAgentCommands(pool, current.slug, requested);
+        if (typeof commands === 'string') return void response.status(400).json({ message: commands });
+        allowed.push({ column: 'allowed_commands', value: commands });
+      }
     }
-    const update = buildUpdate('agents', request.params.id, fields, AGENT_COLUMNS);
-    const result = await pool.query(update.sql, update.values);
+    // Nur unveränderte command/role-Felder eines Nicht-Admins: nichts zu schreiben, aktueller Stand zurück.
+    const update = buildUpdate('agents', request.params.id, allowed, AGENT_COLUMNS);
+    const result = allowed.length
+      ? await pool.query(update.sql, update.values)
+      : await pool.query(`SELECT ${AGENT_COLUMNS} FROM agents WHERE id = $1`, [request.params.id]);
     if (!result.rows[0]) {
       response.status(404).json({ message: 'Agent not found.' });
       return;
