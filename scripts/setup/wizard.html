@@ -348,7 +348,7 @@
       const STEPS = [
         { id: 'system', label: 'System', title: 'Ist alles bereit?' },
         { id: 'access', label: 'Zugang', title: 'Wie meldest du dich an?' },
-        { id: 'options', label: 'Optionen', title: 'Zugriff und Worker' },
+        { id: 'options', label: 'Optionen', title: 'Zugriff, Worker und Beispieldaten' },
         { id: 'install', label: 'Installation', title: 'AIdeation wird eingerichtet' },
       ];
       const state = {
@@ -359,6 +359,7 @@
         domain: '',
         projectRoots: '',
         installWorker: true,
+        demoData: false,
         done: false,
       };
       const $ = (id) => document.getElementById(id);
@@ -439,10 +440,13 @@
           <label>Projektbereich – nur hier legt AIdeation Projekte an und arbeiten Agents
             <input type="text" id="roots" value="${escape(state.projectRoots)}" placeholder="z. B. /Users/du/Projekte" />
           </label>
-          <label class="check"><input type="checkbox" id="worker" ${state.installWorker ? 'checked' : ''} /> Worker automatisch beim Anmelden starten (empfohlen)</label>`;
+          <label class="check"><input type="checkbox" id="worker" ${state.installWorker ? 'checked' : ''} /> Worker automatisch beim Anmelden starten (empfohlen)</label>
+          <label class="check"><input type="checkbox" id="demo" ${state.demoData ? 'checked' : ''} /> Mit Beispielprojekt „Velowerk“ starten</label>
+          <p class="hint">Eine Velo-Werkstatt mit einem Jahr Geschichte: 25 Sprints, rund 240 Aufträge, Bugs, Ideen, Agent-Läufe, Kosten und Testberichte. Zum Ausprobieren – der laufende Sprint ist pausiert, Agents starten erst, wenn du ihn fortsetzt. Das Projekt lässt sich später unter Projekt löschen.</p>`;
         $('domain').oninput = () => (state.domain = $('domain').value.trim());
         $('roots').oninput = () => (state.projectRoots = $('roots').value.trim());
         $('worker').onchange = () => (state.installWorker = $('worker').checked);
+        $('demo').onchange = () => (state.demoData = $('demo').checked);
         $('next').disabled = false;
         $('next').textContent = 'Installieren →';
       }
@@ -452,6 +456,7 @@
           env: 'Konfiguration schreiben',
           docker: 'Container bauen und starten',
           health: 'AIdeation antwortet',
+          demo: 'Beispieldaten',
           worker: 'Worker einrichten',
         };
         const status = {};
@@ -494,6 +499,7 @@
             domain: state.domain,
             projectRoots: state.projectRoots,
             installWorker: state.installWorker,
+            demoData: state.demoData,
           }),
         });
         if (!response.ok) {

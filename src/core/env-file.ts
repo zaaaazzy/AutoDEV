@@ -16,6 +16,8 @@ export interface EnvInput {
 
 export interface InstallInput extends EnvInput {
   installWorker: boolean;
+  /** Beispielprojekt „Velowerk“ (ein Jahr Entwicklung in 25 Sprints) zum Ausprobieren anlegen. */
+  demoData?: boolean;
 }
 
 export interface EnvPlan {
@@ -91,7 +93,7 @@ export function mergeEnv(text: string, updates: Map<string, string>): string {
 /** Prüft die Formulareingaben auf Typ und Inhalt; liefert eine lesbare Meldung oder null. */
 export function validateInstall(body: unknown): string | null {
   if (!body || typeof body !== 'object') return 'Ungültige Anfrage.';
-  const { username, password, domain, projectRoots, installWorker } = body as Record<string, unknown>;
+  const { username, password, domain, projectRoots, installWorker, demoData } = body as Record<string, unknown>;
   if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,40}$/.test(username))
     return 'Benutzername: 3–40 Zeichen (Buchstaben, Ziffern, . _ -).';
   if (typeof password !== 'string' || password.length < 16) return 'Das Passwort braucht mindestens 16 Zeichen.';
@@ -107,6 +109,7 @@ export function validateInstall(body: unknown): string | null {
   if (projectRoots && projectRoots.length > 4000) return 'Der Projektbereich ist zu lang.';
   if (installWorker !== undefined && typeof installWorker !== 'boolean')
     return 'Die Worker-Auswahl muss ja oder nein sein.';
+  if (demoData !== undefined && typeof demoData !== 'boolean') return 'Die Beispieldaten-Wahl muss ja oder nein sein.';
   return null;
 }
 

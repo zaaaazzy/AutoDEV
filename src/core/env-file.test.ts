@@ -94,6 +94,8 @@ test('install input is checked for type and line breaks', () => {
   assert.match(validateInstall({ ...valid, password: 'x'.repeat(15) })!, /16 Zeichen/);
   assert.match(validateInstall({ ...valid, domain: 'kein domain' })!, /Domain/);
   assert.match(validateInstall({ ...valid, installWorker: 'ja' })!, /Worker/);
+  assert.equal(validateInstall({ ...valid, demoData: true }), null);
+  assert.match(validateInstall({ ...valid, demoData: 'ja' })!, /Beispieldaten/);
   assert.match(validateInstall(null)!, /Ungültig/);
 });
 
