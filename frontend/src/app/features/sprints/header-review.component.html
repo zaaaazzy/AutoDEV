@@ -1,0 +1,107 @@
+<div class="review-picker">
+  <button
+    class="review-trigger"
+    type="button"
+    [class.open]="open()"
+    [disabled]="!commits().length"
+    aria-haspopup="listbox"
+    [attr.aria-expanded]="open()"
+    [attr.aria-label]="chosen() ? 'Stand für die Vorschau: ' + chosen()!.title : 'Noch keine Stände für die Vorschau'"
+    (click)="toggle()"
+  >
+    <svg class="review-trigger-icon" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="4" cy="3.5" r="1.6" />
+      <circle cx="4" cy="12.5" r="1.6" />
+      <circle cx="12" cy="6" r="1.6" />
+      <path d="M4 5.1v5.8M12 7.6c0 2.4-3.2 2.2-6.6 3.6" />
+    </svg>
+    @if (chosen(); as commit) {
+      <span class="review-trigger-text">
+        <strong>{{ commit.title }}</strong>
+        <small>{{ commit.sprintName }} · {{ commit.hash.slice(0, 7) }} · {{ date(commit) }}</small>
+      </span>
+    } @else {
+      <span class="review-trigger-text">
+        <strong>{{
+          loadError() ? 'Stände nicht erreichbar' : loaded() ? 'Noch keine Stände' : 'Stände werden geladen …'
+        }}</strong>
+        <small>Vorschau</small>
+      </span>
+    }
+    <svg class="switcher-chevron" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" /></svg>
+  </button>
+
+  @if (open()) {
+    <div class="review-menu" role="listbox" aria-label="Stände für die Vorschau" tabindex="-1" (keydown)="move($event)">
+      @for (group of groups(); track group.sprintId) {
+        <p class="review-menu-group">{{ group.sprintName }}</p>
+        @for (commit of group.commits; track commit.hash) {
+          <button
+            class="review-option"
+            type="button"
+            role="option"
+            [attr.aria-selected]="commit.hash === chosen()?.hash"
+            [class.running]="commit.hash === runningHash()"
+            (click)="choose(commit)"
+          >
+            <span class="review-option-title">{{ commit.title }}</span>
+            <span class="review-option-meta">
+              <span class="review-badge" [class]="'review-badge ' + badge(commit).tone">{{ badge(commit).text }}</span>
+              <code>{{ commit.hash.slice(0, 7) }}</code>
+              <span>{{ date(commit) }}</span>
+              @if (commit.hash === runningHash()) {
+                <span class="review-option-live">● läuft</span>
+              }
+            </span>
+          </button>
+        }
+      }
+    </div>
+  }
+</div>
+
+<button
+  class="review-play"
+  type="button"
+  [disabled]="!chosen() || starting() || !auth.can('run')"
+  [attr.title]="auth.can('run') ? 'Stand im Review-Container starten' : 'Starten braucht das Recht „Ausführen“'"
+  aria-label="Stand im Review-Container starten"
+  (click)="start()"
+>
+  @if (starting()) {
+    <span class="review-spinner" aria-hidden="true"></span>
+  } @else {
+    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2v9.6L12.6 8z" /></svg>
+  }
+</button>
+
+@if (slot(); as slot) {
+  <div class="review-live" [class]="'review-live ' + slot.status" role="status">
+    @if (slot.status === 'running') {
+      <span class="review-live-dot" aria-hidden="true"></span>
+      <a
+        class="review-live-link"
+        [href]="slot.url"
+        target="_blank"
+        rel="noopener"
+        [attr.title]="'Review ' + slot.slot + ': ' + slotTitle(slot)"
+        >{{ linkText(slot) }} ↗</a
+      >
+    } @else {
+      <span class="review-live-text" [attr.title]="statusText(slot)">{{ statusText(slot) }}</span>
+    }
+    @if (slot.status !== 'stopping' && auth.can('run')) {
+      <button
+        class="review-stop"
+        type="button"
+        title="Review-Container beenden"
+        [attr.aria-label]="'Review ' + slot.slot + ' beenden'"
+        (click)="stop(slot)"
+      >
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" /></svg>
+      </button>
+    }
+  </div>
+} @else if (launch.error()) {
+  <span class="review-live failed" role="alert" [attr.title]="launch.error()">{{ launch.error() }}</span>
+}

@@ -1,0 +1,311 @@
+/* ── Kopfzeile: Stand wählen, im Review-Container starten, Link und Stopp ───────────────────────────── */
+.header-review {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.review-picker {
+  position: relative;
+  min-width: 0;
+}
+.review-trigger {
+  display: inline-flex;
+  width: 300px;
+  max-width: 34vw;
+  height: 40px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgb(32 40 36 / 5%);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.review-trigger:hover:not(:disabled),
+.review-trigger.open {
+  border-color: #a9c2b1;
+  box-shadow: 0 6px 18px rgb(32 40 36 / 10%);
+}
+.review-trigger:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.review-trigger.open .switcher-chevron {
+  transform: rotate(180deg);
+}
+.review-trigger-icon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+}
+.review-trigger-text {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  line-height: 1.15;
+  text-align: left;
+}
+.review-trigger-text strong,
+.review-trigger-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-trigger-text strong {
+  font-size: 13px;
+}
+.review-trigger-text small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.review-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  gap: 2px;
+  width: 400px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 20px 50px rgb(32 40 36 / 18%);
+  animation: review-menu-in 0.16s ease-out;
+}
+@keyframes review-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.review-menu-group {
+  margin: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.review-menu-group:first-child {
+  margin-top: 2px;
+}
+.review-option {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.review-option:hover,
+.review-option:focus-visible {
+  outline: none;
+  background: #f3f6f2;
+}
+.review-option[aria-selected='true'] {
+  border-color: #cfe0d4;
+  background: #eef5f0;
+}
+.review-option-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.review-option-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.review-option-meta code {
+  font-size: 11px;
+}
+.review-option-live {
+  color: var(--green);
+  font-weight: 700;
+}
+.review-badge {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.review-badge.merged {
+  background: #e6f2ea;
+  color: var(--green);
+}
+.review-badge.approval {
+  background: #fbeee2;
+  color: #9a5527;
+}
+.review-badge.branch {
+  background: #eef0ec;
+  color: #5b665e;
+}
+.review-play,
+.review-stop {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+.review-play {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--green);
+  color: #fff;
+  box-shadow: 0 1px 2px rgb(32 40 36 / 12%);
+  transition:
+    background 0.15s,
+    transform 0.1s;
+}
+.review-play:hover:not(:disabled) {
+  background: #1c5240;
+}
+.review-play:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.review-play:disabled {
+  background: #a9c2b1;
+  cursor: default;
+}
+.review-play svg {
+  width: 16px;
+  height: 16px;
+  fill: currentcolor;
+}
+.review-play .review-spinner {
+  margin: 0;
+}
+.review-live {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 260px;
+  height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+}
+.review-live.running {
+  border-color: #cfe0d4;
+  background: #f1f8f3;
+}
+.review-live.failed {
+  border-color: #efc9c0;
+  background: #fff4f1;
+  color: #9d3b2a;
+}
+.review-live > span.review-live-text,
+.review-live.failed:not(:has(.review-stop)) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+span.review-live.failed {
+  padding-right: 10px;
+}
+.review-live-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f9e6c;
+  box-shadow: 0 0 0 3px rgb(47 158 108 / 18%);
+  animation: review-live-pulse 2s ease-in-out infinite;
+}
+@keyframes review-live-pulse {
+  50% {
+    box-shadow: 0 0 0 5px rgb(47 158 108 / 6%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .review-live-dot,
+  .review-menu {
+    animation: none;
+  }
+}
+.review-live-link {
+  overflow: hidden;
+  color: var(--green);
+  font-weight: 700;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-live-link:hover {
+  text-decoration: underline;
+}
+.review-stop {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #f4e4df;
+  color: #9d3b2a;
+}
+.review-stop:hover {
+  background: #ecd0c7;
+}
+.review-stop svg {
+  width: 12px;
+  height: 12px;
+  fill: currentcolor;
+}
+/* Schmale Desktop-Fenster: Beschriftung kürzen, damit Agents und Sprint in der Zeile bleiben. */
+@media (max-width: 1280px) {
+  .review-trigger {
+    width: 220px;
+  }
+  .review-live {
+    max-width: 180px;
+  }
+}
+@media (max-width: 1120px) {
+  .review-trigger {
+    width: 170px;
+  }
+  .review-trigger-text small {
+    display: none;
+  }
+  .topbar:has(> .header-review) .breadcrumb {
+    display: none;
+  }
+}
+/* Desktop-Raster der Kopfzeile (09-docs-header.css): Projektwahl und Stand-Auswahl teilen sich die Mitte. */
+@media (min-width: 721px) {
+  /* Rechte Spalte nie schmaler als Agents, Sprint und Hilfe: bei wenig Platz schrumpft zuerst der Pfad links. */
+  .topbar:has(> .header-review) {
+    grid-template-columns: minmax(0, 1fr) auto auto minmax(max-content, 1fr);
+  }
+  .topbar > .header-review {
+    margin-left: -8px;
+  }
+}
