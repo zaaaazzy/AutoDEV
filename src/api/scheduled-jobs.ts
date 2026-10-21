@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isRecord } from '../core/validation.js';
 import { JOB_KINDS } from '../runner/scheduler.js';
 import { hasRole, type Principal } from './roles.js';
@@ -60,11 +61,11 @@ export function parseJobUpdate(body: unknown): JobUpdate | string {
 }
 
 export function registerScheduledJobRoutes(app: Router, pool: Pool): void {
-  /** Serverseitige Rollenprüfung, unabhängig von authorize (das GET-Anfragen nicht prüft). */
+  /** Zusätzliche Rollenprüfung in der Route (Lesen prüft der Rollenwächter nicht, nur den Mandanten). */
   const admin = (locals: Record<string, unknown>): boolean =>
     hasRole(locals.principal as Principal | undefined, 'admin');
 
-  app.get('/scheduled-jobs', async (_request, response, next) => {
+  app.get('/scheduled-jobs', access({ tenant: 'admin' }), async (_request, response, next) => {
     try {
       if (!admin(response.locals)) return void response.status(403).json({ message: 'Nur für Administratoren.' });
       const jobs = (await pool.query(`SELECT ${JOB_SELECT} FROM scheduled_jobs ORDER BY key`)).rows;
@@ -74,7 +75,7 @@ export function registerScheduledJobRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.patch('/scheduled-jobs/:key', async (request, response, next) => {
+  app.patch('/scheduled-jobs/:key', access({ role: 'admin', tenant: 'admin' }), async (request, response, next) => {
     try {
       if (!admin(response.locals)) return void response.status(403).json({ message: 'Nur für Administratoren.' });
       const key = request.params.key ?? '';

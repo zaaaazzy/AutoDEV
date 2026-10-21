@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { ensureDefaultAgents } from './agents.js';
 import { DEFAULT_PERMISSION_GROUPS, PERMISSION_GROUPS } from '../agent/tool-permissions.js';
 import {
@@ -40,7 +41,7 @@ function validGroups(value: unknown): string[] | null {
 
 /** Einrichtungsassistent: Vorlagen, Rechte-Gruppen, Host-Jobs (vom Worker ausgeführt) und Projekt anlegen. */
 export function registerSetupRoutes(app: Router, pool: Pool): void {
-  app.get('/setup/templates', (_request, response) => {
+  app.get('/setup/templates', access({ tenant: 'global' }), (_request, response) => {
     response.json({
       groups: TEMPLATE_GROUP_LABELS,
       templates: TEMPLATES.map(({ id, label, description, group, stack }) => ({
@@ -54,11 +55,11 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
   });
 
   // Projektbereich, damit der Assistent den Ordner vorschlagen und ausserhalb liegende Pfade erklären kann.
-  app.get('/setup/scope', (_request, response) => {
+  app.get('/setup/scope', access({ tenant: 'global' }), (_request, response) => {
     response.json({ roots: projectRoots() });
   });
 
-  app.get('/setup/permissions', (_request, response) => {
+  app.get('/setup/permissions', access({ tenant: 'global' }), (_request, response) => {
     response.json({
       // „Dateien“ ist eine Agent-Gruppe (immer verfügbar) und gehört nicht zur Projektfreigabe.
       groups: PERMISSION_GROUPS.filter((group) => group.id !== 'files').map(({ id, label, description }) => ({
@@ -70,7 +71,7 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
     });
   });
 
-  app.post('/setup/jobs', async (request, response, next) => {
+  app.post('/setup/jobs', access({ role: 'admin', tenant: 'admin' }), async (request, response, next) => {
     try {
       const body = isRecord(request.body) ? request.body : {};
       const kind = typeof body.kind === 'string' ? body.kind : '';
@@ -90,7 +91,7 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.get('/setup/jobs/:id', async (request, response, next) => {
+  app.get('/setup/jobs/:id', access({ tenant: 'admin' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
       const job = (
@@ -103,7 +104,7 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/projects/setup', async (request, response, next) => {
+  app.post('/projects/setup', access({ role: 'admin', tenant: 'admin' }), async (request, response, next) => {
     try {
       const body = isRecord(request.body) ? request.body : {};
       const slug = normalizeProjectSlug(typeof body.slug === 'string' ? body.slug : '');
@@ -145,17 +146,21 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.put('/projects/:slug/permissions', async (request, response, next) => {
-    try {
-      const slug =
-        typeof request.params.slug === 'string' && PROJECT_SLUG.test(request.params.slug) ? request.params.slug : '';
-      const groups = validGroups(isRecord(request.body) ? request.body.groups : null);
-      if (!slug || !groups) return void response.status(400).json({ message: 'Ungültige Rechte.' });
-      const result = await pool.query('UPDATE projects SET agent_permissions = $2 WHERE slug = $1', [slug, groups]);
-      if (!result.rowCount) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      response.json({ groups });
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.put(
+    '/projects/:slug/permissions',
+    access({ role: 'admin', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug =
+          typeof request.params.slug === 'string' && PROJECT_SLUG.test(request.params.slug) ? request.params.slug : '';
+        const groups = validGroups(isRecord(request.body) ? request.body.groups : null);
+        if (!slug || !groups) return void response.status(400).json({ message: 'Ungültige Rechte.' });
+        const result = await pool.query('UPDATE projects SET agent_permissions = $2 WHERE slug = $1', [slug, groups]);
+        if (!result.rowCount) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        response.json({ groups });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 }

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
 import { scheduleRoutines } from '../agent/routine.js';
-import { beginShutdown, killOrphan } from '../core/shutdown.js';
+import { beginShutdown, setProcessStore } from '../core/shutdown.js';
+import { databaseProcessStore, killPreviousProcesses } from './process-registry.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
@@ -78,7 +79,7 @@ async function connect(watch: boolean): Promise<Pool> {
 const loggedErrors = new Map<string, string>();
 
 /** pg liefert bei ausgefallener Datenbank AggregateErrors ohne Text; der Code (z. B. ECONNREFUSED) ist dann die einzige Information. */
-function describeError(error: unknown): string {
+export function describeError(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const code = (error as { code?: string }).code;
   return error.message || code || error.name;
@@ -99,7 +100,7 @@ async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
   return results.some(({ result }) => result === 'failed');
 }
 
-interface Target {
+export interface Target {
   options: RunnerOptions;
   problem: string | null;
   /** Projektordner laut Projekt (für die Ausfall-Überwachung). */
@@ -109,7 +110,7 @@ interface Target {
 }
 
 /** With --all every registered project is served from its own project folder (projects.repository). */
-async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Target[]> {
+export async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Target[]> {
   if (!options.all) {
     return [{ options, problem: null, repository: options.cwd, transient: false }];
   }
@@ -173,28 +174,28 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
-async function recoverInterruptedRuns(pool: Pool): Promise<void> {
+export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
   await recoverTestRequests(pool).catch(logged('runner-cli'));
   // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
   await pool
     .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
     .catch(logged('runner-cli'));
-  const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
-    `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`,
-  );
-  for (const orphan of orphans.rows) {
-    if (killOrphan(orphan.pid, orphan.spawnedAt)) console.info(`Verwaisten Agent-Prozess ${orphan.pid} beendet.`);
-  }
-  const requeued = await pool.query(
-    `UPDATE development_items SET status = 'planned', updated_at = NOW()
-      WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`,
-  );
+  // Erst alle Altprozesse beenden (Agent-Schritte, Chat, Autor, Visionär, Testanforderungen), dann neu einplanen.
+  // Lebt einer womöglich noch, liefe die Anfrage sonst doppelt: dann nichts automatisch neu starten.
+  const orphans = await killPreviousProcesses(pool);
+  const safe = orphans.failed === 0;
+  const requeued = safe
+    ? await pool.query(
+        `UPDATE development_items SET status = 'planned', updated_at = NOW()
+          WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`,
+      )
+    : { rowCount: 0 };
   // Aufträge „In Arbeit“ ohne laufenden Lauf hängen (auch nach einem erfolgreichen Lauf ohne Abschluss): blockieren,
   // damit sie erneut gestartet werden können.
   await recoverStuckItems(pool, null);
   await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
-  await pool.query(`UPDATE chat_messages SET status = 'pending' WHERE status = 'processing'`);
+  await pool.query(`UPDATE chat_messages SET status = $1 WHERE status = 'processing'`, [safe ? 'pending' : 'failed']);
   await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
   await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
   await pool
@@ -240,6 +241,9 @@ async function main(): Promise<void> {
       return;
     }
     await recoverInterruptedRuns(pool);
+    // Erst nach dem Aufräumen: ab jetzt landet jeder gestartete Prozess im Register (nur der Dauer-Worker, damit ein
+    // einmaliger Lauf nicht beim nächsten Start als Altprozess gilt).
+    setProcessStore(databaseProcessStore(pool));
     // Ein angeforderter Neustart („AIdeation neu starten“) ist mit diesem Start abgeschlossen.
     await completeRestart(pool).catch((error: unknown) =>
       console.error('Neustart-Status konnte nicht gesetzt werden:', describeError(error)),

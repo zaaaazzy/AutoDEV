@@ -4,5 +4,8 @@
 FROM node:22.22.3-bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+# Ohne root: /work und der npm-Cache (Volume aideation_review_npm_node) gehören dem Benutzer node.
+RUN mkdir -p /work /home/node/.npm && chown node:node /work /home/node/.npm
 COPY entrypoint.sh /usr/local/bin/review-entrypoint
+USER node
 ENTRYPOINT ["sh", "/usr/local/bin/review-entrypoint"]

@@ -1,6 +1,7 @@
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { ANSWERED } from './chat-routes.js';
 import type { Router } from 'express';
+import { access } from './access.js';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
@@ -40,7 +41,7 @@ export const ASSISTANT_AGENT_ID = 'assistant';
 export const VISIONARY_AGENT_ID = 'visionary';
 
 export function registerWorkerRoutes(app: Router, pool: Pool): void {
-  app.get('/settings', async (_request, response, next) => {
+  app.get('/settings', access({ tenant: 'global' }), async (_request, response, next) => {
     try {
       response.json({ maxConcurrentAgents: await readMaxAgents(pool), limit: MAX_AGENTS_LIMIT });
     } catch (error) {
@@ -48,7 +49,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.put('/settings', async (request, response, next) => {
+  app.put('/settings', access({ role: 'admin', tenant: 'admin' }), async (request, response, next) => {
     try {
       const value = Number((request.body as { maxConcurrentAgents?: unknown } | undefined)?.maxConcurrentAgents);
       if (!Number.isInteger(value) || value < 1 || value > MAX_AGENTS_LIMIT) {
@@ -66,7 +67,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.get('/agent-status', async (_request, response, next) => {
+  app.get('/agent-status', access({ tenant: 'global' }), async (_request, response, next) => {
     try {
       const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
       const visible = allowed ? [...allowed] : null;
@@ -95,7 +96,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.get('/projects/:slug/agents/:id/activity', async (request, response, next) => {
+  app.get('/projects/:slug/agents/:id/activity', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug);
       const id = String(request.params.id);
@@ -138,31 +139,35 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/projects/:slug/agents/:id/cancel', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug);
-      if (!slug) {
-        response.status(400).json({ message: 'Ungültiges Projekt.' });
-        return;
-      }
-      const result = await pool.query(
-        `UPDATE agent_run_steps st SET cancel_requested = TRUE
+  app.post(
+    '/projects/:slug/agents/:id/cancel',
+    access({ role: 'run', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug);
+        if (!slug) {
+          response.status(400).json({ message: 'Ungültiges Projekt.' });
+          return;
+        }
+        const result = await pool.query(
+          `UPDATE agent_run_steps st SET cancel_requested = TRUE
            FROM agent_runs r, agents a
           WHERE r.id = st.run_id AND a.id = st.agent_id AND a.project_slug = $1 AND a.id::text = $2
             AND st.status = 'running' AND r.status = 'running'`,
-        [slug, request.params.id],
-      );
-      if (!result.rowCount) {
-        response.status(404).json({ message: 'Dieser Agent läuft gerade nicht.' });
-        return;
+          [slug, request.params.id],
+        );
+        if (!result.rowCount) {
+          response.status(404).json({ message: 'Dieser Agent läuft gerade nicht.' });
+          return;
+        }
+        response.status(202).json({ cancelling: true });
+      } catch (error) {
+        next(error);
       }
-      response.status(202).json({ cancelling: true });
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
-  app.get('/projects/:slug/worker', async (request, response, next) => {
+  app.get('/projects/:slug/worker', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug);
       if (!slug) {
@@ -245,6 +250,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
       agents.push({
         id: ASSISTANT_AGENT_ID,
         name: 'Dashboard-Assistent',
+        role: ASSISTANT_AGENT_ID,
         phase: 'system',
         sprintName: null,
         orderTitle: chat
@@ -265,6 +271,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
       agents.push({
         id: VISIONARY_AGENT_ID,
         name: 'Visionär',
+        role: VISIONARY_AGENT_ID,
         phase: 'system',
         sprintName: null,
         orderTitle: visionary

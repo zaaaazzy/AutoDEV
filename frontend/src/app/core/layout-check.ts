@@ -4,6 +4,7 @@
  * Die Messung teilt sich die Oberfläche mit der visuellen Prüfung des Workers (src/core/layout-measure.ts).
  */
 import { layoutLines, measureLayout } from '../../../../src/core/layout-measure.js';
+import { visibleInterval } from './visible-interval.js';
 
 export function startLayoutCheck(): void {
   if (!/[?&]layoutcheck\b/.test(globalThis.location.search)) return;
@@ -17,6 +18,7 @@ export function startLayoutCheck(): void {
   const update = (): void => {
     box.textContent = layoutLines(measureLayout()).join('\n');
   };
-  globalThis.setInterval(update, 1500);
+  // Diagnose läuft bis zum Schließen der Seite; verborgen wird nicht gemessen.
+  visibleInterval(update, 1500);
   update();
 }

@@ -1,12 +1,15 @@
-import { Component, inject } from '@angular/core';
+import { Component, computed, inject, input } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { RoleIconComponent } from '../../shared/role-icon.component.js';
+import { agentRights, agentRole, agentRoleLabel, rightsTexts } from './agent-options.js';
 
 /** Laufende und inaktive Agents des Projekts (Kopfzeile und Dashboard). */
 @Component({
   selector: 'app-agent-list',
   standalone: true,
+  imports: [RoleIconComponent],
   templateUrl: './agent-list.component.html',
   host: { style: 'display: contents' },
 })
@@ -15,6 +18,27 @@ export class AgentListComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly activity = inject(AgentActivityService);
   protected readonly worker = this.store.worker;
+  /** Dashboard: zusätzlich Rollen-Icon, Rolle und Rechte-Stufe je Agent. */
+  readonly details = input(false);
+
+  /** Agents mit Rolle, Rechten und Aufgabentext; Rechte kommen nur aus `agent-options.ts`. */
+  protected readonly agents = computed(() => {
+    const online = this.worker().online;
+    return this.worker().agents.map((agent) => ({
+      ...agent,
+      roleKey: agentRole(agent.role),
+      roleLabel: agentRoleLabel(agent.role),
+      rights: agentRights(agent.role),
+      rightsText: rightsTexts(agent.role),
+      task: agent.active
+        ? (agent.sprintName ? agent.sprintName + ' - ' : '') + agent.orderTitle
+        : agent.waiting
+          ? `wartet · ${agent.orderTitle ?? 'Rückfrage'}`
+          : online
+            ? 'Inaktiv'
+            : 'Worker offline',
+    }));
+  });
   /** Der Dashboard-Assistent hat keine Agent-Aktivität, sondern arbeitet im Chat des Dashboards. */
   protected readonly assistantId = 'assistant';
   /** Der Visionär arbeitet in Ideation (Fortschritt, Abbrechen, neue Ideen). */

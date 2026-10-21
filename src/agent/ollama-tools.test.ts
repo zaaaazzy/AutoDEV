@@ -37,6 +37,7 @@ function recorder(output = (command: string[]) => `ran ${command.join(' ')}`, ex
 const context = (cwd: string, overrides: Partial<ToolContext> = {}): ToolContext => ({
   cwd,
   canWrite: true,
+  files: { create: true, edit: true, scopes: [] },
   changed: new Set(),
   backupRoot: join(cwd, BACKUP_DIRECTORY, 'lauf'),
   timeoutMs: 1000,

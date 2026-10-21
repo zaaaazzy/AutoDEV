@@ -9,7 +9,8 @@ type Handler = (request: unknown, response: unknown) => Promise<void>;
 test('POST /projects/:slug/docs überschreibt kein bestehendes Handbuch', async () => {
   const handlers = new Map<string, Handler>();
   const app = {
-    post: (path: string, h: Handler) => handlers.set(`POST ${path}`, h),
+    // Letzter Handler: davor steht die Rechte-Deklaration (access).
+    post: (path: string, ...chain: Handler[]) => handlers.set(`POST ${path}`, chain.at(-1)!),
     get() {},
     patch() {},
     delete() {},

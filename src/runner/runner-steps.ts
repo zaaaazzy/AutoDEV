@@ -1,271 +1,61 @@
-import { decryptSecret } from '../core/secrets.js';
 import { logged } from '../core/log.js';
-import { handoffTarget, ORDER_PHASES, parseHandoffs } from '../core/workflow-phases.js';
+import { handoffTarget, parseHandoffs } from '../core/workflow-phases.js';
 import { manualTodo, setActionTodo } from './action-todo.js';
-import type { Pool } from 'pg';
-import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
-import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
-import { isTransientFailure, registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
+import { AGENT_STEP_STATUS } from '../core/status.js';
+import { isTransientFailure, registerFailure, ruleRefusal } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
-import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
-import { readManual, saveOrderDoc, upsertDoc } from '../api/docs.js';
-import {
-  changedFiles,
-  type ChangedFile,
-  changedFilesSection,
-  commitAgentStep,
-  commitTaskToGit,
-  conflictPrompt,
-  finishOrderBranch,
-  type OrderBranch,
-  unresolvedConflicts,
-} from './git-sync.js';
-import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
+import { type CommandResult, redactOutput } from '../core/command.js';
+import { readManual } from '../api/docs.js';
+import { changedFilesSection, commitAgentStep, conflictPrompt, unresolvedConflicts } from './git-sync.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
-import {
-  holdForReview,
-  isMergeConflict,
-  loadReviewMode,
-  needsApproval,
-  retryAfterConflict,
-  type ReviewMode,
-} from './review-gate.js';
 import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
+import type { BudgetState } from './budget.js';
+import { buildPrompt } from './runner-prompts.js';
+import type { WorkflowAgent } from './runner-types.js';
+import { testerPlan } from './order-tests.js';
+import { budgetGate, logEvent, orderChangedFiles, orderFilePaths, type RunContext } from './runner-context.js';
 import {
-  FILES_CREATE,
-  FILES_EDIT,
-  loadProjectPermissions,
-  normalizeCommands,
-  roleDefaultCommands,
-  withAgentPermissions,
-} from '../agent/tool-permissions.js';
-import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
-import { describeCommand, loadRouting, type ProjectRouting, routable, routeModel } from '../agent/model-routing.js';
-import { type BudgetState, checkBudget } from './budget.js';
-import { runTestAgent } from './test-agent.js';
-import { projectEnvironment } from './project-command.js';
-import { agentEnvironment, buildInvocation, buildPrompt, PHASE_ORDER } from './runner-prompts.js';
-import type { BuiltinAgent, StepSummary, WorkItem, WorkflowAgent, WorkItemOptions } from './runner-types.js';
-import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
-import { runVisualStep, VISUAL_CATEGORIES } from './visual-check.js';
+  type AgentResult,
+  findResumableSession,
+  invokeAgent,
+  routeStep,
+  type StepHooks,
+  stepModel,
+} from './runner-agent.js';
+import { TRANSIENT_RETRY_DELAY_MS } from './runner-runs.js';
+import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
 
-const MANUAL_TITLE = 'Anwendungshandbuch';
-const USER_MANUAL_TITLE = 'Benutzerhandbuch';
-const MIN_MANUAL_CHARS = 200;
+export { budgetGate, type RunContext } from './runner-context.js';
+export {
+  findResumableSession,
+  type ResumableSession,
+  resumePrompt,
+  type RoutedModel,
+  routeStep,
+  runBuiltinAgent,
+  stepModel,
+} from './runner-agent.js';
+export { claimRun, selectWorkflowAgents } from './runner-runs.js';
+export { settleItem } from './runner-settle.js';
 
-/** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
-export const runBuiltinAgent: BuiltinAgent = async ({
-  pool,
-  item,
-  agent,
-  prompt,
-  cwd,
-  timeoutMs,
-  signal,
-  onProgress,
-  model,
-  changedFiles: changed,
-}) => {
-  if (agent.role === 'tester') {
-    const startedAt = Date.now();
-    // Nur die Tests zu den geänderten Dateien (Testbefehle je Auftrag); der volle Lauf bleibt dem Live schalten.
-    const plan = await testerPlan(pool, item.projectSlug, cwd, changed);
-    const runId = await runTestAgent(
-      {
-        project: item.projectSlug,
-        cwd,
-        commands: plan.commands.map((entry) => entry.command),
-        skipped: plan.commands.map((entry) => entry.skipped),
-        existingProject: true,
-        timeoutMs,
-        signal,
-        // Testbefehle sind Projektcode: nur das gefilterte Environment, nicht das der Agent-CLIs.
-        env: projectEnvironment(cwd),
-      },
-      pool,
-    );
-    const steps = await pool.query<{ command: string; status: string; output: string }>(
-      'SELECT command, status, output FROM test_run_steps WHERE run_id = $1 ORDER BY position',
-      [runId],
-    );
-    const failed = steps.rows.some((step) => step.status !== 'passed');
-    const output = steps.rows
-      .map((step) =>
-        step.output === SKIPPED_NOTE
-          ? `$ ${step.command} → ${SKIPPED_NOTE}`
-          : `$ ${step.command} → ${step.status}\n${step.status === 'passed' ? step.output.slice(-400) : step.output.slice(-3000)}`,
-      )
-      .join('\n\n');
-    const summary = planSummary(plan);
-    return {
-      exitCode: failed ? 1 : 0,
-      durationMs: Date.now() - startedAt,
-      output: `Testlauf ${runId}\n\n${summary ? `${summary}\n\n` : ''}${output}`,
-    };
-  }
-  const stored = (
-    await pool.query<{ url: string | null }>('SELECT database_url AS url FROM projects WHERE slug = $1', [
-      item.projectSlug,
-    ])
-  ).rows[0]?.url;
-  // Without the key the agent runs without database access instead of failing the whole step.
-  let databaseUrl: string | undefined;
-  try {
-    databaseUrl = stored ? decryptSecret(stored) : undefined;
-  } catch (error) {
-    logged(`database-url:${item.projectSlug}`)(error);
-  }
-  // Dieselben Dateirechte und Ordner wie bei der Claude-CLI, geprüft vom selben Wächter.
-  const commands = normalizeCommands(
-    agent.allowedCommands ?? roleDefaultCommands(agent.role, await loadProjectPermissions(pool, item.projectSlug)),
-  );
-  const files = {
-    create: commands.includes(FILES_CREATE),
-    edit: commands.includes(FILES_EDIT),
-    scopes: agent.fileScope ?? [],
-  };
-  return runOllamaAgent({
-    prompt,
-    role: agent.role,
-    cwd,
-    timeoutMs,
-    signal,
-    databaseUrl,
-    onProgress,
-    files,
-    commands,
-    model,
-  });
-};
-
-async function afterStep(pool: Pool, item: WorkItem, agent: WorkflowAgent, output: string): Promise<void> {
-  if (agent.role === 'documenter' && output.trim()) {
-    await saveOrderDoc(pool, {
-      projectSlug: item.projectSlug,
-      developmentId: item.id,
-      title: item.title,
-      content: output,
-    });
-  } else if (agent.role === 'manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {
-    await upsertDoc(pool, { projectSlug: item.projectSlug, kind: 'manual', title: MANUAL_TITLE, content: output });
-  } else if (agent.role === 'user_manual_writer' && output.trim().length >= MIN_MANUAL_CHARS) {
-    await upsertDoc(pool, { projectSlug: item.projectSlug, kind: 'manual', title: USER_MANUAL_TITLE, content: output });
-  } else if (agent.role === 'developer' && item.bugId) {
-    await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [
-      item.bugId,
-      output.trim().slice(-1500),
-    ]);
-  }
-}
-
-const RUN_TIMEOUT_HOURS = 3;
 /** Rollen, die nur dokumentieren: ihr Scheitern ist kein Fehler im Code. */
-/** Pause vor dem Wiederholen nach einem vorübergehenden Fehler. */
-const TRANSIENT_RETRY_DELAY_MS = 30_000;
-
 export const DOC_ROLES = new Set(['documenter', 'manual_writer', 'user_manual_writer']);
 const CANCEL_POLL_MS = 1500;
 const LIVE_OUTPUT_INTERVAL_MS = 1500;
-
-export interface RunContext {
-  pool: Pool;
-  item: WorkItem;
-  runId: string;
-  options: WorkItemOptions;
-  execute: CommandExecutor;
-  builtin: BuiltinAgent;
-  done: StepSummary[];
-  bugs: KnownBug[];
-  images: string[];
-  fallbackCommand: string[] | null;
-  projectContext: string;
-  /** Eigener Git-Branch des Auftrags (null, wenn ohne Git oder kein Agent Dateien ändert). */
-  branch?: OrderBranch | null;
-  /** Akzeptanzkriterien aus dem Auftragstext und Definition of Done des Projekts. */
-  criteria?: string[];
-  definitionOfDone?: string[];
-  sprintName?: string | null;
-  /** Agents des Auftrags in Workflow-Reihenfolge (für Nachrichten an „den nächsten“ Agent). */
-  ordered?: WorkflowAgent[];
-  /** Nachrichten zwischen Agents (@@NACHRICHT), je Empfänger. */
-  messages?: { toId: string; from: string; text: string }[];
-  /** Ergebnis von „Vor dem Sprint“ für alle Aufträge des Sprints. */
-  sprintNotes?: string | null;
-  /** Höchster Budgetanteil (Prozent) aus der letzten Prüfung vor dem Schritt – für den Sparmodus im Routing. */
-  budgetPercent?: number;
-  /** Routing-Regeln und Stufen-Modelle des Projekts (einmal je Lauf geladen). */
-  routing?: ProjectRouting | null;
-  /** Zuletzt ermittelte geänderte Dateien des Auftrags (für den Abschnitt „Geänderte Dateien“). */
-  changedFiles?: string[];
-  /** Grund, warum der Lauf angehalten wurde (z. B. Budget), für die Push-Nachricht. */
-  stopReason?: string | null;
-}
-
-/** Vom Routing gewähltes Modell eines Schritts: Ollama-Modell oder CLI-Befehl samt greifender Regel. */
-export interface RoutedModel {
-  model?: string;
-  command?: string[];
-  rule: string | null;
-}
-
-/**
- * Budget-Prüfpunkt vor jedem Agent-Schritt (Tag, Sprint, Auftrag): liefert den erreichten Zeitraum oder null. Ein
- * bereits laufender Schritt wird nie abgebrochen; das Limit kann daher um höchstens einen Schritt überschritten werden.
- */
-export async function budgetGate(ctx: RunContext): Promise<BudgetState | null> {
-  const check = await checkBudget(ctx.pool, ctx.item.projectSlug, {
-    itemId: ctx.item.id,
-    sprintId: ctx.item.sprintId ?? null,
-  });
-  ctx.budgetPercent = check.percent;
-  return check.exceeded;
-}
-
-/** Modell-Routing: Stufe nach den Regeln des Projekts; ohne konfiguriertes Modell der Stufe bleibt die Wahl je Rolle. */
-export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<RoutedModel> {
-  if (!routable(agent.role)) return { rule: null };
-  if (ctx.routing === undefined) ctx.routing = await loadRouting(ctx.pool, ctx.item.projectSlug).catch(() => null);
-  if (!ctx.routing) return { rule: null };
-  const decision = routeModel(ctx.routing.rules, {
-    category: ctx.item.category ?? null,
-    effortHours: ctx.item.effortHours ?? null,
-    retryCount: ctx.item.retryCount ?? 0,
-    budgetPercent: ctx.budgetPercent ?? 0,
-  });
-  const { local, strong } = ctx.routing.models;
-  if (decision.tier === 'local' && local) return { model: local, rule: decision.rule };
-  if (decision.tier === 'strong' && strong) return { command: strong, rule: decision.rule };
-  return { rule: null };
-}
-
-/** CLI-Befehl eines Schritts: vom Routing, eigener Befehl des Agents oder Standardbefehl; null = eingebautes Modell. */
-function configuredCommand(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string[] | null {
-  if (routed.model) return null;
-  if (routed.command) return routed.command;
-  return agent.command?.length ? agent.command : agent.role === 'tester' ? null : ctx.fallbackCommand;
-}
-
-/** Anzeige des verwendeten Modells, z. B. „qwen3.5:9b“ oder „claude (opus)“. */
-export function stepModel(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string {
-  if (routed.model) return routed.model;
-  const command = configuredCommand(ctx, agent, routed);
-  if (command) return describeCommand(command);
-  if (agent.role === 'tester')
-    return ctx.fallbackCommand ? `${describeCommand(ctx.fallbackCommand)} + Testlauf` : 'Testlauf';
-  return resolveModel(agent.role);
-}
 
 interface StepOutcome {
   passed: boolean;
   interrupted: boolean;
   /** Gescheitert, aber noch im selben Lauf vom Entwickler nachbesserbar (kein Bug-Bericht angelegt). */
   correctable?: boolean;
+  /** Budget vor dem neuen Versuch erreicht: der Lauf hält an wie vor einem Schritt (kein Bug-Bericht). */
+  budget?: BudgetState;
 }
 
 export interface StepOptions {
@@ -280,238 +70,18 @@ export interface StepOptions {
   observer?: { outcome: string };
 }
 
-/** Claim an order run; an existing run older than three hours is treated as abandoned. */
-export async function claimRun(pool: Pool, item: WorkItem): Promise<string | null> {
-  await pool.query(
-    `UPDATE agent_runs SET status = '${AGENT_RUN_STATUS.failed}', completed_at = NOW()
-      WHERE development_id = $1 AND status = 'running' AND started_at < NOW() - INTERVAL '${RUN_TIMEOUT_HOURS} hours'`,
-    [item.id],
-  );
-  const claim = await pool.query<{ id: string }>(
-    `INSERT INTO agent_runs (project_slug, development_id, status)
-     VALUES ($1, $2, '${AGENT_RUN_STATUS.running}')
-     ON CONFLICT (development_id) WHERE status = 'running' DO NOTHING
-     RETURNING id`,
-    [item.projectSlug, item.id],
-  );
-  return claim.rows[0]?.id ?? null;
-}
-
 /**
- * Select agents in phase and position order, or only the assigned agent for a manual run. Die visuelle Prüfung
- * entfällt bei Aufträgen, die weder Frontend noch Fullstack sind.
+ * Nur ein Fehler des Agents selbst (Modell bzw. Dienst nicht erreichbar, überlastet, Zeitlimit) ist vorübergehend.
+ * Rote Projekttests oder die visuelle Prüfung werden nie wiederholt, auch wenn ihre Ausgabe z. B. ECONNREFUSED enthält.
  */
-export function selectWorkflowAgents(agents: WorkflowAgent[], item: WorkItem): WorkflowAgent[] {
-  return agents
-    .filter((agent) => (ORDER_PHASES as readonly string[]).includes(agent.phase))
-    .filter((agent) =>
-      item.agentId
-        ? agent.id === item.agentId
-        : !(agent.role === 'author' && item.ideationId) &&
-          !(agent.role === 'bug_reviewer' && item.risks?.trim()) &&
-          !(agent.role === 'visual_tester' && !VISUAL_CATEGORIES.has(item.category ?? '')),
-    )
-    .sort(
-      (left, right) =>
-        PHASE_ORDER.indexOf(left.phase as never) - PHASE_ORDER.indexOf(right.phase as never) ||
-        left.position - right.position,
-    );
-}
-
-interface StepHooks {
-  signal: AbortSignal;
-  onOutput: (partial: string) => void;
-  onSpawn: (pid: number) => void;
-  onAction: (message: string) => void;
-  onSession?: (sessionId: string) => void;
-  /** Frühere Claude-Sitzung desselben Einsatzes, die fortgesetzt wird. */
-  resume?: ResumableSession | null;
-}
-
-export interface ResumableSession {
-  sessionId: string;
-  /** Der frühere Schritt war fertig (Nachbesserung) statt abgebrochen bzw. gescheitert. */
-  passed: boolean;
-}
-
-/** Wie lange eine frühere Sitzung fortgesetzt wird; danach ist ein frischer Start meist besser. */
-const RESUME_WINDOW = '24 hours';
-
-/**
- * Letzte Claude-Sitzung desselben Einsatzes (Workflow-Schritt bzw. Agent) bei diesem Auftrag – aus einem
- * abgebrochenen Lauf, einem früheren Versuch oder der Runde vor einer Nachbesserung im selben Lauf.
- */
-export async function findResumableSession(
-  pool: Pool,
-  itemId: string,
-  agent: Pick<WorkflowAgent, 'id' | 'stepId'>,
-  currentStepId: string | undefined,
-): Promise<ResumableSession | null> {
-  const row = (
-    await pool.query<{ sessionId: string; status: string }>(
-      `SELECT s.session_id AS "sessionId", s.status
-         FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
-        WHERE r.development_id = $1 AND s.id IS DISTINCT FROM $2::bigint AND s.session_id IS NOT NULL
-          AND COALESCE(s.workflow_step_id::text, s.agent_id::text) = $3
-          AND s.session_at > NOW() - INTERVAL '${RESUME_WINDOW}'
-        ORDER BY s.session_at DESC LIMIT 1`,
-      [itemId, currentStepId ?? null, agent.stepId ?? agent.id],
-    )
-  ).rows[0];
-  return row?.sessionId ? { sessionId: row.sessionId, passed: row.status === AGENT_STEP_STATUS.passed } : null;
-}
-
-/** Erste Nachricht in der fortgesetzten Sitzung: weitermachen statt neu beginnen, dann der aktuelle Auftrag. */
-export function resumePrompt(prompt: string, resume: ResumableSession): string {
-  const why = resume.passed
-    ? 'Du hast diesen Auftrag schon bearbeitet; jetzt gibt es Rückmeldungen, die du nachbessern sollst.'
-    : 'Dein letzter Lauf zu diesem Auftrag wurde unterbrochen oder abgebrochen.';
-  return `## Fortsetzung deiner früheren Sitzung
-${why} Du kennst den Verlauf dieser Sitzung; dein bisheriger Stand liegt im Arbeitsordner (auch noch nicht committete Änderungen). Prüfe kurz mit \`git status\` und \`git diff\`, was schon erledigt ist, und mach dort weiter – nicht von vorne beginnen. Es folgt der aktuelle Auftrag mit allen neuen Angaben; er hat Vorrang vor früheren Nachrichten.
-
-${prompt}`;
-}
-
-/** Vom Auftrag geänderte Dateien (nur mit Auftrags-Branch; sonst undefined = unbekannt). */
-async function orderChangedFiles(ctx: RunContext): Promise<ChangedFile[] | undefined> {
-  if (!ctx.branch) return undefined;
-  return (
-    (await changedFiles(ctx.options.cwd, ctx.branch.base, ctx.execute).catch(logged('runner-steps', null))) ?? undefined
-  );
-}
-
-async function orderFilePaths(ctx: RunContext): Promise<string[] | undefined> {
-  return (await orderChangedFiles(ctx))?.map((file) => file.path);
+export function shouldRetry(result: AgentResult): boolean {
+  return result.exitCode !== 0 && !result.fromTests && isTransientFailure(result.output);
 }
 
 /** Befehle für die eigene Abdeckungsmessung: dieselben wie im Tester-Schritt (nie der volle Lauf fürs Live schalten). */
 async function coverageCommands(ctx: RunContext): Promise<string[][]> {
   const plan = await testerPlan(ctx.pool, ctx.item.projectSlug, ctx.options.cwd, await orderFilePaths(ctx));
   return plan.commands.filter((entry) => !entry.skipped).map((entry) => entry.command);
-}
-
-/** Run an agent command, the tester workflow, or the built-in local model. */
-async function invokeAgent(
-  ctx: RunContext,
-  agent: WorkflowAgent,
-  prompt: string,
-  hooks: StepHooks,
-  routed: RoutedModel = { rule: null },
-): Promise<CommandResult> {
-  const { pool, item, options, execute, builtin, fallbackCommand } = ctx;
-  const builtinRun = async (): Promise<CommandResult> =>
-    builtin({
-      pool,
-      item,
-      agent,
-      prompt,
-      cwd: options.cwd,
-      timeoutMs: options.timeoutMs,
-      signal: hooks.signal,
-      onProgress: hooks.onAction,
-      ...(routed.model ? { model: routed.model } : {}),
-      ...(agent.role === 'tester' ? { changedFiles: await orderFilePaths(ctx) } : {}),
-    });
-  const configured = configuredCommand(ctx, agent, routed);
-  const permissions = await loadProjectPermissions(pool, item.projectSlug);
-  // Visuelle Prüfung: Screenshots, Pixel-Vergleich und Browser-Prüfungen; der Befehl des Agents dient nur dem KI-Urteil.
-  if (agent.role === 'visual_tester') {
-    return runVisualStep({
-      pool,
-      item,
-      cwd: options.cwd,
-      criteria: ctx.criteria ?? [],
-      signal: hooks.signal,
-      onProgress: hooks.onAction,
-      judgeCommand:
-        configured &&
-        withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
-      execute,
-    });
-  }
-  const command =
-    configured &&
-    withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope);
-  if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
-    // The tester first develops tests from the developer notes, then runs the build and test commands.
-    const written = await executeAgentCommand(
-      execute,
-      buildInvocation(
-        // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers.
-        withAgentPermissions(fallbackCommand, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
-        `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
-      ),
-      options.cwd,
-      {
-        timeoutMs: options.timeoutMs,
-        env: agentEnvironment(options.cwd),
-        onOutput: hooks.onOutput,
-        // Damit ein Abbruch aus der Oberfläche auch diesen Agenten samt Kindprozessen beendet.
-        onSpawn: hooks.onSpawn,
-        onAction: hooks.onAction,
-      },
-    ).catch((error: unknown): CommandResult => ({
-      exitCode: 1,
-      durationMs: 0,
-      output: error instanceof Error ? error.message : String(error),
-    }));
-    if (hooks.signal.aborted) return written;
-    const run = await builtinRun();
-    // Tokens und Kosten des Testschreibens zählen fürs Budget mit (zusätzlich zu denen des Testlaufs).
-    return {
-      ...run,
-      durationMs: run.durationMs + written.durationMs,
-      tokens: (written.tokens ?? 0) + (run.tokens ?? 0),
-      costUsd: (written.costUsd ?? 0) + (run.costUsd ?? 0),
-      output: `## Entwickelte Tests\n${redactOutput(written.output, process.env).trim().slice(-1500)}\n\n## Testlauf\n${run.output}`,
-    };
-  }
-  if (!command) return builtinRun();
-  const run = (resume: ResumableSession | null | undefined): Promise<CommandResult> =>
-    executeAgentCommand(
-      execute,
-      buildInvocation(command, resume ? resumePrompt(prompt, resume) : prompt),
-      options.cwd,
-      {
-        timeoutMs: options.timeoutMs,
-        env: agentEnvironment(options.cwd),
-        onOutput: hooks.onOutput,
-        onSpawn: hooks.onSpawn,
-        onAction: hooks.onAction,
-        onSession: hooks.onSession,
-        resumeSession: resume?.sessionId,
-      },
-    );
-  let result = await run(hooks.resume);
-  // Sitzung nicht mehr vorhanden (z. B. anderer Ordner): frisch mit dem vollständigen Auftrag starten.
-  if (hooks.resume && result.exitCode !== 0 && !hooks.signal.aborted && resumeFailed(result.output)) {
-    hooks.onAction('Frühere Sitzung nicht mehr vorhanden – startet neu');
-    result = await run(null);
-  }
-  // Ein Tester mit eigenem CLI prüft selbst; danach laufen die hinterlegten Projekttests zusätzlich als
-  // gespeicherter Testlauf – objektiv, sichtbar unter „Testläufe“ und in der Erfolgsquote des Dashboards.
-  if (agent.role === 'tester' && result.exitCode === 0 && !hooks.signal?.aborted) {
-    const run = await builtinRun();
-    return {
-      exitCode: run.exitCode,
-      durationMs: result.durationMs + run.durationMs,
-      // Tokens und Kosten des CLI-Laufs gehören zum Schritt und zählen fürs Budget.
-      tokens: (result.tokens ?? 0) + (run.tokens ?? 0),
-      costUsd: (result.costUsd ?? 0) + (run.costUsd ?? 0),
-      output: `${result.output}\n\n## Testlauf (Projekttests)\n${run.output}`,
-    };
-  }
-  return result;
-}
-
-/** Appends a timestamped entry to the step's history (shown as "Verlauf"). */
-function logEvent(pool: Pool, stepId: string | undefined, text: string): Promise<unknown> {
-  return pool
-    .query(`UPDATE agent_run_steps SET events = events || $2::jsonb WHERE id = $1`, [
-      stepId,
-      JSON.stringify([{ at: new Date().toISOString(), text: redactOutput(text, process.env) }]),
-    ])
-    .catch(logged('runner-steps'));
 }
 
 /** Execute a workflow step and persist its progress, cancellation state, and result. */
@@ -645,34 +215,41 @@ export async function runStep(
   const stepStartedAt = Date.now();
   // Nur ein Ordner, der beim Start da war, kann „weggefallen“ sein (sonst ist es ein Konfigurationsfehler).
   const folderAtStart = folderAvailable(ctx.options.cwd);
-  const attempt = (): Promise<CommandResult> =>
-    invokeAgent(ctx, agent, prompt, hooks, routed).catch((error: unknown): CommandResult => ({
+  const attempt = (): Promise<AgentResult> =>
+    invokeAgent(ctx, agent, prompt, hooks, routed).catch((error: unknown): AgentResult => ({
       exitCode: 1,
       durationMs: 0,
       output: error instanceof Error ? error.message : String(error),
     }));
-  let result = await Promise.race([attempt(), cancelRequested]);
-  // Vorübergehender Fehler (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen.
-  if (result.exitCode !== 0 && !cancelled && !isShuttingDown() && isTransientFailure(result.output)) {
-    const delay = options.transientRetryDelayMs ?? TRANSIENT_RETRY_DELAY_MS;
-    await logEvent(pool, stepId, `Vorübergehender Fehler – neuer Versuch in ${Math.round(delay / 1000)} s`);
-    live.update?.(`${agent.name}: vorübergehender Fehler, neuer Versuch …`);
-    const first = result;
-    const paused = await Promise.race([
-      new Promise<null>((resolveDelay) => setTimeout(() => resolveDelay(null), delay)),
-      cancelRequested,
-    ]);
-    if (paused === null && !cancelled && !isShuttingDown()) {
-      const second = await Promise.race([attempt(), cancelRequested]);
-      result = {
-        ...second,
-        durationMs: first.durationMs + second.durationMs,
-        tokens: (first.tokens ?? 0) + (second.tokens ?? 0),
-        costUsd: (first.costUsd ?? 0) + (second.costUsd ?? 0),
-        output: `## Erster Versuch (vorübergehender Fehler)\n${first.output.slice(-1500)}\n\n## Zweiter Versuch\n${second.output}`,
-      };
-    } else if (paused) {
-      result = paused;
+  let result: AgentResult = await Promise.race([attempt(), cancelRequested]);
+  let budgetStop: BudgetState | null = null;
+  // Vorübergehender Fehler des Agents (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen –
+  // aber nur, wenn das Budget den zweiten Versuch noch erlaubt.
+  if (!cancelled && !isShuttingDown() && shouldRetry(result)) {
+    budgetStop = await budgetGate(ctx).catch(logged('runner-steps', null));
+    if (budgetStop) {
+      await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht');
+    } else {
+      const delay = options.transientRetryDelayMs ?? TRANSIENT_RETRY_DELAY_MS;
+      await logEvent(pool, stepId, `Vorübergehender Fehler – neuer Versuch in ${Math.round(delay / 1000)} s`);
+      live.update?.(`${agent.name}: vorübergehender Fehler, neuer Versuch …`);
+      const first = result;
+      const paused = await Promise.race([
+        new Promise<null>((resolveDelay) => setTimeout(() => resolveDelay(null), delay)),
+        cancelRequested,
+      ]);
+      if (paused === null && !cancelled && !isShuttingDown()) {
+        const second = await Promise.race([attempt(), cancelRequested]);
+        result = {
+          ...second,
+          durationMs: first.durationMs + second.durationMs,
+          tokens: (first.tokens ?? 0) + (second.tokens ?? 0),
+          costUsd: (first.costUsd ?? 0) + (second.costUsd ?? 0),
+          output: `## Erster Versuch (vorübergehender Fehler)\n${first.output.slice(-1500)}\n\n## Zweiter Versuch\n${second.output}`,
+        };
+      } else if (paused) {
+        result = paused;
+      }
     }
   }
   stopWatching();
@@ -837,6 +414,11 @@ export async function runStep(
     await commitStep();
     return { passed, interrupted: false };
   }
+  // Budget erreicht statt neuem Versuch: kein Fehler im Code, der Lauf hält an (Kostenbremse wie vor einem Schritt).
+  if (budgetStop) {
+    await commitStep();
+    return { passed: false, interrupted: false, correctable: false, budget: budgetStop };
+  }
   // Rote Tests oder eine Ablehnung im Review gehen zuerst einmal direkt zurück an den Entwickler.
   const correctable = !passed && !cancelled && !refusedByRule && stepOptions.canCorrect === true;
   if (correctable) {
@@ -853,88 +435,4 @@ export async function runStep(
   }
   await commitStep();
   return { passed, interrupted: false, correctable };
-}
-
-/** Push-Nachricht aufs Handy, wenn ein Auftrag fertig ist oder hängen bleibt. */
-async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, problem: string | null): Promise<void> {
-  await sendPush(
-    pool,
-    {
-      title: succeeded ? `✓ Auftrag erledigt · ${item.projectSlug}` : `⚠ Auftrag blockiert · ${item.projectSlug}`,
-      body: succeeded ? item.title : `${item.title}\n${problem ?? 'Ein Agent ist gescheitert – Details im Auftrag.'}`,
-      url: `#development/${item.id}?project=${encodeURIComponent(item.projectSlug)}`,
-      tag: `order-${item.id}`,
-    },
-    { project: item.projectSlug },
-  );
-}
-
-/** Settle the order status and trigger follow-up actions such as commits or bugfix retries. */
-export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
-  const { pool, item, options, execute } = ctx;
-  if (interrupted) {
-    // Return interrupted orders to planned while retaining their assignment so they can resume after restart.
-    await pool.query(
-      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', updated_at = NOW() WHERE id = $1`,
-      [item.id],
-    );
-    return;
-  }
-  // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
-  let mergeProblem: string | null = null;
-  let commit: string | null = null;
-  if (ctx.branch) {
-    // Review-Freigabe (Projekteinstellung): nur ganze Abläufe, nicht das Ausführen eines einzelnen Agents.
-    const review =
-      passed && !item.agentId ? await loadReviewMode(pool, item.projectSlug).catch((): ReviewMode => 'off') : 'off';
-    const hold = review === 'off' ? undefined : (files: string[]) => needsApproval(review, files);
-    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute, hold);
-    console.info(`[${item.id}] ${result.message}`);
-    if (result.held) {
-      await holdForReview(pool, item, ctx.branch);
-      return;
-    }
-    if (passed && !result.merged) mergeProblem = result.message;
-    commit = result.commit;
-  } else if (passed && ctx.sprintName) {
-    commit = await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
-  }
-  if (commit) {
-    // Verweis für die GitHub-Rückmeldung (Issue schließen mit Commit). Nur ein Zusatz: Fehlt er, nennt der
-    // Kommentar keinen Commit – der Abschluss des Auftrags darf daran nicht scheitern.
-    await pool
-      .query(`UPDATE development_items SET git_commit = $2 WHERE id = $1`, [item.id, commit])
-      .catch((error: unknown) => console.warn(`[${item.id}] Commit-Verweis nicht gespeichert: ${String(error)}`));
-  }
-  // Merge-Konflikt mit der Basis: automatisch neu einplanen; der nächste Lauf zieht die Basis nach und der Entwickler
-  // löst die Konflikte (höchstens zweimal, danach „Aktion notwendig“ wie bisher).
-  if (mergeProblem && isMergeConflict(mergeProblem) && !item.agentId) {
-    if (await retryAfterConflict(pool, item, mergeProblem).catch(logged('runner-steps', false))) return;
-  }
-  const succeeded = passed && !mergeProblem;
-  if (mergeProblem) {
-    await pool
-      .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, mergeProblem])
-      .catch(logged('runner-steps'));
-  }
-  if (item.agentId) {
-    // A one-agent play restores the previous status; a blocked order resumes normally after success.
-    await pool.query(
-      `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-              status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status WHEN NOT $2 THEN '${DEVELOPMENT_STATUS.blocked}' WHEN return_status IS NULL OR return_status = '${DEVELOPMENT_STATUS.blocked}' THEN '${DEVELOPMENT_STATUS.planned}' ELSE return_status END
-        WHERE id = $1`,
-      [item.id, succeeded],
-    );
-    await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);
-    return;
-  }
-  // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“.
-  await pool.query(
-    `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-            status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status ELSE $2 END WHERE id = $1`,
-    [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
-  );
-  await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);
-  if (!succeeded) return;
-  if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('runner-steps'));
 }
