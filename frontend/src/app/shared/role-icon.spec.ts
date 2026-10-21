@@ -20,7 +20,7 @@ test('Jede Agent-Rolle hat ein eigenes, unterscheidbares Symbol', () => {
   const seen = new Map<string, string>();
   for (const { value } of AGENT_ROLES) {
     const shape = shapes.get(value);
-    assert.ok(shape?.includes('<'), `Symbol für ${value} fehlt`);
+    assert.ok(shape !== undefined && shape.includes('<'), `Symbol für ${value} fehlt`);
     assert.equal(seen.get(shape), undefined, `${value} teilt das Symbol mit ${seen.get(shape)}`);
     seen.set(shape, value);
   }

@@ -27,7 +27,7 @@ AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich:
 - `npm test` baut die Oberfläche und führt die Backend-Tests aus.
 - `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen. `typecheck` prüft auch die Test-Dateien (`tsconfig.test.json`, `frontend/tsconfig.spec.json`), denn `tsx` allein prüft keine Typen.
 - `npm run test:e2e` startet die Oberflächentests (Playwright, eigene Datenbank `dev_log_e2e`; vorher `npm run build:ui`).
-- CI (`.github/workflows/ci.yml`, nur Leserechte): Job `check` (Lint, Format, Typen, Tests), Job `e2e` (Playwright gegen Postgres), Job `docker` (`docker compose build`, danach Start mit Health-Prüfung von `db`, `dev-log` und `frontend`). `.dockerignore` hält `.env*`, Schlüssel, Sicherungen und Testergebnisse aus den Images heraus.
+- CI (`.github/workflows/ci.yml`, nur Leserechte): Job `check` (Lint, Format, Typen, Tests), Job `e2e` (Playwright gegen Postgres), Job `docker` (baut `dev-log`, `frontend`, `https` und das Review-Image, startet danach `db`, `dev-log` und `frontend` mit Health-Prüfung und zufälligen, maskierten Zugangsdaten). Keine Secrets, kein Token in `.git/config` (`persist-credentials: false`), keine Coverage-Schwelle. Fehler stehen im Log (Playwright-Ausgabe, Container-Logs), Traces zusätzlich als Artefakt. `.dockerignore` hält `.env*`, Schlüssel, Sicherungen und Testergebnisse aus den Images heraus.
 
 ### Sicherheit
 

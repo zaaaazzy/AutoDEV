@@ -11,7 +11,8 @@ export default defineConfig({
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,
-  reporter: [['list']],
+  // In der CI zusätzlich Annotationen am Commit; die Fehler selbst stehen in beiden Fällen im Log (list).
+  reporter: process.env.GITHUB_ACTIONS ? [['list'], ['github']] : [['list']],
   use: { baseURL: `http://127.0.0.1:${PORT}`, trace: 'retain-on-failure' },
   projects: [
     { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
