@@ -1,10 +1,17 @@
 name: CI
 on: [push, pull_request]
+# Nur Lesen: kein Job schreibt ins Repository, in Issues oder Pakete.
+permissions:
+  contents: read
+# Kein Job nutzt Secrets. checkout legt das GITHUB_TOKEN nicht in .git/config ab (persist-credentials: false),
+# damit Projektcode (Tests, Testserver, Docker-Build) es nicht lesen kann.
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
@@ -12,5 +19,73 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run format:check
+      # Prüft auch die Test-Dateien (tsconfig.test.json, frontend/tsconfig.spec.json); tsx allein prüft keine Typen.
       - run: npm run typecheck
       - run: npm test
+
+  # Oberflächentests (Playwright) gegen eine eigene Postgres-Instanz nur für diesen Lauf.
+  e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: devlog
+          POSTGRES_PASSWORD: devlog_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devlog" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Wegwerf-Datenbank des Service-Containers, kein Secret.
+      E2E_ADMIN_DATABASE_URL: postgresql://devlog:devlog_ci_only@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx --no-install playwright install --with-deps chromium
+      # Der Testserver liefert die gebaute Oberfläche aus dist/ui aus.
+      - run: npm run build:ui
+      # Fehler stehen im Log (Reporter list) und als Annotation (Reporter github), Traces zusätzlich im Artefakt.
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: |
+            e2e/test-results/
+            test-results/
+          retention-days: 7
+
+  # Images bauen und starten: Fehler in Dockerfile oder nginx-Konfiguration fallen vor dem Deploy auf.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Zugangsdaten nur für diesen Lauf
+        run: |
+          # Zufällig und maskiert; ohne sie fiele compose auf das bekannte Standardpasswort zurück.
+          for name in DEV_LOG_PASSWORD DEV_LOG_DB_PASSWORD; do
+            value="$(openssl rand -hex 16)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+      # Caddy (Profil https, beim ausdrücklichen Dienstnamen aktiv) wird nur gebaut, nicht gestartet: ohne Domain kein Zertifikat.
+      - run: docker compose build dev-log frontend https
+      - run: docker build deploy/review
+      - name: Container starten und Health prüfen
+        run: |
+          docker compose up -d --wait --wait-timeout 180 db dev-log frontend
+          curl -fsS http://127.0.0.1:3100/health
+      - if: failure()
+        run: docker compose logs --no-color --tail 200 db dev-log frontend
+      - if: always()
+        run: docker compose down -v
