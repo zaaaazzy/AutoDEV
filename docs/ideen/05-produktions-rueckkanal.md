@@ -92,3 +92,12 @@ flowchart LR
 - **Protokoll:** `production_rollbacks` (Projekt, Bug, Ausgangs- und Zieltag, angefordert von, Zeitpunkte, Status, Ergebnistext – auch bei Fehlern ohne einzelnen gescheiterten Befehl). Sichtbar im Bug-Detail „Betrieb“ unter „Rollback-Protokoll“, Push-Meldung nach Abschluss.
 - **Migrationen:** Beim Deploy werden Migrationsdateien erfasst, die seit dem vorherigen Tag hinzukamen oder geändert wurden (`production_deploys.new_migrations`). Der Vorschlag warnt damit; die Datenbank wird **nicht** zurückgesetzt.
 - **Bug-Status:** Bleibt unverändert offen; ob behoben, entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag; das nächste „Live schalten“ zieht ihn wieder auf `main`.
+
+### Geänderte Dateien und Tests (Ausbaustufe 4)
+
+- **Backend:** `src/runner/rollback.ts` (neu: `rollbackProposal`, `processRollback`), `src/runner/deploy.ts` (Sprint-Tag und neue Migrationen je Deploy, Markierung `deploy_started_at`), `src/runner/git-sync.ts` und `git-sync/git-helpers.ts` (`previousSprintTag`), `src/runner/production-events.ts`, `src/runner/runner-cli.ts` (Heartbeat), `src/api/production.ts` (Vorschlag und `POST /api/bugs/:id/rollback`), `src/db/migrations.ts` (Tabelle `production_rollbacks`, neue Spalten).
+- **Oberfläche:** `production-detail.component.html/.ts`, `core/models.ts`, `styles/19-production.css` (nur Bug-Detail „Betrieb“).
+- **Tests:** `src/runner/rollback.test.ts` (Zieltag: Vorgänger, kein Tag, Tag außerhalb des 30-Minuten-Fensters, gesperrte Fälle), `src/api/production-rollback.test.ts`, `git-sync.test.ts`, `migrations.test.ts`. Die Tests räumen ihre Daten auf.
+- **Beachten:**
+  - Die Oberfläche hat weder Komponenten- noch E2E-Test (`npm run test:e2e` lief nicht). Knopf, Dialog und Protokoll im Bug-Detail vor der Freigabe in der Vorschau prüfen.
+  - Ein Rollback setzt die Datenbank nicht zurück. Neuere Migrationen erscheinen nur als Warnung im Dialog (offener Punkt für den Entwickler).
