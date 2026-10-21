@@ -307,6 +307,30 @@ export interface ProductionEvent {
   deploySuspect: DeploySuspect | null;
 }
 
+/** Rollback-Vorschlag eines kritischen Betriebs-Bugs (Auswahl und Sperrgrund kommen vom Server). */
+export interface RollbackProposal {
+  fromTag: string | null;
+  toTag: string | null;
+  deployedAt: string | null;
+  disabledReason: string | null;
+  /** Migrationen, die der Zieltag nicht kennt; null = nicht prüfbar. */
+  migrations: string[] | null;
+}
+
+/** Eintrag im Rollback-Protokoll (Bug-Verlauf). */
+export interface RollbackEntry {
+  id: string;
+  bugId: string | null;
+  fromTag: string;
+  toTag: string;
+  status: 'requested' | 'running' | 'succeeded' | 'failed';
+  result: string | null;
+  requestedBy: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 /** Link zum GitHub-Issue aus owner/repo#123 (null bei ungültigem Verweis). */
 export function githubIssueLink(ref: string | null | undefined): { url: string; label: string } | null {
   const match = /^([A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100})#(\d{1,10})$/.exec(ref ?? '');

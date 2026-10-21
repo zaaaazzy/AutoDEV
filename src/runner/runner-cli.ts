@@ -26,6 +26,7 @@ import { syncFavicon } from './favicon.js';
 import { ProductionMonitor } from './production-monitor.js';
 import { syncGitGraph } from './git-graph.js';
 import { processGitFix, syncGitState } from './git-state-sync.js';
+import { processRollback } from './rollback.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
@@ -272,6 +273,7 @@ async function main(): Promise<void> {
     let gitCheck = 0;
     const githubActive = new Set<string>();
     const gitFixActive = new Set<string>();
+    const rollbackActive = new Set<string>();
     const heartbeat = setInterval(() => {
       beat();
       // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
@@ -282,6 +284,15 @@ async function main(): Promise<void> {
         void processGitFix(pool, slug, target.repository, target.options.cwd)
           .catch(logged('runner-cli'))
           .finally(() => gitFixActive.delete(slug));
+      }
+      // Bestätigte Rollbacks (Bug-Detail „Betrieb“) über den normalen Deploy-Pfad ausrollen.
+      for (const target of chatTargets) {
+        const slug = target.options.project;
+        if (target.problem || stopping || rollbackActive.has(slug)) continue;
+        rollbackActive.add(slug);
+        void processRollback(pool, slug, target.repository, target.options.cwd)
+          .catch(logged('runner-cli'))
+          .finally(() => rollbackActive.delete(slug));
       }
       void publishSystemAgents(pool).catch(logged('runner-cli'));
       if (!stopping) {

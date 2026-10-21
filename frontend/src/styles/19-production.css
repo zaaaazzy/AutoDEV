@@ -133,6 +133,35 @@
   margin: 4px 0;
   padding-left: 18px;
 }
+/* Rollback-Vorschlag und -Protokoll im Bug-Detail „Betrieb“. */
+.production-rollback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fbf3ef;
+}
+.production-rollback p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.production-rollback-warning {
+  color: #9a3412;
+}
+.production-rollback-reason {
+  flex: 1 1 200px;
+}
+.production-rollback-log ul {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+}
+.production-rollback-log li {
+  margin-bottom: 4px;
+  overflow-wrap: anywhere;
+}
 .production-token {
   display: flex;
   flex-wrap: wrap;

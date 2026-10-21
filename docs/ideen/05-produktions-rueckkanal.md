@@ -80,4 +80,15 @@ flowchart LR
 1. Health-URL + Bug.
 2. Log-Scan mit Fingerabdruck.
 3. Ingest-Endpunkt + Snippet.
-4. Automatischer Rollback-Vorschlag: bei kritischem Fehler nach Deploy Knopf „Vorherigen Sprint-Tag wieder ausrollen“.
+4. Automatischer Rollback-Vorschlag: bei kritischem Fehler nach Deploy Knopf „Vorherigen Sprint-Tag wieder ausrollen“ (umgesetzt, siehe unten).
+
+## Umsetzung Ausbaustufe 4: Rollback-Vorschlag
+
+- **Wann:** Bug mit Quelle „Betrieb“, Schwere `critical` und mindestens einem Ereignis mit `deploy_suspect` (30 min nach einem Deploy). Sonst kein Knopf.
+- **Welche Tags:** Jeder erfolgreiche Deploy hält in `production_deploys.sprint_tag` den ausgerollten Sprint-Tag fest (normaler Deploy: Tag des zuletzt abgeschlossenen Sprints; Rollback: der Zieltag). Ziel ist der unmittelbar davor liegende Tag der abgeschlossenen Sprints (`previousSprintTag` in `src/runner/git-sync.ts`), nie mehr als ein Schritt zurück.
+- **Knopf deaktiviert mit Grund:** Tag des letzten Deploys unbekannt, kein vorheriger Tag, ein Deploy oder Rollback läuft (`projects.deploy_started_at`, offene Zeile in `production_rollbacks`), keine Deploy-Befehle, oder die Agents arbeiten im Projektordner (ein Tag-Checkout würde ihre Arbeit verändern), oder dem Benutzer fehlt die Rolle „Planung“. Die Entscheidung trifft zentral `rollbackProposal` in `src/runner/rollback.ts`; die Oberfläche zeigt sie nur an.
+- **Auslösen:** Bestätigungsdialog nennt Ziel- und Ausgangstag sowie neuere Migrationen. `POST /api/bugs/:id/rollback` mit `{ toTag }` – ohne passenden Zieltag 400/409, nichts wird ausgelöst. Rechte wie „Live schalten“ (Rolle `plan`, Git-Prüfung `go_live`). Ein eindeutiger Index lässt je Projekt nur einen offenen Rollback zu.
+- **Ausführen:** Der Worker (`processRollback`) wartet, bis keine Agents laufen und kein Deploy läuft, checkt den Tag im Projektordner aus (nur sauber, nicht auf einem Auftrags-Branch) und ruft `deployProject` mit denselben Deploy-Befehlen auf. Kein neuer Shell-Befehl.
+- **Protokoll:** `production_rollbacks` (Projekt, Bug, Ausgangs- und Zieltag, angefordert von, Zeitpunkte, Status, Ergebnistext – auch bei Fehlern ohne einzelnen gescheiterten Befehl). Sichtbar im Bug-Detail „Betrieb“ unter „Rollback-Protokoll“, Push-Meldung nach Abschluss.
+- **Migrationen:** Beim Deploy werden Migrationsdateien erfasst, die seit dem vorherigen Tag hinzukamen oder geändert wurden (`production_deploys.new_migrations`). Der Vorschlag warnt damit; die Datenbank wird **nicht** zurückgesetzt.
+- **Bug-Status:** Bleibt unverändert offen; ob behoben, entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag; das nächste „Live schalten“ zieht ihn wieder auf `main`.
