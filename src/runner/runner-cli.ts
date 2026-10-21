@@ -78,7 +78,7 @@ async function connect(watch: boolean): Promise<Pool> {
 const loggedErrors = new Map<string, string>();
 
 /** pg liefert bei ausgefallener Datenbank AggregateErrors ohne Text; der Code (z. B. ECONNREFUSED) ist dann die einzige Information. */
-function describeError(error: unknown): string {
+export function describeError(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const code = (error as { code?: string }).code;
   return error.message || code || error.name;
@@ -99,7 +99,7 @@ async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
   return results.some(({ result }) => result === 'failed');
 }
 
-interface Target {
+export interface Target {
   options: RunnerOptions;
   problem: string | null;
   /** Projektordner laut Projekt (für die Ausfall-Überwachung). */
@@ -109,7 +109,7 @@ interface Target {
 }
 
 /** With --all every registered project is served from its own project folder (projects.repository). */
-async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Target[]> {
+export async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Target[]> {
   if (!options.all) {
     return [{ options, problem: null, repository: options.cwd, transient: false }];
   }
@@ -173,7 +173,7 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
-async function recoverInterruptedRuns(pool: Pool): Promise<void> {
+export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
   await recoverTestRequests(pool).catch(logged('runner-cli'));
   // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.

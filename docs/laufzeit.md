@@ -114,7 +114,7 @@ Setzt `agent_id`, merkt den alten Status in `return_status` und plant ein. Es l�
 
 - Bug-Auftrag in Arbeit → Bug „in_progress“; erledigt → Bug „fixed“; abgelehnt → Bug „rejected“; zurück → Bug „open“.
 - „done“ oder „rejected“ löscht „Aktion notwendig“.
-- Pro Auftrag höchstens ein laufender Lauf; älter als 3 h gilt als gescheitert.
+- Pro Auftrag höchstens ein laufender Lauf. Er gilt erst als gescheitert, wenn er rund 9 h kein Lebenszeichen gegeben hat (`ABANDONED_RUN_MS`, abgeleitet aus 2 × 240 min Schritt-Zeitlimit samt Wiederholung plus Reserve).
 
 ## 4 · Arbeitszyklus `runWorkflow` (sofort bei neuer Arbeit, sonst alle 30 s)
 
@@ -175,7 +175,7 @@ flowchart TB
 
 ### Wann ein Schritt besteht
 
-- Exit-Code 0 und nicht abgebrochen. Vorübergehender Fehler (Modell weg, überlastet, Rate-Limit, Zeitlimit): nach 30 s einmal wiederholt.
+- Exit-Code 0 und nicht abgebrochen. Vorübergehender Fehler des Agents (Modell weg, überlastet, Rate-Limit, Zeitlimit): nach 30 s einmal wiederholt, wenn das Budget es noch erlaubt. Ergebnisse der Projekttests und der visuellen Prüfung werden nie wiederholt.
 - Tester mit eigener CLI: jedes Akzeptanzkriterium und jeder DoD-Punkt erfüllt (`@@ACCEPTANCE`); nur manuell prüfbare Punkte werden „Aktion notwendig“ + Push.
 - Reviewer: eindeutige Freigabe, sonst gescheitert.
 - Kein `@@REGEL`-Einspruch (sonst Auftrag „rejected“).
@@ -362,7 +362,7 @@ Rote Tests oder ein abgelehntes Review gehen einmal direkt zurück an den Entwic
 
 ### Kurze Ausfälle
 
-Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitlimit: Der Schritt wird nach 30 s einmal wiederholt, statt den Auftrag sofort zu blockieren.
+Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitlimit: Der Schritt wird nach 30 s einmal wiederholt, statt den Auftrag sofort zu blockieren. Das gilt nur für Fehler des Agents selbst, nicht für rote Projekttests (deren Ausgabe kann ebenfalls `ECONNREFUSED` enthalten). Vor dem zweiten Versuch wird das Budget neu geprüft; ist es erreicht, hält der Lauf an wie vor einem Schritt.
 
 ### Sofortstart
 

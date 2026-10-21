@@ -5,6 +5,9 @@ import { isUuid } from '../core/validation.js';
 import { awaitsBugApprovalSql } from '../core/bug-trust.js';
 import type { RunnerOptions, WorkItem, WorkflowAgent } from './runner-types.js';
 
+/** Höchstes Zeitlimit eines Agent-Schritts (--timeout-minutes); daraus leitet sich die Schwelle für verwaiste Läufe ab. */
+export const MAX_TIMEOUT_MINUTES = 240;
+
 export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ?? process.cwd()): RunnerOptions {
   const values = new Map<string, string>();
   let watch = false;
@@ -43,8 +46,8 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new Error('--limit must be an integer between 1 and 50.');
   }
-  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 240) {
-    throw new Error('--timeout-minutes must be between 1 and 240.');
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > MAX_TIMEOUT_MINUTES) {
+    throw new Error(`--timeout-minutes must be between 1 and ${MAX_TIMEOUT_MINUTES}.`);
   }
   if (!Number.isFinite(seconds) || seconds < 5 || seconds > 3600) {
     throw new Error('--interval-seconds must be between 5 and 3600.');
