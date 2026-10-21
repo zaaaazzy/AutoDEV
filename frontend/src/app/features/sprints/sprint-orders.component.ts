@@ -158,13 +158,15 @@ export class SprintOrdersComponent {
     }
   }
 
-  /** Offene kommen direkt in den Sprint; abgebrochene werden dabei neu eingeplant (Fehler und Vermerk zurückgesetzt). */
+  /**
+   * Offene kommen direkt in den Sprint; abgebrochene werden dabei neu eingeplant (Fehler und Vermerk zurückgesetzt).
+   * Eine Server-Route statt /retry + PATCH: /retry hängte den Auftrag erst an den aktiven Sprint und setzte auto_run,
+   * sodass er auch in einem noch geplanten Sprint sofort startete.
+   */
   private async takeIntoSprint(item: DevelopmentItem): Promise<void> {
-    // Erst prüfen, dann /retry: sonst wäre ein abgebrochener Auftrag neu eingeplant, aber in keinem Sprint.
     if (!this.canTakeIn()) throw new Error('Aufträge lassen sich nur geplanten oder aktiven Sprints zuordnen.');
-    if (item.removedFromSprintAt || item.status === 'blocked') {
-      await this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`);
-    }
-    await this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, { sprintId: this.sprint().id });
+    await this.api.post(`/api/development/${encodeURIComponent(item.id)}/take-into-sprint`, {
+      sprintId: this.sprint().id,
+    });
   }
 }

@@ -36,6 +36,15 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 | Abgeschlossen | Sprint-Bericht wird erzeugt; die Git-Sicherung wird automatisch eingereiht (DB-Trigger).                                                                                                                                                                                                             |
 | Abgebrochen   | Aus „Geplant“ oder „Aktiv“ („Abbrechen“). Laufende Agents der Sprint-Aufträge werden beendet, offene Aufträge verlassen den Sprint mit Vermerk (Backlog, unter „Aktionen“ wieder einplanbar), Erledigtes bleibt beim Sprint. Keine Git-Sicherung, kein Merge. Lässt sich wieder planen oder löschen. |
 
+**Aufträge in einen Sprint nehmen („Aufträge hinzufügen“):** Auf der Sprintseite lassen sich offene und abgebrochene Aufträge in den Sprint übernehmen.
+
+- **Welche Aufträge:** Status „Backlog“, „Geplant“ oder „Blockiert“ ohne Sprint, dazu Aufträge, die aus einem Sprint genommen wurden. Express-Anfragen und Aufträge im Review („Freigabe“) werden nicht übernommen.
+- **Wohin:** Nur in einen Sprint **desselben Projekts**, der geplant oder aktiv ist. Abgeschlossene oder abgebrochene Sprints nehmen nichts auf.
+- **Was passiert:** Der Auftrag ist sofort im Ziel-Sprint, nicht erst im aktiven. Bei abgebrochenen oder blockierten Aufträgen werden Vermerk, Fehler und ein von Hand zugewiesener Agent zurückgesetzt. Blockierte zählen dabei als erneuter Versuch.
+- **Start:** Nur in einem **aktiven** Sprint startet der Worker den Auftrag. In einem **geplanten** Sprint wartet er, bis der Sprint gestartet wird. Auch ein Verschieben per PATCH in einen nicht aktiven Sprint setzt das automatische Starten zurück.
+- **Ablehnung:** Passt ein Auftrag oder Sprint nicht, meldet die Oberfläche „Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen …“. Ein Sammel-Hinweis nennt dann die nicht übernommenen Titel.
+- **Bekannte Einschränkung:** Die Liste „Aufträge hinzufügen“ zeigt Aufträge im Status „Freigabe“ ohne Sprint noch an. Sie lassen sich nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch.
+
 ## 3a. Sprintplanung und Autopilot
 
 Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`):
