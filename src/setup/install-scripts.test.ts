@@ -166,6 +166,21 @@ test('run-with-env.sh: setzt Werte unverändert, bricht ohne oder mit offener En
   assert.equal(run('bash', [wrapper, envFile, ...print], {}).status, 78);
 });
 
+test('Env-Datei der Dienste: leere Werte werden nicht geschrieben', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'aideation-svc-'));
+  const target = join(dir, 'conf', 'worker.env');
+  const lib = join(SCRIPTS, 'lib', 'service-env.sh');
+  const result = run(
+    'bash',
+    ['-c', `. "${lib}" && write_env_file "${target}" DEV_LOG_SECRET_KEY= DEV_LOG_DOMAIN=x.example`],
+    {},
+  );
+  assert.equal(result.status, 0, result.output);
+  const lines = (await readFile(target, 'utf8')).split('\n');
+  assert.ok(lines.includes('DEV_LOG_DOMAIN=x.example'));
+  assert.ok(!lines.some((line) => line.startsWith('DEV_LOG_SECRET_KEY')));
+});
+
 test('PowerShell-Skripte: Code außerhalb von Kommentaren nur ASCII (Windows PowerShell 5.1 ohne BOM)', async () => {
   for (const name of ['install-worker.ps1', 'run-with-env.ps1']) {
     const code = (await readFile(join(SCRIPTS, name), 'utf8'))
