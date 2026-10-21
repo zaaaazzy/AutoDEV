@@ -932,3 +932,25 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   assert.match(String(retry?.values[2]), /Nutzungslimit .* ab \d\d:\d\d Uhr/);
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
 });
+
+test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; danach geht es normal weiter', async () => {
+  const { setDraining } = await import('../core/shutdown.js');
+  const started: string[] = [];
+  const items = [
+    { ...item, id: 'a' },
+    { ...item, id: 'b' },
+  ];
+  try {
+    const results = await runSelectedItems(items, async (current) => {
+      started.push(current.id);
+      // Während Auftrag a läuft, wird ein Neustart angefordert.
+      setDraining(true);
+      return 'passed';
+    });
+    assert.deepEqual(started, ['a']);
+    assert.deepEqual(results, [{ itemId: 'a', result: 'passed' }]);
+  } finally {
+    setDraining(false);
+  }
+  assert.equal((await runSelectedItems(items, async () => 'passed')).length, 2);
+});

@@ -888,6 +888,15 @@ async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, pro
 export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
   const { pool, item, options, execute } = ctx;
   if (interrupted) {
+    // Arbeitsordner freigeben: Zwischenstand als WIP-Commit auf dem Auftrags-Branch sichern und zur Basis zurück.
+    // Sonst bliebe der Ordner (oft stundenlang, z. B. beim Nutzungslimit) auf diesem Branch stehen, und jeder andere
+    // Auftrag scheiterte an „fremden Änderungen“. Der nächste Lauf setzt den Branch samt WIP fort (enterOrderBranch).
+    if (ctx.branch) {
+      const saved = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', false, execute).catch(
+        (error: unknown) => ({ message: error instanceof Error ? error.message : String(error) }),
+      );
+      console.info(`[${item.id}] Unterbrochen – ${saved.message}`);
+    }
     // Return interrupted orders to planned while retaining their assignment so they can resume after restart.
     await pool.query(
       `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', updated_at = NOW() WHERE id = $1`,

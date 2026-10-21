@@ -160,13 +160,25 @@
             }
           </span>
         </fieldset>
+        <label class="wide check">
+          <input
+            type="checkbox"
+            name="autopilotAutoLive"
+            [(ngModel)]="settings.autopilotAutoLive"
+            [disabled]="settings.sprintMode !== 'autopilot'"
+          />
+          Autopilot schaltet selbst live: Ist ein Sprint fertig, schliesst der Autopilot ihn innerhalb der Arbeitszeiten
+          selbst ab (Test-Gate, Merge nach <code>main</code>, Push) und startet danach den nächsten – ohne dein Go. Nur
+          sinnvoll mit Review „aus“ oder „nur Oberfläche“, sonst wartet jeder Auftrag auf deine Freigabe.</label
+        >
         <p class="muted wide">
           Die Kapazität ist der Median der gemessenen Ist-Stunden und Ist-Tokens (Laufzeit der Agents) erledigter
           Aufträge der letzten 3 abgeschlossenen Sprints; ohne Historie gilt die Einstellung. Der Autopilot startet neue
           Sprints nur innerhalb der Arbeitszeiten (Ortszeit des Workers; „Bis“ vor „Von“ = über Mitternacht, gleiche
-          Zeiten = ganztägig). Er schliesst einen Sprint ab, sobald nur noch „Aktion notwendig“ offen ist – diese
-          Aufträge wandern in den nächsten Sprint. Scheitert der Abschluss (Merge/Git), pausiert er bis zur Freigabe in
-          Sprints. Ein Budget gibt es noch nicht; die Arbeitszeiten sind die Kostengrenze.
+          Zeiten = ganztägig). Ein Sprint ist fertig, sobald nur noch „Aktion notwendig“ offen ist – diese Aufträge
+          wandern in den nächsten Sprint. Ohne „selbst live“ wartet er dann auf dein Go („Live schalten“). Scheitert der
+          Abschluss (Test-Gate, Merge, Push), pausiert der Autopilot bis zur Freigabe in Sprints. Kostengrenzen stehen
+          unter „Budget“.
         </p>
         <label class="wide"
           >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea

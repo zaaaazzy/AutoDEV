@@ -35,6 +35,7 @@ export interface Project {
   autopilotStart?: string;
   autopilotEnd?: string;
   autopilotDays?: number[];
+  autopilotAutoLive?: boolean;
   databaseConfigured?: boolean;
   definitionOfReady?: string[] | null;
   definitionOfDone?: string[] | null;

@@ -1,6 +1,6 @@
 import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
-import { applyProposal, autopilotGuard, loadProposal } from '../api/sprint-planning.js';
+import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 
 export type AutopilotStep =
@@ -88,6 +88,38 @@ export async function markSprintReady(pool: Pool, project: string): Promise<bool
 }
 
 /**
+ * Fertigen Sprint selbst live schalten. Nur aus „aktiv“, nicht pausiert (eine Pause ist eine Entscheidung eines
+ * Menschen) und ohne laufenden Auftrag – dieselben Bedingungen wie „Live schalten“ in der Oberfläche.
+ */
+async function goLiveAutomatically(
+  pool: Pool,
+  project: string,
+  sprint: { id: string; name: string },
+): Promise<boolean> {
+  const claimed = await pool.query(
+    `UPDATE sprints s SET status = 'completed'
+      WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'in_progress')
+      RETURNING s.id`,
+    [sprint.id],
+  );
+  if (!claimed.rows[0]) return false;
+  await completeSprint(pool, sprint.id);
+  console.info(`[${project}] Autopilot: „${sprint.name}“ fertig – wird live geschaltet (Test-Gate, Merge, Push).`);
+  await sendPush(
+    pool,
+    {
+      title: `🚀 Sprint wird live geschaltet · ${project}`,
+      body: `${sprint.name}: Alle Aufträge sind durch. Der Autopilot schaltet live (Test-Gate, Merge nach main, Push).`,
+      url: `#sprints?project=${encodeURIComponent(project)}`,
+      tag: `sprint-ready-${sprint.id}`,
+    },
+    { project },
+  ).catch(logged('sprint-autopilot'));
+  return true;
+}
+
+/**
  * Autopilot je Projekt (am Anfang jedes Worker-Zyklus): Ist im laufenden Sprint nichts mehr zu tun, wartet er
  * auf das Go („Live schalten“); erst danach wird – nur innerhalb der Arbeitszeiten – der nächste Sprint vorgeschlagen, übernommen und
  * gestartet. Offene „Aktion notwendig“-Aufträge wandern dabei mit. Scheitert der Abschluss (Merge/Git), pausiert
@@ -120,8 +152,12 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
       )
     ).rows;
     if (!sprintSettled(items)) return 'working';
-    // Alles erledigt: Der Sprint wartet auf das Go (Vorschau ansehen, „Live schalten“) – der Autopilot schaltet nie
-    // selbst live und startet den nächsten Sprint erst danach.
+    // Alles erledigt. Mit „Autopilot schaltet selbst live“ (innerhalb der Arbeitszeiten) schliesst er den Sprint wie
+    // „Live schalten“ ab: Bericht, dann Test-Gate, Merge nach main und Push durch die Git-Sicherung. Scheitert sie,
+    // pausiert der Autopilot wie bisher. Sonst wartet der Sprint auf das Go (Vorschau ansehen, „Live schalten“).
+    if (guard.autoLive && guard.state !== 'outside_hours' && (await goLiveAutomatically(pool, project, active))) {
+      return 'completed';
+    }
     return 'review';
   }
 

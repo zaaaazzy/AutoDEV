@@ -33,6 +33,11 @@ export interface RestartState {
 
 export const OPEN_STATUSES: readonly RestartStatus[] = ['requested', 'building', 'restarting'];
 
+/** Darf der Worker neue Arbeit starten? Nicht, solange ein Neustart angefordert ist oder die Container gebaut werden. */
+export function acceptsNewWork(state: Pick<RestartState, 'status'> | null): boolean {
+  return state?.status !== 'requested' && state?.status !== 'building';
+}
+
 type Queryable = Pick<Pool, 'query'>;
 
 export async function readRestart(pool: Queryable): Promise<RestartState | null> {
