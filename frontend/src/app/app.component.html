@@ -154,6 +154,9 @@
       <header class="topbar">
         <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>AIdeation</strong></div>
         <app-project-switcher (create)="showProjectForm.set(true)" />
+        @if (store.currentProject()?.reviewCommand?.length) {
+          <app-header-review />
+        }
         <div class="topbar-status">
           <div class="agent-indicator">
             <a
@@ -238,6 +241,7 @@
               </a>
               @if (sprintPopover()) {
                 <div class="agent-popover sprint-popover" role="group" aria-label="Sprint-Vorschau">
+                  <app-git-alert [compact]="true" />
                   @if (sprintAttention().length) {
                     <div class="sprint-attention" aria-label="Aufträge mit Handlungsbedarf">
                       <p class="popover-title">Aktion notwendig · {{ sprintAttention().length }}</p>
@@ -313,14 +317,21 @@
                 {{ showCreate() ? 'Schließen' : '+ ' + label }}
               </button>
             }
-            <button
-              class="button secondary"
-              type="button"
-              (click)="store.loadProjects(activeProject())"
-              [disabled]="busy()"
-            >
-              Aktualisieren
-            </button>
+            @if (pageSearch.available()) {
+              <label class="page-search">
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                  <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
+                  <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+                <input
+                  type="search"
+                  [placeholder]="pageSearch.placeholder() ?? 'Seite durchsuchen …'"
+                  [attr.aria-label]="pageSearch.placeholder() ?? 'Seite durchsuchen'"
+                  [value]="pageSearch.query()"
+                  (input)="pageSearch.query.set($any($event.target).value)"
+                />
+              </label>
+            }
           </div>
         </section>
         @if (showProjectForm()) {

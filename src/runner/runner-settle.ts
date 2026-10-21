@@ -59,6 +59,15 @@ async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, pro
 export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
   const { pool, item, options, execute } = ctx;
   if (interrupted) {
+    // Arbeitsordner freigeben: Zwischenstand als WIP-Commit auf dem Auftrags-Branch sichern und zur Basis zurück.
+    // Sonst bliebe der Ordner (oft stundenlang, z. B. beim Nutzungslimit) auf diesem Branch stehen, und jeder andere
+    // Auftrag scheiterte an „fremden Änderungen“. Der nächste Lauf setzt den Branch samt WIP fort (enterOrderBranch).
+    if (ctx.branch) {
+      const saved = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', false, execute).catch(
+        (error: unknown) => ({ message: error instanceof Error ? error.message : String(error) }),
+      );
+      console.info(`[${item.id}] Unterbrochen – ${saved.message}`);
+    }
     // Return interrupted orders to planned while retaining their assignment so they can resume after restart.
     await pool.query(
       `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.planned}', updated_at = NOW() WHERE id = $1`,
@@ -107,17 +116,18 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     // A one-agent play restores the previous status; a blocked order resumes normally after success.
     await pool.query(
       `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-              status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status WHEN NOT $2 THEN '${DEVELOPMENT_STATUS.blocked}' WHEN return_status IS NULL OR return_status = '${DEVELOPMENT_STATUS.blocked}' THEN '${DEVELOPMENT_STATUS.planned}' ELSE return_status END
+              status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.rejected}', '${DEVELOPMENT_STATUS.backlog}') THEN status WHEN NOT $2 THEN '${DEVELOPMENT_STATUS.blocked}' WHEN return_status IS NULL OR return_status = '${DEVELOPMENT_STATUS.blocked}' THEN '${DEVELOPMENT_STATUS.planned}' ELSE return_status END
         WHERE id = $1`,
       [item.id, succeeded],
     );
     await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);
     return;
   }
-  // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“.
+  // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“. „Backlog“ ebenso: der
+  // Sprint wurde währenddessen abgebrochen (cancelSprint), der Auftrag bleibt draußen und wartet unter „Aktionen“.
   await pool.query(
     `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-            status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status ELSE $2 END WHERE id = $1`,
+            status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.rejected}', '${DEVELOPMENT_STATUS.backlog}') THEN status ELSE $2 END WHERE id = $1`,
     [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
   await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);

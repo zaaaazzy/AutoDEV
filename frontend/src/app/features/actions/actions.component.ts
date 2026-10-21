@@ -1,15 +1,15 @@
-import { NgClass } from '@angular/common';
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { BugIconComponent } from '../../shared/bug-icon.component.js';
+import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
+import type { AttentionEntry } from '../../shared/order-attention.js';
 import { isFinished } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderQuestionComponent } from '../../shared/order-question.component.js';
-import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { OrderApprovalComponent } from '../development/order-approval.component.js';
 import { OrderDetailComponent } from '../development/order-detail.component.js';
+import { OrderDetailSlotDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { OrderService } from '../development/order.service.js';
 import { AcceptanceReviewComponent } from './acceptance-review.component.js';
 
@@ -23,14 +23,12 @@ import { AcceptanceReviewComponent } from './acceptance-review.component.js';
   standalone: true,
   imports: [
     AcceptanceReviewComponent,
-    NgClass,
-    BugIconComponent,
     MarkdownPipe,
     OrderApprovalComponent,
     OrderDetailComponent,
+    OrderDetailSlotDirective,
     OrderQuestionComponent,
-    StatusClassPipe,
-    StatusLabelPipe,
+    OrderTableComponent,
   ],
   templateUrl: './actions.component.html',
   host: { style: 'display: contents' },
@@ -43,43 +41,30 @@ export class ActionsComponent {
   protected readonly busy = this.store.busy;
   protected readonly isFinished = isFinished;
   protected readonly attention = this.store.attention;
-  protected readonly openAttention = signal<string | null>(null);
+  /** Zeilen der Tabelle – dieselbe Darstellung wie unter „Aufträge“. */
+  protected readonly items = computed(() => this.attention().map((entry) => entry.item));
+  private readonly entries = computed(() => new Map(this.attention().map((entry) => [entry.item.id, entry])));
+  /** Aufträge mit eingeblendeten Auftragsdetails (Knopf „Details“); zu ist der Normalfall. */
+  private readonly detailsShown = signal<ReadonlySet<string>>(new Set());
+  /** Antwort bzw. Hinweis an die Agents je Auftrag, bis „Erneut versuchen“ ihn mitschickt. */
+  private readonly notes = signal<Record<string, string>>({});
 
   constructor() {
-    // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Karte aufklappen und hinscrollen.
+    // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Die Tabelle klappt die Zeile auf,
+    // hier wird nur hingescrollt.
     effect(() => {
       const id = this.store.focusId();
       if (!id || !this.store.attentionIds().has(id)) return;
-      untracked(() => {
-        this.openAttention.set(id);
-        globalThis.setTimeout(
-          () => document.getElementById(`order-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
-          200,
-        );
-      });
+      untracked(() =>
+        globalThis.setTimeout(() => {
+          const target = document.getElementById(`order-${id}`)?.closest('tr')?.previousElementSibling;
+          (target ?? document.querySelector('.attention-table .row-open'))?.scrollIntoView({
+            block: 'start',
+            behavior: 'smooth',
+          });
+        }, 200),
+      );
     });
-  }
-
-  /** Regel, gegen die ein abgelehnter Auftrag verstösst (aus dem Vermerk des Agents). */
-  protected rule(item: DevelopmentItem): string {
-    const vermerk = /\*\*Vermerk[^*]*:\*\*\s*([^\n]+)/.exec(item.failure ?? '')?.[1] ?? '';
-    return vermerk.replace(/^Projektregel\s*–\s*/, '').trim();
-  }
-
-  protected analysisRunning(item: DevelopmentItem): boolean {
-    return item.analysisStatus === 'requested' || item.analysisStatus === 'running';
-  }
-
-  /** Sprintbericht mit dem ToDo-Kapitel des Auftrags (falls der Sprint schon dokumentiert ist). */
-  protected sprintDoc(item: DevelopmentItem): string | null {
-    const sprintId = item.sprintId;
-    return sprintId
-      ? (this.data().docs.find((doc) => doc.kind === 'sprint' && doc.sprintId === sprintId)?.id ?? null)
-      : null;
-  }
-
-  protected openDoc(id: string): void {
-    this.store.navigate('docs', { focus: id });
   }
 
   /** Ohne gestarteten Behebungsauftrag stimmt „an einen Behebungsauftrag delegiert“ nicht: weglassen. */
@@ -89,10 +74,6 @@ export class ActionsComponent {
 
   protected openBug(id: string): void {
     this.store.navigate('bugs', { focus: id });
-  }
-
-  protected retryOrder(item: DevelopmentItem): Promise<void> {
-    return this.orders.retry(item);
   }
 
   protected analyzeOrder(item: DevelopmentItem): Promise<void> {
@@ -111,7 +92,79 @@ export class ActionsComponent {
     return this.orders.checkPoint(item, check, true);
   }
 
-  protected toggle(id: string): void {
-    this.openAttention.set(this.openAttention() === id ? null : id);
+  protected entryOf(id: string): AttentionEntry | null {
+    return this.entries().get(id) ?? null;
+  }
+
+  protected detailsOpen(id: string): boolean {
+    return this.detailsShown().has(id);
+  }
+
+  protected toggleDetails(id: string): void {
+    this.detailsShown.update((shown) => {
+      const next = new Set(shown);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  protected approve(item: DevelopmentItem): Promise<void> {
+    return this.orders.approve(item);
+  }
+
+  protected reject(item: DevelopmentItem): Promise<void> {
+    return this.orders.rejectReview(item);
+  }
+
+  protected note(id: string): string {
+    return this.notes()[id] ?? '';
+  }
+
+  protected setNote(id: string, value: string): void {
+    this.notes.update((notes) => ({ ...notes, [id]: value }));
+  }
+
+  /** Antwortfeld nur, wo eine Antwort den Auftrag weiterbringt (blockiert und neu startbar). */
+  protected canAnswer(item: DevelopmentItem, step: CardStep): boolean {
+    return (
+      item.status === 'blocked' &&
+      item.kind !== 'express' &&
+      this.auth.can('run') &&
+      (step === 'retry' || step === 'suggestion' || step === 'task')
+    );
+  }
+
+  /** Die eine Hauptaktion der Zeile; null, wenn es nichts zu klicken gibt (z. B. Behebung läuft). */
+  protected primaryLabel(item: DevelopmentItem, step: CardStep): string | null {
+    switch (step) {
+      case 'suggestion':
+        return this.auth.can('run') ? 'So umsetzen lassen' : null;
+      case 'retry':
+      case 'task':
+        return item.kind !== 'express' && this.auth.can('run') ? 'Erneut versuchen' : null;
+      case 'rule':
+        return this.auth.can('run') ? 'Angepasst – erneut versuchen' : null;
+      case 'replan':
+        return this.auth.can('run') ? 'Wieder einplanen' : null;
+      case 'check':
+        return this.auth.can('plan') ? 'Geprüft – alles in Ordnung' : null;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Hauptaktion ausführen – immer erst nach Bestätigung im Dialog. Beim Vorschlag gehen Vorschlag und deine
+   * Ergänzung gemeinsam an die Agents; die Ergänzung ersetzt den Vorschlag nicht.
+   */
+  protected async primary(item: DevelopmentItem, card: AttentionCard, label: string): Promise<void> {
+    if (card.step === 'check') return this.confirmOrder(item);
+    const done = await this.orders.retryNow(item, {
+      label,
+      note: this.note(item.id),
+      suggestion: card.step === 'suggestion' ? card.detail : null,
+    });
+    if (done) this.setNote(item.id, '');
   }
 }

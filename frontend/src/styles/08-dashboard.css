@@ -860,3 +860,168 @@ app-order-table {
   }
 }
 
+
+/* Karte unter „Aktionen“: ein Grund („Warum“), ein nächster Schritt („Was jetzt“), eine Hauptaktion, Rest unter „Mehr“. */
+.attention-card.focused {
+  border-color: #e0a03a;
+  box-shadow: 0 0 0 3px #fdf1e0;
+}
+.attention-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+}
+.attention-label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.attention-why {
+  margin: 0;
+}
+.attention-now {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 10px;
+  background: #fdf6ec;
+}
+.attention-now .attention-label {
+  color: #a0610d;
+}
+.attention-now p,
+.attention-now .todo-list {
+  margin: 0;
+}
+.attention-suggestion {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+}
+.attention-suggestion span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.attention-answer {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.attention-answer textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+}
+/* Live-Anzeige eines laufenden Testlaufs (Testläufe, Test-Gate der Sprint-Sicherung). */
+.test-live {
+  border-color: #b9d6c7;
+}
+.test-live h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.test-live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2f8f5b;
+  animation: test-live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes test-live-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .test-live-dot {
+    animation: none;
+  }
+}
+.test-live-steps {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.test-live-step {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.test-live-step.running {
+  background: #eef6f1;
+}
+.test-live-name {
+  font-weight: 600;
+}
+.test-live-time {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.test-live-progress,
+.test-live-output {
+  grid-column: 2 / -1;
+  font-size: 13px;
+}
+.test-live-output pre {
+  max-height: 240px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #1f2620;
+  color: #e7ede9;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* „Aktionen“ als Auftragstabelle wie unter „Aufträge“; aufgeklappt Warum, Lösungsvorschlag, Ergänzung, Aktionen
+   und – erst über „Details“ – die Auftragsdetails. */
+.attention-body {
+  display: grid;
+  gap: 12px;
+  padding: 4px 4px 8px;
+}
+.attention-section h3,
+.attention-detail > h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.attention-section p {
+  margin: 0;
+}
+.attention-solution .attention-suggestion {
+  padding: 8px 12px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 8px;
+  background: #fdf6ec;
+}
+.attention-solution .small {
+  margin-top: 4px;
+}
+.attention-details-toggle[aria-expanded='true'] {
+  border-color: #2f6f4f;
+}
+.attention-tech {
+  margin-top: 10px;
+}

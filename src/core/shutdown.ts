@@ -28,6 +28,16 @@ export function setProcessStore(next: ProcessStore | null): void {
   store = next;
 }
 
+/**
+ * Neustart angefordert oder Container im Bau: keine neue Arbeit mehr starten (Aufträge, Chat, Tests, Jobs), nur
+ * Laufendes zu Ende bringen. Sonst würde der Neustart sie mitten im Schritt beenden.
+ */
+let draining = false;
+export const isDraining = (): boolean => draining;
+export function setDraining(value: boolean): void {
+  draining = value;
+}
+
 export function trackChild(pid: number, details: { command?: string; cwd?: string } = {}): () => void {
   children.add(pid);
   const entry: TrackedProcess = { pid, startedAt: new Date(), command: details.command ?? '', cwd: details.cwd ?? '' };

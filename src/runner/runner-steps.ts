@@ -4,7 +4,7 @@ import { manualTodo, setActionTodo } from './action-todo.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
-import { isTransientFailure, registerFailure, ruleRefusal } from './autofix.js';
+import { isTransientFailure, registerFailure, ruleRefusal, usageLimitReset } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
@@ -256,6 +256,23 @@ export async function runStep(
   await progress.stop();
 
   let output = redactOutput(result.output, process.env);
+  // Nutzungslimit des Agent-Kontos: kein Fehler im Auftrag, kein Bug, keine Wiederholung in Minuten. Der Auftrag bleibt
+  // geplant und startet erst nach dem Reset wieder (retry_after); bisherige Schritte gelten wie bei einer Unterbrechung.
+  const limitReset = result.exitCode !== 0 && !cancelled ? usageLimitReset(output) : null;
+  if (limitReset) {
+    const until = limitReset.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${until} Uhr wieder.`;
+    await pool.query(
+      `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
+      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
+    );
+    await pool
+      .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, limitReset, reason])
+      .catch(logged('runner-steps'));
+    await logEvent(pool, stepId, reason);
+    console.info(`[${item.id}] ${reason}`);
+    return { passed: false, interrupted: true };
+  }
   // Worker beendet oder Projektordner zwischendurch weg (externes Laufwerk getrennt): kein Fehler im Auftrag, der Lauf
   // wird erneut eingeplant – ohne Bug-Bericht und Problemanalyse.
   const folderLost = result.exitCode !== 0 && folderAtStart && hadOutage(ctx.options.cwd, stepStartedAt);

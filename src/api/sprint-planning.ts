@@ -14,6 +14,7 @@ import {
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { describeWorkingHours, type WorkingHours, withinWorkingHours } from '../core/working-hours.js';
 import { generateSprintReport } from './reports.js';
+import { guardGit } from './git-state.js';
 import { completedSprintUsage, costOfTokens, tokenPriceUsd } from './usage.js';
 
 /** Modus der Sprintplanung je Projekt: manuell (Standard), vorschlagen, Autopilot. */
@@ -32,6 +33,8 @@ export interface AutopilotGuard {
   workingHours: WorkingHours;
   /** Sprint, dessen Git-Fehler den Autopilot anhält (für die Freigabe). */
   failedSprintId: string | null;
+  /** Fertige Sprints selbst live schalten statt auf das Go zu warten (Projekteinstellung). */
+  autoLive: boolean;
 }
 
 export interface LoadedProposal extends SprintProposal {
@@ -134,9 +137,16 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
  */
 export async function autopilotGuard(pool: Pool, project: string, now = new Date()): Promise<AutopilotGuard | null> {
   const settings = (
-    await pool.query<{ mode: SprintMode; start: string; end: string; days: number[]; released: string | null }>(
+    await pool.query<{
+      mode: SprintMode;
+      start: string;
+      end: string;
+      days: number[];
+      released: string | null;
+      autoLive: boolean | null;
+    }>(
       `SELECT sprint_mode AS mode, autopilot_start AS start, autopilot_end AS "end", autopilot_days AS days,
-              autopilot_released_sprint AS released
+              autopilot_released_sprint AS released, autopilot_auto_live AS "autoLive"
          FROM projects WHERE slug = $1`,
       [project],
     )
@@ -148,6 +158,7 @@ export async function autopilotGuard(pool: Pool, project: string, now = new Date
     message,
     workingHours,
     failedSprintId,
+    autoLive: settings.autoLive === true,
   });
   if (settings.mode !== 'autopilot') return guard('off', null);
   const last = (
@@ -289,7 +300,9 @@ export async function applyProposal(
 /** Sprint abschliessen: Bericht, danach testet, merged und pusht der Worker (Git-Sicherung). */
 export async function completeSprint(pool: Pool, sprintId: string): Promise<void> {
   await pool.query(
-    `UPDATE sprints SET status = 'completed', end_date = COALESCE(end_date, CURRENT_DATE) WHERE id = $1`,
+    // Ein vorzeitig gestarteter Sprint hat ein Startdatum in der Zukunft: das Ende nie davor legen (CHECK end >= start).
+    `UPDATE sprints SET status = 'completed', end_date = COALESCE(end_date, GREATEST(start_date, CURRENT_DATE))
+      WHERE id = $1`,
     [sprintId],
   );
   await generateSprintReport(pool, sprintId);
@@ -331,6 +344,7 @@ export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
         if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
         const body = isRecord(request.body) ? request.body : {};
         const comment = typeof body.comment === 'string' ? body.comment : '';
+        if (body.start === true && !(await guardGit(pool, slug, 'sprint_start', body, response))) return;
         const result = await applyProposal(pool, slug, ids, body.start === true, comment);
         if (typeof result === 'string') return void response.status(400).json({ message: result });
         response.status(201).json(result);

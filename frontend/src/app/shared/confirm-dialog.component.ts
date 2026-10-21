@@ -27,25 +27,33 @@ import { ConfirmService } from '../core/confirm.service.js';
             </ul>
           }
           <form class="confirm-form" (submit)="$event.preventDefault(); accept()">
-            <label for="confirm-comment">{{ pending.options.commentLabel ?? 'Kommentar (optional)' }}</label>
-            <textarea
-              #field
-              id="confirm-comment"
-              rows="3"
-              maxlength="2000"
-              [placeholder]="pending.options.commentPlaceholder ?? ''"
-              [required]="!!pending.options.commentRequired"
-              [value]="comment()"
-              (input)="comment.set($any($event.target).value)"
-              (keydown.control.enter)="accept()"
-              (keydown.meta.enter)="accept()"
-            ></textarea>
-            @if (pending.options.commentHint) {
-              <small class="muted">{{ pending.options.commentHint }}</small>
+            @if (!pending.options.withoutComment) {
+              <label for="confirm-comment">{{ pending.options.commentLabel ?? 'Kommentar (optional)' }}</label>
+              <textarea
+                #field
+                id="confirm-comment"
+                rows="3"
+                maxlength="2000"
+                [placeholder]="pending.options.commentPlaceholder ?? ''"
+                [required]="!!pending.options.commentRequired"
+                [value]="comment()"
+                (input)="comment.set($any($event.target).value)"
+                (keydown.control.enter)="accept()"
+                (keydown.meta.enter)="accept()"
+              ></textarea>
+              @if (pending.options.commentHint) {
+                <small class="muted">{{ pending.options.commentHint }}</small>
+              }
             }
             <div class="confirm-actions">
               <button class="button secondary" type="button" (click)="cancel()">Abbrechen</button>
-              <button class="button primary" type="submit" [disabled]="missingComment()">
+              <button
+                #submit
+                class="button primary"
+                type="submit"
+                [class.danger]="!!pending.options.danger"
+                [disabled]="missingComment()"
+              >
                 {{ pending.options.confirmLabel }}
               </button>
             </div>
@@ -59,13 +67,15 @@ export class ConfirmDialogComponent {
   protected readonly confirm = inject(ConfirmService);
   protected readonly comment = signal('');
   private readonly field = viewChild<ElementRef<HTMLTextAreaElement>>('field');
+  private readonly submit = viewChild<ElementRef<HTMLButtonElement>>('submit');
 
   constructor() {
-    // Neuer Dialog: Feld leeren und fokussieren.
+    // Neuer Dialog: Feld vorbelegen (bzw. leeren) und fokussieren; ohne Feld den Bestätigen-Knopf.
     effect(() => {
-      if (!this.confirm.pending()) return;
-      this.comment.set('');
-      queueMicrotask(() => this.field()?.nativeElement.focus());
+      const pending = this.confirm.pending();
+      if (!pending) return;
+      this.comment.set(pending.options.withoutComment ? '' : (pending.options.initialComment ?? ''));
+      queueMicrotask(() => (this.field() ?? this.submit())?.nativeElement.focus());
     });
   }
 

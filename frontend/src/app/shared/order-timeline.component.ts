@@ -26,7 +26,7 @@ const KIND_LABEL: Record<TimelineEntry['kind'], string> = {
   // Der Inhalt zwischen den Tags (z. B. Status- und Sprintwahl) steht zwischen „Stand“ und Zeitleiste:
   // So zeigt der Auftrag zuerst, worauf er wartet, ohne die Zeitleiste ein zweites Mal zu laden.
   template: `
-    @if (timeline(); as current) {
+    @if (showWaiting() && timeline(); as current) {
       <p class="order-waiting" [attr.data-tone]="current.waiting.tone">
         <span class="order-waiting-label">Stand</span> {{ current.waiting.label }}
       </p>
@@ -58,8 +58,12 @@ const KIND_LABEL: Record<TimelineEntry['kind'], string> = {
 export class OrderTimelineComponent {
   private readonly api = inject(ApiService);
   readonly order = input.required<DevelopmentItem>();
+  /** „Stand“ über dem Inhalt zeigen; unter „Aktionen“ aus, dort steht der Grund schon in der Zeile. */
+  readonly showWaiting = input(true);
   protected readonly timeline = signal<OrderTimeline | null>(null);
   private stopTimer: (() => void) | null = null;
+  /** Auftrag, zu dem die angezeigte Zeitleiste gehört. */
+  private loadedFor: string | null = null;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.stopPolling());
@@ -91,6 +95,9 @@ export class OrderTimelineComponent {
       .get<OrderTimeline>(`/api/development/${encodeURIComponent(id)}/timeline`)
       .catch(() => null);
     if (id !== this.order().id) return;
+    // Kurz nicht erreichbar (z. B. Neustart): bisherige Zeitleiste behalten, sonst klappte sie zu und verschwände.
+    if (!result && this.loadedFor === id) return;
+    this.loadedFor = result ? id : null;
     this.timeline.set(result);
   }
 }

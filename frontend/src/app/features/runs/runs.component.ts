@@ -16,6 +16,7 @@ import { statusLabel } from '../../shared/labels.js';
 import { DurationPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { summarizeOutput } from './output-summary.js';
 import { StepSummaryComponent } from './step-summary.component.js';
+import { TestRunLiveComponent } from './test-run-live.component.js';
 
 export const CATEGORIES: { id: TestCategory; label: string; hint: string }[] = [
   { id: 'quality', label: 'Qualität', hint: 'Lint, Formatierung, Typen, Build' },
@@ -97,6 +98,7 @@ interface MediaItem extends TestMedia {
     StatusClassPipe,
     StatusLabelPipe,
     StepSummaryComponent,
+    TestRunLiveComponent,
   ],
   templateUrl: './runs.component.html',
   host: { style: 'display: contents' },

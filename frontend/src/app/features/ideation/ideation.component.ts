@@ -37,6 +37,7 @@ import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
 import { errorMessage } from '../../core/errors.js';
 import {
+  IDEA_EDITABLE_STATUSES,
   IDEA_SELECTABLE_STATUSES,
   IDEA_STATUSES,
   ideaDisplayStatus,
@@ -277,6 +278,11 @@ export class IdeationComponent {
       }`,
     );
     this.clearPicks();
+  }
+
+  /** Bearbeiten wie auf dem Server erlaubt (nicht während der Auftragsautor schreibt, nicht nach der Annahme). */
+  protected editable(idea: Idea): boolean {
+    return IDEA_EDITABLE_STATUSES.includes(idea.status);
   }
 
   protected editIdea(id: string): void {

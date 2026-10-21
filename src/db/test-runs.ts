@@ -44,6 +44,18 @@ export async function createTestRunStep(
   );
 }
 
+/** Zwischenstand eines laufenden Schritts: Fortschrittszeile und Ende der bisherigen Ausgabe (nur solange er läuft). */
+export async function updateTestRunStepProgress(
+  pool: Pool,
+  step: { runId: string; position: number; progress: string; output: string },
+): Promise<void> {
+  await pool.query(
+    `UPDATE test_run_steps SET progress = $3, output = $4
+      WHERE run_id = $1 AND position = $2 AND status = '${TEST_RUN_STATUS.running}'`,
+    [step.runId, step.position, step.progress, step.output],
+  );
+}
+
 export async function finishTestRunStep(
   pool: Pool,
   step: { runId: string; position: number; exitCode: number; durationMs: number; output: string },

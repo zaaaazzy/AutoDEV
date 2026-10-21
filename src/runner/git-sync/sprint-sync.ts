@@ -2,6 +2,7 @@
 import type { Pool } from 'pg';
 import { acquireTree, withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, runCommand } from '../../core/command.js';
+import { isShuttingDown } from '../../core/shutdown.js';
 import { createGithubAdapter, githubRepo } from '../github.js';
 import type { HosterAdapter } from '../hoster.js';
 import { loadTestCommands } from '../runner-selection.js';
@@ -417,6 +418,17 @@ export async function syncSprintToGit(
     return 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Worker wird beendet (Neustart): Das Test-Gate wurde abgeschossen, nicht rot. Erneut einreihen statt „failed“ –
+    // sonst pausierte der Autopilot wegen eines Testfehlers, den es nie gab. Ein Merge nach main wurde vom Gate-Pfad
+    // schon zurückgenommen.
+    if (isShuttingDown()) {
+      await pool.query(
+        `UPDATE sprints SET git_sync = 'pending', git_message = $2 WHERE id = $1 AND git_sync = 'running'`,
+        [sprint.id, 'Durch einen Neustart unterbrochen – die Git-Sicherung läuft nach dem Start erneut.'],
+      );
+      console.info(`Git-Sicherung für Sprint ${sprint.id} durch Neustart unterbrochen, wird wiederholt.`);
+      return 0;
+    }
     await pool.query(`UPDATE sprints SET git_sync = 'failed', git_message = $2, git_synced_at = NOW() WHERE id = $1`, [
       sprint.id,
       [...log, message].join(' ').slice(0, 1500),

@@ -1,8 +1,10 @@
 import { Component, DestroyRef, computed, inject, input } from '@angular/core';
 import type { DevelopmentItem, ReviewSlot } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { WaitStatusComponent } from '../runs/wait-status.component.js';
 import { OrderService } from './order.service.js';
 import { ReviewStateService } from './review-state.service.js';
+import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
 /**
  * Review-Freigabe eines Auftrags: Er ist fertig und getestet, aber noch nicht im Sprint-Branch. In der Review-Instanz
@@ -11,6 +13,7 @@ import { ReviewStateService } from './review-state.service.js';
 @Component({
   selector: 'app-order-approval',
   standalone: true,
+  imports: [GitAlertComponent, WaitStatusComponent],
   template: `
     @let item = order();
     <div class="approval-box">
@@ -32,11 +35,12 @@ import { ReviewStateService } from './review-state.service.js';
         } @else if (shown(); as slot) {
           <p class="approval-instance">
             <span class="approval-dot" [class]="slot.status"></span>
-            {{ instanceLabel() }}
+            {{ slot.status === 'running' && wait.status() ? 'Review ' + slot.slot : instanceLabel() }}
             @if (slot.status === 'running') {
               · <a [href]="slot.url" target="_blank" rel="noopener">Review {{ slot.slot }} öffnen ↗</a>
             }
           </p>
+          <app-wait-status #wait />
           @if (slot.status === 'failed' && slot.message) {
             <pre class="approval-log">{{ slot.message }}</pre>
           }
@@ -49,11 +53,16 @@ import { ReviewStateService } from './review-state.service.js';
         }
       }
       @if (!item.reviewApprovedAt) {
+        <app-git-alert action="approve" />
         <div class="actions">
-          <button class="button primary" type="button" [disabled]="busy()" (click)="approve(item)">✓ Freigeben</button>
-          <button class="button secondary" type="button" [disabled]="busy()" (click)="reject(item)">
-            ↩ Zurückweisen
-          </button>
+          @if (withActions()) {
+            <button class="button primary" type="button" [disabled]="busy()" (click)="approve(item)">
+              ✓ Freigeben
+            </button>
+            <button class="button secondary" type="button" [disabled]="busy()" (click)="reject(item)">
+              ↩ Zurückweisen
+            </button>
+          }
           @if (state()?.configured && (!shown() || shown()?.status === 'failed')) {
             <button class="button secondary" type="button" [disabled]="busy()" (click)="show(item)">
               {{ shown() ? '↻ Review-Container neu starten' : '👀 Im Review-Container anzeigen' }}
@@ -71,6 +80,8 @@ export class OrderApprovalComponent {
   protected readonly busy = this.store.busy;
 
   readonly order = input.required<DevelopmentItem>();
+  /** false: Freigeben/Zurückweisen stehen anderswo (Aktionszeile unter „Aktionen“). */
+  readonly withActions = input(true);
   protected readonly state = this.review.state;
   /** Review-Container, der diesen Auftrag zeigt (bzw. für ihn angefordert ist). */
   protected readonly shown = computed(

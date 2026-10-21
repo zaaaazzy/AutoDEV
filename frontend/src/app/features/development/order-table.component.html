@@ -2,9 +2,13 @@
   class="order-table"
   [rows]="items()"
   [initialFilters]="linkFilters()"
-  [columns]="columns"
+  [columns]="columns()"
   [rowId]="orderId"
   [initialSort]="initialSort()"
+  [groupBy]="groupBy()"
+  [selectable]="selectable()"
+  [(selection)]="selection"
+  [selectLabel]="selectLabel"
   [(expanded)]="openOrder"
   [emptyText]="emptyText()"
 >
@@ -25,23 +29,32 @@
     <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
   </ng-template>
   <ng-template appDataActions let-item>
-    <button
-      type="button"
-      class="button secondary icon-button"
-      (click)="editOrder(item.id)"
-      [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
-      title="Bearbeiten"
-    >
-      ✎
-    </button>
+    @if (extraActions(); as extra) {
+      <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: item }" />
+    }
+    @if (editable()) {
+      <button
+        type="button"
+        class="button secondary icon-button"
+        (click)="editOrder(item.id)"
+        [attr.aria-label]="'Auftrag bearbeiten: ' + item.title"
+        title="Bearbeiten"
+      >
+        ✎
+      </button>
+    }
   </ng-template>
   <ng-template appDataDetail let-item>
-    <app-order-detail
-      [order]="item"
-      [editing]="orderEditing() === item.id"
-      [agentsOpen]="agentsOpen()"
-      (editCancelled)="orderEditing.set(null)"
-      (saved)="saveOrder(item, $event)"
-    />
+    @if (customDetail(); as custom) {
+      <ng-container *ngTemplateOutlet="custom.template; context: { $implicit: item }" />
+    } @else {
+      <app-order-detail
+        [order]="item"
+        [editing]="orderEditing() === item.id"
+        [agentsOpen]="agentsOpen()"
+        (editCancelled)="orderEditing.set(null)"
+        (saved)="saveOrder(item, $event)"
+      />
+    }
   </ng-template>
 </app-data-table>

@@ -9,24 +9,6 @@
   gap: 8px;
   margin-bottom: 8px;
 }
-.docs-search {
-  position: relative;
-  display: flex;
-  flex: 1;
-  align-items: center;
-  margin: 0;
-  color: #6b756f;
-}
-.docs-search svg {
-  position: absolute;
-  left: 10px;
-  pointer-events: none;
-}
-.docs-search input {
-  min-height: 36px;
-  padding: 6px 10px 6px 32px;
-  border-radius: 999px;
-}
 .book-toggle {
   display: inline-flex;
   flex: none;
@@ -464,9 +446,6 @@
   gap: 8px;
   margin: 4px 0 14px;
 }
-.docs-toolbar .docs-search {
-  max-width: 520px;
-}
 .pending-badge {
   color: #a0610d;
   font-weight: 650;
@@ -571,10 +550,5 @@
 .history-pending .history-status {
   background: #fdf1e0;
   color: #a0610d;
-}
-@media (max-width: 720px) {
-  .docs-toolbar .docs-search {
-    max-width: none;
-  }
 }
 

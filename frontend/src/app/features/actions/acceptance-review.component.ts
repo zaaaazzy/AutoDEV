@@ -2,6 +2,7 @@ import { Component, DestroyRef, computed, inject, input } from '@angular/core';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { WaitStatusComponent } from '../runs/wait-status.component.js';
 import { OrderService } from '../development/order.service.js';
 import { ReviewStateService } from '../development/review-state.service.js';
 
@@ -12,6 +13,7 @@ import { ReviewStateService } from '../development/review-state.service.js';
 @Component({
   selector: 'app-acceptance-review',
   standalone: true,
+  imports: [WaitStatusComponent],
   template: `
     @if (state(); as review) {
       @if (!review.configured) {
@@ -22,11 +24,12 @@ import { ReviewStateService } from '../development/review-state.service.js';
         @if (shown(); as slot) {
           <p class="approval-instance">
             <span class="approval-dot" [class]="slot.status"></span>
-            {{ instanceLabel() }}
+            {{ slot.status === 'running' && wait.status() ? 'Review ' + slot.slot : instanceLabel() }}
             @if (slot.status === 'running') {
               · <a [href]="slot.url" target="_blank" rel="noopener">Review {{ slot.slot }} öffnen ↗</a>
             }
           </p>
+          <app-wait-status #wait />
           @if (slot.status === 'failed' && slot.message) {
             <pre class="approval-log">{{ slot.message }}</pre>
           }

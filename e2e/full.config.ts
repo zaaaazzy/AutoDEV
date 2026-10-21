@@ -9,7 +9,8 @@ import base from './playwright.config.js';
  */
 const PORT = Number(process.env.FULL_UI_PORT ?? 3196);
 const baseServer = base.webServer;
-if (!baseServer || Array.isArray(baseServer)) throw new Error('e2e/playwright.config.ts braucht genau einen webServer.');
+if (!baseServer || Array.isArray(baseServer))
+  throw new Error('e2e/playwright.config.ts braucht genau einen webServer.');
 
 export default defineConfig({
   ...base,
@@ -21,7 +22,8 @@ export default defineConfig({
     ...base.use,
     baseURL: `http://127.0.0.1:${PORT}`,
     actionTimeout: 15_000,
-    video: 'on',
+    // Video nur, wenn ein Test scheitert: Aufzeichnen kostet bei jedem Test Rechenzeit und Hunderte MB.
+    video: 'retain-on-failure',
     screenshot: 'on',
     trace: 'off',
   },

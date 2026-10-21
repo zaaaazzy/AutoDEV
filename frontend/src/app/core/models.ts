@@ -1,6 +1,6 @@
 export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
-export type SprintStatus = 'planned' | 'active' | 'review' | 'completed';
+export type SprintStatus = 'planned' | 'active' | 'review' | 'completed' | 'cancelled';
 export type GithubMode = 'aus' | 'issues' | 'issues+pr';
 export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'approval' | 'done' | 'rejected';
 export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
@@ -35,6 +35,7 @@ export interface Project {
   autopilotStart?: string;
   autopilotEnd?: string;
   autopilotDays?: number[];
+  autopilotAutoLive?: boolean;
   databaseConfigured?: boolean;
   definitionOfReady?: string[] | null;
   definitionOfDone?: string[] | null;
@@ -490,8 +491,46 @@ export interface DraftOrder {
   startedAt: string | null;
 }
 
+/** Git-Zustand der Projektordner, vom Worker jede Minute erfasst (siehe src/runner/repo-state.ts). */
+export type GitFix = 'save_wip' | 'checkout_main' | 'sync_main';
+export type GuardedAction = 'go_live' | 'approve' | 'sprint_start';
+
+export interface GitProblem {
+  code: 'foreign_branch' | 'uncommitted' | 'untracked' | 'main_diverged' | 'main_ahead' | 'main_behind';
+  role: 'live' | 'agents';
+  folder: string;
+  severity: 'block' | 'warn';
+  title: string;
+  detail: string;
+  fixes: GitFix[];
+}
+
+export interface GitFolder {
+  folder: string;
+  role: 'live' | 'agents';
+  branch: string | null;
+  repository: boolean;
+}
+
+export interface GitStatus {
+  state: { checkedAt: string; folders: GitFolder[]; problems: GitProblem[] } | null;
+  stateAt: string | null;
+  /** Älter als 5 Minuten (Worker aus): dann wird nichts gesperrt. */
+  stale: boolean;
+  fix: {
+    id: string;
+    fix: GitFix;
+    role: 'live' | 'agents';
+    status: 'requested' | 'running' | 'done' | 'failed';
+    message: string | null;
+    createdAt: string;
+    finishedAt: string | null;
+  } | null;
+}
+
 export interface WorkerStatus {
   online: boolean;
+  git?: GitStatus;
   worker: { lastError: string | null; intervalSeconds: number; cpuPercent: number | null } | null;
   running: { title: string; startedAt: string }[];
   /** Aufträge in Entstehung: Ideen, aus denen der Auftragsautor gerade einen Auftrag schreibt. */
@@ -501,8 +540,10 @@ export interface WorkerStatus {
     name: string;
     role?: string;
     active: boolean;
-    /** Wartet auf eine Antwort (Rückfrage des Dashboard-Assistenten). */
+    /** Wartet auf eine Antwort (Rückfrage des Dashboard-Assistenten) oder auf den Start einer Chat-Anfrage. */
     waiting?: boolean;
+    /** Arbeitet an einer Chat-Anfrage oder Agent-Aufgabe statt an einem Auftrag (kein „Abbrechen“). */
+    manual?: boolean;
     sprintName: string | null;
     orderTitle: string | null;
   }[];
@@ -676,6 +717,15 @@ export interface SprintCommit {
   date: string;
   developmentId: string | null;
   merged: boolean;
+}
+
+/** Startbarer Stand für die Kopfzeile (GET /projects/:slug/review-commits): mit Auftragsname und Sprint. */
+export interface ReviewCommit extends SprintCommit {
+  title: string;
+  orderStatus: string | null;
+  sprintId: string;
+  sprintName: string;
+  sprintStatus: string;
 }
 
 export type BudgetPeriod = 'day' | 'sprint' | 'order';

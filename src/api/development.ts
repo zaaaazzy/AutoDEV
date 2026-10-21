@@ -231,9 +231,14 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         response.status(404).json({ message: 'Development item not found.' });
         return;
       }
+      // Aus einem noch geplanten Sprint nehmen ist reine Planung: kein Vermerk, also auch keine Karte unter „Aktionen“.
+      // Erst aus einem laufenden Sprint gilt ein Auftrag als abgebrochen und wartet auf eine Entscheidung.
       const result = await pool.query(
-        `UPDATE development_items SET removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id),
-              removed_from_sprint_at = NOW(), sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
+        `UPDATE development_items SET
+              removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id AND status <> 'planned'),
+              removed_from_sprint_at = CASE WHEN (SELECT status FROM sprints WHERE id = development_items.sprint_id) = 'planned'
+                                            THEN NULL ELSE NOW() END,
+              sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
               status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
               updated_at = NOW()
         WHERE id = $1 AND sprint_id IS NOT NULL

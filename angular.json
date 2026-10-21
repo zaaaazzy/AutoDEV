@@ -49,7 +49,8 @@
               "frontend/src/styles/22-github.css",
               "frontend/src/styles/23-actions-details.css",
               "frontend/src/styles/24-marketing.css",
-              "frontend/src/styles/25-chat-zoom.css"
+              "frontend/src/styles/25-chat-zoom.css",
+              "frontend/src/styles/26-header-review.css"
             ],
             "allowedCommonJsDependencies": [
               "cytoscape-fcose",

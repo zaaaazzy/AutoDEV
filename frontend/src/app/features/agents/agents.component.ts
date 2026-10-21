@@ -100,7 +100,10 @@ export class AgentsComponent {
         this.systemAgents.set(result.agents);
         this.installedModels.set(result.models);
       })
-      .catch(() => undefined);
+      // Sonst fehlen die System-Agents still (z. B. 403 oder 500) und niemand erfährt, warum.
+      .catch((error: unknown) =>
+        this.store.notice.set(errorMessage(error, 'System-Agents konnten nicht geladen werden.')),
+      );
   }
 
   protected readonly store = inject(ProjectStore);

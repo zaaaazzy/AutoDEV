@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseTestAgentOptions, routePlaywrightSpecs, runTestAgent } from './test-agent.js';
 
 /**
@@ -137,4 +138,48 @@ test('Node-Test mit „@playwright/test“ nur als Text im String bleibt im Node
   // Die eigene Testdatei (enthält genau so einen String) wird nicht als Playwright-Datei erkannt.
   const own = ['npx', 'tsx', '--test', 'src/runner/test-agent.test.ts'];
   assert.deepEqual((await routePlaywrightSpecs([own], process.cwd())).commands, [own]);
+});
+
+test('Playwright-Import nur in einem String macht aus einem Node-Test keinen Playwright-Test', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'route-pw-string-'));
+  mkdirSync(join(cwd, 'e2e'));
+  mkdirSync(join(cwd, 'src'));
+  writeFileSync(join(cwd, 'e2e', 'playwright.config.ts'), 'export default {};');
+  // Wie src/runner/test-agent.test.ts: der Import steht nur als Fixture-Text in einem String.
+  writeFileSync(
+    join(cwd, 'src', 'fixture.test.ts'),
+    [
+      "import test from 'node:test';",
+      'writeFileSync(file, "import { test } from \'@playwright/test\';");',
+      "// import { test } from '@playwright/test';",
+      "const text = `require('@playwright/test')`;",
+    ].join('\n'),
+  );
+  // Echte Imports in verschiedenen Formen bleiben Playwright-Tests.
+  writeFileSync(join(cwd, 'e2e', 'multi.spec.ts'), "import {\n  test,\n  expect,\n} from '@playwright/test';\n");
+  writeFileSync(join(cwd, 'e2e', 'typed.spec.ts'), '  import type { Page } from "@playwright/test";\n');
+  writeFileSync(join(cwd, 'e2e', 'cjs.spec.js'), "const { test } = require('@playwright/test');\n");
+  const routed = await routePlaywrightSpecs(
+    [['npx', 'tsx', '--test', 'src/fixture.test.ts', 'e2e/multi.spec.ts', 'e2e/typed.spec.ts', 'e2e/cjs.spec.js']],
+    cwd,
+  );
+  assert.deepEqual(routed.commands, [
+    ['npx', 'tsx', '--test', 'src/fixture.test.ts'],
+    [
+      'npx',
+      'playwright',
+      'test',
+      '-c',
+      'e2e/playwright.config.ts',
+      'e2e/multi.spec.ts',
+      'e2e/typed.spec.ts',
+      'e2e/cjs.spec.js',
+    ],
+  ]);
+});
+
+test('die eigene Testdatei des Test-Agents läuft im Node-Testrunner', async () => {
+  const cwd = fileURLToPath(new URL('../..', import.meta.url));
+  const command = ['npx', 'tsx', '--test', 'src/runner/test-agent.test.ts'];
+  assert.deepEqual((await routePlaywrightSpecs([command], cwd)).commands, [command]);
 });

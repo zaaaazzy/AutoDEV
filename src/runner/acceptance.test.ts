@@ -57,3 +57,10 @@ test('the last acceptance block wins over an interim one', () => {
   assert.equal(result?.criteria[0]?.met, false);
   assert.equal(stripAcceptance(output), '\nNachprüfung: Kriterium 1 doch nicht erfüllt.');
 });
+
+test('Abnahme-Anweisung: fehlende Abdeckungsmessung ist kein Ablehnungsgrund', async () => {
+  const { acceptanceInstructions } = await import('./acceptance.js');
+  const { COVERAGE_INSTRUCTIONS } = await import('./coverage.js');
+  assert.match(acceptanceInstructions(['A'], ['Jedes Kriterium ist durch einen Test belegt']), /allein kein Grund/);
+  assert.match(COVERAGE_INSTRUCTIONS, /kein Grund, die Abnahme abzulehnen/);
+});

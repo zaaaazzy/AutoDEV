@@ -5,6 +5,7 @@ import {
   contentChild,
   contentChildren,
   Directive,
+  effect,
   ElementRef,
   HostListener,
   inject,
@@ -25,6 +26,7 @@ import {
   type SortingState,
   type Updater,
 } from '@tanstack/angular-table';
+import { PageSearchService } from '../../core/page-search.service.js';
 import { selectionState, toggleAll } from './selection.js';
 
 export interface DataColumn<T> {
@@ -77,10 +79,12 @@ const apply = <S>(updater: Updater<S>, old: S): S =>
 })
 export class DataTableComponent<T> {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly pageSearch = inject(PageSearchService);
 
   readonly rows = input.required<T[]>();
   readonly columns = input.required<DataColumn<T>[]>();
   readonly rowId = input.required<(row: T) => string>();
+  /** Auf die Suche im Seitenkopf reagieren (das Suchfeld selbst steht dort, nicht über der Tabelle). */
   readonly searchable = input(true);
   readonly emptyText = input('Keine Einträge.');
   readonly initialSort = input<SortingState>([]);
@@ -105,7 +109,14 @@ export class DataTableComponent<T> {
   protected readonly detail = contentChild(DataDetailDirective);
   protected readonly actions = contentChild(DataActionsDirective);
 
-  protected readonly search = signal('');
+  protected readonly search = computed(() => (this.searchable() ? this.pageSearch.query() : ''));
+
+  constructor() {
+    // Solange eine durchsuchbare Tabelle da ist, zeigt der Seitenkopf das Suchfeld.
+    effect((onCleanup) => {
+      if (this.searchable()) onCleanup(this.pageSearch.register());
+    });
+  }
   protected readonly sorting = signal<SortingState | null>(null);
   protected readonly filters = signal<ColumnFiltersState | null>(null);
   protected readonly openFilter = signal<string | null>(null);
@@ -155,7 +166,7 @@ export class DataTableComponent<T> {
     getRowId: (row) => this.rowId()(row),
     onSortingChange: (updater) => this.sorting.set(apply(updater, this.effectiveSorting())),
     onColumnFiltersChange: (updater) => this.filters.set(apply(updater, this.effectiveFilters())),
-    onGlobalFilterChange: (updater) => this.search.set(apply(updater, this.search())),
+    onGlobalFilterChange: (updater) => this.pageSearch.query.set(apply(updater, this.search())),
     globalFilterFn: 'includesString',
     enableSortingRemoval: true,
     enableMultiSort: false,
@@ -282,7 +293,7 @@ export class DataTableComponent<T> {
   protected readonly changed = computed(() => !!this.search() || this.filters() !== null || this.sorting() !== null);
 
   protected resetAll(): void {
-    this.search.set('');
+    if (this.search()) this.pageSearch.query.set('');
     this.filters.set(null);
     this.sorting.set(null);
   }

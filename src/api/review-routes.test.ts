@@ -4,7 +4,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import express from 'express';
 import { createDevLogApp } from './app.js';
-import { registerReviewRoutes } from './review-routes.js';
+import { commitTitle, registerReviewRoutes, reviewCommits } from './review-routes.js';
 
 /** Nummern der Platzhalter ($1, $2, …), die eine Abfrage verwendet. */
 function placeholders(sql: string): number[] {
@@ -139,4 +139,144 @@ test('Review-Container: laufender Auftrag wird abgelehnt', async () => {
   const result = await showReview('in_progress');
   assert.equal(result.status, 409);
   assert.equal(result.update, undefined);
+});
+
+test('Review-Container: manueller Start bevorzugt einen freien Container vor einer laufenden Freigabe', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: sql.startsWith('UPDATE review_slots') ? [{ slot: 2 }] : [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    await fetch(`http://127.0.0.1:${port}/api/projects/dev-log/review-slots/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commit: 'c'.repeat(40) }),
+    });
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  const update = queries.find((query) => query.sql.startsWith('UPDATE review_slots'));
+  assert.ok(update);
+  const order = update.sql.slice(update.sql.indexOf('ORDER BY'));
+  // Derselbe Auftrag, dann der eigene manuelle Container, dann ein freier – eine Freigabe kommt zuletzt dran.
+  assert.ok(order.indexOf("kind = 'manual'") < order.indexOf("(status = 'idle') DESC"));
+  assert.ok(order.indexOf("(status = 'idle') DESC") < order.indexOf("kind = 'approval') ASC"));
+  assert.doesNotMatch(order, /\(project_slug IS NOT DISTINCT FROM \$1\) DESC/);
+});
+
+test('Kopfzeile: Stände mit Auftragsname, laufender Sprint zuerst, jeder Commit nur einmal', () => {
+  const commits = reviewCommits(
+    [
+      {
+        id: 's9',
+        name: 'Sprint 9',
+        status: 'active',
+        commits: [
+          {
+            hash: 'a'.repeat(40),
+            subject: 'Projektcode filtern (noch nicht im Sprint)',
+            date: '2026-10-21T21:00:00+02:00',
+            developmentId: '11111111-1111-4111-8111-111111111111',
+            merged: false,
+          },
+          {
+            hash: 'b'.repeat(40),
+            subject: 'Merge auftrag/22222222-ci-e2e: CI: E2E-Tests',
+            date: '2026-10-21T20:00:00+02:00',
+            developmentId: null,
+            merged: true,
+          },
+        ],
+      },
+      {
+        id: 's8',
+        name: 'Sprint 8',
+        status: 'completed',
+        commits: [
+          { hash: 'b'.repeat(40), subject: 'doppelt', date: '', developmentId: null, merged: true },
+          {
+            hash: 'c'.repeat(40),
+            subject: 'chore(Sprint 8): Sprint-Stand sichern',
+            date: '',
+            developmentId: null,
+            merged: true,
+          },
+        ],
+      },
+    ],
+    new Map([
+      ['11111111-1111-4111-8111-111111111111', { title: 'Projektcode nur gefiltert ausführen', status: 'approval' }],
+    ]),
+  );
+  assert.deepEqual(
+    commits.map((commit) => [commit.hash[0], commit.title, commit.sprintName, commit.orderStatus]),
+    [
+      ['a', 'Projektcode nur gefiltert ausführen', 'Sprint 9', 'approval'],
+      ['b', 'CI: E2E-Tests', 'Sprint 9', null],
+      ['c', 'chore(Sprint 8): Sprint-Stand sichern', 'Sprint 8', null],
+    ],
+  );
+  assert.equal(commitTitle("Merge branch 'auftrag/3fb09133-verwaiste' into sprint/sprint-9"), '');
+});
+
+test('Kopfzeile: GET review-commits liest nur Sprints des Projekts und keine geplanten', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('FROM sprints s JOIN sprint_commits')) {
+        return {
+          rows: [
+            {
+              id: 's9',
+              name: 'Sprint 9',
+              status: 'active',
+              commits: [
+                {
+                  hash: 'a'.repeat(40),
+                  subject: 'x',
+                  date: '',
+                  developmentId: '11111111-1111-4111-8111-111111111111',
+                  merged: true,
+                },
+              ],
+            },
+          ],
+        };
+      }
+      if (sql.includes('FROM development_items')) {
+        return { rows: [{ id: '11111111-1111-4111-8111-111111111111', title: 'Login', status: 'done' }] };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const app = express();
+  const router = express.Router();
+  registerReviewRoutes(router, pool);
+  app.use('/api', router);
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const body = (await (await fetch(`${url}/api/projects/dev-log/review-commits`)).json()) as {
+      commits: { title: string; sprintName: string }[];
+    };
+    assert.deepEqual(
+      body.commits.map((commit) => [commit.title, commit.sprintName]),
+      [['Login', 'Sprint 9']],
+    );
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+  const sprints = queries.find((query) => query.sql.includes('FROM sprints s JOIN sprint_commits'));
+  assert.match(sprints?.sql ?? '', /s\.project_slug = \$1 AND s\.status <> 'planned'/);
+  assert.deepEqual(sprints?.values, ['dev-log']);
+  const orders = queries.find((query) => query.sql.includes('FROM development_items'));
+  assert.match(orders?.sql ?? '', /project_slug = \$1/);
 });

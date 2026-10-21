@@ -1,7 +1,16 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type APIRequestContext, type Browser, expect, type Page, test, type TestInfo } from '@playwright/test';
+import {
+  type APIRequestContext,
+  type Browser,
+  expect,
+  type Locator,
+  type Page,
+  test,
+  type TestInfo,
+} from '@playwright/test';
+import pg from 'pg';
 
 /**
  * Kompletter Oberflächentest: jede Seite, jede Tabelle (Sortieren, Filtern, Suchen, Zurücksetzen) und die
@@ -27,6 +36,25 @@ const SECTIONS = [
 ] as const;
 const AUTHOR = { username: 'anna', password: 'autorin-passwort-123' };
 const IGNORED_CONSOLE = [/Service ?Worker/i, /status of 401/, /fetching the script/];
+
+/** Testdatenbank des Oberflächentests (dieselbe wie im Webserver von full.config.ts). */
+function testDatabaseUrl(): string {
+  const url = new URL(
+    process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
+  );
+  url.pathname = `/${process.env.FULL_UI_DATABASE ?? 'dev_log_full'}`;
+  return url.toString();
+}
+
+/** Status, den nur der Worker setzt, für Beispieldaten direkt schreiben. */
+async function setStatus(id: string, status: string): Promise<void> {
+  const pool = new pg.Pool({ connectionString: testDatabaseUrl(), max: 1 });
+  try {
+    await pool.query('UPDATE development_items SET status = $2 WHERE id = $1', [id, status]);
+  } finally {
+    await pool.end();
+  }
+}
 
 /** Beispieldaten: zwei Projekte, Ideen, Aufträge in allen Status, Bugs aller Schweregrade, Sprints, Doku, Autorin. */
 async function seed(request: APIRequestContext): Promise<void> {
@@ -67,7 +95,10 @@ async function seed(request: APIRequestContext): Promise<void> {
         })
       ).item;
       const sprintId = status === 'backlog' ? {} : { sprintId: sprint.id };
-      await call('patch', `/api/development/${item.id}`, { status, ...sprintId });
+      // In Arbeit, Blockiert und Erledigt setzt nur der Worker (die API lehnt sie ab): direkt in der Testdatenbank.
+      const manual = status === 'backlog' || status === 'planned';
+      await call('patch', `/api/development/${item.id}`, { status: manual ? status : 'planned', ...sprintId });
+      if (!manual) await setStatus(item.id, status);
     }
   }
   for (const [title, severity] of [
@@ -133,6 +164,16 @@ async function snap(page: Page, info: TestInfo, name: string, fullPage = true): 
 }
 
 /** Klickt den Button mit genau diesem Text im angegebenen Bereich. */
+/** Sprint-Details: Der aktuelle Sprint steht oben offen, andere klappt ihre Zeile in der Liste auf. */
+async function sprintDetail(page: Page, name: string): Promise<Locator> {
+  const title = page.locator('.sprint-title h3', { hasText: new RegExp(`^${name}$`) });
+  await expect(page.locator('.sprint-current')).toBeVisible();
+  const current = page.locator('.sprint-current app-sprint-detail').filter({ has: title });
+  if (await current.count()) return current;
+  await page.locator('.dt-table tbody tr').filter({ hasText: name }).locator('.dt-expand').first().click();
+  return page.locator('.closed-detail app-sprint-detail').filter({ has: title });
+}
+
 function button(scope: Page | ReturnType<Page['locator']>, name: string | RegExp) {
   return scope.getByRole('button', { name, exact: typeof name === 'string' }).first();
 }
@@ -145,7 +186,11 @@ async function checkTables(page: Page): Promise<TableCheck[]> {
     const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
     const checks: { name: string; ok: boolean; detail: string }[] = [];
     const add = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail });
-    const tables = () => [...document.querySelectorAll<HTMLElement>('.dt')].filter((table) => table.offsetHeight > 0);
+    // Zugeklappte <details> haben in Chrome eine Höhe (content-visibility), sind aber weder sichtbar noch fokussierbar.
+    const tables = () =>
+      [...document.querySelectorAll<HTMLElement>('.dt')].filter(
+        (table) => table.offsetHeight > 0 && !table.closest('details:not([open])'),
+      );
     const text = (element: Element | null | undefined) => element?.textContent?.trim().replace(/\s+/g, ' ') ?? '';
     const unique = (values: string[]) => values.filter((value, index) => values.indexOf(value) === index);
     const fire = (input: HTMLInputElement, value: string) => {
@@ -284,7 +329,7 @@ test('Alle Seiten laden ohne Fehler und ohne seitliches Überlaufen', async ({ p
     await open(page, section);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect.soft(overflow, `Seite ${section} ragt über den Rand`).toBeLessThanOrEqual(1);
-    // Elemente, die über den rechten Rand hinausragen (Tabellen und Boards dürfen waagrecht scrollen)
+    // Elemente, die über den rechten Rand hinausragen (Tabellen dürfen waagrecht scrollen)
     const outside = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('main *')]
         .filter((element) => {
@@ -294,7 +339,7 @@ test('Alle Seiten laden ohne Fehler und ohne seitliches Überlaufen', async ({ p
             box.width > 0 &&
             box.right > innerWidth + 2 &&
             (!parent || parent.right <= innerWidth + 2) &&
-            !element.closest('.table-wrap, .kanban, pre, .dt-filter-menu')
+            !element.closest('.table-wrap, pre, .dt-filter-menu')
           );
         })
         .slice(0, 3)
@@ -388,33 +433,58 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect(row.locator('b')).toHaveCount(0);
 
   await open(page, 'actions');
-  const blocked = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' });
+  // Rückmeldungen als Auftragstabelle wie unter „Aufträge“: aufklappen zeigt Warum, Lösungsvorschlag, Ergänzung und
+  // Aktionen; die Auftragsdetails erst über „Details“. Jede Aktion fragt im Dialog nach.
+  const rows = page.locator('.attention-table tbody tr:not(.closed-detail)');
+  const blocked = rows.filter({ hasText: 'Warenkorb blocked' });
   await expect(blocked.first()).toBeVisible();
+  const panelOf = (row: Locator) => row.locator('xpath=following-sibling::tr[1][contains(@class, "closed-detail")]');
+  const expand = async (row: Locator) => {
+    const toggle = row.locator('.dt-expand');
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    return panelOf(row);
+  };
+  const titleOf = async (row: Locator) => (await row.locator('.order-title').textContent())?.trim() ?? '';
+  const confirmIn = (title: string) => page.getByRole('dialog', { name: title });
+
   const first = blocked.first();
-  const firstTitle = (await first.locator('.attention-title').textContent())?.trim() ?? '';
-  await button(first, 'Details & bearbeiten').click();
+  const firstTitle = await titleOf(first);
+  await expect(panelOf(first)).toHaveCount(0);
+  const firstPanel = await expand(first);
+  await expect(firstPanel.locator('.attention-section').first()).not.toBeEmpty();
+  await expect(firstPanel.locator('app-order-detail')).toHaveCount(0);
+  await button(firstPanel, 'Details').click();
+  await expect(firstPanel.locator('app-order-detail')).toBeVisible();
   await snap(page, info, 'Auftrag Details', false);
-  await first.getByRole('combobox').first().selectOption({ label: 'Backlog' });
-  await expect(page.locator('.attention-card').filter({ hasText: firstTitle })).toHaveCount(0);
+  await firstPanel.getByRole('combobox').first().selectOption({ label: 'Backlog' });
+  await expect(rows.filter({ hasText: firstTitle })).toHaveCount(0);
 
-  const retry = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' }).first();
-  const retryTitle = (await retry.locator('.attention-title').textContent())?.trim() ?? '';
-  await button(retry, 'Erneut versuchen').click();
-  // Erst nach Bestätigung (optional mit Hinweis für die Agents) wird der Auftrag wieder eingeplant.
-  const confirm = page.getByRole('dialog');
-  await expect(confirm).toContainText('erneut versuchen');
-  await confirm.getByRole('button', { name: 'Erneut versuchen' }).click();
-  await expect(page.getByText('Auftrag wird erneut versucht.')).toBeVisible();
-  await expect(page.locator('.attention-card').filter({ hasText: retryTitle })).toHaveCount(0);
+  const retry = blocked.first();
+  const retryTitle = await titleOf(retry);
+  // Die Ergänzung aus der Zeile steht im Bestätigungsdialog vorbelegt und geht mit dem erneuten Versuch an die Agents.
+  const retryPanel = await expand(retry);
+  await retryPanel.locator('.attention-answer textarea').fill('Bitte UTC verwenden.');
+  await button(retryPanel, 'Erneut versuchen').click();
+  const retryDialog = confirmIn('Erneut versuchen?');
+  await expect(retryDialog.locator('textarea')).toHaveValue('Bitte UTC verwenden.');
+  await snap(page, info, 'Erneut versuchen bestätigen', false);
+  await button(retryDialog, 'Erneut versuchen').click();
+  await expect(page.getByText('Antwort übernommen – der Auftrag läuft erneut.')).toBeVisible();
+  await expect(rows.filter({ hasText: retryTitle })).toHaveCount(0);
 
-  const analyse = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' }).first();
-  await button(analyse, 'Analysieren').click();
-  await expect(analyse).toContainText('Analyse läuft');
+  const analyse = blocked.first();
+  const analysePanel = await expand(analyse);
+  await button(analysePanel, 'Neu analysieren').click();
+  await button(confirmIn('Neu analysieren?'), 'Analysieren').click();
+  await expect(analysePanel).toContainText('analysiert gerade');
   await expect
-    .soft(button(analyse, 'Analysieren'), '„Analysieren“ ist gesperrt, solange die Analyse läuft')
+    .soft(button(analysePanel, 'Neu analysieren'), '„Neu analysieren“ ist gesperrt, solange die Analyse läuft')
     .toBeDisabled();
-  page.once('dialog', (dialog) => void dialog.dismiss());
-  await button(analyse, 'Löschen').click();
+  await button(analysePanel, 'Löschen').click();
+  const remove = confirmIn('Auftrag löschen?');
+  await expect(remove).toBeVisible();
+  await button(remove, 'Abbrechen').click();
+  await expect(remove).toHaveCount(0);
   await expect(analyse).toBeVisible();
 });
 
@@ -474,7 +544,7 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
 });
 
-test('Sprints: Datum prüfen, anlegen, Board öffnen, starten', async ({ page, isMobile }, info) => {
+test('Sprints: Datum prüfen, anlegen, Aufträge zeigen, starten', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop-Ablauf');
   await login(page);
   await open(page, 'sprints');
@@ -487,24 +557,22 @@ test('Sprints: Datum prüfen, anlegen, Board öffnen, starten', async ({ page, i
   await expect(page.getByText('Das Enddatum darf nicht vor dem Startdatum liegen.')).toBeVisible();
   await page.locator('input[name=endDate]').fill('2026-10-31');
   await button(page, 'Sprint anlegen').click();
-  await expect(page.locator('.dt-table tbody tr').filter({ hasText: name })).toBeVisible();
+  // Neu angelegt steht er oben als aktueller Sprint oder unter „Geplante Sprints“.
+  await expect(page.getByText(name).first()).toBeVisible();
 
-  const sprint = page.locator('.dt-table tbody tr').filter({ hasText: 'Sprint 1' }).first();
-  await sprint.locator('.dt-expand').click();
-  const board = page.locator('.kanban').first();
-  await expect(board).toBeVisible();
-  await snap(page, info, 'Sprint-Board');
-  const cut = await board.evaluate(
-    (element) =>
-      [...element.querySelectorAll<HTMLElement>('.kanban-card *')].filter(
-        (child) => child.scrollWidth > child.clientWidth + 1 && child.children.length === 0,
-      ).length,
-  );
-  expect.soft(cut, 'Titel auf Kanban-Karten werden nicht abgeschnitten').toBe(0);
-  const detail = page.locator('.closed-detail').first();
+  const detail = await sprintDetail(page, 'Sprint 1');
+  await expect(detail.locator('.sprint-orders')).toBeVisible();
+  await snap(page, info, 'Sprint-Aufträge');
   await button(detail, 'Sprint starten').click();
-  await expect(sprint).toContainText('Aktiv');
-  await expect.soft(sprint, '„Sprint starten“ setzt das Startdatum').not.toContainText('– –');
+  // Jede Aktion fragt nach (globaler Bestätigungsdialog).
+  await page.getByRole('dialog').getByRole('button', { name: 'Sprint starten' }).click();
+  // Gestartet ist er der aktuelle Sprint und steht oben.
+  const current = page.locator('.sprint-current');
+  await expect(current.locator('.sprint-title h3')).toHaveText('Sprint 1');
+  await expect(current.locator('.sprint-title .status').first()).toContainText('Aktiv');
+  await expect
+    .soft(current.locator('.detail-list > div').first().locator('dd'), '„Sprint starten“ setzt das Startdatum')
+    .not.toHaveText('–');
 });
 
 test('Dokumentation: Markdown, bearbeiten, einreichen, freigeben, neues Handbuch', async ({ page, isMobile }, info) => {
@@ -661,7 +729,7 @@ test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: B
   await open(page, 'actions');
   await expect
     .soft(
-      page.locator('.attention-card').getByRole('button', { name: 'Erneut versuchen' }),
+      page.locator('.attention-table').getByRole('button', { name: 'Erneut versuchen' }),
       'Ohne Agent-Rolle kein „Erneut versuchen“',
     )
     .toHaveCount(0);
@@ -731,14 +799,40 @@ async function clickables(page: Page, mark?: Clickable): Promise<Clickable[]> {
   );
 }
 
+/** Offene API-Anfragen je Seite (fetch/XHR), damit „ruhig“ ohne feste Wartezeit erkannt wird. */
+const pendingRequests = new WeakMap<Page, Set<object>>();
+function trackRequests(page: Page): void {
+  const pending = new Set<object>();
+  pendingRequests.set(page, pending);
+  const busy = (request: { resourceType(): string }) => ['fetch', 'xhr'].includes(request.resourceType());
+  page.on('request', (request) => busy(request) && pending.add(request));
+  page.on('requestfinished', (request) => pending.delete(request));
+  page.on('requestfailed', (request) => pending.delete(request));
+}
+
+/**
+ * Wartet, bis die Seite nach einer Aktion ruhig ist: zwei gezeichnete Frames (Angular hat gerendert) und keine offene
+ * API-Anfrage mehr – statt einer festen Pause. Höchstens `max` ms, damit Polling (z. B. Live-Läufe) nicht blockiert.
+ */
+async function settle(page: Page, max = 1_500): Promise<void> {
+  const frames = () =>
+    page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  await frames().catch(() => {});
+  const pending = pendingRequests.get(page);
+  const end = Date.now() + max;
+  while (pending?.size && Date.now() < end) await new Promise((done) => setTimeout(done, 20));
+  // Antworten lösen oft noch ein Rendern aus.
+  if (pending) await frames().catch(() => {});
+}
+
 /** Schließt offene Dialoge und Menüs (Escape, sonst „Schließen“); liefert Menüs, die offen bleiben. */
 async function closeDialogs(page: Page): Promise<string[]> {
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
+  await settle(page);
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!(await page.locator('.modal-backdrop').count())) break;
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(150);
+    await settle(page);
     const close = page.locator('.modal-backdrop [aria-label="Schließen"]').first();
     if ((await page.locator('.modal-backdrop').count()) && (await close.count())) await close.click().catch(() => {});
   }
@@ -758,6 +852,7 @@ test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fe
   const errors = watchConsole(page);
   // Rückfragen wie „Wirklich …?“ verneinen: der Klick wird geprüft, ohne Daten zu ändern.
   page.on('dialog', (dialog) => void dialog.dismiss().catch(() => {}));
+  trackRequests(page);
   await login(page);
   const protocol: string[] = [`# Klickprotokoll (${isMobile ? 'Handy' : 'Desktop'})`, ''];
   for (const section of SECTIONS) {
@@ -821,7 +916,7 @@ test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fe
           return false;
         });
       if (!clicked) continue;
-      await page.waitForTimeout(300);
+      await settle(page);
       let result = '✅';
       // Öffnet der Klick einen Dialog mit Formular: unverändert speichern, das darf keinen Fehler geben.
       const dialog = page.locator('.modal-backdrop [role="dialog"], .modal-backdrop section').first();
@@ -829,7 +924,7 @@ test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fe
         const save = dialog.getByRole('button', { name: /^(Speichern|Übernehmen|Einreichen)$/ }).first();
         if ((await save.count()) && (await save.isEnabled().catch(() => false))) {
           await save.click({ timeout: 4_000 }).catch(() => {});
-          await page.waitForTimeout(500);
+          await settle(page, 3_000);
           const failure = await page
             .locator('.notice.error')
             .first()

@@ -1,5 +1,17 @@
-import { NgClass } from '@angular/common';
-import { Component, computed, effect, inject, input, signal, untracked } from '@angular/core';
+import { NgClass, NgTemplateOutlet } from '@angular/common';
+import {
+  Component,
+  computed,
+  contentChild,
+  Directive,
+  effect,
+  inject,
+  input,
+  model,
+  signal,
+  TemplateRef,
+  untracked,
+} from '@angular/core';
 import type { SortingState } from '@tanstack/angular-table';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -22,6 +34,18 @@ import { OrderService } from './order.service.js';
 
 const PRIORITY_RANK = ['low', 'medium', 'high'];
 
+/** Zusätzliche Knöpfe je Zeile vor dem Bearbeiten-Stift: `<ng-template appOrderActions let-item>`. */
+@Directive({ selector: 'ng-template[appOrderActions]', standalone: true })
+export class OrderActionsDirective {
+  readonly template = inject<TemplateRef<{ $implicit: DevelopmentItem }>>(TemplateRef);
+}
+
+/** Eigener Inhalt der aufgeklappten Zeile statt der Auftragsdetails: `<ng-template appOrderDetail let-item>`. */
+@Directive({ selector: 'ng-template[appOrderDetail]', standalone: true })
+export class OrderDetailSlotDirective {
+  readonly template = inject<TemplateRef<{ $implicit: DevelopmentItem }>>(TemplateRef);
+}
+
 /**
  * Auftragsliste mit aufklappbarer Detail- und Agent-Ansicht. Dieselbe Komponente nutzen die Auftragsseite
  * und die Agents-Seite („Letzte Aufträge“) – eine Änderung gilt überall.
@@ -31,6 +55,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
   standalone: true,
   imports: [
     NgClass,
+    NgTemplateOutlet,
     BugIconComponent,
     DataTableComponent,
     DataCellDirective,
@@ -46,13 +71,29 @@ export class OrderTableComponent {
   private readonly orders = inject(OrderService);
   private readonly store = inject(ProjectStore);
   /** Filter aus einem Dashboard-Link (z. B. Status „Blockiert“). */
-  protected readonly linkFilters = computed(() => this.store.filtersFor('development'));
+  protected readonly linkFilters = computed(() => (this.linkFiltered() ? this.store.filtersFor('development') : {}));
 
   readonly items = input.required<DevelopmentItem[]>();
   readonly emptyText = input('Keine Aufträge.');
   readonly initialSort = input<SortingState>([{ id: 'priority', desc: true }]);
   /** Beim Aufklappen gleich die Agent-Ansicht öffnen (Agents-Seite). */
   readonly agentsOpen = input(false);
+  /** Zwischenüberschriften je Wert dieser Spalte (z. B. Phase im Sprint). */
+  readonly groupBy = input<string | null>(null);
+  /** Spalten ersetzen (gleiche id) bzw. vorne ergänzen; `hiddenColumns` blendet Standardspalten aus. */
+  readonly extraColumns = input<DataColumn<DevelopmentItem>[]>([]);
+  readonly hiddenColumns = input<string[]>([]);
+  /** false: keine Spalte sortierbar – für Listen, deren Reihenfolge selbst die Aussage ist (Abarbeitung im Sprint). */
+  readonly sortable = input<boolean>(true);
+  /** Mehrfachauswahl wie in der Datentabelle; ohne Funktion keine Häkchen. */
+  readonly selectable = input<((item: DevelopmentItem) => boolean) | null>(null);
+  readonly selection = model<ReadonlySet<string>>(new Set());
+  /** false: kein Bearbeiten-Stift in der Zeile (z. B. unter „Aktionen“). */
+  readonly editable = input(true);
+  /** Filter aus Dashboard-Links (#development?status=…) anwenden; unter „Aktionen“ aus. */
+  readonly linkFiltered = input(true);
+  protected readonly extraActions = contentChild(OrderActionsDirective);
+  protected readonly customDetail = contentChild(OrderDetailSlotDirective);
 
   protected readonly openOrder = signal<string | null>(null);
 
@@ -65,7 +106,7 @@ export class OrderTableComponent {
   }
   protected readonly orderEditing = signal<string | null>(null);
   protected readonly orderId = (item: DevelopmentItem): string => item.id;
-  protected readonly columns: DataColumn<DevelopmentItem>[] = [
+  private readonly baseColumns: DataColumn<DevelopmentItem>[] = [
     { id: 'title', header: 'Titel', value: (item) => item.title, filter: 'text', className: 'title-cell' },
     {
       id: 'status',
@@ -90,6 +131,18 @@ export class OrderTableComponent {
       sortValue: (item) => item.effortHours ?? -1,
     },
   ];
+  protected readonly columns = computed(() => {
+    const extra = this.extraColumns();
+    const hidden = new Set(this.hiddenColumns());
+    const replaced = new Set(extra.map((column) => column.id));
+    const base = this.baseColumns
+      .filter((column) => !hidden.has(column.id))
+      .map((column) => (replaced.has(column.id) ? extra.find((entry) => entry.id === column.id)! : column));
+    const known = new Set(this.baseColumns.map((column) => column.id));
+    const columns = [...extra.filter((column) => !known.has(column.id)), ...base];
+    return this.sortable() ? columns : columns.map((column) => ({ ...column, sortable: false }));
+  });
+  protected readonly selectLabel = (item: DevelopmentItem): string => `Auswählen: ${this.displayTitle(item)}`;
 
   /** Bei Bugs ersetzt der Käfer das Präfix „Bug:“. */
   protected displayTitle(item: DevelopmentItem): string {

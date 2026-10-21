@@ -12,7 +12,7 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, extname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
@@ -35,7 +35,9 @@ import {
   finishTestRunStep,
   saveTestCases,
   saveTestReport,
+  updateTestRunStepProgress,
 } from '../src/db/test-runs.js';
+import { stepProgress } from '../src/core/test-progress.js';
 
 const ROOT = join(import.meta.dirname, '..');
 const argument = (name: string) => {
@@ -152,7 +154,12 @@ const USER_STEP: Step = {
 };
 
 /** Führt einen Befehl aus, zeigt die Ausgabe live und gibt sie gesammelt zurück. */
-function run(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
+function run(
+  command: string,
+  args: string[],
+  quiet = false,
+  onOutput?: (output: string) => void,
+): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
     const child = spawn(command, args, {
@@ -169,7 +176,9 @@ function run(command: string, args: string[]): Promise<{ ok: boolean; output: st
     });
     const collect = (chunk: Buffer) => {
       output += chunk.toString();
-      process.stdout.write(chunk);
+      // Parallel laufende Schritte nicht ineinander verschränkt ausgeben; ihr Ergebnis folgt am Ende gesammelt.
+      if (!quiet) process.stdout.write(chunk);
+      onOutput?.(output);
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
@@ -228,6 +237,16 @@ class Recorder {
     });
   }
 
+  /** Zwischenstand für die Live-Anzeige unter „Testläufe“; Fehler hier dürfen den Lauf nicht stören. */
+  async progress(position: number, output: string): Promise<void> {
+    await updateTestRunStepProgress(this.pool, {
+      runId: this.runId,
+      position,
+      progress: stepProgress(output).text,
+      output: redactOutput(output.replace(ANSI, '').slice(-4_000), process.env),
+    }).catch(() => undefined);
+  }
+
   async finish(position: number, result: StepResult): Promise<number> {
     await finishTestRunStep(this.pool, {
       runId: this.runId,
@@ -251,11 +270,27 @@ class Recorder {
   }
 }
 
-async function runStep(position: number, step: Step, recorder: Recorder | null): Promise<StepResult> {
-  console.log(`\n━━ ${step.name} ━━`);
+async function runStep(position: number, step: Step, recorder: Recorder | null, quiet = false): Promise<StepResult> {
+  console.log(`\n━━ ${step.name}${quiet ? ' (läuft parallel, Ausgabe folgt am Ende)' : ''} ━━`);
   await recorder?.start(position, step);
   const begin = Date.now();
-  const { ok, output } = await run(step.command, step.args);
+  // Live-Fortschritt höchstens alle 2 s schreiben (Ansicht „Testläufe“ lädt im selben Takt nach).
+  let latest = '';
+  let written = '';
+  const live = recorder
+    ? setInterval(() => {
+        if (latest === written) return;
+        written = latest;
+        void recorder.progress(position, latest);
+      }, 2_000)
+    : undefined;
+  const { ok, output } = await run(step.command, step.args, quiet, (current) => (latest = current)).finally(() =>
+    clearInterval(live),
+  );
+  if (quiet) {
+    const lines = output.replace(ANSI, '').trim().split('\n');
+    console.log(`\n━━ ${step.name}: ${ok ? 'grün' : 'rot'} ━━\n${lines.slice(ok ? -8 : -80).join('\n')}`);
+  }
   const clean = output.replace(ANSI, '');
   const result: StepResult = {
     name: step.name,
@@ -356,7 +391,21 @@ async function main(): Promise<void> {
   // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
   const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
-  for (const [position, step] of steps.entries()) results.push(await runStep(position, step, recorder));
+  // E2E- und Oberflächentest gleichzeitig: Sie haben eigene Ports und eigene Testdatenbanken (dev_log_e2e, dev_log_full)
+  // und brauchen beide nur die gebaute Oberfläche aus dem Schritt davor.
+  const PARALLEL = new Set(['E2E-Tests', 'Oberflächentest']);
+  for (let position = 0; position < steps.length; position++) {
+    const step = steps[position]!;
+    const next = steps[position + 1];
+    if (next && PARALLEL.has(step.name) && PARALLEL.has(next.name)) {
+      results.push(
+        ...(await Promise.all([runStep(position, step, recorder, true), runStep(position + 1, next, recorder, true)])),
+      );
+      position += 1;
+      continue;
+    }
+    results.push(await runStep(position, step, recorder));
+  }
 
   // Bericht: Befunde und Medien des Oberflächentests
   await mkdir(MEDIA, { recursive: true });
@@ -439,4 +488,46 @@ async function main(): Promise<void> {
   process.exitCode = allOk ? 0 : 1;
 }
 
-await main();
+/**
+ * Nur ein Komplettlauf zugleich auf dieser Maschine: E2E- und Oberflächentest nutzen feste Testdatenbanken
+ * (dev_log_e2e, dev_log_full) und Ports. Zwei Läufe nebeneinander (Worker-Gate und Handlauf, oder zwei Projekte)
+ * löschten sich gegenseitig die Datenbank unter dem Server weg (ECONNREFUSED, „deadlock detected“). Die Sperre ist
+ * ein Ordner im Temp-Verzeichnis; ein liegen gebliebener (Absturz) gilt nach 45 Minuten als verwaist.
+ */
+const LOCK = join(tmpdir(), 'dev-log-test-full.lock');
+const LOCK_STALE_MS = 45 * 60_000;
+const LOCK_WAIT_MS = 10_000;
+async function withSingleRun<T>(task: () => Promise<T>): Promise<T> {
+  const started = Date.now();
+  for (;;) {
+    try {
+      await mkdir(LOCK);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      const age =
+        Date.now() -
+        (await stat(LOCK)
+          .then((info) => info.mtimeMs)
+          .catch(() => Date.now()));
+      if (age > LOCK_STALE_MS) {
+        console.log('Verwaiste Sperre eines früheren Komplettlaufs entfernt.');
+        await rm(LOCK, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() - started > LOCK_STALE_MS)
+        throw new Error('Ein anderer Komplettlauf blockiert seit über 45 Minuten.', { cause: error });
+      if (Date.now() - started < LOCK_WAIT_MS)
+        console.log('Ein anderer Komplettlauf läuft gerade – warte, bis er fertig ist …');
+      await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_MS));
+    }
+  }
+  try {
+    await writeFile(join(LOCK, 'pid'), String(process.pid));
+    return await task();
+  } finally {
+    await rm(LOCK, { recursive: true, force: true });
+  }
+}
+
+await withSingleRun(main);

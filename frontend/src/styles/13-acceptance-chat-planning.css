@@ -259,79 +259,6 @@
   font-size: 0.75rem;
 }
 
-/* Unter dem Board: offene und abgebrochene Aufträge zum Hineinziehen bzw. → */
-.kanban-board {
-  display: grid;
-  gap: 12px;
-}
-
-/* min-width: 0 – sonst wächst die Auswahl auf die Breite aller Karten statt horizontal zu scrollen (Handy) */
-.kanban-pool,
-.kanban-pool-group {
-  min-width: 0;
-}
-
-.kanban-pool {
-  display: grid;
-  gap: 10px;
-  padding: 10px;
-  border: 1px dashed #c9d1c4;
-  border-radius: 12px;
-  background: #fafbf8;
-}
-
-.kanban-pool-group header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
-  margin-bottom: 6px;
-}
-
-.kanban-pool-list {
-  display: flex;
-  gap: 8px;
-  min-height: 44px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.kanban-pool-list::-webkit-scrollbar {
-  display: none;
-}
-
-.kanban-pool-card {
-  flex: 0 0 220px;
-}
-
-/* Mehrfachauswahl: angehakte Aufträge auf einmal in den Sprint */
-.kanban-select {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin: 0;
-  accent-color: var(--green);
-  cursor: pointer;
-}
-
-.kanban-pool-card.selected {
-  border-color: var(--green);
-  box-shadow: 0 0 0 1px var(--green) inset;
-}
-
-.kanban-pool-bar {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: #e8f2ec;
-}
-
 /* Sprint-Hover: Handlungsbedarf, Vorschau der nächsten Aufträge und Review-Start; Klick öffnet den Auftrag */
 .sprint-indicator {
   position: relative;
@@ -449,31 +376,6 @@
   color: var(--muted);
   font-size: 0.82rem;
   cursor: pointer;
-}
-
-/* Tabellensuche rechts auf Höhe des Panel-Titels (Desktop, Tabelle direkt unter dem Titel); auf dem Handy darunter. */
-@media (min-width: 721px) {
-  .panel:has(> .section-heading + :is(app-data-table, app-order-table)) {
-    position: relative;
-  }
-
-  .panel > .section-heading:has(+ :is(app-data-table, app-order-table)) {
-    padding-right: min(300px, 40%);
-  }
-
-  .panel > .section-heading + app-data-table > .dt > .dt-toolbar > .dt-search,
-  .panel > .section-heading + app-order-table > app-data-table > .dt > .dt-toolbar > .dt-search {
-    position: absolute;
-    top: 14px;
-    right: 18px;
-    width: min(280px, 38%);
-  }
-
-  /* Bleibt in der Leiste nur die Suche, fällt die leere Zeile weg. */
-  .panel > .section-heading + app-data-table > .dt > .dt-toolbar:not(:has(.dt-chip, .dt-reset)),
-  .panel > .section-heading + app-order-table > app-data-table > .dt > .dt-toolbar:not(:has(.dt-chip, .dt-reset)) {
-    display: contents;
-  }
 }
 
 /* Sprintplanung: Vorschlag mit Begründung, Summen und Auswahl */

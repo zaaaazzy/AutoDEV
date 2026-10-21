@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { isShuttingDown } from '../core/shutdown.js';
+import { isDraining, isShuttingDown } from '../core/shutdown.js';
 import { runPreSprint } from './pre-sprint.js';
 import { processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
@@ -191,8 +191,9 @@ export async function runWorkItem(
   // weg), den Lauf verwerfen: sonst hält er claimRun stundenlang auf.
   const started = await pool
     .query(
-      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, updated_at = NOW()
-      WHERE d.id = $1 AND NOT ${awaitsBugApprovalSql('d')} AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express' AND (
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, retry_after = NULL, updated_at = NOW()
+      WHERE d.id = $1 AND NOT ${awaitsBugApprovalSql('d')} AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
+        AND (d.retry_after IS NULL OR d.retry_after <= NOW()) AND (
         d.agent_id IS NOT NULL OR (
           NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
           AND (d.auto_run OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
@@ -440,7 +441,8 @@ export async function runSelectedItems(
 ): Promise<{ itemId: string; result: string }[]> {
   const results: { itemId: string; result: string }[] = [];
   for (const item of items) {
-    if (isShuttingDown()) break;
+    // Neustart steht an: keinen weiteren Auftrag beginnen, der dann mitten im Schritt beendet würde.
+    if (isShuttingDown() || isDraining()) break;
     if (results.length) {
       await between().catch(logged('runner'));
       // Budget während des Zyklus erreicht: nur der nächste Auftrag wartet sichtbar, die übrigen bleiben eingeplant.
@@ -461,6 +463,8 @@ export async function runWorkflow(
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
+  // Neustart steht an: weder Git-Sicherung (Test-Gate) noch Autopilot noch Aufträge starten.
+  if (isDraining()) return [];
   await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
     goLive(pool, options.project, options.cwd, execute),
   );

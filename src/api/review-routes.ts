@@ -5,8 +5,63 @@ import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { access } from './access.js';
 import { DEV_COLUMNS, retryComment } from './development.js';
+import { guardGit } from './git-state.js';
 
 const PORT_BASE = 4200;
+/** Sprints, deren Stände die Kopfzeile anbietet (laufender Sprint zuerst). */
+const REVIEW_COMMIT_SPRINTS = 3;
+
+/** Stand, wie ihn der Worker in sprint_commits ablegt (src/runner/sprint-commits.ts). */
+interface StoredCommit {
+  hash: string;
+  subject: string;
+  date: string;
+  developmentId: string | null;
+  merged: boolean;
+}
+
+/** Startbarer Stand für die Kopfzeile: mit Auftragsname und Sprint. */
+export interface ReviewCommit extends StoredCommit {
+  /** Titel des Auftrags; ohne Auftrag (z. B. Sprint-Sicherung) der bereinigte Commit-Betreff. */
+  title: string;
+  orderStatus: string | null;
+  sprintId: string;
+  sprintName: string;
+  sprintStatus: string;
+}
+
+/** Betreff ohne Merge-Präfix und ohne den Hinweis des Workers „(noch nicht im Sprint)“. */
+export function commitTitle(subject: string): string {
+  return subject
+    .replace(/^Merge (?:branch )?'?auftrag\/[^\s:']+'?(?: into [^\s:]+)?:?\s*/i, '')
+    .replace(/\s*\(noch nicht im Sprint\)$/, '')
+    .trim();
+}
+
+/** Stände je Sprint in Auswahl-Reihenfolge, jeder Commit nur einmal (der erste Sprint gewinnt). */
+export function reviewCommits(
+  sprints: { id: string; name: string; status: string; commits: StoredCommit[] }[],
+  orders: Map<string, { title: string; status: string }>,
+): ReviewCommit[] {
+  const seen = new Set<string>();
+  const result: ReviewCommit[] = [];
+  for (const sprint of sprints) {
+    for (const commit of sprint.commits) {
+      if (!commit?.hash || seen.has(commit.hash)) continue;
+      seen.add(commit.hash);
+      const order = commit.developmentId ? orders.get(commit.developmentId) : undefined;
+      result.push({
+        ...commit,
+        title: order?.title ?? (commitTitle(commit.subject) || commit.hash.slice(0, 7)),
+        orderStatus: order?.status ?? null,
+        sprintId: sprint.id,
+        sprintName: sprint.name,
+        sprintStatus: sprint.status,
+      });
+    }
+  }
+  return result;
+}
 
 export interface SlotView {
   slot: number;
@@ -46,8 +101,10 @@ async function loadSlots(pool: Pool, allowed: Set<string> | null | undefined): P
 }
 
 /**
- * Container für einen Stand anfordern: derselbe Auftrag bzw. dasselbe Projekt, sonst ein freier, sonst der am
- * längsten laufende freigegebene Container (die Container sind geteilt). Liefert die Nummer oder null.
+ * Container für einen Stand anfordern: derselbe Auftrag, sonst bei einem manuellen Start der manuelle Container
+ * desselben Projekts (ein neuer Stand ersetzt den eigenen), sonst ein freier, sonst der am längsten laufende
+ * freigegebene Container – dabei zuletzt eine laufende Freigabe (die Container sind geteilt). Ein manueller Start
+ * verdrängt so keine Freigabe-Vorschau, solange ein Container frei ist. Liefert die Nummer oder null.
  */
 async function requestSlot(
   pool: Pool,
@@ -60,7 +117,9 @@ async function requestSlot(
       WHERE slot = (
         SELECT slot FROM review_slots WHERE enabled
          ORDER BY (development_id IS NOT DISTINCT FROM $4::uuid AND $4::uuid IS NOT NULL) DESC,
-                  (project_slug IS NOT DISTINCT FROM $1) DESC, (status = 'idle') DESC, requested_at NULLS FIRST, slot
+                  (project_slug IS NOT DISTINCT FROM $1 AND kind = 'manual' AND $5::text = 'manual') DESC,
+                  (status = 'idle') DESC,
+                  (status <> 'idle' AND kind = 'approval') ASC, requested_at NULLS FIRST, slot
          LIMIT 1)
       RETURNING slot`,
     [project, request.commit, request.label, request.developmentId, request.kind],
@@ -193,11 +252,50 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     response.json(row ?? { branch: null, commits: [], updatedAt: null });
   });
 
+  // Kopfzeile: startbare Stände des Projekts mit Auftrag und Sprint – laufender Sprint zuerst, dann die letzten.
+  app.get('/projects/:slug/review-commits', access({ tenant: 'project' }), async (request, response) => {
+    const slug = parseProjectSlug(request.params.slug);
+    if (!slug) {
+      response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      return;
+    }
+    const sprints = (
+      await pool.query<{ id: string; name: string; status: string; commits: StoredCommit[] }>(
+        `SELECT s.id, s.name, s.status, c.commits FROM sprints s JOIN sprint_commits c ON c.sprint_id = s.id
+          WHERE s.project_slug = $1 AND s.status <> 'planned' AND jsonb_array_length(c.commits) > 0
+          ORDER BY (s.status IN ('active', 'review')) DESC, s.created_at DESC
+          LIMIT ${REVIEW_COMMIT_SPRINTS}`,
+        [slug],
+      )
+    ).rows;
+    const ids = [...new Set(sprints.flatMap((sprint) => sprint.commits.map((commit) => commit.developmentId)))].filter(
+      (id): id is string => typeof id === 'string' && isUuid(id),
+    );
+    const titles = new Map(
+      ids.length
+        ? (
+            await pool.query<{ id: string; title: string; status: string }>(
+              `SELECT id, title, status FROM development_items WHERE project_slug = $1 AND id = ANY($2::uuid[])`,
+              [slug, ids],
+            )
+          ).rows.map((row) => [row.id, row])
+        : [],
+    );
+    response.json({ commits: reviewCommits(sprints, titles) });
+  });
+
   app.post('/development/:id/approve', access({ role: 'run', tenant: 'development' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
     }
+    // Der Worker mergt im Ordner der Agents: dort dürfen keine fremden Änderungen oder Branches liegen.
+    const owner = (
+      await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM development_items WHERE id = $1', [
+        request.params.id,
+      ])
+    ).rows[0];
+    if (owner && !(await guardGit(pool, owner.slug, 'approve', request.body, response))) return;
     const result = await pool.query(
       `UPDATE development_items SET review_approved_at = COALESCE(review_approved_at, NOW()), updated_at = NOW()
         WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.approval}' RETURNING ${DEV_COLUMNS}, project_slug AS "projectSlug"`,

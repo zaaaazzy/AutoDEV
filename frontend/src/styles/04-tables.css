@@ -11,20 +11,21 @@
   align-items: center;
   gap: 8px;
 }
-.dt-search {
+/* Suche im Seitenkopf (ersetzt die frühere Suche über jeder Tabelle). */
+.page-search {
   position: relative;
   display: flex;
   align-items: center;
-  flex: 0 1 280px;
+  flex: 0 1 300px;
   margin: 0;
   color: #6b756f;
 }
-.dt-search svg {
+.page-search svg {
   position: absolute;
   left: 10px;
   pointer-events: none;
 }
-.dt-search input {
+.page-search input {
   min-height: 34px;
   padding: 6px 10px 6px 32px;
   border-radius: 999px;

@@ -62,22 +62,22 @@ export function firstStepsTour(api: ApiService): TourStep[] {
     {
       id: 'sprint-open',
       section: 'sprints',
-      target: '.sprints .dt-table tbody tr .dt-expand',
-      title: 'Sprint öffnen',
-      text: 'Öffne den Sprint, um sein Board zu sehen.',
-      // Weiter, sobald ein Board sichtbar ist – auch wenn der Sprint schon offen war.
+      target: '.sprint-current',
+      title: 'Dein Sprint',
+      text: 'Oben steht immer der aktuelle Sprint – mit allen seinen Aufträgen, nach Stand eingeordnet.',
+      // Weiter, sobald die Auftragsliste des Sprints sichtbar ist.
       waitFor: () => {
-        const board = document.querySelector('.kanban');
-        return Boolean(board && board.getBoundingClientRect().height > 0);
+        const list = document.querySelector('.sprint-current .sprint-orders');
+        return Boolean(list && list.getBoundingClientRect().height > 0);
       },
-      waitHint: 'Tippe auf den Pfeil beim Sprint …',
+      waitHint: 'Lege oben einen Sprint an …',
     },
     {
       id: 'board',
       section: 'sprints',
-      target: '.kanban',
-      title: '4 · Aufträge in den Sprint ziehen',
-      text: 'Ziehe Aufträge von „Offen“ nach „Geplant“ (oder tippe auf →). Die Reihenfolge in „Geplant“ bestimmt, was die Agents zuerst abarbeiten – einer nach dem anderen.',
+      target: '.sprint-current .sprint-pool',
+      title: '4 · Aufträge in den Sprint nehmen',
+      text: 'Unter „Aufträge hinzufügen“ holst du offene Aufträge mit → in den Sprint (oder mehrere per Häkchen). Die Reihenfolge unter „Geplant“ bestimmt, was die Agents zuerst abarbeiten – einer nach dem anderen; mit ↑/↓ änderst du sie.',
     },
     {
       id: 'delete-hint',
@@ -88,7 +88,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
     {
       id: 'start-sprint',
       section: 'sprints',
-      target: '.kanban .col-planned',
+      target: '.sprint-current .sprint-orders',
       title: '5 · Sprint starten?',
       text: 'Wenn „Geplant“ Aufträge enthält, kannst du den Sprint jetzt starten. Der Worker übernimmt sofort den ersten Auftrag.',
       action: { label: 'Sprint jetzt starten', run: startSprint },

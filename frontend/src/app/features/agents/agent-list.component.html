@@ -35,7 +35,7 @@
         <small class="agent-task">{{ agent.task }}</small>
       </span>
     </button>
-    @if (agent.active && agent.id !== assistantId) {
+    @if (agent.active && !agent.manual && agent.id !== assistantId) {
       <button type="button" class="agent-cancel" (click)="cancel(agent.id, agent.name)" title="Agent abbrechen">
         ■ Abbrechen
       </button>

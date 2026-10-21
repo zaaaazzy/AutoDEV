@@ -125,15 +125,17 @@
         <span class="status" [ngClass]="idea.status | statusClass">{{ idea.status | statusLabel }}</span>
       </ng-template>
       <ng-template appDataActions let-idea>
-        <button
-          type="button"
-          class="button secondary icon-button"
-          (click)="editIdea(idea.id)"
-          [attr.aria-label]="'Idee bearbeiten: ' + idea.title"
-          title="Bearbeiten"
-        >
-          ✎
-        </button>
+        @if (editable(idea)) {
+          <button
+            type="button"
+            class="button secondary icon-button"
+            (click)="editIdea(idea.id)"
+            [attr.aria-label]="'Idee bearbeiten: ' + idea.title"
+            title="Bearbeiten"
+          >
+            ✎
+          </button>
+        }
       </ng-template>
       <ng-template appDataDetail let-idea>
         @if (idea.description) {

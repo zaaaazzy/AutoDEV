@@ -1,4 +1,6 @@
+import { GitGraphBackdropComponent } from './git-graph-backdrop.component.js';
 import { GitGraphPanelComponent } from './git-graph-panel.component.js';
+import { GitGraphStore } from './git-graph.store.js';
 import { CoveragePanelComponent } from './coverage-panel.component.js';
 import { TestMethodsPanelComponent } from './test-methods-panel.component.js';
 import { ProductionTileComponent } from './production-tile.component.js';
@@ -22,6 +24,7 @@ import { AgentListComponent } from '../agents/agent-list.component.js';
 import { ChatComponent } from '../chat/chat.component.js';
 import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-options.js';
 import { agentWorkload, newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
+import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
 const RECENT_RUNS = 20;
 /** Farbtöne der Agents in der Verteilung; Rot und Orange bleiben Fehlern und Warnungen vorbehalten. */
@@ -35,12 +38,14 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
   selector: 'app-dashboard',
   standalone: true,
   imports: [
+    GitAlertComponent,
     NgClass,
     AgentListComponent,
     ChatComponent,
     CoveragePanelComponent,
     TestMethodsPanelComponent,
     GitGraphPanelComponent,
+    GitGraphBackdropComponent,
     ProductionTileComponent,
     BudgetPanelComponent,
     ShareBarComponent,
@@ -51,6 +56,7 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
     StatusLabelPipe,
   ],
   templateUrl: './dashboard.component.html',
+  providers: [GitGraphStore],
   host: { style: 'display: contents' },
 })
 export class DashboardComponent {

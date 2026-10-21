@@ -913,3 +913,44 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   assert.equal(saved.values[5], 800);
   assert.equal(saved.values[6], 0.4);
 });
+
+test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach dem Reset, kein Bug', async () => {
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => ({
+    exitCode: command[0] === 'b' ? 1 : 0,
+    durationMs: 1,
+    output: command[0] === 'b' ? "You've hit your session limit · resets 12:40am (Europe/Zurich)" : '',
+  });
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+  assert.equal(result, 'failed');
+  const settled = queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1);
+  assert.match(settled?.sql ?? '', /'planned'/);
+  assert.doesNotMatch(settled?.sql ?? '', /'blocked'/);
+  const retry = queries.find((query) => query.sql.includes('SET retry_after = $2'));
+  assert.ok(retry?.values[1] instanceof Date, 'Startzeit nach dem Reset gespeichert');
+  assert.match(String(retry?.values[2]), /Nutzungslimit .* ab \d\d:\d\d Uhr/);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+});
+
+test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; danach geht es normal weiter', async () => {
+  const { setDraining } = await import('../core/shutdown.js');
+  const started: string[] = [];
+  const items = [
+    { ...item, id: 'a' },
+    { ...item, id: 'b' },
+  ];
+  try {
+    const results = await runSelectedItems(items, async (current) => {
+      started.push(current.id);
+      // Während Auftrag a läuft, wird ein Neustart angefordert.
+      setDraining(true);
+      return 'passed';
+    });
+    assert.deepEqual(started, ['a']);
+    assert.deepEqual(results, [{ itemId: 'a', result: 'passed' }]);
+  } finally {
+    setDraining(false);
+  }
+  assert.equal((await runSelectedItems(items, async () => 'passed')).length, 2);
+});

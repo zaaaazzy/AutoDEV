@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
 import { scheduleRoutines } from '../agent/routine.js';
-import { beginShutdown, setProcessStore } from '../core/shutdown.js';
+import { beginShutdown, isDraining, setDraining, setProcessStore } from '../core/shutdown.js';
 import { databaseProcessStore, killPreviousProcesses } from './process-registry.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
@@ -25,13 +25,14 @@ import { processVisionaryRun } from '../agent/visionary.js';
 import { syncFavicon } from './favicon.js';
 import { ProductionMonitor } from './production-monitor.js';
 import { syncGitGraph } from './git-graph.js';
+import { processGitFix, syncGitState } from './git-state-sync.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
-import { completeRestart, processRestart } from './system-restart.js';
+import { acceptsNewWork, completeRestart, processRestart, readRestart } from './system-restart.js';
 import { sendPush } from '../core/push.js';
 import { listenForWork, WorkSignal } from './work-signal.js';
 import { runDueJobs } from './scheduler.js';
@@ -270,8 +271,18 @@ async function main(): Promise<void> {
     // Git-Verlauf fürs Dashboard jede Minute.
     let gitCheck = 0;
     const githubActive = new Set<string>();
+    const gitFixActive = new Set<string>();
     const heartbeat = setInterval(() => {
       beat();
+      // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
+      for (const target of chatTargets) {
+        const slug = target.options.project;
+        if (target.problem || stopping || gitFixActive.has(slug)) continue;
+        gitFixActive.add(slug);
+        void processGitFix(pool, slug, target.repository, target.options.cwd)
+          .catch(logged('runner-cli'))
+          .finally(() => gitFixActive.delete(slug));
+      }
       void publishSystemAgents(pool).catch(logged('runner-cli'));
       if (!stopping) {
         production.tick(
@@ -285,6 +296,9 @@ async function main(): Promise<void> {
         for (const target of chatTargets) {
           if (target.problem) continue;
           void syncGitGraph(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
+          void syncGitState(pool, target.options.project, target.repository, target.options.cwd).catch(
+            logged('runner-cli'),
+          );
           void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
           // GitHub-Brücke: Issue-Import, Rückmeldung und Sprints im Review (Intervalle begrenzt das Modul selbst).
           const slug = target.options.project;
@@ -328,7 +342,7 @@ async function main(): Promise<void> {
     // Einrichtungsassistent: Host-Aufgaben (Ordner, Git, GitHub, Vorlagen, Agent-Tests) schnell und parallel abarbeiten.
     let setupActive = 0;
     const setupTimer = setInterval(() => {
-      if (setupActive >= SETUP_PARALLEL || stopping) return;
+      if (setupActive >= SETUP_PARALLEL || stopping || isDraining()) return;
       setupActive += 1;
       void processSetupJob(pool)
         .catch((error: unknown) => logOnce('setup', `Einrichtungsaufgabe fehlgeschlagen: ${describeError(error)}`))
@@ -350,7 +364,7 @@ async function main(): Promise<void> {
     });
     let reviewActive = false;
     const reviewTimer = setInterval(() => {
-      if (reviewActive || stopping) return;
+      if (reviewActive || stopping || isDraining()) return;
       reviewActive = true;
       void reviewSlots
         .sync()
@@ -362,7 +376,7 @@ async function main(): Promise<void> {
     // führt sie dann aus). Gesperrte Projekte (laufender Auftrag) bleiben fällig, bis die Sperre frei ist.
     let routineActive = false;
     const routineTimer = setInterval(() => {
-      if (routineActive || stopping) return;
+      if (routineActive || stopping || isDraining()) return;
       const projects = chatTargets.filter((target) => !target.problem).map((target) => target.options.project);
       if (!projects.length) return;
       routineActive = true;
@@ -375,6 +389,8 @@ async function main(): Promise<void> {
         .finally(() => (routineActive = false));
     }, 60_000);
     const chatTimer = setInterval(() => {
+      // Neustart steht an: Chat, Tests, Analysen und Visionär warten, bis der Worker neu gestartet ist.
+      if (isDraining()) return;
       for (const target of chatTargets) {
         const slug = target.options.project;
         // Kompletter Test auf Knopfdruck (Aktionen-Menü, Testläufe): unabhängig vom Chat, der sonst alles Weitere blockiert.
@@ -469,7 +485,7 @@ async function main(): Promise<void> {
     // Zeitlimit, der Zyklus wartet nie darauf. Höchstens ein Durchgang gleichzeitig je Worker.
     let schedulerActive = false;
     const runScheduledJobs = (): void => {
-      if (schedulerActive || stopping) return;
+      if (schedulerActive || stopping || isDraining()) return;
       schedulerActive = true;
       void runDueJobs(pool, { installRoot: INSTALL_ROOT }, () => stopping)
         .then((runs) => {
@@ -492,7 +508,21 @@ async function main(): Promise<void> {
         testActive.size +
         setupActive +
         (schedulerActive ? 1 : 0);
-      void processRestart(pool, INSTALL_ROOT, busy)
+      // Erst den Stand lesen: Ist ein Neustart angefordert oder im Bau, startet ab jetzt nichts Neues mehr (Drain).
+      // So wird busy() wirklich 0, und der Neubau beendet keine Arbeit mitten im Schritt.
+      void readRestart(pool)
+        .then((state) => {
+          const draining = !acceptsNewWork(state);
+          if (draining !== isDraining()) {
+            console.info(
+              draining
+                ? 'Neustart angefordert – keine neue Arbeit mehr, Laufendes wird fertig.'
+                : 'Neustart abgeschlossen oder verworfen – Arbeit läuft wieder.',
+            );
+          }
+          setDraining(draining);
+          return processRestart(pool, INSTALL_ROOT, busy);
+        })
         .then((result) => {
           // Ein gescheiterter Neustart meldet sich selbst per Push (writeRestart → notifyRestart).
           if (result !== 'restart') return;
@@ -520,7 +550,7 @@ async function main(): Promise<void> {
               errors.set(slug, target.problem);
               continue;
             }
-            if (active.has(slug) || active.size >= limit) {
+            if (active.has(slug) || active.size >= limit || isDraining()) {
               continue;
             }
             lastStart.set(slug, Date.now());
@@ -531,7 +561,8 @@ async function main(): Promise<void> {
             active.set(slug, task);
           }
         } catch (error) {
-          console.error('Worker-Zyklus fehlgeschlagen:', error instanceof Error ? error.message : error);
+          // describeError: pg meldet eine ausgefallene Datenbank als AggregateError ohne Text (nur der Code sagt etwas).
+          console.error('Worker-Zyklus fehlgeschlagen:', describeError(error));
         }
         // Projektübergreifend, deshalb ausserhalb von runWorkflow (das je Projekt läuft).
         runScheduledJobs();

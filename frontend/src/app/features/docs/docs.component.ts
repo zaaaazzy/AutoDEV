@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { DocRevision, DocumentEntry } from '../../core/models.js';
+import { PageSearchService } from '../../core/page-search.service.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
@@ -41,7 +42,9 @@ export class DocsComponent {
   protected readonly openGroups = signal(new Set<DocumentEntry['kind']>(['manual']));
   /** Dokument, das gerade bearbeitet wird (sonst Lesemodus). */
   protected readonly editing = signal<string | null>(null);
-  protected readonly query = signal('');
+  private readonly pageSearch = inject(PageSearchService);
+  /** Suchbegriff aus dem Seitenkopf. */
+  protected readonly query = this.pageSearch.query;
   protected readonly hits = computed(() => searchDocs(this.data().docs, this.query()));
   /** Inhaltsverzeichnis zugeklappt (Desktop: Buch-Symbol, Handy: nach oben eingeklappt). */
   protected readonly collapsed = signal(readCollapsed());
@@ -75,6 +78,16 @@ export class DocsComponent {
   protected readonly marketingOpen = signal(isAgentPermissionsHash(globalThis.location.hash));
 
   constructor() {
+    const unregister = this.pageSearch.register();
+    this.pageSearch.placeholder.set('Dokumentation durchsuchen …');
+    inject(DestroyRef).onDestroy(() => {
+      unregister();
+      this.pageSearch.placeholder.set(null);
+    });
+    // Treffer stehen im Inhaltsverzeichnis: beim Suchen aufklappen.
+    effect(() => {
+      if (this.query().trim() && untracked(this.collapsed)) this.setCollapsed(false);
+    });
     const onHashChange = (): void => this.marketingOpen.set(isAgentPermissionsHash(globalThis.location.hash));
     globalThis.addEventListener('hashchange', onHashChange);
     inject(DestroyRef).onDestroy(() => globalThis.removeEventListener('hashchange', onHashChange));
@@ -121,11 +134,6 @@ export class DocsComponent {
   /** Der Link setzt die Adresse (eigener Verlaufseintrag); auf dem Handy wie bei Dokumenten das Inhaltsverzeichnis zuklappen. */
   protected openMarketing(): void {
     if (globalThis.matchMedia?.('(max-width: 720px)').matches) this.setCollapsed(true);
-  }
-
-  protected search(value: string): void {
-    this.query.set(value);
-    if (value.trim() && this.collapsed()) this.setCollapsed(false);
   }
 
   protected revisionsOf(doc: DocumentEntry): DocRevision[] {

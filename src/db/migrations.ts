@@ -74,6 +74,44 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 3,
     name: 'agent-run-steps-agent-index',
     sql: 'CREATE INDEX IF NOT EXISTS agent_run_steps_agent_idx ON agent_run_steps (agent_id);',
+  }, // Stand von main, der parallel zu Sprint 9 entstand (Sprint abbrechen, Autopilot live, Testfortschritt,
+  // Nutzungslimit, Git-Zustand und Git-Lösungen). Alles idempotent: läuft auch dort, wo es schon angelegt ist.
+  {
+    version: 4,
+    name: 'main-parallel-zu-sprint-9',
+    sql: `
+      -- Sprint abgebrochen: laufende Agents werden beendet, offene Aufträge gehen zurück ins Backlog; kein Git-Sync.
+      ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_status_check;
+      ALTER TABLE sprints ADD CONSTRAINT sprints_status_check
+        CHECK (status IN ('planned', 'active', 'review', 'completed', 'cancelled'));
+      -- Autopilot schaltet einen fertigen Sprint selbst live (Test-Gate, Merge nach main, Push), statt auf das Go zu warten.
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS autopilot_auto_live BOOLEAN NOT NULL DEFAULT FALSE;
+      -- Live-Fortschritt eines laufenden Testschritts („13 von 28 Tests · 12 ✓ · 1 ✗“) und Start für die Laufzeit.
+      ALTER TABLE test_run_steps ADD COLUMN IF NOT EXISTS progress TEXT;
+      ALTER TABLE test_run_steps ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT NOW();
+      -- Nutzungslimit des Agent-Kontos erreicht: der Auftrag bleibt geplant und startet erst ab dieser Zeit wieder.
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS retry_after TIMESTAMPTZ;
+      -- Git-Zustand der Projektordner (Branch, offene Änderungen, Abstand zu GitHub), vom Worker jede Minute erfasst;
+      -- riskante Aktionen (Live schalten, Freigeben, Sprint starten) prüfen ihn vorher.
+      ALTER TABLE project_git_graphs ADD COLUMN IF NOT EXISTS state JSONB;
+      ALTER TABLE project_git_graphs ADD COLUMN IF NOT EXISTS state_at TIMESTAMPTZ;
+      ALTER TABLE project_git_graphs ALTER COLUMN graph DROP NOT NULL;
+      -- Lösungen auf Knopfdruck (Zwischenstand sichern, zurück auf main, main mit GitHub abgleichen), vom Worker ausgeführt.
+      CREATE TABLE IF NOT EXISTS git_fix_requests (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+        fix TEXT NOT NULL CHECK (fix IN ('save_wip', 'checkout_main', 'sync_main')),
+        role TEXT NOT NULL DEFAULT 'live' CHECK (role IN ('live', 'agents')),
+        status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'running', 'done', 'failed')),
+        message TEXT,
+        requested_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        finished_at TIMESTAMPTZ
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS git_fix_requests_open_idx ON git_fix_requests (project_slug)
+        WHERE status IN ('requested', 'running');
+      CREATE INDEX IF NOT EXISTS git_fix_requests_project_idx ON git_fix_requests (project_slug, created_at DESC);
+    `,
   },
 ];
 

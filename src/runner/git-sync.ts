@@ -4,10 +4,13 @@ export {
   checkedOutElsewhere,
   checkoutSprintBranch,
   filesWithSecrets,
+  gitHelpers,
+  type GitHelpers,
   isValidGitRemote,
   pushRemote,
   sprintBranch,
   sprintTag,
+  stageAll,
   taskCommitMessage,
 } from './git-sync/git-helpers.js';
 export {

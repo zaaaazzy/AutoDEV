@@ -193,10 +193,13 @@ export function failureParts(failure: string): FailureParts {
   const agent = /^Agent „([^“]+)“/.exec(text)?.[1] ?? '';
   const notes = [...text.matchAll(/\*\*Vermerk[^*]*:\*\*\s*([^\n]+)/g)].map((match) => clean(match[1] ?? ''));
   const body = text.replace(/\*\*Vermerk[^*]*:\*\*[^\n]*\n?/g, '').replace(/^Agent „[^“]+“[^\n]*\n*/, '');
+  // Nur Aufzählungspunkte zählen: Steht der Abschnitt in einem Code-Block (ältere Meldungen), wäre die schliessende
+  // Zeile „```“ sonst ein leerer zweiter Punkt („und 1 weiterer Punkt“).
   const unmet = sectionBody(body, /Abnahme nicht bestanden/)
     .split('\n')
-    .map((line) => line.trim().replace(/^[-*]\s*/, ''))
-    .filter(Boolean)
+    .map((line) => line.trim())
+    .filter((line) => /^[-*]\s+\S/.test(line))
+    .map((line) => line.replace(/^[-*]\s+/, ''))
     .map((line) => {
       const match = /^(.*?)\s*„([^“]+)“\s*:\s*(.+)$/.exec(line);
       return match
