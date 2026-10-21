@@ -22,6 +22,7 @@ import {
 } from './git-helpers.js';
 import { ensureCiWorkflow, runTestGate, waitForCi } from './ci.js';
 import { orderWorkInProgress } from './order-branch.js';
+import { gitEnvironment } from '../project-command.js';
 
 /** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */
 export async function commitTaskToGit(
@@ -38,7 +39,7 @@ export async function commitTaskToGit(
     await stageAll(git, must);
     if (!(await must('diff', '--cached', '--name-only'))) return null;
     const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
-    await must('commit', '-m', subject, '-m', body);
+    await must('commit', '--no-verify', '-m', subject, '-m', body);
     return await must('rev-parse', '--short', 'HEAD');
   } catch (error) {
     console.error(
@@ -65,6 +66,7 @@ export async function commitProjectSetup(
   if (!staged && hasCommit) return { initialized, committed: false, held };
   await must(
     'commit',
+    '--no-verify',
     '--allow-empty',
     '-m',
     hasCommit ? 'chore: Projekt mit AIdeation verbunden' : 'chore: Initial-Commit',
@@ -135,6 +137,7 @@ async function pushSprint(
   if (await must('diff', '--cached', '--name-only')) {
     await must(
       'commit',
+      '--no-verify',
       '-m',
       `chore(${sprint.name}): Sprint-Stand sichern`,
       '-m',
@@ -188,6 +191,7 @@ async function pushSprint(
       if (mergedMain && sprint.remote) {
         const pushed = await ci.execute(['git', 'push', '-u', 'origin', MAIN_BRANCH], elsewhere, {
           timeoutMs: 120_000,
+          env: gitEnvironment({ GIT_TERMINAL_PROMPT: '0' }),
         });
         log.push(
           pushed.exitCode === 0 ? `${MAIN_BRANCH} nach GitHub gepusht.` : `Push von ${MAIN_BRANCH} fehlgeschlagen.`,
@@ -259,7 +263,7 @@ export async function mergeIntoCheckedOutMain(
   log: string[],
 ): Promise<boolean> {
   const git = (...args: string[]) =>
-    execute(['git', ...args], folder, { timeoutMs: 120_000, env: { ...process.env, ...BOT_IDENTITY } });
+    execute(['git', ...args], folder, { timeoutMs: 120_000, env: gitEnvironment(BOT_IDENTITY) });
   const head = await git('rev-parse', '--abbrev-ref', 'HEAD');
   const status = await git('status', '--porcelain', '--untracked-files=no');
   if (head.exitCode !== 0 || head.output.trim() !== MAIN_BRANCH || status.exitCode !== 0 || status.output.trim()) {

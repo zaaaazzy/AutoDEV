@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   areaName,
+  directRunner,
   measureCoverage,
   mergeCoverage,
   parseNodeCoverage,
@@ -118,4 +119,62 @@ test('misst AIdeation selbst: erst vorbereiten, dann mit Abdeckung testen', asyn
   assert.ok(calls[1]?.includes('src/**/*.test.ts'));
   assert.equal(areas[0]?.lines, 80.5);
   assert.equal(areas[0]?.passed, 5);
+});
+
+test('erkennt direkte Aufrufe des Node-Test-Runners aus dem Testplan je Auftrag', () => {
+  assert.deepEqual(directRunner(['npx', 'tsx', '--test', 'src/a.test.ts']), { binary: 'tsx', args: ['src/a.test.ts'] });
+  assert.deepEqual(directRunner(['npx', '--no-install', 'tsx', '--test', 'a.test.ts']), {
+    binary: 'tsx',
+    args: ['a.test.ts'],
+  });
+  assert.deepEqual(directRunner(['node', '--test', '--experimental-test-coverage', 'a.test.js']), {
+    binary: 'node',
+    args: ['a.test.js'],
+  });
+  assert.equal(directRunner(['npm', 'test']), null);
+  assert.equal(directRunner(['npx', 'playwright', 'test', 'e2e/app.spec.ts']), null);
+  // Fremde Wrapper (Shell, env, …) übernimmt die Messung nicht.
+  assert.equal(directRunner(['sh', '-c', 'tsx', '--test']), null);
+  assert.equal(directRunner(['env', 'X=1', 'tsx', '--test', 'a.test.ts']), null);
+});
+
+test('misst die Abdeckung auch für Testbefehle je Auftrag (npx tsx --test <Dateien>)', async () => {
+  const { mkdtemp, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = await mkdtemp(join(tmpdir(), 'coverage-'));
+  await writeFile(join(dir, 'package.json'), JSON.stringify({ name: 'dev-log', scripts: {} }));
+  const calls: { command: string[]; env?: NodeJS.ProcessEnv }[] = [];
+  const previous = process.env.DEV_LOG_SECRET_KEY;
+  process.env.DEV_LOG_SECRET_KEY = 'geheim-coverage';
+  try {
+    const areas = await measureCoverage(
+      dir,
+      [
+        ['npx', 'tsx', '--test', 'src/runner/a.test.ts', 'src/runner/b.test.ts'],
+        ['npx', 'playwright', 'test', 'e2e/app.spec.ts'],
+      ],
+      async (command, _cwd, options) => {
+        calls.push({ command, env: options?.env });
+        return { exitCode: 0, durationMs: 1, output: '# pass 4\n# fail 0\n# all files | 75 | 60 | 80 |\n' };
+      },
+    );
+    assert.equal(calls.length, 1, 'Playwright wird nicht gemessen');
+    assert.deepEqual(calls[0]!.command.slice(0, 6), [
+      'npm',
+      'exec',
+      '--',
+      'tsx',
+      '--test',
+      '--experimental-test-coverage',
+    ]);
+    assert.deepEqual(calls[0]!.command.slice(-2), ['src/runner/a.test.ts', 'src/runner/b.test.ts']);
+    assert.equal(calls[0]!.env?.DEV_LOG_SECRET_KEY, undefined, 'gefiltertes Environment');
+    assert.ok(calls[0]!.env?.PATH);
+    assert.equal(areas[0]?.lines, 75);
+    assert.equal(areas[0]?.passed, 4);
+  } finally {
+    if (previous === undefined) delete process.env.DEV_LOG_SECRET_KEY;
+    else process.env.DEV_LOG_SECRET_KEY = previous;
+  }
 });

@@ -16,6 +16,7 @@ import {
 import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
 import { describeCommand, loadRouting, routable, routeModel } from '../agent/model-routing.js';
 import { runTestAgent } from './test-agent.js';
+import { projectEnvironment } from './project-command.js';
 import { agentEnvironment, buildInvocation } from './runner-prompts.js';
 import type { BuiltinAgent, WorkflowAgent } from './runner-types.js';
 import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
@@ -48,7 +49,8 @@ export const runBuiltinAgent: BuiltinAgent = async ({
         existingProject: true,
         timeoutMs,
         signal,
-        env: agentEnvironment(cwd),
+        // Testbefehle sind Projektcode: nur das gefilterte Environment, nicht das der Agent-CLIs.
+        env: projectEnvironment(cwd),
       },
       pool,
     );

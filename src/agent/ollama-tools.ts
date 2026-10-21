@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, readdir, realpath, stat, writeFile } from 'n
 import { dirname, join, relative } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { withProjectLock } from '../core/project-lock.js';
+import { projectEnvironment } from '../runner/project-command.js';
 import {
   DATABASE_COMMAND,
   isAllowedCommand,
@@ -160,6 +161,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           if (COMPOSE_STARTING.test(command)) {
             const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, {
               timeoutMs: 60_000,
+              env: projectEnvironment(context.cwd),
             });
             const reason =
               check.exitCode === 0
@@ -170,7 +172,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           }
           const result = await context.execute(executed, context.cwd, {
             timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
-            env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_'))),
+            // Befehle des Assistenten sind Projektcode: nur das gefilterte Environment (Allowlist).
+            env: projectEnvironment(context.cwd),
           });
           return clip(
             `Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`,

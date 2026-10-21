@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { sprintBranch } from './git-sync.js';
+import { gitEnvironment } from './project-command.js';
 
 /**
  * Review-Container: projektübergreifend geteilte Docker-Container, die der Administrator freigibt (einer ist
@@ -283,7 +284,9 @@ export class ReviewSlots {
       )
     ).rows[0];
     if (!item || item.status !== DEVELOPMENT_STATUS.approval || item.approved || !item.branch) return null;
-    const head = await this.execute(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${item.branch}`], folder);
+    const head = await this.execute(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${item.branch}`], folder, {
+      env: gitEnvironment(),
+    });
     return head.exitCode === 0 ? head.output.trim() : null;
   }
 
@@ -300,7 +303,9 @@ export class ReviewSlots {
       )
     ).rows[0];
     for (const branch of [...(sprint ? [sprintBranch(sprint.name)] : []), 'main']) {
-      const head = await this.execute(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], folder);
+      const head = await this.execute(['git', 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], folder, {
+        env: gitEnvironment(),
+      });
       if (head.exitCode === 0 && head.output.trim()) return head.output.trim();
     }
     return null;

@@ -1,4 +1,4 @@
-import { basename, dirname } from 'node:path';
+import { agentComposeProject } from './project-command.js';
 import { HANDOFF_RULE } from '../core/workflow-phases.js';
 import { acceptanceInstructions } from './acceptance.js';
 import { reviewInstructions } from './review.js';
@@ -80,18 +80,4 @@ export function agentEnvironment(cwd?: string): NodeJS.ProcessEnv {
   return compose ? { ...env, COMPOSE_PROJECT_NAME: compose } : env;
 }
 
-/**
- * Docker-Compose-Projekt im Arbeitsordner der Agents (<Projekt>/agent bzw. <Ordner>-agents): eigener Name
- * (<projekt>-agent), damit „docker compose up/build“ der Agents nie die Live-Container des Projekts ersetzt – auch
- * wenn die Compose-Datei einen festen Namen setzt (die Umgebungsvariable hat Vorrang).
- */
-export function agentComposeProject(cwd: string): string | null {
-  const folder = basename(cwd);
-  const project = folder === 'agent' ? basename(dirname(cwd)) : folder.endsWith('-agents') ? folder.slice(0, -7) : null;
-  if (!project) return null;
-  const name = project
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[-_]+/, '');
-  return name ? `${name}-agent` : null;
-}
+export { agentComposeProject };

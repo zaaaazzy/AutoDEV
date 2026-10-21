@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
+import { gitEnvironment } from './project-command.js';
 import {
   type CiStatus,
   type HosterAdapter,
@@ -115,7 +116,8 @@ export function searchTimestamp(date: Date): string {
  * maskierter Ausgabe. Wirft bei unbekanntem Unterbefehl, bei Fehlern und bei Rate-Limits (dann `rateLimited`).
  */
 export function ghRunner(execute: CommandExecutor, cwd: string) {
-  const env = { ...process.env, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' };
+  // gh startet git im Projektordner: dasselbe gefilterte Environment ohne Hooks wie der Git-Sync.
+  const env = gitEnvironment({ GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', NO_COLOR: '1' });
   return async (
     group: string,
     command: string,

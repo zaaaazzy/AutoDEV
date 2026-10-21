@@ -12,6 +12,7 @@ import type { Pool } from 'pg';
 import { redactOutput, runCommand } from '../core/command.js';
 import { killGroup } from '../core/shutdown.js';
 import { SKIPPED_NOTE } from './order-tests.js';
+import { gitEnvironment, projectEnvironment } from './project-command.js';
 
 const execFile = promisify(nodeExecFile);
 
@@ -92,7 +93,7 @@ export function parseTestAgentOptions(args: string[], cwd = process.env.INIT_CWD
 
 async function getGitValue(cwd: string, argument: string): Promise<string | null> {
   try {
-    const { stdout } = await execFile('git', ['rev-parse', argument], { cwd, timeout: 5_000 });
+    const { stdout } = await execFile('git', ['rev-parse', argument], { cwd, timeout: 5_000, env: gitEnvironment() });
     return stdout.trim() || null;
   } catch {
     return null;
@@ -109,7 +110,12 @@ async function getProjectName(cwd: string): Promise<string> {
 }
 
 const NODE_TEST_RUNNERS = new Set(['tsx', 'node']);
-const PLAYWRIGHT_IMPORT = /(?:from\s+|require\(\s*|import\(\s*)['"]@playwright\/test['"]/;
+/**
+ * Nur echte Importe am Zeilenanfang: Node-Tests, die „from '@playwright/test'“ als Text in einem String enthalten
+ * (z. B. test-agent.test.ts), sind keine Playwright-Dateien – sonst liefe „playwright test“ mit „No tests found“.
+ */
+const PLAYWRIGHT_IMPORT =
+  /^\s*(?:import\s[^;'"]*?from\s+|import\s+|(?:const|let|var)\s[^=;]*=\s*(?:await\s+)?(?:require|import)\(\s*)['"]@playwright\/test['"]/m;
 const PLAYWRIGHT_CONFIGS = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.mjs'];
 
 /** Nächste Playwright-Konfiguration vom Ordner der Datei aufwärts bis zum Projektordner (relativ zu diesem). */
@@ -209,7 +215,8 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
       ? { exitCode: 130, durationMs: 0, output: 'Abgebrochen.' }
       : await runCommand(command, options.cwd, {
           timeoutMs: options.timeoutMs,
-          env: options.env,
+          // Fail-closed: ohne Vorgabe nie das volle Environment des Workers (DEV_LOG_DATABASE_URL usw.).
+          env: options.env ?? projectEnvironment(options.cwd),
           onSpawn: (value) => {
             pid = value;
           },

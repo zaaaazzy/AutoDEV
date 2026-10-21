@@ -364,6 +364,13 @@ Legende: ✅ erlaubt · ⚠️ eingeschränkt · ⛔ gesperrt
 - Umleitungen in Dateien, riskante Git-Optionen, npx ohne --no-install, unsichere Compose-Dateien.
 - Ausnahme: Assistent mit voller Freigabe im Befehl.
 
+### Projektcode nur mit gefiltertem Environment
+
+- Tests, Test-Gate, Komplettlauf, Coverage-Messung und Befehle des Chat-Assistenten laufen über `runProjectCommand` bzw. `projectEnvironment` (`src/runner/project-command.ts`). Weitergegeben wird nur eine Allowlist: `PATH`, `HOME`, `TMPDIR`, Locale, Terminal, `CI`, `NODE_ENV`, `SSH_AUTH_SOCK` sowie `LC_*`, `NPM_CONFIG_*`, `PLAYWRIGHT_*`, `DOCKER_*`, `XDG_*`, `NVM_*`. `DEV_LOG_*` und alles mit SECRET, TOKEN, PASSWORD, API_KEY, DATABASE_URL oder CREDENTIAL im Namen fehlen immer; einen Rückfall auf `process.env` gibt es nicht.
+- Git und gh des Workers laufen mit `gitEnvironment`: dieselbe Allowlist plus GitHub-Token für den Push, Hooks aus (`core.hooksPath=/dev/null`) und kein fsmonitor. Alle Commits zusätzlich mit `--no-verify`.
+- Die eigene Coverage-Messung führt Vorbereitungsschritte aus dem `test`-Skript nur aus, wenn sie `npm run`, `npm ci`, `tsc`, `ng build` oder `vite build` sind. Sonst entfällt die Messung; die Ablehnung steht im Tester-Schritt (Ausgabe und Verlauf). Testbefehle je Auftrag (`npx tsx --test <Dateien>`, `node --test …`) misst AIdeation direkt mit `--experimental-test-coverage`, ohne Skript und ohne Vorbereitung.
+- Agent-CLIs (Claude, Codex) und Deploy-Befehle behalten `agentEnvironment` (nur `DEV_LOG_*` entfernt), weil sie API-Schlüssel bzw. Hoster-Zugänge brauchen.
+
 ## 10 · Neu im aktuellen Stand
 
 Die vier Auffälligkeiten der ersten Fassung sind behoben (Tester/Reviewer melden Bugs, Problemanalyse nur lesend, Doku angeglichen). Dazu kamen diese Änderungen am Ablauf.

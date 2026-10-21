@@ -4,6 +4,7 @@ import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../../core/command.js';
 import { GIT_TIMEOUT_MS, type GitHelpers, SECRET_CONTENT } from './git-helpers.js';
+import { gitEnvironment, runProjectCommand } from '../project-command.js';
 
 // Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
 const TEST_TIMEOUT_MS = 45 * 60_000;
@@ -77,6 +78,7 @@ export async function ensureCiWorkflow(
   await helpers.must('add', CI_WORKFLOW, ...(node ? ['.nvmrc'] : []));
   await helpers.must(
     'commit',
+    '--no-verify',
     '-m',
     'ci: GitHub-Actions-Workflow für Build und Tests',
     '-m',
@@ -111,14 +113,14 @@ export async function waitForCi(
   log: string[],
   pollMs = 10_000,
 ): Promise<void> {
-  const env = { ...process.env, GH_PROMPT_DISABLED: '1' };
+  const env = gitEnvironment({ GH_PROMPT_DISABLED: '1' });
   const gh = async (timeoutMs: number, ...args: string[]) => execute(['gh', ...args], cwd, { timeoutMs, env });
   const auth = await gh(GIT_TIMEOUT_MS, 'auth', 'status', '--hostname', 'github.com').catch(() => null);
   if (!auth || auth.exitCode !== 0) {
     log.push('CI-Status nicht prüfbar (GitHub CLI fehlt oder ist nicht angemeldet) – das lokale Test-Gate gilt.');
     return;
   }
-  const sha = (await execute(['git', 'rev-parse', 'HEAD'], cwd, { timeoutMs: GIT_TIMEOUT_MS })).output.trim();
+  const sha = (await execute(['git', 'rev-parse', 'HEAD'], cwd, { timeoutMs: GIT_TIMEOUT_MS, env })).output.trim();
   let runId = '';
   for (let attempt = 0; attempt < 24 && !runId; attempt += 1) {
     const list = await gh(
@@ -174,10 +176,9 @@ export async function runTestGate(
   log: string[],
 ): Promise<void> {
   for (const command of commands) {
-    // Ohne die internen Variablen des Workers (DEV_LOG_*): Projekttests sollen weder AIdeation-Zugänge sehen noch
-    // vom Projektbereich des Workers abhängen.
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_')));
-    const result = await execute(command, cwd, { timeoutMs: TEST_TIMEOUT_MS, env });
+    // Nur mit dem gefilterten Environment: Projekttests sollen weder AIdeation-Zugänge sehen noch vom Projektbereich
+    // des Workers abhängen.
+    const result = await runProjectCommand(command, cwd, { timeoutMs: TEST_TIMEOUT_MS }, execute);
     if (result.exitCode !== 0) {
       throw new Error(
         `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${redactOutput(result.output, process.env).slice(-600)}`,

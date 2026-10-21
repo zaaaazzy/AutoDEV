@@ -223,7 +223,7 @@ export async function finishOrderBranch(
     if (passed) {
       if (dirty) {
         const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
-        await must('commit', '-m', subject, '-m', body);
+        await must('commit', '--no-verify', '-m', subject, '-m', body);
       }
       // Review-Freigabe: Branch bleibt bestehen und wird erst nach der Freigabe gemergt (mergeApprovedBranch).
       if (hold) {

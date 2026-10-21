@@ -6,6 +6,7 @@ import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
 import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
+import { gitEnvironment } from '../project-command.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -110,13 +111,13 @@ export const BOT_IDENTITY = {
 };
 
 export function gitHelpers(execute: CommandExecutor, cwd: string) {
-  const env = {
-    ...process.env,
+  // Gefiltert und ohne Hooks: Agents können im Projekt Hooks oder fsmonitor setzen, die sonst beim Commit liefen.
+  const env = gitEnvironment({
     ...BOT_IDENTITY,
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'never',
     GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
-  };
+  });
   const git = async (...args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
     return { ...result, output: redactOutput(result.output, process.env).trim() };
