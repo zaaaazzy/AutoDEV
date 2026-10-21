@@ -1133,4 +1133,15 @@ export const SCHEMA = `
     ('close_old_sprints', FALSE, 86400, 'close_old_sprints', '{"inactiveDays": 14}'),
     ('push_alert', TRUE, 3600, 'push_alert', '{}')
   ON CONFLICT (key) DO NOTHING;
+  -- Prozessregister des Workers: jeder gestartete Prozess (Agents, Chat, Autor, Visionär, Testläufe) mit Startzeit.
+  -- Nach einem Absturz beendet der neue Worker diese Gruppen, bevor er Anfragen erneut einplant.
+  CREATE TABLE IF NOT EXISTS agent_processes (
+    id BIGSERIAL PRIMARY KEY,
+    pid INTEGER NOT NULL CHECK (pid > 0),
+    pid_started_at TIMESTAMPTZ NOT NULL,
+    command TEXT NOT NULL DEFAULT '',
+    cwd TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  CREATE INDEX IF NOT EXISTS agent_processes_pid_idx ON agent_processes (pid, pid_started_at);
 `;
