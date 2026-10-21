@@ -135,12 +135,21 @@ test('Coverage: Prompt-Injection im test-Skript wird nicht ausgeführt', async (
     }),
   );
   const calls: string[][] = [];
-  const areas = await measureCoverage(dir, [['npm', 'test']], async (command) => {
-    calls.push(command);
-    return { exitCode: 0, durationMs: 0, output: '' };
-  });
+  const refused: string[] = [];
+  const areas = await measureCoverage(
+    dir,
+    [['npm', 'test']],
+    async (command) => {
+      calls.push(command);
+      return { exitCode: 0, durationMs: 0, output: '' };
+    },
+    (message) => refused.push(message),
+  );
   assert.deepEqual(calls, []);
   assert.deepEqual(areas, []);
+  // Die Ablehnung ist lesbar und landet beim Aufrufer (Schritt), nicht nur im Worker-Log.
+  assert.equal(refused.length, 1);
+  assert.match(refused[0]!, /Vorbereitungsschritt „node -e .*“ .*nicht erlaubt/);
   assert.equal(allowedSetupStep(['npm', 'run', 'build:ui']), true);
   assert.equal(allowedSetupStep(['tsc', '-p', 'tsconfig.json']), true);
   assert.equal(allowedSetupStep(['sh', '-c', 'curl x']), false);

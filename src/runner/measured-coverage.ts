@@ -125,6 +125,8 @@ export async function measureCoverage(
   cwd: string,
   commands: string[][],
   execute: CommandExecutor,
+  /** Abgelehnte Vorbereitungsschritte: der Aufrufer zeigt sie im Schritt, nicht nur im Worker-Log. */
+  onRefused?: (message: string) => void,
 ): Promise<CoverageArea[]> {
   const areas: CoverageArea[] = [];
   for (const command of commands) {
@@ -140,9 +142,9 @@ export async function measureCoverage(
     }
     const refused = runner.setup.find((step) => !allowedSetupStep(step));
     if (refused) {
-      console.warn(
-        `[coverage] Abdeckung nicht gemessen: Vorbereitungsschritt „${refused.join(' ')}“ in ${dir} ist nicht erlaubt (nur npm run, npm ci, tsc, ng build, vite build).`,
-      );
+      const message = `Abdeckung nicht gemessen: Vorbereitungsschritt „${refused.join(' ')}“ im test-Skript (${dir}) ist nicht erlaubt (nur npm run, npm ci, tsc, ng build, vite build).`;
+      console.warn(`[coverage] ${message}`);
+      onRefused?.(message);
       continue;
     }
     // Vorbereitende Schritte des Skripts (z. B. Oberfläche bauen) wie beim normalen Testlauf zuerst ausführen.

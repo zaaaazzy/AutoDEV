@@ -332,10 +332,18 @@ export async function runStep(
   // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
   const reported = agent.role === 'tester' ? parseCoverage(output) : null;
   // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
+  const refusedSetup: string[] = [];
   const measured =
     agent.role === 'tester' && !cancelled
-      ? await measureCoverage(options.cwd, await coverageCommands(ctx), execute).catch(logged('runner-steps', []))
+      ? await measureCoverage(options.cwd, await coverageCommands(ctx), execute, (message) =>
+          refusedSetup.push(message),
+        ).catch(logged('runner-steps', []))
       : [];
+  // Abgelehnte Befehle stehen im Schritt selbst (Ausgabe und Verlauf), nicht nur im Worker-Log.
+  for (const message of refusedSetup) {
+    await logEvent(pool, stepId, message);
+    output += `\n\n${message}`;
+  }
   const coverage = mergeCoverage(reported, measured);
   if (coverage) {
     await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) =>
