@@ -182,7 +182,10 @@ async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
     .catch(logged('runner-cli'));
   const orphans = await pool.query<{ pid: number; spawnedAt: Date }>(
-    `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps WHERE status = 'running' AND pid IS NOT NULL`,
+    // Auch Schritte, die der Abbruch schon direkt beendet hat (Worker war weg): ihr Prozess kann noch laufen.
+    `SELECT pid, pid_started_at AS "spawnedAt" FROM agent_run_steps
+      WHERE pid IS NOT NULL
+        AND (status = 'running' OR (cancel_requested AND pid_started_at > NOW() - INTERVAL '1 day'))`,
   );
   for (const orphan of orphans.rows) {
     if (killOrphan(orphan.pid, orphan.spawnedAt)) console.info(`Verwaisten Agent-Prozess ${orphan.pid} beendet.`);

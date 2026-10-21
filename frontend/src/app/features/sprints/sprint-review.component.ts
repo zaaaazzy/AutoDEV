@@ -6,6 +6,7 @@ import type { ReviewSlot, Sprint, SprintCommit } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ReviewLaunchService } from '../../core/review-launch.service.js';
 import { formatIsoDate } from '../../shared/format.js';
+import { WaitStatusComponent } from '../runs/wait-status.component.js';
 import { commitOptionLabel, reviewStarting, reviewStatusText, sprintReviewSlot } from './review-launch.js';
 
 /**
@@ -15,7 +16,7 @@ import { commitOptionLabel, reviewStarting, reviewStatusText, sprintReviewSlot }
 @Component({
   selector: 'app-sprint-review',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, WaitStatusComponent],
   template: `
     <div class="sprint-review" [class.compact]="compact()">
       <label class="sprint-review-pick">
@@ -47,7 +48,11 @@ import { commitOptionLabel, reviewStarting, reviewStatusText, sprintReviewSlot }
           @if (starting()) {
             <span class="review-spinner" aria-hidden="true"></span>
           }
-          Review {{ slot.slot }}: {{ statusText(slot) }}
+          @if (slot.status === 'running' && wait.status()) {
+            Review {{ slot.slot }}
+          } @else {
+            Review {{ slot.slot }}: {{ statusText(slot) }}
+          }
           @if (slot.status === 'running') {
             · <a [href]="slot.url" target="_blank" rel="noopener">{{ compact() ? 'öffnen' : slot.url }} ↗</a>
           }
@@ -56,6 +61,8 @@ import { commitOptionLabel, reviewStarting, reviewStatusText, sprintReviewSlot }
           }
         </span>
       }
+      <!-- Test, Test-Gate oder Push laufen noch: statt „Review läuft“ sagen, wie lange es noch dauert. -->
+      <app-wait-status #wait />
       @if (compact() && launch.blockedUrl(); as url) {
         <span class="sprint-review-status">
           Der Browser hat das Öffnen blockiert –

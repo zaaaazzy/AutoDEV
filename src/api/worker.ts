@@ -1,5 +1,6 @@
 import { loadGitState } from './git-state.js';
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { cancelAgent } from './agent-cancel.js';
 import { ANSWERED } from './chat-routes.js';
 import type { Router } from 'express';
 import { cpus, loadavg } from 'node:os';
@@ -22,6 +23,51 @@ export async function beatHeartbeat(
            started_at = CASE WHEN $5 THEN NOW() ELSE worker_heartbeats.started_at END`,
     [project, process.pid, intervalSeconds, lastError, startup, cpuPercent],
   );
+}
+
+/** Eintrag der Agent-Anzeige (Kopfzeile, Dashboard). */
+export interface AgentStatusRow {
+  id: string;
+  name: string;
+  orderTitle: string | null;
+  active: boolean;
+  waiting?: boolean;
+  /** Läuft über eine Chat-Anfrage bzw. Aufgabe, nicht über einen Auftrag (kein „Abbrechen“ des Auftragslaufs). */
+  manual?: boolean;
+}
+
+/** Offene Chat-Anfrage; mit agentId an einen bestimmten Agent gerichtet, mit task aus einer Agent-Aufgabe. */
+export interface AgentRequest {
+  content: string;
+  status: string;
+  agentId: string | null;
+  task: string | null;
+}
+
+/**
+ * Von Hand gestartete Agents sichtbar machen: Eine laufende Anfrage an einen Agent (Chat oder manuelle bzw. geplante
+ * Aufgabe) zeigt ihn als aktiv, eine wartende als wartend – ein Workflow-Lauf des Agents geht vor. Liefert die
+ * Anfragen, die bei keinem Agent landen (sie bearbeitet der Dashboard-Assistent).
+ */
+export function markManualAgents(agents: AgentStatusRow[], requests: AgentRequest[]): AgentRequest[] {
+  const rest: AgentRequest[] = [];
+  for (const request of requests) {
+    const agent = request.agentId ? agents.find((entry) => entry.id === request.agentId) : undefined;
+    if (!agent) {
+      rest.push(request);
+      continue;
+    }
+    if (agent.active) continue;
+    const text = request.task
+      ? `Aufgabe: ${request.task}`
+      : `Chat: ${request.content.replace(/\s+/g, ' ').trim().slice(0, 60)}`;
+    if (request.status === 'processing') {
+      Object.assign(agent, { active: true, waiting: false, manual: true, orderTitle: text });
+    } else if (!agent.waiting) {
+      Object.assign(agent, { waiting: true, manual: true, orderTitle: `Wartet – ${text}` });
+    }
+  }
+  return rest;
 }
 
 export const MAX_AGENTS_LIMIT = 8;
@@ -146,18 +192,13 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         response.status(400).json({ message: 'Ungültiges Projekt.' });
         return;
       }
-      const result = await pool.query(
-        `UPDATE agent_run_steps st SET cancel_requested = TRUE
-           FROM agent_runs r, agents a
-          WHERE r.id = st.run_id AND a.id = st.agent_id AND a.project_slug = $1 AND a.id::text = $2
-            AND st.status = 'running' AND r.status = 'running'`,
-        [slug, request.params.id],
-      );
-      if (!result.rowCount) {
+      const result = await cancelAgent(pool, slug, request.params.id);
+      if (!result.requested) {
         response.status(404).json({ message: 'Dieser Agent läuft gerade nicht.' });
         return;
       }
-      response.status(202).json({ cancelling: true });
+      // Verwaiste Schritte sind schon beendet; sonst bricht der Worker den Agent in den nächsten Sekunden ab.
+      response.status(202).json({ cancelling: result.closed < result.requested, closed: result.closed });
     } catch (error) {
       next(error);
     }
@@ -224,14 +265,22 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         const agent = agents.find((entry) => entry.role === draft.agent && !entry.active);
         if (agent) Object.assign(agent, { active: true, orderTitle: `Neuer Auftrag: ${draft.title}` });
       }
-      // Der Dashboard-Assistent ist kein Workflow-Agent, wird aber wie einer angezeigt (aktiv, solange er eine Chat-Anfrage bearbeitet).
-      const chat = (
-        await pool.query<{ content: string }>(
-          `SELECT content FROM chat_messages
-            WHERE project_slug = $1 AND role = 'user' AND status = 'processing' ORDER BY created_at LIMIT 1`,
+      // Von Hand gestartete Agents: Chat-Anfragen an einen bestimmten Agent und manuelle oder geplante Aufgaben
+      // (agent_tasks) laufen als Chat-Nachricht mit agent_id. Sie zählen beim Agent selbst, nicht beim Assistenten.
+      const requests = (
+        await pool.query<{ content: string; status: string; agentId: string | null; task: string | null }>(
+          `SELECT m.content, m.status, m.agent_id AS "agentId", t.title AS task
+             FROM chat_messages m
+             LEFT JOIN agent_task_runs r ON r.id = m.task_run_id
+             LEFT JOIN agent_tasks t ON t.id = r.task_id
+            WHERE m.project_slug = $1 AND m.role = 'user' AND m.status IN ('processing', 'pending')
+            ORDER BY m.status = 'processing' DESC, m.created_at`,
           [slug],
         )
-      ).rows[0];
+      ).rows;
+      const assistantRequests = markManualAgents(agents, requests);
+      // Der Dashboard-Assistent ist kein Workflow-Agent, wird aber wie einer angezeigt (aktiv, solange er eine Chat-Anfrage bearbeitet).
+      const chat = assistantRequests.find((request) => request.status === 'processing');
       // Offene Rückfrage: letzte Assistenten-Nachricht ist eine Frage und noch nicht beantwortet.
       const question = chat
         ? undefined

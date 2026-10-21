@@ -1,6 +1,7 @@
 import { Component, DestroyRef, computed, inject, input } from '@angular/core';
 import type { DevelopmentItem, ReviewSlot } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { WaitStatusComponent } from '../runs/wait-status.component.js';
 import { OrderService } from './order.service.js';
 import { ReviewStateService } from './review-state.service.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
@@ -12,7 +13,7 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
 @Component({
   selector: 'app-order-approval',
   standalone: true,
-  imports: [GitAlertComponent],
+  imports: [GitAlertComponent, WaitStatusComponent],
   template: `
     @let item = order();
     <div class="approval-box">
@@ -34,11 +35,12 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
         } @else if (shown(); as slot) {
           <p class="approval-instance">
             <span class="approval-dot" [class]="slot.status"></span>
-            {{ instanceLabel() }}
+            {{ slot.status === 'running' && wait.status() ? 'Review ' + slot.slot : instanceLabel() }}
             @if (slot.status === 'running') {
               · <a [href]="slot.url" target="_blank" rel="noopener">Review {{ slot.slot }} öffnen ↗</a>
             }
           </p>
+          <app-wait-status #wait />
           @if (slot.status === 'failed' && slot.message) {
             <pre class="approval-log">{{ slot.message }}</pre>
           }

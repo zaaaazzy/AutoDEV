@@ -10,6 +10,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { platform } from 'node:os';
 import { join, resolve } from 'node:path';
+import pg from 'pg';
 import {
   DEFAULT_DB_USER,
   type EnvPlan,
@@ -17,6 +18,8 @@ import {
   validateInstall,
   writeEnvFile,
 } from '../../src/core/env-file.js';
+import { projectRoots } from '../../src/core/validation.js';
+import { installDemoProject } from './demo-data.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const ENV_FILE = join(ROOT, '.env');
@@ -182,6 +185,25 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
     return false;
   }
 
+  if (body.demoData) {
+    step('demo', 'running');
+    // Läuft auf diesem Rechner gegen die eben gestartete Datenbank (Port 5433), das Schema hat der Server angelegt.
+    const pool = new pg.Pool({ connectionString: env.get('DEV_LOG_DATABASE_URL')!, max: 2 });
+    const root = projectRoots({ DEV_LOG_PROJECT_ROOTS: env.get('DEV_LOG_PROJECT_ROOTS') })[0] ?? resolve(ROOT, '..');
+    try {
+      const result = await installDemoProject(pool, root, log);
+      step('demo', 'ok', result === 'exists' ? 'War schon vorhanden.' : 'Velowerk angelegt, Sprint pausiert.');
+    } catch (error) {
+      // Kein Abbruch: AIdeation läuft auch ohne Beispieldaten.
+      log(`Beispieldaten: ${(error as Error).message}`);
+      step('demo', 'error', 'Beispieldaten konnten nicht angelegt werden – AIdeation läuft trotzdem.');
+    } finally {
+      await pool.end().catch(() => undefined);
+    }
+  } else {
+    step('demo', 'skipped', 'Ohne Beispieldaten – du startest mit einem leeren AIdeation.');
+  }
+
   if (!body.installWorker) {
     step('worker', 'skipped', 'Den Worker startest du später mit „npm run worker“.');
   } else {
@@ -261,6 +283,7 @@ const server = createServer(async (request, response) => {
             domain: payload.domain ?? '',
             projectRoots: payload.projectRoots ?? '',
             installWorker: payload.installWorker !== false,
+            demoData: payload.demoData === true,
           },
           send,
         ).catch((error: unknown) => {
