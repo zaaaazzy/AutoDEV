@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { collectBudget, loadDisplay, parseBudgetInput, saveBudget } from './budget.js';
-import { requiredRole } from './roles.js';
+import { requiredRole } from './route-table.test.js';
 
 test('Budget-Eingaben: leer = unbegrenzt, ungültige Werte werden abgelehnt', () => {
   assert.deepEqual(

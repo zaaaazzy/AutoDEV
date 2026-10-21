@@ -3,7 +3,8 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from 'express';
 import type { Pool } from 'pg';
-import { requiredRole, type Principal } from './roles.js';
+import type { Principal } from './roles.js';
+import { requiredRole } from './route-table.test.js';
 import { parseJobUpdate, registerScheduledJobRoutes } from './scheduled-jobs.js';
 
 const admin: Principal = { id: null, username: 'admin', displayName: 'Admin', roles: ['admin'] };

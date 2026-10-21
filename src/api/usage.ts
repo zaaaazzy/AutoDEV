@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { parseProjectSlug } from '../core/validation.js';
 
 /** Bezeichnungen der Agents außerhalb des Auftrags-Workflows (Tabelle agent_usage). */
@@ -262,7 +263,7 @@ export async function loadPromptLog(pool: Pool, slug: string, role: string | nul
 }
 
 export function registerUsageRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/usage', async (request, response, next) => {
+  app.get('/projects/:slug/usage', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -272,7 +273,7 @@ export function registerUsageRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.get('/projects/:slug/usage/prompts', async (request, response) => {
+  app.get('/projects/:slug/usage/prompts', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
     const role =

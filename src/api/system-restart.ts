@@ -1,11 +1,12 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { readRestart, requestRestart } from '../runner/system-restart.js';
 import type { Principal } from './roles.js';
 
 /** Neustart von AIdeation (Container neu bauen, Worker neu starten): anfordern nur mit Administration, lesen alle. */
 export function registerSystemRestartRoutes(app: Router, pool: Pool): void {
-  app.get('/system/restart', async (_request, response, next) => {
+  app.get('/system/restart', access({ tenant: 'admin' }), async (_request, response, next) => {
     try {
       response.json({ restart: await readRestart(pool) });
     } catch (error) {
@@ -13,7 +14,7 @@ export function registerSystemRestartRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/system/restart', async (request, response, next) => {
+  app.post('/system/restart', access({ role: 'admin', tenant: 'admin' }), async (request, response, next) => {
     try {
       const principal = response.locals.principal as Principal | undefined;
       const body = request.body as { comment?: unknown } | undefined;
