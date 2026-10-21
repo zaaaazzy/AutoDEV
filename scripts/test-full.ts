@@ -35,7 +35,9 @@ import {
   finishTestRunStep,
   saveTestCases,
   saveTestReport,
+  updateTestRunStepProgress,
 } from '../src/db/test-runs.js';
+import { stepProgress } from '../src/core/test-progress.js';
 
 const ROOT = join(import.meta.dirname, '..');
 const argument = (name: string) => {
@@ -152,7 +154,12 @@ const USER_STEP: Step = {
 };
 
 /** Führt einen Befehl aus, zeigt die Ausgabe live und gibt sie gesammelt zurück. */
-function run(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
+function run(
+  command: string,
+  args: string[],
+  quiet = false,
+  onOutput?: (output: string) => void,
+): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
     const child = spawn(command, args, {
@@ -169,7 +176,9 @@ function run(command: string, args: string[]): Promise<{ ok: boolean; output: st
     });
     const collect = (chunk: Buffer) => {
       output += chunk.toString();
-      process.stdout.write(chunk);
+      // Parallel laufende Schritte nicht ineinander verschränkt ausgeben; ihr Ergebnis folgt am Ende gesammelt.
+      if (!quiet) process.stdout.write(chunk);
+      onOutput?.(output);
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
@@ -228,6 +237,16 @@ class Recorder {
     });
   }
 
+  /** Zwischenstand für die Live-Anzeige unter „Testläufe“; Fehler hier dürfen den Lauf nicht stören. */
+  async progress(position: number, output: string): Promise<void> {
+    await updateTestRunStepProgress(this.pool, {
+      runId: this.runId,
+      position,
+      progress: stepProgress(output).text,
+      output: redactOutput(output.replace(ANSI, '').slice(-4_000), process.env),
+    }).catch(() => undefined);
+  }
+
   async finish(position: number, result: StepResult): Promise<number> {
     await finishTestRunStep(this.pool, {
       runId: this.runId,
@@ -251,11 +270,27 @@ class Recorder {
   }
 }
 
-async function runStep(position: number, step: Step, recorder: Recorder | null): Promise<StepResult> {
-  console.log(`\n━━ ${step.name} ━━`);
+async function runStep(position: number, step: Step, recorder: Recorder | null, quiet = false): Promise<StepResult> {
+  console.log(`\n━━ ${step.name}${quiet ? ' (läuft parallel, Ausgabe folgt am Ende)' : ''} ━━`);
   await recorder?.start(position, step);
   const begin = Date.now();
-  const { ok, output } = await run(step.command, step.args);
+  // Live-Fortschritt höchstens alle 2 s schreiben (Ansicht „Testläufe“ lädt im selben Takt nach).
+  let latest = '';
+  let written = '';
+  const live = recorder
+    ? setInterval(() => {
+        if (latest === written) return;
+        written = latest;
+        void recorder.progress(position, latest);
+      }, 2_000)
+    : undefined;
+  const { ok, output } = await run(step.command, step.args, quiet, (current) => (latest = current)).finally(() =>
+    clearInterval(live),
+  );
+  if (quiet) {
+    const lines = output.replace(ANSI, '').trim().split('\n');
+    console.log(`\n━━ ${step.name}: ${ok ? 'grün' : 'rot'} ━━\n${lines.slice(ok ? -8 : -80).join('\n')}`);
+  }
   const clean = output.replace(ANSI, '');
   const result: StepResult = {
     name: step.name,
@@ -356,7 +391,21 @@ async function main(): Promise<void> {
   // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
   const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
-  for (const [position, step] of steps.entries()) results.push(await runStep(position, step, recorder));
+  // E2E- und Oberflächentest gleichzeitig: Sie haben eigene Ports und eigene Testdatenbanken (dev_log_e2e, dev_log_full)
+  // und brauchen beide nur die gebaute Oberfläche aus dem Schritt davor.
+  const PARALLEL = new Set(['E2E-Tests', 'Oberflächentest']);
+  for (let position = 0; position < steps.length; position++) {
+    const step = steps[position]!;
+    const next = steps[position + 1];
+    if (next && PARALLEL.has(step.name) && PARALLEL.has(next.name)) {
+      results.push(
+        ...(await Promise.all([runStep(position, step, recorder, true), runStep(position + 1, next, recorder, true)])),
+      );
+      position += 1;
+      continue;
+    }
+    results.push(await runStep(position, step, recorder));
+  }
 
   // Bericht: Befunde und Medien des Oberflächentests
   await mkdir(MEDIA, { recursive: true });

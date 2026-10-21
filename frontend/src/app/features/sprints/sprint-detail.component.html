@@ -19,6 +19,15 @@
       <button class="button primary" type="button" (click)="goLive(sprint)">Live schalten</button>
     </div>
   }
+  @if (sprint.gitSync === 'pending' || sprint.gitSync === 'running') {
+    <div class="sprint-go">
+      <strong>⏳ Git-Sicherung {{ sprint.gitSync === 'running' ? 'läuft' : 'steht an' }}.</strong>
+      <span>Test-Gate, Merge nach <code>main</code> und Push laufen im Hintergrund.</span>
+      <a href="#runs" class="button secondary" (click)="$event.preventDefault(); store.navigate('runs')"
+        >Test-Gate live ansehen</a
+      >
+    </div>
+  }
   @if (sprint.status === 'completed' && sprint.gitSync === 'failed') {
     <div class="sprint-go failed">
       <strong>Live schalten ist gescheitert.</strong>

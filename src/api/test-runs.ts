@@ -22,7 +22,8 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
     const ids = runs.rows.map((run) => run.id);
     const steps = await pool.query(
       `SELECT s.run_id AS "runId", s.position, s.command, s.status, s.category,
-              s.exit_code AS "exitCode", s.duration_ms AS "durationMs", s.output
+              s.exit_code AS "exitCode", s.duration_ms AS "durationMs", s.output, s.progress,
+              s.started_at AS "startedAt"
          FROM test_run_steps s
          JOIN test_runs r ON r.id = s.run_id
         WHERE r.project_slug = $1
@@ -58,6 +59,35 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
         };
       }),
     });
+  });
+
+  // Live-Ansicht: der neueste laufende Testlauf mit seinen Schritten (Fortschritt, Laufzeit, Ende der Ausgabe).
+  // Klein gehalten, weil die Oberfläche ihn alle paar Sekunden abfragt; null, wenn gerade nichts läuft.
+  app.get('/projects/:slug/test-runs/live', async (request, response) => {
+    const slug = parseProjectSlug(request.params.slug ?? '');
+    if (!slug) {
+      response.status(400).json({ message: 'Invalid project slug.' });
+      return;
+    }
+    const run = (
+      await pool.query(
+        `SELECT id, status, trigger, branch, started_at AS "startedAt", NOW() AS "now"
+           FROM test_runs WHERE project_slug = $1 AND status = 'running'
+          ORDER BY started_at DESC LIMIT 1`,
+        [slug],
+      )
+    ).rows[0];
+    if (!run) {
+      response.set('Cache-Control', 'no-store').json({ run: null });
+      return;
+    }
+    const steps = await pool.query(
+      `SELECT position, command, status, category, progress, duration_ms AS "durationMs", started_at AS "startedAt",
+              CASE WHEN status = 'running' THEN right(output, 2000) ELSE '' END AS output
+         FROM test_run_steps WHERE run_id = $1 ORDER BY position`,
+      [run.id],
+    );
+    response.set('Cache-Control', 'no-store').json({ run: { ...run, steps: steps.rows } });
   });
 
   app.get('/projects/:slug/test-runs/:id/cases', async (request, response) => {

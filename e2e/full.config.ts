@@ -19,7 +19,8 @@ export default defineConfig({
     ...base.use,
     baseURL: `http://127.0.0.1:${PORT}`,
     actionTimeout: 15_000,
-    video: 'on',
+    // Video nur, wenn ein Test scheitert: Aufzeichnen kostet bei jedem Test Rechenzeit und Hunderte MB.
+    video: 'retain-on-failure',
     screenshot: 'on',
     trace: 'off',
   },

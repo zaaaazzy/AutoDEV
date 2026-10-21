@@ -945,3 +945,72 @@ app-order-table {
     right: 0;
   }
 }
+
+/* Live-Anzeige eines laufenden Testlaufs (Testläufe, Test-Gate der Sprint-Sicherung). */
+.test-live {
+  border-color: #b9d6c7;
+}
+.test-live h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.test-live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2f8f5b;
+  animation: test-live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes test-live-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .test-live-dot {
+    animation: none;
+  }
+}
+.test-live-steps {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.test-live-step {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.test-live-step.running {
+  background: #eef6f1;
+}
+.test-live-name {
+  font-weight: 600;
+}
+.test-live-time {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.test-live-progress,
+.test-live-output {
+  grid-column: 2 / -1;
+  font-size: 13px;
+}
+.test-live-output pre {
+  max-height: 240px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #1f2620;
+  color: #e7ede9;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
