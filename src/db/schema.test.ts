@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA } from './schema.js';
+import { MIGRATIONS } from './migrations.js';
 
-// Das Schema läuft bei jedem Start als ein Aufruf. Jede Fassung von bugs_source_check wird gegen die bereits
-// vorhandenen Zeilen geprüft; fehlt in einer Zwischenfassung ein Wert wie 'github', scheitert der Start.
+// Bestands-Datenbanken holen den Basisschritt auf vorhandenen Zeilen nach. Jede Fassung von bugs_source_check (in
+// allen Migrationen, in Reihenfolge) wird dabei geprüft; fehlt in einer Fassung ein Wert wie 'github', scheitert der Start.
 test('bugs_source_check: jede Fassung erlaubt alle Quellen, die der Code schreibt (auch github)', () => {
-  const versions = [...SCHEMA.matchAll(/ADD CONSTRAINT bugs_source_check\s+CHECK \(source IN \(([^)]*)\)\)/g)].map(
+  const sql = MIGRATIONS.map((migration) => migration.sql).join('\n');
+  const versions = [...sql.matchAll(/ADD CONSTRAINT bugs_source_check\s+CHECK \(source IN \(([^)]*)\)\)/g)].map(
     (match) => [...match[1].matchAll(/'([^']+)'/g)].map((value) => value[1]),
   );
   assert.ok(versions.length >= 1);

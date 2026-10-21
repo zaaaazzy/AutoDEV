@@ -1,7 +1,7 @@
 import { logged } from '../core/log.js';
 import { Pool } from 'pg';
 import { ensureDefaultAgents, ensureReviewer } from '../api/agents.js';
-import { SCHEMA } from './schema.js';
+import { runMigrations } from './migrations.js';
 import { seedDefaultActions, seedRoutineTemplates } from '../api/agent-tasks.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
 
@@ -49,13 +49,11 @@ export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> 
   // Idle connection failures, such as a PostgreSQL restart, must not terminate the process.
   pool.on('error', (error) => console.error('Datenbankverbindung getrennt:', error.message));
   try {
-    // Serialises schema changes when the server and the runner start at the same time.
+    // Nur ausstehende Migrationen; Sperre und Transaktionen brauchen dieselbe Verbindung.
     const client = await pool.connect();
     try {
-      await client.query('SELECT pg_advisory_lock(727401)');
-      await client.query(SCHEMA);
+      await runMigrations(client);
     } finally {
-      await client.query('SELECT pg_advisory_unlock(727401)').catch(() => undefined);
       client.release();
     }
     const projects = await pool.query<{ slug: string }>('SELECT slug FROM projects WHERE NOT agents_seeded');
