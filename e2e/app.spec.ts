@@ -100,6 +100,36 @@ test('Dashboard: Agents mit Rolle, Rechten und Aufgabe, Verteilung der offenen A
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: 'Login-Seite modernisieren' })).toHaveCount(0);
 });
 
+test('Dashboard: inaktiver Agent zeigt „Worker offline“ bzw. „Inaktiv“, fehlende Rolle ist „Eigene Rolle“', async ({
+  page,
+}) => {
+  let online = false;
+  const agents = [{ id: 'a1', name: 'Ohne Rolle', active: false, sprintName: null, orderTitle: null }];
+  await page.route(/\/api\/projects\/[^/]+\/worker(\?|$)/, (route) =>
+    route.fulfill({ json: { online, worker: null, running: [], agents } }),
+  );
+  await login(page);
+  await page.goto('/#dashboard');
+  const panel = page.locator('article.panel').filter({ has: page.getByRole('heading', { name: 'Agent-Status' }) });
+  const row = panel.locator('.agent-row').filter({ hasText: 'Ohne Rolle' });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('.agent-task')).toHaveText('Worker offline');
+  await expect(row.getByRole('img', { name: 'Rolle: Eigene Rolle' })).toBeVisible();
+  // Worker kommt online: neu laden statt aufs Polling (10 s) warten; die Route bleibt aktiv.
+  online = true;
+  await page.reload();
+  await expect(row.locator('.agent-task')).toHaveText('Inaktiv');
+});
+
+test('Dashboard: Projekt ohne Agents zeigt „Keine Agents für dieses Projekt“ statt Diagramm', async ({ page }) => {
+  await page.route(/\/api\/projects\/[^/]+\/agents(\?|$)/, (route) => route.fulfill({ json: { agents: [] } }));
+  await login(page);
+  await page.goto('/#dashboard');
+  const workload = page.getByRole('article', { name: 'Offene Aufträge je Agent' });
+  await expect(workload.getByText('Keine Agents für dieses Projekt')).toBeVisible();
+  await expect(workload.locator('.share-key')).toHaveCount(0);
+});
+
 test('Navigation: Menü auf dem Handy, Seitenleiste auf dem Desktop', async ({ page, isMobile }) => {
   await login(page);
   if (isMobile) {
