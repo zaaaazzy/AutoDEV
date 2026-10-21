@@ -59,6 +59,7 @@ export class SettingsComponent {
     autopilotStart: '08:00',
     autopilotEnd: '18:00',
     autopilotDays: [1, 2, 3, 4, 5] as number[],
+    autopilotAutoLive: false,
     databaseUrl: '',
     clearDatabase: false,
     githubMode: 'aus' as GithubMode,
@@ -138,6 +139,7 @@ export class SettingsComponent {
           autopilotStart: this.settings.autopilotStart,
           autopilotEnd: this.settings.autopilotEnd,
           autopilotDays: this.settings.autopilotDays,
+          autopilotAutoLive: this.settings.autopilotAutoLive,
           githubMode: this.settings.githubMode,
           githubRequireApproval: this.settings.githubRequireApproval,
           ...(this.settings.clearDatabase
@@ -206,6 +208,7 @@ export class SettingsComponent {
       autopilotStart: project?.autopilotStart ?? '08:00',
       autopilotEnd: project?.autopilotEnd ?? '18:00',
       autopilotDays: [...(project?.autopilotDays ?? [1, 2, 3, 4, 5])],
+      autopilotAutoLive: project?.autopilotAutoLive ?? false,
       databaseUrl: '',
       clearDatabase: false,
       githubMode: project?.githubMode ?? 'aus',

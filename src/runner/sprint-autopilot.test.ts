@@ -76,3 +76,54 @@ test('Sprint nicht fertig, solange ein Auftrag wegen Budget wartet (er läuft vo
     true,
   );
 });
+
+/** Aktiver Sprint mit erledigten Aufträgen; `autoLive` ist die Projekteinstellung „Autopilot schaltet selbst live“. */
+function finishedSprintPool(autoLive: boolean, items = [{ status: 'done', actionTodo: null }], completable = true) {
+  const statements: string[] = [];
+  const answer = (sql: string) => {
+    statements.push(sql);
+    if (sql.includes('autopilot_start AS start'))
+      return [{ mode: 'autopilot', start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5], released: null, autoLive }];
+    if (sql.includes("WHERE project_slug = $1 AND status = 'active'")) return [{ id: 'sprint-9', name: 'Sprint 9' }];
+    if (sql.includes('FROM development_items') && sql.includes('sprint_id = $1')) return items;
+    if (sql.includes("UPDATE sprints s SET status = 'completed'")) return completable ? [{ id: 'sprint-9' }] : [];
+    return [];
+  };
+  const pool = { query: async (sql: string) => ({ rows: answer(sql) }) } as unknown as Pool;
+  return {
+    pool,
+    completed: () => statements.some((sql) => sql.includes("UPDATE sprints s SET status = 'completed'")),
+    queuedSync: () => statements.some((sql) => sql.includes("SET git_sync = 'pending'")),
+  };
+}
+
+test('Autopilot schaltet selbst live: fertiger Sprint wird abgeschlossen und die Git-Sicherung eingereiht', async () => {
+  const { pool, completed, queuedSync } = finishedSprintPool(true);
+  assert.equal(await sprintAutopilot(pool, 'demo', MONDAY_10), 'completed');
+  assert.ok(completed(), 'Sprint auf abgeschlossen gesetzt');
+  assert.ok(queuedSync(), 'Test-Gate, Merge und Push eingereiht');
+});
+
+test('Ohne „selbst live“ wartet ein fertiger Sprint weiter auf das Go', async () => {
+  const { pool, completed } = finishedSprintPool(false);
+  assert.equal(await sprintAutopilot(pool, 'demo', MONDAY_10), 'review');
+  assert.equal(completed(), false);
+});
+
+test('„Selbst live“ nur in den Arbeitszeiten, nie mit offener Arbeit, nie bei pausiertem Sprint', async () => {
+  const night = finishedSprintPool(true);
+  assert.equal(await sprintAutopilot(night.pool, 'demo', MONDAY_22), 'review');
+  assert.equal(night.completed(), false);
+
+  const open = finishedSprintPool(true, [
+    { status: 'done', actionTodo: null },
+    { status: 'approval', actionTodo: null },
+  ]);
+  assert.equal(await sprintAutopilot(open.pool, 'demo', MONDAY_10), 'working');
+  assert.equal(open.completed(), false);
+
+  // Pausiert oder ein Auftrag läuft doch noch: das UPDATE trifft keine Zeile, der Sprint wartet.
+  const paused = finishedSprintPool(true, undefined, false);
+  assert.equal(await sprintAutopilot(paused.pool, 'demo', MONDAY_10), 'review');
+  assert.equal(paused.queuedSync(), false);
+});
