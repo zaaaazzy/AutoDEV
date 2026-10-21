@@ -183,6 +183,9 @@ test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
   await expect(page.getByRole('dialog', { name: 'Benachrichtigungen erlauben' })).toBeVisible();
   await page.getByRole('button', { name: 'Später' }).click();
+  // Zwei-Faktor einrichten verlangt das aktuelle Passwort (vorher ist „Einrichten“ gesperrt).
+  await expect(page.getByRole('button', { name: 'Einrichten' })).toBeDisabled();
+  await page.getByLabel('Aktuelles Passwort').fill(password);
   await page.getByRole('button', { name: 'Einrichten' }).click();
   await expect(page.getByAltText('QR-Code für die Authenticator-App')).toBeVisible();
   await page.getByRole('button', { name: 'Abbrechen' }).click();
@@ -716,6 +719,10 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await page.getByRole('button', { name: /Nächsten Sprint vorschlagen/ }).click();
   const card = page.locator('.sprint-proposal');
   await expect(card.getByRole('heading', { name: /Vorschlag für Sprint/ })).toBeVisible();
+  // Der Vorschlag ist standardmässig zugeklappt (Zustand je Gerät gemerkt): für die Tabelle aufklappen.
+  const toggle = card.locator('.proposal-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const row = card.locator('tbody tr', { hasText: title });
   await expect(row).toContainText('Priorität hoch');
   const box = row.getByRole('checkbox');
