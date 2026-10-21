@@ -176,6 +176,34 @@ ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; ge
 
 **Behoben und dokumentiert:** Schließt der Bug-Auftrag erfolgreich ab, setzt ein DB-Trigger den Bug auf „Behoben“. Die Lösung (Ausgabe des Entwicklers) steht am Bug (`fix_notes`) und wird allen späteren Agents als „bekannte Bugs mit Lösung“ mitgegeben. Der Bug-Fix lässt sich per Klick am Bug, am Auftrag oder im Sprint starten.
 
+### 5a. Betrieb: Log-Scan und Bug-Detail
+
+Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Betrieb als Bug mit Quelle „Betrieb“. Er wird in den Einstellungen „Betrieb“ eingerichtet.
+
+**Einrichten:** In den Einstellungen unter „Betrieb“ die Compose-Dienste eintragen, etwa `api, web`. Nur gültige Dienstnamen werden an `docker compose logs` übergeben; der Befehl läuft ohne Shell. Außerdem lassen sich Ausschlussmuster (eines pro Zeile) und die Aufbewahrung in Tagen (1 bis 365) festlegen.
+
+**Wann gescannt wird:** Alle 15 Minuten und nach jedem erfolgreichen Deploy, mit derselben Logik.
+
+**Bedingungen:**
+- **Ohne Dienste kein Scan.** Ist für das Projekt kein Dienst eingetragen, findet kein Aufruf statt. Die Einstellungen zeigen dann keine Scan-Angaben.
+- **Lückenloses Fenster.** Jeder Scan liest ab dem Zeitpunkt des letzten erfolgreichen Scans. Ein verspäteter Lauf erfasst die Zeit dazwischen vollständig. Zeilen, die ein früherer Scan schon gezählt hat, zählen nicht noch einmal.
+- **Begrenzung auf 1 Stunde.** Liegt der letzte Scan mehr als eine Stunde zurück, wird das Fenster auf die letzte Stunde gekürzt. Die übersprungene Zeit steht in den Einstellungen unter „Lücke“. Zeilen gehen nicht stillschweigend verloren.
+- **Ausschlussmuster** wirken vor der Gruppierung. Eine Zeile, die einen Eintrag enthält (ohne Unterscheidung von Groß- und Kleinschreibung), erzeugt kein Ereignis und zählt nicht.
+- **Fehler des Scans.** Schlägt `docker compose logs` fehl, erscheint der Fehler unter „Letzter Fehler“ (höchstens 300 Zeichen). Es entstehen dann keine Ereignisse, und der Zeitpunkt des letzten Scans bleibt stehen. Der nächste erfolgreiche Scan setzt den Fehler zurück.
+- **Gruppierung.** Gleiche Fehler werden über einen Fingerabdruck zusammengefasst: die Meldung bzw. der Titel, dazu der oberste Stack-Frame. Zehn gleiche Fehler ergeben also ein Ereignis mit Zähler 10 und nicht zehn Ereignisse.
+- **Wann ein Bug entsteht:** Ein kritisches Ereignis (50 oder mehr Vorkommen pro Stunde) erzeugt sofort einen Bug mit Schwere „kritisch“. Sonst entsteht ein Bug, sobald ein Fehler in den letzten 24 Stunden mindestens 3 Mal aufgetreten ist.
+- **Regression.** Tritt ein Fehler erneut auf, dessen Bug bereits „Behoben“ ist, wird dieser Bug wieder geöffnet.
+- **Aufbewahrung.** Nach Ablauf der Frist löscht Dev Log Ereignisse, den stündlichen Verlauf und Deploy-Einträge, die älter als die eingestellten Tage sind.
+
+**Anzeige in den Einstellungen „Betrieb“:** Zeitpunkt des letzten Scans, letzter Fehler, Anzahl erfasster Ereignisse mit Vorkommen und, falls vorhanden, die Lücke. Vor dem ersten Scan steht dort „Noch kein Scan“.
+
+**Bug-Detail:** Der Abschnitt „Betrieb: Verlauf und Deploy-Verdacht“ zeigt:
+- **Verlauf:** die Vorkommen je Stunde für die letzten 48 Stunden, mit Summe und Spitzenwert.
+- **Ereignisse:** Quelle, Anzahl, Zeitpunkte des ersten und letzten Auftretens sowie das gekürzte, maskierte Beispiel und der Fingerabdruck.
+- **Deploy-Verdacht:** Tritt ein Ereignis erstmals innerhalb von 30 Minuten nach einem Deploy auf, nennt Dev Log den Deploy-Zeitpunkt, die seit dem vorigen Deploy erledigten Aufträge und die zugehörigen Sprints. Ohne solchen Zusammenhang steht dort „Kein Deploy-Verdacht“.
+
+**Hinweis:** Schlägt das Speichern einzelner Ereignisse teilweise fehl, bleibt der Zeitpunkt des letzten Scans stehen. Der nächste Scan zählt dann dieselben Zeilen erneut. Das ist das bisherige Verhalten.
+
 ## 6. Git im Sprint
 
 | Zeitpunkt                                         | Aktion                                                                                                                                                                                        |
