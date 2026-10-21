@@ -925,8 +925,6 @@ app-order-table {
 .attention-more {
   position: relative;
 }
->>>
-
 .attention-more-menu {
   position: absolute;
   z-index: 5;
