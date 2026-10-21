@@ -238,6 +238,7 @@
               </a>
               @if (sprintPopover()) {
                 <div class="agent-popover sprint-popover" role="group" aria-label="Sprint-Vorschau">
+                  <app-git-alert [compact]="true" />
                   @if (sprintAttention().length) {
                     <div class="sprint-attention" aria-label="Aufträge mit Handlungsbedarf">
                       <p class="popover-title">Aktion notwendig · {{ sprintAttention().length }}</p>

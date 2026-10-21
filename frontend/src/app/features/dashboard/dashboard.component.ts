@@ -24,6 +24,7 @@ import { AgentListComponent } from '../agents/agent-list.component.js';
 import { ChatComponent } from '../chat/chat.component.js';
 import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-options.js';
 import { newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
+import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
 const RECENT_RUNS = 20;
 
@@ -35,6 +36,7 @@ const RECENT_RUNS = 20;
   selector: 'app-dashboard',
   standalone: true,
   imports: [
+    GitAlertComponent,
     NgClass,
     AgentListComponent,
     ChatComponent,

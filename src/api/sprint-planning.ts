@@ -13,6 +13,7 @@ import {
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { describeWorkingHours, type WorkingHours, withinWorkingHours } from '../core/working-hours.js';
 import { generateSprintReport } from './reports.js';
+import { guardGit } from './git-state.js';
 import { completedSprintUsage, costOfTokens, tokenPriceUsd } from './usage.js';
 
 /** Modus der Sprintplanung je Projekt: manuell (Standard), vorschlagen, Autopilot. */
@@ -339,6 +340,7 @@ export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
       if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
       const body = isRecord(request.body) ? request.body : {};
       const comment = typeof body.comment === 'string' ? body.comment : '';
+      if (body.start === true && !(await guardGit(pool, slug, 'sprint_start', body, response))) return;
       const result = await applyProposal(pool, slug, ids, body.start === true, comment);
       if (typeof result === 'string') return void response.status(400).json({ message: result });
       response.status(201).json(result);

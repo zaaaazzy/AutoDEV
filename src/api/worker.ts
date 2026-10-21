@@ -1,3 +1,4 @@
+import { loadGitState } from './git-state.js';
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { ANSWERED } from './chat-routes.js';
 import type { Router } from 'express';
@@ -275,9 +276,24 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         active: Boolean(visionary),
       });
       const online = Boolean(beat) && beat.ageSeconds <= 60;
-      response
-        .set('Cache-Control', 'no-store')
-        .json({ worker: beat && { ...beat, online }, online, running, agents, drafts });
+      // Git-Zustand der Projektordner (Befunde, letzte angeforderte Lösung) fürs Dashboard, Sprint und Auftrag.
+      const gitState = await loadGitState(pool, slug);
+      const gitFix =
+        (
+          await pool.query(
+            `SELECT id, fix, role, status, message, created_at AS "createdAt", finished_at AS "finishedAt"
+               FROM git_fix_requests WHERE project_slug = $1 ORDER BY created_at DESC LIMIT 1`,
+            [slug],
+          )
+        ).rows[0] ?? null;
+      response.set('Cache-Control', 'no-store').json({
+        worker: beat && { ...beat, online },
+        online,
+        running,
+        agents,
+        drafts,
+        git: { ...gitState, fix: gitFix },
+      });
     } catch (error) {
       next(error);
     }

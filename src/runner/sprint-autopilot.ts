@@ -2,6 +2,7 @@ import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
+import { loadGitState, problemsFor } from '../api/git-state.js';
 
 export type AutopilotStep =
   'off' | 'paused' | 'working' | 'review' | 'completed' | 'started' | 'outside_hours' | 'idle';
@@ -96,6 +97,15 @@ async function goLiveAutomatically(
   project: string,
   sprint: { id: string; name: string },
 ): Promise<boolean> {
+  // Wie in der Oberfläche: nicht live schalten, solange der Projektordner einen sperrenden Git-Befund hat.
+  const { state, stale } = await loadGitState(pool, project);
+  const problems = stale ? [] : problemsFor(state, 'go_live');
+  if (problems.length) {
+    console.info(
+      `[${project}] Autopilot schaltet „${sprint.name}“ nicht live: ${problems.map((p) => p.title).join(' · ')}`,
+    );
+    return false;
+  }
   const claimed = await pool.query(
     `UPDATE sprints s SET status = 'completed'
       WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
@@ -167,6 +177,9 @@ export async function sprintAutopilot(pool: Pool, project: string, now = new Dat
   // Nur übernommene „Aktion notwendig“-Aufträge: kein neuer Sprint, sonst würde er sofort wieder abgeschlossen.
   if (!proposal || !selected.some((item) => !item.carryOver)) return 'idle';
   const ids = [...selected].sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0)).map((item) => item.id);
+  // Kein neuer Sprint, solange der Agent-Ordner fremde Änderungen oder Branches hat: Jeder Auftrag würde blockieren.
+  const git = await loadGitState(pool, project);
+  if (!git.stale && problemsFor(git.state, 'sprint_start').length) return 'idle';
   const result = await applyProposal(pool, project, ids, true);
   if (typeof result === 'string') return 'idle';
   await sendPush(

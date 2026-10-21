@@ -3,6 +3,7 @@ import { ApiService } from '../../core/api.service.js';
 import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ConfirmService, type ConfirmOptions } from '../../core/confirm.service.js';
+import { GitGuardService } from '../../core/git-guard.service.js';
 import { retryComment } from '../../shared/attention-card.js';
 import { numberOrNull, type FormValues } from '../../shared/forms.js';
 
@@ -21,6 +22,7 @@ export class OrderService {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
   private readonly confirm = inject(ConfirmService);
+  private readonly gitGuard = inject(GitGuardService);
 
   /** Jede Aktion auf einem Auftrag erst nach Rückfrage im globalen Dialog; ohne Kommentarfeld. */
   private async sure(options: Omit<ConfirmOptions, 'withoutComment'>): Promise<boolean> {
@@ -139,14 +141,20 @@ export class OrderService {
 
   /** Review-Freigabe: Auftrag freigeben – der Worker mergt ihn in den Sprint-Branch und zieht die Vorschau nach. */
   async approve(item: DevelopmentItem): Promise<void> {
-    const ok = await this.sure({
-      title: 'Auftrag freigeben?',
-      message: `„${item.title}“ wird in den Sprint-Branch gemergt; die Vorschau zieht danach nach.`,
-      confirmLabel: 'Freigeben',
-    });
-    if (!ok) return;
+    // Gemergt wird im Ordner der Agents: Liegt dort Fremdes, fragt der Dialog mit Warnung und Begründung nach.
+    const answer = await this.gitGuard.confirmAction(
+      'approve',
+      {
+        title: 'Auftrag freigeben?',
+        message: `„${item.title}“ wird in den Sprint-Branch gemergt; die Vorschau zieht danach nach.`,
+        confirmLabel: 'Freigeben',
+        withoutComment: true,
+      },
+      'Trotzdem freigeben',
+    );
+    if (!answer) return;
     await this.store.perform(
-      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/approve`),
+      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/approve`, answer.body),
       'Freigegeben – wird gleich gemergt.',
     );
   }

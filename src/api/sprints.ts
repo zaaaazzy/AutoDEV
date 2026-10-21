@@ -2,6 +2,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import type { Principal } from './roles.js';
 import { completeSprint } from './sprint-planning.js';
+import { guardGit } from './git-state.js';
 import {
   buildUpdate,
   isRecord,
@@ -131,8 +132,8 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       let from: string | undefined;
       if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string; running: number }>(
-          `SELECT status, (SELECT COUNT(*)::int FROM development_items
+        const current = await pool.query<{ status: string; running: number; slug: string }>(
+          `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
                             WHERE sprint_id = s.id AND status = 'in_progress') AS running
              FROM sprints s WHERE id = $1`,
           [request.params.id],
@@ -155,6 +156,11 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
           response.status(409).json({ message: conflict });
           return;
         }
+        // Git-Zustand: Live schalten braucht einen sauberen Projektordner, Starten einen sauberen Agent-Ordner.
+        const slug = current.rows[0]?.slug;
+        const guarded =
+          target === 'completed' ? 'go_live' : target === 'active' && from !== 'active' ? 'sprint_start' : null;
+        if (slug && guarded && !(await guardGit(pool, slug, guarded, request.body, response))) return;
       }
       // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein TOCTOU mit Worker oder zweitem Klick).
       const update = buildUpdate(

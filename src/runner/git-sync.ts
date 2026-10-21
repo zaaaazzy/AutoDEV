@@ -116,7 +116,7 @@ export const BOT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'dev-log@mainty.local',
 };
 
-function gitHelpers(execute: CommandExecutor, cwd: string) {
+export function gitHelpers(execute: CommandExecutor, cwd: string) {
   const env = {
     ...process.env,
     ...BOT_IDENTITY,
@@ -138,13 +138,13 @@ function gitHelpers(execute: CommandExecutor, cwd: string) {
   return { git, must };
 }
 
-type GitHelpers = ReturnType<typeof gitHelpers>;
+export type GitHelpers = ReturnType<typeof gitHelpers>;
 
 /**
  * „git add -A“ mit Schutz: Dateien, die nach Zugangsdaten aussehen, werden wieder aus dem Index genommen
  * (sie bleiben im Arbeitsverzeichnis) und gemeldet. Gibt die zurückgehaltenen Dateien zurück.
  */
-async function stageAll(
+export async function stageAll(
   git: GitHelpers['git'],
   must: GitHelpers['must'],
   log?: string[],

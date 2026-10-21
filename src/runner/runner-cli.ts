@@ -23,6 +23,7 @@ import { processVisionaryRun } from '../agent/visionary.js';
 import { syncFavicon } from './favicon.js';
 import { ProductionMonitor } from './production-monitor.js';
 import { syncGitGraph } from './git-graph.js';
+import { processGitFix, syncGitState } from './git-state-sync.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
 import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
@@ -265,8 +266,18 @@ async function main(): Promise<void> {
     // Git-Verlauf fürs Dashboard jede Minute.
     let gitCheck = 0;
     const githubActive = new Set<string>();
+    const gitFixActive = new Set<string>();
     const heartbeat = setInterval(() => {
       beat();
+      // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
+      for (const target of chatTargets) {
+        const slug = target.options.project;
+        if (target.problem || stopping || gitFixActive.has(slug)) continue;
+        gitFixActive.add(slug);
+        void processGitFix(pool, slug, target.repository, target.options.cwd)
+          .catch(logged('runner-cli'))
+          .finally(() => gitFixActive.delete(slug));
+      }
       void publishSystemAgents(pool).catch(logged('runner-cli'));
       if (!stopping) {
         production.tick(
@@ -280,6 +291,9 @@ async function main(): Promise<void> {
         for (const target of chatTargets) {
           if (target.problem) continue;
           void syncGitGraph(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
+          void syncGitState(pool, target.options.project, target.repository, target.options.cwd).catch(
+            logged('runner-cli'),
+          );
           void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
           // GitHub-Brücke: Issue-Import, Rückmeldung und Sprints im Review (Intervalle begrenzt das Modul selbst).
           const slug = target.options.project;

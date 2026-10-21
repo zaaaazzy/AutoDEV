@@ -1180,4 +1180,24 @@ export const SCHEMA = `
   ALTER TABLE test_run_steps ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT NOW();
   -- Nutzungslimit des Agent-Kontos erreicht: der Auftrag bleibt geplant und startet erst ab dieser Zeit wieder.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS retry_after TIMESTAMPTZ;
+  -- Git-Zustand der Projektordner (Branch, offene Änderungen, Abstand zu GitHub), vom Worker jede Minute erfasst;
+  -- riskante Aktionen (Live schalten, Freigeben, Sprint starten) prüfen ihn vorher.
+  ALTER TABLE project_git_graphs ADD COLUMN IF NOT EXISTS state JSONB;
+  ALTER TABLE project_git_graphs ADD COLUMN IF NOT EXISTS state_at TIMESTAMPTZ;
+  ALTER TABLE project_git_graphs ALTER COLUMN graph DROP NOT NULL;
+  -- Lösungen auf Knopfdruck (Zwischenstand sichern, zurück auf main, main mit GitHub abgleichen), vom Worker ausgeführt.
+  CREATE TABLE IF NOT EXISTS git_fix_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    fix TEXT NOT NULL CHECK (fix IN ('save_wip', 'checkout_main', 'sync_main')),
+    role TEXT NOT NULL DEFAULT 'live' CHECK (role IN ('live', 'agents')),
+    status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'running', 'done', 'failed')),
+    message TEXT,
+    requested_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS git_fix_requests_open_idx ON git_fix_requests (project_slug)
+    WHERE status IN ('requested', 'running');
+  CREATE INDEX IF NOT EXISTS git_fix_requests_project_idx ON git_fix_requests (project_slug, created_at DESC);
 `;

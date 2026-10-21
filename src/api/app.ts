@@ -13,6 +13,7 @@ import { registerBugRoutes } from './bugs.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { registerAgentTaskRoutes } from './agent-tasks.js';
 import { registerTestRequestRoutes } from './test-requests.js';
+import { registerGitStateRoutes } from './git-state.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
 import { registerCoverageRoutes } from './coverage.js';
@@ -124,6 +125,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerQualityRoutes(api, pool);
   registerAgentTaskRoutes(api, pool);
   registerTestRequestRoutes(api, pool);
+  registerGitStateRoutes(api, pool);
   registerSystemRestartRoutes(api, pool);
   registerScheduledJobRoutes(api, pool);
   registerWorkerRoutes(api, pool);

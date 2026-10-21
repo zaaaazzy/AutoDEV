@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { DEV_COLUMNS, retryComment } from './development.js';
+import { guardGit } from './git-state.js';
 
 const PORT_BASE = 4200;
 
@@ -180,6 +181,13 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
     }
+    // Der Worker mergt im Ordner der Agents: dort dürfen keine fremden Änderungen oder Branches liegen.
+    const owner = (
+      await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM development_items WHERE id = $1', [
+        request.params.id,
+      ])
+    ).rows[0];
+    if (owner && !(await guardGit(pool, owner.slug, 'approve', request.body, response))) return;
     const result = await pool.query(
       `UPDATE development_items SET review_approved_at = COALESCE(review_approved_at, NOW()), updated_at = NOW()
         WHERE id = $1 AND status = '${DEVELOPMENT_STATUS.approval}' RETURNING ${DEV_COLUMNS}, project_slug AS "projectSlug"`,

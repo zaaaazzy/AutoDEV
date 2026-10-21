@@ -3,6 +3,7 @@ import type { DevelopmentItem, ReviewSlot } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { OrderService } from './order.service.js';
 import { ReviewStateService } from './review-state.service.js';
+import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
 /**
  * Review-Freigabe eines Auftrags: Er ist fertig und getestet, aber noch nicht im Sprint-Branch. In der Review-Instanz
@@ -11,6 +12,7 @@ import { ReviewStateService } from './review-state.service.js';
 @Component({
   selector: 'app-order-approval',
   standalone: true,
+  imports: [GitAlertComponent],
   template: `
     @let item = order();
     <div class="approval-box">
@@ -49,6 +51,7 @@ import { ReviewStateService } from './review-state.service.js';
         }
       }
       @if (!item.reviewApprovedAt) {
+        <app-git-alert action="approve" />
         <div class="actions">
           @if (withActions()) {
             <button class="button primary" type="button" [disabled]="busy()" (click)="approve(item)">

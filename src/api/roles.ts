@@ -113,6 +113,8 @@ const RULES: Rule[] = [
   // Arbeiten mit dem Assistenten.
   ['*', /^\/api\/(projects\/[^/]+\/agent-tasks$|agent-tasks\/[^/]+(\/(run|runs|pause|resume))?$)/, 'chat'],
   ['POST', /^\/api\/projects\/[^/]+\/test-requests$/, 'run'],
+  // Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) ändern den Projektordner: Ausführen.
+  ['POST', /^\/api\/projects\/[^/]+\/git-fix$/, 'run'],
   // AIdeation neu starten (Container neu bauen, Worker neu starten): betrifft alle Projekte.
   ['POST', /^\/api\/system\/restart$/, 'admin'],
   // Wartungs-Jobs des Workers (Zeitplan, Konfiguration): nur Administration; GET prüft die Route selbst.
