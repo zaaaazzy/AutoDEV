@@ -3,14 +3,20 @@ import test from 'node:test';
 import type { CommandExecutor } from '../core/command.js';
 import type { PushMessage } from '../core/push.js';
 import { deployProject } from './deploy.js';
+import { errorFingerprint, fingerprint } from './production-events.js';
 import { FakeProductionDb } from './production-fake-db.test.js';
 import {
   checkHealth,
   evaluateAlerts,
   type Fetcher,
   healthUrlError,
+  linesInWindow,
+  LOG_MAX_WINDOW_MS,
+  logTimestamp,
+  logWindow,
   nextHealth,
   parseComposeLogs,
+  ProductionMonitor,
   purgeProductionData,
   scanLogs,
   updateAlerts,
@@ -152,12 +158,217 @@ test('Ein Fehler, der zehnmal in den Logs auftaucht, ergibt genau einen Bug mit 
   ).join('\n');
   const commands: string[][] = [];
   const execute: CommandExecutor = async (command) => (commands.push(command), { exitCode: 0, durationMs: 1, output });
-  const result = await scanLogs(db.pool, 'shop', '/projects/shop', execute);
+  const result = await scanLogs(db.pool, 'shop', '/projects/shop', execute, new Date('2026-10-18T10:15:00Z'));
   assert.deepEqual(result, { events: 1, occurrences: 10 });
-  assert.deepEqual(commands[0], ['docker', 'compose', 'logs', '--since', '15m', '--no-color', 'api']);
+  // Erster Scan: das Standardintervall von 15 Minuten.
+  assert.deepEqual(commands[0], [
+    'docker',
+    'compose',
+    'logs',
+    '--timestamps',
+    '--since',
+    '2026-10-18T10:00:00.000Z',
+    '--no-color',
+    'api',
+  ]);
   assert.equal(db.bugs.length, 1);
   assert.equal(db.events[0]!.count, 10);
   assert.equal(db.events[0]!.source, 'logs');
+});
+
+/** Ausgabe wie `docker compose logs --timestamps`: Dienst, Zeitstempel, Text. */
+const stamped = (at: string, text: string, service = 'api-1') => `${service}  | ${at} ${text}`;
+
+/** Executor, der die Ausgabe liefert und die Befehle sammelt. */
+function logsExecutor(output: () => string, commands: string[][] = []): CommandExecutor {
+  return async (command) => (commands.push(command), { exitCode: 0, durationMs: 1, output: output() });
+}
+
+test('Zeitstempel von --timestamps: Nanosekunden und Offsets werden millisekundengenau gelesen', () => {
+  assert.equal(logTimestamp('2026-10-18T10:00:00.123456789Z ERROR x')?.at, Date.parse('2026-10-18T10:00:00.123Z'));
+  assert.equal(logTimestamp('2026-10-18T12:00:00+02:00 ERROR x')?.at, Date.parse('2026-10-18T10:00:00Z'));
+  assert.equal(logTimestamp('2026-10-18T12:00:00.5+0200 x')?.at, Date.parse('2026-10-18T10:00:00.500Z'));
+  assert.equal(logTimestamp('ERROR ohne Zeitstempel'), null);
+  const output = [
+    stamped('2026-10-18T09:59:59.000Z', 'ERROR alt'),
+    'api-1  |     at alt (/app/a.js:1:1)',
+    stamped('2026-10-18T10:00:00.000Z', 'ERROR auf der Grenze'),
+    stamped('2026-10-18T10:00:00.001Z', 'ERROR neu'),
+    'api-1  |     at neu (/app/n.js:1:1)',
+    stamped('2026-10-18T10:15:00.001Z', 'ERROR nach dem Scan-Zeitpunkt'),
+  ].join('\n');
+  assert.equal(
+    linesInWindow(output, new Date('2026-10-18T10:00:00.000Z'), new Date('2026-10-18T10:15:00.000Z')),
+    'api-1  | ERROR neu\napi-1  |     at neu (/app/n.js:1:1)',
+  );
+});
+
+test('Verspäteter Tick: das Fenster deckt den ganzen Abstand seit dem letzten Scan ab', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const commands: string[][] = [];
+  let output = '';
+  const execute = logsExecutor(() => output, commands);
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:00:00Z'));
+  // 20 Minuten später (über dem Intervall): Fehler von 10:02 lägen ausserhalb eines festen 15-Minuten-Fensters.
+  output = Array.from({ length: 3 }, () => stamped('2026-10-18T10:02:00Z', 'ERROR verspätet gesehen')).join('\n');
+  assert.deepEqual(await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:20:00Z')), {
+    events: 1,
+    occurrences: 3,
+  });
+  assert.equal(commands[1]![5], '2026-10-18T10:00:00.000Z', 'Fenster beginnt beim letzten erfolgreichen Scan');
+  assert.equal(db.events[0]!.count, 3);
+  assert.equal(db.status.get('shop')?.logGap, null, 'keine Lücke');
+});
+
+test('Überlappende Fenster: dieselbe Fehlerzeile in zwei Scans wird genau einmal gezählt', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  // docker liefert die Zeile in beiden Scans (z. B. weil --since sekundengenau rundet).
+  const output = stamped('2026-10-18T10:00:30Z', 'ERROR doppelt geliefert');
+  const execute = logsExecutor(() => output);
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:01:00Z'));
+  assert.deepEqual(await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:02:00Z')), {
+    events: 0,
+    occurrences: 0,
+  });
+  assert.equal(db.events.length, 1);
+  assert.equal(db.events[0]!.count, 1);
+});
+
+test('Scan nach dem Deploy und Takt gleichzeitig: dieselben Zeilen zählen nur einmal', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  await scanLogs(
+    db.pool,
+    'shop',
+    '/x',
+    logsExecutor(() => ''),
+    new Date('2026-10-18T10:00:00Z'),
+  );
+  const output = stamped('2026-10-18T10:05:00Z', 'ERROR gleichzeitig');
+  const now = new Date('2026-10-18T10:10:00Z');
+  await Promise.all([
+    scanLogs(
+      db.pool,
+      'shop',
+      '/x',
+      logsExecutor(() => output),
+      now,
+    ),
+    scanLogs(
+      db.pool,
+      'shop',
+      '/x',
+      logsExecutor(() => output),
+      now,
+    ),
+  ]);
+  assert.equal(db.events[0]!.count, 1);
+});
+
+test('Letzter Scan zu lange her: Fenster wird begrenzt und die Lücke im Scan-Status vermerkt', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const commands: string[][] = [];
+  let output = '';
+  const execute = logsExecutor(() => output, commands);
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:00:00Z'));
+  output = [
+    stamped('2026-10-18T11:00:00Z', 'ERROR vor dem Fenster'),
+    stamped('2026-10-18T13:30:00Z', 'ERROR im Fenster'),
+  ].join('\n');
+  const now = new Date('2026-10-18T14:00:00Z');
+  assert.deepEqual(logWindow(new Date('2026-10-18T10:00:00Z'), now).since, new Date(now.getTime() - LOG_MAX_WINDOW_MS));
+  assert.deepEqual(await scanLogs(db.pool, 'shop', '/x', execute, now), { events: 1, occurrences: 1 });
+  assert.equal(commands[1]![5], '2026-10-18T13:00:00.000Z');
+  assert.equal(
+    db.status.get('shop')?.logGap,
+    'Logs von 2026-10-18 10:00 UTC bis 2026-10-18 13:00 UTC nicht gelesen (letzter erfolgreicher Scan zu lange her).',
+  );
+  assert.equal(db.status.get('shop')?.logsScannedAt, now);
+  // Der Vermerk bleibt, bis eine neue Lücke entsteht.
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T14:15:00Z'));
+  assert.match(db.status.get('shop')?.logGap ?? '', /10:00 UTC bis 2026-10-18 13:00 UTC/);
+});
+
+test('Gruppierung im Log-Scan und Speichern nutzen denselben Fingerabdruck', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const output = [
+    'api-1  | TypeError: Cannot read properties of undefined (reading "id")',
+    'api-1  |     at loadOrder (/app/src/orders.js:41:13)',
+  ].join('\n');
+  const [error] = parseComposeLogs(output);
+  const execute = logsExecutor(() => output);
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:00:00Z'));
+  assert.equal(db.events[0]!.fingerprint, errorFingerprint(error!));
+  assert.equal(db.events[0]!.fingerprint, fingerprint(error!.message, error!.stack));
+  // Mit Titel zählt der Titel – im Log-Scan genauso wie in recordEvent.
+  assert.equal(errorFingerprint({ ...error!, title: 'Titel' }), fingerprint('Titel', error!.stack));
+});
+
+test('Ungültige Dienstnamen werden nicht an docker compose logs übergeben', async () => {
+  const commands: string[][] = [];
+  const execute = logsExecutor(() => '', commands);
+  const db = new FakeProductionDb({ logServices: ['api', '-v', '--since=0', 'web;rm -rf /', 'a b', '$(id)', 'db_1'] });
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:00:00Z'));
+  assert.deepEqual(commands[0]!.slice(7), ['api', 'db_1']);
+  const invalid = new FakeProductionDb({ logServices: ['-v', '../x'] });
+  assert.equal(await scanLogs(invalid.pool, 'shop', '/x', execute), null);
+  assert.equal(commands.length, 1, 'ohne gültigen Dienst kein Aufruf');
+});
+
+test('Fehlgeschlagenes docker compose logs setzt log_error, legt nichts an; der nächste Erfolg setzt zurück', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const failing: CommandExecutor = async () => ({
+    exitCode: 1,
+    durationMs: 1,
+    output: `${'x'.repeat(400)}\nno such service: api`,
+  });
+  assert.equal(await scanLogs(db.pool, 'shop', '/x', failing, new Date('2026-10-18T10:00:00Z')), null);
+  assert.equal(db.events.length, 0);
+  assert.equal(db.bugs.length, 0);
+  assert.equal(db.status.get('shop')?.logError?.length, 300);
+  assert.equal(db.status.get('shop')?.logsScannedAt, null, 'Zeitpunkt rückt nicht vor');
+  const thrown: CommandExecutor = async () => {
+    throw new Error('spawn docker ENOENT');
+  };
+  await scanLogs(db.pool, 'shop', '/x', thrown, new Date('2026-10-18T10:05:00Z'));
+  assert.equal(db.status.get('shop')?.logError, 'spawn docker ENOENT');
+  const now = new Date('2026-10-18T10:10:00Z');
+  await scanLogs(
+    db.pool,
+    'shop',
+    '/x',
+    logsExecutor(() => ''),
+    now,
+  );
+  assert.equal(db.status.get('shop')?.logError, null);
+  assert.equal(db.status.get('shop')?.logsScannedAt, now);
+});
+
+test('Ein Log-Ereignis nach einem behobenen Bug öffnet diesen als Regression wieder', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  let output = Array.from({ length: 3 }, () => stamped('2026-10-18T09:50:00Z', 'ERROR Kasse kaputt 1')).join('\n');
+  const execute = logsExecutor(() => output);
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:00:00Z'));
+  assert.equal(db.bugs.length, 1);
+  db.bugs[0]!.status = 'fixed';
+  output = stamped('2026-10-18T10:05:00Z', 'ERROR Kasse kaputt 2');
+  await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:15:00Z'));
+  assert.equal(db.bugs.length, 1, 'kein neuer Bug');
+  assert.equal(db.bugs[0]!.status, 'open');
+  assert.match(db.bugs[0]!.fixNotes, /Regression/);
+  assert.equal(db.events[0]!.count, 4);
+});
+
+test('Ab 50 gleichen Log-Fehlern in einer Stunde ist der Bug kritisch', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  const output = Array.from({ length: 50 }, (_, index) => `api-1  | ERROR timeout ${index}`).join('\n');
+  await scanLogs(
+    db.pool,
+    'shop',
+    '/x',
+    logsExecutor(() => output),
+    new Date('2026-10-18T10:00:00Z'),
+  );
+  assert.equal(db.bugs[0]!.severity, 'critical');
 });
 
 test('Zeilen mit Ausschlussmuster erzeugen kein Ereignis', async () => {
@@ -194,25 +405,45 @@ test('Nach erfolgreichem Deploy wird der Deploy festgehalten und ein Log-Scan an
     }
   );
   assert.equal(await deployProject(db.pool, 'shop', '/projects/shop', execute), true);
-  assert.deepEqual(commands, ['docker compose up -d', 'docker compose logs --since 15m --no-color api']);
+  assert.equal(commands[0], 'docker compose up -d');
+  assert.match(commands[1]!, /^docker compose logs --timestamps --since \d{4}-\d\d-\d\dT[\d:.]+Z --no-color api$/);
+  assert.equal(commands.length, 2);
   assert.equal(db.deploys.length, 1);
   assert.deepEqual(db.deploys[0]!.orderIds, ['o-1']);
   assert.equal(db.bugs.length, 1);
   assert.deepEqual((db.events[0]!.deploySuspect as { orders: unknown[] }).orders, [{ id: 'o-1', title: 'Neu' }]);
 });
 
-test('Ohne Log-Dienste kein Scan; ein zweiter Scan kurz danach liest nur die neuen Sekunden', async () => {
+test('Ohne Log-Dienste kein Scan; ein zweiter Scan kurz danach liest ab dem letzten Scan', async () => {
   const commands: string[][] = [];
-  const execute: CommandExecutor = async (command) => (
-    commands.push(command),
-    { exitCode: 0, durationMs: 1, output: '' }
-  );
-  assert.equal(await scanLogs(new FakeProductionDb().pool, 'shop', '/x', execute), null);
+  const execute = logsExecutor(() => '', commands);
+  const empty = new FakeProductionDb();
+  assert.equal(await scanLogs(empty.pool, 'shop', '/x', execute), null);
   assert.equal(commands.length, 0);
+  assert.equal(empty.status.get('shop'), undefined, 'kein Eintrag in production_status');
   const db = new FakeProductionDb({ logServices: ['api'] });
   await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:00:00Z'));
   await scanLogs(db.pool, 'shop', '/x', execute, new Date('2026-10-18T10:01:30Z'));
-  assert.equal(commands[1]![4], '90s');
+  assert.equal(commands[1]![5], '2026-10-18T10:00:00.000Z');
+});
+
+test('Der periodische Takt startet den Log-Scan nur für Projekte mit Log-Diensten', async () => {
+  const db = new FakeProductionDb({ logServices: ['api'] });
+  db.addProject({ slug: 'ohne', name: 'Ohne' });
+  const commands: string[][] = [];
+  new ProductionMonitor(
+    db.pool,
+    logsExecutor(() => '', commands),
+    healthy,
+  ).tick([
+    { slug: 'shop', cwd: '/shop' },
+    { slug: 'ohne', cwd: '/ohne' },
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0]![2], 'logs');
+  assert.ok(db.status.get('shop')?.logsScannedAt);
+  assert.equal(db.status.get('ohne')?.logsScannedAt ?? null, null);
 });
 
 test('Aufbewahrung: Ereignisse, Verlauf und Deploys älter als die Frist des Projekts werden gelöscht', async () => {

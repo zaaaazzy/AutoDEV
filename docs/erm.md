@@ -29,7 +29,7 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `production_events` (`project_slug`, `fingerprint` – eindeutig je Projekt, `source` health/logs/ingest, `origin` Dienst bzw. Pfad, `first_seen`, `last_seen`, `count`, `sample` maskiert und auf 2000 Zeichen gekürzt, `bug_id` → `bugs`, `deploy_suspect` JSONB mit Deploy-Zeitpunkt, Aufträgen und Sprints) – n:1 zu `bugs`.
 - `production_event_buckets` (`event_id`, `hour`, `count`): Verlauf je Stunde für „seit gestern“, die Schwere (≥ 50/h = kritisch) und das Diagramm im Bug-Detail.
 - `production_deploys` (`project_slug`, `deployed_at`, `order_ids` UUID[]): erfolgreiche Deploys mit den seit dem vorigen Deploy erledigten Aufträgen; Grundlage des Deploy-Verdachts (30 min).
-- `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des Log-Scans und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
+- `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des letzten erfolgreichen Log-Scans (`logs_scanned_at`, untere Grenze des nächsten Scan-Fensters), letzter Scan-Fehler (`log_error`, höchstens 300 Zeichen, beim nächsten Erfolg leer), zuletzt vermerkte Lücke (`log_gap`) und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
 - Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.
 
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)

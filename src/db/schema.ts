@@ -950,6 +950,8 @@ export const SCHEMA = `
     logs_scanned_at TIMESTAMPTZ,
     log_error TEXT
   );
+  -- Log-Scan: zuletzt vermerkte Lücke, wenn der letzte erfolgreiche Scan länger als das längste Fenster her war.
+  ALTER TABLE production_status ADD COLUMN IF NOT EXISTS log_gap TEXT;
   -- GitHub-Brücke: Issue-Import, Rückmeldung und Sprint-Pull-Request über die gh-Anmeldung des Workers (kein Token).
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_mode TEXT NOT NULL DEFAULT 'aus'
     CHECK (github_mode IN ('aus', 'issues', 'issues+pr'));

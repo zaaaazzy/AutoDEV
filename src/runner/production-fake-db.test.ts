@@ -59,6 +59,7 @@ export interface FakeStatus {
   notifiedAt: Date | null;
   logsScannedAt: Date | null;
   logError: string | null;
+  logGap: string | null;
 }
 
 export class FakeProductionDb {
@@ -108,6 +109,7 @@ export class FakeProductionDb {
         notifiedAt: null,
         logsScannedAt: null,
         logError: null,
+        logGap: null,
       };
       this.status.set(project, state);
     }
@@ -345,10 +347,11 @@ export class FakeProductionDb {
           : [],
       );
     }
-    if (text.startsWith('INSERT INTO production_status (project_slug, logs_scanned_at, log_error)')) {
+    if (text.startsWith('INSERT INTO production_status (project_slug, logs_scanned_at, log_error, log_gap)')) {
       const state = this.state(v[0] as string);
       state.logError = v[2] as string | null;
       if (!state.logError) state.logsScannedAt = v[1] as Date;
+      state.logGap = (v[3] as string | null) ?? state.logGap;
       return rows([]);
     }
     if (text.startsWith('SELECT deploy_commands AS commands FROM projects')) {

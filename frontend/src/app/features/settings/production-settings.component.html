@@ -36,14 +36,20 @@
       />
     </label>
     <p class="muted wide">
-      Alle 15 Minuten und nach jedem erfolgreichen Deploy: <code>docker compose logs --since 15m --no-color</code> im
-      Projektordner. Erkannt werden Stacktraces, ERROR-Zeilen und HTTP-5xx.
-      @if (status()?.logError) {
-        Letzter Scan fehlgeschlagen: {{ status()?.logError }}
-      } @else if (status()?.logsScannedAt) {
-        Zuletzt {{ status()?.logsScannedAt | dateTime }}.
-      }
+      Alle 15 Minuten und nach jedem erfolgreichen Deploy: <code>docker compose logs --timestamps --since …</code> im
+      Projektordner, lückenlos ab dem letzten erfolgreichen Scan (höchstens 1 Stunde zurück; ältere Zeilen werden als
+      Lücke vermerkt). Erkannt werden Stacktraces, ERROR-Zeilen und HTTP-5xx.
     </p>
+    @if (logScan(); as rows) {
+      <dl class="wide production-scan" data-testid="log-scan-status">
+        @for (row of rows; track row.label) {
+          <div>
+            <dt class="muted">{{ row.label }}</dt>
+            <dd [class.problem]="row.problem">{{ row.value }}</dd>
+          </div>
+        }
+      </dl>
+    }
     <label class="wide"
       >Ausschlussmuster (eines pro Zeile)<textarea
         name="productionIgnore"
