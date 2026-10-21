@@ -49,8 +49,12 @@ export interface RouteEntry {
   match: (path: string) => Record<string, string> | null;
 }
 
-/** Express-Pfad (nur feste Teile und :parameter) als Muster; null = nicht unterstützt. */
-function compile(path: string): RouteEntry['match'] | null {
+/**
+ * Express-Pfad (nur feste Teile und :parameter) als Muster; null = nicht unterstützt. strict wie beim Router: Ohne
+ * strict trifft Express die Route auch mit Schrägstrich am Ende, dann muss der Wächter sie ebenso treffen – sonst
+ * fiele „/development/x/“ auf eine andere (schwächere) Regel als die Route, die Express tatsächlich ausführt.
+ */
+function compile(path: string, strict: boolean): RouteEntry['match'] | null {
   const keys: string[] = [];
   const parts = path.split('/').map((part) => {
     const param = /^:([A-Za-z_]\w*)$/.exec(part);
@@ -61,8 +65,8 @@ function compile(path: string): RouteEntry['match'] | null {
     return /^[\w.-]*$/.test(part) ? part.replace(/\./g, '\\.') : null;
   });
   if (parts.includes(null)) return null;
-  // Wie Express: Groß-/Kleinschreibung zählt (case sensitive routing), ein abschließender Schrägstrich nicht.
-  const pattern = new RegExp(`^${parts.join('/')}/?$`);
+  // Wie Express: Groß-/Kleinschreibung zählt (case sensitive routing), ein abschließender Schrägstrich nur mit strict.
+  const pattern = new RegExp(`^${parts.join('/')}${strict ? '' : '/?'}$`);
   return (candidate) => {
     const found = pattern.exec(candidate);
     if (!found) return null;
@@ -77,12 +81,14 @@ interface RouteLayer {
 /** Alle Routen eines Routers in Registrierungsreihenfolge, mit Deklaration (erster Handler). */
 export function routeTable(router: Router): RouteEntry[] {
   const entries: RouteEntry[] = [];
+  // Einstellung des Routers selbst (express.Router({ strict })), damit Wächter und Router dieselbe Route wählen.
+  const strict = (router as { strict?: unknown }).strict === true;
   for (const layer of router.stack as RouteLayer[]) {
     const route = layer.route;
     if (!route) continue;
     const path = String(route.path);
     // Nicht unterstützte Pfade (Platzhalter, Muster) treffen nie: Anfragen dorthin brauchen Administration.
-    const match = compile(path) ?? (() => null);
+    const match = compile(path, strict) ?? (() => null);
     for (const method of Object.keys(route.methods)) {
       entries.push({ method: method.toUpperCase(), path, access: declarationOf(route.stack[0]?.handle), match });
     }
