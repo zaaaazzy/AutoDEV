@@ -35,9 +35,12 @@ export interface GuardInput {
 /** Ordnerangabe für die Einschränkung: relativ, ohne „..“ und ohne Shell-Sonderzeichen. */
 export const SCOPE_PATTERN = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@][\w@.+-]*(?:\/[\w@][\w@.+-]*)*$/;
 
-/** Nie beschreibbar: Git-Interna, Agent-Einstellungen (sonst könnte sich ein Agent selbst Rechte geben) und Geheimnisse. */
+/**
+ * Nie beschreibbar: Git-Interna und Git-Hooks (.husky), Agent-Einstellungen (.claude, .mcp.json – sonst könnte sich ein
+ * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen) und Geheimnisse.
+ */
 const PROTECTED_PATH =
-  /(?:^|\/)(?:\.git|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
+  /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
@@ -150,8 +153,16 @@ function quoteLayers(command: string): { unquoted: string; expanding: string } |
   return { unquoted, expanding };
 }
 
-/** Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). */
-export function bashProblem(command: string, projectRoot: string, run = spawnSync): string | null {
+/**
+ * Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). Gilt für Claude-Agents
+ * und das lokale Modell gleichermassen. run = null: Compose-Starts nicht selbst prüfen (das lokale Modell prüft sie
+ * asynchron unter der Projektsperre).
+ */
+export function bashProblem(
+  command: string,
+  projectRoot: string,
+  run: typeof spawnSync | null = spawnSync,
+): string | null {
   if (SECRET_IN_COMMAND.test(command)) return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.';
   const layers = quoteLayers(command);
   if (!layers) {
@@ -196,7 +207,7 @@ export function bashProblem(command: string, projectRoot: string, run = spawnSyn
     if (COMPOSE_STARTING.test(part) && !COMPOSE_START_FORMS.some((form) => form.test(part))) {
       return `„${part}“: erlaubt sind nur „docker compose up -d [--build] [--wait] [--force-recreate] [dienste]“ sowie start/restart/build [dienste].`;
     }
-    if (COMPOSE_STARTING.test(part)) {
+    if (COMPOSE_STARTING.test(part) && run) {
       const check = run('docker', ['compose', 'config', '--format', 'json'], {
         cwd: projectRoot,
         encoding: 'utf8',

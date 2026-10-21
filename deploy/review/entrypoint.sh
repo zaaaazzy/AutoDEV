@@ -3,8 +3,10 @@ set -eu
 : "${REVIEW_COMMIT:?REVIEW_COMMIT fehlt}"
 : "${REVIEW_COMMAND:?REVIEW_COMMAND fehlt}"
 echo "[review] Stand ${REVIEW_COMMIT} (${REVIEW_LABEL:-ohne Titel})"
-# Leeres Repository, das die eingebundenen Objekte mitliest (nichts wird kopiert, kein Zugriff auf den Projektordner).
+git config --global --add safe.directory '*'
+# /work selbst gehört node und bleibt stehen (der Benutzer darf / nicht ändern); nur den Inhalt leeren.
 find /work -mindepth 1 -delete
+# Leeres Repository, das die eingebundenen Objekte mitliest (nichts wird kopiert, kein Zugriff auf den Projektordner).
 git init --quiet /work
 echo /source/objects > /work/.git/objects/info/alternates
 cd /work

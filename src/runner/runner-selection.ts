@@ -2,7 +2,11 @@ import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 import { isUuid } from '../core/validation.js';
+import { awaitsBugApprovalSql } from '../core/bug-trust.js';
 import type { RunnerOptions, WorkItem, WorkflowAgent } from './runner-types.js';
+
+/** Höchstes Zeitlimit eines Agent-Schritts (--timeout-minutes); daraus leitet sich die Schwelle für verwaiste Läufe ab. */
+export const MAX_TIMEOUT_MINUTES = 240;
 
 export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ?? process.cwd()): RunnerOptions {
   const values = new Map<string, string>();
@@ -42,8 +46,8 @@ export function parseRunnerOptions(args: string[], cwd = process.env.INIT_CWD ??
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
     throw new Error('--limit must be an integer between 1 and 50.');
   }
-  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > 240) {
-    throw new Error('--timeout-minutes must be between 1 and 240.');
+  if (!Number.isFinite(minutes) || minutes <= 0 || minutes > MAX_TIMEOUT_MINUTES) {
+    throw new Error(`--timeout-minutes must be between 1 and ${MAX_TIMEOUT_MINUTES}.`);
   }
   if (!Number.isFinite(seconds) || seconds < 5 || seconds > 3600) {
     throw new Error('--interval-seconds must be between 5 and 3600.');
@@ -89,12 +93,16 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
   return result.rows;
 }
 
-/** Planned items of the active sprint or assigned directly to an agent, most important first. */
+/**
+ * Planned items of the active sprint or assigned directly to an agent, most important first. Aufträge zu Bugs aus
+ * fremden Quellen (Betrieb, GitHub) ohne Freigabe durch einen Menschen werden nie gewählt, auch nicht gezielt (--item).
+ */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.retry_count AS "retryCount"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.retry_count AS "retryCount"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
-      `SELECT ${columns} FROM development_items d WHERE d.id = $1 AND d.project_slug = $2`,
+      `SELECT ${columns} FROM development_items d
+        WHERE d.id = $1 AND d.project_slug = $2 AND NOT ${awaitsBugApprovalSql('d')}`,
       [options.itemId, options.project],
     );
     return result.rows;
@@ -104,6 +112,7 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
        FROM development_items d
        LEFT JOIN sprints s ON s.id = d.sprint_id
       WHERE d.project_slug = $1 AND d.status = 'planned' AND d.kind <> 'express'
+        AND NOT ${awaitsBugApprovalSql('d')}
         AND (s.status = 'active' OR d.agent_id IS NOT NULL OR d.auto_run)
         -- Pausierter Sprint: keine Aufträge starten (ausser ein einzelner Agent wurde von Hand gestartet).
         AND (s.paused_at IS NULL OR d.agent_id IS NOT NULL)

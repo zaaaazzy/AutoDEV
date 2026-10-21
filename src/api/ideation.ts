@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { EDITABLE_IDEATION_STATUSES, IDEATION_STATUS } from '../core/status.js';
 import {
   buildUpdate,
@@ -38,7 +39,7 @@ export const IDEA_FIELDS = {
 };
 
 export function registerIdeationRoutes(app: Router, pool: Pool): void {
-  app.post('/projects/:slug/ideation', async (request, response) => {
+  app.post('/projects/:slug/ideation', access({ role: 'plan', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     const fields = parseFields(body, IDEA_FIELDS);
@@ -74,7 +75,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  app.patch('/ideation/:id', async (request, response) => {
+  app.patch('/ideation/:id', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -110,7 +111,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
   });
 
   // The author agent defines the idea; this is only possible from the manually editable statuses.
-  app.post('/ideation/:id/define', async (request, response) => {
+  app.post('/ideation/:id/define', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -129,7 +130,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
   });
 
   // Ablehnen mit Grund: Der Grund steht an der Idee und als Kommentar; der Visionär beachtet ihn beim nächsten Lauf.
-  app.post('/ideation/:id/reject', async (request, response) => {
+  app.post('/ideation/:id/reject', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

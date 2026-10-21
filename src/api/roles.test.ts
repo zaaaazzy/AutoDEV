@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { hashPassword, verifyPassword } from './auth.js';
-import { hasRole, requiredRole } from './roles.js';
+import { hasRole } from './roles.js';
+import { requiredRole } from './route-table.test.js';
 
 test('every write maps to the right role; reads and own-account actions need none', () => {
   assert.equal(requiredRole('POST', '/api/users', {}), 'admin');

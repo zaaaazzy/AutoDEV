@@ -1,4 +1,10 @@
 import { logged } from '../core/log.js';
+import {
+  EXTERNAL_TEXT_END,
+  EXTERNAL_TEXT_START,
+  UNTRUSTED_BUG_SOURCES_SQL,
+  unapprovedBugSql,
+} from '../core/bug-trust.js';
 import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
@@ -6,6 +12,7 @@ import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
+import { UNTRUSTED_START } from './hoster.js';
 
 const MAX_AUTO_RETRIES = 2;
 
@@ -128,12 +135,13 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
   // Wartet der Auftrag auf einen Menschen, heisst er „Aktion notwendig“ statt „fehlgeschlagen“.
   const todo = humanActionFor(tail);
   if (todo) await setActionTodo(pool, item.id, todo).catch(logged('autofix'));
+  // Fail-closed: ohne Projektzeile kein Auto-Bugfix.
   const auto =
     (
       await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [
         item.projectSlug,
       ])
-    ).rows[0]?.auto ?? true;
+    ).rows[0]?.auto ?? false;
   if (item.bugId) {
     await pool.query('UPDATE bugs SET fix_notes = $2, updated_at = NOW() WHERE id = $1', [
       item.bugId,
@@ -200,7 +208,7 @@ export async function delegateAfterAnalysis(
       await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [
         item.projectSlug,
       ])
-    ).rows[0]?.auto ?? true;
+    ).rows[0]?.auto ?? false;
   if (auto) await queueBugFix(pool, item, item.failureBugId);
 }
 
@@ -220,6 +228,8 @@ export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: 
 /**
  * Erzeugt (einmalig) den Behebungsauftrag zu einem Bug; er läuft automatisch, auch ohne Sprint. Ohne `intro`
  * behebt er den Fehler, der den Auftrag `item` blockiert; Bugs aus dem Betrieb geben einen eigenen Einstieg mit.
+ * Bugs aus fremden Quellen (Betrieb, GitHub) bekommen erst nach der Freigabe durch einen Menschen einen Auftrag;
+ * ältere Beschreibungen ohne Fremdtext-Marker werden dabei als Fremdtext eingefasst.
  */
 export async function queueBugFix(
   pool: Pool,
@@ -230,11 +240,13 @@ export async function queueBugFix(
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
      SELECT b.project_slug, $2, 'Bug: ' || b.title,
-            COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' || b.description,
+            COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
+            CASE WHEN b.source IN ${UNTRUSTED_BUG_SOURCES_SQL} AND strpos(b.description, $5) = 0 AND strpos(b.description, $7) = 0
+                 THEN $5 || E'\n' || b.description || E'\n' || $6 ELSE b.description END,
             'planned', 'high', 'bug', b.id, TRUE
-       FROM bugs b WHERE b.id = $1
+       FROM bugs b WHERE b.id = $1 AND NOT ${unapprovedBugSql('b')}
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO NOTHING`,
-    [bugId, item.sprintId ?? null, item.title, intro ?? null],
+    [bugId, item.sprintId ?? null, item.title, intro ?? null, EXTERNAL_TEXT_START, EXTERNAL_TEXT_END, UNTRUSTED_START],
   );
 }
 

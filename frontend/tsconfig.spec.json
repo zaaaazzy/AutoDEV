@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "outDir": "../out-tsc/spec",
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "../src/core/layout-measure.ts",
+    "../src/core/cron.ts",
+    "../src/core/development-transitions.ts"
+  ],
+  "exclude": []
+}

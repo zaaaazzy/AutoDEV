@@ -1611,6 +1611,44 @@ h3 .link-button {
 .agent-line.down small {
   color: #c9573f;
 }
+/* Dashboard: Rollen-Icon und Rechte-Chips je Agent */
+.role-icon {
+  display: inline-grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 7px;
+  background: #eef2ee;
+  color: var(--ink);
+}
+.agent-rights {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+  font-size: 11px;
+}
+.agent-role {
+  color: var(--ink);
+  font-weight: 600;
+}
+.right-chip {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f1f1ef;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.right-chip.yes {
+  background: #e3f1e9;
+  color: #22603d;
+}
+.right-hint {
+  color: var(--muted);
+  font-style: italic;
+}
 .agent-detail > .link-button {
   margin-bottom: 10px;
 }

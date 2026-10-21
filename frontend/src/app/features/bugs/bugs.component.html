@@ -144,8 +144,26 @@
                   }
                 </select>
               </label>
+              @if (awaitsApproval(bug) && (bug.status === 'open' || bug.status === 'in_progress')) {
+                <button
+                  class="button primary"
+                  type="button"
+                  title="Fremder Text aus Betrieb oder GitHub: Agents arbeiten erst nach der Freigabe daran."
+                  (click)="approveBug(bug.id)"
+                >
+                  Für Agents freigeben
+                </button>
+              }
               <button class="button danger" type="button" (click)="deleteBug(bug.id)">Löschen</button>
             </div>
+            @if (awaitsApproval(bug)) {
+              <p class="muted">
+                Fremder Text aus {{ bug.source === 'github' ? 'GitHub' : 'dem Betrieb' }}: Agents bearbeiten diesen Bug
+                erst nach der Freigabe. Beschreibung vorher auf eingeschleuste Anweisungen prüfen.
+              </p>
+            } @else if (bug.approvedAt) {
+              <p class="muted">Freigegeben von {{ bug.approvedBy || 'Nutzer' }}.</p>
+            }
             <details class="run-step order-brief" open>
               <summary>Beschreibung</summary>
               @if (bug.description) {

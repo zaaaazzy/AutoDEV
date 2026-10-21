@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import {
   affectedFiles,
   type Capacity,
@@ -309,7 +310,7 @@ const parseIds = (body: unknown): string[] | null =>
     : null;
 
 export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/sprints/proposal', async (request, response, next) => {
+  app.get('/projects/:slug/sprints/proposal', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const proposal = slug ? await loadProposal(pool, slug) : null;
@@ -320,22 +321,26 @@ export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/projects/:slug/sprints/proposal/apply', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      const ids = parseIds(request.body);
-      if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
-      const body = isRecord(request.body) ? request.body : {};
-      const comment = typeof body.comment === 'string' ? body.comment : '';
-      const result = await applyProposal(pool, slug, ids, body.start === true, comment);
-      if (typeof result === 'string') return void response.status(400).json({ message: result });
-      response.status(201).json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.post(
+    '/projects/:slug/sprints/proposal/apply',
+    access({ role: 'plan', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        const ids = parseIds(request.body);
+        if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
+        const body = isRecord(request.body) ? request.body : {};
+        const comment = typeof body.comment === 'string' ? body.comment : '';
+        const result = await applyProposal(pool, slug, ids, body.start === true, comment);
+        if (typeof result === 'string') return void response.status(400).json({ message: result });
+        response.status(201).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.get('/projects/:slug/sprints/roadmap', async (request, response, next) => {
+  app.get('/projects/:slug/sprints/roadmap', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const roadmap = slug ? await loadRoadmap(pool, slug) : null;
@@ -347,66 +352,78 @@ export function registerSprintPlanningRoutes(app: Router, pool: Pool): void {
   });
 
   // KI-Kommentar: der Worker lässt den Auftragsautor den Vorschlag kommentieren (nur Text, ändert die Auswahl nicht).
-  app.get('/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
-      const comment = (
-        await pool.query(
-          `SELECT item_ids AS "itemIds", status, comment, requested_at AS "requestedAt", finished_at AS "finishedAt"
+  app.get(
+    '/projects/:slug/sprints/proposal/comment',
+    access({ tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+        const comment = (
+          await pool.query(
+            `SELECT item_ids AS "itemIds", status, comment, requested_at AS "requestedAt", finished_at AS "finishedAt"
              FROM sprint_proposal_comments WHERE project_slug = $1`,
-          [slug],
-        )
-      ).rows[0];
-      response.json({ comment: comment ?? null });
-    } catch (error) {
-      next(error);
-    }
-  });
+            [slug],
+          )
+        ).rows[0];
+        response.json({ comment: comment ?? null });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.post('/projects/:slug/sprints/proposal/comment', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      const ids = parseIds(request.body);
-      if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
-      const proposal = await loadProposal(pool, slug);
-      if (!proposal) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      const allowed = new Set(proposal.items.map((item) => item.id));
-      if (ids.some((id) => !allowed.has(id)))
-        return void response.status(400).json({ message: 'Nur vorgeschlagene Aufträge lassen sich kommentieren.' });
-      const comment = (
-        await pool.query(
-          `INSERT INTO sprint_proposal_comments (project_slug, item_ids, status) VALUES ($1, $2, 'requested')
+  app.post(
+    '/projects/:slug/sprints/proposal/comment',
+    access({ role: 'plan', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        const ids = parseIds(request.body);
+        if (!slug || !ids) return void response.status(400).json({ message: 'Aufträge auswählen.' });
+        const proposal = await loadProposal(pool, slug);
+        if (!proposal) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        const allowed = new Set(proposal.items.map((item) => item.id));
+        if (ids.some((id) => !allowed.has(id)))
+          return void response.status(400).json({ message: 'Nur vorgeschlagene Aufträge lassen sich kommentieren.' });
+        const comment = (
+          await pool.query(
+            `INSERT INTO sprint_proposal_comments (project_slug, item_ids, status) VALUES ($1, $2, 'requested')
            ON CONFLICT (project_slug) DO UPDATE
              SET item_ids = EXCLUDED.item_ids, status = 'requested', comment = NULL, requested_at = NOW(),
                  finished_at = NULL
            WHERE sprint_proposal_comments.status NOT IN ('requested', 'running')
            RETURNING item_ids AS "itemIds", status, comment`,
-          [slug, ids],
-        )
-      ).rows[0];
-      if (!comment) return void response.status(409).json({ message: 'Der Kommentar wird schon geschrieben.' });
-      response.status(202).json({ comment });
-    } catch (error) {
-      next(error);
-    }
-  });
+            [slug, ids],
+          )
+        ).rows[0];
+        if (!comment) return void response.status(409).json({ message: 'Der Kommentar wird schon geschrieben.' });
+        response.status(202).json({ comment });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   // Manuelle Freigabe nach gescheitertem Abschluss: der Fehler dieses Sprints hält den Autopilot nicht mehr an.
-  app.post('/projects/:slug/sprints/autopilot/resume', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      const guard = slug ? await autopilotGuard(pool, slug) : null;
-      if (!slug || !guard) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      if (guard.state !== 'paused' || !guard.failedSprintId)
-        return void response.status(400).json({ message: 'Der Autopilot ist nicht pausiert.' });
-      await pool.query('UPDATE projects SET autopilot_released_sprint = $2 WHERE slug = $1', [
-        slug,
-        guard.failedSprintId,
-      ]);
-      response.json({ resumed: true });
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.post(
+    '/projects/:slug/sprints/autopilot/resume',
+    access({ role: 'plan', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        const guard = slug ? await autopilotGuard(pool, slug) : null;
+        if (!slug || !guard) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        if (guard.state !== 'paused' || !guard.failedSprintId)
+          return void response.status(400).json({ message: 'Der Autopilot ist nicht pausiert.' });
+        await pool.query('UPDATE projects SET autopilot_released_sprint = $2 WHERE slug = $1', [
+          slug,
+          guard.failedSprintId,
+        ]);
+        response.json({ resumed: true });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 }

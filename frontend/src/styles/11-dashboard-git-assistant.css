@@ -161,6 +161,13 @@ a.git-commit[href]:hover {
   color: var(--muted);
 }
 
+/* Das Feld selbst ist rahmenlos; der Fokus-Ring sitzt am Rahmen drumherum. */
+.agent-tasks-search:focus-within {
+  border-color: var(--green);
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
 .agent-tasks-search input {
   flex: 1;
   min-width: 0;
@@ -569,10 +576,13 @@ a.git-commit[href]:hover {
   transition: filter 0.15s;
 }
 
-.share-seg:hover,
-.share-seg:focus-visible {
-  outline: none;
+.share-seg:hover {
   filter: brightness(0.85);
+}
+.share-seg:focus-visible {
+  filter: brightness(0.85);
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
 }
 
 .share-legend {

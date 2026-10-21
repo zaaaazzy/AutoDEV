@@ -439,6 +439,7 @@ export class ReviewSlots {
       '-v',
       `${join(gitDir.output.trim(), 'objects')}:/source/objects:ro`,
       '-v',
+      // Container läuft als node (deploy/review/Dockerfile); eigenes Volume je Projekt, das alte gehört root.
       `${reviewNpmVolume(slot.projectSlug ?? 'ohne-projekt')}:/home/node/.npm`,
       ...env.flatMap((entry) => ['-e', entry]),
       REVIEW_IMAGE,
