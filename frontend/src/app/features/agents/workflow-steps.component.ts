@@ -170,12 +170,12 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
                 >
                   <strong>… oder neuen Agent anlegen</strong>
                   <input #newName name="name" placeholder="Name, z. B. Sicherheitsprüfer" maxlength="80" required />
-                  <select #newRole name="role" aria-label="Rolle">
+                  <select #newRole name="role" aria-label="Rolle" [disabled]="!auth.can('admin')">
                     @for (role of roles; track role.value) {
                       <option [value]="role.value" [selected]="role.value === 'custom'">{{ role.label }}</option>
                     }
                   </select>
-                  <select #newModel name="model" aria-label="Modell">
+                  <select #newModel name="model" aria-label="Modell" [disabled]="!auth.can('admin')">
                     @for (preset of presets; track preset.id) {
                       <option [value]="preset.id">{{ presetLabel(preset) }}</option>
                     }
@@ -196,7 +196,7 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
 export class WorkflowStepsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
-  private readonly auth = inject(AuthService);
+  protected readonly auth = inject(AuthService);
 
   /** Freigabe-Kategorien des Projekts (für die Agent-Einstellungen). */
   readonly groups = input<PermissionGroupInfo[]>([]);
@@ -317,10 +317,10 @@ export class WorkflowStepsComponent {
         `${this.api.projectPath(this.store.activeProject())}/agents`,
         {
           name: name.trim(),
-          role,
+          // Rolle und Befehl setzt nur die Administration; sonst entsteht ein eigener Agent ohne Befehl.
+          ...(this.auth.can('admin') ? { role, command: preset ? parseCommand(preset.command) : null } : {}),
           phase,
           instructions: '',
-          command: preset ? parseCommand(preset.command) : null,
           allowedCommands: [],
         },
       );
