@@ -364,7 +364,11 @@
 .switcher-item:hover,
 .switcher-item:focus-visible {
   background: #f3f6f2;
-  outline: none;
+}
+/* Fokus-Ring nach innen, sonst schneidet das Menü ihn ab. */
+.switcher-item:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: -2px;
 }
 .switcher-item.active {
   background: #eef6f1;

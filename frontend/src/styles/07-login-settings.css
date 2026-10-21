@@ -53,7 +53,8 @@
 }
 .login-card input:focus {
   border-color: var(--green);
-  outline: none;
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
   box-shadow: 0 0 0 4px rgb(47 111 79 / 14%);
 }
 .login-code {

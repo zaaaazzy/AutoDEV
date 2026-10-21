@@ -429,7 +429,10 @@
 .attention-line:hover,
 .attention-line:focus-visible {
   background: #fdf7ec;
-  outline: none;
+}
+.attention-line:focus-visible {
+  outline: 2px solid var(--orange);
+  outline-offset: -2px;
 }
 
 .attention-line strong {
