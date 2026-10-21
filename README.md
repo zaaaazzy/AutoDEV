@@ -25,7 +25,9 @@ AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich:
 - `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` an die API weiter.
 - `npm run build` baut die Angular-Oberfläche und kompiliert anschließend das Backend.
 - `npm test` baut die Oberfläche und führt die Backend-Tests aus.
-- `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen (läuft auch in der CI unter `.github/workflows`).
+- `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen. `typecheck` prüft auch die Test-Dateien (`tsconfig.test.json`, `frontend/tsconfig.spec.json`), denn `tsx` allein prüft keine Typen.
+- `npm run test:e2e` startet die Oberflächentests (Playwright, eigene Datenbank `dev_log_e2e`; vorher `npm run build:ui`).
+- CI (`.github/workflows/ci.yml`, nur Leserechte): Job `check` (Lint, Format, Typen, Tests), Job `e2e` (Playwright gegen Postgres), Job `docker` (`docker compose build`, danach Start mit Health-Prüfung von `db`, `dev-log` und `frontend`). `.dockerignore` hält `.env*`, Schlüssel, Sicherungen und Testergebnisse aus den Images heraus.
 
 ### Sicherheit
 
