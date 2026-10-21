@@ -6,6 +6,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseTestAgentOptions, routePlaywrightSpecs, runTestAgent } from './test-agent.js';
 
+/**
+ * Paketname zusammengesetzt: Ein wörtlicher Import als Text ließe ältere Worker (Erkennung ohne Zeilenanfang) diese
+ * Node-Testdatei für einen Playwright-Test halten („playwright test … → No tests found“).
+ */
+const PLAYWRIGHT = ['@playwright', 'test'].join('/');
+
 test('parses project, working directory, and explicit argument-array commands', () => {
   const options = parseTestAgentOptions([
     '--project',
@@ -79,7 +85,7 @@ test('Playwright-Dateien laufen mit playwright test statt im Node-Testrunner', a
   mkdirSync(join(cwd, 'e2e'));
   mkdirSync(join(cwd, 'src'));
   writeFileSync(join(cwd, 'e2e', 'playwright.config.ts'), 'export default {};');
-  writeFileSync(join(cwd, 'e2e', 'app.spec.ts'), "import { test } from '@playwright/test';");
+  writeFileSync(join(cwd, 'e2e', 'app.spec.ts'), `import { test } from '${PLAYWRIGHT}';`);
   writeFileSync(join(cwd, 'src', 'a.spec.ts'), "import test from 'node:test';");
   const mixed = await routePlaywrightSpecs([['npx', 'tsx', '--test', 'e2e/app.spec.ts', 'src/a.spec.ts']], cwd);
   assert.deepEqual(mixed.commands, [
@@ -121,7 +127,7 @@ test('Node-Test mit „@playwright/test“ nur als Text im String bleibt im Node
   );
   writeFileSync(
     join(cwd, 'e2e', 'multi.spec.ts'),
-    ["import {\n  test,\n  expect,\n} from '@playwright/test';", "const pw = require('@playwright/test');"].join('\n'),
+    [`import {\n  test,\n  expect,\n} from '${PLAYWRIGHT}';`, `const pw = require('${PLAYWRIGHT}');`].join('\n'),
   );
   const command = ['npx', 'tsx', '--test', 'src/routing.test.ts'];
   assert.deepEqual((await routePlaywrightSpecs([command], cwd)).commands, [command]);
