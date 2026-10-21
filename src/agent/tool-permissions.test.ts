@@ -726,3 +726,23 @@ test('npmOptionProblem: --ignore-scripts lässt sich nicht wieder abschalten', (
     assert.equal(npmOptionProblem(command), null, command);
   }
 });
+
+test('loadProjectPermissions: zu breite eigene Regeln aus älteren Zeilen gelten beim Laden nicht mehr', async () => {
+  const pool = {
+    query: async <R>(sql: string): Promise<{ rows: R[] }> =>
+      sql.startsWith('SELECT agent_permissions')
+        ? { rows: [{ groups: ['docker-eigen'] }] as R[] }
+        : {
+            rows: [
+              {
+                id: 'docker-eigen',
+                label: 'Docker (alt)',
+                description: '',
+                rules: ['Bash(docker:*)', 'Bash(docker compose ps:*)', 'Bash(git:*)', 'Bash(npm run prisma:*)'],
+              },
+            ] as R[],
+          },
+  };
+  const loaded = await loadProjectPermissions(pool, 'p');
+  assert.deepEqual(loaded.custom[0]?.rules, ['Bash(docker compose ps:*)', 'Bash(npm run prisma:*)']);
+});

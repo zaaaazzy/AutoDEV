@@ -7,7 +7,7 @@ import type { KnownBug } from '../api/bugs.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
-import { isTransientFailure, registerFailure, resumeBlockedByBug, ruleRefusal } from './autofix.js';
+import { isTransientFailure, registerFailure, resumeBlockedByBug, ruleRefusal, usageLimitReset } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
@@ -677,6 +677,23 @@ export async function runStep(
   await progress.stop();
 
   let output = redactOutput(result.output, process.env);
+  // Nutzungslimit des Agent-Kontos: kein Fehler im Auftrag, kein Bug, keine Wiederholung in Minuten. Der Auftrag bleibt
+  // geplant und startet erst nach dem Reset wieder (retry_after); bisherige Schritte gelten wie bei einer Unterbrechung.
+  const limitReset = result.exitCode !== 0 && !cancelled ? usageLimitReset(output) : null;
+  if (limitReset) {
+    const until = limitReset.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+    const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${until} Uhr wieder.`;
+    await pool.query(
+      `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
+      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
+    );
+    await pool
+      .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, limitReset, reason])
+      .catch(logged('runner-steps'));
+    await logEvent(pool, stepId, reason);
+    console.info(`[${item.id}] ${reason}`);
+    return { passed: false, interrupted: true };
+  }
   // Worker beendet oder Projektordner zwischendurch weg (externes Laufwerk getrennt): kein Fehler im Auftrag, der Lauf
   // wird erneut eingeplant – ohne Bug-Bericht und Problemanalyse.
   const folderLost = result.exitCode !== 0 && folderAtStart && hadOutage(ctx.options.cwd, stepStartedAt);
@@ -919,17 +936,18 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     // A one-agent play restores the previous status; a blocked order resumes normally after success.
     await pool.query(
       `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-              status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status WHEN NOT $2 THEN '${DEVELOPMENT_STATUS.blocked}' WHEN return_status IS NULL OR return_status = '${DEVELOPMENT_STATUS.blocked}' THEN '${DEVELOPMENT_STATUS.planned}' ELSE return_status END
+              status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.rejected}', '${DEVELOPMENT_STATUS.backlog}') THEN status WHEN NOT $2 THEN '${DEVELOPMENT_STATUS.blocked}' WHEN return_status IS NULL OR return_status = '${DEVELOPMENT_STATUS.blocked}' THEN '${DEVELOPMENT_STATUS.planned}' ELSE return_status END
         WHERE id = $1`,
       [item.id, succeeded],
     );
     await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);
     return;
   }
-  // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“.
+  // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“. „Backlog“ ebenso: der
+  // Sprint wurde währenddessen abgebrochen (cancelSprint), der Auftrag bleibt draußen und wartet unter „Aktionen“.
   await pool.query(
     `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
-            status = CASE WHEN status = '${DEVELOPMENT_STATUS.rejected}' THEN status ELSE $2 END WHERE id = $1`,
+            status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.rejected}', '${DEVELOPMENT_STATUS.backlog}') THEN status ELSE $2 END WHERE id = $1`,
     [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );
   await notifySettled(pool, item, succeeded, mergeProblem ?? ctx.stopReason ?? null);

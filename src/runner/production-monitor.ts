@@ -1,6 +1,7 @@
 import { isIP } from 'node:net';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { describeError } from '../core/log.js';
 import { type PushMessage, sendPush } from '../core/push.js';
 import { fingerprint, isExcluded, type ProductionError, recordEvent } from './production-events.js';
 import { agentEnvironment } from './runner-prompts.js';
@@ -421,9 +422,7 @@ export class ProductionMonitor {
     this.lastRun.set(key, now);
     this.active.add(key);
     void task()
-      .catch((error: unknown) =>
-        console.error(`Betriebs-Rückkanal (${key}) fehlgeschlagen:`, error instanceof Error ? error.message : error),
-      )
+      .catch((error: unknown) => console.error(`Betriebs-Rückkanal (${key}) fehlgeschlagen:`, describeError(error)))
       .finally(() => this.active.delete(key));
   }
 }

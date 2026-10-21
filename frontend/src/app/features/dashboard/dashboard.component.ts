@@ -1,4 +1,6 @@
+import { GitGraphBackdropComponent } from './git-graph-backdrop.component.js';
 import { GitGraphPanelComponent } from './git-graph-panel.component.js';
+import { GitGraphStore } from './git-graph.store.js';
 import { CoveragePanelComponent } from './coverage-panel.component.js';
 import { TestMethodsPanelComponent } from './test-methods-panel.component.js';
 import { ProductionTileComponent } from './production-tile.component.js';
@@ -39,6 +41,7 @@ const RECENT_RUNS = 20;
     CoveragePanelComponent,
     TestMethodsPanelComponent,
     GitGraphPanelComponent,
+    GitGraphBackdropComponent,
     ProductionTileComponent,
     BudgetPanelComponent,
     ShareBarComponent,
@@ -49,6 +52,7 @@ const RECENT_RUNS = 20;
     StatusLabelPipe,
   ],
   templateUrl: './dashboard.component.html',
+  providers: [GitGraphStore],
   host: { style: 'display: contents' },
 })
 export class DashboardComponent {

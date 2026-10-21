@@ -68,9 +68,6 @@
   background: #fff8e6;
   color: #8a5a00;
 }
-.kanban-card.express {
-  border-left: 3px solid #f0b429;
-}
 
 /* ── Rückfragen im Chat: Antworten zum Anklicken, Antwort-Hinweis ─────── */
 .chat-answers {

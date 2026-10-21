@@ -1,0 +1,290 @@
+@let sprint = sprintInput();
+<article class="sprint-card">
+  @if (sprint.status === 'active' && sprint.pausedAt) {
+    <div class="sprint-go paused">
+      <strong>⏸ Sprint pausiert{{ sprint.pausedBy ? ' von ' + sprint.pausedBy : '' }}.</strong>
+      <span
+        >Laufende Agents beenden ihren Schritt, danach startet kein weiterer Agent und kein neuer Auftrag. Angefangene
+        Aufträge machen nach dem Fortsetzen beim nächsten Agent weiter.</span
+      >
+      <button class="button primary" type="button" (click)="resumeSprint(sprint.id)">
+        <app-nav-icon name="play" />Fortsetzen
+      </button>
+    </div>
+  }
+  @if (sprint.status === 'active' && sprint.reviewReadyAt) {
+    <div class="sprint-go">
+      <strong>🚀 Alle Aufträge sind durch – der Sprint wartet auf dein Go.</strong>
+      <span>Sieh dir den Stand in der Vorschau an und schalte ihn dann live (Merge nach main und Deploy).</span>
+      <button class="button primary" type="button" (click)="goLive(sprint)">Live schalten</button>
+    </div>
+  }
+  @if (sprint.status === 'completed' && sprint.gitSync === 'failed') {
+    <div class="sprint-go failed">
+      <strong>Live schalten ist gescheitert.</strong>
+      <span>{{ sprint.gitMessage }}</span>
+    </div>
+  }
+  @if (sprint.status === 'cancelled') {
+    <div class="sprint-go failed">
+      <strong>⏹ Sprint abgebrochen.</strong>
+      <span
+        >Laufende Agents wurden beendet. Offene Aufträge sind zurück im Backlog und warten unter „Aktionen“ auf eine
+        Entscheidung; Erledigtes bleibt beim Sprint, gemergt wurde nichts.</span
+      >
+    </div>
+  }
+  @if (store.currentProject()?.reviewCommand?.length) {
+    <app-sprint-review [sprint]="sprint" />
+  }
+  <div class="sprint-layout">
+    <div class="sprint-main">
+      <div class="section-heading">
+        <div class="sprint-title">
+          <h3>{{ sprint.name }}</h3>
+          <span class="status" [ngClass]="sprint.status | statusClass">{{ sprint.status | statusLabel }}</span>
+          @if (githubBase(); as repo) {
+            <a
+              class="gh-link"
+              [href]="repo + '/tree/' + (sprint.gitBranch || 'main')"
+              target="_blank"
+              rel="noopener"
+              title="Branch auf GitHub"
+            >
+              <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true">
+                <path
+                  d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.71 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+                />
+              </svg>
+              {{ sprint.gitBranch || 'main' }}</a
+            >
+            @if (sprint.gitCommit) {
+              <a
+                class="gh-link"
+                [href]="repo + '/commit/' + sprint.gitCommit"
+                target="_blank"
+                rel="noopener"
+                title="Commit auf GitHub"
+              >
+                <code>{{ sprint.gitCommit }}</code>
+              </a>
+            }
+          }
+          <span class="git-sync-buttons">
+            <button
+              class="button git-button"
+              type="button"
+              (click)="syncGit(sprint.id, 'push')"
+              [disabled]="busy() || gitBusy(sprint)"
+              title="Git Push: Stand committen und nach GitHub pushen"
+            >
+              <app-nav-icon name="git-push" />Push
+            </button>
+            @if (zipUrl(sprint); as zip) {
+              <a
+                class="button git-button"
+                [href]="zip"
+                download
+                title="Code dieses Sprint-Stands als ZIP von GitHub herunterladen"
+              >
+                <app-nav-icon name="git-pull" />ZIP
+              </a>
+            } @else {
+              <button class="button git-button" type="button" disabled title="Kein GitHub-Remote im Projekt hinterlegt">
+                <app-nav-icon name="git-pull" />ZIP
+              </button>
+            }
+          </span>
+        </div>
+      </div>
+      <p class="sprint-goal">{{ sprint.goal || 'Kein Sprint-Ziel' }}</p>
+      @if (pullRequest(sprint); as pr) {
+        <p class="sprint-pr">
+          <a class="gh-link" [href]="pr.url" target="_blank" rel="noopener noreferrer">Pull Request #{{ pr.number }}</a>
+          <span class="ci-light" [ngClass]="sprint.ciStatus ?? ''" [title]="'CI: ' + ciLabel(sprint)">
+            CI {{ ciLabel(sprint) }}</span
+          >
+        </p>
+      }
+      @if (sprint.gitMessage) {
+        <p class="notice">{{ sprint.gitMessage }}</p>
+      }
+      <details class="sprint-orders-section" [open]="sprint.status !== 'completed'">
+        <summary>
+          Aufträge <span class="muted">({{ sprintProgress(sprint.id) }})</span>
+        </summary>
+        <app-sprint-orders [sprint]="sprint" />
+      </details>
+      @if (sprint.status === 'completed' || sprint.status === 'review') {
+        <div class="actions">
+          <button class="button secondary" (click)="refreshReport(sprint.id)">Sprintbericht aktualisieren</button>
+        </div>
+        @if (reportFor(sprint.id); as report) {
+          <details class="report" open>
+            <summary>{{ report.summary }}</summary>
+            <div class="report-columns">
+              <div>
+                <h4>Umgesetzt</h4>
+                @for (item of report.implemented; track item.id) {
+                  <p>{{ item.title }}</p>
+                } @empty {
+                  <p class="muted">Nichts umgesetzt.</p>
+                }
+              </div>
+              <div>
+                <h4>Offen</h4>
+                @for (item of report.missing; track item.id) {
+                  <p>{{ item.title }} · {{ item.status | statusLabel }}</p>
+                } @empty {
+                  <p class="muted">Alles umgesetzt.</p>
+                }
+              </div>
+              <div>
+                <h4>Probleme</h4>
+                @for (item of report.problems; track item.title) {
+                  <p>
+                    <strong>{{ item.title }}</strong> – {{ item.detail }}
+                  </p>
+                } @empty {
+                  <p class="muted">Keine Probleme.</p>
+                }
+              </div>
+            </div>
+            <form (ngSubmit)="saveReportNotes(sprint.id, reportNotes.value)" #reportForm="ngForm">
+              <label
+                >Notizen<textarea
+                  name="notes"
+                  [ngModel]="report.notes"
+                  maxlength="10000"
+                  #reportNotes
+                  required
+                ></textarea>
+              </label>
+              <button class="button secondary" type="submit">Notizen speichern</button>
+            </form>
+          </details>
+        }
+      }
+    </div>
+    <div class="sprint-side">
+      <section class="git-tree sprint-details" aria-label="Details">
+        <h4>Details</h4>
+        @if (editingId() === sprint.id) {
+          <div class="sprint-edit">
+            <label>Name<input [value]="sprint.name" maxlength="120" #sn /></label>
+            <label>Ziel<input [value]="sprint.goal" maxlength="1000" #sg /></label>
+            <label>Start<input type="date" [value]="sprint.startDate ?? ''" #ss /></label>
+            <label>Ende<input type="date" [value]="sprint.endDate ?? ''" #se /></label>
+            <div class="actions">
+              <button
+                class="button primary"
+                type="button"
+                [disabled]="busy()"
+                (click)="
+                  saveSprint(sprint.id, {
+                    name: sn.value,
+                    goal: sg.value,
+                    startDate: ss.value || null,
+                    endDate: se.value || null,
+                  })
+                "
+              >
+                Speichern
+              </button>
+              <button class="button" type="button" (click)="editingId.set(null)">Abbrechen</button>
+            </div>
+          </div>
+        } @else {
+          <dl class="detail-list">
+            <div>
+              <dt>Start</dt>
+              <dd>{{ sprint.startDate ? (sprint.startDate | isoDate) : '–' }}</dd>
+            </div>
+            <div>
+              <dt>Ende</dt>
+              <dd>{{ sprint.endDate ? (sprint.endDate | isoDate) : '–' }}</dd>
+            </div>
+            <div>
+              <dt>Aufträge</dt>
+              <dd>{{ sprintProgress(sprint.id) }}</dd>
+            </div>
+            <div>
+              <dt>Geschätzt</dt>
+              <dd>{{ sprintEstimate(sprint.id) | hours }}</dd>
+            </div>
+            <div class="sub">
+              <dt>Tokens</dt>
+              <dd>{{ sprintTokensEstimate(sprint.id) | tokens }}</dd>
+            </div>
+            <div class="sub">
+              <dt>Kosten</dt>
+              <dd [title]="'Referenzpreis ' + usdRate + ' $ je 1 Mio. Tokens'">
+                {{ sprintTokensEstimate(sprint.id) | usd }}
+              </dd>
+            </div>
+            <div>
+              <dt>Aufgewendet</dt>
+              <dd>{{ sprintSpent(sprint.id) === null ? '–' : (sprintSpent(sprint.id) | duration) }}</dd>
+            </div>
+            <div class="sub">
+              <dt>Tokens</dt>
+              <dd>{{ sprintTokensSpent(sprint.id) | tokens }}</dd>
+            </div>
+            <div class="sub">
+              <dt>Kosten</dt>
+              <dd [title]="'Referenzpreis ' + usdRate + ' $ je 1 Mio. Tokens'">
+                {{ sprintTokensSpent(sprint.id) | usd }}
+              </dd>
+            </div>
+          </dl>
+        }
+      </section>
+      <app-git-tree [nodes]="gitNodes(sprint)">
+        <div class="git-actions">
+          <button class="button" type="button" (click)="editingId.set(sprint.id)">
+            <app-nav-icon name="edit" />Bearbeiten
+          </button>
+          @if (sprint.status === 'planned') {
+            <button class="button primary" type="button" (click)="updateSprint(sprint.id, { status: 'active' })">
+              <app-nav-icon name="play" />Sprint starten
+            </button>
+          }
+          @if (sprint.status === 'active') {
+            @if (sprint.pausedAt) {
+              <button class="button primary" type="button" (click)="resumeSprint(sprint.id)">
+                <app-nav-icon name="play" />Fortsetzen
+              </button>
+            } @else {
+              <button class="button secondary" type="button" (click)="pauseSprint(sprint.id)">
+                <app-nav-icon name="pause" />Pausieren
+              </button>
+            }
+            <button
+              [class]="sprint.reviewReadyAt ? 'button primary' : 'button secondary'"
+              type="button"
+              (click)="goLive(sprint)"
+            >
+              🚀 Live schalten
+            </button>
+          }
+          @if (sprint.status === 'completed') {
+            <button class="button secondary" type="button" (click)="updateSprint(sprint.id, { status: 'active' })">
+              <app-nav-icon name="undo" />Wieder öffnen
+            </button>
+          }
+          @if (sprint.status === 'planned' || sprint.status === 'active') {
+            <button class="button secondary" type="button" (click)="cancelSprint(sprint)">⏹ Abbrechen</button>
+          }
+          @if (sprint.status === 'cancelled') {
+            <button class="button secondary" type="button" (click)="updateSprint(sprint.id, { status: 'planned' })">
+              <app-nav-icon name="undo" />Wieder planen
+            </button>
+          }
+          <button class="button danger" type="button" (click)="deleteSprint(sprint.id)">
+            <app-nav-icon name="trash" />Löschen
+          </button>
+        </div>
+      </app-git-tree>
+    </div>
+  </div>
+</article>

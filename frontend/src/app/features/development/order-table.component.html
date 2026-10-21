@@ -2,9 +2,13 @@
   class="order-table"
   [rows]="items()"
   [initialFilters]="linkFilters()"
-  [columns]="columns"
+  [columns]="columns()"
   [rowId]="orderId"
   [initialSort]="initialSort()"
+  [groupBy]="groupBy()"
+  [selectable]="selectable()"
+  [(selection)]="selection"
+  [selectLabel]="selectLabel"
   [(expanded)]="openOrder"
   [emptyText]="emptyText()"
 >
@@ -25,6 +29,9 @@
     <span class="status" [ngClass]="item.status | statusClass">{{ item.status | statusLabel }}</span>
   </ng-template>
   <ng-template appDataActions let-item>
+    @if (extraActions(); as extra) {
+      <ng-container *ngTemplateOutlet="extra.template; context: { $implicit: item }" />
+    }
     <button
       type="button"
       class="button secondary icon-button"

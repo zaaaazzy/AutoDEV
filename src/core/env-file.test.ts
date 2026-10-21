@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { formatEnvValue, mergeEnv, parseEnv, planEnv, validateInstall, writeEnvFile } from './env-file.js';
 
-const input = { username: 'admin', password: 'ein-sehr-langes-passwort', domain: '', projectRoots: '/Users/du/Projekte' };
+const input = {
+  username: 'admin',
+  password: 'ein-sehr-langes-passwort',
+  domain: '',
+  projectRoots: '/Users/du/Projekte',
+};
 const valid = { ...input, installWorker: true };
 
 /** Jeder Test bekommt ein eigenes temporäres Verzeichnis; die echte .env bleibt unberührt. */
@@ -78,7 +83,10 @@ test('values with spaces are quoted, line breaks are rejected', () => {
 
 test('install input is checked for type and line breaks', () => {
   assert.equal(validateInstall(valid), null);
-  assert.equal(validateInstall({ ...valid, domain: undefined, projectRoots: undefined, installWorker: undefined }), null);
+  assert.equal(
+    validateInstall({ ...valid, domain: undefined, projectRoots: undefined, installWorker: undefined }),
+    null,
+  );
   assert.match(validateInstall({ ...valid, projectRoots: '/a\nDEV_LOG_AUTH=off' })!, /Zeilenumbrüche/);
   assert.match(validateInstall({ ...valid, projectRoots: ['/a'] })!, /Text/);
   assert.match(validateInstall({ ...valid, projectRoots: "/a'b" })!, /'/);
@@ -107,7 +115,11 @@ test('running the wizard twice keeps the secret key and DB password, backups are
 
     const files = (await readdir(dir)).sort();
     assert.equal(files.filter((name) => name.startsWith('.env.bak-')).length, 2);
-    assert.equal(files.some((name) => name.includes('.tmp-')), false, 'no temporary file left behind');
+    assert.equal(
+      files.some((name) => name.includes('.tmp-')),
+      false,
+      'no temporary file left behind',
+    );
     if (process.platform !== 'win32') {
       assert.equal((await stat(file)).mode & 0o777, 0o600);
       assert.equal((await stat(second.backup!)).mode & 0o777, 0o600);

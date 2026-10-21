@@ -1,12 +1,9 @@
-import { Component, computed, effect, inject, OnDestroy, signal } from '@angular/core';
-import { ApiService } from '../../core/api.service.js';
-import { ProjectStore } from '../../core/project-store.js';
-import { type GitCommit, type GitGraph, type GraphEdge, layoutGraph } from './git-graph.js';
+import { Component, computed, inject, signal } from '@angular/core';
+import { type GitCommit, type GraphEdge, layoutGraph, PALETTE } from './git-graph.js';
+import { GitGraphStore } from './git-graph.store.js';
 
 const ROW = 30;
 const LANE = 14;
-const REFRESH_MS = 60_000;
-const PALETTE = ['#2f7de1', '#e8590c', '#2b9a66', '#ae3ec9', '#d6336c', '#0c8599', '#f08c00', '#5c7cfa'];
 
 /** Commits und Branches des Projekts als Graph; jeder Commit auf GitHub verlinkt (sobald gepusht). */
 @Component({
@@ -15,42 +12,15 @@ const PALETTE = ['#2f7de1', '#e8590c', '#2b9a66', '#ae3ec9', '#d6336c', '#0c8599
   templateUrl: './git-graph-panel.component.html',
   host: { style: 'display: contents' },
 })
-export class GitGraphPanelComponent implements OnDestroy {
-  private readonly api = inject(ApiService);
-  private readonly store = inject(ProjectStore);
-  protected readonly graph = signal<GitGraph | null>(null);
-  protected readonly loaded = signal(false);
+export class GitGraphPanelComponent {
+  private readonly source = inject(GitGraphStore);
+  protected readonly graph = this.source.graph;
+  protected readonly loaded = this.source.loaded;
   protected readonly showAll = signal(false);
   protected readonly layout = computed(() => layoutGraph(this.graph()?.commits ?? []));
   protected readonly visibleRows = computed(() => this.layout().rows.slice(0, this.showAll() ? undefined : 25));
   protected readonly graphWidth = computed(() => Math.min(this.layout().lanes, 10) * LANE + LANE / 2);
   protected readonly rowHeight = ROW;
-  private timer: ReturnType<typeof setInterval> | undefined;
-
-  constructor() {
-    effect(() => {
-      const slug = this.store.activeProject();
-      this.graph.set(null);
-      this.loaded.set(false);
-      clearInterval(this.timer);
-      if (!slug) return;
-      void this.load(slug);
-      this.timer = setInterval(() => void this.load(slug), REFRESH_MS);
-    });
-  }
-
-  ngOnDestroy(): void {
-    clearInterval(this.timer);
-  }
-
-  private async load(slug: string): Promise<void> {
-    const result = await this.api
-      .get<{ graph: GitGraph | null }>(`${this.api.projectPath(slug)}/git-graph`)
-      .catch(() => null);
-    if (slug !== this.store.activeProject()) return;
-    this.graph.set(result?.graph ?? null);
-    this.loaded.set(true);
-  }
 
   protected x(lane: number): number {
     return Math.min(lane, 9) * LANE + LANE / 2 + 1;

@@ -655,3 +655,108 @@ button.share-key:hover {
   background: var(--paper);
 }
 
+
+/* Git-Verlauf als blasse Live-Dekoration im freien Rand neben dem Inhalt (Sidebar 64px, Inhalt 1280px) */
+.git-backdrop {
+  display: none;
+}
+@media (min-width: 1600px) {
+  .git-backdrop {
+    position: fixed;
+    top: 62px;
+    bottom: 0;
+    z-index: 0;
+    display: flex;
+    width: calc((100vw - 64px - 1280px) / 2);
+    padding: 40px 18px 0;
+    overflow: hidden;
+    opacity: 0.2;
+    pointer-events: none;
+    mask-image: linear-gradient(to bottom, transparent, #000 6%, #000 55%, transparent);
+  }
+  .git-backdrop-left {
+    left: 64px;
+    justify-content: flex-end;
+  }
+  /* Gespiegelt: die Hauptspur liegt auf beiden Seiten nah am Inhalt, Branches wachsen nach aussen. */
+  .git-backdrop-left svg {
+    transform: scaleX(-1);
+  }
+  .git-backdrop-right {
+    right: 0;
+    justify-content: flex-start;
+  }
+  .git-backdrop svg {
+    flex: none;
+    overflow: visible;
+  }
+}
+.git-backdrop path {
+  fill: none;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.git-backdrop-node {
+  stroke-width: 2.5;
+}
+.git-backdrop-pulse {
+  fill: none;
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .git-backdrop-row {
+    animation: git-backdrop-in 0.8s ease-out both;
+    animation-delay: var(--row-delay, 0ms);
+  }
+  .git-backdrop-pulse {
+    animation: git-backdrop-pulse 2.8s ease-out infinite;
+  }
+  /* Neu dazugekommene Commits: Linien zeichnen sich, der Knoten leuchtet kurz auf. */
+  .git-backdrop-row.fresh path {
+    stroke-dasharray: 1;
+    animation: git-backdrop-draw 1.4s ease-out both;
+  }
+  .git-backdrop-row.fresh .git-backdrop-node {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: git-backdrop-pop 1.6s ease-out both;
+  }
+}
+@keyframes git-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes git-backdrop-pulse {
+  0% {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  80%,
+  100% {
+    opacity: 0;
+    transform: scale(3.2);
+  }
+}
+@keyframes git-backdrop-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes git-backdrop-pop {
+  0% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(2.2);
+    filter: drop-shadow(0 0 6px currentColor);
+  }
+  100% {
+    transform: scale(1);
+  }
+}

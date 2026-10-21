@@ -15,6 +15,9 @@ export interface GitGraph {
   commits: GitCommit[];
 }
 
+/** Spurfarben für Panel und Rand-Dekoration. */
+export const PALETTE = ['#2f7de1', '#e8590c', '#2b9a66', '#ae3ec9', '#d6336c', '#0c8599', '#f08c00', '#5c7cfa'];
+
 /** Linie innerhalb einer Zeile: von Spur `from` (y 0 = oben, 0.5 = Knoten, 1 = unten) zu Spur `to`. */
 export interface GraphEdge {
   from: number;

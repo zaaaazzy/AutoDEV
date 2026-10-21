@@ -1,4 +1,5 @@
 @if (store.ready()) {
+  <app-git-graph-backdrop />
   <section class="summary-grid" aria-label="Projektkennzahlen">
     <a class="summary-card" href="#development" (click)="$event.preventDefault(); store.navigate('development')">
       <strong>{{ store.openDevelopmentCount() }}</strong>

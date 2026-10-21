@@ -81,3 +81,30 @@ test('ENOENT in einem Test ist kein Umgebungsfehler (Auftrag ea3a49b1)', () => {
   assert.equal(isEnvironmentFailure(out), false);
   assert.equal(isEnvironmentFailure('Path "/x/fixtures" does not exist'), false);
 });
+
+test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach dem Reset', async () => {
+  const { usageLimitReset } = await import('./autofix.js');
+  const output = "Agent „Entwickler“ scheiterte:\n\nYou've hit your session limit · resets 12:40am (Europe/Zurich)";
+  assert.equal(isAgentFailure(output), true);
+  const now = new Date('2026-10-20T23:16:00+02:00');
+  const reset = usageLimitReset(output, now);
+  assert.ok(reset, 'Reset-Zeit erkannt');
+  // 00:40 Uhr des Folgetags plus drei Minuten Reserve.
+  assert.equal(reset.getHours(), 0);
+  assert.equal(reset.getMinutes(), 43);
+  assert.ok(reset.getTime() > now.getTime());
+  // Wochenlimit mit Datum, Nachmittagszeit.
+  const weekly = usageLimitReset("You've hit your weekly limit · resets Oct 24 at 3pm (Europe/Zurich)", now);
+  assert.equal(weekly?.getMonth(), 9);
+  assert.equal(weekly?.getDate(), 24);
+  assert.equal(weekly?.getHours(), 15);
+  // Ohne lesbare Zeit: eine Stunde später. Ohne Limit-Meldung: nichts.
+  const vague = usageLimitReset("You've hit your usage limit.", now);
+  assert.equal(vague?.getTime(), now.getTime() + 60 * 60_000);
+  assert.equal(usageLimitReset('AssertionError: expected 2 to equal 3', now), null);
+});
+
+test('ENOENT gilt nur für den fehlenden Agent-Befehl als Agent-Fehler, nicht für ein fehlendes Fixture im Test', () => {
+  assert.equal(isAgentFailure('spawn claude ENOENT'), true);
+  assert.equal(isAgentFailure("Error: ENOENT: no such file or directory, open 'test/fixtures/a.json'"), false);
+});

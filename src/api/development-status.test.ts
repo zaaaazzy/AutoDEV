@@ -105,3 +105,36 @@ test('Folgeauftrag: aktiver Sprint bleibt erlaubt', async () => {
   assert.notEqual(result.status, 409);
   assert.ok(result.queries.some((sql) => /INSERT INTO development_items/i.test(sql)));
 });
+
+/** Auftrag aus dem Sprint nehmen; liefert die UPDATE-Abfrage. */
+async function removeFromSprint() {
+  const queries: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      return { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/development/${ID}/remove-from-sprint`, {
+      method: 'POST',
+    });
+    return { status: response.status, update: queries.find((sql) => /UPDATE development_items/.test(sql)) ?? '' };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('Aus dem Sprint nehmen: nur aus laufenden Sprints mit Vermerk (Karte unter „Aktionen“), aus geplanten ohne', async () => {
+  const result = await removeFromSprint();
+  assert.equal(result.status, 200);
+  // Der Vermerk hängt am Sprint-Status: geplant = reine Planung, kein Vermerk.
+  assert.match(
+    result.update,
+    /removed_from_sprint = \(SELECT name FROM sprints WHERE id = development_items\.sprint_id AND status <> 'planned'\)/,
+  );
+  assert.match(result.update, /= 'planned'\s+THEN NULL ELSE NOW\(\) END/);
+});

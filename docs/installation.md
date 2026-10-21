@@ -68,8 +68,8 @@ wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**
 2. **Tour starten** – danach (oder jederzeit unter **Hilfe → Interaktive Tour**) führt dich AIdeation Schritt für Schritt:
    - **Ideation**: Idee erfassen, Auftrag vom Auftragsautor erstellen lassen
    - **Auftrag**: Aufträge direkt anlegen, „In Entstehung“ und „Besondere Aufmerksamkeit“
-   - **Sprint**: Sprint anlegen, im **Board** Aufträge von „Offen“ nach „Geplant“ ziehen –
-     die Reihenfolge bestimmt, was die Agents zuerst abarbeiten
+   - **Sprint**: Sprint anlegen, unter **Aufträge hinzufügen** offene Aufträge in den Sprint nehmen –
+     die Reihenfolge unter „Geplant“ (↑/↓) bestimmt, was die Agents zuerst abarbeiten
    - **Sprint starten** und dem ersten Agent live zuschauen
 
 Ausprobierte Projekte lassen sich unter **Einstellungen → Projekt löschen** wieder entfernen – auf Wunsch samt

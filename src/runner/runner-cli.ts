@@ -523,7 +523,8 @@ async function main(): Promise<void> {
             active.set(slug, task);
           }
         } catch (error) {
-          console.error('Worker-Zyklus fehlgeschlagen:', error instanceof Error ? error.message : error);
+          // describeError: pg meldet eine ausgefallene Datenbank als AggregateError ohne Text (nur der Code sagt etwas).
+          console.error('Worker-Zyklus fehlgeschlagen:', describeError(error));
         }
         // Projektübergreifend, deshalb ausserhalb von runWorkflow (das je Projekt läuft).
         runScheduledJobs();
