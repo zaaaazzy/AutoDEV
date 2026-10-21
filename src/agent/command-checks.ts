@@ -233,8 +233,35 @@ export function realPath(path: string): string {
 export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
-const FORBIDDEN_COMMANDS =
-  /^(?:sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\d*|gem|cargo|go)\b/;
+const FORBIDDEN_COMMAND_NAMES =
+  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
+const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
+/**
+ * Befehle, die Dateien anlegen, ändern oder löschen. Die ersten sieben gibt die CLI mit --permission-mode acceptEdits
+ * ohne Rückfrage und ohne --allowedTools-Regel frei – am Wächter vorbei an Rechten und Ordner-Einschränkung. Dateien
+ * ändern Agents nur über die Datei-Werkzeuge; dazu Wrapper, die einen weiteren Befehl starten (command rm …).
+ */
+const FILE_COMMAND_NAMES =
+  'mkdir|touch|rm|rmdir|mv|cp|sed|gsed|ln|tee|truncate|install|unlink|shred|patch|chflags|ditto|command|builtin|nohup|time|nice|timeout';
+/** Gesperrte Befehle, die eingebaute Gruppen nur mit festem Präfix freigeben (node --check, npx --no-install …). */
+const GUARD_PREFIXED = new Set(['node', 'npx', 'launchctl']);
+const GUARD_FORBIDDEN = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES}|${FILE_COMMAND_NAMES})$`);
+/** find-Optionen, die löschen, Programme starten oder in Dateien schreiben. */
+const FIND_WRITING = /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/;
+
+/**
+ * Gesperrter Befehlsname in einem einfachen Befehl (für den Wächter, je Teilbefehl einer Kette): alle Befehle, die
+ * keine Gruppe freigeben darf, und alle Datei-Befehle – auch mit Pfad (/bin/rm), in Anführungszeichen oder escapt.
+ * Ein Befehlsname, den erst die Shell zusammensetzt ($X, r?, {rm,}), ist gesperrt (fail-closed).
+ */
+export function forbiddenCommand(command: string): boolean {
+  const words = shellWords(command);
+  const name = words[0] ?? '';
+  if (/[$*?[\]{}~]/.test(name)) return true;
+  const program = name.slice(name.lastIndexOf('/') + 1);
+  if (program === 'find') return words.some((word) => FIND_WRITING.test(word));
+  return GUARD_FORBIDDEN.test(program) && !(GUARD_PREFIXED.has(program) && program === name);
+}
 /** Unterbefehle, die keine Gruppe freigeben darf; der Wächter sperrt sie zusätzlich bei jedem Shell-Befehl. */
 const FORBIDDEN_SUBCOMMAND_LIST = [
   ...[

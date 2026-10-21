@@ -176,7 +176,7 @@ test('run_command: Rolle, Geheimnisse, Agent-Freigaben und feste Liste werden ge
   );
   const dev = context(cwd, { execute });
   assert.match(await executeTool(dev, call('run_command', { command: 'git log -- .env' })), /Geheimnisse/);
-  assert.match(await executeTool(dev, call('run_command', { command: 'rm -rf /' })), /^Befehl nicht erlaubt/);
+  assert.match(await executeTool(dev, call('run_command', { command: 'rm -rf /' })), /Datei-Werkzeugen/);
   assert.match(await executeTool(dev, call('run_command', {})), /^Befehl nicht erlaubt/, 'fehlender Befehl');
   const limited = context(cwd, { execute, commands: ['Bash(npm test:*)'] });
   assert.match(
