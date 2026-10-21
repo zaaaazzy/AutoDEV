@@ -42,8 +42,9 @@ flowchart TB
 | 15 min        | `watchdog_logs`    | Wächter-Prüfungen (`collectProblems`, ohne `git status`) im Worker; gleiche Probleme erst nach 6 h (`REMIND_MS`) erneut per Push, Merkzustand in der Datenbank.                                                                                                                                                                       |
 | 1 h · Fehler  | `push_alert`       | Push an Projektkreis (`config.project`) oder Administration, wenn ein beobachteter Job fehlgeschlagen ist; nach jedem Fehlschlag sofort fällig. Gleiche Fehlschläge erst nach 6 h wieder, Entwarnung einmal.                                                                                                                       |
 | 1 Tag · aus   | `close_old_sprints`| Standardmäßig aus. Schliesst aktive, nicht pausierte Sprints über `completeSprint`, wenn alle Aufträge erledigt sind (`sprintSettled`), kein Agent läuft und seit `inactiveDays` (14, 1–365) nichts passiert ist.                                                                                                                  |
-| Start         | Wiederherstellung  | Unterbrochene Läufe → Auftrag wieder „Geplant“, Testanforderungen „fehlgeschlagen“, Abnahmeprüfungen und Visionär neu angefragt, Neustart als „erledigt“ markiert.                                                                                                                                                                    |
+| Start         | Wiederherstellung  | Zuerst die Prozessgruppen des alten Workers beenden: jeder Befehl (Agent-Schritte, Chat, Auftragsautor, Visionär, Testanforderungen, `npm test` …) steht während des Laufs mit PID und Startzeit in `agent_processes`. Lebt die PID noch, muss die Startzeit passen (sonst neu vergeben, nicht angefasst); ist nur der Gruppenführer weg, wird die Restgruppe beendet. Danach: unterbrochene Läufe → Auftrag wieder „Geplant“, Chat → „pending“, Testanforderungen „fehlgeschlagen“, Abnahmeprüfungen und Visionär neu angefragt, Neustart als „erledigt“ markiert. Lässt sich ein Altprozess nicht sicher beenden, wird nichts doppelt gestartet: Chat → „failed“, Aufträge nicht neu eingeplant, Eintrag bleibt für den nächsten Start. |
 | Signal        | Herunterfahren     | Alle Agent-Prozesse werden beendet; laufende Aufträge → „Geplant“, Chat → „pending“, Ideen in Arbeit → „requested“.                                                                                                                                                                                                                   |
+| Befehlsende   | Aufräumen          | Jeder Befehl läuft als eigene Prozessgruppe. Nach seinem Ende (Erfolg, Fehler, Zeitlimit, Abbruch) wird die ganze Gruppe beendet, damit gestartete Dev-Server keine Ports belegen. Wer einen Dienst dauerhaft starten will, braucht einen eigenen Dienst-Manager (launchd, Docker).                                                     |
 
 ## 2 · Idee → Auftrag
 
@@ -115,6 +116,17 @@ Setzt `agent_id`, merkt den alten Status in `return_status` und plant ein. Es l�
 - Bug-Auftrag in Arbeit → Bug „in_progress“; erledigt → Bug „fixed“; abgelehnt → Bug „rejected“; zurück → Bug „open“.
 - „done“ oder „rejected“ löscht „Aktion notwendig“.
 - Pro Auftrag höchstens ein laufender Lauf. Er gilt erst als gescheitert, wenn er rund 9 h kein Lebenszeichen gegeben hat (`ABANDONED_RUN_MS`, abgeleitet aus 2 × 240 min Schritt-Zeitlimit samt Wiederholung plus Reserve).
+
+### Schema-Migrationen beim Start
+
+API und Worker rufen beim Start `createDatabasePool` auf (`src/db/database.ts`). Dieser führt nur die noch fehlenden Schritte aus `src/db/migrations.ts` aus und vermerkt jeden in `schema_migrations`.
+
+- Alle Schritte laufen unter einer Advisory-Sperre (727401), deshalb migrieren gleichzeitig startende Prozesse nacheinander. Jeder Schritt hat eine eigene Transaktion. Scheitert ein Schritt, wird er zurückgerollt und nicht vermerkt, und der Start bricht mit „Migration n (Name) fehlgeschlagen“ ab.
+- Ist die Datenbank auf dem Stand, liest der Start nur die vermerkten Versionen. Es läuft kein `ALTER TABLE` und keine Daten-Änderung.
+- Schritt 1 `basis` ist das bisherige `src/db/schema.ts`, also nur Struktur und Grundeinträge. Er ist idempotent, damit Bestands-Datenbanken ihn einmal nachholen.
+- Schritt 2 `daten-altbestand` enthält die Daten-Korrekturen, die früher bei jedem Start liefen (z. B. Systemagent-Einstellungen aus `app_settings`, Kostenbremse nach `budgets`, Dateirechte `files`). Er läuft genau einmal.
+- Schritt 3 legt den Index `agent_run_steps (agent_id)` an.
+- Neue Änderungen kommen als weiterer Schritt hinten an die Liste. Bestehende Schritte werden nie geändert.
 
 ## 4 · Arbeitszyklus `runWorkflow` (sofort bei neuer Arbeit, sonst alle 30 s)
 

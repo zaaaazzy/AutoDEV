@@ -1,5 +1,5 @@
-@for (agent of worker().agents; track agent.id) {
-  <div class="agent-row">
+@for (agent of agents(); track agent.id) {
+  <div class="agent-row" [class.detailed]="details()">
     <button
       type="button"
       class="agent-line"
@@ -9,17 +9,30 @@
       (click)="open(agent.id)"
     >
       <span class="agent-dot"></span>
+      @if (details()) {
+        <app-role-icon [key]="agent.roleKey" [label]="agent.roleLabel" />
+      }
       <span class="agent-text">
         <strong>{{ agent.name }}</strong>
-        <small>{{
-          agent.active
-            ? (agent.sprintName ? agent.sprintName + ' - ' : '') + agent.orderTitle
-            : agent.waiting
-              ? agent.orderTitle
-              : worker().online
-                ? 'Inaktiv'
-                : 'Worker offline'
-        }}</small>
+        @if (details()) {
+          <span class="agent-rights" role="group" [attr.aria-label]="'Agent-Rechte ' + agent.name">
+            @if (agent.roleLabel !== agent.name) {
+              <span class="agent-role">{{ agent.roleLabel }}</span>
+            }
+            <span class="right-chip" [class.yes]="agent.rights.files" [title]="agent.rightsText.files">{{
+              agent.rightsText.files
+            }}</span>
+            <span class="right-chip" [class.yes]="agent.rights.commands" [title]="agent.rightsText.commands">{{
+              agent.rightsText.commands
+            }}</span>
+            @if (agent.rightsText.hint) {
+              <span class="right-hint" title="Standardwert der Rolle; Claude-CLI und lokales Modell weichen ab">{{
+                agent.rightsText.hint
+              }}</span>
+            }
+          </span>
+        }
+        <small class="agent-task">{{ agent.task }}</small>
       </span>
     </button>
     @if (agent.active && agent.id !== assistantId) {

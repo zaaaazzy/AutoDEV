@@ -8,14 +8,16 @@ import type { RunnerOptions } from './runner.js';
 
 function fakePool(projects: { slug: string; repository: string; separate: boolean }[] = []) {
   const queries: string[] = [];
+  const params: unknown[][] = [];
   const pool = {
-    query: async (sql: string) => {
+    query: async (sql: string, values: unknown[] = []) => {
       queries.push(sql.replace(/\s+/g, ' ').trim());
+      params.push(values);
       if (sql.includes('FROM projects')) return { rows: projects, rowCount: projects.length };
       return { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
-  return { pool, queries };
+  return { pool, queries, params };
 }
 
 const options = {
@@ -29,7 +31,7 @@ const options = {
 } as unknown as RunnerOptions;
 
 test('recoverInterruptedRuns: plant unterbrochene Aufträge neu, bevor die Läufe als gescheitert gelten', async () => {
-  const { pool, queries } = fakePool();
+  const { pool, queries, params } = fakePool();
   await recoverInterruptedRuns(pool);
   const index = (part: string): number => queries.findIndex((sql) => sql.includes(part));
   const requeue = index("UPDATE development_items SET status = 'planned'");
@@ -41,7 +43,10 @@ test('recoverInterruptedRuns: plant unterbrochene Aufträge neu, bevor die Läuf
   assert.match(queries[steps] ?? '', /Unterbrochen: Der Worker wurde beendet/);
   assert.ok(index("UPDATE test_requests SET status = 'failed'") >= 0, 'Testanforderungen gelten als abgebrochen');
   assert.ok(index("UPDATE acceptance_checks SET status = 'verifying'") >= 0);
-  assert.ok(index("UPDATE chat_messages SET status = 'pending'") >= 0);
+  // Ohne verwaiste Prozesse gehen unterbrochene Chat-Anfragen zurück auf „pending“ (Status als Parameter).
+  const chat = index('UPDATE chat_messages SET status = $1');
+  assert.ok(chat >= 0);
+  assert.deepEqual(params[chat], ['pending']);
   assert.ok(index("UPDATE ideation_items SET status = 'requested'") >= 0);
 });
 

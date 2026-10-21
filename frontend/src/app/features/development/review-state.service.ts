@@ -2,6 +2,7 @@ import { Injectable, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { ReviewState } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 
 const REVIEW_REFRESH_MS = 5000;
 
@@ -15,7 +16,7 @@ export class ReviewStateService {
   private readonly store = inject(ProjectStore);
   readonly state = signal<ReviewState | null>(null);
   private subscribers = 0;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private stopTimer: (() => void) | null = null;
 
   constructor() {
     // Projektwechsel: alten Stand verwerfen und sofort für das neue Projekt laden.
@@ -34,18 +35,18 @@ export class ReviewStateService {
   /** Meldet eine Freigabe-Box an; die zurückgegebene Funktion meldet sie wieder ab. */
   subscribe(): () => void {
     this.subscribers++;
-    if (!this.timer) {
+    if (!this.stopTimer) {
       void this.refresh();
-      this.timer = setInterval(() => void this.refresh(), REVIEW_REFRESH_MS);
+      this.stopTimer = visibleInterval(() => void this.refresh(), REVIEW_REFRESH_MS);
     }
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.subscribers--;
-      if (!this.subscribers && this.timer) {
-        clearInterval(this.timer);
-        this.timer = null;
+      if (!this.subscribers && this.stopTimer) {
+        this.stopTimer();
+        this.stopTimer = null;
       }
     };
   }

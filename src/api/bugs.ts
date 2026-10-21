@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
 import { relatedResourceBelongsToProject } from './resource.js';
 import { isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
@@ -114,7 +115,7 @@ export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40)
 }
 
 export function registerBugRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/bugs', async (request, response) => {
+  app.get('/projects/:slug/bugs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -127,7 +128,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     response.json({ bugs: result.rows });
   });
 
-  app.post('/projects/:slug/bugs', async (request, response) => {
+  app.post('/projects/:slug/bugs', access({ role: 'plan', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, BUG_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -165,7 +166,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ bug: result.rows[0] });
   });
 
-  app.patch('/bugs/:id', async (request, response) => {
+  app.patch('/bugs/:id', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -206,7 +207,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
 
   // Freigabe eines Bugs aus fremder Quelle (Betrieb, GitHub) durch einen Menschen mit Recht „Ausführen“: erst danach
   // nimmt der Runner Aufträge dazu auf. Betriebs-Bugs bekommen dabei ihren Behebungsauftrag. Per PATCH nicht setzbar.
-  app.post('/bugs/:id/approve', async (request, response) => {
+  app.post('/bugs/:id/approve', access({ role: 'run', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -237,7 +238,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     response.json({ bug: result.rows[0] });
   });
 
-  app.delete('/bugs/:id', async (request, response) => {
+  app.delete('/bugs/:id', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

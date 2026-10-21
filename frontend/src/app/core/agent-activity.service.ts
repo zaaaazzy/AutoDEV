@@ -3,6 +3,7 @@ import { ApiService } from './api.service.js';
 import { errorMessage } from './errors.js';
 import type { AgentActivity, UpcomingTask } from './models.js';
 import { ProjectStore } from './project-store.js';
+import { visibleInterval } from './visible-interval.js';
 
 const LIVE_REFRESH_MS = 3_000;
 
@@ -19,8 +20,7 @@ export class AgentActivityService {
   readonly done = computed(() => this.activity().filter((entry) => entry.stepStatus !== 'running'));
 
   constructor() {
-    const timer = globalThis.setInterval(() => void this.refreshLive(), LIVE_REFRESH_MS);
-    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
+    inject(DestroyRef).onDestroy(visibleInterval(() => void this.refreshLive(), LIVE_REFRESH_MS));
   }
 
   async show(id: string): Promise<void> {

@@ -7,6 +7,8 @@
 # („Not a directory“). Dann beendet sich das Skript mit Fehler, damit Docker den Container neu startet und
 # die Einbindung neu aufbaut; der Wächter (watchdog) startet ihn notfalls wieder.
 set -u
+# Dumps enthalten die ganze Datenbank: nur für den Besitzer lesbar.
+umask 077
 KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
 while true; do
   if ! touch /backups/.write-test 2>/dev/null; then

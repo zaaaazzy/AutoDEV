@@ -90,7 +90,12 @@ import { PermissionPickerComponent, type PermissionGroupInfo } from './permissio
           ></textarea>
         </label>
         <label
-          >Modell<select name="preset" [ngModel]="presetOf(form.command)" (ngModelChange)="applyPreset($event)">
+          >Modell<select
+            name="preset"
+            [ngModel]="presetOf(form.command)"
+            (ngModelChange)="applyPreset($event)"
+            [disabled]="!auth.can('admin')"
+          >
             @for (preset of presets; track preset.id) {
               <option [value]="preset.id">{{ presetLabel(preset) }}</option>
             }
@@ -103,6 +108,8 @@ import { PermissionPickerComponent, type PermissionGroupInfo } from './permissio
             [(ngModel)]="form.command"
             maxlength="1000"
             placeholder="claude -p"
+            [disabled]="!auth.can('admin')"
+            [title]="auth.can('admin') ? '' : 'Modell und Befehl ändert nur die Administration.'"
           />
         </label>
         <label class="wide"
@@ -211,7 +218,8 @@ export class AgentSettingsComponent {
         this.api.patch(`/api/agents/${encodeURIComponent(this.agent().id)}`, {
           name: this.form.name,
           instructions: this.form.instructions,
-          command,
+          // Den Befehl ändert nur die Administration (sonst 403 vom Server).
+          command: this.auth.can('admin') ? command : undefined,
           handoffTo: this.form.handoffTo,
           allowedCommands: this.commands,
           fileScope: this.scopes,

@@ -1,5 +1,6 @@
 import type { Router, NextFunction, Request, Response } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { hasRole, type Principal } from './roles.js';
 
@@ -15,7 +16,7 @@ const COLUMNS = `r.id, r.doc_id AS "docId", r.title, r.content, r.base_title AS 
 export function registerDocRevisionRoutes(app: Router, pool: Pool): void {
   const me = (response: Response) => response.locals.principal as Principal;
 
-  app.get('/projects/:slug/doc-revisions', async (request, response, next) => {
+  app.get('/projects/:slug/doc-revisions', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -32,7 +33,7 @@ export function registerDocRevisionRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/docs/:id/revisions', async (request, response, next) => {
+  app.post('/docs/:id/revisions', access({ role: 'docs', tenant: 'docs' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Dokument nicht gefunden.' });
       const body = (request.body ?? {}) as Record<string, unknown>;
@@ -151,6 +152,6 @@ export function registerDocRevisionRoutes(app: Router, pool: Pool): void {
         next(error);
       }
     };
-  app.post('/doc-revisions/:id/approve', review('approved'));
-  app.post('/doc-revisions/:id/reject', review('rejected'));
+  app.post('/doc-revisions/:id/approve', access({ role: 'editor', tenant: 'doc-revisions' }), review('approved'));
+  app.post('/doc-revisions/:id/reject', access({ role: 'editor', tenant: 'doc-revisions' }), review('rejected'));
 }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computeNextRun, MAX_PROMPT, parseTask, taskMessage } from './agent-tasks.js';
-import { requiredRole } from './roles.js';
+import { declaredAccess, requiredRole } from './route-table.test.js';
 
 test('Agent-Aufgabe: Titel und Anweisung werden geprüft', () => {
   assert.deepEqual(parseTask({ title: ' Tests ', prompt: ' npm test ausführen ' }), {
@@ -25,7 +25,8 @@ test('Agent-Aufgaben verlangen die Rolle „Assistent nutzen“', () => {
   assert.equal(requiredRole('POST', '/api/projects/mainty/agent-tasks', {}), 'chat');
   assert.equal(requiredRole('PATCH', '/api/agent-tasks/abc', {}), 'chat');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/run', {}), 'chat');
-  assert.equal(requiredRole('GET', '/api/agent-tasks/abc/runs', {}), 'chat');
+  // Den Verlauf lesen braucht keine Rolle, nur das Projekt der Aufgabe.
+  assert.equal(declaredAccess('GET', '/api/agent-tasks/abc/runs')?.tenant, 'agent-tasks');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/pause', {}), 'chat');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/resume', {}), 'chat');
   assert.equal(requiredRole('POST', '/api/agent-tasks/abc/other', {}), 'admin');

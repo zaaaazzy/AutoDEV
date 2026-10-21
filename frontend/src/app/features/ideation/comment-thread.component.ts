@@ -4,6 +4,7 @@ import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { IdeaComment } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import {
   activeMentions,
@@ -75,10 +76,11 @@ export class CommentThreadComponent {
         .catch(() => this.people.set([]));
     });
     // Solange ein Agent an einer Antwort arbeitet, die Kommentare regelmäßig nachladen.
-    const timer = globalThis.setInterval(() => {
-      if (this.working()) void this.reloadComments();
-    }, POLL_MS);
-    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
+    inject(DestroyRef).onDestroy(
+      visibleInterval(() => {
+        if (this.working()) void this.reloadComments();
+      }, POLL_MS),
+    );
   }
 
   protected isOwn(comment: IdeaComment): boolean {

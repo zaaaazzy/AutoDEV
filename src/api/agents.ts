@@ -4,8 +4,9 @@ import { seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
 import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
-import type { Router } from 'express';
+import type { Response, Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import {
   buildUpdate,
   isRecord,
@@ -21,6 +22,7 @@ import {
   parseTitle,
 } from '../core/validation.js';
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { hasRole, type Principal } from './roles.js';
 
 const ROLES = new Set([
   'author',
@@ -47,6 +49,29 @@ const AGENT_FIELDS = {
   fileScope: { column: 'file_scope', parse: parseFileScope },
   handoffTo: { column: 'handoff_to', parse: parseNullableUuid },
 };
+
+/** Felder, die nur Administration setzen darf: command läuft als Prozess auf dem Worker, role steuert den Ablauf. */
+const ADMIN_COLUMNS = new Set(['command', 'role']);
+const ADMIN_ONLY = 'Befehl (command) und Rolle eines Agents darf nur die Administration ändern.';
+
+/**
+ * Gemeinsame Schreibprüfung für command und role (POST und PATCH). Ohne Admin-Rolle (auch ohne Benutzer) ist nur
+ * erlaubt, was exakt dem Bestand entspricht (beim Anlegen: kein Befehl, Rolle „custom“). Gibt die Felder ohne die
+ * unveränderten Admin-Felder zurück, damit nichts geschrieben wird, oder null = verboten (403).
+ */
+export function adminFieldsCheck(
+  principal: Principal | undefined,
+  fields: { column: string; value: unknown }[],
+  current: { command: unknown; role: unknown },
+): { column: string; value: unknown }[] | null {
+  if (principal && hasRole(principal, 'admin')) return fields;
+  const stored: Record<string, unknown> = current;
+  const changed = fields.some(
+    (field) =>
+      ADMIN_COLUMNS.has(field.column) && JSON.stringify(field.value) !== JSON.stringify(stored[field.column] ?? null),
+  );
+  return changed ? null : fields.filter((field) => !ADMIN_COLUMNS.has(field.column));
+}
 
 /** Erlaubte Ordner für Dateirechte: relativ zum Projekt, ohne „..“, höchstens 20; leer = ganzes Projekt. */
 function parseFileScope(value: unknown): string[] | typeof INVALID {
@@ -155,7 +180,8 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
 }
 
 export function registerAgentRoutes(app: Router, pool: Pool): void {
-  app.get('/system-agents', async (_request, response) => {
+  const principalOf = (response: Response) => response.locals.principal as Principal | undefined;
+  app.get('/system-agents', access({ tenant: 'global' }), async (_request, response) => {
     const row = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'system_agents'`))
       .rows[0];
     const models = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ollama_models'`))
@@ -176,7 +202,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     });
   });
 
-  app.put('/system-agents/:role', async (request, response) => {
+  app.put('/system-agents/:role', access({ role: 'admin', tenant: 'admin' }), async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
     const body = (request.body ?? {}) as { model?: unknown; command?: unknown; allowTools?: unknown };
     const model = body.model;
@@ -215,7 +241,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
   });
 
   // Workflow order: phase (pre, while, after), then position.
-  app.get('/projects/:slug/agents', async (request, response) => {
+  app.get('/projects/:slug/agents', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -229,13 +255,16 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.json({ agents: result.rows });
   });
 
-  app.post('/projects/:slug/agents', async (request, response) => {
+  app.post('/projects/:slug/agents', access({ role: 'agents', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, AGENT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     if (!slug || !fields || !values.get('name') || !values.get('phase')) {
       response.status(400).json({ message: 'Invalid agent.' });
       return;
+    }
+    if (!adminFieldsCheck(principalOf(response), fields, { command: null, role: 'custom' })) {
+      return void response.status(403).json({ message: ADMIN_ONLY });
     }
     // Rechte: jeder Befehl wird einzeln gesetzt, nur aus Kategorien dieses Projekts (Mandantentrennung).
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
@@ -265,42 +294,46 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ agent: result.rows[0] });
   });
 
-  app.post('/projects/:slug/agents/defaults', async (request, response) => {
-    const slug = parseProjectSlug(request.params.slug ?? '');
-    if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
-      return;
-    }
-    const result = await pool.query(
-      `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
+  app.post(
+    '/projects/:slug/agents/defaults',
+    access({ role: 'agents', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) {
+        response.status(400).json({ message: 'Invalid project slug.' });
+        return;
+      }
+      const result = await pool.query(
+        `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
        SELECT $1, d.name, d.role, d.phase, d.ord, d.instructions
          FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS d(name, role, phase, instructions, ord)
         WHERE NOT EXISTS (SELECT 1 FROM agents WHERE project_slug = $1)
        RETURNING ${AGENT_COLUMNS}`,
-      [
-        slug,
-        DEFAULT_AGENTS.map((agent) => agent.name),
-        DEFAULT_AGENTS.map((agent) => agent.role),
-        DEFAULT_AGENTS.map((agent) => agent.phase),
-        DEFAULT_AGENTS.map((agent) => agent.instructions),
-      ],
-    );
-    if (result.rows.length) {
-      await seedDefaultActions(pool, slug).catch(logged('agents'));
-      await materializeAgentCommands(pool, slug).catch(logged('agents'));
-    }
-    // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
-    await pool.query(
-      `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
+        [
+          slug,
+          DEFAULT_AGENTS.map((agent) => agent.name),
+          DEFAULT_AGENTS.map((agent) => agent.role),
+          DEFAULT_AGENTS.map((agent) => agent.phase),
+          DEFAULT_AGENTS.map((agent) => agent.instructions),
+        ],
+      );
+      if (result.rows.length) {
+        await seedDefaultActions(pool, slug).catch(logged('agents'));
+        await materializeAgentCommands(pool, slug).catch(logged('agents'));
+      }
+      // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
+      await pool.query(
+        `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
        SELECT a.project_slug, a.phase, a.position, a.id FROM agents a
         WHERE a.project_slug = $1 AND a.id = ANY($2::uuid[])
           AND EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)`,
-      [slug, result.rows.map((row: { id: string }) => row.id)],
-    );
-    response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
-  });
+        [slug, result.rows.map((row: { id: string }) => row.id)],
+      );
+      response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
+    },
+  );
 
-  app.post('/projects/:slug/agents/order', async (request, response) => {
+  app.post('/projects/:slug/agents/order', access({ role: 'agents', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     if (
@@ -325,7 +358,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.status(204).end();
   });
 
-  app.patch('/agents/:id', async (request, response) => {
+  app.patch('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -336,17 +369,29 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Invalid agent update.' });
       return;
     }
-    if (requested !== undefined) {
-      const project = (
-        await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM agents WHERE id = $1', [request.params.id])
-      ).rows[0]?.slug;
-      if (!project) return void response.status(404).json({ message: 'Agent not found.' });
-      const commands = await validAgentCommands(pool, project, requested);
-      if (typeof commands === 'string') return void response.status(400).json({ message: commands });
-      fields.push({ column: 'allowed_commands', value: commands });
+    let allowed = fields;
+    if (requested !== undefined || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
+      const current = (
+        await pool.query<{ slug: string; command: string[] | null; role: string }>(
+          'SELECT project_slug AS slug, command, role FROM agents WHERE id = $1',
+          [request.params.id],
+        )
+      ).rows[0];
+      if (!current) return void response.status(404).json({ message: 'Agent not found.' });
+      const checked = adminFieldsCheck(principalOf(response), fields, current);
+      if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
+      allowed = checked;
+      if (requested !== undefined) {
+        const commands = await validAgentCommands(pool, current.slug, requested);
+        if (typeof commands === 'string') return void response.status(400).json({ message: commands });
+        allowed.push({ column: 'allowed_commands', value: commands });
+      }
     }
-    const update = buildUpdate('agents', request.params.id, fields, AGENT_COLUMNS);
-    const result = await pool.query(update.sql, update.values);
+    // Nur unveränderte command/role-Felder eines Nicht-Admins: nichts zu schreiben, aktueller Stand zurück.
+    const update = buildUpdate('agents', request.params.id, allowed, AGENT_COLUMNS);
+    const result = allowed.length
+      ? await pool.query(update.sql, update.values)
+      : await pool.query(`SELECT ${AGENT_COLUMNS} FROM agents WHERE id = $1`, [request.params.id]);
     if (!result.rows[0]) {
       response.status(404).json({ message: 'Agent not found.' });
       return;
@@ -354,7 +399,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.json({ agent: result.rows[0] });
   });
 
-  app.delete('/agents/:id', async (request, response) => {
+  app.delete('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

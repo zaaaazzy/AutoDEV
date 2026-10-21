@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { parseProjectSlug } from '../core/validation.js';
 
 /** Auswertung „Was klappt“: wo der Ablauf hilft und wo er hängen bleibt (letzte 30 Tage). */
@@ -107,7 +108,7 @@ export async function collectQuality(pool: Pool, slug: string, days = 30): Promi
 }
 
 export function registerQualityRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/quality', async (request, response, next) => {
+  app.get('/projects/:slug/quality', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
