@@ -3,6 +3,7 @@ import test from 'node:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OUTPUT_GRACE_MS, redactOutput, runCommand } from './command.js';
+import { setProcessStore, type TrackedProcess } from './shutdown.js';
 
 function alive(pid: number): boolean {
   try {
@@ -42,6 +43,44 @@ test('ein Enkelprozess ausserhalb der Gruppe hält das Ergebnis nicht auf', asyn
     assert.ok(Date.now() - startedAt < OUTPUT_GRACE_MS + 3_000, `dauerte ${Date.now() - startedAt} ms`);
   } finally {
     if (grandchild > 0 && alive(grandchild)) process.kill(grandchild, 'SIGKILL');
+  }
+});
+
+test('auch nach einem erfolgreichen Befehl endet, was er im Hintergrund gestartet hat (z. B. Dev-Server)', async () => {
+  // Der Hintergrundprozess schliesst stdout, damit runCommand nicht erst über das Zeitlimit zurückkommt.
+  const result = await runCommand(['sh', '-c', 'sleep 30 >/dev/null 2>&1 & echo "child $!"'], process.cwd(), {
+    timeoutMs: 10_000,
+  });
+  const child = Number(/child (\d+)/.exec(result.output)?.[1]);
+  try {
+    assert.equal(result.exitCode, 0);
+    assert.ok(child > 0);
+    // SIGKILL ist asynchron zugestellt; kurz warten, bis der Prozess weg ist.
+    for (let attempt = 0; attempt < 20 && alive(child); attempt += 1) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(alive(child), false, 'Hintergrundprozess läuft nach dem Befehl weiter');
+  } finally {
+    if (child > 0 && alive(child)) process.kill(child, 'SIGKILL');
+  }
+});
+
+test('der Prozess steht während des Laufs im Prozessregister und wird danach entfernt', async () => {
+  const added: TrackedProcess[] = [];
+  const removed: TrackedProcess[] = [];
+  setProcessStore({ add: (entry) => added.push(entry), remove: (entry) => removed.push(entry) });
+  try {
+    let spawned = 0;
+    await runCommand(['sh', '-c', 'exit 0'], process.cwd(), {
+      onSpawn: (pid) => {
+        spawned = pid;
+        assert.equal(added.length, 1, 'Eintrag besteht vor dem Start der Arbeit');
+      },
+    });
+    assert.equal(added[0]?.pid, spawned);
+    assert.equal(added[0]?.command, 'sh');
+    assert.ok(added[0]?.startedAt instanceof Date);
+    assert.deepEqual(removed, added);
+  } finally {
+    setProcessStore(null);
   }
 });
 
