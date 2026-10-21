@@ -1,4 +1,5 @@
 import { PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { cancelAgent } from './agent-cancel.js';
 import { ANSWERED } from './chat-routes.js';
 import type { Router } from 'express';
 import { cpus, loadavg } from 'node:os';
@@ -145,18 +146,13 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         response.status(400).json({ message: 'Ungültiges Projekt.' });
         return;
       }
-      const result = await pool.query(
-        `UPDATE agent_run_steps st SET cancel_requested = TRUE
-           FROM agent_runs r, agents a
-          WHERE r.id = st.run_id AND a.id = st.agent_id AND a.project_slug = $1 AND a.id::text = $2
-            AND st.status = 'running' AND r.status = 'running'`,
-        [slug, request.params.id],
-      );
-      if (!result.rowCount) {
+      const result = await cancelAgent(pool, slug, request.params.id);
+      if (!result.requested) {
         response.status(404).json({ message: 'Dieser Agent läuft gerade nicht.' });
         return;
       }
-      response.status(202).json({ cancelling: true });
+      // Verwaiste Schritte sind schon beendet; sonst bricht der Worker den Agent in den nächsten Sekunden ab.
+      response.status(202).json({ cancelling: result.closed < result.requested, closed: result.closed });
     } catch (error) {
       next(error);
     }
