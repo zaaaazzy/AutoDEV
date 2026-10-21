@@ -4,13 +4,15 @@ Workflow: `.github/workflows/ci.yml`. Läuft bei `push` und `pull_request`. Der 
 
 ## Jobs
 
-| Job      | Inhalt                                                                                                                                                                                          |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `check`  | `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm test`                                                                                                                         |
-| `e2e`    | Postgres 17 als Service, Chromium installieren, `build:ui`, `npm run test:e2e`. Bei Fehlern werden Playwright-Traces als Artefakt `playwright-traces` (7 Tage) hochgeladen.                      |
-| `docker` | `docker compose build dev-log frontend`, dann `up -d --wait` für `db`, `dev-log`, `frontend` und `curl /health` auf Port 3100. Das Passwort wird zufällig erzeugt und maskiert. Am Ende `down -v`. |
+Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHUB_TOKEN` landet nicht in `.git/config`, Projektcode (Tests, Testserver, Docker-Build) kann es nicht lesen. Kein Job nutzt Secrets.
 
-Der Dienst mit Caddy/https (Profil) wird in der CI nicht gebaut.
+- **`check`**: `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm test`.
+- **`e2e`**: Postgres 17 als Service (Wegwerf-Datenbank, kein Secret), Chromium installieren, `build:ui`, `npm run test:e2e`. Der Playwright-Reporter ist in der CI `list` plus `github`, Fehler stehen also im Log und als Annotation. Bei Fehlern werden die Traces als Artefakt `playwright-traces` (7 Tage) hochgeladen.
+- **`docker`**:
+  1. Zufällige, maskierte Werte für `DEV_LOG_PASSWORD` und `DEV_LOG_DB_PASSWORD` (sonst griffe das bekannte Standardpasswort aus compose).
+  2. `docker compose build dev-log frontend https` (Caddy wird nur gebaut, nicht gestartet) und `docker build deploy/review`.
+  3. `up -d --wait` für `db`, `dev-log`, `frontend`, dann `curl /health` auf Port 3100.
+  4. Bei Fehlern `docker compose logs` (db, dev-log, frontend) im Log, am Ende immer `down -v`.
 
 ## Typprüfung der Tests
 
@@ -26,11 +28,11 @@ Der Dienst mit Caddy/https (Profil) wird in der CI nicht gebaut.
 
 - Lint: die 2 `no-regex-spaces`-Fehler sind im Code behoben (0 Fehler). Die rund 370 Warnungen sind nicht Teil dieses Auftrags.
 - `.dockerignore` geprüft: kein `.env` und keine Zugangsdaten im Build-Kontext.
-- `e2e/full.config.ts`, `e2e/app.spec.ts`, `README.md` angepasst.
+- `e2e/full.config.ts`, `e2e/playwright.config.ts` (CI-Reporter), `e2e/app.spec.ts`, `README.md` angepasst.
+- Nach dem Merge von `main` kamen 2 neue Typfehler in Tests dazu (`src/api/agents.test.ts`, `frontend/src/app/shared/role-icon.spec.ts`); beide sind im Code behoben.
 
 ## Worauf zu achten ist
 
-- **Noch nicht in GitHub Actions belegt:** Die Jobs `e2e` und `docker` liefen bisher nur lokal (Build, E2E: 48 bestanden, 2 nur auf dem Handy übersprungen). Der Containerstart mit Health-Prüfung lief lokal nicht, weil der feste `container_name` die Produktiv-Container ersetzt hätte. Den Auftrag erst nach dem ersten grünen CI-Lauf als erledigt führen.
-- `npm test` war einmal mit 1 von 818 Tests rot (Test unbekannt), danach zweimal grün. Vermutlich unzuverlässiger Test bei parallelem Lauf mit Lint. Bei erneutem Auftreten den Test benennen.
-- Die Testabdeckung wurde nicht gemessen (der Wächter blockiert `--experimental-test-coverage`).
+- **Noch nicht in GitHub Actions belegt:** Lokal grün sind Typprüfung, Lint, Format, `npm test` (870/870), E2E (58 bestanden, 2 nur auf dem Handy übersprungen) und der Compose-Build von `dev-log`, `frontend`, `https`. Nicht lokal geprüft sind `docker build deploy/review` (der Wächter erlaubt nur `docker compose`) und der Containerstart mit Health-Prüfung (der feste `container_name` würde die Produktiv-Container ersetzen). Den Auftrag erst nach dem ersten grünen CI-Lauf von `e2e` und `docker` als erledigt führen.
+- Die Testabdeckung wird nicht gemessen (der Wächter blockiert `--experimental-test-coverage`, Werte bleiben `null`). Es gibt bewusst keine Coverage-Schwelle in der CI.
 - Neue Test-Dateien müssen typsicher sein, sonst schlägt `typecheck` in der CI fehl.
