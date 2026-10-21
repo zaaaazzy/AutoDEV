@@ -860,3 +860,88 @@ app-order-table {
   }
 }
 
+
+/* Karte unter „Aktionen“: ein Grund („Warum“), ein nächster Schritt („Was jetzt“), eine Hauptaktion, Rest unter „Mehr“. */
+.attention-card.focused {
+  border-color: #e0a03a;
+  box-shadow: 0 0 0 3px #fdf1e0;
+}
+.attention-title {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+}
+.attention-label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.attention-why {
+  margin: 0;
+}
+.attention-now {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 10px;
+  background: #fdf6ec;
+}
+.attention-now .attention-label {
+  color: #a0610d;
+}
+.attention-now p,
+.attention-now .todo-list {
+  margin: 0;
+}
+.attention-suggestion {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+}
+.attention-suggestion span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.attention-answer {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.attention-answer textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+}
+.attention-more {
+  position: relative;
+}
+>>>
+
+.attention-more-menu {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 6px;
+  min-width: 200px;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+@media (max-width: 600px) {
+  .attention-more-menu {
+    right: 0;
+  }
+}

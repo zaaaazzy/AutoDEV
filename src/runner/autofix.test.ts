@@ -108,3 +108,10 @@ test('ENOENT gilt nur für den fehlenden Agent-Befehl als Agent-Fehler, nicht f�
   assert.equal(isAgentFailure('spawn claude ENOENT'), true);
   assert.equal(isAgentFailure("Error: ENOENT: no such file or directory, open 'test/fixtures/a.json'"), false);
 });
+
+test('failureDetail: abgelehnte Abnahme oder nur grüne Tests ergeben keine irreführende Testzusammenfassung', () => {
+  const green = 'TAP version 13\nok 1 - a\n1..1\n# tests 1\n# pass 1\n# fail 0\n';
+  assert.equal(failureDetail(green), null);
+  const rejected = `${green}\n## Abnahme nicht bestanden\n- DoD 1 „Kriterium“: Abdeckung nicht messbar`;
+  assert.equal(failureDetail(rejected), null);
+});

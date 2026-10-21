@@ -1,5 +1,6 @@
 import type { AcceptanceCheck, DevelopmentItem } from '../core/models.js';
 import { isFinished, statusLabel } from './labels.js';
+import { type AttentionCard, attentionCard } from './attention-card.js';
 import { failureParts, orderGuide, type FailureParts, type OrderGuide } from './order-problem.js';
 
 export interface AttentionReason {
@@ -17,6 +18,8 @@ export interface AttentionEntry {
   checks: AcceptanceCheck[];
   guide: OrderGuide | null;
   failure: FailureParts | null;
+  /** Ein Grund und ein nächster Schritt für die Karte unter „Aktionen“. */
+  card: AttentionCard;
 }
 
 /**
@@ -54,6 +57,7 @@ export function orderAttention(development: DevelopmentItem[], acceptance: Accep
         checks: item.actionTodo ? [] : checks,
         guide: orderGuide(item),
         failure: item.failure ? failureParts(item.failure) : null,
+        card: attentionCard(item, item.actionTodo ? 0 : checks.length),
       };
     })
     .filter((entry) => entry.reasons.length);

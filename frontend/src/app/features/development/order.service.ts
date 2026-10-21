@@ -90,6 +90,24 @@ export class OrderService {
     );
   }
 
+  /**
+   * Ohne Rückfrage erneut versuchen bzw. wieder einplanen (Karte unter „Aktionen“): Die Antwort bzw. der Hinweis
+   * steht schon im Feld der Karte und wird mit Datum an die Beschreibung gehängt, damit alle Agents ihn sehen.
+   */
+  async retryNow(item: DevelopmentItem, comment: string | null): Promise<void> {
+    await this.store.perform(
+      () =>
+        this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`, {
+          comment: comment?.trim() || undefined,
+        }),
+      item.status === 'blocked'
+        ? comment?.trim()
+          ? 'Antwort übernommen – der Auftrag läuft erneut.'
+          : 'Auftrag wird erneut versucht.'
+        : 'Auftrag ist wieder eingeplant.',
+    );
+  }
+
   /** Review-Freigabe: Auftrag freigeben – der Worker mergt ihn in den Sprint-Branch und zieht die Vorschau nach. */
   async approve(item: DevelopmentItem): Promise<void> {
     await this.store.perform(
