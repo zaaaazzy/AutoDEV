@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 import { mock, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { visibleInterval, type VisibilitySource } from './visible-interval.js';
 
 class FakeDocument extends EventTarget implements VisibilitySource {
@@ -57,4 +60,28 @@ test('Startet ein Tab verborgen, wird erst beim Sichtbarwerden gepollt', (contex
   context.mock.timers.tick(1000);
   assert.equal(tick.mock.callCount(), 2);
   stop();
+});
+
+/** Rohe Intervalle nur dort, wo nichts vom Server geladen wird. */
+const RAW_INTERVAL_ALLOWED = new Set([
+  'core/visible-interval.ts',
+  // Spotlight der Tour folgt dem Ziel-Element; läuft nur während der Tour und lädt nichts.
+  'features/tour/tour-overlay.component.ts',
+]);
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return entry.name.endsWith('.ts') && !entry.name.endsWith('.spec.ts') ? [path] : [];
+  });
+}
+
+test('Polling im Frontend läuft über visibleInterval (kein rohes setInterval)', () => {
+  const app = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const offenders = sourceFiles(app)
+    .map((path) => relative(app, path).split('\\').join('/'))
+    .filter((file) => !RAW_INTERVAL_ALLOWED.has(file))
+    .filter((file) => /\bsetInterval\s*\(/.test(readFileSync(join(app, file), 'utf8')));
+  assert.deepEqual(offenders, []);
 });

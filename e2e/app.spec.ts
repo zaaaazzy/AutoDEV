@@ -120,6 +120,8 @@ test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
   await expect(page.getByRole('dialog', { name: 'Benachrichtigungen erlauben' })).toBeVisible();
   await page.getByRole('button', { name: 'Später' }).click();
+  // Zwei-Faktor einrichten verlangt das aktuelle Passwort.
+  await page.getByLabel('Aktuelles Passwort').fill(password);
   await page.getByRole('button', { name: 'Einrichten' }).click();
   await expect(page.getByAltText('QR-Code für die Authenticator-App')).toBeVisible();
   await page.getByRole('button', { name: 'Abbrechen' }).click();
@@ -653,6 +655,9 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await page.getByRole('button', { name: /Nächsten Sprint vorschlagen/ }).click();
   const card = page.locator('.sprint-proposal');
   await expect(card.getByRole('heading', { name: /Vorschlag für Sprint/ })).toBeVisible();
+  // Der Vorschlag ist aufklappbar; zugeklappt zeigt er nur die Summen.
+  const toggle = card.locator('.proposal-toggle');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   const row = card.locator('tbody tr', { hasText: title });
   await expect(row).toContainText('Priorität hoch');
   const box = row.getByRole('checkbox');
@@ -873,4 +878,91 @@ test('Ideen vorschlagen lassen: Richtung im Dialog vorgeben, Abbrechen startet k
   await expect(bar).toBeVisible();
   await bar.getByRole('button', { name: 'Abbrechen' }).click();
   await expect(bar).toHaveCount(0);
+});
+
+/** Testlauf mit einem fehlgeschlagenen Prüfschritt und einem fehlgeschlagenen Einzeltest (Läufe legt nur der Runner an). */
+async function mockFailedRun(page: Page): Promise<void> {
+  const run = {
+    id: 'e2e-run-1',
+    status: 'failed',
+    trigger: 'manual',
+    branch: 'main',
+    commitSha: null,
+    startedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(),
+    steps: [
+      { runId: 'e2e-run-1', position: 1, command: 'npm run lint', status: 'failed', output: 'error x', category: 'quality' },
+    ],
+  };
+  const testCase = {
+    id: 'e2e-case-1',
+    position: 1,
+    category: 'unit',
+    title: 'Befund per Tastatur',
+    file: 'src/x.test.ts',
+    device: null,
+    status: 'failed',
+    durationMs: 5,
+    errors: ['Erwartet 1, erhalten 2'],
+    media: [],
+  };
+  await page.route(/\/api\/projects\/e2e\/test-runs$/, (route) => route.fulfill({ json: { runs: [run] } }));
+  await page.route(/\/api\/projects\/e2e\/test-runs\/e2e-run-1\/cases$/, (route) =>
+    route.fulfill({ json: { cases: [testCase] } }),
+  );
+}
+
+test('Testläufe: Befunde sind Buttons, per Tastatur und per Klick auf die Karte bedienbar', async ({ page }) => {
+  await mockFailedRun(page);
+  await login(page);
+  await page.goto('/#runs');
+  const findings = page.locator('.test-findings > li');
+  await expect(findings).toHaveCount(2);
+
+  // Prüfschritt: Enter auf dem Button klappt den Schritt unter „Alle Tests“ auf.
+  const step = findings.nth(0).getByRole('button', { name: 'npm run lint' });
+  await step.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#step-1 details.step-card')).toHaveAttribute('open', '');
+
+  // Einzeltest: Enter öffnet die Details in der Tabelle.
+  const testCase = findings.nth(1).getByRole('button', { name: 'Befund per Tastatur' });
+  await testCase.focus();
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.step-facts').first()).toBeVisible();
+
+  // Die Karte bleibt als Ganzes klickbar (Titel-Button deckt sie ab).
+  await page.reload();
+  await expect(page.locator('#step-1 details.step-card')).not.toHaveAttribute('open', '');
+  // Klick unten rechts in die Karte (außerhalb der runden Ecke), weit weg vom Titel.
+  const box = await findings.nth(0).boundingBox();
+  await findings.nth(0).click({ position: { x: (box?.width ?? 40) - 20, y: (box?.height ?? 20) - 8 } });
+  await expect(page.locator('#step-1 details.step-card')).toHaveAttribute('open', '');
+});
+
+test('Fokus-Ringe sind bei Tastaturbedienung sichtbar (Login, Projektwahl, Befunde)', async ({ page, isMobile }) => {
+  const ring = (selector: string) =>
+    page.locator(selector).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) };
+    });
+
+  await page.goto('/');
+  await page.getByLabel('Benutzername').focus();
+  expect(await ring('.login-card input:focus')).toEqual({ style: 'solid', width: 2 });
+
+  await mockFailedRun(page);
+  await login(page);
+  await page.goto('/#runs');
+  await page.keyboard.press('Shift');
+  await page.locator('.test-findings .finding-open').first().focus();
+  expect(await ring('.finding-open:focus-visible')).toEqual({ style: 'solid', width: 2 });
+
+  // Auf dem Handy wählt eine Auswahlliste das Projekt, das Menü gibt es nur auf dem Desktop.
+  if (isMobile) return;
+  await page.getByRole('button', { name: 'Projekt wechseln' }).focus();
+  await page.keyboard.press('Enter');
+  await page.locator('.switcher-item').first().focus();
+  await page.keyboard.press('ArrowDown');
+  expect(await ring('.switcher-item:focus-visible')).toEqual({ style: 'solid', width: 2 });
 });

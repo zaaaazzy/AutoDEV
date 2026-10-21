@@ -5,6 +5,7 @@ import { AuthService } from '../../core/auth.service.js';
 import type { ReviewSlot, Sprint, SprintCommit } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { ReviewLaunchService } from '../../core/review-launch.service.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { formatIsoDate } from '../../shared/format.js';
 import { commitOptionLabel, reviewStarting, reviewStatusText, sprintReviewSlot } from './review-launch.js';
 
@@ -92,8 +93,7 @@ export class SprintReviewComponent {
     effect((onCleanup) => {
       const id = this.sprint().id;
       void this.load(id);
-      const timer = setInterval(() => void this.load(id), 5000);
-      onCleanup(() => clearInterval(timer));
+      onCleanup(visibleInterval(() => void this.load(id), 5000));
     });
   }
 

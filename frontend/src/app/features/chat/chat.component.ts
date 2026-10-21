@@ -5,6 +5,7 @@ import { ConfirmService } from '../../core/confirm.service.js';
 import { errorMessage } from '../../core/errors.js';
 import type { ChatMessage } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
 import { AgentTasksComponent } from './agent-tasks.component.js';
@@ -108,7 +109,7 @@ export class ChatComponent {
       // Hängt diese (Proxy puffert, Browser-Verbindungslimit, Seitenwechsel), bliebe der Chat sonst leer.
       // Solange die Live-Verbindung nichts liefert, wird zusätzlich regelmäßig nachgeladen.
       let streamDelivered = false;
-      let poll: ReturnType<typeof setInterval> | undefined;
+      let stopPoll = (): void => undefined;
       const loadOnce = (): void => {
         void this.api
           .get<{ messages?: ChatMessage[] }>(`${this.api.projectPath(slug)}/chat`)
@@ -117,11 +118,11 @@ export class ChatComponent {
       };
       const connect = (): void => {
         globalThis.clearTimeout(retry);
-        globalThis.clearInterval(poll);
+        stopPoll();
         stream?.close();
         streamDelivered = false;
         loadOnce();
-        poll = globalThis.setInterval(() => !streamDelivered && loadOnce(), FALLBACK_POLL_MS);
+        stopPoll = visibleInterval(() => !streamDelivered && loadOnce(), FALLBACK_POLL_MS);
         stream = new EventSource(this.api.url(`${this.api.projectPath(slug)}/chat/stream`));
         stream.onopen = () => {
           attempt = 0;
@@ -129,7 +130,7 @@ export class ChatComponent {
         };
         stream.onmessage = (event: MessageEvent<string>) => {
           streamDelivered = true;
-          globalThis.clearInterval(poll);
+          stopPoll();
           this.connected.set(true);
           show(JSON.parse(event.data) as ChatMessage[]);
         };
@@ -156,7 +157,7 @@ export class ChatComponent {
       onCleanup(() => {
         stopped = true;
         globalThis.clearTimeout(retry);
-        globalThis.clearInterval(poll);
+        stopPoll();
         document.removeEventListener('visibilitychange', wake);
         globalThis.removeEventListener('online', wake);
         stream?.close();

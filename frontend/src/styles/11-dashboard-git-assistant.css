@@ -576,11 +576,11 @@ a.git-commit[href]:hover {
   transition: filter 0.15s;
 }
 
-.share-seg:hover,
-.share-seg:focus-visible {
+.share-seg:hover {
   filter: brightness(0.85);
 }
 .share-seg:focus-visible {
+  filter: brightness(0.85);
   outline: 2px solid var(--ink);
   outline-offset: 1px;
 }

@@ -426,11 +426,11 @@
   cursor: pointer;
 }
 
-.attention-line:hover,
-.attention-line:focus-visible {
+.attention-line:hover {
   background: #fdf7ec;
 }
 .attention-line:focus-visible {
+  background: #fdf7ec;
   outline: 2px solid var(--orange);
   outline-offset: -2px;
 }
