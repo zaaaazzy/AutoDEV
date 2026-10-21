@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { isShuttingDown } from '../core/shutdown.js';
+import { isDraining, isShuttingDown } from '../core/shutdown.js';
 import { runPreSprint } from './pre-sprint.js';
 import { processApprovals } from './review-gate.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
@@ -433,7 +433,8 @@ export async function runSelectedItems(
 ): Promise<{ itemId: string; result: string }[]> {
   const results: { itemId: string; result: string }[] = [];
   for (const item of items) {
-    if (isShuttingDown()) break;
+    // Neustart steht an: keinen weiteren Auftrag beginnen, der dann mitten im Schritt beendet würde.
+    if (isShuttingDown() || isDraining()) break;
     if (results.length) {
       await between().catch(logged('runner'));
       // Budget während des Zyklus erreicht: nur der nächste Auftrag wartet sichtbar, die übrigen bleiben eingeplant.
@@ -454,6 +455,8 @@ export async function runWorkflow(
   execute?: CommandExecutor,
   builtin?: BuiltinAgent,
 ): Promise<{ itemId: string; result: string }[]> {
+  // Neustart steht an: weder Git-Sicherung (Test-Gate) noch Autopilot noch Aufträge starten.
+  if (isDraining()) return [];
   await syncSprintToGit(pool, options.project, options.cwd, execute, () =>
     goLive(pool, options.project, options.cwd, execute),
   );

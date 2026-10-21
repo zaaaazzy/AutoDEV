@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
 import { scheduleRoutines } from '../agent/routine.js';
-import { beginShutdown, killOrphan } from '../core/shutdown.js';
+import { beginShutdown, isDraining, killOrphan, setDraining } from '../core/shutdown.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
@@ -29,7 +29,7 @@ import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions 
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
-import { completeRestart, processRestart } from './system-restart.js';
+import { acceptsNewWork, completeRestart, processRestart, readRestart } from './system-restart.js';
 import { sendPush } from '../core/push.js';
 import { listenForWork, WorkSignal } from './work-signal.js';
 import { runDueJobs } from './scheduler.js';
@@ -323,7 +323,7 @@ async function main(): Promise<void> {
     // Einrichtungsassistent: Host-Aufgaben (Ordner, Git, GitHub, Vorlagen, Agent-Tests) schnell und parallel abarbeiten.
     let setupActive = 0;
     const setupTimer = setInterval(() => {
-      if (setupActive >= SETUP_PARALLEL || stopping) return;
+      if (setupActive >= SETUP_PARALLEL || stopping || isDraining()) return;
       setupActive += 1;
       void processSetupJob(pool)
         .catch((error: unknown) => logOnce('setup', `Einrichtungsaufgabe fehlgeschlagen: ${describeError(error)}`))
@@ -342,7 +342,7 @@ async function main(): Promise<void> {
     const reviewSlots = new ReviewSlots(pool, INSTALL_ROOT);
     let reviewActive = false;
     const reviewTimer = setInterval(() => {
-      if (reviewActive || stopping) return;
+      if (reviewActive || stopping || isDraining()) return;
       reviewActive = true;
       void reviewSlots
         .sync()
@@ -354,7 +354,7 @@ async function main(): Promise<void> {
     // führt sie dann aus). Gesperrte Projekte (laufender Auftrag) bleiben fällig, bis die Sperre frei ist.
     let routineActive = false;
     const routineTimer = setInterval(() => {
-      if (routineActive || stopping) return;
+      if (routineActive || stopping || isDraining()) return;
       const projects = chatTargets.filter((target) => !target.problem).map((target) => target.options.project);
       if (!projects.length) return;
       routineActive = true;
@@ -367,6 +367,8 @@ async function main(): Promise<void> {
         .finally(() => (routineActive = false));
     }, 60_000);
     const chatTimer = setInterval(() => {
+      // Neustart steht an: Chat, Tests, Analysen und Visionär warten, bis der Worker neu gestartet ist.
+      if (isDraining()) return;
       for (const target of chatTargets) {
         const slug = target.options.project;
         // Kompletter Test auf Knopfdruck (Aktionen-Menü, Testläufe): unabhängig vom Chat, der sonst alles Weitere blockiert.
@@ -461,7 +463,7 @@ async function main(): Promise<void> {
     // Zeitlimit, der Zyklus wartet nie darauf. Höchstens ein Durchgang gleichzeitig je Worker.
     let schedulerActive = false;
     const runScheduledJobs = (): void => {
-      if (schedulerActive || stopping) return;
+      if (schedulerActive || stopping || isDraining()) return;
       schedulerActive = true;
       void runDueJobs(pool, { installRoot: INSTALL_ROOT }, () => stopping)
         .then((runs) => {
@@ -484,7 +486,21 @@ async function main(): Promise<void> {
         testActive.size +
         setupActive +
         (schedulerActive ? 1 : 0);
-      void processRestart(pool, INSTALL_ROOT, busy)
+      // Erst den Stand lesen: Ist ein Neustart angefordert oder im Bau, startet ab jetzt nichts Neues mehr (Drain).
+      // So wird busy() wirklich 0, und der Neubau beendet keine Arbeit mitten im Schritt.
+      void readRestart(pool)
+        .then((state) => {
+          const draining = !acceptsNewWork(state);
+          if (draining !== isDraining()) {
+            console.info(
+              draining
+                ? 'Neustart angefordert – keine neue Arbeit mehr, Laufendes wird fertig.'
+                : 'Neustart abgeschlossen oder verworfen – Arbeit läuft wieder.',
+            );
+          }
+          setDraining(draining);
+          return processRestart(pool, INSTALL_ROOT, busy);
+        })
         .then((result) => {
           // Ein gescheiterter Neustart meldet sich selbst per Push (writeRestart → notifyRestart).
           if (result !== 'restart') return;
@@ -512,7 +528,7 @@ async function main(): Promise<void> {
               errors.set(slug, target.problem);
               continue;
             }
-            if (active.has(slug) || active.size >= limit) {
+            if (active.has(slug) || active.size >= limit || isDraining()) {
               continue;
             }
             lastStart.set(slug, Date.now());

@@ -6,6 +6,16 @@ const children = new Set<number>();
 export const shutdownSignal: AbortSignal = controller.signal;
 export const isShuttingDown = (): boolean => controller.signal.aborted;
 
+/**
+ * Neustart angefordert oder Container im Bau: keine neue Arbeit mehr starten (Aufträge, Chat, Tests, Jobs), nur
+ * Laufendes zu Ende bringen. Sonst würde der Neustart sie mitten im Schritt beenden.
+ */
+let draining = false;
+export const isDraining = (): boolean => draining;
+export function setDraining(value: boolean): void {
+  draining = value;
+}
+
 export function trackChild(pid: number): () => void {
   children.add(pid);
   return () => children.delete(pid);

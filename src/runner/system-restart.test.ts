@@ -168,3 +168,13 @@ test('Neustart scheitert schon vor dem Bau (falscher Branch): genau eine Benachr
   assert.equal(await processRestart(pool, '/x', () => 0, feature, undefined, { notify, branch: 'main' }), 'failed');
   assert.deepEqual(seen, ['failed']);
 });
+
+test('Drain: solange ein Neustart angefordert ist oder gebaut wird, startet der Worker keine neue Arbeit', async () => {
+  const { acceptsNewWork } = await import('./system-restart.js');
+  assert.equal(acceptsNewWork(null), true);
+  assert.equal(acceptsNewWork({ status: 'requested' }), false);
+  assert.equal(acceptsNewWork({ status: 'building' }), false);
+  assert.equal(acceptsNewWork({ status: 'restarting' }), true);
+  assert.equal(acceptsNewWork({ status: 'done' }), true);
+  assert.equal(acceptsNewWork({ status: 'failed' }), true);
+});
