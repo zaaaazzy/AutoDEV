@@ -220,6 +220,51 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
+  /**
+   * In einen Sprint übernehmen (Sprintseite „Aufträge hinzufügen“): offene und abgebrochene Aufträge in einer Abfrage.
+   * Abgebrochene (aus einem Sprint genommen oder blockiert) werden dabei wie bei /retry zurückgesetzt, landen aber direkt
+   * im Ziel-Sprint statt erst im aktiven. auto_run nur, wenn der Ziel-Sprint läuft – ein geplanter wartet auf seinen Start.
+   */
+  app.post('/development/:id/take-into-sprint', async (request, response) => {
+    if (!isUuid(request.params.id)) {
+      response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+      return;
+    }
+    const sprintId = isRecord(request.body) ? request.body.sprintId : undefined;
+    if (!isUuid(sprintId)) {
+      response.status(400).json({ message: 'Sprint fehlt oder ist ungültig.' });
+      return;
+    }
+    const aborted = `(d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVELOPMENT_STATUS.blocked}')`;
+    // Ohne Join auf sprints: DEV_COLUMNS (RETURNING) nennt id und status ohne Tabellen-Präfix.
+    const result = await pool.query(
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', sprint_id = $2,
+              auto_run = COALESCE((SELECT s.status = 'active' FROM sprints s WHERE s.id = $2), FALSE),
+              agent_id = CASE WHEN ${aborted} THEN NULL ELSE d.agent_id END,
+              failure = CASE WHEN ${aborted} THEN NULL ELSE d.failure END,
+              action_todo = CASE WHEN ${aborted} THEN NULL ELSE d.action_todo END,
+              retry_count = d.retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
+              analysis_status = CASE WHEN NOT ${aborted} OR d.analysis_status IN ('requested', 'running')
+                                     THEN d.analysis_status ELSE NULL END,
+              budget_since = CASE WHEN ${aborted} THEN NOW() ELSE d.budget_since END,
+              removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
+        WHERE d.id = $1 AND d.sprint_id IS NULL AND d.kind <> 'express'
+          AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.blocked}')
+          AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
+                         AND s.status IN ('planned', 'active'))
+        RETURNING ${DEV_COLUMNS}`,
+      [request.params.id, sprintId],
+    );
+    if (!result.rows[0]) {
+      response.status(409).json({
+        message:
+          'Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen, und nur in geplante oder aktive Sprints desselben Projekts.',
+      });
+      return;
+    }
+    response.json({ item: result.rows[0] });
+  });
+
   // Aus dem Sprint nehmen: Der Auftrag wartet danach unter „Aktionen“ auf eine Entscheidung.
   app.post('/development/:id/remove-from-sprint', async (request, response) => {
     if (!isUuid(request.params.id)) {
@@ -341,6 +386,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       }
     }
     const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
+    let targetSprintStatus: string | undefined;
     if (typeof sprintId === 'string') {
       const sprint = await pool.query<{ sprintStatus: string }>(
         `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
@@ -355,6 +401,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         response.status(409).json({ message: 'Orders can only be assigned to planned or active sprints.' });
         return;
       }
+      targetSprintStatus = sprint.rows[0].sprintStatus;
     }
     const agentId = fields.find((field) => field.column === 'agent_id')?.value;
     if (typeof agentId === 'string') {
@@ -397,6 +444,11 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         ', updated_at = NOW()',
         ', removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()',
       );
+    }
+    if (targetSprintStatus && targetSprintStatus !== 'active') {
+      // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
+      // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
+      update.sql = update.sql.replace(', updated_at = NOW()', ', auto_run = FALSE, updated_at = NOW()');
     }
     if (manualStart) {
       // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
