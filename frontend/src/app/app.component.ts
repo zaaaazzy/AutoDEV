@@ -34,6 +34,7 @@ import { PageSearchService } from './core/page-search.service.js';
 import { isOpenIdea } from './features/ideation/idea-options.js';
 import { nextOpenOrders } from './features/sprints/review-launch.js';
 import { SprintReviewComponent } from './features/sprints/sprint-review.component.js';
+import { HeaderReviewComponent } from './features/sprints/header-review.component.js';
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
@@ -65,6 +66,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
     DevelopmentComponent,
     SprintsComponent,
     SprintReviewComponent,
+    HeaderReviewComponent,
     IdeationComponent,
     BugsComponent,
     DocsComponent,

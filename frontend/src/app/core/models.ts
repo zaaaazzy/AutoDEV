@@ -499,8 +499,10 @@ export interface WorkerStatus {
     name: string;
     role?: string;
     active: boolean;
-    /** Wartet auf eine Antwort (Rückfrage des Dashboard-Assistenten). */
+    /** Wartet auf eine Antwort (Rückfrage des Dashboard-Assistenten) oder auf den Start einer Chat-Anfrage. */
     waiting?: boolean;
+    /** Arbeitet an einer Chat-Anfrage oder Agent-Aufgabe statt an einem Auftrag (kein „Abbrechen“). */
+    manual?: boolean;
     sprintName: string | null;
     orderTitle: string | null;
   }[];
@@ -674,6 +676,15 @@ export interface SprintCommit {
   date: string;
   developmentId: string | null;
   merged: boolean;
+}
+
+/** Startbarer Stand für die Kopfzeile (GET /projects/:slug/review-commits): mit Auftragsname und Sprint. */
+export interface ReviewCommit extends SprintCommit {
+  title: string;
+  orderStatus: string | null;
+  sprintId: string;
+  sprintName: string;
+  sprintStatus: string;
 }
 
 export type BudgetPeriod = 'day' | 'sprint' | 'order';
