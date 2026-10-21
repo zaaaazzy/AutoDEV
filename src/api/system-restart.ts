@@ -4,7 +4,7 @@ import { access } from './access.js';
 import { readRestart, requestRestart } from '../runner/system-restart.js';
 import type { Principal } from './roles.js';
 
-/** Neustart von AIdeation (Container neu bauen, Worker neu starten): anfordern nur mit Administration, lesen alle. */
+/** Neustart von AIdeation (Container neu bauen, Worker neu starten): anfordern und lesen nur mit Administration (Mandant `admin`). */
 export function registerSystemRestartRoutes(app: Router, pool: Pool): void {
   app.get('/system/restart', access({ tenant: 'admin' }), async (_request, response, next) => {
     try {
