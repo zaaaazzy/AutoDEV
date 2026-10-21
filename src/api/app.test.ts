@@ -944,6 +944,37 @@ test('Rolle „Ausführen“ darf über agentId nur einen Agent starten, nicht d
   });
 });
 
+test('Schrägstrich am Pfadende umgeht die Rolle „Ausführen“ nicht (nur Planung: 403, kein UPDATE)', async () => {
+  const writes: string[] = [];
+  const pool = memberPool(['plan'], (sql) => {
+    if (/^\s*(UPDATE|INSERT|DELETE)/.test(sql)) writes.push(sql);
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const requests: [string, string, unknown?][] = [
+      ['PATCH', `/api/development/${IDEA_ID}/`, { agentId: IDEA_ID }],
+      ['PATCH', `/api/development/${IDEA_ID}//`, { agentId: IDEA_ID }],
+      ['POST', `/api/development/${IDEA_ID}/approve/`],
+      ['POST', `/api/development/${IDEA_ID}/retry/`],
+      ['POST', `/api/bugs/${IDEA_ID}/approve/`],
+      ['POST', `/api/sprints/${SPRINT_ID}/git-sync/`],
+      ['POST', `/api/sprints/${SPRINT_ID}/pause/`],
+      ['POST', `/api/sprints/${SPRINT_ID}/resume/`],
+      ['POST', `/api/agent-tasks/${IDEA_ID}/pause/`],
+      ['POST', `/api/agent-tasks/${IDEA_ID}/resume/`],
+    ];
+    for (const [method, path, body] of requests) {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method,
+        headers: sessionHeaders,
+        body: JSON.stringify(body ?? {}),
+      });
+      assert.ok([403, 404].includes(response.status), `${method} ${path}: ${response.status}`);
+    }
+  });
+  assert.deepEqual(writes, []);
+});
+
 test('Visionär-Lauf: ohne Rolle „Planung“ 403, mit Planung angefragt, je Projekt nur einer, abbrechbar', async () => {
   await withServer(memberPool(['chat']), async (baseUrl) => {
     const denied = await fetch(`${baseUrl}/api/projects/p/ideation/visionary`, {

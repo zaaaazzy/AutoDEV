@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from 'express';
 import type { Pool } from 'pg';
-import { access, routeGuard } from './access.js';
+import { access, findRoute, routeGuard, routeTable } from './access.js';
 import { registerReviewRoutes } from './review-routes.js';
 import type { Principal } from './roles.js';
 import { apiRoutes } from './route-table.test.js';
@@ -199,4 +199,30 @@ test('Undeklarierte Route und Pfad ohne Route: nur Administration (fail-closed)'
   await withGuardedApi(admin, extra, async (url) => {
     assert.equal((await post(`${url}/api/neu`)).status, 200);
   });
+});
+
+test('Schrägstrich am Pfadende: Wächter und Router wählen dieselbe Route (mit und ohne strict)', async () => {
+  const declaration = access({ role: 'run', tenant: 'development' });
+  for (const strict of [false, true]) {
+    const router = express.Router({ caseSensitive: true, strict });
+    router.patch('/development/:id', declaration, (_request, response) => void response.json({ route: true }));
+    const table = routeTable(router);
+    const guard = (path: string) => findRoute(table, 'PATCH', path)?.entry.path;
+    const app = express();
+    app.use('/api', router);
+    app.use((_request, response) => void response.status(404).json({ route: false }));
+    const server = app.listen(0, '127.0.0.1');
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+      for (const path of ['/development/x', '/development/x/', '/development/x//', '/Development/x']) {
+        const reached = (await (await fetch(`${url}${path}`, { method: 'PATCH' })).json()).route as boolean;
+        // Trifft Express die Route, muss der Wächter sie auch treffen (sonst gälte eine andere Rolle).
+        assert.equal(guard(path) !== undefined, reached, `strict=${strict} ${path}`);
+      }
+      assert.equal(guard('/development/x/'), strict ? undefined : '/development/:id');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }
 });
