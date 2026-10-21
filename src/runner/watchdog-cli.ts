@@ -1,11 +1,15 @@
 import { join } from 'node:path';
 import pg from 'pg';
+import { DEFAULT_DB_PASSWORD, warnDefaultDatabasePassword } from '../core/default-credentials.js';
 import { runWatchdog } from './watchdog.js';
 
 /** Einmaliger Wächter-Durchlauf; launchd startet ihn alle zwei Minuten (scripts/install-watchdog.sh). */
 const root = join(import.meta.dirname, '..', '..');
+const databaseUrl =
+  process.env.DEV_LOG_DATABASE_URL ?? `postgresql://devlog:${DEFAULT_DB_PASSWORD}@localhost:5433/aideation`;
+warnDefaultDatabasePassword(databaseUrl);
 const pool = new pg.Pool({
-  connectionString: process.env.DEV_LOG_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation',
+  connectionString: databaseUrl,
   connectionTimeoutMillis: 5_000,
   max: 2,
 });
