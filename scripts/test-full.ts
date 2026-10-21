@@ -152,7 +152,7 @@ const USER_STEP: Step = {
 };
 
 /** Führt einen Befehl aus, zeigt die Ausgabe live und gibt sie gesammelt zurück. */
-function run(command: string, args: string[]): Promise<{ ok: boolean; output: string }> {
+function run(command: string, args: string[], quiet = false): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
     const child = spawn(command, args, {
@@ -169,7 +169,8 @@ function run(command: string, args: string[]): Promise<{ ok: boolean; output: st
     });
     const collect = (chunk: Buffer) => {
       output += chunk.toString();
-      process.stdout.write(chunk);
+      // Parallel laufende Schritte nicht ineinander verschränkt ausgeben; ihr Ergebnis folgt am Ende gesammelt.
+      if (!quiet) process.stdout.write(chunk);
     };
     child.stdout.on('data', collect);
     child.stderr.on('data', collect);
@@ -251,11 +252,15 @@ class Recorder {
   }
 }
 
-async function runStep(position: number, step: Step, recorder: Recorder | null): Promise<StepResult> {
-  console.log(`\n━━ ${step.name} ━━`);
+async function runStep(position: number, step: Step, recorder: Recorder | null, quiet = false): Promise<StepResult> {
+  console.log(`\n━━ ${step.name}${quiet ? ' (läuft parallel, Ausgabe folgt am Ende)' : ''} ━━`);
   await recorder?.start(position, step);
   const begin = Date.now();
-  const { ok, output } = await run(step.command, step.args);
+  const { ok, output } = await run(step.command, step.args, quiet);
+  if (quiet) {
+    const lines = output.replace(ANSI, '').trim().split('\n');
+    console.log(`\n━━ ${step.name}: ${ok ? 'grün' : 'rot'} ━━\n${lines.slice(ok ? -8 : -80).join('\n')}`);
+  }
   const clean = output.replace(ANSI, '');
   const result: StepResult = {
     name: step.name,
@@ -356,7 +361,21 @@ async function main(): Promise<void> {
   // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
   const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
-  for (const [position, step] of steps.entries()) results.push(await runStep(position, step, recorder));
+  // E2E- und Oberflächentest gleichzeitig: Sie haben eigene Ports und eigene Testdatenbanken (dev_log_e2e, dev_log_full)
+  // und brauchen beide nur die gebaute Oberfläche aus dem Schritt davor.
+  const PARALLEL = new Set(['E2E-Tests', 'Oberflächentest']);
+  for (let position = 0; position < steps.length; position++) {
+    const step = steps[position]!;
+    const next = steps[position + 1];
+    if (next && PARALLEL.has(step.name) && PARALLEL.has(next.name)) {
+      results.push(
+        ...(await Promise.all([runStep(position, step, recorder, true), runStep(position + 1, next, recorder, true)])),
+      );
+      position += 1;
+      continue;
+    }
+    results.push(await runStep(position, step, recorder));
+  }
 
   // Bericht: Befunde und Medien des Oberflächentests
   await mkdir(MEDIA, { recursive: true });

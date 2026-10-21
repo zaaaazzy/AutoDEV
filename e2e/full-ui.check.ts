@@ -772,14 +772,40 @@ async function clickables(page: Page, mark?: Clickable): Promise<Clickable[]> {
   );
 }
 
+/** Offene API-Anfragen je Seite (fetch/XHR), damit „ruhig“ ohne feste Wartezeit erkannt wird. */
+const pendingRequests = new WeakMap<Page, Set<object>>();
+function trackRequests(page: Page): void {
+  const pending = new Set<object>();
+  pendingRequests.set(page, pending);
+  const busy = (request: { resourceType(): string }) => ['fetch', 'xhr'].includes(request.resourceType());
+  page.on('request', (request) => busy(request) && pending.add(request));
+  page.on('requestfinished', (request) => pending.delete(request));
+  page.on('requestfailed', (request) => pending.delete(request));
+}
+
+/**
+ * Wartet, bis die Seite nach einer Aktion ruhig ist: zwei gezeichnete Frames (Angular hat gerendert) und keine offene
+ * API-Anfrage mehr – statt einer festen Pause. Höchstens `max` ms, damit Polling (z. B. Live-Läufe) nicht blockiert.
+ */
+async function settle(page: Page, max = 1_500): Promise<void> {
+  const frames = () =>
+    page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  await frames().catch(() => {});
+  const pending = pendingRequests.get(page);
+  const end = Date.now() + max;
+  while (pending?.size && Date.now() < end) await new Promise((done) => setTimeout(done, 20));
+  // Antworten lösen oft noch ein Rendern aus.
+  if (pending) await frames().catch(() => {});
+}
+
 /** Schließt offene Dialoge und Menüs (Escape, sonst „Schließen“); liefert Menüs, die offen bleiben. */
 async function closeDialogs(page: Page): Promise<string[]> {
   await page.keyboard.press('Escape');
-  await page.waitForTimeout(150);
+  await settle(page);
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!(await page.locator('.modal-backdrop').count())) break;
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(150);
+    await settle(page);
     const close = page.locator('.modal-backdrop [aria-label="Schließen"]').first();
     if ((await page.locator('.modal-backdrop').count()) && (await close.count())) await close.click().catch(() => {});
   }
@@ -799,6 +825,7 @@ test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fe
   const errors = watchConsole(page);
   // Rückfragen wie „Wirklich …?“ verneinen: der Klick wird geprüft, ohne Daten zu ändern.
   page.on('dialog', (dialog) => void dialog.dismiss().catch(() => {}));
+  trackRequests(page);
   await login(page);
   const protocol: string[] = [`# Klickprotokoll (${isMobile ? 'Handy' : 'Desktop'})`, ''];
   for (const section of SECTIONS) {
@@ -862,7 +889,7 @@ test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fe
           return false;
         });
       if (!clicked) continue;
-      await page.waitForTimeout(300);
+      await settle(page);
       let result = '✅';
       // Öffnet der Klick einen Dialog mit Formular: unverändert speichern, das darf keinen Fehler geben.
       const dialog = page.locator('.modal-backdrop [role="dialog"], .modal-backdrop section').first();
@@ -870,7 +897,7 @@ test('Jeder Knopf und Link: anklicken, Dialoge bearbeiten und speichern, ohne Fe
         const save = dialog.getByRole('button', { name: /^(Speichern|Übernehmen|Einreichen)$/ }).first();
         if ((await save.count()) && (await save.isEnabled().catch(() => false))) {
           await save.click({ timeout: 4_000 }).catch(() => {});
-          await page.waitForTimeout(500);
+          await settle(page, 3_000);
           const failure = await page
             .locator('.notice.error')
             .first()
