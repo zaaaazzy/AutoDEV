@@ -520,7 +520,8 @@ test('PR-Modus: nach dem Merge des Pull Requests wird live geschaltet (Deploy un
   const { adapter } = reviewAdapter({ checks: 'success' });
   adapter.mergePullRequest = () => mergeOnGithub(remote);
   assert.equal(await pollSprintReviews(pool, 'p', cwd, adapter, false, undefined, () => goLive(pool, 'p', cwd)), 1);
-  assert.deepEqual(deploys, [['p']]);
+  // Ohne abgeschlossene Sprints im Test-Pool ist der Sprint-Tag unbekannt (null), Migrationen ungeprüft (null).
+  assert.deepEqual(deploys, [['p', null, null]]);
   assert.ok(
     updates.some((entry) => /SET deploy_status/.test(entry.sql) && /Aktualisiert/.test(String(entry.values[1]))),
   );

@@ -113,6 +113,36 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS git_fix_requests_project_idx ON git_fix_requests (project_slug, created_at DESC);
     `,
   },
+  // Rollback-Vorschlag nach kritischem Betriebsfehler: Sprint-Tag je Deploy, laufender Deploy, Rollback-Protokoll.
+  {
+    version: 5,
+    name: 'production-rollback',
+    sql: `
+      -- Welcher Sprint-Tag ausgerollt wurde und welche Migrationen seit dem vorherigen Tag hinzukamen (NULL = unbekannt).
+      ALTER TABLE production_deploys ADD COLUMN IF NOT EXISTS sprint_tag TEXT;
+      ALTER TABLE production_deploys ADD COLUMN IF NOT EXISTS new_migrations TEXT[];
+      -- Läuft gerade ein Deploy? Gesetzt zu Beginn von deployProject, am Ende wieder gelöscht.
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS deploy_started_at TIMESTAMPTZ;
+      -- Rollback-Protokoll: von einem Menschen bestätigt, vom Worker über den normalen Deploy-Pfad ausgeführt.
+      CREATE TABLE IF NOT EXISTS production_rollbacks (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+        bug_id UUID REFERENCES bugs(id) ON DELETE SET NULL,
+        from_tag TEXT NOT NULL,
+        to_tag TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested', 'running', 'succeeded', 'failed')),
+        result TEXT,
+        requested_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        started_at TIMESTAMPTZ,
+        finished_at TIMESTAMPTZ
+      );
+      -- Höchstens ein offener Rollback je Projekt: ein zweiter Klick startet keinen zweiten Deploy.
+      CREATE UNIQUE INDEX IF NOT EXISTS production_rollbacks_open_idx ON production_rollbacks (project_slug)
+        WHERE status IN ('requested', 'running');
+      CREATE INDEX IF NOT EXISTS production_rollbacks_bug_idx ON production_rollbacks (bug_id, created_at DESC);
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

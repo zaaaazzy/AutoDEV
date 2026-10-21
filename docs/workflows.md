@@ -176,6 +176,34 @@ ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; ge
 
 **Behoben und dokumentiert:** Schließt der Bug-Auftrag erfolgreich ab, setzt ein DB-Trigger den Bug auf „Behoben“. Die Lösung (Ausgabe des Entwicklers) steht am Bug (`fix_notes`) und wird allen späteren Agents als „bekannte Bugs mit Lösung“ mitgegeben. Der Bug-Fix lässt sich per Klick am Bug, am Auftrag oder im Sprint starten.
 
+## 5a. Betrieb: Rollback-Vorschlag nach einem Deploy
+
+Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, bietet das Bug-Detail an, den vorherigen Sprint-Tag wieder auszurollen. Der Rollback startet nur nach ausdrücklicher Bestätigung durch einen Menschen.
+
+**Wann der Knopf erscheint:** Der Bug hat die Quelle „Betrieb“, die Schwere `critical` und mindestens ein Ereignis liegt höchstens 30 Minuten nach einem Deploy (`deploy_suspect`). Ohne diese Bedingung erscheint kein Vorschlag und kein Knopf.
+
+**Was der Vorschlag nennt:** „Zuletzt ausgerollt“ mit dem Sprint-Tag des letzten Deploys und dessen Zeitpunkt, „davor“ den unmittelbar vorherigen Sprint-Tag. Es wird immer nur ein Schritt zurück angeboten.
+
+**Knopf deaktiviert (mit Grund unter dem Knopf):**
+- Der Sprint-Tag des letzten Deploys ist nicht bekannt.
+- Es gibt keinen vorherigen Sprint-Tag.
+- Es läuft bereits ein Deploy des Projekts.
+- Für das Projekt sind keine Deploy-Befehle hinterlegt.
+- Die Agents arbeiten im Projektordner. Ein Tag-Checkout würde deren Arbeit verändern. Der Grund nennt, einen eigenen Arbeitsordner für Agents einzustellen.
+- Dem Benutzer fehlt die Berechtigung „Planung“. Ohne sie erscheint der Knopf deaktiviert mit dem Hinweis auf die fehlende Berechtigung.
+
+**Bestätigung:** Der Knopf öffnet einen Dialog „Vorherigen Sprint-Tag wieder ausrollen“. Er nennt den Zieltag und den aktuell ausgerollten Tag und lässt sich mit „[Zieltag] ausrollen“ oder abbrechen beenden. Abbrechen löst nichts aus. Erst die Bestätigung schickt die Anforderung an den Server; sie enthält den Zieltag, und der Server prüft ihn erneut. Hat sich der Zieltag inzwischen geändert, weist der Server die Anforderung ab und bittet um neues Laden.
+
+**Migrationen:** Der Vorschlag prüft, ob der Zieltag neuere Datenbank-Migrationen nicht kennt. Dann nennt der Dialog sie als Warnung. Die Datenbank wird **nicht** zurückgesetzt; ob ein Rollback mit diesem Datenbankstand funktioniert, entscheidet der Mensch. Lässt sich der Stand nicht prüfen, weist der Dialog ebenfalls darauf hin.
+
+**Ablauf:** Nach der Bestätigung steht der Rollback als „Wartet auf den Worker“ im Protokoll. Der Worker startet ihn, sobald kein Agent und kein Deploy des Projekts läuft. Er checkt den Zieltag im Projektordner aus und rollt ihn über denselben Deploy-Pfad aus wie ein normaler „Live schalten“-Lauf. Die Oberfläche aktualisiert das Protokoll alle 5 Sekunden, solange ein Rollback offen ist.
+
+**Protokoll im Bug-Detail:** Jeder Rollback steht mit Status (Wartet auf den Worker, Läuft …, Erfolgreich, Fehlgeschlagen), Ausgangs- und Zieltag, Zeitpunkt der Anforderung und des Abschlusses, dem Anfordernden und einem Ergebnistext. Ein fehlgeschlagener Rollback nennt den Grund im Ergebnistext, auch wenn kein einzelner Befehl gescheitert ist. Zusätzlich geht eine Push-Nachricht an das Projekt.
+
+**Der Bug bleibt offen:** Nach einem Rollback ändert Dev Log den Bug nicht auf „Behoben“. Das entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag, bis das nächste „Live schalten“ ihn wieder auf `main` zieht.
+
+*[Printscreens für diesen Abschnitt fehlen noch: Knopf aktiv, Knopf deaktiviert mit Grund, Bestätigungsdialog mit Migrationswarnung, Rollback-Protokoll.]*
+
 ## 6. Git im Sprint
 
 | Zeitpunkt                                         | Aktion                                                                                                                                                                                        |

@@ -213,17 +213,24 @@ export async function deploySuspect(db: Db, project: string, at: Date): Promise<
   };
 }
 
-/** Hält einen erfolgreichen Deploy fest – mit den Aufträgen, die seit dem vorigen Deploy erledigt wurden. */
-export async function recordDeploy(pool: Pick<Pool, 'query'>, project: string): Promise<void> {
+/**
+ * Hält einen erfolgreichen Deploy fest – mit den Aufträgen, die seit dem vorigen Deploy erledigt wurden, dem
+ * ausgerollten Sprint-Tag (für den Rollback-Vorschlag) und den Migrationen, die seit dem vorherigen Tag hinzukamen.
+ */
+export async function recordDeploy(
+  pool: Pick<Pool, 'query'>,
+  project: string,
+  deployed: { sprintTag?: string | null; newMigrations?: string[] | null } = {},
+): Promise<void> {
   await pool.query(
-    `INSERT INTO production_deploys (project_slug, order_ids)
+    `INSERT INTO production_deploys (project_slug, order_ids, sprint_tag, new_migrations)
      SELECT $1, COALESCE(ARRAY(
               SELECT d.id FROM development_items d
                WHERE d.project_slug = $1 AND d.status = 'done' AND d.completed_at <= NOW()
                  AND d.completed_at > COALESCE(
                    (SELECT MAX(deployed_at) FROM production_deploys WHERE project_slug = $1), NOW() - INTERVAL '1 day')
-               ORDER BY d.completed_at), '{}')`,
-    [project],
+               ORDER BY d.completed_at), '{}'), $2, $3`,
+    [project, deployed.sprintTag ?? null, deployed.newMigrations ?? null],
   );
 }
 

@@ -7,6 +7,7 @@ export {
   gitHelpers,
   type GitHelpers,
   isValidGitRemote,
+  previousSprintTag,
   pushRemote,
   sprintBranch,
   sprintTag,

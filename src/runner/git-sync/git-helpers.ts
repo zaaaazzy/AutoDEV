@@ -37,6 +37,16 @@ export function sprintTag(name: string, id: string): string {
   return `sprint-${slugify(name)}-${id.slice(0, 6)}`;
 }
 
+/**
+ * Sprint-Tag unmittelbar vor `current` (Rollback-Ziel). `tags` sind die Tags der abgeschlossenen Sprints, ältester
+ * zuerst. Nur genau ein Schritt zurück; ist `current` unbekannt oder der älteste Tag, gibt es kein Ziel (null).
+ */
+export function previousSprintTag(tags: readonly string[], current: string | null | undefined): string | null {
+  if (!current) return null;
+  const index = tags.lastIndexOf(current);
+  return index > 0 ? (tags[index - 1] ?? null) : null;
+}
+
 /** Branch, auf dem alle Aufträge eines Sprints committet werden; am Sprintende wird er nach main gemergt. */
 export function sprintBranch(name: string): string {
   return `sprint/${slugify(name)}`;

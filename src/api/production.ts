@@ -1,8 +1,11 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
-import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
+import { loadRollbackFacts, ROLLBACK_COLUMNS, rollbackProposal, SPRINT_TAG } from '../runner/rollback.js';
+import { guardGit } from './git-state.js';
 import { createIngestToken } from './ingest.js';
+import type { Principal } from './roles.js';
 import { browserSnippet, ingestEndpoint, nodeSnippet, publicBaseUrl } from './production-snippets.js';
 
 const HISTORY_HOURS = 48;
@@ -87,6 +90,65 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
         )
       ).rows;
       response.set('Cache-Control', 'no-store').json({ events, history: fillHistory(history) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Rollback-Vorschlag eines Betriebs-Bugs und Protokoll der ausgelösten Rollbacks (Bug-Verlauf).
+  app.get('/bugs/:id/rollback', access({ tenant: 'bugs' }), async (request, response, next) => {
+    try {
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      const loaded = await loadRollbackFacts(pool, request.params.id);
+      if (!loaded) return void response.status(404).json({ message: 'Bug nicht gefunden.' });
+      const rollbacks = (
+        await pool.query(
+          `SELECT ${ROLLBACK_COLUMNS} FROM production_rollbacks WHERE bug_id = $1 ORDER BY created_at DESC LIMIT 20`,
+          [request.params.id],
+        )
+      ).rows;
+      response.set('Cache-Control', 'no-store').json({ proposal: rollbackProposal(loaded.facts), rollbacks });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Auslösen nur mit Bestätigung: der Body nennt den Zieltag aus dem Dialog. Dieselbe Rolle und Git-Prüfung wie
+  // „Live schalten“; ausgeführt wird im Worker über deployProject. Der Bug bleibt unverändert.
+  app.post('/bugs/:id/rollback', access({ role: 'plan', tenant: 'bugs' }), async (request, response, next) => {
+    try {
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      const body = isRecord(request.body) ? request.body : {};
+      const confirmed = typeof body.toTag === 'string' ? body.toTag : '';
+      if (!SPRINT_TAG.test(confirmed)) {
+        return void response.status(400).json({ message: 'Bestätigung fehlt: Zieltag aus dem Dialog angeben.' });
+      }
+      const loaded = await loadRollbackFacts(pool, request.params.id);
+      if (!loaded) return void response.status(404).json({ message: 'Bug nicht gefunden.' });
+      const proposal = rollbackProposal(loaded.facts);
+      if (!proposal) {
+        return void response.status(409).json({ message: 'Für diesen Bug gibt es keinen Rollback-Vorschlag.' });
+      }
+      if (proposal.disabledReason) return void response.status(409).json({ message: proposal.disabledReason });
+      if (proposal.toTag !== confirmed) {
+        return void response
+          .status(409)
+          .json({ message: 'Der Zieltag hat sich inzwischen geändert – bitte neu laden und erneut bestätigen.' });
+      }
+      if (!(await guardGit(pool, loaded.project, 'go_live', request.body, response))) return;
+      const principal = response.locals.principal as Principal | undefined;
+      const created = (
+        await pool.query(
+          `INSERT INTO production_rollbacks (project_slug, bug_id, from_tag, to_tag, requested_by)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (project_slug) WHERE status IN ('requested', 'running') DO NOTHING
+           RETURNING ${ROLLBACK_COLUMNS}`,
+          [loaded.project, request.params.id, proposal.fromTag, proposal.toTag, principal?.displayName ?? null],
+        )
+      ).rows[0];
+      if (!created) return void response.status(409).json({ message: 'Es läuft bereits ein Deploy des Projekts.' });
+      await pool.query(`SELECT pg_notify('devlog_work', $1)`, [loaded.project]).catch(() => undefined);
+      response.status(201).json({ rollback: created });
     } catch (error) {
       next(error);
     }

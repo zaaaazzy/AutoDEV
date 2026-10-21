@@ -132,10 +132,10 @@ test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nic
     await legacy.query(`INSERT INTO bugs (project_slug, title, source) VALUES ('shop', 'Issue', 'github')`);
     await legacy.query(`INSERT INTO app_settings (key, value) VALUES ('model:developer', 'opus')`);
 
-    assert.deepEqual(await runMigrations(fresh), [1, 2, 3, 4]);
+    assert.deepEqual(await runMigrations(fresh), [1, 2, 3, 4, 5]);
     const legacyClient = await legacy.connect();
     try {
-      assert.deepEqual(await runMigrations(legacyClient), [1, 2, 3, 4]);
+      assert.deepEqual(await runMigrations(legacyClient), [1, 2, 3, 4, 5]);
       // Zweiter Start: nichts mehr auszuführen.
       assert.deepEqual(await runMigrations(legacyClient), []);
     } finally {

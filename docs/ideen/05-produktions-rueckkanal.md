@@ -80,4 +80,24 @@ flowchart LR
 1. Health-URL + Bug.
 2. Log-Scan mit Fingerabdruck.
 3. Ingest-Endpunkt + Snippet.
-4. Automatischer Rollback-Vorschlag: bei kritischem Fehler nach Deploy Knopf „Vorherigen Sprint-Tag wieder ausrollen“.
+4. Automatischer Rollback-Vorschlag: bei kritischem Fehler nach Deploy Knopf „Vorherigen Sprint-Tag wieder ausrollen“ (umgesetzt, siehe unten).
+
+## Umsetzung Ausbaustufe 4: Rollback-Vorschlag
+
+- **Wann:** Bug mit Quelle „Betrieb“, Schwere `critical` und mindestens einem Ereignis mit `deploy_suspect` (30 min nach einem Deploy). Sonst kein Knopf.
+- **Welche Tags:** Jeder erfolgreiche Deploy hält in `production_deploys.sprint_tag` den ausgerollten Sprint-Tag fest (normaler Deploy: Tag des zuletzt abgeschlossenen Sprints; Rollback: der Zieltag). Ziel ist der unmittelbar davor liegende Tag der abgeschlossenen Sprints (`previousSprintTag` in `src/runner/git-sync.ts`), nie mehr als ein Schritt zurück.
+- **Knopf deaktiviert mit Grund:** Tag des letzten Deploys unbekannt, kein vorheriger Tag, ein Deploy oder Rollback läuft (`projects.deploy_started_at`, offene Zeile in `production_rollbacks`), keine Deploy-Befehle, oder die Agents arbeiten im Projektordner (ein Tag-Checkout würde ihre Arbeit verändern), oder dem Benutzer fehlt die Rolle „Planung“. Die Entscheidung trifft zentral `rollbackProposal` in `src/runner/rollback.ts`; die Oberfläche zeigt sie nur an.
+- **Auslösen:** Bestätigungsdialog nennt Ziel- und Ausgangstag sowie neuere Migrationen. `POST /api/bugs/:id/rollback` mit `{ toTag }` – ohne passenden Zieltag 400/409, nichts wird ausgelöst. Rechte wie „Live schalten“ (Rolle `plan`, Git-Prüfung `go_live`). Ein eindeutiger Index lässt je Projekt nur einen offenen Rollback zu.
+- **Ausführen:** Der Worker (`processRollback`) wartet, bis keine Agents laufen und kein Deploy läuft, checkt den Tag im Projektordner aus (nur sauber, nicht auf einem Auftrags-Branch) und ruft `deployProject` mit denselben Deploy-Befehlen auf. Kein neuer Shell-Befehl.
+- **Protokoll:** `production_rollbacks` (Projekt, Bug, Ausgangs- und Zieltag, angefordert von, Zeitpunkte, Status, Ergebnistext – auch bei Fehlern ohne einzelnen gescheiterten Befehl). Sichtbar im Bug-Detail „Betrieb“ unter „Rollback-Protokoll“, Push-Meldung nach Abschluss.
+- **Migrationen:** Beim Deploy werden Migrationsdateien erfasst, die seit dem vorherigen Tag hinzukamen oder geändert wurden (`production_deploys.new_migrations`). Der Vorschlag warnt damit; die Datenbank wird **nicht** zurückgesetzt.
+- **Bug-Status:** Bleibt unverändert offen; ob behoben, entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag; das nächste „Live schalten“ zieht ihn wieder auf `main`.
+
+### Geänderte Dateien und Tests (Ausbaustufe 4)
+
+- **Backend:** `src/runner/rollback.ts` (neu: `rollbackProposal`, `processRollback`), `src/runner/deploy.ts` (Sprint-Tag und neue Migrationen je Deploy, Markierung `deploy_started_at`), `src/runner/git-sync.ts` und `git-sync/git-helpers.ts` (`previousSprintTag`), `src/runner/production-events.ts`, `src/runner/runner-cli.ts` (Heartbeat), `src/api/production.ts` (Vorschlag und `POST /api/bugs/:id/rollback`), `src/db/migrations.ts` (Tabelle `production_rollbacks`, neue Spalten).
+- **Oberfläche:** `production-detail.component.html/.ts`, `core/models.ts`, `styles/19-production.css` (nur Bug-Detail „Betrieb“).
+- **Tests:** `src/runner/rollback.test.ts` (Zieltag: Vorgänger, kein Tag, Tag außerhalb des 30-Minuten-Fensters, gesperrte Fälle), `src/api/production-rollback.test.ts`, `git-sync.test.ts`, `migrations.test.ts`. Die Tests räumen ihre Daten auf.
+- **Beachten:**
+  - Die Oberfläche hat weder Komponenten- noch E2E-Test (`npm run test:e2e` lief nicht). Knopf, Dialog und Protokoll im Bug-Detail vor der Freigabe in der Vorschau prüfen.
+  - Ein Rollback setzt die Datenbank nicht zurück. Neuere Migrationen erscheinen nur als Warnung im Dialog (offener Punkt für den Entwickler).
