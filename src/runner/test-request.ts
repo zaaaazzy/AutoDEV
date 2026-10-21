@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree, withProjectLock } from '../core/project-lock.js';
+import { adminDatabaseUrl } from '../core/local-database.js';
 import { sendPush } from '../core/push.js';
 import { fileBugs, stepBug } from '../core/test-bugs.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
@@ -76,6 +77,23 @@ export function fullTestCommand(project: string, request: Claimed): string[] {
   ];
 }
 
+/**
+ * Zusätzliche Variablen für den Komplettlauf: test:full schreibt den Lauf in die AIdeation-Datenbank und der
+ * E2E-Webserver legt daneben seine eigene Testdatenbank an. Nur diese beiden Zugänge kommen zur gefilterten
+ * Umgebung hinzu (kein Secret Key, keine anderen DEV_LOG_*-Werte). Ohne DEV_LOG_DATABASE_URL im Worker nichts.
+ */
+export function fullTestExtraEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const databaseUrl = source.DEV_LOG_DATABASE_URL?.trim();
+  if (!databaseUrl) return {};
+  let admin = source.E2E_ADMIN_DATABASE_URL?.trim() || source.DEV_LOG_ADMIN_DATABASE_URL?.trim();
+  try {
+    admin ||= adminDatabaseUrl(databaseUrl);
+  } catch {
+    // Unlesbare Adresse: kein Admin-Ziel, der E2E-Webserver liest es dann selbst aus der .env.
+  }
+  return { DEV_LOG_DATABASE_URL: databaseUrl, ...(admin ? { E2E_ADMIN_DATABASE_URL: admin } : {}) };
+}
+
 /** Die aussagekräftigen letzten Zeilen einer Ausgabe (ohne Leerzeilen), für die Statuszeile der Anforderung. */
 export function failureTail(output: string): string {
   const lines = output
@@ -120,7 +138,7 @@ export async function processTestRequest(
         const outcome = await runProjectCommand(
           fullTestCommand(options.project, request),
           options.cwd,
-          { timeoutMs: TEST_TIMEOUT_MS },
+          { timeoutMs: TEST_TIMEOUT_MS, extraEnv: fullTestExtraEnv() },
           execute,
         );
         const linked = (

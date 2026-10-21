@@ -8,7 +8,8 @@
  *   npm run test:full -- --nur-oberflaeche     nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
  *   npm run test:full -- --projekt devlog --bugs   Befunde zusätzlich als Bugs anlegen (Quelle „Testlauf“)
  *
- * Datenbank für --projekt: DEV_LOG_DATABASE_URL, sonst die lokale aus docker-compose (127.0.0.1:5433).
+ * Datenbank für --projekt: DEV_LOG_DATABASE_URL, sonst die lokale aus docker-compose (127.0.0.1:5433) mit dem
+ * Zugang aus der .env (DEV_LOG_DB_USER, DEV_LOG_DB_PASSWORD).
  */
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -27,6 +28,7 @@ import {
   type TestCategory,
 } from '../src/core/test-results.js';
 import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
+import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
 import { createDatabasePool, readDatabaseConfig } from '../src/db/database.js';
 import {
   createTestRun,
@@ -58,7 +60,8 @@ const TEMP = join(tmpdir(), `dev-log-test-full-${stamp}`);
 const OUT = join(ROOT, 'docs', 'tests', stamp);
 const MEDIA = join(OUT, 'media');
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-const LOCAL_DATABASE = 'postgresql://devlog:devlog_local_dev@127.0.0.1:5433/aideation';
+// Zugang aus der .env (DEV_LOG_DB_USER/DEV_LOG_DB_PASSWORD), sonst der Standard aus docker-compose.
+const LOCAL_DATABASE = localDatabaseUrl(readEnvValues(ROOT));
 
 type Step = {
   name: string;
@@ -162,11 +165,15 @@ function run(
 ): Promise<{ ok: boolean; output: string }> {
   return new Promise((resolve) => {
     let output = '';
+    // Die Schritte brauchen die AIdeation-Datenbank nicht (nur der Recorder), wohl aber das Admin-Ziel für E2E.
+    const environment = { ...process.env };
+    delete environment.DEV_LOG_DATABASE_URL;
     const child = spawn(command, args, {
       cwd: ROOT,
       shell: process.platform === 'win32',
       env: {
-        ...process.env,
+        ...environment,
+        E2E_ADMIN_DATABASE_URL: process.env.E2E_ADMIN_DATABASE_URL ?? adminDatabaseUrl(LOCAL_DATABASE),
         FORCE_COLOR: '0',
         // nur für den E2E-Schritt: die Umgebungsvariable hat bei Playwright Vorrang vor der Konfiguration
         ...(args.includes('e2e/playwright.config.ts') ? { PLAYWRIGHT_JSON_OUTPUT_FILE: E2E_JSON } : {}),
