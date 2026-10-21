@@ -154,6 +154,9 @@
       <header class="topbar">
         <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>AIdeation</strong></div>
         <app-project-switcher (create)="showProjectForm.set(true)" />
+        @if (store.currentProject()?.reviewCommand?.length) {
+          <app-header-review />
+        }
         <div class="topbar-status">
           <div class="agent-indicator">
             <a

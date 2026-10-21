@@ -51,9 +51,12 @@ export async function syncSprintCommits(
     const result = await execute(['git', ...args], cwd, { timeoutMs: 15_000 });
     return result.exitCode === 0 ? result.output.trim() : null;
   };
+  // Laufende Sprints zuerst, geplante gar nicht (sie haben noch keine Stände): Sonst schieben vorab angelegte Sprints
+  // den aktiven Sprint aus dem Fenster und seine Auswahl bleibt auf einem alten Stand stehen.
   const sprints = (
     await pool.query<{ id: string; name: string }>(
-      `SELECT id, name FROM sprints WHERE project_slug = $1 ORDER BY created_at DESC LIMIT ${SPRINTS}`,
+      `SELECT id, name FROM sprints WHERE project_slug = $1 AND status <> 'planned'
+        ORDER BY (status IN ('active', 'review')) DESC, created_at DESC LIMIT ${SPRINTS}`,
       [project],
     )
   ).rows;
