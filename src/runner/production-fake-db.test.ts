@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 
 /**
  * Testhilfe (keine eigenen Tests): Speicher für die Tabellen des Produktions-Rückkanals, der genau die Anweisungen
@@ -39,6 +40,8 @@ export interface FakeBug {
   category: string | null;
   fixNotes: string;
   regressedAt: Date | null;
+  /** Freigabe durch einen Menschen (fremde Quellen). */
+  approvedAt?: Date | null;
 }
 export interface FakeOrder {
   id: string;
@@ -215,6 +218,7 @@ export class FakeProductionDb {
         regressedAt: v[1],
         severity: v[2],
         fixNotes: bug.fixNotes ? `${bug.fixNotes}\n\n${v[3]}` : v[3],
+        ...(text.includes('approved_at = NULL') ? { approvedAt: null } : {}),
       });
       return rows([]);
     }
@@ -271,6 +275,9 @@ export class FakeProductionDb {
     if (text.startsWith('INSERT INTO development_items')) {
       const bug = this.bugs.find((entry) => entry.id === v[0])!;
       if (this.orders.some((order) => order.bugId === bug.id)) return rows([]);
+      // Wie die Bedingung in queueBugFix: fremde, nicht freigegebene Bugs bekommen keinen Auftrag.
+      const gated = text.includes(unapprovedBugSql('b'));
+      if (gated && isUntrustedBugSource(bug.source) && !bug.approvedAt) return { rows: [], rowCount: 0 };
       this.orders.push({
         id: this.id(),
         project: bug.project,

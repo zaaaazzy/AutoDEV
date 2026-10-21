@@ -6,6 +6,7 @@ import { materializeAgentCommands } from '../agent/tool-permissions.js';
 import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
 import type { Response, Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import {
   buildUpdate,
   isRecord,
@@ -156,7 +157,7 @@ export async function ensureDefaultAgents(pool: Pool, slug: string): Promise<voi
 }
 
 export function registerAgentRoutes(app: Router, pool: Pool): void {
-  app.get('/system-agents', async (_request, response) => {
+  app.get('/system-agents', access({ tenant: 'global' }), async (_request, response) => {
     const row = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'system_agents'`))
       .rows[0];
     const models = (await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'ollama_models'`))
@@ -177,7 +178,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     });
   });
 
-  app.put('/system-agents/:role', async (request, response) => {
+  app.put('/system-agents/:role', access({ role: 'admin', tenant: 'admin' }), async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
     const body = (request.body ?? {}) as { model?: unknown; command?: unknown; allowTools?: unknown };
     const model = body.model;
@@ -216,7 +217,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
   });
 
   // Workflow order: phase (pre, while, after), then position.
-  app.get('/projects/:slug/agents', async (request, response) => {
+  app.get('/projects/:slug/agents', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -230,7 +231,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.json({ agents: result.rows });
   });
 
-  app.post('/projects/:slug/agents', async (request, response) => {
+  app.post('/projects/:slug/agents', access({ role: 'agents', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, AGENT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -266,42 +267,46 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ agent: result.rows[0] });
   });
 
-  app.post('/projects/:slug/agents/defaults', async (request, response) => {
-    const slug = parseProjectSlug(request.params.slug ?? '');
-    if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
-      return;
-    }
-    const result = await pool.query(
-      `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
+  app.post(
+    '/projects/:slug/agents/defaults',
+    access({ role: 'agents', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) {
+        response.status(400).json({ message: 'Invalid project slug.' });
+        return;
+      }
+      const result = await pool.query(
+        `INSERT INTO agents (project_slug, name, role, phase, position, instructions)
        SELECT $1, d.name, d.role, d.phase, d.ord, d.instructions
          FROM unnest($2::text[], $3::text[], $4::text[], $5::text[]) WITH ORDINALITY AS d(name, role, phase, instructions, ord)
         WHERE NOT EXISTS (SELECT 1 FROM agents WHERE project_slug = $1)
        RETURNING ${AGENT_COLUMNS}`,
-      [
-        slug,
-        DEFAULT_AGENTS.map((agent) => agent.name),
-        DEFAULT_AGENTS.map((agent) => agent.role),
-        DEFAULT_AGENTS.map((agent) => agent.phase),
-        DEFAULT_AGENTS.map((agent) => agent.instructions),
-      ],
-    );
-    if (result.rows.length) {
-      await seedDefaultActions(pool, slug).catch(logged('agents'));
-      await materializeAgentCommands(pool, slug).catch(logged('agents'));
-    }
-    // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
-    await pool.query(
-      `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
+        [
+          slug,
+          DEFAULT_AGENTS.map((agent) => agent.name),
+          DEFAULT_AGENTS.map((agent) => agent.role),
+          DEFAULT_AGENTS.map((agent) => agent.phase),
+          DEFAULT_AGENTS.map((agent) => agent.instructions),
+        ],
+      );
+      if (result.rows.length) {
+        await seedDefaultActions(pool, slug).catch(logged('agents'));
+        await materializeAgentCommands(pool, slug).catch(logged('agents'));
+      }
+      // Hat das Projekt schon Workflow-Schritte, kommen die neuen Standard-Agents dort an ihre Stelle.
+      await pool.query(
+        `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
        SELECT a.project_slug, a.phase, a.position, a.id FROM agents a
         WHERE a.project_slug = $1 AND a.id = ANY($2::uuid[])
           AND EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)`,
-      [slug, result.rows.map((row: { id: string }) => row.id)],
-    );
-    response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
-  });
+        [slug, result.rows.map((row: { id: string }) => row.id)],
+      );
+      response.status(result.rows.length ? 201 : 200).json({ agents: result.rows });
+    },
+  );
 
-  app.post('/projects/:slug/agents/order', async (request, response) => {
+  app.post('/projects/:slug/agents/order', access({ role: 'agents', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     if (
@@ -326,7 +331,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.status(204).end();
   });
 
-  app.patch('/agents/:id', async (request, response) => {
+  app.patch('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -355,7 +360,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     response.json({ agent: result.rows[0] });
   });
 
-  app.delete('/agents/:id', async (request, response) => {
+  app.delete('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

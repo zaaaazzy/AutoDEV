@@ -223,6 +223,19 @@ export class BugsComponent {
     await this.store.perform(() => this.api.patch(`/api/bugs/${encodeURIComponent(id)}`, values), 'Bug aktualisiert.');
   }
 
+  /** Bugs aus Betrieb oder GitHub enthalten fremden Text; Agents bearbeiten sie erst nach der Freigabe. */
+  protected awaitsApproval(bug: Bug): boolean {
+    return (bug.source === 'production' || bug.source === 'github') && !bug.approvedAt;
+  }
+
+  protected async approveBug(id: string): Promise<void> {
+    if (!globalThis.confirm('Beschreibung geprüft? Erst nach der Freigabe arbeiten Agents an diesem Bug.')) return;
+    await this.store.perform(
+      () => this.api.post(`/api/bugs/${encodeURIComponent(id)}/approve`, {}),
+      'Bug für Agents freigegeben.',
+    );
+  }
+
   protected async deleteBug(id: string): Promise<void> {
     if (!globalThis.confirm('Bug löschen?')) return;
     await this.store.perform(() => this.api.delete(`/api/bugs/${encodeURIComponent(id)}`), 'Bug gelöscht.');

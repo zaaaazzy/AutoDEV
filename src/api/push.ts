@@ -1,11 +1,12 @@
 import type { Principal } from './roles.js';
 import type { Router } from 'express';
+import { access } from './access.js';
 import type { Pool } from 'pg';
 import { sendPush, vapidKeys } from '../core/push.js';
 
 /** Geräte für Push-Nachrichten an- und abmelden, Testnachricht senden. */
 export function registerPushRoutes(app: Router, pool: Pool): void {
-  app.get('/push/key', async (_request, response, next) => {
+  app.get('/push/key', access({ tenant: 'global' }), async (_request, response, next) => {
     try {
       response.json({ publicKey: (await vapidKeys(pool)).publicKey });
     } catch (error) {
@@ -13,7 +14,7 @@ export function registerPushRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/push/subscribe', async (request, response, next) => {
+  app.post('/push/subscribe', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const body = (request.body ?? {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
       const endpoint = typeof body.endpoint === 'string' ? body.endpoint : '';
@@ -45,7 +46,7 @@ export function registerPushRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/push/unsubscribe', async (request, response, next) => {
+  app.post('/push/unsubscribe', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const endpoint = (request.body as { endpoint?: unknown } | undefined)?.endpoint;
       if (typeof endpoint === 'string')
@@ -56,7 +57,7 @@ export function registerPushRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/push/test', async (_request, response, next) => {
+  app.post('/push/test', access({ role: null, tenant: 'global' }), async (_request, response, next) => {
     try {
       const principal = response.locals.principal as Principal | undefined;
       const sent = await sendPush(

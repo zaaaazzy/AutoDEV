@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { generatedDocs } from './generated-docs.js';
 import { publicBaseUrl } from './production-snippets.js';
 import type { Principal } from './roles.js';
@@ -90,7 +91,7 @@ export async function syncRepoDocs(pool: Pool, projectSlug: string, cwd: string)
 }
 
 export function registerDocRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/docs', async (request, response) => {
+  app.get('/projects/:slug/docs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -112,7 +113,7 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
     response.json({ docs: [...result.rows, ...generated] });
   });
 
-  app.post('/projects/:slug/docs', async (request, response) => {
+  app.post('/projects/:slug/docs', access({ role: 'docs', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, DOC_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -137,7 +138,7 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ doc: result.rows[0] });
   });
 
-  app.patch('/docs/:id', async (request, response) => {
+  app.patch('/docs/:id', access({ role: 'editor', tenant: 'docs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -156,7 +157,7 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
     response.json({ doc: result.rows[0] });
   });
 
-  app.delete('/docs/:id', async (request, response) => {
+  app.delete('/docs/:id', access({ role: 'editor', tenant: 'docs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

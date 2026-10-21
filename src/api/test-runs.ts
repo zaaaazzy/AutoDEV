@@ -1,10 +1,11 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { categoryOfCommand } from '../core/test-results.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 
 export function registerTestRunRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/test-runs', async (request, response) => {
+  app.get('/projects/:slug/test-runs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -60,7 +61,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
     });
   });
 
-  app.get('/projects/:slug/test-runs/:id/cases', async (request, response) => {
+  app.get('/projects/:slug/test-runs/:id/cases', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug || !isUuid(request.params.id)) {
       response.status(400).json({ message: 'Invalid test run.' });
@@ -90,7 +91,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
   });
 
   // Screenshots und Videos; Videos mit Range-Anfragen, damit der Browser darin springen kann.
-  app.get('/test-media/:id', async (request, response) => {
+  app.get('/test-media/:id', access({ tenant: 'test-media' }), async (request, response) => {
     const result = isUuid(request.params.id)
       ? await pool.query<{ mime: string; data: Buffer }>(`SELECT mime, data FROM test_media WHERE id = $1`, [
           request.params.id,

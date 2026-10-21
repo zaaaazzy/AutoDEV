@@ -258,6 +258,9 @@ export interface Bug {
   externalRef?: string | null;
   /** Betriebs-Bug, der nach dem Beheben wieder auftrat. */
   regressedAt?: string | null;
+  /** Freigabe für Agents (nur Bugs aus Betrieb oder GitHub): wann und von wem. */
+  approvedAt?: string | null;
+  approvedBy?: string | null;
   /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
   productionCount?: number | null;
 }

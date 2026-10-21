@@ -3,6 +3,7 @@ import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } fr
 import { promisify } from 'node:util';
 import type { Router, Request, RequestHandler, Response } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import QRCode from 'qrcode';
 import { isRole, type Principal, type Role } from './roles.js';
 import { FailureLimiter, fullPath } from './security.js';
@@ -277,7 +278,7 @@ async function findAccount(
 
 /** Öffentliche Anmelde-Routen; vor requireCredentials registrieren. */
 export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, limiter: FailureLimiter): void {
-  app.get('/session', async (request, response, next) => {
+  app.get('/session', access({ tenant: 'global' }), async (request, response, next) => {
     try {
       const token = sessionToken(request);
       const principal = token ? await sessionPrincipal(pool, auth, token) : null;
@@ -293,7 +294,7 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
     }
   });
 
-  app.post('/login', async (request, response, next) => {
+  app.post('/login', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const body = (request.body ?? {}) as Record<string, unknown>;
       const client = attemptKey(request.ip, body.username);
@@ -338,7 +339,7 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
     }
   });
 
-  app.post('/logout', async (request, response, next) => {
+  app.post('/logout', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const token = sessionToken(request);
       if (token) await pool.query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashToken(token)]);
@@ -421,7 +422,7 @@ export function registerSecurityRoutes(
     return true;
   };
 
-  app.get('/auth/status', async (request, response, next) => {
+  app.get('/auth/status', access({ tenant: 'global' }), async (request, response, next) => {
     try {
       const principal = principalOf(response);
       const sessions = await pool.query<{ count: string }>(
@@ -439,7 +440,7 @@ export function registerSecurityRoutes(
     }
   });
 
-  app.post('/auth/totp/setup', async (request, response, next) => {
+  app.post('/auth/totp/setup', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const principal = principalOf(response);
       if (!(await confirmIdentity(principal, request.body, response, true))) return;
@@ -461,7 +462,7 @@ export function registerSecurityRoutes(
     }
   });
 
-  app.post('/auth/totp/enable', async (request, response, next) => {
+  app.post('/auth/totp/enable', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const principal = principalOf(response);
       if (!(await confirmIdentity(principal, request.body, response, false))) return;
@@ -504,7 +505,7 @@ export function registerSecurityRoutes(
     }
   });
 
-  app.post('/auth/totp/disable', async (request, response, next) => {
+  app.post('/auth/totp/disable', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const principal = principalOf(response);
       const secret = await totpOf(principal);
@@ -525,7 +526,7 @@ export function registerSecurityRoutes(
     }
   });
 
-  app.post('/auth/logout-others', async (request, response, next) => {
+  app.post('/auth/logout-others', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const token = sessionToken(request);
       const result = await pool.query(
