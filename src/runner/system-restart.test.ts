@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { CommandExecutor } from '../core/command.js';
-import { completeRestart, processRestart, readRestart, requestRestart, RESTART_COMMAND } from './system-restart.js';
+import {
+  completeRestart,
+  composeEnvironment,
+  processRestart,
+  readRestart,
+  requestRestart,
+  RESTART_COMMAND,
+} from './system-restart.js';
 
 /** app_settings im Speicher: genug für SELECT value … WHERE key und INSERT … ON CONFLICT. */
 function memoryPool() {
@@ -167,6 +174,72 @@ test('Neustart scheitert schon vor dem Bau (falscher Branch): genau eine Benachr
       : ok(command, cwd);
   assert.equal(await processRestart(pool, '/x', () => 0, feature, undefined, { notify, branch: 'main' }), 'failed');
   assert.deepEqual(seen, ['failed']);
+});
+
+test('Neustart und Rollback: Compose läuft ohne DEV_LOG_*/COMPOSE_* aus der Worker-Umgebung, damit die .env gilt', async () => {
+  const keys = ['DEV_LOG_SECRET_KEY', 'DEV_LOG_PROJECT_ROOTS', 'COMPOSE_PROJECT_NAME', 'AIDEATION_TEST_MARKER'];
+  const saved = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  // Worker ohne Schlüssel installiert: leerer Wert würde bei Compose die .env überdecken.
+  process.env.DEV_LOG_SECRET_KEY = '';
+  process.env.DEV_LOG_PROJECT_ROOTS = '/platzhalter/projekte';
+  process.env.COMPOSE_PROJECT_NAME = 'platzhalter';
+  process.env.AIDEATION_TEST_MARKER = 'bleibt';
+  try {
+    const pool = memoryPool();
+    const calls: { command: string[]; env: NodeJS.ProcessEnv | undefined }[] = [];
+    const execute: CommandExecutor = async (command, cwd, options) => {
+      calls.push({ command, env: options?.env });
+      if (command.includes('images'))
+        return {
+          exitCode: 0,
+          durationMs: 1,
+          output: '[{"ID":"sha256:abc","Repository":"devlog-dev-log","Tag":"latest"}]',
+        };
+      return ok(command, cwd);
+    };
+    await requestRestart(pool, 'Patrick');
+    // Der neue Stand antwortet nie: Neubau und Rollback werden beide ausgeführt.
+    const result = await processRestart(pool, '/srv', () => 0, execute, undefined, {
+      health: async () => false,
+      healthTimeoutMs: 0,
+      healthIntervalMs: 0,
+    });
+    assert.equal(result, 'failed');
+    const compose = calls.filter((call) => call.command[1] === 'compose');
+    assert.deepEqual(
+      compose.map((call) => call.command.slice(2, 4).join(' ')),
+      ['images dev-log', 'up -d', 'up -d'],
+      'images, Neubau und Rollback',
+    );
+    assert.ok(compose.some((call) => call.command.join(' ') === RESTART_COMMAND.join(' ')));
+    assert.ok(compose.some((call) => call.command.includes('--no-build')));
+    for (const call of compose) {
+      assert.ok(call.env, `${call.command.join(' ')} bekommt eine eigene Umgebung`);
+      const leaked = Object.keys(call.env).filter((key) => /^(DEV_LOG|COMPOSE)_/i.test(key));
+      assert.deepEqual(leaked, [], `${call.command.join(' ')} ohne DEV_LOG_*/COMPOSE_*`);
+      assert.equal(call.env.AIDEATION_TEST_MARKER, 'bleibt', 'übrige Umgebung (PATH, DOCKER_HOST …) bleibt');
+    }
+    // Gegenprobe: docker tag liest keine .env und läuft unverändert.
+    const tag = calls.find((call) => call.command[1] === 'tag');
+    assert.ok(tag);
+    assert.equal(tag.env, undefined);
+  } finally {
+    for (const key of keys) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  }
+});
+
+test('composeEnvironment: entfernt DEV_LOG_* und COMPOSE_* (auch leere Werte), lässt den Rest', () => {
+  const env = composeEnvironment({
+    PATH: '/usr/bin',
+    DOCKER_HOST: 'unix:///platzhalter.sock',
+    DEV_LOG_SECRET_KEY: '',
+    DEV_LOG_DOMAIN: '',
+    COMPOSE_FILE: 'anderes.yml',
+  });
+  assert.deepEqual(env, { PATH: '/usr/bin', DOCKER_HOST: 'unix:///platzhalter.sock' });
 });
 
 test('Drain: solange ein Neustart angefordert ist oder gebaut wird, startet der Worker keine neue Arbeit', async () => {
