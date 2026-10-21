@@ -18,7 +18,9 @@
             <span class="status priority-{{ idea.priority }}">Priorität: {{ idea.priority | priorityLabel }}</span>
             <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
             @if (idea.source === 'visionary') {
-              <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">Visionär</span>
+              <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">{{
+                sourceLabel(idea.source)
+              }}</span>
             }
             <app-github-link [ref]="idea.externalRef" />
           </div>

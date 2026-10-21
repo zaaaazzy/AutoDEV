@@ -155,7 +155,7 @@
     <div class="title-with-hint">
       <button type="button" class="link-button clamp" (click)="openIdea.set(idea.id)">{{ idea.title }}</button>
       @if (idea.source === 'visionary') {
-        <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">Visionär</span>
+        <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">{{ sourceLabel(idea.source) }}</span>
       }
       <app-github-link [ref]="idea.externalRef" />
     </div>
