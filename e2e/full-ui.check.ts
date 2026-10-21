@@ -437,26 +437,34 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect(blocked.first()).toBeVisible();
   const first = blocked.first();
   const firstTitle = (await first.locator('.attention-title').textContent())?.trim() ?? '';
-  await button(first, 'Details & bearbeiten').click();
+  // Jede Karte: ein Grund („Warum“), ein nächster Schritt („Was jetzt“); Bearbeiten, Analysieren, Löschen unter „Mehr“.
+  await expect(first.locator('.attention-why')).not.toBeEmpty();
+  await expect(first.locator('.attention-now')).toBeVisible();
+  const more = async (card: ReturnType<Page['locator']>) => {
+    const menu = card.locator('.attention-more');
+    if ((await menu.getAttribute('open')) === null) await menu.locator('summary').click();
+  };
+  await more(first);
+  await button(first, 'Bearbeiten').click();
   await snap(page, info, 'Auftrag Details', false);
   await first.getByRole('combobox').first().selectOption({ label: 'Backlog' });
   await expect(page.locator('.attention-card').filter({ hasText: firstTitle })).toHaveCount(0);
 
   const retry = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' }).first();
   const retryTitle = (await retry.locator('.attention-title').textContent())?.trim() ?? '';
-  await button(retry, 'Erneut versuchen').click();
-  // Erst nach Bestätigung (optional mit Hinweis für die Agents) wird der Auftrag wieder eingeplant.
-  const confirm = page.getByRole('dialog');
-  await expect(confirm).toContainText('erneut versuchen');
-  await confirm.getByRole('button', { name: 'Erneut versuchen' }).click();
-  await expect(page.getByText('Auftrag wird erneut versucht.')).toBeVisible();
+  // Antworten direkt auf der Karte: Der Hinweis geht mit dem erneuten Versuch an die Agents, ohne Zwischendialog.
+  await retry.locator('.attention-answer textarea').fill('Bitte UTC verwenden.');
+  await button(retry, 'Antworten und erneut versuchen').click();
+  await expect(page.getByText('Antwort übernommen – der Auftrag läuft erneut.')).toBeVisible();
   await expect(page.locator('.attention-card').filter({ hasText: retryTitle })).toHaveCount(0);
 
   const analyse = page.locator('.attention-card').filter({ hasText: 'Warenkorb blocked' }).first();
-  await button(analyse, 'Analysieren').click();
-  await expect(analyse).toContainText('Analyse läuft');
+  await more(analyse);
+  await button(analyse, 'Neu analysieren').click();
+  await expect(analyse).toContainText('analysiert gerade');
+  await more(analyse);
   await expect
-    .soft(button(analyse, 'Analysieren'), '„Analysieren“ ist gesperrt, solange die Analyse läuft')
+    .soft(button(analyse, 'Neu analysieren'), '„Neu analysieren“ ist gesperrt, solange die Analyse läuft')
     .toBeDisabled();
   page.once('dialog', (dialog) => void dialog.dismiss());
   await button(analyse, 'Löschen').click();

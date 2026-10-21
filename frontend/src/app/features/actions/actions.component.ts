@@ -4,6 +4,7 @@ import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
+import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
 import { isFinished } from '../../shared/labels.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderQuestionComponent } from '../../shared/order-question.component.js';
@@ -44,42 +45,22 @@ export class ActionsComponent {
   protected readonly isFinished = isFinished;
   protected readonly attention = this.store.attention;
   protected readonly openAttention = signal<string | null>(null);
+  /** Antwort bzw. Hinweis an die Agents je Auftrag, bis „Erneut versuchen“ ihn mitschickt. */
+  private readonly notes = signal<Record<string, string>>({});
 
   constructor() {
-    // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Karte aufklappen und hinscrollen.
+    // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): zur Karte scrollen und sie hervorheben.
+    // Nicht mehr die Bearbeitung aufklappen – die wiederholte sonst alles, was die Karte schon sagt.
     effect(() => {
       const id = this.store.focusId();
       if (!id || !this.store.attentionIds().has(id)) return;
       untracked(() => {
-        this.openAttention.set(id);
         globalThis.setTimeout(
           () => document.getElementById(`order-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
           200,
         );
       });
     });
-  }
-
-  /** Regel, gegen die ein abgelehnter Auftrag verstösst (aus dem Vermerk des Agents). */
-  protected rule(item: DevelopmentItem): string {
-    const vermerk = /\*\*Vermerk[^*]*:\*\*\s*([^\n]+)/.exec(item.failure ?? '')?.[1] ?? '';
-    return vermerk.replace(/^Projektregel\s*–\s*/, '').trim();
-  }
-
-  protected analysisRunning(item: DevelopmentItem): boolean {
-    return item.analysisStatus === 'requested' || item.analysisStatus === 'running';
-  }
-
-  /** Sprintbericht mit dem ToDo-Kapitel des Auftrags (falls der Sprint schon dokumentiert ist). */
-  protected sprintDoc(item: DevelopmentItem): string | null {
-    const sprintId = item.sprintId;
-    return sprintId
-      ? (this.data().docs.find((doc) => doc.kind === 'sprint' && doc.sprintId === sprintId)?.id ?? null)
-      : null;
-  }
-
-  protected openDoc(id: string): void {
-    this.store.navigate('docs', { focus: id });
   }
 
   /** Ohne gestarteten Behebungsauftrag stimmt „an einen Behebungsauftrag delegiert“ nicht: weglassen. */
@@ -89,10 +70,6 @@ export class ActionsComponent {
 
   protected openBug(id: string): void {
     this.store.navigate('bugs', { focus: id });
-  }
-
-  protected retryOrder(item: DevelopmentItem): Promise<void> {
-    return this.orders.retry(item);
   }
 
   protected analyzeOrder(item: DevelopmentItem): Promise<void> {
@@ -113,5 +90,54 @@ export class ActionsComponent {
 
   protected toggle(id: string): void {
     this.openAttention.set(this.openAttention() === id ? null : id);
+  }
+
+  protected note(id: string): string {
+    return this.notes()[id] ?? '';
+  }
+
+  protected setNote(id: string, value: string): void {
+    this.notes.update((notes) => ({ ...notes, [id]: value }));
+  }
+
+  /** Antwortfeld nur, wo eine Antwort den Auftrag weiterbringt (blockiert und neu startbar). */
+  protected canAnswer(item: DevelopmentItem, step: CardStep): boolean {
+    return (
+      item.status === 'blocked' &&
+      item.kind !== 'express' &&
+      this.auth.can('run') &&
+      (step === 'retry' || step === 'suggestion' || step === 'task')
+    );
+  }
+
+  /** Die eine Hauptaktion der Karte; null, wenn es nichts zu klicken gibt (z. B. Behebung läuft). */
+  protected primaryLabel(item: DevelopmentItem, step: CardStep): string | null {
+    const typed = !!this.note(item.id).trim();
+    switch (step) {
+      case 'suggestion':
+        return typed ? 'Mit meiner Anweisung erneut versuchen' : 'So umsetzen lassen';
+      case 'retry':
+      case 'task':
+        if (item.kind === 'express') return null;
+        return this.auth.can('run') ? (typed ? 'Antworten und erneut versuchen' : 'Erneut versuchen') : null;
+      case 'rule':
+        return this.auth.can('run') ? 'Angepasst – erneut versuchen' : null;
+      case 'replan':
+        return this.auth.can('run') ? 'Wieder einplanen' : null;
+      case 'check':
+        return this.auth.can('plan') ? 'Geprüft – alles in Ordnung' : null;
+      default:
+        return null;
+    }
+  }
+
+  protected async primary(item: DevelopmentItem, card: AttentionCard): Promise<void> {
+    if (card.step === 'check') return this.confirmOrder(item);
+    const typed = this.note(item.id).trim();
+    const comment =
+      typed ||
+      (card.step === 'suggestion' && card.detail ? `Bitte so umsetzen (Vorschlag der Analyse): ${card.detail}` : '');
+    await this.orders.retryNow(item, comment || null);
+    this.setNote(item.id, '');
   }
 }

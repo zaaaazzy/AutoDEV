@@ -131,8 +131,13 @@ export function isEnvironmentFailure(output: string): boolean {
  * der Ausgabe als Codeblock ab einer ganzen Zeile. Andere Ausgaben (z. B. die Antwort eines Agents) bleiben, wie sie sind.
  */
 export function failureDetail(output: string): string | null {
+  // Abnahme abgelehnt (Tests grün, aber Kriterien nicht erfüllt): Die Gründe stehen am Ende der Ausgabe und müssen
+  // lesbar bleiben – keine Testzusammenfassung davor, die „alles bestanden“ meldet und den Grund im Protokoll versteckt.
+  if (/^##\s*Abnahme nicht bestanden/m.test(output)) return null;
   const summary = summarizeTestFailure(output.slice(-50_000));
   if (!summary) return null;
+  // Keine roten Tests im gesehenen Ausschnitt: Die Zusammenfassung wäre irreführend (oft ein Teil-Lauf mit „1 Tests“).
+  if (/·\s*0 fehlgeschlagen/.test(summary)) return null;
   const tail = output.trim().slice(-1500);
   const lines = tail.slice(tail.indexOf('\n') + 1).replaceAll('```', "'''");
   return `${summary}\n\n**Ausgabe (Ende):**\n\n\`\`\`text\n${lines}\n\`\`\``;
