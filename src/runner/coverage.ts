@@ -10,7 +10,8 @@ export const COVERAGE_INSTRUCTIONS = `## Testabdeckung (Pflicht für den Tester)
 1. Ermittle pro Bereich des Projekts (z. B. Frontend, Backend, Contracts/Shared) die Testabdeckung. Gibt es ein npm-Skript \`test:coverage\`, nutze zuerst \`npm run test:coverage\`; sonst die Werkzeuge des Projekts (z. B. \`ng test --watch=false --coverage\`, \`tsx --test --experimental-test-coverage\`, \`vitest --coverage\`). Fehlt ein Coverage-Werkzeug, richte es als devDependency ein.
 2. Zähle die Testfälle je Bereich nach Testart: Unit-Tests (isolierte Funktionen/Services), Komponententests (UI-Komponenten mit TestBed o. Ä.), Integrationstests (mehrere Schichten, z. B. HTTP-Route mit Datenbank) und End-to-End-Tests (E2E, Browser über die ganze Anwendung).
 3. Liegt die Zeilenabdeckung eines Bereichs unter ${COVERAGE_TARGET} % oder ist der geänderte Code des Auftrags ungetestet, schreibe gezielt Tests für die ungetesteten, fachlich wichtigen Pfade und miss danach erneut.
-4. Beende deine Antwort mit genau einer Zeile in diesem Format (gültiges JSON in einer Zeile, Prozentwerte als Zahl, unbekannt = null):
+4. Lässt sich die Abdeckung nicht messen (Werkzeug fehlt, Befehl vom Wächter gesperrt), melde die Prozentwerte als null und arbeite weiter – das ist kein Fehler und kein Grund, die Abnahme abzulehnen. AIdeation misst die Abdeckung nach deinem Schritt selbst.
+5. Beende deine Antwort mit genau einer Zeile in diesem Format (gültiges JSON in einer Zeile, Prozentwerte als Zahl, unbekannt = null):
 @@COVERAGE {"summary":"<kurze Zusammenfassung in Markdown, inkl. neu geschriebener Tests und verbleibender Lücken>","areas":[{"area":"Frontend","unit":0,"component":0,"integration":0,"e2e":0,"passed":0,"failed":0,"lines":0,"statements":0,"branches":0,"functions":0}]}`;
 
 export interface CoverageArea {

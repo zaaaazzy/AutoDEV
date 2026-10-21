@@ -89,6 +89,9 @@ Lässt sich ein Punkt grundsätzlich nur durch einen Menschen prüfen (z. B. Log
 auf einem echten Gerät, Einstellungen außerhalb des Projekts), setze "manual":true und beschreibe in "note", was der Mensch
 prüfen oder einstellen muss. Nutze das nie für Punkte, die du mit Tests oder durch Ausführen prüfen könntest.
 Der DoD-Punkt „Alle Akzeptanzkriterien sind erfüllt“ gilt als erfüllt, wenn alle übrigen Kriterien erfüllt sind.
+Die Testabdeckung misst AIdeation nach deinem Schritt selbst. Konntest du sie nicht messen (Werkzeug fehlt, Befehl
+gesperrt), ist das allein kein Grund, einen Punkt als nicht erfüllt zu melden: Ein Punkt wie „durch einen automatischen
+Test belegt“ ist erfüllt, wenn es zu jedem Kriterium einen Test gibt und die Tests grün sind.
 
 Beende die Antwort (nach dem @@COVERAGE-Block) mit genau einer Zeile gültigem JSON:
 @@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"},{"nr":2,"met":false,"manual":true,"note":"Was der Mensch prüfen muss"}],"done":[{"nr":1,"met":true,"note":""}]}`;

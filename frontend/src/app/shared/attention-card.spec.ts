@@ -94,6 +94,15 @@ test('Sätze enden sauber: kein „:.“, richtige Einzahl bei einem weiteren Pu
   const analysis =
     '## Ursache\nDer Aufbau enthält mehrere Lücken im Widerspruch zum Kommentar in review.sh:\n1. .env lesbar\n2. Haupt-DB';
   assert.doesNotMatch(blockedReason({ failure: '', analysis }), /:\.$/);
-  const two = `${ACCEPTANCE.replace('\n```', '\n- DoD 2 „Manuelle Kriterien nur mit Begründung.“: fehlt\n```')}`;
+  // Zweiten Punkt direkt hinter dem ersten einfügen (vor der schliessenden Zeile des Code-Blocks).
+  const cut = ACCEPTANCE.lastIndexOf('\n```');
+  const two = `${ACCEPTANCE.slice(0, cut)}\n- DoD 2 „Manuelle Kriterien nur mit Begründung.“: fehlt${ACCEPTANCE.slice(cut)}`;
   assert.match(blockedReason({ failure: two }), /\(und 1 weiterer Punkt\)$/);
+});
+
+test('Abnahme in einem Code-Block (ältere Meldung): kein leerer zweiter Punkt', () => {
+  assert.equal(
+    blockedReason({ failure: ACCEPTANCE }),
+    'Tester: Abnahme nicht bestanden – Tests grün, aber die Abdeckung konnte nicht gemessen werden',
+  );
 });
