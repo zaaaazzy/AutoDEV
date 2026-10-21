@@ -1,4 +1,41 @@
-import type { DevelopmentStatus, Sprint } from '../../core/models.js';
+import type { Agent, DevelopmentItem, DevelopmentStatus, Sprint } from '../../core/models.js';
+import { isFinished } from '../../shared/labels.js';
+
+/** Wert der Spalte „Agent“ in der Auftragsliste für Aufträge ohne (bekannten) Agent. */
+export const NO_AGENT = 'Ohne Agent';
+
+/** Name des zugeordneten Agents, sonst „Ohne Agent“ (auch wenn der Agent nicht mehr existiert). */
+export function orderAgentName(
+  item: Pick<DevelopmentItem, 'agentId'>,
+  agents: readonly Pick<Agent, 'id' | 'name'>[],
+): string {
+  return agents.find((agent) => agent.id === item.agentId)?.name ?? NO_AGENT;
+}
+
+export interface AgentWorkload {
+  /** Agent-ID, `null` für „Ohne Agent“. */
+  id: string | null;
+  label: string;
+  value: number;
+}
+
+/**
+ * Offene Aufträge (nicht erledigt/abgelehnt) je Agent des Projekts, zuletzt „Ohne Agent“. Die Summe aller
+ * Werte ist die Zahl der offenen Aufträge; Agents ohne offene Aufträge erscheinen mit 0.
+ */
+export function agentWorkload(
+  items: readonly Pick<DevelopmentItem, 'agentId' | 'status'>[],
+  agents: readonly Pick<Agent, 'id' | 'name'>[],
+): AgentWorkload[] {
+  const open = items.filter((item) => !isFinished(item.status));
+  const rows = agents.map((agent) => ({
+    id: agent.id,
+    label: agent.name,
+    value: open.filter((item) => item.agentId === agent.id).length,
+  }));
+  const assigned = rows.reduce((sum, row) => sum + row.value, 0);
+  return [...rows, { id: null, label: NO_AGENT, value: open.length - assigned }];
+}
 
 /** Reihenfolge der Auftrags-Status im Dashboard; enthält jeden Status aus `DevelopmentStatus`. */
 export const ORDER_STATUSES = [

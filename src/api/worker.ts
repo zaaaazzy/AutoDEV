@@ -250,6 +250,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
       agents.push({
         id: ASSISTANT_AGENT_ID,
         name: 'Dashboard-Assistent',
+        role: ASSISTANT_AGENT_ID,
         phase: 'system',
         sprintName: null,
         orderTitle: chat
@@ -270,6 +271,7 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
       agents.push({
         id: VISIONARY_AGENT_ID,
         name: 'Visionär',
+        role: VISIONARY_AGENT_ID,
         phase: 'system',
         sprintName: null,
         orderTitle: visionary

@@ -14,6 +14,16 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Ein per SIGKILL beendeter, verwaister Prozess verschwindet erst, wenn das System ihn abräumt: kurz warten. */
+async function gone(pid: number, waitMs = 2_000): Promise<boolean> {
+  const until = Date.now() + waitMs;
+  while (alive(pid)) {
+    if (Date.now() > until) return false;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return true;
+}
+
 test('Zeitlimit beendet die ganze Prozessgruppe, auch Kindprozesse, die stdout offen halten', async () => {
   const startedAt = Date.now();
   // Ohne Gruppen-Kill lebten die beiden sleep weiter, hielten die Pipe offen, und runCommand käme erst nach 30 s zurück.
@@ -26,7 +36,7 @@ test('Zeitlimit beendet die ganze Prozessgruppe, auch Kindprozesse, die stdout o
   assert.match(result.output, /Process ended by SIGKILL \(timeout or kill\)/);
   const child = Number(/child (\d+)/.exec(result.output)?.[1]);
   assert.ok(child > 0);
-  assert.equal(alive(child), false, 'Hintergrundprozess wurde mit beendet');
+  assert.equal(await gone(child), true, 'Hintergrundprozess wurde mit beendet');
 });
 
 test('ein Enkelprozess ausserhalb der Gruppe hält das Ergebnis nicht auf', async () => {

@@ -67,6 +67,69 @@ test('Alle Bereiche laden ohne seitliches Überlaufen', async ({ page }) => {
   }
 });
 
+test('Dashboard: Agents mit Rolle, Rechten und Aufgabe, Verteilung der offenen Aufträge filtert die Liste', async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto('/#dashboard');
+  const status = page.locator('article.panel').filter({ has: page.getByRole('heading', { name: 'Agent-Status' }) });
+  const developer = status.locator('.agent-row').filter({ has: page.getByRole('img', { name: 'Rolle: Entwickler' }) });
+  await expect(developer).toHaveCount(1);
+  await expect(developer).toContainText('Dateien ändern: ja');
+  await expect(developer).toContainText('Befehle: ja');
+  const author = status.locator('.agent-row').filter({ has: page.getByRole('img', { name: 'Rolle: Auftragsautor' }) });
+  await expect(author).toContainText('Dateien ändern: nein');
+  await expect(author).toContainText('Befehle: nein');
+  // Ohne laufenden Auftrag: „Inaktiv“ bzw. „Worker offline“, je nach Worker.
+  await expect(author.locator('.agent-task')).toHaveText(/^(Inaktiv|Worker offline)$/);
+  // Genau ein Eintrag mit Rollen-Icon je Agent.
+  await expect(status.locator('.agent-row')).toHaveCount(await status.locator('app-role-icon').count());
+
+  // Summe der Balken inkl. „Ohne Agent“ = Kachel „Offene Aufträge“.
+  const workload = page.getByRole('article', { name: 'Offene Aufträge je Agent' });
+  await expect(workload).toBeVisible();
+  const total = Number((await workload.locator('.share-total').textContent())?.match(/\d+/)?.[0]);
+  const card = page.locator('.summary-card').filter({ hasText: 'Offene Aufträge' });
+  expect(total).toBe(Number(await card.locator('strong').textContent()));
+  await workload.locator('.share-key').filter({ hasText: 'Ohne Agent' }).click();
+  await expect(page).toHaveURL(/#development$/);
+  await expect(page.locator('.dt-table tbody tr').filter({ hasText: 'Login-Seite modernisieren' })).toBeVisible();
+  await page.goto('/#dashboard');
+  await workload.locator('.share-key').filter({ hasText: 'Entwickler' }).click();
+  await expect(page).toHaveURL(/#development$/);
+  await expect(page.locator('.dt-table tbody tr').filter({ hasText: 'Login-Seite modernisieren' })).toHaveCount(0);
+});
+
+test('Dashboard: inaktiver Agent zeigt „Worker offline“ bzw. „Inaktiv“, fehlende Rolle ist „Eigene Rolle“', async ({
+  page,
+}) => {
+  let online = false;
+  const agents = [{ id: 'a1', name: 'Ohne Rolle', active: false, sprintName: null, orderTitle: null }];
+  await page.route(/\/api\/projects\/[^/]+\/worker(\?|$)/, (route) =>
+    route.fulfill({ json: { online, worker: null, running: [], agents } }),
+  );
+  await login(page);
+  await page.goto('/#dashboard');
+  const panel = page.locator('article.panel').filter({ has: page.getByRole('heading', { name: 'Agent-Status' }) });
+  const row = panel.locator('.agent-row').filter({ hasText: 'Ohne Rolle' });
+  await expect(row).toHaveCount(1);
+  await expect(row.locator('.agent-task')).toHaveText('Worker offline');
+  await expect(row.getByRole('img', { name: 'Rolle: Eigene Rolle' })).toBeVisible();
+  // Worker kommt online: neu laden statt aufs Polling (10 s) warten; die Route bleibt aktiv.
+  online = true;
+  await page.reload();
+  await expect(row.locator('.agent-task')).toHaveText('Inaktiv');
+});
+
+test('Dashboard: Projekt ohne Agents zeigt „Keine Agents für dieses Projekt“ statt Diagramm', async ({ page }) => {
+  await page.route(/\/api\/projects\/[^/]+\/agents(\?|$)/, (route) => route.fulfill({ json: { agents: [] } }));
+  await login(page);
+  await page.goto('/#dashboard');
+  const workload = page.getByRole('article', { name: 'Offene Aufträge je Agent' });
+  await expect(workload.getByText('Keine Agents für dieses Projekt')).toBeVisible();
+  await expect(workload.locator('.share-key')).toHaveCount(0);
+});
+
 test('Navigation: Menü auf dem Handy, Seitenleiste auf dem Desktop', async ({ page, isMobile }) => {
   await login(page);
   if (isMobile) {
@@ -120,7 +183,8 @@ test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
   await expect(page.getByRole('dialog', { name: 'Benachrichtigungen erlauben' })).toBeVisible();
   await page.getByRole('button', { name: 'Später' }).click();
-  // Zwei-Faktor einrichten verlangt das aktuelle Passwort.
+  // Zwei-Faktor einrichten verlangt das aktuelle Passwort (vorher ist „Einrichten“ gesperrt).
+  await expect(page.getByRole('button', { name: 'Einrichten' })).toBeDisabled();
   await page.getByLabel('Aktuelles Passwort').fill(password);
   await page.getByRole('button', { name: 'Einrichten' }).click();
   await expect(page.getByAltText('QR-Code für die Authenticator-App')).toBeVisible();
@@ -655,9 +719,10 @@ test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuw
   await page.getByRole('button', { name: /Nächsten Sprint vorschlagen/ }).click();
   const card = page.locator('.sprint-proposal');
   await expect(card.getByRole('heading', { name: /Vorschlag für Sprint/ })).toBeVisible();
-  // Der Vorschlag ist aufklappbar; zugeklappt zeigt er nur die Summen.
+  // Der Vorschlag ist aufklappbar und standardmässig zugeklappt (nur Summen, Zustand je Gerät gemerkt).
   const toggle = card.locator('.proposal-toggle');
   if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   const row = card.locator('tbody tr', { hasText: title });
   await expect(row).toContainText('Priorität hoch');
   const box = row.getByRole('checkbox');
