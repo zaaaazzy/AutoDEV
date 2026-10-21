@@ -111,17 +111,15 @@ test('scheitert der Wechsel auf den Sprint-Branch, startet der Auftrag nicht (ke
   assert.equal(git('branch', '--list', 'auftrag/*'), '');
 });
 
-test('scheitert ein Commit-Hook, bleibt nichts Gestagtes für den nächsten Auftrag liegen', async () => {
+test('Hooks des Projekts laufen beim Commit nicht, nichts bleibt gestagt', async () => {
   const { cwd, git } = await project();
   const branch = await enterOrderBranch(cwd, item, 'Sprint 1');
   assert.ok(branch);
   await writeFile(join(cwd, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
   await writeFile(join(cwd, 'login.ts'), 'export {};\n');
-  const result = await finishOrderBranch(cwd, item, branch, 'Sprint 1', true);
-  assert.equal(result.merged, false);
-  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1');
+  await finishOrderBranch(cwd, item, branch, 'Sprint 1', true);
   assert.equal(git('status', '--porcelain'), '');
-  assert.match(git('log', '-1', '--format=%s', branch.branch), /^wip\(/);
+  assert.equal(git('log', '--all', '--format=%s', '--', 'login.ts').includes('wip('), false);
 });
 
 test('eine Markdown-Zeile „=======“ ist kein Konfliktmarker', async () => {

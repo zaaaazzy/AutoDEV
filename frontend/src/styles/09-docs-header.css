@@ -343,10 +343,14 @@
   color: var(--ink);
   text-align: left;
 }
-.switcher-item:hover,
+.switcher-item:hover {
+  background: #f3f6f2;
+}
+/* Fokus-Ring nach innen, sonst schneidet das Menü ihn ab. */
 .switcher-item:focus-visible {
   background: #f3f6f2;
-  outline: none;
+  outline: 2px solid var(--orange);
+  outline-offset: -2px;
 }
 .switcher-item.active {
   background: #eef6f1;

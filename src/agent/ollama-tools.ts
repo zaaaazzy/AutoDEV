@@ -2,6 +2,7 @@ import { copyFile, mkdir, readFile, readdir, realpath, stat, writeFile } from 'n
 import { dirname, join, relative } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { withProjectLock } from '../core/project-lock.js';
+import { projectEnvironment } from '../runner/project-command.js';
 import {
   DATABASE_COMMAND,
   isAllowedCommand,
@@ -10,9 +11,8 @@ import {
   withIgnoreScripts,
   composeViolation,
   COMPOSE_STARTING,
-  SECRET_IN_COMMAND,
 } from './tool-permissions.js';
-import { fileProblem, type GuardPolicy } from './agent-guard.js';
+import { bashProblem, fileProblem, type GuardPolicy } from './agent-guard.js';
 import { runProjectSql, type SqlClientFactory } from './tool-sql.js';
 import type { ToolCall } from './ollama-types.js';
 import { MAX_FILE_BYTES, SECRET_NAME, SKIPPED_DIRECTORIES, resolveInside, walkText } from './tool-paths.js';
@@ -49,10 +49,11 @@ async function backup(context: ToolContext, target: string): Promise<void> {
   });
 }
 
+// Ohne Dateirechte fail-closed: kein Schreiben (sonst griffen weder geschützte Pfade noch Ordner-Einschränkung).
 const filesProblem = (context: ToolContext, tool: string, target: string): string | null =>
   context.files
     ? fileProblem({ tool_name: tool, tool_input: { file_path: target } }, context.files, context.cwd)
-    : null;
+    : 'Dateien schreiben ist ohne Dateirechte des Agents nicht erlaubt.';
 
 /** Executes one tool call; failures are returned as text so the model can correct itself. */
 export async function executeTool(context: ToolContext, call: ToolCall): Promise<string> {
@@ -133,9 +134,18 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         if (!context.canWrite) {
           return 'Befehle sind für diese Rolle nicht erlaubt.';
         }
-        if (SECRET_IN_COMMAND.test(command)) {
-          return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind nicht erlaubt.';
-        }
+        const parts = command.split(/\s+/);
+        const executed = withIgnoreScripts(parts);
+        // Derselbe Wächter wie bei der Claude-CLI (Geheimnisse, npm-/Git-Optionen, Wrapper, Shell-Konstrukte). Er
+        // verlangt --ignore-scripts direkt nach dem Unterbefehl; ausgeführt wird es am Ende (bei npm gewinnt die letzte
+        // Angabe). Compose-Starts prüft der Pfad unten asynchron. Einzige Ausnahme: „git clone <https/ssh-URL> [ordner]“
+        // des Assistenten – ohne Optionen und Shell-Zeichen (isAssistantServiceCommand), also ohne -u/--upload-pack.
+        const checked =
+          executed.length > parts.length ? [...parts.slice(0, 2), '--ignore-scripts', ...parts.slice(2)] : parts;
+        const assistantClone =
+          context.canManageServices === true && parts[1] === 'clone' && isAssistantServiceCommand(command);
+        const problem = assistantClone ? null : bashProblem(checked.join(' '), context.cwd, null);
+        if (problem) return problem;
         if (context.commands && !rulesAllow(context.commands, command)) {
           return `„${command}“ ist für diesen Agent nicht freigegeben (Rechte des Agents).`;
         }
@@ -151,6 +161,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           if (COMPOSE_STARTING.test(command)) {
             const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, {
               timeoutMs: 60_000,
+              env: projectEnvironment(context.cwd),
             });
             const reason =
               check.exitCode === 0
@@ -159,9 +170,10 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
             if (reason)
               return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
           }
-          const result = await context.execute(withIgnoreScripts(command.split(/\s+/)), context.cwd, {
+          const result = await context.execute(executed, context.cwd, {
             timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
-            env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('DEV_LOG_'))),
+            // Befehle des Assistenten sind Projektcode: nur das gefilterte Environment (Allowlist).
+            env: projectEnvironment(context.cwd),
           });
           return clip(
             `Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`,

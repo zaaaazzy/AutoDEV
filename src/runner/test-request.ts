@@ -6,7 +6,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree, withProjectLock } from '../core/project-lock.js';
 import { sendPush } from '../core/push.js';
 import { fileBugs, stepBug } from '../core/test-bugs.js';
-import { agentEnvironment } from './runner-prompts.js';
+import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
 
@@ -28,7 +28,7 @@ interface Claimed {
  * Liefert den Branch, auf dem der Worktree vorher stand (für restoreBranch), sonst null.
  */
 export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<string | null> {
-  const git = (...args: string[]) => execute(['git', ...args], cwd, { timeoutMs: 60_000 });
+  const git = (...args: string[]) => execute(['git', ...args], cwd, { timeoutMs: 60_000, env: gitEnvironment() });
   // Nur in einem verknüpften Worktree (eigenes Git-Verzeichnis ≠ gemeinsames), unabhängig vom Ordnernamen.
   const dirs = await git('rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir');
   const [own, common] = dirs.output.trim().split('\n');
@@ -44,7 +44,7 @@ export async function useLatestMain(cwd: string, execute: CommandExecutor): Prom
 /** Nach dem Test zurück auf den Branch von vorher, damit der nächste Auftrag nicht von einem losgelösten Stand startet. */
 export async function restoreBranch(cwd: string, branch: string | null, execute: CommandExecutor): Promise<void> {
   if (!branch) return;
-  const restored = await execute(['git', 'checkout', '-q', branch], cwd, { timeoutMs: 60_000 });
+  const restored = await execute(['git', 'checkout', '-q', branch], cwd, { timeoutMs: 60_000, env: gitEnvironment() });
   if (restored.exitCode !== 0)
     console.error(`Nach dem Test nicht zurück auf ${branch}: ${restored.output.slice(-300)}`);
 }
@@ -117,10 +117,12 @@ export async function processTestRequest(
     const result = await withProjectLock(options.cwd, async () => {
       previous = await useLatestMain(options.cwd, execute);
       if (await hasFullTestScript(options.cwd)) {
-        const outcome = await execute(fullTestCommand(options.project, request), options.cwd, {
-          timeoutMs: TEST_TIMEOUT_MS,
-          env: agentEnvironment(),
-        });
+        const outcome = await runProjectCommand(
+          fullTestCommand(options.project, request),
+          options.cwd,
+          { timeoutMs: TEST_TIMEOUT_MS },
+          execute,
+        );
         const linked = (
           await pool.query<{ runId: string | null }>('SELECT run_id AS "runId" FROM test_requests WHERE id = $1', [
             request.id,
@@ -143,6 +145,7 @@ export async function processTestRequest(
           cwd: options.cwd,
           commands,
           existingProject: true,
+          env: projectEnvironment(options.cwd),
           timeoutMs: TEST_TIMEOUT_MS,
           // Sofort verknüpfen: bei Neustart oder Fehler während der Befehle findet recoverTestRequests den Lauf.
           onRunCreated: async (created) => {

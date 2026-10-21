@@ -1,32 +1,20 @@
 #!/bin/sh
 # Vorschau von AIdeation selbst im Review-Container (Projekt-Einstellung „Review-Befehl“:
-#   sh /source/deploy/review/aideation-review.sh).
-# Läuft ohne Anmeldung und mit einer eigenen, leeren Datenbank (aideation_review_<n>) – echte Daten, Zugänge und
-# Schlüssel kommen nie in die Vorschau. Erreichbar nur auf diesem Rechner (Port des Review-Containers).
+#   sh deploy/review/aideation-review.sh – läuft im ausgecheckten Stand unter /work).
+# Läuft ohne Anmeldung mit der eigenen, leeren Slot-Datenbank (aideation_review_<n>), die der Runner mit dem
+# Review-DB-User anlegt (REVIEW_DATABASE_URL). Dieser User ist kein Superuser und kommt nur an aideation_review_*;
+# der Container sieht weder die .env noch die Haupt-Zugänge noch die Datenbank „postgres“. Fehlt REVIEW_DATABASE_URL,
+# bricht die Vorschau ab statt auf andere Zugänge auszuweichen. Erreichbar nur auf diesem Rechner (Port des Containers).
 set -eu
-env_value() { sed -n "s/^$1=//p" /source/.env 2>/dev/null | tail -n 1; }
-DB_USER="${DEV_LOG_DB_USER:-$(env_value DEV_LOG_DB_USER)}"
-DB_PASSWORD="${DEV_LOG_DB_PASSWORD:-$(env_value DEV_LOG_DB_PASSWORD)}"
-DB_USER="${DB_USER:-devlog}"
-DB_PASSWORD="${DB_PASSWORD:-devlog_local_dev}"
-SLOT_DB="aideation_review_$(( ${REVIEW_PUBLIC_URL##*:} - 4200 ))"
-export DEV_LOG_DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@host.docker.internal:5433/$SLOT_DB"
-export DEV_LOG_ADMIN_DATABASE_URL="postgresql://$DB_USER:$DB_PASSWORD@host.docker.internal:5433/postgres"
+: "${REVIEW_DATABASE_URL:?REVIEW_DATABASE_URL fehlt – im Runner DEV_LOG_REVIEW_DATABASE_URL einrichten (scripts/setup-review-db.sh)}"
+export DEV_LOG_DATABASE_URL="$REVIEW_DATABASE_URL"
+# Der Server prüft beim Start über diese Adresse, ob seine Datenbank existiert – hier die eigene, nie „postgres“.
+export DEV_LOG_ADMIN_DATABASE_URL="$REVIEW_DATABASE_URL"
 export DEV_LOG_AUTH=off
 export DEV_LOG_HOST=0.0.0.0
 export PORT="${REVIEW_FRONTEND_PORT:-4200}"
 
 echo "[aideation-review] Oberfläche bauen"
 npm run build:ui
-# Datenbank hier anlegen statt im Server: ältere Stände legten nur „dev_log“ an, ihre Vorschau brach sonst ab.
-echo "[aideation-review] Datenbank $SLOT_DB anlegen (falls nötig)"
-SLOT_DB="$SLOT_DB" node --input-type=module -e "
-import pg from 'pg';
-const client = new pg.Client({ connectionString: process.env.DEV_LOG_ADMIN_DATABASE_URL });
-await client.connect();
-const { rows } = await client.query('SELECT 1 FROM pg_database WHERE datname = \$1', [process.env.SLOT_DB]);
-if (!rows.length) await client.query('CREATE DATABASE ' + process.env.SLOT_DB);
-await client.end();
-"
-echo "[aideation-review] Server auf :$PORT (Datenbank $SLOT_DB)"
+echo "[aideation-review] Server auf :$PORT (Datenbank ${REVIEW_DATABASE_URL##*/})"
 exec npx tsx src/server.ts

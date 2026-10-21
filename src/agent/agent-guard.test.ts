@@ -41,7 +41,15 @@ test('Wächter: nur erlaubte Ordner, nichts ausserhalb, keine geschützten Pfade
   assert.match(fileProblem(write('docs/../src/x.ts'), docs, root) ?? '', /erlaubten Ordner/);
   assert.match(fileProblem(write('/etc/hosts'), all, root) ?? '', /ausserhalb/);
   assert.match(fileProblem(write('docs/raus/x'), all, root) ?? '', /ausserhalb/);
-  for (const path of ['.claude/settings.json', '.git/config', '.env', 'src/.env.local', '.mcp.json', 'k.pem']) {
+  for (const path of [
+    '.claude/settings.json',
+    '.git/config',
+    '.husky/pre-commit',
+    '.env',
+    'src/.env.local',
+    '.mcp.json',
+    'k.pem',
+  ]) {
     assert.match(fileProblem(write(path), all, root) ?? '', /geschützt/, path);
   }
 });

@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { orderBranch, sprintBranch } from './git-sync.js';
+import { gitEnvironment } from './project-command.js';
 
 /** Ein startbarer Stand eines Sprints: ein gemergter Auftrag im Sprint-Branch oder ein noch offener Auftrags-Branch. */
 export interface SprintCommit {
@@ -48,7 +49,7 @@ export async function syncSprintCommits(
   execute: CommandExecutor = runCommand,
 ): Promise<void> {
   const git = async (...args: string[]) => {
-    const result = await execute(['git', ...args], cwd, { timeoutMs: 15_000 });
+    const result = await execute(['git', ...args], cwd, { timeoutMs: 15_000, env: gitEnvironment() });
     return result.exitCode === 0 ? result.output.trim() : null;
   };
   // Laufende Sprints zuerst, geplante gar nicht (sie haben noch keine Stände): Sonst schieben vorab angelegte Sprints

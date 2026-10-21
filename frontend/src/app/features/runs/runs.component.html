@@ -140,9 +140,11 @@
         </div>
         <ul class="test-findings">
           @for (step of failedChecks(); track step.position) {
-            <li class="clickable" (click)="openFinding($event, null, step.position)">
+            <li class="clickable">
               <div class="test-finding-head">
-                <strong>{{ step.command }}</strong>
+                <button type="button" class="link-button finding-open" (click)="openFailedStep(step.position)">
+                  {{ step.command }}
+                </button>
                 <span class="tag">{{ categoryLabel('quality') }}</span>
                 <span class="status status-failed">Fehlgeschlagen</span>
               </div>
@@ -150,9 +152,11 @@
             </li>
           }
           @for (testCase of findings(); track testCase.id) {
-            <li class="clickable" (click)="openFinding($event, testCase, null)">
+            <li class="clickable">
               <div class="test-finding-head">
-                <button type="button" class="link-button" (click)="showCase(testCase)">{{ testCase.title }}</button>
+                <button type="button" class="link-button finding-open" (click)="showCase(testCase)">
+                  {{ testCase.title }}
+                </button>
                 <span class="tag">{{ categoryLabel(testCase.category) }}</span>
                 <span class="tag">{{ areaOf(testCase) }}</span>
                 <span class="tag">{{ deviceOf(testCase) }}</span>

@@ -1,5 +1,8 @@
 @let sprint = sprintInput();
 <article class="sprint-card">
+  @if (sprint.status === 'active' || sprint.status === 'planned') {
+    <app-git-alert [action]="sprint.status === 'active' ? 'go_live' : 'sprint_start'" />
+  }
   @if (sprint.status === 'active' && sprint.pausedAt) {
     <div class="sprint-go paused">
       <strong>⏸ Sprint pausiert{{ sprint.pausedBy ? ' von ' + sprint.pausedBy : '' }}.</strong>
@@ -16,7 +19,9 @@
     <div class="sprint-go">
       <strong>🚀 Alle Aufträge sind durch – der Sprint wartet auf dein Go.</strong>
       <span>Sieh dir den Stand in der Vorschau an und schalte ihn dann live (Merge nach main und Deploy).</span>
-      <button class="button primary" type="button" (click)="goLive(sprint)">Live schalten</button>
+      <button class="button primary" type="button" [class.git-blocked]="gitBlocksLive()" (click)="goLive(sprint)">
+        Live schalten
+      </button>
     </div>
   }
   @if (sprint.gitSync === 'pending' || sprint.gitSync === 'running') {
@@ -254,7 +259,7 @@
             <app-nav-icon name="edit" />Bearbeiten
           </button>
           @if (sprint.status === 'planned') {
-            <button class="button primary" type="button" (click)="updateSprint(sprint.id, { status: 'active' })">
+            <button class="button primary" type="button" (click)="startSprint(sprint)">
               <app-nav-icon name="play" />Sprint starten
             </button>
           }
@@ -270,6 +275,8 @@
             }
             <button
               [class]="sprint.reviewReadyAt ? 'button primary' : 'button secondary'"
+              [class.git-blocked]="gitBlocksLive()"
+              [attr.title]="gitBlocksLive() ? 'Git-Zustand des Projektordners prüfen – siehe Hinweis oben' : null"
               type="button"
               (click)="goLive(sprint)"
             >
@@ -277,7 +284,7 @@
             </button>
           }
           @if (sprint.status === 'completed') {
-            <button class="button secondary" type="button" (click)="updateSprint(sprint.id, { status: 'active' })">
+            <button class="button secondary" type="button" (click)="startSprint(sprint)">
               <app-nav-icon name="undo" />Wieder öffnen
             </button>
           }

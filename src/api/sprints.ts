@@ -1,7 +1,9 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import type { Principal } from './roles.js';
 import { completeSprint } from './sprint-planning.js';
+import { guardGit } from './git-state.js';
 import {
   buildUpdate,
   isRecord,
@@ -69,7 +71,7 @@ function databaseCode(error: unknown): string | undefined {
 }
 
 export function registerSprintRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/sprints', async (request, response) => {
+  app.get('/projects/:slug/sprints', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -83,7 +85,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     response.json({ sprints: result.rows });
   });
 
-  app.post('/projects/:slug/sprints', async (request, response) => {
+  app.post('/projects/:slug/sprints', access({ role: 'plan', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const fields = parseFields(request.body, SPRINT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
@@ -116,7 +118,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.patch('/sprints/:id', async (request, response) => {
+  app.patch('/sprints/:id', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -131,8 +133,8 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       let from: string | undefined;
       if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string; running: number }>(
-          `SELECT status, (SELECT COUNT(*)::int FROM development_items
+        const current = await pool.query<{ status: string; running: number; slug: string }>(
+          `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
                             WHERE sprint_id = s.id AND status = 'in_progress') AS running
              FROM sprints s WHERE id = $1`,
           [request.params.id],
@@ -155,6 +157,11 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
           response.status(409).json({ message: conflict });
           return;
         }
+        // Git-Zustand: Live schalten braucht einen sauberen Projektordner, Starten einen sauberen Agent-Ordner.
+        const slug = current.rows[0]?.slug;
+        const guarded =
+          target === 'completed' ? 'go_live' : target === 'active' && from !== 'active' ? 'sprint_start' : null;
+        if (slug && guarded && !(await guardGit(pool, slug, guarded, request.body, response))) return;
       }
       // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein TOCTOU mit Worker oder zweitem Klick).
       const update = buildUpdate(
@@ -195,7 +202,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/sprints/:id/git-sync', async (request, response) => {
+  app.post('/sprints/:id/git-sync', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -215,7 +222,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   // Sprint pausieren: laufende Agents beenden ihren Schritt, danach startet kein weiterer Schritt und kein Auftrag.
   // Angefangene Aufträge bleiben „Geplant“ und machen nach dem Fortsetzen beim nächsten Agent weiter.
-  app.post('/sprints/:id/pause', async (request, response) => {
+  app.post('/sprints/:id/pause', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -233,7 +240,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     response.json({ sprint: result.rows[0] });
   });
 
-  app.post('/sprints/:id/resume', async (request, response) => {
+  app.post('/sprints/:id/resume', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;
@@ -250,7 +257,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
   });
 
   // Kanban: Reihenfolge der Aufträge im Sprint festlegen (oberste zuerst).
-  app.post('/sprints/:id/order', async (request, response, next) => {
+  app.post('/sprints/:id/order', access({ role: 'plan', tenant: 'sprints' }), async (request, response, next) => {
     try {
       const ids = (request.body as { ids?: unknown } | undefined)?.ids;
       if (!isUuid(request.params.id) || !Array.isArray(ids) || ids.length > 500 || !ids.every(isUuid)) {
@@ -269,7 +276,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.delete('/sprints/:id', async (request, response) => {
+  app.delete('/sprints/:id', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Not found.' });
       return;

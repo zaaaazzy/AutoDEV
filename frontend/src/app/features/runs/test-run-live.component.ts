@@ -1,6 +1,7 @@
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { formatDuration } from '../../shared/format.js';
 import { type LiveRun, type LiveStep, liveStepMs, liveStepName } from './test-run-live.js';
 
@@ -86,8 +87,7 @@ export class TestRunLiveComponent {
       }
     };
     void poll();
-    const timer = globalThis.setInterval(() => void poll(), POLL_MS);
-    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
+    inject(DestroyRef).onDestroy(visibleInterval(() => void poll(), POLL_MS));
   }
 
   protected stepTime(step: LiveStep): string {

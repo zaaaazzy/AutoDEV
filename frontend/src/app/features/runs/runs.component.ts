@@ -311,13 +311,8 @@ export class RunsComponent {
     return summarizeOutput(step.command, step.output ?? '', step.status).headline;
   }
 
-  /** Klick auf einen Befund (nicht auf Knöpfe darin): Test bzw. Prüfschritt unter „Alle Tests“ öffnen. */
-  protected openFinding(event: MouseEvent, testCase: TestCase | null, stepPosition: number | null): void {
-    if ((event.target as HTMLElement | null)?.closest('button, a, video')) return;
-    if (testCase) {
-      this.showCase(testCase);
-      return;
-    }
+  /** Befund eines fehlgeschlagenen Prüfschritts: Schritt unter „Alle Tests“ öffnen. */
+  protected openFailedStep(stepPosition: number): void {
     this.openStep.set(stepPosition);
     queueMicrotask(() =>
       document.getElementById(`step-${stepPosition}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }),

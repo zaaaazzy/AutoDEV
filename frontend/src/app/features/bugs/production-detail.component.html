@@ -22,6 +22,65 @@
     <span>vor 48 h</span>
     <span>jetzt</span>
   </div>
+  @if (proposal(); as rollback) {
+    <section class="production-rollback" aria-label="Rollback-Vorschlag">
+      <p>
+        <strong>Rollback-Vorschlag:</strong>
+        @if (rollback.fromTag) {
+          Zuletzt ausgerollt <code>{{ rollback.fromTag }}</code>
+          @if (rollback.deployedAt) {
+            ({{ rollback.deployedAt | dateTime }})
+          }
+        } @else {
+          Sprint-Tag des letzten Deploys unbekannt
+        }
+        @if (rollback.toTag) {
+          · davor <code>{{ rollback.toTag }}</code>
+        }
+      </p>
+      @if (rollback.migrations?.length) {
+        <p class="production-rollback-warning">
+          Achtung: Der Zieltag kennt neuere Migrationen nicht ({{ rollback.migrations!.join(', ') }}). Die Datenbank
+          wird nicht zurückgesetzt.
+        </p>
+      }
+      <button
+        class="button danger"
+        type="button"
+        [disabled]="!!blockedReason()"
+        [attr.aria-describedby]="blockedReason() ? 'rollback-reason' : null"
+        (click)="startRollback()"
+      >
+        Vorherigen Sprint-Tag wieder ausrollen
+      </button>
+      @if (blockedReason(); as reason) {
+        <small id="rollback-reason" class="muted production-rollback-reason">{{ reason }}</small>
+      }
+      @if (rollbackMessage(); as message) {
+        <p class="muted" role="status">{{ message }}</p>
+      }
+    </section>
+  }
+  @if (rollbacks().length) {
+    <section class="production-rollback-log" aria-label="Rollback-Protokoll">
+      <strong>Rollback-Protokoll</strong>
+      <ul>
+        @for (entry of rollbacks(); track entry.id) {
+          <li [attr.data-status]="entry.status">
+            <span class="tag">{{ rollbackStatus[entry.status] }}</span>
+            <code>{{ entry.fromTag }}</code> → <code>{{ entry.toTag }}</code> · angefordert
+            {{ entry.createdAt | dateTime }}{{ entry.requestedBy ? ' von ' + entry.requestedBy : '' }}
+            @if (entry.finishedAt) {
+              · beendet {{ entry.finishedAt | dateTime }}
+            }
+            @if (entry.result) {
+              <div class="muted">{{ entry.result }}</div>
+            }
+          </li>
+        }
+      </ul>
+    </section>
+  }
   @for (event of events(); track event.id) {
     <article class="production-event">
       <div class="production-event-head">

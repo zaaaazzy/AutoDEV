@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { logged } from '../core/log.js';
+import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START, plainExternalText } from '../core/bug-trust.js';
 import { BUG_STATUS } from '../core/status.js';
 import { maskSecrets } from '../core/secret-mask.js';
 import { shortTitle } from '../core/validation.js';
@@ -168,17 +168,22 @@ export function isDeploySuspect(deployedAt: Date | string, at: Date): boolean {
 const SOURCE_LABEL: Record<EventSource, string> = { health: 'Health-Check', logs: 'Compose-Logs', ingest: 'Ingest' };
 
 function bugDescription(error: ProductionError, print: string, sample: string): string {
-  const origin = error.origin ? ` · ${error.source === 'logs' ? 'Dienst' : 'Herkunft'} \`${error.origin}\`` : '';
-  // Kein HTML aus der Anwendung: das Beispiel steht als Codeblock (wird escaped) und kann ihn nicht schliessen.
-  const safe = sample.replace(/```/g, "'''");
+  // Meldung, Stack und Herkunft kommen von aussen (Ingest-Token ist öffentlich): nur im markierten Fremdtext-Block,
+  // als Codeblock ohne HTML, ohne Steuerzeichen und ohne Zeichen, die Block oder Marker schliessen könnten.
+  const origin = error.origin
+    ? `${error.source === 'logs' ? 'Dienst' : 'Herkunft'}: ${plainExternalText(error.origin, 200)}\n`
+    : '';
   return [
-    `**Quelle:** Betrieb (${SOURCE_LABEL[error.source]}${origin})`,
+    `**Quelle:** Betrieb (${SOURCE_LABEL[error.source]})`,
     '',
     `Automatisch erfasst vom Produktions-Rückkanal. Gleiche Fehler (Fingerabdruck \`${print}\`) erhöhen nur den Zähler.`,
+    'Agents bearbeiten den Bug erst nach Freigabe durch einen Menschen.',
     '',
+    EXTERNAL_TEXT_START,
     '```text',
-    safe,
+    `${origin}${plainExternalText(sample, SAMPLE_MAX)}`,
     '```',
+    EXTERNAL_TEXT_END,
   ].join('\n');
 }
 
@@ -213,17 +218,24 @@ export async function deploySuspect(db: Db, project: string, at: Date): Promise<
   };
 }
 
-/** Hält einen erfolgreichen Deploy fest – mit den Aufträgen, die seit dem vorigen Deploy erledigt wurden. */
-export async function recordDeploy(pool: Pick<Pool, 'query'>, project: string): Promise<void> {
+/**
+ * Hält einen erfolgreichen Deploy fest – mit den Aufträgen, die seit dem vorigen Deploy erledigt wurden, dem
+ * ausgerollten Sprint-Tag (für den Rollback-Vorschlag) und den Migrationen, die seit dem vorherigen Tag hinzukamen.
+ */
+export async function recordDeploy(
+  pool: Pick<Pool, 'query'>,
+  project: string,
+  deployed: { sprintTag?: string | null; newMigrations?: string[] | null } = {},
+): Promise<void> {
   await pool.query(
-    `INSERT INTO production_deploys (project_slug, order_ids)
+    `INSERT INTO production_deploys (project_slug, order_ids, sprint_tag, new_migrations)
      SELECT $1, COALESCE(ARRAY(
               SELECT d.id FROM development_items d
                WHERE d.project_slug = $1 AND d.status = 'done' AND d.completed_at <= NOW()
                  AND d.completed_at > COALESCE(
                    (SELECT MAX(deployed_at) FROM production_deploys WHERE project_slug = $1), NOW() - INTERVAL '1 day')
-               ORDER BY d.completed_at), '{}')`,
-    [project],
+               ORDER BY d.completed_at), '{}'), $2, $3`,
+    [project, deployed.sprintTag ?? null, deployed.newMigrations ?? null],
   );
 }
 
@@ -245,7 +257,6 @@ export async function recordEvent(
   const sample = sampleOf(error);
   const client = await pool.connect();
   let result: RecordResult;
-  let autoFix: 'new' | 'regression' | null = null;
   try {
     await client.query('BEGIN');
     const event = (
@@ -301,7 +312,8 @@ export async function recordEvent(
            VALUES ($1, $2, $3, $4, 'production', $5) RETURNING id`,
           [
             project,
-            error.title ?? `Betrieb: ${shortTitle(firstLine(maskSecrets(error.message)) || 'Unbekannter Fehler', 90)}`,
+            error.title ??
+              `Betrieb: ${shortTitle(firstLine(plainExternalText(maskSecrets(error.message), 500)) || 'Unbekannter Fehler', 90)}`,
             bugDescription(error, print, sample),
             severity,
             categoryFor(error),
@@ -313,12 +325,13 @@ export async function recordEvent(
         bugId,
         JSON.stringify(await deploySuspect(client, project, now)),
       ]);
-      autoFix = 'new';
     } else if (action === 'reopen') {
       const note = `**Regression** (${now.toISOString().slice(0, 16).replace('T', ' ')} UTC): Der Fehler ist im Betrieb wieder aufgetreten (Fingerabdruck \`${print}\`).`;
+      // Eine Regression kann jeder mit dem Ingest-Token auslösen: die frühere Freigabe gilt nicht weiter.
       await client.query(
         `UPDATE bugs SET status = 'open', fixed_at = NULL, regressed_at = $2, severity = $3, updated_at = NOW(),
-                fix_notes = CASE WHEN fix_notes = '' THEN $4 ELSE fix_notes || E'\n\n' || $4 END
+                fix_notes = CASE WHEN fix_notes = '' THEN $4 ELSE fix_notes || E'\n\n' || $4 END,
+                approved_at = NULL, approved_by = NULL
           WHERE id = $1`,
         [bugId, now, higherSeverity(bug!.severity, severity), note],
       );
@@ -326,7 +339,6 @@ export async function recordEvent(
         event.id,
         JSON.stringify(await deploySuspect(client, project, now)),
       ]);
-      autoFix = 'regression';
     } else if (bug && (bug.status === BUG_STATUS.open || bug.status === BUG_STATUS.inProgress)) {
       // Nur erhöhen, nie senken: eine von Hand höher gesetzte Schwere bleibt.
       const raised = higherSeverity(bug.severity, severity);
@@ -342,9 +354,8 @@ export async function recordEvent(
   } finally {
     client.release();
   }
-  // Das Ereignis ist schon gespeichert: ein Fehler beim Einplanen darf recordEvent nicht scheitern lassen.
-  if (autoFix && result.bugId)
-    await startBugFix(pool, project, result.bugId, autoFix === 'regression').catch(logged('production-events'));
+  // Kein automatischer Behebungsauftrag: der Text stammt von aussen (Prompt-Injection). Erst die Freigabe durch
+  // einen Menschen (POST /bugs/:id/approve) startet die Behebung, auch bei aktivem Auto-Bugfix.
   return result;
 }
 
@@ -361,19 +372,16 @@ function withoutNul(error: ProductionError): ProductionError {
 const PRODUCTION_INTRO =
   'Behebe den Fehler, den der Produktions-Rückkanal im Betrieb erfasst hat (Quelle „Betrieb“). Das maskierte Beispiel steht unten; Verlauf und Deploy-Verdacht zeigt das Bug-Detail.';
 
-/** Nur mit aktivem Auto-Bugfix: neuer Betriebs-Bug → Bug-Auftrag; Regression → erledigten Auftrag erneut einplanen. */
-async function startBugFix(pool: Pool, project: string, bugId: string, regression: boolean): Promise<void> {
-  const auto = (
-    await pool.query<{ auto: boolean }>('SELECT auto_bugfix AS auto FROM projects WHERE slug = $1', [project])
-  ).rows[0]?.auto;
-  if (!auto) return;
-  if (regression) {
-    const replanned = await pool.query(
-      `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, updated_at = NOW()
-        WHERE bug_id = $1 AND status = 'done'`,
-      [bugId],
-    );
-    if (replanned.rowCount) return;
-  }
+/**
+ * Nach der Freigabe eines Betriebs-Bugs durch einen Menschen: Regression → erledigten Auftrag erneut einplanen,
+ * sonst Bug-Auftrag anlegen. queueBugFix und die Runner-Auswahl prüfen die Freigabe selbst noch einmal.
+ */
+export async function startProductionFix(pool: Pool, bugId: string): Promise<void> {
+  const replanned = await pool.query(
+    `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, updated_at = NOW()
+      WHERE bug_id = $1 AND status = 'done'`,
+    [bugId],
+  );
+  if (replanned.rowCount) return;
   await queueBugFix(pool, { title: 'Betrieb', sprintId: null }, bugId, PRODUCTION_INTRO);
 }

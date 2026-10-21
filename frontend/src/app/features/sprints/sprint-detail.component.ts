@@ -1,5 +1,6 @@
 import { NgClass } from '@angular/common';
-import { Component, inject, input, signal } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
+import { GitGuardService } from '../../core/git-guard.service.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
@@ -19,12 +20,14 @@ import {
 import { SprintOrdersComponent } from './sprint-orders.component.js';
 import { orderSprint } from './sprint-phases.js';
 import { SprintReviewComponent } from './sprint-review.component.js';
+import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
 /** Ein Sprint im Detail: Hinweise zum Go, Aufträge, Ziel, Bericht, Kennzahlen, Git-Stand und Aktionen. */
 @Component({
   selector: 'app-sprint-detail',
   standalone: true,
   imports: [
+    GitAlertComponent,
     NgClass,
     FormsModule,
     GitTreeComponent,
@@ -43,6 +46,7 @@ import { SprintReviewComponent } from './sprint-review.component.js';
 })
 export class SprintDetailComponent {
   private readonly api = inject(ApiService);
+  private readonly gitGuard = inject(GitGuardService);
   protected readonly store = inject(ProjectStore);
   protected readonly busy = this.store.busy;
   protected readonly usdRate = USD_PER_MILLION_TOKENS;
@@ -125,18 +129,48 @@ export class SprintDetailComponent {
     );
   }
 
+  /** Sperrender Git-Befund am Projektordner: Live schalten fragt dann mit Warnung nach. */
+  protected readonly gitBlocksLive = computed(() => this.gitGuard.blocking('go_live').length > 0);
+
   /** Go zum Sprint: Tests, CI, Merge nach main, dann zieht der Projektordner nach und es wird deployt. */
   protected async goLive(sprint: Sprint): Promise<void> {
-    const open = sprint.reviewReadyAt ? '' : '\n\nAchtung: Es sind noch nicht alle Aufträge durch.';
-    if (
-      !globalThis.confirm(
-        `„${sprint.name}“ live schalten?\n\nTests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.${open}`,
-      )
-    )
-      return;
+    const answer = await this.gitGuard.confirmAction(
+      'go_live',
+      {
+        title: 'Sprint live schalten?',
+        message: `„${sprint.name}“: Tests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.`,
+        details: sprint.reviewReadyAt ? [] : ['Achtung: Es sind noch nicht alle Aufträge durch.'],
+        confirmLabel: 'Live schalten',
+        withoutComment: true,
+      },
+      'Trotzdem live schalten',
+    );
+    if (!answer) return;
     await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed' }),
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed', ...answer.body }),
       'Wird live geschaltet – Tests, CI und Merge laufen im Hintergrund.',
+    );
+  }
+
+  /** Sprint starten bzw. wieder öffnen: Die Agents arbeiten danach in ihrem Ordner – der muss sauber sein. */
+  protected async startSprint(sprint: Sprint): Promise<void> {
+    const reopen = sprint.status === 'completed';
+    const answer = await this.gitGuard.confirmAction(
+      'sprint_start',
+      {
+        title: reopen ? 'Sprint wieder öffnen?' : 'Sprint starten?',
+        message: reopen
+          ? `„${sprint.name}“ wird wieder aktiv; offene Aufträge laufen weiter.`
+          : `„${sprint.name}“ startet; die Agents arbeiten die Aufträge der Reihe nach ab.`,
+        confirmLabel: reopen ? 'Wieder öffnen' : 'Sprint starten',
+        withoutComment: true,
+      },
+      reopen ? 'Trotzdem wieder öffnen' : 'Trotzdem starten',
+    );
+    if (!answer) return;
+    await this.store.perform(
+      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'active', ...answer.body }),
+      reopen ? 'Sprint ist wieder offen.' : 'Sprint gestartet.',
     );
   }
 

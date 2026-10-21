@@ -111,13 +111,13 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 
 - **Auswahl:** Status `planned` und (Sprint aktiv **oder** fester Agent **oder** `auto_run`). Reihenfolge: Priorität hoch → niedrig, dann Alter. Bis zu 3 Aufträge pro Durchgang; Entwickler und Tester arbeiten aber nie gleichzeitig an zwei Aufträgen (siehe unten). Vor dem Start wird jeder ausgewählte Auftrag erneut geprüft (noch `planned`, Sprint aktiv und nicht pausiert); wurde er inzwischen abgelehnt, zurückgestellt oder aus dem Sprint genommen, wird er übersprungen. Scheitert ein Auftrag unerwartet, laufen die übrigen weiter.
 - **Hängende Aufträge:** Scheitert der Abschluss eines Auftrags (z. B. Datenbank kurz weg) oder stirbt der Worker dazwischen, wird ein Auftrag „In Arbeit“ ohne laufenden Lauf blockiert (Hinweis „Abschluss unterbrochen“, kein Bug) – am Anfang jedes Durchgangs und beim Worker-Start.
-- **Sperre:** Pro Auftrag nur ein Lauf (`agent_runs` mit Status `running` ist eindeutig); Läufe älter als 3 h gelten als fehlgeschlagen.
+- **Sperre:** Pro Auftrag nur ein Lauf (`agent_runs` mit Status `running` ist eindeutig). Ein Lauf gilt erst als verwaist und fehlgeschlagen, wenn er länger als `ABANDONED_RUN_MS` kein Lebenszeichen gegeben hat (Start des Laufs oder letzter Eintrag im Verlauf eines Schritts). Die Schwelle wird aus dem höchsten Schritt-Zeitlimit abgeleitet (2 × 240 min samt Wiederholung, plus 30 s Pause und 1 h Reserve, also rund 9 h), damit ein zweiter Worker keinen lebenden Lauf abräumt (`src/runner/runner-runs.ts`).
 - **Agents:** Aktivierte Agents laufen nach Phase (`pre_task`, `while_task`, `after_task`) und Position. Der erste fehlgeschlagene Schritt beendet den Lauf.
 - **Informationsfluss:** Entwickler erhalten Anforderung und Risiken; jeder Agent bekommt die Ergebnisse der vorherigen Agents (Entwickler: Dateiliste → Tester → Dokumentierer → Handbücher).
 - **Nach jedem Schritt:** Dokumentierer → Auftragsdoku, Handbuch-Autoren → Handbücher, Entwickler bei Bug-Aufträgen → Fix-Notiz am Bug.
 - **Abbruch:** Der Nutzer kann einen Lauf abbrechen (Status Blockiert, ohne Bug-Bericht – auch nicht nachträglich über `backfillFailures`). Beim Herunterfahren des Workers wird der Auftrag zurück auf „Geplant“ gesetzt und läuft beim nächsten Start weiter.
 - **Sofortstart:** Wird ein Auftrag eingeplant (neu, „Erneut versuchen“, Bugfix, Sprint gestartet), meldet die Datenbank das per `NOTIFY devlog_work`; der Worker startet den nächsten Durchgang sofort statt nach bis zu 30 s. Ein frei werdender Platz weckt ihn ebenfalls. Das Intervall bleibt als Absicherung.
-- **Kurze Ausfälle:** Scheitert ein Schritt vorübergehend (Modell nicht erreichbar, überlastet, Rate-Limit, Verbindung abgebrochen, Zeitlimit), wird er nach 30 s einmal wiederholt. Erst wenn auch das scheitert, gilt der Schritt als fehlgeschlagen. Im Verlauf steht „Vorübergehender Fehler – neuer Versuch“.
+- **Kurze Ausfälle:** Scheitert ein Schritt vorübergehend (Modell nicht erreichbar, überlastet, Rate-Limit, Verbindung abgebrochen, Zeitlimit), wird er nach 30 s einmal wiederholt. Erst wenn auch das scheitert, gilt der Schritt als fehlgeschlagen. Im Verlauf steht „Vorübergehender Fehler – neuer Versuch“. Wiederholt wird nur ein Fehler des Agents selbst: Rote Projekttests (eingebauter Tester, Testlauf nach dem CLI-Tester) und die visuelle Prüfung werden nie wiederholt, auch wenn ihre Ausgabe z. B. `ECONNREFUSED` enthält. Vor dem zweiten Versuch wird das Budget neu geprüft. Ist es erreicht, hält der Lauf ohne Bug-Bericht an, wie vor einem Schritt („Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht“).
 - **Budget:** Unter Einstellungen → Budget lassen sich je Projekt Limits für Tag, Sprint und Auftrag setzen (Tokens und/oder USD, Tabelle `budgets`; leer = unbegrenzt, ohne Limit keine Prüfung). Verbrauch = `agent_run_steps` + `agent_usage` im Zeitraum (Tag ab Mitternacht, Sprint ab Sprintbeginn, Auftrag seit dem letzten „Erneut versuchen“, `budget_since`); Ollama zählt mit 0 USD, aber mit seinen Tokens. Vor jedem Agent-Schritt (`budgetGate`, `src/runner/budget.ts`) und vor jedem Lauf von Chat, Auftragsautor, Visionär usw. (`runAuthorAgent`) wird geprüft:
   - **ab 80 %:** genau eine Push-Warnung je Projekt, Zeitraum und Periode (gemerkt in `budget_warnings`);
   - **ab 100 %:** kein neuer Schritt; ein laufender Schritt endet regulär (das Limit kann um einen Schritt überschritten werden). Der Auftrag wird `blocked` mit „Aktion notwendig: Budget erreicht: erhöhen oder warten (…)“ – ohne Bug und ohne Bugfix; `budget_blocked` merkt den Zeitraum. Ist das Tages- oder Sprintbudget vor dem nächsten Auftrag erreicht – vor dem Durchgang oder mitten darin –, wartet genau ein Auftrag sichtbar, die übrigen bleiben eingeplant und starten keinen Lauf.
@@ -160,7 +160,7 @@ ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; ge
 0. **Nachbesserung im selben Lauf:** Sind die Tests rot oder lehnt der Reviewer ab, geht der Auftrag zuerst einmal direkt zurück an den Entwickler – mit der Ausgabe von Tester bzw. Reviewer als Rückmeldung. Danach laufen Entwickler, Tester und Reviewer erneut. Erst wenn auch dieser Versuch scheitert, greift der folgende Ablauf. Die erste Rückmeldung bleibt als fehlgeschlagener Schritt im Lauf sichtbar („Zurück an den Entwickler zur Nachbesserung“). Bei einem einzelnen Agent (Play-Knopf) gibt es keine Nachbesserung.
 1. Ein Schritt scheitert → Auftrag wird **Blockiert**, der Fehler am Auftrag gespeichert, ein **Bug-Bericht** angelegt. Das gilt in allen Phasen, also auch für Tester und Reviewer in `after_task`; nur Fehler der Doku-Agents (Dokumentierer, Handbuch-Autoren) blockieren den Auftrag ohne Bug.
    Ausnahme: Scheitert der Agent selbst (Zeitlimit, Schleife, Schrittlimit, keine Dateien geändert, Modell nicht erreichbar, Befehl nicht gefunden), entsteht **kein** Bug und kein Bug-Auftrag – der Auftrag bleibt blockiert und die Problemanalyse wird angefordert. Meldet die Claude-CLI ihr Nutzungslimit („You've hit your session limit · resets …“), gilt das als Unterbrechung: der Auftrag bleibt geplant und startet erst nach der gemeldeten Reset-Zeit wieder (`retry_after`).
-2. Danach prüft die Problemanalyse (Rolle `analyst`, nur lesend) den Fehler. Erst wenn sie einen **Code-Fehler bestätigt** und `auto_bugfix` am Projekt aktiv ist (Standard), entsteht **einmalig** ein Bug-Auftrag (hohe Priorität, `auto_run`, auch ohne Sprint). Findet sie keinen Code-Fehler, bleibt der Auftrag mit „Aktion notwendig“ und ihrem Vermerk blockiert.
+2. Danach prüft die Problemanalyse (Rolle `analyst`, nur lesend) den Fehler. Erst wenn sie einen **Code-Fehler bestätigt** und `auto_bugfix` am Projekt aktiv ist (für neue Projekte standardmäßig aus), entsteht **einmalig** ein Bug-Auftrag (hohe Priorität, `auto_run`, auch ohne Sprint). Findet sie keinen Code-Fehler, bleibt der Auftrag mit „Aktion notwendig“ und ihrem Vermerk blockiert.
 3. Ist der Bug-Auftrag erfolgreich, wird der Ursprungsauftrag erneut geplant (`auto_run`). **Höchstens 2 automatische Wiederholungen** (`retry_count`).
 
 4. Scheitert ein Bug-Auftrag selbst, entsteht kein weiterer Bug (keine Endlosschleife); stattdessen wird eine Problemanalyse durch den Assistenten angefordert (nur lesend, Rolle `analyst`).
@@ -176,7 +176,7 @@ ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; ge
 
 **Behoben und dokumentiert:** Schließt der Bug-Auftrag erfolgreich ab, setzt ein DB-Trigger den Bug auf „Behoben“. Die Lösung (Ausgabe des Entwicklers) steht am Bug (`fix_notes`) und wird allen späteren Agents als „bekannte Bugs mit Lösung“ mitgegeben. Der Bug-Fix lässt sich per Klick am Bug, am Auftrag oder im Sprint starten.
 
-### 5a. Betrieb: Log-Scan und Bug-Detail
+## 5a. Betrieb: Log-Scan und Bug-Detail
 
 Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Betrieb als Bug mit Quelle „Betrieb“. Er wird in den Einstellungen „Betrieb“ eingerichtet.
 
@@ -203,6 +203,34 @@ Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Be
 - **Deploy-Verdacht:** Tritt ein Ereignis erstmals innerhalb von 30 Minuten nach einem Deploy auf, nennt Dev Log den Deploy-Zeitpunkt, die seit dem vorigen Deploy erledigten Aufträge und die zugehörigen Sprints. Ohne solchen Zusammenhang steht dort „Kein Deploy-Verdacht“.
 
 **Hinweis:** Schlägt das Speichern einzelner Ereignisse teilweise fehl, bleibt der Zeitpunkt des letzten Scans stehen. Der nächste Scan zählt dann dieselben Zeilen erneut. Das ist das bisherige Verhalten.
+
+## 5b. Betrieb: Rollback-Vorschlag nach einem Deploy
+
+Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, bietet das Bug-Detail an, den vorherigen Sprint-Tag wieder auszurollen. Der Rollback startet nur nach ausdrücklicher Bestätigung durch einen Menschen.
+
+**Wann der Knopf erscheint:** Der Bug hat die Quelle „Betrieb“, die Schwere `critical` und mindestens ein Ereignis liegt höchstens 30 Minuten nach einem Deploy (`deploy_suspect`). Ohne diese Bedingung erscheint kein Vorschlag und kein Knopf.
+
+**Was der Vorschlag nennt:** „Zuletzt ausgerollt“ mit dem Sprint-Tag des letzten Deploys und dessen Zeitpunkt, „davor“ den unmittelbar vorherigen Sprint-Tag. Es wird immer nur ein Schritt zurück angeboten.
+
+**Knopf deaktiviert (mit Grund unter dem Knopf):**
+- Der Sprint-Tag des letzten Deploys ist nicht bekannt.
+- Es gibt keinen vorherigen Sprint-Tag.
+- Es läuft bereits ein Deploy des Projekts.
+- Für das Projekt sind keine Deploy-Befehle hinterlegt.
+- Die Agents arbeiten im Projektordner. Ein Tag-Checkout würde deren Arbeit verändern. Der Grund nennt, einen eigenen Arbeitsordner für Agents einzustellen.
+- Dem Benutzer fehlt die Berechtigung „Planung“. Ohne sie erscheint der Knopf deaktiviert mit dem Hinweis auf die fehlende Berechtigung.
+
+**Bestätigung:** Der Knopf öffnet einen Dialog „Vorherigen Sprint-Tag wieder ausrollen“. Er nennt den Zieltag und den aktuell ausgerollten Tag und lässt sich mit „[Zieltag] ausrollen“ oder abbrechen beenden. Abbrechen löst nichts aus. Erst die Bestätigung schickt die Anforderung an den Server; sie enthält den Zieltag, und der Server prüft ihn erneut. Hat sich der Zieltag inzwischen geändert, weist der Server die Anforderung ab und bittet um neues Laden.
+
+**Migrationen:** Der Vorschlag prüft, ob der Zieltag neuere Datenbank-Migrationen nicht kennt. Dann nennt der Dialog sie als Warnung. Die Datenbank wird **nicht** zurückgesetzt; ob ein Rollback mit diesem Datenbankstand funktioniert, entscheidet der Mensch. Lässt sich der Stand nicht prüfen, weist der Dialog ebenfalls darauf hin.
+
+**Ablauf:** Nach der Bestätigung steht der Rollback als „Wartet auf den Worker“ im Protokoll. Der Worker startet ihn, sobald kein Agent und kein Deploy des Projekts läuft. Er checkt den Zieltag im Projektordner aus und rollt ihn über denselben Deploy-Pfad aus wie ein normaler „Live schalten“-Lauf. Die Oberfläche aktualisiert das Protokoll alle 5 Sekunden, solange ein Rollback offen ist.
+
+**Protokoll im Bug-Detail:** Jeder Rollback steht mit Status (Wartet auf den Worker, Läuft …, Erfolgreich, Fehlgeschlagen), Ausgangs- und Zieltag, Zeitpunkt der Anforderung und des Abschlusses, dem Anfordernden und einem Ergebnistext. Ein fehlgeschlagener Rollback nennt den Grund im Ergebnistext, auch wenn kein einzelner Befehl gescheitert ist. Zusätzlich geht eine Push-Nachricht an das Projekt.
+
+**Der Bug bleibt offen:** Nach einem Rollback ändert Dev Log den Bug nicht auf „Behoben“. Das entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag, bis das nächste „Live schalten“ ihn wieder auf `main` zieht.
+
+*[Printscreens für diesen Abschnitt fehlen noch: Knopf aktiv, Knopf deaktiviert mit Grund, Bestätigungsdialog mit Migrationswarnung, Rollback-Protokoll.]*
 
 ## 6. Git im Sprint
 

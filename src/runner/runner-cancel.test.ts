@@ -27,10 +27,10 @@ test('Abbrechen beendet einen hängenden Agent-Schritt sofort', async () => {
     },
   } as unknown as Pool;
   let started = false;
-  const execute: CommandExecutor = (_command, options) =>
-    new Promise((resolve) => {
+  // Der Agent hängt und reagiert auf nichts: nur der Abbruch-Wächter kann den Schritt beenden.
+  const execute: CommandExecutor = () =>
+    new Promise(() => {
       started = true;
-      options?.signal?.addEventListener('abort', () => resolve({ exitCode: 143, durationMs: 1, output: 'killed' }));
     });
   const running = runWorkItem(pool, item, [agent], { cwd: '/repo', timeoutMs: 600_000, execute });
   await new Promise((resolve) => setTimeout(resolve, 200));

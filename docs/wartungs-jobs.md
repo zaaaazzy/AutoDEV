@@ -23,7 +23,7 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 - `GET /api/scheduled-jobs` liefert Jobs und die erlaubten Job-Arten.
 - `PATCH /api/scheduled-jobs/:key` ändert `enabled`, `intervalSeconds` (60 s bis 30 Tage), `startAt` und `config` (JSON-Objekt, höchstens 4000 Zeichen). Bei neuem Intervall oder neuer Startzeit wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
-- Beide Routen prüfen die Admin-Rolle serverseitig (Regel in `src/api/roles.ts` und Prüfung in der Route, da `authorize` GET nicht prüft). Nicht-Administratoren erhalten 403.
+- Beide Routen prüfen die Admin-Rolle serverseitig (Deklaration `access({ tenant: 'admin' })` an der Route und zusätzliche Prüfung in der Route, siehe `docs/agents-und-rechte.md`, Abschnitt „Benutzerrollen und Mandanten an den API-Routen“). Nicht-Administratoren erhalten 403.
 - Die Job-Art lässt sich nicht ändern. Eine Oberfläche gibt es nicht.
 
 ## Worauf zu achten ist

@@ -23,9 +23,12 @@ import { ShareBarComponent, type ShareSegment } from '../../shared/share-bar.com
 import { AgentListComponent } from '../agents/agent-list.component.js';
 import { ChatComponent } from '../chat/chat.component.js';
 import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-options.js';
-import { newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
+import { agentWorkload, newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
+import { GitAlertComponent } from '../../shared/git-alert.component.js';
 
 const RECENT_RUNS = 20;
+/** Farbtöne der Agents in der Verteilung; Rot und Orange bleiben Fehlern und Warnungen vorbehalten. */
+const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
 
 /**
  * Dashboard: alle Anteile als einheitliche 100-%-Balken. Die Zahlen stammen aus denselben Daten wie die
@@ -35,6 +38,7 @@ const RECENT_RUNS = 20;
   selector: 'app-dashboard',
   standalone: true,
   imports: [
+    GitAlertComponent,
     NgClass,
     AgentListComponent,
     ChatComponent,
@@ -224,6 +228,16 @@ export class DashboardComponent {
         ] satisfies ShareSegment[],
       };
     }),
+  );
+
+  /** Offene Aufträge je Agent (plus „Ohne Agent“); Klick filtert die Auftragsliste nach dem Agent. */
+  protected readonly agentWorkload = computed<ShareSegment[]>(() =>
+    agentWorkload(this.data().development, this.data().agents).map((row, index) => ({
+      label: row.label,
+      value: row.value,
+      tone: row.id ? (WORKLOAD_TONES[index % WORKLOAD_TONES.length] ?? 'active') : 'neutral',
+      link: { section: 'development', filters: { agent: [row.label] } },
+    })),
   );
 
   /** Je Sprint ein Balken mit den Aufträgen nach Status (neueste Sprints zuerst, max. 8). */

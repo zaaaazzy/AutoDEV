@@ -4,8 +4,8 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
 import type { Principal } from './roles.js';
-import { requiredRole } from './roles.js';
-import { projectOfRequest, tenantGuard } from './tenancy.js';
+import { guardStatus, requiredRole } from './route-table.test.js';
+import { projectOfTenant } from './tenancy.js';
 import { parsePreviewSettings } from './visual.js';
 
 const ORDER = '0b6f1c7e-1d2a-4c3b-9e8f-112233445566';
@@ -108,31 +108,14 @@ test('Snapshots nur für Nutzer des zugehörigen Projekts (fremde Mandanten: 404
       return { rows: slug ? [{ slug }] : [] };
     },
   } as unknown as Pool;
-  assert.equal(await projectOfRequest(pool, `/api/visual-snapshots/${OWN_SHOT}`), 'alpha');
+  assert.equal(await projectOfTenant(pool, 'visual-snapshots', { id: OWN_SHOT }), 'alpha');
   const member: Principal = {
     id: '2d6f1c7e-1d2a-4c3b-9e8f-112233445566',
     username: 'ana',
     displayName: 'Ana',
     roles: ['plan'],
   };
-  const status = async (path: string): Promise<number> => {
-    let code = 200;
-    const response = {
-      locals: { principal: member } as Record<string, unknown>,
-      status(value: number) {
-        code = value;
-        return this;
-      },
-      json() {
-        return this;
-      },
-    };
-    await new Promise<void>((resolve) => {
-      void tenantGuard(pool)({ method: 'GET', path } as never, response as never, () => resolve());
-      setTimeout(resolve, 20);
-    });
-    return code;
-  };
+  const status = (path: string): Promise<number> => guardStatus(pool, member, 'GET', path);
   assert.equal(await status(`/api/visual-snapshots/${OWN_SHOT}`), 200);
   assert.equal(await status(`/api/visual-snapshots/${FOREIGN_SHOT}`), 404);
   assert.equal(requiredRole('POST', `/api/development/${ORDER}/visual/approve`, {}), 'run');

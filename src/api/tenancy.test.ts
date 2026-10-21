@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { projectOfRequest, tenantGuard } from './tenancy.js';
+import { projectOfTenant } from './tenancy.js';
 import type { Principal } from './roles.js';
+import { guardStatus } from './route-table.test.js';
 
 const ORDER = '0b6f1c7e-1d2a-4c3b-9e8f-112233445566';
 const FOREIGN = '1c6f1c7e-1d2a-4c3b-9e8f-112233445566';
@@ -19,24 +20,7 @@ function fakePool(): Pool {
   } as unknown as Pool;
 }
 
-async function call(principal: Principal, method: string, path: string): Promise<number> {
-  let status = 200;
-  const response = {
-    locals: { principal } as Record<string, unknown>,
-    status(code: number) {
-      status = code;
-      return this;
-    },
-    json() {
-      return this;
-    },
-  };
-  await new Promise<void>((resolve) => {
-    void tenantGuard(fakePool())({ method, path } as never, response as never, () => resolve());
-    setTimeout(resolve, 20);
-  });
-  return status;
-}
+const call = (principal: Principal, method: string, path: string) => guardStatus(fakePool(), principal, method, path);
 
 const member: Principal = {
   id: '2d6f1c7e-1d2a-4c3b-9e8f-112233445566',
@@ -46,11 +30,11 @@ const member: Principal = {
 };
 const admin: Principal = { id: null, username: 'admin', displayName: 'Admin', roles: ['admin'] };
 
-test('Projekt einer Anfrage aus Pfad oder Datensatz', async () => {
-  assert.equal(await projectOfRequest(fakePool(), '/api/projects/alpha/board'), 'alpha');
-  assert.equal(await projectOfRequest(fakePool(), `/api/development/${ORDER}/retry`), 'alpha');
-  assert.equal(await projectOfRequest(fakePool(), '/api/development/kein-uuid'), null);
-  assert.equal(await projectOfRequest(fakePool(), '/api/unbekannt/x'), undefined);
+test('Projekt einer Anfrage aus Pfadparameter oder Datensatz', async () => {
+  assert.equal(await projectOfTenant(fakePool(), 'project', { slug: 'alpha' }), 'alpha');
+  assert.equal(await projectOfTenant(fakePool(), 'development', { id: ORDER }), 'alpha');
+  assert.equal(await projectOfTenant(fakePool(), 'development', { id: 'kein-uuid' }), null);
+  assert.equal(await projectOfTenant(fakePool(), 'project', { slug: '%E0%A4%A' }), null, 'kaputte Kodierung');
 });
 
 test('Mandantentrennung: eigenes Projekt ja, fremdes nein (404), Unzuordenbares nur für Administration', async () => {
@@ -61,6 +45,7 @@ test('Mandantentrennung: eigenes Projekt ja, fremdes nein (404), Unzuordenbares 
   assert.equal(await call(member, 'GET', '/api/users'), 403);
   assert.equal(await call(member, 'GET', '/api/setup/jobs/abc'), 403);
   assert.equal(await call(member, 'GET', '/api/projects'), 200);
+  assert.equal(await call(member, 'GET', '/api/unbekannt/x'), 403, 'Pfad ohne Route: nur Administration');
   assert.equal(await call(admin, 'GET', '/api/projects/beta/board'), 200);
 });
 
@@ -70,4 +55,8 @@ test('Review-Container: Nicht-Admins kommen durch den Mandantenwächter, Freigeb
   assert.equal(await call(runner, 'POST', '/api/review-slots/2/stop'), 200);
   assert.equal(await call(runner, 'PUT', '/api/review-slots/2'), 403);
   assert.equal(await call(runner, 'GET', '/api/review-slots/2'), 403);
+  // Starten: eigenes Projekt ja, fremdes nicht gefunden.
+  assert.equal(await call(runner, 'POST', '/api/projects/alpha/review-slots/start'), 200);
+  assert.equal(await call(runner, 'POST', '/api/projects/beta/review-slots/start'), 404);
+  assert.equal(await call(member, 'POST', '/api/review-slots/2/stop'), 403, 'Planung allein stoppt nichts');
 });
