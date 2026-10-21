@@ -294,6 +294,12 @@ export async function runWorkItem(
       const outcome = await runStep(ctx, agent, position, ordered.length, { stepPosition, canCorrect });
       stepPosition += 1;
       if (outcome.interrupted) interrupted = true;
+      // Budget vor dem neuen Versuch nach einem vorübergehenden Fehler erreicht: anhalten wie vor einem Schritt.
+      if (outcome.budget) {
+        budgetStop = outcome.budget;
+        passed = false;
+        break;
+      }
       if (!outcome.passed && outcome.correctable && !interrupted) {
         // Einmalige Nachbesserung: ab dem Entwickler erneut, mit der Rückmeldung von Tester oder Reviewer.
         corrected = true;

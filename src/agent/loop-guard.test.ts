@@ -53,3 +53,40 @@ test('repeatedCall: derselbe Aufruf viermal direkt hintereinander, andere Argume
   // Zwei Wächter teilen keinen Zustand.
   assert.equal(new LoopGuard().repeatedCall('list_files', args), false);
 });
+
+test('repeatedCall: ein Kreis aus zwei oder drei gleichen Aufrufen wird über das Fenster erkannt', () => {
+  const pair = new LoopGuard();
+  const calls = (guard: LoopGuard, sequence: [string, Record<string, unknown>][]): boolean[] =>
+    sequence.map(([name, args]) => guard.repeatedCall(name, args));
+  const read: [string, Record<string, unknown>] = ['read_file', { path: 'a.ts' }];
+  const search: [string, Record<string, unknown>] = ['search', { pattern: 'x', path: 'src' }];
+  // A → B → A → B → A → B: beim dritten vollständigen Durchlauf ist es eine Schleife.
+  assert.deepEqual(calls(pair, [read, search, read, search, read]), [false, false, false, false, false]);
+  assert.equal(pair.repeatedCall(...search), true);
+
+  const triple = new LoopGuard();
+  const list: [string, Record<string, unknown>] = ['list_files', { path: '.' }];
+  const round = [read, search, list];
+  assert.ok(calls(triple, [...round, ...round, read, search]).every((value) => !value));
+  assert.equal(triple.repeatedCall(...list), true);
+});
+
+test('repeatedCall: dieselben Argumente in anderer Reihenfolge sind derselbe Aufruf', () => {
+  const guard = new LoopGuard();
+  guard.repeatedCall('search', { pattern: 'x', path: 'src' });
+  guard.repeatedCall('search', { path: 'src', pattern: 'x' });
+  guard.repeatedCall('search', { pattern: 'x', path: 'src' });
+  assert.equal(guard.repeatedCall('search', { path: 'src', pattern: 'x' }), true);
+});
+
+test('repeatedCall: Lesen und Ändern im Wechsel mit neuem Inhalt ist keine Schleife', () => {
+  const guard = new LoopGuard();
+  for (let round = 0; round < 10; round += 1) {
+    assert.equal(guard.repeatedCall('read_file', { path: 'src/a.ts' }), false, `Runde ${round}: lesen`);
+    assert.equal(
+      guard.repeatedCall('edit_file', { path: 'src/a.ts', content: `Stand ${round}` }),
+      false,
+      `Runde ${round}: ändern`,
+    );
+  }
+});
