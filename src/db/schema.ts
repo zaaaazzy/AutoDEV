@@ -1175,6 +1175,9 @@ export const SCHEMA = `
     CHECK (status IN ('planned', 'active', 'review', 'completed', 'cancelled'));
   -- Autopilot schaltet einen fertigen Sprint selbst live (Test-Gate, Merge nach main, Push), statt auf das Go zu warten.
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS autopilot_auto_live BOOLEAN NOT NULL DEFAULT FALSE;
+  -- Live-Fortschritt eines laufenden Testschritts („13 von 28 Tests · 12 ✓ · 1 ✗“) und Start für die Laufzeit.
+  ALTER TABLE test_run_steps ADD COLUMN IF NOT EXISTS progress TEXT;
+  ALTER TABLE test_run_steps ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT NOW();
   -- Nutzungslimit des Agent-Kontos erreicht: der Auftrag bleibt geplant und startet erst ab dieser Zeit wieder.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS retry_after TIMESTAMPTZ;
 `;
