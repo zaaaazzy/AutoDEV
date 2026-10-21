@@ -14,6 +14,8 @@ DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABAS
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
   "DEV_LOG_DATABASE_URL=$DATABASE_URL" \
+  "DEV_LOG_REVIEW_DATABASE_URL=$(resolve_value DEV_LOG_REVIEW_DATABASE_URL "$ENV_FILE")" \
+  "DEV_LOG_OLLAMA_MODEL=$(resolve_value DEV_LOG_OLLAMA_MODEL "$ENV_FILE" "qwen3.5:9b")" \
   "DEV_LOG_SECRET_KEY=$(resolve_value DEV_LOG_SECRET_KEY "$ENV_FILE")"
 write_private_file "$UNIT" <<UNIT
 [Unit]
