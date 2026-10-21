@@ -34,19 +34,6 @@
           <span>Inhalt</span>
         }
       </button>
-      <label class="docs-search">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-          <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
-          <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        </svg>
-        <input
-          type="search"
-          placeholder="Dokumentation durchsuchen …"
-          aria-label="Dokumentation durchsuchen"
-          [value]="query()"
-          (input)="search($any($event.target).value)"
-        />
-      </label>
     </div>
 
     <div class="docs-layout" [class.collapsed]="collapsed()">

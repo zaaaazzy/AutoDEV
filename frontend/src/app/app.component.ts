@@ -30,6 +30,7 @@ import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component
 import type { DevelopmentItem } from './core/models.js';
 import { isFinished, sprintLabel } from './shared/labels.js';
 import { navCount } from './core/nav-counts.js';
+import { PageSearchService } from './core/page-search.service.js';
 import { isOpenIdea } from './features/ideation/idea-options.js';
 import { nextOpenOrders } from './features/sprints/review-launch.js';
 import { SprintReviewComponent } from './features/sprints/sprint-review.component.js';
@@ -131,6 +132,7 @@ export class AppComponent {
   protected readonly loading = this.store.loading;
   protected readonly notice = this.store.notice;
   protected readonly busy = this.store.busy;
+  protected readonly pageSearch = inject(PageSearchService);
   protected readonly showCreate = this.store.showCreate;
   protected readonly menuClosed = signal(false);
   /** Ausgeklappte Navigation auf schmalen Bildschirmen. */

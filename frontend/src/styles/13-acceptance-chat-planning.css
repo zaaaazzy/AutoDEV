@@ -375,31 +375,6 @@
   cursor: pointer;
 }
 
-/* Tabellensuche rechts auf Höhe des Panel-Titels (Desktop, Tabelle direkt unter dem Titel); auf dem Handy darunter. */
-@media (min-width: 721px) {
-  .panel:has(> .section-heading + :is(app-data-table, app-order-table)) {
-    position: relative;
-  }
-
-  .panel > .section-heading:has(+ :is(app-data-table, app-order-table)) {
-    padding-right: min(300px, 40%);
-  }
-
-  .panel > .section-heading + app-data-table > .dt > .dt-toolbar > .dt-search,
-  .panel > .section-heading + app-order-table > app-data-table > .dt > .dt-toolbar > .dt-search {
-    position: absolute;
-    top: 14px;
-    right: 18px;
-    width: min(280px, 38%);
-  }
-
-  /* Bleibt in der Leiste nur die Suche, fällt die leere Zeile weg. */
-  .panel > .section-heading + app-data-table > .dt > .dt-toolbar:not(:has(.dt-chip, .dt-reset)),
-  .panel > .section-heading + app-order-table > app-data-table > .dt > .dt-toolbar:not(:has(.dt-chip, .dt-reset)) {
-    display: contents;
-  }
-}
-
 /* Sprintplanung: Vorschlag mit Begründung, Summen und Auswahl */
 .sprint-propose {
   margin-bottom: 12px;

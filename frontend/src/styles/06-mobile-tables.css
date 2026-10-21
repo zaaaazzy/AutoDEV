@@ -142,9 +142,6 @@
     border-style: dashed;
     box-shadow: none;
   }
-  .dt-search {
-    flex: 1 1 100%;
-  }
   .dt-filter-menu {
     max-width: calc(100vw - 24px);
   }

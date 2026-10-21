@@ -1202,6 +1202,9 @@ details > summary {
     flex: 1;
     justify-content: center;
   }
+  .page-heading .actions .page-search {
+    flex: 1 1 100%;
+  }
   .view-grid,
   .report-columns,
   .docs-layout {
