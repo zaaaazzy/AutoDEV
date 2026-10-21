@@ -220,6 +220,26 @@ flowchart TD
   classDef person fill:#e8eef6,stroke:#36608f,color:#1f3a5c
 ```
 
+`auto_bugfix` ist für neue Projekte aus (bestehende Projekte behalten ihren Wert). Fehlt die Projektzeile, gilt es als aus.
+
+### Bugs aus fremden Quellen (Betrieb, GitHub)
+
+Das Ingest-Token steht im Browser-Snippet und ist damit praktisch öffentlich; GitHub-Issues schreibt jeder. Ihr Text kann Anweisungen an Agents enthalten (Prompt-Injection). Deshalb gilt, unabhängig von `auto_bugfix`:
+
+- Ein neuer Betriebs-Bug und eine Regression legen **keinen** Behebungsauftrag an. Eine Regression setzt eine frühere Freigabe zurück.
+- Die Runner-Auswahl (`selectItems`, auch `--item`) und der Start im Runner überspringen jeden Auftrag, dessen Bug aus `production` oder `github` stammt und kein `approved_at` hat. Das gilt für alle Wege: Sprint, `auto_run`, Wiederholungen, Retries. Altdaten ohne Freigabe bleiben gesperrt.
+- Die Freigabe setzt ein Mensch mit Recht „Ausführen“ im Bug („Für Agents freigeben“, `POST /api/bugs/:id/approve`). Per `PATCH /api/bugs/:id` lässt sie sich nicht setzen. Bei Betriebs-Bugs entsteht mit der Freigabe der Behebungsauftrag (bzw. der erledigte Auftrag wird erneut eingeplant).
+- Meldung, Stack und Herkunft stehen in der Bug-Beschreibung nur im Block `<<<FREMDER-TEXT aus dem Produktions-Rückkanal …>>>`, ohne Steuerzeichen, auf 2000 Zeichen gekürzt. Prompts mit solchen Aufträgen bekommen den Sicherheitshinweis „fremder Text“. Nicht freigegebene fremde Bugs erscheinen nicht unter „Bekannte Bugs“ im Prompt.
+
+```mermaid
+flowchart LR
+  A[Ingest-POST mit Token] --> B[Bug, Quelle production]
+  B --> C{Freigabe durch Mensch?}
+  C -- nein --> D[Bug bleibt offen, kein Auftrag]
+  C -- ja --> E[Auftrag mit auto_run]
+  E --> F[Prompt: Fremdtext nur im markierten Block]
+```
+
 ## 7 · Sprint, Autopilot und Git
 
 Pro Projekt höchstens ein aktiver Sprint (Datenbank-Regel). Modus in den Einstellungen: `manual`, `suggest` oder `autopilot`.
