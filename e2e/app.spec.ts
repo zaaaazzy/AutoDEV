@@ -21,7 +21,8 @@ const SECTIONS = [
 async function seed(request: APIRequestContext): Promise<void> {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const projects = await (await request.get('/api/projects', { headers })).json();
-  if (projects.projects.length) return;
+  // Das Beispielprojekt „Velowerk“ (e2e/demo) ist schon da: nur nach dem eigenen Projekt fragen.
+  if (projects.projects.some((project: { slug: string }) => project.slug === 'e2e')) return;
   const created = await request.post('/api/projects', {
     headers,
     data: { slug: 'e2e', name: 'E2E-Projekt', repository: join(tmpdir(), 'dev-log-e2e-project') },
@@ -37,6 +38,10 @@ async function seed(request: APIRequestContext): Promise<void> {
 async function login(page: Page, welcome = false): Promise<void> {
   // Die Begrüßung erscheint sonst in jedem frischen Browser und überdeckt die Seite.
   if (!welcome) await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
+  // Neben dem Beispielprojekt „Velowerk“ immer das eigene Testprojekt öffnen.
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('devlog.activeProject')) localStorage.setItem('devlog.activeProject', 'e2e');
+  });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'AIdeation' })).toBeVisible();
   await page.getByLabel('Benutzername').fill(username);

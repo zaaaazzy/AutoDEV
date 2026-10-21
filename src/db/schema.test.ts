@@ -19,3 +19,22 @@ test('bugs_source_check: jede Fassung erlaubt alle Quellen, die der Code schreib
     }
   }
 });
+
+// Gleiches Problem bei jeder mehrfach definierten Prüfung: Eine Zwischenfassung ohne einen später ergänzten Wert
+// (z. B. Sprint-Status 'cancelled') lässt den Start scheitern, sobald eine Zeile diesen Wert trägt.
+test('Mehrfach definierte CHECK-Listen: jede Fassung erlaubt alle Werte der letzten', () => {
+  const versions = new Map<string, string[][]>();
+  for (const match of SCHEMA.matchAll(/ADD CONSTRAINT (\w+)\s+CHECK \(\w+ IN \(([^)]*)\)\)/g)) {
+    const values = [...match[2].matchAll(/'([^']+)'/g)].map((value) => value[1]);
+    versions.set(match[1], [...(versions.get(match[1]) ?? []), values]);
+  }
+  assert.ok(versions.has('sprints_status_check'));
+  for (const [name, lists] of versions) {
+    const last = lists.at(-1)!;
+    for (const [index, values] of lists.entries()) {
+      for (const value of last) {
+        assert.ok(values.includes(value), `${name}: Fassung ${index + 1} erlaubt '${value}' nicht`);
+      }
+    }
+  }
+});

@@ -20,6 +20,7 @@
     "worker": "tsx src/runner/runner-cli.ts --all --watch --limit 3",
     "watchdog": "tsx src/runner/watchdog-cli.ts",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
+    "seed:demo": "tsx scripts/seed-demo.ts",
     "test:full": "tsx scripts/test-full.ts",
     "check:diagrams": "tsx scripts/check-diagrams.ts"
   },

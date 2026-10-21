@@ -21,4 +21,19 @@ await mkdir(folder, { recursive: true });
 process.env.E2E_PROJECT_FOLDER = folder;
 process.env.DEV_LOG_PROJECT_ROOTS = tmpdir();
 
+// Beispielprojekt „Velowerk“ (25 Sprints Geschichte), damit die Testinstanz wie eine echte aussieht.
+// Abschalten mit E2E_DEMO_DATA=0.
+if (process.env.E2E_DEMO_DATA !== '0') {
+  const { createDatabasePool } = await import('../src/db/database.js');
+  const { seedDemoProject } = await import('./demo/seed.js');
+  const demoFolder = join(tmpdir(), `${DATABASE.replaceAll('_', '-')}-velowerk`);
+  await mkdir(demoFolder, { recursive: true });
+  const pool = await createDatabasePool({ databaseUrl: url.toString(), adminDatabaseUrl: adminUrl });
+  try {
+    await seedDemoProject(pool, demoFolder);
+  } finally {
+    await pool.end();
+  }
+}
+
 await import('../src/server.js');

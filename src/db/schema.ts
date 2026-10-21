@@ -961,7 +961,7 @@ export const SCHEMA = `
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS github_auth_checked_at TIMESTAMPTZ;
   -- Sprint im Review: Pull Request offen, Merge und Tag folgen nach grüner CI (und ggf. Freigabe).
   ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_status_check;
-  ALTER TABLE sprints ADD CONSTRAINT sprints_status_check CHECK (status IN ('planned', 'active', 'review', 'completed'));
+  ALTER TABLE sprints ADD CONSTRAINT sprints_status_check CHECK (status IN ('planned', 'active', 'review', 'completed', 'cancelled'));
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pr_url TEXT;
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS ci_status TEXT CHECK (ci_status IN ('pending', 'success', 'failure'));
   -- CI-Lauf, zu dem schon ein Bug angelegt wurde (höchstens ein Bug je Lauf).
