@@ -109,7 +109,13 @@ async function getProjectName(cwd: string): Promise<string> {
 }
 
 const NODE_TEST_RUNNERS = new Set(['tsx', 'node']);
-const PLAYWRIGHT_IMPORT = /(?:from\s+|require\(\s*|import\(\s*)['"]@playwright\/test['"]/;
+/**
+ * Echter Import von @playwright/test: nur als Anweisung am Zeilenanfang (import … from, import(…), require(…),
+ * export … from). Steht der Import nur in einem String – etwa als Fixture in einem Node-Test –, ist die Datei kein
+ * Playwright-Test; sonst liefe sie mit „playwright test“ und scheiterte mit „No tests found“.
+ */
+const PLAYWRIGHT_IMPORT =
+  /^[ \t]*(?:(?:import|export)\b[^;'"`]*?\bfrom\s*|import\s*\(\s*|(?:(?:const|let|var)\b[^=;]*=\s*)?require\(\s*)['"]@playwright\/test['"]/m;
 const PLAYWRIGHT_CONFIGS = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.mjs'];
 
 /** Nächste Playwright-Konfiguration vom Ordner der Datei aufwärts bis zum Projektordner (relativ zu diesem). */
