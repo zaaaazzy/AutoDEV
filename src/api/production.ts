@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { createIngestToken } from './ingest.js';
 import { browserSnippet, ingestEndpoint, nodeSnippet, publicBaseUrl } from './production-snippets.js';
@@ -23,7 +24,7 @@ export function fillHistory(
 
 /** Oberfläche des Produktions-Rückkanals: Status fürs Dashboard, Ereignisse eines Bugs, Ingest-Token. */
 export function registerProductionRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/production', async (request, response, next) => {
+  app.get('/projects/:slug/production', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -65,7 +66,7 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.get('/bugs/:id/production', async (request, response, next) => {
+  app.get('/bugs/:id/production', access({ tenant: 'bugs' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
       const events = (
@@ -92,30 +93,38 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
   });
 
   // Erzeugen und Rotieren: der Klartext wird genau einmal zurückgegeben, gespeichert wird nur der Hash.
-  app.post('/projects/:slug/ingest-token', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      const { token, hash } = createIngestToken();
-      if (!slug) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      const updated = await pool.query('UPDATE projects SET ingest_token_hash = $2 WHERE slug = $1', [slug, hash]);
-      if (!updated.rowCount) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      response
-        .set('Cache-Control', 'no-store')
-        .status(201)
-        .json({ token, endpoint: ingestEndpoint(publicBaseUrl(request), slug, token) });
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.post(
+    '/projects/:slug/ingest-token',
+    access({ role: 'admin', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        const { token, hash } = createIngestToken();
+        if (!slug) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        const updated = await pool.query('UPDATE projects SET ingest_token_hash = $2 WHERE slug = $1', [slug, hash]);
+        if (!updated.rowCount) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        response
+          .set('Cache-Control', 'no-store')
+          .status(201)
+          .json({ token, endpoint: ingestEndpoint(publicBaseUrl(request), slug, token) });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.delete('/projects/:slug/ingest-token', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      if (!slug) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      await pool.query('UPDATE projects SET ingest_token_hash = NULL WHERE slug = $1', [slug]);
-      response.status(204).end();
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.delete(
+    '/projects/:slug/ingest-token',
+    access({ role: 'admin', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        if (!slug) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        await pool.query('UPDATE projects SET ingest_token_hash = NULL WHERE slug = $1', [slug]);
+        response.status(204).end();
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 }

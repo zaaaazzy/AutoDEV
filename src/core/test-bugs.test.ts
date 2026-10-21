@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { failureTail, fullTestCommand, useLatestMain } from '../runner/test-request.js';
 import { parseScope } from '../api/test-requests.js';
-import { requiredRole } from '../api/roles.js';
+import { requiredRole } from '../api/route-table.test.js';
 import { caseBugs, stepBug } from './test-bugs.js';
 import type { TestCaseResult } from './test-results.js';
 

@@ -329,7 +329,8 @@ export class ReviewSlots {
       '-v',
       `${project.folder}:/source:ro`,
       '-v',
-      'aideation_review_npm:/root/.npm',
+      // Container läuft als node (deploy/review/Dockerfile); eigenes Volume, das alte gehört root.
+      'aideation_review_npm_node:/home/node/.npm',
       ...env.flatMap((entry) => ['-e', entry]),
       REVIEW_IMAGE,
     ]);

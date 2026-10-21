@@ -2,6 +2,7 @@ import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { ApiService } from './api.service.js';
 import { errorMessage } from './errors.js';
 import type { ReviewSlot, SprintCommit } from './models.js';
+import { visibleInterval } from './visible-interval.js';
 
 const PENDING_REFRESH_MS = 2_000;
 
@@ -24,7 +25,7 @@ export class ReviewLaunchService {
   readonly blockedUrl = signal<string | null>(null);
   /** Im Klick reservierter Tab (sonst blockiert der Popup-Blocker das Öffnen nach der Antwort). */
   private tab: Window | null = null;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private stopTimer: (() => void) | null = null;
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.stopPolling());
@@ -119,11 +120,11 @@ export class ReviewLaunchService {
 
   private startPolling(): void {
     this.stopPolling();
-    this.timer = setInterval(() => void this.loadSlots().catch(() => undefined), PENDING_REFRESH_MS);
+    this.stopTimer = visibleInterval(() => void this.loadSlots().catch(() => undefined), PENDING_REFRESH_MS);
   }
 
   private stopPolling(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.stopTimer?.();
+    this.stopTimer = null;
   }
 }

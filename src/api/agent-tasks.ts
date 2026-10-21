@@ -1,5 +1,6 @@
 import type { Router, Response } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { nextCronRun, nextRoutineRun, parseCron, parseWindow } from '../core/cron.js';
 import { OUTPUT_TARGETS, type OutputTarget, queueRun, taskMessage } from '../agent/routine.js';
@@ -181,7 +182,7 @@ const notFound = (response: Response): void => void response.status(404).json({ 
 export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
   const me = (response: Response) => response.locals.principal as Principal | undefined;
 
-  app.get('/projects/:slug/agent-tasks', async (request, response, next) => {
+  app.get('/projects/:slug/agent-tasks', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
@@ -198,46 +199,50 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.post('/projects/:slug/agent-tasks', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      const task = parseTask(request.body);
-      if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
-      if (typeof task === 'string') return void response.status(400).json({ message: task });
-      if (!(await agentInProject(pool, task.agentId, slug))) {
-        return void response.status(400).json({ message: 'Agent gehört nicht zum Projekt.' });
-      }
-      const schedule = task.schedule ?? null;
-      const runWindow = task.runWindow ?? null;
-      const enabled = task.enabled ?? true;
-      const row = (
-        await pool.query(
-          `WITH t AS (INSERT INTO agent_tasks (project_slug, title, prompt, agent_id, created_by, schedule, output_target,
+  app.post(
+    '/projects/:slug/agent-tasks',
+    access({ role: 'chat', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        const task = parseTask(request.body);
+        if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+        if (typeof task === 'string') return void response.status(400).json({ message: task });
+        if (!(await agentInProject(pool, task.agentId, slug))) {
+          return void response.status(400).json({ message: 'Agent gehört nicht zum Projekt.' });
+        }
+        const schedule = task.schedule ?? null;
+        const runWindow = task.runWindow ?? null;
+        const enabled = task.enabled ?? true;
+        const row = (
+          await pool.query(
+            `WITH t AS (INSERT INTO agent_tasks (project_slug, title, prompt, agent_id, created_by, schedule, output_target,
                                                run_window, enabled, next_run_at)
              SELECT slug, $2, $3, $4, $5, $6, $7, $8, $9, $10 FROM projects WHERE slug = $1 RETURNING *)
            SELECT ${COLUMNS} FROM t`,
-          [
-            slug,
-            task.title,
-            task.prompt,
-            task.agentId,
-            me(response)?.displayName ?? null,
-            schedule,
-            task.outputTarget ?? 'chat',
-            runWindow,
-            enabled,
-            computeNextRun({ schedule, runWindow, enabled }),
-          ],
-        )
-      ).rows[0];
-      if (!row) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      response.status(201).json(row);
-    } catch (error) {
-      next(error);
-    }
-  });
+            [
+              slug,
+              task.title,
+              task.prompt,
+              task.agentId,
+              me(response)?.displayName ?? null,
+              schedule,
+              task.outputTarget ?? 'chat',
+              runWindow,
+              enabled,
+              computeNextRun({ schedule, runWindow, enabled }),
+            ],
+          )
+        ).rows[0];
+        if (!row) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        response.status(201).json(row);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.patch('/agent-tasks/:id', async (request, response, next) => {
+  app.patch('/agent-tasks/:id', access({ role: 'chat', tenant: 'agent-tasks' }), async (request, response, next) => {
     try {
       const task = parseTask(request.body);
       if (!isUuid(request.params.id)) return notFound(response);
@@ -293,7 +298,7 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.delete('/agent-tasks/:id', async (request, response, next) => {
+  app.delete('/agent-tasks/:id', access({ role: 'chat', tenant: 'agent-tasks' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Aufgabe nicht gefunden.' });
       await pool.query('DELETE FROM agent_tasks WHERE id = $1', [request.params.id]);
@@ -304,7 +309,7 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
   });
 
   // Ein Klick: Aufgabe als Nachricht an den Assistenten des Projekts übergeben.
-  app.post('/agent-tasks/:id/run', async (request, response, next) => {
+  app.post('/agent-tasks/:id/run', access({ role: 'chat', tenant: 'agent-tasks' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return notFound(response);
       const task = (
@@ -331,7 +336,7 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
   });
 
   // Verlauf: die letzten Läufe mit Start, Dauer, Ergebnis, Tokens, Hinweisen und angelegten Einträgen.
-  app.get('/agent-tasks/:id/runs', async (request, response, next) => {
+  app.get('/agent-tasks/:id/runs', access({ tenant: 'agent-tasks' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return notFound(response);
       const runs = (
@@ -350,56 +355,64 @@ export function registerAgentTaskRoutes(app: Router, pool: Pool): void {
   });
 
   // Pausieren: kein nächster Lauf; wartende Läufe werden abgebrochen (zählt nicht als Fehlschlag).
-  app.post('/agent-tasks/:id/pause', async (request, response, next) => {
-    try {
-      if (!isUuid(request.params.id)) return notFound(response);
-      const row = (
-        await pool.query(
-          `WITH t AS (UPDATE agent_tasks SET enabled = FALSE, last_error = COALESCE($2, last_error)
+  app.post(
+    '/agent-tasks/:id/pause',
+    access({ role: 'chat', tenant: 'agent-tasks' }),
+    async (request, response, next) => {
+      try {
+        if (!isUuid(request.params.id)) return notFound(response);
+        const row = (
+          await pool.query(
+            `WITH t AS (UPDATE agent_tasks SET enabled = FALSE, last_error = COALESCE($2, last_error)
                       WHERE id = $1 RETURNING *)
            SELECT ${COLUMNS} FROM t`,
-          [request.params.id, `Pausiert von ${me(response)?.displayName ?? 'Benutzer'}.`],
-        )
-      ).rows[0];
-      if (!row) return notFound(response);
-      const cancelled = await pool.query<{ messageId: string | null }>(
-        `UPDATE agent_task_runs SET status = 'cancelled', finished_at = NOW(), error = 'Vom Benutzer pausiert.'
+            [request.params.id, `Pausiert von ${me(response)?.displayName ?? 'Benutzer'}.`],
+          )
+        ).rows[0];
+        if (!row) return notFound(response);
+        const cancelled = await pool.query<{ messageId: string | null }>(
+          `UPDATE agent_task_runs SET status = 'cancelled', finished_at = NOW(), error = 'Vom Benutzer pausiert.'
           WHERE task_id = $1 AND status = 'queued' RETURNING message_id AS "messageId"`,
-        [request.params.id],
-      );
-      const messages = cancelled.rows.map((run) => run.messageId).filter(Boolean);
-      if (messages.length) {
-        await pool.query(`DELETE FROM chat_messages WHERE id = ANY($1::uuid[]) AND status = 'pending'`, [messages]);
+          [request.params.id],
+        );
+        const messages = cancelled.rows.map((run) => run.messageId).filter(Boolean);
+        if (messages.length) {
+          await pool.query(`DELETE FROM chat_messages WHERE id = ANY($1::uuid[]) AND status = 'pending'`, [messages]);
+        }
+        response.json(row);
+      } catch (error) {
+        next(error);
       }
-      response.json(row);
-    } catch (error) {
-      next(error);
-    }
-  });
+    },
+  );
 
   // Fortsetzen: Zählung zurücksetzen, Pausengrund löschen, nächsten Lauf neu berechnen.
-  app.post('/agent-tasks/:id/resume', async (request, response, next) => {
-    try {
-      if (!isUuid(request.params.id)) return notFound(response);
-      const current = (
-        await pool.query<{ schedule: string | null; runWindow: string | null }>(
-          `SELECT schedule, run_window AS "runWindow" FROM agent_tasks WHERE id = $1`,
-          [request.params.id],
-        )
-      ).rows[0];
-      if (!current) return notFound(response);
-      const row = (
-        await pool.query(
-          `WITH t AS (UPDATE agent_tasks SET enabled = TRUE, failure_streak = 0, last_error = NULL, next_run_at = $2
+  app.post(
+    '/agent-tasks/:id/resume',
+    access({ role: 'chat', tenant: 'agent-tasks' }),
+    async (request, response, next) => {
+      try {
+        if (!isUuid(request.params.id)) return notFound(response);
+        const current = (
+          await pool.query<{ schedule: string | null; runWindow: string | null }>(
+            `SELECT schedule, run_window AS "runWindow" FROM agent_tasks WHERE id = $1`,
+            [request.params.id],
+          )
+        ).rows[0];
+        if (!current) return notFound(response);
+        const row = (
+          await pool.query(
+            `WITH t AS (UPDATE agent_tasks SET enabled = TRUE, failure_streak = 0, last_error = NULL, next_run_at = $2
                       WHERE id = $1 RETURNING *)
            SELECT ${COLUMNS} FROM t`,
-          [request.params.id, computeNextRun({ ...current, enabled: true })],
-        )
-      ).rows[0];
-      if (!row) return notFound(response);
-      response.json(row);
-    } catch (error) {
-      next(error);
-    }
-  });
+            [request.params.id, computeNextRun({ ...current, enabled: true })],
+          )
+        ).rows[0];
+        if (!row) return notFound(response);
+        response.json(row);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 }

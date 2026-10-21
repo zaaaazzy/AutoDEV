@@ -121,6 +121,9 @@ async function writeEnv(body: InstallRequest, log: (line: string) => void): Prom
     ['DEV_LOG_DATABASE_URL', `postgresql://devlog:${dbPassword}@localhost:5433/aideation`],
   ]);
   if (body.projectRoots.trim()) values.set('DEV_LOG_PROJECT_ROOTS', body.projectRoots.trim());
+  // Backup-Container läuft ohne root: unter Linux als eigener Benutzer, damit er in ./backups schreiben darf.
+  if (platform() === 'linux' && process.getuid && process.getgid)
+    values.set('DEV_LOG_BACKUP_USER', `${process.getuid()}:${process.getgid()}`);
   if (body.domain.trim()) {
     values.set('DEV_LOG_DOMAIN', body.domain.trim());
     values.set('DEV_LOG_PUBLIC_URL', `https://${body.domain.trim()}`);

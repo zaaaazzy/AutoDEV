@@ -1,6 +1,7 @@
 import { Component, computed, effect, inject, OnDestroy, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { type GitCommit, type GitGraph, type GraphEdge, layoutGraph } from './git-graph.js';
 
 const ROW = 30;
@@ -25,22 +26,23 @@ export class GitGraphPanelComponent implements OnDestroy {
   protected readonly visibleRows = computed(() => this.layout().rows.slice(0, this.showAll() ? undefined : 25));
   protected readonly graphWidth = computed(() => Math.min(this.layout().lanes, 10) * LANE + LANE / 2);
   protected readonly rowHeight = ROW;
-  private timer: ReturnType<typeof setInterval> | undefined;
+  private stopTimer: (() => void) | undefined;
 
   constructor() {
     effect(() => {
       const slug = this.store.activeProject();
       this.graph.set(null);
       this.loaded.set(false);
-      clearInterval(this.timer);
+      this.stopTimer?.();
+      this.stopTimer = undefined;
       if (!slug) return;
       void this.load(slug);
-      this.timer = setInterval(() => void this.load(slug), REFRESH_MS);
+      this.stopTimer = visibleInterval(() => void this.load(slug), REFRESH_MS);
     });
   }
 
   ngOnDestroy(): void {
-    clearInterval(this.timer);
+    this.stopTimer?.();
   }
 
   private async load(slug: string): Promise<void> {

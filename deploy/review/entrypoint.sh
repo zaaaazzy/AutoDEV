@@ -4,7 +4,8 @@ set -eu
 : "${REVIEW_COMMAND:?REVIEW_COMMAND fehlt}"
 echo "[review] Stand ${REVIEW_COMMIT} (${REVIEW_LABEL:-ohne Titel})"
 git config --global --add safe.directory '*'
-rm -rf /work
+# /work selbst gehört node und bleibt stehen (der Benutzer darf / nicht ändern); nur den Inhalt leeren.
+find /work -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 # --shared: Objekte direkt aus dem eingebundenen Repository lesen (schnell, nichts wird kopiert).
 git clone --quiet --no-checkout --shared /source /work
 cd /work

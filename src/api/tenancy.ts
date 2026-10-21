@@ -1,16 +1,14 @@
-import type { RequestHandler } from 'express';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import type { Principal } from './roles.js';
-import { fullPath } from './security.js';
 
 /**
  * Mandantentrennung: Ein Mandant ist ein Projekt. Administratoren sehen alle Projekte, alle anderen nur die, für
- * die sie freigeschaltet sind (project_members). Jede Anfrage wird einem Projekt zugeordnet – über den Pfad
- * (/api/projects/<slug>/…) oder über den Datensatz (/api/development/<id>/… usw.). Was sich keinem Projekt
+ * die sie freigeschaltet sind (project_members). Jede Route deklariert ihren Mandanten (access in access.ts):
+ * über den Pfad (:slug), über den Datensatz (:id) oder ausdrücklich projektübergreifend. Was sich keinem Projekt
  * zuordnen lässt und nicht ausdrücklich projektübergreifend ist, bleibt Administratoren vorbehalten.
  */
-const ENTITY_PROJECT: Record<string, string> = {
+export const ENTITY_PROJECT = {
   development: 'SELECT project_slug AS slug FROM development_items WHERE id = $1',
   sprints: 'SELECT project_slug AS slug FROM sprints WHERE id = $1',
   bugs: 'SELECT project_slug AS slug FROM bugs WHERE id = $1',
@@ -24,22 +22,23 @@ const ENTITY_PROJECT: Record<string, string> = {
   'test-media': 'SELECT r.project_slug AS slug FROM test_media m JOIN test_runs r ON r.id = m.run_id WHERE m.id = $1',
   attachments: `SELECT COALESCE(i.project_slug, b.project_slug) AS slug FROM ideation_attachments a
                   LEFT JOIN ideation_items i ON i.id = a.ideation_id LEFT JOIN bugs b ON b.id = a.bug_id WHERE a.id = $1`,
-};
+} as const;
 
-/** Für jeden angemeldeten Benutzer erlaubt, ohne Projektbezug (eigene Sitzung, eigene Geräte, Kataloge). */
-const GLOBAL_ROUTES: [string, RegExp][] = [
-  ['*', /^\/api\/(session|login|logout)$/],
-  ['*', /^\/api\/auth\//],
-  ['*', /^\/api\/push\//],
-  ['GET', /^\/api\/projects$/],
-  ['GET', /^\/api\/agent-status$/],
-  ['GET', /^\/api\/setup\/(templates|permissions|scope)$/],
-  ['GET', /^\/api\/system-agents$/],
-  ['GET', /^\/api\/settings$/],
-  // Review-Container sind projektübergreifend; die Routen filtern selbst nach allowedProjects.
-  ['GET', /^\/api\/review-slots$/],
-  ['POST', /^\/api\/review-slots\/\d+\/stop$/],
-];
+export type Entity = keyof typeof ENTITY_PROJECT;
+
+/**
+ * Mandant einer Route:
+ * - 'global': jeder angemeldete Benutzer, ohne Projektbezug (eigene Sitzung, eigene Geräte, Kataloge); Routen, die
+ *   projektübergreifend Daten liefern, filtern selbst nach response.locals.allowedProjects.
+ * - 'project': Projekt aus dem Pfadparameter :slug.
+ * - Entity (z. B. 'development'): Projekt des Datensatzes aus dem Pfadparameter :id.
+ * - 'admin': keinem Projekt zuordenbar, nur Administratoren.
+ */
+export type Tenant = 'global' | 'admin' | 'project' | Entity;
+
+export function isEntity(value: string): value is Entity {
+  return Object.hasOwn(ENTITY_PROJECT, value);
+}
 
 export function isAdmin(principal: Principal | undefined): boolean {
   return Boolean(principal?.roles.includes('admin'));
@@ -58,40 +57,25 @@ export async function allowedProjects(pool: Pool, principal: Principal | undefin
   return new Set(rows.map((row) => row.slug));
 }
 
-/** Projekt einer Anfrage: aus dem Pfad oder über den Datensatz; undefined = kein Projektbezug erkennbar. */
-export async function projectOfRequest(pool: Pool, path: string): Promise<string | null | undefined> {
-  const project = path.match(/^\/api\/projects\/([^/]+)(?:\/|$)/)?.[1];
-  if (project !== undefined) return parseProjectSlug(decodeURIComponent(project));
-  const entity = path.match(/^\/api\/([a-z-]+)\/([^/]+)(?:\/|$)/);
-  const sql = entity ? ENTITY_PROJECT[entity[1]!] : undefined;
-  if (!entity || !sql) return undefined;
-  if (!isUuid(entity[2])) return null;
-  return (await pool.query<{ slug: string | null }>(sql, [entity[2]])).rows[0]?.slug ?? null;
+function decoded(value: string | undefined): string | null {
+  if (value === undefined) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
-export function tenantGuard(pool: Pool): RequestHandler {
-  return async (request, response, next) => {
-    try {
-      const path = fullPath(request);
-      if (!path.startsWith('/api/')) return next();
-      const principal = response.locals.principal as Principal | undefined;
-      const allowed = await allowedProjects(pool, principal);
-      response.locals.allowedProjects = allowed;
-      if (allowed === null) return next();
-      if (
-        GLOBAL_ROUTES.some(([method, pattern]) => (method === '*' || method === request.method) && pattern.test(path))
-      )
-        return next();
-      const project = await projectOfRequest(pool, path);
-      if (project === undefined) {
-        // Nicht zuordenbar und nicht ausdrücklich global: nur für Administratoren.
-        return void response.status(403).json({ message: 'Dafür braucht es Administrationsrechte.' });
-      }
-      // Fremde oder unbekannte Projekte sehen gleich aus: nicht gefunden (verrät nicht, dass es sie gibt).
-      if (!project || !allowed.has(project)) return void response.status(404).json({ message: 'Nicht gefunden.' });
-      next();
-    } catch (error) {
-      next(error);
-    }
-  };
+/** Projekt einer Anfrage nach dem deklarierten Mandanten und den Pfadparametern; null = keines/unbekannt. */
+export async function projectOfTenant(
+  pool: Pool,
+  tenant: 'project' | Entity,
+  params: Record<string, string>,
+): Promise<string | null> {
+  if (tenant === 'project') {
+    const slug = decoded(params.slug);
+    return slug === null ? null : parseProjectSlug(slug);
+  }
+  if (!isUuid(params.id)) return null;
+  return (await pool.query<{ slug: string | null }>(ENTITY_PROJECT[tenant], [params.id])).rows[0]?.slug ?? null;
 }

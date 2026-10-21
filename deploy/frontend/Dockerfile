@@ -14,7 +14,11 @@ COPY src/core/development-transitions.ts ./src/core/development-transitions.ts
 RUN npm run build:ui
 
 FROM nginx:1.27.3-alpine
+# Ohne root: PID-Datei nach /tmp, keine user-Anweisung, Cache-Ordner dem Benutzer nginx (Port 8080 braucht kein root).
+RUN sed -i -e '/^user /d' -e 's,^pid .*;,pid /tmp/nginx.pid;,' /etc/nginx/nginx.conf \
+    && chown -R nginx:nginx /var/cache/nginx
 COPY deploy/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 COPY deploy/frontend/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist/ui/browser /usr/share/nginx/html
+USER nginx
 EXPOSE 8080
