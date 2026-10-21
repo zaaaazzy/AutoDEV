@@ -3,6 +3,7 @@ import { ApiService } from '../core/api.service.js';
 import { AuthService } from '../core/auth.service.js';
 import { errorMessage } from '../core/errors.js';
 import type { DevelopmentItem } from '../core/models.js';
+import { ConfirmService } from '../core/confirm.service.js';
 import { ProjectStore } from '../core/project-store.js';
 import { hashParameter, targetFromHash } from '../core/navigation.js';
 
@@ -61,6 +62,7 @@ export interface OrderQuestion {
 export class OrderQuestionComponent {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  private readonly confirm = inject(ConfirmService);
   protected readonly auth = inject(AuthService);
 
   readonly order = input.required<DevelopmentItem>();
@@ -101,6 +103,14 @@ export class OrderQuestionComponent {
     const current = this.question();
     const reply = content.trim();
     if (!current || !reply || this.sending()) return;
+    const ok = await this.confirm.ask({
+      title: 'Antwort senden?',
+      message: `Der Agent bekommt diese Antwort auf seine Rückfrage zu „${this.order().title}“ und arbeitet weiter.`,
+      details: [reply],
+      confirmLabel: 'Antwort senden',
+      withoutComment: true,
+    });
+    if (!ok || this.question()?.id !== current.id) return;
     this.sending.set(true);
     try {
       const slug = this.store.activeProject();
