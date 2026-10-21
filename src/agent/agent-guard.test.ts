@@ -362,6 +362,60 @@ test('Wächter: escapte Anführungszeichen verstecken keine Umleitung, Ersetzung
   }
 });
 
+test('Wächter: Datei-Befehle aus der acceptEdits-Liste der CLI sind gesperrt, auch versteckt', () => {
+  // acceptEdits gibt diese sieben Befehle ohne --allowedTools-Regel frei; nur der Wächter hält sie auf.
+  for (const name of ['mkdir', 'touch', 'rm', 'rmdir', 'mv', 'cp', 'sed']) {
+    for (const command of [
+      `${name} a b`,
+      `"${name}" a b`,
+      `'${name}' a b`,
+      `\\${name} a b`,
+      `/bin/${name} a b`,
+      `git status && ${name} a b`,
+      `git status; ${name} a b`,
+      `git log | xargs ${name} a`,
+      `git status\n${name} a b`,
+      `env ${name} a b`,
+      `"env" ${name} a b`,
+      `command ${name} a b`,
+      `"command" ${name} a b`,
+      `sudo ${name} a b`,
+      `git status $(${name} a b)`,
+      `git status \`${name} a b\``,
+    ]) {
+      assert.match(bashProblem(command, root) ?? '', /gesperrt/, command);
+    }
+  }
+  for (const command of [
+    'rm -rf backend',
+    "sed -i '' s/a/b/ x.ts",
+    "sed -i '' 's/a/b/' backend/x.ts",
+    'cp a b',
+    'mv a b',
+    'rm ~/Library/Logs/x.log',
+    'ln -s /etc/hosts x',
+    'git log | tee notes.txt',
+    'truncate -s 0 README.md',
+    'install -m 644 a b',
+    'dd if=/dev/zero of=x',
+    'find . -delete',
+    'find src -name "*.ts" -exec sed -i "" s/a/b/ {} +',
+    '$X a b',
+    'r? a b',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt/, command);
+  }
+  for (const command of [
+    'find src -name "*.ts"',
+    'npx --no-install tsc --noEmit',
+    'node --check src/x.js',
+    'git log --grep rm',
+    'npm run build && npm test',
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
 test('Wächter: gewöhnliche Quotes bleiben erlaubt', () => {
   for (const command of [
     'git log --grep "a > b"',

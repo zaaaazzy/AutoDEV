@@ -45,6 +45,7 @@ export {
   CUSTOM_GROUP_ID,
   SECRET_IN_COMMAND,
   customRuleProblem,
+  forbiddenCommand,
   forbiddenSubcommand,
   gitOptionProblem,
   gitPathProblem,

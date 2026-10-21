@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import {
   COMPOSE_STARTING,
   composeViolation,
+  forbiddenCommand,
   forbiddenSubcommand,
   gitOptionProblem,
   gitPathProblem,
@@ -178,6 +179,10 @@ export function bashProblem(
   for (const part of command.split(/&&|\|\||[;|\n]/).map((entry) => entry.trim())) {
     if (/^[A-Za-z_]\w*=/.test(part) || /^(?:env|command|exec|builtin|nohup|time|sudo)\s/.test(part)) {
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
+    }
+    // acceptEdits gibt mkdir, touch, rm, rmdir, mv, cp und sed ohne Regel frei – Rechte und Ordner prüft nur der Wächter.
+    if (forbiddenCommand(part)) {
+      return `„${part}“: dieser Befehl ist für Agents gesperrt – Dateien nur mit den Datei-Werkzeugen anlegen, ändern oder löschen.`;
     }
     if (/^git\s+-/.test(part)) return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
     if (gitOptionProblem(part)) {
