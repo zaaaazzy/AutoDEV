@@ -122,7 +122,7 @@ test('Node-Test mit „@playwright/test“ nur als Text im String bleibt im Node
     join(cwd, 'src', 'routing.test.ts'),
     [
       "import test from 'node:test';",
-      'test(\'x\', () => writeFileSync(\'a.spec.ts\', "import { test } from \'@playwright/test\';"));',
+      "test('x', () => writeFileSync('a.spec.ts', \"import { test } from '@playwright/test';\"));",
     ].join('\n'),
   );
   writeFileSync(

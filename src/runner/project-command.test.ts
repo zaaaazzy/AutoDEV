@@ -76,7 +76,10 @@ test('Allowlist: PATH, HOME, TMPDIR erlaubt, Geheimnisse und DEV_LOG_* nie', () 
 });
 
 test('Git-Environment: gefiltert, Hooks und fsmonitor aus, Push-Token bleibt', () => {
-  const env = gitEnvironment({ GIT_AUTHOR_NAME: 'AIdeation' }, { PATH: '/bin', GH_TOKEN: 'gh', DEV_LOG_SECRET_KEY: SECRET });
+  const env = gitEnvironment(
+    { GIT_AUTHOR_NAME: 'AIdeation' },
+    { PATH: '/bin', GH_TOKEN: 'gh', DEV_LOG_SECRET_KEY: SECRET },
+  );
   assert.equal(env.DEV_LOG_SECRET_KEY, undefined);
   assert.equal(env.GH_TOKEN, 'gh');
   assert.equal(env.GIT_AUTHOR_NAME, 'AIdeation');

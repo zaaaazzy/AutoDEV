@@ -90,7 +90,9 @@ export function gitEnvironment(
   source: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const tokens = Object.fromEntries(
-    ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST', 'GH_CONFIG_DIR'].flatMap((key) => (source[key] ? [[key, source[key]]] : [])),
+    ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST', 'GH_CONFIG_DIR'].flatMap((key) =>
+      source[key] ? [[key, source[key]]] : [],
+    ),
   );
   return {
     ...projectEnvironment(undefined, source),
