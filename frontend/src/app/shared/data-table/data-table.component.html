@@ -84,6 +84,18 @@
                             (input)="setText(header.id, $any($event.target).value)"
                           />
                         } @else {
+                          @if (column(header.id)?.options) {
+                            <label class="dt-option">
+                              <input
+                                type="checkbox"
+                                [checked]="!col.getIsFiltered()"
+                                [disabled]="!col.getIsFiltered()"
+                                (change)="clearColumn(header.id)"
+                              />
+                              <span>Alle</span>
+                              <small>{{ rows().length }}</small>
+                            </label>
+                          }
                           @for (facet of facets(header.id); track facet.value) {
                             <label class="dt-option">
                               <input

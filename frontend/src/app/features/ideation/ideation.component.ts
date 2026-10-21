@@ -44,6 +44,7 @@ import {
   ideaPhase,
   isOpenIdea,
   VISIONARY_CONFIRM,
+  SOURCE_FILTER_OPTIONS,
   sourceLabel,
 } from './idea-options.js';
 
@@ -106,7 +107,7 @@ export class IdeationComponent {
       sortValue: (idea) => IDEA_STATUSES.indexOf(idea.status),
     },
     categoryColumn<Idea>((idea) => idea.category),
-    { id: 'source', header: 'Herkunft', value: (idea) => sourceLabel(idea.source) },
+    { id: 'source', header: 'Herkunft', value: (idea) => sourceLabel(idea.source), options: SOURCE_FILTER_OPTIONS },
     {
       id: 'priority',
       header: 'Priorität',
@@ -139,6 +140,8 @@ export class IdeationComponent {
     this.ideaColumns.find((column) => column.id === 'createdAt')!,
   ];
   protected readonly categories = CATEGORIES;
+  /** Badge-Text wie Spalte und Filter „Herkunft“. */
+  protected readonly sourceLabel = sourceLabel;
 
   protected ideaForm: { title: string; description: string; priority: Priority; category: string } = {
     title: '',

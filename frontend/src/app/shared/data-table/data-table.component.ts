@@ -27,6 +27,7 @@ import {
   type Updater,
 } from '@tanstack/angular-table';
 import { PageSearchService } from '../../core/page-search.service.js';
+import { filterFacets, matchesSelection } from './filter.js';
 import { selectionState, toggleAll } from './selection.js';
 
 export interface DataColumn<T> {
@@ -38,6 +39,8 @@ export interface DataColumn<T> {
   sortValue?: (row: T) => string | number | null | undefined;
   /** select = Mehrfachauswahl der vorhandenen Werte, text = Freitext, false = kein Filter. */
   filter?: 'select' | 'text' | false;
+  /** Feste Werte des Auswahlfilters (mit „Alle“ davor), auch wenn gerade keine Zeile sie hat. */
+  options?: readonly string[];
   sortable?: boolean;
   /** CSS-Klasse für Kopf und Zellen, z. B. `title-cell`. */
   className?: string;
@@ -151,7 +154,7 @@ export class DataTableComponent<T> {
       filterFn:
         column.filter === 'text'
           ? 'includesString'
-          : (row, id, wanted: string[]) => !wanted?.length || wanted.includes(String(row.getValue(id))),
+          : (row, id, wanted: string[]) => matchesSelection(row.getValue(id), wanted),
     })),
   );
 
@@ -252,11 +255,7 @@ export class DataTableComponent<T> {
 
   /** Werte einer Spalte mit Anzahl, für das Filtermenü. */
   protected facets(id: string): { value: string; count: number }[] {
-    const unique = this.table.getColumn(id)?.getFacetedUniqueValues() ?? new Map();
-    return [...unique.entries()]
-      .map(([value, count]) => ({ value: String(value), count: Number(count) }))
-      .filter((entry) => entry.value !== '')
-      .sort((a, b) => a.value.localeCompare(b.value, 'de', { numeric: true }));
+    return filterFacets(this.table.getColumn(id)?.getFacetedUniqueValues() ?? new Map(), this.column(id)?.options);
   }
 
   protected selected(id: string): string[] {

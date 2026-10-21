@@ -56,10 +56,16 @@ const SOURCE_LABELS: Record<string, string> = {
   github: 'GitHub',
 };
 
+/** Herkunftswerte wie `IDEA_SOURCES` auf dem Server, in der Reihenfolge des Filters. */
+export const IDEA_SOURCES = Object.keys(SOURCE_LABELS);
+
 /** Bezeichnung der Herkunft einer Idee (ältere Ideen ohne Angabe gelten als von Hand erfasst). */
 export function sourceLabel(source: string | null | undefined): string {
   return SOURCE_LABELS[source ?? 'human'] ?? source ?? 'Mensch';
 }
+
+/** Feste Werte des Herkunft-Filters („Alle“ ergänzt die Tabelle) – gleich benannt wie Spalte und Badge. */
+export const SOURCE_FILTER_OPTIONS: readonly string[] = IDEA_SOURCES.map(sourceLabel);
 
 /** Feld „Richtung“ für den Visionär: gleich in der Ideation und im Aktionsmenü des Assistenten. */
 export const VISIONARY_DIRECTION = {
