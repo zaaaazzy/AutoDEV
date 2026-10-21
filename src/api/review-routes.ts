@@ -3,6 +3,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { access } from './access.js';
 import { DEV_COLUMNS, retryComment } from './development.js';
 
 const PORT_BASE = 4200;
@@ -72,7 +73,7 @@ async function requestSlot(
  * Freigeben merkt die Freigabe vor; gemergt wird vom Worker auf dem Host (dort liegt das Git-Repository).
  */
 export function registerReviewRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/review', async (request, response) => {
+  app.get('/projects/:slug/review', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug);
     if (!slug) {
       response.status(404).json({ message: 'Projekt nicht gefunden.' });
@@ -100,12 +101,13 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     });
   });
 
-  app.get('/review-slots', async (_request, response) => {
+  // Review-Container sind projektübergreifend; Inhalte fremder Projekte blendet loadSlots aus.
+  app.get('/review-slots', access({ tenant: 'global' }), async (_request, response) => {
     response.json({ slots: await loadSlots(pool, response.locals.allowedProjects as Set<string> | null | undefined) });
   });
 
   // Administrator: Review-Container freigeben bzw. sperren (ein gesperrter wird vom Worker beendet).
-  app.put('/review-slots/:slot', async (request, response) => {
+  app.put('/review-slots/:slot', access({ role: 'admin', tenant: 'admin' }), async (request, response) => {
     const slot = Number(request.params.slot);
     const enabled = (request.body as { enabled?: unknown } | undefined)?.enabled;
     if (!Number.isInteger(slot) || slot < 1 || slot > 9 || typeof enabled !== 'boolean') {
@@ -120,7 +122,8 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     response.json({ slots: await loadSlots(pool, null) });
   });
 
-  app.post('/review-slots/:slot/stop', async (request, response) => {
+  // Beenden ist Ausführen; die Abfrage trifft nur Container der eigenen Projekte (allowedProjects).
+  app.post('/review-slots/:slot/stop', access({ role: 'run', tenant: 'global' }), async (request, response) => {
     const slot = Number(request.params.slot);
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
@@ -136,33 +139,48 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
   });
 
   // Sprint-Ansicht: einen Stand (Commit) des Projekts in einem Review-Container starten.
-  app.post('/projects/:slug/review-slots/start', async (request, response) => {
-    const slug = parseProjectSlug(request.params.slug);
-    const body = (request.body ?? {}) as { commit?: unknown; label?: unknown; developmentId?: unknown };
-    const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit : null;
-    if (!slug || !commit) {
-      response.status(400).json({ message: 'Bitte einen Stand (Commit) wählen.' });
-      return;
-    }
-    const label = typeof body.label === 'string' ? body.label.trim().slice(0, 200) : '';
-    const developmentId =
-      typeof body.developmentId === 'string' && isUuid(body.developmentId) ? body.developmentId : null;
-    const slot = await requestSlot(pool, slug, {
-      commit,
-      label: label || commit.slice(0, 8),
-      developmentId,
-      kind: 'manual',
-    });
-    if (!slot) {
-      response.status(409).json({
-        message: 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.',
+  app.post(
+    '/projects/:slug/review-slots/start',
+    access({ role: 'run', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug);
+      const body = (request.body ?? {}) as { commit?: unknown; label?: unknown; developmentId?: unknown };
+      const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit : null;
+      if (!slug || !commit) {
+        response.status(400).json({ message: 'Bitte einen Stand (Commit) wählen.' });
+        return;
+      }
+      const label = typeof body.label === 'string' ? body.label.trim().slice(0, 200) : '';
+      const developmentId =
+        typeof body.developmentId === 'string' && isUuid(body.developmentId) ? body.developmentId : null;
+      // Der Mandant ist über :slug geprüft, der Auftrag nicht: Ein Auftrag aus einem anderen Projekt übernähme sonst
+      // dessen Container (requestSlot bevorzugt den Container desselben Auftrags).
+      if (
+        developmentId &&
+        !(
+          await pool.query('SELECT 1 FROM development_items WHERE id = $1 AND project_slug = $2', [developmentId, slug])
+        ).rowCount
+      ) {
+        response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+        return;
+      }
+      const slot = await requestSlot(pool, slug, {
+        commit,
+        label: label || commit.slice(0, 8),
+        developmentId,
+        kind: 'manual',
       });
-      return;
-    }
-    response.json({ slot });
-  });
+      if (!slot) {
+        response.status(409).json({
+          message: 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.',
+        });
+        return;
+      }
+      response.json({ slot });
+    },
+  );
 
-  app.get('/sprints/:id/commits', async (request, response) => {
+  app.get('/sprints/:id/commits', access({ tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
@@ -175,7 +193,7 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     response.json(row ?? { branch: null, commits: [], updatedAt: null });
   });
 
-  app.post('/development/:id/approve', async (request, response) => {
+  app.post('/development/:id/approve', access({ role: 'run', tenant: 'development' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
@@ -195,65 +213,73 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     response.json({ item });
   });
 
-  app.post('/development/:id/review-reject', async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Auftrag nicht gefunden.' });
-      return;
-    }
-    const comment = retryComment(request.body);
-    if (!comment) {
-      response.status(400).json({ message: 'Bitte kurz beschreiben, was nicht passt – das geht an den Entwickler.' });
-      return;
-    }
-    // Zurück an die Agents: der Auftrag läuft erneut auf seinem Branch, die Rückmeldung steht in der Beschreibung.
-    const result = await pool.query(
-      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, review_approved_at = NULL,
+  app.post(
+    '/development/:id/review-reject',
+    access({ role: 'run', tenant: 'development' }),
+    async (request, response) => {
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+        return;
+      }
+      const comment = retryComment(request.body);
+      if (!comment) {
+        response.status(400).json({ message: 'Bitte kurz beschreiben, was nicht passt – das geht an den Entwickler.' });
+        return;
+      }
+      // Zurück an die Agents: der Auftrag läuft erneut auf seinem Branch, die Rückmeldung steht in der Beschreibung.
+      const result = await pool.query(
+        `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, review_approved_at = NULL,
               review_since = NULL, failure = NULL, action_todo = NULL, budget_since = NOW(), updated_at = NOW(),
               description = COALESCE(d.description, '') || E'\\n\\n## Rückmeldung aus der Review-Freigabe (' ||
                 to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\\n' || $2::text
         WHERE d.id = $1 AND d.status = '${DEVELOPMENT_STATUS.approval}' AND d.review_approved_at IS NULL
         RETURNING ${DEV_COLUMNS}`,
-      [request.params.id, comment],
-    );
-    if (!result.rows[0]) {
-      response
-        .status(409)
-        .json({ message: 'Nur Aufträge, die noch auf die Freigabe warten, können zurückgewiesen werden.' });
-      return;
-    }
-    response.json({ item: result.rows[0] });
-  });
+        [request.params.id, comment],
+      );
+      if (!result.rows[0]) {
+        response
+          .status(409)
+          .json({ message: 'Nur Aufträge, die noch auf die Freigabe warten, können zurückgewiesen werden.' });
+        return;
+      }
+      response.json({ item: result.rows[0] });
+    },
+  );
 
-  app.post('/development/:id/show-review', async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Auftrag nicht gefunden.' });
-      return;
-    }
-    const item = (
-      await pool.query<{ slug: string; title: string; status: string }>(
-        'SELECT project_slug AS slug, title, status FROM development_items WHERE id = $1',
-        [request.params.id],
-      )
-    ).rows[0];
-    // Freigabe: Stand des Auftrags-Branches. Abnahme (Seite „Aktionen“): Stand, in dem der Auftrag steckt – den
-    // Commit bestimmt der Worker beim Start (Sprint-Branch bzw. main), weil nur er das Repository sieht.
-    const approval = item?.status === DEVELOPMENT_STATUS.approval;
-    if (!item || (!approval && item.status === DEVELOPMENT_STATUS.inProgress)) {
-      response.status(409).json({ message: 'Der Auftrag läuft gerade – erst danach im Review-Container prüfbar.' });
-      return;
-    }
-    const slot = await requestSlot(pool, item.slug, {
-      commit: null,
-      label: `${approval ? 'Freigabe' : 'Abnahme'}: ${item.title}`.slice(0, 200),
-      developmentId: request.params.id,
-      kind: approval ? 'approval' : 'manual',
-    });
-    if (!slot) {
-      response.status(409).json({
-        message: 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.',
+  app.post(
+    '/development/:id/show-review',
+    access({ role: 'run', tenant: 'development' }),
+    async (request, response) => {
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+        return;
+      }
+      const item = (
+        await pool.query<{ slug: string; title: string; status: string }>(
+          'SELECT project_slug AS slug, title, status FROM development_items WHERE id = $1',
+          [request.params.id],
+        )
+      ).rows[0];
+      // Freigabe: Stand des Auftrags-Branches. Abnahme (Seite „Aktionen“): Stand, in dem der Auftrag steckt – den
+      // Commit bestimmt der Worker beim Start (Sprint-Branch bzw. main), weil nur er das Repository sieht.
+      const approval = item?.status === DEVELOPMENT_STATUS.approval;
+      if (!item || (!approval && item.status === DEVELOPMENT_STATUS.inProgress)) {
+        response.status(409).json({ message: 'Der Auftrag läuft gerade – erst danach im Review-Container prüfbar.' });
+        return;
+      }
+      const slot = await requestSlot(pool, item.slug, {
+        commit: null,
+        label: `${approval ? 'Freigabe' : 'Abnahme'}: ${item.title}`.slice(0, 200),
+        developmentId: request.params.id,
+        kind: approval ? 'approval' : 'manual',
       });
-      return;
-    }
-    response.json({ ok: true });
-  });
+      if (!slot) {
+        response.status(409).json({
+          message: 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.',
+        });
+        return;
+      }
+      response.json({ ok: true });
+    },
+  );
 }

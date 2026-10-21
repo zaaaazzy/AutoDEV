@@ -4,7 +4,8 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { awaitsBugApprovalSql, isUntrustedBugSource, plainExternalText } from '../core/bug-trust.js';
 import { loadKnownBugs, registerBugRoutes } from '../api/bugs.js';
-import { hasRole, requiredRole } from '../api/roles.js';
+import { hasRole } from '../api/roles.js';
+import { requiredRole } from '../api/route-table.test.js';
 import { selectItems } from './runner-selection.js';
 import { buildPrompt } from './runner-prompts.js';
 import { UNTRUSTED_HINT } from './hoster.js';
@@ -97,8 +98,9 @@ function bugRoutes(bug: BugRow) {
   const handlers = new Map<string, (request: unknown, response: unknown) => Promise<void>>();
   const app = {
     get: () => undefined,
-    post: (path: string, handler: never) => handlers.set(`POST ${path}`, handler),
-    patch: (path: string, handler: never) => handlers.set(`PATCH ${path}`, handler),
+    // Letzter Handler: davor steht die Rechte-Deklaration (access).
+    post: (path: string, ...chain: never[]) => handlers.set(`POST ${path}`, chain.at(-1)!),
+    patch: (path: string, ...chain: never[]) => handlers.set(`PATCH ${path}`, chain.at(-1)!),
     delete: () => undefined,
   };
   const queries: string[] = [];

@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isRecord, parseProjectSlug } from '../core/validation.js';
 import { asCommand } from '../agent/system-agents.js';
 import { DEFAULT_RULES, loadRouting, parseRules, ruleLabel, type RoutingRule } from '../agent/model-routing.js';
@@ -184,13 +185,13 @@ export async function collectBudget(pool: Pool, project: string): Promise<Record
 }
 
 export function registerBudgetRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/budget', async (request, response) => {
+  app.get('/projects/:slug/budget', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
     response.json(await collectBudget(pool, slug));
   });
 
-  app.put('/projects/:slug/budget', async (request, response) => {
+  app.put('/projects/:slug/budget', access({ role: 'admin', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
     const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
