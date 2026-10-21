@@ -73,11 +73,16 @@ export class SprintOrdersComponent {
   ];
   protected readonly anyRow = (): boolean => true;
   /**
+   * Nur „leer ja/nein“ als Quelle: Die Auftragsliste wird bei jedem Nachladen (Agent-Läufe alle 3 s, Commits) neu
+   * berechnet. Hinge der Offen-Zustand direkt an ihr, klappte eine von Hand geöffnete Liste jedes Mal wieder zu.
+   */
+  private readonly sprintEmpty = computed(() => !this.orders().length);
+  /**
    * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu. Die Liste wird nur gerendert, wenn sie offen ist:
    * In einem zugeklappten <details> hätte sie eine Höhe, wäre aber nicht fokussierbar (Chrome rendert den Inhalt
    * mit content-visibility) – Filter und Prüfungen hielten sie für sichtbar.
    */
-  protected readonly poolOpen = linkedSignal(() => !this.orders().length);
+  protected readonly poolOpen = linkedSignal(() => this.sprintEmpty());
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
   protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));

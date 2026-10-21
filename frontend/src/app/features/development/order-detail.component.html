@@ -1,7 +1,7 @@
 @let item = order();
 <div class="order-panel">
   <!-- „Stand“ (worauf der Auftrag wartet) steht über der Status-/Sprint-/Agent-Zeile; die Zeitleiste ganz unten. -->
-  <app-order-timeline [order]="item">
+  <app-order-timeline [order]="item" [showWaiting]="!embedded()">
     <div class="order-controls">
       <label class="control"
         ><span>Status</span
@@ -56,13 +56,13 @@
         </label>
       }
     </div>
-    @if (item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
+    @if (!embedded() && item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
       <app-order-question [order]="item" />
     }
-    @if (item.status === 'approval') {
+    @if (!embedded() && item.status === 'approval') {
       <app-order-approval [order]="item" />
     }
-    @if (item.status === 'blocked' || item.status === 'rejected') {
+    @if (!embedded() && (item.status === 'blocked' || item.status === 'rejected')) {
       <section class="detail-alert" [class.rejected]="item.status === 'rejected'">
         <h3 class="detail-heading">
           {{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}

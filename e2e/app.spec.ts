@@ -60,6 +60,19 @@ async function sprintDetail(page: Page, name: string): Promise<Locator> {
   return page.locator('.closed-detail app-sprint-detail').filter({ has: title });
 }
 
+/** Zeile unter „Aktionen“ (Auftragstabelle) mit diesem Titel. */
+function attentionRow(page: Page, title: string): Locator {
+  return page.locator('.attention-table tbody tr:not(.closed-detail)').filter({ hasText: title });
+}
+
+/** Zeile unter „Aktionen“ aufklappen und den Bereich darunter liefern (Warum, Lösungsvorschlag, Aktionen). */
+async function attentionPanel(page: Page, title: string): Promise<Locator> {
+  const row = attentionRow(page, title).first();
+  const toggle = row.locator('.dt-expand');
+  if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  return row.locator('xpath=following-sibling::tr[1][contains(@class, "closed-detail")]');
+}
+
 test.beforeAll(async ({ request }) => seed(request));
 
 test('Login-Seite weist falsche Zugangsdaten ab und meldet richtig an', async ({ page }) => {
@@ -588,14 +601,16 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
   await page.goto('/#development');
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
   await page.goto('/#actions');
-  const card = page.locator('.attention-card').filter({ hasText: title });
+  // Zeile aufklappen: Grund und Aktionen stehen darin; Löschen fragt im Dialog nach.
+  const card = await attentionPanel(page, title);
   await expect(card).toContainText(`Aus Sprint „${sprint.name}“ genommen`);
   await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
-  // Seltenere Aktionen liegen unter „Mehr“.
-  await card.getByRole('button', { name: 'Mehr' }).click();
-  page.once('dialog', (dialog) => void dialog.accept());
   await card.getByRole('button', { name: 'Löschen' }).click();
-  await expect(card).toHaveCount(0);
+  await page
+    .getByRole('dialog', { name: 'Auftrag löschen?' })
+    .getByRole('button', { name: 'Endgültig löschen' })
+    .click();
+  await expect(attentionRow(page, title)).toHaveCount(0);
   if (started) {
     await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'planned' } });
     await request.delete(`/api/sprints/${sprint.id}`, { headers });
@@ -942,7 +957,7 @@ test('Sprint abbrechen: Auftrag geht zurück ins Backlog und wartet unter „Akt
     await expect(row).toContainText('Abgebrochen');
     // Der Auftrag ist nicht mehr geplant, sondern wartet unter „Aktionen“ mit dem Vermerk des Sprints.
     await page.goto('/#actions');
-    const card = page.locator('.attention-card').filter({ hasText: title });
+    const card = await attentionPanel(page, title);
     await expect(card).toContainText(`Aus Sprint „${name}“ genommen`);
     await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
   } finally {

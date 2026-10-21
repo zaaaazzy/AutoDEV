@@ -53,6 +53,11 @@ export class OrderDetailComponent {
   protected readonly manualAgent: Record<string, string> = {};
 
   readonly order = input.required<DevelopmentItem>();
+  /**
+   * Eingebettet unter „Aktionen“: ohne „Stand“, Blockiert-Kasten, Rückfrage und Freigabe – die zeigt die Zeile dort
+   * schon, sonst stünde alles doppelt.
+   */
+  readonly embedded = input(false);
 
   /**
    * Status-Auswahl: aktueller Status plus die von Hand erlaubten Ziele (dieselbe Tabelle wie der Server).
@@ -193,7 +198,8 @@ export class OrderDetailComponent {
   protected async startWithAgent(item: DevelopmentItem): Promise<void> {
     const agentId = this.manualAgent[item.id] || item.agentId;
     if (!agentId) return;
-    await this.orders.startWithAgent(item, agentId);
+    const agentName = this.data().agents.find((agent) => agent.id === agentId)?.name;
+    await this.orders.startWithAgent(item, agentId, agentName);
     delete this.manualAgent[item.id];
   }
 }

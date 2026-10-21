@@ -15,6 +15,12 @@ export interface ConfirmOptions {
   commentPlaceholder?: string;
   /** Kurzer Hinweis unter dem Feld, wofür der Kommentar verwendet wird. */
   commentHint?: string;
+  /** Vorbelegter Kommentar, z. B. die schon eingetippte Ergänzung. */
+  initialComment?: string;
+  /** Ohne Kommentarfeld – reine Rückfrage „Wirklich …?“. */
+  withoutComment?: boolean;
+  /** Bestätigen-Knopf als Warnung (Löschen u. ä.). */
+  danger?: boolean;
 }
 
 export interface ConfirmResult {

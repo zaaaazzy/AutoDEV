@@ -2,7 +2,8 @@ import { Injectable, inject } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { AcceptanceCheck, DevelopmentItem, Estimate } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { ConfirmService } from '../../core/confirm.service.js';
+import { ConfirmService, type ConfirmOptions } from '../../core/confirm.service.js';
+import { retryComment } from '../../shared/attention-card.js';
 import { numberOrNull, type FormValues } from '../../shared/forms.js';
 
 function estimateValues(values: FormValues): Estimate {
@@ -20,6 +21,11 @@ export class OrderService {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
   private readonly confirm = inject(ConfirmService);
+
+  /** Jede Aktion auf einem Auftrag erst nach Rückfrage im globalen Dialog; ohne Kommentarfeld. */
+  private async sure(options: Omit<ConfirmOptions, 'withoutComment'>): Promise<boolean> {
+    return !!(await this.confirm.ask({ ...options, withoutComment: true }));
+  }
 
   async update(id: string, values: Partial<DevelopmentItem>): Promise<void> {
     await this.store.perform(
@@ -91,10 +97,32 @@ export class OrderService {
   }
 
   /**
-   * Ohne Rückfrage erneut versuchen bzw. wieder einplanen (Karte unter „Aktionen“): Die Antwort bzw. der Hinweis
-   * steht schon im Feld der Karte und wird mit Datum an die Beschreibung gehängt, damit alle Agents ihn sehen.
+   * Erneut versuchen bzw. wieder einplanen aus „Aktionen“: Der Dialog zeigt den Vorschlag der Analyse und hat die
+   * schon eingetippte Ergänzung vorbelegt. Beides geht gemeinsam mit Datum an die Beschreibung, damit alle Agents es
+   * sehen – die Ergänzung ersetzt den Vorschlag nicht. Liefert false, wenn abgebrochen wurde.
    */
-  async retryNow(item: DevelopmentItem, comment: string | null): Promise<void> {
+  async retryNow(
+    item: DevelopmentItem,
+    options: { label: string; note: string; suggestion?: string | null },
+  ): Promise<boolean> {
+    const blocked = item.status === 'blocked';
+    const answer = await this.confirm.ask({
+      title: `${options.label}?`,
+      message: `„${item.title}“ wird ${blocked ? 'erneut versucht' : 'wieder eingeplant'}; der Worker übernimmt ihn beim nächsten Zyklus.`,
+      details: options.suggestion ? [`Vorschlag der Analyse: ${options.suggestion}`] : undefined,
+      confirmLabel: options.label,
+      commentLabel: 'Ergänzung für die Agents (optional)',
+      commentPlaceholder: 'z. B. „Nur das Skript anpassen, den npm-Cache lassen.“',
+      commentHint: options.suggestion
+        ? 'Vorschlag und Ergänzung werden mit Datum an die Beschreibung des Auftrags angehängt.'
+        : 'Wird mit Datum an die Beschreibung des Auftrags angehängt und so allen Agents mitgegeben.',
+      initialComment: options.note,
+    });
+    if (!answer) return false;
+    const comment = retryComment(
+      { step: options.suggestion ? 'suggestion' : 'retry', detail: options.suggestion ?? null },
+      answer.comment,
+    );
     await this.store.perform(
       () =>
         this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`, {
@@ -106,10 +134,17 @@ export class OrderService {
           : 'Auftrag wird erneut versucht.'
         : 'Auftrag ist wieder eingeplant.',
     );
+    return true;
   }
 
   /** Review-Freigabe: Auftrag freigeben – der Worker mergt ihn in den Sprint-Branch und zieht die Vorschau nach. */
   async approve(item: DevelopmentItem): Promise<void> {
+    const ok = await this.sure({
+      title: 'Auftrag freigeben?',
+      message: `„${item.title}“ wird in den Sprint-Branch gemergt; die Vorschau zieht danach nach.`,
+      confirmLabel: 'Freigeben',
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/approve`),
       'Freigegeben – wird gleich gemergt.',
@@ -137,6 +172,12 @@ export class OrderService {
 
   /** Diesen Auftrag in der Review-Instanz zeigen (bzw. nach einem Fehlstart neu starten). */
   async showReview(item: DevelopmentItem): Promise<void> {
+    const ok = await this.sure({
+      title: 'Im Review-Container anzeigen?',
+      message: `Ein Review-Container startet „${item.title}“ – ein belegter Container wechselt dafür den Auftrag.`,
+      confirmLabel: 'Anzeigen',
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/show-review`),
       'Review-Instanz wechselt – das dauert einen Moment.',
@@ -145,6 +186,12 @@ export class OrderService {
   }
 
   async removeFromSprint(item: DevelopmentItem): Promise<void> {
+    const ok = await this.sure({
+      title: 'Aus dem Sprint nehmen?',
+      message: `„${item.title}“ verlässt den Sprint und steht danach unter „Aktionen“.`,
+      confirmLabel: 'Aus dem Sprint nehmen',
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`),
       'Auftrag aus dem Sprint genommen – er steht jetzt unter „Aktionen“.',
@@ -152,8 +199,13 @@ export class OrderService {
   }
 
   async remove(item: DevelopmentItem): Promise<void> {
-    if (!globalThis.confirm(`Auftrag „${item.title}“ endgültig löschen? Das lässt sich nicht rückgängig machen.`))
-      return;
+    const ok = await this.sure({
+      title: 'Auftrag löschen?',
+      message: `„${item.title}“ wird endgültig gelöscht. Das lässt sich nicht rückgängig machen.`,
+      confirmLabel: 'Endgültig löschen',
+      danger: true,
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.delete(`/api/development/${encodeURIComponent(item.id)}`),
       'Auftrag gelöscht.',
@@ -161,6 +213,12 @@ export class OrderService {
   }
 
   async confirmChecks(item: DevelopmentItem): Promise<void> {
+    const ok = await this.sure({
+      title: 'Alles geprüft?',
+      message: `Die offenen Punkte von „${item.title}“ werden als von dir geprüft vermerkt.`,
+      confirmLabel: 'Geprüft – alles in Ordnung',
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/acceptance/confirm`),
       'Danke – die Punkte sind als geprüft vermerkt.',
@@ -182,6 +240,14 @@ export class OrderService {
 
   /** Offene Punkte (oder einen) vom Tester-Agent automatisch prüfen lassen. */
   async verifyPoints(item: DevelopmentItem, check?: AcceptanceCheck): Promise<void> {
+    const ok = await this.sure({
+      title: check ? 'Punkt vom Tester prüfen lassen?' : 'Offene Punkte vom Tester prüfen lassen?',
+      message: check
+        ? `Der Tester-Agent prüft „${check.text}“ automatisch.`
+        : `Der Tester-Agent prüft die offenen Punkte von „${item.title}“ automatisch.`,
+      confirmLabel: 'Prüfen lassen',
+    });
+    if (!ok) return;
     await this.store.perform(
       () =>
         this.api.post(
@@ -193,13 +259,25 @@ export class OrderService {
   }
 
   async analyze(item: DevelopmentItem): Promise<void> {
+    const ok = await this.sure({
+      title: 'Neu analysieren?',
+      message: `Der Assistent analysiert „${item.title}“ erneut und schlägt eine Lösung vor.`,
+      confirmLabel: 'Analysieren',
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/analyze`),
       'Der Assistent analysiert den Auftrag.',
     );
   }
 
-  async startWithAgent(item: DevelopmentItem, agentId: string): Promise<void> {
+  async startWithAgent(item: DevelopmentItem, agentId: string, agentName?: string): Promise<void> {
+    const ok = await this.sure({
+      title: 'Agent starten?',
+      message: `${agentName ? `„${agentName}“` : 'Der gewählte Agent'} übernimmt „${item.title}“ beim nächsten Zyklus des Workers.`,
+      confirmLabel: 'Starten',
+    });
+    if (!ok) return;
     await this.store.perform(
       () => this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, { agentId }),
       'Agent gestartet – der Worker übernimmt beim nächsten Zyklus.',

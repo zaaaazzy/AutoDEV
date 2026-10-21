@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { attentionCard, blockedReason } from './attention-card.js';
+import { attentionCard, blockedReason, retryComment } from './attention-card.js';
 
 /** Gespeicherte Meldung wie bei „Projektcode nur mit gefiltertem Environment“ (21.10.2026). */
 const ACCEPTANCE = `Agent „Tester“ scheiterte:
@@ -105,4 +105,18 @@ test('Abnahme in einem Code-Block (ältere Meldung): kein leerer zweiter Punkt',
     blockedReason({ failure: ACCEPTANCE }),
     'Tester: Abnahme nicht bestanden – Tests grün, aber die Abdeckung konnte nicht gemessen werden',
   );
+});
+
+test('Erneut versuchen: Vorschlag und Ergänzung gehen gemeinsam an die Agents', () => {
+  const card = { step: 'suggestion' as const, detail: 'Skript anpassen' };
+  assert.equal(
+    retryComment(card, 'setz es um'),
+    'Bitte so umsetzen (Vorschlag der Analyse): Skript anpassen\nErgänzung: setz es um',
+  );
+  assert.equal(retryComment(card, '  '), 'Bitte so umsetzen (Vorschlag der Analyse): Skript anpassen');
+  assert.equal(
+    retryComment({ step: 'retry', detail: null }, 'Bitte UTC verwenden.'),
+    'Ergänzung: Bitte UTC verwenden.',
+  );
+  assert.equal(retryComment({ step: 'retry', detail: null }, ''), null);
 });
