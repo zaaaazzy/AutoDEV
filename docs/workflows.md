@@ -27,6 +27,29 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 3. **Bug-Wächter** (`assessRisks`): übernimmt die Anforderung des Autors, prüft sie gegen alle bisherigen Bugs (offene und behobene samt Lösung) und speichert die Risiken am Auftrag („was nicht wiederholt werden darf“). Beide Schritte laufen beim Ausarbeiten und werden bei der Abarbeitung nicht wiederholt.
 4. Die Sprint-Zuordnung ist manuell oder läuft über die Sprintplanung (Abschnitt 3a). Hängende `drafting`-Ideen werden nach einer Frist zurückgesetzt.
 
+### 2a. Herkunft-Filter in der Ideation-Liste
+
+Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnungen sind dieselben wie die Badges („Visionär“ steht für Ideen vom Visionär, `source = visionary`):
+
+| Wert | Bedeutung |
+|---|---|
+| Mensch | von Hand erfasst; ältere Ideen ohne Angabe gelten ebenfalls als „Mensch“ |
+| Visionär | vom Visionär-Agenten vorgeschlagen (Badge „Visionär“) |
+| Routine | von einer Routine angelegt |
+| Produktion | Idee mit Herkunft Produktion |
+| GitHub | Idee mit Herkunft GitHub |
+
+**So filtern Sie:** Auf den Trichter neben dem Spaltenkopf „Herkunft“ klicken. Das Menü zeigt „Alle“ und jede Herkunft mit der Anzahl der Ideen. Auch Herkunften ohne Treffer stehen in fester Reihenfolge darin, mit der Anzahl 0.
+
+**Bedingungen:**
+- Mehrere Herkünfte gleichzeitig wählen: Die Liste zeigt Ideen, die mindestens eine der gewählten Herkünfte haben (z. B. Visionär und GitHub).
+- Der Herkunft-Filter lässt sich mit allen anderen Spaltenfiltern kombinieren, etwa Herkunft „Visionär“ mit einem Status-Filter. Dann erscheinen nur Ideen, die beide Bedingungen erfüllen. Dabei kann die Liste leer bleiben.
+- „Alle“ hebt den Herkunft-Filter auf. Ist kein Filter gesetzt, ist „Alle“ ausgewählt und nicht anklickbar.
+- Ein aktiver Filter erscheint als Chip über der Tabelle. Mit dem × am Chip oder „Filter leeren“ im Menü wird er entfernt; „Zurücksetzen“ leert alle Spaltenfilter, Suche und Sortierung auf einmal.
+- **Nach dem Neuladen der Seite ist der Filter wieder auf „Alle“.** Das gilt auch für die anderen Spaltenfilter, die ebenfalls nicht gespeichert werden.
+
+**Keine Änderung** an den Ideen selbst: Der Filter blendet nur Zeilen aus. Er ändert weder Herkunft noch Status.
+
 ## 3. Sprint-Lebenszyklus
 
 | Status        | Bedeutung                                                                                                                                                                                                                                                                                            |
