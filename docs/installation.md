@@ -100,6 +100,46 @@ Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `
 `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it aideation_database_postgres psql -U devlog aideation`.
 
+## Hintergrunddienste und Zugänge
+
+Die Installationsskripte (`scripts/install-worker.sh`, `install-watchdog.sh`, `install-worker-linux.sh`,
+`install-worker.ps1`) schreiben die Zugänge (`DEV_LOG_DATABASE_URL`, `DEV_LOG_SECRET_KEY`) in eine **Env-Datei, die nur
+du lesen kannst**. In Plist, systemd-Unit oder Befehlszeile der geplanten Aufgabe stehen sie nicht mehr. Beim Start liest
+`scripts/run-with-env.sh` bzw. `run-with-env.ps1` die Datei. Fehlt sie oder können andere sie lesen, bricht der Start
+mit einer Meldung im Log ab.
+
+| System | Dienst | Env-Datei |
+|---|---|---|
+| macOS | `~/Library/LaunchAgents/com.aideation.worker.plist` (Rechte 600) | `~/.config/aideation/worker.env` (600) |
+| macOS | `~/Library/LaunchAgents/com.aideation.watchdog.plist` (600) | `~/.config/aideation/watchdog.env` (600) |
+| Linux | `~/.config/systemd/user/aideation-worker.service` (600) | `~/.config/aideation/worker.env` (600) |
+| Windows | Aufgabe `AIdeationWorker` | `%LOCALAPPDATA%\AIdeation\worker.env` (ACL nur für dich) |
+
+Werte ändern: Skript mit neuen Werten erneut ausführen, z. B. `DEV_LOG_DATABASE_URL=… ./scripts/install-worker.sh`.
+Ohne Angabe übernimmt ein erneuter Lauf die Werte aus der bestehenden Env-Datei.
+
+**Umstieg von älteren Installationen:** Ältere Skripte schrieben die Zugänge direkt in Plist bzw. Unit (für alle lesbar)
+und unter Windows in die Befehlszeile der Aufgabe. Führe das passende Skript einmal erneut aus. Es ersetzt die alte
+Plist bzw. Unit, unter Windows die Aufgabe. Danach stehen keine Zugänge mehr darin. Wurde das Datenbank-Passwort früher
+in einer Plist oder Unit gespeichert, solltest du es ändern.
+
+**Standardpasswort:** Ohne `DEV_LOG_DB_PASSWORD` in der `.env` nutzt die Datenbank das bekannte Passwort
+`devlog_local_dev`. Server, Wächter und Installationsskripte warnen dann. Zum Wechseln setzt du das Passwort in
+PostgreSQL (`ALTER USER devlog PASSWORD '…'`), trägst es in die `.env` ein, startest mit `docker compose up -d` neu
+und installierst den Worker mit der neuen `DEV_LOG_DATABASE_URL` erneut.
+
+### Container-Härtung
+
+Jeder Dienst in `docker-compose.yml` hat Grenzen für Speicher, CPU und Prozesse und einen Healthcheck. `frontend`
+(nginx, Port 8080 im Container), `https` (Caddy) und `backup` laufen ohne root und ohne Linux-Capabilities. Caddy
+behält nur `NET_BIND_SERVICE` für die Ports 80/443. Der einmalige Dienst `https-volumes` übergibt bestehende
+Zertifikats-Volumes an den Benutzer `caddy` und beendet sich danach. Der Review-Container läuft als Benutzer `node`.
+
+Der Backup-Container schreibt als `70:70` (Benutzer `postgres` des Images) nach `./backups`. Die Dumps haben die
+Rechte 600. Unter **Linux** muss der Ordner für diesen Benutzer beschreibbar sein. Sonst setzt du in der `.env`
+`DEV_LOG_BACKUP_USER=<uid>:<gid>` deines Benutzers (`id -u`, `id -g`). Der Einrichtungs-Assistent trägt das selbst
+ein. Unter macOS ist nichts zu tun.
+
 ## Fehlerbehebung
 
 | Problem | Lösung |
@@ -107,5 +147,7 @@ Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `
 | „Docker läuft nicht“ | Docker Desktop starten, dann erneut `./start.sh` |
 | Seite lädt nicht | `docker compose logs dev-log` – meist fehlt `DEV_LOG_PASSWORD` (mind. 16 Zeichen) in `.env` |
 | Agents starten nicht | Worker-Status oben in AIdeation prüfen; `npm run worker` zeigt Fehler direkt |
+| Worker-Log: „Env-Datei … fehlt“ oder „für andere lesbar“ | Installationsskript erneut ausführen bzw. `chmod 600` auf die Env-Datei |
+| Backup-Container startet immer neu (Linux) | `./backups` ist für ihn nicht beschreibbar – `DEV_LOG_BACKUP_USER` setzen (siehe oben) |
 | Zwei-Faktor-Gerät verloren | siehe README, Abschnitt Sicherheit |
 | Zu viele Fehlversuche | 15 Minuten warten – gesperrt wird nur das betroffene Konto |

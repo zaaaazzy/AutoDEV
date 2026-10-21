@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, readFile, rename, writeFile } from 'node:fs/promises';
+import { platform } from 'node:os';
 
 export interface EnvInput {
   username: string;
@@ -139,6 +140,9 @@ export function planEnv(existing: string, input: EnvInput): EnvPlan {
 
   // Leere Felder lassen bestehende Werte stehen.
   if (input.projectRoots.trim()) updates.set('DEV_LOG_PROJECT_ROOTS', input.projectRoots.trim());
+  // Backup-Container läuft ohne root: unter Linux als eigener Benutzer, damit er in ./backups schreiben darf.
+  if (platform() === 'linux' && process.getuid && process.getgid)
+    updates.set('DEV_LOG_BACKUP_USER', `${process.getuid()}:${process.getgid()}`);
   if (input.domain.trim()) {
     updates.set('DEV_LOG_DOMAIN', input.domain.trim());
     updates.set('DEV_LOG_PUBLIC_URL', `https://${input.domain.trim()}`);

@@ -259,6 +259,9 @@ export interface Bug {
   externalRef?: string | null;
   /** Betriebs-Bug, der nach dem Beheben wieder auftrat. */
   regressedAt?: string | null;
+  /** Freigabe für Agents (nur Bugs aus Betrieb oder GitHub): wann und von wem. */
+  approvedAt?: string | null;
+  approvedBy?: string | null;
   /** Betriebs-Bugs: Vorkommen der letzten 24 Stunden. */
   productionCount?: number | null;
 }
@@ -488,8 +491,46 @@ export interface DraftOrder {
   startedAt: string | null;
 }
 
+/** Git-Zustand der Projektordner, vom Worker jede Minute erfasst (siehe src/runner/repo-state.ts). */
+export type GitFix = 'save_wip' | 'checkout_main' | 'sync_main';
+export type GuardedAction = 'go_live' | 'approve' | 'sprint_start';
+
+export interface GitProblem {
+  code: 'foreign_branch' | 'uncommitted' | 'untracked' | 'main_diverged' | 'main_ahead' | 'main_behind';
+  role: 'live' | 'agents';
+  folder: string;
+  severity: 'block' | 'warn';
+  title: string;
+  detail: string;
+  fixes: GitFix[];
+}
+
+export interface GitFolder {
+  folder: string;
+  role: 'live' | 'agents';
+  branch: string | null;
+  repository: boolean;
+}
+
+export interface GitStatus {
+  state: { checkedAt: string; folders: GitFolder[]; problems: GitProblem[] } | null;
+  stateAt: string | null;
+  /** Älter als 5 Minuten (Worker aus): dann wird nichts gesperrt. */
+  stale: boolean;
+  fix: {
+    id: string;
+    fix: GitFix;
+    role: 'live' | 'agents';
+    status: 'requested' | 'running' | 'done' | 'failed';
+    message: string | null;
+    createdAt: string;
+    finishedAt: string | null;
+  } | null;
+}
+
 export interface WorkerStatus {
   online: boolean;
+  git?: GitStatus;
   worker: { lastError: string | null; intervalSeconds: number; cpuPercent: number | null } | null;
   running: { title: string; startedAt: string }[];
   /** Aufträge in Entstehung: Ideen, aus denen der Auftragsautor gerade einen Auftrag schreibt. */

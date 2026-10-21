@@ -2,6 +2,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express, { type Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -21,7 +22,7 @@ export function safeFilename(name: unknown): string {
 export function registerAttachmentRoutes(app: Router, pool: Pool): void {
   const rawImage = express.raw({ type: IMAGE_TYPES, limit: MAX_ATTACHMENT_BYTES });
 
-  app.get('/projects/:slug/attachments', async (request, response) => {
+  app.get('/projects/:slug/attachments', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -40,10 +41,16 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
 
   // Bilder zu Ideen und Bugs; owner bestimmt die Spalte, die übrige Logik ist identisch.
   for (const owner of [
-    { path: '/ideation/:id/attachments', table: 'ideation_items', column: 'ideation_id', label: 'Idee' },
-    { path: '/bugs/:id/attachments', table: 'bugs', column: 'bug_id', label: 'Bug' },
+    {
+      path: '/ideation/:id/attachments',
+      tenant: 'ideation',
+      table: 'ideation_items',
+      column: 'ideation_id',
+      label: 'Idee',
+    },
+    { path: '/bugs/:id/attachments', tenant: 'bugs', table: 'bugs', column: 'bug_id', label: 'Bug' },
   ] as const) {
-    app.post(owner.path, rawImage, async (request, response) => {
+    app.post(owner.path, access({ role: 'plan', tenant: owner.tenant }), rawImage, async (request, response) => {
       const data: unknown = request.body;
       if (!isUuid(request.params.id)) {
         response.status(404).json({ message: 'Not found.' });
@@ -72,7 +79,7 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
     });
   }
 
-  app.get('/attachments/:id', async (request, response) => {
+  app.get('/attachments/:id', access({ tenant: 'attachments' }), async (request, response) => {
     const result = isUuid(request.params.id)
       ? await pool.query(`SELECT mime, data FROM ideation_attachments WHERE id = $1`, [request.params.id])
       : { rows: [] };
@@ -90,7 +97,7 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
     response.send(row.data);
   });
 
-  app.delete('/attachments/:id', async (request, response) => {
+  app.delete('/attachments/:id', access({ role: 'plan', tenant: 'attachments' }), async (request, response) => {
     const result = isUuid(request.params.id)
       ? await pool.query(`DELETE FROM ideation_attachments WHERE id = $1`, [request.params.id])
       : { rowCount: 0 };

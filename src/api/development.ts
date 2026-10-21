@@ -4,7 +4,9 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 import { canSetDevelopmentStatus, isAssignableSprintStatus } from '../core/development-transitions.js';
+import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
+import { developmentPatchRole } from './roles.js';
 import {
   buildUpdate,
   isRecord,
@@ -54,7 +56,7 @@ export function retryComment(body: unknown): string | null {
 
 export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
-  app.post('/ideation/:id/promote', async (request, response) => {
+  app.post('/ideation/:id/promote', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(400).json({ message: 'Invalid idea.' });
       return;
@@ -81,7 +83,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  app.post('/projects/:slug/development', async (request, response) => {
+  app.post('/projects/:slug/development', access({ role: 'plan', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body = request.body as unknown;
     if (
@@ -130,7 +132,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   });
 
   // Folgeauftrag zu einem erledigten Auftrag: neuer Auftrag mit Bezug, optional gleich in einem Sprint eingeplant.
-  app.post('/development/:id/follow-up', async (request, response) => {
+  app.post('/development/:id/follow-up', access({ role: 'plan', tenant: 'development' }), async (request, response) => {
     const body = request.body as unknown;
     if (
       !isUuid(request.params.id) ||
@@ -191,7 +193,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   });
 
   // Retry a blocked or (after adjusting) rejected order, using the project's active sprint when none is assigned.
-  app.post('/development/:id/retry', async (request, response) => {
+  app.post('/development/:id/retry', access({ role: 'run', tenant: 'development' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -225,20 +227,23 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
    * Abgebrochene (aus einem Sprint genommen oder blockiert) werden dabei wie bei /retry zurückgesetzt, landen aber direkt
    * im Ziel-Sprint statt erst im aktiven. auto_run nur, wenn der Ziel-Sprint läuft – ein geplanter wartet auf seinen Start.
    */
-  app.post('/development/:id/take-into-sprint', async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Auftrag nicht gefunden.' });
-      return;
-    }
-    const sprintId = isRecord(request.body) ? request.body.sprintId : undefined;
-    if (!isUuid(sprintId)) {
-      response.status(400).json({ message: 'Sprint fehlt oder ist ungültig.' });
-      return;
-    }
-    const aborted = `(d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVELOPMENT_STATUS.blocked}')`;
-    // Ohne Join auf sprints: DEV_COLUMNS (RETURNING) nennt id und status ohne Tabellen-Präfix.
-    const result = await pool.query(
-      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', sprint_id = $2,
+  app.post(
+    '/development/:id/take-into-sprint',
+    access({ role: 'plan', tenant: 'development' }),
+    async (request, response) => {
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+        return;
+      }
+      const sprintId = isRecord(request.body) ? request.body.sprintId : undefined;
+      if (!isUuid(sprintId)) {
+        response.status(400).json({ message: 'Sprint fehlt oder ist ungültig.' });
+        return;
+      }
+      const aborted = `(d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVELOPMENT_STATUS.blocked}')`;
+      // Ohne Join auf sprints: DEV_COLUMNS (RETURNING) nennt id und status ohne Tabellen-Präfix.
+      const result = await pool.query(
+        `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', sprint_id = $2,
               auto_run = COALESCE((SELECT s.status = 'active' FROM sprints s WHERE s.id = $2), FALSE),
               agent_id = CASE WHEN ${aborted} THEN NULL ELSE d.agent_id END,
               failure = CASE WHEN ${aborted} THEN NULL ELSE d.failure END,
@@ -253,28 +258,32 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
           AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
                          AND s.status IN ('planned', 'active'))
         RETURNING ${DEV_COLUMNS}`,
-      [request.params.id, sprintId],
-    );
-    if (!result.rows[0]) {
-      response.status(409).json({
-        message:
-          'Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen, und nur in geplante oder aktive Sprints desselben Projekts.',
-      });
-      return;
-    }
-    response.json({ item: result.rows[0] });
-  });
+        [request.params.id, sprintId],
+      );
+      if (!result.rows[0]) {
+        response.status(409).json({
+          message:
+            'Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen, und nur in geplante oder aktive Sprints desselben Projekts.',
+        });
+        return;
+      }
+      response.json({ item: result.rows[0] });
+    },
+  );
 
   // Aus dem Sprint nehmen: Der Auftrag wartet danach unter „Aktionen“ auf eine Entscheidung.
-  app.post('/development/:id/remove-from-sprint', async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Development item not found.' });
-      return;
-    }
-    // Aus einem noch geplanten Sprint nehmen ist reine Planung: kein Vermerk, also auch keine Karte unter „Aktionen“.
-    // Erst aus einem laufenden Sprint gilt ein Auftrag als abgebrochen und wartet auf eine Entscheidung.
-    const result = await pool.query(
-      `UPDATE development_items SET
+  app.post(
+    '/development/:id/remove-from-sprint',
+    access({ role: 'plan', tenant: 'development' }),
+    async (request, response) => {
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Development item not found.' });
+        return;
+      }
+      // Aus einem noch geplanten Sprint nehmen ist reine Planung: kein Vermerk, also auch keine Karte unter „Aktionen“.
+      // Erst aus einem laufenden Sprint gilt ein Auftrag als abgebrochen und wartet auf eine Entscheidung.
+      const result = await pool.query(
+        `UPDATE development_items SET
               removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id AND status <> 'planned'),
               removed_from_sprint_at = CASE WHEN (SELECT status FROM sprints WHERE id = development_items.sprint_id) = 'planned'
                                             THEN NULL ELSE NOW() END,
@@ -284,19 +293,20 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         WHERE id = $1 AND sprint_id IS NOT NULL
           AND status NOT IN ('${DEVELOPMENT_STATUS.inProgress}', '${DEVELOPMENT_STATUS.done}')
         RETURNING ${DEV_COLUMNS}`,
-      [request.params.id],
-    );
-    if (!result.rows[0]) {
-      response
-        .status(409)
-        .json({ message: 'Nur geplante oder blockierte Aufträge eines Sprints lassen sich herausnehmen.' });
-      return;
-    }
-    response.json({ item: result.rows[0] });
-  });
+        [request.params.id],
+      );
+      if (!result.rows[0]) {
+        response
+          .status(409)
+          .json({ message: 'Nur geplante oder blockierte Aufträge eines Sprints lassen sich herausnehmen.' });
+        return;
+      }
+      response.json({ item: result.rows[0] });
+    },
+  );
 
   // Endgültig löschen (nicht, solange Agents daran arbeiten); Läufe und Abnahme werden mitgelöscht.
-  app.delete('/development/:id', async (request, response) => {
+  app.delete('/development/:id', access({ role: 'plan', tenant: 'development' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -323,23 +333,27 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   });
 
   // Rückfragen beantworten: Punkte, die der Tester „von dir zu prüfen“ gemeldet hat, als geprüft bestätigen.
-  app.post('/development/:id/acceptance/confirm', async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Development item not found.' });
-      return;
-    }
-    const result = await pool.query(
-      `UPDATE acceptance_checks SET status = 'met', note = TRIM(note || ' (von dir bestätigt)'), checked_at = NOW()
+  app.post(
+    '/development/:id/acceptance/confirm',
+    access({ role: 'plan', tenant: 'development' }),
+    async (request, response) => {
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Development item not found.' });
+        return;
+      }
+      const result = await pool.query(
+        `UPDATE acceptance_checks SET status = 'met', note = TRIM(note || ' (von dir bestätigt)'), checked_at = NOW()
         WHERE development_id = $1 AND status = 'manual'`,
-      [request.params.id],
-    );
-    // Alle manuellen Punkte bestätigt: nichts mehr zu tun (Sprintbericht wird aktualisiert).
-    await setActionTodo(pool, request.params.id, null).catch(logged('development'));
-    response.json({ confirmed: result.rowCount ?? 0 });
-  });
+        [request.params.id],
+      );
+      // Alle manuellen Punkte bestätigt: nichts mehr zu tun (Sprintbericht wird aktualisiert).
+      await setActionTodo(pool, request.params.id, null).catch(logged('development'));
+      response.json({ confirmed: result.rowCount ?? 0 });
+    },
+  );
 
   // Ask the troubleshooter to analyze a blocked order and record the findings as a bug.
-  app.post('/development/:id/analyze', async (request, response) => {
+  app.post('/development/:id/analyze', access({ role: 'run', tenant: 'development' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Development item not found.' });
       return;
@@ -357,114 +371,118 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     response.json({ item: result.rows[0] });
   });
 
-  app.patch('/development/:id', async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
-      return;
-    }
-    const fields = parseFields(request.body, DEV_FIELDS);
-    if (!fields) {
-      response.status(400).json({ message: 'Invalid development update.' });
-      return;
-    }
-    const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
-    let from: string | undefined;
-    if (target) {
-      const current = await pool.query<{ status: string }>(`SELECT status FROM development_items WHERE id = $1`, [
-        request.params.id,
-      ]);
-      from = current.rows[0]?.status;
-      if (!from) {
-        response.status(404).json({ message: 'Development item not found.' });
+  app.patch(
+    '/development/:id',
+    access({ role: developmentPatchRole, tenant: 'development' }),
+    async (request, response) => {
+      if (!isUuid(request.params.id)) {
+        response.status(404).json({ message: 'Not found.' });
         return;
       }
-      if (!canSetDevelopmentStatus(from, target)) {
-        response.status(409).json({
-          message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
+      const fields = parseFields(request.body, DEV_FIELDS);
+      if (!fields) {
+        response.status(400).json({ message: 'Invalid development update.' });
+        return;
+      }
+      const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+      let from: string | undefined;
+      if (target) {
+        const current = await pool.query<{ status: string }>(`SELECT status FROM development_items WHERE id = $1`, [
+          request.params.id,
+        ]);
+        from = current.rows[0]?.status;
+        if (!from) {
+          response.status(404).json({ message: 'Development item not found.' });
+          return;
+        }
+        if (!canSetDevelopmentStatus(from, target)) {
+          response.status(409).json({
+            message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
+          });
+          return;
+        }
+      }
+      const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
+      let targetSprintStatus: string | undefined;
+      if (typeof sprintId === 'string') {
+        const sprint = await pool.query<{ sprintStatus: string }>(
+          `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
+          WHERE s.id = $1 AND e.id = $2`,
+          [sprintId, request.params.id],
+        );
+        if (!sprint.rows[0]) {
+          response.status(400).json({ message: 'Sprint does not belong to the project of this item.' });
+          return;
+        }
+        if (!isAssignableSprintStatus(sprint.rows[0].sprintStatus)) {
+          response.status(409).json({ message: 'Orders can only be assigned to planned or active sprints.' });
+          return;
+        }
+        targetSprintStatus = sprint.rows[0].sprintStatus;
+      }
+      const agentId = fields.find((field) => field.column === 'agent_id')?.value;
+      if (typeof agentId === 'string') {
+        if (!(await pool.query(`SELECT 1 FROM development_items WHERE id = $1`, [request.params.id])).rows[0]) {
+          response.status(404).json({ message: 'Development item not found.' });
+          return;
+        }
+        const sameProject = await pool.query(
+          `SELECT 1 FROM agents a JOIN development_items d ON d.project_slug = a.project_slug
+          WHERE a.id = $1 AND d.id = $2`,
+          [agentId, request.params.id],
+        );
+        if (!sameProject.rows[0]) {
+          response.status(400).json({ message: 'Agent does not belong to the project of this item.' });
+          return;
+        }
+      }
+      const sprintField = fields.find((field) => field.column === 'sprint_id');
+      const agentField = fields.find((field) => field.column === 'agent_id');
+      // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
+      const update = buildUpdate(
+        'development_items',
+        request.params.id,
+        fields,
+        `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
+        from ? { column: 'status', values: [from] } : undefined,
+      );
+      const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
+      if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
+        // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
+        const assigned = (sprintField ?? agentField)?.value !== null;
+        update.sql = update.sql.replace(
+          ', updated_at = NOW()',
+          `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`,
+        );
+      }
+      if (sprintField && sprintField.value !== null) {
+        // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
+        update.sql = update.sql.replace(
+          ', updated_at = NOW()',
+          ', removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()',
+        );
+      }
+      if (targetSprintStatus && targetSprintStatus !== 'active') {
+        // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
+        // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
+        update.sql = update.sql.replace(', updated_at = NOW()', ', auto_run = FALSE, updated_at = NOW()');
+      }
+      if (manualStart) {
+        // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
+        update.sql = update.sql.replace(
+          ', updated_at = NOW()',
+          `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,
+          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`,
+        );
+      }
+      const result = await pool.query(update.sql, update.values);
+      if (!result.rows[0]) {
+        response.status(from ? 409 : 404).json({
+          message: from ? 'The order has changed in the meantime – please reload.' : 'Development item not found.',
         });
         return;
       }
-    }
-    const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
-    let targetSprintStatus: string | undefined;
-    if (typeof sprintId === 'string') {
-      const sprint = await pool.query<{ sprintStatus: string }>(
-        `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
-          WHERE s.id = $1 AND e.id = $2`,
-        [sprintId, request.params.id],
-      );
-      if (!sprint.rows[0]) {
-        response.status(400).json({ message: 'Sprint does not belong to the project of this item.' });
-        return;
-      }
-      if (!isAssignableSprintStatus(sprint.rows[0].sprintStatus)) {
-        response.status(409).json({ message: 'Orders can only be assigned to planned or active sprints.' });
-        return;
-      }
-      targetSprintStatus = sprint.rows[0].sprintStatus;
-    }
-    const agentId = fields.find((field) => field.column === 'agent_id')?.value;
-    if (typeof agentId === 'string') {
-      if (!(await pool.query(`SELECT 1 FROM development_items WHERE id = $1`, [request.params.id])).rows[0]) {
-        response.status(404).json({ message: 'Development item not found.' });
-        return;
-      }
-      const sameProject = await pool.query(
-        `SELECT 1 FROM agents a JOIN development_items d ON d.project_slug = a.project_slug
-          WHERE a.id = $1 AND d.id = $2`,
-        [agentId, request.params.id],
-      );
-      if (!sameProject.rows[0]) {
-        response.status(400).json({ message: 'Agent does not belong to the project of this item.' });
-        return;
-      }
-    }
-    const sprintField = fields.find((field) => field.column === 'sprint_id');
-    const agentField = fields.find((field) => field.column === 'agent_id');
-    // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
-    const update = buildUpdate(
-      'development_items',
-      request.params.id,
-      fields,
-      `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
-      from ? { column: 'status', values: [from] } : undefined,
-    );
-    const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
-    if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
-      // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
-      const assigned = (sprintField ?? agentField)?.value !== null;
-      update.sql = update.sql.replace(
-        ', updated_at = NOW()',
-        `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`,
-      );
-    }
-    if (sprintField && sprintField.value !== null) {
-      // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
-      update.sql = update.sql.replace(
-        ', updated_at = NOW()',
-        ', removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()',
-      );
-    }
-    if (targetSprintStatus && targetSprintStatus !== 'active') {
-      // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
-      // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
-      update.sql = update.sql.replace(', updated_at = NOW()', ', auto_run = FALSE, updated_at = NOW()');
-    }
-    if (manualStart) {
-      // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
-      update.sql = update.sql.replace(
-        ', updated_at = NOW()',
-        `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,
-          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`,
-      );
-    }
-    const result = await pool.query(update.sql, update.values);
-    if (!result.rows[0]) {
-      response.status(from ? 409 : 404).json({
-        message: from ? 'The order has changed in the meantime – please reload.' : 'Development item not found.',
-      });
-      return;
-    }
-    response.json({ item: result.rows[0] });
-  });
+      response.json({ item: result.rows[0] });
+    },
+  );
 }

@@ -1,5 +1,6 @@
 @if (store.ready()) {
   <app-git-graph-backdrop />
+  <app-git-alert />
   <section class="summary-grid" aria-label="Projektkennzahlen">
     <a class="summary-card" href="#development" (click)="$event.preventDefault(); store.navigate('development')">
       <strong>{{ store.openDevelopmentCount() }}</strong>
@@ -83,7 +84,27 @@
           }
         </span>
       </div>
-      <app-agent-list />
+      <app-agent-list [details]="true" />
+    </article>
+    <article class="panel" aria-labelledby="agent-workload-title">
+      <div class="section-heading">
+        <h2 id="agent-workload-title">Offene Aufträge je Agent</h2>
+        <a href="#development" (click)="$event.preventDefault(); store.navigate('development')">Alle Aufträge</a>
+      </div>
+      @if (data().agents.length) {
+        <app-share-bar
+          label="Verteilung"
+          [link]="{ section: 'development' }"
+          [segments]="agentWorkload()"
+          [showTotal]="true"
+          suffix="offen"
+        />
+        @if (!store.openDevelopmentCount()) {
+          <p class="muted">Keine offenen Aufträge.</p>
+        }
+      } @else {
+        <p class="empty-state">Keine Agents für dieses Projekt</p>
+      }
     </article>
     <article class="panel">
       <div class="section-heading">

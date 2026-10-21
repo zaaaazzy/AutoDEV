@@ -10,6 +10,8 @@ export interface WorkItem {
   description: string;
   kind?: string;
   bugId?: string | null;
+  /** Quelle des Bugs (production, github …): fremde Quellen bekommen im Prompt den Sicherheitshinweis. */
+  bugSource?: string | null;
   sprintId?: string | null;
   ideationId?: string | null;
   agentId?: string | null;

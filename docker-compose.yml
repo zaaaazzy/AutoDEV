@@ -1,5 +1,8 @@
 name: aideation
 # Containernamen: aideation_<Aufgabe>_<Technik>. Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
+# Härtung: jeder Dienst hat Grenzen für Speicher, CPU und Prozesse (deploy.resources.limits) und einen Healthcheck;
+# frontend (nginx), https (Caddy) und backup laufen ohne root und ohne Linux-Capabilities.
+# Ohne DEV_LOG_DB_PASSWORD in der .env gilt das bekannte Standardpasswort devlog_local_dev – der Server warnt dann beim Start.
 services:
   db:
     image: postgres:17-alpine
@@ -18,6 +21,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 1g, pids: 512 }
 
   dev-log:
     build: .
@@ -49,6 +55,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 2g, pids: 512 }
 
   frontend:
     build:
@@ -62,17 +71,28 @@ services:
     depends_on:
       dev-log:
         condition: service_healthy
+    # Läuft als Benutzer nginx (deploy/frontend/Dockerfile) auf Port 8080 im Container.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 256m, pids: 128 }
 
   backup:
     image: postgres:17-alpine
     container_name: aideation_backup_postgres
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/backup.sh"]
+    # Benutzer postgres (70:70) des Images. Unter Linux muss ./backups für ihn beschreibbar sein – oder
+    # DEV_LOG_BACKUP_USER=<uid>:<gid> des eigenen Benutzers in der .env setzen (der Einrichtungs-Assistent tut das).
+    user: "${DEV_LOG_BACKUP_USER:-70:70}"
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     environment:
       PGHOST: db
       PGUSER: ${DEV_LOG_DB_USER:-devlog}
@@ -84,16 +104,38 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Gesund, solange ./backups beschreibbar ist und ein Backup jünger als 26 Stunden existiert.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "touch /backups/.health && rm -f /backups/.health && find /backups -maxdepth 1 -name 'aideation-*.dump' -mmin -1560 | grep -q .",
+        ]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      start_period: 15m
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 512m, pids: 64 }
 
   # HTTPS-Zugang von aussen (optional): nur mit COMPOSE_PROFILES=https und DEV_LOG_DOMAIN in der .env.
   https:
     profiles: ["https"]
-    image: caddy:2.8.4-alpine
+    # Caddy als Benutzer caddy (deploy/caddy/Dockerfile); Ports 80/443 im Container ohne root erlaubt (sysctl).
+    build: deploy/caddy
+    image: aideation-caddy:2.8.4
     container_name: aideation_proxy_caddy
     ports:
       - "80:80"
       - "443:443"
     restart: unless-stopped
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+    cap_drop: [ALL]
+    # /usr/bin/caddy trägt die Datei-Capability cap_net_bind_service; ohne sie im Bounding-Set scheitert der Start.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
     environment:
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-localhost}
     volumes:
@@ -101,7 +143,38 @@ services:
       - aideation_caddy_data:/data
       - aideation_caddy_config:/config
     depends_on:
-      - frontend
+      frontend:
+        condition: service_started
+      https-volumes:
+        condition: service_completed_successfully
+    # Admin-API von Caddy (nur im Container auf localhost:2019) antwortet, solange Caddy läuft.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "1", memory: 256m, pids: 128 }
+
+  # Einmaliger Schritt vor Caddy: Zertifikate in bestehenden Volumes gehören noch root (frühere Fassung lief als root).
+  # Übergibt sie dem Benutzer caddy und beendet sich – nur chown, ohne Netzwerk.
+  https-volumes:
+    profiles: ["https"]
+    build: deploy/caddy
+    image: aideation-caddy:2.8.4
+    container_name: aideation_proxy_caddy_volumes
+    user: root
+    entrypoint: ["chown", "-R", "caddy:caddy", "/data", "/config"]
+    network_mode: none
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - aideation_caddy_data:/data
+      - aideation_caddy_config:/config
 
 volumes:
   aideation_pgdata:

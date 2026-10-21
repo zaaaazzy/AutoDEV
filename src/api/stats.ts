@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
 
@@ -155,7 +156,7 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
 }
 
 export function registerStatsRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/stats', async (request, response) => {
+  app.get('/projects/:slug/stats', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });

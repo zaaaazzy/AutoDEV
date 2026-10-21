@@ -2,6 +2,7 @@ import { DatePipe } from '@angular/common';
 import { Component, DestroyRef, effect, inject, input, signal } from '@angular/core';
 import { ApiService } from '../core/api.service.js';
 import type { DevelopmentItem } from '../core/models.js';
+import { visibleInterval } from '../core/visible-interval.js';
 import { visibleTimelineEntries, type OrderTimeline, type TimelineEntry } from './timeline-entries.js';
 
 const KIND_LABEL: Record<TimelineEntry['kind'], string> = {
@@ -60,7 +61,7 @@ export class OrderTimelineComponent {
   /** „Stand“ über dem Inhalt zeigen; unter „Aktionen“ aus, dort steht der Grund schon in der Zeile. */
   readonly showWaiting = input(true);
   protected readonly timeline = signal<OrderTimeline | null>(null);
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private stopTimer: (() => void) | null = null;
   /** Auftrag, zu dem die angezeigte Zeitleiste gehört. */
   private loadedFor: string | null = null;
 
@@ -74,7 +75,7 @@ export class OrderTimelineComponent {
       void item.actionTodo;
       void this.load(item.id);
       this.stopPolling();
-      if (item.status === 'in_progress') this.timer = setInterval(() => void this.load(item.id), 10_000);
+      if (item.status === 'in_progress') this.stopTimer = visibleInterval(() => void this.load(item.id), 10_000);
     });
   }
 
@@ -85,8 +86,8 @@ export class OrderTimelineComponent {
   }
 
   private stopPolling(): void {
-    if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    this.stopTimer?.();
+    this.stopTimer = null;
   }
 
   private async load(id: string): Promise<void> {

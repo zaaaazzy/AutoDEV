@@ -36,6 +36,7 @@ import { nextOpenOrders } from './features/sprints/review-launch.js';
 import { SprintReviewComponent } from './features/sprints/sprint-review.component.js';
 import { HeaderReviewComponent } from './features/sprints/header-review.component.js';
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
+import { GitAlertComponent } from './shared/git-alert.component.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
   development: 'Neuer Auftrag',
@@ -50,6 +51,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   selector: 'app-root',
   standalone: true,
   imports: [
+    GitAlertComponent,
     FormsModule,
     ConfirmDialogComponent,
     LoginComponent,

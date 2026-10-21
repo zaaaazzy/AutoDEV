@@ -3,7 +3,7 @@ import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { runOllamaAgent } from './ollama-agent.js';
+import { BACKUP_DIRECTORY, executeTool, runOllamaAgent } from './ollama-agent.js';
 
 /** Modell, das genau einen Werkzeugaufruf versucht und danach antwortet. */
 function scripted(name: string, args: Record<string, unknown>): typeof fetch {
@@ -39,7 +39,7 @@ test('Chat-Assistent ohne Rechte-Kontext schreibt nicht (fail-closed)', async ()
 
 test('Chat-Assistent mit Rechte-Kontext respektiert PROTECTED_PATH', async () => {
   const cwd = await tempProject();
-  for (const path of ['.mcp.json', '.claude/settings.json', 'server.pem']) {
+  for (const path of ['.mcp.json', '.claude/settings.json', '.husky/pre-commit', 'server.pem']) {
     await runOllamaAgent({
       prompt: 'x',
       role: 'assistant',
@@ -84,6 +84,51 @@ test('Chat-Assistent führt nicht freigegebene Projektbefehle (Docker) nicht aus
     },
   });
   assert.deepEqual(ran, []);
+});
+
+test('Ollama-Pfad: gefährliche npm-Optionen sind auch bei freigegebenem npm run build gesperrt', async () => {
+  const cwd = await tempProject();
+  const ran: string[][] = [];
+  for (const command of [
+    'npm run build --script-shell=docs/x.sh',
+    'npm run build --scr=docs/x.sh',
+    'npm run build --node-options=--require=./docs/x.js',
+    'npm run build --prefix=/tmp',
+    // Gegenprobe: ohne Option läuft der freigegebene Befehl.
+    'npm run build',
+  ]) {
+    await runOllamaAgent({
+      prompt: 'x',
+      role: 'assistant',
+      cwd,
+      timeoutMs: 5000,
+      fetchImpl: scripted('run_command', { command }),
+      files: { create: true, edit: true, scopes: ['docs'] },
+      commands: ['Bash(npm run build:*)'],
+      execute: async (parts) => {
+        ran.push(parts);
+        return { exitCode: 0, durationMs: 1, output: '' };
+      },
+    });
+  }
+  assert.deepEqual(ran, [['npm', 'run', 'build']]);
+});
+
+test('Ollama-Pfad: Werkzeuge ohne Dateirechte schreiben nicht, auch mit canWrite', async () => {
+  const cwd = await tempProject();
+  const result = await executeTool(
+    {
+      cwd,
+      canWrite: true,
+      changed: new Set(),
+      backupRoot: join(cwd, BACKUP_DIRECTORY, 't'),
+      timeoutMs: 1000,
+      execute: async () => ({ exitCode: 0, durationMs: 1, output: '' }),
+    },
+    { function: { name: 'write_file', arguments: { path: 'neu.txt', content: 'x' } } },
+  );
+  assert.match(result, /ohne Dateirechte/);
+  assert.equal(await exists(join(cwd, 'neu.txt')), false);
 });
 
 test('Chat-Assistent ohne Kontext führt keine Befehle aus (fail-closed)', async () => {

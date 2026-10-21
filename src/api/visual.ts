@@ -1,5 +1,6 @@
 import type { Response, Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { isRecord, isUuid } from '../core/validation.js';
 import { parsePreviewPages, parseVisualSettings, previewUrlError } from '../runner/visual-check.js';
 import type { Principal } from './roles.js';
@@ -67,7 +68,7 @@ const principalName = (response: Response): string => {
  * /api/visual-snapshots/<id> gehört zum Projekt des Snapshots) und die optische Freigabe.
  */
 export function registerVisualRoutes(app: Router, pool: Pool): void {
-  app.get('/development/:id/visual', async (request, response, next) => {
+  app.get('/development/:id/visual', access({ tenant: 'development' }), async (request, response, next) => {
     try {
       if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       const order = (
@@ -84,7 +85,7 @@ export function registerVisualRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.get('/visual-snapshots/:id', async (request, response, next) => {
+  app.get('/visual-snapshots/:id', access({ tenant: 'visual-snapshots' }), async (request, response, next) => {
     try {
       const row = isUuid(request.params.id)
         ? (await pool.query<{ data: Buffer }>('SELECT data FROM visual_snapshots WHERE id = $1', [request.params.id]))
@@ -104,25 +105,29 @@ export function registerVisualRoutes(app: Router, pool: Pool): void {
   });
 
   // „Optisch freigeben“ (approved: true) oder die Freigabe zurücknehmen (approved: false).
-  app.post('/development/:id/visual/approve', async (request, response, next) => {
-    try {
-      const body = isRecord(request.body) ? request.body : {};
-      const approved = body.approved !== false;
-      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
-      const row = (
-        await pool.query<{ approvedAt: string | null; approvedBy: string | null }>(
-          `UPDATE development_items
+  app.post(
+    '/development/:id/visual/approve',
+    access({ role: 'run', tenant: 'development' }),
+    async (request, response, next) => {
+      try {
+        const body = isRecord(request.body) ? request.body : {};
+        const approved = body.approved !== false;
+        if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+        const row = (
+          await pool.query<{ approvedAt: string | null; approvedBy: string | null }>(
+            `UPDATE development_items
               SET visual_approved_at = CASE WHEN $2::boolean THEN NOW() END,
                   visual_approved_by = CASE WHEN $2::boolean THEN $3::text END
             WHERE id = $1
             RETURNING visual_approved_at AS "approvedAt", visual_approved_by AS "approvedBy"`,
-          [request.params.id, approved, principalName(response)],
-        )
-      ).rows[0];
-      if (!row) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
-      response.json({ approval: row });
-    } catch (error) {
-      next(error);
-    }
-  });
+            [request.params.id, approved, principalName(response)],
+          )
+        ).rows[0];
+        if (!row) return void response.status(404).json({ message: 'Auftrag nicht gefunden.' });
+        response.json({ approval: row });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 }

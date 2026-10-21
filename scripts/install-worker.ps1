@@ -1,20 +1,68 @@
 # Installiert den AIdeation-Worker unter Windows als geplante Aufgabe (Start bei Anmeldung).
-# URL und Secret Key stehen in einer Startdatei im Benutzerprofil (nicht im Aufgabenbefehl: der ist auf 261 Zeichen
-# begrenzt und für andere Programme lesbar). PATH bleibt unverändert, damit der Worker die Agent-CLIs findet.
+# Zugänge (DEV_LOG_DATABASE_URL, DEV_LOG_SECRET_KEY) stehen in %LOCALAPPDATA%\AIdeation\worker.env (ACL nur für den
+# Benutzer), nicht in der Befehlszeile der Aufgabe; scripts\run-with-env.ps1 liest sie beim Start.
+# Zeichenketten nur ASCII: Windows PowerShell 5.1 liest Skripte ohne BOM nicht als UTF-8.
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$database = if ($env:DEV_LOG_DATABASE_URL) { $env:DEV_LOG_DATABASE_URL } else { 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation' }
-# In .cmd-Dateien muss % verdoppelt werden (kommt in URL-kodierten Passwörtern vor).
-function Escape-Cmd([string]$value) { $value.Replace('%', '%%') }
 $dir = Join-Path $env:LOCALAPPDATA 'AIdeation'
+$envFile = Join-Path $dir 'worker.env'
+$onWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
+
+# Nur der aktuelle Benutzer (per SID) hat Zugriff, geerbte Rechte werden entfernt.
+function Protect-Path([string]$Path, [string]$Grant) {
+  if (-not $onWindows) { return }
+  $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  & icacls $Path /inheritance:r /grant:r "*${sid}:$Grant" | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Rechte fuer $Path konnten nicht gesetzt werden." }
+}
+
+# Letzter Wert von $Key in der bestehenden Env-Datei (erneuter Lauf behält die Zugänge).
+function Get-EnvFileValue([string]$Key) {
+  if (-not (Test-Path -LiteralPath $envFile)) { return '' }
+  $value = ''
+  foreach ($line in [IO.File]::ReadAllLines($envFile)) {
+    if ($line.StartsWith("$Key=")) { $value = $line.Substring($Key.Length + 1) }
+  }
+  return $value
+}
+
+function Resolve-Value([string]$Key, [string]$Default = '') {
+  $value = [Environment]::GetEnvironmentVariable($Key)
+  if (-not $value) { $value = Get-EnvFileValue $Key }
+  if (-not $value) { $value = $Default }
+  return $value
+}
+
+$values = [ordered]@{
+  DEV_LOG_DATABASE_URL = Resolve-Value 'DEV_LOG_DATABASE_URL' 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation'
+  DEV_LOG_SECRET_KEY = Resolve-Value 'DEV_LOG_SECRET_KEY'
+}
+if ($values.DEV_LOG_DATABASE_URL.Contains('devlog_local_dev')) {
+  Write-Warning 'Die Datenbank-URL nutzt das Standardpasswort devlog_local_dev. Setze DEV_LOG_DB_PASSWORD in der .env und installiere mit DEV_LOG_DATABASE_URL erneut (siehe docs/installation.md).'
+}
+$lines = @('# AIdeation - Zugaenge fuer den Worker (erzeugt von scripts\install-worker.ps1, nur fuer diesen Benutzer lesbar).')
+foreach ($key in $values.Keys) {
+  $value = [string]$values[$key]
+  if ($value -match "[`r`n]") { throw "Wert fuer $key enthaelt einen Zeilenumbruch - nicht erlaubt." }
+  if ($value) { $lines += "$key=$value" }
+}
+
+# Erst Ordner und leere Datei schützen, dann schreiben: der Inhalt ist nie für andere lesbar.
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-$launcher = Join-Path $dir 'worker.cmd'
-$lines = @('@echo off', "cd /d `"$root`"", "set `"DEV_LOG_DATABASE_URL=$(Escape-Cmd $database)`"")
-if ($env:DEV_LOG_SECRET_KEY) { $lines += "set `"DEV_LOG_SECRET_KEY=$(Escape-Cmd $env:DEV_LOG_SECRET_KEY)`"" }
-# Ausgaben ohne Umlaute: PowerShell 5.1 liest Skripte ohne BOM als ANSI.
-else { Write-Host 'Hinweis: DEV_LOG_SECRET_KEY fehlt - verschluesselte Werte kann der Worker nicht lesen.' }
-$lines += 'npm run worker'
-Set-Content -Path $launcher -Value $lines -Encoding Default
-schtasks /Create /F /SC ONLOGON /RL LIMITED /TN 'AIdeationWorker' /TR "`"$launcher`"" | Out-Null
-schtasks /Run /TN 'AIdeationWorker' | Out-Null
-Write-Host "Worker installiert (Aufgabenplanung: AIdeationWorker, Startdatei: $launcher)"
+Protect-Path $dir '(OI)(CI)F'
+if (-not (Test-Path -LiteralPath $envFile)) { New-Item -ItemType File -Path $envFile | Out-Null }
+Protect-Path $envFile 'F'
+[IO.File]::WriteAllText($envFile, ($lines -join "`n") + "`n", (New-Object Text.UTF8Encoding($false)))
+
+$wrapper = Join-Path (Join-Path $root 'scripts') 'run-with-env.ps1'
+$arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`" `"$envFile`" npm run worker"
+if ($env:AIDEATION_INSTALL_DRY_RUN -eq '1') {
+  Write-Host "Probelauf: $envFile geschrieben, Aufgabe nicht registriert."
+  Write-Host "Aufgabe: powershell.exe $arguments"
+  exit 0
+}
+$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
+Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -RunLevel Limited -Force | Out-Null
+Start-ScheduledTask -TaskName 'AIdeationWorker'
+Write-Host "Worker installiert (Aufgabenplanung: AIdeationWorker, Zugaenge: $envFile)"

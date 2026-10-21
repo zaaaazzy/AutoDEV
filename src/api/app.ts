@@ -1,8 +1,8 @@
 import { registerPermissionGroupRoutes } from './permission-groups.js';
-import { tenantGuard } from './tenancy.js';
+import { access, routeGuard } from './access.js';
 import { registerSprintPlanningRoutes } from './sprint-planning.js';
 import { join } from 'node:path';
-import express, { type Express } from 'express';
+import express, { type Express, type Router } from 'express';
 import type { Pool } from 'pg';
 import { registerAgentRoutes } from './agents.js';
 import { registerAttachmentRoutes } from './attachments.js';
@@ -13,6 +13,7 @@ import { registerBugRoutes } from './bugs.js';
 import { registerChatRoutes } from './chat-routes.js';
 import { registerAgentTaskRoutes } from './agent-tasks.js';
 import { registerTestRequestRoutes } from './test-requests.js';
+import { registerGitStateRoutes } from './git-state.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
 import { registerCoverageRoutes } from './coverage.js';
@@ -28,7 +29,6 @@ import { registerReviewRoutes } from './review-routes.js';
 import { registerProjectRoutes } from './projects.js';
 import { registerPushRoutes } from './push.js';
 import { registerDocRevisionRoutes } from './doc-revisions.js';
-import { authorize } from './roles.js';
 import { registerUserRoutes } from './users.js';
 import { registerUsageRoutes } from './usage.js';
 import { registerBudgetRoutes } from './budget.js';
@@ -65,16 +65,27 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.use(sameOriginWrites);
   app.use(express.json({ limit: '32kb' }));
 
-  // Alle API-Routen hängen an diesem Router: Anmeldung, Rollen und Mandanten laufen dadurch vor jeder API-Route,
-  // unabhängig davon, wie der Pfad geschrieben ist.
+  app.use('/api', createApiRouter(pool, auth));
+  app.use(express.static(UI_DIRECTORY, { index: false }));
+  app.get('/', async (_request, response) => {
+    response.sendFile(join(UI_DIRECTORY, 'index.html'));
+  });
+
+  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));
+  return app;
+}
+
+/**
+ * Alle API-Routen hängen an diesem Router: Anmeldung, Rollen und Mandanten laufen dadurch vor jeder API-Route,
+ * unabhängig davon, wie der Pfad geschrieben ist. Rolle und Mandant deklariert jede Route selbst (access).
+ */
+export function createApiRouter(pool: Pool, auth: DevLogAuth | null): Router {
   const api = express.Router({ caseSensitive: true });
-  app.use('/api', api);
   if (auth) {
     const limiter = new FailureLimiter();
     registerLoginRoutes(api, pool, auth, limiter);
     api.use(requireCredentials(auth, pool, limiter));
-    api.use(authorize);
-    api.use(tenantGuard(pool));
+    api.use(routeGuard(pool, api));
     registerSecurityRoutes(api, pool, auth);
   } else {
     // Ohne Login (DEV_LOG_AUTH=off) arbeitet jeder als Administrator.
@@ -82,7 +93,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       response.locals.principal = { id: null, username: 'local', displayName: 'Lokal', roles: ['admin'] };
       next();
     });
-    api.get('/session', (_request, response) =>
+    api.use(routeGuard(pool, api));
+    api.get('/session', access({ tenant: 'global' }), (_request, response) =>
       response.json({
         authenticated: true,
         authRequired: false,
@@ -91,10 +103,6 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
       }),
     );
   }
-  app.use(express.static(UI_DIRECTORY, { index: false }));
-  app.get('/', async (_request, response) => {
-    response.sendFile(join(UI_DIRECTORY, 'index.html'));
-  });
 
   registerProjectRoutes(api, pool);
   registerTestRunRoutes(api, pool);
@@ -124,6 +132,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerQualityRoutes(api, pool);
   registerAgentTaskRoutes(api, pool);
   registerTestRequestRoutes(api, pool);
+  registerGitStateRoutes(api, pool);
   registerSystemRestartRoutes(api, pool);
   registerScheduledJobRoutes(api, pool);
   registerWorkerRoutes(api, pool);
@@ -132,7 +141,5 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   registerDocRevisionRoutes(api, pool);
   registerUsageRoutes(api, pool);
   registerBudgetRoutes(api, pool);
-
-  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));
-  return app;
+  return api;
 }

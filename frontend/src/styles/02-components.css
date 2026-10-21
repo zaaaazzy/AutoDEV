@@ -1614,6 +1614,44 @@ h3 .link-button {
 .agent-line.down small {
   color: #c9573f;
 }
+/* Dashboard: Rollen-Icon und Rechte-Chips je Agent */
+.role-icon {
+  display: inline-grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 7px;
+  background: #eef2ee;
+  color: var(--ink);
+}
+.agent-rights {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+  font-size: 11px;
+}
+.agent-role {
+  color: var(--ink);
+  font-weight: 600;
+}
+.right-chip {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f1f1ef;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.right-chip.yes {
+  background: #e3f1e9;
+  color: #22603d;
+}
+.right-hint {
+  color: var(--muted);
+  font-style: italic;
+}
 .agent-detail > .link-button {
   margin-bottom: 10px;
 }
@@ -1828,4 +1866,77 @@ h3 .link-button {
 }
 .info-block p {
   margin: 3px 0;
+}
+
+/* Git-Zustand der Projektordner (app-git-alert): rot = sperrt Aktionen, gelb = Hinweis. */
+.git-alert {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid #e8d49a;
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #fdf8e8;
+  color: #5c4a12;
+}
+.git-alert.block {
+  border-color: #ecc9c0;
+  border-left-color: #c9573f;
+  background: #fbeeea;
+  color: #6b2a1d;
+}
+.git-alert header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+}
+.git-alert ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+.git-alert li {
+  display: grid;
+  gap: 2px;
+}
+.git-alert-title {
+  font-weight: 600;
+}
+.git-alert-detail {
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}
+.git-alert-fixes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.git-alert-status {
+  margin: 8px 0 0;
+  font-size: 0.9em;
+}
+.git-alert-status.failed {
+  color: #9d4938;
+  font-weight: 600;
+}
+.git-alert-compact {
+  display: block;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #fdf8e8;
+  color: #5c4a12;
+  font-size: 0.85em;
+  text-decoration: none;
+}
+.git-alert-compact.block {
+  background: #fbeeea;
+  color: #6b2a1d;
+}
+.button.git-blocked {
+  outline: 2px solid #c9573f;
+  outline-offset: 1px;
 }

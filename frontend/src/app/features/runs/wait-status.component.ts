@@ -1,6 +1,7 @@
 import { Component, DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import type { LiveRun } from './test-run-live.js';
 import { waitStatus } from './wait-status.js';
 
@@ -15,24 +16,24 @@ export class TestLiveService {
   private readonly store = inject(ProjectStore);
   readonly live = signal<LiveRun | null>(null);
   private subscribers = 0;
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private stopTimer: (() => void) | null = null;
   private busy = false;
   private lastSyncReload = 0;
 
   subscribe(): () => void {
     this.subscribers++;
-    if (!this.timer) {
+    if (!this.stopTimer) {
       void this.poll();
-      this.timer = setInterval(() => void this.poll(), POLL_MS);
+      this.stopTimer = visibleInterval(() => void this.poll(), POLL_MS);
     }
     let released = false;
     return () => {
       if (released) return;
       released = true;
       this.subscribers--;
-      if (!this.subscribers && this.timer) {
-        clearInterval(this.timer);
-        this.timer = null;
+      if (!this.subscribers && this.stopTimer) {
+        this.stopTimer();
+        this.stopTimer = null;
       }
     };
   }

@@ -60,7 +60,7 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const untrack = child.pid ? trackChild(child.pid) : () => undefined;
+    const untrack = child.pid ? trackChild(child.pid, { command: command[0], cwd }) : () => undefined;
     if (child.pid) options.onSpawn?.(child.pid);
     let output = '';
     const appendOutput = (text: string): void => {
@@ -104,6 +104,9 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
       finished = true;
       clearTimeout(timer);
       clearTimeout(grace);
+      // Nach jedem Befehl, auch bei Erfolg und Fehler: was er im Hintergrund gestartet hat (z. B. Dev-Server aus
+      // npm test), endet mit. Erst danach den Eintrag im Prozessregister löschen.
+      if (pid) killGroup(pid);
       untrack();
       appendOutput(stdoutDecoder.end());
       appendOutput(stderrDecoder.end());

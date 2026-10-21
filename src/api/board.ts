@@ -1,12 +1,13 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { DEV_COLUMNS } from './development.js';
 import { COMMENT_COLUMNS } from './idea-comments.js';
 import { IDEA_COLUMNS, IDEA_SOURCES } from './ideation.js';
 import { parseProjectSlug } from '../core/validation.js';
 
 export function registerBoardRoutes(app: Router, pool: Pool): void {
-  app.get('/projects/:slug/board', async (request, response) => {
+  app.get('/projects/:slug/board', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });
@@ -36,7 +37,7 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
     response.json({ ideas: ideas.rows, development: development.rows, comments: comments.rows });
   });
 
-  app.get('/projects/:slug/agent-runs', async (request, response) => {
+  app.get('/projects/:slug/agent-runs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
       response.status(400).json({ message: 'Invalid project slug.' });

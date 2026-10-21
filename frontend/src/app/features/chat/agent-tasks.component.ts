@@ -21,6 +21,7 @@ import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { TestRequest, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { ConfirmService } from '../../core/confirm.service.js';
 import { VISIONARY_DIRECTION } from '../ideation/idea-options.js';
 
@@ -270,12 +271,13 @@ export class AgentTasksComponent {
 
   constructor() {
     // Solange ein Test wartet oder läuft und das Menü offen ist, den Stand regelmäßig nachladen.
-    const timer = globalThis.setInterval(() => {
-      if (this.open() && ['requested', 'running'].includes(this.latestTest()?.status ?? '')) void this.loadTests();
-      if (this.open() && this.visionaryOpen()) void this.loadVisionary();
-      if (this.open() && this.restartOpen()) void this.loadRestart();
-    }, POLL_MS);
-    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
+    inject(DestroyRef).onDestroy(
+      visibleInterval(() => {
+        if (this.open() && ['requested', 'running'].includes(this.latestTest()?.status ?? '')) void this.loadTests();
+        if (this.open() && this.visionaryOpen()) void this.loadVisionary();
+        if (this.open() && this.restartOpen()) void this.loadRestart();
+      }, POLL_MS),
+    );
   }
 
   protected position(entry: MenuEntry): number {

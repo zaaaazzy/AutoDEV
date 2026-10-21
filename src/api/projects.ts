@@ -3,6 +3,7 @@ import { SPRINT_MODES, type SprintMode } from './sprint-planning.js';
 import { isValidWorkingHours, type WorkingHours } from '../core/working-hours.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { access } from './access.js';
 import { ensureDefaultAgents, ensureVisualTester } from './agents.js';
 import { parsePreviewSettings, VISUAL_COLUMNS } from './visual.js';
 import { logged } from '../core/log.js';
@@ -91,23 +92,27 @@ const GITHUB_COLUMNS = `github_mode AS "githubMode", github_require_approval AS 
 
 export function registerProjectRoutes(app: Router, pool: Pool): void {
   // „Anmeldung prüfen“: Der Worker fragt `gh auth status` beim nächsten Takt erneut ab (nur bei aktivem Modus).
-  app.post('/projects/:slug/github/check', async (request, response, next) => {
-    try {
-      const slug = parseProjectSlug(request.params.slug ?? '');
-      const result = slug
-        ? await pool.query(
-            `UPDATE projects SET github_auth_checked_at = NULL WHERE slug = $1 RETURNING ${GITHUB_COLUMNS}`,
-            [slug],
-          )
-        : null;
-      if (!result?.rows[0]) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-      response.json({ github: result.rows[0] });
-    } catch (error) {
-      next(error);
-    }
-  });
+  app.post(
+    '/projects/:slug/github/check',
+    access({ role: 'admin', tenant: 'project' }),
+    async (request, response, next) => {
+      try {
+        const slug = parseProjectSlug(request.params.slug ?? '');
+        const result = slug
+          ? await pool.query(
+              `UPDATE projects SET github_auth_checked_at = NULL WHERE slug = $1 RETURNING ${GITHUB_COLUMNS}`,
+              [slug],
+            )
+          : null;
+        if (!result?.rows[0]) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+        response.json({ github: result.rows[0] });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.get('/projects', async (_request, response) => {
+  app.get('/projects', access({ tenant: 'global' }), async (_request, response) => {
     // Mandantentrennung: nur freigeschaltete Projekte (null = Administrator, alle).
     const allowed = response.locals.allowedProjects as Set<string> | null | undefined;
     const result = await pool.query(
@@ -122,7 +127,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
   });
 
   // Projekt löschen: Name zur Bestätigung; der Ordner auf dem Rechner wird auf Wunsch vom Worker gelöscht.
-  app.delete('/projects/:slug', async (request, response, next) => {
+  app.delete('/projects/:slug', access({ role: 'admin', tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const body = (isRecord(request.body) ? request.body : {}) as { confirm?: unknown; deleteFolder?: unknown };
@@ -166,7 +171,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
   });
 
   // Git-Verlauf (Commits, Branches) fürs Dashboard, vom Worker erfasst.
-  app.get('/projects/:slug/git-graph', async (request, response, next) => {
+  app.get('/projects/:slug/git-graph', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const row = slug
@@ -184,7 +189,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
   });
 
   // Favicon der Anwendung; strenge CSP, damit ein SVG aus dem Projekt nie als Seite mit Skripten läuft.
-  app.get('/projects/:slug/favicon', async (request, response, next) => {
+  app.get('/projects/:slug/favicon', access({ tenant: 'project' }), async (request, response, next) => {
     try {
       const slug = parseProjectSlug(request.params.slug ?? '');
       const row = slug
@@ -212,7 +217,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
     }
   });
 
-  app.patch('/projects/:slug', async (request, response) => {
+  app.patch('/projects/:slug', access({ role: 'admin', tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     const body: Record<string, unknown> = isRecord(request.body) ? request.body : {};
     const sets: string[] = [];
@@ -440,7 +445,7 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
     response.json({ project: result.rows[0] });
   });
 
-  app.post('/projects', async (request, response) => {
+  app.post('/projects', access({ role: 'admin', tenant: 'admin' }), async (request, response) => {
     const body = request.body as unknown;
     if (isRecord(body) && typeof body.slug === 'string') body.slug = normalizeProjectSlug(body.slug);
     const invalid = !isRecord(body)

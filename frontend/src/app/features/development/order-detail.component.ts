@@ -7,6 +7,7 @@ import { Component, computed, effect, inject, input, output, signal } from '@ang
 import { FormsModule } from '@angular/forms';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import type { FormValues } from '../../shared/forms.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
 import {
@@ -121,8 +122,7 @@ export class OrderDetailComponent {
     // Während der Tester prüft, den Stand regelmässig nachladen.
     effect((onCleanup) => {
       if (!this.verifying()) return;
-      const timer = setInterval(() => void this.store.loadProject(this.store.activeProject(), true), 5000);
-      onCleanup(() => clearInterval(timer));
+      onCleanup(visibleInterval(() => void this.store.loadProject(this.store.activeProject(), true), 5000));
     });
   }
 

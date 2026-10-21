@@ -28,6 +28,7 @@ import type { FormValues } from '../../shared/forms.js';
 import { DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
+import { orderAgentName } from '../dashboard/order-shares.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 
@@ -121,6 +122,8 @@ export class OrderTableComponent {
     },
     categoryColumn<DevelopmentItem>((item) => item.category),
     { id: 'sprint', header: 'Sprint', value: (item) => this.store.sprintOf(item)?.name ?? 'Kein Sprint' },
+    // Filterziel der Dashboard-Verteilung „Offene Aufträge je Agent“.
+    { id: 'agent', header: 'Agent', value: (item) => orderAgentName(item, this.store.data().agents) },
     {
       id: 'effortHours',
       header: 'Aufwand',

@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandExecutor } from '../core/command.js';
 import type { CoverageArea, CoverageReport } from './coverage.js';
+import { runProjectCommand } from './project-command.js';
 
 /**
  * Eigene Abdeckungsmessung von AIdeation: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
@@ -59,6 +60,24 @@ export interface TestRunner {
 const MAX_SCRIPT_DEPTH = 3;
 
 /**
+ * Vorbereitende Schritte, die die Messung selbst startet: nur npm-Skripte und bekannte Build-Werkzeuge. Beliebige
+ * Befehle aus dem `test`-Skript (`node -e …`, `curl …`, `sh -c …`) führt AIdeation nicht aus.
+ */
+const SETUP_COMMANDS: ((step: string[]) => boolean)[] = [
+  (step) => step[0] === 'npm' && (step[1] === 'run' || step[1] === 'run-script') && /^[\w:.-]+$/.test(step[2] ?? ''),
+  (step) => step[0] === 'npm' && step[1] === 'ci' && step.length === 2,
+  (step) => step[0] === 'tsc',
+  (step) => step[0] === 'ng' && step[1] === 'build',
+  (step) => step[0] === 'vite' && step[1] === 'build',
+];
+
+export function allowedSetupStep(step: string[]): boolean {
+  // Keine Shell-Zeichen: Die Schritte laufen ohne Shell; Verkettungen oder Ersetzungen gehören nicht hinein.
+  if (step.some((part) => /[;|&<>`$()]/.test(part))) return false;
+  return SETUP_COMMANDS.some((allowed) => allowed(step));
+}
+
+/**
  * Findet den Node-Test-Runner in einem npm-Skript: auch hinter `&&` (z. B. `npm run build:ui && tsx --test …`)
  * und über `npm run <name>` in anderen Skripten (höchstens ein paar Ebenen tief). Null, wenn keiner vorkommt.
  */
@@ -106,9 +125,18 @@ export async function measureCoverage(
   cwd: string,
   commands: string[][],
   execute: CommandExecutor,
+  /** Abgelehnte Vorbereitungsschritte: der Aufrufer zeigt sie im Schritt, nicht nur im Worker-Log. */
+  onRefused?: (message: string) => void,
 ): Promise<CoverageArea[]> {
   const areas: CoverageArea[] = [];
   for (const command of commands) {
+    // Testplan je Auftrag: „npx tsx --test <Dateien>“ direkt mit Abdeckung wiederholen (kein Skript, kein Setup).
+    const direct = directRunner(command);
+    if (direct) {
+      const measured = await coverageRun(cwd, direct, execute);
+      if (measured) areas.push(coverageArea(areaName((await packageJson(cwd))?.name ?? 'Projekt'), measured));
+      continue;
+    }
     if (command[0] !== 'npm' || command[1] !== 'test') continue;
     const workspace = command.find((part) => part.startsWith('--workspace='))?.slice('--workspace='.length);
     const dir = workspace ? await workspaceDir(cwd, workspace) : cwd;
@@ -119,43 +147,77 @@ export async function measureCoverage(
       console.warn(`[coverage] Abdeckung nicht messbar: Testskript in ${dir} nicht erkannt (kein tsx/node --test).`);
       continue;
     }
+    const refused = runner.setup.find((step) => !allowedSetupStep(step));
+    if (refused) {
+      const message = `Abdeckung nicht gemessen: Vorbereitungsschritt „${refused.join(' ')}“ im test-Skript (${dir}) ist nicht erlaubt (nur npm run, npm ci, tsc, ng build, vite build).`;
+      console.warn(`[coverage] ${message}`);
+      onRefused?.(message);
+      continue;
+    }
     // Vorbereitende Schritte des Skripts (z. B. Oberfläche bauen) wie beim normalen Testlauf zuerst ausführen.
     let prepared = true;
     for (const step of runner.setup) {
-      const done = await execute(step, dir, { timeoutMs: TIMEOUT_MS }).catch(() => null);
+      const done = await runProjectCommand(step, dir, { timeoutMs: TIMEOUT_MS }, execute).catch(() => null);
       if (done?.exitCode !== 0) prepared = false;
     }
     if (!prepared) continue;
-    const result = await execute(
-      [
-        'npm',
-        'exec',
-        '--',
-        runner.binary,
-        '--test',
-        '--experimental-test-coverage',
-        '--test-coverage-exclude=**/*.test.ts',
-        '--test-coverage-exclude=**/*.test.js',
-        '--test-coverage-exclude=**/*.spec.ts',
-        '--test-coverage-exclude=**/node_modules/**',
-        ...runner.args,
-      ],
-      dir,
-      { timeoutMs: TIMEOUT_MS },
-    ).catch(() => null);
-    const measured = result && parseNodeCoverage(result.output);
+    const measured = await coverageRun(dir, runner, execute);
     if (!measured) continue;
-    areas.push({
-      area: areaName(workspace ?? (await packageJson(dir))?.name ?? 'Projekt'),
-      unit: measured.passed + measured.failed,
-      component: 0,
-      integration: 0,
-      e2e: 0,
-      statements: null,
-      ...measured,
-    });
+    areas.push(coverageArea(areaName(workspace ?? (await packageJson(dir))?.name ?? 'Projekt'), measured));
   }
   return areas;
+}
+
+const COVERAGE_FLAG = '--experimental-test-coverage';
+
+/** Wrapper vor dem Testläufer, die die Messung übernehmen darf (`npx`, `npx --no-install`, `npm exec --`). */
+const RUNNER_PREFIXES = new Set(['', 'npx', 'npx --no-install', 'npm exec --', 'npm exec --no-install --']);
+
+/** Direkter Aufruf des Node-Test-Runners (`npx tsx --test a.test.ts`, `node --test …`), sonst null. */
+export function directRunner(command: string[]): Pick<TestRunner, 'binary' | 'args'> | null {
+  const index = command.findIndex((part, position) => /^(tsx|node)$/.test(part) && command[position + 1] === '--test');
+  if (index < 0 || !RUNNER_PREFIXES.has(command.slice(0, index).join(' '))) return null;
+  const args = command.slice(index + 2).filter((part) => !part.startsWith('--test-coverage') && part !== COVERAGE_FLAG);
+  return { binary: command[index]!, args };
+}
+
+/** Startet den Testläufer mit Abdeckung (gefiltertes Environment) und liest das Ergebnis. */
+async function coverageRun(
+  dir: string,
+  runner: Pick<TestRunner, 'binary' | 'args'>,
+  execute: CommandExecutor,
+): Promise<ReturnType<typeof parseNodeCoverage>> {
+  const result = await runProjectCommand(
+    [
+      'npm',
+      'exec',
+      '--',
+      runner.binary,
+      '--test',
+      COVERAGE_FLAG,
+      '--test-coverage-exclude=**/*.test.ts',
+      '--test-coverage-exclude=**/*.test.js',
+      '--test-coverage-exclude=**/*.spec.ts',
+      '--test-coverage-exclude=**/node_modules/**',
+      ...runner.args,
+    ],
+    dir,
+    { timeoutMs: TIMEOUT_MS },
+    execute,
+  ).catch(() => null);
+  return result && parseNodeCoverage(result.output);
+}
+
+function coverageArea(area: string, measured: NonNullable<ReturnType<typeof parseNodeCoverage>>): CoverageArea {
+  return {
+    area,
+    unit: measured.passed + measured.failed,
+    component: 0,
+    integration: 0,
+    e2e: 0,
+    statements: null,
+    ...measured,
+  };
 }
 
 /** Ergänzt den Bericht des Testers um die gemessenen Werte (gemessene Prozente haben Vorrang). */

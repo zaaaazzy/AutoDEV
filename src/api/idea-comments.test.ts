@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { agentCommentPrompt, MAX_COMMENT, MAX_MENTIONS, parseComment, SYSTEM_PERSON } from './idea-comments.js';
-import { requiredRole } from './roles.js';
+import { requiredRole } from './route-table.test.js';
 
 const agent = '0b6f1c7e-1d2a-4c3b-9e8f-112233445566';
 

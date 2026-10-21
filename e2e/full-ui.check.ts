@@ -564,6 +564,8 @@ test('Sprints: Datum prüfen, anlegen, Aufträge zeigen, starten', async ({ page
   await expect(detail.locator('.sprint-orders')).toBeVisible();
   await snap(page, info, 'Sprint-Aufträge');
   await button(detail, 'Sprint starten').click();
+  // Jede Aktion fragt nach (globaler Bestätigungsdialog).
+  await page.getByRole('dialog').getByRole('button', { name: 'Sprint starten' }).click();
   // Gestartet ist er der aktuelle Sprint und steht oben.
   const current = page.locator('.sprint-current');
   await expect(current.locator('.sprint-title h3')).toHaveText('Sprint 1');

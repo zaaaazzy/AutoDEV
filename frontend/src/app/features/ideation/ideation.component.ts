@@ -8,6 +8,7 @@ import { AuthService } from '../../core/auth.service.js';
 import { ConfirmService } from '../../core/confirm.service.js';
 import type { DevelopmentItem, Idea, Priority, Sprint, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import {
   type DataColumn,
   DataActionsDirective,
@@ -165,11 +166,12 @@ export class IdeationComponent {
         if (slug) void this.loadVisionaryRun(slug);
       });
     });
-    const timer = globalThis.setInterval(() => {
-      const slug = this.store.activeProject();
-      if (slug && this.visionaryOpen() && !document.hidden) void this.loadVisionaryRun(slug);
-    }, VISIONARY_POLL_MS);
-    inject(DestroyRef).onDestroy(() => globalThis.clearInterval(timer));
+    inject(DestroyRef).onDestroy(
+      visibleInterval(() => {
+        const slug = this.store.activeProject();
+        if (slug && this.visionaryOpen()) void this.loadVisionaryRun(slug);
+      }, VISIONARY_POLL_MS),
+    );
   }
 
   private visionaryPath(slug = this.store.activeProject()): string {

@@ -4,9 +4,11 @@ set -eu
 : "${REVIEW_COMMAND:?REVIEW_COMMAND fehlt}"
 echo "[review] Stand ${REVIEW_COMMIT} (${REVIEW_LABEL:-ohne Titel})"
 git config --global --add safe.directory '*'
-rm -rf /work
-# --shared: Objekte direkt aus dem eingebundenen Repository lesen (schnell, nichts wird kopiert).
-git clone --quiet --no-checkout --shared /source /work
+# /work selbst gehört node und bleibt stehen (der Benutzer darf / nicht ändern); nur den Inhalt leeren.
+find /work -mindepth 1 -delete
+# Leeres Repository, das die eingebundenen Objekte mitliest (nichts wird kopiert, kein Zugriff auf den Projektordner).
+git init --quiet /work
+echo /source/objects > /work/.git/objects/info/alternates
 cd /work
 git checkout --quiet --detach "$REVIEW_COMMIT"
 if [ -f package-lock.json ]; then

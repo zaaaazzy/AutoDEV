@@ -1,5 +1,16 @@
 node_modules
 dist
 .angular
-.env
 .git
+# Zugangsdaten und Schlüssel gehören nie in ein Image.
+.env
+.env.*
+**/*.pem
+**/*.key
+# Laufzeitdaten, Sicherungen und Testergebnisse (Screenshots, Logs).
+.dev-log
+backups
+test-results
+e2e/test-results
+docs/tests
+out-tsc

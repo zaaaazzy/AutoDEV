@@ -6,6 +6,7 @@ import { folderAvailable, hadOutage } from '../core/folder-guard.js';
 import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
+import { awaitsBugApprovalSql } from '../core/bug-trust.js';
 import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { loadFollowUpContext } from './follow-up.js';
@@ -185,12 +186,13 @@ export async function runWorkItem(
   // Ein neuer Lauf hebt eine frühere Budget-Blockade auf; reicht das Budget nicht, setzt die Prüfung sie neu.
   // Der Worker wählt mehrere Aufträge auf einmal und arbeitet sie nacheinander ab: Wurde dieser inzwischen
   // abgelehnt, zurückgestellt, aus dem Sprint genommen oder der Sprint pausiert, startet er nicht (wie selectItems).
-  // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon. Scheitert schon der Start (z. B. Datenbank kurz
+  // Ein gezielt gestarteter Auftrag (--item) läuft unabhängig davon, ausser sein Bug stammt aus einer fremden Quelle
+  // und ist nicht freigegeben (Prompt-Injection aus Betrieb oder GitHub). Scheitert schon der Start (z. B. Datenbank kurz
   // weg), den Lauf verwerfen: sonst hält er claimRun stundenlang auf.
   const started = await pool
     .query(
       `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.inProgress}', budget_blocked = NULL, retry_after = NULL, updated_at = NOW()
-      WHERE d.id = $1 AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
+      WHERE d.id = $1 AND NOT ${awaitsBugApprovalSql('d')} AND ($2 OR (d.status = '${DEVELOPMENT_STATUS.planned}' AND d.kind <> 'express'
         AND (d.retry_after IS NULL OR d.retry_after <= NOW()) AND (
         d.agent_id IS NOT NULL OR (
           NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
@@ -293,6 +295,12 @@ export async function runWorkItem(
       const outcome = await runStep(ctx, agent, position, ordered.length, { stepPosition, canCorrect });
       stepPosition += 1;
       if (outcome.interrupted) interrupted = true;
+      // Budget vor dem neuen Versuch nach einem vorübergehenden Fehler erreicht: anhalten wie vor einem Schritt.
+      if (outcome.budget) {
+        budgetStop = outcome.budget;
+        passed = false;
+        break;
+      }
       if (!outcome.passed && outcome.correctable && !interrupted) {
         // Einmalige Nachbesserung: ab dem Entwickler erneut, mit der Rückmeldung von Tester oder Reviewer.
         corrected = true;

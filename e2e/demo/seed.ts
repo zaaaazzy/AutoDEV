@@ -239,6 +239,9 @@ export async function seedDemoProject(pool: Pool, folder: string, now = Date.now
     await client.query('COMMIT');
   } catch (error) {
     await client.query('ROLLBACK').catch(() => undefined);
+    // Projekt und Agents liegen ausserhalb der Transaktion: wieder entfernen, sonst überspränge der nächste Lauf
+    // ein leeres Projekt.
+    await pool.query('DELETE FROM projects WHERE slug = $1', [DEMO_SLUG]).catch(() => undefined);
     throw error;
   } finally {
     client.release();
