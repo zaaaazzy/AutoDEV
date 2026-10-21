@@ -31,6 +31,59 @@ export function roleLabel(role: string): string {
   return AGENT_ROLES.find((item) => item.value === role)?.label ?? role;
 }
 
+/** Rechte-Stufe einer Rolle (Standardwert); `variiert` = hängt vom Befehl ab (Claude-CLI oder lokales Modell). */
+export interface AgentRights {
+  files: boolean;
+  commands: boolean;
+  variiert: boolean;
+}
+
+/**
+ * Einzige Zuordnung Rolle → Rechte im Frontend, nach docs/agents-und-rechte.md (Abschnitt 3 und 4) und
+ * `TRUSTED_ROLES`/`READ_ONLY_ROLES` in src/agent/tool-permissions.ts. Ändert sich die Tabelle, hier nachziehen.
+ */
+const AGENT_RIGHTS: Record<string, AgentRights> = {
+  author: { files: false, commands: false, variiert: false },
+  bug_reviewer: { files: false, commands: false, variiert: false },
+  developer: { files: true, commands: true, variiert: false },
+  tester: { files: true, commands: true, variiert: true },
+  visual_tester: { files: false, commands: false, variiert: false },
+  reviewer: { files: false, commands: true, variiert: true },
+  documenter: { files: false, commands: false, variiert: true },
+  manual_writer: { files: false, commands: false, variiert: true },
+  user_manual_writer: { files: false, commands: false, variiert: true },
+  custom: { files: false, commands: false, variiert: false },
+  assistant: { files: true, commands: true, variiert: false },
+  visionary: { files: false, commands: false, variiert: false },
+};
+
+/** Rollen der System-Agents (kein Workflow-Agent), nur für die Anzeige in der Agent-Liste. */
+const SYSTEM_ROLE_LABELS: Record<string, string> = { assistant: 'Dashboard-Assistent', visionary: 'Visionär' };
+
+/** Rolle eines Agents aus dem Worker-Status; fehlt sie oder ist unbekannt, gilt `custom`. */
+export function agentRole(role: string | null | undefined): string {
+  return role && role in AGENT_RIGHTS ? role : 'custom';
+}
+
+export function agentRoleLabel(role: string | null | undefined): string {
+  const key = agentRole(role);
+  return SYSTEM_ROLE_LABELS[key] ?? roleLabel(key);
+}
+
+export function agentRights(role: string | null | undefined): AgentRights {
+  return AGENT_RIGHTS[agentRole(role)] ?? { files: false, commands: false, variiert: false };
+}
+
+/** Text der Rechte-Chips, z. B. „Dateien ändern: ja“. */
+export function rightsTexts(role: string | null | undefined): { files: string; commands: string; hint: string } {
+  const rights = agentRights(role);
+  return {
+    files: `Dateien ändern: ${rights.files ? 'ja' : 'nein'}`,
+    commands: `Befehle: ${rights.commands ? 'ja' : 'nein'}`,
+    hint: rights.variiert ? 'je nach Befehl' : '',
+  };
+}
+
 /** Leerer Text ergibt null (eingebauter Agent), `[...]` wird als JSON-Array gelesen, sonst an Leerzeichen getrennt. */
 export function parseCommand(text: string): string[] | null {
   const trimmed = text.trim();

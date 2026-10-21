@@ -1,7 +1,50 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { DEVELOPMENT_STATUSES } from '../../shared/labels.js';
-import { newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
+import {
+  agentWorkload,
+  newestSprints,
+  NO_AGENT,
+  opensActions,
+  orderAgentName,
+  ORDER_STATUSES,
+  ORDER_TONES,
+} from './order-shares.js';
+
+test('Verteilung je Agent: Balken plus „Ohne Agent“ ergeben die offenen Aufträge', () => {
+  const agents = [
+    { id: 'a1', name: 'Entwickler' },
+    { id: 'a2', name: 'Tester' },
+  ];
+  const items = [
+    { agentId: 'a1', status: 'planned' },
+    { agentId: 'a1', status: 'in_progress' },
+    { agentId: 'a1', status: 'done' },
+    { agentId: 'a2', status: 'rejected' },
+    { agentId: null, status: 'backlog' },
+    { agentId: 'geloescht', status: 'blocked' },
+  ] as const;
+  const rows = agentWorkload(items, agents);
+  assert.deepEqual(rows, [
+    { id: 'a1', label: 'Entwickler', value: 2 },
+    { id: 'a2', label: 'Tester', value: 0 },
+    { id: null, label: NO_AGENT, value: 2 },
+  ]);
+  const open = items.filter((item) => item.status !== 'done' && item.status !== 'rejected').length;
+  assert.equal(
+    rows.reduce((sum, row) => sum + row.value, 0),
+    open,
+  );
+  // Spalte „Agent“ der Auftragsliste nutzt dieselben Namen wie die Balken.
+  assert.equal(orderAgentName(items[0], agents), 'Entwickler');
+  assert.equal(orderAgentName(items[5], agents), NO_AGENT);
+});
+
+test('Verteilung ohne Agents enthält nur „Ohne Agent“', () => {
+  assert.deepEqual(agentWorkload([{ agentId: null, status: 'planned' }], []), [
+    { id: null, label: NO_AGENT, value: 1 },
+  ]);
+});
 
 test('Dashboard zählt jeden Auftrags-Status, auch „Wartet auf Freigabe“', () => {
   assert.deepEqual([...ORDER_STATUSES].sort(), [...DEVELOPMENT_STATUSES].sort());

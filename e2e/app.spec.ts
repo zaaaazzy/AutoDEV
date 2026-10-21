@@ -67,6 +67,39 @@ test('Alle Bereiche laden ohne seitliches Überlaufen', async ({ page }) => {
   }
 });
 
+test('Dashboard: Agents mit Rolle, Rechten und Aufgabe, Verteilung der offenen Aufträge filtert die Liste', async ({
+  page,
+}) => {
+  await login(page);
+  await page.goto('/#dashboard');
+  const status = page.locator('article.panel').filter({ has: page.getByRole('heading', { name: 'Agent-Status' }) });
+  const developer = status.locator('.agent-row').filter({ has: page.getByRole('img', { name: 'Rolle: Entwickler' }) });
+  await expect(developer).toHaveCount(1);
+  await expect(developer).toContainText('Dateien ändern: ja');
+  await expect(developer).toContainText('Befehle: ja');
+  const author = status.locator('.agent-row').filter({ has: page.getByRole('img', { name: 'Rolle: Auftragsautor' }) });
+  await expect(author).toContainText('Dateien ändern: nein');
+  await expect(author).toContainText('Befehle: nein');
+  // Ohne laufenden Auftrag: „Inaktiv“ bzw. „Worker offline“, je nach Worker.
+  await expect(author.locator('.agent-task')).toHaveText(/^(Inaktiv|Worker offline)$/);
+  // Genau ein Eintrag mit Rollen-Icon je Agent.
+  await expect(status.locator('.agent-row')).toHaveCount(await status.locator('app-role-icon').count());
+
+  // Summe der Balken inkl. „Ohne Agent“ = Kachel „Offene Aufträge“.
+  const workload = page.getByRole('article', { name: 'Offene Aufträge je Agent' });
+  await expect(workload).toBeVisible();
+  const total = Number((await workload.locator('.share-total').textContent())?.match(/\d+/)?.[0]);
+  const card = page.locator('.summary-card').filter({ hasText: 'Offene Aufträge' });
+  expect(total).toBe(Number(await card.locator('strong').textContent()));
+  await workload.locator('.share-key').filter({ hasText: 'Ohne Agent' }).click();
+  await expect(page).toHaveURL(/#development$/);
+  await expect(page.locator('.dt-table tbody tr').filter({ hasText: 'Login-Seite modernisieren' })).toBeVisible();
+  await page.goto('/#dashboard');
+  await workload.locator('.share-key').filter({ hasText: 'Entwickler' }).click();
+  await expect(page).toHaveURL(/#development$/);
+  await expect(page.locator('.dt-table tbody tr').filter({ hasText: 'Login-Seite modernisieren' })).toHaveCount(0);
+});
+
 test('Navigation: Menü auf dem Handy, Seitenleiste auf dem Desktop', async ({ page, isMobile }) => {
   await login(page);
   if (isMobile) {
