@@ -292,7 +292,8 @@
 .wizard input:focus,
 .wizard select:focus {
   border-color: var(--wz-accent);
-  outline: none;
+  outline: 2px solid var(--wz-accent);
+  outline-offset: 1px;
   box-shadow: 0 0 0 4px rgb(47 111 79 / 14%);
 }
 .input-with-state {

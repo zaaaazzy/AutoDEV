@@ -338,6 +338,11 @@
 .comment-form:focus-within {
   border-color: #9cc3ad;
 }
+/* Das Textfeld ist rahmenlos; bei Tastaturfokus zeigt der Rahmen des Formulars den Ring. */
+.comment-form:has(textarea:focus-visible) {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
 .comment-form textarea {
   flex: 1;
   min-height: 40px;
@@ -481,8 +486,20 @@
 .dt-table tbody tr.dt-clickable:hover > td {
   background: rgb(36 99 78 / 4%);
 }
+/* Der Titel-Button deckt die ganze Karte ab (Klickfläche wie bisher, bedienbar per Tastatur). */
 .test-findings > li.clickable {
+  position: relative;
   cursor: pointer;
+}
+.test-findings > li.clickable .finding-open::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  content: '';
+}
+.test-findings > li.clickable :is(button, a, video):not(.finding-open) {
+  position: relative;
+  z-index: 1;
 }
 .test-findings > li.clickable:hover {
   border-color: #e3b9ad;

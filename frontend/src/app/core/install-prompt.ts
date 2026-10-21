@@ -10,10 +10,22 @@ export interface InstallPromptEvent extends Event {
  */
 export const installPrompt = signal<InstallPromptEvent | null>(null);
 
-export function listenForInstallPrompt(): void {
-  globalThis.addEventListener?.('beforeinstallprompt', (event) => {
+let stopListening: (() => void) | null = null;
+
+/** Hängt die Listener genau einmal an; mehrfacher Aufruf liefert dieselbe Aufräumfunktion. */
+export function listenForInstallPrompt(target: EventTarget | undefined = globalThis): () => void {
+  if (stopListening) return stopListening;
+  const onPrompt = (event: Event): void => {
     event.preventDefault();
     installPrompt.set(event as InstallPromptEvent);
-  });
-  globalThis.addEventListener?.('appinstalled', () => installPrompt.set(null));
+  };
+  const onInstalled = (): void => installPrompt.set(null);
+  target?.addEventListener?.('beforeinstallprompt', onPrompt);
+  target?.addEventListener?.('appinstalled', onInstalled);
+  stopListening = () => {
+    target?.removeEventListener?.('beforeinstallprompt', onPrompt);
+    target?.removeEventListener?.('appinstalled', onInstalled);
+    stopListening = null;
+  };
+  return stopListening;
 }

@@ -13,6 +13,7 @@ import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Secti
 import { fetchProjectData, keepFailedSections } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
+import { visibleInterval } from './visible-interval.js';
 
 const WORKER_REFRESH_MS = 10_000;
 const LIVE_RUNS_REFRESH_MS = 3_000;
@@ -99,14 +100,15 @@ export class ProjectStore {
     document.addEventListener('visibilitychange', onVisibilityChange);
     globalThis.navigator?.serviceWorker?.addEventListener('message', onWorkerMessage);
     void this.loadProjects();
-    const refreshTimer = globalThis.setInterval(() => void this.refreshWorker(), WORKER_REFRESH_MS);
-    const liveTimer = globalThis.setInterval(() => void this.refreshLiveRuns(), LIVE_RUNS_REFRESH_MS);
+    // Verborgene Tabs pollen nicht; beim Zurückkehren wird sofort nachgeladen.
+    const stopWorker = visibleInterval(() => void this.refreshWorker(), WORKER_REFRESH_MS);
+    const stopLiveRuns = visibleInterval(() => void this.refreshLiveRuns(), LIVE_RUNS_REFRESH_MS);
     inject(DestroyRef).onDestroy(() => {
       globalThis.removeEventListener('hashchange', onHashChange);
       document.removeEventListener('visibilitychange', onVisibilityChange);
       globalThis.navigator?.serviceWorker?.removeEventListener('message', onWorkerMessage);
-      globalThis.clearInterval(refreshTimer);
-      globalThis.clearInterval(liveTimer);
+      stopWorker();
+      stopLiveRuns();
     });
   }
 
