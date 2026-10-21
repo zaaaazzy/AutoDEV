@@ -128,6 +128,12 @@ in einer Plist oder Unit gespeichert, solltest du es ändern.
 PostgreSQL (`ALTER USER devlog PASSWORD '…'`), trägst es in die `.env` ein, startest mit `docker compose up -d` neu
 und installierst den Worker mit der neuen `DEV_LOG_DATABASE_URL` erneut.
 
+**Testläufe und E2E:** Der Komplettlauf (`npm run test:full`) bekommt vom Worker nur `DEV_LOG_DATABASE_URL` und das
+daraus abgeleitete Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle
+anderen `DEV_LOG_*`-Werte bleiben draußen. Von Hand gestartet, lesen `test:full` und die E2E-Konfiguration fehlende
+Zugänge aus `DEV_LOG_DB_USER` und `DEV_LOG_DB_PASSWORD` der `.env` (Port 5433). Das Standardpasswort gilt nur, wenn
+die `.env` kein eigenes Passwort enthält.
+
 ### Container-Härtung
 
 Jeder Dienst in `docker-compose.yml` hat Grenzen für Speicher, CPU und Prozesse und einen Healthcheck. `frontend`

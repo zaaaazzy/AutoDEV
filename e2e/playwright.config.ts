@@ -1,10 +1,19 @@
 import { randomBytes } from 'node:crypto';
+import { join } from 'node:path';
 import { defineConfig, devices } from '@playwright/test';
+import { localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
 
 // Zufällige Zugangsdaten je Lauf; der Testserver nutzt eine eigene Datenbank (dev_log_e2e).
 process.env.E2E_USERNAME ??= 'e2e-tester';
 process.env.E2E_PASSWORD ??= randomBytes(16).toString('hex');
 const PORT = Number(process.env.E2E_PORT ?? 3195);
+// Admin-Zugang der lokalen Datenbank: vorgegeben (test:full, Worker) oder aus der .env, nie fest das Standardpasswort.
+// Hier gesetzt, damit auch die Tests selbst (gleiche Umgebung in den Playwright-Workern) denselben Zugang nutzen.
+process.env.E2E_ADMIN_DATABASE_URL ??= localDatabaseUrl(
+  readEnvValues(join(import.meta.dirname, '..')),
+  'postgres',
+  'localhost',
+);
 
 export default defineConfig({
   testDir: '.',
@@ -29,8 +38,7 @@ export default defineConfig({
       DEV_LOG_HOST: '127.0.0.1',
       DEV_LOG_USERNAME: process.env.E2E_USERNAME,
       DEV_LOG_PASSWORD: process.env.E2E_PASSWORD,
-      E2E_ADMIN_DATABASE_URL:
-        process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
+      E2E_ADMIN_DATABASE_URL: process.env.E2E_ADMIN_DATABASE_URL,
     },
   },
 });

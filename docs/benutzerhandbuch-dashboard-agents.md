@@ -137,6 +137,13 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 - Testbefehle `npx tsx --test <Dateien>` oder `node --test …` werden direkt mit Abdeckung gemessen, ohne Skript und ohne Vorbereitung.
 - Läuft der Test über ein `test`-Skript mit Vorbereitungsschritten, werden diese nur ausgeführt, wenn sie zur erlaubten Liste gehören (`npm run`, `npm ci`, `tsc`, `ng build`, `vite build`), und ohne Verkettung mit `&&`, `;`, Pipes, Umleitungen oder `$`. Sonst entfällt die Messung, und der Schritt nennt den Grund. Die Tests selbst laufen weiter.
 
+**Testläufe mit eigenem Datenbank-Passwort:** Ein Testlauf, den du unter **Testläufe** anforderst, und der Komplettlauf (`npm run test:full`) funktionieren auch dann, wenn du in der `.env` ein eigenes `DEV_LOG_DB_PASSWORD` hast, zum Beispiel vom Einrichtungs-Assistenten erzeugt.
+- Der Worker gibt diesen Befehlen nur `DEV_LOG_DATABASE_URL` mit, dazu das Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle anderen `DEV_LOG_*`-Werte fehlen dort.
+- Startest du `test:full` oder den E2E-Webserver von Hand, lesen sie den Zugang aus `DEV_LOG_DB_USER` und `DEV_LOG_DB_PASSWORD` der `.env` (Port 5433).
+- Das Passwort `devlog_local_dev` gilt nur noch, wenn die `.env` kein eigenes Passwort enthält. Dann warnt der Server.
+- Ein Passwort mit Sonderzeichen wie `@`, `:` oder `/` funktioniert, weil die Adresse mit dem URL-Parser gebaut wird.
+- Die übrigen Befehle (Chat-Assistent, Coverage) bekommen weiterhin nur die Allowlist ohne `DEV_LOG_*`.
+
 ---
 
 ## Verwandte Dokumente
