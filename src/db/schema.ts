@@ -1,3 +1,8 @@
+/**
+ * Basisschritt (Migration 1): Stand des Schemas, bevor es versionierte Migrationen gab. Er ist idempotent, damit
+ * Bestands-Datenbanken ihn einmalig nachholen können, und enthält nur Struktur und Grundeinträge (ON CONFLICT DO
+ * NOTHING), keine Daten-UPDATEs. Nicht mehr ändern: Neues kommt als eigener Schritt in migrations.ts.
+ */
 export const SCHEMA = `
   CREATE TABLE IF NOT EXISTS projects (
     slug TEXT PRIMARY KEY CHECK (slug ~ '^[a-z0-9][a-z0-9-]{0,62}$'),
@@ -558,9 +563,6 @@ export const SCHEMA = `
     CHECK (sprint_mode IN ('manual', 'suggest', 'autopilot'));
   ALTER TABLE projects ADD COLUMN IF NOT EXISTS sprint_capacity_hours DOUBLE PRECISION NOT NULL DEFAULT 40
     CHECK (sprint_capacity_hours > 0);
-  -- Angenommene Ideen, deren Auftrag gelöscht wurde, sind wieder offen.
-  UPDATE ideation_items i SET status = 'idea', updated_at = NOW()
-   WHERE i.status = 'accepted' AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id);
   -- Erledigte oder abgelehnte Aufträge brauchen keine Aktion mehr: Hinweis beim Abschluss löschen (auch Altfälle).
   CREATE OR REPLACE FUNCTION clear_action_todo() RETURNS trigger AS $$
   BEGIN
@@ -573,8 +575,6 @@ export const SCHEMA = `
   CREATE OR REPLACE TRIGGER development_items_clear_action_todo
     BEFORE INSERT OR UPDATE OF status ON development_items
     FOR EACH ROW EXECUTE FUNCTION clear_action_todo();
-  UPDATE development_items SET action_todo = NULL
-   WHERE status IN ('done', 'rejected') AND action_todo IS NOT NULL;
   -- Mandantentrennung: Benutzer sehen nur freigeschaltete Projekte (Administratoren alle).
   CREATE TABLE IF NOT EXISTS project_members (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -585,17 +585,6 @@ export const SCHEMA = `
   -- Push nur an Geräte von Benutzern mit Zugriff auf das Projekt.
   ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
   ALTER TABLE push_subscriptions ADD COLUMN IF NOT EXISTS system_admin BOOLEAN NOT NULL DEFAULT FALSE;
-  -- Ältere Geräte ohne Besitzer stammen aus der Zeit vor Benutzerkonten: dem Systemadministrator zuordnen.
-  UPDATE push_subscriptions SET system_admin = TRUE WHERE user_id IS NULL AND NOT system_admin;
-  -- Einmalig beim Einführen der Mandantentrennung: bestehende Benutzer behalten Zugriff auf die bestehenden Projekte.
-  DO $$
-  BEGIN
-    IF NOT EXISTS (SELECT 1 FROM app_settings WHERE key = 'tenancy_migrated') THEN
-      INSERT INTO project_members (user_id, project_slug)
-        SELECT u.id, p.slug FROM users u CROSS JOIN projects p ON CONFLICT DO NOTHING;
-      INSERT INTO app_settings (key, value) VALUES ('tenancy_migrated', 'true');
-    END IF;
-  END $$;
   -- Rechte je Agent auf Befehlsebene (null = Projektstandard wie bisher) und eigene Kategorien je Projekt (Administration).
   ALTER TABLE agents DROP COLUMN IF EXISTS permission_groups;
   ALTER TABLE agents ADD COLUMN IF NOT EXISTS allowed_commands TEXT[];
@@ -614,12 +603,6 @@ export const SCHEMA = `
 
   -- Dateirechte getrennt: „files“ wird zu „Dateien anlegen“ und „Dateien ändern“; dazu erlaubte Ordner je Agent.
   ALTER TABLE agents ADD COLUMN IF NOT EXISTS file_scope TEXT[] NOT NULL DEFAULT '{}';
-  UPDATE agents SET allowed_commands = ARRAY(
-      SELECT DISTINCT unnest(array_remove(allowed_commands, 'files') || ARRAY['files:create', 'files:edit']))
-    WHERE 'files' = ANY(allowed_commands);
-  UPDATE project_permission_groups SET rules = ARRAY(
-      SELECT DISTINCT unnest(array_remove(rules, 'files') || ARRAY['files:create', 'files:edit']))
-    WHERE 'files' = ANY(rules);
 
   -- Kommentare an Ideen: @-Erwähnungen von Agents und Personen; ein erwähnter Agent antwortet als Kommentar.
   ALTER TABLE ideation_comments ADD COLUMN IF NOT EXISTS author_kind TEXT NOT NULL DEFAULT 'user';
@@ -649,11 +632,6 @@ export const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS visionary_runs_open_idx ON visionary_runs (project_slug)
     WHERE status IN ('requested', 'running');
   CREATE INDEX IF NOT EXISTS visionary_runs_project_idx ON visionary_runs (project_slug, requested_at DESC);
-  -- launchctl-Freigabe ohne feste Benutzer-ID (der Container hat eine andere als der Worker).
-  UPDATE agents SET allowed_commands = ARRAY(SELECT DISTINCT CASE
-      WHEN rule ~ '^Bash\\(launchctl kickstart -k gui/[0-9]+/ch\\.\\*\\)$' THEN 'services' ELSE rule END
-      FROM unnest(allowed_commands) rule)
-    WHERE EXISTS (SELECT 1 FROM unnest(allowed_commands) rule WHERE rule LIKE 'Bash(launchctl kickstart -k gui/%');
 
   -- Sprint-Autopilot: Arbeitszeiten (nur darin startet er Sprints; 1 = Montag … 7 = Sonntag) und manuelle Freigabe
   -- nach gescheiterter Git-Sicherung (Sprint, dessen Fehler bewusst übergangen wird).
@@ -690,9 +668,9 @@ export const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS test_requests_open_idx ON test_requests (project_slug)
     WHERE status IN ('requested', 'running');
   -- Bugs aus Testbefunden (Quelle „test“), damit sie im Bug-Workflow landen; aus dem Betrieb (Quelle „production“).
-  -- Das Schema läuft bei jedem Start als ein Aufruf: jede Fassung dieser Prüfung muss alle Quellen erlauben, die
-  -- der Code schreibt (auch die später ergänzten 'github' und 'routine'), sonst scheitert ADD CONSTRAINT an
-  -- bestehenden Zeilen und der Start bricht ab.
+  -- Der Basisschritt läuft als ein Aufruf, bei Bestands-Datenbanken auf vorhandenen Zeilen: jede Fassung dieser
+  -- Prüfung muss alle Quellen erlauben, die der Code schreibt (auch die später ergänzten 'github' und 'routine'),
+  -- sonst scheitert ADD CONSTRAINT an bestehenden Zeilen und der Start bricht ab.
   ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_source_check;
   ALTER TABLE bugs ADD CONSTRAINT bugs_source_check
     CHECK (source IN ('manual', 'agent', 'test', 'production', 'github', 'routine'));
@@ -875,24 +853,12 @@ export const SCHEMA = `
   ALTER TABLE sprints ADD COLUMN IF NOT EXISTS review_ready_at TIMESTAMPTZ;
 
   -- Dashboard-Wahl der Systemagents (Modell, externe CLI, volle Werkzeugrechte) statt loser app_settings-Schlüssel.
-  -- Die Übernahme alter Schlüssel ist idempotent: Danach sind sie gelöscht, ein späterer Start findet nichts mehr.
   CREATE TABLE IF NOT EXISTS system_agent_settings (
     role TEXT PRIMARY KEY,
     model TEXT,
     command JSONB CHECK (command IS NULL OR jsonb_typeof(command) = 'array'),
     allow_tools BOOLEAN NOT NULL DEFAULT FALSE
   );
-  INSERT INTO system_agent_settings (role, model, command, allow_tools)
-  SELECT r.role,
-         (SELECT NULLIF(btrim(value), '') FROM app_settings WHERE key = 'model:' || r.role),
-         (SELECT CASE WHEN pg_input_is_valid(value, 'jsonb') THEN
-                   CASE WHEN jsonb_typeof(value::jsonb) = 'array' THEN value::jsonb END END
-            FROM app_settings WHERE key = 'command:' || r.role),
-         COALESCE((SELECT value = 'true' FROM app_settings WHERE key = 'allow_tools:' || r.role), FALSE)
-    FROM (SELECT DISTINCT split_part(key, ':', 2) AS role FROM app_settings
-           WHERE key ~ '^(model|command|allow_tools):') r
-  ON CONFLICT (role) DO NOTHING;
-  DELETE FROM app_settings WHERE key ~ '^(model|command|allow_tools):';
 
   -- Produktions-Rückkanal: Health-URL, Compose-Dienste für den Log-Scan, Ingest-Token (nur der SHA-256-Hash),
   -- Ausschlussmuster und Aufbewahrung der Fehlerbeispiele.
@@ -1034,13 +1000,6 @@ export const SCHEMA = `
     max_cost_usd NUMERIC(10, 2) CHECK (max_cost_usd > 0),
     PRIMARY KEY (project_slug, period)
   );
-  -- Die bisherige Kostenbremse je Auftrag (Spalten an projects) wandert einmalig in budgets.
-  INSERT INTO budgets (project_slug, period, max_tokens, max_cost_usd)
-  SELECT slug, 'order', order_token_limit, order_cost_limit FROM projects
-   WHERE order_token_limit IS NOT NULL OR order_cost_limit IS NOT NULL
-  ON CONFLICT (project_slug, period) DO NOTHING;
-  UPDATE projects SET order_token_limit = NULL, order_cost_limit = NULL
-   WHERE order_token_limit IS NOT NULL OR order_cost_limit IS NOT NULL;
   -- Gemeldete Schwellen (80 %) je Zeitraum und Periode (Tag, Sprint-ID, Auftrag): genau eine Push-Warnung.
   CREATE TABLE IF NOT EXISTS budget_warnings (
     project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,

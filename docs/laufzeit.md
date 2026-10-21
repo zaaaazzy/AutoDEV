@@ -116,6 +116,17 @@ Setzt `agent_id`, merkt den alten Status in `return_status` und plant ein. Es l�
 - „done“ oder „rejected“ löscht „Aktion notwendig“.
 - Pro Auftrag höchstens ein laufender Lauf. Er gilt erst als gescheitert, wenn er rund 9 h kein Lebenszeichen gegeben hat (`ABANDONED_RUN_MS`, abgeleitet aus 2 × 240 min Schritt-Zeitlimit samt Wiederholung plus Reserve).
 
+### Schema-Migrationen beim Start
+
+API und Worker rufen beim Start `createDatabasePool` auf (`src/db/database.ts`). Dieser führt nur die noch fehlenden Schritte aus `src/db/migrations.ts` aus und vermerkt jeden in `schema_migrations`.
+
+- Alle Schritte laufen unter einer Advisory-Sperre (727401), deshalb migrieren gleichzeitig startende Prozesse nacheinander. Jeder Schritt hat eine eigene Transaktion. Scheitert ein Schritt, wird er zurückgerollt und nicht vermerkt, und der Start bricht mit „Migration n (Name) fehlgeschlagen“ ab.
+- Ist die Datenbank auf dem Stand, liest der Start nur die vermerkten Versionen. Es läuft kein `ALTER TABLE` und keine Daten-Änderung.
+- Schritt 1 `basis` ist das bisherige `src/db/schema.ts`, also nur Struktur und Grundeinträge. Er ist idempotent, damit Bestands-Datenbanken ihn einmal nachholen.
+- Schritt 2 `daten-altbestand` enthält die Daten-Korrekturen, die früher bei jedem Start liefen (z. B. Systemagent-Einstellungen aus `app_settings`, Kostenbremse nach `budgets`, Dateirechte `files`). Er läuft genau einmal.
+- Schritt 3 legt den Index `agent_run_steps (agent_id)` an.
+- Neue Änderungen kommen als weiterer Schritt hinten an die Liste. Bestehende Schritte werden nie geändert.
+
 ## 4 · Arbeitszyklus `runWorkflow` (sofort bei neuer Arbeit, sonst alle 30 s)
 
 Die Reihenfolge ist fest. Aufträge eines Zyklus laufen parallel, aber nur einer hält gleichzeitig die Umsetzungssperre (siehe Abschnitt 5).
