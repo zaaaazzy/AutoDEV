@@ -16,6 +16,16 @@ const BUILD_TIMEOUT_MS = 20 * 60_000;
 export const MAX_WAIT_MS = 15 * 60_000;
 const MAX_LOG_CHARS = 4_000;
 
+/**
+ * Umgebung für Compose-Aufrufe (Neubau, Rollback, Abbilder): ohne `DEV_LOG_*` und `COMPOSE_*`. Bei Compose gehen
+ * Shell-Variablen der `.env` vor – auch leere. Der Worker hat z. B. `DEV_LOG_SECRET_KEY` aus seiner Env-Datei (ggf.
+ * leer oder veraltet) und setzt `DEV_LOG_PROJECT_ROOTS` selbst; ohne Filter bekäme der neue Container diese Werte
+ * statt der `.env` und verlöre im schlimmsten Fall den Schlüssel für die verschlüsselten Zugänge.
+ */
+export function composeEnvironment(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(Object.entries(source).filter(([key]) => !/^(DEV_LOG|COMPOSE)_/i.test(key)));
+}
+
 export type RestartStatus = 'requested' | 'building' | 'restarting' | 'done' | 'failed';
 
 export interface RestartState {
@@ -294,10 +304,14 @@ export async function processRestart(
     (
       await execute(['docker', 'compose', 'images', ...BUILT_SERVICES, '--format', 'json'], installRoot, {
         timeoutMs: 30_000,
+        env: composeEnvironment(),
       }).catch(() => ({ exitCode: 1, durationMs: 0, output: '' }))
     ).output,
   );
-  const result = await execute(RESTART_COMMAND, installRoot, { timeoutMs: BUILD_TIMEOUT_MS });
+  const result = await execute(RESTART_COMMAND, installRoot, {
+    timeoutMs: BUILD_TIMEOUT_MS,
+    env: composeEnvironment(),
+  });
   const log = redactOutput(result.output, process.env).trim().slice(-MAX_LOG_CHARS);
   if (result.exitCode !== 0) {
     await writeRestart(
@@ -329,6 +343,7 @@ export async function processRestart(
       const restarted = tagged
         ? await execute(['docker', 'compose', 'up', '-d', '--no-build', ...BUILT_SERVICES], installRoot, {
             timeoutMs: 5 * 60_000,
+            env: composeEnvironment(),
           })
         : null;
       rolledBack = restarted?.exitCode === 0 && (await waitHealthy(options));
