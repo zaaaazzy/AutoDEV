@@ -10,6 +10,7 @@ import { OrderQuestionComponent } from '../../shared/order-question.component.js
 import { OrderApprovalComponent } from '../development/order-approval.component.js';
 import { OrderDetailComponent } from '../development/order-detail.component.js';
 import { OrderVisualComponent } from '../development/order-visual.component.js';
+import { actionHint } from './action-hints.js';
 import { needsVisual } from '../development/needs-visual.js';
 import { OrderDetailSlotDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { OrderService } from '../development/order.service.js';
@@ -85,8 +86,9 @@ export class ActionsComponent {
     return this.orders.analyze(item);
   }
 
-  protected deleteOrder(item: DevelopmentItem): Promise<void> {
-    return this.orders.remove(item);
+  /** Hover-Text eines Knopfs (was der Klick bewirkt). */
+  protected hint(label: string): string {
+    return actionHint(label);
   }
 
   protected confirmOrder(item: DevelopmentItem): Promise<void> {

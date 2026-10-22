@@ -100,29 +100,50 @@ async function loadSlots(pool: Pool, allowed: Set<string> | null | undefined): P
   });
 }
 
+/** Gewählte Umgebung aus dem Body: null = keine Wahl (requestSlot sucht selbst), undefined = ungültig. */
+export function chosenSlot(body: unknown): number | null | undefined {
+  const value = (body as { slot?: unknown } | null | undefined)?.slot;
+  if (value === undefined || value === null) return null;
+  return Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 9 ? (value as number) : undefined;
+}
+
+/** Antwort, wenn kein (bzw. der gewählte) Container nicht freigegeben ist. */
+function noSlotMessage(wanted: number | null): string {
+  return wanted !== null
+    ? `Umgebung ${wanted} ist nicht freigegeben – ein Administrator kann sie unter Einstellungen freigeben.`
+    : 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.';
+}
+
 /**
  * Container für einen Stand anfordern: derselbe Auftrag, sonst bei einem manuellen Start der manuelle Container
  * desselben Projekts (ein neuer Stand ersetzt den eigenen), sonst ein freier, sonst der am längsten laufende
  * freigegebene Container – dabei zuletzt eine laufende Freigabe (die Container sind geteilt). Ein manueller Start
- * verdrängt so keine Freigabe-Vorschau, solange ein Container frei ist. Liefert die Nummer oder null.
+ * verdrängt so keine Freigabe-Vorschau, solange ein Container frei ist. Mit `slot` genau dieser (gewählt in der
+ * optischen Abnahme), sofern er freigegeben ist. Liefert die Nummer oder null.
  */
 async function requestSlot(
   pool: Pool,
   project: string,
-  request: { commit: string | null; label: string; developmentId: string | null; kind: 'manual' | 'approval' },
+  request: {
+    commit: string | null;
+    label: string;
+    developmentId: string | null;
+    kind: 'manual' | 'approval';
+    slot?: number | null;
+  },
 ): Promise<number | null> {
   const result = await pool.query<{ slot: number }>(
     `UPDATE review_slots SET status = 'requested', project_slug = $1, commit_sha = $2, label = $3, development_id = $4,
             kind = $5, message = 'Angefordert – startet gleich.', requested_at = NOW(), updated_at = NOW()
       WHERE slot = (
-        SELECT slot FROM review_slots WHERE enabled
+        SELECT slot FROM review_slots WHERE enabled AND ($6::int IS NULL OR slot = $6)
          ORDER BY (development_id IS NOT DISTINCT FROM $4::uuid AND $4::uuid IS NOT NULL) DESC,
                   (project_slug IS NOT DISTINCT FROM $1 AND kind = 'manual' AND $5::text = 'manual') DESC,
                   (status = 'idle') DESC,
                   (status <> 'idle' AND kind = 'approval') ASC, requested_at NULLS FIRST, slot
          LIMIT 1)
       RETURNING slot`,
-    [project, request.commit, request.label, request.developmentId, request.kind],
+    [project, request.commit, request.label, request.developmentId, request.kind, request.slot ?? null],
   );
   return result.rows[0]?.slot ?? null;
 }
@@ -203,7 +224,12 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
     access({ role: 'run', tenant: 'project' }),
     async (request, response) => {
       const slug = parseProjectSlug(request.params.slug);
-      const body = (request.body ?? {}) as { commit?: unknown; label?: unknown; developmentId?: unknown };
+      const body = (request.body ?? {}) as {
+        commit?: unknown;
+        label?: unknown;
+        developmentId?: unknown;
+        slot?: unknown;
+      };
       const commit = typeof body.commit === 'string' && /^[0-9a-f]{40}$/.test(body.commit) ? body.commit : null;
       if (!slug || !commit) {
         response.status(400).json({ message: 'Bitte einen Stand (Commit) wählen.' });
@@ -223,16 +249,21 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
         response.status(404).json({ message: 'Auftrag nicht gefunden.' });
         return;
       }
+      // Gewählte Umgebung; ohne Angabe sucht requestSlot einen passenden Container.
+      const wanted = chosenSlot(body);
+      if (wanted === undefined) {
+        response.status(400).json({ message: 'Ungültige Umgebung.' });
+        return;
+      }
       const slot = await requestSlot(pool, slug, {
         commit,
         label: label || commit.slice(0, 8),
         developmentId,
         kind: 'manual',
+        slot: wanted,
       });
       if (!slot) {
-        response.status(409).json({
-          message: 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.',
-        });
+        response.status(409).json({ message: noSlotMessage(wanted) });
         return;
       }
       response.json({ slot });
@@ -352,6 +383,12 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
         response.status(404).json({ message: 'Auftrag nicht gefunden.' });
         return;
       }
+      // Optische Abnahme: in der gewählten Umgebung starten.
+      const wanted = chosenSlot(request.body);
+      if (wanted === undefined) {
+        response.status(400).json({ message: 'Ungültige Umgebung.' });
+        return;
+      }
       const item = (
         await pool.query<{ slug: string; title: string; status: string }>(
           'SELECT project_slug AS slug, title, status FROM development_items WHERE id = $1',
@@ -370,14 +407,13 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
         label: `${approval ? 'Freigabe' : 'Abnahme'}: ${item.title}`.slice(0, 200),
         developmentId: request.params.id,
         kind: approval ? 'approval' : 'manual',
+        slot: wanted,
       });
       if (!slot) {
-        response.status(409).json({
-          message: 'Kein Review-Container freigegeben – ein Administrator kann ihn unter Einstellungen freigeben.',
-        });
+        response.status(409).json({ message: noSlotMessage(wanted) });
         return;
       }
-      response.json({ ok: true });
+      response.json({ ok: true, slot });
     },
   );
 }

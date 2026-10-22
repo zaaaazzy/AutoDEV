@@ -104,14 +104,32 @@
 
               <div class="attention-actions">
                 @if (card.step === 'approve' && !item.reviewApprovedAt) {
-                  <button class="button primary" type="button" [disabled]="busy()" (click)="approve(item)">
+                  <button
+                    class="button primary"
+                    type="button"
+                    [disabled]="busy()"
+                    [title]="hint('✓ Freigeben')"
+                    (click)="approve(item)"
+                  >
                     ✓ Freigeben
                   </button>
-                  <button class="button secondary" type="button" [disabled]="busy()" (click)="reject(item)">
+                  <button
+                    class="button secondary"
+                    type="button"
+                    [disabled]="busy()"
+                    [title]="hint('↩ Zurückweisen')"
+                    (click)="reject(item)"
+                  >
                     ↩ Zurückweisen
                   </button>
                 } @else if (primaryLabel(item, card.step); as label) {
-                  <button class="button primary" type="button" [disabled]="busy()" (click)="primary(item, card, label)">
+                  <button
+                    class="button primary"
+                    type="button"
+                    [disabled]="busy()"
+                    [title]="hint(label)"
+                    (click)="primary(item, card, label)"
+                  >
                     {{ label }}
                   </button>
                 }
@@ -120,6 +138,7 @@
                   type="button"
                   [attr.aria-expanded]="showDetails"
                   [attr.aria-controls]="'attention-details-' + item.id"
+                  [title]="hint(showDetails ? 'Details ausblenden' : 'Details')"
                   (click)="toggleDetails(item.id)"
                 >
                   {{ showDetails ? 'Details ausblenden' : 'Details' }}
@@ -129,19 +148,10 @@
                     class="button secondary"
                     type="button"
                     [disabled]="busy() || card.step === 'analyzing'"
+                    [title]="hint('Neu analysieren')"
                     (click)="analyzeOrder(item)"
                   >
                     Neu analysieren
-                  </button>
-                }
-                @if (auth.can('plan')) {
-                  <button
-                    class="button secondary danger"
-                    type="button"
-                    [disabled]="busy() || item.status === 'in_progress'"
-                    (click)="deleteOrder(item)"
-                  >
-                    Löschen
                   </button>
                 }
               </div>

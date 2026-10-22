@@ -487,11 +487,9 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect
     .soft(button(analysePanel, 'Neu analysieren'), '„Neu analysieren“ ist gesperrt, solange die Analyse läuft')
     .toBeDisabled();
-  await button(analysePanel, 'Löschen').click();
-  const remove = confirmIn('Auftrag löschen?');
-  await expect(remove).toBeVisible();
-  await button(remove, 'Abbrechen').click();
-  await expect(remove).toHaveCount(0);
+  // Löschen gibt es unter „Aktionen“ nicht; jeder Knopf erklärt sich per Hover-Text.
+  await expect(button(analysePanel, 'Löschen')).toHaveCount(0);
+  await expect(button(analysePanel, 'Neu analysieren')).toHaveAttribute('title', /kein Code/);
   await expect(analyse).toBeVisible();
 });
 

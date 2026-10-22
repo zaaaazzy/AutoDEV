@@ -631,7 +631,7 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   expect((await cleared.json()).status).toEqual([]);
 });
 
-test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', async ({ page, request }) => {
+test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden, dort nicht löschbar', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Sprint-Aufgabe ${Date.now()}`;
   // Nur aus einem laufenden Sprint genommen wartet ein Auftrag unter „Aktionen“: den aktiven Sprint nutzen bzw. starten.
@@ -664,15 +664,16 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
   await page.goto('/#development');
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
   await page.goto('/#actions');
-  // Zeile aufklappen: Grund und Aktionen stehen darin; Löschen fragt im Dialog nach.
+  // Zeile aufklappen: Grund und Aktionen stehen darin; löschen lässt sich ein Auftrag hier nicht.
   const card = await attentionPanel(page, title);
   await expect(card).toContainText(`Aus Sprint „${sprint.name}“ genommen`);
-  await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
-  await card.getByRole('button', { name: 'Löschen' }).click();
-  await page
-    .getByRole('dialog', { name: 'Auftrag löschen?' })
-    .getByRole('button', { name: 'Endgültig löschen' })
-    .click();
+  const replan = card.getByRole('button', { name: 'Wieder einplanen' });
+  await expect(replan).toBeVisible();
+  await expect(replan).toHaveAttribute('title', /nächsten Sprint/);
+  await expect(card.getByRole('button', { name: 'Löschen' })).toHaveCount(0);
+  // Aufräumen über die API.
+  expect((await request.delete(`/api/development/${item.id}`, { headers })).ok()).toBe(true);
+  await page.reload();
   await expect(attentionRow(page, title)).toHaveCount(0);
   if (started) {
     await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'planned' } });
