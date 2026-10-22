@@ -195,6 +195,23 @@ app-wait-status {
   font-size: 13px;
   color: #a0610d;
 }
+/* Dashboard: eigene Karte über den Kennzahlen, solange Test, Merge, Push oder CI laufen */
+.wait-status.wait-status-card {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  border: 1px solid #ecd9b8;
+  border-radius: 11px;
+  background: #fffaf2;
+  box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
+  font-size: 14px;
+}
+.wait-status-card .wait-status-bar {
+  height: 8px;
+}
+.wait-status-detail {
+  color: var(--muted);
+  font-size: 12.5px;
+}
 .wait-status-bar {
   display: block;
   height: 6px;

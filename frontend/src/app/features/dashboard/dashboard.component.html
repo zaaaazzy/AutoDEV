@@ -1,6 +1,8 @@
 @if (store.ready()) {
   <app-git-graph-backdrop />
   <app-git-alert />
+  <!-- Test, Merge, Push oder CI-Prüfung laufen: Ladesymbol mit Restzeit und Fortschritt (sonst unsichtbar). -->
+  <app-wait-status [card]="true" />
   <section class="summary-grid" aria-label="Projektkennzahlen">
     <a class="summary-card" href="#development" (click)="$event.preventDefault(); store.navigate('development')">
       <strong>{{ store.openDevelopmentCount() }}</strong>

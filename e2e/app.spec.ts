@@ -1123,3 +1123,49 @@ test('Sprint abbrechen: Auftrag geht zurück ins Backlog und wartet unter „Akt
     expect((await request.delete(`/api/sprints/${sprint.id}`, { headers })).status()).toBe(204);
   }
 });
+
+test('Dashboard: laufender Test zeigt Ladesymbol mit Schritt, Restzeit und Fortschritt', async ({ page }) => {
+  const started = new Date(Date.now() - 60_000).toISOString();
+  await page.route(/\/api\/projects\/[^/]+\/test-runs\/live(\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        run: {
+          id: '00000000-0000-4000-8000-0000000000aa',
+          trigger: 'full',
+          branch: 'sprint/sprint-19',
+          startedAt: started,
+          now: new Date().toISOString(),
+          steps: [
+            {
+              position: 0,
+              command: 'npm run lint',
+              status: 'passed',
+              category: null,
+              progress: null,
+              durationMs: 3000,
+              startedAt: started,
+              output: '',
+            },
+            {
+              position: 1,
+              command: 'npm test',
+              status: 'running',
+              category: null,
+              progress: '120 von 980 Tests',
+              durationMs: null,
+              startedAt: started,
+              output: '',
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await login(page);
+  const card = page.locator('.wait-status-card');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Test läuft');
+  await expect(card).toContainText('Schritt 2 von 2 · Unit-Tests (inkl. UI-Build) · 120 von 980 Tests');
+  await expect(card.getByRole('progressbar')).toBeVisible();
+  if (process.env.E2E_SCREENSHOT) await card.screenshot({ path: process.env.E2E_SCREENSHOT });
+});
