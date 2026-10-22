@@ -30,6 +30,8 @@ export type CommandExecutor = (
     onOutput?: (output: string) => void;
     /** Every raw chunk, also beyond the captured-output limit (for parsing streamed agent events). */
     onChunk?: (chunk: string) => void;
+    /** Abbruch (Benutzer, Zeitlimit des Agents, Worker-Ende): beendet die ganze Prozessgruppe sofort. */
+    signal?: AbortSignal;
   },
 ) => Promise<CommandResult>;
 
@@ -52,6 +54,11 @@ export function redactOutput(output: string, environment: NodeJS.ProcessEnv): st
 export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
   return new Promise((resolveCommand) => {
     const startedAt = Date.now();
+    // Schon abgebrochen: gar nicht erst starten (ein 'abort'-Listener feuert für ein bereits abgebrochenes Signal nie).
+    if (options.signal?.aborted) {
+      resolveCommand({ exitCode: 130, durationMs: 0, output: 'Abgebrochen, bevor der Befehl startete.\n' });
+      return;
+    }
     const child = spawn(command[0], command.slice(1), {
       cwd,
       env: options.env ?? process.env,
@@ -90,13 +97,13 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
     // Eigener Timer statt spawn({ timeout }): der trifft nur den direkten Prozess. Gestartete Server oder Testläufer
     // lebten weiter, hielten stdout offen, und 'close' käme nie.
     const pid = child.pid;
-    const timer = options.timeoutMs
-      ? setTimeout(() => {
-          if (pid) killGroup(pid);
-          // Ohne Prozessgruppen (Windows) wenigstens den direkten Prozess beenden.
-          child.kill('SIGKILL');
-        }, options.timeoutMs)
-      : undefined;
+    const kill = (): void => {
+      if (pid) killGroup(pid);
+      // Ohne Prozessgruppen (Windows) wenigstens den direkten Prozess beenden.
+      child.kill('SIGKILL');
+    };
+    const timer = options.timeoutMs ? setTimeout(kill, options.timeoutMs) : undefined;
+    options.signal?.addEventListener('abort', kill, { once: true });
     let grace: NodeJS.Timeout | undefined;
     let finished = false;
     const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
@@ -104,6 +111,7 @@ export const runCommand: CommandExecutor = (command, cwd, options = {}) => {
       finished = true;
       clearTimeout(timer);
       clearTimeout(grace);
+      options.signal?.removeEventListener('abort', kill);
       // Nach jedem Befehl, auch bei Erfolg und Fehler: was er im Hintergrund gestartet hat (z. B. Dev-Server aus
       // npm test), endet mit. Erst danach den Eintrag im Prozessregister löschen.
       if (pid) killGroup(pid);

@@ -191,17 +191,25 @@ test('runStep: Abbruch aus der Oberfläche beendet den Schritt sofort, ohne Bug 
     return undefined;
   });
   let calls = 0;
-  // Der Agent reagiert nicht; der Abbruch darf trotzdem nicht auf ihn warten.
-  const execute: CommandExecutor = () => {
+  let agentEnded = false;
+  // Der Agent endet erst über das Abbruch-Signal (wie runCommand); ohne Signal liefe er bis zum Zeitlimit.
+  const execute: CommandExecutor = (_command, _cwd, options = {}) => {
     calls += 1;
     return new Promise((resolveRun) => {
-      setTimeout(() => resolveRun({ exitCode: 1, durationMs: 0, output: 'Ollama nicht erreichbar' }), 2_500).unref();
+      options.signal?.addEventListener('abort', () =>
+        setTimeout(() => {
+          agentEnded = true;
+          resolveRun({ exitCode: 1, durationMs: 0, output: 'Ollama nicht erreichbar' });
+        }, 200),
+      );
     });
   };
   const ctx = context(pool, execute);
   const startedAt = Date.now();
   const outcome = await runStep(ctx, agent('Dev', { command: ['dev'] }), 0, 1);
-  assert.ok(Date.now() - startedAt < 2_500, 'wartet nicht auf den hängenden Agent');
+  assert.ok(Date.now() - startedAt < 10_000, 'Abbruch erreicht den Agent über das Signal');
+  // Commit und checkout base dürfen erst laufen, wenn der Agent wirklich beendet ist.
+  assert.equal(agentEnded, true, 'wartet auf das echte Ende des Agents');
   assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: false });
   assert.equal(calls, 1, 'ein Abbruch wird nicht als vorübergehender Fehler wiederholt');
   const saved = queries.find((query) => query.sql.includes('SET status = $2, exit_code = $3'));
