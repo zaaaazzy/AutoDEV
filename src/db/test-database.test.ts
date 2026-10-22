@@ -1,16 +1,18 @@
+import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import pg from 'pg';
 import { runMigrations } from './migrations.js';
+import { localDatabaseUrl, readEnvValues } from '../core/local-database.js';
 
 /**
- * Hilfen für Tests gegen eine echte PostgreSQL-Datenbank (lokal aus docker-compose oder
- * DEV_LOG_TEST_ADMIN_DATABASE_URL). Ohne Datenbank werden diese Tests übersprungen, ausser
+ * Hilfen für Tests gegen eine echte PostgreSQL-Datenbank: DEV_LOG_TEST_ADMIN_DATABASE_URL, sonst die lokale aus
+ * docker-compose mit dem Zugang aus der .env (wie e2e/playwright.config.ts). Ohne Datenbank werden diese Tests übersprungen, ausser
  * DEV_LOG_TEST_REQUIRE_DATABASE ist gesetzt (CI): Dann schlagen sie fehl, statt still zu fehlen.
  */
 export const ADMIN_URL =
   process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ??
   process.env.E2E_ADMIN_DATABASE_URL ??
-  'postgresql://devlog:devlog_local_dev@localhost:5433/postgres';
+  localDatabaseUrl(readEnvValues(join(import.meta.dirname, '..', '..')), 'postgres', 'localhost');
 
 /** Test überspringen, weil keine Datenbank erreichbar ist; mit DEV_LOG_TEST_REQUIRE_DATABASE ein Fehler. */
 export function skipWithoutDatabase(t: TestContext): void {

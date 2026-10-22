@@ -38,6 +38,10 @@ test('Agent-Ausgabe: fehlgeschlagene und verweigerte Befehle werden markiert', (
     /class="tool-call failed"><span class="tool-icon" aria-hidden="true">✕/,
   );
   assert.doesNotMatch(render('● Read(a.ts)\n  └ 12 Zeilen'), /failed/);
+  for (const result of ['0 errors, 3 warnings', 'No errors found', 'Keine Fehler', 'fehlerfrei'])
+    assert.doesNotMatch(render(`● Bash(npm run lint)\n  └ ${result}`), /failed/, result);
+  assert.match(render('● Bash(npm test)\n  └ 0 errors, 2 Fehler'), /failed/, 'echter Fehler daneben zählt weiter');
+  assert.match(render('● Bash(npm test)\n  └ 3 errors'), /failed/);
 });
 
 test('Agent-Ausgabe: Befehle und Ergebnisse werden escaped (kein HTML aus der Agent-Ausgabe)', () => {
