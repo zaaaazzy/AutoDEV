@@ -496,9 +496,8 @@
   font-size: 0.78rem;
 }
 
-.capacity-fallback {
-  color: var(--orange);
-  font-weight: 600;
+.proposal-calibration {
+  font-size: 0.78rem;
 }
 
 .autopilot-hours {

@@ -18,10 +18,12 @@ export interface WorkItem {
   risks?: string;
   /**
    * Kategorie (frontend, backend, fullstack …): Modell-Routing; die visuelle Prüfung läuft nur bei Frontend und
-   * Fullstack. Dazu Schätzung (Stunden) und Anzahl automatischer Wiederholungen fürs Modell-Routing.
+   * Fullstack. Dazu Schätzung (Stunden, samt Herkunft für die Kalibrierung) und Anzahl automatischer Wiederholungen
+   * fürs Modell-Routing.
    */
   category?: string | null;
   effortHours?: number | null;
+  estimateSource?: string | null;
   retryCount?: number;
 }
 

@@ -170,6 +170,8 @@ function ideasPool(ideas: { id: string; title: string; description: string }[], 
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes('FROM ideation_items')) return { rows: ideas };
+      // Ist-Werte ähnlicher Aufträge (loadActualReference): hier keine.
+      if (sql.includes('percentile_cont')) return { rows: [{ count: '0', hours: null, tokens: null }] };
       if (sql.includes('FROM projects')) return { rows: [{ name: 'Dev Log', description, guidelines: '' }] };
       updates.push({ sql, values });
       return { rows: [] };
@@ -213,6 +215,8 @@ test('estimateNewIdeas: Werte übernehmen, Fehlschläge einmal vermerken, fremde
   assert.equal(count, 3);
   assert.match(prompts[0]!, /Projekt: ## Projekt „Dev Log“\nEin Projekt\./);
   assert.match(prompts[0]!, /Titel: Export\nCSV-Export/);
+  assert.match(prompts[0]!, /effortHours: erwartete Agent-Laufzeit in Stunden/);
+  assert.match(updates[0]!.sql, /THEN 'quick'/);
   assert.ok(prompts[1]!.includes(`Titel: Import\n${'x'.repeat(1500)}`) && !prompts[1]!.includes('x'.repeat(1501)));
   assert.deepEqual(
     updates.map((update) => update.values),

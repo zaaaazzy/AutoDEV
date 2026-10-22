@@ -146,7 +146,13 @@
           </select>
         </label>
         <label
-          >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
+          >Aufwand (Agent-Std.)<input
+            name="effortHours"
+            type="number"
+            min="0"
+            step="0.05"
+            [ngModel]="item.effortHours"
+          />
         </label>
         <label
           >Token-Schätzung<input
@@ -237,8 +243,13 @@
         <dd>{{ store.sprintOf(item)?.name ?? 'Kein Sprint' }}</dd>
       </div>
       <div>
-        <dt>Aufwand</dt>
-        <dd>{{ item.effortHours | hours }}</dd>
+        <dt>Aufwand (Agent-Std.)</dt>
+        <dd>
+          {{ item.calibratedHours ?? item.effortHours | hours }}
+          @if (item.calibratedHours != null && item.calibratedHours !== item.effortHours) {
+            <small class="muted">geschätzt {{ item.effortHours | hours }}, kalibriert</small>
+          }
+        </dd>
       </div>
       @if (item.benefit != null || item.cost != null) {
         <div>

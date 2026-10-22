@@ -31,11 +31,13 @@
           @if (plan.capacity.tokens !== null) {
             · {{ plan.capacity.tokens | localeNumber }} Tokens
           }
-          @if (plan.capacity.source === 'history') {
-            (Median der Ist-Werte der letzten 3 Sprints)
-          } @else {
-            <strong class="capacity-fallback" title="Noch keine abgeschlossenen Sprints mit gemessenem Aufwand"
-              >(Einstellung – noch keine Sprint-Historie)</strong
+          (Agent-Stunden aus der Einstellung)
+          @if (plan.capacity.historyHours !== null) {
+            · letzte 3 Sprints im Median {{ formatHours(plan.capacity.historyHours) }}
+          }
+          @if (plan.calibration.length) {
+            <br /><small class="proposal-calibration" title="Ist ÷ Schätzung der zuletzt erledigten Aufträge"
+              >Schätzungen kalibriert: {{ calibrationText(plan.calibration) }}</small
             >
           }
           @if (plan.mode === 'autopilot') {
@@ -81,7 +83,7 @@
               <th aria-label="Auswahl"></th>
               <th>Auftrag</th>
               <th class="num">Score</th>
-              <th class="num">Std.</th>
+              <th class="num" title="Kalibrierte Schätzung in Agent-Stunden">Agent-Std.</th>
               <th class="num">Tokens</th>
             </tr>
           </thead>
@@ -102,7 +104,7 @@
                   <small class="muted proposal-reason">{{ item.reason }}</small>
                 </td>
                 <td class="num">{{ item.score }}</td>
-                <td class="num">{{ formatHours(item.hours) }}</td>
+                <td class="num" [attr.title]="rawHoursTitle(item)">{{ formatHours(item.hours) }}</td>
                 <td class="num">{{ item.tokens === null ? '–' : (item.tokens | localeNumber) }}</td>
               </tr>
             }

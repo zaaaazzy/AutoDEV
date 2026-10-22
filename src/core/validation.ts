@@ -161,6 +161,23 @@ export const ESTIMATE_FIELDS: Record<string, { column: string; parse: Parser }> 
   cost: { column: 'cost', parse: nullableNumber(0, 10, true) },
 };
 
+/** Spalten, deren Herkunft `estimate_source` festhält (Nutzen und Kosten werden nicht kalibriert). */
+const CALIBRATED_COLUMNS = new Set(['effort_hours', 'token_estimate']);
+
+/**
+ * Zusatz für ein UPDATE aus `buildUpdate`: Ändert jemand Aufwand oder Token-Schätzung von Hand, gilt die Schätzung als
+ * `manual` und bleibt vor dem Auftragsautor geschützt. Unveränderte Werte zählen nicht, denn Formulare senden alle
+ * Felder mit. Die Platzhalter sind die von `buildUpdate` ($2 = erstes Feld).
+ */
+export function manualEstimateSql(fields: { column: string }[]): string {
+  const changed = fields.flatMap((field, index) =>
+    CALIBRATED_COLUMNS.has(field.column) ? [`${field.column} IS DISTINCT FROM $${index + 2}`] : [],
+  );
+  return changed.length
+    ? `, estimate_source = CASE WHEN ${changed.join(' OR ')} THEN 'manual' ELSE estimate_source END`
+    : '';
+}
+
 export type FieldSpec = Record<string, { column: string; parse: Parser }>;
 
 /** Parses the provided body keys against a whitelist; returns null if empty or invalid. */

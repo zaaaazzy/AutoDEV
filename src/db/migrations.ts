@@ -217,6 +217,25 @@ export const MIGRATIONS: readonly Migration[] = [
          AND s.status = 'completed' AND s.git_sync = 'done' AND b.title = 'CI rot im Pull Request von „' || s.name || '“';
     `,
   },
+  // Schätzungen in Agent-Stunden: woher ein Wert stammt (von Hand, Schnellschätzung, Auftragsautor; NULL = Altbestand
+  // in Menschenstunden), damit der Planer jede Herkunft getrennt kalibriert und der Autor nur Maschinenwerte ersetzt.
+  // Die Sprint-Kapazität zählt jetzt Agent-Stunden; der alte Standard 40 (Menschenstunden) wird zu 4.
+  {
+    version: 9,
+    name: 'schaetzung-in-agent-stunden',
+    sql: `
+      ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS estimate_source TEXT
+        CHECK (estimate_source IN ('manual', 'quick', 'author'));
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS estimate_source TEXT
+        CHECK (estimate_source IN ('manual', 'quick', 'author'));
+      -- Altbestand unter 1 h stammt schon vom Auftragsautor mit Ist-Werten (gemessen: Ist ÷ Schätzung im Median
+      -- 0,79 statt 0,02–0,08 bei grösseren Werten) und wird wie eine Autorschätzung kalibriert; der Rest bleibt NULL.
+      UPDATE ideation_items SET estimate_source = 'author' WHERE estimate_source IS NULL AND effort_hours < 1;
+      UPDATE development_items SET estimate_source = 'author' WHERE estimate_source IS NULL AND effort_hours < 1;
+      ALTER TABLE projects ALTER COLUMN sprint_capacity_hours SET DEFAULT 4;
+      UPDATE projects SET sprint_capacity_hours = 4 WHERE sprint_capacity_hours = 40;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
