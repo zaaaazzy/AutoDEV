@@ -188,7 +188,8 @@ Dieser Abschnitt betrifft den Bereich **Einstellungen → Sicherheit**. Er gilt 
 - Die Zwei-Faktor-Anmeldung braucht den Schlüssel `DEV_LOG_SECRET_KEY` in der `.env`. Ohne ihn lässt sie sich nicht einrichten, und der Dienst startet nicht, sobald schon Geheimnisse gespeichert sind. Die Meldung nennt keine Interna.
 - Der Schlüssel muss gesichert sein (Passwort-Manager). Geht er verloren, lassen sich die gespeicherten Geheimnisse nicht mehr lesen. Siehe `installation.md` für die Wiederherstellung.
 - Falsches Passwort und falscher Code werden nicht getrennt gemeldet. Ist die Zwei-Faktor-Anmeldung aktiv, lautet die Meldung „Passwort oder Code stimmen nicht.“, damit niemand aus ihr ableiten kann, was stimmt.
-- Nach zu vielen Fehlversuchen sperrt die Anmeldung 15 Minuten lang („Zu viele Fehlversuche …“).
+- Die Anmeldung bremst nach Fehlversuchen, sie sperrt nicht hart. Nach 10 Fehlversuchen für denselben Benutzernamen von derselben Adresse wartet man zuerst 1 Minute. Jeder weitere Fehlversuch verdoppelt die Wartezeit, höchstens sind es 15 Minuten. Die Meldung „Zu viele Fehlversuche …“ nennt die Wartezeit. Gebremst wird nur dieses Konto von dieser Adresse aus, andere Benutzer und Geräte bleiben frei. Ausnahme: Kommen von einer Adresse mehr als 300 Fehlversuche in einer Minute, wird diese Adresse für alle Namen gebremst. Nach dem richtigen Passwort nach Ablauf der Wartezeit ist die Anmeldung wieder frei.
+- Hinter einem Proxy (Caddy oder nginx) setzt die Administration `DEV_LOG_TRUST_PROXY` auf die Adresse des Proxys (Standard in Compose: `uniquelocal`). Ohne das sehen alle externen Geräte dieselbe Adresse, und die Bremse trifft alle gemeinsam. Einzelheiten stehen in `installation.md`.
 - Bei Anmeldung mit `DEV_LOG_AUTH=off` gibt es in diesem Bereich nichts einzustellen.
 
 ### 6.3 Fehlerbehebung
@@ -200,7 +201,7 @@ Dieser Abschnitt betrifft den Bereich **Einstellungen → Sicherheit**. Er gilt 
 | Dienst startet nicht, nachdem Zwei-Faktor aktiv war | `DEV_LOG_SECRET_KEY` fehlt in der `.env`. Den gesicherten Schlüssel eintragen und den Dienst neu starten. |
 | „Zwei-Faktor lässt sich gerade nicht einrichten. Bitte die Administration informieren.“ | Der Schlüssel fehlt, deshalb speichert AIdeation kein Geheimnis. Die Administration setzt `DEV_LOG_SECRET_KEY`, danach erneut einrichten. |
 | „Der Code stimmt nicht.“ beim Bestätigen | Der Code ist abgelaufen oder stammt von einer anderen Einrichtung. Den aktuellen Code aus der App eingeben. Stimmt die Uhr des Handys nicht, schlagen Codes fehl. |
-| „Zu viele Fehlversuche …“ | Die Sperre gilt 15 Minuten. Danach erneut versuchen. |
+| „Zu viele Fehlversuche. Bitte in … erneut versuchen.“ | Die Wartezeit läuft ab dem letzten Fehlversuch. Die Meldung nennt sie in Minuten, höchstens 15. Bis dahin hilft kein neuer Versuch. Andere Benutzernamen und andere Geräte bleiben frei, außer bei mehr als 300 Fehlversuchen pro Minute von einer Adresse. |
 | „Passwort oder Code stimmen nicht.“ beim Ausschalten | Das Passwort oder der Code ist falsch. Den aktuellen Code aus der App eingeben. Die Meldung ist absichtlich dieselbe für beides. |
 | Code verloren, Zugang nicht mehr möglich | Die Administration setzt die Zwei-Faktor-Anmeldung zurück. Das Vorgehen steht in `README.md`, Abschnitt Sicherheit. |
 
