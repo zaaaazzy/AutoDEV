@@ -78,12 +78,55 @@ const INTERNAL_EXCLUDES = [
 export const SECRET_CONTENT = SECRET_PATTERNS;
 
 /** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
+/**
+ * Pfad aus einer Diff-Kopfzeile („+++ b/pfad“). Git hängt bei Namen mit Leerzeichen einen Tab an und setzt Namen mit
+ * Sonderzeichen in Anführungszeichen mit C-Escapes („+++ "b/zug\303\244nge.txt"“) – beides muss gelesen werden, sonst
+ * rutschen Dateien mit Zugangsdaten durch die Prüfung.
+ */
+export function diffTargetPath(header: string): string | null {
+  let rest = header.slice(4);
+  if (rest.startsWith('"') && rest.endsWith('"')) {
+    const bytes: number[] = [];
+    const inner = rest.slice(1, -1);
+    for (let index = 0; index < inner.length; index++) {
+      const char = inner[index]!;
+      if (char !== '\\') {
+        bytes.push(...Buffer.from(char, 'utf8'));
+        continue;
+      }
+      const next = inner[index + 1] ?? '';
+      if (/[0-7]/.test(next)) {
+        bytes.push(parseInt(inner.slice(index + 1, index + 4), 8));
+        index += 3;
+      } else {
+        const escapes: Record<string, string> = {
+          t: '\t',
+          n: '\n',
+          '"': '"',
+          '\\': '\\',
+          a: '\x07',
+          b: '\b',
+          f: '\f',
+          r: '\r',
+          v: '\v',
+        };
+        bytes.push(...Buffer.from(escapes[next] ?? next, 'utf8'));
+        index += 1;
+      }
+    }
+    rest = Buffer.from(bytes).toString('utf8');
+  } else {
+    rest = rest.replace(/\t$/, '');
+  }
+  return rest.startsWith('b/') ? rest.slice(2) : null;
+}
+
 export function filesWithSecrets(diff: string): string[] {
   const found = new Set<string>();
   let file: string | null = null;
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
-      file = line.startsWith('+++ b/') ? line.slice(6) : null;
+      file = diffTargetPath(line);
     } else if (file && line.startsWith('+') && SECRET_CONTENT.some((pattern) => pattern.test(line))) {
       found.add(file);
     }
@@ -172,11 +215,15 @@ export async function stageAll(
     if ((await git('check-ignore', '-q', '--no-index', path)).exitCode !== 0) excluded.push(`:(exclude)${path}`);
   }
   await must('add', '-A', ...(options.orderOnly ? ['--', '.', ...excluded] : []));
-  const diff = await git('diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
+  const diff = await git('-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
   const held = diff.exitCode === 0 ? filesWithSecrets(diff.output) : [];
   if (!held.length) return held;
   const hasHead = (await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode === 0;
-  await must(...(hasHead ? ['reset', '-q', '--'] : ['rm', '--cached', '-q', '--']), ...held);
+  // Wörtliche Pfade: Sonderzeichen wie * oder [ im Namen dürfen keinen Mustervergleich auslösen.
+  await must(
+    ...(hasHead ? ['reset', '-q', '--'] : ['rm', '--cached', '-q', '--']),
+    ...held.map((file) => `:(literal)${file}`),
+  );
   const message = `Nicht committet, weil sie nach Zugangsdaten aussehen: ${held.join(', ')}`;
   if (log) log.push(message);
   else console.warn(message);
