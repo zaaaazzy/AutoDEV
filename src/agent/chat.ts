@@ -2,7 +2,7 @@ import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
-import { acquireTree, treeBusy } from '../core/project-lock.js';
+import { tryAcquireTree } from '../core/project-lock.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
@@ -108,6 +108,16 @@ export async function loadChatHistory(
   );
 }
 
+/**
+ * Arbeitet gerade ein Auftrag (oder ein Testlauf, auch in einem anderen Worker) im selben Ordner, antwortet der
+ * Assistent nur lesend: seine Änderungen landeten sonst im Commit des Auftrags, und ein `git checkout` wechselte dem
+ * Auftrag den Branch. Sonst hält er den Ordner, bis er fertig ist. Prüfen und Nehmen in einem Schritt.
+ */
+export async function claimChatTree(cwd: string): Promise<{ readOnly: boolean; releaseTree?: () => void }> {
+  const releaseTree = await tryAcquireTree(cwd);
+  return releaseTree ? { readOnly: false, releaseTree } : { readOnly: true };
+}
+
 /** Answers the oldest pending chat message of a project; returns false when nothing was waiting. */
 const READ_ONLY_NOTE =
   'Hinweis: Gerade arbeitet ein Auftrag im Projektordner. Du kannst nur lesen und antworten, aber keine Dateien ' +
@@ -191,10 +201,8 @@ export async function processChat(
   ]);
   const startedAt = Date.now();
   const folderAtStart = folderAvailable(options.cwd);
-  // Arbeitet gerade ein Auftrag (oder ein Testlauf) im selben Ordner, antwortet der Assistent nur lesend: seine
-  // Änderungen landeten sonst im Commit des Auftrags. Sonst hält er den Ordner, bis er fertig ist.
-  const readOnly = treeBusy(options.cwd);
-  const releaseTree = readOnly ? undefined : await acquireTree(options.cwd);
+  // Ordner belegt (Auftrag, Testlauf, anderer Worker) → nur lesend; sonst hält der Chat ihn bis zum Ende der Antwort.
+  const { readOnly, releaseTree } = await claimChatTree(options.cwd);
   const { exitCode, output, sessionId, tokens } = await runAuthorAgent(
     pool,
     options,

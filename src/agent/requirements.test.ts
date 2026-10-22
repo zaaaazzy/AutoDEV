@@ -214,6 +214,22 @@ test('runAuthorAgent: Dashboard-CLI für Assistent und (eingeschränkt) Problema
   assert.match(analyst.calls[0]!.command.join(' '), /--disallowedTools Write,Edit,NotebookEdit,MultiEdit,Bash/);
 });
 
+test('runAuthorAgent: ohne gehaltenen Arbeitsordner nur lesen – kein `git checkout main` neben dem Entwickler', async () => {
+  const readOnly = /--disallowedTools Write,Edit,NotebookEdit,MultiEdit,Bash/;
+  // Auftragsautor (draftRequirements), Bug-Wächter und Abnahme (Rolle „assistant“) laufen parallel zu runWorkflow.
+  for (const role of ['author', 'bug_reviewer', 'assistant']) {
+    const { pool } = fakePool([[/FROM agents\b/, [CLAUDE_AGENT]], ...PROJECT]);
+    const { calls, execute } = fakeClaude(() => ({ text: 'ok' }));
+    await runAuthorAgent(pool, options, () => 'x', execute, role);
+    assert.match(calls[0]!.command.join(' '), readOnly, `${role}: weder Datei-Werkzeuge noch Shell`);
+  }
+  // Nur wer den Ordner hält (Chat mit tryAcquireTree), übergibt readOnly = false und behält seine Rechte.
+  const { pool } = fakePool([[/FROM agents\b/, [CLAUDE_AGENT]], ...PROJECT]);
+  const { calls, execute } = fakeClaude(() => ({ text: 'ok' }));
+  await runAuthorAgent(pool, options, () => 'x', execute, 'assistant', undefined, undefined, null, undefined, false);
+  assert.doesNotMatch(calls[0]!.command.join(' '), readOnly);
+});
+
 test('runAuthorAgent: Fortsetzen einer Claude-Sitzung mit den Projektregeln', async () => {
   const { pool } = fakePool([[/FROM agents\b/, [CLAUDE_AGENT]], ...PROJECT]);
   const { calls, execute } = fakeClaude(() => ({ text: 'weiter' }));
