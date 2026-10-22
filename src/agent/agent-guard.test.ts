@@ -426,10 +426,40 @@ test('Wächter: node nur als --version oder --check <datei>, ohne Lade-Optionen'
     'node -e 1',
     'node a.js',
     'export NODE_OPTIONS=--import=./x.js; node --check a.js',
+    // Fundfall des Auftrags und weitere Lade-Optionen, auch ohne Leerzeichen, mit = und in Anführungszeichen.
+    `node --check --import "data:text/javascript,import('node:child_process').then(c=>c.execSync('id'))" ok.js`,
+    'node --check -r ./x.js ok.js',
+    'node --check -r./x.js ok.js',
+    'node --check --import=./x.mjs ok.js',
+    'node --check --loader ./x.mjs ok.js',
+    'node --check --experimental-loader=./x.mjs ok.js',
+    'node --check "--import" ./x.mjs ok.js',
+    'node --check ok.js --import ./x.mjs',
+    'node -r ./x.js --check ok.js',
+    'node -c ok.js',
+    'node --check -',
+    'node --check',
+    // Datei muss eine relative Projektdatei sein.
+    'node --check /etc/x.js',
+    'node --check ../x.js',
+    'node --check src/../../x.js',
+    'node --check data:text/javascript,1',
+    'node --check file:///tmp/x.js',
+    'node --check $F',
+    // Umgebung und Verkettung.
+    'NODE_OPTIONS=--require=./x.js node --check ok.js',
+    'env NODE_OPTIONS=--import=./x.mjs node --check ok.js',
+    'node --check ok.js && node --import ./x.mjs ok.js',
   ]) {
     assert.match(bashProblem(command, root) ?? '', /gesperrt|erlaubt sind nur/, command);
   }
-  for (const command of ['node --check src/x.js', 'node --version']) {
+  for (const command of [
+    'node --check src/x.js',
+    'node --check src/a.js',
+    'node --check ./src/a.js',
+    'node --check "src/a b.js"',
+    'node --version',
+  ]) {
     assert.equal(bashProblem(command, root), null, command);
   }
 });
