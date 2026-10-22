@@ -4,6 +4,8 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { customRuleProblem } from './command-checks.js';
 import {
+  CHECK_GROUP,
+  CHECK_ROLES,
   CREATE_TOOLS,
   EDIT_TOOLS,
   FILES_CREATE,
@@ -21,6 +23,8 @@ import {
 } from './permission-rules.js';
 
 export {
+  CHECK_GROUP,
+  CHECK_ROLES,
   CREATE_TOOLS,
   DATABASE_COMMAND,
   DEFAULT_PERMISSION_GROUPS,
@@ -187,17 +191,19 @@ export function hasFullAccess(command: readonly string[], role: string): boolean
 
 /**
  * Freigaben eines Agents: eigene Zuweisung, sonst der Projektstandard der Rolle – nur Befehle aus freigeschalteten
- * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln.
+ * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln. Routinen bekommen
+ * zusätzlich immer die Prüf-Gruppe (CHECK_GROUP), auch bei eigener Zuweisung.
  */
 function chosenRules(role: string, permissions: ProjectPermissions, agentCommands: string[] | null): string[] {
   if (READ_ONLY_ROLES.has(role)) return [];
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
   const available = availableCommands(permissions);
-  return normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
+  const chosen = normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
     (rule) =>
       (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
       !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
   );
+  return CHECK_ROLES.has(role) ? [...new Set([...chosen, ...CHECK_GROUP.rules])] : chosen;
 }
 
 /**
