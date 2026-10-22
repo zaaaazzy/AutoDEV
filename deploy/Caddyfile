@@ -4,5 +4,8 @@
 {$DEV_LOG_DOMAIN} {
 	encode gzip
 	header Strict-Transport-Security "max-age=31536000"
+	# Caddy setzt X-Forwarded-For selbst auf die echte Client-IP und verwirft einen mitgeschickten Wert (ohne
+	# trusted_proxies). nginx hängt seine Sicht an, das Backend glaubt nur Proxys aus DEV_LOG_TRUST_PROXY (uniquelocal).
+	# So zählen Fehlversuche je Client statt für alle gemeinsam unter der Proxy-Adresse.
 	reverse_proxy frontend:8080
 }

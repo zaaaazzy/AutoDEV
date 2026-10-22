@@ -1109,6 +1109,48 @@ test('a locked-out account does not lock out other accounts from the same addres
   });
 });
 
+test('behind the proxy, failed logins for the admin name from one client do not lock out the admin elsewhere', async () => {
+  process.env.DEV_LOG_TRUST_PROXY = 'loopback';
+  try {
+    const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+    await withServer(pool, async (baseUrl) => {
+      const attacker = {
+        Authorization: `Basic ${Buffer.from(`${auth.username}:falsch`).toString('base64')}`,
+        'X-Forwarded-For': '198.51.100.9',
+      };
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: attacker })).status, 401);
+      }
+      const blocked = await fetch(`${baseUrl}/api/projects`, { headers: attacker });
+      assert.equal(blocked.status, 429);
+      assert.equal(blocked.headers.get('retry-after'), '60', 'erste Wartezeit eine Minute statt 15');
+      const admin = { Authorization: basicAuth(), 'X-Forwarded-For': '203.0.113.1' };
+      assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: admin })).status, 200);
+    });
+  } finally {
+    delete process.env.DEV_LOG_TRUST_PROXY;
+  }
+});
+
+test('DEV_LOG_TRUST_PROXY=true is rejected: a forged X-Forwarded-For does not get around the lockout', async () => {
+  process.env.DEV_LOG_TRUST_PROXY = 'true';
+  try {
+    const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+    await withServer(pool, async (baseUrl) => {
+      const wrong = (attempt: number) => ({
+        Authorization: `Basic ${Buffer.from(`${auth.username}:falsch`).toString('base64')}`,
+        'X-Forwarded-For': `198.51.100.${attempt + 1}`,
+      });
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        await fetch(`${baseUrl}/api/projects`, { headers: wrong(attempt) });
+      }
+      assert.equal((await fetch(`${baseUrl}/api/projects`, { headers: wrong(50) })).status, 429);
+    });
+  } finally {
+    delete process.env.DEV_LOG_TRUST_PROXY;
+  }
+});
+
 test('with a second factor, cached basic credentials neither count as failures nor block the login', async () => {
   const pool = { query: async () => ({ rows: [], rowCount: 0 }) } as unknown as Pool;
   const server = createDevLogApp(pool, { ...auth, totpSecret: 'JBSWY3DPEHPK3PXP' }).listen(0, '127.0.0.1');

@@ -162,4 +162,5 @@ ein. Unter macOS ist nichts zu tun.
 | Start bricht ab: „Zwei-Faktor-Schlüssel brauchen DEV_LOG_SECRET_KEY“ | Den bisherigen `DEV_LOG_SECRET_KEY` in der `.env` wieder eintragen und neu starten |
 | Nach dem Update überall abgemeldet | Gewollt: Sitzungen von vor der Passwort-Bindung gelten nicht mehr, einmal neu anmelden |
 | Nach neuem `DEV_LOG_PASSWORD` abgemeldet | Gewollt: Eine Passwortrotation beendet alle Sitzungen des Systemadministrators |
-| Zu viele Fehlversuche | 15 Minuten warten – gesperrt wird nur das betroffene Konto |
+| Zu viele Fehlversuche | Die Meldung nennt die Wartezeit (1 bis höchstens 15 Minuten). Gebremst wird nur dieses Konto von dieser Adresse aus, von einem anderen Gerät oder Netz geht die Anmeldung weiter |
+| Alle Geräte werden gemeinsam gebremst | Das Backend sieht nur die Proxy-Adresse. `DEV_LOG_TRUST_PROXY` muss den Proxy abdecken (Compose: `uniquelocal`), `true` wird abgelehnt (Warnung im Log von `dev-log`) |

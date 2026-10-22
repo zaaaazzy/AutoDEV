@@ -34,7 +34,7 @@ import { registerUsageRoutes } from './usage.js';
 import { registerBudgetRoutes } from './budget.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
-import { FailureLimiter, sameOriginWrites, securityHeaders } from './security.js';
+import { FailureLimiter, sameOriginWrites, securityHeaders, trustProxySetting } from './security.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerScheduledJobRoutes } from './scheduled-jobs.js';
 import { registerSystemRestartRoutes } from './system-restart.js';
@@ -57,8 +57,15 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.use(securityHeaders);
   // Hinter dem HTTPS-Proxy: Protokoll und Client-IP aus X-Forwarded-* übernehmen,
   // damit die Herkunftsprüfung https erkennt und Fehlversuche je Client zählen.
-  const trustProxy = process.env.DEV_LOG_TRUST_PROXY?.trim();
+  // Nur konkrete Proxy-Netze, nie `true` (siehe trustProxySetting).
+  const configured = process.env.DEV_LOG_TRUST_PROXY?.trim();
+  const trustProxy = trustProxySetting(configured);
   if (trustProxy) app.set('trust proxy', trustProxy);
+  else if (configured) {
+    console.warn(
+      '[auth] DEV_LOG_TRUST_PROXY ungültig (erlaubt: loopback, linklocal, uniquelocal, IP oder CIDR) – X-Forwarded-For wird ignoriert.',
+    );
+  }
   // Produktions-Rückkanal: einzige Route ohne Login (Token im Pfad), vor Herkunftsprüfung und JSON-Parser,
   // weil das Snippet von der Origin der betreuten Anwendung sendet und eigene Grenzen (16 KB) gelten.
   registerIngestRoutes(app, pool);
