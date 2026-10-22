@@ -65,6 +65,19 @@ test('Autopilot pausiert nach gescheitertem Merge und startet keinen Sprint', as
   assert.equal(started(), false);
 });
 
+test('Sprint nicht fertig, wenn Aufträge nur am Arbeitsordner oder Laufwerk scheiterten (Sprint 20)', () => {
+  const git = { status: 'blocked', actionTodo: 'Arbeitsordner aufräumen (Git)' };
+  const drive = {
+    status: 'blocked',
+    actionTodo: 'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen, der Auftrag startet dann neu',
+  };
+  const done = { status: 'done', actionTodo: null };
+  assert.equal(sprintSettled([done, done, git]), false);
+  assert.equal(sprintSettled([done, drive]), false);
+  // Eine echte „Aktion notwendig“ (z. B. Zugangsdaten eintragen) wartet weiterhin auf einen Menschen.
+  assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: 'API-Schlüssel eintragen' }]), true);
+});
+
 test('Sprint nicht fertig, solange ein Auftrag wegen Budget wartet (er läuft von selbst weiter)', () => {
   const budget = { status: 'blocked', actionTodo: 'Budget erreicht: Tageslimit …', budgetBlocked: 'day' };
   assert.equal(sprintSettled([{ status: 'done', actionTodo: null }, budget]), false);

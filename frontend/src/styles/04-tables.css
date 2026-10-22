@@ -308,6 +308,8 @@
 }
 .inline-form.dev-create {
   grid-template-columns: minmax(180px, 1fr) 160px 140px auto;
+  /* Oben ausrichten: eine Fehlermeldung unter dem Titel verschiebt sonst die übrigen Felder. */
+  align-items: start;
 }
 @media (max-width: 720px) {
   .inline-form.dev-create {

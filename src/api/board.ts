@@ -10,7 +10,7 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/board', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     // Optionaler Filter „Herkunft“ (?source=visionary); unbekannte Werte zeigen alle Ideen.
@@ -40,7 +40,7 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/agent-runs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const runs = await pool.query(

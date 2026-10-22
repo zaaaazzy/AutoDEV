@@ -28,6 +28,7 @@ import {
   releaseBudgetBlocks,
 } from './budget.js';
 import { setActionTodo } from './action-todo.js';
+import { pauseForFolderProblem } from './folder-pause.js';
 import {
   budgetGate,
   claimRun,
@@ -357,12 +358,12 @@ export async function runWorkItem(
     // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
     if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
     else if (error instanceof OrderBranchError) {
-      // Kein eigener Branch: der Auftrag wartet auf einen Menschen, statt auf einem fremden Branch zu committen.
+      // Der Arbeitsordner ist nicht sauber (fremde Änderungen, falscher Branch): Das betrifft jeden Auftrag, nicht
+      // diesen. Also nicht blockieren, sondern eingeplant lassen und den Sprint pausieren – sonst scheiterte ein
+      // Auftrag nach dem anderen (Sprint 20: 18 Aufträge in vier Minuten) und der Autopilot hielte sie für erledigt.
+      interrupted = true;
       ctx.stopReason = error.message;
-      await setActionTodo(pool, item.id, 'Arbeitsordner aufräumen (Git)').catch(logged('runner'));
-      await pool
-        .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, error.message])
-        .catch(logged('runner'));
+      await pauseForFolderProblem(pool, item, error.message).catch(logged('runner'));
     }
     console.error(`Run ${runId} aborted:`, error);
   } finally {

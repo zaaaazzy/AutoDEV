@@ -15,6 +15,7 @@ import {
   gitHelpers,
   type GitHelpers,
   MAIN_BRANCH,
+  porcelainPath,
   slugify,
   sprintBranch,
   stageAll,
@@ -80,7 +81,7 @@ async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
   if (status.exitCode !== 0) return [];
   return status.output
     .split('\n')
-    .map((line) => line.slice(3).trim())
+    .map(porcelainPath)
     .filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix)));
 }
 

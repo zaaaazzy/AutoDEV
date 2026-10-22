@@ -275,3 +275,16 @@ export function taskCommitMessage(
     `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom AIdeation.`,
   ];
 }
+
+/**
+ * Pfad aus einer Zeile von `git status --porcelain` (mit `core.quotePath=false`). Robust gegen das Trimmen der
+ * Ausgabe durch `gitHelpers`: Die erste Zeile verliert dort ihr führendes Leerzeichen („ M docs/a.md“ → „M docs/a.md“),
+ * ein festes `slice(3)` schnitte dann den ersten Buchstaben des Pfads ab („ocs/a.md“) – und ignorierte Pfade wie
+ * docs/tests/ gälten als fremd. Bei Umbenennungen zählt das Ziel.
+ */
+export function porcelainPath(line: string): string {
+  return line
+    .replace(/^[ MADRCUT?!]{1,2}\s+/, '')
+    .replace(/^.* -> /, '')
+    .trim();
+}

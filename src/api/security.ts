@@ -61,7 +61,7 @@ export const allowedHostsOnly: RequestHandler = (request, response, next) => {
 export const sameOriginWrites: RequestHandler = (request, response, next) => {
   const origin = request.get('origin');
   if (MUTATING_METHODS.has(request.method) && origin && origin !== `${request.protocol}://${request.get('host')}`) {
-    response.status(403).json({ message: 'Cross-origin request rejected.' });
+    response.status(403).json({ message: 'Anfrage von fremder Herkunft abgelehnt.' });
     return;
   }
   next();

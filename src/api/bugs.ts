@@ -8,6 +8,7 @@ import { startProductionFix } from '../runner/production-events.js';
 import type { Principal } from './roles.js';
 import {
   buildUpdate,
+  invalidInput,
   isUuid,
   parseFields,
   parseLongText,
@@ -119,7 +120,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/bugs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -134,13 +135,16 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     const fields = parseFields(request.body, BUG_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     if (!slug || !fields || !values.get('title')) {
-      response.status(400).json({ message: 'Invalid bug.' });
+      response
+        .status(400)
+        .json(slug ? invalidInput(request.body, BUG_FIELDS, ['title']) : { message: 'Ungültiges Projekt.' });
       return;
     }
     if (!validText(values.get('title'), TITLE_MAX)) {
-      response
-        .status(400)
-        .json({ message: `Titel bitte kurz halten (max. ${TITLE_MAX} Zeichen); Details in die Beschreibung.` });
+      response.status(400).json({
+        field: 'title',
+        message: `Titel bitte kurz halten (max. ${TITLE_MAX} Zeichen); Details in die Beschreibung.`,
+      });
       return;
     }
     const sprintId = (values.get('sprint_id') as string | null | undefined) ?? null;
@@ -169,12 +173,12 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
 
   app.patch('/bugs/:id', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const fields = parseFields(request.body, BUG_FIELDS);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid bug update.' });
+      response.status(400).json(invalidInput(request.body, BUG_FIELDS));
       return;
     }
     const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
@@ -197,7 +201,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     const update = buildUpdate('bugs', request.params.id, withFixDate, BUG_COLUMNS);
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Bug not found.' });
+      response.status(404).json({ message: 'Bug nicht gefunden.' });
       return;
     }
     if (fields.some((field) => field.column === 'sprint_id' || field.column === 'status')) {
@@ -210,7 +214,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
   // nimmt der Runner Aufträge dazu auf. Betriebs-Bugs bekommen dabei ihren Behebungsauftrag. Per PATCH nicht setzbar.
   app.post('/bugs/:id/approve', access({ role: 'run', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const bug = (
@@ -219,7 +223,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       ])
     ).rows[0];
     if (!bug) {
-      response.status(404).json({ message: 'Bug not found.' });
+      response.status(404).json({ message: 'Bug nicht gefunden.' });
       return;
     }
     if (!isUntrustedBugSource(bug.source)) {
@@ -241,12 +245,12 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
 
   app.delete('/bugs/:id', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query('DELETE FROM bugs WHERE id = $1 RETURNING id', [request.params.id]);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Bug not found.' });
+      response.status(404).json({ message: 'Bug nicht gefunden.' });
       return;
     }
     response.status(204).end();

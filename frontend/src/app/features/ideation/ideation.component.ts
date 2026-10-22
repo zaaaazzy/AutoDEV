@@ -35,6 +35,7 @@ import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
+import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import { errorMessage } from '../../core/errors.js';
 import {
   IDEA_EDITABLE_STATUSES,
@@ -143,6 +144,7 @@ export class IdeationComponent {
   /** Badge-Text wie Spalte und Filter „Herkunft“. */
   protected readonly sourceLabel = sourceLabel;
 
+  protected readonly ideaErrors = new FieldErrors();
   protected ideaForm: { title: string; description: string; priority: Priority; category: string } = {
     title: '',
     description: '',
@@ -307,22 +309,28 @@ export class IdeationComponent {
     input.value = '';
   }
 
-  protected async createIdea(): Promise<void> {
+  protected async createIdea(form: HTMLFormElement): Promise<void> {
     const { title, description, priority, category } = this.ideaForm;
+    if (!this.ideaErrors.require('title', title, 'Bitte einen Titel angeben.')) {
+      focusField(form, 'title');
+      return;
+    }
     const files = this.pendingImages;
     let uploadError = '';
     await this.store.perform(async () => {
       // Größe vorher prüfen: Ein zu großes Bild darf keine Idee ohne Bild anlegen.
       assertImageSizes(files);
-      const created = await this.api.post<{ item: Idea }>(
-        `${this.api.projectPath(this.store.activeProject())}/ideation`,
-        {
+      const created = await this.api
+        .post<{ item: Idea }>(`${this.api.projectPath(this.store.activeProject())}/ideation`, {
           title,
           description,
           priority,
           category: category || null,
-        },
-      );
+        })
+        .catch((error: unknown) => {
+          this.ideaErrors.take(error, form);
+          throw error;
+        });
       // Angelegt ist angelegt: Formular sofort leeren, damit ein zweiter Klick keine doppelte Idee erzeugt.
       this.pendingImages = [];
       this.ideaForm = { title: '', description: '', priority: 'medium', category: '' };

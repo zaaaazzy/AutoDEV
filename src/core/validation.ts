@@ -182,6 +182,61 @@ export function parseFields(body: unknown, spec: FieldSpec): { column: string; v
   return fields.length ? fields : null;
 }
 
+/** Deutsche Feldnamen für Fehlermeldungen; unbekannte Schlüssel erscheinen wie gesendet. */
+const FIELD_LABELS: Record<string, string> = {
+  title: 'Titel',
+  name: 'Name',
+  description: 'Beschreibung',
+  content: 'Inhalt',
+  goal: 'Sprint-Ziel',
+  status: 'Status',
+  priority: 'Priorität',
+  severity: 'Schweregrad',
+  category: 'Kategorie',
+  sprintId: 'Sprint',
+  agentId: 'Agent',
+  ideationId: 'Idee',
+  testRunId: 'Testlauf',
+  startDate: 'Startdatum',
+  endDate: 'Enddatum',
+  fixNotes: 'Behebungsnotiz',
+  effortHours: 'Aufwand',
+  tokenEstimate: 'Token-Schätzung',
+  benefit: 'Nutzen',
+  cost: 'Kosten',
+  role: 'Rolle',
+  phase: 'Phase',
+  instructions: 'Anweisungen',
+  enabled: 'Aktiv',
+  command: 'Befehl',
+  fileScope: 'Dateibereich',
+  handoffTo: 'Übergabe an',
+};
+
+export type InvalidInput = { message: string; field?: string };
+
+/**
+ * Erklärt, warum parseFields scheiterte: erstes fehlendes Pflichtfeld oder erstes ungültige Feld.
+ * `field` ist der Schlüssel aus dem Body, damit die Oberfläche den Fehler direkt am Feld zeigen kann.
+ */
+export function invalidInput(body: unknown, spec: FieldSpec, required: readonly string[] = []): InvalidInput {
+  if (!isRecord(body)) {
+    return { message: 'Die Anfrage enthält keine Angaben.' };
+  }
+  for (const key of required) {
+    const value = body[key];
+    if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+      return { field: key, message: `Bitte ${FIELD_LABELS[key] ?? key} angeben.` };
+    }
+  }
+  for (const [key, entry] of Object.entries(spec)) {
+    if (body[key] !== undefined && entry.parse(body[key]) === INVALID) {
+      return { field: key, message: `${FIELD_LABELS[key] ?? key}: ungültiger Wert.` };
+    }
+  }
+  return { message: 'Keine gültigen Angaben zum Speichern.' };
+}
+
 /**
  * Builds a parameterised UPDATE. Table and columns come from code constants, never from input.
  * `onlyIf` limits the update to rows whose column still has one of the given values (atomic status check).
