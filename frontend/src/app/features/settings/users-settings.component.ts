@@ -5,6 +5,7 @@ import { AuthService, type Role } from '../../core/auth.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { DateTimePipe } from '../../shared/pipes.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 interface ManagedUser {
   id: string;
@@ -29,7 +30,7 @@ interface RoleInfo {
 @Component({
   selector: 'app-users-settings',
   standalone: true,
-  imports: [FormsModule, DateTimePipe],
+  imports: [FormsModule, DateTimePipe, SettingsGroupDirective],
   templateUrl: './users-settings.component.html',
 })
 export class UsersSettingsComponent {

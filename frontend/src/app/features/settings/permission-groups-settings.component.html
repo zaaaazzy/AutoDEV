@@ -1,5 +1,5 @@
-<section class="panel">
-  <div class="section-heading">
+<details appSettingsGroup="rechte">
+  <summary class="section-heading">
     <div>
       <h2>Rechte-Kategorien</h2>
       <p class="muted">
@@ -8,6 +8,8 @@
         selbst.
       </p>
     </div>
+  </summary>
+  <div class="settings-tools">
     <button class="button primary" type="button" (click)="startNew()">+ Kategorie</button>
   </div>
   @if (editing() === 'new') {
@@ -43,7 +45,7 @@
       </li>
     }
   </ul>
-</section>
+</details>
 
 <ng-template #groupForm>
   <form class="form-grid permission-form" (ngSubmit)="save()">

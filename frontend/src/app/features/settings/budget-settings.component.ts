@@ -4,6 +4,7 @@ import { ApiService } from '../../core/api.service.js';
 import type { BudgetOverview, BudgetPeriod, RoutingRule, RuleEffect } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 export const PERIODS: { key: BudgetPeriod; label: string; hint: string }[] = [
   { key: 'day', label: 'Je Tag', hint: 'Agents und Assistent zusammen; wird am Folgetag wieder frei.' },
@@ -67,7 +68,7 @@ export function fromForm(form: RuleForm): RoutingRule {
 @Component({
   selector: 'app-budget-settings',
   standalone: true,
-  imports: [FormsModule, BudgetMeterComponent],
+  imports: [FormsModule, BudgetMeterComponent, SettingsGroupDirective],
   templateUrl: './budget-settings.component.html',
   host: { style: 'display: contents' },
 })

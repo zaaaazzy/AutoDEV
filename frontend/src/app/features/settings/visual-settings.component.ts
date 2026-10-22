@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { Project, VisualSettings } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 const EMPTY_LOGIN = {
   path: '',
@@ -20,11 +21,11 @@ const EMPTY_LOGIN = {
 @Component({
   selector: 'app-visual-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, SettingsGroupDirective],
   host: { style: 'display: contents' },
   template: `
-    <section class="panel" id="visual-settings">
-      <div class="section-heading">
+    <details appSettingsGroup="visuell" id="visual-settings">
+      <summary class="section-heading">
         <div>
           <h2>Visuelle Prüfung</h2>
           <p class="muted">
@@ -32,7 +33,7 @@ const EMPTY_LOGIN = {
             automatische Layout-Prüfungen (nur Frontend- und Fullstack-Aufträge)
           </p>
         </div>
-      </div>
+      </summary>
       <form class="form-grid" (ngSubmit)="save()">
         <label class="wide"
           >Vorschau-Adresse<input
@@ -135,7 +136,7 @@ const EMPTY_LOGIN = {
         }
         <button class="button primary" type="submit" [disabled]="busy()">Visuelle Prüfung speichern</button>
       </form>
-    </section>
+    </details>
   `,
 })
 export class VisualSettingsComponent {

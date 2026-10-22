@@ -1,0 +1,167 @@
+/* ── Einstellungen: aufklappbare Gruppen in drei Bereichen (Projekt, alle Projekte, Konto) ───────────── */
+.settings-page {
+  display: grid;
+  max-width: 1080px;
+  gap: 10px;
+}
+.settings-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.settings-bar p {
+  margin: 0;
+}
+.settings-bar-actions {
+  display: flex;
+  gap: 14px;
+}
+.settings-cluster {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.settings-form {
+  display: grid;
+  gap: 10px;
+}
+/* Gruppen liegen dicht untereinander; der Abstand kommt vom Raster, nicht vom Panel. */
+.settings-page .settings-group {
+  margin: 0;
+  padding: 0;
+}
+.settings-page .settings-group > summary.section-heading {
+  position: relative;
+  margin: 0;
+  padding: 14px 18px 14px 40px;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  list-style: none;
+}
+.settings-group > summary::-webkit-details-marker {
+  display: none;
+}
+.settings-group > summary::before {
+  content: '';
+  position: absolute;
+  top: 21px;
+  left: 18px;
+  width: 7px;
+  height: 7px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.15s;
+}
+.settings-group[open] > summary::before {
+  transform: rotate(45deg);
+}
+.settings-group > summary h2 {
+  font-size: 16px;
+}
+.settings-group > summary p {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+}
+.settings-group > summary:hover h2 {
+  color: var(--green);
+}
+/* Inhalt einer Gruppe: gleicher Innenabstand wie die Kopfzeile, eine Linie trennt beides. */
+.settings-group[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.settings-group > :not(summary) {
+  margin-inline: 18px;
+}
+.settings-group > summary + * {
+  margin-top: 14px;
+}
+.settings-group > :last-child:not(summary) {
+  margin-bottom: 18px;
+}
+.settings-group .form-grid {
+  align-items: start;
+}
+/* Knöpfe in der Feldreihe nicht auf Spaltenbreite ziehen. */
+.settings-group .form-grid > .button {
+  justify-self: start;
+  align-self: end;
+  width: auto;
+  min-width: 140px;
+}
+.settings-group .form-grid > p.muted {
+  margin: -4px 0 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.settings-group label.check {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-group fieldset {
+  min-width: 0;
+}
+.settings-group legend {
+  padding: 0 4px;
+  color: #4b554e;
+  font-size: 12px;
+  font-weight: 650;
+}
+.settings-group .autopilot-days {
+  align-self: center;
+  gap: 12px;
+}
+.settings-group .autopilot-days label.check {
+  align-items: center;
+}
+.settings-tools {
+  display: flex;
+  justify-content: flex-end;
+}
+/* Ein Zahlenfeld mit Speichern daneben statt zwei halbe Zeilen. */
+.settings-inline {
+  grid-template-columns: minmax(0, 220px) auto;
+  justify-content: start;
+  align-items: end;
+}
+.settings-save {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 -4px 14px rgb(0 0 0 / 5%);
+}
+@media (max-width: 720px) {
+  .settings-page .settings-group > summary.section-heading {
+    flex-direction: row;
+    padding: 12px 12px 12px 34px;
+  }
+  .settings-group > summary::before {
+    top: 19px;
+    left: 13px;
+  }
+  .settings-group > :not(summary) {
+    margin-inline: 12px;
+  }
+  .settings-inline {
+    grid-template-columns: 1fr;
+  }
+  .settings-save .button {
+    flex: 1 1 auto;
+  }
+}

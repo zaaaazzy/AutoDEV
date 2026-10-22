@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { installPrompt } from '../../core/install-prompt.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   const padded = (value + '='.repeat((4 - (value.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
@@ -15,6 +16,7 @@ function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
 @Component({
   selector: 'app-notification-settings',
   standalone: true,
+  imports: [SettingsGroupDirective],
   templateUrl: './notification-settings.component.html',
 })
 export class NotificationSettingsComponent {

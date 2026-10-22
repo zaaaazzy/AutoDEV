@@ -1,9 +1,11 @@
-<section class="panel">
-  <div class="section-heading">
+<details appSettingsGroup="benutzer">
+  <summary class="section-heading">
     <div>
       <h2>Benutzer &amp; Rollen</h2>
       <p class="muted">Wer sich anmelden darf und was er tun darf. Lesen dürfen alle Benutzer.</p>
     </div>
+  </summary>
+  <div class="settings-tools">
     <button class="button primary" type="button" (click)="creating.set(!creating())">
       {{ creating() ? 'Schließen' : '+ Benutzer' }}
     </button>
@@ -190,4 +192,4 @@
   @if (error()) {
     <p class="notice error" role="alert">{{ error() }}</p>
   }
-</section>
+</details>
