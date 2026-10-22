@@ -1,41 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import pg from 'pg';
-import { fileURLToPath } from 'node:url';
-import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../core/local-database.js';
 import { MIGRATIONS, runMigrations } from './migrations.js';
-
-// Zugang wie docker-compose aus der .env (im Worktree die des Hauptordners), nicht fest das Standardpasswort.
-const ADMIN_URL =
-  process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ??
-  process.env.E2E_ADMIN_DATABASE_URL ??
-  adminDatabaseUrl(
-    localDatabaseUrl(readEnvValues(fileURLToPath(new URL('../..', import.meta.url))), 'postgres', 'localhost'),
-  );
-
-async function adminPool(): Promise<pg.Pool | undefined> {
-  const pool = new pg.Pool({ connectionString: ADMIN_URL, max: 1, connectionTimeoutMillis: 2000 });
-  try {
-    await pool.query('SELECT 1');
-    return pool;
-  } catch {
-    await pool.end();
-    return undefined;
-  }
-}
+import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 test('Bugs zu einem Auftrag kommen auf den Friedhof, sobald er erledigt ist (Migration 8 und Trigger)', async (t) => {
-  const admin = await adminPool();
-  if (!admin) {
-    t.skip(`keine PostgreSQL-Datenbank unter ${new URL(ADMIN_URL).host}`);
-    return;
-  }
+  const admin = await adminPool(t);
+  if (!admin) return;
   const name = `devlog_graveyard_${process.pid}`;
-  await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await dropDatabase(admin, name);
   await admin.query(`CREATE DATABASE ${name}`);
-  const url = new URL(ADMIN_URL);
-  url.pathname = `/${name}`;
-  const pool = new pg.Pool({ connectionString: url.toString(), max: 1 });
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
   try {
     // Stand vor Migration 8, mit Aufträgen und Meldungen wie in der laufenden Installation.
     const before = MIGRATIONS.filter((migration) => migration.version < 8);
@@ -110,7 +85,7 @@ test('Bugs zu einem Auftrag kommen auf den Friedhof, sobald er erledigt ist (Mig
     assert.equal((await state(unrelated)).status, 'open');
   } finally {
     await pool.end();
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await dropDatabase(admin, name);
     await admin.end();
   }
 });
