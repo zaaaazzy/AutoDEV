@@ -34,7 +34,7 @@ import { registerUsageRoutes } from './usage.js';
 import { registerBudgetRoutes } from './budget.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
-import { FailureLimiter, sameOriginWrites, securityHeaders, trustProxySetting } from './security.js';
+import { FailureLimiter, allowedHostsOnly, sameOriginWrites, securityHeaders, trustProxySetting } from './security.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerScheduledJobRoutes } from './scheduled-jobs.js';
 import { registerSystemRestartRoutes } from './system-restart.js';
@@ -55,6 +55,9 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.disable('x-powered-by');
   app.get('/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(securityHeaders);
+  // Vor allen übrigen Routen (auch Ingest): nur bekannte Host-Namen, sonst steuert eine fremde Seite per DNS-Rebinding
+  // die API – ohne Login (DEV_LOG_AUTH=off) mit Administratorrechten.
+  app.use(allowedHostsOnly);
   // Hinter dem HTTPS-Proxy: Protokoll und Client-IP aus X-Forwarded-* übernehmen,
   // damit die Herkunftsprüfung https erkennt und Fehlversuche je Client zählen.
   // Nur konkrete Proxy-Netze, nie `true` (siehe trustProxySetting).
