@@ -16,6 +16,7 @@ import {
   startSessionCleanup,
 } from './auth.js';
 import { registerUserRoutes } from './users.js';
+import { adminPool, databaseUrl } from '../db/test-database.test.js';
 
 delete process.env.DEV_LOG_PROJECT_ROOTS;
 
@@ -235,27 +236,14 @@ test('TOTP-Schlüssel: ohne DEV_LOG_SECRET_KEY startet der Dienst mit vorhandene
   );
 });
 
-// Echte PostgreSQL-Datenbank (wie in migrations.test.ts); ohne sie übersprungen.
-const ADMIN_URL =
-  process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ??
-  process.env.E2E_ADMIN_DATABASE_URL ??
-  'postgresql://devlog:devlog_local_dev@localhost:5433/postgres';
-
+// Echte PostgreSQL-Datenbank (siehe test-database.test.ts); ohne sie übersprungen.
 test('Migration und Bereinigung auf PostgreSQL: Indizes, Altsitzungen weg, aktive bleiben', async (t) => {
-  const admin = new pg.Pool({ connectionString: ADMIN_URL, max: 1, connectionTimeoutMillis: 2000 });
-  try {
-    await admin.query('SELECT 1');
-  } catch {
-    await admin.end();
-    t.skip(`keine PostgreSQL-Datenbank unter ${new URL(ADMIN_URL).host}`);
-    return;
-  }
+  const admin = await adminPool(t);
+  if (!admin) return;
   const name = `devlog_sessions_${process.pid}`;
-  const url = new URL(ADMIN_URL);
-  url.pathname = `/${name}`;
   await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
   await admin.query(`CREATE DATABASE ${name}`);
-  const pool = new pg.Pool({ connectionString: url.toString(), max: 1 });
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
   try {
     // Bestands-DB mit einer Sitzung von vor der Bindung.
     const before = MIGRATIONS.filter((migration) => migration.version < 7);
