@@ -62,6 +62,21 @@ test('Zwischenstand auf main: neuer Branch wip/…, main bleibt sauber und ausge
   assert.equal(await git(work, 'show', 'wip/20261021-2015:a.txt'), 'auf main geändert');
 });
 
+test('Zwischenstand auf losgelöstem Stand (Agent-Worktree): danach wieder losgelöst auf demselben Commit', async () => {
+  const { work } = await setup();
+  const start = await git(work, 'rev-parse', 'HEAD');
+  await git(work, 'switch', '-q', '--detach', start);
+  await writeFile(join(work, 'a.txt'), 'losgelöst geändert\n');
+  const message = await applyGitFix('save_wip', work, runCommand, new Date('2026-10-22T16:00:00Z'));
+  assert.match(message, /auf wip\/20261022-1600 gesichert/);
+  assert.match(message, /vorherigen Stand .* \(losgelöst\)/);
+  assert.equal(await git(work, 'rev-parse', 'HEAD'), start);
+  const state = await readFolder(work, 'agents');
+  assert.equal(state.branch, null);
+  assert.equal(state.changedCount, 0);
+  assert.equal(await git(work, 'show', 'wip/20261022-1600:a.txt'), 'losgelöst geändert');
+});
+
 test('Zurück auf main nur ohne offene Änderungen', async () => {
   const { work } = await setup();
   await git(work, 'switch', '-q', '-c', 'feat/x');

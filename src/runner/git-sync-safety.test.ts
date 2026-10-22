@@ -180,3 +180,23 @@ test('Auftrag ohne Sprint im losgelösten Worktree landet in main, während main
   assert.notEqual(git('rev-parse', 'main'), mainBefore);
   assert.match(git('ls-tree', '-r', '--name-only', 'main'), /fix\.ts/);
 });
+
+// Die getrimmte Ausgabe von „git status“ kostete den ersten Pfad ein Zeichen („docs/tests/…“ → „ocs/tests/…“): Dann
+// galten ignorierte Testberichte als fremde Änderung und blockierten jeden Auftrag.
+test('Geänderter Testbericht in docs/tests als erste Statuszeile blockiert keinen Auftrag', async () => {
+  const { cwd, git } = await project();
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'alt\n');
+  git('add', '-A');
+  git('commit', '-m', 'bericht');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'neu\n');
+  const branch = await enterOrderBranch(cwd, item, null);
+  assert.ok(branch, 'Auftrags-Branch wurde angelegt');
+});
+
+test('Fremde Änderung wird mit vollständigem Pfad gemeldet', async () => {
+  const { cwd } = await project();
+  await mkdir(join(cwd, 'docs'), { recursive: true });
+  await writeFile(join(cwd, 'base.txt'), 'geändert\n');
+  await assert.rejects(enterOrderBranch(cwd, item, null), /\(base\.txt\)/);
+});

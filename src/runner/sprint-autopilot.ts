@@ -3,14 +3,23 @@ import type { Pool } from 'pg';
 import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 import { loadGitState, problemsFor } from '../api/git-state.js';
+import { ENVIRONMENT_TODO } from './autofix.js';
 
 export type AutopilotStep =
   'off' | 'paused' | 'working' | 'review' | 'completed' | 'started' | 'outside_hours' | 'idle';
 
 /**
+ * „Aktion notwendig“, die nichts mit dem Auftrag zu tun hat, sondern mit der Umgebung (Arbeitsordner, Laufwerk): Der
+ * Auftrag ist nicht bearbeitet, nur aufgehalten. Ältere Läufe setzten den Git-Hinweis noch je Auftrag.
+ */
+export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
+const ENVIRONMENT_TODOS = [GIT_FOLDER_TODO, ENVIRONMENT_TODO];
+
+/**
  * Offen = noch zu bearbeiten. Blockierte Aufträge halten den Sprint nur dann nicht auf, wenn sie „Aktion notwendig“
  * haben (warten auf einen Menschen); andere Blockierte sind Fehler, die noch behoben werden. Wegen Budget blockierte
- * Aufträge (budget_blocked) laufen von selbst weiter, sobald das Budget wieder reicht: Sie sind noch offen.
+ * Aufträge (budget_blocked) laufen von selbst weiter, sobald das Budget wieder reicht: Sie sind noch offen. Ebenso
+ * Aufträge, die nur an der Umgebung scheiterten (Sprint 20 galt sonst mit 18 von 20 so blockierten als „fertig“).
  */
 export function sprintSettled(
   items: { status: string; actionTodo: string | null; budgetBlocked?: string | null }[],
@@ -21,7 +30,8 @@ export function sprintSettled(
       (item) =>
         // Wartet ein Auftrag auf die Review-Freigabe, ist er noch nicht im Sprint-Branch: der Sprint wartet mit.
         ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
-        (item.status === 'blocked' && (!item.actionTodo || Boolean(item.budgetBlocked))),
+        (item.status === 'blocked' &&
+          (!item.actionTodo || Boolean(item.budgetBlocked) || ENVIRONMENT_TODOS.includes(item.actionTodo))),
     )
   );
 }

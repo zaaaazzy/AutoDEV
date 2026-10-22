@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { gitHelpers } from './git-sync.js';
+import { porcelainPath } from './git-sync/git-helpers.js';
 
 /**
  * Git-Zustand der Projektordner, wie ihn der Worker jede Minute sieht: Branch, offene Änderungen und wie weit das
@@ -83,12 +84,19 @@ export async function readFolder(
   if (!existsSync(join(folder, '.git'))) return empty;
   const { git } = gitHelpers(execute, folder);
   const head = await git('symbolic-ref', '--short', '-q', 'HEAD');
-  const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=normal');
+  // Nur lesen, nie den Index auffrischen: Ohne --no-optional-locks nimmt „git status“ kurz index.lock und kann so
+  // einen gleichzeitigen Commit oder Checkout der Agents scheitern lassen („index.lock: File exists“).
+  const status = await git(
+    '--no-optional-locks',
+    '-c',
+    'core.quotePath=false',
+    'status',
+    '--porcelain',
+    '--untracked-files=normal',
+  );
   const lines = status.exitCode === 0 ? status.output.split('\n').filter(Boolean) : [];
-  // Die erste Zeile verliert durch das Trimmen ihr führendes Leerzeichen („ M a.txt“ → „M a.txt“).
-  const path = (line: string): string => line.replace(/^[ MADRCUT?!]{1,2}\s+/, '').replace(/^.* -> /, '');
-  const untracked = lines.filter((line) => line.startsWith('??')).map(path);
-  const changed = lines.filter((line) => !line.startsWith('??')).map(path);
+  const untracked = lines.filter((line) => line.startsWith('??')).map(porcelainPath);
+  const changed = lines.filter((line) => !line.startsWith('??')).map(porcelainPath);
   let mainAhead: number | null = null;
   let mainBehind: number | null = null;
   const remote = await git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${MAIN}`);
