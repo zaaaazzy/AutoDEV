@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
 import { scheduleRoutines } from '../agent/routine.js';
 import { beginShutdown, isDraining, setDraining, setProcessStore } from '../core/shutdown.js';
+import { shareTreeLocks } from '../core/project-lock.js';
 import { databaseProcessStore, killPreviousProcesses } from './process-registry.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
@@ -221,6 +222,8 @@ async function main(): Promise<void> {
   console.log(`Projektbereich: ${process.env.DEV_LOG_PROJECT_ROOTS}`);
   const options = parseRunnerOptions(process.argv.slice(2));
   const pool = await connect(options.watch);
+  // Ordner-Sperre auch gegenüber anderen Workern (Host/Container, runner-cli ohne --all) über Postgres-Advisory-Locks.
+  shareTreeLocks(pool);
   let stopping = false;
   const stop = (): void => {
     if (stopping) process.exit(1);
@@ -427,7 +430,8 @@ async function main(): Promise<void> {
             )
             .finally(() => estimateActive.delete(slug));
         }
-        // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft.
+        // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft – nur lesend
+        // (runAuthorAgent ist standardmäßig read-only), er hält den Arbeitsordner deshalb nicht.
         if (!authorActive.has(slug) && !stopping) {
           authorActive.add(slug);
           void draftRequirements(pool, target.options)

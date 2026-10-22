@@ -2,7 +2,7 @@ import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { folderAvailable, hadOutage } from '../core/folder-guard.js';
-import { acquireTree, treeBusy } from '../core/project-lock.js';
+import { tryAcquireTree } from '../core/project-lock.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { sendPush } from '../core/push.js';
 import { startProgress } from './chat-progress.js';
@@ -192,9 +192,10 @@ export async function processChat(
   const startedAt = Date.now();
   const folderAtStart = folderAvailable(options.cwd);
   // Arbeitet gerade ein Auftrag (oder ein Testlauf) im selben Ordner, antwortet der Assistent nur lesend: seine
-  // Änderungen landeten sonst im Commit des Auftrags. Sonst hält er den Ordner, bis er fertig ist.
-  const readOnly = treeBusy(options.cwd);
-  const releaseTree = readOnly ? undefined : await acquireTree(options.cwd);
+  // Änderungen landeten sonst im Commit des Auftrags (und ein `git checkout` wechselte dem Auftrag den Branch). Sonst
+  // hält er den Ordner, bis er fertig ist. Prüfen und Nehmen in einem Schritt, auch über andere Worker hinweg.
+  const releaseTree = await tryAcquireTree(options.cwd);
+  const readOnly = !releaseTree;
   const { exitCode, output, sessionId, tokens } = await runAuthorAgent(
     pool,
     options,

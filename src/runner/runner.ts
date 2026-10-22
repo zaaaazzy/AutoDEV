@@ -61,11 +61,17 @@ export type {
 } from './runner-types.js';
 
 const PROMPT_BUG_LIMIT = 15;
-const TREE_ROLES = new Set(['developer', 'tester']);
+// Der Dokumentar schreibt das Benutzerhandbuch ins Projekt und committet es mit dem Auftrag.
+const TREE_ROLES = new Set(['developer', 'tester', 'documenter']);
 
-/** Developer and tester (and every agent of the implementation phase) modify files in the project folder. */
+/** Developer, tester, documenter (and every agent of the implementation phase) modify files in the project folder. */
 export function changesWorkingTree(agent: Pick<WorkflowAgent, 'phase' | 'role'>): boolean {
   return agent.phase === 'while_task' || TREE_ROLES.has(agent.role);
+}
+
+/** Hinweis, wenn ein Auftrag auf den Arbeitsordner wartet (anderer Auftrag, Chat oder Worker hält ihn) – kein Fehler. */
+function waitingForTree(itemId: string, cwd: string): () => void {
+  return () => console.info(`[${itemId}] wartet auf Arbeitsordner ${cwd} – ein anderer Lauf ändert dort gerade Dateien.`);
 }
 
 /**
@@ -285,7 +291,7 @@ export async function runWorkItem(
         break;
       }
       if (!releaseTree && changesWorkingTree(agent)) {
-        releaseTree = await acquireTree(options.cwd);
+        releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
         // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
         ctx.sprintName = await sprintNameOf(pool, item);
         ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
@@ -334,7 +340,7 @@ export async function runWorkItem(
         // Auch „Bei abgeschlossen/abgelehnt“ starten nicht mehr, wenn das Budget erreicht ist (ohne Blockade).
         if (await budgetGate(ctx).catch(logged('runner', null))) break;
         if (!releaseTree && changesWorkingTree(agent)) {
-          releaseTree = await acquireTree(options.cwd);
+          releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
           ctx.sprintName = await sprintNameOf(pool, item);
           ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
         }
