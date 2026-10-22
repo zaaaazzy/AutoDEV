@@ -499,12 +499,14 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
   app.post('/logout', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       // Push-Abo dieses Geräts mit abmelden (Ergänzung zum Abmelden im Browser), solange der Besitzer noch feststeht.
+      // /logout liegt vor requireCredentials: Besitzer aus der Sitzung lesen; ohne gültige Sitzung wird nichts gelöscht.
+      const token = sessionToken(request);
+      const principal = token ? await sessionPrincipal(pool, auth, token) : null;
       await deleteOwnSubscription(
         pool,
-        response.locals.principal as Principal | undefined,
+        principal ?? undefined,
         (request.body as { endpoint?: unknown } | undefined)?.endpoint,
       );
-      const token = sessionToken(request);
       if (token) await pool.query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashToken(token)]);
       setSessionCookie(request, response, '', 0);
       response.json({ authenticated: false });
