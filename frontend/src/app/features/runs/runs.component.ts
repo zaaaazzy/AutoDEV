@@ -183,10 +183,16 @@ export class RunsComponent {
   );
   protected readonly images = computed(() => this.media().filter((file) => file.mime.startsWith('image/')));
   protected readonly videos = computed(() => this.media().filter((file) => file.mime.startsWith('video/')));
-  /** Fehlgeschlagene Schritte ohne Einzeltests (Lint, Formatierung, Typen, Build) gelten ebenfalls als Befund. */
-  protected readonly failedChecks = computed(() =>
-    this.qualitySteps().filter((step) => step.category === 'quality' && step.status === 'failed'),
-  );
+  /**
+   * Fehlgeschlagene Schritte ohne Einzeltests (Lint, Formatierung, Typen, Build) gelten ebenfalls als Befund – auch ein
+   * gescheiterter Unit- oder E2E-Schritt, dessen Einzeltests nicht erfasst wurden (sonst stünde dort „0 Befunde“).
+   */
+  protected readonly failedChecks = computed(() => {
+    const withFailedCases = new Set<string | undefined>(this.findings().map((testCase) => testCase.category));
+    return this.qualitySteps().filter(
+      (step) => step.status === 'failed' && (step.category === 'quality' || !withFailedCases.has(step.category)),
+    );
+  });
   protected readonly findingCount = computed(() => this.findings().length + this.failedChecks().length);
   protected readonly qualitySteps = computed(() =>
     (this.selected()?.steps ?? []).filter((step) => !this.category() || step.category === this.category()),

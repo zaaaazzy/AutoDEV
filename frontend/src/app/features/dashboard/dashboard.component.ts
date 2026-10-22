@@ -62,6 +62,11 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
   host: { style: 'display: contents' },
 })
 export class DashboardComponent {
+  /** Nur der Ordnername; der volle (oft lange, technische) Pfad steht im Tooltip. */
+  protected folderName(path: string): string {
+    return path.replace(/\/+$/, '').split('/').pop() || path;
+  }
+
   protected readonly store = inject(ProjectStore);
   private readonly agentActivity = inject(AgentActivityService);
   protected readonly data = this.store.data;
