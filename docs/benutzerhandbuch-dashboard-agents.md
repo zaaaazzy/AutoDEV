@@ -155,6 +155,57 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 
 ---
 
+## 6. Anmeldung, Sitzungen und Zwei-Faktor (Einstellungen → Sicherheit)
+
+Dieser Abschnitt betrifft den Bereich **Einstellungen → Sicherheit**. Er gilt für jeden Benutzer, auch für den Systemadministrator aus der `.env`.
+
+**Printscreens:** keine. Die Beschreibung nennt die Beschriftungen, wie sie im Bereich stehen. Ein Browserlauf für Aufnahmen ist nicht erfolgt.
+
+### 6.1 Was sich geändert hat
+
+- **Sitzung ist an das Passwort gebunden.** Jede Anmeldung merkt sich eine Version der Zugangsdaten. Ändert sich das Passwort, passt die alte Sitzung nicht mehr und gilt als abgemeldet.
+  - Benutzer: Ein neues Passwort beendet alle Sitzungen dieses Benutzers.
+  - Systemadministrator: Ein neues `DEV_LOG_PASSWORD` in der `.env` beendet alle Sitzungen beim nächsten Start.
+- **Einmalige Abmeldung nach dem Update.** Sitzungen von vor dieser Änderung haben keine Bindung und gelten nicht mehr. Alle Benutzer melden sich einmal neu an. Das ist gewollt.
+- **Aufräumen:** Abgelaufene und ungebundene Sitzungen löscht der Dienst beim Start und danach stündlich. Gültige Sitzungen bleiben.
+- **Zwei-Faktor-Anmeldung (TOTP) ist abgesichert:**
+  - Einrichten, Ausschalten und jeder Schritt zum Ersetzen verlangen das **aktuelle Passwort**. Ohne Passwort passiert nichts, und es wird nichts gespeichert.
+  - Ist die Zwei-Faktor-Anmeldung schon aktiv, verlangt das Ausschalten zusätzlich einen **aktuellen Code** aus der App. Ein gestohlenes Cookie reicht damit nicht mehr, um den zweiten Faktor zu ersetzen oder abzuschalten.
+  - Die Geheimnisse liegen verschlüsselt in der Datenbank, nicht mehr im Klartext.
+
+### 6.2 Bedienung
+
+| Aktion | Wo | Was du eingibst | Ergebnis |
+| --- | --- | --- | --- |
+| Zwei-Faktor einrichten | Sicherheit → „Zwei-Faktor-Anmeldung“, Feld „Aktuelles Passwort“, Schaltfläche „Einrichten“ | Passwort | QR-Code und Schlüssel erscheinen. Danach den 6-stelligen Code aus der App unter „Code aus der App“ eingeben und „Bestätigen“ drücken. |
+| Ausschalten | Sicherheit → „Zwei-Faktor-Anmeldung“ (nur wenn „Aktiv“), Felder „Aktuelles Passwort“ und „Code zum Ausschalten“, Schaltfläche „Ausschalten“ | Passwort und aktueller Code | Zwei-Faktor ist aus. |
+| Ersetzen | Erst „Ausschalten“, dann „Einrichten“ | wie oben | Neuer Schlüssel. Der alte Code funktioniert danach nicht mehr. |
+| Andere Geräte abmelden | Sicherheit → „Andere Geräte abmelden“ | – | Alle anderen Sitzungen dieses Kontos enden. Die aktuelle bleibt. |
+| Abmelden | Sicherheit → „Abmelden“ (nur bei Anmeldung mit Login) | – | Die aktuelle Sitzung endet. |
+
+**Bedingungen und Grenzen:**
+
+- Die Zwei-Faktor-Anmeldung braucht den Schlüssel `DEV_LOG_SECRET_KEY` in der `.env`. Ohne ihn lässt sie sich nicht einrichten, und der Dienst startet nicht, sobald schon Geheimnisse gespeichert sind. Die Meldung nennt keine Interna.
+- Der Schlüssel muss gesichert sein (Passwort-Manager). Geht er verloren, lassen sich die gespeicherten Geheimnisse nicht mehr lesen. Siehe `installation.md` für die Wiederherstellung.
+- Falsches Passwort und falscher Code werden nicht getrennt gemeldet. Ist die Zwei-Faktor-Anmeldung aktiv, lautet die Meldung „Passwort oder Code stimmen nicht.“, damit niemand aus ihr ableiten kann, was stimmt.
+- Nach zu vielen Fehlversuchen sperrt die Anmeldung 15 Minuten lang („Zu viele Fehlversuche …“).
+- Bei Anmeldung mit `DEV_LOG_AUTH=off` gibt es in diesem Bereich nichts einzustellen.
+
+### 6.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Nach dem Update überall abgemeldet | Gewollt. Sitzungen von vor der Passwort-Bindung gelten nicht mehr. Einmal neu anmelden. |
+| Nach neuem `DEV_LOG_PASSWORD` abgemeldet | Gewollt. Eine Passwortrotation beendet alle Sitzungen des Systemadministrators. Mit dem neuen Passwort neu anmelden. |
+| Dienst startet nicht, nachdem Zwei-Faktor aktiv war | `DEV_LOG_SECRET_KEY` fehlt in der `.env`. Den gesicherten Schlüssel eintragen und den Dienst neu starten. |
+| „Zwei-Faktor lässt sich gerade nicht einrichten. Bitte die Administration informieren.“ | Der Schlüssel fehlt, deshalb speichert AIdeation kein Geheimnis. Die Administration setzt `DEV_LOG_SECRET_KEY`, danach erneut einrichten. |
+| „Der Code stimmt nicht.“ beim Bestätigen | Der Code ist abgelaufen oder stammt von einer anderen Einrichtung. Den aktuellen Code aus der App eingeben. Stimmt die Uhr des Handys nicht, schlagen Codes fehl. |
+| „Zu viele Fehlversuche …“ | Die Sperre gilt 15 Minuten. Danach erneut versuchen. |
+| „Passwort oder Code stimmen nicht.“ beim Ausschalten | Das Passwort oder der Code ist falsch. Den aktuellen Code aus der App eingeben. Die Meldung ist absichtlich dieselbe für beides. |
+| Code verloren, Zugang nicht mehr möglich | Die Administration setzt die Zwei-Faktor-Anmeldung zurück. Das Vorgehen steht in `README.md`, Abschnitt Sicherheit. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
