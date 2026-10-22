@@ -71,7 +71,8 @@ export function changesWorkingTree(agent: Pick<WorkflowAgent, 'phase' | 'role'>)
 
 /** Hinweis, wenn ein Auftrag auf den Arbeitsordner wartet (anderer Auftrag, Chat oder Worker hält ihn) – kein Fehler. */
 function waitingForTree(itemId: string, cwd: string): () => void {
-  return () => console.info(`[${itemId}] wartet auf Arbeitsordner ${cwd} – ein anderer Lauf ändert dort gerade Dateien.`);
+  return () =>
+    console.info(`[${itemId}] wartet auf Arbeitsordner ${cwd} – ein anderer Lauf ändert dort gerade Dateien.`);
 }
 
 /**
