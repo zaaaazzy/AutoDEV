@@ -33,6 +33,8 @@ export interface ToolContext {
   commands?: string[];
   databaseUrl?: string | null;
   sqlClient?: SqlClientFactory;
+  /** Abbruch des Agent-Laufs (Zeitlimit, Stopp, Herunterfahren); bricht auch laufende SQL-Abfragen ab. */
+  signal?: AbortSignal;
   changed: Set<string>;
   backupRoot: string;
   execute: CommandExecutor;
@@ -190,7 +192,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         if (typeof args.sql !== 'string' || !args.sql.trim() || args.sql.length > 20_000) {
           return 'sql muss ein nicht leerer Text sein.';
         }
-        return clip(await runProjectSql(context.databaseUrl, args.sql, context.sqlClient));
+        return clip(await runProjectSql(context.databaseUrl, args.sql, context.sqlClient, undefined, context.signal));
       }
       default:
         return `Unbekanntes Werkzeug: ${name}`;

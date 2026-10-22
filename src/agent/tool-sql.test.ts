@@ -7,7 +7,9 @@ test('sqlViolation blocks server-level statements and unbounded writes', () => {
   assert.match(sqlViolation('DROP DATABASE x') ?? '', /Nicht erlaubt/);
   assert.match(sqlViolation("select pg_read_file('/etc/passwd')") ?? '', /Nicht erlaubt/);
   assert.match(sqlViolation('DELETE FROM users') ?? '', /WHERE/);
-  assert.equal(sqlViolation('UPDATE users SET a = 1 WHERE id = 2; SELECT 1'), null);
+  // Seit dem Auftrag „run_sql: Transaktion, Timeout und Ergebnisgröße“ nur noch eine Anweisung pro Aufruf.
+  assert.match(sqlViolation('UPDATE users SET a = 1 WHERE id = 2; SELECT 1') ?? '', /mehrere Anweisungen/);
+  assert.equal(sqlViolation('UPDATE users SET a = 1 WHERE id = 2;'), null);
   assert.equal(sqlViolation('CREATE TABLE t (id int)'), null);
   assert.equal(sqlViolation('ALTER TABLE t ADD COLUMN note text'), null);
   assert.equal(sqlViolation("UPDATE users SET a = 1 WHERE email = 'x@y.ch' RETURNING id"), null);
