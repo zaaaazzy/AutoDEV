@@ -405,6 +405,16 @@ Optional nach dem Sprint-Abschluss automatisch; nach dem Neubau Gesundheitsprüf
 
 Alle Compose-Aufrufe dabei (`images`, `up -d --build`, Rücksetzen mit `up -d --no-build`) laufen ohne `DEV_LOG_*`- und `COMPOSE_*`-Variablen aus der Worker-Umgebung (`composeEnvironment` in `src/runner/system-restart.ts`). Compose zieht Shell-Variablen der `.env` vor, auch leere; so gilt für die Container allein die `.env`, etwa der `DEV_LOG_SECRET_KEY`, und nicht der Wert aus `worker.env` oder das vom Worker gesetzte `DEV_LOG_PROJECT_ROOTS`.
 
+### Fehlversuch-Bremse bei der Anmeldung
+
+`FailureLimiter` in `src/api/security.ts`, geprüft in `src/api/auth.ts` (Login, Basic Auth, Zwei-Faktor-Bestätigung) **vor** dem scrypt-Lauf:
+
+- **Schlüssel:** Herkunft und Benutzername (klein, ohne Leerraum). Die Herkunft ist die Client-IP, IPv4-mapped IPv6 zählt als IPv4, IPv6 als ganzes /64 (`clientSource`). Eine Sperre allein nach Benutzername gibt es bewusst nicht: Sonst könnte jeder den Admin für alle aussperren.
+- **Backoff statt harter Sperre:** Die ersten 10 Fehlversuche je Schlüssel sind frei. Danach heißt es 1 min warten, jeder weitere Fehlversuch verdoppelt die Wartezeit bis höchstens 15 min. Nach 15 min ohne Fehlversuch beginnt der Zähler neu, eine erfolgreiche Anmeldung setzt ihn zurück. Die Antwort ist 429 mit `Retry-After`.
+- **Limit je Herkunft:** höchstens 300 Fehlversuche pro Minute über alle Benutzernamen. Massen-Logins mit Zufallsnamen kosten dadurch weder CPU noch Speicher, andere Adressen bleiben frei.
+- **Speicher:** Beide Tabellen haben höchstens 10 000 Einträge. Beim Einfügen werden zuerst abgelaufene, dann die ältesten Einträge gelöscht.
+- **Client-IP:** kommt aus `X-Forwarded-For`, aber nur von Proxys aus `DEV_LOG_TRUST_PROXY`. Erlaubt sind `loopback`, `linklocal`, `uniquelocal` sowie IP- oder CIDR-Angaben. `true`, `*` oder Hop-Zahlen werden mit Warnung verworfen; dann gilt die Socket-Adresse (`trustProxySetting`).
+
 ### Log-Scan im Produktions-Rückkanal
 
 Für jedes Projekt mit `log_services` liest der Worker alle 15 min und nach jedem Deploy mit derselben Logik (`scanLogs` in `src/runner/production-monitor.ts`) `docker compose logs --timestamps --no-color` (ohne Shell, nur gültige Dienstnamen). Projekte ohne `log_services` lösen keinen Aufruf aus und bekommen keinen Eintrag in `production_status.logs_scanned_at`.

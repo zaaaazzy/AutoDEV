@@ -7,7 +7,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import QRCode from 'qrcode';
 import { isRole, type Principal, type Role } from './roles.js';
-import { FailureLimiter, fullPath } from './security.js';
+import { FailureLimiter, clientSource, fullPath } from './security.js';
 import { currentStep, generateSecret, otpauthUri, verifyTotp } from './totp.js';
 
 const scrypt = promisify(scryptCallback) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
@@ -237,12 +237,22 @@ function acceptCode(account: string, secret: string, code: unknown): boolean {
 const roleList = (roles: unknown): Role[] => (Array.isArray(roles) ? roles.filter(isRole) : []);
 
 /**
- * Schlüssel für die Fehlversuch-Sperre: Konto und Adresse. Hinter Docker Desktop erscheinen alle Zugriffe von aussen
- * mit derselben IP – eine Sperre nur nach IP träfe dann alle Geräte gleichzeitig.
+ * Schlüssel für die Fehlversuch-Sperre: Konto und Herkunft. Hinter Docker Desktop erscheinen alle Zugriffe von aussen
+ * mit derselben IP – eine Sperre nur nach IP träfe dann alle Geräte gleichzeitig. Die echte Client-IP kommt über
+ * X-Forwarded-For, aber nur von Proxys aus DEV_LOG_TRUST_PROXY (siehe app.ts).
  */
-function attemptKey(ip: string | undefined, username: unknown): string {
+function attemptKey(source: string, username: unknown): string {
   const name = typeof username === 'string' ? username.trim().toLowerCase().slice(0, 80) : '';
-  return `${ip ?? 'unknown'}|${name}`;
+  return `${source}|${name}`;
+}
+
+/** 429 mit Wartezeit (Retry-After in Sekunden, Meldung in ganzen Minuten). */
+function tooManyAttempts(response: Response, waitMs: number): void {
+  const minutes = Math.max(1, Math.ceil(waitMs / 60_000));
+  response.set('Retry-After', String(Math.max(1, Math.ceil(waitMs / 1000))));
+  response.status(429).json({
+    message: `Zu viele Fehlversuche. Bitte in ${minutes === 1 ? 'einer Minute' : `${minutes} Minuten`} erneut versuchen.`,
+  });
 }
 
 /** Angemeldeter Benutzer zur Sitzung (null = ungültig, abgelaufen oder Benutzer deaktiviert). */
@@ -329,9 +339,11 @@ export function requireCredentials(auth: DevLogAuth, pool: Pool, limiter = new F
       // Header ignoriert statt gezählt: Browser senden alte, zwischengespeicherte Zugangsdaten bei jeder Anfrage
       // automatisch mit – das würde sonst sofort das Konto sperren. Eigener Schlüssel, damit die Login-Seite frei bleibt.
       if (basic && !auth.totpSecret) {
-        const client = `basic|${attemptKey(request.ip, basic[0])}`;
-        if (limiter.isBlocked(client)) {
-          response.status(429).json({ message: 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.' });
+        const source = clientSource(request.ip);
+        const client = `basic|${attemptKey(source, basic[0])}`;
+        const wait = limiter.retryAfter(client, source);
+        if (wait > 0) {
+          tooManyAttempts(response, wait);
           return;
         }
         if (equalSecret(basic[0], auth.username) && equalSecret(basic[1], auth.password)) {
@@ -340,7 +352,7 @@ export function requireCredentials(auth: DevLogAuth, pool: Pool, limiter = new F
           next();
           return;
         }
-        limiter.recordFailure(client);
+        limiter.recordFailure(client, Date.now(), source);
       }
       response.status(401).json({ message: 'Anmeldung erforderlich.' });
     } catch (error) {
@@ -434,11 +446,12 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
   app.post('/login', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const body = (request.body ?? {}) as Record<string, unknown>;
-      const client = attemptKey(request.ip, body.username);
-      if (limiter.isBlocked(client)) {
-        response
-          .status(429)
-          .json({ message: 'Zu viele Fehlversuche für dieses Konto. Bitte in 15 Minuten erneut versuchen.' });
+      // Vor dem scrypt-Lauf prüfen: Gebremste Anfragen kosten so weder CPU noch einen neuen Eintrag.
+      const source = clientSource(request.ip);
+      const client = attemptKey(source, body.username);
+      const wait = limiter.retryAfter(client, source);
+      if (wait > 0) {
+        tooManyAttempts(response, wait);
         return;
       }
       const account = await findAccount(pool, auth, body.username, body.password);
@@ -449,7 +462,7 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
       }
       const codeOk = !account?.totpSecret || acceptCode(account.key, account.totpSecret, body.code);
       if (!account || !codeOk) {
-        limiter.recordFailure(client);
+        limiter.recordFailure(client, Date.now(), source);
         const message =
           account && account.totpSecret
             ? 'Der Code aus der Authenticator-App stimmt nicht.'
@@ -529,8 +542,9 @@ export function registerSecurityRoutes(
   ): Promise<boolean> => {
     const { password, currentCode } = (body ?? {}) as { password?: unknown; currentCode?: unknown };
     const key = `totp|${principal.id ?? 'system'}`;
-    if (limiter.isBlocked(key)) {
-      response.status(429).json({ message: 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.' });
+    const wait = limiter.retryAfter(key);
+    if (wait > 0) {
+      tooManyAttempts(response, wait);
       return false;
     }
     const secret = await totpOf(principal);
