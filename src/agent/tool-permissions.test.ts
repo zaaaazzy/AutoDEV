@@ -700,6 +700,24 @@ test('shellWords: zerlegt wie Bash, offene Anführungszeichen werden entfernt', 
   assert.deepEqual(shellWords('echo "a \\" b"'), ['echo', 'a " b']);
   assert.deepEqual(shellWords('git commit -m "fix'), ['git', 'commit', '-m', 'fix']);
   assert.deepEqual(shellWords('  '), []);
+  // Derselbe Tokenizer wie im Wächter: Fortsetzungszeilen, '…' ohne Escape-Wirkung, Umleitungen sind keine Wörter.
+  assert.deepEqual(shellWords('git log \\\n--oneline'), ['git', 'log', '--oneline']);
+  assert.deepEqual(shellWords(`git log --grep 'a\\' 2>/dev/null`), ['git', 'log', '--grep', 'a\\']);
+});
+
+test('isAllowedCommand: nur ein einfacher Befehl ohne Umleitungen und Shell-Erweiterungen', () => {
+  for (const command of [
+    'git log $X',
+    'git log ~/x',
+    'git status > x',
+    'git status; git log',
+    'git log $(id)',
+    "git log 'offen",
+    'git diff {a,b}',
+  ]) {
+    assert.ok(!isAllowedCommand(command), command);
+  }
+  assert.ok(isAllowedCommand('git log --oneline -5'));
 });
 
 test('npmOptionProblem: --ignore-scripts lässt sich nicht wieder abschalten', () => {

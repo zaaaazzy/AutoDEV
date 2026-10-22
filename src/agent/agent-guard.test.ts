@@ -426,3 +426,62 @@ test('Wächter: gewöhnliche Quotes bleiben erlaubt', () => {
     assert.equal(bashProblem(command, root), null, command);
   }
 });
+
+test('Wächter-Tokenizer: Escapes, Fortsetzungszeilen und Shell-Konstrukte verstecken nichts', () => {
+  for (const command of [
+    // Aus dem Code-Review: escapte Quotes vor Ersetzung bzw. Umleitung.
+    "git log \\' $(id) \\'",
+    'git log \\" > /tmp/pwned \\"',
+    // Fortsetzungszeile: Backslash + Zeilenumbruch trennt keinen Befehl, die Option gehört zu git.
+    'git log \\\n--output=/tmp/x',
+    'git \\\n-c core.pager=sh log',
+    'git status \\\n> /tmp/x',
+    // Ersetzungen in "…" wirken, ${…} kann eine verstecken.
+    'git log "$(id)"',
+    'git log "`id`"',
+    'git log ${X:-$(id)}',
+    'git log $((1+2))',
+    // Variablen in git/npm/docker: export setzt sie vorher, der Wächter sähe den Wert nicht.
+    'export X=--output=/tmp/x; git log $X',
+    "git log $'--output=/tmp/x'",
+    'npm run build "$X"',
+    // Schlüsselwörter starten Konstrukte, deren Befehle sonst niemand prüfte.
+    '! rm -rf src',
+    'if true; then rm x; fi',
+    'while true; do rm x; done',
+    '{ rm x; }',
+    'time rm x',
+    // Heredocs, Syntaxfehler und offene Enden.
+    'git log <<EOF\nx\nEOF',
+    'git status &&',
+    'git status |',
+    '&& git status',
+    'git status;; git log',
+    'git status >',
+    'git log --grep x\\',
+    "git log --grep 'offen",
+    // Umleitungen in allen Formen.
+    'git status >&/tmp/x',
+    'git status &>>/tmp/x',
+    'git status 2> /tmp/x',
+    'git status >| x',
+    'git status > "$HOME/x"',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt|zerlegen/, JSON.stringify(command));
+  }
+  for (const command of [
+    'git log --grep "x; rm y"',
+    "git log --grep 'a | b && c'",
+    "git log --grep 'C:\\'",
+    "git log --grep '$(id)'",
+    'git log --grep "\\$HOME"',
+    'git status &&\ngit log --oneline',
+    'git log --oneline # Kommentar > x',
+    'npm test 2>&1 | head',
+    'git status >&2',
+    'git status 2>"/dev/null"',
+    'git log --grep "a\\\\b"',
+  ]) {
+    assert.equal(bashProblem(command, root), null, JSON.stringify(command));
+  }
+});
