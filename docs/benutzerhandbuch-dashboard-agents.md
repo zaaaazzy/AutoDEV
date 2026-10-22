@@ -329,6 +329,53 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 
 ---
 
+## 8. Ein Arbeitsordner, ein Auftrag (Sperre und Chat)
+
+Ein Projekt hat einen Arbeitsordner, in dem Agents Dateien ändern, committen und den Branch wechseln. Damit nicht zwei Agents gleichzeitig darin arbeiten, gilt jetzt eine Sperre. Du musst dafür nichts einstellen. Der Ablauf ist aber anders als früher, und das zeigt sich im Dashboard und im Chat.
+
+### 8.1 Wer schreibt, wer liest
+
+| Agent | Ordner | Bedingung |
+| --- | --- | --- |
+| Entwickler, Tester, Dokumentierer (Benutzerhandbuch), Autofix | schreibend, hält die Sperre | Läuft im Auftrag. Die Sperre gilt vom ersten schreibenden Schritt bis zum Ende des Auftrags. |
+| Chat-Assistent | schreibend, wenn der Ordner frei ist | Ist der Ordner belegt, antwortet er nur lesend. |
+| Auftragsautor, Bug-Wächter, Visionär, Analyse, Abnahme, Sprint-Kommentar | nur lesend (Standard) | Sie dürfen nicht schreiben. Ein Agent, der schreiben soll, muss den Ordner selbst halten. |
+| Vor-dem-Sprint-Agents | nur lesend | Nur Planung und Prüfung. |
+
+Die Angaben stammen aus `src/agent/chat.ts`, `src/agent/requirements.ts` (Standard `readOnly = true`) und `src/runner/runner.ts` (`TREE_ROLES`).
+
+### 8.2 Chat-Assistent: schreibend oder nur lesend
+
+- **Ordner frei:** Der Assistent darf Dateien ändern und Befehle ausführen. Er hält den Ordner bis zum Ende seiner Antwort.
+- **Ordner belegt:** Ein Auftrag, ein Testlauf oder ein anderer Worker nutzt den Ordner gerade. Der Assistent antwortet nur lesend und sagt dir das im Chat. Stelle die Frage nach dem Lauf erneut.
+- **Warum:** Schreibt der Assistent während eines Entwickler-Schritts, landen seine Änderungen im Commit des Auftrags. Ein `git checkout main` durch den Assistenten hätte die Änderungen des Entwicklers auf `main` committet. Das ist mit der Sperre nicht mehr möglich.
+
+`[Bild 6] Chat-Antwort, wenn der Arbeitsordner belegt ist (nur lesend)`
+
+### 8.3 Wartende Läufe
+
+- Ist der Ordner belegt, wartet der Lauf. Im Log steht einmal „wartet auf Arbeitsordner“.
+- Das ist **kein Fehler**. Autofix startet dadurch keinen neuen Versuch.
+- Der Lauf startet, sobald der Ordner frei ist. Du musst nichts tun.
+- **Bekannte Lücke:** Der Status „wartet auf Arbeitsordner“ erscheint noch nicht in der Oberfläche. Schau dafür im Log des Laufs nach.
+
+`[Bild 7] Log eines wartenden Laufs mit dem Hinweis „wartet auf Arbeitsordner“`
+
+### 8.4 Ein Ordner, ein Auftrag
+
+- Zwei Projekte mit demselben Repository oder demselben Ordner (auch über einen Symlink) laufen nicht gleichzeitig. Der zweite wartet.
+- Die Sperre gilt über Prozessgrenzen hinweg, also auch für einen zweiten Worker (z. B. Host und Container). Dafür sorgt eine Sperre in der Datenbank. Stürzt ein Worker ab, gibt Postgres die Sperre selbst frei.
+- **Bedingung:** Die Sperre schützt nur, wenn Host und Container denselben Ordner unter **demselben Pfad** sehen. Zeigen sie über verschiedene Pfade auf denselben Ordner, entstehen zwei Schlüssel und die Sperre wirkt nicht. Prüfe das bei einem Container-Betrieb.
+- **Ohne Datenbank** (z. B. in Tests) gilt die Sperre nur innerhalb des Prozesses.
+
+### 8.5 Was du beachten solltest
+
+- Ein eigener Agent, der Dateien ändern soll, braucht eine Freigabe über die Sperre. Sonst läuft er nur lesend.
+- Eigene Befehle im Projekt, die den Branch wechseln, können die Sperre umgehen, wenn sie außerhalb von AIdeation laufen. Lass während eines Laufs keine manuellen Checkouts im Arbeitsordner machen.
+- `verifyAcceptance` (Abnahme) läuft weiterhin ohne Shell. Es kann keine Befehle ausführen.
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
