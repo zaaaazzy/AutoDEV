@@ -1,4 +1,5 @@
 import { logged } from '../core/log.js';
+import { decryptSecret, encryptSecret, isEncrypted } from '../core/secrets.js';
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { Router, Request, RequestHandler, Response } from 'express';
@@ -24,6 +25,8 @@ const TOTP_KEY = 'auth_totp_secret';
 const TOTP_PENDING_KEY = 'auth_totp_pending';
 /** Zuletzt angenommener TOTP-Zeitschritt je Konto – derselbe Code gilt nur einmal. */
 const lastTotpSteps = new Map<string, number>();
+/** Abgelaufene und ungültige Sitzungen werden stündlich gelöscht. */
+const SESSION_CLEANUP_MS = 60 * 60 * 1000;
 
 function equalSecret(received: string, expected: string): boolean {
   const actualBuffer = Buffer.from(received);
@@ -90,6 +93,80 @@ function setSessionCookie(request: Request, response: Response, token: string, m
   );
 }
 
+/** Ohne DEV_LOG_SECRET_KEY lässt sich kein TOTP-Schlüssel verschlüsselt speichern. */
+export class TotpKeyMissingError extends Error {
+  constructor() {
+    super('Zwei-Faktor-Schlüssel brauchen DEV_LOG_SECRET_KEY. Den Schlüssel in der .env setzen und neu starten.');
+  }
+}
+
+/** TOTP-Schlüssel kommen nur verschlüsselt in die Datenbank; ohne Schlüssel wird nichts geschrieben (fail-closed). */
+export function sealTotp(secret: string, environment: NodeJS.ProcessEnv = process.env): string {
+  const sealed = encryptSecret(secret, environment);
+  if (!isEncrypted(sealed)) throw new TotpKeyMissingError();
+  return sealed;
+}
+
+/** Liest einen gespeicherten TOTP-Schlüssel. Klartext gibt es nach dem Start nicht mehr; er gilt als Fehler. */
+export function openTotp(
+  stored: string | null | undefined,
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (!stored) return null;
+  if (!isEncrypted(stored)) throw new Error('Zwei-Faktor-Schlüssel liegt unverschlüsselt vor.');
+  return decryptSecret(stored, environment);
+}
+
+/**
+ * Beim Start: TOTP-Schlüssel aus der Zeit vor der Verschlüsselung (Benutzer und Systemadministrator, aktiv und
+ * ausstehend) werden einmal verschlüsselt neu geschrieben; vorhandene müssen sich mit dem Schlüssel lesen lassen.
+ * Gibt es gespeicherte Schlüssel, aber keinen DEV_LOG_SECRET_KEY, startet der Dienst nicht. Gibt die Zahl der neu
+ * verschlüsselten Werte zurück.
+ */
+export async function sealStoredTotpSecrets(pool: Pool, environment: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const stored = [
+    ...(
+      await pool.query<{ id: string; pending: boolean; value: string }>(
+        `SELECT id::text, FALSE AS pending, totp_secret AS value FROM users WHERE totp_secret IS NOT NULL
+         UNION ALL
+         SELECT id::text, TRUE AS pending, totp_pending AS value FROM users WHERE totp_pending IS NOT NULL`,
+      )
+    ).rows.map((row) => ({ ...row, column: row.pending ? ('totp_pending' as const) : ('totp_secret' as const) })),
+    ...(
+      await pool.query<{ id: string; value: string }>(
+        'SELECT key AS id, value FROM app_settings WHERE key IN ($1, $2)',
+        [TOTP_KEY, TOTP_PENDING_KEY],
+      )
+    ).rows.map((row) => ({ ...row, column: null })),
+  ];
+  if (!stored.length) return 0;
+  if (!environment.DEV_LOG_SECRET_KEY?.trim()) throw new TotpKeyMissingError();
+  let sealed = 0;
+  for (const row of stored) {
+    if (isEncrypted(row.value)) {
+      try {
+        decryptSecret(row.value, environment);
+      } catch {
+        throw new Error('Zwei-Faktor-Schlüssel lassen sich mit dem gesetzten DEV_LOG_SECRET_KEY nicht lesen.');
+      }
+      continue;
+    }
+    const value = sealTotp(row.value, environment);
+    // Nur ersetzen, was noch der gelesene Klartext ist (ein gleichzeitiger Start hat es sonst schon erledigt).
+    if (row.column) {
+      await pool.query(`UPDATE users SET ${row.column} = $2 WHERE id = $1 AND ${row.column} = $3`, [
+        row.id,
+        value,
+        row.value,
+      ]);
+    } else {
+      await pool.query('UPDATE app_settings SET value = $2 WHERE key = $1 AND value = $3', [row.id, value, row.value]);
+    }
+    sealed += 1;
+  }
+  return sealed;
+}
+
 /** Lädt den TOTP-Schlüssel des Systemadministrators (fehlt die Tabelle noch, gilt: kein zweiter Faktor). */
 export async function loadTotpSecret(pool: Pool): Promise<string | null> {
   // Only a missing table (fresh database) means no second factor; any other error must not switch it off.
@@ -99,7 +176,53 @@ export async function loadTotpSecret(pool: Pool): Promise<string | null> {
       if (error.code === '42P01') return null;
       throw error;
     });
-  return result?.rows[0]?.value ?? null;
+  return openTotp(result?.rows[0]?.value);
+}
+
+/** Zwischenspeicher für die Bindung des Systemadministrators – scrypt läuft so nur einmal je Passwort. */
+let adminVersion: { id: string; value: Promise<string> } | null = null;
+
+/**
+ * Bindung einer Sitzung an die Zugangsdaten. Benutzer: abgeleitet vom Passwort-Hash (neues Passwort = neuer Salt =
+ * neue Version). Systemadministrator: abgeleitet von Name und Passwort aus der .env, per scrypt, damit aus der
+ * Datenbank allein das Passwort nicht schnell zu erraten ist. Wird das Passwort rotiert, passt keine alte Sitzung mehr.
+ */
+export async function credentialVersion(auth: DevLogAuth, passwordHash: string | null): Promise<string> {
+  if (passwordHash !== null) return `u1:${createHash('sha256').update(passwordHash).digest('hex')}`;
+  const id = `${auth.username}\0${auth.password}`;
+  if (adminVersion?.id !== id) {
+    adminVersion = {
+      id,
+      value: scrypt(id, Buffer.from('dev-log/session-binding'), 32).then((hash) => `s1:${hash.toString('hex')}`),
+    };
+  }
+  return adminVersion.value;
+}
+
+/**
+ * Löscht abgelaufene Sitzungen, Sitzungen ohne Bindung und Sitzungen des Systemadministrators mit einer alten
+ * Bindung (Passwort in der .env rotiert). Aktive, gültige Sitzungen bleiben. Gibt die Zahl der gelöschten zurück.
+ */
+export async function purgeSessions(pool: Pool, auth: DevLogAuth | null): Promise<number> {
+  const result = await pool.query(
+    `DELETE FROM auth_sessions
+      WHERE expires_at <= NOW() OR credential_version IS NULL
+         OR (user_id IS NULL AND credential_version IS DISTINCT FROM $1)`,
+    [auth ? await credentialVersion(auth, null) : null],
+  );
+  return result.rowCount ?? 0;
+}
+
+/** Startet die stündliche Sitzungs-Bereinigung (erster Lauf sofort, blockiert den Start nicht); gibt den Stopp zurück. */
+export function startSessionCleanup(pool: Pool, auth: DevLogAuth | null, intervalMs = SESSION_CLEANUP_MS): () => void {
+  const run = (): void => void purgeSessions(pool, auth).catch(logged('auth'));
+  const first = setImmediate(run);
+  const timer = setInterval(run, intervalMs);
+  timer.unref();
+  return () => {
+    clearImmediate(first);
+    clearInterval(timer);
+  };
 }
 
 /** Prüft einen TOTP-Code und verhindert, dass derselbe Code zweimal angenommen wird. */
@@ -127,19 +250,24 @@ async function sessionPrincipal(pool: Pool, auth: DevLogAuth, token: string): Pr
   const result = await pool.query<{
     last_seen: Date;
     user_id: string | null;
+    credential_version: string | null;
+    password_hash: string | null;
     username: string | null;
     display_name: string | null;
     roles: string[] | null;
     active: boolean | null;
   }>(
-    `SELECT s.last_seen, s.user_id, u.username, u.display_name, u.roles, u.active
+    `SELECT s.last_seen, s.user_id, s.credential_version, u.password_hash, u.username, u.display_name, u.roles, u.active
        FROM auth_sessions s LEFT JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = $1 AND s.expires_at > NOW()`,
     [hashToken(token)],
   );
   const session = result.rows[0];
   if (!session) return null;
-  if (session.user_id && !session.active) return null;
+  if (session.user_id && (!session.active || !session.password_hash)) return null;
+  // Ohne Bindung oder mit alter Bindung (Passwort geändert) gilt die Sitzung nicht – auch für den .env-Admin.
+  const expected = await credentialVersion(auth, session.user_id ? (session.password_hash ?? '') : null);
+  if (!session.credential_version || !equalSecret(session.credential_version, expected)) return null;
   if (Date.now() - new Date(session.last_seen).getTime() > 10 * 60 * 1000) {
     await pool.query('UPDATE auth_sessions SET last_seen = NOW() WHERE token_hash = $1', [hashToken(token)]);
   }
@@ -154,8 +282,9 @@ async function sessionPrincipal(pool: Pool, auth: DevLogAuth, token: string): Pr
 }
 
 /**
- * Erneute Prüfung für lange offene Verbindungen (Chat-Stream): Sitzung noch gültig (kein Logout, nicht abgelaufen),
- * Benutzer aktiv und das Projekt weiterhin freigegeben (Administrator oder Mitglied).
+ * Erneute Prüfung für lange offene Verbindungen (Chat-Stream): Sitzung noch gültig (kein Logout, nicht abgelaufen,
+ * gebunden), Benutzer aktiv und das Projekt weiterhin freigegeben (Administrator oder Mitglied). Alte Bindungen
+ * verschwinden ganz: Ein neues Benutzerpasswort löscht die Sitzungen, ein neues .env-Passwort purgeSessions beim Start.
  */
 export async function sessionStillAllowed(pool: Pool, token: string, project: string): Promise<boolean> {
   const session = (
@@ -163,7 +292,7 @@ export async function sessionStillAllowed(pool: Pool, token: string, project: st
       `SELECT s.user_id, u.active, u.roles,
               EXISTS (SELECT 1 FROM project_members m WHERE m.user_id = s.user_id AND m.project_slug = $2) AS member
          FROM auth_sessions s LEFT JOIN users u ON u.id = s.user_id
-        WHERE s.token_hash = $1 AND s.expires_at > NOW()`,
+        WHERE s.token_hash = $1 AND s.expires_at > NOW() AND s.credential_version IS NOT NULL`,
       [hashToken(token), project],
     )
   ).rows[0];
@@ -225,6 +354,8 @@ interface Account {
   /** Schlüssel für die Einmal-Code-Sperre */
   key: string;
   totpSecret: string | null;
+  /** Bindung für die neue Sitzung (siehe credentialVersion) */
+  credentialVersion: string;
 }
 
 /** Prüft Benutzername und Passwort – zuerst Systemadministrator (.env), dann Benutzer aus der Datenbank. */
@@ -240,7 +371,12 @@ async function findAccount(
     // nicht an einer schnelleren Antwort zu erkennen ist.
     await dummyVerify(password);
     return equalSecret(password, auth.password)
-      ? { principal: systemAdmin(auth), key: 'system', totpSecret: auth.totpSecret ?? null }
+      ? {
+          principal: systemAdmin(auth),
+          key: 'system',
+          totpSecret: auth.totpSecret ?? null,
+          credentialVersion: await credentialVersion(auth, null),
+        }
       : null;
   }
   const user = (
@@ -272,7 +408,8 @@ async function findAccount(
       roles: roleList(user.roles),
     },
     key: user.id,
-    totpSecret: user.totp_secret,
+    totpSecret: openTotp(user.totp_secret),
+    credentialVersion: await credentialVersion(auth, user.password_hash),
   };
 }
 
@@ -323,9 +460,15 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
       limiter.reset(client);
       const token = randomBytes(32).toString('base64url');
       await pool.query(
-        `INSERT INTO auth_sessions (token_hash, expires_at, user_agent, user_id)
-         VALUES ($1, NOW() + make_interval(days => $2), $3, $4)`,
-        [hashToken(token), SESSION_DAYS, (request.get('user-agent') ?? '').slice(0, 300), account.principal.id],
+        `INSERT INTO auth_sessions (token_hash, expires_at, user_agent, user_id, credential_version)
+         VALUES ($1, NOW() + make_interval(days => $2), $3, $4, $5)`,
+        [
+          hashToken(token),
+          SESSION_DAYS,
+          (request.get('user-agent') ?? '').slice(0, 300),
+          account.principal.id,
+          account.credentialVersion,
+        ],
       );
       if (account.principal.id) {
         await pool
@@ -361,17 +504,20 @@ export function registerSecurityRoutes(
   const principalOf = (response: Response): Principal => response.locals.principal as Principal;
   const totpOf = async (principal: Principal): Promise<string | null> =>
     principal.id
-      ? ((
-          await pool.query<{ secret: string | null }>('SELECT totp_secret AS secret FROM users WHERE id = $1', [
-            principal.id,
-          ])
-        ).rows[0]?.secret ?? null)
+      ? openTotp(
+          (
+            await pool.query<{ secret: string | null }>('SELECT totp_secret AS secret FROM users WHERE id = $1', [
+              principal.id,
+            ])
+          ).rows[0]?.secret,
+        )
       : (auth.totpSecret ?? null);
 
   /**
-   * Einen Schlüssel einrichten oder ersetzen verlangt das aktuelle Passwort und – ist der zweite Faktor schon aktiv –
-   * einen gültigen Code des bisherigen Schlüssels. Ein gestohlenes Sitzungs-Cookie allein reicht so nicht, um den
-   * Besitzer mit einem eigenen Schlüssel auszusperren. Antwortet selbst und gibt false zurück, wenn etwas fehlt.
+   * Einen Schlüssel einrichten, ersetzen oder abschalten verlangt das aktuelle Passwort und – ist der zweite Faktor
+   * schon aktiv – einen gültigen Code des bisherigen Schlüssels. Ein gestohlenes Sitzungs-Cookie allein reicht so
+   * nicht, um den Besitzer mit einem eigenen Schlüssel auszusperren. Antwortet selbst und gibt false zurück, wenn etwas
+   * fehlt. Ein fehlender Code wird vor der Passwortprüfung gemeldet; ist etwas falsch, sagt die Antwort nicht, was.
    * consumeCode: Beim Einrichten gilt der Code nur einmal; beim Bestätigen kurz danach darf derselbe Code noch einmal
    * kommen, sonst müsste man auf den nächsten Code der App warten.
    */
@@ -387,6 +533,14 @@ export function registerSecurityRoutes(
       response.status(429).json({ message: 'Zu viele Fehlversuche. Bitte in 15 Minuten erneut versuchen.' });
       return false;
     }
+    const secret = await totpOf(principal);
+    if (secret && (typeof currentCode !== 'string' || !currentCode.trim())) {
+      response.status(400).json({
+        message: 'Bitte das Passwort und den aktuellen Code aus der Authenticator-App eingeben.',
+        field: 'currentCode',
+      });
+      return false;
+    }
     let passwordOk = false;
     if (typeof password === 'string') {
       if (principal.id) {
@@ -399,22 +553,18 @@ export function registerSecurityRoutes(
         passwordOk = equalSecret(password, auth.password);
       }
     }
-    if (!passwordOk) {
-      limiter.recordFailure(key);
-      response.status(400).json({ message: 'Das Passwort stimmt nicht.', field: 'password' });
-      return false;
-    }
-    const secret = await totpOf(principal);
+    // Der Code wird nur bei richtigem Passwort geprüft (und verbraucht); die Antwort ist in beiden Fällen gleich.
     const codeOk =
-      !secret ||
-      (consumeCode
-        ? acceptCode(principal.id ?? 'system', secret, currentCode)
-        : typeof currentCode === 'string' && verifyTotp(secret, currentCode) !== null);
+      passwordOk &&
+      (!secret ||
+        (consumeCode
+          ? acceptCode(principal.id ?? 'system', secret, currentCode)
+          : typeof currentCode === 'string' && verifyTotp(secret, currentCode) !== null));
     if (!codeOk) {
       limiter.recordFailure(key);
       response.status(400).json({
-        message: 'Bitte den aktuellen Code des bisherigen Schlüssels aus der Authenticator-App eingeben.',
-        field: 'currentCode',
+        message: secret ? 'Passwort oder Code stimmen nicht.' : 'Das Passwort stimmt nicht.',
+        field: 'password',
       });
       return false;
     }
@@ -443,15 +593,22 @@ export function registerSecurityRoutes(
   app.post('/auth/totp/setup', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const principal = principalOf(response);
+      if (!process.env.DEV_LOG_SECRET_KEY?.trim()) {
+        // Ohne Schlüssel kein verschlüsseltes Speichern – dann lieber gar keinen zweiten Faktor einrichten.
+        response
+          .status(503)
+          .json({ message: 'Zwei-Faktor lässt sich gerade nicht einrichten. Bitte die Administration informieren.' });
+        return;
+      }
       if (!(await confirmIdentity(principal, request.body, response, true))) return;
       const secret = generateSecret();
       if (principal.id) {
-        await pool.query('UPDATE users SET totp_pending = $2 WHERE id = $1', [principal.id, secret]);
+        await pool.query('UPDATE users SET totp_pending = $2 WHERE id = $1', [principal.id, sealTotp(secret)]);
       } else {
         await pool.query(
           `INSERT INTO app_settings (key, value) VALUES ($1, $2)
            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-          [TOTP_PENDING_KEY, secret],
+          [TOTP_PENDING_KEY, sealTotp(secret)],
         );
       }
       const uri = otpauthUri(secret, principal.username);
@@ -466,14 +623,16 @@ export function registerSecurityRoutes(
     try {
       const principal = principalOf(response);
       if (!(await confirmIdentity(principal, request.body, response, false))) return;
-      const pending = principal.id
-        ? (
-            await pool.query<{ value: string | null }>('SELECT totp_pending AS value FROM users WHERE id = $1', [
-              principal.id,
-            ])
-          ).rows[0]?.value
-        : (await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [TOTP_PENDING_KEY]))
-            .rows[0]?.value;
+      const pending = openTotp(
+        principal.id
+          ? (
+              await pool.query<{ value: string | null }>('SELECT totp_pending AS value FROM users WHERE id = $1', [
+                principal.id,
+              ])
+            ).rows[0]?.value
+          : (await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [TOTP_PENDING_KEY]))
+              .rows[0]?.value,
+      );
       const code = (request.body as { code?: unknown } | undefined)?.code;
       if (!pending || typeof code !== 'string' || verifyTotp(pending, code) === null) {
         response.status(400).json({ message: 'Der Code stimmt nicht. Bitte den aktuellen Code aus der App eingeben.' });
@@ -487,7 +646,7 @@ export function registerSecurityRoutes(
         await pool.query(
           `INSERT INTO app_settings (key, value) VALUES ($1, $2)
            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
-          [TOTP_KEY, pending],
+          [TOTP_KEY, sealTotp(pending)],
         );
         await pool.query('DELETE FROM app_settings WHERE key = $1', [TOTP_PENDING_KEY]);
         auth.totpSecret = pending;
@@ -508,12 +667,12 @@ export function registerSecurityRoutes(
   app.post('/auth/totp/disable', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
       const principal = principalOf(response);
-      const secret = await totpOf(principal);
-      const code = (request.body as { code?: unknown } | undefined)?.code;
-      if (!secret || !acceptCode(principal.id ?? 'system', secret, code)) {
-        response.status(400).json({ message: 'Der Code stimmt nicht.' });
+      if (!(await totpOf(principal))) {
+        response.status(400).json({ message: 'Die Zwei-Faktor-Anmeldung ist nicht aktiv.' });
         return;
       }
+      // Wie beim Einrichten: Passwort und aktueller Code, sonst sperrt ein gestohlenes Cookie den Besitzer aus.
+      if (!(await confirmIdentity(principal, request.body, response, true))) return;
       if (principal.id) {
         await pool.query('UPDATE users SET totp_secret = NULL WHERE id = $1', [principal.id]);
       } else {

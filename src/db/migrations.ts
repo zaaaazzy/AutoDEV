@@ -149,6 +149,18 @@ export const MIGRATIONS: readonly Migration[] = [
     name: 'production-log-gap',
     sql: 'ALTER TABLE production_status ADD COLUMN IF NOT EXISTS log_gap TEXT;',
   },
+  // Sitzungen an die Zugangsdaten binden (Passwortwechsel beendet sie) und für Bereinigung und Abfragen indizieren.
+  // Sitzungen von vorher haben keine Bindung und gelten nicht mehr (fail-closed): einmal neu anmelden.
+  {
+    version: 7,
+    name: 'auth-sessions-bindung',
+    sql: `
+      ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS credential_version TEXT;
+      CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions (user_id);
+      CREATE INDEX IF NOT EXISTS auth_sessions_expires_idx ON auth_sessions (expires_at);
+      DELETE FROM auth_sessions WHERE credential_version IS NULL;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

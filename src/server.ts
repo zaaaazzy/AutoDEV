@@ -1,5 +1,5 @@
 import { createDevLogApp } from './api/app.js';
-import { loadTotpSecret } from './api/auth.js';
+import { loadTotpSecret, sealStoredTotpSecrets, startSessionCleanup } from './api/auth.js';
 import { encryptProjectSecrets } from './api/projects.js';
 import { createDatabasePool, readDatabaseConfig } from './db/database.js';
 
@@ -26,13 +26,19 @@ async function start(): Promise<void> {
   const pool = await createDatabasePool(readDatabaseConfig());
   const encrypted = await encryptProjectSecrets(pool);
   if (encrypted) console.info(`${encrypted} Datenbank-Zugang/Zugänge verschlüsselt.`);
+  // Zwei-Faktor-Schlüssel aus der Zeit vor der Verschlüsselung neu schreiben; ohne Schlüssel startet der Dienst nicht.
+  const sealed = await sealStoredTotpSecrets(pool);
+  if (sealed) console.info(`${sealed} Zwei-Faktor-Schlüssel verschlüsselt.`);
   const port = Number(process.env.PORT ?? 3100);
   const auth =
     username && password && !authDisabled ? { username, password, totpSecret: await loadTotpSecret(pool) } : null;
+  // Abgelaufene und an ein altes Passwort gebundene Sitzungen löschen (sofort im Hintergrund, danach stündlich).
+  const stopCleanup = startSessionCleanup(pool, auth);
   const server = createDevLogApp(pool, auth).listen(port, host, () => {
     console.info(`AIdeation listening on ${host}:${port}.`);
   });
   const shutdown = (): void => {
+    stopCleanup();
     server.close(() => void pool.end());
   };
   process.on('SIGTERM', shutdown);

@@ -141,13 +141,18 @@ export function registerUserRoutes(app: Router, pool: Pool, auth: DevLogAuth | n
       const password = (request.body as { password?: unknown } | undefined)?.password;
       const problem = passwordProblem(password);
       if (problem) return void response.status(400).json({ message: problem });
-      const result = await pool.query('UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1', [
-        request.params.id,
-        await hashPassword(password as string),
-      ]);
-      if (!result.rowCount) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
-      // Neues Passwort: alle Sitzungen dieses Benutzers beenden.
-      await pool.query('DELETE FROM auth_sessions WHERE user_id = $1', [request.params.id]);
+      // Neues Passwort und Ende aller Sitzungen dieses Benutzers in einer Anweisung (also atomar). Die Sitzungen sind
+      // zusätzlich an den Passwort-Hash gebunden und gälten auch ohne das Löschen nicht mehr.
+      const result = await pool.query<{ id: string }>(
+        `WITH changed AS (
+           UPDATE users SET password_hash = $2, updated_at = NOW() WHERE id = $1 RETURNING id
+         ), ended AS (
+           DELETE FROM auth_sessions WHERE user_id IN (SELECT id FROM changed)
+         )
+         SELECT id FROM changed`,
+        [request.params.id, await hashPassword(password as string)],
+      );
+      if (!result.rows.length) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
       response.json({ updated: true });
     } catch (error) {
       next(error);
