@@ -31,7 +31,8 @@ test('Bewertung: Priorität × Nutzen/Kosten, Bonus für Bugs, Malus für Blocki
   assert.equal(scoreOf(order({ troubled: true }), false), 0.5);
 });
 
-test('Kapazität aus den letzten 3 Sprints (Median), ohne Historie aus der Einstellung', () => {
+test('Kapazität: Median der letzten 3 Sprints, aber nie unter der Einstellung', () => {
+  // Weniger geschafft als eingestellt (Ist-Stunden sind Rechenzeit): die Einstellung gilt, ohne Token-Grenze.
   assert.deepEqual(
     capacityFrom(
       [
@@ -42,23 +43,29 @@ test('Kapazität aus den letzten 3 Sprints (Median), ohne Historie aus der Einst
       ],
       40,
     ),
-    {
-      hours: 20,
-      tokens: null,
-      source: 'history',
-    },
+    { hours: 40, tokens: null, source: 'setting' },
   );
-  // Ist-Tokens ebenfalls als Median; Sprints ohne gemessene Laufzeit zählen nicht als Historie.
   assert.deepEqual(
     capacityFrom(
       [
-        { hours: 5, tokens: 300_000 },
-        { hours: 0, tokens: 0 },
-        { hours: 7, tokens: 100_000 },
+        { hours: 0.25, tokens: 6_000_000 },
+        { hours: 0.2, tokens: 5_000_000 },
       ],
       40,
     ),
-    { hours: 6, tokens: 200_000, source: 'history' },
+    { hours: 40, tokens: null, source: 'setting' },
+  );
+  // Mehr geschafft: die Historie hebt die Kapazität an, Ist-Tokens als Median; Sprints ohne Laufzeit zählen nicht.
+  assert.deepEqual(
+    capacityFrom(
+      [
+        { hours: 50, tokens: 300_000 },
+        { hours: 0, tokens: 0 },
+        { hours: 70, tokens: 100_000 },
+      ],
+      40,
+    ),
+    { hours: 60, tokens: 200_000, source: 'history' },
   );
   assert.deepEqual(capacityFrom([], 40), { hours: 40, tokens: null, source: 'setting' });
 });
@@ -180,4 +187,19 @@ test('Autopilot: Sprint ist fertig, wenn nur noch Erledigtes oder „Aktion notw
   assert.equal(sprintSettled([item('in_progress')]), false);
   assert.equal(sprintSettled([item('backlog')]), false);
   assert.equal(sprintSettled([]), false);
+});
+
+test('Übernommene Aufträge allein füllen keinen Sprint: mindestens ein neuer kommt immer dazu', () => {
+  const proposal = proposeSprint(
+    [
+      order({ id: 'carry', title: 'Blockiert aus dem Vorsprint', carryOver: true }),
+      order({ id: 'new', title: 'Neu', effortHours: 2 }),
+      order({ id: 'second', title: 'Noch einer', effortHours: 2 }),
+    ],
+    new Set(),
+    { hours: 0.25, tokens: null, source: 'history' },
+  );
+  const selected = proposal.items.filter((item) => item.selected).map((item) => item.id);
+  assert.ok(selected.includes('carry'));
+  assert.equal(selected.filter((id) => id !== 'carry').length, 1, 'genau ein neuer trotz zu knapper Kapazität');
 });

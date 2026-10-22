@@ -68,13 +68,16 @@ function median(values: number[]): number | null {
 }
 
 /**
- * Kapazität = Median der erledigten Ist-Stunden (bzw. Ist-Tokens) der letzten 3 abgeschlossenen Sprints, sonst
- * Einstellung. Sprints ohne gemessene Stunden zählen nicht als Historie.
+ * Kapazität = Median der erledigten Ist-Stunden (bzw. Ist-Tokens) der letzten 3 abgeschlossenen Sprints, aber nie
+ * weniger als die Einstellung. Sonst schrumpft sie von selbst: Ein Sprint schafft höchstens, was eingeplant war, und
+ * die Ist-Stunden sind Rechenzeit der Agents (ein auf 2 h geschätzter Auftrag ist oft in 15 Minuten fertig) – nach
+ * wenigen Sprints passte kein Auftrag mehr hinein. Die Historie hebt die Kapazität also nur an. Sprints ohne gemessene
+ * Stunden zählen nicht als Historie; eine Token-Grenze gilt nur, wenn die Historie die Kapazität bestimmt.
  */
 export function capacityFrom(history: { hours: number; tokens: number }[], settingHours: number): Capacity {
   const recent = history.filter((sprint) => sprint.hours > 0).slice(0, 3);
   const hours = median(recent.map((sprint) => sprint.hours));
-  if (hours === null) return { hours: settingHours, tokens: null, source: 'setting' };
+  if (hours === null || hours <= settingHours) return { hours: settingHours, tokens: null, source: 'setting' };
   const tokens = median(recent.map((sprint) => sprint.tokens).filter((value) => value > 0));
   return { hours, tokens, source: 'history' };
 }
@@ -150,6 +153,23 @@ export function proposeSprint(
       skipped.delete(candidate.id);
       hours += entry.hours;
       tokens += candidate.tokenEstimate ?? 0;
+    }
+  }
+
+  // Nur übernommene Aufträge ergäben keinen Sprint (der Autopilot startet ihn dann nicht): Passt kein neuer Auftrag
+  // mehr in die Kapazität, kommt trotzdem der am besten bewertete dazu, dessen Vorgänger erledigt ist.
+  if (!chosen.some((entry) => !entry.candidate.carryOver)) {
+    const next = scored.find(
+      ({ candidate }) =>
+        !candidate.carryOver &&
+        (!candidate.followUpOf || doneIds.has(candidate.followUpOf) || chosenIds.has(candidate.followUpOf)),
+    );
+    if (next) {
+      chosen.push(next);
+      chosenIds.add(next.candidate.id);
+      skipped.delete(next.candidate.id);
+      hours += next.hours;
+      tokens += next.candidate.tokenEstimate ?? 0;
     }
   }
 
