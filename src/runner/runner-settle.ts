@@ -4,6 +4,7 @@ import { logged } from '../core/log.js';
 import { sendPush } from '../core/push.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { saveOrderDoc, upsertDoc } from '../api/docs.js';
+import { clearManualTodo, MERGE_TODO, setActionTodo } from './action-todo.js';
 import { resumeBlockedByBug } from './autofix.js';
 import { commitTaskToGit, finishOrderBranch } from './git-sync.js';
 import {
@@ -141,6 +142,11 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     await pool
       .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, mergeProblem])
       .catch(logged('runner-steps'));
+    // Kein Konflikt (die gehen oben in einen neuen Versuch): Ohne Vermerk wartete der Sprint still auf eine Behebung,
+    // die niemand startet – sichtbar machen, was zu tun ist.
+    if (!isMergeConflict(mergeProblem)) await setActionTodo(pool, item.id, MERGE_TODO).catch(logged('runner-steps'));
+  } else if (!succeeded) {
+    await clearManualTodo(pool, item.id).catch(logged('runner-steps'));
   }
   if (item.agentId) {
     // A one-agent play restores the previous status; a blocked order resumes normally after success.

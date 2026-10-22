@@ -16,7 +16,7 @@ import {
   sprintBranch,
   stageAll,
 } from './git-helpers.js';
-import { clearStaleIndexLock } from './stale-lock.js';
+import { clearStaleLocks } from './stale-lock.js';
 
 /**
  * Aufräumen des Agent-Arbeitsordners beim Start des Workers. Wurde der Worker mitten in einem Commit oder Merge
@@ -89,8 +89,7 @@ export async function reconcileWorkingTree(
   const separate = repository !== agentFolder;
   // Beim Start laufen keine alten git-Prozesse mehr (killPreviousProcesses): jede ungehaltene Sperre ist verwaist.
   for (const folder of separate ? [agentFolder, repository] : [agentFolder]) {
-    const cleared = await clearStaleIndexLock(folder, now.getTime(), { minAgeMs: 0 }).catch(() => null);
-    if (cleared) actions.push(cleared);
+    actions.push(...(await clearStaleLocks(folder, now.getTime(), { minAgeMs: 0 }).catch((): string[] => [])));
   }
   if (!separate || !existsSync(join(agentFolder, '.git'))) return { actions };
   const execute: CommandExecutor = (command, directory, options) =>

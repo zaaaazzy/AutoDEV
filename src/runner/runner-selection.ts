@@ -113,7 +113,9 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
        LEFT JOIN sprints s ON s.id = d.sprint_id
       WHERE d.project_slug = $1 AND d.status = 'planned' AND d.kind <> 'express'
         AND NOT ${awaitsBugApprovalSql('d')}
-        AND (s.status = 'active' OR d.agent_id IS NOT NULL OR d.auto_run)
+        -- auto_run nur ohne Sprint: Ein geplanter Sprint wartet auf seinen Start, ein abgeschlossener bzw. abgebrochener
+        -- hält den Auftrag ohnehin an (sprintPaused) – er drehte sich sonst endlos (detachFromClosedSprints hängt ihn um).
+        AND (s.status = 'active' OR d.agent_id IS NOT NULL OR (d.auto_run AND d.sprint_id IS NULL))
         -- Nutzungslimit des Agent-Kontos bzw. Arbeitsordner nicht sauber: erst nach dem Reset wieder starten. Beides gilt
         -- für das ganze Projekt, nicht nur für den Auftrag, der es bemerkt hat – sonst liefe jeder weitere Auftrag in
         -- dieselbe Wand (ein von Hand gestarteter Agent läuft trotzdem).

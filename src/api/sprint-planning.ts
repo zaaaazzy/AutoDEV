@@ -277,14 +277,26 @@ export async function applyProposal(
         ],
       )
     ).rows[0]!.id;
+    // Blockierte Aufträge (z. B. aus einem gescheiterten Sprint) werden wie bei „In Sprint übernehmen“ zurückgesetzt:
+    // Sonst landeten sie blockiert samt altem Vermerk im neuen Sprint, liefen nie und hielten ihn offen (Sprint 21).
+    // auto_run folgt dem Sprint: ein geplanter wartet auf seinen Start.
     await client.query(
       `UPDATE development_items d
           SET sprint_id = $2, sprint_rank = picked.rank,
-              status = CASE WHEN d.status = 'backlog' THEN 'planned' ELSE d.status END,
+              status = CASE WHEN d.status IN ('backlog', 'blocked') THEN 'planned' ELSE d.status END,
+              auto_run = $4,
+              agent_id = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.agent_id END,
+              failure = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.failure END,
+              action_todo = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.action_todo END,
+              retry_after = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.retry_after END,
+              retry_count = d.retry_count + CASE WHEN d.status = 'blocked' THEN 1 ELSE 0 END,
+              analysis_status = CASE WHEN d.status <> 'blocked' OR d.analysis_status IN ('requested', 'running')
+                                     THEN d.analysis_status ELSE NULL END,
+              budget_since = CASE WHEN d.status = 'blocked' THEN NOW() ELSE d.budget_since END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
          FROM unnest($1::uuid[]) WITH ORDINALITY AS picked(id, rank)
         WHERE d.id = picked.id AND d.project_slug = $3`,
-      [ids, sprintId, project],
+      [ids, sprintId, project, shouldStart],
     );
     await client.query('DELETE FROM sprint_proposal_comments WHERE project_slug = $1', [project]);
     await client.query('COMMIT');
