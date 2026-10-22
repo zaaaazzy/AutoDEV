@@ -492,6 +492,52 @@ Das Ergebnis steht im Auftragsdetail unter „Analyse“, die Bugs im Bereich �
 | „409: Der Auftrag ist nicht blockiert …“ | Der Auftrag hat den Status gewechselt, z. B. weil er neu gestartet wurde. Die Analyse ist nur für blockierte Aufträge da. |
 | Es gibt keinen neuen Bug, obwohl die Analyse lief | Ein Bug mit gleichem Titel existiert im Projekt schon, oder der Auftrag hatte einen Bug-Bericht, den die Analyse ergänzt hat. Die Analyse steht in beiden Fällen im Auftrag unter „Analyse“. |
 
+## 11. Aufträge in den Sprint nehmen („Aufträge hinzufügen“)
+
+Auf der Sprintseite lassen sich offene und abgebrochene Aufträge in den Sprint übernehmen, ohne sie einzeln anzulegen oder zu öffnen. Die Liste steht unter dem Auftragsbereich des Sprints.
+
+[Bild 12: Sprintseite mit zugeklappter Liste „Aufträge hinzufügen (n verfügbar)“ und mit geöffneter Liste samt Auswahl]
+
+### 11.1 Wann die Liste erscheint und was sie zeigt
+
+- **Ort:** Sprintseite, unter der Auftragstabelle, Eintrag „Aufträge hinzufügen (N verfügbar)“.
+- **Nur mit Recht „plan“:** Ohne dieses Recht fehlt die Liste ganz.
+- **Nur in geplanten oder aktiven Sprints:** In abgeschlossenen oder abgebrochenen Sprints fehlt sie. Auch im Review und danach wird nichts übernommen. Der Server prüft dieselbe Regel.
+- **Inhalt:** Offene Aufträge (noch in keinem Sprint) und abgebrochene Aufträge (aus einem Sprint genommen oder mit Status „blockiert“). Abgebrochene stehen unten, jeweils in Rangfolge. Die Spalte „Herkunft“ zeigt, welche Art es ist.
+- **Nicht enthalten:** Aufträge, die gerade laufen, abgeschlossen oder abgebrochen sind, und Aufträge, die schon in einem Sprint stehen.
+
+### 11.2 Offen und zu oder offen
+
+- **Vorgabe:** Ist der Sprint leer, ist die Liste beim Öffnen der Seite offen. Ist er nicht leer, ist sie zu.
+- **Von Hand:** Ein Klick auf den Eintrag öffnet oder schließt die Liste. Sie bleibt dann so, bis du sie wieder änderst.
+- **Bleibt offen:** Die Liste klappt nicht zu, wenn sich die Daten neu laden. Das passiert etwa alle 3 Sekunden, solange ein Agent läuft, und nach jedem Übernehmen. Auch Filter und Auswahl bleiben erhalten.
+- **Wechsel des Sprints:** Wird der Sprint leer oder ist er nicht mehr leer, gilt wieder die Vorgabe (siehe oben).
+
+### 11.3 Auswahl und Übernahme
+
+- **Einzeln:** Der Pfeil „→“ in einer Zeile übernimmt diesen Auftrag sofort in den Sprint.
+- **Mehrere:** Haken setzen. Oben erscheint „N ausgewählt“ mit „→ In den Sprint (N)“ und „Auswahl aufheben“.
+- **Nach der Übernahme:** Der Auftrag verschwindet aus der Liste. Die übrige Auswahl bleibt markiert.
+- **Sperre:** Während eine Aktion läuft, sind die Schaltflächen gesperrt.
+- **Wohin:** Ein übernommener Auftrag landet in der Auftragsliste des Sprints als „geplant“. Er wird in der angezeigten Reihenfolge abgearbeitet. Ob er sofort startet, hängt davon ab, ob der Sprint aktiv ist (siehe [`laufzeit.md`](laufzeit.md)).
+
+[Bild 13: Sprint mit geöffneter Liste, zwei markierten Aufträgen und Leiste „2 ausgewählt“]
+
+### 11.4 Grenzen
+
+- **Nur der Sprint in der Ansicht:** Die Liste bietet Aufträge für den Sprint an, den du gerade öffnest.
+- **Keine Filter nach Status:** Die Liste zeigt alle verfügbaren Aufträge. Aufträge im Status „Freigabe“ ohne Sprint erscheinen ebenfalls, lassen sich aber nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch (siehe [`workflows.md`](workflows.md)).
+- **Inzwischen eingeplant:** Ein Auftrag, der nach dem Markieren schon in einem Sprint gelandet ist, fällt aus der Auswahl heraus.
+
+### 11.5 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Die Liste fehlt | Dir fehlt das Recht „plan“, oder der Sprint ist abgeschlossen oder abgebrochen. |
+| Die Liste klappt beim Übernehmen oder Nachladen trotzdem zu | Das sollte mit dem Fix nicht mehr passieren. Lade die Seite neu. Tritt es danach weiterhin auf, melde es als Fehler mit Sprint und Schritten. |
+| Ein Auftrag fehlt in der Liste | Er gehört schon zu einem Sprint, läuft gerade oder ist abgeschlossen. |
+| Übernahme schlägt fehl | Die Meldung nennt den Grund. Häufig ist der Sprint inzwischen abgeschlossen oder der Auftrag schon eingeplant. |
+
 ---
 
 ## Verwandte Dokumente
