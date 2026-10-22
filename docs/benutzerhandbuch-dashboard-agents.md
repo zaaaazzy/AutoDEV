@@ -433,6 +433,67 @@ Die Vorlagen werden einmal je Projekt angelegt. Sie sind immer deaktiviert und n
 
 ---
 
+## 10. Problemanalyse für blockierte Aufträge
+
+Ein Auftrag wird blockiert, wenn er nicht weiterlaufen kann. Das kann an einem fehlgeschlagenen Agent-Schritt liegen, aber auch an anderen Gründen: Git-Fehler beim Betreten des Auftrags-Branches (etwa „fremde, nicht committete Änderungen“), Budget, Merge-Konflikt oder ein gescheiterter Abschluss. Die Problemanalyse erklärt dann die Ursache und schlägt eine Lösung vor. Vorher sah die Analyse bei diesen Gründen nur „Keine Fehlerausgabe vorhanden“, weil sie nur fehlgeschlagene Schritte las. Das ist behoben.
+
+[Bild 10: Blockierter Auftrag im Detail mit dem Abschnitt „Blockiert“ und dem Button „🔎 Problem analysieren“]
+
+### 10.1 Wann der Button erscheint
+
+- **Ort:** Auftragsdetail, Abschnitt „Blockiert“. Er steht neben „↻ Erneut versuchen“. Der Abschnitt erscheint bei Status „blockiert“ und bei „abgelehnt“ (verstößt gegen eine Projektregel).
+- **Beschriftung:** „🔎 Problem analysieren“. Während die Analyse läuft, zeigt er „Assistent analysiert …“ und ist gesperrt.
+- **Bestätigung:** Vor dem Start fragt AIdeation „Neu analysieren?“. Mit „Analysieren“ startet sie.
+- **Nicht bei Express-Aufträgen:** Die Schaltfläche steht zwar da, aber der Server lehnt die Analyse für Express-Aufträge mit 409 ab.
+- **Nur bei blockierten Aufträgen:** Ist der Auftrag nicht blockiert oder läuft schon eine Analyse, antwortet der Server mit 409: „Der Auftrag ist nicht blockiert oder wird bereits analysiert.“
+
+### 10.2 Was die Analyse liest
+
+Die Analyse läuft im Chat-Takt des Workers (etwa alle 1,5 s). Sie nimmt jeweils den ältesten angeforderten Auftrag des Projekts. Der Analyse-Prompt enthält in dieser Reihenfolge:
+
+| Abschnitt im Prompt | Quelle | Bedingung und Kürzung |
+| --- | --- | --- |
+| Blockiergrund des Auftrags | Feld `failure` | Nur wenn gesetzt. Höchstens 2.500 Zeichen. Der **Anfang** bleibt erhalten, weil dort der Grund steht und Dateilisten erst danach folgen. |
+| Offene Aktion | Feld `action_todo` | Nur wenn gesetzt. Gleiche Grenze von 2.500 Zeichen. |
+| Ausgabe fehlgeschlagener Schritte | letzte drei Schritte mit Status „fehlgeschlagen“ | Je Schritt höchstens 2.500 Zeichen. Das **Ende** der Ausgabe bleibt erhalten. |
+
+- **Leere Felder** erzeugen keinen eigenen Abschnitt. Erst wenn weder Blockiergrund, offene Aktion noch fehlgeschlagener Schritt vorliegt, steht dort „Keine Fehlerausgabe vorhanden.“
+- **Geheimnisse** in Blockiergrund und offener Aktion werden vor dem Versand geschwärzt. Die Schwärzung betrifft diese beiden Felder, nicht die Schrittausgaben.
+- **Bekannte Bugs:** Die letzten 30 Bugs des Projekts gehen ebenfalls in den Prompt, damit die Analyse bekannte Ursachen erkennt.
+- **Nur lesen:** Die Analyse hat nur lesende Rechte (Rolle `analyst`). Sie ändert keinen Code und keine Datei.
+
+### 10.3 Was danach passiert
+
+| Ergebnis der Analyse | Folge |
+| --- | --- |
+| Antwort mit Titel und Ursache, kein Bug-Bericht zum Auftrag vorhanden | Ein Bug mit Schwere „hoch“ und Quelle „Agent“ wird angelegt. Gibt es im Projekt schon einen Bug mit demselben Titel, entsteht kein zweiter. Die Analyse steht im Auftrag unter „Analyse“. Ein Behebungsauftrag entsteht hier nicht. |
+| Antwort mit Titel und Ursache, Bug-Bericht zum Auftrag existiert schon (vom gescheiterten Agent) | Die Analyse ergänzt diesen Bug in den Fix-Notizen und legt keinen zweiten an. Ist die Zeile „AKTION“ leer („keine“), wird der Bug an die Behebung delegiert: Der Bug-Auftrag entsteht nur, wenn `auto_bugfix` am Projekt aktiv ist (siehe [`workflows.md`](workflows.md)). |
+| Zeile „AKTION: …“ mit einem Menschen-Schritt (z. B. „API-Schlüssel in .env eintragen“) | Der Auftrag zeigt „Aktion notwendig“ mit dem Schritt und wartet darauf. Gibt es einen Bug-Bericht zum Auftrag, bekommt er den Vermerk „Kein Code-Fehler“. Es entsteht in jedem Fall kein Behebungsauftrag. |
+| Antwort zu kurz (unter 60 Zeichen) oder Analyse mit Fehler | Die Analyse gilt als fehlgeschlagen. Der Text „Analyse fehlgeschlagen: …“ erscheint unter der Analyse, es entsteht kein Bug. Danach kannst du erneut analysieren lassen. |
+| Worker wird während der Analyse beendet | Die Analyse wird wieder als „angefordert“ eingetragen und beim nächsten Start neu ausgeführt. |
+
+Das Ergebnis steht im Auftragsdetail unter „Analyse“, die Bugs im Bereich „Bugs“.
+
+[Bild 11: Auftragsdetail nach der Analyse mit „**Bug:** …“ und dem Hinweis auf den neuen Bug]
+
+### 10.4 Grenzen
+
+- **Nur ein Auftrag je Projekt und Takt:** Mehrere angeforderte Analysen laufen nacheinander.
+- **Keine Schritte, die nicht fehlgeschlagen sind:** Die letzten erfolgreichen Schritte und die Läufe der Agents (`agent_runs`) gehen nicht in die Analyse. Die Analyse sieht nur den Blockiergrund, die offene Aktion und die fehlgeschlagenen Schritte.
+- **Kein Ersatz für Fehlerbehebung:** Die Analyse erklärt und schlägt vor. Umgesetzt wird sie nur über einen Bugfix-Auftrag oder eine Aktion, die ein Mensch ausführt.
+
+### 10.5 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Analyse nennt keine Ursache, obwohl der Auftrag blockiert ist | Prüfe, ob im Auftrag ein Blockiergrund steht. Fehlt er, war der Grund nicht im Auftrag gespeichert. Dann bleibt nur die Ausgabe der Schritte. |
+| Analyse zeigt „Analyse fehlgeschlagen: …“ | Der Analyse-Agent lief nicht durch (Modell nicht erreichbar, Zeitlimit, Befehl nicht gefunden). Die Meldung nennt den Grund. Behebe die Ursache und fordere die Analyse erneut an. |
+| Button ist grau und zeigt „Assistent analysiert …“ | Eine Analyse ist angefordert oder läuft gerade. Warte auf den Abschluss oder prüfe, ob der Worker läuft (siehe Abschnitt 4). |
+| „409: Der Auftrag ist nicht blockiert …“ | Der Auftrag hat den Status gewechselt, z. B. weil er neu gestartet wurde. Die Analyse ist nur für blockierte Aufträge da. |
+| Es gibt keinen neuen Bug, obwohl die Analyse lief | Ein Bug mit gleichem Titel existiert im Projekt schon, oder der Auftrag hatte einen Bug-Bericht, den die Analyse ergänzt hat. Die Analyse steht in beiden Fällen im Auftrag unter „Analyse“. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
