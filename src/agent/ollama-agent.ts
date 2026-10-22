@@ -63,8 +63,10 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const maxTurns =
     options.maxTurns ??
     (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
+  const controller = new AbortController();
   const context: ToolContext = {
     cwd: options.cwd,
+    signal: controller.signal,
     canWrite,
     canManageServices: options.role === 'assistant' && !options.readOnly,
     databaseUrl: canWrite ? options.databaseUrl : null,
@@ -89,7 +91,6 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl)) },
     { role: 'user', content: options.prompt },
   ];
-  const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs);
   const abortOnShutdown = (): void => controller.abort();
   shutdownSignal.addEventListener('abort', abortOnShutdown, { once: true });
