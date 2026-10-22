@@ -49,7 +49,10 @@ wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**
 - Gesetzt werden nur Benutzername, Passwort und die ausgefüllten Optionen. Leere Felder (Domain, Projektbereich)
   lassen bestehende Werte stehen. Eigene Einträge, Kommentare und die Reihenfolge bleiben erhalten.
 - **Secret Key** (`DEV_LOG_SECRET_KEY`): Fehlt er oder ist er leer, erzeugt der Assistent einen zufälligen Schlüssel.
-  Ein vorhandener Schlüssel wird nie ersetzt. Mit ihm werden die Zugangsdaten der Projekte verschlüsselt.
+  Ein vorhandener Schlüssel wird nie ersetzt. Mit ihm werden die Zugangsdaten der Projekte und die Schlüssel der
+  Zwei-Faktor-Anmeldung verschlüsselt. Ohne ihn lässt sich kein zweiter Faktor einrichten. Sind schon Zwei-Faktor-
+  Schlüssel gespeichert, startet der Dienst ohne ihn (oder mit einem anderen Schlüssel) nicht. Ältere, unverschlüsselt
+  gespeicherte Zwei-Faktor-Schlüssel verschlüsselt der Dienst beim ersten Start mit dem Schlüssel.
   **Sichere die `.env` (oder wenigstens diesen Schlüssel) in deinem Passwort-Manager.** Geht er verloren, sind die
   verschlüsselten Werte nicht mehr lesbar.
 - **Datenbank-Passwort** (`DEV_LOG_DB_PASSWORD`): Fehlt es, wird ein zufälliges erzeugt (früher galt der Standard
@@ -156,4 +159,7 @@ ein. Unter macOS ist nichts zu tun.
 | Worker-Log: „Env-Datei … fehlt“ oder „für andere lesbar“ | Installationsskript erneut ausführen bzw. `chmod 600` auf die Env-Datei |
 | Backup-Container startet immer neu (Linux) | `./backups` ist für ihn nicht beschreibbar – `DEV_LOG_BACKUP_USER` setzen (siehe oben) |
 | Zwei-Faktor-Gerät verloren | siehe README, Abschnitt Sicherheit |
+| Start bricht ab: „Zwei-Faktor-Schlüssel brauchen DEV_LOG_SECRET_KEY“ | Den bisherigen `DEV_LOG_SECRET_KEY` in der `.env` wieder eintragen und neu starten |
+| Nach dem Update überall abgemeldet | Gewollt: Sitzungen von vor der Passwort-Bindung gelten nicht mehr, einmal neu anmelden |
+| Nach neuem `DEV_LOG_PASSWORD` abgemeldet | Gewollt: Eine Passwortrotation beendet alle Sitzungen des Systemadministrators |
 | Zu viele Fehlversuche | 15 Minuten warten – gesperrt wird nur das betroffene Konto |

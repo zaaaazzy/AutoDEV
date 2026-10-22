@@ -60,6 +60,14 @@
       @if (current.totp) {
         <form class="totp-confirm" (ngSubmit)="disable()">
           <input
+            type="password"
+            name="disablePassword"
+            [(ngModel)]="password"
+            autocomplete="current-password"
+            placeholder="Aktuelles Passwort"
+            aria-label="Aktuelles Passwort"
+          />
+          <input
             name="disableCode"
             [(ngModel)]="code"
             inputmode="numeric"
@@ -68,7 +76,7 @@
             placeholder="Code zum Ausschalten"
             aria-label="Code zum Ausschalten"
           />
-          <button class="button secondary" type="submit" [disabled]="busy() || code.trim().length < 6">
+          <button class="button secondary" type="submit" [disabled]="busy() || !password || code.trim().length < 6">
             Ausschalten
           </button>
         </form>

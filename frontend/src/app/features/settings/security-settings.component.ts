@@ -59,7 +59,8 @@ export class SecuritySettingsComponent {
 
   protected async disable(): Promise<void> {
     await this.run(async () => {
-      await this.api.post('/api/auth/totp/disable', { code: this.code });
+      await this.api.post('/api/auth/totp/disable', { password: this.password, currentCode: this.code });
+      this.password = '';
       this.code = '';
       this.message.set('Zwei-Faktor-Anmeldung ist ausgeschaltet.');
       await this.load();

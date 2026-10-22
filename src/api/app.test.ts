@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
-import { hashPassword, verifyPassword } from './auth.js';
+import { credentialVersion, hashPassword, verifyPassword } from './auth.js';
 import { DEV_COLUMNS } from './development.js';
 import { currentStep, hotp } from './totp.js';
 
@@ -11,6 +11,13 @@ import { currentStep, hotp } from './totp.js';
 delete process.env.DEV_LOG_PROJECT_ROOTS;
 
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
+// Zwei-Faktor-Schlüssel werden nur verschlüsselt gespeichert; dafür braucht es einen Schlüssel.
+process.env.DEV_LOG_SECRET_KEY ??= 'ein-schluessel-nur-fuer-tests';
+/** Bindung einer Benutzer-Sitzung an ihren Passwort-Hash (sonst gilt die Sitzung nicht). */
+const boundUser = {
+  password_hash: 'scrypt$salz$hash',
+  credential_version: await credentialVersion(auth, 'scrypt$salz$hash'),
+};
 
 async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {
   const server = createDevLogApp(pool, auth).listen(0, '127.0.0.1');
@@ -68,14 +75,14 @@ test('API paths are case-sensitive, so other spellings never reach a route past 
 
 /** Speicher für Sitzungen und Einstellungen, damit Login und Zwei-Faktor ohne Datenbank laufen. */
 function sessionPool(): Pool {
-  const sessions = new Map<string, Date>();
+  const sessions = new Map<string, string>();
   const settings = new Map<string, string>();
   return {
     query: async (sql: string, values: unknown[] = []) => {
-      if (sql.startsWith('INSERT INTO auth_sessions')) sessions.set(values[0] as string, new Date());
+      if (sql.startsWith('INSERT INTO auth_sessions')) sessions.set(values[0] as string, values[4] as string);
       else if (sql.includes('FROM auth_sessions s')) {
-        const seen = sessions.get(values[0] as string);
-        return { rows: seen ? [{ last_seen: seen, user_id: null }] : [] };
+        const version = sessions.get(values[0] as string);
+        return { rows: version ? [{ last_seen: new Date(), user_id: null, credential_version: version }] : [] };
       } else if (sql.startsWith('DELETE FROM auth_sessions WHERE token_hash <>')) {
         for (const key of [...sessions.keys()]) if (key !== values[0]) sessions.delete(key);
       } else if (sql.startsWith('DELETE FROM auth_sessions')) sessions.delete(values[0] as string);
@@ -180,6 +187,19 @@ test('2FA einrichten verlangt das Passwort und bei aktivem zweitem Faktor einen 
     // Derselbe alte Code wie beim Einrichten gilt beim Bestätigen noch – sonst müsste man auf den nächsten warten.
     assert.equal((await post('enable', { password: auth.password, currentCode, code: newCode })).status, 200);
     assert.equal(totpAuth.totpSecret, secondSecret);
+
+    // Abschalten: ein Code allein (gestohlenes Cookie) genügt nicht, es braucht auch das Passwort.
+    const offCode = hotp(secondSecret, currentStep() + 1);
+    const codeOnly = await post('disable', { currentCode: offCode });
+    assert.equal(codeOnly.status, 400);
+    assert.equal(totpAuth.totpSecret, secondSecret, 'nothing changed without the password');
+    // Falsches Passwort und falscher Code ergeben dieselbe Antwort.
+    const wrongPassword = await (await post('disable', { password: 'wrong-password', currentCode: offCode })).json();
+    const wrongCode = await (await post('disable', { password: auth.password, currentCode: '000000' })).json();
+    assert.deepEqual(wrongPassword, wrongCode);
+    assert.equal(totpAuth.totpSecret, secondSecret);
+    assert.equal((await post('disable', { password: auth.password, currentCode: offCode })).status, 200);
+    assert.equal(totpAuth.totpSecret, null);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
@@ -871,6 +891,7 @@ test('a planner may read but not manage users or agents', async () => {
                 display_name: 'Pia',
                 roles: ['plan'],
                 active: true,
+                ...boundUser,
               },
             ],
           }
@@ -896,7 +917,17 @@ function memberPool(roles: string[], answer: (sql: string, values: unknown[]) =>
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes('FROM auth_sessions s')) {
         return {
-          rows: [{ last_seen: new Date(), user_id: 'u1', username: 'pia', display_name: 'Pia', roles, active: true }],
+          rows: [
+            {
+              last_seen: new Date(),
+              user_id: 'u1',
+              username: 'pia',
+              display_name: 'Pia',
+              roles,
+              active: true,
+              ...boundUser,
+            },
+          ],
         };
       }
       if (sql.includes('FROM project_members')) return { rows: [{ slug: 'p' }] };
