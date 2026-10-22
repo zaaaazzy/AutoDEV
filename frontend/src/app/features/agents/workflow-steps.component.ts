@@ -63,7 +63,7 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
             @for (step of stepsOf(phase.id); track step.id; let index = $index; let last = $last) {
               @let agent = agentOf(step);
               <li class="workflow-step" [class.disabled]="!step.enabled || !agent?.enabled">
-                <div class="workflow-step-head">
+                <div class="workflow-step-head row">
                   <span class="kanban-rank">{{ index + 1 }}</span>
                   <strong class="workflow-step-name">{{ agent?.name ?? 'Agent gelöscht' }}</strong>
                   @if (agent && running().has(agent.id)) {

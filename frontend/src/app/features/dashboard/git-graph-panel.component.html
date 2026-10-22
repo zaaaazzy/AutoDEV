@@ -32,7 +32,7 @@
             />
           </svg>
           <a
-            class="git-commit"
+            class="git-commit row"
             [class.local]="!url"
             [attr.href]="url"
             target="_blank"
@@ -41,9 +41,9 @@
           >
             <code class="git-hash">{{ row.commit.hash.slice(0, 7) }}</code>
             @for (ref of refs(row.commit); track ref.ref) {
-              <span [class]="'git-ref git-ref-' + ref.kind">{{ ref.label }}</span>
+              <span [class]="'git-ref truncate git-ref-' + ref.kind">{{ ref.label }}</span>
             }
-            <span class="git-subject">{{ row.commit.subject }}</span>
+            <span class="git-subject truncate">{{ row.commit.subject }}</span>
             <span class="git-meta muted">{{ row.commit.author }} · {{ relative(row.commit.date) }}</span>
           </a>
         </div>
