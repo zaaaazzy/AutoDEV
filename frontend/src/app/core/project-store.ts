@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { ApiService } from './api.service.js';
-import { errorMessage } from './errors.js';
+import { errorMessage, FieldError } from './errors.js';
 import {
   emptyProjectData,
   type DevelopmentItem,
@@ -227,7 +227,8 @@ export class ProjectStore {
         if (this.notice() === success) this.notice.set('');
       }, NOTICE_MS);
     } catch (error) {
-      this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
+      // Steht die Meldung schon am Formularfeld, nicht zusätzlich oben anzeigen.
+      if (!(error instanceof FieldError && error.shown)) this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
     } finally {
       this.busy.set(false);
     }

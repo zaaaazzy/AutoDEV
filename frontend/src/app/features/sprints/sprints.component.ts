@@ -14,6 +14,7 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
 import { combinedCategory, statusLabel } from '../../shared/labels.js';
+import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { SprintDetailComponent } from './sprint-detail.component.js';
 import { SprintProposalComponent } from './sprint-proposal.component.js';
@@ -49,6 +50,7 @@ export class SprintsComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
+  protected readonly sprintErrors = new FieldErrors();
   protected sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
 
   protected readonly current = computed(() => {
@@ -134,7 +136,11 @@ export class SprintsComponent {
     this.openSprint.update((current) => (current === id ? null : id));
   }
 
-  protected async createSprint(): Promise<void> {
+  protected async createSprint(form: HTMLFormElement): Promise<void> {
+    if (!this.sprintErrors.require('name', this.sprintForm.name, 'Bitte einen Namen angeben.')) {
+      focusField(form, 'name');
+      return;
+    }
     const body = {
       name: this.sprintForm.name,
       goal: this.sprintForm.goal,
@@ -142,7 +148,12 @@ export class SprintsComponent {
       endDate: this.sprintForm.endDate || null,
     };
     await this.store.perform(async () => {
-      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/sprints`, body);
+      await this.api
+        .post(`${this.api.projectPath(this.store.activeProject())}/sprints`, body)
+        .catch((error: unknown) => {
+          this.sprintErrors.take(error, form);
+          throw error;
+        });
       this.sprintForm = { name: '', goal: '', startDate: '', endDate: '' };
       this.store.showCreate.set(false);
     }, 'Sprint angelegt.');

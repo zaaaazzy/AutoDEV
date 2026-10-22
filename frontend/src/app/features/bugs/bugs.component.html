@@ -9,7 +9,7 @@
           </div>
         </div>
         @if (store.showCreate()) {
-          <form class="form-grid create-form" (ngSubmit)="createBug()">
+          <form class="form-grid create-form" #bugFormElement (ngSubmit)="createBug(bugFormElement)">
             <label class="wide"
               >Titel<input
                 name="title"
@@ -17,7 +17,13 @@
                 maxlength="80"
                 required
                 placeholder="Kurz: was ist kaputt (max. 80 Zeichen)"
-            /></label>
+                [attr.aria-invalid]="bugErrors.message('title') ? true : null"
+                (input)="bugErrors.clear('title')"
+              />
+              @if (bugErrors.message('title')) {
+                <small class="field-error" role="alert">{{ bugErrors.message('title') }}</small>
+              }
+            </label>
             <label
               >Schweregrad<select name="severity" [(ngModel)]="bugForm.severity">
                 <option value="medium">Mittel</option>

@@ -8,7 +8,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/test-runs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const runs = await pool.query(
@@ -67,7 +67,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/test-runs/live', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const run = (
@@ -94,7 +94,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/test-runs/:id/cases', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug || !isUuid(request.params.id)) {
-      response.status(400).json({ message: 'Invalid test run.' });
+      response.status(400).json({ message: 'Ungültiger Testlauf.' });
       return;
     }
     const cases = await pool.query(
@@ -129,7 +129,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
       : { rows: [] };
     const row = result.rows[0];
     if (!row) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     response.set({
