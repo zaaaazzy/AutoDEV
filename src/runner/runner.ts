@@ -29,6 +29,7 @@ import {
 } from './budget.js';
 import { setActionTodo } from './action-todo.js';
 import { pauseForFolderProblem } from './folder-pause.js';
+import { leftItsSprint } from './runner-settle.js';
 import {
   budgetGate,
   claimRun,
@@ -157,13 +158,18 @@ async function resumePosition(
   return position;
 }
 
-/** Name des Sprints eines Auftrags (für Sprint-Branch und Commit-Nachrichten). */
+/**
+ * Name des Sprints eines Auftrags (für Sprint-Branch und Commit-Nachrichten). Ein abgeschlossener oder abgebrochener
+ * Sprint zählt nicht: Sein Branch ist schon gesichert, ein Merge dorthin käme nie mehr in main. Der Auftrag arbeitet
+ * dann wie einer ohne Sprint auf main.
+ */
 async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> {
   if (!item.sprintId) return null;
   const sprint = await pool
-    .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
+    .query<{ name: string; status: string }>('SELECT name, status FROM sprints WHERE id = $1', [item.sprintId])
     .catch(logged('runner', null));
-  return sprint?.rows[0]?.name ?? null;
+  const row = sprint?.rows[0];
+  return row && row.status !== 'completed' && row.status !== 'cancelled' ? row.name : null;
 }
 
 /** Ist der Sprint des Auftrags pausiert? Ein von Hand gestarteter einzelner Agent läuft trotzdem. */
@@ -287,7 +293,10 @@ export async function runWorkItem(
       }
       // Sprint pausiert: der vorige Agent hat seinen Schritt beendet, der nächste startet erst nach dem Fortsetzen.
       // Der Auftrag gilt als unterbrochen (wieder „Geplant“); der nächste Lauf überspringt die erfolgreichen Agents.
-      if (await sprintPaused(pool, item).catch(logged('runner', false))) {
+      if (
+        (await sprintPaused(pool, item).catch(logged('runner', false))) ||
+        (await leftItsSprint(pool, item).catch(logged('runner', false)))
+      ) {
         console.info(`[${item.id}] Sprint pausiert – „${agent.name}“ startet nach dem Fortsetzen.`);
         passed = false;
         interrupted = true;

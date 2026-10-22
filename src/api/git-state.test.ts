@@ -61,13 +61,13 @@ const state = (problems: GitProblem[], separate = true): ProjectGitState => ({
   problems,
 });
 
-test('Live schalten zählt nur Befunde am Projektordner, Freigeben nur am Agent-Ordner', () => {
+test('Live schalten zählt beide Ordner (Sicherung im Agent-Ordner, Deploy im Projektordner), Freigeben nur den Agent-Ordner', () => {
   const live = problem({ code: 'foreign_branch' });
   const diverged = problem({ code: 'main_diverged' });
   const agents = problem({ role: 'agents', folder: '/p-agents' });
   const warn = problem({ code: 'untracked', severity: 'warn' });
   const all = state([live, diverged, agents, warn]);
-  assert.deepEqual(problemsFor(all, 'go_live'), [live, diverged]);
+  assert.deepEqual(problemsFor(all, 'go_live'), [live, diverged, agents]);
   assert.deepEqual(problemsFor(all, 'approve'), [agents]);
   assert.deepEqual(problemsFor(all, 'sprint_start'), [agents]);
   // Ohne eigenen Agent-Ordner arbeiten die Agents im Projektordner; der Abstand zu GitHub zählt dort nicht.

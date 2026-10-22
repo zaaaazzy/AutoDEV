@@ -122,7 +122,7 @@ async function pushSprint(
     cwd: string;
     commands: string[][];
     execute: CommandExecutor;
-    mergeElsewhere?: boolean;
+
     pullRequest?: PullRequestPlan | null;
   },
 ): Promise<SyncResult> {
@@ -186,23 +186,32 @@ async function pushSprint(
   if (sprint.status === 'completed' && current === branch) {
     if (sprint.remote) await waitForCi(ci.execute, ci.cwd, branch, log);
     const elsewhere = await checkedOutElsewhere(git, MAIN_BRANCH, ci.cwd);
-    if (elsewhere && ci.mergeElsewhere) {
-      // „Nach dem Sprint neu starten“: main im Arbeitsordner der Menschen nur übernehmen, wenn dort nichts offen ist.
+    if (elsewhere) {
+      // main ist im Arbeitsordner der Menschen ausgecheckt: dort übernehmen, aber nur, wenn er sauber auf main steht
+      // (Test-Gate dort, bei Rot zurückgenommen). Geht das nicht, gilt die Sicherung als gescheitert – früher hiess
+      // sie „done“, obwohl nichts in main war, und der nächste Sprint zweigte vom alten main ab (Arbeit gestrandet).
       mergedMain = await mergeIntoCheckedOutMain(ci.execute, elsewhere, branch, sprint.name, ci.commands, log);
-      if (mergedMain && sprint.remote) {
-        const pushed = await ci.execute(['git', 'push', '-u', 'origin', MAIN_BRANCH], elsewhere, {
-          timeoutMs: 120_000,
-          env: gitEnvironment({ GIT_TERMINAL_PROMPT: '0' }),
-        });
-        log.push(
-          pushed.exitCode === 0 ? `${MAIN_BRANCH} nach GitHub gepusht.` : `Push von ${MAIN_BRANCH} fehlgeschlagen.`,
+      if (!mergedMain) {
+        throw new Error(
+          `${log.at(-1) ?? `${branch} konnte nicht nach ${MAIN_BRANCH} übernommen werden.`} Der Sprint ist noch nicht in ${MAIN_BRANCH}; nach dem Aufräumen „Git-Sicherung“ erneut starten.`,
         );
       }
-    } else if (elsewhere) {
-      // Agents im eigenen Worktree: main gehört dem Arbeitsordner der Menschen und wird dort nicht angefasst.
-      log.push(
-        `Sprint abgeschlossen: ${branch} ist bereit. ${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt – dort mit „git merge ${branch}“ übernehmen.`,
-      );
+      if (sprint.remote) {
+        const pushed = await ci.execute(['git', 'push', '-u', 'origin', MAIN_BRANCH], elsewhere, {
+          timeoutMs: 120_000,
+          env: gitEnvironment({
+            GIT_TERMINAL_PROMPT: '0',
+            GCM_INTERACTIVE: 'never',
+            GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+          }),
+        });
+        if (pushed.exitCode !== 0) {
+          throw new Error(
+            `Sprint in ${elsewhere} nach ${MAIN_BRANCH} gemergt, aber der Push nach GitHub ist fehlgeschlagen: ${pushed.output.trim().slice(-300)}`,
+          );
+        }
+        log.push(`${MAIN_BRANCH} nach GitHub gepusht.`);
+      }
     } else if (await branchExists(git, MAIN_BRANCH)) {
       await must('checkout', MAIN_BRANCH);
       const before = await must('rev-parse', 'HEAD');
@@ -390,7 +399,7 @@ export async function syncSprintToGit(
             cwd,
             commands,
             execute: rawExecute,
-            mergeElsewhere: restartAfterSprint,
+
             pullRequest,
           });
     if (result.pullRequest) {

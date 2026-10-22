@@ -136,9 +136,11 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       let from: string | undefined;
       if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string; running: number; slug: string }>(
+        const current = await pool.query<{ status: string; running: number; waiting: number; slug: string }>(
           `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
-                            WHERE sprint_id = s.id AND status = 'in_progress') AS running
+                            WHERE sprint_id = s.id AND status = 'in_progress') AS running,
+                  (SELECT COUNT(*)::int FROM development_items
+                    WHERE sprint_id = s.id AND status = 'approval') AS waiting
              FROM sprints s WHERE id = $1`,
           [request.params.id],
         );
@@ -155,7 +157,10 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
             ? `Statuswechsel ${from} → ${target} ist für Sprints nicht erlaubt.`
             : target === 'completed' && Number(current.rows[0]?.running) > 0
               ? 'Im Sprint laufen noch Aufträge – erst abwarten oder stoppen, dann abschließen.'
-              : null;
+              : target === 'completed' && Number(current.rows[0]?.waiting) > 0
+                ? // Freigaben werden später in den Sprint-Branch gemergt – nach dem Abschluss kämen sie nie mehr in main.
+                  `${current.rows[0]?.waiting} Auftrag/Aufträge warten auf die Review-Freigabe oder den Merge danach – erst freigeben bzw. zurückweisen und den Merge abwarten, dann abschliessen.`
+                : null;
         if (conflict) {
           response.status(409).json({ message: conflict });
           return;
