@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
@@ -7,6 +7,7 @@ import { generatedDocs } from './generated-docs.js';
 import { publicBaseUrl } from './production-snippets.js';
 import type { Principal } from './roles.js';
 import { isAdmin } from './tenancy.js';
+import { readProjectText } from '../core/project-paths.js';
 import { INVALID, buildUpdate, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
 
 const MAX_API_CONTENT = 30_000;
@@ -76,15 +77,17 @@ export async function syncRepoDocs(pool: Pool, projectSlug: string, cwd: string)
   }
   let synced = 0;
   for (const file of files) {
+    // Links (auch ein verlinkter docs-Ordner), Hardlinks, fehlende und zu grosse Dateien werden übersprungen:
+    // Agents schreiben in den Ordner, ein Link auf ~/.ssh/… darf nicht für alle lesbar in `docs` landen.
+    const content = await readProjectText(cwd, file, MAX_STORED_CONTENT);
+    if (content === null) {
+      continue;
+    }
     try {
-      const path = join(cwd, file);
-      if ((await stat(path)).size > MAX_STORED_CONTENT) {
-        continue;
-      }
-      await upsertDoc(pool, { projectSlug, kind: 'repo', title: file, content: await readFile(path, 'utf8') });
+      await upsertDoc(pool, { projectSlug, kind: 'repo', title: file, content });
       synced += 1;
     } catch {
-      // Missing file: skip.
+      // Wie bisher: ein fehlgeschlagener Eintrag hält den Lauf nicht an.
     }
   }
   return synced;

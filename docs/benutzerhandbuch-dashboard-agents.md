@@ -227,6 +227,54 @@ Dieser Abschnitt betrifft den Bereich **Einstellungen → Sicherheit**. Er gilt 
 
 ---
 
+## 7. Repo-Dokumentation und Bild-Anhänge (Symlinks)
+
+Dieser Abschnitt betrifft die Seite **Dokumentation** (Einträge mit der Art „Repo“, also `README.md` und `docs/*.md` des Projekts) und die Bilder, die CLI-Agents zu einer Idee oder einem Bug bekommen. AIdeation folgt dabei **keinen Symlinks** mehr. Vorher konnte ein Link wie `docs/x.md -> ~/.ssh/id_rsa` den Inhalt einer fremden Datei in die Dokumentation holen, und der war für alle Projektmitglieder lesbar.
+
+> **Screenshots:** Für diesen Abschnitt fehlt noch ein Bild der Seite Dokumentation mit einem übersprungenen Eintrag. Es wurde nicht aufgenommen, weil dafür App, Datenbank und Browser laufen müssen.
+
+### 7.1 Repo-Doku-Sync: wann eine Datei übernommen wird
+
+Der Sync läuft mit dem Projektlauf. Er liest nur Dateien, die direkt im Projektordner liegen.
+
+| Bedingung | Ergebnis |
+| --- | --- |
+| Normale Datei, Größe höchstens 200 000 Bytes | Wird übernommen, der Titel ist der Pfad (z. B. `docs/laufzeit.md`). |
+| Datei ist ein Symlink | Wird übersprungen. Ein Link auf eine Datei außerhalb des Projekts wird nie gelesen. |
+| Ordner `docs` oder ein Unterordner ist ein Symlink | Alle Dateien darin werden übersprungen. |
+| Datei hat mehrere Verweise (Hardlink) | Wird übersprungen. |
+| Link ins Leere oder fehlende Datei | Wird übersprungen, der Sync bricht nicht ab. |
+| Datei größer als 200 000 Bytes | Wird übersprungen. |
+| Datei wird während des Lesens ausgetauscht | Wird übersprungen. |
+
+**Was das für dich bedeutet:** Ein Projekt, das bewusst Symlinks in `docs/` nutzt, verliert diese Einträge in der Dokumentation. Abhilfe: die Datei als echte Kopie in `docs/` ablegen und die Kopie pflegen.
+
+### 7.2 Bild-Anhänge für CLI-Agents
+
+Bilder einer Idee oder eines Bugs werden vor dem Lauf nach `.dev-log/attachments/<ID>/` geschrieben. Die Dateien heißen `1-<Name>`, `2-<Name>` usw. Ungültige Auftrags-IDs bekommen keine Bilder.
+
+| Bedingung | Ergebnis |
+| --- | --- |
+| `.dev-log` oder `.dev-log/attachments` ist ein Symlink | Nichts wird gelöscht und nichts geschrieben. Der Agent bekommt keine Bilder, der Lauf geht ohne sie weiter. |
+| Der Auftragsordner `<ID>` ist ein Symlink | Nur der Link wird entfernt, nie sein Ziel. Die Bilder werden danach neu angelegt. |
+| Ein Zwischenordner fehlt | Er wird einzeln angelegt, nicht rekursiv, damit kein Link durchlaufen wird. |
+| Der Ordner `<ID>` lässt sich nicht leeren, weil ein Teil des Pfads ein Link ist | Dann wird gar nichts geschrieben, und der Agent bekommt keine Bilder. Den Link durch einen echten Ordner ersetzen. |
+
+### 7.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Eintrag fehlt in „Dokumentation“ | Im Projekt nachsehen: `ls -l docs/` zeigt Symlinks mit `l` am Anfang, Hardlinks mit einer Zahl größer als 1 in der zweiten Spalte. Durch eine echte Datei ersetzen. |
+| Agent bekommt keine Bilder | `.dev-log` oder `.dev-log/attachments` im Projekt ist ein Link. Den Link durch einen echten Ordner ersetzen und den Lauf erneut starten. |
+
+### 7.4 Grenzen
+
+- **Windows:** Junctions werden nicht als Symlink erkannt. Dort greift der Schutz nur eingeschränkt.
+- **Kurzes Zeitfenster:** Ein Link, der genau zwischen der Prüfung eines Elternordners und dem Schreiben oder Löschen eingesetzt wird, ist nicht abgefangen. Dafür ist ein eigener Folgeauftrag vorgesehen.
+- **Lesen:** Für Bilder und Dateien des Projekts, die andere Agents über Werkzeuge lesen (Favicon, Visionär), gilt diese Regel noch nicht. Dort ist die Umstellung ein eigener Auftrag.
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
