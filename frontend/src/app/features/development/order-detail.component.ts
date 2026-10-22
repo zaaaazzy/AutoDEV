@@ -21,6 +21,8 @@ import { parseRisks } from '../../shared/risk-list.js';
 import { OrderService } from './order.service.js';
 import { OrderApprovalComponent } from './order-approval.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
+import { needsVisual } from './needs-visual.js';
+import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -101,16 +103,8 @@ export class OrderDetailComponent {
     };
   });
 
-  /** Reiter „Ansicht“ bei Frontend- und Fullstack-Aufträgen (oder wenn es schon Befunde bzw. eine Freigabe gibt). */
-  protected readonly showVisual = computed(() => {
-    const item = this.order();
-    return (
-      item.category === 'frontend' ||
-      item.category === 'fullstack' ||
-      Boolean(item.visualApprovedAt) ||
-      this.acceptance().visual.length > 0
-    );
-  });
+  protected readonly showVisual = computed(() => needsVisual(this.order(), this.acceptance().visual.length));
+  protected readonly agentEnds = computed(() => agentEnds(buildWorkflow(this.data(), this.order())));
 
   /**
    * Eigener Wahrheitswert: `acceptance()` liefert bei jedem Live-Refresh ein neues Objekt; hinge der Poll daran,

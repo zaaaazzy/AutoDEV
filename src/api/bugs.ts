@@ -70,16 +70,17 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
 /** Creates a bug report for a failed agent step unless an identical open bug already exists. */
 export async function reportAgentBug(
   pool: Pool,
-  bug: { projectSlug: string; title: string; description: string; sprintId?: string | null },
+  bug: { projectSlug: string; title: string; description: string; sprintId?: string | null; developmentId?: string },
 ): Promise<string> {
   const title = bug.title.slice(0, 180);
+  // development_id: Ist der Auftrag später doch erledigt, kommt die Meldung auf den Friedhof (Trigger).
   const created = await pool.query<{ id: string }>(
-    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id)
-     SELECT $1, $2, $3, 'high', 'agent', NULL
+    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id)
+     SELECT $1, $2, $3, 'high', 'agent', NULL, $4
       WHERE NOT EXISTS (
         SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
       ) RETURNING id`,
-    [bug.projectSlug, title, bug.description.slice(0, 10_000)],
+    [bug.projectSlug, title, bug.description.slice(0, 10_000), bug.developmentId ?? null],
   );
   if (created.rows[0]) return created.rows[0].id;
   const existing = (

@@ -208,6 +208,7 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung.
     title: `${agentName}: ${shortTitle(item.title)}`,
     description: detail,
+    developmentId: item.id,
   });
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
   await pool.query(

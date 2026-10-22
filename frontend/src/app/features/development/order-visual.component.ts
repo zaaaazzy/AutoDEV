@@ -39,7 +39,7 @@ export function visualPages(snapshots: VisualSnapshot[], orderId: string, device
   standalone: true,
   imports: [DateTimePipe],
   template: `
-    <details class="run-step order-brief order-visual" (toggle)="toggled($event)">
+    <details class="run-step order-brief order-visual" [open]="open()" (toggle)="toggled($event)">
       <summary>
         Ansicht
         @if (approval().approvedAt) {
@@ -130,6 +130,8 @@ export class OrderVisualComponent {
   private readonly store = inject(ProjectStore);
 
   readonly order = input.required<DevelopmentItem>();
+  /** Gleich aufgeklappt (oben unter „Aktionen“), sonst erst beim Klick. */
+  readonly open = input(false);
   protected readonly snapshots = signal<VisualSnapshot[]>([]);
   protected readonly loaded = signal<VisualApproval | null>(null);
   protected readonly loading = signal(false);
