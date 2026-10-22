@@ -68,8 +68,19 @@
   font-size: 11px;
 }
 @media (max-width: 760px) {
+  /* Handy: Nummer und Pfeile in einer Kopfzeile, die Felder zu zweit darunter. */
   .routing-rule {
     grid-template-columns: 1fr 1fr;
+  }
+  .routing-rule > :first-child {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+  }
+  .routing-rule .rule-actions {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
   }
   .budget-limits {
     grid-template-columns: 1fr;

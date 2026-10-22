@@ -1,5 +1,5 @@
-<section class="panel" id="budget-settings">
-  <div class="section-heading">
+<details appSettingsGroup="budget" id="budget-settings">
+  <summary class="section-heading">
     <div>
       <h2>Budget</h2>
       <p class="muted">
@@ -7,7 +7,7 @@
         Push-Warnung, bei 100 % startet kein neuer Agent-Schritt; ein laufender Schritt endet regulär.
       </p>
     </div>
-  </div>
+  </summary>
   @if (overview(); as current) {
     <app-budget-meter [status]="current.status" [display]="current" [warnPercent]="current.warnPercent" />
   }
@@ -192,4 +192,4 @@
       <button class="button" type="submit" [disabled]="busy()">Budget speichern</button>
     </div>
   </form>
-</section>
+</details>

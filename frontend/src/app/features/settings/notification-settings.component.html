@@ -1,10 +1,10 @@
-<section class="panel">
-  <div class="section-heading">
+<details appSettingsGroup="benachrichtigungen">
+  <summary class="section-heading">
     <div>
       <h2>App &amp; Benachrichtigungen</h2>
       <p class="muted">Auf diesem Gerät</p>
     </div>
-  </div>
+  </summary>
   <div class="setting-rows">
     <label class="setting-row">
       <span class="setting-text">
@@ -54,7 +54,7 @@
   @if (error() && !guide()) {
     <p class="notice error" role="alert">{{ error() }}</p>
   }
-</section>
+</details>
 
 @if (guide(); as kind) {
   <div class="modal-backdrop guide-backdrop" (click)="guide.set(null)">

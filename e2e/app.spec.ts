@@ -206,6 +206,14 @@ test('Projekt-Assistent öffnet, prüft Eingaben und schließt', async ({ page, 
 test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten', async ({ page }) => {
   await login(page);
   await page.goto('/#settings');
+  // Die Gruppen sind zu Beginn zugeklappt; die Seitensuche klappt passende auf und blendet die übrigen aus.
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeHidden();
+  await page.getByPlaceholder('Seite durchsuchen …').fill('Definition of Done');
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeVisible();
+  await expect(page.locator('details.settings-group', { hasText: 'Sicherheit' })).toBeHidden();
+  await page.getByPlaceholder('Seite durchsuchen …').fill('');
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeHidden();
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeVisible();
   await expect(page.getByRole('switch', { name: 'Push-Nachrichten' })).toBeVisible();
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
@@ -599,6 +607,7 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   expect(invalid.status()).toBe(400);
   await login(page);
   await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   const budget = page.locator('#budget-settings');
   await expect(budget.getByRole('heading', { name: 'Budget' })).toBeVisible();
   // Standardregeln sind sichtbar, solange keine eigenen gespeichert sind.
@@ -921,6 +930,7 @@ test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und 
   const title = `E2E-Fehler im Betrieb ${isMobile ? 'Handy' : 'Desktop'}`;
   await login(page);
   await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   const settings = page.locator('#production-settings');
   // Ab dem zweiten Lauf ist ein Token hinterlegt: Rotieren fragt nach.
   page.once('dialog', (dialog) => void dialog.accept());
