@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OUTPUT_GRACE_MS, redactOutput, runCommand } from './command.js';
+import { parseNodeCoverage } from '../runner/measured-coverage.js';
+import { MAX_CAPTURED_OUTPUT, OUTPUT_GRACE_MS, redactOutput, runCommand } from './command.js';
 import { setProcessStore, type TrackedProcess } from './shutdown.js';
 
 function alive(pid: number): boolean {
@@ -127,6 +128,80 @@ test('ein Umlaut, der über eine Chunk-Grenze fällt, bleibt erhalten', async ()
   assert.equal(result.output, 'Gärt\n');
   assert.equal(chunks.join(''), 'Gärt\n');
   assert.ok(!chunks.join('').includes('�'));
+});
+
+test('lange Ausgabe: Kopf und Ende bleiben, das Ende enthält Fehlerzusammenfassung und Coverage', async () => {
+  // 300 kB Testlauf auf stdout, dazwischen stderr; die Zusammenfassung steht wie beim Node-Test-Runner ganz am Schluss.
+  const script =
+    "process.stdout.write('ANFANG\\n');" +
+    "for (let i = 0; i < 3000; i += 1) { process.stdout.write('ok ' + i + ' ' + 'x'.repeat(90) + '\\n'); if (i % 500 === 0) process.stderr.write('warnung ' + i + '\\n'); }" +
+    "process.stdout.write('# pass 63\\n# fail 1\\n# all files | 84.02 | 82.64 | 91.78 |\\n');";
+  const result = await runCommand([process.execPath, '-e', script], process.cwd());
+  assert.equal(result.exitCode, 0);
+  assert.ok(result.output.length <= MAX_CAPTURED_OUTPUT + 200, `zu lang: ${result.output.length}`);
+  assert.ok(result.output.startsWith('ANFANG\n'));
+  assert.match(result.output, /Zeichen der Ausgabe ausgelassen/);
+  assert.match(result.output, /ok 2999 x+\n# pass 63\n# fail 1\n# all files/);
+  assert.deepEqual(parseNodeCoverage(result.output), {
+    lines: 84.02,
+    branches: 82.64,
+    functions: 91.78,
+    passed: 63,
+    failed: 1,
+  });
+});
+
+test('Emoji und Umlaut auf der Chunk- und Kürzungsgrenze bleiben ganz', async () => {
+  // „😀“ = F0 9F 98 80: Bytes über zwei Chunks verteilt. Die Längen sind so gewählt, dass Kopf- und Endgrenze
+  // (20 000 bzw. 100 000 Zeichen vor Schluss) genau zwischen die Hälften eines Emojis fallen.
+  const script =
+    'process.stdout.write(Buffer.from([0xf0, 0x9f]));' +
+    "setTimeout(() => { process.stdout.write(Buffer.from([0x98, 0x80])); process.stdout.write('x' + 'ä😀'.repeat(70000) + 'ENDE!!'); }, 100);";
+  const result = await runCommand([process.execPath, '-e', script], process.cwd());
+  assert.equal(result.exitCode, 0);
+  assert.ok(result.output.startsWith('😀xä😀'));
+  assert.ok(result.output.endsWith('😀ENDE!!'));
+  assert.ok(!result.output.includes('�'));
+  // Kein einzelnes Surrogat: jedes Zeichen ist gültiges UTF-16.
+  assert.doesNotMatch(result.output, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+});
+
+test('ein Secret auf der Schnittkante wird geschwärzt, keine Hälfte bleibt sichtbar', () => {
+  const secret = 'geheim-0123456789';
+  const env = { GITHUB_TOKEN: secret };
+  // Kopf endet nach 20 000 Zeichen, Ende beginnt 100 000 Zeichen vor Schluss: Secret jeweils genau auf der Kante.
+  const output = `${'a'.repeat(19_995)}${secret}${'b'.repeat(200_000)}${secret}${'c'.repeat(99_990)}`;
+  const safe = redactOutput(output, env);
+  assert.ok(safe.length <= MAX_CAPTURED_OUTPUT + 200);
+  assert.ok(safe.endsWith('c'.repeat(1000)));
+  for (let length = 4; length < secret.length; length += 1) {
+    assert.ok(!safe.includes(secret.slice(0, length)), `Anfang des Secrets sichtbar: ${secret.slice(0, length)}`);
+    assert.ok(!safe.includes(secret.slice(-length)), `Ende des Secrets sichtbar: ${secret.slice(-length)}`);
+  }
+});
+
+test('runCommand schwärzt Secrets der Umgebung, bevor gekürzt wird', async () => {
+  const secret = 'pw-1234567890-geheim';
+  const script =
+    "const s = process.env.DB_PASSWORD; process.stdout.write('x'.repeat(19990) + s + 'y'.repeat(200000) + s);";
+  const result = await runCommand([process.execPath, '-e', script], process.cwd(), {
+    env: { ...process.env, DB_PASSWORD: secret },
+  });
+  assert.ok(!result.output.includes(secret.slice(0, 6)));
+  assert.ok(!result.output.includes(secret.slice(-6)));
+  assert.ok(result.output.endsWith('[REDACTED]'));
+});
+
+test('stdout und stderr kommen getrennt bei onChunk an', async () => {
+  const script = "process.stdout.write('{\"a\":'); process.stderr.write('warnung\\n'); process.stdout.write('1}\\n');";
+  const streams: Record<string, string> = { stdout: '', stderr: '' };
+  await runCommand([process.execPath, '-e', script], process.cwd(), {
+    onChunk: (chunk, stream) => {
+      streams[stream ?? 'stdout'] += chunk;
+    },
+  });
+  assert.equal(streams.stdout, '{"a":1}\n');
+  assert.equal(streams.stderr, 'warnung\n');
 });
 
 test('redactOutput maskiert API-Schlüssel, Tokens und Secrets aus der Umgebung', () => {

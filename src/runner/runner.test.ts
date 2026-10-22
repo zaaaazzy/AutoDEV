@@ -560,11 +560,14 @@ test('Fortsetzen scheitert (Sitzung weg): derselbe Schritt startet frisch mit de
     },
   } as unknown as Pool;
   const calls: string[][] = [];
-  const execute: CommandExecutor = async (command) => {
+  const execute: CommandExecutor = async (command, _cwd, options) => {
     calls.push(command);
-    return command.includes('--resume')
-      ? { exitCode: 1, durationMs: 1, output: 'No conversation found with session ID: alt' }
-      : { exitCode: 0, durationMs: 1, output: 'ok' };
+    if (command.includes('--resume')) {
+      return { exitCode: 1, durationMs: 1, output: 'No conversation found with session ID: alt' };
+    }
+    // Ohne result-Ereignis gälte der Lauf als fehlgeschlagen.
+    options?.onChunk?.(`${JSON.stringify({ type: 'result', result: 'ok' })}\n`);
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
   };
   const agents = [{ ...agent('Dev', 'while_task', 1, ['claude', '-p']), role: 'developer' }];
   assert.equal(await runWorkItem(pool, item, agents, { cwd: '/r', timeoutMs: 1, execute }), 'passed');
@@ -897,14 +900,13 @@ test('Tester-Schritt speichert Tokens und Kosten des LLM-Laufs (Testschreiben + 
 
 test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speichern erhalten', async () => {
   const { pool, queries } = fakePool();
-  const execute: CommandExecutor = async () => ({
-    exitCode: 0,
-    durationMs: 1,
-    // Ein Tester mit eigenem CLI muss die Abnahme melden, sonst gilt der Schritt als nicht bestanden.
-    output: `geprüft\n@@ACCEPTANCE {"criteria":[],"done":${JSON.stringify([1, 2, 3, 4, 5].map((nr) => ({ nr, met: true })))}}`,
-    tokens: 800,
-    costUsd: 0.4,
-  });
+  // Ein Tester mit eigenem CLI muss die Abnahme melden, sonst gilt der Schritt als nicht bestanden.
+  const output = `geprüft\n@@ACCEPTANCE {"criteria":[],"done":${JSON.stringify([1, 2, 3, 4, 5].map((nr) => ({ nr, met: true })))}}`;
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    // result-Ereignis ohne Kosten und Tokens: die Werte des CLI-Laufs selbst müssen bleiben.
+    options?.onChunk?.(JSON.stringify({ type: 'result', result: output }));
+    return { exitCode: 0, durationMs: 1, output, tokens: 800, costUsd: 0.4 };
+  };
   const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
   const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
   assert.equal(await runWorkItem(pool, item, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin }), 'passed');

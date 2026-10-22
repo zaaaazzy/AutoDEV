@@ -155,6 +155,26 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 
 ---
 
+### 5.5 Befehlsausgabe in Testläufen lesen
+
+Dieser Abschnitt betrifft die Ausgabe, die ein Test- oder Befehlsschritt zurückgibt (Auftrags-Testlauf, Test-Gate, Komplettlauf). Eine Einstellung gibt es dafür nicht.
+
+**Was gilt:**
+- Jede Ausgabe ist auf **120 000 Zeichen** begrenzt. Bleibt sie darunter, steht sie vollständig da.
+- Ist sie länger, bleiben der **Anfang (20 000 Zeichen)** und das **Ende (100 000 Zeichen)**. Dazwischen steht die Zeile `[… N Zeichen der Ausgabe ausgelassen …]`. Das Mittelstück wird schon während des Laufs verworfen.
+- Das Ende bleibt, weil dort die Fehlerzusammenfassung und die Coverage-Zeilen des Tests stehen. Steht eine Fehlermeldung nur im gekürzten Mittelstück, ist sie in der Ausgabe nicht mehr zu sehen.
+- Geheimnisse werden **vor dem Kürzen** geschwärzt. Ein Wert, der über eine Schnittkante reicht, erscheint deshalb nicht halb.
+- Umlaute und Emojis bleiben auch dann richtig, wenn sie über eine Chunk-Grenze der Ausgabe laufen. Es wird nie mitten in ein Emoji geschnitten.
+- Bei Claude-Schritten (`stream-json`) wird nur die Ausgabe von stdout als Ergebnis gelesen. Fehlermeldungen aus stderr landen in der Ausgabe, verfälschen aber nicht das Ergebnis.
+- **Ohne Ergebnis-Ereignis gilt ein Claude-Schritt als fehlgeschlagen.** Das gilt auch bei Exit-Code 0. Die Meldung „Die Claude-CLI hat kein Ergebnis gemeldet (result-Ereignis fehlt) …“ steht am Ende der Ausgabe. Die Kosten sind dann nicht 0, der Schritt ist nur nicht bewertbar.
+- Die Live-Ausgabe aktualisiert sich höchstens alle 500 ms. Bei sehr langen Läufen sieht man den lesbaren Text der letzten rund 120 000 Zeichen.
+
+**Abhilfe, wenn die Coverage fehlt:** Die Zahlen stehen im Ende der Ausgabe. Fehlen sie dort, prüfe den Testbefehl gegen die Bedingungen in Abschnitt 5, Coverage-Messung.
+
+**Printscreens:** Für diesen Abschnitt fehlen Bildschirmfotos. Sie erfordern eine laufende App mit Datenbank und Browser. Der Text oben beschreibt, was du siehst. Die Beschriftungen müssen gegen die laufende Oberfläche geprüft werden, bevor das Handbuch veröffentlicht wird.
+
+---
+
 ## 6. Anmeldung, Sitzungen und Zwei-Faktor (Einstellungen → Sicherheit)
 
 Dieser Abschnitt betrifft den Bereich **Einstellungen → Sicherheit**. Er gilt für jeden Benutzer, auch für den Systemadministrator aus der `.env`.
