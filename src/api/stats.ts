@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { realFailureSql } from '../core/interrupted-steps.js';
 
 type CountRow = { key: string; count: string };
 const counts = (rows: CountRow[]): Record<string, number> =>
@@ -91,7 +92,7 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       pool.query<{ agent: string; passed: string; failed: string; skipped: string }>(
         `SELECT st.agent_name AS agent,
               COUNT(*) FILTER (WHERE st.status = 'passed') AS passed,
-              COUNT(*) FILTER (WHERE st.status = 'failed') AS failed,
+              COUNT(*) FILTER (WHERE ${realFailureSql('st')}) AS failed,
               COUNT(*) FILTER (WHERE st.status = 'skipped') AS skipped
          FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
         WHERE r.project_slug = $1 GROUP BY st.agent_name ORDER BY st.agent_name`,

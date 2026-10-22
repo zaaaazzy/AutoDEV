@@ -4,6 +4,7 @@ import { access } from './access.js';
 import type { Principal } from './roles.js';
 import { completeSprint } from './sprint-planning.js';
 import { guardGit } from './git-state.js';
+import { sprintBranch } from '../runner/git-sync/git-helpers.js';
 import {
   buildUpdate,
   isRecord,
@@ -65,6 +66,22 @@ export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stop
   return { stopped: stopped.rowCount ?? 0, released: released.rowCount ?? 0 };
 }
 
+const SAME_BRANCH_MESSAGE =
+  'Ein anderer Sprint dieses Projekts hat schon einen gleichwertigen Namen (gleicher Git-Branch) – bitte anders benennen.';
+
+/**
+ * Zwei Sprints mit gleichem Branch-Namen (z. B. „Sprint 5“ und „sprint-5“, oder Namen, die nach 40 Zeichen gleich
+ * werden) teilten sich einen Sprint-Branch: Der neue setzte dann die ungesicherte Arbeit des alten fort.
+ */
+async function branchNameTaken(pool: Pool, project: string, name: string, exceptId?: string): Promise<boolean> {
+  const branch = sprintBranch(name);
+  const others = await pool.query<{ name: string }>(
+    'SELECT name FROM sprints WHERE project_slug = $1 AND ($2::uuid IS NULL OR id <> $2::uuid)',
+    [project, exceptId ?? null],
+  );
+  return others.rows.some((sprint) => typeof sprint.name === 'string' && sprintBranch(sprint.name) === branch);
+}
+
 function databaseCode(error: unknown): string | undefined {
   return typeof error === 'object' && error !== null && 'code' in error
     ? String((error as { code: unknown }).code)
@@ -95,6 +112,10 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response
         .status(400)
         .json(slug ? invalidInput(request.body, SPRINT_FIELDS, ['name']) : { message: 'Ungültiges Projekt.' });
+      return;
+    }
+    if (await branchNameTaken(pool, slug, String(values.get('name')))) {
+      response.status(409).json({ field: 'name', message: SAME_BRANCH_MESSAGE });
       return;
     }
     try {
@@ -132,13 +153,27 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       return;
     }
     const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+    const rename = fields.find((field) => field.column === 'name')?.value as string | undefined;
+    if (rename) {
+      const owner = (
+        await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM sprints WHERE id = $1', [
+          request.params.id,
+        ])
+      ).rows[0];
+      if (owner && (await branchNameTaken(pool, owner.slug, rename, request.params.id))) {
+        response.status(409).json({ field: 'name', message: SAME_BRANCH_MESSAGE });
+        return;
+      }
+    }
     try {
       let from: string | undefined;
       if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string; running: number; slug: string }>(
+        const current = await pool.query<{ status: string; running: number; waiting: number; slug: string }>(
           `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
-                            WHERE sprint_id = s.id AND status = 'in_progress') AS running
+                            WHERE sprint_id = s.id AND status = 'in_progress') AS running,
+                  (SELECT COUNT(*)::int FROM development_items
+                    WHERE sprint_id = s.id AND status = 'approval') AS waiting
              FROM sprints s WHERE id = $1`,
           [request.params.id],
         );
@@ -155,7 +190,10 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
             ? `Statuswechsel ${from} → ${target} ist für Sprints nicht erlaubt.`
             : target === 'completed' && Number(current.rows[0]?.running) > 0
               ? 'Im Sprint laufen noch Aufträge – erst abwarten oder stoppen, dann abschließen.'
-              : null;
+              : target === 'completed' && Number(current.rows[0]?.waiting) > 0
+                ? // Freigaben werden später in den Sprint-Branch gemergt – nach dem Abschluss kämen sie nie mehr in main.
+                  `${current.rows[0]?.waiting} Auftrag/Aufträge warten auf die Review-Freigabe oder den Merge danach – erst freigeben bzw. zurückweisen und den Merge abwarten, dann abschliessen.`
+                : null;
         if (conflict) {
           response.status(409).json({ message: conflict });
           return;

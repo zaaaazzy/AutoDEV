@@ -516,13 +516,24 @@
   margin: 6px 0;
   font-size: 13.5px;
 }
-.check {
+/* Checkbox und Text nebeneinander (label ist sonst ein Raster: Kästchen und Text untereinander). */
+label.check {
+  display: flex;
   flex-direction: row;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  line-height: 1.45;
 }
 .check input {
   width: auto;
+}
+label.check > input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 1px 0 0;
+  padding: 0;
 }
 
 .timeline {

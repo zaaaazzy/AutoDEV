@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { gitHelpers } from './git-sync.js';
-import { porcelainPath } from './git-sync/git-helpers.js';
+import { CHANGED_FILES_IGNORED, porcelainPath } from './git-sync/git-helpers.js';
 
 /**
  * Git-Zustand der Projektordner, wie ihn der Worker jede Minute sieht: Branch, offene Änderungen und wie weit das
@@ -95,8 +95,16 @@ export async function readFolder(
     '--untracked-files=normal',
   );
   const lines = status.exitCode === 0 ? status.output.split('\n').filter(Boolean) : [];
-  const untracked = lines.filter((line) => line.startsWith('??')).map(porcelainPath);
-  const changed = lines.filter((line) => !line.startsWith('??')).map(porcelainPath);
+  // Testberichte und Agent-Ablage zählen nicht (wie bei der Prüfung vor jedem Auftrag).
+  const counted = (path: string): boolean => !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix));
+  const untracked = lines
+    .filter((line) => line.startsWith('??'))
+    .map(porcelainPath)
+    .filter(counted);
+  const changed = lines
+    .filter((line) => !line.startsWith('??'))
+    .map(porcelainPath)
+    .filter(counted);
   let mainAhead: number | null = null;
   let mainBehind: number | null = null;
   const remote = await git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${MAIN}`);
@@ -167,7 +175,8 @@ export function assessFolder(snapshot: FolderSnapshot, context: FolderContext): 
     problems.push({
       ...base,
       code: 'untracked',
-      severity: 'warn',
+      // Wo die Agents arbeiten, blockiert jede neue Datei den nächsten Auftrag („fremde Änderungen“): dort sperrend.
+      severity: snapshot.role === 'agents' || context.agentsWorkHere ? 'block' : 'warn',
       title: `${snapshot.untrackedCount} neue, nicht versionierte Datei${snapshot.untrackedCount === 1 ? '' : 'en'}`,
       detail: `In ${where}: ${list(snapshot.untracked, snapshot.untrackedCount)}.`,
       fixes: ['save_wip'],

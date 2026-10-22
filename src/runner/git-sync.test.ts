@@ -508,6 +508,8 @@ test('green CI without required approval merges the pull request and tags main',
 test('PR-Modus: nach dem Merge des Pull Requests wird live geschaltet (Deploy und production_deploys)', async () => {
   const { cwd, remote, git } = await sprintRepository();
   git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  // Der Projektordner steht wie im Betrieb sauber auf main (sonst wird bewusst nicht deployt).
+  git('checkout', '-q', 'main');
   const { pool: review, updates } = reviewPool({ ...REVIEW });
   const deploys: unknown[][] = [];
   const pool = {
@@ -711,7 +713,7 @@ test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderunge
   const { pool, updates } = fakePool(null);
   assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
   assert.equal(
-    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('30 minutes')),
+    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('60 minutes')),
     false,
     'nichts übernommen, Sprint bleibt pending',
   );
@@ -755,4 +757,67 @@ test('geänderte Dateien eines Auftrags: Commits seit der Basis plus offene, neu
   ]);
   assert.equal(changedFilesSection(files), '## Geänderte Dateien\n- alt.txt (gelöscht)\n- base.txt\n- zäh.ts');
   assert.deepEqual(await changedFiles(await mkdtemp(join(tmpdir(), 'git-nogit-')), 'main'), []);
+});
+
+test('Live schalten deployt nicht aus einem Projektordner auf fremdem Branch oder mit offenen Änderungen', async () => {
+  const { cwd, git } = await sprintRepository();
+  const updates: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('SELECT repository')) return { rows: [{ repository: cwd }] };
+      if (sql.includes('deploy_commands')) return { rows: [{ commands: [['true']] }] };
+      if (sql.includes('SET deploy_status')) updates.push(values);
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  // Steht auf dem Sprint-Branch (Stand eines fremden Branchs).
+  await assert.rejects(goLive(pool, 'p', cwd), /nicht deployt – Projektordner .* steht auf sprint\/sprint-1-apfel/);
+  assert.match(String(updates.at(-1)?.[1]), /^Nicht deployt:/);
+  git('checkout', '-q', 'main');
+  await writeFile(join(cwd, 'offen.txt'), 'x');
+  git('add', 'offen.txt');
+  await assert.rejects(goLive(pool, 'p', cwd), /1 offene Änderung/);
+  git('reset', '-q', 'offen.txt');
+  assert.equal(await goLive(pool, 'p', cwd), true);
+});
+
+// Früher hiess die Sicherung „done“, obwohl der Sprint nie in main ankam (main im Ordner der Menschen ausgecheckt, dort
+// offene Änderungen) – der nächste Sprint zweigte dann vom alten main ab.
+test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gescheitert statt „done“, dort nichts angefasst', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
+  const agents = `${human}-agents`;
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    })
+      .toString()
+      .trim();
+  run(human, 'init', '-q', '-b', 'main');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '-b', 'sprint/sprint-1-apfel', agents, 'main');
+  await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'sprint');
+  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+  assert.equal(await syncSprintToGit(pool, 'p', agents), 0);
+  const failed = updates.find((entry) => /git_sync = 'failed'/.test(entry.sql));
+  assert.ok(failed, 'als gescheitert markiert');
+  assert.match(
+    String(failed.values.find((value) => typeof value === 'string' && value.includes('main'))),
+    /noch nicht in main/,
+  );
+  assert.ok(!updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
+  assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+  assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
 });

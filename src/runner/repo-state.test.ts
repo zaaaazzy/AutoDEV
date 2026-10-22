@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -124,4 +124,35 @@ test('readFolder liest Branch, Änderungen und den Abstand zu origin/main aus ei
   assert.deepEqual(state.untracked, ['neu.txt']);
   assert.equal(state.mainAhead, 1);
   assert.equal(state.mainBehind, 0);
+});
+
+test('Neue Dateien im Agent-Ordner sperren (sie blockieren jeden Auftrag), im Projektordner nur Hinweis', () => {
+  const files = { untracked: ['neu.ts'], untrackedCount: 1 };
+  assert.deepEqual(codes(assessFolder(snapshot({ role: 'agents', branch: null, ...files }), idle)), [
+    'untracked:block',
+  ]);
+  assert.deepEqual(codes(assessFolder(snapshot(files), idle)), ['untracked:warn']);
+});
+
+test('readFolder zählt Testberichte (docs/tests) nicht als offene Änderung', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'repo-state-ignore-'));
+  const run = (...args: string[]) =>
+    runCommand(['git', ...args], root, {
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    });
+  await run('init', '-q', '-b', 'main');
+  await writeFile(join(root, 'a.txt'), 'a\n');
+  await mkdir(join(root, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(root, 'docs', 'README.md'), 'Doku\n');
+  await run('add', '.');
+  await run('commit', '-q', '-m', 'eins');
+  await writeFile(join(root, 'docs', 'tests', 'bericht.md'), 'x\n');
+  const state = await readFolder(root, 'agents');
+  assert.equal(state.untrackedCount, 0);
 });

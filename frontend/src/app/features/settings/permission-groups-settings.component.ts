@@ -5,6 +5,7 @@ import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { PermissionGroupInfo } from '../agents/permission-picker.component.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 /**
  * Rechte-Gruppen des Projekts (nur Administration): eingebaute ansehen, eigene anlegen, ändern und löschen.
@@ -13,7 +14,7 @@ import type { PermissionGroupInfo } from '../agents/permission-picker.component.
 @Component({
   selector: 'app-permission-groups-settings',
   standalone: true,
-  imports: [FormsModule, NgTemplateOutlet],
+  imports: [FormsModule, NgTemplateOutlet, SettingsGroupDirective],
   templateUrl: './permission-groups-settings.component.html',
 })
 export class PermissionGroupsSettingsComponent {

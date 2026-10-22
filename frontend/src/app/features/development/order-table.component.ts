@@ -28,7 +28,7 @@ import type { FormValues } from '../../shared/forms.js';
 import { DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
-import { orderAgentName } from '../dashboard/order-shares.js';
+import { NO_AGENT, orderAgentName } from '../dashboard/order-shares.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 
@@ -134,6 +134,11 @@ export class OrderTableComponent {
   protected readonly columns = computed(() => {
     const extra = this.extraColumns();
     const hidden = new Set(this.hiddenColumns());
+    // „Agent“ nur zeigen, wenn mindestens ein Auftrag einen Agent hat (oder danach gefiltert wird);
+    // sonst steht in jeder Zeile nur „Ohne Agent“.
+    const agents = this.store.data().agents;
+    const agentFiltered = Boolean(this.linkFilters()['agent']?.length);
+    if (!agentFiltered && this.items().every((item) => orderAgentName(item, agents) === NO_AGENT)) hidden.add('agent');
     const replaced = new Set(extra.map((column) => column.id));
     const base = this.baseColumns
       .filter((column) => !hidden.has(column.id))

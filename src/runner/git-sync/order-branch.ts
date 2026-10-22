@@ -16,6 +16,8 @@ import {
   type GitHelpers,
   MAIN_BRANCH,
   porcelainPath,
+  refreshSprintFromMain,
+  trackedChanges,
   slugify,
   sprintBranch,
   stageAll,
@@ -124,6 +126,9 @@ export async function enterOrderBranch(
       if (!(await checkoutSprintBranch(cwd, sprintName, rawExecute))) {
         throw new OrderBranchError(`Sprint-Branch ${sprintBranch(sprintName)} lässt sich nicht auschecken.`);
       }
+      // Vor jedem neuen Auftrag: aktuellen main in den Sprint-Branch holen (Konflikte früh und klein statt am Ende).
+      const refreshed = await refreshSprintFromMain(git, sprintBranch(sprintName));
+      if (refreshed) console.info(`[${item.id}] ${refreshed}`);
     } else if ((await currentBranch(git)) === 'HEAD' && (await branchExists(git, MAIN_BRANCH))) {
       // Losgelöst (z. B. nach dem kompletten Test): der Auftrag ohne Sprint arbeitet auf main auf.
       if (await checkedOutElsewhere(git, MAIN_BRANCH, cwd)) detachedBase = MAIN_BRANCH;
@@ -256,18 +261,24 @@ export async function finishOrderBranch(
         };
       }
       const merged = await git('merge', '--no-ff', target.branch, '-m', mergeMessage);
+      const patchNote = backup ? ` Ein offener Merge wurde vorher verworfen, Arbeitsstand als Patch in ${backup}.` : '';
       if (merged.exitCode !== 0) {
+        // Nur echte Konflikte heissen „Merge-Konflikt“ (der Auftrag wird dann neu eingeplant und der Entwickler löst
+        // sie). Andere Fehler (Sperre, Hook, Platte voll) dürfen keinen erfundenen Konflikt auslösen.
+        const conflicts = await unresolvedConflicts(cwd, execute);
         await git('merge', '--abort');
         return {
           merged: false,
           commit: null,
-          message: `Merge-Konflikt mit ${target.base} – Branch ${target.branch} bleibt bestehen.`,
+          message: conflicts.length
+            ? `Merge-Konflikt mit ${target.base} (${conflicts.slice(0, 5).join(', ')}) – Branch ${target.branch} bleibt bestehen.${patchNote}`
+            : `Merge nach ${target.base} fehlgeschlagen: ${merged.output.slice(-300)} – Branch ${target.branch} bleibt bestehen.${patchNote}`,
         };
       }
       return {
         merged: true,
         commit: await must('rev-parse', '--short', 'HEAD'),
-        message: `In ${target.base} gemergt.${await deleteOrderBranch(git, target.branch)}`,
+        message: `In ${target.base} gemergt.${await deleteOrderBranch(git, target.branch)}${patchNote}`,
       };
     }
     if (dirty) {
@@ -451,8 +462,12 @@ export async function mergeApprovedBranch(
   try {
     if (!(await branchExists(git, branch))) return { merged: false, message: `Branch ${branch} gibt es nicht mehr.` };
     if (!(await branchExists(git, base))) return { merged: false, message: `Basis-Branch ${base} gibt es nicht mehr.` };
-    if ((await git('status', '--porcelain', '--untracked-files=no')).output)
-      return { merged: false, message: `Offene Änderungen im Arbeitsordner – ${branch} nicht gemergt.` };
+    const open = await trackedChanges(git);
+    if (open.length)
+      return {
+        merged: false,
+        message: `Offene Änderungen im Arbeitsordner (${open.slice(0, 5).join(', ')}) – ${branch} nicht gemergt.`,
+      };
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output !== base) await must('checkout', base);
     const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: ${item.title.slice(0, 72)}`);
     if (merged.exitCode !== 0) {

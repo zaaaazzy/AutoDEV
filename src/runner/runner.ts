@@ -29,6 +29,7 @@ import {
 } from './budget.js';
 import { setActionTodo } from './action-todo.js';
 import { pauseForFolderProblem } from './folder-pause.js';
+import { leftItsSprint } from './runner-settle.js';
 import {
   budgetGate,
   claimRun,
@@ -157,24 +158,32 @@ async function resumePosition(
   return position;
 }
 
-/** Name des Sprints eines Auftrags (für Sprint-Branch und Commit-Nachrichten). */
+/**
+ * Name des Sprints eines Auftrags (für Sprint-Branch und Commit-Nachrichten). Ein abgeschlossener oder abgebrochener
+ * Sprint zählt nicht: Sein Branch ist schon gesichert, ein Merge dorthin käme nie mehr in main. Der Auftrag arbeitet
+ * dann wie einer ohne Sprint auf main.
+ */
 async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> {
   if (!item.sprintId) return null;
   const sprint = await pool
-    .query<{ name: string }>('SELECT name FROM sprints WHERE id = $1', [item.sprintId])
+    .query<{ name: string; status: string }>('SELECT name, status FROM sprints WHERE id = $1', [item.sprintId])
     .catch(logged('runner', null));
-  return sprint?.rows[0]?.name ?? null;
+  const row = sprint?.rows[0];
+  return row && row.status !== 'completed' && row.status !== 'cancelled' ? row.name : null;
 }
 
 /** Ist der Sprint des Auftrags pausiert? Ein von Hand gestarteter einzelner Agent läuft trotzdem. */
 export async function sprintPaused(pool: Pool, item: Pick<WorkItem, 'sprintId' | 'agentId'>): Promise<boolean> {
   if (!item.sprintId || item.agentId) return false;
   const row = (
-    await pool.query<{ paused: boolean }>('SELECT paused_at IS NOT NULL AS paused FROM sprints WHERE id = $1', [
-      item.sprintId,
-    ])
+    await pool.query<{ paused: boolean; status?: string }>(
+      'SELECT paused_at IS NOT NULL AS paused, status FROM sprints WHERE id = $1',
+      [item.sprintId],
+    )
   ).rows[0];
-  return row?.paused === true;
+  // Auch ein inzwischen abgeschlossener, abgebrochener oder im Review stehender Sprint hält an: Der Auftrag würde sonst
+  // in einen Sprint-Branch gemergt, der schon gesichert ist (Race zwischen „Live schalten“ und Auftragsstart).
+  return row?.paused === true || ['completed', 'cancelled', 'review'].includes(row?.status ?? '');
 }
 
 /** Rollen, deren Ablehnung den Auftrag zurück zum Entwickler schickt. */
@@ -278,9 +287,19 @@ export async function runWorkItem(
     while (position < ordered.length) {
       const agent = ordered[position];
       if (!agent) break;
+      // Worker wird beendet (Neustart, Abbruch): keinen weiteren Agent starten. Sonst liefe ein neuer CLI-Agent los,
+      // während der Shutdown die Kindprozesse beendet – und hinterliesse halbe Commits und index.lock im Ordner.
+      if (isShuttingDown()) {
+        passed = false;
+        interrupted = true;
+        break;
+      }
       // Sprint pausiert: der vorige Agent hat seinen Schritt beendet, der nächste startet erst nach dem Fortsetzen.
       // Der Auftrag gilt als unterbrochen (wieder „Geplant“); der nächste Lauf überspringt die erfolgreichen Agents.
-      if (await sprintPaused(pool, item).catch(logged('runner', false))) {
+      if (
+        (await sprintPaused(pool, item).catch(logged('runner', false))) ||
+        (await leftItsSprint(pool, item).catch(logged('runner', false)))
+      ) {
         console.info(`[${item.id}] Sprint pausiert – „${agent.name}“ startet nach dem Fortsetzen.`);
         passed = false;
         interrupted = true;
@@ -331,7 +350,7 @@ export async function runWorkItem(
     }
     // Ende des Auftrags: „Bei abgeschlossen“ bzw. „Bei abgelehnt“ – noch vor dem Abschluss, damit ihre Änderungen im
     // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung oder Kostenbremse.
-    if (!interrupted && !budgetStop && !item.agentId) {
+    if (!interrupted && !budgetStop && !item.agentId && !isShuttingDown()) {
       const phase = passed ? 'on_done' : 'on_rejected';
       const observers = agents.filter((agent) => agent.phase === phase);
       const last = ctx.done.at(-1);
@@ -357,6 +376,8 @@ export async function runWorkItem(
     passed = false;
     // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
     if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
+    // Worker wird beendet (z. B. während der Auftrag auf den Arbeitsordner wartete): unterbrochen, nicht blockiert.
+    else if (isShuttingDown()) interrupted = true;
     else if (error instanceof OrderBranchError) {
       // Der Arbeitsordner ist nicht sauber (fremde Änderungen, falscher Branch): Das betrifft jeden Auftrag, nicht
       // diesen. Also nicht blockieren, sondern eingeplant lassen und den Sprint pausieren – sonst scheiterte ein
@@ -528,6 +549,8 @@ export async function runWorkflow(
       held,
     )),
   );
+  // Nach Beginn des Shutdowns weder Doku-Abgleich noch Git-Sicherung (Test-Gate, Merge, Push) beginnen.
+  if (isShuttingDown()) return results;
   await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,

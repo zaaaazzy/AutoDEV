@@ -114,8 +114,12 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
       WHERE d.project_slug = $1 AND d.status = 'planned' AND d.kind <> 'express'
         AND NOT ${awaitsBugApprovalSql('d')}
         AND (s.status = 'active' OR d.agent_id IS NOT NULL OR d.auto_run)
-        -- Nutzungslimit des Agent-Kontos: erst nach dem Reset wieder starten.
+        -- Nutzungslimit des Agent-Kontos bzw. Arbeitsordner nicht sauber: erst nach dem Reset wieder starten. Beides gilt
+        -- für das ganze Projekt, nicht nur für den Auftrag, der es bemerkt hat – sonst liefe jeder weitere Auftrag in
+        -- dieselbe Wand (ein von Hand gestarteter Agent läuft trotzdem).
         AND (d.retry_after IS NULL OR d.retry_after <= NOW())
+        AND (d.agent_id IS NOT NULL OR NOT EXISTS (
+              SELECT 1 FROM development_items x WHERE x.project_slug = d.project_slug AND x.retry_after > NOW()))
         -- Pausierter Sprint: keine Aufträge starten (ausser ein einzelner Agent wurde von Hand gestartet).
         AND (s.paused_at IS NULL OR d.agent_id IS NOT NULL)
       ORDER BY d.sprint_rank NULLS LAST, CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at

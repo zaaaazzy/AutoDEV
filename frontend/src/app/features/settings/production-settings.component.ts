@@ -5,6 +5,7 @@ import type { Project, ProductionSnippets, ProductionStatus } from '../../core/m
 import { ProjectStore } from '../../core/project-store.js';
 import { DateTimePipe } from '../../shared/pipes.js';
 import { logScanSummary } from './log-scan.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 const TOKEN_PLACEHOLDER = '<TOKEN>';
 
@@ -15,7 +16,7 @@ const TOKEN_PLACEHOLDER = '<TOKEN>';
 @Component({
   selector: 'app-production-settings',
   standalone: true,
-  imports: [FormsModule, DateTimePipe],
+  imports: [FormsModule, DateTimePipe, SettingsGroupDirective],
   templateUrl: './production-settings.component.html',
   host: { style: 'display: contents' },
 })

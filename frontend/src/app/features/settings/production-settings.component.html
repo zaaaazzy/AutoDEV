@@ -1,5 +1,5 @@
-<section class="panel" id="production-settings">
-  <div class="section-heading">
+<details appSettingsGroup="betrieb" id="production-settings">
+  <summary class="section-heading">
     <div>
       <h2>Betrieb</h2>
       <p class="muted">Fehler der Anwendung im Betrieb erkennen und als Bug mit Quelle „Betrieb“ erfassen</p>
@@ -9,7 +9,7 @@
         {{ current.down ? 'Ausfall' : current.healthy ? 'Gesund' : 'Kritischer Fehler' }}
       </span>
     }
-  </div>
+  </summary>
   <form class="form-grid" (ngSubmit)="save()">
     <label class="wide"
       >Health-URL (optional)<input
@@ -116,4 +116,4 @@
     </details>
     <p class="muted">Ausführlich: Dokumentation → „Betrieb: Fehler an Dev Log melden“.</p>
   }
-</section>
+</details>

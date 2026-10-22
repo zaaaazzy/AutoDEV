@@ -78,6 +78,14 @@ test('Sprint nicht fertig, wenn Aufträge nur am Arbeitsordner oder Laufwerk sch
   assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: 'API-Schlüssel eintragen' }]), true);
 });
 
+test('Budget je Auftrag gibt nie von selbst frei: dieser Auftrag hält den Sprint nicht ewig offen', () => {
+  const done = { status: 'done', actionTodo: null };
+  const order = { status: 'blocked', actionTodo: 'Budget je Auftrag erreicht', budgetBlocked: 'order' };
+  const day = { status: 'blocked', actionTodo: 'Tagesbudget erreicht', budgetBlocked: 'day' };
+  assert.equal(sprintSettled([done, order]), true);
+  assert.equal(sprintSettled([done, day]), false);
+});
+
 test('Sprint nicht fertig, solange ein Auftrag wegen Budget wartet (er läuft von selbst weiter)', () => {
   const budget = { status: 'blocked', actionTodo: 'Budget erreicht: Tageslimit …', budgetBlocked: 'day' };
   assert.equal(sprintSettled([{ status: 'done', actionTodo: null }, budget]), false);

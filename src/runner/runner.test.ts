@@ -956,3 +956,38 @@ test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; dan
   }
   assert.equal((await runSelectedItems(items, async () => 'passed')).length, 2);
 });
+
+// Sprint abgebrochen, während der Auftrag lief: Er darf nicht mehr in den Sprint-Branch gemergt und nicht „erledigt“
+// werden (der Sprint wird nie mehr gesichert), sondern geht zurück ins Backlog.
+test('Sprint während des Laufs abgebrochen: nächster Agent startet nicht, Auftrag ins Backlog statt erledigt', async () => {
+  let removed = false;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: `run-${queries.length}` }] };
+      if (sql.includes('paused_at IS NOT NULL AS paused')) return { rows: [{ paused: false }] };
+      if (sql.includes('SELECT sprint_id AS "sprintId"')) return { rows: [{ sprintId: removed ? null : 'sprint-1' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) return { rows: [] };
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    if (command[0] === 'dev') removed = true;
+    return { exitCode: 0, durationMs: 1, output: 'erledigt' };
+  };
+  const agents = [agent('dev', 'while_task', 1, ['dev']), agent('tester', 'after_task', 1, ['tester'])];
+  assert.equal(
+    await runWorkItem(pool, { ...item, sprintId: 'sprint-1' }, agents, { cwd: '/r', timeoutMs: 1, execute }),
+    'failed',
+  );
+  assert.deepEqual(calls, ['dev']);
+  assert.ok(
+    queries.some((query) => /SET status = 'backlog'/.test(query.sql)),
+    'zurück ins Backlog',
+  );
+  assert.ok(!queries.some((query) => query.values.includes('done')), 'nicht erledigt');
+});

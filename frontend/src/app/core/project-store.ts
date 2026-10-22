@@ -278,7 +278,10 @@ export class ProjectStore {
       return;
     }
     if (section === this.section()) return;
+    // Wie navigate(): neue Seite oben beginnen und ein offenes Anlegeformular der alten Seite nicht mitnehmen.
+    globalThis.scrollTo?.({ top: 0 });
     this.section.set(section);
+    this.showCreate.set(false);
     this.refreshActiveProject();
   }
 

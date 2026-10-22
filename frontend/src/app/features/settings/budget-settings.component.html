@@ -1,5 +1,5 @@
-<section class="panel" id="budget-settings">
-  <div class="section-heading">
+<details appSettingsGroup="budget" id="budget-settings">
+  <summary class="section-heading">
     <div>
       <h2>Budget</h2>
       <p class="muted">
@@ -7,189 +7,203 @@
         Push-Warnung, bei 100 % startet kein neuer Agent-Schritt; ein laufender Schritt endet regulär.
       </p>
     </div>
-  </div>
+  </summary>
   @if (overview(); as current) {
     <app-budget-meter [status]="current.status" [display]="current" [warnPercent]="current.warnPercent" />
   }
-  <form (ngSubmit)="save()">
-    <h3>Limits</h3>
-    <div class="budget-limits">
-      <span></span>
-      <strong>Tokens</strong>
-      <strong>Kosten (USD)</strong>
-      @for (period of periods; track period.key) {
-        <span [title]="period.hint">{{ period.label }}</span>
-        <input
-          type="number"
-          min="1"
-          step="1000"
-          placeholder="unbegrenzt"
-          [name]="'budget-tokens-' + period.key"
-          [attr.aria-label]="period.label + ': Tokens'"
-          [(ngModel)]="limits[period.key].maxTokens"
-        />
-        <input
-          type="number"
-          min="0.01"
-          step="0.5"
-          placeholder="unbegrenzt"
-          [name]="'budget-cost-' + period.key"
-          [attr.aria-label]="period.label + ': Kosten in USD'"
-          [(ngModel)]="limits[period.key].maxCostUsd"
-        />
-      }
-    </div>
-    <p class="muted">
-      Leer = unbegrenzt (keine Prüfung). Verbrauch = Agent-Schritte und Systemagents (Chat, Auftragsautor, Visionär).
-      Lokale Modelle zählen mit 0 USD, ihre Tokens aber gegen das Token-Limit. Externe CLIs melden Kosten erst am Ende
-      eines Schritts – ein Limit kann daher um einen Schritt überschritten werden.
-    </p>
-
-    <h3>Anzeige</h3>
-    <div class="form-grid">
-      <label
-        >Währung
-        <select name="budget-currency" [(ngModel)]="display.currency">
-          <option value="USD">USD</option>
-          <option value="CHF">CHF</option>
-        </select>
-      </label>
-      <label
-        >Wechselkurs (CHF je USD)
-        <input type="number" name="budget-rate" min="0.01" step="0.01" [(ngModel)]="display.chfPerUsd" />
-      </label>
-      <p class="muted wide">Fester Kurs für die Anzeige (kein Live-Kurs); gespeichert werden Beträge in USD.</p>
-    </div>
-
-    <h3>Modell-Routing</h3>
-    <div class="form-grid">
-      <label
-        >Modell „lokal“ (Ollama)
-        <input
-          name="routing-local"
-          list="budget-ollama-models"
-          placeholder="nicht konfiguriert"
-          [(ngModel)]="routing.localModel"
-        />
-        <datalist id="budget-ollama-models">
-          @for (model of overview()?.ollamaModels ?? []; track model) {
-            <option [value]="model"></option>
-          }
-        </datalist>
-      </label>
-      <label
-        >Modell „stark“ (CLI-Befehl)
-        <input name="routing-strong" placeholder="z. B. claude -p --model opus" [(ngModel)]="routing.strongCommand" />
-      </label>
-      <p class="muted wide">
-        Ist eine Stufe nicht konfiguriert, bleibt für sie die heutige Modellwahl je Rolle. Der Tester (Projekttests)
-        wird nicht umgeleitet.
+  <form class="budget-form" (ngSubmit)="save()">
+    <section class="settings-block">
+      <h3>Limits</h3>
+      <div class="budget-limits">
+        <span></span>
+        <strong>Tokens</strong>
+        <strong>Kosten (USD)</strong>
+        @for (period of periods; track period.key) {
+          <span [title]="period.hint">{{ period.label }}</span>
+          <input
+            type="number"
+            min="1"
+            step="1000"
+            placeholder="unbegrenzt"
+            [name]="'budget-tokens-' + period.key"
+            [attr.aria-label]="period.label + ': Tokens'"
+            [(ngModel)]="limits[period.key].maxTokens"
+          />
+          <input
+            type="number"
+            min="0.01"
+            step="0.5"
+            placeholder="unbegrenzt"
+            [name]="'budget-cost-' + period.key"
+            [attr.aria-label]="period.label + ': Kosten in USD'"
+            [(ngModel)]="limits[period.key].maxCostUsd"
+          />
+        }
+      </div>
+      <p class="muted">
+        Leer = unbegrenzt (keine Prüfung). Verbrauch = Agent-Schritte und Systemagents (Chat, Auftragsautor, Visionär).
+        Lokale Modelle zählen mit 0 USD, ihre Tokens aber gegen das Token-Limit. Externe CLIs melden Kosten erst am Ende
+        eines Schritts – ein Limit kann daher um einen Schritt überschritten werden.
       </p>
-    </div>
-    <p class="muted">
-      Regeln nach Priorität: Die erste zutreffende Regel mit „lokal“ oder „stark“ bestimmt die Stufe, danach verschieben
-      alle zutreffenden „höher/tiefer“-Regeln sie. Alle ausgefüllten Felder einer Regel müssen zutreffen.
-      {{ routing.customized ? 'Eigene Regeln.' : 'Standardregeln.' }}
-    </p>
-    <ol class="routing-rules">
-      @for (rule of rules; track $index; let index = $index) {
-        <li class="routing-rule">
-          <strong>{{ index + 1 }}.</strong>
-          <label
-            >Kategorien
-            <input
-              [name]="'rule-categories-' + index"
-              placeholder="alle"
-              [(ngModel)]="rule.categories"
-              (ngModelChange)="routing.customized = true"
-            />
-          </label>
-          <label
-            >Schätzung &gt; h
-            <input
-              type="number"
-              min="0"
-              step="0.5"
-              [name]="'rule-min-hours-' + index"
-              [(ngModel)]="rule.minHours"
-              (ngModelChange)="routing.customized = true"
-            />
-          </label>
-          <label
-            >Schätzung &lt; h
-            <input
-              type="number"
-              min="0"
-              step="0.5"
-              [name]="'rule-max-hours-' + index"
-              [(ngModel)]="rule.maxHours"
-              (ngModelChange)="routing.customized = true"
-            />
-          </label>
-          <label
-            >retry ≥
-            <input
-              type="number"
-              min="0"
-              step="1"
-              [name]="'rule-retries-' + index"
-              [(ngModel)]="rule.minRetries"
-              (ngModelChange)="routing.customized = true"
-            />
-          </label>
-          <label
-            >Budget &gt; %
-            <input
-              type="number"
-              min="0"
-              max="100"
-              step="5"
-              [name]="'rule-budget-' + index"
-              [(ngModel)]="rule.minBudgetPercent"
-              (ngModelChange)="routing.customized = true"
-            />
-          </label>
-          <label
-            >Stufe
-            <select [name]="'rule-tier-' + index" [(ngModel)]="rule.tier" (ngModelChange)="routing.customized = true">
-              @for (effect of effects; track effect.key) {
-                <option [value]="effect.key">{{ effect.label }}</option>
-              }
-            </select>
-          </label>
-          <span class="rule-actions">
-            <button
-              type="button"
-              class="link-button"
-              [disabled]="index === 0"
-              (click)="moveRule(index, -1)"
-              aria-label="Nach oben"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              class="link-button"
-              [disabled]="index === rules.length - 1"
-              (click)="moveRule(index, 1)"
-              aria-label="Nach unten"
-            >
-              ↓
-            </button>
-            <button type="button" class="link-button" (click)="removeRule(index)" aria-label="Regel entfernen">
-              ✕
-            </button>
-          </span>
-        </li>
-      } @empty {
-        <li class="muted">Keine Regeln – die Modellwahl je Rolle bleibt.</li>
-      }
-    </ol>
-    <p class="muted">Kategorien: frontend, backend, fullstack, infrastructure, docs, security (mehrere mit Komma).</p>
-    <div class="actions">
-      <button type="button" class="button secondary" (click)="addRule()">Regel hinzufügen</button>
-      <button type="button" class="button secondary" (click)="resetRules()">Standardregeln</button>
-      <button class="button" type="submit" [disabled]="busy()">Budget speichern</button>
+    </section>
+
+    <section class="settings-block">
+      <h3>Anzeige</h3>
+      <div class="form-grid">
+        <label
+          >Währung
+          <select name="budget-currency" [(ngModel)]="display.currency">
+            <option value="USD">USD</option>
+            <option value="CHF">CHF</option>
+          </select>
+        </label>
+        <label
+          >Wechselkurs (CHF je USD)
+          <input type="number" name="budget-rate" min="0.01" step="0.01" [(ngModel)]="display.chfPerUsd" />
+        </label>
+        <p class="muted wide">Fester Kurs für die Anzeige (kein Live-Kurs); gespeichert werden Beträge in USD.</p>
+      </div>
+    </section>
+
+    <section class="settings-block">
+      <h3>Modell-Routing</h3>
+      <div class="form-grid">
+        <label
+          >Modell „lokal“ (Ollama)
+          <input
+            name="routing-local"
+            list="budget-ollama-models"
+            placeholder="nicht konfiguriert"
+            [(ngModel)]="routing.localModel"
+          />
+          <datalist id="budget-ollama-models">
+            @for (model of overview()?.ollamaModels ?? []; track model) {
+              <option [value]="model"></option>
+            }
+          </datalist>
+        </label>
+        <label
+          >Modell „stark“ (CLI-Befehl)
+          <input name="routing-strong" placeholder="z. B. claude -p --model opus" [(ngModel)]="routing.strongCommand" />
+        </label>
+        <p class="muted wide">
+          Ist eine Stufe nicht konfiguriert, bleibt für sie die heutige Modellwahl je Rolle. Der Tester (Projekttests)
+          wird nicht umgeleitet.
+        </p>
+      </div>
+      <p class="muted">
+        Regeln nach Priorität: Die erste zutreffende Regel mit „lokal“ oder „stark“ bestimmt die Stufe, danach
+        verschieben alle zutreffenden „höher/tiefer“-Regeln sie. Alle ausgefüllten Felder einer Regel müssen zutreffen.
+        {{ routing.customized ? 'Eigene Regeln.' : 'Standardregeln.' }}
+      </p>
+      <ol class="routing-rules">
+        @if (rules.length) {
+          <li class="routing-rule routing-head" aria-hidden="true">
+            <span>#</span><span>Kategorien</span><span>Schätzung &gt; h</span><span>Schätzung &lt; h</span
+            ><span>retry ≥</span><span>Budget &gt; %</span><span>Stufe</span><span></span>
+          </li>
+        }
+        @for (rule of rules; track $index; let index = $index) {
+          <li class="routing-rule">
+            <strong class="rule-rank">{{ index + 1 }}</strong>
+            <label
+              ><span class="rule-label">Kategorien</span>
+              <input
+                [name]="'rule-categories-' + index"
+                placeholder="alle"
+                [(ngModel)]="rule.categories"
+                (ngModelChange)="routing.customized = true"
+              />
+            </label>
+            <label
+              ><span class="rule-label">Schätzung &gt; h</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                [name]="'rule-min-hours-' + index"
+                [(ngModel)]="rule.minHours"
+                (ngModelChange)="routing.customized = true"
+              />
+            </label>
+            <label
+              ><span class="rule-label">Schätzung &lt; h</span>
+              <input
+                type="number"
+                min="0"
+                step="0.5"
+                [name]="'rule-max-hours-' + index"
+                [(ngModel)]="rule.maxHours"
+                (ngModelChange)="routing.customized = true"
+              />
+            </label>
+            <label
+              ><span class="rule-label">retry ≥</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                [name]="'rule-retries-' + index"
+                [(ngModel)]="rule.minRetries"
+                (ngModelChange)="routing.customized = true"
+              />
+            </label>
+            <label
+              ><span class="rule-label">Budget &gt; %</span>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="5"
+                [name]="'rule-budget-' + index"
+                [(ngModel)]="rule.minBudgetPercent"
+                (ngModelChange)="routing.customized = true"
+              />
+            </label>
+            <label
+              ><span class="rule-label">Stufe</span>
+              <select [name]="'rule-tier-' + index" [(ngModel)]="rule.tier" (ngModelChange)="routing.customized = true">
+                @for (effect of effects; track effect.key) {
+                  <option [value]="effect.key">{{ effect.label }}</option>
+                }
+              </select>
+            </label>
+            <span class="rule-actions">
+              <button
+                type="button"
+                class="link-button"
+                [disabled]="index === 0"
+                (click)="moveRule(index, -1)"
+                aria-label="Nach oben"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                class="link-button"
+                [disabled]="index === rules.length - 1"
+                (click)="moveRule(index, 1)"
+                aria-label="Nach unten"
+              >
+                ↓
+              </button>
+              <button type="button" class="link-button" (click)="removeRule(index)" aria-label="Regel entfernen">
+                ✕
+              </button>
+            </span>
+          </li>
+        } @empty {
+          <li class="muted">Keine Regeln – die Modellwahl je Rolle bleibt.</li>
+        }
+      </ol>
+      <p class="muted">Kategorien: frontend, backend, fullstack, infrastructure, docs, security (mehrere mit Komma).</p>
+      <div class="routing-tools">
+        <button type="button" class="button secondary" (click)="addRule()">+ Regel hinzufügen</button>
+        <button type="button" class="button secondary" (click)="resetRules()">Standardregeln</button>
+      </div>
+    </section>
+    <div class="settings-actions">
+      <button class="button primary" type="submit" [disabled]="busy()">Budget speichern</button>
     </div>
   </form>
-</section>
+</details>

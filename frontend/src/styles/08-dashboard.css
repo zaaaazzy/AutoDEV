@@ -611,14 +611,18 @@ app-order-table {
   .order-table .dt-table td.title-cell {
     max-width: 0;
   }
+  /* Bis zu zwei Zeilen statt nach wenigen Wörtern „…“: In engen Tabellen (Sprint) bleibt der Titel lesbar. */
   .order-table .order-title {
-    display: block;
+    display: -webkit-box;
     width: 100%;
     overflow: hidden;
     font-size: 13.5px;
     text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
   }
   .order-table .dt-table td:not(.title-cell):not(.expand-cell) {
     white-space: nowrap;

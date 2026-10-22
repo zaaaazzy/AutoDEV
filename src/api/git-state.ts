@@ -37,7 +37,8 @@ export function problemsFor(state: ProjectGitState | null, action: GuardedAction
   const separate = state.folders.some((folder) => folder.role === 'agents');
   return state.problems.filter((problem) => {
     if (problem.severity !== 'block') return false;
-    if (action === 'go_live') return problem.role === 'live';
+    // Live schalten: Die Git-Sicherung committet und mergt im Agent-Ordner, der Deploy läuft im Projektordner – beide zählen.
+    if (action === 'go_live') return true;
     // Freigeben und Sprint starten arbeiten im Ordner der Agents; der Abstand zu GitHub spielt dort keine Rolle.
     if (problem.code.startsWith('main_')) return false;
     return separate ? problem.role === 'agents' : problem.role === 'live';

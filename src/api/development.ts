@@ -227,7 +227,13 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
                                  ELSE COALESCE(d.description, '') || E'\n\n## Hinweis zum erneuten Versuch (' || to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\n' || $2::text END,
               retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
               analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
-              sprint_id = COALESCE(d.sprint_id, (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)),
+              -- Sprint schon abgeschlossen oder abgebrochen: nicht dorthin zurück (die Arbeit landete im alten Sprint-Branch
+              -- und nie in main), sondern in den aktiven Sprint bzw. ohne Sprint auf main.
+              sprint_id = CASE
+                WHEN d.sprint_id IS NOT NULL AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id
+                                                           AND s.status NOT IN ('completed', 'cancelled')) THEN d.sprint_id
+                ELSE (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)
+              END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()
         WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
               OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))

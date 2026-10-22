@@ -19,7 +19,7 @@ test('Befunde je Aktion: wie die Sperre auf dem Server', () => {
   const diverged = problem({ code: 'main_diverged' });
   const agents = problem({ role: 'agents' });
   const all = [live, diverged, agents];
-  assert.deepEqual(problemsForAction(all, true, 'go_live'), [live, diverged]);
+  assert.deepEqual(problemsForAction(all, true, 'go_live'), [live, diverged, agents]);
   assert.deepEqual(problemsForAction(all, true, 'approve'), [agents]);
   assert.deepEqual(problemsForAction(all, false, 'sprint_start'), [live]);
   assert.deepEqual(problemsForAction(all, true, 'all'), all);

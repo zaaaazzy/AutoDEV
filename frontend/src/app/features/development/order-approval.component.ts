@@ -25,8 +25,12 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
         </p>
       } @else {
         <p>
-          Der Auftrag ist fertig und getestet, aber noch nicht im Sprint. Sieh ihn dir im Review-Container an und gib
-          ihn frei – erst dann wird er gemergt.
+          Der Auftrag ist fertig und getestet, aber noch nicht in den Sprint-Branch gemergt.
+          @if (state()?.configured) {
+            Sieh ihn dir im Review-Container an und gib ihn frei – erst dann wird er gemergt.
+          } @else {
+            Prüfe die Änderungen und gib ihn frei – erst dann wird er gemergt.
+          }
         </p>
       }
       @if (state(); as review) {

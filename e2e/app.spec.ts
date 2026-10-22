@@ -163,14 +163,14 @@ test('Navigation: Menü auf dem Handy, Seitenleiste auf dem Desktop', async ({ p
   if (isMobile) {
     const toggle = page.getByRole('button', { name: 'Menü öffnen' });
     await toggle.click();
-    await page.getByRole('link', { name: 'Auftrag' }).click();
-    await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+    await page.getByRole('link', { name: 'Aufträge', exact: true }).click();
+    await expect(page.locator('.page-heading h1')).toHaveText('Aufträge');
     await expect(page.getByRole('button', { name: 'Menü öffnen' })).toBeVisible();
   } else {
     await expect(page.locator('.menu-toggle')).toBeHidden();
     await page.locator('.sidebar').hover();
-    await page.getByRole('link', { name: 'Auftrag' }).click();
-    await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+    await page.getByRole('link', { name: 'Aufträge', exact: true }).click();
+    await expect(page.locator('.page-heading h1')).toHaveText('Aufträge');
   }
 });
 
@@ -206,6 +206,14 @@ test('Projekt-Assistent öffnet, prüft Eingaben und schließt', async ({ page, 
 test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten', async ({ page }) => {
   await login(page);
   await page.goto('/#settings');
+  // Die Gruppen sind zu Beginn zugeklappt; die Seitensuche klappt passende auf und blendet die übrigen aus.
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeHidden();
+  await page.getByPlaceholder('Seite durchsuchen …').fill('Definition of Done');
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeVisible();
+  await expect(page.locator('details.settings-group', { hasText: 'Sicherheit' })).toBeHidden();
+  await page.getByPlaceholder('Seite durchsuchen …').fill('');
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeHidden();
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeVisible();
   await expect(page.getByRole('switch', { name: 'Push-Nachrichten' })).toBeVisible();
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
@@ -555,7 +563,7 @@ test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async 
   const card = page.locator('.tour-card');
   await expect(card.locator('h3')).toHaveText('Willkommen in AIdeation');
   await card.getByRole('button', { name: 'Weiter' }).click();
-  await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
+  await expect(card.locator('h3')).toHaveText('Ideen sammeln');
   await expect(page).toHaveURL(/#ideation/);
   await expect(page.locator('.tour-spotlight')).toBeVisible();
   await card.getByRole('button', { name: 'Tour beenden' }).click();
@@ -599,10 +607,11 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   expect(invalid.status()).toBe(400);
   await login(page);
   await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   const budget = page.locator('#budget-settings');
   await expect(budget.getByRole('heading', { name: 'Budget' })).toBeVisible();
   // Standardregeln sind sichtbar, solange keine eigenen gespeichert sind.
-  await expect(budget.locator('.routing-rule').first()).toBeVisible();
+  await expect(budget.locator('.routing-rule:not(.routing-head)').first()).toBeVisible();
   await budget.getByLabel('Je Tag: Tokens').fill('5000000');
   await budget.getByLabel('Je Sprint: Kosten in USD').fill('25');
   await budget.getByLabel('Je Auftrag: Tokens').fill('800000');
@@ -921,6 +930,7 @@ test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und 
   const title = `E2E-Fehler im Betrieb ${isMobile ? 'Handy' : 'Desktop'}`;
   await login(page);
   await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   const settings = page.locator('#production-settings');
   // Ab dem zweiten Lauf ist ein Token hinterlegt: Rotieren fragt nach.
   page.once('dialog', (dialog) => void dialog.accept());
@@ -1221,11 +1231,17 @@ test('Aktionen: „Läuft gerade“ zeigt laufenden Test mit Fortschritt und den
   );
   await login(page);
   await page.goto('/#actions');
-  const panel = page.getByRole('region', { name: 'Läuft gerade' });
+  const panel = page.locator('details.running-panel');
   await expect(panel).toBeVisible();
+  await expect(panel.locator('summary')).toContainText('Läuft gerade (2)');
   await expect(panel.locator('.wait-status-card')).toContainText('Test läuft');
   await expect(panel.locator('.wait-status-card')).toContainText('Schritt 2 von 2 · E2E-Tests · 12 von 65 Tests');
   await expect(panel.locator('.running-item.agent')).toContainText('Entwickler arbeitet');
   await expect(panel.locator('.running-item.agent')).toContainText('Push-Abos absichern');
   if (process.env.E2E_SCREENSHOT) await panel.screenshot({ path: process.env.E2E_SCREENSHOT });
+  // Zuklappbar wie „Aufträge“ im Sprint: die Kopfzeile bleibt, der Inhalt verschwindet.
+  await panel.locator('summary').click();
+  await expect(panel.locator('.running-item.agent')).toBeHidden();
+  await panel.locator('summary').click();
+  await expect(panel.locator('.running-item.agent')).toBeVisible();
 });
