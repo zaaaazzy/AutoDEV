@@ -178,19 +178,28 @@ export class OrderService {
     );
   }
 
-  /** Diesen Auftrag in der Review-Instanz zeigen (bzw. nach einem Fehlstart neu starten). */
-  async showReview(item: DevelopmentItem): Promise<void> {
+  /**
+   * Diesen Auftrag in der Review-Instanz zeigen (bzw. nach einem Fehlstart neu starten); mit `slot` in genau dieser
+   * Umgebung (optische Abnahme). Liefert true, wenn der Start angefordert wurde.
+   */
+  async showReview(item: DevelopmentItem, slot?: number): Promise<boolean> {
+    const where = slot ? `Umgebung ${slot}` : 'Ein Review-Container';
     const ok = await this.sure({
-      title: 'Im Review-Container anzeigen?',
-      message: `Ein Review-Container startet „${item.title}“ – ein belegter Container wechselt dafür den Auftrag.`,
-      confirmLabel: 'Anzeigen',
+      title: slot ? `In Umgebung ${slot} laden?` : 'Im Review-Container anzeigen?',
+      message: `${where} startet „${item.title}“ – ein belegter Container wechselt dafür den Auftrag.`,
+      confirmLabel: slot ? 'Laden' : 'Anzeigen',
     });
-    if (!ok) return;
+    if (!ok) return false;
+    let started = false;
     await this.store.perform(
-      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/show-review`),
+      async () => {
+        await this.api.post(`/api/development/${encodeURIComponent(item.id)}/show-review`, slot ? { slot } : undefined);
+        started = true;
+      },
       'Review-Instanz wechselt – das dauert einen Moment.',
       false,
     );
+    return started;
   }
 
   async removeFromSprint(item: DevelopmentItem): Promise<void> {

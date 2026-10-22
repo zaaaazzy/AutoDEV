@@ -1011,8 +1011,13 @@ app-order-table {
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
+/* Die Detailzeile steht in einer Tabellenzelle mit nowrap: Texte (Pfade, Vorschläge) hier wieder umbrechen. */
+.attention-body {
+  white-space: normal;
+}
 .attention-section p {
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .attention-solution .attention-suggestion {
   padding: 8px 12px;
