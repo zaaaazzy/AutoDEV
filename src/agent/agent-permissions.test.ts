@@ -61,11 +61,11 @@ test('Eigene Befehle: sichere ja, gesperrte und Shell-Tricks nein', () => {
 test('Agent bekommt genau die einzeln gesetzten Befehle; Datei-Werkzeuge nur mit Anlegen bzw. Ändern', () => {
   const reviewer = withAgentPermissions(CLAUDE, 'reviewer', project, ['Bash(git status:*)', 'Bash(git diff:*)']);
   assert.equal(option(reviewer, '--allowedTools'), 'Bash(git status:*),Bash(git diff:*)');
-  assert.equal(option(reviewer, '--disallowedTools'), 'Write,Edit,NotebookEdit');
+  assert.equal(option(reviewer, '--disallowedTools'), 'Write,Edit,NotebookEdit,MultiEdit');
   assert.deepEqual(policyOf(reviewer), { create: false, edit: false, scopes: [] });
 
   const writer = withAgentPermissions(CLAUDE, 'documenter', project, ['files:create'], ['docs']);
-  assert.equal(option(writer, '--disallowedTools'), 'Edit,NotebookEdit');
+  assert.equal(option(writer, '--disallowedTools'), 'Edit,NotebookEdit,MultiEdit');
   assert.deepEqual(policyOf(writer), { create: true, edit: false, scopes: ['docs'] });
 
   const developer = withAgentPermissions(CLAUDE, 'developer', project, ['files', 'logs', 'Bash(npm run prisma:*)']);

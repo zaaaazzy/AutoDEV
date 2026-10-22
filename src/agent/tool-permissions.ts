@@ -238,22 +238,25 @@ export function withAgentPermissions(
   if (hasFullAccess(command, role)) return command;
   const readOnly = READ_ONLY_ROLES.has(role);
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
-  const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
+  // Eigene Freigaben (--allowedTools) im Befehl ersetzen nur die von AIdeation angehängten Freigaben; die
+  // Datei-Rechte kommen immer aus der Zuweisung, und --disallowedTools allein schränkt nur weiter ein.
+  const custom = !readOnly && !noFileWrite && rest.some((part) => /^--allowed-?tools(?:=|$)/i.test(part));
+  const { own, others } = splitDisallowed(rest);
   const chosen = chosenRules(role, permissions, agentCommands);
-  // Selbst gesetzte Werkzeug-Regeln im Befehl bleiben (Entscheid des Admins); der Wächter prüft trotzdem.
   const policy = readOnly
     ? { create: false, edit: false, scopes: [], shell: false }
     : noFileWrite
       ? { create: false, edit: false, scopes: [] }
-      : custom
-        ? { create: true, edit: true, scopes: [] }
-        : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
+      : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
   const hook = guardHookCommand(policy);
+  // Eigene und selbst gesetzte Sperren in einem einzigen --disallowedTools, damit keine Sperre verloren geht.
   const blocked = [
-    ...(policy.create && hook ? [] : CREATE_TOOLS),
-    ...(policy.edit && hook ? [] : EDIT_TOOLS),
-    ...(readOnly ? ['MultiEdit'] : []),
-    ...(hook && !readOnly ? [] : ['Bash']),
+    ...new Set([
+      ...(policy.create && hook ? [] : CREATE_TOOLS),
+      ...(policy.edit && hook ? [] : [...EDIT_TOOLS, 'MultiEdit']),
+      ...(hook && !readOnly ? [] : ['Bash']),
+      ...own,
+    ]),
   ];
   const guard = hook
     ? [
@@ -270,7 +273,7 @@ export function withAgentPermissions(
         }),
       ]
     : [];
-  if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...rest];
+  if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...others];
   const rules = [...chosen.filter(isToolRule), ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : [])];
   const directories = chosen.includes(LOGS_COMMAND)
     ? readDirectories.flatMap((directory) => ['--add-dir', directory])
@@ -281,6 +284,23 @@ export function withAgentPermissions(
     ...guard,
     ...(rules.length ? ['--allowedTools', rules.join(',')] : []),
     ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []),
-    ...rest,
+    ...others,
   ];
+}
+
+/** Trennt selbst gesetzte Sperren (`--disallowedTools X`, `--disallowed-tools=X`) vom übrigen Befehl. */
+function splitDisallowed(parts: readonly string[]): { own: string[]; others: string[] } {
+  const own: string[] = [];
+  const others: string[] = [];
+  for (let index = 0; index < parts.length; index++) {
+    const match = /^--disallowed-?tools(?:=(.*))?$/is.exec(parts[index]!);
+    if (!match) {
+      others.push(parts[index]!);
+      continue;
+    }
+    const value = match[1] ?? parts[++index] ?? '';
+    // Nur an Kommas ausserhalb von Klammern trennen: Regeln wie „Bash(git status:*)“ enthalten Leerzeichen.
+    own.push(...value.split(/,(?![^(]*\))/).map((tool) => tool.trim()).filter(Boolean));
+  }
+  return { own, others };
 }
