@@ -8,6 +8,7 @@ import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
 import {
   containerEnvProblem,
+  exitCause,
   DATABASE_COPY_SCRIPT,
   REVIEW_DATABASE_SCRIPT,
   ReviewSlots,
@@ -245,4 +246,20 @@ test('Review-Datenbank anlegen: nur über die eigene Basis-Datenbank, nie über 
   assert.ok(calls.every((call) => call.startsWith('aideation_review|')));
   assert.match(calls[1]!, /CREATE DATABASE aideation_review_3/);
   assert.ok(!calls.join('\n').includes('postgres'));
+});
+
+test('Beendeter Review-Container: die Ursache steht in der ersten Zeile der Meldung', () => {
+  const mainty = [
+    '[review] Backend auf :3000',
+    'Warning: This is a simple server for use in testing or debugging Angular applications',
+    'Backend startup failed: Error: Bootstrap-Administrator benötigt einen gültigen Benutzernamen.',
+    '    at bootstrapAdministrator (/work/backend/src/modules/auth/auth.service.ts:144:11)',
+    '[review] 15:46:45 Ein Server ist beendet.',
+  ].join('\n');
+  assert.equal(
+    exitCause(mainty),
+    'Backend startup failed: Error: Bootstrap-Administrator benötigt einen gültigen Benutzernamen.',
+  );
+  assert.equal(exitCause('npm error code ERESOLVE\nnpm error ERESOLVE could not resolve'), 'npm error code ERESOLVE');
+  assert.equal(exitCause('[review] Start\n[review] alles gut'), null);
 });

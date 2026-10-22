@@ -59,3 +59,12 @@ test('Manuelle Prüfpunkte werden gezählt, ausser es wartet eine Aktion', () =>
   assert.deepEqual(todo!.checks, []);
   assert.equal(todo!.reasons[0]!.label, 'Aktion notwendig');
 });
+
+test('Schon freigegeben: kein Eintrag mehr unter „Rückmeldungen“ (wartet nur noch auf den Merge)', () => {
+  const approved = order({ id: 'x', status: 'approval', reviewApprovedAt: '2026-10-22T16:00:00Z' });
+  const open = order({ id: 'y', status: 'approval', reviewApprovedAt: null });
+  assert.deepEqual(
+    orderAttention([approved, open], []).map((entry) => entry.item.id),
+    ['y'],
+  );
+});

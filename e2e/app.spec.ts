@@ -1169,3 +1169,63 @@ test('Dashboard: laufender Test zeigt Ladesymbol mit Schritt, Restzeit und Forts
   await expect(card.getByRole('progressbar')).toBeVisible();
   if (process.env.E2E_SCREENSHOT) await card.screenshot({ path: process.env.E2E_SCREENSHOT });
 });
+
+test('Aktionen: „Läuft gerade“ zeigt laufenden Test mit Fortschritt und den arbeitenden Agent', async ({ page }) => {
+  const started = new Date(Date.now() - 60_000).toISOString();
+  await page.route(/\/api\/projects\/[^/]+\/worker(\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        online: true,
+        worker: null,
+        running: [],
+        agents: [
+          { id: 'a1', name: 'Entwickler', active: true, sprintName: 'Sprint 20', orderTitle: 'Push-Abos absichern' },
+        ],
+      },
+    }),
+  );
+  await page.route(/\/api\/projects\/[^/]+\/test-runs\/live(\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        run: {
+          id: '00000000-0000-4000-8000-0000000000ab',
+          trigger: 'full',
+          branch: 'sprint/sprint-20',
+          startedAt: started,
+          now: new Date().toISOString(),
+          steps: [
+            {
+              position: 0,
+              command: 'npm run lint',
+              status: 'passed',
+              category: null,
+              progress: null,
+              durationMs: 3000,
+              startedAt: started,
+              output: '',
+            },
+            {
+              position: 1,
+              command: 'npx playwright test -c e2e/playwright.config.ts',
+              status: 'running',
+              category: null,
+              progress: '12 von 65 Tests',
+              durationMs: null,
+              startedAt: started,
+              output: '',
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await login(page);
+  await page.goto('/#actions');
+  const panel = page.getByRole('region', { name: 'Läuft gerade' });
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('.wait-status-card')).toContainText('Test läuft');
+  await expect(panel.locator('.wait-status-card')).toContainText('Schritt 2 von 2 · E2E-Tests · 12 von 65 Tests');
+  await expect(panel.locator('.running-item.agent')).toContainText('Entwickler arbeitet');
+  await expect(panel.locator('.running-item.agent')).toContainText('Push-Abos absichern');
+  if (process.env.E2E_SCREENSHOT) await panel.screenshot({ path: process.env.E2E_SCREENSHOT });
+});

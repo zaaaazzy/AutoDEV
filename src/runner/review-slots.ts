@@ -116,6 +116,22 @@ export function reviewSlotDatabase(config: ReviewDatabaseConfig, slot: number): 
 }
 
 /** Prüft das Env für den Container: kein Haupt-DB-Passwort, kein Haupt-User, keine Verbindung zur DB „postgres“. */
+/**
+ * Ursache eines beendeten Review-Containers aus seinem Protokoll: die erste Zeile, die nach einem Fehler aussieht
+ * (z. B. „Backend startup failed: …“). Steht in der ersten Zeile der Meldung, die die Kopfzeile anzeigt.
+ */
+export function exitCause(logs: string): string | null {
+  const line = logs
+    .split('\n')
+    .map((entry) => entry.trim())
+    .find((entry) =>
+      /startup failed|^error\b|^npm (?:error|ERR!)|^\w*Error:|fehlgeschlagen|failed to|cannot find module|EADDRINUSE|exited with/i.test(
+        entry,
+      ),
+    );
+  return line ? line.slice(0, 240) : null;
+}
+
 export function containerEnvProblem(env: string[], mainUrl: string | null): string | null {
   const main = parseUrl(mainUrl);
   const password = main ? decodeURIComponent(main.password) : '';
@@ -352,10 +368,11 @@ export class ReviewSlots {
     if (slot.status === 'starting' || slot.status === 'running') {
       const state = await this.docker(['inspect', '-f', '{{.State.Running}}', name], 15_000);
       if (state.output.trim() !== 'true') {
-        const logs = await this.docker(['logs', '--tail', '12', name], 15_000);
+        const logs = await this.docker(['logs', '--tail', '40', name], 15_000);
+        const cause = exitCause(logs.output);
         await update(this.pool, slot.slot, {
           status: 'failed',
-          message: `Container beendet.\n${logs.output.trim().slice(-800)}`,
+          message: `Container beendet${cause ? `: ${cause}` : '.'}\n${logs.output.trim().slice(-800)}`,
         });
         return;
       }

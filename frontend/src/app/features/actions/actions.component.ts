@@ -12,6 +12,7 @@ import { OrderDetailComponent } from '../development/order-detail.component.js';
 import { OrderDetailSlotDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { OrderService } from '../development/order.service.js';
 import { AcceptanceReviewComponent } from './acceptance-review.component.js';
+import { RunningPanelComponent } from './running-panel.component.js';
 
 /**
  * Seite „Aktionen“: Rückmeldungen der Agents und alles, was auf dich wartet – Rückfragen, blockierte oder
@@ -22,6 +23,7 @@ import { AcceptanceReviewComponent } from './acceptance-review.component.js';
   selector: 'app-actions',
   standalone: true,
   imports: [
+    RunningPanelComponent,
     AcceptanceReviewComponent,
     MarkdownPipe,
     OrderApprovalComponent,

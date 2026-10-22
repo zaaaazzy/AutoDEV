@@ -202,11 +202,24 @@ export class ProjectStore {
     void this.refreshWorker();
   }
 
+  /**
+   * Antwort des Servers zu einem Auftrag sofort übernehmen (Freigabe, erneuter Versuch …), bevor das ganze Projekt
+   * nachgeladen ist: Die Rückmeldung unter „Aktionen“ verschwindet damit gleich beim Klick.
+   */
+  applyItem(response: unknown): void {
+    const item = (response as { item?: Partial<DevelopmentItem> & { id?: string } } | null)?.item;
+    if (!item?.id) return;
+    this.data.update((data) => ({
+      ...data,
+      development: data.development.map((entry) => (entry.id === item.id ? { ...entry, ...item } : entry)),
+    }));
+  }
+
   async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<void> {
     this.busy.set(true);
     this.notice.set('');
     try {
-      await action();
+      this.applyItem(await action());
       // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
       this.notice.set(success);
