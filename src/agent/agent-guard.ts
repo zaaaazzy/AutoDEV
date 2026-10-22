@@ -12,6 +12,8 @@ import {
   npmOptionProblem,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
+import { CHECKED_PROGRAMS } from './command-checks.js';
+import { parseShell, renderWords, type ShellRedirect } from './shell-parse.js';
 
 /**
  * Wächter für Claude-Agents (PreToolUse-Hook): prüft jeden Datei- und Shell-Zugriff, bevor die CLI ihn ausführt.
@@ -45,11 +47,6 @@ const PROTECTED_PATH =
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-/**
- * Shell-Konstrukte, die weitere Befehle verstecken oder im Hintergrund starten: Befehlsersetzung, Prozessersetzung,
- * Subshells und ein einzelnes „&“. Die CLI-Freigaben prüfen nur den Anfang; was dahinter steckt, sähe niemand.
- */
-const SHELL_CONSTRUCT = /`|\$\(|[<>]\(|(?:^|[^&>|])&(?![&>])|&>(?!\s*\/dev\/null)|(?:^|[\s;&|])\(|\)(?:$|[\s;&|])/;
 /** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
 const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
 /** docker compose: Startbefehle nur in dieser Form – keine Compose-Datei, Umgebung oder Ordner von anderswo. */
@@ -58,11 +55,20 @@ const COMPOSE_START_FORMS = [
   /^docker compose (?:start|restart|build)(?: [a-zA-Z0-9][\w.-]*)*$/,
 ];
 
+/** Wrapper und Präfixe, die einen weiteren Befehl starten – dessen Prüfung sähe sonst niemand. */
+const WRAPPERS = new Set(['env', 'command', 'exec', 'builtin', 'nohup', 'time', 'sudo']);
+
 /**
- * Ausgabe in Dateien umleiten (ausser nach /dev/null bzw. 2>&1) – Schreiben läuft nur über die Datei-Werkzeuge.
- * Auch mehrstellige File-Deskriptoren (10>datei) und „<>“ (öffnet zum Lesen und Schreiben, legt die Datei an).
+ * Schreibt die Umleitung in eine Datei? Erlaubt sind nur /dev/null, Lesen (<, <<<) und das Verdoppeln von
+ * File-Deskriptoren (2>&1, >&-). Auch mehrstellige File-Deskriptoren (10>datei) und „<>“ (öffnet zum Lesen und
+ * Schreiben, legt die Datei an) zählen – Schreiben läuft nur über die Datei-Werkzeuge.
  */
-const FILE_REDIRECT = /(?:^|[^<>&\d])\d*(?:<>|>>?)(?!&\d)(?!\s*\/dev\/null)/;
+function writesFile({ operator, target }: ShellRedirect): boolean {
+  const kind = operator.replace(/^\d+/, '');
+  if (kind === '<' || kind === '<<<' || kind === '<&') return false;
+  if (kind === '>&' && /^(?:\d+|-)$/.test(target.text) && !target.expanded) return false;
+  return target.text !== '/dev/null' || target.expanded || target.glob;
+}
 
 /**
  * Pfad samt symbolischer Links auflösen (für noch nicht vorhandene Dateien über den nächsten vorhandenen Ordner).
@@ -102,62 +108,10 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
 }
 
 /**
- * Zerlegt einen Befehl wie Bash in Quote-Bereiche: „unquoted“ ist der Text ausserhalb aller Anführungszeichen,
- * „expanding“ zusätzlich der Inhalt von "…" (dort wirken $(…) und Backticks weiter). Backslash-Escapes, $'…' und
- * Anführungszeichen in Anführungszeichen werden wie in Bash behandelt; escapte Zeichen werden durch „_“ ersetzt.
- * null (fail-closed) bei einem offenen Anführungszeichen oder einem escapten Anführungszeichen ausserhalb von '…' –
- * beides braucht ein Agent nicht, und beides verschleiert, wo ein Argument endet.
- */
-function quoteLayers(command: string): { unquoted: string; expanding: string } | null {
-  let unquoted = '';
-  let expanding = '';
-  let index = 0;
-  while (index < command.length) {
-    const char = command[index] ?? '';
-    if (char === '\\') {
-      const next = command[index + 1];
-      if (next === undefined || next === "'" || next === '"') return null;
-      unquoted += '_';
-      expanding += '_';
-      index += 2;
-    } else if (char === '$' && command[index + 1] === "'") {
-      // ANSI-C-Quoting: Backslash-Escapes (auch \') gelten innerhalb.
-      index += 2;
-      while (index < command.length && command[index] !== "'") index += command[index] === '\\' ? 2 : 1;
-      if (index >= command.length) return null;
-      index += 1;
-    } else if (char === "'") {
-      const end = command.indexOf("'", index + 1);
-      if (end < 0) return null;
-      index = end + 1;
-    } else if (char === '"') {
-      index += 1;
-      while (index < command.length && command[index] !== '"') {
-        if (command[index] === '\\') {
-          const next = command[index + 1];
-          if (next === undefined || next === '"' || next === "'") return null;
-          expanding += '_';
-          index += 2;
-        } else {
-          expanding += command[index];
-          index += 1;
-        }
-      }
-      if (index >= command.length) return null;
-      index += 1;
-    } else {
-      unquoted += char;
-      expanding += char;
-      index += 1;
-    }
-  }
-  return { unquoted, expanding };
-}
-
-/**
  * Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). Gilt für Claude-Agents
- * und das lokale Modell gleichermassen. run = null: Compose-Starts nicht selbst prüfen (das lokale Modell prüft sie
- * asynchron unter der Projektsperre).
+ * und das lokale Modell gleichermassen. Der Befehl wird mit dem Tokenizer (parseShell) wie von Bash zerlegt; alle
+ * Prüfungen sehen dieselben Wörter. Was sich nicht eindeutig zerlegen lässt, ist gesperrt. run = null: Compose-Starts
+ * nicht selbst prüfen (das lokale Modell prüft sie asynchron unter der Projektsperre).
  */
 export function bashProblem(
   command: string,
@@ -165,50 +119,59 @@ export function bashProblem(
   run: typeof spawnSync | null = spawnSync,
 ): string | null {
   if (SECRET_IN_COMMAND.test(command)) return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.';
-  const layers = quoteLayers(command);
-  if (!layers) {
-    return 'Offene Anführungszeichen und escapte Anführungszeichen (\\\' bzw. \\") sind gesperrt – Argumente einfach quoten.';
-  }
-  if (FILE_REDIRECT.test(layers.unquoted)) {
-    return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
-  }
-  if (SHELL_CONSTRUCT.test(layers.unquoted) || /\$\(|`/.test(layers.expanding)) {
-    return 'Befehlsersetzung, Subshells und Hintergrund-Befehle („$(…)“, Backticks, „(…)“, „&“) sind gesperrt – Befehle einzeln ausführen.';
+  const parsed = parseShell(command);
+  if (!parsed.ok) return parsed.problem;
+  if (parsed.escapedQuote) {
+    return 'Escapte Anführungszeichen (\\\' bzw. \\") sind gesperrt – Argumente einfach quoten.';
   }
   const root = realpathSync(projectRoot);
-  for (const part of command.split(/&&|\|\||[;|\n]/).map((entry) => entry.trim())) {
-    if (/^[A-Za-z_]\w*=/.test(part) || /^(?:env|command|exec|builtin|nohup|time|sudo)\s/.test(part)) {
+  // Je einfacher Befehl einer Kette (;, &&, ||, |, Zeilenumbruch), mit den Wörtern nach Bash-Quoting.
+  for (const { words, redirects } of parsed.commands) {
+    if (redirects.some(writesFile)) {
+      return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
+    }
+    const part = renderWords(words);
+    const [program = '', subcommand = '', third = ''] = words.map((word) => word.text);
+    if (/^[A-Za-z_]\w*=/.test(program) || (WRAPPERS.has(program) && words.length > 1)) {
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
     }
     // acceptEdits gibt mkdir, touch, rm, rmdir, mv, cp und sed ohne Regel frei – Rechte und Ordner prüft nur der Wächter.
-    if (forbiddenCommand(part)) {
+    if (forbiddenCommand(words)) {
       return `„${part}“: dieser Befehl ist für Agents gesperrt – Dateien nur mit den Datei-Werkzeugen anlegen, ändern oder löschen.`;
     }
-    if (/^git\s+-/.test(part)) return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
-    if (gitOptionProblem(part)) {
+    if (program === 'git' && subcommand.startsWith('-')) {
+      return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
+    }
+    if (gitOptionProblem(words)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
     // Auch bei breiten eigenen Freigaben (Bash(git:*), Bash(docker:*)): diese Unterbefehle gibt keine Gruppe frei.
-    if (forbiddenSubcommand(part)) return `„${part}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
-    const gitProblem = gitPathProblem(part, root);
+    if (forbiddenSubcommand(words)) return `„${part}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
+    // Variablen in Argumenten geprüfter Programme: X=--output=… lässt sich vorher mit export setzen.
+    if (CHECKED_PROGRAMS.has(program) && words.some((word) => word.expanded)) {
+      return `„${part}“: Variablen und Shell-Erweiterungen ($X, $'…', {a,b}, ~) sind in git-, npm- und docker-Befehlen gesperrt.`;
+    }
+    const gitProblem = gitPathProblem(words, root);
     if (gitProblem) return gitProblem;
-    if (/^npm\s/.test(part)) {
-      const npmProblem = npmOptionProblem(part, root);
+    if (program === 'npm') {
+      const npmProblem = npmOptionProblem(words, root);
       if (npmProblem) return npmProblem;
-      const words = part.split(/\s+/);
-      if (['install', 'i', 'add'].includes(words[1] ?? '')) {
-        const specs = words.slice(2).filter((word) => !word.startsWith('-'));
-        const foreign = specs.find((spec) => !REGISTRY_SPEC.test(spec));
-        if (foreign) return `„${foreign}“: nur Pakete aus der npm-Registry, keine Git-, Datei- oder URL-Quellen.`;
+      if (['install', 'i', 'add'].includes(subcommand)) {
+        const specs = words.slice(2).filter((word) => !word.text.startsWith('-'));
+        const foreign = specs.find((spec) => !REGISTRY_SPEC.test(spec.text));
+        if (foreign) return `„${foreign.text}“: nur Pakete aus der npm-Registry, keine Git-, Datei- oder URL-Quellen.`;
       }
     }
-    if (/^npx\s/.test(part) && !/^npx --no-install\s/.test(part)) {
+    if (program === 'npx' && (subcommand !== '--no-install' || words.length < 3)) {
       return 'npx nur mit --no-install (sonst lädt npx fremde Pakete aus dem Netz).';
     }
-    if (/^docker(?:-compose|\s+compose)\s+-/.test(part)) {
+    if (
+      (program === 'docker-compose' && subcommand.startsWith('-')) ||
+      (program === 'docker' && subcommand === 'compose' && third.startsWith('-'))
+    ) {
       return `„${part}“: Optionen vor dem Compose-Befehl (-f, --project-directory, --env-file …) sind gesperrt.`;
     }
-    if (/^docker-compose\s/.test(part)) return 'Bitte „docker compose“ (ohne Bindestrich) verwenden.';
+    if (program === 'docker-compose') return 'Bitte „docker compose“ (ohne Bindestrich) verwenden.';
     if (COMPOSE_STARTING.test(part) && !COMPOSE_START_FORMS.some((form) => form.test(part))) {
       return `„${part}“: erlaubt sind nur „docker compose up -d [--build] [--wait] [--force-recreate] [dienste]“ sowie start/restart/build [dienste].`;
     }

@@ -1,6 +1,10 @@
 // Prüfungen von Shell-Befehlen (npm, git, Assistenten-Dienste, eigene Regeln) für Wächter und lokales Modell.
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
+import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
+
+/** Ein Befehl als Text oder – im Wächter – schon zerlegt (Wörter eines einfachen Befehls). */
+type CommandInput = string | readonly ShellWord[];
 
 const COMMAND_PATTERN =
   /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
@@ -83,10 +87,11 @@ const DANGEROUS_NPM_OPTIONS = [
 const DANGEROUS_NPM_SHORT = /[gL]/;
 
 /** --prefix bzw. -C: nur ein relativer Ordner im Projekt (samt aufgelöster Links), ohne Shell-Ersetzungen. */
-function prefixInside(raw: string | undefined, root: string | undefined): boolean {
-  const value = (raw ?? '').replace(/['"\\]/g, '');
-  if (!value || value.startsWith('-') || value.startsWith('~') || value.includes('$') || isAbsolute(value))
+function prefixInside(word: ShellWord | undefined, root: string | undefined): boolean {
+  const value = word?.text ?? '';
+  if (!word || word.expanded || !value || value.startsWith('-') || value.startsWith('~') || value.includes('$'))
     return false;
+  if (isAbsolute(value)) return false;
   if (!root) return RELATIVE_DIRECTORY.test(value);
   const real = realPath(resolve(root, value));
   return real === root || real.startsWith(root + sep);
@@ -107,16 +112,20 @@ function disablesIgnoreScripts(name: string, inline: string | undefined, next: s
  * Ohne Projektordner (root) ist --prefix nur mit einem einfachen relativen Ordner erlaubt. Nach „--“ gehören die
  * Argumente dem Skript, nicht npm.
  */
-export function npmOptionProblem(command: string, root?: string): string | null {
-  const words = command.trim().split(/\s+/);
-  if (words[0] !== 'npm') return null;
+export function npmOptionProblem(input: CommandInput, root?: string): string | null {
+  const words = toWords(input);
+  const command = label(input);
+  if (words[0]?.text !== 'npm') return null;
   for (let index = 1; index < words.length; index++) {
-    const word = (words[index] ?? '').replace(/['"\\]/g, '');
+    const current = words[index];
+    const word = current?.text ?? '';
     if (word === '--') break;
     if (!word.startsWith('-')) continue;
     const [flag = '', inline] = word.split(/=(.*)/s);
-    const prefixValue = (): string | undefined => inline ?? words[++index];
-    if (disablesIgnoreScripts(flag.replace(/^-+/, ''), inline, words[index + 1]?.replace(/['"\\]/g, ''))) {
+    // Wert direkt hinter „=“ oder als nächstes Wort.
+    const prefixValue = (): ShellWord | undefined =>
+      inline === undefined || !current ? words[++index] : { ...current, text: inline };
+    if (disablesIgnoreScripts(flag.replace(/^-+/, ''), inline, words[index + 1]?.text)) {
       return `„${command}“: --ignore-scripts lässt sich nicht abschalten.`;
     }
     if (flag.startsWith('--')) {
@@ -163,8 +172,8 @@ const SAFE_GIT_OPTIONS = new Set(['text']);
  * --upload-pack), darum ist jede lange Option gesperrt, deren Name der Anfang einer gesperrten ist. Dazu -c, -u und
  * -O (Pager bzw. Reihenfolge-Datei). Anführungszeichen und Backslashes werden wie in Bash entfernt.
  */
-export function gitOptionProblem(command: string): boolean {
-  const words = shellWords(command);
+export function gitOptionProblem(command: CommandInput): boolean {
+  const words = toWords(command).map((word) => word.text);
   if (words[0] !== 'git') return false;
   return words.slice(1).some((word) => {
     if (/^-[cu](?:=|$)/.test(word) || word.startsWith('-O')) return true;
@@ -180,18 +189,15 @@ export function gitOptionProblem(command: string): boolean {
  * aufgelöster Links – im Projekt liegen; Shell-Ersetzungen ($, ~) und Ordner-Dateien (-O) sind gesperrt.
  * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt.
  */
-export function gitPathProblem(command: string, root?: string): string | null {
-  // Umleitungen nach /dev/null bzw. 2>&1 sind keine Argumente (andere Umleitungen sperrt der Wächter vorher).
-  const words = command
-    .replace(/\d*>>?\s*(?:&\d+|\/dev\/null)/g, ' ')
-    .trim()
-    .split(/\s+/);
-  if (words[0] !== 'git' || words[1] !== 'diff') return null;
-  for (const raw of words.slice(2)) {
-    const word = raw.replace(/['"\\]/g, '');
+export function gitPathProblem(input: CommandInput, root?: string): string | null {
+  // Umleitungen (2>/dev/null, 2>&1) trennt der Tokenizer ab; sie sind keine Argumente.
+  const words = toWords(input);
+  const command = label(input);
+  if (words[0]?.text !== 'git' || words[1]?.text !== 'diff') return null;
+  for (const { text: word, expanded } of words.slice(2)) {
     if (/^(?:-O|--orderfile)/.test(word)) return `„${command}“: -O/--orderfile ist gesperrt.`;
     if (!word || word.startsWith('-')) continue;
-    if (word.startsWith('~') || word.includes('$')) return `„${command}“: nur Pfade im Projektordner.`;
+    if (expanded || word.startsWith('~') || word.includes('$')) return `„${command}“: nur Pfade im Projektordner.`;
     const outside = root
       ? ((real) => real !== root && !real.startsWith(root + sep))(realPath(resolve(root, word)))
       : isAbsolute(word) || word.split('/').includes('..');
@@ -205,6 +211,10 @@ export function gitPathProblem(command: string, root?: string): string | null {
  * --prefix samt symbolischer Links aufgelöst; ohne ist er nur als einfacher relativer Ordner erlaubt.
  */
 export function isAllowedCommand(command: string, root?: string): boolean {
+  // Genau ein einfacher Befehl ohne Umleitungen und ohne Werte, die erst die Shell zusammensetzt.
+  const parsed = parseShell(command);
+  const simple = parsed.ok && parsed.commands.length === 1 ? parsed.commands[0] : undefined;
+  if (!simple || simple.redirects.length || simple.words.some((word) => word.expanded)) return false;
   if (npmOptionProblem(command, root) || gitPathProblem(command, root)) return false;
   if (COMMAND_PATTERN.test(command) || READ_COMMAND.test(command)) return true;
   const parts = command.split(/\s+/);
@@ -254,12 +264,14 @@ const FIND_WRITING = /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|f
  * keine Gruppe freigeben darf, und alle Datei-Befehle – auch mit Pfad (/bin/rm), in Anführungszeichen oder escapt.
  * Ein Befehlsname, den erst die Shell zusammensetzt ($X, r?, {rm,}), ist gesperrt (fail-closed).
  */
-export function forbiddenCommand(command: string): boolean {
-  const words = shellWords(command);
-  const name = words[0] ?? '';
-  if (/[$*?[\]{}~]/.test(name)) return true;
+export function forbiddenCommand(command: CommandInput): boolean {
+  const words = toWords(command);
+  const first = words[0];
+  if (!first) return false;
+  const name = first.text;
+  if (first.expanded || first.glob || /[$*?[\]{}~]/.test(name)) return true;
   const program = name.slice(name.lastIndexOf('/') + 1);
-  if (program === 'find') return words.some((word) => FIND_WRITING.test(word));
+  if (program === 'find') return words.some((word) => FIND_WRITING.test(word.text));
   return GUARD_FORBIDDEN.test(program) && !(GUARD_PREFIXED.has(program) && program === name);
 }
 /** Unterbefehle, die keine Gruppe freigeben darf; der Wächter sperrt sie zusätzlich bei jedem Shell-Befehl. */
@@ -346,57 +358,44 @@ const FORBIDDEN_SUBCOMMANDS = new RegExp(
  * Gesperrter Unterbefehl in einem Shell-Befehl (für den Wächter). Optionen vor dem Unterbefehl (git -C, docker -H,
  * npm --prefix) sind ebenfalls gesperrt, damit sie die Prüfung nicht umgehen.
  */
-export function forbiddenSubcommand(command: string): boolean {
+export function forbiddenSubcommand(command: CommandInput): boolean {
   // Bash entfernt Anführungszeichen und Backslashes: git "push", git pu\sh und npm 'install' sind dieselben Befehle.
-  const words = shellWords(command);
+  const tokens = toWords(command);
+  const words = tokens.map((word) => word.text);
   const normalized = words.join(' ');
   if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized)) return true;
   // Befehlsname und Unterbefehl nur wörtlich: Variablen, Globs, Klammer-Erweiterung oder $'…' (git $X, git pus?,
   // git {push,}) setzt erst die Shell zusammen – und alle übrigen Prüfungen sähen den Befehl nicht.
   if (!CHECKED_PROGRAMS.has(words[0] ?? '')) return false;
-  const raw = command.trim().split(/\s+/);
-  const literal = raw.slice(0, words[0] === 'docker' && words[1] === 'compose' ? 3 : 2);
-  return literal.some((word) => !/^[\w.:@/=+,-]+$/.test(word));
+  const literal = tokens.slice(0, words[0] === 'docker' && words[1] === 'compose' ? 3 : 2);
+  return literal.some((word) => !/^[\w.:@/=+,-]+$/.test(word.raw));
 }
 
 /** Programme, deren Unterbefehle der Wächter prüft. */
-const CHECKED_PROGRAMS = new Set(['git', 'docker', 'docker-compose', 'npm', 'npx']);
+export const CHECKED_PROGRAMS = new Set(['git', 'docker', 'docker-compose', 'npm', 'npx']);
 
 /**
- * Zerlegt einen einfachen Shell-Befehl wie Bash in Wörter: Anführungszeichen und Backslashes werden entfernt,
- * Leerzeichen in Anführungszeichen trennen nicht. Bei einem offenen Anführungszeichen (der Wächter trennt Befehlsketten
- * auch innerhalb von Anführungszeichen) werden Anführungszeichen und Backslashes einfach entfernt.
+ * Zerlegt einen Befehl mit dem Tokenizer des Wächters (parseShell) in Wörter; Umleitungen gehören nicht dazu.
+ * Lässt er sich nicht zerlegen (offenes Anführungszeichen, $(…) …), werden Anführungszeichen und Backslashes einfach
+ * entfernt – sperren muss dann der Wächter selbst, die Prüfungen hier sehen so möglichst viele Wörter.
  */
+function shellTokens(command: string): ShellWord[] {
+  const parsed = parseShell(command);
+  if (parsed.ok) return parsed.commands.flatMap((simple) => simple.words);
+  return command
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((raw) => ({ text: raw.replace(/['"\\]/g, ''), raw, expanded: /[$~{}]/.test(raw), glob: /[*?[]/.test(raw) }));
+}
+
+const toWords = (command: CommandInput): readonly ShellWord[] =>
+  typeof command === 'string' ? shellTokens(command) : command;
+const label = (command: CommandInput): string => (typeof command === 'string' ? command : renderWords(command));
+
+/** Zerlegt einen Befehl wie Bash in Wörter: Anführungszeichen und Backslashes entfernt, Leerzeichen darin trennen nicht. */
 export function shellWords(command: string): string[] {
-  const words: string[] = [];
-  let word = '';
-  let started = false;
-  let quote = '';
-  for (let index = 0; index < command.length; index++) {
-    const char = command[index] ?? '';
-    if (quote) {
-      if (char === quote) quote = '';
-      else if (quote === '"' && char === '\\' && /["\\$`]/.test(command[index + 1] ?? '')) word += command[++index];
-      else word += char;
-    } else if (/\s/.test(char)) {
-      if (started) words.push(word);
-      word = '';
-      started = false;
-    } else {
-      started = true;
-      if (char === "'" || char === '"') quote = char;
-      else if (char === '\\') word += command[++index] ?? '';
-      else word += char;
-    }
-  }
-  if (quote)
-    return command
-      .replace(/['"\\]/g, '')
-      .trim()
-      .split(/\s+/)
-      .filter(Boolean);
-  if (started) words.push(word);
-  return words;
+  return shellTokens(command).map((word) => word.text);
 }
 
 /** Deckt ein Präfix (Regel „Bash(<präfix>:*)“) einen gesperrten Unterbefehl ab, z. B. „git“ oder „docker compose“? */
