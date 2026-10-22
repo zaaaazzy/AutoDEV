@@ -63,6 +63,9 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const maxTurns =
     options.maxTurns ??
     (Number.isInteger(configuredTurns) && configuredTurns >= 10 ? Math.min(configuredTurns, 200) : canWrite ? 80 : 25);
+  // Ein Signal für alles: Zeitlimit, Worker-Ende und Abbruch von aussen. Es erreicht Modellanfragen, Werkzeuge und
+  // laufende Befehle (ganze Prozessgruppe).
+  const controller = new AbortController();
   const context: ToolContext = {
     cwd: options.cwd,
     canWrite,
@@ -74,6 +77,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     backupRoot: join(options.cwd, BACKUP_DIRECTORY, new Date().toISOString().replace(/[:.]/g, '-')),
     execute: options.execute ?? runCommand,
     timeoutMs: options.timeoutMs,
+    signal: controller.signal,
   };
   let tokens = 0;
   const finish = (exitCode: number, text: string): CommandResult => {
@@ -89,11 +93,17 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl)) },
     { role: 'user', content: options.prompt },
   ];
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.timeoutMs);
   const abortOnShutdown = (): void => controller.abort();
   shutdownSignal.addEventListener('abort', abortOnShutdown, { once: true });
   options.signal?.addEventListener('abort', abortOnShutdown, { once: true });
+  // Ein schon abgebrochenes Signal löst kein 'abort' mehr aus.
+  if (shutdownSignal.aborted || options.signal?.aborted) controller.abort();
+  const abortReason = (): string => (timedOut ? 'Zeitlimit erreicht' : 'Abgebrochen: Der Agent wurde gestoppt.');
   try {
     for (let turn = 0; turn < maxTurns; turn += 1) {
       const lastTurn = turn === maxTurns - 1;
@@ -184,6 +194,8 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         return finish(0, text);
       }
       for (const call of message.tool_calls) {
+        // Vor jedem Werkzeug: nach einem Abbruch schreibt kein weiterer write_file-Aufruf mehr.
+        if (controller.signal.aborted) return finish(1, abortReason());
         if (loopGuard.repeatedCall(call.function.name, call.function.arguments)) {
           return finish(1, `Abbruch: Das Modell ruft „${call.function.name}“ wiederholt mit denselben Argumenten auf.`);
         }
@@ -191,11 +203,12 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
         const result = await executeTool(context, call);
         messages.push({ role: 'tool', tool_name: call.function.name, content: result });
       }
+      if (controller.signal.aborted) return finish(1, abortReason());
     }
     return finish(1, `Abbruch: Maximale Anzahl von ${maxTurns} Schritten erreicht.`);
   } catch (error) {
     const reason = controller.signal.aborted
-      ? 'Zeitlimit erreicht'
+      ? abortReason()
       : `Ollama nicht erreichbar unter ${baseUrl} (${describeError(error)})`;
     return finish(1, reason);
   } finally {

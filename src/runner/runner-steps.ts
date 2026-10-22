@@ -221,7 +221,18 @@ export async function runStep(
       durationMs: 0,
       output: error instanceof Error ? error.message : String(error),
     }));
-  let result: AgentResult = await Promise.race([attempt(), cancelRequested]);
+  // Der Abbruch meldet sich sofort, Git-Schritte (Commit, checkout base) dürfen aber erst laufen, wenn der Agent wirklich
+  // beendet ist – sonst schreiben restliche Werkzeuge weiter und landen auf dem Basis-Branch. Das Signal erreicht
+  // Modell, Werkzeuge und Prozessgruppen, das Warten endet also. Tokens und Kosten des abgebrochenen Laufs bleiben.
+  const raceAttempt = async (): Promise<AgentResult> => {
+    const running = attempt();
+    const first = await Promise.race([running, cancelRequested]);
+    if (!cancelled) return first;
+    await logEvent(pool, stepId, 'Abbruch – warte, bis der Agent beendet ist');
+    const ended = await running;
+    return { ...first, durationMs: ended.durationMs, tokens: ended.tokens, costUsd: ended.costUsd };
+  };
+  let result: AgentResult = await raceAttempt();
   let budgetStop: BudgetState | null = null;
   // Vorübergehender Fehler des Agents (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen –
   // aber nur, wenn das Budget den zweiten Versuch noch erlaubt.
@@ -239,7 +250,7 @@ export async function runStep(
         cancelRequested,
       ]);
       if (paused === null && !cancelled && !isShuttingDown()) {
-        const second = await Promise.race([attempt(), cancelRequested]);
+        const second = await raceAttempt();
         result = {
           ...second,
           durationMs: first.durationMs + second.durationMs,

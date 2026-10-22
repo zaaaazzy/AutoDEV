@@ -271,6 +271,8 @@ export async function invokeAgent(
         // Damit ein Abbruch aus der Oberfläche auch diesen Agenten samt Kindprozessen beendet.
         onSpawn: hooks.onSpawn,
         onAction: hooks.onAction,
+        // Auch ein Abbruch vor onSpawn (noch keine PID) beendet bzw. verhindert den Prozess.
+        signal: hooks.signal,
       },
     ).catch((error: unknown): CommandResult => ({
       exitCode: 1,
@@ -304,6 +306,7 @@ export async function invokeAgent(
         onAction: hooks.onAction,
         onSession: hooks.onSession,
         resumeSession: resume?.sessionId,
+        signal: hooks.signal,
       },
     );
   let result = await run(hooks.resume);

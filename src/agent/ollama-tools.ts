@@ -37,7 +37,11 @@ export interface ToolContext {
   backupRoot: string;
   execute: CommandExecutor;
   timeoutMs: number;
+  /** Abbruch des Agents (Benutzer, Zeitlimit, Worker-Ende): kein Werkzeug startet mehr, laufende Befehle enden. */
+  signal?: AbortSignal;
 }
+
+export const TOOL_ABORTED = 'Abgebrochen: Der Agent wurde gestoppt, das Werkzeug wurde nicht ausgeführt.';
 
 async function backup(context: ToolContext, target: string): Promise<void> {
   const rel = relative(await realpath(context.cwd), target);
@@ -58,6 +62,7 @@ const filesProblem = (context: ToolContext, tool: string, target: string): strin
 /** Executes one tool call; failures are returned as text so the model can correct itself. */
 export async function executeTool(context: ToolContext, call: ToolCall): Promise<string> {
   const { name, arguments: args } = call.function;
+  if (context.signal?.aborted) return TOOL_ABORTED;
   try {
     switch (name) {
       case 'list_files': {
@@ -101,6 +106,8 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         if (denied) return denied;
         await backup(context, target);
         await mkdir(dirname(target), { recursive: true });
+        // Zwischen Prüfung und Schreiben liegen awaits: ein Abbruch in dieser Zeit verhindert das Schreiben noch.
+        if (context.signal?.aborted) return TOOL_ABORTED;
         await writeFile(target, args.content, 'utf8');
         context.changed.add(relative(await realpath(context.cwd), target));
         return `${relative(context.cwd, target)} geschrieben (${args.content.length} Zeichen).`;
@@ -121,6 +128,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return `old_text kommt ${occurrences}-mal vor, erwartet genau 1.`;
         }
         await backup(context, target);
+        if (context.signal?.aborted) return TOOL_ABORTED;
         await writeFile(
           target,
           content.replace(args.old_text, () => args.new_text as string),
@@ -158,10 +166,13 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           );
         }
         return withProjectLock(root, async () => {
+          // Das Warten auf die Projektsperre kann dauern: danach erneut prüfen.
+          if (context.signal?.aborted) return TOOL_ABORTED;
           if (COMPOSE_STARTING.test(command)) {
             const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, {
               timeoutMs: 60_000,
               env: projectEnvironment(context.cwd),
+              signal: context.signal,
             });
             const reason =
               check.exitCode === 0
@@ -170,10 +181,12 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
             if (reason)
               return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
           }
+          if (context.signal?.aborted) return TOOL_ABORTED;
           const result = await context.execute(executed, context.cwd, {
             timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
             // Befehle des Assistenten sind Projektcode: nur das gefilterte Environment (Allowlist).
             env: projectEnvironment(context.cwd),
+            signal: context.signal,
           });
           return clip(
             `Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`,
@@ -190,6 +203,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         if (typeof args.sql !== 'string' || !args.sql.trim() || args.sql.length > 20_000) {
           return 'sql muss ein nicht leerer Text sein.';
         }
+        if (context.signal?.aborted) return TOOL_ABORTED;
         return clip(await runProjectSql(context.databaseUrl, args.sql, context.sqlClient));
       }
       default:

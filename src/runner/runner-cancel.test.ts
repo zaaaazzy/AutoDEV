@@ -27,10 +27,18 @@ test('Abbrechen beendet einen hängenden Agent-Schritt sofort', async () => {
     },
   } as unknown as Pool;
   let started = false;
-  // Der Agent hängt und reagiert auf nichts: nur der Abbruch-Wächter kann den Schritt beenden.
-  const execute: CommandExecutor = () =>
-    new Promise(() => {
+  let agentEnded = false;
+  // Der Agent hängt bis zum Abbruch-Signal (wie runCommand, das dann die Prozessgruppe beendet) und braucht danach
+  // noch etwas, bis er wirklich fertig ist.
+  const execute: CommandExecutor = (_command, _cwd, options = {}) =>
+    new Promise((resolve) => {
       started = true;
+      options.signal?.addEventListener('abort', () =>
+        setTimeout(() => {
+          agentEnded = true;
+          resolve({ exitCode: 1, durationMs: 1, output: 'beendet', tokens: 42, costUsd: 0.5 });
+        }, 300),
+      );
     });
   const running = runWorkItem(pool, item, [agent], { cwd: '/repo', timeoutMs: 600_000, execute });
   await new Promise((resolve) => setTimeout(resolve, 200));
@@ -38,5 +46,8 @@ test('Abbrechen beendet einen hängenden Agent-Schritt sofort', async () => {
   cancel = true;
   const result = await Promise.race([running, new Promise((resolve) => setTimeout(() => resolve('hängt'), 6000))]);
   assert.equal(result, 'failed');
+  // Git-Schritte und Abschluss erst, wenn der Agent wirklich beendet ist – nicht schon beim Abbruch-Signal.
+  assert.equal(agentEnded, true);
   assert.ok(queries.some((query) => query.values.some((value) => String(value).includes('Vom Benutzer abgebrochen'))));
+  assert.ok(queries.some((query) => query.values.some((value) => String(value).includes('warte, bis der Agent'))));
 });
