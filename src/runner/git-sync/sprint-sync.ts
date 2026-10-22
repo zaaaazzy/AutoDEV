@@ -11,6 +11,7 @@ import {
   BOT_IDENTITY,
   branchExists,
   checkedOutElsewhere,
+  currentBranch,
   ensureRepository,
   gitHelpers,
   type GitHelpers,
@@ -131,6 +132,10 @@ async function pushSprint(
   let mergedMain = false;
   if (await branchExists(git, branch)) {
     if ((await must('rev-parse', '--abbrev-ref', 'HEAD')) !== branch) await must('checkout', branch);
+  } else if ((await currentBranch(git)) === 'HEAD') {
+    // Losgelöst (Agent-Worktree): Ohne Branch landete der Sicherungs-Commit nur am Tag und nie in main.
+    await must('checkout', '-b', branch);
+    log.push(`Kein Sprint-Branch vorhanden – ${branch} aus dem aktuellen Stand angelegt.`);
   } else {
     log.push(`Kein Sprint-Branch ${branch} – sichere den aktuellen Branch.`);
   }
@@ -349,8 +354,10 @@ export async function syncSprintToGit(
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   await pool.query(
+    // Hängengebliebene Sicherung (Worker abgestürzt) nach einer Stunde wieder einreihen; das Test-Gate dauert höchstens
+    // 45 Minuten. updated_at setzt der Claim unten – vorher wurde es nie aktualisiert und der Reset griff sofort.
     `UPDATE sprints SET git_sync = 'pending' WHERE project_slug = $1 AND git_sync = 'running'
-        AND updated_at < NOW() - INTERVAL '30 minutes'`,
+        AND updated_at < NOW() - INTERVAL '60 minutes'`,
     [project],
   );
   // Ein unterbrochener Auftrag (z. B. durch einen Neustart) steht noch mit offenen Änderungen auf seinem Branch und
@@ -358,7 +365,7 @@ export async function syncSprintToGit(
   // Ende desselben Durchlaufs erneut.
   if (await orderWorkInProgress(cwd, execute)) return 0;
   const claimed = await pool.query<PendingSprint>(
-    `UPDATE sprints s SET git_sync = 'running'
+    `UPDATE sprints s SET git_sync = 'running', updated_at = NOW()
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
       RETURNING s.id, s.name, s.status, s.git_action AS action, s.pr_url AS "prUrl",

@@ -8,6 +8,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree, treeBusy } from '../core/project-lock.js';
 import {
   BOT_IDENTITY,
+  checkoutSprintBranch,
   commitAgentStep,
   enterOrderBranch,
   finishOrderBranch,
@@ -199,4 +200,20 @@ test('Fremde Änderung wird mit vollständigem Pfad gemeldet', async () => {
   await mkdir(join(cwd, 'docs'), { recursive: true });
   await writeFile(join(cwd, 'base.txt'), 'geändert\n');
   await assert.rejects(enterOrderBranch(cwd, item, null), /\(base\.txt\)/);
+});
+
+// Ein neuer Sprint zweigte vom lokalen main ab, auch wenn GitHub weiter war (z. B. gemergter Pull Request des
+// Vorgänger-Sprints) – dann fehlte ihm dessen Arbeit.
+test('Neuer Sprint-Branch startet vom neueren origin/main, wenn das lokale main nur zurückliegt', async () => {
+  const { cwd: remote } = await project();
+  const clone = await mkdtemp(join(tmpdir(), 'git-safety-clone-'));
+  execFileSync('git', ['clone', '-q', remote, clone]);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: clone, stdio: 'pipe' }).toString().trim();
+  // GitHub (hier: remote) bekommt einen neuen Commit, den das lokale main nicht hat.
+  await writeFile(join(remote, 'vorgaenger.txt'), 'Sprint davor\n');
+  execFileSync('git', ['add', '-A'], { cwd: remote });
+  execFileSync('git', ['commit', '-q', '-m', 'Sprint davor'], { cwd: remote });
+  const branch = await checkoutSprintBranch(clone, 'Sprint 2');
+  assert.equal(branch, 'sprint/sprint-2');
+  assert.equal(git('show', 'HEAD:vorgaenger.txt'), 'Sprint davor');
 });

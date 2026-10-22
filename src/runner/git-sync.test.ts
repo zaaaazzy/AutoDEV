@@ -713,7 +713,7 @@ test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderunge
   const { pool, updates } = fakePool(null);
   assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
   assert.equal(
-    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('30 minutes')),
+    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('60 minutes')),
     false,
     'nichts übernommen, Sprint bleibt pending',
   );

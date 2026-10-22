@@ -286,6 +286,20 @@ export async function branchExists(git: GitHelpers['git'], branch: string): Prom
  * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
  * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
  */
+/**
+ * Basis für einen neuen Sprint-Branch: der neueste Stand von main. Liegt GitHub vorn (z. B. ein gemergter Pull
+ * Request des Vorgänger-Sprints) und hat das lokale main nichts Eigenes, zählt origin/main – sonst fehlte dem neuen
+ * Sprint die Arbeit des vorigen. Ohne Remote oder bei eigenen lokalen Commits bleibt es beim lokalen main.
+ */
+async function freshestMain(git: GitHelpers['git']): Promise<string> {
+  if (!(await git('remote')).output.split('\n').includes('origin')) return MAIN_BRANCH;
+  await git('fetch', '-q', 'origin', MAIN_BRANCH);
+  const remote = `refs/remotes/origin/${MAIN_BRANCH}`;
+  if ((await git('rev-parse', '--verify', '--quiet', remote)).exitCode !== 0) return MAIN_BRANCH;
+  const behindOnly = (await git('merge-base', '--is-ancestor', MAIN_BRANCH, remote)).exitCode === 0;
+  return behindOnly ? remote : MAIN_BRANCH;
+}
+
 export async function checkoutSprintBranch(
   cwd: string,
   sprintName: string,
@@ -299,7 +313,8 @@ export async function checkoutSprintBranch(
     await ensureRepository(git, must, cwd);
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output === branch) return branch;
     if (await branchExists(git, branch)) await must('checkout', branch);
-    else if (await branchExists(git, MAIN_BRANCH)) await must('checkout', '-b', branch, MAIN_BRANCH);
+    else if (await branchExists(git, MAIN_BRANCH))
+      await must('checkout', '--no-track', '-b', branch, await freshestMain(git));
     else await must('checkout', '-b', branch);
     return branch;
   } catch (error) {

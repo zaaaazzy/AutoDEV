@@ -373,6 +373,8 @@ export async function runWorkItem(
     passed = false;
     // Z. B. git im Projektordner scheitert, weil das Laufwerk kurz weg war: erneut einplanen statt blockieren.
     if (folderAtStart && hadOutage(options.cwd, startedAt)) interrupted = true;
+    // Worker wird beendet (z. B. während der Auftrag auf den Arbeitsordner wartete): unterbrochen, nicht blockiert.
+    else if (isShuttingDown()) interrupted = true;
     else if (error instanceof OrderBranchError) {
       // Der Arbeitsordner ist nicht sauber (fremde Änderungen, falscher Branch): Das betrifft jeden Auftrag, nicht
       // diesen. Also nicht blockieren, sondern eingeplant lassen und den Sprint pausieren – sonst scheiterte ein

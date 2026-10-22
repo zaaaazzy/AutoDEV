@@ -31,7 +31,11 @@ export function sprintSettled(
         // Wartet ein Auftrag auf die Review-Freigabe, ist er noch nicht im Sprint-Branch: der Sprint wartet mit.
         ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
         (item.status === 'blocked' &&
-          (!item.actionTodo || Boolean(item.budgetBlocked) || ENVIRONMENT_TODOS.includes(item.actionTodo))),
+          (!item.actionTodo ||
+            // Tages- und Sprint-Budget geben von selbst wieder frei; das Budget je Auftrag nie (nur „Erneut versuchen“
+            // setzt es zurück) – dieser Auftrag wartet also auf einen Menschen und hält den Sprint nicht ewig offen.
+            (Boolean(item.budgetBlocked) && item.budgetBlocked !== 'order') ||
+            ENVIRONMENT_TODOS.includes(item.actionTodo))),
     )
   );
 }
