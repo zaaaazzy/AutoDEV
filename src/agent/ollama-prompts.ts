@@ -3,7 +3,13 @@ const parameter = (description: string, type = 'string'): { type: string; descri
   description,
 });
 
-export function toolDefinitions(canWrite: boolean, canManageServices = false, hasDatabase = false): unknown[] {
+/** Werkzeuge des lokalen Modells; run_command auch ohne Schreibrecht, wenn die Rolle Befehle ausführen darf. */
+export function toolDefinitions(
+  canWrite: boolean,
+  canManageServices = false,
+  hasDatabase = false,
+  canRunCommands = canWrite,
+): unknown[] {
   const tools: { name: string; description: string; properties: Record<string, unknown>; required: string[] }[] = [
     {
       name: 'list_files',
@@ -45,13 +51,27 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false, ha
         },
         required: ['path', 'old_text', 'new_text'],
       },
-      {
-        name: 'run_command',
-        description: `Führt erlaubte Projektbefehle aus (npm test/run/ls, git status/diff/log${canManageServices ? ', docker compose ps/logs/up -d/stop/down/restart/build, git clone/pull, npm install' : ''}).`,
-        properties: { command: parameter('z. B. "npm run build", "npm test" oder "docker compose ps"') },
-        required: ['command'],
-      },
     );
+  }
+  if (canRunCommands) {
+    tools.push(
+      canWrite
+        ? {
+            name: 'run_command',
+            description: `Führt erlaubte Projektbefehle aus (npm test/run/ls, git status/diff/log${canManageServices ? ', docker compose ps/logs/up -d/stop/down/restart/build, git clone/pull, npm install' : ''}).`,
+            properties: { command: parameter('z. B. "npm run build", "npm test" oder "docker compose ps"') },
+            required: ['command'],
+          }
+        : {
+            name: 'run_command',
+            description:
+              'Führt freigegebene Prüfbefehle aus (npm audit, npm outdated, git ls-files, git grep). Ändert nichts.',
+            properties: { command: parameter('z. B. "npm audit --json", "npm outdated" oder "git grep -n TODO"') },
+            required: ['command'],
+          },
+    );
+  }
+  if (canWrite) {
     if (hasDatabase) {
       tools.push({
         name: 'run_sql',
@@ -73,7 +93,7 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false, ha
   }));
 }
 
-export function systemPrompt(role: string, canWrite: boolean, hasDatabase = false): string {
+export function systemPrompt(role: string, canWrite: boolean, hasDatabase = false, canRunCommands = canWrite): string {
   return [
     role === 'assistant'
       ? 'Du bist der Dashboard-Assistent und Problemlöser. Du darfst Probleme im Projekt selbst untersuchen ' +
@@ -101,6 +121,10 @@ export function systemPrompt(role: string, canWrite: boolean, hasDatabase = fals
         : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als ' +
           'letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich ' +
           'relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
+    canRunCommands && !canWrite
+      ? 'Mit run_command führst du freigegebene Prüfbefehle aus (z. B. "npm audit --json", "npm outdated", ' +
+        '"git ls-files", "git grep -n TODO") und meldest ihr tatsächliches Ergebnis.'
+      : '',
     hasDatabase
       ? 'Du hast mit run_sql Zugriff auf die Datenbank dieses Projekts. Prüfe zuerst per SELECT, ob Daten vorhanden ' +
         'sind, ändere nur gezielt und überschreibe keine Daten, die du nicht kennst. Erfinde keine Passwörter, ' +
