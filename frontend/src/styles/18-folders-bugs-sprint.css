@@ -12,7 +12,7 @@
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
 }
 .folder-picker-head {
   display: flex;
@@ -41,7 +41,7 @@
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: #e8f1ec;
+  background: var(--green-soft);
   color: var(--green);
 }
 .folder-picker-actions {
@@ -53,7 +53,7 @@
 }
 .folder-picker-error {
   margin: 4px 0;
-  color: #c0392b;
+  color: var(--danger);
   font-size: 13px;
 }
 .system-tools { display: flex; gap: 6px; align-items: center; margin-top: 8px; font-size: 12.5px; }
@@ -96,7 +96,7 @@
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 .bug-stats-card h3 {
   margin: 0 0 8px;
@@ -181,7 +181,7 @@
   color: var(--green);
 }
 .sprint-review-status.failed {
-  color: #c0392b;
+  color: var(--danger);
 }
 /* Test, Test-Gate oder Push laufen noch: Restzeit und Fortschritt statt „Review läuft“ */
 app-wait-status {
@@ -193,7 +193,7 @@ app-wait-status {
   gap: 5px;
   margin: 4px 0;
   font-size: 13px;
-  color: #a0610d;
+  color: var(--warn);
 }
 /* Dashboard: eigene Karte über den Kennzahlen, solange Test, Merge, Push oder CI laufen */
 .wait-status.wait-status-card {
@@ -276,7 +276,7 @@ app-wait-status {
 }
 .sprint-go.failed {
   border-color: #e6b8b3;
-  border-left-color: #c0392b;
+  border-left-color: var(--danger);
   background: #fdf1ef;
 }
 .sprint-go.paused {
@@ -349,12 +349,12 @@ app-wait-status {
   color: #a33d26;
 }
 .agent-end.warn {
-  background: #fdf1e0;
-  color: #a0610d;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 .agent-end.running {
   background: #e7eff7;
-  color: #36608f;
+  color: var(--blue);
 }
 .attention-visual .order-visual {
   margin: 0;

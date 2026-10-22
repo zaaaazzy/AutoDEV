@@ -57,112 +57,108 @@
 </details>
 
 @if (guide(); as kind) {
-  <div class="modal-backdrop guide-backdrop" (click)="guide.set(null)">
-    <section
-      class="guide-sheet"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="guide-title"
-      (click)="$event.stopPropagation()"
-    >
-      <header class="guide-head">
-        <span class="guide-icon" aria-hidden="true">{{ kind === 'install' ? '📲' : '🔔' }}</span>
-        <div>
-          <p class="eyebrow">Einrichtung</p>
-          <h3 id="guide-title">
-            {{ kind === 'install' ? 'AIdeation als App installieren' : 'Benachrichtigungen erlauben' }}
-          </h3>
-        </div>
-        <button class="wizard-icon-button" type="button" aria-label="Schließen" (click)="guide.set(null)">✕</button>
-      </header>
+  <app-modal
+    panelClass="guide-sheet"
+    backdropClass="guide-backdrop"
+    labelledBy="guide-title"
+    (closed)="guide.set(null)"
+  >
+    <header class="guide-head">
+      <span class="guide-icon" aria-hidden="true">{{ kind === 'install' ? '📲' : '🔔' }}</span>
+      <div>
+        <p class="eyebrow">Einrichtung</p>
+        <h3 id="guide-title">
+          {{ kind === 'install' ? 'AIdeation als App installieren' : 'Benachrichtigungen erlauben' }}
+        </h3>
+      </div>
+      <button class="wizard-icon-button" type="button" aria-label="Schließen" (click)="guide.set(null)">✕</button>
+    </header>
 
-      @if (kind === 'install') {
-        @if (ios) {
-          <ol class="guide-steps">
-            <li>
-              <strong>In Safari unten auf „Teilen“ tippen</strong>
-              <small>Das Quadrat mit dem Pfeil nach oben <span class="guide-key">⬆︎</span>.</small>
-            </li>
-            <li>
-              <strong>„Zum Home-Bildschirm“ wählen</strong>
-              <small>Falls nicht sichtbar: in der Liste nach unten wischen.</small>
-            </li>
-            <li>
-              <strong>„Hinzufügen“ tippen</strong>
-              <small>Auf dem Home-Bildschirm erscheint das AIdeation-Symbol.</small>
-            </li>
-            <li>
-              <strong>AIdeation über das neue Symbol öffnen</strong>
-              <small
-                >Dann hier unter Einstellungen „Push-Nachrichten“ einschalten – auf dem iPhone geht das nur in der
-                App.</small
-              >
-            </li>
-          </ol>
-        } @else if (android) {
-          <ol class="guide-steps">
-            <li><strong>Oben rechts das Menü ⋮ öffnen</strong><small>In Chrome bzw. dem genutzten Browser.</small></li>
-            <li>
-              <strong>„App installieren“ bzw. „Zum Startbildschirm hinzufügen“</strong><small>Dann bestätigen.</small>
-            </li>
-            <li><strong>AIdeation über das neue Symbol öffnen</strong></li>
-          </ol>
-        } @else if (safariMac) {
-          <ol class="guide-steps">
-            <li><strong>Menü „Ablage“ öffnen</strong></li>
-            <li><strong>„Zum Dock hinzufügen …“ wählen</strong><small>Dann „Hinzufügen“.</small></li>
-          </ol>
-        } @else {
-          <ol class="guide-steps">
-            <li>
-              <strong>In der Adressleiste rechts auf das Installieren-Symbol klicken</strong>
-              <small>Alternativ im Browsermenü „AIdeation installieren“.</small>
-            </li>
-            <li><strong>„Installieren“ bestätigen</strong></li>
-          </ol>
-        }
-        <footer class="guide-foot">
-          <button class="button primary" type="button" (click)="guide.set(null)">Verstanden</button>
-        </footer>
+    @if (kind === 'install') {
+      @if (ios) {
+        <ol class="guide-steps">
+          <li>
+            <strong>In Safari unten auf „Teilen“ tippen</strong>
+            <small>Das Quadrat mit dem Pfeil nach oben <span class="guide-key">⬆︎</span>.</small>
+          </li>
+          <li>
+            <strong>„Zum Home-Bildschirm“ wählen</strong>
+            <small>Falls nicht sichtbar: in der Liste nach unten wischen.</small>
+          </li>
+          <li>
+            <strong>„Hinzufügen“ tippen</strong>
+            <small>Auf dem Home-Bildschirm erscheint das AIdeation-Symbol.</small>
+          </li>
+          <li>
+            <strong>AIdeation über das neue Symbol öffnen</strong>
+            <small
+              >Dann hier unter Einstellungen „Push-Nachrichten“ einschalten – auf dem iPhone geht das nur in der
+              App.</small
+            >
+          </li>
+        </ol>
+      } @else if (android) {
+        <ol class="guide-steps">
+          <li><strong>Oben rechts das Menü ⋮ öffnen</strong><small>In Chrome bzw. dem genutzten Browser.</small></li>
+          <li>
+            <strong>„App installieren“ bzw. „Zum Startbildschirm hinzufügen“</strong><small>Dann bestätigen.</small>
+          </li>
+          <li><strong>AIdeation über das neue Symbol öffnen</strong></li>
+        </ol>
+      } @else if (safariMac) {
+        <ol class="guide-steps">
+          <li><strong>Menü „Ablage“ öffnen</strong></li>
+          <li><strong>„Zum Dock hinzufügen …“ wählen</strong><small>Dann „Hinzufügen“.</small></li>
+        </ol>
       } @else {
         <ol class="guide-steps">
           <li>
-            <strong>Gleich fragt {{ ios ? 'iOS' : 'der Browser' }} nach der Erlaubnis</strong>
-            <small>Dort <span class="guide-key">Erlauben</span> wählen.</small>
+            <strong>In der Adressleiste rechts auf das Installieren-Symbol klicken</strong>
+            <small>Alternativ im Browsermenü „AIdeation installieren“.</small>
           </li>
-          <li>
-            <strong>AIdeation meldet dieses Gerät an</strong>
-            <small>Zur Kontrolle kommt sofort eine Testnachricht.</small>
-          </li>
+          <li><strong>„Installieren“ bestätigen</strong></li>
         </ol>
-        @if (permission() === 'denied') {
-          <div class="guide-warn">
-            <strong>Benachrichtigungen sind gesperrt.</strong>
-            @if (ios) {
-              <small
-                >Einstellungen → Mitteilungen → AIdeation → „Mitteilungen erlauben“ einschalten, dann hier erneut
-                versuchen.</small
-              >
-            } @else if (android) {
-              <small>Schloss-Symbol links in der Adressleiste → Berechtigungen → Benachrichtigungen → Zulassen.</small>
-            } @else {
-              <small
-                >Auf das Symbol links in der Adressleiste klicken → Benachrichtigungen → Zulassen, dann neu
-                laden.</small
-              >
-            }
-          </div>
-        }
-        @if (error()) {
-          <p class="notice error" role="alert">{{ error() }}</p>
-        }
-        <footer class="guide-foot">
-          <button class="button secondary" type="button" (click)="guide.set(null)">Später</button>
-          <button class="button primary" type="button" [disabled]="busy()" (click)="allowAndSubscribe()">
-            {{ busy() ? 'Wird eingerichtet …' : 'Erlauben' }}
-          </button>
-        </footer>
       }
-    </section>
-  </div>
+      <footer class="guide-foot">
+        <button class="button primary" type="button" (click)="guide.set(null)">Verstanden</button>
+      </footer>
+    } @else {
+      <ol class="guide-steps">
+        <li>
+          <strong>Gleich fragt {{ ios ? 'iOS' : 'der Browser' }} nach der Erlaubnis</strong>
+          <small>Dort <span class="guide-key">Erlauben</span> wählen.</small>
+        </li>
+        <li>
+          <strong>AIdeation meldet dieses Gerät an</strong>
+          <small>Zur Kontrolle kommt sofort eine Testnachricht.</small>
+        </li>
+      </ol>
+      @if (permission() === 'denied') {
+        <div class="guide-warn">
+          <strong>Benachrichtigungen sind gesperrt.</strong>
+          @if (ios) {
+            <small
+              >Einstellungen → Mitteilungen → AIdeation → „Mitteilungen erlauben“ einschalten, dann hier erneut
+              versuchen.</small
+            >
+          } @else if (android) {
+            <small>Schloss-Symbol links in der Adressleiste → Berechtigungen → Benachrichtigungen → Zulassen.</small>
+          } @else {
+            <small
+              >Auf das Symbol links in der Adressleiste klicken → Benachrichtigungen → Zulassen, dann neu laden.</small
+            >
+          }
+        </div>
+      }
+      @if (error()) {
+        <p class="notice error" role="alert">{{ error() }}</p>
+      }
+      <footer class="guide-foot">
+        <button class="button secondary" type="button" (click)="guide.set(null)">Später</button>
+        <button class="button primary" type="button" [disabled]="busy()" (click)="allowAndSubscribe()">
+          {{ busy() ? 'Wird eingerichtet …' : 'Erlauben' }}
+        </button>
+      </footer>
+    }
+  </app-modal>
 }

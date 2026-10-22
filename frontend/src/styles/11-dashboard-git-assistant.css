@@ -76,7 +76,7 @@ a.git-commit[href]:hover {
 .git-ref-head {
   border-color: var(--green);
   background: var(--green);
-  color: #fff;
+  color: var(--surface);
 }
 
 .git-ref-branch {
@@ -128,7 +128,7 @@ a.git-commit[href]:hover {
   border: 1px solid var(--green);
   border-radius: 999px;
   background: var(--green);
-  color: #fff;
+  color: var(--surface);
   font: inherit;
   font-size: 0.85rem;
   cursor: pointer;
@@ -147,7 +147,7 @@ a.git-commit[href]:hover {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 
@@ -255,7 +255,7 @@ a.git-commit[href]:hover {
 }
 
 .agent-task-icon:hover {
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
 }
 
@@ -267,7 +267,7 @@ a.git-commit[href]:hover {
   position: sticky;
   z-index: 1;
   top: 0;
-  background: #fff;
+  background: var(--surface);
 }
 
 .agent-task.disabled {
@@ -286,7 +286,7 @@ a.git-commit[href]:hover {
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: var(--shadow);
   font-size: 0.85rem;
 }

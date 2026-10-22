@@ -18,7 +18,7 @@
 }
 .production-tile.tone-idle {
   border-left-color: var(--line);
-  background: white;
+  background: var(--surface);
 }
 .production-tile.tone-idle strong {
   color: var(--muted);
@@ -99,7 +99,7 @@
   padding: 5px 8px;
   border-radius: 6px;
   background: #26312a;
-  color: #fff;
+  color: var(--surface);
   font-size: 12px;
   transform: translateX(-50%);
   pointer-events: none;
@@ -138,7 +138,7 @@
   padding: 10px;
   overflow: auto;
   border-radius: 8px;
-  background: #f4f5f1;
+  background: var(--paper);
   font-size: 12px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

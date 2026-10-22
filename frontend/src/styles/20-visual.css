@@ -13,7 +13,7 @@
 .segmented button {
   padding: 4px 12px;
   border: 0;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   cursor: pointer;
 }
@@ -22,7 +22,7 @@
 }
 .segmented button.active {
   background: var(--green);
-  color: #fff;
+  color: var(--surface);
 }
 .visual-page h5 {
   margin: 12px 0 6px;
@@ -51,7 +51,7 @@
   object-position: top;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
 }
 .order-visual > summary {
   display: flex;
@@ -90,7 +90,7 @@
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 .visual-step h4 {
   display: flex;
@@ -239,8 +239,8 @@
   color: var(--green);
 }
 .tag.visual-open {
-  background: #fdf1e0;
-  color: #a0610d;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 @media (max-width: 700px) {
   .visual-grid {

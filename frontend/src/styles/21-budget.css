@@ -63,7 +63,7 @@
   white-space: nowrap;
 }
 .routing-rule:not(.routing-head):hover {
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .routing-rule .rule-rank {
   display: inline-grid;

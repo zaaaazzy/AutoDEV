@@ -4,7 +4,7 @@
   padding: 12px 14px;
   border: 1px solid #dfe3da;
   border-radius: 10px;
-  background: #fafbf8;
+  background: var(--surface-soft);
   font-size: 13px;
 }
 .git-tree h4 {
@@ -12,7 +12,7 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b756f;
+  color: var(--muted);
 }
 .git-tree ol {
   list-style: none;
@@ -34,7 +34,7 @@
   top: 12px;
   bottom: -2px;
   width: 2px;
-  background: #c9d1c6;
+  background: var(--line-strong);
 }
 .git-node:last-child {
   padding-bottom: 0;
@@ -49,25 +49,25 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 2px solid #fafbf8;
+  border: 2px solid var(--surface-soft);
   background: #8aa291;
   box-sizing: content-box;
 }
 .git-node.branch .git-dot {
-  background: #2f6f4f;
+  background: var(--green-light);
 }
 .git-node.commit .git-dot {
   background: #d98a2b;
 }
 .git-node.empty .git-dot {
-  background: #fafbf8;
-  border-color: #c9d1c6;
+  background: var(--surface-soft);
+  border-color: var(--line-strong);
 }
 .git-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b756f;
+  color: var(--muted);
 }
 .git-text {
   font-weight: 600;
@@ -75,10 +75,10 @@
 }
 .git-node.empty .git-text {
   font-weight: 400;
-  color: #6b756f;
+  color: var(--muted);
 }
 .git-detail {
-  color: #6b756f;
+  color: var(--muted);
 }
 .git-actions {
   display: flex;
@@ -100,7 +100,7 @@
   padding: 6px 12px;
   border: 1px solid #d5dbd0;
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: #4a554d;
   font-size: 13px;
   cursor: pointer;
@@ -130,8 +130,8 @@
   padding: 0 20px;
   border: 0;
   border-radius: 999px;
-  background: #2f6f4f;
-  color: #fff;
+  background: var(--green-light);
+  color: var(--surface);
   font-weight: 600;
   cursor: pointer;
   transition:
@@ -145,13 +145,13 @@
   transform: scale(0.97);
 }
 .chat-send:disabled {
-  background: #c9d1c6;
+  background: var(--line-strong);
   cursor: default;
 }
 .task-chevron {
   margin-left: auto;
   font-size: 18px;
-  color: #2f6f4f;
+  color: var(--green-light);
   transition: transform 0.15s;
   transform: rotate(-90deg);
 }
@@ -224,7 +224,7 @@
 .order-panel .markdown,
 .order-brief .markdown {
   max-height: none;
-  background: #fff;
+  background: var(--surface);
 }
 .order-detail .markdown h2,
 .order-panel .markdown h2,
@@ -250,7 +250,7 @@
 .order-context summary {
   cursor: pointer;
   font-weight: 600;
-  color: #2f6f4f;
+  color: var(--green-light);
 }
 .item-content h4 .button {
   margin-left: 8px;
@@ -281,10 +281,10 @@
   color: #24292f;
   text-decoration: none;
   font-size: 13px;
-  background: #fff;
+  background: var(--surface);
 }
 .gh-link:hover {
-  border-color: #2f6f4f;
+  border-color: var(--green-light);
 }
 .sprint-layout {
   display: grid;
@@ -319,10 +319,10 @@
 .detail-list .sub dt,
 .detail-list .sub dd {
   font-weight: 400;
-  color: #6b756f;
+  color: var(--muted);
 }
 .detail-list dt {
-  color: #6b756f;
+  color: var(--muted);
 }
 .detail-list dd {
   margin: 0;
@@ -337,7 +337,7 @@
   display: grid;
   gap: 3px;
   font-size: 12px;
-  color: #6b756f;
+  color: var(--muted);
 }
 .git-sync-buttons {
   display: inline-flex;
@@ -367,7 +367,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   margin-bottom: 6px;
-  background: #fff;
+  background: var(--surface);
 }
 .sprint-task-head {
   display: flex;
@@ -399,7 +399,7 @@
   padding: 6px 10px 10px;
   border: 1px solid #dfe3da;
   border-radius: 9px;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .agent-steps .sprint-task-head {
   padding: 4px 8px;
@@ -446,7 +446,7 @@
   background: var(--orange);
 }
 .approval-dot.failed {
-  background: #c0392b;
+  background: var(--danger);
 }
 .approval-log {
   margin: 6px 0 0;
@@ -454,7 +454,7 @@
   max-height: 160px;
   overflow: auto;
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
   font-size: 12px;
   white-space: pre-wrap;
 }
@@ -469,7 +469,7 @@
 }
 .agent-cancel {
   border: 1px solid #e4b4ae;
-  background: #fff;
+  background: var(--surface);
   color: #b3382c;
   border-radius: 8px;
   padding: 5px 10px;
@@ -507,7 +507,7 @@
 .failure-text {
   margin: 8px 0;
   padding: 8px 12px;
-  background: #fff;
+  background: var(--surface);
   border-radius: 8px;
   max-height: 260px;
   overflow-y: auto;
@@ -556,7 +556,7 @@ label.check > input[type='checkbox'] {
   top: 12px;
   bottom: -4px;
   width: 2px;
-  background: #c9d1c6;
+  background: var(--line-strong);
 }
 .timeline li:last-child {
   padding-bottom: 0;
@@ -572,12 +572,12 @@ label.check > input[type='checkbox'] {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #2f6f4f;
+  background: var(--green-light);
 }
 .timeline time {
   flex: none;
   min-width: 62px;
-  color: #6b756f;
+  color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-size: 12px;
 }
@@ -606,7 +606,7 @@ label.check > input[type='checkbox'] {
 }
 .timeline .event-read .event-kind {
   background: #e7eff7;
-  color: #36608f;
+  color: var(--blue);
 }
 .timeline .event-write .event-kind {
   background: #faf1da;
@@ -620,7 +620,7 @@ label.check > input[type='checkbox'] {
   color: #5b4a8b;
 }
 .timeline .event-read::after {
-  background: #36608f;
+  background: var(--blue);
 }
 .timeline .event-write::after {
   background: #c08a2a;
@@ -646,7 +646,7 @@ label.check > input[type='checkbox'] {
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b756f;
+  color: var(--muted);
 }
 .sprint-task-head:disabled {
   cursor: default;
@@ -790,7 +790,7 @@ label.check > input[type='checkbox'] {
   padding: 14px 16px;
   border: 1px solid #dfe3da;
   border-radius: 9px;
-  background: #fff;
+  background: var(--surface);
   font-size: 13px;
   line-height: 1.55;
 }
@@ -869,9 +869,9 @@ label.check > input[type='checkbox'] {
   height: 17px;
   margin-top: 2px;
   place-items: center;
-  border: 1px solid #c9d1c6;
+  border: 1px solid var(--line-strong);
   border-radius: 50%;
-  color: #6b756f;
+  color: var(--muted);
   font-size: 11px;
   font-style: italic;
   font-weight: 700;
@@ -889,7 +889,7 @@ label.check > input[type='checkbox'] {
   padding: 8px 10px;
   border-radius: 8px;
   background: #26312a;
-  color: #fff;
+  color: var(--surface);
   font-size: 12px;
   font-style: normal;
   font-weight: 400;
@@ -924,7 +924,7 @@ label.check > input[type='checkbox'] {
 .agent-workflow > li > details {
   border: 1px solid #dfe3da;
   border-radius: 9px;
-  background: #fff;
+  background: var(--surface);
 }
 .agent-workflow > li > details > summary {
   display: flex;
@@ -1076,23 +1076,23 @@ label.check > input[type='checkbox'] {
 
 /* Geöffnete Listenzeile und Detailbereich bilden einen gemeinsamen Rahmen */
 .idea-table tr.row-open > td {
-  border-top: 1px solid #c9d1c6;
+  border-top: 1px solid var(--line-strong);
   border-bottom: 0;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .idea-table tr.row-open > td:first-child {
-  border-left: 1px solid #c9d1c6;
+  border-left: 1px solid var(--line-strong);
   border-top-left-radius: 10px;
 }
 .idea-table tr.row-open > td:last-child {
-  border-right: 1px solid #c9d1c6;
+  border-right: 1px solid var(--line-strong);
   border-top-right-radius: 10px;
 }
 .idea-table tr.row-open + .closed-detail > td {
-  border: 1px solid #c9d1c6;
+  border: 1px solid var(--line-strong);
   border-top: 0;
   border-radius: 0 0 10px 10px;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .idea-table tr.row-open + .closed-detail + tr > td {
   border-top: 0;
@@ -1116,7 +1116,7 @@ label.check > input[type='checkbox'] {
   padding: 8px 12px;
   border: 1px solid #e3e7de;
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 .order-controls .control {
   display: flex;

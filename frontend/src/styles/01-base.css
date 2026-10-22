@@ -2,16 +2,27 @@
 :root {
   color-scheme: light;
   font-family: Inter, 'Segoe UI', system-ui, sans-serif;
-  color: #202824;
-  background: #f4f5f1;
+  color: var(--ink);
+  background: var(--paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: #202824;
   --muted: #6d766f;
   --paper: #f4f5f1;
+  /* Flächen: Karten, Panels, Eingabefelder */
+  --surface: #fff;
+  --surface-soft: #fafbf8;
   --line: #e2e7df;
+  --line-strong: #c9d1c6;
   --green: #24634e;
+  --green-light: #2f6f4f;
+  --green-soft: #e8f1ec;
   --orange: #d7864e;
+  /* Zustände: Warnung, Fehler, Info */
+  --warn: #a0610d;
+  --warn-soft: #fdf1e0;
+  --danger: #c0392b;
+  --blue: #36608f;
   --shadow: 0 10px 28px rgb(32 40 36 / 8%);
 }
 
@@ -60,6 +71,6 @@ textarea {
   padding: 8px 10px;
   border: 1px solid #cfd8ce;
   border-radius: 7px;
-  background: white;
+  background: var(--surface);
   color: var(--ink);
 }
