@@ -5,6 +5,7 @@ import {
   completeRestart,
   composeEnvironment,
   processRestart,
+  pullBranch,
   readRestart,
   requestRestart,
   RESTART_COMMAND,
@@ -159,6 +160,82 @@ test('Neustart: baut nur einen sauberen Stand des erlaubten Branches', async () 
   assert.match(dirty.message, /Nicht committete Änderungen im AIdeation-Ordner \(src\/server\.ts\)/);
   assert.equal((await run(gitState('fix/irgendwas', ''), '*')).result, 'restart', '„*“ erlaubt jeden Branch');
   assert.equal((await run(gitState('release', ''), 'release')).result, 'restart');
+});
+
+/** Git mit Remote „origin“: rev-parse HEAD liefert erst `before`, nach dem Merge `after`; fetch/merge wie angegeben. */
+function remoteGit(options: { fetch?: number; merge?: number; before?: string; after?: string } = {}) {
+  const calls: string[][] = [];
+  let merged = false;
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push(command);
+    if (command[0] !== 'git') return ok(command, cwd);
+    const result = (exitCode: number, output = '') => ({ exitCode, durationMs: 1, output });
+    switch (command[1]) {
+      case 'remote':
+        return result(0, 'origin\n');
+      case 'rev-parse':
+        if (command[2] === '--abbrev-ref') return result(0, 'main\n');
+        return result(0, `${merged ? (options.after ?? 'a'.repeat(40)) : (options.before ?? 'a'.repeat(40))}\n`);
+      case 'fetch':
+        return result(
+          options.fetch ?? 0,
+          options.fetch ? 'ssh: connect to host github.com: Network is unreachable' : '',
+        );
+      case 'merge':
+        merged = (options.merge ?? 0) === 0;
+        return result(options.merge ?? 0, options.merge ? 'fatal: Not possible to fast-forward, aborting.' : '');
+      default:
+        return result(0);
+    }
+  };
+  return { calls, execute };
+}
+
+test('Neustart: holt vor dem Bau den neuesten Stand per Fast-Forward von origin', async () => {
+  const git = remoteGit({ before: '1111111aaaa', after: '2222222bbbb' });
+  const pool = memoryPool();
+  await requestRestart(pool, 'Patrick');
+  const result = await processRestart(pool, '/x', () => 0, git.execute, undefined, { health: async () => true });
+  assert.equal(result, 'restart');
+  const order = git.calls.map((command) => command.slice(0, 2).join(' '));
+  assert.ok(order.indexOf('git fetch') < order.indexOf('git merge'), 'erst holen, dann vorspulen');
+  assert.ok(order.indexOf('git merge') < order.indexOf('docker compose'), 'vor dem Bau');
+  assert.deepEqual(
+    git.calls.find((command) => command[1] === 'merge'),
+    ['git', 'merge', '--ff-only', 'FETCH_HEAD'],
+  );
+  assert.match((await readRestart(pool))?.log ?? '', /^Neuester Stand von origin\/main geholt \(1111111 → 2222222\)/);
+});
+
+test('pullBranch: offline, abweichender Stand oder kein Remote baut den lokalen Stand', async () => {
+  assert.match(await pullBranch('/x', remoteGit({ fetch: 128 }).execute), /GitHub nicht erreichbar.*lokale Stand/);
+  assert.match(await pullBranch('/x', remoteGit({ merge: 128 }).execute), /kein Fast-Forward möglich.*lokale Stand/);
+  assert.match(await pullBranch('/x', remoteGit().execute), /war schon aktuell/);
+  assert.match(await pullBranch('/x', ok), /Kein Remote „origin“/);
+});
+
+test('Neustart: ohne Netz wird trotzdem gebaut', async () => {
+  const pool = memoryPool();
+  await requestRestart(pool, 'Patrick');
+  const git = remoteGit({ fetch: 128 });
+  assert.equal(
+    await processRestart(pool, '/x', () => 0, git.execute, undefined, { health: async () => true }),
+    'restart',
+  );
+  assert.ok(git.calls.some((command) => command.includes('--build')));
+  assert.ok(!git.calls.some((command) => command[1] === 'merge'), 'ohne fetch kein merge');
+});
+
+test('Neustart: unsauberer Ordner wird gar nicht erst aktualisiert', async () => {
+  const pool = memoryPool();
+  await requestRestart(pool, 'Patrick');
+  const calls: string[][] = [];
+  const dirty: CommandExecutor = async (command) => {
+    calls.push(command);
+    return { exitCode: 0, durationMs: 1, output: command[1] === 'rev-parse' ? 'main\n' : ' M src/server.ts\n' };
+  };
+  assert.equal(await processRestart(pool, '/x', () => 0, dirty), 'failed');
+  assert.ok(!calls.some((command) => command[1] === 'fetch' || command[1] === 'merge'));
 });
 
 test('Neustart scheitert schon vor dem Bau (falscher Branch): genau eine Benachrichtigung', async () => {

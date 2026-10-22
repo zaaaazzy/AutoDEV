@@ -6,8 +6,9 @@ import { gitEnvironment } from './project-command.js';
 
 /**
  * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
- * baut die Container mit `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive)
- * startet ihn sofort wieder – mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
+ * holt den neuesten Stand per Fast-Forward von origin (pullBranch), baut die Container mit
+ * `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive) startet ihn sofort wieder –
+ * mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
  */
 export const RESTART_KEY = 'system:restart';
 export const RESTART_COMMAND = ['docker', 'compose', 'up', '-d', '--build'];
@@ -227,6 +228,35 @@ export async function deployProblem(
   return null;
 }
 
+/**
+ * Holt vor dem Bau den neuesten Stand des ausgecheckten Branches von „origin“, nur per Fast-Forward. Läuft erst nach
+ * deployProblem, also nur auf einem sauberen Stand des erlaubten Branches – so geht ein auf GitHub gemergter Pull
+ * Request mit dem nächsten Neustart live. Scheitert es (offline, kein Remote, lokale Commits, die origin nicht hat),
+ * wird der lokale Stand gebaut; die Rückgabe sagt, was passiert ist.
+ */
+export async function pullBranch(installRoot: string, execute: CommandExecutor): Promise<string> {
+  const git = (timeoutMs: number, ...args: string[]) =>
+    execute(['git', ...args], installRoot, { timeoutMs, env: gitEnvironment() });
+  const remotes = await git(30_000, 'remote');
+  if (remotes.exitCode !== 0 || !remotes.output.split('\n').some((line) => line.trim() === 'origin')) {
+    return 'Kein Remote „origin“ – gebaut wird der lokale Stand.';
+  }
+  const branch = (await git(30_000, 'rev-parse', '--abbrev-ref', 'HEAD')).output.trim();
+  const before = (await git(30_000, 'rev-parse', 'HEAD')).output.trim();
+  const fetched = await git(120_000, 'fetch', '--quiet', 'origin', branch);
+  if (fetched.exitCode !== 0) {
+    return `GitHub nicht erreichbar (${fetched.output.trim().slice(-160) || `Exit-Code ${fetched.exitCode}`}) – gebaut wird der lokale Stand.`;
+  }
+  const merged = await git(60_000, 'merge', '--ff-only', 'FETCH_HEAD');
+  if (merged.exitCode !== 0) {
+    return `Lokaler Stand weicht von origin/${branch} ab, kein Fast-Forward möglich – gebaut wird der lokale Stand.`;
+  }
+  const after = (await git(30_000, 'rev-parse', 'HEAD')).output.trim();
+  return before === after
+    ? `Stand von origin/${branch} war schon aktuell.`
+    : `Neuester Stand von origin/${branch} geholt (${before.slice(0, 7)} → ${after.slice(0, 7)}).`;
+}
+
 /** Abbild des laufenden Dienstes „dev-log“ vor dem Neubau – zum Zurücksetzen, falls der neue Stand nicht startet. */
 export interface PreviousImage {
   id: string;
@@ -294,11 +324,15 @@ export async function processRestart(
     );
     return 'failed';
   }
+  const pulled = await pullBranch(installRoot, execute).catch(
+    (error: unknown) =>
+      `Neuester Stand nicht geholt (${error instanceof Error ? error.message : String(error)}) – gebaut wird der lokale Stand.`,
+  );
   const building = await writeRestart(pool, {
     ...current,
     status: 'building',
     startedAt: now().toISOString(),
-    message: `Baut die Container neu: ${RESTART_COMMAND.join(' ')}`,
+    message: `${pulled} Baut die Container neu: ${RESTART_COMMAND.join(' ')}`,
   });
   const previous = parseComposeImages(
     (
@@ -312,7 +346,10 @@ export async function processRestart(
     timeoutMs: BUILD_TIMEOUT_MS,
     env: composeEnvironment(),
   });
-  const log = redactOutput(result.output, process.env).trim().slice(-MAX_LOG_CHARS);
+  // Vorne steht, ob der neueste Stand geholt wurde; danach das Ende der Ausgabe von docker compose.
+  const log = `${pulled}\n\n${redactOutput(result.output, process.env)
+    .trim()
+    .slice(-(MAX_LOG_CHARS - pulled.length - 2))}`;
   if (result.exitCode !== 0) {
     await writeRestart(
       pool,
