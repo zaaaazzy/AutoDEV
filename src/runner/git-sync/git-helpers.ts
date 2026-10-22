@@ -291,13 +291,31 @@ export async function branchExists(git: GitHelpers['git'], branch: string): Prom
  * Request des Vorgänger-Sprints) und hat das lokale main nichts Eigenes, zählt origin/main – sonst fehlte dem neuen
  * Sprint die Arbeit des vorigen. Ohne Remote oder bei eigenen lokalen Commits bleibt es beim lokalen main.
  */
-async function freshestMain(git: GitHelpers['git']): Promise<string> {
+export async function freshestMain(git: GitHelpers['git']): Promise<string> {
   if (!(await git('remote')).output.split('\n').includes('origin')) return MAIN_BRANCH;
   await git('fetch', '-q', 'origin', MAIN_BRANCH);
   const remote = `refs/remotes/origin/${MAIN_BRANCH}`;
   if ((await git('rev-parse', '--verify', '--quiet', remote)).exitCode !== 0) return MAIN_BRANCH;
   const behindOnly = (await git('merge-base', '--is-ancestor', MAIN_BRANCH, remote)).exitCode === 0;
   return behindOnly ? remote : MAIN_BRANCH;
+}
+
+/**
+ * Den Sprint-Branch laufend auf dem Stand von main halten (vor jedem neuen Auftrag des Sprints). Früher kam main erst
+ * beim Abschluss hinein – bis dahin hatten sich Korrekturen, PR-Merges und Doku auf main angesammelt und prallten
+ * auf einmal aufeinander („main lässt sich nicht konfliktfrei übernehmen“). Ohne Konflikt wird gemergt; mit Konflikt
+ * bleibt der Sprint-Branch wie er war (der Auftrag läuft weiter), und die Meldung steht im Log.
+ */
+export async function refreshSprintFromMain(git: GitHelpers['git'], branch: string): Promise<string | null> {
+  if (!(await branchExists(git, MAIN_BRANCH))) return null;
+  const main = await freshestMain(git);
+  if ((await git('merge-base', '--is-ancestor', main, 'HEAD')).exitCode === 0) return null;
+  const merged = await git('merge', '--no-edit', main, '-m', `Merge ${MAIN_BRANCH} in ${branch}`);
+  if (merged.exitCode === 0) return `Aktuellen ${MAIN_BRANCH} in ${branch} übernommen.`;
+  await git('merge', '--abort');
+  const message = `${MAIN_BRANCH} lässt sich gerade nicht konfliktfrei in ${branch} übernehmen – der Sprint läuft weiter, beim Abschluss muss zusammengeführt werden.`;
+  console.warn(message);
+  return message;
 }
 
 export async function checkoutSprintBranch(
@@ -358,4 +376,19 @@ export function porcelainPath(line: string): string {
     .replace(/^[ MADRCUT?!]{1,2}\s+/, '')
     .replace(/^.* -> /, '')
     .trim();
+}
+
+/**
+ * Geänderte versionierte Dateien, ohne Testberichte und Agent-Ablage (CHANGED_FILES_IGNORED). Auftrags-Commits nehmen
+ * diese Pfade bewusst nicht mit (die Sprint-Sicherung tut es) – zählten sie hier, sperrte ein neu geschriebener
+ * Testbericht jede Freigabe („Offene Änderungen im Arbeitsordner“).
+ */
+export async function trackedChanges(git: GitHelpers['git']): Promise<string[]> {
+  const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=no');
+  if (status.exitCode !== 0) return ['(git status fehlgeschlagen)'];
+  return status.output
+    .split('\n')
+    .filter(Boolean)
+    .map(porcelainPath)
+    .filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix)));
 }

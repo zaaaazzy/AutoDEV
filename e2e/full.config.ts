@@ -2,12 +2,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineConfig } from '@playwright/test';
 import base from './playwright.config.js';
+import { reserveDatabase, reservePort } from './test-ports.js';
 
 /**
  * Kompletter Oberflächentest (npm run test:full): alle Seiten, Tabellen und Abläufe, mit Video und Screenshots.
  * Eigener Port, eigene Datenbank (dev_log_full) und eigener Ausgabeordner, damit er neben den E2E-Tests laufen kann.
  */
-const PORT = Number(process.env.FULL_UI_PORT ?? 3196);
+const PORT = reservePort('FULL_UI_PORT', 3196);
+const DATABASE = reserveDatabase('FULL_UI_DATABASE', 'dev_log_full', PORT, 3196);
 const baseServer = base.webServer;
 if (!baseServer || Array.isArray(baseServer))
   throw new Error('e2e/playwright.config.ts braucht genau einen webServer.');
@@ -33,7 +35,7 @@ export default defineConfig({
     env: {
       ...baseServer.env,
       PORT: String(PORT),
-      E2E_DATABASE: process.env.FULL_UI_DATABASE ?? 'dev_log_full',
+      E2E_DATABASE: DATABASE,
     },
   },
 });

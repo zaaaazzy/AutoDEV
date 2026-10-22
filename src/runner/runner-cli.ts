@@ -190,6 +190,20 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
 }
 
 // Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
+/** Schlüssel der Datenbank-Sperre „ein Dauer-Worker für alle Projekte“ (beliebig, aber fest). */
+const WORKER_LOCK_KEY = 727_402;
+
+/** Nimmt die Worker-Sperre auf einer eigenen Verbindung, die offen bleibt (endet der Prozess, endet die Sperre). */
+async function holdWorkerLock(pool: Pool): Promise<boolean> {
+  const client = await pool.connect();
+  // Bricht die Verbindung ab (Datenbank-Neustart), darf das den Worker nicht beenden; die Sperre ist dann frei.
+  client.on('error', (error) => console.warn('Worker-Sperre: Verbindung getrennt –', error.message));
+  const held = (await client.query<{ ok: boolean }>('SELECT pg_try_advisory_lock($1) AS ok', [WORKER_LOCK_KEY])).rows[0]
+    ?.ok;
+  if (!held) client.release();
+  return held === true;
+}
+
 export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
   // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
   await recoverTestRequests(pool).catch(logged('runner-cli'));
@@ -264,6 +278,15 @@ async function main(): Promise<void> {
         failed = (await runOnce(pool, target.options)) || failed;
       }
       process.exitCode = failed ? 1 : 0;
+      return;
+    }
+    // Nur ein Dauer-Worker für alle Projekte: Ein zweiter (z. B. „npm run worker“ neben dem Dienst) setzte beim Start
+    // die laufenden Aufträge des ersten zurück und führte sie doppelt aus. Die Sperre hält die Verbindung bis zum Ende.
+    if (options.all && !(await holdWorkerLock(pool))) {
+      console.error(
+        'Ein anderer Worker für alle Projekte läuft bereits – dieser beendet sich, damit Aufträge nicht doppelt laufen.',
+      );
+      process.exitCode = 1;
       return;
     }
     await recoverInterruptedRuns(pool);
