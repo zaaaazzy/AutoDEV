@@ -1,8 +1,8 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import express, { type Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
+import { createProjectDirectory, removeProjectDirectory, writeNewProjectFile } from '../core/project-paths.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -116,8 +116,11 @@ export async function materializeAttachments(
   itemId: string,
   cwd: string,
 ): Promise<string[]> {
-  const directory = join(cwd, ATTACHMENT_DIRECTORY, itemId);
-  await rm(directory, { recursive: true, force: true });
+  const relative = join(ATTACHMENT_DIRECTORY, itemId);
+  // Ohne Links: ist `.dev-log` oder `attachments` ein Link, wird weder gelöscht noch geschrieben.
+  if (!isUuid(itemId) || !(await removeProjectDirectory(cwd, relative))) {
+    return [];
+  }
   if (!source.ideationId && !source.bugId) {
     return [];
   }
@@ -129,12 +132,16 @@ export async function materializeAttachments(
   if (!result.rows.length) {
     return [];
   }
-  await mkdir(directory, { recursive: true });
+  const directory = await createProjectDirectory(cwd, relative);
+  if (!directory) {
+    return [];
+  }
   const paths: string[] = [];
   for (const [index, row] of result.rows.entries()) {
-    const path = join(ATTACHMENT_DIRECTORY, itemId, `${index + 1}-${safeFilename(row.filename)}`);
-    await writeFile(join(cwd, path), row.data);
-    paths.push(path);
+    const name = `${index + 1}-${safeFilename(row.filename)}`;
+    if (await writeNewProjectFile(directory, name, row.data)) {
+      paths.push(join(relative, name));
+    }
   }
   return paths;
 }
