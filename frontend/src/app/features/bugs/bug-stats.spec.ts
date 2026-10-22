@@ -60,7 +60,7 @@ test('Statistik: wer, wo und in welchen Tests – offen und begraben getrennt ge
       ['Backend', 1],
       ['E2E-Tests', 1],
       ['Frontend', 1],
-      ['Seite Auftrag', 1],
+      ['Seite Aufträge', 1],
       ['Seite Ideation', 1],
     ],
   );

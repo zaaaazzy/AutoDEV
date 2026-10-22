@@ -87,7 +87,9 @@ export class AgentOutputPipe implements PipeTransform {
 
   private card(call: ToolCall): string {
     const command = call.command.trim();
-    const failed = call.failed || /denied|fehl|error/i.test(call.result);
+    // „0 errors“, „no errors“, „keine Fehler“, „fehlerfrei“ melden Erfolg, nicht Fehler.
+    const result = call.result.replace(/\b(?:0|no|keine?)\s+(?:errors?|fehler)\b|fehlerfrei/gi, '');
+    const failed = call.failed || /denied|fehl|error/i.test(result);
     const icon = failed ? '✕' : '›';
     return (
       `<div class="tool-call${failed ? ' failed' : ''}"><span class="tool-icon" aria-hidden="true">${icon}</span>` +

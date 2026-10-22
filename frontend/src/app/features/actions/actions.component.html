@@ -1,13 +1,15 @@
 @if (store.ready()) {
   <app-running-panel />
   @if (attention().length) {
-    <section class="panel attention-panel" id="attention-orders">
-      <div class="section-heading">
+    <details class="panel attention-panel fold-panel" id="attention-orders" open>
+      <summary class="section-heading">
         <div>
-          <h2>Rückmeldungen der Agents</h2>
-          <p class="muted">Diese Aufträge warten auf dich. Aufklappen zeigt, warum – und was jetzt zu tun ist.</p>
+          <h2>
+            Rückmeldungen der Agents <span class="muted">({{ attention().length }} warten auf dich)</span>
+          </h2>
+          <p class="muted">Eine Zeile aufklappen zeigt, warum der Auftrag wartet – und was jetzt zu tun ist.</p>
         </div>
-      </div>
+      </summary>
       <app-order-table
         class="attention-table"
         [items]="items()"
@@ -222,7 +224,7 @@
           }
         </ng-template>
       </app-order-table>
-    </section>
+    </details>
   } @else {
     <section class="panel actions-empty">
       <p class="empty-state">

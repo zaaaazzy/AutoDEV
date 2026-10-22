@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 interface AuthStatus {
   totp: boolean;
@@ -13,7 +14,7 @@ interface AuthStatus {
 @Component({
   selector: 'app-security-settings',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, SettingsGroupDirective],
   templateUrl: './security-settings.component.html',
 })
 export class SecuritySettingsComponent {

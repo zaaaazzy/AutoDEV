@@ -8,6 +8,23 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Eigene Postgres-Instanz für die Datenbank-Tests (Migrationen, Sitzungen, Benutzer- und Rechte-Routen).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: devlog
+          POSTGRES_PASSWORD: devlog_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devlog" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Wegwerf-Datenbank des Service-Containers, kein Secret.
+      DEV_LOG_TEST_ADMIN_DATABASE_URL: postgresql://devlog:devlog_ci_only@localhost:5432/postgres
+      # Ohne erreichbare Datenbank schlagen die Datenbank-Tests fehl, statt still übersprungen zu werden.
+      DEV_LOG_TEST_REQUIRE_DATABASE: '1'
     steps:
       - uses: actions/checkout@v4
         with:

@@ -190,7 +190,8 @@
   overflow-wrap: anywhere;
 }
 #production-settings h3 {
-  margin: 18px 0 4px;
+  margin-top: 18px;
+  margin-bottom: 4px;
 }
 #production-settings .actions {
   display: flex;

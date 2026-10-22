@@ -16,7 +16,7 @@
       <span>API-Kosten{{ data.totals.costUsd ? '' : ' (ab jetzt erfasst)' }}</span>
     </div>
     <div class="summary-card">
-      <strong>{{ ratioText(data.totals.estimateActualTokens, data.totals.estimateTokens) }}</strong>
+      <strong>{{ shortRatio(data.totals.estimateActualTokens, data.totals.estimateTokens) }}</strong>
       <span>Tokens tatsächlich gegenüber Schätzung</span>
     </div>
   </section>

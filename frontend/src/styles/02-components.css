@@ -301,6 +301,10 @@ h4 {
 .agent-indicator:focus-within .agent-popover {
   display: block;
 }
+/* Während der Tour verdeckt das Popover sonst den nächsten Schritt (Fokus bleibt nach dem Klick am Status). */
+body:has(.tour-layer) .agent-indicator .agent-popover {
+  display: none;
+}
 .nav-title {
   display: inline-flex;
   align-items: center;
@@ -522,6 +526,23 @@ a.summary-card:hover {
   background: white;
   color: var(--ink);
   font-size: 12px;
+}
+/* Datei-Auswahl (Bilder an Ideen/Bugs) im Stil der übrigen Knöpfe statt des Browser-Standards. */
+input[type='file']::file-selector-button {
+  min-height: 32px;
+  margin-right: 10px;
+  padding: 0 12px;
+  border: 1px solid #d8ddd7;
+  border-radius: 7px;
+  background: white;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+input[type='file']::file-selector-button:hover {
+  border-color: var(--green);
+  color: var(--green);
 }
 .button:hover:not(:disabled) {
   border-color: var(--green);

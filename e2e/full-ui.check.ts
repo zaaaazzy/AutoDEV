@@ -664,6 +664,7 @@ test('Agents: „Was machen die Rollen?“ auf- und zuklappen', async ({ page },
 test('Einstellungen: Validierungen, Benutzer anlegen, Projekt löschen gesperrt', async ({ page, isMobile }, info) => {
   await login(page);
   await open(page, 'settings');
+  await button(page, 'Alle aufklappen').click();
   if (isMobile) {
     const remove = button(page, 'Projekt endgültig löschen');
     await remove.scrollIntoViewIfNeeded();

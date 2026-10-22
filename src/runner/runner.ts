@@ -176,11 +176,14 @@ async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> 
 export async function sprintPaused(pool: Pool, item: Pick<WorkItem, 'sprintId' | 'agentId'>): Promise<boolean> {
   if (!item.sprintId || item.agentId) return false;
   const row = (
-    await pool.query<{ paused: boolean }>('SELECT paused_at IS NOT NULL AS paused FROM sprints WHERE id = $1', [
-      item.sprintId,
-    ])
+    await pool.query<{ paused: boolean; status?: string }>(
+      'SELECT paused_at IS NOT NULL AS paused, status FROM sprints WHERE id = $1',
+      [item.sprintId],
+    )
   ).rows[0];
-  return row?.paused === true;
+  // Auch ein inzwischen abgeschlossener, abgebrochener oder im Review stehender Sprint hält an: Der Auftrag würde sonst
+  // in einen Sprint-Branch gemergt, der schon gesichert ist (Race zwischen „Live schalten“ und Auftragsstart).
+  return row?.paused === true || ['completed', 'cancelled', 'review'].includes(row?.status ?? '');
 }
 
 /** Rollen, deren Ablehnung den Auftrag zurück zum Entwickler schickt. */

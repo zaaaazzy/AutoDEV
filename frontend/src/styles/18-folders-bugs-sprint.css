@@ -292,7 +292,8 @@ app-wait-status {
 
 /* Aktionen: „Läuft gerade“ (Git, Tests, Agents, eigene Aktionen) */
 .running-panel .wait-status.wait-status-card {
-  margin-bottom: 12px;
+  /* app-wait-status hat display: contents – der Innenabstand des Panels muss hier stehen. */
+  margin: 14px 18px 12px;
 }
 .running-list {
   display: grid;

@@ -1,351 +1,429 @@
 @if (store.ready()) {
-  @if (auth.can('admin')) {
-    <section class="panel">
-      <div class="section-heading">
-        <div>
-          <h2>Projekteinstellungen</h2>
-          <p class="muted">{{ store.currentProject()?.name }}</p>
-        </div>
-      </div>
-      <form class="form-grid" (ngSubmit)="saveSettings()">
-        <label class="wide"
-          >Projektordner
-          <div class="path-row">
-            <input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
-            <app-folder-picker [value]="settings.repository" (picked)="settings.repository = $event" />
-          </div>
-        </label>
-        <div class="wide folder-picker-row">
-          @if (settings.repository !== (store.currentProject()?.repository ?? '')) {
-            <span class="muted"
-              >Neuer Ordner – mit „Speichern“ übernehmen. Die Agents arbeiten danach dort (bzw. in „…-agents“).</span
-            >
-          }
-        </div>
-        <label class="wide"
-          >Testbefehle (Live schalten, ein Befehl pro Zeile)<textarea
-            name="testCommands"
-            [(ngModel)]="settings.testCommands"
-            rows="3"
-            placeholder="npm run build&#10;npm test"
-          ></textarea>
-        </label>
-        <label class="wide"
-          >Testbefehle je Auftrag (ein Befehl pro Zeile)<textarea
-            name="orderTestCommands"
-            [(ngModel)]="settings.orderTestCommands"
-            rows="3"
-            placeholder="npm run typecheck&#10;npx tsx --test &#123;tests&#125;"
-          ></textarea>
-        </label>
-        <p class="muted wide">
-          Laufen im Tester-Schritt jedes Auftrags. &#123;tests&#125; = Testdateien zu den geänderten Dateien,
-          &#123;files&#125; = geänderte Dateien. Leer = wie Testbefehle. Die Testbefehle oben laufen nur noch beim Live
-          schalten.
-        </p>
-        <label class="wide"
-          >Projektbeschreibung<textarea
-            name="description"
-            [(ngModel)]="settings.description"
-            rows="4"
-            maxlength="10000"
-            placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"
-          ></textarea>
-        </label>
-        <label class="wide"
-          >Regeln für Agents (Do's and Don'ts)<textarea
-            name="guidelines"
-            [(ngModel)]="settings.guidelines"
-            rows="6"
-            maxlength="10000"
-            placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"
-          ></textarea>
-        </label>
-        <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
-        <label class="wide"
-          >Definition of Ready (ein Punkt pro Zeile)<textarea
-            name="definitionOfReady"
-            [(ngModel)]="settings.definitionOfReady"
-            rows="4"
-            [placeholder]="(store.data().acceptanceDefaults?.definitionOfReady ?? []).join('\n')"
-          ></textarea>
-        </label>
-        <p class="muted wide">Der Auftragsautor schreibt jeden Auftrag so, dass diese Punkte erfüllt sind.</p>
-        <label class="wide"
-          >Definition of Done (ein Punkt pro Zeile)<textarea
-            name="definitionOfDone"
-            [(ngModel)]="settings.definitionOfDone"
-            rows="5"
-            [placeholder]="(store.data().acceptanceDefaults?.definitionOfDone ?? []).join('\n')"
-          ></textarea>
-        </label>
-        <p class="muted wide">
-          Der Tester hakt diese Punkte und die Akzeptanzkriterien jedes Auftrags ab. Leer lassen für die Vorgabe (grau
-          angezeigt).
-        </p>
-        <label class="wide check">
-          <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" /> Automatisches Bugfixing:
-          Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag gehängt und die Behebung gestartet.
-          Bugs aus Betrieb oder GitHub starten nie automatisch, sondern erst nach Freigabe im Bug.</label
-        >
-        <label class="wide check">
-          <input type="checkbox" name="agentWorkspace" [(ngModel)]="settings.agentWorkspace" /> Eigener Arbeitsordner
-          für die Agents: Aufträge laufen in „{{ settings.repository || 'Projektordner' }}-agents“ (Git-Worktree), der
-          Projektordner und ein dort laufender Entwicklungsserver bleiben unberührt.</label
-        >
-        <label
-          >Review-Freigabe
-          <select name="reviewMode" [(ngModel)]="settings.reviewMode">
-            <option value="off">Nie – fertige Aufträge werden sofort gemergt</option>
-            <option value="ui">Nur bei Oberflächen-Änderungen</option>
-            <option value="always">Immer</option>
-          </select>
-        </label>
-        <label class="wide"
-          >Review-Befehl
-          <input
-            name="reviewCommand"
-            [(ngModel)]="settings.reviewCommand"
-            placeholder="sh /source/scripts/review-live.sh"
-          />
-        </label>
-        <p class="muted wide">
-          Mit Review-Freigabe wartet ein fertiger Auftrag, bis du ihn freigibst; erst dann wird er in den Sprint gemergt
-          (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl läuft in einem Review-Container: dort ist
-          der Source-Ordner unter <code>/source</code> eingebunden, gearbeitet wird im gewählten Stand (Ports und
-          Datenbank-Kopie stellt der Container). In der Sprint-Ansicht lässt sich so jeder Stand mit ▶ starten.
-        </p>
-        <p class="muted wide">
-          Kostengrenzen je Tag, Sprint und Auftrag sowie das Modell-Routing stehen unten unter „Budget“.
-        </p>
-        <label class="wide check">
-          <input type="checkbox" name="restartAfterSprint" [(ngModel)]="settings.restartAfterSprint" /> Nach dem
-          Sprint-Abschluss AIdeation neu starten: Ist der Sprint nach <code>main</code> gemergt, baut AIdeation die
-          Container neu und startet den Worker neu – nur für das Projekt, in dem AIdeation selbst entwickelt
-          wird.</label
-        >
-        <label
-          >Sprintplanung
-          <select name="sprintMode" [(ngModel)]="settings.sprintMode">
-            <option value="manual">Manuell – Sprints selbst zusammenstellen</option>
-            <option value="suggest">Vorschlagen – AIdeation schlägt vor, du übernimmst</option>
-            <option value="autopilot">Autopilot – vorschlagen, starten und abschliessen</option>
-          </select>
-        </label>
-        <label
-          >Sprint-Kapazität (Std., ohne Sprint-Historie)<input
-            name="sprintCapacityHours"
-            type="number"
-            min="1"
-            max="1000"
-            step="1"
-            [(ngModel)]="settings.sprintCapacityHours"
-          />
-        </label>
-        <fieldset class="wide autopilot-hours">
-          <legend>Arbeitszeiten des Autopilots</legend>
-          <label>Von<input name="autopilotStart" type="time" required [(ngModel)]="settings.autopilotStart" /></label>
-          <label>Bis<input name="autopilotEnd" type="time" required [(ngModel)]="settings.autopilotEnd" /></label>
-          <span class="autopilot-days" role="group" aria-label="Wochentage">
-            @for (weekday of weekdays; track weekday.day) {
-              <label class="check"
-                ><input
-                  type="checkbox"
-                  [name]="'autopilotDay' + weekday.day"
-                  [checked]="settings.autopilotDays.includes(weekday.day)"
-                  (change)="toggleDay(weekday.day)"
-                />
-                {{ weekday.label }}</label
+  <div class="settings-page">
+    <div class="settings-bar">
+      <p class="muted">Gruppen auf- und zuklappen; die Suche oben öffnet passende Gruppen.</p>
+      <span class="settings-bar-actions">
+        <button class="link-button" type="button" (click)="groups.all(true)">Alle aufklappen</button>
+        <button class="link-button" type="button" (click)="groups.all(false)">Alle zuklappen</button>
+      </span>
+    </div>
+
+    @if (auth.can('admin') && store.currentProject(); as project) {
+      <h2 class="settings-cluster">Projekt „{{ project.name }}“</h2>
+      <form class="settings-form" (ngSubmit)="saveSettings()">
+        <details appSettingsGroup="projekt">
+          <summary class="section-heading">
+            <div>
+              <h2>Projekt &amp; Ordner</h2>
+              <p class="muted">Projektordner, Beschreibung, Regeln für die Agents und Projekt-Datenbank</p>
+            </div>
+          </summary>
+          <div class="form-grid">
+            <label class="wide"
+              >Projektordner
+              <div class="path-row">
+                <input name="repository" [(ngModel)]="settings.repository" maxlength="500" required />
+                <app-folder-picker [value]="settings.repository" (picked)="settings.repository = $event" />
+              </div>
+            </label>
+            @if (settings.repository !== project.repository) {
+              <p class="muted wide">
+                Neuer Ordner – mit „Speichern“ übernehmen. Die Agents arbeiten danach dort (bzw. in „…-agents“).
+              </p>
+            }
+            <label class="wide check">
+              <input type="checkbox" name="agentWorkspace" [(ngModel)]="settings.agentWorkspace" />
+              <span
+                >Eigener Arbeitsordner für die Agents: Aufträge laufen in „{{
+                  settings.repository || 'Projektordner'
+                }}-agents“ (Git-Worktree), der Projektordner und ein dort laufender Entwicklungsserver bleiben
+                unberührt.</span
               >
+            </label>
+            <label class="wide"
+              >Projektbeschreibung<textarea
+                name="description"
+                [(ngModel)]="settings.description"
+                rows="4"
+                maxlength="10000"
+                placeholder="Was macht das Projekt? Technologien, Aufbau, Ziele …"
+              ></textarea>
+            </label>
+            <label class="wide"
+              >Regeln für Agents (Do's and Don'ts)<textarea
+                name="guidelines"
+                [(ngModel)]="settings.guidelines"
+                rows="6"
+                maxlength="10000"
+                placeholder="Do: Tests zu jeder Änderung schreiben&#10;Don't: Keine neuen Abhängigkeiten ohne Rückfrage"
+              ></textarea>
+            </label>
+            <p class="muted wide">Alle Agents dieses Projekts erhalten Beschreibung und Regeln bei jeder Aufgabe.</p>
+            <label class="wide"
+              >Datenbank-Zugang für Entwickler (optional)<input
+                name="databaseUrl"
+                type="password"
+                autocomplete="off"
+                [(ngModel)]="settings.databaseUrl"
+                maxlength="500"
+                [placeholder]="
+                  project.databaseConfigured
+                    ? 'Hinterlegt – leer lassen, um beizubehalten'
+                    : 'postgresql://user:passwort@host:5432/datenbank'
+                "
+              />
+            </label>
+            @if (project.databaseConfigured) {
+              <label class="wide check">
+                <input type="checkbox" name="clearDatabase" [(ngModel)]="settings.clearDatabase" />
+                <span>Datenbank-Zugang entfernen</span>
+              </label>
             }
-          </span>
-        </fieldset>
-        <label class="wide check">
-          <input
-            type="checkbox"
-            name="autopilotAutoLive"
-            [(ngModel)]="settings.autopilotAutoLive"
-            [disabled]="settings.sprintMode !== 'autopilot'"
-          />
-          Autopilot schaltet selbst live: Ist ein Sprint fertig, schliesst der Autopilot ihn innerhalb der Arbeitszeiten
-          selbst ab (Test-Gate, Merge nach <code>main</code>, Push) und startet danach den nächsten – ohne dein Go. Nur
-          sinnvoll mit Review „aus“ oder „nur Oberfläche“, sonst wartet jeder Auftrag auf deine Freigabe.</label
-        >
-        <p class="muted wide">
-          Die Kapazität ist der Median der gemessenen Ist-Stunden und Ist-Tokens (Laufzeit der Agents) erledigter
-          Aufträge der letzten 3 abgeschlossenen Sprints; ohne Historie gilt die Einstellung. Der Autopilot startet neue
-          Sprints nur innerhalb der Arbeitszeiten (Ortszeit des Workers; „Bis“ vor „Von“ = über Mitternacht, gleiche
-          Zeiten = ganztägig). Ein Sprint ist fertig, sobald nur noch „Aktion notwendig“ offen ist – diese Aufträge
-          wandern in den nächsten Sprint. Ohne „selbst live“ wartet er dann auf dein Go („Live schalten“). Scheitert der
-          Abschluss (Test-Gate, Merge, Push), pausiert der Autopilot bis zur Freigabe in Sprints. Kostengrenzen stehen
-          unter „Budget“.
-        </p>
-        <label class="wide"
-          >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
-            name="deployCommands"
-            [(ngModel)]="settings.deployCommands"
-            rows="2"
-            maxlength="2000"
-            placeholder="docker compose up -d --build"
-          ></textarea>
-        </label>
-        <p class="muted wide">
-          Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
-          @if (store.currentProject()?.deployStatus) {
-            Letzter Lauf: {{ store.currentProject()?.deployStatus }}
-          }
-        </p>
-        <label class="wide"
-          >GitHub-Repository<input
-            name="gitRemote"
-            [(ngModel)]="settings.gitRemote"
-            maxlength="300"
-            placeholder="git@github.com:user/repo.git"
-          />
-        </label>
-        <fieldset class="wide github-bridge">
-          <legend>GitHub-Brücke</legend>
+            <p class="muted wide">
+              Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
+              AIdeation-Datenbank).
+            </p>
+          </div>
+        </details>
+
+        <details appSettingsGroup="qualitaet">
+          <summary class="section-heading">
+            <div>
+              <h2>Qualität &amp; Tests</h2>
+              <p class="muted">Definition of Ready/Done, Testbefehle und automatisches Bugfixing</p>
+            </div>
+          </summary>
+          <div class="form-grid">
+            <label
+              >Definition of Ready (ein Punkt pro Zeile)<textarea
+                name="definitionOfReady"
+                [(ngModel)]="settings.definitionOfReady"
+                rows="5"
+                [placeholder]="(store.data().acceptanceDefaults?.definitionOfReady ?? []).join('\n')"
+              ></textarea>
+            </label>
+            <label
+              >Definition of Done (ein Punkt pro Zeile)<textarea
+                name="definitionOfDone"
+                [(ngModel)]="settings.definitionOfDone"
+                rows="5"
+                [placeholder]="(store.data().acceptanceDefaults?.definitionOfDone ?? []).join('\n')"
+              ></textarea>
+            </label>
+            <p class="muted wide">
+              Der Auftragsautor schreibt jeden Auftrag so, dass die Ready-Punkte erfüllt sind; der Tester hakt die
+              Done-Punkte und die Akzeptanzkriterien ab. Leer lassen für die Vorgabe (grau angezeigt).
+            </p>
+            <label
+              >Testbefehle je Auftrag (ein Befehl pro Zeile)<textarea
+                name="orderTestCommands"
+                [(ngModel)]="settings.orderTestCommands"
+                rows="3"
+                placeholder="npm run typecheck&#10;npx tsx --test &#123;tests&#125;"
+              ></textarea>
+            </label>
+            <label
+              >Testbefehle beim Live schalten (ein Befehl pro Zeile)<textarea
+                name="testCommands"
+                [(ngModel)]="settings.testCommands"
+                rows="3"
+                placeholder="npm run build&#10;npm test"
+              ></textarea>
+            </label>
+            <p class="muted wide">
+              Die Befehle je Auftrag laufen im Tester-Schritt: &#123;tests&#125; = Testdateien zu den geänderten
+              Dateien, &#123;files&#125; = geänderte Dateien; leer = wie beim Live schalten.
+            </p>
+            <label class="wide check">
+              <input type="checkbox" name="autoBugfix" [(ngModel)]="settings.autoBugfix" />
+              <span
+                >Automatisches Bugfixing: Scheitert ein Agent, wird sofort ein Bug-Bericht angelegt, an den Auftrag
+                gehängt und die Behebung gestartet. Bugs aus Betrieb oder GitHub starten nie automatisch, sondern erst
+                nach Freigabe im Bug.</span
+              >
+            </label>
+          </div>
+        </details>
+
+        <details appSettingsGroup="review">
+          <summary class="section-heading">
+            <div>
+              <h2>Review &amp; Deploy</h2>
+              <p class="muted">Freigabe fertiger Aufträge, Review-Container und Befehle nach dem Merge</p>
+            </div>
+          </summary>
+          <div class="form-grid">
+            <label
+              >Review-Freigabe
+              <select name="reviewMode" [(ngModel)]="settings.reviewMode">
+                <option value="off">Nie – fertige Aufträge werden sofort gemergt</option>
+                <option value="ui">Nur bei Oberflächen-Änderungen</option>
+                <option value="always">Immer</option>
+              </select>
+            </label>
+            <label
+              >Review-Befehl
+              <input
+                name="reviewCommand"
+                [(ngModel)]="settings.reviewCommand"
+                placeholder="sh /source/scripts/review-live.sh"
+              />
+            </label>
+            <p class="muted wide">
+              Mit Review-Freigabe wartet ein fertiger Auftrag, bis du ihn freigibst; erst dann wird er in den Sprint
+              gemergt (und die Vorschau im Projektordner nachgezogen). Der Review-Befehl läuft in einem
+              Review-Container: dort ist der Source-Ordner unter <code>/source</code> eingebunden, gearbeitet wird im
+              gewählten Stand (Ports und Datenbank-Kopie stellt der Container).
+            </p>
+            <label class="wide"
+              >Nach erfolgreichen Aufträgen ausführen (Deploy, optional)<textarea
+                name="deployCommands"
+                [(ngModel)]="settings.deployCommands"
+                rows="2"
+                maxlength="2000"
+                placeholder="docker compose up -d --build"
+              ></textarea>
+            </label>
+            <p class="muted wide">
+              Ein Befehl pro Zeile, im Projektordner. So laufen Container immer mit dem neuesten Stand.
+              @if (project.deployStatus) {
+                Letzter Lauf: {{ project.deployStatus }}
+              }
+            </p>
+            <label class="wide check">
+              <input type="checkbox" name="restartAfterSprint" [(ngModel)]="settings.restartAfterSprint" />
+              <span
+                >Nach dem Sprint-Abschluss AIdeation neu starten: Ist der Sprint nach <code>main</code> gemergt, baut
+                AIdeation die Container neu und startet den Worker neu – nur für das Projekt, in dem AIdeation selbst
+                entwickelt wird.</span
+              >
+            </label>
+          </div>
+        </details>
+
+        <details appSettingsGroup="sprints">
+          <summary class="section-heading">
+            <div>
+              <h2>Sprints &amp; Autopilot</h2>
+              <p class="muted">Sprintplanung, Kapazität und Arbeitszeiten des Autopilots</p>
+            </div>
+          </summary>
+          <div class="form-grid">
+            <label
+              >Sprintplanung
+              <select name="sprintMode" [(ngModel)]="settings.sprintMode">
+                <option value="manual">Manuell – Sprints selbst zusammenstellen</option>
+                <option value="suggest">Vorschlagen – AIdeation schlägt vor, du übernimmst</option>
+                <option value="autopilot">Autopilot – vorschlagen, starten und abschliessen</option>
+              </select>
+            </label>
+            <label
+              >Sprint-Kapazität (Std., ohne Sprint-Historie)<input
+                name="sprintCapacityHours"
+                type="number"
+                min="1"
+                max="1000"
+                step="1"
+                [(ngModel)]="settings.sprintCapacityHours"
+              />
+            </label>
+            <fieldset class="wide autopilot-hours">
+              <legend>Arbeitszeiten des Autopilots</legend>
+              <label
+                >Von<input name="autopilotStart" type="time" required [(ngModel)]="settings.autopilotStart"
+              /></label>
+              <label>Bis<input name="autopilotEnd" type="time" required [(ngModel)]="settings.autopilotEnd" /></label>
+              <span class="autopilot-days" role="group" aria-label="Wochentage">
+                @for (weekday of weekdays; track weekday.day) {
+                  <label class="check"
+                    ><input
+                      type="checkbox"
+                      [name]="'autopilotDay' + weekday.day"
+                      [checked]="settings.autopilotDays.includes(weekday.day)"
+                      (change)="toggleDay(weekday.day)"
+                    />
+                    <span>{{ weekday.label }}</span></label
+                  >
+                }
+              </span>
+            </fieldset>
+            <label class="wide check">
+              <input
+                type="checkbox"
+                name="autopilotAutoLive"
+                [(ngModel)]="settings.autopilotAutoLive"
+                [disabled]="settings.sprintMode !== 'autopilot'"
+              />
+              <span
+                >Autopilot schaltet selbst live: Ist ein Sprint fertig, schliesst der Autopilot ihn innerhalb der
+                Arbeitszeiten selbst ab (Test-Gate, Merge nach <code>main</code>, Push) und startet danach den nächsten
+                – ohne dein Go. Nur sinnvoll mit Review „aus“ oder „nur Oberfläche“, sonst wartet jeder Auftrag auf
+                deine Freigabe.</span
+              >
+            </label>
+            <p class="muted wide">
+              Die Kapazität ist der Median der gemessenen Ist-Stunden erledigter Aufträge der letzten 3 abgeschlossenen
+              Sprints, mindestens aber die Einstellung. Der Autopilot startet neue Sprints nur innerhalb der
+              Arbeitszeiten (Ortszeit des Workers; „Bis“ vor „Von“ = über Mitternacht, gleiche Zeiten = ganztägig). Ein
+              Sprint ist fertig, sobald nur noch „Aktion notwendig“ offen ist – diese Aufträge wandern in den nächsten
+              Sprint. Scheitert der Abschluss (Test-Gate, Merge, Push), pausiert der Autopilot bis zur Freigabe in
+              Sprints. Kostengrenzen stehen unter „Budget“.
+            </p>
+          </div>
+        </details>
+
+        <details appSettingsGroup="github">
+          <summary class="section-heading">
+            <div>
+              <h2>GitHub</h2>
+              <p class="muted">Repository, Issues und Pull Requests</p>
+            </div>
+            @if (project.githubMode && project.githubMode !== 'aus') {
+              <span class="tag" [class.production-ok]="project.githubAuth === 'ok'">{{
+                project.githubMode === 'issues+pr' ? 'Issues + PR' : 'Issues'
+              }}</span>
+            }
+          </summary>
+          <div class="form-grid">
+            <label class="wide"
+              >GitHub-Repository<input
+                name="gitRemote"
+                [(ngModel)]="settings.gitRemote"
+                maxlength="300"
+                placeholder="git@github.com:user/repo.git"
+              />
+            </label>
+            <fieldset class="wide github-bridge">
+              <legend>GitHub-Brücke</legend>
+              <label
+                >Modus
+                <select name="githubMode" [(ngModel)]="settings.githubMode">
+                  <option value="aus">Aus</option>
+                  <option value="issues">Issues – importieren und Status zurückmelden</option>
+                  <option value="issues+pr">Issues und Pull Request beim Sprint-Abschluss</option>
+                </select>
+              </label>
+              @if (settings.githubMode === 'issues+pr') {
+                <label class="check"
+                  ><input type="checkbox" name="githubRequireApproval" [(ngModel)]="settings.githubRequireApproval" />
+                  <span>Freigabe erforderlich: erst nach Approve eines Menschen mergen</span></label
+                >
+              }
+              <p
+                class="muted github-auth"
+                [class.ok]="project.githubAuth === 'ok'"
+                [class.missing]="project.githubAuth === 'missing'"
+              >
+                @if (!githubRemote()) {
+                  Nur mit einem GitHub-Repository (github.com) möglich.
+                } @else if ((project.githubMode ?? 'aus') === 'aus') {
+                  Aus – Dev Log ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
+                } @else if (project.githubAuth === 'ok') {
+                  ✓ Angemeldet (gh auth status{{
+                    project.githubAuthCheckedAt
+                      ? ', geprüft ' + (project.githubAuthCheckedAt | date: 'dd.MM. HH:mm')
+                      : ''
+                  }}).
+                } @else if (project.githubAuth === 'missing') {
+                  ⚠ {{ project.githubAuthMessage }} Bis dahin bleibt der Modus wirkungslos; Git-Sicherung, Merge und Tag
+                  laufen wie bisher.
+                } @else {
+                  {{ project.githubAuthMessage || 'Anmeldung wird beim nächsten Worker-Takt geprüft …' }}
+                }
+              </p>
+              @if (githubRemote() && (project.githubMode ?? 'aus') !== 'aus') {
+                <button class="button" type="button" (click)="checkGithub()" [disabled]="busy()">
+                  Anmeldung erneut prüfen
+                </button>
+              }
+            </fieldset>
+            <p class="muted wide">
+              Issues mit Label <code>idea</code> bzw. <code>bug</code> werden alle 5 Minuten als Idee bzw. Bug
+              übernommen (Bilder nur als Link); Statuswechsel kommen als Kommentar ins Issue, „erledigt“ schließt es. Im
+              PR-Modus öffnet der Sprint-Abschluss einen Pull Request und merged erst nach grüner CI. Es wird kein Token
+              gespeichert: Dev Log nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des Worker-Benutzers.
+            </p>
+          </div>
+        </details>
+
+        <div class="settings-save">
+          <span class="muted">Gilt für die fünf Gruppen oben.</span>
+          <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
+        </div>
+      </form>
+
+      <app-budget-settings />
+      <app-production-settings />
+      <app-visual-settings />
+      <app-permission-groups-settings />
+    }
+
+    @if (auth.can('admin')) {
+      <h2 class="settings-cluster">Alle Projekte</h2>
+      <details appSettingsGroup="agents">
+        <summary class="section-heading">
+          <div>
+            <h2>Agents</h2>
+            <p class="muted">Wie viele Agents gleichzeitig arbeiten</p>
+          </div>
+        </summary>
+        <form class="form-grid settings-inline" (ngSubmit)="saveMaxAgents()">
           <label
-            >Modus
-            <select name="githubMode" [(ngModel)]="settings.githubMode">
-              <option value="aus">Aus</option>
-              <option value="issues">Issues – importieren und Status zurückmelden</option>
-              <option value="issues+pr">Issues und Pull Request beim Sprint-Abschluss</option>
-            </select>
+            >Gleichzeitige Agents (1–8)<input
+              name="maxAgents"
+              type="number"
+              min="1"
+              max="8"
+              step="1"
+              [(ngModel)]="maxAgents"
+              required
+            />
           </label>
-          @if (settings.githubMode === 'issues+pr') {
-            <label class="check"
-              ><input type="checkbox" name="githubRequireApproval" [(ngModel)]="settings.githubRequireApproval" />
-              Freigabe erforderlich: erst nach Approve eines Menschen mergen</label
-            >
-          }
-          @let project = store.currentProject();
-          <p
-            class="muted github-auth"
-            [class.ok]="project?.githubAuth === 'ok'"
-            [class.missing]="project?.githubAuth === 'missing'"
-          >
-            @if (!githubRemote()) {
-              Nur mit einem GitHub-Repository (github.com) möglich.
-            } @else if ((project?.githubMode ?? 'aus') === 'aus') {
-              Aus – Dev Log ruft GitHub nicht auf. Die Anmeldung wird geprüft, sobald ein Modus gespeichert ist.
-            } @else if (project?.githubAuth === 'ok') {
-              ✓ Angemeldet (gh auth status{{
-                project?.githubAuthCheckedAt
-                  ? ', geprüft ' + (project?.githubAuthCheckedAt | date: 'dd.MM. HH:mm')
-                  : ''
-              }}).
-            } @else if (project?.githubAuth === 'missing') {
-              ⚠ {{ project?.githubAuthMessage }} Bis dahin bleibt der Modus wirkungslos; Git-Sicherung, Merge und Tag
-              laufen wie bisher.
-            } @else {
-              {{ project?.githubAuthMessage || 'Anmeldung wird beim nächsten Worker-Takt geprüft …' }}
-            }
+          <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+          <p class="muted wide">
+            Jedes Projekt arbeitet seine Aufträge nacheinander ab; mehrere Projekte laufen parallel. Der Worker
+            übernimmt die Änderung im nächsten Durchlauf.
           </p>
-          @if (githubRemote() && (project?.githubMode ?? 'aus') !== 'aus') {
-            <button class="button" type="button" (click)="checkGithub()" [disabled]="busy()">
-              Anmeldung erneut prüfen
-            </button>
-          }
-        </fieldset>
-        <p class="muted wide">
-          Issues mit Label <code>idea</code> bzw. <code>bug</code> werden alle 5 Minuten als Idee bzw. Bug übernommen
-          (Bilder nur als Link); Statuswechsel kommen als Kommentar ins Issue, „erledigt“ schließt es. Im PR-Modus
-          öffnet der Sprint-Abschluss einen Pull Request und merged erst nach grüner CI. Es wird kein Token gespeichert:
-          Dev Log nutzt die Anmeldung der GitHub CLI (<code>gh auth login</code>) des Worker-Benutzers.
-        </p>
-        <label class="wide"
-          >Datenbank-Zugang für Entwickler (optional)<input
-            name="databaseUrl"
-            type="password"
-            autocomplete="off"
-            [(ngModel)]="settings.databaseUrl"
-            maxlength="500"
-            [placeholder]="
-              store.currentProject()?.databaseConfigured
-                ? 'Hinterlegt – leer lassen, um beizubehalten'
-                : 'postgresql://user:passwort@host:5432/datenbank'
-            "
-          />
-        </label>
-        @if (store.currentProject()?.databaseConfigured) {
+        </form>
+      </details>
+      <app-review-slots-settings />
+      <app-users-settings />
+    }
+
+    <h2 class="settings-cluster">Mein Konto &amp; dieses Gerät</h2>
+    <app-notification-settings />
+    <app-security-settings />
+
+    @if (auth.can('admin') && store.currentProject(); as project) {
+      <details appSettingsGroup="loeschen" class="danger-zone">
+        <summary class="section-heading">
+          <div>
+            <h2>Projekt löschen</h2>
+            <p class="muted">
+              Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus AIdeation.
+            </p>
+          </div>
+        </summary>
+        <form class="form-grid" (ngSubmit)="deleteProject()">
           <label class="wide check">
-            <input type="checkbox" name="clearDatabase" [(ngModel)]="settings.clearDatabase" /> Datenbank-Zugang
-            entfernen</label
-          >
-        }
-        <p class="muted wide">
-          Entwickler und Assistent dürfen in dieser Projekt-Datenbank lesen und schreiben (nicht in der
-          AIdeation-Datenbank).
-        </p>
-        <button class="button primary" type="submit" [disabled]="busy()">Einstellungen speichern</button>
-      </form>
-    </section>
-    <section class="panel">
-      <div class="section-heading">
-        <div>
-          <h2>Agents</h2>
-          <p class="muted">Gilt für alle Projekte</p>
-        </div>
-      </div>
-      <form class="form-grid" (ngSubmit)="saveMaxAgents()">
-        <label
-          >Gleichzeitige Agents (1–8)<input
-            name="maxAgents"
-            type="number"
-            min="1"
-            max="8"
-            step="1"
-            [(ngModel)]="maxAgents"
-            required
-          />
-        </label>
-        <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-        <p class="muted wide">
-          Jedes Projekt arbeitet seine Aufträge nacheinander ab; mehrere Projekte laufen parallel. Der Worker übernimmt
-          die Änderung im nächsten Durchlauf.
-        </p>
-      </form>
-    </section>
-  }
-  @if (auth.can('admin') && store.currentProject(); as project) {
-    <section class="panel danger-zone">
-      <div class="section-heading">
-        <div>
-          <h2>Projekt löschen</h2>
-          <p class="muted">
-            Entfernt „{{ project.name }}“ mit allen Ideen, Aufträgen, Sprints und Läufen aus AIdeation.
-          </p>
-        </div>
-      </div>
-      <form class="form-grid" (ngSubmit)="deleteProject()">
-        <label class="wide check">
-          <input type="checkbox" name="deleteFolder" [(ngModel)]="deleteFolder" />
-          Auch den Ordner <code>{{ project.repository }}</code> auf dem Rechner löschen (nicht rückgängig zu machen)
-        </label>
-        <label class="wide"
-          >Zur Bestätigung den Projektnamen eintippen<input
-            name="deleteConfirm"
-            [(ngModel)]="deleteConfirm"
-            autocomplete="off"
-            [placeholder]="project.name"
-        /></label>
-        <button class="button danger" type="submit" [disabled]="busy() || deleteConfirm.trim() !== project.name">
-          Projekt endgültig löschen
-        </button>
-      </form>
-    </section>
-  }
-  @if (auth.can('admin') && store.currentProject()) {
-    <app-budget-settings />
-    <app-production-settings />
-    <app-visual-settings />
-    <app-permission-groups-settings />
-  }
-  @if (auth.can('admin')) {
-    <app-review-slots-settings />
-    <app-users-settings />
-  }
-  <app-notification-settings />
-  <app-security-settings />
+            <input type="checkbox" name="deleteFolder" [(ngModel)]="deleteFolder" />
+            <span
+              >Auch den Ordner <code>{{ project.repository }}</code> auf dem Rechner löschen (nicht rückgängig zu
+              machen)</span
+            >
+          </label>
+          <label class="wide"
+            >Zur Bestätigung den Projektnamen eintippen<input
+              name="deleteConfirm"
+              [(ngModel)]="deleteConfirm"
+              autocomplete="off"
+              [placeholder]="project.name"
+          /></label>
+          <button class="button danger" type="submit" [disabled]="busy() || deleteConfirm.trim() !== project.name">
+            Projekt endgültig löschen
+          </button>
+        </form>
+      </details>
+    }
+  </div>
 }
