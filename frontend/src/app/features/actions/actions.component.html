@@ -83,6 +83,12 @@
                 }
               </section>
 
+              @if (showVisual(item)) {
+                <section class="attention-section attention-visual">
+                  <app-order-visual [order]="item" [open]="true" />
+                </section>
+              }
+
               @if (canAnswer(item, card.step)) {
                 <label class="attention-answer">
                   <span>Ergänzung für die Agents (optional)</span>
@@ -170,7 +176,7 @@
                               }
                             </ul>
                           }
-                          @if (failure.report) {
+                          @if (failure.report && !repeatsWhy(failure.report, card.why)) {
                             <h4>Meldung{{ failure.agent ? ' des Agents „' + failure.agent + '“' : '' }}</h4>
                             <article
                               class="markdown attention-report"

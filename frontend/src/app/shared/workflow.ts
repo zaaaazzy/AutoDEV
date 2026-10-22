@@ -44,3 +44,28 @@ export function buildWorkflow(data: BoardData, item: DevelopmentItem): WorkflowR
   }
   return rows;
 }
+
+/** Wie ein Agent seinen letzten Schritt beendet hat – kurz für die Überschrift „Agents“. */
+export interface AgentEnd {
+  name: string;
+  icon: string;
+  label: string;
+  tone: 'ok' | 'error' | 'warn' | 'running';
+}
+
+export function agentEnds(rows: WorkflowRow[]): AgentEnd[] {
+  return rows.flatMap((row) => {
+    const step = row.step;
+    if (!step) return [];
+    const output = step.output ?? '';
+    const end = (icon: string, label: string, tone: AgentEnd['tone']): AgentEnd[] => [
+      { name: row.name, icon, label, tone },
+    ];
+    if (step.status === 'running') return end('⏳', 'läuft', 'running');
+    if (step.status === 'passed') return end('✓', 'bestanden', 'ok');
+    if (/Vom Benutzer abgebrochen/.test(output)) return end('⏹', 'abgebrochen', 'warn');
+    if (/Unterbrochen:/.test(output)) return end('⏸', 'unterbrochen', 'warn');
+    if (step.status === 'failed') return end('✗', 'gescheitert', 'error');
+    return end('•', step.status, 'warn');
+  });
+}
