@@ -6,6 +6,7 @@ import {
   buildUpdate,
   ESTIMATE_FIELDS,
   isRecord,
+  invalidInput,
   isUuid,
   PRIORITIES,
   parseFields,
@@ -44,13 +45,14 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
     const body = request.body as unknown;
     const fields = parseFields(body, IDEA_FIELDS);
     if (!slug || !fields || !isRecord(body) || body.title === undefined) {
-      response.status(400).json({ message: 'Invalid ideation item.' });
+      response.status(400).json(slug ? invalidInput(body, IDEA_FIELDS, ['title']) : { message: 'Ungültiges Projekt.' });
       return;
     }
     if (!validText(body.title, TITLE_MAX)) {
-      response
-        .status(400)
-        .json({ message: `Titel bitte kurz halten (max. ${TITLE_MAX} Zeichen); Details in die Beschreibung.` });
+      response.status(400).json({
+        field: 'title',
+        message: `Titel bitte kurz halten (max. ${TITLE_MAX} Zeichen); Details in die Beschreibung.`,
+      });
       return;
     }
     const values = new Map(fields.map((field) => [field.column, field.value]));
@@ -77,12 +79,12 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
 
   app.patch('/ideation/:id', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const fields = parseFields(request.body, IDEA_FIELDS);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid ideation update.' });
+      response.status(400).json(invalidInput(request.body, IDEA_FIELDS));
       return;
     }
     // Solange der Auftragsautor schreibt (requested, drafting) oder der Auftrag steht (accepted), bleibt die Idee
@@ -104,7 +106,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
         });
         return;
       }
-      response.status(404).json({ message: 'Ideation item not found.' });
+      response.status(404).json({ message: 'Idee nicht gefunden.' });
       return;
     }
     response.json({ item: result.rows[0] });
@@ -113,7 +115,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
   // The author agent defines the idea; this is only possible from the manually editable statuses.
   app.post('/ideation/:id/define', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query(
@@ -132,7 +134,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
   // Ablehnen mit Grund: Der Grund steht an der Idee und als Kommentar; der Visionär beachtet ihn beim nächsten Lauf.
   app.post('/ideation/:id/reject', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const body = request.body as unknown;

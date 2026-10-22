@@ -244,7 +244,7 @@ export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMAND_NAMES =
-  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
+  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|export|declare|typeset|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
 const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
 /**
  * Befehle, die Dateien anlegen, ändern oder löschen. Die ersten sieben gibt die CLI mit --permission-mode acceptEdits

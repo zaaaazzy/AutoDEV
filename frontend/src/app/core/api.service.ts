@@ -2,6 +2,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { AuthService } from './auth.service.js';
+import { FieldError } from './errors.js';
 import type { Project } from './models.js';
 
 @Injectable({ providedIn: 'root' })
@@ -62,7 +63,14 @@ export class ApiService {
             : error.status === 0
               ? 'AIdeation ist nicht erreichbar. Prüfe, ob der Server läuft, und lade die Seite neu.'
               : `Anfrage fehlgeschlagen (${error.status}).`;
-        throw new Error(message, { cause: error });
+        const field =
+          typeof error.error === 'object' &&
+          error.error !== null &&
+          'field' in error.error &&
+          typeof error.error.field === 'string'
+            ? error.error.field
+            : '';
+        throw field ? new FieldError(message, field, { cause: error }) : new Error(message, { cause: error });
       }
       throw error;
     }

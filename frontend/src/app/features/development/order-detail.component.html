@@ -2,60 +2,63 @@
 <div class="order-panel">
   <!-- „Stand“ (worauf der Auftrag wartet) steht über der Status-/Sprint-/Agent-Zeile; die Zeitleiste ganz unten. -->
   <app-order-timeline [order]="item" [showWaiting]="!embedded()">
-    <div class="order-controls">
-      <label class="control"
-        ><span>Status</span
-        ><select
-          [ngModel]="item.status"
-          (ngModelChange)="update(item.id, { status: $event })"
-          [name]="'status-' + item.id"
-          [disabled]="statusLocked()"
-          [title]="statusLocked() ? 'Diesen Status setzt der Worker – ändern über die Aktionen des Auftrags.' : ''"
-        >
-          @for (status of statusOptions(); track status) {
-            <option [value]="status">{{ status | statusLabel }}</option>
-          }
-        </select>
-      </label>
-      <label class="control"
-        ><span>Sprint</span
-        ><select
-          [ngModel]="item.sprintId"
-          (ngModelChange)="update(item.id, { sprintId: $event || null })"
-          [name]="'sprint-' + item.id"
-        >
-          <option [ngValue]="null">Kein Sprint</option>
-          @for (sprint of sprintOptions(); track sprint.id) {
-            <option [value]="sprint.id">{{ sprint.name }}</option>
-          }
-        </select>
-      </label>
-      @if (item.kind !== 'express') {
-        <label class="control control-agent"
-          ><span>Agent</span
+    <!-- Unter „Aktionen“ ohne Status-, Sprint- und Agent-Wahl: dort führen die Aktionen der Karte weiter. -->
+    @if (!embedded()) {
+      <div class="order-controls">
+        <label class="control"
+          ><span>Status</span
           ><select
-            [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
-            (ngModelChange)="manualAgent[item.id] = $event"
-            [name]="'agent-' + item.id"
+            [ngModel]="item.status"
+            (ngModelChange)="update(item.id, { status: $event })"
+            [name]="'status-' + item.id"
+            [disabled]="statusLocked()"
+            [title]="statusLocked() ? 'Diesen Status setzt der Worker – ändern über die Aktionen des Auftrags.' : ''"
           >
-            <option value="">Einzeln starten …</option>
-            @for (agent of data().agents; track agent.id) {
-              <option [value]="agent.id">{{ agent.name }}</option>
+            @for (status of statusOptions(); track status) {
+              <option [value]="status">{{ status | statusLabel }}</option>
             }
           </select>
-          <button
-            class="button primary run-agent"
-            type="button"
-            title="Mit gewähltem Agent starten"
-            aria-label="Agent starten"
-            [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
-            (click)="startWithAgent(item)"
-          >
-            ▶
-          </button>
         </label>
-      }
-    </div>
+        <label class="control"
+          ><span>Sprint</span
+          ><select
+            [ngModel]="item.sprintId"
+            (ngModelChange)="update(item.id, { sprintId: $event || null })"
+            [name]="'sprint-' + item.id"
+          >
+            <option [ngValue]="null">Kein Sprint</option>
+            @for (sprint of sprintOptions(); track sprint.id) {
+              <option [value]="sprint.id">{{ sprint.name }}</option>
+            }
+          </select>
+        </label>
+        @if (item.kind !== 'express') {
+          <label class="control control-agent"
+            ><span>Agent</span
+            ><select
+              [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+              (ngModelChange)="manualAgent[item.id] = $event"
+              [name]="'agent-' + item.id"
+            >
+              <option value="">Einzeln starten …</option>
+              @for (agent of data().agents; track agent.id) {
+                <option [value]="agent.id">{{ agent.name }}</option>
+              }
+            </select>
+            <button
+              class="button primary run-agent"
+              type="button"
+              title="Mit gewähltem Agent starten"
+              aria-label="Agent starten"
+              [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+              (click)="startWithAgent(item)"
+            >
+              ▶
+            </button>
+          </label>
+        }
+      </div>
+    }
     @if (!embedded() && item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
       <app-order-question [order]="item" />
     }
@@ -357,7 +360,14 @@
       }
     }
     <details class="run-step order-brief" [open]="agentsOpen()">
-      <summary>Agents</summary>
+      <summary>
+        Agents
+        @for (end of agentEnds(); track end.name) {
+          <span [class]="'agent-end ' + end.tone" [title]="end.name + ': ' + end.label"
+            >{{ end.name }} {{ end.icon }}{{ end.tone === 'ok' ? '' : ' ' + end.label }}</span
+          >
+        }
+      </summary>
       <app-agent-workflow [order]="item" />
     </details>
     @let files = item.changedFiles ?? [];
@@ -371,13 +381,14 @@
         </ul>
       </details>
     }
-    @if (item.analysis) {
+    @if (item.analysis && !embedded()) {
       <details class="run-step order-brief">
         <summary>Analyse des Assistenten</summary>
         <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
       </details>
     }
-    @if (showVisual()) {
+    <!-- Unter „Aktionen“ steht die Ansicht samt „Optisch freigeben“ oben in der Karte. -->
+    @if (showVisual() && !embedded()) {
       <app-order-visual [order]="item" />
     }
     @if (item.risks?.trim()) {

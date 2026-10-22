@@ -42,6 +42,8 @@ export default defineConfig({
       DEV_LOG_PASSWORD: process.env.E2E_PASSWORD,
       DEV_LOG_SECRET_KEY: process.env.E2E_SECRET_KEY,
       E2E_ADMIN_DATABASE_URL: process.env.E2E_ADMIN_DATABASE_URL,
+      // Eigene Wegwerf-Datenbank des Testservers: das lokale Standardpasswort ist hier ausdrücklich erlaubt.
+      DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD: '1',
     },
   },
 });

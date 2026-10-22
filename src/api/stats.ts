@@ -159,7 +159,7 @@ export function registerStatsRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/stats', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     response.json(await collectStats(pool, slug));

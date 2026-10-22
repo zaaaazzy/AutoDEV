@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FailureLimiter, clientSource, trustProxySetting } from './security.js';
+import { FailureLimiter, allowedHost, clientSource, trustProxySetting } from './security.js';
 
 const MINUTE = 60 * 1000;
 
@@ -96,4 +96,36 @@ test('clientSource: IPv4-mapped IPv6 wie IPv4, IPv6 je /64, fehlende Adresse', (
   assert.equal(clientSource('::1'), '0:0:0:0::/64');
   assert.equal(clientSource(undefined), 'unknown');
   assert.equal(clientSource(''), 'unknown');
+});
+
+test('allowedHost: IPs, localhost, *.local und eigene Domains, keine fremden Namen (DNS-Rebinding)', () => {
+  const environment = {
+    DEV_LOG_DOMAIN: 'aideation.example.ch',
+    DEV_LOG_ALLOWED_HOSTS: 'mac.tail1234.ts.net, Extra.Example',
+  };
+  for (const host of [
+    '127.0.0.1:3100',
+    'localhost:3100',
+    'LOCALHOST',
+    '[::1]:3100',
+    '192.168.1.20:3100',
+    'app.localhost:4200',
+    'patricks-mac.local:3100',
+    'aideation.example.ch',
+    'aideation.example.ch.',
+    'mac.tail1234.ts.net:3100',
+    'extra.example',
+  ]) {
+    assert.equal(allowedHost(host, environment), true, host);
+  }
+  for (const host of [
+    undefined,
+    '',
+    'evil.example:3100',
+    'aideation.example.ch.evil.example',
+    'localhost.evil.example',
+  ]) {
+    assert.equal(allowedHost(host, environment), false, String(host));
+  }
+  assert.equal(allowedHost('aideation.example.ch', {}), false, 'ohne DEV_LOG_DOMAIN keine Domain');
 });

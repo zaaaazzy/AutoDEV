@@ -36,6 +36,9 @@ services:
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
       # Weitere eigene Domains für die Health-URL der betreuten Anwendungen (Komma-getrennt, inkl. Subdomains).
       DEV_LOG_OWN_DOMAINS: ${DEV_LOG_OWN_DOMAINS:-}
+      # Weitere Host-Namen, unter denen AIdeation selbst erreichbar ist (Komma-getrennt, z. B. Tailscale). IPs, localhost,
+      # *.local und DEV_LOG_DOMAIN gelten immer; andere Namen weist der Server ab (Schutz vor DNS-Rebinding).
+      DEV_LOG_ALLOWED_HOSTS: ${DEV_LOG_ALLOWED_HOSTS:-}
       DEV_LOG_PROJECT_ROOTS: ${DEV_LOG_PROJECT_ROOTS:-}
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres

@@ -332,3 +332,29 @@ app-wait-status {
     min-width: 0;
   }
 }
+
+/* Auftrag: wie die Agents ihren letzten Schritt beendet haben (Überschrift „Agents“) */
+.agent-end {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eef3ef;
+  color: #2f6b45;
+  font-size: 12px;
+  font-weight: 500;
+}
+.agent-end.error {
+  background: #fbeeea;
+  color: #a33d26;
+}
+.agent-end.warn {
+  background: #fdf1e0;
+  color: #a0610d;
+}
+.agent-end.running {
+  background: #e7eff7;
+  color: #36608f;
+}
+.attention-visual .order-visual {
+  margin: 0;
+}

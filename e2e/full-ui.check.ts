@@ -456,7 +456,14 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await button(firstPanel, 'Details').click();
   await expect(firstPanel.locator('app-order-detail')).toBeVisible();
   await snap(page, info, 'Auftrag Details', false);
-  await firstPanel.getByRole('combobox').first().selectOption({ label: 'Backlog' });
+  // Unter „Aktionen“ keine Status-/Sprint-/Agent-Zeile mehr: den Status ändert man auf der Seite „Aufträge“.
+  await expect(firstPanel.locator('app-order-detail .order-controls')).toHaveCount(0);
+  const firstId = (await firstPanel.locator('.attention-body').getAttribute('id'))?.replace(/^order-/, '');
+  expect(
+    (await page.request.patch(`/api/development/${firstId}`, { headers: auth, data: { status: 'backlog' } })).ok(),
+  ).toBe(true);
+  await page.reload();
+  await open(page, 'actions');
   await expect(rows.filter({ hasText: firstTitle })).toHaveCount(0);
 
   const retry = blocked.first();

@@ -91,7 +91,7 @@ export function registerVisualRoutes(app: Router, pool: Pool): void {
         ? (await pool.query<{ data: Buffer }>('SELECT data FROM visual_snapshots WHERE id = $1', [request.params.id]))
             .rows[0]
         : undefined;
-      if (!row) return void response.status(404).json({ message: 'Not found.' });
+      if (!row) return void response.status(404).json({ message: 'Nicht gefunden.' });
       response.set({
         'Content-Type': 'image/png',
         'X-Content-Type-Options': 'nosniff',

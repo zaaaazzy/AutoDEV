@@ -161,6 +161,62 @@ export const MIGRATIONS: readonly Migration[] = [
       DELETE FROM auth_sessions WHERE credential_version IS NULL;
     `,
   },
+  // Bugs zu einem Auftrag (Fehlschlag eines Agents, Problemanalyse) kommen auf den Friedhof, sobald der Auftrag
+  // erledigt ist – alle, nicht nur der zuletzt in failure_bug_id vermerkte. Bestehende Meldungen werden über
+  // failure_bug_id bzw. den Auftragstitel im Text („Aufgetreten bei Auftrag „…““, „Tester: <Titel>“) verknüpft.
+  {
+    version: 8,
+    name: 'bugs-zum-auftrag-auf-den-friedhof',
+    sql: `
+      ALTER TABLE bugs ADD COLUMN IF NOT EXISTS development_id UUID REFERENCES development_items(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS bugs_development_idx ON bugs (development_id) WHERE development_id IS NOT NULL;
+
+      UPDATE bugs b SET development_id = d.id FROM development_items d
+       WHERE d.failure_bug_id = b.id AND b.development_id IS NULL;
+      UPDATE bugs b SET development_id = (
+          SELECT d.id FROM development_items d
+           WHERE d.project_slug = b.project_slug AND d.kind <> 'express' AND (
+                 b.description LIKE 'Aufgetreten bei Auftrag „' || d.title || '“%'
+              OR substring(b.title FROM position(': ' IN b.title) + 2) = d.title
+              OR (b.title LIKE '%…' AND position(': ' IN b.title) > 0
+                  AND left(d.title, char_length(rtrim(substring(b.title FROM position(': ' IN b.title) + 2), '…')))
+                      = rtrim(substring(b.title FROM position(': ' IN b.title) + 2), '…')))
+           ORDER BY d.created_at DESC LIMIT 1)
+       WHERE b.development_id IS NULL AND b.source = 'agent';
+
+      CREATE OR REPLACE FUNCTION development_items_sync_bug() RETURNS trigger AS $fn$
+      BEGIN
+        IF OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'done' THEN
+          -- Behebungsauftrag erledigt oder Auftrag mit Fehlschlag-Meldungen doch noch fertig: auf den Friedhof.
+          UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+           WHERE (id = NEW.bug_id OR id = NEW.failure_bug_id OR development_id = NEW.id)
+             AND status IN ('open', 'in_progress');
+        ELSIF NEW.bug_id IS NOT NULL AND OLD.status IS DISTINCT FROM NEW.status THEN
+          IF NEW.status = 'in_progress' THEN
+            UPDATE bugs SET status = 'in_progress', updated_at = NOW() WHERE id = NEW.bug_id AND status = 'open';
+          ELSIF NEW.status = 'rejected' THEN
+            UPDATE bugs SET status = 'rejected', updated_at = NOW() WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
+          ELSIF NEW.status IN ('planned', 'backlog', 'blocked') THEN
+            UPDATE bugs SET status = 'open', updated_at = NOW() WHERE id = NEW.bug_id AND status = 'in_progress';
+          END IF;
+        END IF;
+        RETURN NULL;
+      END;
+      $fn$ LANGUAGE plpgsql;
+
+      -- Aufräumen: Meldungen, deren Auftrag schon erledigt ist.
+      UPDATE bugs b SET status = 'fixed', fixed_at = NOW(), updated_at = NOW(),
+             fix_notes = concat_ws(E'\\n\\n', NULLIF(b.fix_notes, ''), 'Auftrag inzwischen erledigt – automatisch auf den Friedhof.')
+        FROM development_items d
+       WHERE b.status IN ('open', 'in_progress') AND d.status = 'done'
+         AND (d.id = b.development_id OR d.failure_bug_id = b.id);
+      -- Meldung „CI rot im Pull Request von „Sprint …““, deren Sprint inzwischen gemergt ist.
+      UPDATE bugs b SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+        FROM sprints s
+       WHERE b.status IN ('open', 'in_progress') AND b.source = 'github' AND s.project_slug = b.project_slug
+         AND s.status = 'completed' AND s.git_sync = 'done' AND b.title = 'CI rot im Pull Request von „' || s.name || '“';
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

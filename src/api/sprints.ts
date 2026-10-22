@@ -7,6 +7,7 @@ import { guardGit } from './git-state.js';
 import {
   buildUpdate,
   isRecord,
+  invalidInput,
   isUuid,
   parseFields,
   parseLongText,
@@ -74,7 +75,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/sprints', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -91,7 +92,9 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     // Neue Sprints starten immer als geplant: aktiv und abgeschlossen gibt es nur über die Statuswechsel.
     if (!slug || !fields || !values.get('name') || (values.get('status') ?? 'planned') !== 'planned') {
-      response.status(400).json({ message: 'Invalid sprint.' });
+      response
+        .status(400)
+        .json(slug ? invalidInput(request.body, SPRINT_FIELDS, ['name']) : { message: 'Ungültiges Projekt.' });
       return;
     }
     try {
@@ -111,7 +114,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(201).json({ sprint: result.rows[0] });
     } catch (error) {
       if (databaseCode(error) === '23514') {
-        response.status(400).json({ message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
+        response.status(400).json({ field: 'endDate', message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
         return;
       }
       throw error;
@@ -120,12 +123,12 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.patch('/sprints/:id', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const fields = parseFields(request.body, SPRINT_FIELDS);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid sprint update.' });
+      response.status(400).json(invalidInput(request.body, SPRINT_FIELDS));
       return;
     }
     const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
@@ -173,9 +176,9 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       );
       const result = await pool.query(update.sql, update.values);
       if (!result.rows[0]) {
-        response
-          .status(from ? 409 : 404)
-          .json({ message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint not found.' });
+        response.status(from ? 409 : 404).json({
+          message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint nicht gefunden.',
+        });
         return;
       }
       // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
@@ -195,7 +198,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         return;
       }
       if (code === '23514') {
-        response.status(400).json({ message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
+        response.status(400).json({ field: 'endDate', message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
         return;
       }
       throw error;
@@ -204,7 +207,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.post('/sprints/:id/git-sync', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const action = isRecord(request.body) && request.body.action === 'pull' ? 'pull' : 'push';
@@ -224,7 +227,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
   // Angefangene Aufträge bleiben „Geplant“ und machen nach dem Fortsetzen beim nächsten Agent weiter.
   app.post('/sprints/:id/pause', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const principal = response.locals.principal as Principal | undefined;
@@ -242,7 +245,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.post('/sprints/:id/resume', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query(
@@ -250,7 +253,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       [request.params.id],
     );
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Sprint not found.' });
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
     }
     response.json({ sprint: result.rows[0] });
@@ -278,7 +281,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.delete('/sprints/:id', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     // Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Aufträge und ohne laufende Git-Sicherung:
@@ -307,7 +310,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         });
         return;
       }
-      response.status(404).json({ message: 'Sprint not found.' });
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
     }
     response.status(204).end();

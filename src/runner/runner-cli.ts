@@ -222,6 +222,14 @@ export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
   );
   await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
+  // Eine laufende Git-Lösung endet mit dem Worker; „läuft“ bliebe sonst stehen und sperrte jede weitere Anfrage (409).
+  await pool
+    .query(
+      `UPDATE git_fix_requests SET status = 'failed', finished_at = NOW(),
+              message = 'Durch einen Neustart des Workers unterbrochen – bitte den Git-Zustand prüfen und erneut anfordern.'
+        WHERE status = 'running'`,
+    )
+    .catch(logged('runner-cli'));
   if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
 }
 
@@ -293,7 +301,8 @@ async function main(): Promise<void> {
       // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
       for (const target of chatTargets) {
         const slug = target.options.project;
-        if (target.problem || stopping || gitFixActive.has(slug)) continue;
+        // Kein Start während eines angeforderten Neustarts (Drain): ein abgebrochener Commit hinterliesse index.lock.
+        if (target.problem || stopping || isDraining() || gitFixActive.has(slug)) continue;
         gitFixActive.add(slug);
         void processGitFix(pool, slug, target.repository, target.options.cwd)
           .catch(logged('runner-cli'))
@@ -534,6 +543,7 @@ async function main(): Promise<void> {
         commentActive.size +
         visionaryActive.size +
         testActive.size +
+        gitFixActive.size +
         setupActive +
         (schedulerActive ? 1 : 0);
       // Erst den Stand lesen: Ist ein Neustart angefordert oder im Bau, startet ab jetzt nichts Neues mehr (Drain).

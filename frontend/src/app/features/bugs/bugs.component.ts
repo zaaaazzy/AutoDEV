@@ -7,6 +7,7 @@ import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { errorMessage } from '../../core/errors.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
+import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import type { FormValues } from '../../shared/forms.js';
 import {
   type DataColumn,
@@ -143,6 +144,7 @@ export class BugsComponent {
     ];
   }
 
+  protected readonly bugErrors = new FieldErrors();
   protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
   protected readonly categories = CATEGORIES;
   protected pendingImages: File[] = [];
@@ -155,17 +157,23 @@ export class BugsComponent {
     return this.data().sprints.filter((sprint) => sprint.status !== 'completed');
   }
 
-  protected async createBug(): Promise<void> {
+  protected async createBug(form: HTMLFormElement): Promise<void> {
+    if (!this.bugErrors.require('title', this.bugForm.title, 'Bitte einen Titel angeben.')) {
+      focusField(form, 'title');
+      return;
+    }
     const body = { ...this.bugForm, sprintId: this.bugForm.sprintId || null };
     const files = this.pendingImages;
     let uploadError = '';
     await this.store.perform(async () => {
       // Größe vorher prüfen: Ein zu großes Bild darf keinen Bug ohne Bild anlegen.
       assertImageSizes(files);
-      const created = await this.api.post<{ bug: Bug }>(
-        `${this.api.projectPath(this.store.activeProject())}/bugs`,
-        body,
-      );
+      const created = await this.api
+        .post<{ bug: Bug }>(`${this.api.projectPath(this.store.activeProject())}/bugs`, body)
+        .catch((error: unknown) => {
+          this.bugErrors.take(error, form);
+          throw error;
+        });
       // Angelegt ist angelegt: Formular sofort leeren, damit ein zweiter Klick keinen doppelten Bug erzeugt.
       this.pendingImages = [];
       this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };

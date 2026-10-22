@@ -10,6 +10,7 @@ import { access } from './access.js';
 import {
   buildUpdate,
   isRecord,
+  invalidInput,
   isUuid,
   parseBoolean,
   INVALID,
@@ -244,7 +245,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/agents', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -260,7 +261,9 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     const fields = parseFields(request.body, AGENT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     if (!slug || !fields || !values.get('name') || !values.get('phase')) {
-      response.status(400).json({ message: 'Invalid agent.' });
+      response
+        .status(400)
+        .json(slug ? invalidInput(request.body, AGENT_FIELDS, ['name', 'phase']) : { message: 'Ungültiges Projekt.' });
       return;
     }
     if (!adminFieldsCheck(principalOf(response), fields, { command: null, role: 'custom' })) {
@@ -300,7 +303,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     async (request, response) => {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) {
-        response.status(400).json({ message: 'Invalid project slug.' });
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
         return;
       }
       const result = await pool.query(
@@ -345,7 +348,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       body.ids.length > 100 ||
       !body.ids.every(isUuid)
     ) {
-      response.status(400).json({ message: 'Invalid agent order.' });
+      response.status(400).json({ message: 'Ungültige Reihenfolge der Agents.' });
       return;
     }
     await pool.query(
@@ -360,13 +363,13 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
 
   app.patch('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
     const fields = parseFields(request.body, AGENT_FIELDS) ?? (requested !== undefined ? [] : null);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid agent update.' });
+      response.status(400).json(invalidInput(request.body, AGENT_FIELDS));
       return;
     }
     let allowed = fields;
@@ -377,7 +380,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
           [request.params.id],
         )
       ).rows[0];
-      if (!current) return void response.status(404).json({ message: 'Agent not found.' });
+      if (!current) return void response.status(404).json({ message: 'Agent nicht gefunden.' });
       const checked = adminFieldsCheck(principalOf(response), fields, current);
       if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
       allowed = checked;
@@ -393,7 +396,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       ? await pool.query(update.sql, update.values)
       : await pool.query(`SELECT ${AGENT_COLUMNS} FROM agents WHERE id = $1`, [request.params.id]);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Agent not found.' });
+      response.status(404).json({ message: 'Agent nicht gefunden.' });
       return;
     }
     response.json({ agent: result.rows[0] });
@@ -401,12 +404,12 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
 
   app.delete('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query('DELETE FROM agents WHERE id = $1 RETURNING id', [request.params.id]);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Agent not found.' });
+      response.status(404).json({ message: 'Agent nicht gefunden.' });
       return;
     }
     response.status(204).end();

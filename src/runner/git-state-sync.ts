@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
-import { acquireTree } from '../core/project-lock.js';
+import { acquireTree, treeBusy } from '../core/project-lock.js';
 import { sendPush } from '../core/push.js';
 import { applyGitFix } from './repo-fix.js';
 import { gitHelpers } from './git-sync.js';
@@ -55,7 +55,10 @@ export async function syncGitState(
 ): Promise<ProjectGitState> {
   const agentsWorkHere = same(repository, agentFolder);
   const running = await agentRunning(pool, project);
-  await fetchOccasionally(repository, execute).catch(() => undefined);
+  // Holen schreibt Referenzen ins gemeinsame Git-Verzeichnis: nur, wenn gerade kein Agent und niemand im Ordner arbeitet.
+  if (!running && !treeBusy(agentFolder) && !treeBusy(repository)) {
+    await fetchOccasionally(repository, execute).catch(() => undefined);
+  }
   const folders: FolderSnapshot[] = [await readFolder(repository, 'live', execute)];
   if (!agentsWorkHere) folders.push(await readFolder(agentFolder, 'agents', execute));
   const problems: GitProblem[] = folders.flatMap((snapshot) =>

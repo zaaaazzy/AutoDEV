@@ -4,15 +4,36 @@
  * ein vom Einrichtungs-Assistenten erzeugtes Passwort gilt. Das Standardpasswort bleibt nur für eine .env ohne
  * eigenes Passwort (wie docker-compose selbst).
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, sep } from 'node:path';
 import { DEFAULT_DB_USER, parseEnv } from './env-file.js';
 
 const DEFAULT_DB_PASSWORD = 'devlog_local_dev';
 
-/** Werte der .env im Ordner `root`; ohne lesbare Datei leer. */
+/**
+ * Hauptordner zu einem Git-Worktree (Agent-Ordner, Arbeitsordner): dort liegt die .env. Ein Worktree hat statt des
+ * Ordners .git eine Datei „gitdir: <haupt>/.git/worktrees/<name>“. Sonst null.
+ */
+export function mainWorktreeRoot(root: string): string | null {
+  try {
+    const marker = join(root, '.git');
+    if (!existsSync(marker) || !statSync(marker).isFile()) return null;
+    const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(marker, 'utf8'))?.[1]?.trim();
+    const index = gitdir?.lastIndexOf(`${sep}.git${sep}worktrees${sep}`) ?? -1;
+    return gitdir && index > 0 ? gitdir.slice(0, index) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Werte der .env im Ordner `root`; in einem Git-Worktree ohne eigene .env die des Hauptordners (sonst fiele etwa das
+ * Test-Gate im Agent-Ordner auf das Standardpasswort zurück). Ohne lesbare Datei leer.
+ */
 export function readEnvValues(root: string): Map<string, string> {
-  const file = join(root, '.env');
+  const own = join(root, '.env');
+  const main = mainWorktreeRoot(root);
+  const file = existsSync(own) || !main ? own : join(main, '.env');
   if (!existsSync(file)) return new Map();
   try {
     return parseEnv(readFileSync(file, 'utf8'));

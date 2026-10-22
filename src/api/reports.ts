@@ -172,7 +172,7 @@ export function registerReportRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/sprint-reports', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -187,12 +187,12 @@ export function registerReportRoutes(app: Router, pool: Pool): void {
 
   app.post('/sprints/:id/report', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const report = await generateSprintReport(pool, request.params.id);
     if (!report) {
-      response.status(404).json({ message: 'Sprint not found.' });
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
     }
     response.status(201).json({ report });
@@ -201,7 +201,7 @@ export function registerReportRoutes(app: Router, pool: Pool): void {
   app.patch('/sprints/:id/report', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     const body = request.body as unknown;
     if (!isUuid(request.params.id) || !isRecord(body) || typeof body.notes !== 'string' || body.notes.length > 10_000) {
-      response.status(400).json({ message: 'Invalid report notes.' });
+      response.status(400).json({ message: 'Notizen ungültig (Text, höchstens 10 000 Zeichen).' });
       return;
     }
     const result = await pool.query('UPDATE sprint_reports SET notes = $2 WHERE sprint_id = $1 RETURNING sprint_id', [

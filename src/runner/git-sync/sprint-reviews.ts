@@ -1,5 +1,6 @@
 // Sprints im Review (PR-Modus): CI verfolgen, rote Läufe als Bug melden, mergen und taggen.
 import type { Pool } from 'pg';
+import { logged } from '../../core/log.js';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, runCommand } from '../../core/command.js';
 import type { CiStatus, HosterAdapter } from '../hoster.js';
@@ -14,6 +15,9 @@ interface ReviewSprint {
   ciStatus: CiStatus | null;
   ciBugRun: string | null;
 }
+
+/** Titel der Meldung zu roter CI im Pull Request eines Sprints (beim Anlegen und beim Beerdigen gleich). */
+export const ciBugTitle = (sprintName: string): string => `CI rot im Pull Request von „${sprintName}“`.slice(0, 180);
 
 /** Legt für einen roten CI-Lauf genau einen Bug an (der Lauf wird am Sprint vermerkt, bevor der Bug entsteht). */
 async function reportCiFailure(
@@ -36,7 +40,7 @@ async function reportCiFailure(
     `INSERT INTO bugs (project_slug, title, description, severity, source) VALUES ($1, $2, $3, 'high', 'github')`,
     [
       project,
-      `CI rot im Pull Request von „${sprint.name}“`.slice(0, 180),
+      ciBugTitle(sprint.name),
       [
         `Der CI-Lauf ${run} für den Pull Request ${sprint.prUrl} ist fehlgeschlagen. Der Sprint bleibt im Review und ` +
           `wird nicht gemergt; nach einem grünen Lauf übernimmt Dev Log Merge und Tag.`,
@@ -162,6 +166,14 @@ export async function pollSprintReviews(
     const tagged = await tagMergedSprint(cwd, sprint, rawExecute);
     // Nur mit nachgezogenem lokalem main: sonst würde der alte Stand deployt.
     if (tagged.mainUpdated && onMergedMain) await goLiveLogged(onMergedMain, tagged.log);
+    // Die CI-Meldung zu diesem Pull Request ist mit dem Merge erledigt (auch wenn ein Wiederholungslauf grün war).
+    await pool
+      .query(
+        `UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+          WHERE project_slug = $1 AND source = 'github' AND title = $2 AND status IN ('open', 'in_progress')`,
+        [project, ciBugTitle(sprint.name)],
+      )
+      .catch(logged('sprint-reviews'));
     await pool.query(
       `UPDATE sprints SET status = 'completed', ci_status = $5, git_sync = 'done', git_message = $2, git_commit = $3,
               git_branch = $4, git_synced_at = NOW() WHERE id = $1`,
