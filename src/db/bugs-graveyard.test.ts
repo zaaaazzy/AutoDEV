@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import pg from 'pg';
+import { fileURLToPath } from 'node:url';
+import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../core/local-database.js';
 import { MIGRATIONS, runMigrations } from './migrations.js';
 
+// Zugang wie docker-compose aus der .env (im Worktree die des Hauptordners), nicht fest das Standardpasswort.
 const ADMIN_URL =
   process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ??
   process.env.E2E_ADMIN_DATABASE_URL ??
-  'postgresql://devlog:devlog_local_dev@localhost:5433/postgres';
+  adminDatabaseUrl(
+    localDatabaseUrl(readEnvValues(fileURLToPath(new URL('../..', import.meta.url))), 'postgres', 'localhost'),
+  );
 
 async function adminPool(): Promise<pg.Pool | undefined> {
   const pool = new pg.Pool({ connectionString: ADMIN_URL, max: 1, connectionTimeoutMillis: 2000 });
