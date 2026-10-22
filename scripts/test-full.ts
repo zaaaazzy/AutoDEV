@@ -29,7 +29,7 @@ import {
 } from '../src/core/test-results.js';
 import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
 import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
-import { createDatabasePool, readDatabaseConfig } from '../src/db/database.js';
+import { connectExistingDatabase, readDatabaseConfig } from '../src/db/database.js';
 import {
   createTestRun,
   createTestRunStep,
@@ -202,7 +202,8 @@ class Recorder {
 
   static async open(slug: string): Promise<Recorder> {
     const environment = { ...process.env, DEV_LOG_DATABASE_URL: process.env.DEV_LOG_DATABASE_URL ?? LOCAL_DATABASE };
-    const pool = await createDatabasePool(readDatabaseConfig(environment));
+    // Nur mitschreiben: Der getestete Stand ist noch nicht freigegeben und darf das Schema nicht migrieren.
+    const pool = connectExistingDatabase(readDatabaseConfig(environment));
     const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
     if (!exists.rowCount) {
       await pool.end();

@@ -45,6 +45,17 @@ export async function ensureDatabase(config: DatabaseConfig): Promise<void> {
   }
 }
 
+/**
+ * Verbindung zu einer bestehenden AIdeation-Datenbank ohne Migrationen und Startdaten. Für Werkzeuge, die mit dem Code
+ * eines noch nicht freigegebenen Stands laufen (Test-Gate eines Sprints): Sie dürfen nur hineinschreiben, nie das Schema
+ * der laufenden Installation auf ihren Stand heben.
+ */
+export function connectExistingDatabase(config: DatabaseConfig): Pool {
+  const pool = new Pool({ connectionString: config.databaseUrl });
+  pool.on('error', (error) => console.error('Datenbankverbindung getrennt:', error.message));
+  return pool;
+}
+
 export async function createDatabasePool(config: DatabaseConfig): Promise<Pool> {
   await ensureDatabase(config);
   const pool = new Pool({ connectionString: config.databaseUrl });
