@@ -278,6 +278,13 @@ export async function runWorkItem(
     while (position < ordered.length) {
       const agent = ordered[position];
       if (!agent) break;
+      // Worker wird beendet (Neustart, Abbruch): keinen weiteren Agent starten. Sonst liefe ein neuer CLI-Agent los,
+      // während der Shutdown die Kindprozesse beendet – und hinterliesse halbe Commits und index.lock im Ordner.
+      if (isShuttingDown()) {
+        passed = false;
+        interrupted = true;
+        break;
+      }
       // Sprint pausiert: der vorige Agent hat seinen Schritt beendet, der nächste startet erst nach dem Fortsetzen.
       // Der Auftrag gilt als unterbrochen (wieder „Geplant“); der nächste Lauf überspringt die erfolgreichen Agents.
       if (await sprintPaused(pool, item).catch(logged('runner', false))) {
@@ -331,7 +338,7 @@ export async function runWorkItem(
     }
     // Ende des Auftrags: „Bei abgeschlossen“ bzw. „Bei abgelehnt“ – noch vor dem Abschluss, damit ihre Änderungen im
     // Commit des Auftrags landen. Sie ändern das Ergebnis nicht. Nicht bei Unterbrechung oder Kostenbremse.
-    if (!interrupted && !budgetStop && !item.agentId) {
+    if (!interrupted && !budgetStop && !item.agentId && !isShuttingDown()) {
       const phase = passed ? 'on_done' : 'on_rejected';
       const observers = agents.filter((agent) => agent.phase === phase);
       const last = ctx.done.at(-1);
@@ -528,6 +535,8 @@ export async function runWorkflow(
       held,
     )),
   );
+  // Nach Beginn des Shutdowns weder Doku-Abgleich noch Git-Sicherung (Test-Gate, Merge, Push) beginnen.
+  if (isShuttingDown()) return results;
   await syncRepoDocs(pool, options.project, options.cwd);
   const active = await pool.query<{ id: string }>(
     `SELECT id FROM sprints WHERE project_slug = $1 AND status = 'active'`,
