@@ -16,13 +16,20 @@ const KIND_LABEL = { git: 'Git', agent: 'Agent', user: 'Deine Aktion' } as const
   standalone: true,
   imports: [WaitStatusComponent],
   template: `
-    <section class="panel running-panel" [hidden]="!wait.status() && !activities().length" aria-label="Läuft gerade">
-      <div class="section-heading">
+    <details
+      class="panel running-panel fold-panel"
+      [hidden]="!wait.status() && !activities().length"
+      aria-label="Läuft gerade"
+      open
+    >
+      <summary class="section-heading">
         <div>
-          <h2>Läuft gerade</h2>
+          <h2>
+            Läuft gerade <span class="muted">({{ activities().length + (wait.status() ? 1 : 0) }})</span>
+          </h2>
           <p class="muted">Git, Tests, Agents und was du angestossen hast – aktualisiert sich von selbst.</p>
         </div>
-      </div>
+      </summary>
       <app-wait-status #wait [card]="true" />
       @if (activities().length) {
         <ul class="running-list">
@@ -40,7 +47,7 @@ const KIND_LABEL = { git: 'Git', agent: 'Agent', user: 'Deine Aktion' } as const
           }
         </ul>
       }
-    </section>
+    </details>
   `,
 })
 export class RunningPanelComponent {

@@ -37,11 +37,42 @@
 }
 .routing-rule {
   display: grid;
-  grid-template-columns: 28px minmax(110px, 1.4fr) repeat(4, minmax(70px, 1fr)) minmax(120px, 1.2fr) auto;
-  gap: 6px;
-  align-items: end;
-  padding: 8px 0;
+  grid-template-columns: 34px minmax(130px, 1.5fr) repeat(4, minmax(72px, 1fr)) minmax(140px, 1.3fr) 86px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
   border-bottom: 1px solid #edf0eb;
+  font-size: 12px;
+}
+/* Eine Kopfzeile statt der Beschriftung in jeder Zeile (die bleibt für Screenreader und das Handy). */
+.routing-rule.routing-head {
+  padding: 0 0 6px;
+  border-bottom-color: var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.routing-rule .rule-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.routing-rule:not(.routing-head):hover {
+  background: #fafbf8;
+}
+.routing-rule .rule-rank {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef3ef;
+  color: var(--green);
   font-size: 12px;
 }
 .routing-rule label {
@@ -52,10 +83,33 @@
 .routing-rule select {
   width: 100%;
   min-width: 0;
+  min-height: 34px;
 }
 .routing-rule .rule-actions {
   display: flex;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.routing-rule .rule-actions .link-button {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.routing-rule .rule-actions .link-button:hover:not(:disabled) {
+  background: #eef2ed;
+  color: var(--green);
+}
+.routing-rule .rule-actions .link-button:disabled {
+  opacity: 0.3;
+}
+.routing-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .step-model {
   margin: 4px 0;
@@ -68,19 +122,31 @@
   font-size: 11px;
 }
 @media (max-width: 760px) {
-  /* Handy: Nummer und Pfeile in einer Kopfzeile, die Felder zu zweit darunter. */
+  /* Handy: Nummer und Pfeile in einer Kopfzeile, die Felder mit Beschriftung zu zweit darunter. */
   .routing-rule {
     grid-template-columns: 1fr 1fr;
+    padding: 10px 0;
+  }
+  .routing-rule.routing-head {
+    display: none;
+  }
+  .routing-rule .rule-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    color: #4b554e;
+    font-size: 12px;
+    font-weight: 600;
   }
   .routing-rule > :first-child {
     grid-column: 1;
     grid-row: 1;
-    align-self: center;
   }
   .routing-rule .rule-actions {
     grid-column: 2;
     grid-row: 1;
-    justify-self: end;
   }
   .budget-limits {
     grid-template-columns: 1fr;

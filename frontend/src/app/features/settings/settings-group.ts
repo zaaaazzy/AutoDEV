@@ -51,7 +51,7 @@ export class SettingsGroups {
 @Directive({
   selector: 'details[appSettingsGroup]',
   standalone: true,
-  host: { class: 'panel settings-group', '(toggle)': 'toggled()' },
+  host: { class: 'panel settings-group fold-panel', '(toggle)': 'toggled()' },
 })
 export class SettingsGroupDirective {
   readonly key = input.required<string>({ alias: 'appSettingsGroup' });

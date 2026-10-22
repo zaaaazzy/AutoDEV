@@ -611,7 +611,7 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   const budget = page.locator('#budget-settings');
   await expect(budget.getByRole('heading', { name: 'Budget' })).toBeVisible();
   // Standardregeln sind sichtbar, solange keine eigenen gespeichert sind.
-  await expect(budget.locator('.routing-rule').first()).toBeVisible();
+  await expect(budget.locator('.routing-rule:not(.routing-head)').first()).toBeVisible();
   await budget.getByLabel('Je Tag: Tokens').fill('5000000');
   await budget.getByLabel('Je Sprint: Kosten in USD').fill('25');
   await budget.getByLabel('Je Auftrag: Tokens').fill('800000');
@@ -1231,11 +1231,17 @@ test('Aktionen: „Läuft gerade“ zeigt laufenden Test mit Fortschritt und den
   );
   await login(page);
   await page.goto('/#actions');
-  const panel = page.getByRole('region', { name: 'Läuft gerade' });
+  const panel = page.locator('details.running-panel');
   await expect(panel).toBeVisible();
+  await expect(panel.locator('summary')).toContainText('Läuft gerade (2)');
   await expect(panel.locator('.wait-status-card')).toContainText('Test läuft');
   await expect(panel.locator('.wait-status-card')).toContainText('Schritt 2 von 2 · E2E-Tests · 12 von 65 Tests');
   await expect(panel.locator('.running-item.agent')).toContainText('Entwickler arbeitet');
   await expect(panel.locator('.running-item.agent')).toContainText('Push-Abos absichern');
   if (process.env.E2E_SCREENSHOT) await panel.screenshot({ path: process.env.E2E_SCREENSHOT });
+  // Zuklappbar wie „Aufträge“ im Sprint: die Kopfzeile bleibt, der Inhalt verschwindet.
+  await panel.locator('summary').click();
+  await expect(panel.locator('.running-item.agent')).toBeHidden();
+  await panel.locator('summary').click();
+  await expect(panel.locator('.running-item.agent')).toBeVisible();
 });

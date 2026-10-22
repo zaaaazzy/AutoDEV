@@ -72,7 +72,7 @@
                 {
                   "type": "bundle",
                   "name": "styles",
-                  "maximumWarning": "175kB",
+                  "maximumWarning": "185kB",
                   "maximumError": "200kB"
                 }
               ],
