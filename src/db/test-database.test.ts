@@ -34,6 +34,22 @@ export async function adminPool(t: TestContext): Promise<pg.Pool | undefined> {
   }
 }
 
+/**
+ * Löscht eine Test-Datenbank. pool.end() meldet sich fertig, bevor die Verbindungen wirklich zu sind; ein sofortiges
+ * DROP … WITH (FORCE) bricht sie dann hart ab, und der Client wirft 57P01 als uncaughtException. Darum erst warten,
+ * bis keine Verbindung mehr auf die Datenbank zeigt (FORCE nur noch für Hängengebliebenes).
+ */
+export async function dropDatabase(admin: pg.Pool, name: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const open = await admin.query('SELECT 1 FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()', [
+      name,
+    ]);
+    if (!open.rowCount) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+}
+
 export function databaseUrl(name: string): string {
   const url = new URL(ADMIN_URL);
   url.pathname = `/${name}`;
@@ -49,7 +65,7 @@ export async function withMigratedDatabase(
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `${prefix}_${process.pid}`;
-  await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await dropDatabase(admin, name);
   await admin.query(`CREATE DATABASE ${name}`);
   const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 2 });
   try {
@@ -57,7 +73,7 @@ export async function withMigratedDatabase(
     await run(pool);
   } finally {
     await pool.end();
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await dropDatabase(admin, name);
     await admin.end();
   }
 }

@@ -16,7 +16,7 @@ import {
   startSessionCleanup,
 } from './auth.js';
 import { registerUserRoutes } from './users.js';
-import { adminPool, databaseUrl } from '../db/test-database.test.js';
+import { adminPool, databaseUrl, dropDatabase } from '../db/test-database.test.js';
 
 delete process.env.DEV_LOG_PROJECT_ROOTS;
 
@@ -241,7 +241,7 @@ test('Migration und Bereinigung auf PostgreSQL: Indizes, Altsitzungen weg, aktiv
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `devlog_sessions_${process.pid}`;
-  await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+  await dropDatabase(admin, name);
   await admin.query(`CREATE DATABASE ${name}`);
   const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
   try {
@@ -287,7 +287,7 @@ test('Migration und Bereinigung auf PostgreSQL: Indizes, Altsitzungen weg, aktiv
     assert.equal(openTotp(user.totp_secret, KEY), 'JBSWY3DPEHPK3PXP');
   } finally {
     await pool.end();
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    await dropDatabase(admin, name);
     await admin.end();
   }
 });

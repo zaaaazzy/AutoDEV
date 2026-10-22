@@ -3,7 +3,7 @@ import test from 'node:test';
 import pg from 'pg';
 import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
-import { adminPool, databaseUrl } from './test-database.test.js';
+import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
 function fakeClient(done: number[], fail?: string) {
@@ -94,7 +94,7 @@ test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nic
   const pools: pg.Pool[] = [];
   try {
     for (const name of names) {
-      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      await dropDatabase(admin, name);
       await admin.query(`CREATE DATABASE ${name}`);
       pools.push(new pg.Pool({ connectionString: databaseUrl(name), max: 1 }));
     }
@@ -135,7 +135,7 @@ test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nic
     assert.equal(lock.rows[0].n, 0, 'Sperre nach dem Lauf gelöst');
   } finally {
     for (const pool of pools) await pool.end();
-    for (const name of names) await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    for (const name of names) await dropDatabase(admin, name);
     await admin.end();
   }
 });
