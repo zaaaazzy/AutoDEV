@@ -387,6 +387,12 @@ Rote Tests oder ein abgelehntes Review gehen einmal direkt zurück an den Entwic
 
 Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitlimit: Der Schritt wird nach 30 s einmal wiederholt, statt den Auftrag sofort zu blockieren. Das gilt nur für Fehler des Agents selbst, nicht für rote Projekttests (deren Ausgabe kann ebenfalls `ECONNREFUSED` enthalten). Vor dem zweiten Versuch wird das Budget neu geprüft; ist es erreicht, hält der Lauf an wie vor einem Schritt.
 
+### Befehlsausgabe
+
+- Von jeder Befehlsausgabe (`runCommand`, `redactOutput`) bleiben höchstens 120 000 Zeichen: die ersten 20 000 und die letzten 100 000. Dazwischen steht `[… N Zeichen der Ausgabe ausgelassen …]`. Das Ende bleibt erhalten, weil dort Fehlerzusammenfassung und Coverage des Testlaufs stehen. Der Puffer ist fest begrenzt, das Mittelstück wird schon während des Laufs verworfen.
+- Geschwärzt wird vor dem Kürzen. Ein Secret, das über eine Schnittkante reicht, wird dort ganz entfernt. Geschnitten wird nie mitten in einem Emoji (Surrogate-Paar). stdout und stderr haben je einen eigenen UTF-8-Decoder, deshalb bleiben Umlaute auf Chunk-Grenzen ganz.
+- Claude-CLI (`stream-json`): stdout und stderr haben getrennte Zeilenpuffer, und nur stdout wird als Ereignis gelesen. stderr kann so keine JSON-Zeile zerreissen und kein gefälschtes `result` einschleusen. Die letzte Zeile ohne Zeilenumbruch wird beim Abschluss gelesen. Fehlt das `result`-Ereignis bei Exit-Code 0, gilt der Schritt als fehlgeschlagen, nicht als Erfolg mit Kosten 0. Die Live-Ausgabe wird höchstens alle 500 ms neu zusammengesetzt, der lesbare Text ist auf die letzten rund 120 000 Zeichen begrenzt.
+
 ### Sofortstart
 
 Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. Das 30-s-Intervall bleibt als Absicherung.

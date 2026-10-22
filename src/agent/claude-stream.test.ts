@@ -110,3 +110,71 @@ test('continues a claude session with --resume and reports the session id', asyn
   assert.equal(calls[0]?.[5], 'abc-123');
   assert.equal(result.sessionId, 'abc-123');
 });
+
+test('stderr mitten in einer JSON-Zeile zerstört das result-Ereignis nicht', async () => {
+  const resultLine = line({ type: 'result', result: 'Fertig.', is_error: true, total_cost_usd: 0.3, usage: {} });
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onChunk?.(resultLine.slice(0, 30), 'stdout');
+    options?.onChunk?.('Warnung: langsames Netz\n', 'stderr');
+    options?.onChunk?.(resultLine.slice(30), 'stdout');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.output, 'Fertig.');
+  assert.equal(result.costUsd, 0.3);
+  // is_error wird ausgewertet, obwohl stderr dazwischen kam.
+  assert.equal(result.exitCode, 1);
+});
+
+test('stderr wird nie als Ereignis gelesen, auch wenn es wie JSON aussieht', () => {
+  const parser = createStreamParser('/repo', () => undefined);
+  parser.push(line({ type: 'result', result: 'gefälscht', is_error: false }), 'stderr');
+  assert.equal(parser.result(), null);
+});
+
+test('die letzte JSON-Zeile ohne Zeilenumbruch wird beim Abschluss gelesen', async () => {
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onChunk?.(RESULT.trimEnd(), 'stdout');
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.output, 'Fertig umgesetzt.');
+  assert.equal(result.tokens, 15);
+});
+
+test('fehlt das result-Ereignis, gilt der Lauf nicht als Erfolg mit Kosten 0', async () => {
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onChunk?.(line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Halb fertig.' }] } }));
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /^Halb fertig\.[\s\S]*kein Ergebnis gemeldet/);
+});
+
+test('Live-Ausgabe: viele Chunks setzen den Text nicht je Chunk neu zusammen', async () => {
+  const live: string[] = [];
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    for (let i = 0; i < 2000; i += 1) {
+      options?.onChunk?.(line({ type: 'assistant', message: { content: [{ type: 'text', text: `Schritt ${i}` }] } }));
+    }
+    options?.onChunk?.(RESULT);
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', { onOutput: (output) => live.push(output) });
+  assert.ok(live.length < 10, `${live.length} Live-Ausgaben für 2001 Chunks`);
+  // Der letzte Stand kommt trotzdem an.
+  assert.match(live.at(-1) ?? '', /Schritt 1999$/);
+});
+
+test('der lesbare Text bleibt bei sehr langen Läufen begrenzt', () => {
+  const parser = createStreamParser('/repo', () => undefined);
+  for (let i = 0; i < 5000; i += 1) {
+    parser.push(line({ type: 'assistant', message: { content: [{ type: 'text', text: `${i} ${'x'.repeat(100)}` }] } }));
+  }
+  const transcript = parser.transcript();
+  assert.ok(transcript.length < 130_000, `${transcript.length} Zeichen`);
+  assert.match(transcript, /^\[… frühere Ausgabe gekürzt …\]/);
+  assert.match(transcript, /4999 x+$/);
+});

@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import type { CommandExecutor, CommandResult } from '../core/command.js';
+import type { CommandExecutor, CommandResult, OutputStream } from '../core/command.js';
 
 /**
  * `claude -p` prints its answer only when it is done. With `--output-format stream-json` it reports every
@@ -7,6 +7,12 @@ import type { CommandExecutor, CommandResult } from '../core/command.js';
  */
 
 const MAX_ACTION_CHARS = 160;
+/** Lesbarer Text des Agents: ältere Absätze fallen weg, damit der Speicher bei langen Läufen begrenzt bleibt. */
+const MAX_TRANSCRIPT_CHARS = 120_000;
+/** Eine einzelne Zeile ohne Umbruch darf nicht unbegrenzt wachsen; das result-Ereignis ist weit kleiner. */
+const MAX_LINE_CHARS = 20_000_000;
+/** Live-Ausgabe höchstens so oft neu zusammensetzen (transcript() kopiert den ganzen Text). */
+export const LIVE_TRANSCRIPT_INTERVAL_MS = 500;
 
 export function isClaudeCommand(command: string[]): boolean {
   return command[0] !== undefined && basename(command[0]) === 'claude';
@@ -88,8 +94,11 @@ export function describeToolUse(block: ContentBlock, cwd: string): string {
 }
 
 export interface StreamParser {
-  /** Feeds raw stdout; complete lines are parsed, the rest waits for the next chunk. */
-  push(chunk: string): void;
+  /**
+   * Feeds raw output; complete lines are parsed, the rest waits for the next chunk. stdout und stderr haben je einen
+   * eigenen Zeilenpuffer, und nur stdout wird als JSON gelesen: stderr kann so nie mitten in ein Ereignis geraten.
+   */
+  push(chunk: string, stream?: OutputStream): void;
   /** The agent's Markdown text so far, used as live output while the agent runs. */
   transcript(): string;
   /** Final answer and token usage, or null when no result event arrived (e.g. the CLI failed to start). */
@@ -103,20 +112,39 @@ export function createStreamParser(
   onAction: (message: string) => void,
   onSession?: (sessionId: string) => void,
 ): StreamParser {
-  let buffer = '';
+  const buffers: Record<OutputStream, { text: string; overflow: boolean }> = {
+    stdout: { text: '', overflow: false },
+    stderr: { text: '', overflow: false },
+  };
   // Live output reads like documentation: only the agent's own Markdown text; tool calls go to the history.
   const paragraphs: string[] = [];
+  let paragraphChars = 0;
+  let paragraphsDropped = false;
+  let cached: string | undefined;
   let final: { text: string; isError: boolean; tokens: number; costUsd: number } | null = null;
   let session: string | undefined;
   const action = (message: string): void => {
     if (message) onAction(message);
   };
-  const handle = (line: string): void => {
+  const addParagraph = (text: string): void => {
+    paragraphs.push(text);
+    paragraphChars += text.length;
+    cached = undefined;
+    while (paragraphChars > MAX_TRANSCRIPT_CHARS && paragraphs.length > 1) {
+      paragraphChars -= paragraphs.shift()?.length ?? 0;
+      paragraphsDropped = true;
+    }
+  };
+  const handle = (line: string, stream: OutputStream): void => {
+    if (stream === 'stderr') {
+      if (line.trim()) addParagraph(line.trim());
+      return;
+    }
     let event: StreamEvent;
     try {
       event = JSON.parse(line) as StreamEvent;
     } catch {
-      if (line.trim()) paragraphs.push(line.trim());
+      if (line.trim()) addParagraph(line.trim());
       return;
     }
     if (typeof event.session_id === 'string' && event.session_id !== session) {
@@ -128,7 +156,7 @@ export function createStreamParser(
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use') action(describeToolUse(block, cwd));
         else if (block.type === 'text' && block.text?.trim()) {
-          paragraphs.push(block.text.trim());
+          addParagraph(block.text.trim());
           action(shorten(block.text));
         }
       }
@@ -142,18 +170,36 @@ export function createStreamParser(
     }
   };
   return {
-    push(chunk) {
-      buffer += chunk;
-      const parts = buffer.split('\n');
-      buffer = parts.pop() ?? '';
-      for (const line of parts) handle(line);
+    push(chunk, stream = 'stdout') {
+      const buffer = buffers[stream];
+      if (!chunk.includes('\n')) {
+        buffer.text += chunk;
+      } else {
+        const parts = (buffer.text + chunk).split('\n');
+        buffer.text = parts.pop() ?? '';
+        for (const line of parts) {
+          // Der Rest einer übergrossen Zeile ist kein gültiges Ereignis mehr: verwerfen.
+          if (!buffer.overflow) handle(line, stream);
+          buffer.overflow = false;
+        }
+      }
+      if (buffer.text.length > MAX_LINE_CHARS) {
+        buffer.text = '';
+        buffer.overflow = true;
+      }
     },
-    transcript: () => paragraphs.join('\n\n'),
+    transcript() {
+      cached ??= (paragraphsDropped ? ['[… frühere Ausgabe gekürzt …]', ...paragraphs] : paragraphs).join('\n\n');
+      return cached;
+    },
     sessionId: () => session,
     result() {
-      if (buffer.trim()) {
-        handle(buffer);
-        buffer = '';
+      // Die letzte Zeile ohne Zeilenumbruch gehört auch dazu (stdout zuerst: dort steht das result-Ereignis).
+      for (const stream of ['stdout', 'stderr'] as const) {
+        const buffer = buffers[stream];
+        if (buffer.text.trim() && !buffer.overflow) handle(buffer.text, stream);
+        buffer.text = '';
+        buffer.overflow = false;
       }
       return final;
     },
@@ -179,17 +225,39 @@ export async function executeAgentCommand(
   const { onAction, resumeSession, onSession, ...executeOptions } = options;
   if (!isClaudeCommand(command)) return execute(command, cwd, executeOptions);
   const parser = createStreamParser(cwd, (message) => onAction?.(message), onSession);
+  // Live-Ausgabe gedrosselt: transcript() je Chunk wäre bei langen Läufen quadratisch.
+  let lastLive = 0;
+  let shown: string | undefined;
+  const showLive = (force: boolean): void => {
+    if (!executeOptions.onOutput || (!force && Date.now() - lastLive < LIVE_TRANSCRIPT_INTERVAL_MS)) return;
+    lastLive = Date.now();
+    const transcript = parser.transcript();
+    if (transcript === shown) return;
+    shown = transcript;
+    executeOptions.onOutput(transcript);
+  };
   const result = await execute(withStreamJson(withResume(command, resumeSession)), cwd, {
     ...executeOptions,
     onOutput: undefined,
-    onChunk: (chunk) => {
-      parser.push(chunk);
-      executeOptions.onOutput?.(parser.transcript());
+    onChunk: (chunk, stream) => {
+      parser.push(chunk, stream);
+      showLive(false);
     },
   });
   const final = parser.result();
-  // Without a result event (abort, crash) keep the readable text instead of raw JSON lines.
-  if (!final) return { ...result, output: parser.transcript() || result.output, sessionId: parser.sessionId() };
+  showLive(true);
+  // Without a result event (abort, crash) keep the readable text instead of raw JSON lines. Ein Lauf ohne Ergebnis
+  // ist nie ein Erfolg: Kosten und is_error wären sonst unbekannt und der Schritt zählte mit Kosten 0 als bestanden.
+  if (!final) {
+    const output = parser.transcript() || result.output;
+    if (result.exitCode !== 0) return { ...result, output, sessionId: parser.sessionId() };
+    return {
+      ...result,
+      exitCode: 1,
+      output: `${output}\n\nDie Claude-CLI hat kein Ergebnis gemeldet (result-Ereignis fehlt); der Lauf gilt als fehlgeschlagen.`,
+      sessionId: parser.sessionId(),
+    };
+  }
   return {
     ...result,
     sessionId: parser.sessionId(),
