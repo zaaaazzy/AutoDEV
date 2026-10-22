@@ -14,7 +14,7 @@
     <p>{{ agent.instructions }}</p>
   }
   @if (agentActivityLoading()) {
-    <p class="loading">Wird geladen …</p>
+    <p class="loading" role="status">Wird geladen …</p>
   }
   <h3 class="subheading">Aktive Aufgaben ({{ agentActive().length }})</h3>
   @for (entry of agentActive(); track entry.id) {

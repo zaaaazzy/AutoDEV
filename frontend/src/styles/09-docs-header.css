@@ -20,7 +20,7 @@
   padding: 0 9px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   color: var(--green);
   font-weight: 650;
 }
@@ -68,7 +68,7 @@
   padding: 9px 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   text-align: left;
 }
@@ -162,7 +162,7 @@
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--muted);
   text-decoration: none;
   white-space: nowrap;
@@ -204,15 +204,15 @@
 }
 .sprint-pill.state-done .sprint-state {
   background: #2f8a57;
-  color: #fff;
+  color: var(--surface);
 }
 .sprint-pill.state-warn .sprint-state {
   background: #e08a1e;
-  color: #fff;
+  color: var(--surface);
 }
 .sprint-pill.state-stopped .sprint-state {
   background: #c9573f;
-  color: #fff;
+  color: var(--surface);
   font-size: 8px;
 }
 .sprint-pill.state-running .sprint-state,
@@ -229,7 +229,7 @@
   place-items: center;
   border: 1px solid var(--line);
   border-radius: 50%;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   font-weight: 700;
 }
@@ -252,7 +252,7 @@
   padding: 0 12px 0 8px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   font-weight: 700;
   box-shadow: 0 1px 2px rgb(32 40 36 / 5%);
@@ -273,7 +273,7 @@
   padding: 3px;
   place-items: center;
   border-radius: 8px;
-  background: #f4f5f1;
+  background: var(--paper);
   object-fit: contain;
 }
 .switcher-icon.brand-mark {
@@ -313,7 +313,7 @@
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 20px 50px rgb(32 40 36 / 18%);
   transform: translateX(-50%);
   animation: switcher-in 0.16s ease-out;
@@ -378,7 +378,7 @@
   padding-top: 12px;
 }
 .switcher-plus {
-  background: #e8f1ec;
+  background: var(--green-soft);
   color: var(--green);
   font-weight: 800;
 }
@@ -447,7 +447,7 @@
   margin: 4px 0 14px;
 }
 .pending-badge {
-  color: #a0610d;
+  color: var(--warn);
   font-weight: 650;
 }
 .pending-dot {
@@ -491,7 +491,7 @@
   overflow: auto;
   padding: 10px 12px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   font-size: 12.5px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -510,7 +510,7 @@
   text-decoration-color: rgb(138 47 28 / 40%);
 }
 .diff-same {
-  color: #6b756f;
+  color: var(--muted);
 }
 .diff-gap {
   color: #9aa39c;
@@ -541,14 +541,14 @@
 }
 .history-approved .history-status {
   background: #e3f2e9;
-  color: #2f6f4f;
+  color: var(--green-light);
 }
 .history-rejected .history-status {
   background: #fbe9e6;
   color: #a33d26;
 }
 .history-pending .history-status {
-  background: #fdf1e0;
-  color: #a0610d;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 

@@ -6,6 +6,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import { SetupService } from '../../core/setup.service.js';
 import { type CheckState, CheckStateComponent } from '../../shared/check-state.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
+import { ModalComponent } from '../../shared/modal.component.js';
 
 interface FolderInfo {
   exists: boolean;
@@ -106,7 +107,7 @@ const slugify = (value: string): string =>
 @Component({
   selector: 'app-project-wizard',
   standalone: true,
-  imports: [FormsModule, CheckStateComponent, MarkdownPipe],
+  imports: [ModalComponent, FormsModule, CheckStateComponent, MarkdownPipe],
   templateUrl: './project-wizard.component.html',
   host: { style: 'display: contents' },
 })

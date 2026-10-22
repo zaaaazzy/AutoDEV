@@ -15,7 +15,7 @@ select:hover {
   border-color: #9fb3a5;
 }
 select:focus {
-  border-color: #2f6f4f;
+  border-color: var(--green-light);
   box-shadow: 0 0 0 3px rgb(47 111 79 / 14%);
 }
 textarea {
@@ -68,7 +68,7 @@ h4 {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: white;
+  color: var(--surface);
   font-size: 17px;
   font-weight: 700;
 }
@@ -120,7 +120,7 @@ h4 {
 .nav-link:hover,
 .nav-link.active {
   background: #344139;
-  color: white;
+  color: var(--surface);
   text-decoration: none;
 }
 .nav-count {
@@ -138,17 +138,17 @@ h4 {
 .nav-count.ok,
 .nav-link.active .nav-count.ok {
   background: #2f8a57;
-  color: #fff;
+  color: var(--surface);
 }
 .nav-count.warn,
 .nav-link.active .nav-count.warn {
   background: #e08a1e;
-  color: #fff;
+  color: var(--surface);
 }
 .nav-count.stopped,
 .nav-link.active .nav-count.stopped {
-  background: #c0392b;
-  color: #fff;
+  background: var(--danger);
+  color: var(--surface);
 }
 .menu-toggle {
   display: none;
@@ -367,7 +367,7 @@ a.summary-card:hover {
 .sprint-status .sprint-bar span {
   display: block;
   height: 100%;
-  background: #2f6f4f;
+  background: var(--green-light);
 }
 @media (max-width: 720px) {
   .sprint-status .sprint-name,
@@ -523,7 +523,7 @@ a.summary-card:hover {
   padding: 0 12px;
   border: 1px solid #d8ddd7;
   border-radius: 7px;
-  background: white;
+  background: var(--surface);
   color: var(--ink);
   font-size: 12px;
 }
@@ -534,7 +534,7 @@ input[type='file']::file-selector-button {
   padding: 0 12px;
   border: 1px solid #d8ddd7;
   border-radius: 7px;
-  background: white;
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 12px;
@@ -551,11 +551,11 @@ input[type='file']::file-selector-button:hover {
 .button.primary {
   border-color: var(--green);
   background: var(--green);
-  color: white;
+  color: var(--surface);
 }
 .button.primary:hover:not(:disabled) {
   background: #1d523f;
-  color: white;
+  color: var(--surface);
 }
 .button.danger {
   border-color: #ecc9c0;
@@ -569,12 +569,12 @@ input[type='file']::file-selector-button:hover {
 .button.primary.danger {
   border-color: #9d4938;
   background: #9d4938;
-  color: white;
+  color: var(--surface);
 }
 .button.primary.danger:hover:not(:disabled) {
   border-color: #823a2c;
   background: #823a2c;
-  color: white;
+  color: var(--surface);
 }
 .button:disabled {
   opacity: 0.55;
@@ -587,7 +587,7 @@ input[type='file']::file-selector-button:hover {
 .run-card {
   border: 1px solid var(--line);
   border-radius: 11px;
-  background: white;
+  background: var(--surface);
   box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
 }
 .panel {
@@ -710,7 +710,7 @@ input[type='file']::file-selector-button:hover {
 .status-passed,
 .status-fixed,
 .status-implemented {
-  background: #e8f1ec;
+  background: var(--green-soft);
   color: #39704e;
 }
 .status-failed,
@@ -728,7 +728,7 @@ input[type='file']::file-selector-button:hover {
 .status-accepted,
 .status-considering {
   background: #e7eff7;
-  color: #36608f;
+  color: var(--blue);
 }
 .status-open,
 .status-idea,
@@ -931,7 +931,7 @@ details > summary {
   padding: 15px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fafbf8;
+  background: var(--surface-soft);
   color: #4b554e;
   font:
     12px/1.6 ui-monospace,
@@ -945,7 +945,7 @@ details > summary {
   padding: 15px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fafbf8;
+  background: var(--surface-soft);
   overflow-wrap: anywhere;
 }
 .markdown h1,
@@ -1356,7 +1356,7 @@ details > summary {
   overflow: auto;
   padding: 24px;
   border-radius: 14px;
-  background: white;
+  background: var(--surface);
   box-shadow: var(--shadow);
 }
 .flow {
@@ -1566,7 +1566,7 @@ h3 .link-button {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
   font-weight: 400;
 }
@@ -1599,7 +1599,7 @@ h3 .link-button {
   z-index: -1;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: white;
+  background: var(--surface);
   box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
   content: '';
 }
@@ -1813,8 +1813,8 @@ h3 .link-button {
   margin: 0 0 8px;
   padding: 8px 12px;
   border-radius: 10px;
-  background: #fdf1e0;
-  color: #a0610d;
+  background: var(--warn-soft);
+  color: var(--warn);
   font-size: 13px;
 }
 .chat-offline .link-button {
@@ -1845,21 +1845,21 @@ h3 .link-button {
   color: var(--ink);
 }
 .chat-msg.failed {
-  outline: 1px solid #c0392b;
+  outline: 1px solid var(--danger);
 }
 /* Assistenten-Antworten in derselben Schrittansicht wie Agents (Live-Zeile, Verlauf, Ausgabe) */
 .chat-msg.assistant {
   width: min(100%, 860px);
   max-width: 100%;
   padding: 6px 10px 10px;
-  background: #f4f5f1;
+  background: var(--paper);
   white-space: normal;
 }
 .chat-msg.assistant .step-output {
   max-height: none;
 }
 .chat-msg.typing {
-  color: #6b756f;
+  color: var(--muted);
   font-style: italic;
   animation: chat-pulse 1.2s ease-in-out infinite;
 }
@@ -1905,14 +1905,14 @@ h3 .link-button {
   padding: 10px 14px;
   border: 1px solid #dfe3da;
   border-radius: 10px;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .info-block h4 {
   margin: 0 0 6px;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #6b756f;
+  color: var(--muted);
 }
 .info-block p {
   margin: 3px 0;

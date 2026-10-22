@@ -20,7 +20,7 @@ a.doc-link {
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fff;
+  background: var(--surface);
 }
 .ap-card p {
   margin: 4px 0 0;

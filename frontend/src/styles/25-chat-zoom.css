@@ -12,7 +12,7 @@
   padding: 0;
   border: 1px solid #d5dbd0;
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: #4a554d;
   font-size: 14px;
   cursor: pointer;
@@ -28,7 +28,7 @@
 }
 .chat-icon-button[aria-pressed='true'] {
   background: var(--green);
-  color: #fff;
+  color: var(--surface);
   border-color: var(--green);
 }
 .chat .section-heading {
@@ -42,7 +42,7 @@
   display: flex;
   flex-direction: column;
   margin: 0;
-  background: #fff;
+  background: var(--surface);
 }
 .chat.chat-docked .chat-log,
 .chat.chat-modal .chat-log,
@@ -113,7 +113,7 @@ body.chat-docked .chat-bubble-window:not(:has(.chat-docked)) {
   border: 0;
   border-radius: 50%;
   background: var(--green);
-  color: #fff;
+  color: var(--surface);
   font-size: 20px;
   box-shadow: 0 10px 24px rgb(36 99 78 / 35%);
   cursor: pointer;

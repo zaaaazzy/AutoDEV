@@ -18,7 +18,7 @@
   align-items: center;
   flex: 0 1 300px;
   margin: 0;
-  color: #6b756f;
+  color: var(--muted);
 }
 .page-search svg {
   position: absolute;
@@ -29,7 +29,7 @@
   min-height: 34px;
   padding: 6px 10px 6px 32px;
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
 }
 .dt-chip {
   display: inline-flex;
@@ -38,7 +38,7 @@
   padding: 3px 4px 3px 10px;
   border-radius: 999px;
   background: #e7eff7;
-  color: #36608f;
+  color: var(--blue);
   font-size: 12px;
 }
 .dt-chip button {
@@ -66,7 +66,7 @@
   padding: 4px 10px;
   border: 1px solid #dfe3da;
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: #4a554d;
   font-size: 12px;
 }
@@ -77,7 +77,7 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #fafbf8;
+  background: var(--surface-soft);
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.02em;
@@ -110,7 +110,7 @@
   font-size: 11px;
 }
 .dt-sort-icon.active {
-  color: #2f6f4f;
+  color: var(--green-light);
 }
 .dt-filter {
   position: relative;
@@ -131,7 +131,7 @@
 }
 .dt-filter-button.active {
   background: #e7eff7;
-  color: #36608f;
+  color: var(--blue);
 }
 .dt-filter-menu {
   position: fixed;
@@ -144,7 +144,7 @@
   padding: 8px;
   border: 1px solid #dfe3da;
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
   font-size: 13px;
   font-weight: 500;
@@ -162,7 +162,7 @@
   cursor: pointer;
 }
 .dt-option:hover {
-  background: #f4f5f1;
+  background: var(--paper);
 }
 .dt-option input {
   width: auto;
@@ -172,10 +172,10 @@
   flex: 1;
 }
 .dt-option small {
-  color: #6b756f;
+  color: var(--muted);
 }
 .dt-table tbody tr:not(.closed-detail):hover > td {
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .sprint-progress-cell {
   display: inline-flex;
@@ -197,7 +197,7 @@
 .sprint-progress-cell .sprint-bar span {
   display: block;
   height: 100%;
-  background: #2f6f4f;
+  background: var(--green-light);
 }
 .closed-detail .sprint-card {
   margin: 0;
@@ -221,7 +221,7 @@
   place-items: center;
   border-radius: 50%;
   background: #2f8a57;
-  color: #fff;
+  color: var(--surface);
   font-size: 10px;
   font-weight: 800;
 }
@@ -235,7 +235,7 @@
   padding: 0;
   border: 1px solid #dfe3da;
   border-radius: 7px;
-  background: #fff;
+  background: var(--surface);
   color: #5b665e;
   transition:
     background 0.15s,
@@ -243,15 +243,15 @@
 }
 .dt-expand:hover {
   border-color: #9fb3a5;
-  background: #f4f5f1;
+  background: var(--paper);
 }
 .dt-expand svg {
   transition: transform 0.15s;
 }
 .dt-expand.open {
-  border-color: #2f6f4f;
-  background: #2f6f4f;
-  color: #fff;
+  border-color: var(--green-light);
+  background: var(--green-light);
+  color: var(--surface);
 }
 .dt-expand.open svg {
   transform: rotate(90deg);
@@ -276,14 +276,14 @@
 /* Kategorien: gleiche Farbe in allen Tabellen und Formularen */
 .tag.category-frontend {
   background: #e7eff7;
-  color: #36608f;
+  color: var(--blue);
 }
 .tag.category-backend {
   background: #ece8f5;
   color: #5b4a8b;
 }
 .tag.category-fullstack {
-  background: #e8f1ec;
+  background: var(--green-soft);
   color: #39704e;
 }
 .tag.category-infrastructure {
@@ -330,7 +330,7 @@
   font-weight: 600;
 }
 .chat-question-label {
-  color: #a0610d;
+  color: var(--warn);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -344,7 +344,7 @@
   box-shadow: 0 0 0 3px rgb(224 138 30 / 20%);
 }
 .agent-line.waiting small {
-  color: #a0610d;
+  color: var(--warn);
 }
 .question-badge {
   display: inline-grid;
@@ -354,7 +354,7 @@
   margin-left: 4px;
   border-radius: 50%;
   background: #e08a1e;
-  color: #fff;
+  color: var(--surface);
   font-size: 11px;
   font-weight: 800;
 }
@@ -382,7 +382,7 @@
 }
 .coverage-table .coverage-total td {
   border-top: 2px solid #dfe3da;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 .coverage-failed {
   display: block;
@@ -414,7 +414,7 @@
   background: #e08a1e;
 }
 .coverage-value.bad .coverage-bar span {
-  background: #c0392b;
+  background: var(--danger);
 }
 .coverage-value.bad {
   color: #b4472f;
@@ -428,7 +428,7 @@
   height: 18px;
   place-items: center;
   border-radius: 50%;
-  color: #fff;
+  color: var(--surface);
   font-size: 11px;
   font-weight: 800;
 }
@@ -436,13 +436,13 @@
   background: #2f8a57;
 }
 .check-state.error {
-  background: #c0392b;
+  background: var(--danger);
 }
 .check-state.warn {
   background: #e08a1e;
 }
 .check-state.loading {
-  color: #36608f;
+  color: var(--blue);
   animation: check-spin 0.9s linear infinite;
 }
 @keyframes check-spin {

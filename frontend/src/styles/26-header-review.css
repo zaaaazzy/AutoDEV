@@ -19,7 +19,7 @@
   padding: 0 10px 0 9px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   box-shadow: 0 1px 2px rgb(32 40 36 / 5%);
   cursor: pointer;
@@ -81,7 +81,7 @@
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 16px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 20px 50px rgb(32 40 36 / 18%);
   animation: review-menu-in 0.16s ease-out;
 }
@@ -178,7 +178,7 @@
   height: 40px;
   border-radius: 12px;
   background: var(--green);
-  color: #fff;
+  color: var(--surface);
   box-shadow: 0 1px 2px rgb(32 40 36 / 12%);
   transition:
     background 0.15s,
@@ -212,7 +212,7 @@
   padding: 0 4px 0 10px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   font-size: 12px;
 }
 .review-live.running {

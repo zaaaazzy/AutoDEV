@@ -24,12 +24,14 @@ import {
   MAX_IMAGE_BYTES,
   sourceLabel,
 } from './idea-options.js';
+import { ModalComponent } from '../../shared/modal.component.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
 @Component({
   selector: 'app-idea-detail',
   standalone: true,
   imports: [
+    ModalComponent,
     GithubLinkComponent,
     CommentThreadComponent,
     DatePipe,

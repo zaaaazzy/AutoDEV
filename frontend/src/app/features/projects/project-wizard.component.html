@@ -1,549 +1,540 @@
-<div class="modal-backdrop wizard-backdrop" (click)="closed.emit()">
-  <section
-    class="wizard"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="wizard-title"
-    (click)="$event.stopPropagation()"
-  >
-    <aside class="wizard-rail">
-      <div class="wizard-brand">
-        <span class="brand-mark">m</span>
-        <div>
-          <p class="eyebrow">Neues Projekt</p>
-          <h2 id="wizard-title">Projekt einrichten</h2>
-        </div>
+<app-modal
+  panelClass="wizard"
+  backdropClass="wizard-backdrop"
+  labelledBy="wizard-title"
+  [closeOnEscape]="false"
+  (closed)="closed.emit()"
+>
+  <aside class="wizard-rail">
+    <div class="wizard-brand">
+      <span class="brand-mark">m</span>
+      <div>
+        <p class="eyebrow">Neues Projekt</p>
+        <h2 id="wizard-title">Projekt einrichten</h2>
       </div>
-      <ol class="wizard-steps">
-        @for (label of steps; track label; let index = $index) {
-          <li [class.active]="step() === index && !created()" [class.done]="step() > index || !!created()">
-            <button type="button" (click)="goTo(index)" [disabled]="index > step() || !!created()">
-              <span class="wizard-step-number">{{ step() > index || created() ? '✓' : index + 1 }}</span>
-              <span class="wizard-step-text">
-                <strong>{{ label }}</strong>
-                <small>{{ stepInfo[index].hint }}</small>
-              </span>
-            </button>
-          </li>
-        }
-      </ol>
-      <p class="wizard-rail-foot">Alles lässt sich später in den Projekteinstellungen ändern.</p>
-    </aside>
+    </div>
+    <ol class="wizard-steps">
+      @for (label of steps; track label; let index = $index) {
+        <li [class.active]="step() === index && !created()" [class.done]="step() > index || !!created()">
+          <button type="button" (click)="goTo(index)" [disabled]="index > step() || !!created()">
+            <span class="wizard-step-number">{{ step() > index || created() ? '✓' : index + 1 }}</span>
+            <span class="wizard-step-text">
+              <strong>{{ label }}</strong>
+              <small>{{ stepInfo[index].hint }}</small>
+            </span>
+          </button>
+        </li>
+      }
+    </ol>
+    <p class="wizard-rail-foot">Alles lässt sich später in den Projekteinstellungen ändern.</p>
+  </aside>
 
-    <div class="wizard-panel">
-      <header class="wizard-head">
-        <div class="wizard-head-text">
-          <p class="wizard-counter">
-            {{ created() ? 'Fertig' : 'Schritt ' + (step() + 1) + ' von ' + steps.length }}
-          </p>
-          <h3 class="wizard-step-title">{{ created() ? 'Geschafft!' : stepInfo[step()].title }}</h3>
-        </div>
-        <button
-          class="wizard-icon-button"
-          type="button"
-          [class.active]="helpOpen()"
-          [attr.aria-expanded]="helpOpen()"
-          aria-controls="wizard-help"
-          (click)="helpOpen.set(!helpOpen())"
-        >
-          <span aria-hidden="true">?</span><span class="wizard-icon-label">Fragen</span>
-        </button>
-        <button class="wizard-icon-button" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
-        <div class="wizard-progress" aria-hidden="true">
-          <span [style.width.%]="created() ? 100 : ((step() + 1) / steps.length) * 100"></span>
-        </div>
-      </header>
+  <div class="wizard-panel">
+    <header class="wizard-head">
+      <div class="wizard-head-text">
+        <p class="wizard-counter">
+          {{ created() ? 'Fertig' : 'Schritt ' + (step() + 1) + ' von ' + steps.length }}
+        </p>
+        <h3 class="wizard-step-title">{{ created() ? 'Geschafft!' : stepInfo[step()].title }}</h3>
+      </div>
+      <button
+        class="wizard-icon-button"
+        type="button"
+        [class.active]="helpOpen()"
+        [attr.aria-expanded]="helpOpen()"
+        aria-controls="wizard-help"
+        (click)="helpOpen.set(!helpOpen())"
+      >
+        <span aria-hidden="true">?</span><span class="wizard-icon-label">Fragen</span>
+      </button>
+      <button class="wizard-icon-button" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
+      <div class="wizard-progress" aria-hidden="true">
+        <span [style.width.%]="created() ? 100 : ((step() + 1) / steps.length) * 100"></span>
+      </div>
+    </header>
 
-      <div class="wizard-body">
-        <div class="wizard-main">
-          @if (created(); as slug) {
-            <div class="wizard-done">
-              <span class="wizard-done-mark" aria-hidden="true">
-                <svg viewBox="0 0 52 52" width="72" height="72">
-                  <circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" stroke-width="3" />
-                  <path
-                    d="M15 27l7 7 15-16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                  />
-                </svg>
-              </span>
-              <h3>Projekt „{{ name() }}“ ist angelegt</h3>
-              <p class="muted">
-                ID <code>{{ slug }}</code> · Ordner <code>{{ folder() }}</code
-                >. Lege als Nächstes eine Idee oder einen Auftrag an – die Agents übernehmen ab dort.
+    <div class="wizard-body">
+      <div class="wizard-main">
+        @if (created(); as slug) {
+          <div class="wizard-done">
+            <span class="wizard-done-mark" aria-hidden="true">
+              <svg viewBox="0 0 52 52" width="72" height="72">
+                <circle cx="26" cy="26" r="24" fill="none" stroke="currentColor" stroke-width="3" />
+                <path
+                  d="M15 27l7 7 15-16"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </span>
+            <h3>Projekt „{{ name() }}“ ist angelegt</h3>
+            <p class="muted">
+              ID <code>{{ slug }}</code> · Ordner <code>{{ folder() }}</code
+              >. Lege als Nächstes eine Idee oder einen Auftrag an – die Agents übernehmen ab dort.
+            </p>
+            <button class="button primary" type="button" (click)="closed.emit()">Zum Projekt</button>
+          </div>
+        } @else {
+          @switch (step()) {
+            @case (0) {
+              <p class="wizard-intro">
+                Gib dem Projekt einen Namen und wähle den Ordner auf deinem Rechner. Der Ordner wird sofort geprüft –
+                ist er noch nicht vorhanden, kannst du ihn direkt anlegen.
               </p>
-              <button class="button primary" type="button" (click)="closed.emit()">Zum Projekt</button>
-            </div>
-          } @else {
-            @switch (step()) {
-              @case (0) {
-                <p class="wizard-intro">
-                  Gib dem Projekt einen Namen und wähle den Ordner auf deinem Rechner. Der Ordner wird sofort geprüft –
-                  ist er noch nicht vorhanden, kannst du ihn direkt anlegen.
-                </p>
-                <div class="form-grid">
-                  <label
-                    >Projektname<input
-                      [ngModel]="name()"
-                      (ngModelChange)="setName($event)"
-                      maxlength="120"
-                      placeholder="z. B. KeyGuard"
-                      autofocus
-                  /></label>
-                  <label
-                    >Projekt-ID<input
-                      [ngModel]="slugTouched() ? slugInput() : slug()"
-                      (ngModelChange)="setSlug($event)"
-                      maxlength="63"
+              <div class="form-grid">
+                <label
+                  >Projektname<input
+                    [ngModel]="name()"
+                    (ngModelChange)="setName($event)"
+                    maxlength="120"
+                    placeholder="z. B. KeyGuard"
+                    autofocus
+                /></label>
+                <label
+                  >Projekt-ID<input
+                    [ngModel]="slugTouched() ? slugInput() : slug()"
+                    (ngModelChange)="setSlug($event)"
+                    maxlength="63"
+                  />
+                  <small class="muted"
+                    >Gespeichert als <code>{{ slug() || '–' }}</code></small
+                  >
+                </label>
+                <label class="wide"
+                  >Projektordner
+                  <span class="input-with-state">
+                    <input
+                      [ngModel]="folder()"
+                      (ngModelChange)="setFolder($event)"
+                      maxlength="500"
+                      [placeholder]="(scopeRoots()[0] || '/Users/name/Projekte') + '/mein-projekt'"
                     />
+                    <app-check-state [state]="folderState()" />
+                  </span>
+                  @if (scopeRoots().length) {
                     <small class="muted"
-                      >Gespeichert als <code>{{ slug() || '–' }}</code></small
+                      >Projektbereich: <code>{{ scopeRoots().join(' · ') }}</code> – AIdeation legt Ordner nur hier an,
+                      Agents arbeiten nur hier.</small
                     >
-                  </label>
-                  <label class="wide"
-                    >Projektordner
-                    <span class="input-with-state">
-                      <input
-                        [ngModel]="folder()"
-                        (ngModelChange)="setFolder($event)"
-                        maxlength="500"
-                        [placeholder]="(scopeRoots()[0] || '/Users/name/Projekte') + '/mein-projekt'"
-                      />
-                      <app-check-state [state]="folderState()" />
-                    </span>
-                    @if (scopeRoots().length) {
-                      <small class="muted"
-                        >Projektbereich: <code>{{ scopeRoots().join(' · ') }}</code> – AIdeation legt Ordner nur hier
-                        an, Agents arbeiten nur hier.</small
-                      >
-                    }
-                  </label>
-                </div>
-                @if (folderState() === 'loading') {
-                  <p class="muted">Ordner wird geprüft …</p>
-                } @else if (folderError()) {
-                  <p class="wizard-error">{{ folderError() }}</p>
-                } @else if (folderInfo(); as info) {
-                  @if (!info.exists) {
-                    <div class="wizard-hint warn">
-                      <p>Der Ordner existiert noch nicht – er wird mit „Weiter“ automatisch angelegt.</p>
-                      <button class="button secondary" type="button" (click)="createFolder()">Jetzt anlegen</button>
-                    </div>
-                  } @else {
-                    <div class="wizard-hint ok">
-                      <p>
-                        Ordner gefunden –
-                        {{ info.empty ? 'leer, eine Vorlage kann angewendet werden.' : 'enthält bereits Dateien.' }}
-                      </p>
-                      @if (info.git?.isRepo) {
-                        <p class="muted">
-                          Git-Repository auf <code>{{ info.git?.branch }}</code>
-                          @if (info.git?.remote) {
-                            · verbunden mit <code>{{ info.git?.remote }}</code>
-                          }
-                          · {{ info.git?.commits }} Commits
-                        </p>
-                      }
-                    </div>
                   }
-                }
-              }
-
-              @case (1) {
-                <p class="wizard-intro">
-                  Wähle, wie der Code versioniert wird. Mit GitHub sichert AIdeation jeden Sprint nach erfolgreichen
-                  Tests.
-                </p>
-                <div class="wizard-connection">
-                  <app-check-state [state]="githubState()" />
-                  @if (githubState() === 'loading') {
-                    <span>GitHub-Verbindung wird geprüft …</span>
-                  } @else if (github(); as info) {
-                    <span>
-                      GitHub CLI:
-                      {{
-                        info.gh.installed
-                          ? info.gh.authenticated
-                            ? 'angemeldet' + (info.gh.user ? ' als ' + info.gh.user : '')
-                            : 'installiert, nicht angemeldet'
-                          : 'nicht installiert'
-                      }}
-                      · SSH: {{ info.ssh.ok ? 'verbunden als ' + info.ssh.user : 'kein Zugriff' }}
-                    </span>
-                    <button class="button secondary small" type="button" (click)="checkGithub()">Erneut prüfen</button>
-                  }
-                </div>
-                @if (github(); as info) {
-                  @if (!info.gh.authenticated) {
-                    <details class="run-step order-brief">
-                      <summary>GitHub CLI einrichten (für neue Repositories)</summary>
-                      <pre><code>brew install gh
-gh auth login   # GitHub.com → SSH → im Browser bestätigen</code></pre>
-                      <p class="muted">
-                        Danach „Erneut prüfen“. Ohne gh kannst du ein vorhandenes Repository per SSH verbinden.
-                      </p>
-                    </details>
-                  }
-                }
-
-                <h3 class="wizard-subtitle">Versionierung</h3>
-                <div class="choice-grid">
-                  @if (folderInfo()?.git?.remote) {
-                    <button
-                      type="button"
-                      class="choice"
-                      [class.selected]="gitMode() === 'keep'"
-                      (click)="chooseMode('keep')"
-                    >
-                      <strong>Bestehendes Repository behalten</strong>
-                      <small>{{ folderInfo()?.git?.remote }}</small>
-                    </button>
-                  }
-                  <button
-                    type="button"
-                    class="choice"
-                    [class.selected]="gitMode() === 'github-new'"
-                    [disabled]="!github()?.gh?.authenticated"
-                    (click)="chooseMode('github-new')"
-                  >
-                    <strong>Neues GitHub-Repository</strong>
-                    <small>Wird mit gh angelegt und initial gepusht.</small>
-                  </button>
-                  <button
-                    type="button"
-                    class="choice"
-                    [class.selected]="gitMode() === 'github-existing'"
-                    [disabled]="!github()?.ssh?.ok"
-                    (click)="chooseMode('github-existing')"
-                  >
-                    <strong>Vorhandenes GitHub-Repository</strong>
-                    <small>URL angeben, Push per SSH.</small>
-                  </button>
-                  <button
-                    type="button"
-                    class="choice"
-                    [class.selected]="gitMode() === 'local'"
-                    (click)="chooseMode('local')"
-                  >
-                    <strong>Nur lokal</strong>
-                    <small>Git-Repository ohne GitHub.</small>
-                  </button>
-                  <button
-                    type="button"
-                    class="choice"
-                    [class.selected]="gitMode() === 'none'"
-                    (click)="chooseMode('none')"
-                  >
-                    <strong>Ohne Git</strong>
-                    <small>Keine Versionierung (nicht empfohlen).</small>
-                  </button>
-                </div>
-                @if (gitMode() === 'github-new') {
-                  <div class="form-grid">
-                    <label
-                      >Repository-Name<input
-                        [ngModel]="repoName()"
-                        (ngModelChange)="repoName.set($event)"
-                        maxlength="100"
-                    /></label>
-                    <label
-                      >Sichtbarkeit<select [ngModel]="visibility()" (ngModelChange)="visibility.set($event)">
-                        <option value="private">Privat</option>
-                        <option value="public">Öffentlich</option>
-                      </select>
-                    </label>
-                  </div>
-                } @else if (gitMode() === 'github-existing') {
-                  <label class="wide"
-                    >GitHub-URL<input
-                      [ngModel]="remote()"
-                      (ngModelChange)="remote.set($event)"
-                      placeholder="git@github.com:name/repo.git"
-                  /></label>
-                }
-
-                <h3 class="wizard-subtitle">Vorlage</h3>
-                @if (folderInfo()?.empty) {
-                  <div class="choice-grid">
-                    <button
-                      type="button"
-                      class="choice"
-                      [class.selected]="template() === 'none'"
-                      (click)="chooseTemplate('none')"
-                    >
-                      <strong>Keine Vorlage</strong>
-                      <small>Ordner bleibt leer.</small>
-                    </button>
-                    @for (entry of featured(); track entry.id) {
-                      <button
-                        type="button"
-                        class="choice"
-                        [class.selected]="template() === entry.id"
-                        (click)="chooseTemplate(entry.id)"
-                      >
-                        <strong>{{ entry.label }}</strong>
-                        <small>{{ entry.description }}</small>
-                        <span class="choice-stack">
-                          @for (item of entry.stack; track item) {
-                            <span class="tag">{{ item }}</span>
-                          }
-                        </span>
-                      </button>
-                    }
-                  </div>
-                  <label class="wizard-more"
-                    >Weitere Frameworks
-                    <select
-                      [ngModel]="isMoreTemplate() ? template() : ''"
-                      (ngModelChange)="$event && chooseTemplate($event)"
-                    >
-                      <option value="">Framework wählen …</option>
-                      @for (group of moreGroups(); track group.label) {
-                        <optgroup [label]="group.label">
-                          @for (entry of group.templates; track entry.id) {
-                            <option [value]="entry.id">{{ entry.label }} – {{ entry.stack.join(', ') }}</option>
-                          }
-                        </optgroup>
-                      }
-                    </select>
-                  </label>
-                  @if (template() === 'custom') {
-                    <label class="wide"
-                      >Git-URL der Vorlage<input
-                        [ngModel]="templateUrl()"
-                        (ngModelChange)="templateUrl.set($event)"
-                        placeholder="https://github.com/org/template.git"
-                    /></label>
-                  }
-                } @else {
-                  <p class="muted">Der Ordner enthält bereits Dateien – eine Vorlage wird nicht angewendet.</p>
-                }
-
-                <div class="wizard-action">
-                  <button
-                    class="button primary"
-                    type="button"
-                    (click)="applyGit()"
-                    [disabled]="gitState() === 'loading' || (gitMode() === 'none' && template() === 'none')"
-                  >
-                    {{ template() !== 'none' ? 'Vorlage anwenden und einrichten' : 'Git einrichten' }}
-                  </button>
-                  <app-check-state [state]="gitState()" />
-                  @if (gitState() === 'ok') {
-                    <span>Eingerichtet.</span>
-                  }
-                </div>
-                @if (gitError()) {
-                  <p class="wizard-error">{{ gitError() }}</p>
-                }
-                @if (gitLog()) {
-                  <pre class="wizard-log">{{ gitLog() }}</pre>
-                }
-              }
-
-              @case (2) {
-                <p class="wizard-intro">
-                  Wähle, wer die Aufträge bearbeitet: ein lokales Modell (kostenlos) oder ein bezahlter Anbieter. Die
-                  Verbindung wird nach jeder Auswahl getestet.
-                </p>
-                <div class="choice-grid">
-                  @for (entry of providers; track entry.id) {
-                    <button
-                      type="button"
-                      class="choice"
-                      [class.selected]="provider() === entry.id"
-                      (click)="chooseProvider(entry.id)"
-                    >
-                      <strong>{{ entry.label }}</strong>
-                      <small>{{ entry.paid ? 'Bezahlt' : 'Kostenlos, lokal' }}</small>
-                    </button>
-                  }
-                </div>
-                @if (providerModels().length) {
-                  <label class="wizard-more"
-                    >Modell
-                    <select [ngModel]="model()" (ngModelChange)="chooseModel($event)">
-                      @for (entry of providerModels(); track entry.id) {
-                        <option [value]="entry.id">{{ entry.label }}</option>
-                      }
-                    </select>
-                  </label>
-                }
-                <div class="wizard-action">
-                  <app-check-state [state]="agentState()" />
-                  @switch (agentState()) {
-                    @case ('loading') {
-                      <span>Integration wird getestet …</span>
-                    }
-                    @case ('ok') {
-                      <span>Funktioniert – der Agent hat geantwortet.</span>
-                    }
-                    @case ('error') {
-                      <span>{{
-                        agentResult()?.installed === false ? 'Nicht installiert.' : 'Test fehlgeschlagen.'
-                      }}</span>
-                      <button class="button secondary small" type="button" (click)="testAgent()">Erneut testen</button>
-                    }
-                  }
-                </div>
-                @if (agentState() === 'error') {
+                </label>
+              </div>
+              @if (folderState() === 'loading') {
+                <p class="muted">Ordner wird geprüft …</p>
+              } @else if (folderError()) {
+                <p class="wizard-error">{{ folderError() }}</p>
+              } @else if (folderInfo(); as info) {
+                @if (!info.exists) {
                   <div class="wizard-hint warn">
-                    <p>{{ help[provider()].note }}</p>
-                    <p><strong>1. Installieren</strong></p>
-                    <pre><code>{{ help[provider()].install }}</code></pre>
-                    <p><strong>2. Anmelden bzw. starten</strong></p>
-                    <pre><code>{{ help[provider()].login }}</code></pre>
-                    @if (agentResult()?.output) {
-                      <details>
-                        <summary>Antwort des Tests</summary>
-                        <pre class="wizard-log">{{ agentResult()?.output }}</pre>
-                      </details>
-                    }
-                    @if (provider() === 'ollama' && agentResult()?.models?.length) {
+                    <p>Der Ordner existiert noch nicht – er wird mit „Weiter“ automatisch angelegt.</p>
+                    <button class="button secondary" type="button" (click)="createFolder()">Jetzt anlegen</button>
+                  </div>
+                } @else {
+                  <div class="wizard-hint ok">
+                    <p>
+                      Ordner gefunden –
+                      {{ info.empty ? 'leer, eine Vorlage kann angewendet werden.' : 'enthält bereits Dateien.' }}
+                    </p>
+                    @if (info.git?.isRepo) {
                       <p class="muted">
-                        Installierte Modelle: {{ agentResult()?.models?.join(', ') }} – erwartet:
-                        {{ agentResult()?.model }}
+                        Git-Repository auf <code>{{ info.git?.branch }}</code>
+                        @if (info.git?.remote) {
+                          · verbunden mit <code>{{ info.git?.remote }}</code>
+                        }
+                        · {{ info.git?.commits }} Commits
                       </p>
                     }
                   </div>
-                }
-                <div class="wizard-action" data-testid="chromium-check">
-                  <app-check-state [state]="chromiumState()" />
-                  @switch (chromiumState()) {
-                    @case ('loading') {
-                      <span>Chromium für die visuelle Prüfung wird geprüft …</span>
-                    }
-                    @case ('ok') {
-                      <span>Chromium ist vorhanden – Screenshots für die visuelle Prüfung möglich.</span>
-                    }
-                    @case ('warn') {
-                      <span>Chromium fehlt (optional, für Screenshots der visuellen Prüfung).</span>
-                      <button class="button secondary small" type="button" (click)="installChromium()">
-                        Chromium installieren
-                      </button>
-                    }
-                    @case ('error') {
-                      <span>Chromium konnte nicht geprüft oder installiert werden.</span>
-                      <button class="button secondary small" type="button" (click)="checkChromium()">
-                        Erneut prüfen
-                      </button>
-                    }
-                  }
-                </div>
-                @if (chromiumState() === 'warn' || chromiumState() === 'error') {
-                  <div class="wizard-hint">
-                    <p>Alternativ im AIdeation-Ordner im Terminal:</p>
-                    <pre><code>{{ chromiumCommand() }}</code></pre>
-                    @if (chromiumLog()) {
-                      <details>
-                        <summary>Ausgabe der Installation</summary>
-                        <pre class="wizard-log">{{ chromiumLog() }}</pre>
-                      </details>
-                    }
-                  </div>
-                }
-              }
-
-              @case (3) {
-                <p class="wizard-intro">
-                  Lege fest, was der Entwickler und der Dashboard-Assistent ohne Rückfrage ausführen dürfen. Push,
-                  Löschen (rm), sudo und das Beenden von Prozessen bleiben immer gesperrt.
-                </p>
-                <ul class="permission-list">
-                  @for (group of permissionGroups(); track group.id) {
-                    <li>
-                      <label>
-                        <input
-                          type="checkbox"
-                          [checked]="permissions().includes(group.id)"
-                          (change)="togglePermission(group.id, $any($event.target).checked)"
-                        />
-                        <span>
-                          <strong>{{ group.label }}</strong>
-                          <small>{{ group.description }}</small>
-                        </span>
-                      </label>
-                    </li>
-                  }
-                </ul>
-                @if (provider() === 'ollama') {
-                  <p class="muted">
-                    Hinweis: Diese Rechte gelten für Claude-Agents; das lokale Modell nutzt eigene, feste Werkzeuge.
-                  </p>
-                }
-                @if (saveError()) {
-                  <p class="wizard-error">{{ saveError() }}</p>
                 }
               }
             }
-          }
-        </div>
 
-        <aside id="wizard-help" class="wizard-help" [class.open]="helpOpen()" aria-label="Hilfe-Assistent">
-          <div class="wizard-help-head">
-            <h3>Fragen?</h3>
-            <button class="wizard-icon-button" type="button" (click)="helpOpen.set(false)" aria-label="Hilfe schließen">
-              ✕
-            </button>
-          </div>
-          <p class="muted">Der kostenlose Hilfe-Assistent (lokales Modell) beantwortet Fragen zur Einrichtung.</p>
-          <div class="wizard-chat">
-            @for (message of chat(); track $index) {
-              <div class="wizard-chat-msg" [class.mine]="message.role === 'user'">
-                @if (message.role === 'assistant') {
-                  <div class="markdown" [innerHTML]="message.content | markdown"></div>
-                } @else {
-                  {{ message.content }}
+            @case (1) {
+              <p class="wizard-intro">
+                Wähle, wie der Code versioniert wird. Mit GitHub sichert AIdeation jeden Sprint nach erfolgreichen
+                Tests.
+              </p>
+              <div class="wizard-connection">
+                <app-check-state [state]="githubState()" />
+                @if (githubState() === 'loading') {
+                  <span>GitHub-Verbindung wird geprüft …</span>
+                } @else if (github(); as info) {
+                  <span>
+                    GitHub CLI:
+                    {{
+                      info.gh.installed
+                        ? info.gh.authenticated
+                          ? 'angemeldet' + (info.gh.user ? ' als ' + info.gh.user : '')
+                          : 'installiert, nicht angemeldet'
+                        : 'nicht installiert'
+                    }}
+                    · SSH: {{ info.ssh.ok ? 'verbunden als ' + info.ssh.user : 'kein Zugriff' }}
+                  </span>
+                  <button class="button secondary small" type="button" (click)="checkGithub()">Erneut prüfen</button>
                 }
               </div>
+              @if (github(); as info) {
+                @if (!info.gh.authenticated) {
+                  <details class="run-step order-brief">
+                    <summary>GitHub CLI einrichten (für neue Repositories)</summary>
+                    <pre><code>brew install gh
+gh auth login   # GitHub.com → SSH → im Browser bestätigen</code></pre>
+                    <p class="muted">
+                      Danach „Erneut prüfen“. Ohne gh kannst du ein vorhandenes Repository per SSH verbinden.
+                    </p>
+                  </details>
+                }
+              }
+
+              <h3 class="wizard-subtitle">Versionierung</h3>
+              <div class="choice-grid">
+                @if (folderInfo()?.git?.remote) {
+                  <button
+                    type="button"
+                    class="choice"
+                    [class.selected]="gitMode() === 'keep'"
+                    (click)="chooseMode('keep')"
+                  >
+                    <strong>Bestehendes Repository behalten</strong>
+                    <small>{{ folderInfo()?.git?.remote }}</small>
+                  </button>
+                }
+                <button
+                  type="button"
+                  class="choice"
+                  [class.selected]="gitMode() === 'github-new'"
+                  [disabled]="!github()?.gh?.authenticated"
+                  (click)="chooseMode('github-new')"
+                >
+                  <strong>Neues GitHub-Repository</strong>
+                  <small>Wird mit gh angelegt und initial gepusht.</small>
+                </button>
+                <button
+                  type="button"
+                  class="choice"
+                  [class.selected]="gitMode() === 'github-existing'"
+                  [disabled]="!github()?.ssh?.ok"
+                  (click)="chooseMode('github-existing')"
+                >
+                  <strong>Vorhandenes GitHub-Repository</strong>
+                  <small>URL angeben, Push per SSH.</small>
+                </button>
+                <button
+                  type="button"
+                  class="choice"
+                  [class.selected]="gitMode() === 'local'"
+                  (click)="chooseMode('local')"
+                >
+                  <strong>Nur lokal</strong>
+                  <small>Git-Repository ohne GitHub.</small>
+                </button>
+                <button
+                  type="button"
+                  class="choice"
+                  [class.selected]="gitMode() === 'none'"
+                  (click)="chooseMode('none')"
+                >
+                  <strong>Ohne Git</strong>
+                  <small>Keine Versionierung (nicht empfohlen).</small>
+                </button>
+              </div>
+              @if (gitMode() === 'github-new') {
+                <div class="form-grid">
+                  <label
+                    >Repository-Name<input
+                      [ngModel]="repoName()"
+                      (ngModelChange)="repoName.set($event)"
+                      maxlength="100"
+                  /></label>
+                  <label
+                    >Sichtbarkeit<select [ngModel]="visibility()" (ngModelChange)="visibility.set($event)">
+                      <option value="private">Privat</option>
+                      <option value="public">Öffentlich</option>
+                    </select>
+                  </label>
+                </div>
+              } @else if (gitMode() === 'github-existing') {
+                <label class="wide"
+                  >GitHub-URL<input
+                    [ngModel]="remote()"
+                    (ngModelChange)="remote.set($event)"
+                    placeholder="git@github.com:name/repo.git"
+                /></label>
+              }
+
+              <h3 class="wizard-subtitle">Vorlage</h3>
+              @if (folderInfo()?.empty) {
+                <div class="choice-grid">
+                  <button
+                    type="button"
+                    class="choice"
+                    [class.selected]="template() === 'none'"
+                    (click)="chooseTemplate('none')"
+                  >
+                    <strong>Keine Vorlage</strong>
+                    <small>Ordner bleibt leer.</small>
+                  </button>
+                  @for (entry of featured(); track entry.id) {
+                    <button
+                      type="button"
+                      class="choice"
+                      [class.selected]="template() === entry.id"
+                      (click)="chooseTemplate(entry.id)"
+                    >
+                      <strong>{{ entry.label }}</strong>
+                      <small>{{ entry.description }}</small>
+                      <span class="choice-stack">
+                        @for (item of entry.stack; track item) {
+                          <span class="tag">{{ item }}</span>
+                        }
+                      </span>
+                    </button>
+                  }
+                </div>
+                <label class="wizard-more"
+                  >Weitere Frameworks
+                  <select
+                    [ngModel]="isMoreTemplate() ? template() : ''"
+                    (ngModelChange)="$event && chooseTemplate($event)"
+                  >
+                    <option value="">Framework wählen …</option>
+                    @for (group of moreGroups(); track group.label) {
+                      <optgroup [label]="group.label">
+                        @for (entry of group.templates; track entry.id) {
+                          <option [value]="entry.id">{{ entry.label }} – {{ entry.stack.join(', ') }}</option>
+                        }
+                      </optgroup>
+                    }
+                  </select>
+                </label>
+                @if (template() === 'custom') {
+                  <label class="wide"
+                    >Git-URL der Vorlage<input
+                      [ngModel]="templateUrl()"
+                      (ngModelChange)="templateUrl.set($event)"
+                      placeholder="https://github.com/org/template.git"
+                  /></label>
+                }
+              } @else {
+                <p class="muted">Der Ordner enthält bereits Dateien – eine Vorlage wird nicht angewendet.</p>
+              }
+
+              <div class="wizard-action">
+                <button
+                  class="button primary"
+                  type="button"
+                  (click)="applyGit()"
+                  [disabled]="gitState() === 'loading' || (gitMode() === 'none' && template() === 'none')"
+                >
+                  {{ template() !== 'none' ? 'Vorlage anwenden und einrichten' : 'Git einrichten' }}
+                </button>
+                <app-check-state [state]="gitState()" />
+                @if (gitState() === 'ok') {
+                  <span>Eingerichtet.</span>
+                }
+              </div>
+              @if (gitError()) {
+                <p class="wizard-error">{{ gitError() }}</p>
+              }
+              @if (gitLog()) {
+                <pre class="wizard-log">{{ gitLog() }}</pre>
+              }
             }
-            @if (chatBusy()) {
-              <div class="wizard-chat-msg"><app-check-state state="loading" /> denkt nach …</div>
+
+            @case (2) {
+              <p class="wizard-intro">
+                Wähle, wer die Aufträge bearbeitet: ein lokales Modell (kostenlos) oder ein bezahlter Anbieter. Die
+                Verbindung wird nach jeder Auswahl getestet.
+              </p>
+              <div class="choice-grid">
+                @for (entry of providers; track entry.id) {
+                  <button
+                    type="button"
+                    class="choice"
+                    [class.selected]="provider() === entry.id"
+                    (click)="chooseProvider(entry.id)"
+                  >
+                    <strong>{{ entry.label }}</strong>
+                    <small>{{ entry.paid ? 'Bezahlt' : 'Kostenlos, lokal' }}</small>
+                  </button>
+                }
+              </div>
+              @if (providerModels().length) {
+                <label class="wizard-more"
+                  >Modell
+                  <select [ngModel]="model()" (ngModelChange)="chooseModel($event)">
+                    @for (entry of providerModels(); track entry.id) {
+                      <option [value]="entry.id">{{ entry.label }}</option>
+                    }
+                  </select>
+                </label>
+              }
+              <div class="wizard-action">
+                <app-check-state [state]="agentState()" />
+                @switch (agentState()) {
+                  @case ('loading') {
+                    <span>Integration wird getestet …</span>
+                  }
+                  @case ('ok') {
+                    <span>Funktioniert – der Agent hat geantwortet.</span>
+                  }
+                  @case ('error') {
+                    <span>{{
+                      agentResult()?.installed === false ? 'Nicht installiert.' : 'Test fehlgeschlagen.'
+                    }}</span>
+                    <button class="button secondary small" type="button" (click)="testAgent()">Erneut testen</button>
+                  }
+                }
+              </div>
+              @if (agentState() === 'error') {
+                <div class="wizard-hint warn">
+                  <p>{{ help[provider()].note }}</p>
+                  <p><strong>1. Installieren</strong></p>
+                  <pre><code>{{ help[provider()].install }}</code></pre>
+                  <p><strong>2. Anmelden bzw. starten</strong></p>
+                  <pre><code>{{ help[provider()].login }}</code></pre>
+                  @if (agentResult()?.output) {
+                    <details>
+                      <summary>Antwort des Tests</summary>
+                      <pre class="wizard-log">{{ agentResult()?.output }}</pre>
+                    </details>
+                  }
+                  @if (provider() === 'ollama' && agentResult()?.models?.length) {
+                    <p class="muted">
+                      Installierte Modelle: {{ agentResult()?.models?.join(', ') }} – erwartet:
+                      {{ agentResult()?.model }}
+                    </p>
+                  }
+                </div>
+              }
+              <div class="wizard-action" data-testid="chromium-check">
+                <app-check-state [state]="chromiumState()" />
+                @switch (chromiumState()) {
+                  @case ('loading') {
+                    <span>Chromium für die visuelle Prüfung wird geprüft …</span>
+                  }
+                  @case ('ok') {
+                    <span>Chromium ist vorhanden – Screenshots für die visuelle Prüfung möglich.</span>
+                  }
+                  @case ('warn') {
+                    <span>Chromium fehlt (optional, für Screenshots der visuellen Prüfung).</span>
+                    <button class="button secondary small" type="button" (click)="installChromium()">
+                      Chromium installieren
+                    </button>
+                  }
+                  @case ('error') {
+                    <span>Chromium konnte nicht geprüft oder installiert werden.</span>
+                    <button class="button secondary small" type="button" (click)="checkChromium()">
+                      Erneut prüfen
+                    </button>
+                  }
+                }
+              </div>
+              @if (chromiumState() === 'warn' || chromiumState() === 'error') {
+                <div class="wizard-hint">
+                  <p>Alternativ im AIdeation-Ordner im Terminal:</p>
+                  <pre><code>{{ chromiumCommand() }}</code></pre>
+                  @if (chromiumLog()) {
+                    <details>
+                      <summary>Ausgabe der Installation</summary>
+                      <pre class="wizard-log">{{ chromiumLog() }}</pre>
+                    </details>
+                  }
+                </div>
+              }
             }
-          </div>
-          <form class="wizard-chat-form" (ngSubmit)="ask()">
-            <input
-              name="question"
-              [ngModel]="chatInput()"
-              (ngModelChange)="chatInput.set($event)"
-              placeholder="z. B. Wie richte ich gh ein?"
-              maxlength="1000"
-            />
-            <button class="button secondary" type="submit" [disabled]="chatBusy() || !chatInput().trim()">
-              Fragen
-            </button>
-          </form>
-        </aside>
+
+            @case (3) {
+              <p class="wizard-intro">
+                Lege fest, was der Entwickler und der Dashboard-Assistent ohne Rückfrage ausführen dürfen. Push, Löschen
+                (rm), sudo und das Beenden von Prozessen bleiben immer gesperrt.
+              </p>
+              <ul class="permission-list">
+                @for (group of permissionGroups(); track group.id) {
+                  <li>
+                    <label>
+                      <input
+                        type="checkbox"
+                        [checked]="permissions().includes(group.id)"
+                        (change)="togglePermission(group.id, $any($event.target).checked)"
+                      />
+                      <span>
+                        <strong>{{ group.label }}</strong>
+                        <small>{{ group.description }}</small>
+                      </span>
+                    </label>
+                  </li>
+                }
+              </ul>
+              @if (provider() === 'ollama') {
+                <p class="muted">
+                  Hinweis: Diese Rechte gelten für Claude-Agents; das lokale Modell nutzt eigene, feste Werkzeuge.
+                </p>
+              }
+              @if (saveError()) {
+                <p class="wizard-error">{{ saveError() }}</p>
+              }
+            }
+          }
+        }
       </div>
 
-      @if (!created()) {
-        <footer class="wizard-foot">
-          <button
-            class="button secondary wizard-back"
-            type="button"
-            (click)="goTo(step() - 1)"
-            [disabled]="step() === 0"
-          >
-            ← Zurück
+      <aside id="wizard-help" class="wizard-help" [class.open]="helpOpen()" aria-label="Hilfe-Assistent">
+        <div class="wizard-help-head">
+          <h3>Fragen?</h3>
+          <button class="wizard-icon-button" type="button" (click)="helpOpen.set(false)" aria-label="Hilfe schließen">
+            ✕
           </button>
-          @if (step() === 2 && agentState() === 'error') {
-            <button class="link-button" type="button" (click)="step.set(3)">Ohne erfolgreichen Test fortfahren</button>
+        </div>
+        <p class="muted">Der kostenlose Hilfe-Assistent (lokales Modell) beantwortet Fragen zur Einrichtung.</p>
+        <div class="wizard-chat">
+          @for (message of chat(); track $index) {
+            <div class="wizard-chat-msg" [class.mine]="message.role === 'user'">
+              @if (message.role === 'assistant') {
+                <div class="markdown" [innerHTML]="message.content | markdown"></div>
+              } @else {
+                {{ message.content }}
+              }
+            </div>
           }
-          @if (step() < steps.length - 1) {
-            <button class="button primary" type="button" (click)="goTo(step() + 1)" [disabled]="!canNext()">
-              Weiter →
-            </button>
-          } @else {
-            <button class="button primary" type="button" (click)="createProject()" [disabled]="saving()">
-              {{ saving() ? 'Wird angelegt …' : 'Projekt anlegen' }}
-            </button>
+          @if (chatBusy()) {
+            <div class="wizard-chat-msg"><app-check-state state="loading" /> denkt nach …</div>
           }
-        </footer>
-      }
+        </div>
+        <form class="wizard-chat-form" (ngSubmit)="ask()">
+          <input
+            name="question"
+            [ngModel]="chatInput()"
+            (ngModelChange)="chatInput.set($event)"
+            placeholder="z. B. Wie richte ich gh ein?"
+            maxlength="1000"
+          />
+          <button class="button secondary" type="submit" [disabled]="chatBusy() || !chatInput().trim()">Fragen</button>
+        </form>
+      </aside>
     </div>
-  </section>
-</div>
+
+    @if (!created()) {
+      <footer class="wizard-foot">
+        <button class="button secondary wizard-back" type="button" (click)="goTo(step() - 1)" [disabled]="step() === 0">
+          ← Zurück
+        </button>
+        @if (step() === 2 && agentState() === 'error') {
+          <button class="link-button" type="button" (click)="step.set(3)">Ohne erfolgreichen Test fortfahren</button>
+        }
+        @if (step() < steps.length - 1) {
+          <button class="button primary" type="button" (click)="goTo(step() + 1)" [disabled]="!canNext()">
+            Weiter →
+          </button>
+        } @else {
+          <button class="button primary" type="button" (click)="createProject()" [disabled]="saving()">
+            {{ saving() ? 'Wird angelegt …' : 'Projekt anlegen' }}
+          </button>
+        }
+      </footer>
+    }
+  </div>
+</app-modal>

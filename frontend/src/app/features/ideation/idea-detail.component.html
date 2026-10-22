@@ -1,208 +1,205 @@
 @let idea = selected();
-<div class="modal-backdrop" (click)="closed.emit()">
-  <section
-    class="help-dialog idea-detail"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="idea-title"
-    (click)="$event.stopPropagation()"
-  >
-    <header class="idea-hero">
-      <div class="idea-hero-text">
-        <p class="eyebrow">💡 Idee · erfasst am {{ idea.createdAt | date: 'dd.MM.yyyy' }}</p>
-        @if (!editing()) {
-          <h2 id="idea-title">{{ idea.title }}</h2>
-          @let status = displayStatus(idea);
-          <div class="idea-chips">
-            <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
-            <span class="status priority-{{ idea.priority }}">Priorität: {{ idea.priority | priorityLabel }}</span>
-            <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
-            @if (idea.source === 'visionary') {
-              <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">{{
-                sourceLabel(idea.source)
-              }}</span>
-            }
-            <app-github-link [ref]="idea.externalRef" />
-          </div>
-        } @else {
-          <h2 id="idea-title">Idee bearbeiten</h2>
-        }
-      </div>
-      <div class="idea-hero-actions">
-        @if (!editing() && editable(idea)) {
-          <button
-            class="icon-button"
-            type="button"
-            (click)="editing.set(true)"
-            aria-label="Bearbeiten"
-            title="Bearbeiten"
-          >
-            ✎
-          </button>
-        }
-        <button class="icon-button" type="button" (click)="closed.emit()" aria-label="Schließen" title="Schließen">
-          ✕
+<app-modal
+  panelClass="help-dialog idea-detail"
+  labelledBy="idea-title"
+  [closeOnEscape]="false"
+  (closed)="closed.emit()"
+>
+  <header class="idea-hero">
+    <div class="idea-hero-text">
+      <p class="eyebrow">💡 Idee · erfasst am {{ idea.createdAt | date: 'dd.MM.yyyy' }}</p>
+      @if (!editing()) {
+        <h2 id="idea-title">{{ idea.title }}</h2>
+        @let status = displayStatus(idea);
+        <div class="idea-chips">
+          <span class="status {{ status | statusClass }}">{{ status | statusLabel }}</span>
+          <span class="status priority-{{ idea.priority }}">Priorität: {{ idea.priority | priorityLabel }}</span>
+          <span class="tag category category-{{ idea.category ?? 'none' }}">{{ idea.category | categoryLabel }}</span>
+          @if (idea.source === 'visionary') {
+            <span class="source-badge visionary" title="Vom Visionär vorgeschlagen">{{
+              sourceLabel(idea.source)
+            }}</span>
+          }
+          <app-github-link [ref]="idea.externalRef" />
+        </div>
+      } @else {
+        <h2 id="idea-title">Idee bearbeiten</h2>
+      }
+    </div>
+    <div class="idea-hero-actions">
+      @if (!editing() && editable(idea)) {
+        <button
+          class="icon-button"
+          type="button"
+          (click)="editing.set(true)"
+          aria-label="Bearbeiten"
+          title="Bearbeiten"
+        >
+          ✎
         </button>
+      }
+      <button class="icon-button" type="button" (click)="closed.emit()" aria-label="Schließen" title="Schließen">
+        ✕
+      </button>
+    </div>
+  </header>
+  @if (editing()) {
+    <form class="form-grid" (ngSubmit)="saveIdea(idea, ideaEdit.value)" #ideaEdit="ngForm">
+      <label class="wide">Titel<input name="title" [ngModel]="idea.title" maxlength="180" required /> </label>
+      <label class="wide"
+        >Beschreibung<textarea name="description" [ngModel]="idea.description" maxlength="10000"></textarea>
+      </label>
+      <label
+        >Status<select name="status" [ngModel]="idea.status">
+          @for (status of statusOptions(idea); track status) {
+            <option [value]="status">{{ status | statusLabel }}</option>
+          }
+        </select>
+      </label>
+      <label
+        >Kategorie<select name="category" [ngModel]="idea.category ?? ''">
+          <option value="">Ohne Kategorie</option>
+          @for (category of categories; track category) {
+            <option [value]="category">{{ category | categoryLabel }}</option>
+          }
+        </select>
+      </label>
+      <label
+        >Priorität<select name="priority" [ngModel]="idea.priority">
+          <option value="low">Niedrig</option>
+          <option value="medium">Mittel</option>
+          <option value="high">Hoch</option>
+        </select>
+      </label>
+      <label class="wide"
+        >Bilder anhängen (PNG, JPEG, WebP, GIF · max. 5 MB)
+        <input
+          type="file"
+          name="images"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          #imageInput
+          [disabled]="busy()"
+          (change)="addImages(idea, imageInput)"
+        />
+      </label>
+      <div class="actions wide form-actions">
+        <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
+        <button class="button secondary" type="button" (click)="editing.set(false)">Abbrechen</button>
       </div>
-    </header>
-    @if (editing()) {
-      <form class="form-grid" (ngSubmit)="saveIdea(idea, ideaEdit.value)" #ideaEdit="ngForm">
-        <label class="wide">Titel<input name="title" [ngModel]="idea.title" maxlength="180" required /> </label>
-        <label class="wide"
-          >Beschreibung<textarea name="description" [ngModel]="idea.description" maxlength="10000"></textarea>
-        </label>
-        <label
-          >Status<select name="status" [ngModel]="idea.status">
-            @for (status of statusOptions(idea); track status) {
-              <option [value]="status">{{ status | statusLabel }}</option>
-            }
-          </select>
-        </label>
-        <label
-          >Kategorie<select name="category" [ngModel]="idea.category ?? ''">
-            <option value="">Ohne Kategorie</option>
-            @for (category of categories; track category) {
-              <option [value]="category">{{ category | categoryLabel }}</option>
-            }
-          </select>
-        </label>
-        <label
-          >Priorität<select name="priority" [ngModel]="idea.priority">
-            <option value="low">Niedrig</option>
-            <option value="medium">Mittel</option>
-            <option value="high">Hoch</option>
-          </select>
-        </label>
-        <label class="wide"
-          >Bilder anhängen (PNG, JPEG, WebP, GIF · max. 5 MB)
-          <input
-            type="file"
-            name="images"
-            accept="image/png,image/jpeg,image/webp,image/gif"
-            multiple
-            #imageInput
-            [disabled]="busy()"
-            (change)="addImages(idea, imageInput)"
-          />
-        </label>
-        <div class="actions wide form-actions">
-          <button class="button primary" type="submit" [disabled]="busy()">Speichern</button>
-          <button class="button secondary" type="button" (click)="editing.set(false)">Abbrechen</button>
-        </div>
-      </form>
-    } @else {
-      <dl class="detail-stats">
-        <div>
-          <dt>Aufwand</dt>
-          <dd>
-            {{ idea.effortHours != null ? (idea.calibratedHours ?? idea.effortHours | hours) : 'wird geschätzt …' }}
-          </dd>
-        </div>
-        <div>
-          <dt>Token</dt>
-          <dd>{{ idea.tokenEstimate != null ? (idea.tokenEstimate | number: '1.0-0') : '–' }}</dd>
-        </div>
-        <div class="meter benefit">
-          <dt>Nutzen</dt>
-          <dd>{{ idea.benefit != null ? idea.benefit + ' / 10' : '–' }}</dd>
-          <span class="meter-bar"><i [style.width.%]="(idea.benefit ?? 0) * 10"></i></span>
-        </div>
-        <div class="meter cost">
-          <dt>Kosten</dt>
-          <dd>{{ idea.cost != null ? idea.cost + ' / 10' : '–' }}</dd>
-          <span class="meter-bar"><i [style.width.%]="(idea.cost ?? 0) * 10"></i></span>
-        </div>
-      </dl>
-      @if (idea.status === 'rejected' && idea.rejectionReason) {
-        <section class="detail-alert rejected">
-          <h3 class="detail-heading">Abgelehnt</h3>
-          <p>{{ idea.rejectionReason }}</p>
-        </section>
-      }
-      <section class="detail-section">
-        <h3 class="detail-heading">Auftrag</h3>
-        @if (linkedOrder(idea.id); as order) {
-          <div class="linked-order">
-            <div class="linked-order-text">
-              <p class="linked-order-title">
-                <strong>{{ order.title }}</strong>
-                <span class="status {{ order.status | statusClass }}">{{ order.status | statusLabel }}</span>
-              </p>
-              <small class="muted">
-                Priorität {{ order.priority | priorityLabel }} · {{ store.sprintOf(order)?.name ?? 'Kein Sprint' }}
-                @if (order.completedAt) {
-                  · erledigt am {{ order.completedAt | date: 'dd.MM.yyyy' }}
-                }
-              </small>
-            </div>
-            <a
-              class="button secondary small"
-              [href]="'#development/' + order.id"
-              (click)="$event.preventDefault(); openOrder(order.id)"
-              >Auftrag öffnen →</a
-            >
-          </div>
-        } @else if (canPromote(idea)) {
-          <div class="detail-card idea-promote-card">
-            <p>
-              <strong>Bereit für die Umsetzung?</strong> Der Auftragsautor formuliert daraus einen Auftrag im Backlog.
-            </p>
-            <div class="actions">
-              <button class="button secondary" type="button" (click)="rejecting.set(!rejecting())" [disabled]="busy()">
-                Ablehnen mit Grund
-              </button>
-              <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
-                {{ idea.source === 'visionary' ? 'Übernehmen' : 'Auftrag erstellen' }}
-              </button>
-            </div>
-            @if (rejecting()) {
-              <form class="idea-reject" (ngSubmit)="rejectIdea(idea)">
-                <label
-                  >Ablehnungsgrund (der Visionär beachtet ihn beim nächsten Lauf)
-                  <textarea name="reason" [(ngModel)]="rejectReason" maxlength="1000" required></textarea>
-                </label>
-                <div class="actions">
-                  <button class="button secondary" type="button" (click)="rejecting.set(false)">Abbrechen</button>
-                  <button class="button primary" type="submit" [disabled]="busy() || !rejectReason.trim()">
-                    Ablehnen
-                  </button>
-                </div>
-              </form>
-            }
-          </div>
-        } @else if (idea.status === 'requested' || idea.status === 'drafting') {
-          <p class="muted">Der Auftragsautor formuliert aus dieser Idee gerade einen Auftrag.</p>
-        } @else {
-          <p class="muted">Aus dieser Idee ist kein Auftrag entstanden.</p>
-        }
-      </section>
-      @if (idea.source === 'visionary' && idea.agentNote) {
-        <section class="detail-section">
-          <h3 class="detail-heading">Begründung des Visionärs</h3>
-          <p>{{ idea.agentNote }}</p>
-        </section>
-      }
-      <section class="detail-section">
-        <h3 class="detail-heading">Beschreibung</h3>
-        <article
-          class="idea-description markdown"
-          [innerHTML]="idea.description || 'Keine Beschreibung' | markdown"
-        ></article>
+    </form>
+  } @else {
+    <dl class="detail-stats">
+      <div>
+        <dt>Aufwand</dt>
+        <dd>
+          {{ idea.effortHours != null ? (idea.calibratedHours ?? idea.effortHours | hours) : 'wird geschätzt …' }}
+        </dd>
+      </div>
+      <div>
+        <dt>Token</dt>
+        <dd>{{ idea.tokenEstimate != null ? (idea.tokenEstimate | number: '1.0-0') : '–' }}</dd>
+      </div>
+      <div class="meter benefit">
+        <dt>Nutzen</dt>
+        <dd>{{ idea.benefit != null ? idea.benefit + ' / 10' : '–' }}</dd>
+        <span class="meter-bar"><i [style.width.%]="(idea.benefit ?? 0) * 10"></i></span>
+      </div>
+      <div class="meter cost">
+        <dt>Kosten</dt>
+        <dd>{{ idea.cost != null ? idea.cost + ' / 10' : '–' }}</dd>
+        <span class="meter-bar"><i [style.width.%]="(idea.cost ?? 0) * 10"></i></span>
+      </div>
+    </dl>
+    @if (idea.status === 'rejected' && idea.rejectionReason) {
+      <section class="detail-alert rejected">
+        <h3 class="detail-heading">Abgelehnt</h3>
+        <p>{{ idea.rejectionReason }}</p>
       </section>
     }
     <section class="detail-section">
-      @if (imageCount(idea.id); as count) {
-        <h3 class="detail-heading">
-          Bilder &amp; Folien <span class="count">{{ count }}</span>
-        </h3>
+      <h3 class="detail-heading">Auftrag</h3>
+      @if (linkedOrder(idea.id); as order) {
+        <div class="linked-order">
+          <div class="linked-order-text">
+            <p class="linked-order-title">
+              <strong>{{ order.title }}</strong>
+              <span class="status {{ order.status | statusClass }}">{{ order.status | statusLabel }}</span>
+            </p>
+            <small class="muted">
+              Priorität {{ order.priority | priorityLabel }} · {{ store.sprintOf(order)?.name ?? 'Kein Sprint' }}
+              @if (order.completedAt) {
+                · erledigt am {{ order.completedAt | date: 'dd.MM.yyyy' }}
+              }
+            </small>
+          </div>
+          <a
+            class="button secondary small"
+            [href]="'#development/' + order.id"
+            (click)="$event.preventDefault(); openOrder(order.id)"
+            >Auftrag öffnen →</a
+          >
+        </div>
+      } @else if (canPromote(idea)) {
+        <div class="detail-card idea-promote-card">
+          <p>
+            <strong>Bereit für die Umsetzung?</strong> Der Auftragsautor formuliert daraus einen Auftrag im Backlog.
+          </p>
+          <div class="actions">
+            <button class="button secondary" type="button" (click)="rejecting.set(!rejecting())" [disabled]="busy()">
+              Ablehnen mit Grund
+            </button>
+            <button class="button primary" type="button" (click)="promoteIdea(idea)" [disabled]="busy()">
+              {{ idea.source === 'visionary' ? 'Übernehmen' : 'Auftrag erstellen' }}
+            </button>
+          </div>
+          @if (rejecting()) {
+            <form class="idea-reject" (ngSubmit)="rejectIdea(idea)">
+              <label
+                >Ablehnungsgrund (der Visionär beachtet ihn beim nächsten Lauf)
+                <textarea name="reason" [(ngModel)]="rejectReason" maxlength="1000" required></textarea>
+              </label>
+              <div class="actions">
+                <button class="button secondary" type="button" (click)="rejecting.set(false)">Abbrechen</button>
+                <button class="button primary" type="submit" [disabled]="busy() || !rejectReason.trim()">
+                  Ablehnen
+                </button>
+              </div>
+            </form>
+          }
+        </div>
+      } @else if (idea.status === 'requested' || idea.status === 'drafting') {
+        <p class="muted">Der Auftragsautor formuliert aus dieser Idee gerade einen Auftrag.</p>
+      } @else {
+        <p class="muted">Aus dieser Idee ist kein Auftrag entstanden.</p>
       }
-      <app-gallery [ideationId]="idea.id" [removable]="editing()" />
     </section>
+    @if (idea.source === 'visionary' && idea.agentNote) {
+      <section class="detail-section">
+        <h3 class="detail-heading">Begründung des Visionärs</h3>
+        <p>{{ idea.agentNote }}</p>
+      </section>
+    }
     <section class="detail-section">
-      <h3 class="detail-heading">
-        Kommentare <span class="count">{{ commentCount(idea.id) }}</span>
-      </h3>
-      <app-comment-thread [ideationId]="idea.id" />
+      <h3 class="detail-heading">Beschreibung</h3>
+      <article
+        class="idea-description markdown"
+        [innerHTML]="idea.description || 'Keine Beschreibung' | markdown"
+      ></article>
     </section>
+  }
+  <section class="detail-section">
+    @if (imageCount(idea.id); as count) {
+      <h3 class="detail-heading">
+        Bilder &amp; Folien <span class="count">{{ count }}</span>
+      </h3>
+    }
+    <app-gallery [ideationId]="idea.id" [removable]="editing()" />
   </section>
-</div>
+  <section class="detail-section">
+    <h3 class="detail-heading">
+      Kommentare <span class="count">{{ commentCount(idea.id) }}</span>
+    </h3>
+    <app-comment-thread [ideationId]="idea.id" />
+  </section>
+</app-modal>
