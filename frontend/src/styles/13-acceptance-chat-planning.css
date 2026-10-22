@@ -12,7 +12,7 @@
 }
 
 .acceptance-todo > summary {
-  color: #a0610d;
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -24,7 +24,7 @@
   place-items: center;
   border-radius: 50%;
   background: #e8590c;
-  color: #fff;
+  color: var(--surface);
   font-size: 12px;
   font-weight: 800;
 }
@@ -78,7 +78,7 @@
   padding: 4px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
@@ -109,7 +109,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 14px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 12px 32px rgb(32 40 36 / 16%);
   animation: mention-in 0.14s ease-out;
 }
@@ -145,7 +145,7 @@
   padding: 6px 12px;
   border: 1px solid #d5dbd0;
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   font-size: 0.86rem;
@@ -163,7 +163,7 @@
 
 .mention-bubble.active {
   border-color: var(--green);
-  background: #e8f1ec;
+  background: var(--green-soft);
   transform: translateY(-1px);
 }
 
@@ -239,7 +239,7 @@
   padding: 0 5px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
   font: inherit;
   font-weight: 700;
 }
@@ -254,7 +254,7 @@
 .chat-ref {
   padding: 1px 8px;
   border-radius: 999px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid #c9dccf;
   font-size: 0.75rem;
 }
@@ -367,7 +367,7 @@
 }
 
 .attention-line b {
-  color: #a0610d;
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -527,7 +527,7 @@
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
   font-size: 0.86rem;
 }
 
@@ -542,7 +542,7 @@
   gap: 4px;
   padding: 8px 10px;
   border-left: 3px solid var(--green);
-  background: #fff;
+  background: var(--surface);
   font-size: 0.9rem;
   white-space: pre-line;
 }
@@ -571,7 +571,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .roadmap-sprint ol {

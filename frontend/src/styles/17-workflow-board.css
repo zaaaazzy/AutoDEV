@@ -38,7 +38,7 @@
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #fff;
+  background: var(--surface);
   box-shadow: 0 12px 28px rgb(32 40 36 / 18%);
   font-size: 13px;
 }
@@ -269,7 +269,7 @@
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 .workflow-step.disabled {
   background: #f1f1ee;

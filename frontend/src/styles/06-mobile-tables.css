@@ -41,7 +41,7 @@
     padding: 3px 4px 3px 8px;
     border: 1px solid var(--line);
     border-radius: 999px;
-    background: #fff;
+    background: var(--surface);
     font-size: 11px;
   }
   .dt-table tbody tr {
@@ -52,7 +52,7 @@
     padding: 14px 14px 12px;
     border: 1px solid var(--line);
     border-radius: 14px;
-    background: #fff;
+    background: var(--surface);
     box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
   }
   .dt-table tbody tr > td,
@@ -116,18 +116,18 @@
   }
   .dt-table tbody tr.row-open {
     margin-bottom: 0;
-    border-color: #c9d1c6;
+    border-color: var(--line-strong);
     border-bottom: 0;
     border-radius: 14px 14px 0 0;
-    background: #fafbf8;
+    background: var(--surface-soft);
   }
   .dt-table tbody tr.closed-detail {
     display: block;
     padding: 4px 12px 14px;
-    border-color: #c9d1c6;
+    border-color: var(--line-strong);
     border-top: 0;
     border-radius: 0 0 14px 14px;
-    background: #fafbf8;
+    background: var(--surface-soft);
   }
   .dt-table tbody tr.dt-group {
     display: block;

@@ -86,7 +86,7 @@ body {
   margin-left: 6px;
   padding: 0 6px;
   border-radius: 999px;
-  background: #e8f1ec;
+  background: var(--green-soft);
   color: var(--green);
   font-size: 0.72rem;
   font-weight: 600;
@@ -95,8 +95,8 @@ body {
 
 /* Aktion notwendig (blockiert): wartet auf einen Menschen – überall orange */
 .status-blocked {
-  background: #fdf1e0;
-  color: #a0610d;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 
 a.app-link {
@@ -118,7 +118,7 @@ a.app-link {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
-  background: #fafbf8;
+  background: var(--surface-soft);
 }
 
 .follow-up-ref {
@@ -175,7 +175,7 @@ a.app-link {
   border: 1px solid var(--line);
   border-left: 3px solid #2b9a66;
   border-radius: 8px;
-  background: #fafbf8;
+  background: var(--surface-soft);
   font-size: 13px;
 }
 

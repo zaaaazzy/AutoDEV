@@ -1,50 +1,42 @@
-<div class="modal-backdrop" (click)="closed.emit()" (keydown.escape)="closed.emit()">
-  <section
-    class="help-dialog"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="help-title"
-    (click)="$event.stopPropagation()"
-  >
-    <div class="section-heading">
-      <div>
-        <p class="eyebrow">Ablauf</p>
-        <h2 id="help-title">So funktioniert AIdeation</h2>
-      </div>
-      <div class="actions">
-        <button class="button primary" type="button" (click)="startTour.emit()">▶ Interaktive Tour</button>
-        <button class="button secondary" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
-      </div>
+<app-modal panelClass="help-dialog" labelledBy="help-title" (closed)="closed.emit()">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Ablauf</p>
+      <h2 id="help-title">So funktioniert AIdeation</h2>
     </div>
-    <ol class="flow">
-      @for (step of flow; track step.title; let i = $index) {
-        <li class="flow-step">
-          <span class="flow-icon">{{ step.icon }}</span>
-          <strong>{{ i + 1 }}. {{ step.title }}</strong>
-          <span>{{ step.text }}</span>
-        </li>
-      }
-    </ol>
-    <details class="workflow">
-      <summary>Workflow nach Status</summary>
-      @for (lane of workflow; track lane.object) {
-        <div class="wf-lane">
-          <div class="wf-title">
-            <span class="flow-icon">{{ lane.icon }}</span
-            >{{ lane.object }}
-          </div>
-          <div class="wf-steps">
-            @for (step of lane.steps; track step.status) {
-              <div class="wf-step">
-                <strong>{{ step.status }}</strong>
-                <span class="wf-agent" [class.none]="!step.agent">🤖 {{ step.agent ?? 'Nutzer' }}</span>
-                <span class="wf-rule">{{ step.rule }}</span>
-              </div>
-            }
-          </div>
+    <div class="actions">
+      <button class="button primary" type="button" (click)="startTour.emit()">▶ Interaktive Tour</button>
+      <button class="button secondary" type="button" (click)="closed.emit()" aria-label="Schließen">✕</button>
+    </div>
+  </div>
+  <ol class="flow">
+    @for (step of flow; track step.title; let i = $index) {
+      <li class="flow-step">
+        <span class="flow-icon">{{ step.icon }}</span>
+        <strong>{{ i + 1 }}. {{ step.title }}</strong>
+        <span>{{ step.text }}</span>
+      </li>
+    }
+  </ol>
+  <details class="workflow">
+    <summary>Workflow nach Status</summary>
+    @for (lane of workflow; track lane.object) {
+      <div class="wf-lane">
+        <div class="wf-title">
+          <span class="flow-icon">{{ lane.icon }}</span
+          >{{ lane.object }}
         </div>
-      }
-    </details>
-    <p class="muted">Sprints starten und beenden Sie manuell – Agents ändern den Sprint-Status nicht.</p>
-  </section>
-</div>
+        <div class="wf-steps">
+          @for (step of lane.steps; track step.status) {
+            <div class="wf-step">
+              <strong>{{ step.status }}</strong>
+              <span class="wf-agent" [class.none]="!step.agent">🤖 {{ step.agent ?? 'Nutzer' }}</span>
+              <span class="wf-rule">{{ step.rule }}</span>
+            </div>
+          }
+        </div>
+      </div>
+    }
+  </details>
+  <p class="muted">Sprints starten und beenden Sie manuell – Agents ändern den Sprint-Status nicht.</p>
+</app-modal>
