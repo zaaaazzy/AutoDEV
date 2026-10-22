@@ -48,8 +48,8 @@ async function reportCiFailure(
 }
 
 /**
- * Nach dem Merge auf GitHub: main holen, den Sprint-Tag wie bisher setzen und pushen und das lokale main nachziehen,
- * sofern es nicht in einem anderen Ordner ausgecheckt ist (dort bleibt es beim Hinweis).
+ * Nach dem Merge auf GitHub: main holen, den Sprint-Tag wie bisher setzen und pushen und das lokale main nachziehen –
+ * auch im Live-Ordner, wenn main dort ausgecheckt ist und keine offenen Änderungen hat (sonst bleibt es beim Hinweis).
  */
 export async function tagMergedSprint(
   cwd: string,
@@ -60,7 +60,7 @@ export async function tagMergedSprint(
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
   const log: string[] = [];
-  let mainUpdated = false;
+  let mainUpdated: boolean;
   const remoteMain = `refs/remotes/origin/${MAIN_BRANCH}`;
   await must('fetch', 'origin', `+refs/heads/${MAIN_BRANCH}:${remoteMain}`);
   const tag = sprintTag(sprint.name, sprint.id);
@@ -70,7 +70,19 @@ export async function tagMergedSprint(
   const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).output;
   const elsewhere = head === MAIN_BRANCH ? null : await checkedOutElsewhere(git, MAIN_BRANCH, cwd);
   if (elsewhere) {
-    log.push(`${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt – dort mit „git pull“ übernehmen.`);
+    // Agents arbeiten im eigenen Ordner, main ist im Live-Ordner ausgecheckt (der Normalfall): dort nachziehen, sonst
+    // ginge im PR-Modus nie ein Sprint live. Nur Fast-Forward und nur ohne offene Änderungen – wie beim direkten Merge.
+    const live = gitHelpers(execute, elsewhere).git;
+    const branch = (await live('rev-parse', '--abbrev-ref', 'HEAD')).output.trim();
+    const status = await live('status', '--porcelain', '--untracked-files=no');
+    const clean = branch === MAIN_BRANCH && status.exitCode === 0 && !status.output.trim();
+    const updated = clean ? await live('merge', '--ff-only', remoteMain) : null;
+    mainUpdated = updated?.exitCode === 0;
+    log.push(
+      mainUpdated
+        ? `${MAIN_BRANCH} in ${elsewhere} nachgezogen.`
+        : `${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt${clean ? ' und weicht ab' : ' und hat offene Änderungen'} – dort mit „git pull“ übernehmen.`,
+    );
   } else {
     // Nur Fast-Forward: lokale Commits auf main gehen nie verloren.
     const updated =
