@@ -768,6 +768,56 @@ test('Chat: „@“ wählt den Agent, „/“ verweist mit Bubbles, beim Tippen 
   await expect(input).toHaveValue('');
 });
 
+test('Mehrfachauswahl: mehrere Aufträge markieren, Priorität setzen und gemeinsam erneut versuchen', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const stamp = Date.now();
+  const titles = [`Sammel A ${stamp}`, `Sammel B ${stamp}`];
+  const ids: string[] = [];
+  for (const title of titles) {
+    const created = await request.post('/api/projects/e2e/development', {
+      headers,
+      data: { title, status: 'backlog' },
+    });
+    ids.push(((await created.json()) as { item: { id: string } }).item.id);
+  }
+  const statusOf = async (id: string) =>
+    (
+      (await (await request.get('/api/projects/e2e/board', { headers })).json()) as {
+        development: { id: string; status: string; priority: string }[];
+      }
+    ).development.find((item) => item.id === id);
+
+  await login(page);
+  // Aufträge: beide markieren, die schmale Leiste zeigt die Anzahl; Priorität für beide auf „Hoch“.
+  await page.goto('/#development');
+  for (const title of titles) await page.getByRole('checkbox', { name: new RegExp(`Auswählen: ${title}`) }).check();
+  const bar = page.locator('app-bulk-bar');
+  await expect(bar).toContainText('2 Aufträge ausgewählt');
+  await expect(bar.getByRole('button', { name: /Erneut versuchen \(0\)/ })).toBeDisabled();
+  await bar.getByLabel('Priorität der gewählten setzen').selectOption('high');
+  await expect.poll(async () => (await statusOf(ids[1]!))?.priority).toBe('high');
+  expect((await statusOf(ids[0]!))?.priority).toBe('high');
+  await bar.getByRole('button', { name: 'Auswahl aufheben' }).click();
+  await expect(bar).toHaveCount(0);
+
+  // Abgelehnte warten unter „Aktionen“: beide markieren und mit einem gemeinsamen Hinweis erneut versuchen.
+  for (const id of ids)
+    expect((await request.patch(`/api/development/${id}`, { headers, data: { status: 'rejected' } })).ok()).toBe(true);
+  await page.goto('/#actions');
+  for (const title of titles) await page.getByRole('checkbox', { name: new RegExp(`Auswählen: ${title}`) }).check();
+  await bar.getByRole('button', { name: /Erneut versuchen \(2\)/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('2 Aufträge erneut versuchen?');
+  await expect(dialog).toContainText(titles[0]!);
+  await dialog.getByRole('button', { name: 'Erneut versuchen' }).click();
+  await expect.poll(async () => (await statusOf(ids[0]!))?.status).toBe('planned');
+  expect((await statusOf(ids[1]!))?.status).toBe('planned');
+  for (const id of ids) await request.delete(`/api/development/${id}`, { headers });
+});
+
 test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuwählen', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Planungs-Auftrag ${test.info().project.name} ${Date.now()}`;

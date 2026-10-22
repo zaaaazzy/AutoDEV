@@ -79,7 +79,7 @@
       </form>
     }
     @if (data().development.length) {
-      <app-order-table [items]="openOrders()" emptyText="Keine offenen Aufträge für diese Filter." />
+      <app-order-table [items]="openOrders()" [bulk]="true" emptyText="Keine offenen Aufträge für diese Filter." />
     } @else {
       <p class="empty-state">Noch keine Entwicklungsaufträge vorhanden.</p>
     }

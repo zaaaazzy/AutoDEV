@@ -146,14 +146,6 @@
 .sprint-pool:not([open]) > summary {
   margin-bottom: 0;
 }
-.sprint-pool-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
 /* Zähler und Rang-Kreis (Workflow der Agents) */
 .kanban-count {
   padding: 0 7px;
