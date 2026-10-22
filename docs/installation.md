@@ -127,7 +127,7 @@ Plist bzw. Unit, unter Windows die Aufgabe. Danach stehen keine Zugänge mehr da
 in einer Plist oder Unit gespeichert, solltest du es ändern.
 
 **Standardpasswort:** Ohne `DEV_LOG_DB_PASSWORD` in der `.env` nutzt die Datenbank das bekannte Passwort
-`devlog_local_dev`. Server, Wächter und Installationsskripte warnen dann. Zum Wechseln setzt du das Passwort in
+`devlog_local_dev`. Server und Worker starten dann nicht (Wächter und Installationsskripte warnen). Zum Wechseln setzt du das Passwort in
 PostgreSQL (`ALTER USER devlog PASSWORD '…'`), trägst es in die `.env` ein, startest mit `docker compose up -d` neu
 und installierst den Worker mit der neuen `DEV_LOG_DATABASE_URL` erneut.
 
@@ -163,4 +163,6 @@ ein. Unter macOS ist nichts zu tun.
 | Nach dem Update überall abgemeldet | Gewollt: Sitzungen von vor der Passwort-Bindung gelten nicht mehr, einmal neu anmelden |
 | Nach neuem `DEV_LOG_PASSWORD` abgemeldet | Gewollt: Eine Passwortrotation beendet alle Sitzungen des Systemadministrators |
 | Zu viele Fehlversuche | Die Meldung nennt die Wartezeit (1 bis höchstens 15 Minuten). Gebremst wird nur dieses Konto von dieser Adresse aus, von einem anderen Gerät oder Netz geht die Anmeldung weiter |
+| Start bricht ab: „Standardpasswort … Start abgebrochen“ | `./start.sh --setup` erneut ausführen (setzt `DEV_LOG_DB_PASSWORD` und ändert es in PostgreSQL), danach den Worker neu installieren. Nur für Wegwerf-Umgebungen: `DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD=1` |
+| „Unbekannter Host“ (Status 421) | AIdeation wird über einen Namen aufgerufen, der weder IP, `localhost`, `*.local` noch `DEV_LOG_DOMAIN` ist (Schutz vor DNS-Rebinding). Namen in `DEV_LOG_ALLOWED_HOSTS` der `.env` eintragen (Komma-getrennt) und neu starten |
 | Alle Geräte werden gemeinsam gebremst | Das Backend sieht nur die Proxy-Adresse. `DEV_LOG_TRUST_PROXY` muss den Proxy abdecken (Compose: `uniquelocal`), `true` wird abgelehnt (Warnung im Log von `dev-log`) |

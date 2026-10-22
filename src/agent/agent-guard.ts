@@ -13,7 +13,7 @@ import {
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
 import { CHECKED_PROGRAMS } from './command-checks.js';
-import { parseShell, renderWords, type ShellRedirect } from './shell-parse.js';
+import { parseShell, renderWords, type ShellRedirect, type ShellWord } from './shell-parse.js';
 
 /**
  * Wächter für Claude-Agents (PreToolUse-Hook): prüft jeden Datei- und Shell-Zugriff, bevor die CLI ihn ausführt.
@@ -107,6 +107,13 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   return policy.edit ? null : 'Dateien ändern ist für diesen Agent nicht freigegeben.';
 }
 
+/** node --version oder node --check mit genau einer Datei (kein Optionswort, keine Shell-Erweiterung). */
+function nodeCheckOnly(words: readonly ShellWord[]): boolean {
+  const [, option, file] = words;
+  if (words.length === 2) return option?.text === '--version';
+  return words.length === 3 && option?.text === '--check' && !!file && !file.expanded && !file.text.startsWith('-');
+}
+
 /**
  * Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). Gilt für Claude-Agents
  * und das lokale Modell gleichermassen. Der Befehl wird mit dem Tokenizer (parseShell) wie von Bash zerlegt; alle
@@ -164,6 +171,10 @@ export function bashProblem(
     }
     if (program === 'npx' && (subcommand !== '--no-install' || words.length < 3)) {
       return 'npx nur mit --no-install (sonst lädt npx fremde Pakete aus dem Netz).';
+    }
+    // node lädt auch unter --check Module aus --import/-r und führt sie aus: nur genau diese zwei Formen.
+    if (program === 'node' && !nodeCheckOnly(words)) {
+      return `„${part}“: erlaubt sind nur „node --version“ und „node --check <datei>“ ohne weitere Optionen.`;
     }
     if (
       (program === 'docker-compose' && subcommand.startsWith('-')) ||

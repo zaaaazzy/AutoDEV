@@ -416,6 +416,24 @@ test('Wächter: Datei-Befehle aus der acceptEdits-Liste der CLI sind gesperrt, a
   }
 });
 
+test('Wächter: node nur als --version oder --check <datei>, ohne Lade-Optionen', () => {
+  for (const command of [
+    'node --check --import data:text/javascript,1 a.js',
+    'node --check -r ./x.js a.js',
+    'node --check --require=./x.js a.js',
+    'node --check=a.js',
+    'node --check a.js b.js',
+    'node -e 1',
+    'node a.js',
+    'export NODE_OPTIONS=--import=./x.js; node --check a.js',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt|erlaubt sind nur/, command);
+  }
+  for (const command of ['node --check src/x.js', 'node --version']) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
 test('Wächter: gewöhnliche Quotes bleiben erlaubt', () => {
   for (const command of [
     'git log --grep "a > b"',
