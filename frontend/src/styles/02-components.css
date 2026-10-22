@@ -544,6 +544,17 @@ a.summary-card:hover {
   border-color: #c9573f;
   background: #fbeeea;
 }
+/* Hauptaktion, die etwas zerstört (Bestätigungsdialog): rot gefüllt statt grün. */
+.button.primary.danger {
+  border-color: #9d4938;
+  background: #9d4938;
+  color: white;
+}
+.button.primary.danger:hover:not(:disabled) {
+  border-color: #823a2c;
+  background: #823a2c;
+  color: white;
+}
 .button:disabled {
   opacity: 0.55;
   cursor: default;
@@ -724,6 +735,24 @@ a.summary-card:hover {
 .form-grid h3,
 .wide {
   grid-column: 1 / -1;
+}
+/* Fehler direkt am Formularfeld (FieldErrors) */
+input[aria-invalid='true'],
+select[aria-invalid='true'],
+textarea[aria-invalid='true'] {
+  border-color: #c9573f;
+  box-shadow: 0 0 0 2px rgb(201 87 63 / 18%);
+}
+.field-error {
+  display: block;
+  margin-top: 4px;
+  color: #9d4938;
+  font-size: 12px;
+  font-weight: 600;
+}
+.inline-form .field {
+  display: grid;
+  min-width: 0;
 }
 .create-form {
   margin: 16px 0 20px;

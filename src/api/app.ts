@@ -78,7 +78,7 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     response.sendFile(join(UI_DIRECTORY, 'index.html'));
   });
 
-  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));
+  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Nicht gefunden.' }));
   return app;
 }
 

@@ -25,7 +25,7 @@ export function registerVisionaryRoutes(app: Router, pool: Pool): void {
     async (request, response) => {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) {
-        response.status(400).json({ message: 'Invalid project slug.' });
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
         return;
       }
       const project = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
@@ -53,7 +53,7 @@ export function registerVisionaryRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/ideation/visionary', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     response.json({ run: await latestRun(pool, slug) });
@@ -65,7 +65,7 @@ export function registerVisionaryRoutes(app: Router, pool: Pool): void {
     async (request, response) => {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) {
-        response.status(400).json({ message: 'Invalid project slug.' });
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
         return;
       }
       // Der Worker sieht den Status beim nächsten Abfragen und beendet den Agent; angelegt wird dann nichts.

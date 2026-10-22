@@ -5,6 +5,7 @@ import type { Priority } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { CATEGORIES, isFinished, statusLabel } from '../../shared/labels.js';
 import { CategoryLabelPipe } from '../../shared/pipes.js';
+import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import { OrderTableComponent } from './order-table.component.js';
 
 @Component({
@@ -26,6 +27,7 @@ export class DevelopmentComponent {
     return seconds < 60 ? `${seconds} s` : `${Math.round(seconds / 60)} min`;
   }
 
+  protected readonly developmentErrors = new FieldErrors();
   protected developmentForm: { title: string; priority: Priority; category: string } = {
     title: '',
     priority: 'medium',
@@ -75,12 +77,21 @@ export class DevelopmentComponent {
     this.data().development.filter((item) => !isFinished(item.status) && !this.store.attentionIds().has(item.id)),
   );
 
-  protected async createDevelopment(): Promise<void> {
+  protected async createDevelopment(form: HTMLFormElement): Promise<void> {
+    if (!this.developmentErrors.require('title', this.developmentForm.title, 'Bitte einen Titel angeben.')) {
+      focusField(form, 'title');
+      return;
+    }
     await this.store.perform(async () => {
-      await this.api.post(`${this.api.projectPath(this.store.activeProject())}/development`, {
-        ...this.developmentForm,
-        category: this.developmentForm.category || null,
-      });
+      await this.api
+        .post(`${this.api.projectPath(this.store.activeProject())}/development`, {
+          ...this.developmentForm,
+          category: this.developmentForm.category || null,
+        })
+        .catch((error: unknown) => {
+          this.developmentErrors.take(error, form);
+          throw error;
+        });
       this.developmentForm = { title: '', priority: 'medium', category: '' };
       this.store.showCreate.set(false);
     }, 'Entwicklungsauftrag hinzugefügt.');

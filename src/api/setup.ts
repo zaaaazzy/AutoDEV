@@ -93,11 +93,11 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
 
   app.get('/setup/jobs/:id', access({ tenant: 'admin' }), async (request, response, next) => {
     try {
-      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Nicht gefunden.' });
       const job = (
         await pool.query(`SELECT id, kind, status, result, log FROM setup_jobs WHERE id = $1`, [request.params.id])
       ).rows[0];
-      if (!job) return void response.status(404).json({ message: 'Not found.' });
+      if (!job) return void response.status(404).json({ message: 'Nicht gefunden.' });
       response.set('Cache-Control', 'no-store').json({ job });
     } catch (error) {
       next(error);

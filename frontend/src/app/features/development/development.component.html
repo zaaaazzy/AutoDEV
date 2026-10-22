@@ -44,14 +44,26 @@
       </div>
     </div>
     @if (store.showCreate()) {
-      <form class="inline-form dev-create" (ngSubmit)="createDevelopment()">
-        <input
-          name="title"
-          [(ngModel)]="developmentForm.title"
-          placeholder="Neuer Entwicklungsauftrag (kurzer Titel) …"
-          maxlength="80"
-          required
-        />
+      <form
+        class="inline-form dev-create"
+        #developmentFormElement
+        (ngSubmit)="createDevelopment(developmentFormElement)"
+      >
+        <div class="field">
+          <input
+            name="title"
+            [(ngModel)]="developmentForm.title"
+            placeholder="Neuer Entwicklungsauftrag (kurzer Titel) …"
+            aria-label="Titel des Auftrags"
+            maxlength="80"
+            required
+            [attr.aria-invalid]="developmentErrors.message('title') ? true : null"
+            (input)="developmentErrors.clear('title')"
+          />
+          @if (developmentErrors.message('title')) {
+            <small class="field-error" role="alert">{{ developmentErrors.message('title') }}</small>
+          }
+        </div>
         <select name="category" [(ngModel)]="developmentForm.category" aria-label="Kategorie">
           <option value="">Ohne Kategorie</option>
           @for (category of categories; track category) {
