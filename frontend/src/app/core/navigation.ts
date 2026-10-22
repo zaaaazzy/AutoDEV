@@ -16,7 +16,7 @@ export const NAVIGATION: { id: Section; label: string }[] = [
   { id: 'actions', label: 'Aktionen' },
   { id: 'docs', label: 'Dokumentation' },
   { id: 'ideation', label: 'Ideation' },
-  { id: 'development', label: 'Auftrag' },
+  { id: 'development', label: 'Aufträge' },
   { id: 'sprints', label: 'Sprints' },
   { id: 'bugs', label: 'Bugs' },
   { id: 'runs', label: 'Testläufe' },

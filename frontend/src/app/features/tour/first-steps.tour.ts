@@ -3,7 +3,7 @@ import type { TourService, TourStep } from './tour.service.js';
 
 const CREATE_BUTTON = '.page-heading .actions .button.primary';
 
-/** Erste Schritte: Ideation → Auftrag → Sprint → Board → Sprint starten → Agent live beobachten. */
+/** Erste Schritte: Ideation → Aufträge → Sprint → Board → Sprint starten → Agent live beobachten. */
 export function firstStepsTour(api: ApiService): TourStep[] {
   const startSprint = async (tour: TourService): Promise<void> => {
     const data = tour.store.data();
@@ -35,7 +35,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       id: 'ideation',
       section: 'ideation',
       target: CREATE_BUTTON,
-      title: '1 · Ideen sammeln',
+      title: 'Ideen sammeln',
       text: 'Unter Ideation hältst du Einfälle fest – kurz und formlos. Lege jetzt eine Idee an oder tippe auf „Weiter“.',
     },
     {
@@ -43,20 +43,20 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       section: 'ideation',
       target: '.dt-table',
       title: 'Auftrag erstellen lassen',
-      text: 'Bei jeder Idee kannst du die Auftragsbeschreibung vom Auftragsautor erstellen lassen. Er schreibt Ziel, Anforderungen und prüfbare Akzeptanzkriterien – du siehst ihn danach unter „Auftrag → In Entstehung“.',
+      text: 'Bei jeder Idee kannst du die Auftragsbeschreibung vom Auftragsautor erstellen lassen. Er schreibt Ziel, Anforderungen und prüfbare Akzeptanzkriterien – du siehst ihn danach unter „Aufträge → In Entstehung“.',
     },
     {
       id: 'orders',
       section: 'development',
       target: CREATE_BUTTON,
-      title: '2 · Aufträge',
+      title: 'Aufträge',
       text: 'Aufträge kannst du auch direkt anlegen. Fehlgeschlagene oder aus dem Sprint genommene Aufträge landen im Menü unter „Aktionen“.',
     },
     {
       id: 'sprint-create',
       section: 'sprints',
       target: CREATE_BUTTON,
-      title: '3 · Sprint anlegen',
+      title: 'Sprint anlegen',
       text: 'Ein Sprint bündelt die Aufträge, die als Nächstes umgesetzt werden. Lege einen an, falls noch keiner existiert.',
     },
     {
@@ -76,7 +76,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       id: 'board',
       section: 'sprints',
       target: '.sprint-current .sprint-pool',
-      title: '4 · Aufträge in den Sprint nehmen',
+      title: 'Aufträge in den Sprint nehmen',
       text: 'Unter „Aufträge hinzufügen“ holst du offene Aufträge mit → in den Sprint (oder mehrere per Häkchen). Die Reihenfolge unter „Geplant“ bestimmt, was die Agents zuerst abarbeiten – einer nach dem anderen; mit ↑/↓ änderst du sie.',
     },
     {
@@ -89,7 +89,7 @@ export function firstStepsTour(api: ApiService): TourStep[] {
       id: 'start-sprint',
       section: 'sprints',
       target: '.sprint-current .sprint-orders',
-      title: '5 · Sprint starten?',
+      title: 'Sprint starten?',
       text: 'Wenn „Geplant“ Aufträge enthält, kannst du den Sprint jetzt starten. Der Worker übernimmt sofort den ersten Auftrag.',
       action: { label: 'Sprint jetzt starten', run: startSprint },
     },

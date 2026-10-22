@@ -163,14 +163,14 @@ test('Navigation: Menü auf dem Handy, Seitenleiste auf dem Desktop', async ({ p
   if (isMobile) {
     const toggle = page.getByRole('button', { name: 'Menü öffnen' });
     await toggle.click();
-    await page.getByRole('link', { name: 'Auftrag' }).click();
-    await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+    await page.getByRole('link', { name: 'Aufträge', exact: true }).click();
+    await expect(page.locator('.page-heading h1')).toHaveText('Aufträge');
     await expect(page.getByRole('button', { name: 'Menü öffnen' })).toBeVisible();
   } else {
     await expect(page.locator('.menu-toggle')).toBeHidden();
     await page.locator('.sidebar').hover();
-    await page.getByRole('link', { name: 'Auftrag' }).click();
-    await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+    await page.getByRole('link', { name: 'Aufträge', exact: true }).click();
+    await expect(page.locator('.page-heading h1')).toHaveText('Aufträge');
   }
 });
 
@@ -563,7 +563,7 @@ test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async 
   const card = page.locator('.tour-card');
   await expect(card.locator('h3')).toHaveText('Willkommen in AIdeation');
   await card.getByRole('button', { name: 'Weiter' }).click();
-  await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
+  await expect(card.locator('h3')).toHaveText('Ideen sammeln');
   await expect(page).toHaveURL(/#ideation/);
   await expect(page.locator('.tour-spotlight')).toBeVisible();
   await card.getByRole('button', { name: 'Tour beenden' }).click();

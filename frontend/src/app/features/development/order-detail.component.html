@@ -247,7 +247,12 @@
         </div>
       }
     </dl>
-    <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
+    <app-order-brief
+      [description]="item.description"
+      [ideationId]="item.ideationId"
+      [bugId]="item.bugId"
+      [open]="true"
+    />
     @if (acceptance().total) {
       <ng-template #checkLine let-check>
         <li [class]="'acceptance-' + check.status">

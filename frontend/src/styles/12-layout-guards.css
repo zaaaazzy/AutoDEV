@@ -11,6 +11,19 @@
   }
 }
 
+/* Touch: kleine Symbolknöpfe (Bearbeiten, Aufklappen, Filter) mindestens 40 px, damit sie mit dem Finger treffbar sind. */
+@media (pointer: coarse) {
+  .icon-button,
+  .dt-expand {
+    min-width: 40px;
+    min-height: 40px;
+  }
+  .dt-filter-button {
+    width: 32px;
+    height: 32px;
+  }
+}
+
 /* Nichts darf die Seite breiter machen: Felder und Rasterzellen dürfen schrumpfen, seitliches Verschieben ist gesperrt. */
 input,
 select,
