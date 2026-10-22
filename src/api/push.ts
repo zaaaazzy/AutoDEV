@@ -4,17 +4,20 @@ import { access } from './access.js';
 import type { Pool } from 'pg';
 import { isAllowedPushEndpoint, sendPush, vapidKeys } from '../core/push.js';
 
-/** Löscht ein Abo nur, wenn es dem Benutzer gehört (ohne Konto: dem Systemadministrator). Auch beim Logout genutzt. */
+/**
+ * Löscht ein Abo nur, wenn es dem Benutzer gehört (ohne Konto: dem Systemadministrator). Auch beim Logout genutzt.
+ * Ohne Anmeldung wird nichts gelöscht – sonst träfe die Bedingung für `system_admin` auch anonyme Anfragen.
+ */
 export async function deleteOwnSubscription(
   pool: Pool,
   principal: Principal | undefined,
   endpoint: unknown,
 ): Promise<void> {
-  if (typeof endpoint !== 'string' || !endpoint) return;
+  if (!principal || typeof endpoint !== 'string' || !endpoint) return;
   await pool.query(
     `DELETE FROM push_subscriptions
       WHERE endpoint = $1 AND CASE WHEN $2::uuid IS NULL THEN system_admin ELSE user_id = $2 END`,
-    [endpoint, principal?.id ?? null],
+    [endpoint, principal.id ?? null],
   );
 }
 

@@ -4,6 +4,7 @@ import { mock, test } from 'node:test';
 import type { Pool } from 'pg';
 import webpush from 'web-push';
 import { createDevLogApp } from './app.js';
+import { deleteOwnSubscription } from './push.js';
 
 delete process.env.DEV_LOG_PROJECT_ROOTS;
 
@@ -63,7 +64,8 @@ function store(rows: Row[]) {
   return pool;
 }
 
-type Call = (path: string, body?: unknown) => Promise<Response>;
+/** POST an die API, standardmäßig mit der Sitzung des .env-Admins; `anonymous` schickt kein Cookie mit. */
+type Call = (path: string, body?: unknown, anonymous?: boolean) => Promise<Response>;
 
 async function withAdmin<T>(pool: Pool, action: (call: Call) => Promise<T>): Promise<T> {
   const server = createDevLogApp(pool, auth).listen(0, '127.0.0.1');
@@ -77,10 +79,10 @@ async function withAdmin<T>(pool: Pool, action: (call: Call) => Promise<T>): Pro
     });
     assert.equal(login.status, 200);
     const cookie = (login.headers.get('set-cookie') ?? '').split(';')[0]!;
-    return await action((path, body) =>
+    return await action((path, body, anonymous) =>
       fetch(`${baseUrl}/api${path}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Cookie: cookie },
+        headers: { 'Content-Type': 'application/json', ...(anonymous ? {} : { Cookie: cookie }) },
         body: JSON.stringify(body ?? {}),
       }),
     );
@@ -160,4 +162,21 @@ test('Logout löscht das eigene Abo zum mitgeschickten Endpunkt, fremde bleiben'
     assert.equal((await call('/logout', { endpoint: FOREIGN })).status, 200);
   });
   assert.deepEqual(rows, [foreignRow()]);
+});
+
+test('Logout ohne Anmeldung löscht kein Abo des Systemadministrators', async () => {
+  const own = (): Row => ({ endpoint: OWN, p256dh: 'p', auth: 'a', user_id: null, system_admin: true });
+  const rows = [own()];
+  await withAdmin(store(rows), async (call) => {
+    await call('/logout', { endpoint: OWN }, true);
+    await call('/push/unsubscribe', { endpoint: OWN }, true);
+  });
+  assert.deepEqual(rows, [own()]);
+});
+
+test('deleteOwnSubscription fragt ohne Principal die Datenbank gar nicht erst', async () => {
+  const queries: string[] = [];
+  const pool = { query: async (sql: string) => (queries.push(sql), { rows: [] }) } as unknown as Pool;
+  await deleteOwnSubscription(pool, undefined, OWN);
+  assert.deepEqual(queries, []);
 });
