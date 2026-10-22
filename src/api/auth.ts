@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { Router, Request, RequestHandler, Response } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
+import { deleteOwnSubscription } from './push.js';
 import QRCode from 'qrcode';
 import { isRole, type Principal, type Role } from './roles.js';
 import { FailureLimiter, clientSource, fullPath } from './security.js';
@@ -497,6 +498,12 @@ export function registerLoginRoutes(app: Router, pool: Pool, auth: DevLogAuth, l
 
   app.post('/logout', access({ role: null, tenant: 'global' }), async (request, response, next) => {
     try {
+      // Push-Abo dieses Geräts mit abmelden (Ergänzung zum Abmelden im Browser), solange der Besitzer noch feststeht.
+      await deleteOwnSubscription(
+        pool,
+        response.locals.principal as Principal | undefined,
+        (request.body as { endpoint?: unknown } | undefined)?.endpoint,
+      );
       const token = sessionToken(request);
       if (token) await pool.query('DELETE FROM auth_sessions WHERE token_hash = $1', [hashToken(token)]);
       setSessionCookie(request, response, '', 0);

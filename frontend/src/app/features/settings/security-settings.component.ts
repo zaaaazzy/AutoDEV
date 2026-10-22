@@ -2,6 +2,7 @@ import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
+import { browserSubscription, logoutWithPush } from './push-logout.js';
 
 interface AuthStatus {
   totp: boolean;
@@ -77,7 +78,10 @@ export class SecuritySettingsComponent {
 
   protected async logout(): Promise<void> {
     await this.run(async () => {
-      await this.api.post('/api/logout');
+      await logoutWithPush({
+        subscription: browserSubscription,
+        post: (url, body) => this.api.post(url, body),
+      });
       globalThis.location.reload();
     });
   }
