@@ -61,12 +61,15 @@ test('macOS-Worker: Plist wohlgeformt, Rechte 600, Zugänge nur in der Env-Datei
   assert.doesNotMatch(xml, /devlog:a&|schluessel|DEV_LOG_DATABASE_URL|DEV_LOG_SECRET_KEY/);
   const parsed = JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }).stdout);
   assert.equal(parsed.WorkingDirectory, root);
-  assert.deepEqual(parsed.ProgramArguments.slice(0, 3), [
-    '/bin/bash',
-    join(root, 'scripts', 'run-with-env.sh'),
-    envFile,
+  // Node direkt (kein /bin/bash: dem verweigert macOS als Dienst den Zugriff auf externe Laufwerke), Zugänge per --env-file.
+  assert.match(parsed.ProgramArguments[0], /\/node$/);
+  assert.deepEqual(parsed.ProgramArguments.slice(1, 4), [
+    `--env-file=${envFile}`,
+    join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    'src/runner/runner-cli.ts',
   ]);
-  assert.deepEqual(parsed.ProgramArguments.slice(-2), ['run', 'worker']);
+  assert.deepEqual(parsed.ProgramArguments.slice(-4), ['--all', '--watch', '--limit', '3']);
+  assert.ok(!parsed.ProgramArguments.includes('/bin/bash'));
 
   const lines = (await readFile(envFile, 'utf8')).split('\n');
   assert.ok(lines.includes(`DEV_LOG_DATABASE_URL=${DATABASE_URL}`));
@@ -112,6 +115,12 @@ test('macOS-Wächter: Plist wohlgeformt, Rechte 600, ohne Datenbank-URL', { skip
   const lines = (await readFile(envFile, 'utf8')).split('\n');
   assert.ok(lines.includes(`DEV_LOG_DATABASE_URL=${DATABASE_URL}`));
   assert.ok(lines.includes('DEV_LOG_PUBLIC_URL=https://aideation.example.com/?a=1&b=2'));
+  const parsed = JSON.parse(spawnSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }).stdout);
+  assert.deepEqual(parsed.ProgramArguments.slice(1), [
+    `--env-file=${envFile}`,
+    join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    'src/runner/watchdog-cli.ts',
+  ]);
 });
 
 test('Linux-Worker: Unit ohne Geheimnisse, Rechte 600, Sonderzeichen für systemd escapt', async () => {
