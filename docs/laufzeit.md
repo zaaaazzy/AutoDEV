@@ -368,6 +368,13 @@ Legende: ✅ erlaubt · ⚠️ eingeschränkt · ⛔ gesperrt
 - Umleitungen in Dateien, riskante Git-Optionen, npx ohne --no-install, unsichere Compose-Dateien.
 - Ausnahme: Assistent mit voller Freigabe im Befehl.
 
+### Projekt-Datenbank (`run_sql`)
+
+- Eine Anweisung pro Aufruf in einer Transaktion; vor dem `COMMIT` prüft `SAVEPOINT`, dass sie noch offen ist, und ein vom Server zurückgerolltes `COMMIT` gilt nicht als Erfolg (`runProjectSql` in `src/agent/tool-sql.ts`).
+- Zeitlimits in der Verbindung (`options: -c statement_timeout=15000 -c lock_timeout=5000 -c idle_in_transaction_session_timeout=20000`), dazu `query_timeout` und ein eigenes Zeitlimit von 20 s im Worker. Das Abbruchsignal des Agent-Laufs (`ToolContext.signal`) beendet eine laufende Abfrage ebenfalls.
+- Das Ergebnis wird Zeile für Zeile gelesen (pg-`Query` mit `row`-Ereignis, ohne `pg-cursor`): höchstens 50 Zeilen und 1 MB. Darüber, bei Zeitlimit oder Abbruch: `pg_cancel_backend` über eine zweite Verbindung, dann `end()`. Die Transaktion wird dabei zurückgerollt, und die Meldung sagt „nichts gespeichert“. Zellen werden in der Ausgabe auf 500 Zeichen gekürzt, `bytea` als `\x…`.
+- Grenze bleibt: Eine einzelne riesige Zelle liegt beim Lesen kurz ganz im Speicher. Die eigentliche Sicherheitsgrenze ist ein Datenbank-Benutzer mit eingeschränkten Rechten.
+
 ### Projektcode nur mit gefiltertem Environment
 
 - Tests, Test-Gate, Komplettlauf, Coverage-Messung und Befehle des Chat-Assistenten laufen über `runProjectCommand` bzw. `projectEnvironment` (`src/runner/project-command.ts`). Weitergegeben wird nur eine Allowlist: `PATH`, `HOME`, `TMPDIR`, Locale, Terminal, `CI`, `NODE_ENV`, `SSH_AUTH_SOCK` sowie `LC_*`, `NPM_CONFIG_*`, `PLAYWRIGHT_*`, `DOCKER_*`, `XDG_*`, `NVM_*`. `DEV_LOG_*` und alles mit SECRET, TOKEN, PASSWORD, API_KEY, DATABASE_URL oder CREDENTIAL im Namen fehlen immer; einen Rückfall auf `process.env` gibt es nicht.

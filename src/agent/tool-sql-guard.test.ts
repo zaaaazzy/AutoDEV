@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runProjectSql, sqlViolation, type SqlClient } from './tool-sql.js';
+import { connectionConfig, runProjectSql, sqlViolation, type SqlClient } from './tool-sql.js';
 
 test('SQL-Wächter: Kommentarzeichen in Strings verstecken keine Anweisung', () => {
   for (const sql of [
@@ -65,4 +65,205 @@ test('runProjectSql: abgelehntes SQL erreicht die Datenbank nie', async () => {
   );
   assert.match(result, /Nicht erlaubt/);
   assert.deepEqual(calls, []);
+});
+
+test('SQL-Wächter: Unicode-Escapes U&"…" und U&\'…\' sind verboten', () => {
+  for (const sql of [
+    `SELECT U&"\\0073et_config"('statement_timeout', '0', false)`,
+    `SELECT u&"\\0070g_read_file"('/etc/passwd')`,
+    `SELECT U&'\\0041'`,
+    `SELECT * FROM t WHERE x = U&'d\\0061t\\+000061'`,
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /Unicode-Escapes/, sql);
+  }
+  // Bitweises UND und U& in Strings oder Kommentaren bleiben erlaubt.
+  assert.equal(sqlViolation('SELECT u & 1 FROM t'), null);
+  assert.equal(sqlViolation(`SELECT 'U&"x"' -- U&'y'`), null);
+});
+
+test('SQL-Wächter: nur eine Anweisung pro Aufruf', () => {
+  for (const sql of ['SELECT 1; SELECT 2', 'SELECT pg_sleep(1); SELECT 1;', "INSERT INTO t VALUES ('a;b'); SELECT 1"]) {
+    assert.match(sqlViolation(sql) ?? '', /mehrere Anweisungen/, sql);
+  }
+  assert.equal(sqlViolation('SELECT 1;'), null);
+  assert.equal(sqlViolation("SELECT 'a;b' -- ; noch was"), null);
+});
+
+test('SQL-Wächter: WHERE-Bedingungen, die jede Zeile treffen, gelten nicht als echte Bedingung', () => {
+  for (const sql of [
+    'DELETE FROM users WHERE id IS NOT NULL',
+    'DELETE FROM users WHERE 2>1',
+    'UPDATE users SET a = 1 WHERE 1 <> 2',
+    'DELETE FROM users WHERE id = 5 OR true',
+    'DELETE FROM users WHERE NOT false RETURNING id',
+    'UPDATE users SET a = 1 WHERE id >= id',
+    "DELETE FROM users WHERE 'x' <> 'y'",
+    'DELETE FROM users WHERE id NOTNULL',
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /echte WHERE-Bedingung/, sql);
+  }
+  for (const sql of [
+    'DELETE FROM users WHERE id = 5',
+    'UPDATE users SET a = 1 WHERE id IN (1, 2)',
+    'DELETE FROM users WHERE (id = 5)',
+    'DELETE FROM users WHERE id = 5 AND email IS NOT NULL',
+    'DELETE FROM users WHERE deleted_at IS NULL AND id > 10',
+  ]) {
+    assert.equal(sqlViolation(sql), null, sql);
+  }
+});
+
+/** Fake-Client mit Zeilen-Stream: liefert `rows` Zeilen einzeln aus, solange niemand abbricht. */
+function streamingClient(rows: number, makeRow: (index: number) => unknown = (index) => ({ id: index })) {
+  const state = { calls: [] as string[], streamed: 0, cancelled: false, ended: false };
+  const client: SqlClient = {
+    connect: async () => undefined,
+    query: async (text) => {
+      state.calls.push(text);
+      return { command: text.split(' ')[0], rowCount: 0, rows: [] };
+    },
+    queryRows: async (text, onRow) => {
+      state.calls.push(text);
+      for (let index = 0; index < rows && !state.cancelled && !state.ended; index += 1) {
+        state.streamed += 1;
+        onRow(makeRow(index));
+      }
+      if (state.cancelled) throw new Error('canceling statement due to user request');
+      return { command: 'SELECT', rowCount: rows };
+    },
+    cancel: async () => {
+      state.cancelled = true;
+    },
+    end: async () => {
+      state.ended = true;
+    },
+  };
+  return { client, state };
+}
+
+test('runProjectSql: Zeitlimits stehen in der Verbindungskonfiguration, nicht nur im SQL', async () => {
+  const config = connectionConfig('postgres://x/proj');
+  assert.match(String(config.options), /-c statement_timeout=15000\b/);
+  assert.match(String(config.options), /-c lock_timeout=\d+/);
+  assert.match(String(config.options), /-c idle_in_transaction_session_timeout=\d+/);
+  assert.ok(Number(config.query_timeout) > 15_000);
+  assert.ok(Number(config.connectionTimeoutMillis) > 0);
+  // Die Fabrik bekommt genau diese Konfiguration.
+  let received: unknown;
+  const { client } = streamingClient(1);
+  await runProjectSql(
+    'postgres://x/proj',
+    'SELECT 1',
+    (given) => {
+      received = given;
+      return client;
+    },
+    {},
+  );
+  assert.deepEqual(received, config);
+});
+
+test('runProjectSql: höchstens MAX_ROWS Zeilen werden gelesen, darüber bricht die Abfrage auf dem Server ab', async () => {
+  const { client, state } = streamingClient(1_000_000);
+  const result = await runProjectSql('postgres://x/proj', 'SELECT * FROM grosse_tabelle', () => client, {});
+  assert.match(result, /mehr als 50 Zeilen/);
+  assert.match(result, /nichts gespeichert/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(state.cancelled, 'pg_cancel_backend über cancel()');
+  assert.ok(state.ended, 'Verbindung beendet');
+  assert.equal(state.streamed, 51);
+  assert.ok(!state.calls.includes('COMMIT'));
+  const shown = JSON.parse(result.slice(result.indexOf('\n') + 1)) as unknown[];
+  assert.equal(shown.length, 50);
+});
+
+test('runProjectSql: Byte-Grenze beim Lesen und gekürzte Zellen', async () => {
+  const wide = streamingClient(100, () => ({ blob: 'x'.repeat(200_000) }));
+  const tooBig = await runProjectSql('postgres://x/proj', 'SELECT blob FROM t', () => wide.client, {});
+  assert.match(tooBig, /mehr als 1 MB/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(wide.state.cancelled && wide.state.ended);
+  assert.ok(wide.state.streamed <= 6, `gelesen: ${wide.state.streamed}`);
+
+  const cells = streamingClient(2, (index) => ({ id: index, text: 'y'.repeat(5_000), data: Buffer.alloc(3_000) }));
+  const clipped = await runProjectSql('postgres://x/proj', 'SELECT * FROM t', () => cells.client, {});
+  assert.match(clipped, /^SELECT: 2 Zeile\(n\)\n/);
+  const rows = JSON.parse(clipped.split('\n')[1] ?? '') as { id: number; text: string; data: string }[];
+  assert.equal(rows.length, 2);
+  assert.match(rows[0]?.text ?? '', /^y{500}… \[gekürzt, 5000 Zeichen\]$/);
+  assert.match(rows[0]?.data ?? '', /^\\x0{498}… \[gekürzt, 6002 Zeichen\]$/);
+  assert.ok(cells.state.calls.includes('COMMIT'));
+});
+
+test('runProjectSql: Abbruchsignal und Client-Zeitlimit beenden eine hängende Abfrage', async (t) => {
+  const hanging = () => {
+    const state = { cancelled: false, ended: false };
+    const client: SqlClient = {
+      connect: async () => undefined,
+      query: async () => ({ command: 'BEGIN' }),
+      queryRows: () => new Promise(() => undefined),
+      cancel: async () => {
+        state.cancelled = true;
+      },
+      end: async () => {
+        state.ended = true;
+      },
+    };
+    return { client, state };
+  };
+  const controller = new AbortController();
+  const first = hanging();
+  const pending = runProjectSql('postgres://x/proj', 'SELECT pg_sleep(1e6)', () => first.client, {}, controller.signal);
+  setTimeout(() => controller.abort(), 10);
+  assert.match(await pending, /abgebrochen/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(first.state.cancelled && first.state.ended);
+
+  // Bereits abgebrochen: keine Verbindung.
+  let created = false;
+  const aborted = AbortSignal.abort();
+  const factory = (): SqlClient => {
+    created = true;
+    return first.client;
+  };
+  assert.match(await runProjectSql('postgres://x/proj', 'SELECT 1', factory, {}, aborted), /abgebrochen/);
+  assert.equal(created, false);
+
+  // Client-Zeitlimit mit gemockter Uhr.
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const second = hanging();
+  const timed = runProjectSql('postgres://x/proj', 'SELECT pg_sleep(1e6)', () => second.client, {});
+  for (let index = 0; index < 5; index += 1) await new Promise((resolve) => setImmediate(resolve));
+  t.mock.timers.tick(20_000);
+  assert.match(await timed, /Zeitlimit/);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(second.state.cancelled && second.state.ended);
+});
+
+test('runProjectSql: ohne offene Transaktion oder bei Rollback durch den Server kein Erfolg', async () => {
+  const client = (fail: 'savepoint' | 'commit'): SqlClient => ({
+    connect: async () => undefined,
+    query: async (text) => {
+      if (fail === 'savepoint' && text.startsWith('SAVEPOINT')) {
+        throw new Error('SAVEPOINT can only be used in transaction blocks');
+      }
+      return { command: text === 'COMMIT' && fail === 'commit' ? 'ROLLBACK' : 'SELECT', rowCount: 1, rows: [] };
+    },
+    end: async () => undefined,
+  });
+  assert.match(await runProjectSql('postgres://x/proj', 'SELECT 1', () => client('savepoint'), {}), /nicht mehr offen/);
+  assert.match(await runProjectSql('postgres://x/proj', 'SELECT 1', () => client('commit'), {}), /zurückgerollt/);
+});
+
+test('runProjectSql: Fehlermeldungen enthalten den Datenbank-Zugang nicht', async () => {
+  const url = 'postgres://user:geheim@db/proj';
+  const client: SqlClient = {
+    connect: async () => {
+      throw new Error(`connect failed for ${url}`);
+    },
+    query: async () => ({}),
+    end: async () => undefined,
+  };
+  const result = await runProjectSql(url, 'SELECT 1', () => client, {});
+  assert.doesNotMatch(result, /geheim/);
 });

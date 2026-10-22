@@ -68,6 +68,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const controller = new AbortController();
   const context: ToolContext = {
     cwd: options.cwd,
+    signal: controller.signal,
     canWrite,
     canManageServices: options.role === 'assistant' && !options.readOnly,
     databaseUrl: canWrite ? options.databaseUrl : null,
@@ -77,7 +78,6 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     backupRoot: join(options.cwd, BACKUP_DIRECTORY, new Date().toISOString().replace(/[:.]/g, '-')),
     execute: options.execute ?? runCommand,
     timeoutMs: options.timeoutMs,
-    signal: controller.signal,
   };
   let tokens = 0;
   const finish = (exitCode: number, text: string): CommandResult => {

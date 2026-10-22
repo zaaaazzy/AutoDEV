@@ -37,7 +37,7 @@ export interface ToolContext {
   backupRoot: string;
   execute: CommandExecutor;
   timeoutMs: number;
-  /** Abbruch des Agents (Benutzer, Zeitlimit, Worker-Ende): kein Werkzeug startet mehr, laufende Befehle enden. */
+  /** Abbruch des Agents (Benutzer, Zeitlimit, Worker-Ende): kein Werkzeug startet mehr, laufende Befehle und SQL-Abfragen enden. */
   signal?: AbortSignal;
 }
 
@@ -204,7 +204,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return 'sql muss ein nicht leerer Text sein.';
         }
         if (context.signal?.aborted) return TOOL_ABORTED;
-        return clip(await runProjectSql(context.databaseUrl, args.sql, context.sqlClient));
+        return clip(await runProjectSql(context.databaseUrl, args.sql, context.sqlClient, undefined, context.signal));
       }
       default:
         return `Unbekanntes Werkzeug: ${name}`;

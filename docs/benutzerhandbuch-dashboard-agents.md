@@ -275,6 +275,60 @@ Bilder einer Idee oder eines Bugs werden vor dem Lauf nach `.dev-log/attachments
 
 ---
 
+## 6. Datenbank-Abfragen (`run_sql`) für Entwickler und Chat-Assistenten
+
+Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Datenbank** ausführen. Das Werkzeug heißt `run_sql`. Du siehst das Ergebnis im Verlauf des Laufs bzw. im Chat, nicht als eigenen Bildschirm.
+
+**Voraussetzung:** In den Projekteinstellungen ist eine Projekt-Datenbank hinterlegt. Die Adresse wird nie im Frontend angezeigt. Ohne sie gibt es keine Abfragen.
+
+**Was erlaubt ist**
+
+- Eine Anweisung pro Aufruf. Mehrere Anweisungen in einem Aufruf werden abgelehnt.
+- Lesen und Daten ändern (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) sowie additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`).
+- `UPDATE` und `DELETE` nur mit echter `WHERE`-Bedingung. Abgelehnt werden u. a. `WHERE true`, `WHERE 1=1`, `WHERE 2>1` und `WHERE id IS NOT NULL`.
+
+**Was gesperrt ist**
+
+- Die AIdeation-Datenbank selbst. Ist die hinterlegte Adresse diese Datenbank, wird sie nicht verwendet.
+- Transaktions- und Sitzungsbefehle am Anfang einer Anweisung (`BEGIN`, `COMMIT`, `ROLLBACK`, `SET`, `RESET` …). Der Lauf verwaltet die Transaktion selbst.
+- `DROP` auf Datenbank, Rolle, Erweiterung, Schema, Tabelle, Sicht, Sequenz oder Typ, `TRUNCATE`, `ALTER … DROP`, `ALTER SYSTEM`, `ALTER`/`CREATE` von Datenbank, Rolle oder Erweiterung.
+- `DO`-Blöcke, `EXECUTE`, eigene Funktionen, Prozeduren und Trigger, `GRANT`/`REVOKE`, `COPY`, Rollenwechsel.
+- Server- und Dateifunktionen (z. B. `pg_read_file`, `lo_import`, `pg_terminate_backend`, `dblink`).
+- Unicode-Escapes `U&'…'` und `U&"…"`, offene Strings oder Kommentare.
+
+**Grenzen beim Ergebnis**
+
+| Grenze | Wert | Was passiert |
+| --- | --- | --- |
+| Zeilen | höchstens 50 | Die 51. Zeile bricht die Abfrage ab. Die Transaktion wird zurückgerollt, nichts gespeichert. Die Meldung bittet, mit `WHERE` oder `LIMIT` einzugrenzen. |
+| Ergebnisgröße | höchstens 1 MB (als JSON gemessen) | Gleiches Verhalten wie bei den Zeilen. |
+| Zelle | höchstens 500 Zeichen in der Ausgabe | Die Zelle wird gekürzt und mit der Länge markiert. `bytea` wird als `\x…` angezeigt. |
+
+**Zeitlimits**
+
+- Die Datenbank bricht eine Anweisung nach 15 s ab, ein Warten auf eine Sperre nach 5 s und eine offene Transaktion ohne Aktivität nach 20 s.
+- Der Worker wartet höchstens 20 s auf die Abfrage. Danach wird sie abgebrochen (`pg_cancel_backend` über eine zweite Verbindung) und nichts gespeichert. Die Meldung lautet „SQL-Zeitlimit …“.
+
+**Wann eine Abfrage abgebrochen wird:** Wird der Agent beendet (Stopp, Zeitlimit des Laufs, Herunterfahren des Workers), endet auch die laufende Abfrage. Die Meldung lautet „SQL abgebrochen: Der Agent wurde beendet, nichts gespeichert.“
+
+**Erfolg:** Eine Meldung „OK“ oder „UPDATE …“ mit Zeilenzahl erscheint nur, wenn der `COMMIT` bestätigt ist. Fehlt die offene Transaktion vor dem `COMMIT` oder hat der Server zurückgerollt, steht dort „SQL-Fehler … nichts gespeichert“ bzw. „das Ergebnis ist nicht bestätigt“. Ein Fehler wird also nicht als Erfolg gemeldet.
+
+**Typische Meldungen und was zu tun ist**
+
+| Meldung | Ursache und was zu tun ist |
+| --- | --- |
+| „Nicht erlaubt: mehrere Anweisungen …“ | Die Abfrage in einzelne Aufrufe aufteilen. |
+| „UPDATE und DELETE brauchen eine echte WHERE-Bedingung …“ | Eine Bedingung angeben, die nur die betroffenen Zeilen trifft. |
+| „Ergebnis zu groß: mehr als 50 Zeilen …“ | Mit `WHERE` oder `LIMIT` eingrenzen oder Spalten weglassen. Bei `UPDATE … RETURNING` gilt dasselbe: Die Änderung wird dann nicht gespeichert. |
+| „SQL-Zeitlimit: …“ | Die Abfrage ist zu langsam. Index prüfen oder Umfang verringern. |
+| „Der hinterlegte Datenbank-Zugang zeigt auf die AIdeation-Datenbank …“ | In den Projekteinstellungen die richtige Projekt-Datenbank eintragen. |
+
+**Wichtig:** `run_sql` ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze. Die eigentliche Grenze ist ein Datenbank-Benutzer des Projekts mit eingeschränkten Rechten (lesend, wo möglich). Den Benutzer richtest du in der Projekt-Datenbank ein, nicht in AIdeation.
+
+**Bilder:** Für diesen Abschnitt gibt es noch keine Printscreens. Dafür müssten App, Projekt-Datenbank und ein Agent-Lauf mit `run_sql` laufen. Platzhalter: `[Bild 4] Verlauf eines Laufs mit einer abgelehnten Abfrage` und `[Bild 5] Ergebnisausgabe mit gekürzter Zelle`.
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
