@@ -376,6 +376,63 @@ Die Angaben stammen aus `src/agent/chat.ts`, `src/agent/requirements.ts` (Standa
 
 ---
 
+## 9. Routinen: Prüfbefehle (npm audit, git grep)
+
+Zeitgesteuerte Routinen (Agent-Rolle „Routine“) können jetzt die Prüfbefehle ausführen, die ihre Vorlagen verlangen. Vorher bekamen sie kein Befehlsrecht, oder die Claude-CLI verweigerte den Befehl im Hintergrund. Die Routine meldete dann „Messwert fehlt“ und legte keinen Bug an.
+
+[Bild 8: Routine „Nächtlicher Sicherheits-Check“ mit dem Schalter „aktiv“ und dem Ausgabeziel „Bugs“]
+
+### 9.1 Welche Befehle freigegeben sind
+
+Die Prüf-Gruppe ist eingebaut. Sie lässt nur diese Befehle zu:
+
+| Befehl | Zweck |
+| --- | --- |
+| `npm audit` (auch mit `--json`) | Sicherheitslücken in den Abhängigkeiten |
+| `npm outdated` | veraltete Abhängigkeiten |
+| `git ls-files` | Dateien im Repository auflisten |
+| `git grep` (z. B. `git grep -n TODO`) | Text im Repository suchen |
+
+Das ist eine Ausnahme nur für Routinen. Sie erscheint nicht als Projektgruppe, die man an- oder abschaltet.
+
+### 9.2 Bedingungen und Grenzen
+
+- **Nur die Rolle „Routine“.** Entwickler, Assistent und Tester bekommen diese Befehle nicht, auch nicht über eine eigene Zuweisung am Agent.
+- **Nur lesen.** Routinen bekommen keine Datei-Werkzeuge zum Schreiben. Sie ändern nichts im Projekt. Ergebnisse gehen nur über die Marker (`@@BUG`, `@@IDEA`, `@@ORDER`) weiter, und daraus entstehen Bugs, Ideen oder Aufträge.
+- **Gesperrt bleiben:**
+  - `npm audit fix` (auch `npm audit --json fix` und mit Anführungszeichen), weil es `package-lock.json` ändert.
+  - `git grep -O` und `--open-files-in-pager` (Pager bzw. Reihenfolge-Datei), auch in zusammengefassten Kurzoptionen wie `-iOless`.
+  - `git grep --no-index`, `--no-exclude-standard` und `-f`/`--file` mit einer Datei außerhalb des Projekts.
+  - Pfade außerhalb des Projektordners (absolute Pfade und `..`).
+  - Geheimnis-Dateien wie `.env`.
+  - Escapte Anführungszeichen (`\"`, `\'`) und die anderen Schreibweisen, die der Befehlswächter in Abschnitt 3 nennt.
+- **Lokales Modell (Standard ohne CLI):** Routinen bekommen `run_command`, aber kein `write_file` und kein `edit_file`. Ohne Rechte-Kontext (Datei- und Befehlsrechte) gibt es gar keine Shell. Das ist Absicht (fail-closed).
+- **Claude-CLI:** Die Freigabe läuft über dieselben Regeln wie die übrigen Befehle. Die Routine bekommt die Prüf-Gruppe auch dann, wenn ihre Projektgruppen eingeschränkt sind.
+- **Offen:** Routinen bekommen weiterhin alle Befehle der freigeschalteten Projektgruppen (z. B. `npm run`). Diese Einschränkung ist ein eigener Auftrag und noch nicht umgesetzt.
+
+### 9.3 Vorlagen, die diese Befehle nutzen
+
+Die Vorlagen werden einmal je Projekt angelegt. Sie sind immer deaktiviert und nur lesend. Du schaltest sie selbst ein.
+
+| Vorlage | Befehle | Ergebnis |
+| --- | --- | --- |
+| Nächtlicher Sicherheits-Check (02:00, Fenster 22–06 Uhr) | `npm audit`, `npm outdated` | Bug je Sicherheitslücke ab Schwere „moderate“ |
+| Wöchentlicher Doku-Abgleich | `git ls-files` | Aufträge |
+| Tote Dateien und TODOs finden | `git ls-files`, `git grep -n TODO` | Ideen mit Fundstellen |
+| Testabdeckung unter 75 % melden | Coverage-Messung | Aufträge; fehlende Messwerte gelten als Hinweis, nicht als bestanden |
+
+[Bild 9: Routine „Nächtlicher Sicherheits-Check“ nach einem Lauf mit einem neuen Bug aus `npm audit`]
+
+### 9.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Routine meldet „Messwert fehlt“ oder legt keinen Bug an | Die Routine hat keine Shell oder der Befehl wurde gesperrt. Prüfe die Meldung im Lauf. Bei einem Befehl mit `-O`, `fix` oder einem Pfad außerhalb des Projekts ist die Sperre richtig. Den Befehl ohne diese Teile neu formulieren. |
+| Lauf meldet „Escapte Anführungszeichen“ | Argumente in ganze Anführungszeichen setzen (`'…'` oder `"…"`), statt zu escapen. Siehe Abschnitt 4. |
+| `npm audit` liefert keine Ergebnisse oder einen Fehler | `npm audit` braucht Netzzugang zum Paketregister. Die Ausgabe des Laufs zeigt, ob der Befehl selbst fehlgeschlagen ist. Diesen Fall habe ich nicht gegen einen echten Lauf geprüft. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
