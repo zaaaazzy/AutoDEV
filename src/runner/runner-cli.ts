@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { processChat, rejectChat } from '../agent/chat.js';
 import { scheduleRoutines } from '../agent/routine.js';
 import { beginShutdown, isDraining, setDraining, setProcessStore } from '../core/shutdown.js';
+import { shareTreeLocks, treeLockName } from '../core/project-lock.js';
 import { databaseProcessStore, killPreviousProcesses } from './process-registry.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
@@ -86,6 +87,17 @@ export function describeError(error: unknown): string {
   if (!(error instanceof Error)) return String(error);
   const code = (error as { code?: string }).code;
   return error.message || code || error.name;
+}
+
+/**
+ * Läuft schon ein Auftrag eines anderen Projekts im selben echten Ordner (gleiches Repository, gemeinsamer
+ * Agent-Worktree, Symlink)? Dann startet dieses Projekt nicht, statt unbemerkt auf die Ordner-Sperre zu warten.
+ * Liefert das Projekt, das den Ordner gerade benutzt. Schlüssel immer über den realpath (`treeLockName`).
+ */
+export function folderInUseBy(cwd: string, running: ReadonlyMap<string, string>): string | null {
+  const key = treeLockName(cwd);
+  for (const [slug, other] of running) if (other === key) return slug;
+  return null;
 }
 
 /** Gleiche Fehlermeldungen pro Schlüssel nur einmal ausgeben, bis sie sich ändern oder der Fehler verschwindet. */
@@ -221,6 +233,8 @@ async function main(): Promise<void> {
   console.log(`Projektbereich: ${process.env.DEV_LOG_PROJECT_ROOTS}`);
   const options = parseRunnerOptions(process.argv.slice(2));
   const pool = await connect(options.watch);
+  // Ordner-Sperre auch gegenüber anderen Workern (Host/Container, runner-cli ohne --all) über Postgres-Advisory-Locks.
+  shareTreeLocks(pool);
   let stopping = false;
   const stop = (): void => {
     if (stopping) process.exit(1);
@@ -427,7 +441,8 @@ async function main(): Promise<void> {
             )
             .finally(() => estimateActive.delete(slug));
         }
-        // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft.
+        // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft – nur lesend
+        // (runAuthorAgent ist standardmäßig read-only), er hält den Arbeitsordner deshalb nicht.
         if (!authorActive.has(slug) && !stopping) {
           authorActive.add(slug);
           void draftRequirements(pool, target.options)
@@ -475,6 +490,8 @@ async function main(): Promise<void> {
     }, 1500);
     // Each project runs in its own task; at most "maxConcurrentAgents" tasks run at the same time.
     const active = new Map<string, Promise<void>>();
+    // Ordner (realpath-Schlüssel) der laufenden Projekte: ein Ordner, ein Auftrag – auch projektübergreifend.
+    const activeFolders = new Map<string, string>();
     const lastStart = new Map<string, number>();
     // Sofortstart: Die Datenbank meldet neue Aufträge (LISTEN devlog_work); ein freier Platz weckt ebenfalls.
     const signal = new WorkSignal();
@@ -564,9 +581,20 @@ async function main(): Promise<void> {
             if (active.has(slug) || active.size >= limit || isDraining()) {
               continue;
             }
+            const owner = folderInUseBy(target.options.cwd, activeFolders);
+            if (owner) {
+              logOnce(
+                `folder:${slug}`,
+                `[${slug}] wartet auf Arbeitsordner – Projekt „${owner}“ arbeitet im selben Ordner.`,
+              );
+              continue;
+            }
+            loggedErrors.delete(`folder:${slug}`);
             lastStart.set(slug, Date.now());
+            activeFolders.set(slug, treeLockName(target.options.cwd));
             const task = runTarget(target).finally(() => {
               active.delete(slug);
+              activeFolders.delete(slug);
               signal.wake();
             });
             active.set(slug, task);

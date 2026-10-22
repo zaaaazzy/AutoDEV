@@ -131,8 +131,12 @@ export async function runAuthorAgent(
   agentId?: string | null,
   /** Bricht den Lauf ab (z. B. „Abbrechen“ beim Visionär): beendet die CLI bzw. das lokale Modell. */
   signal?: AbortSignal,
-  /** Nur lesen, unabhängig von der Rolle (z. B. Assistent, während ein Auftrag im selben Ordner arbeitet). */
-  readOnly = false,
+  /**
+   * Nur lesen, unabhängig von der Rolle. Standard: ja. Diese Läufe (Auftragsautor, Bug-Wächter, Visionär, Analyse,
+   * Abnahme, Sprint-Kommentar) arbeiten parallel zu Aufträgen im selben Ordner; schreiben darf nur, wer den
+   * Arbeitsordner hält (`acquireTree`/`tryAcquireTree`) und deshalb ausdrücklich `false` übergibt – wie der Chat.
+   */
+  readOnly = true,
 ): Promise<{ exitCode: number; output: string; sessionId?: string; tokens?: number }> {
   const author = (
     agentId

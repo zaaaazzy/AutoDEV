@@ -1,8 +1,24 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { describeError, recoverInterruptedRuns, resolveTargets } from './runner-cli.js';
+import { mkdtemp, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { treeLockName } from '../core/project-lock.js';
+import { describeError, folderInUseBy, recoverInterruptedRuns, resolveTargets } from './runner-cli.js';
 import type { RunnerOptions } from './runner.js';
+
+test('Ein Ordner, ein Auftrag: zweites Projekt im selben echten Ordner (auch per Symlink) startet nicht', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'runner-folder-'));
+  const other = await mkdtemp(join(tmpdir(), 'runner-other-'));
+  const link = `${folder}-link`;
+  await symlink(folder, link);
+  const running = new Map([['projekt-a', treeLockName(folder)]]);
+  assert.equal(folderInUseBy(link, running), 'projekt-a');
+  assert.equal(folderInUseBy(`${folder}/.`, running), 'projekt-a');
+  assert.equal(folderInUseBy(other, running), null);
+  assert.equal(folderInUseBy(folder, new Map()), null);
+});
 
 // Charakterisierung von runner-cli.ts: Wiederherstellung nach Neustart und Auflösen der Projektordner.
 
