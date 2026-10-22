@@ -191,7 +191,7 @@ test('runProjectSql: Byte-Grenze beim Lesen und gekürzte Zellen', async () => {
   const rows = JSON.parse(clipped.split('\n')[1] ?? '') as { id: number; text: string; data: string }[];
   assert.equal(rows.length, 2);
   assert.match(rows[0]?.text ?? '', /^y{500}… \[gekürzt, 5000 Zeichen\]$/);
-  assert.match(rows[0]?.data ?? '',/^\\x0{498}…\[gekürzt, 6002 Zeichen\]$/);
+  assert.match(rows[0]?.data ?? '',/^\\x0{498}… \[gekürzt, 6002 Zeichen\]$/);
   assert.ok(cells.state.calls.includes('COMMIT'));
 });
 
