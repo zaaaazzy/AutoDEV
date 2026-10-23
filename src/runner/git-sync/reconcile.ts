@@ -44,13 +44,17 @@ async function abortInProgress(git: GitHelpers['git'], gitDir: string, actions: 
   }
 }
 
-/** Basis eines Auftrags-Branchs: Sprint-Branch seines Sprints (falls vorhanden), sonst main. */
+/**
+ * Basis eines Auftrags-Branchs: Sprint-Branch seines Sprints (falls vorhanden und der Sprint noch offen), sonst main.
+ * Ein abgeschlossener oder abgebrochener Sprint ist schon gesichert: Wer dorthin zurückkehrte, arbeitete am alten Stand.
+ */
 async function baseOf(pool: Pool, project: string, branch: string, git: GitHelpers['git']): Promise<string> {
   const prefix = /^auftrag\/([0-9a-f]{8})-/.exec(branch)?.[1];
   if (prefix) {
     const row = (
       await pool.query<{ name: string | null }>(
-        `SELECT s.name FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
+        `SELECT s.name FROM development_items d
+           LEFT JOIN sprints s ON s.id = d.sprint_id AND s.status NOT IN ('completed', 'cancelled')
           WHERE d.project_slug = $1 AND d.id::text LIKE $2 LIMIT 1`,
         [project, `${prefix}%`],
       )
