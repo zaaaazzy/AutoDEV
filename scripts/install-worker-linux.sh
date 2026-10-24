@@ -9,7 +9,8 @@ source "$ROOT/scripts/lib/service-env.sh"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="$UNIT_DIR/aideation-worker.service"
 ENV_FILE="$SERVICE_ENV_DIR/worker.env"
-NODE_BIN="$(dirname "$(command -v node)")"
+# Echter Pfad statt Shim/Sitzungspfad (fnm, Volta): der Dienst startet später ohne die Shell-Umgebung.
+NODE_BIN="$(dirname "$(node -p process.execPath)")"
 DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
