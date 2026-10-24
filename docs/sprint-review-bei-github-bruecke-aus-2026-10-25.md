@@ -28,7 +28,7 @@ Beim Abschluss von Sprint 21 öffnete die Git-Sicherung im PR-Modus den Pull Req
 
 ## Worauf zu achten ist
 
-- **Testlauf offen:** Der Entwickler konnte `git-sync.test.ts` und `github-sync.test.ts` nicht selbst ausführen (Freigabe nötig). Der Tester führt sie aus: `npx --no-install tsx --test src/runner/git-sync.test.ts src/runner/github-sync.test.ts`, ohne Coverage-Flags.
-- Die bekannten Rotfälle in `secret-holdback.test.ts`, `report-copies.test.ts` und `sprint-reviews-live.test.ts` wurden nicht gegengeprüft.
+- **Testlauf:** Projekt-Testlauf 6b47961d: `npm run typecheck` grün, `npx tsx --test src/runner/git-sync.test.ts src/runner/github-sync.test.ts` 51 von 51 grün, darunter die beiden neuen „Brücke aus: …“-Tests. Die Tests wurden nie mit dem alten Code rot gesehen; dass sie dort scheitern, folgt nur aus dem Code (früher `skipped: 'Modus aus'`).
+- Die bekannten Rotfälle in `secret-holdback.test.ts`, `report-copies.test.ts` und `sprint-reviews-live.test.ts` wurden nicht gesondert gegengeprüft.
 - Die Alternative („PR-Modus nur wählbar, wenn die Abfrage läuft“) wurde verworfen, weil bereits offene PRs wie #31 so weiter hängen blieben.
 - Ohne `gh`-Anmeldung oder GitHub-Remote kann der Sprint auch jetzt nicht abgeschlossen werden; dann bleibt er im Review, bis beides stimmt.
