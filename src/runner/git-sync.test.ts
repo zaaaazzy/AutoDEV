@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import type { CommandExecutor } from '../core/command.js';
+import { type CommandExecutor, runCommand } from '../core/command.js';
+import { conflictSection, remainingConflicts } from './runner-steps.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
 import {
@@ -707,14 +708,18 @@ test('Fortsetzen auf dem Auftrags-Branch behält offene Merge-Konflikte (Neustar
   // Neustart: Der Ordner steht schon auf dem Auftrags-Branch, der Merge ist noch offen.
   const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
   assert.deepEqual(resumed, { branch: 'auftrag/99999999-liste', base: 'sprint/sprint-1', conflicts: ['liste.txt'] });
-  assert.match(conflictPrompt(resumed!), /Merge-Konflikte lösen[\s\S]*`liste.txt`/);
+  // Der Prompt des nächsten Agents (runStep) beginnt mit dem Konfliktabschnitt.
+  assert.match(conflictSection(resumed), /^## Zuerst: Merge-Konflikte lösen[\s\S]*`liste.txt`[\s\S]*\n\n$/);
   // Weder Abort noch Reset: MERGE_HEAD und die Marker bleiben stehen.
   assert.ok(git('rev-parse', '-q', '--verify', 'MERGE_HEAD'));
   assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), conflicted);
   assert.equal(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true), null);
+  // Lässt der Agent die Marker stehen, ist der Schritt nicht bestanden (Prüfung nach dem Schritt in runStep).
+  assert.deepEqual(await remainingConflicts(cwd, runCommand), ['liste.txt']);
 
   // Ohne offenen Merge bleibt das Ergebnis wie bisher (kein leeres conflicts-Feld).
   await writeFile(join(cwd, 'liste.txt'), 'basis\nauftrag\nanderer auftrag\n');
+  assert.deepEqual(await remainingConflicts(cwd, runCommand), []);
   assert.ok(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true));
   assert.deepEqual(await enterOrderBranch(cwd, item, 'Sprint 1'), {
     branch: 'auftrag/99999999-liste',
@@ -727,8 +732,31 @@ test('unresolvedConflicts wirft, wenn git scheitert, statt „keine Konflikte“
     exitCode: 128,
     durationMs: 0,
     output: 'fatal: index kaputt',
-  })) as unknown as Parameters<typeof unresolvedConflicts>[1];
+  })) as unknown as CommandExecutor;
   await assert.rejects(unresolvedConflicts('/repo', execute), /Konfliktprüfung fehlgeschlagen/);
+  // Nach dem Schritt gilt das als offener Konflikt: der Schritt scheitert, statt zu bestehen.
+  const remaining = await remainingConflicts('/repo', execute);
+  assert.equal(remaining.length, 1);
+  assert.match(remaining[0]!, /Prüfung fehlgeschlagen: Konfliktprüfung fehlgeschlagen: fatal: index kaputt/);
+});
+
+test('Fortsetzen ohne offenen Merge liefert keine Konflikte und keinen Konfliktabschnitt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-resume-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'liste.txt'), 'basis\n');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  const item = { id: '99999999-6666-7777-8888-999999999999', title: 'Sauber' };
+  await enterOrderBranch(cwd, item, 'Sprint 1');
+  // Abbruch mitten im Schritt: offene Änderung, aber kein Merge.
+  await writeFile(join(cwd, 'liste.txt'), 'basis\nangefangen\n');
+  const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(resumed, { branch: 'auftrag/99999999-sauber', base: 'sprint/sprint-1' });
+  assert.equal(conflictSection(resumed), '');
+  assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), 'basis\nangefangen\n');
 });
 
 test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderungen im Ordner hat', async () => {
