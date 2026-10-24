@@ -1072,6 +1072,55 @@ test('Bugs: Wer nur lesen darf, sieht keine Bearbeiten- und Löschknöpfe', asyn
   await request.delete(`/api/bugs/${id}`, { headers: admin });
 });
 
+test('Tabellen: ab 20 Einträgen blättern, Suche beginnt auf Seite 1, Deep-Link springt auf die richtige Seite', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const prefix = `Blättern${isMobile ? 'H' : 'D'}${Date.now() % 100000}`;
+  const ids: string[] = [];
+  for (let index = 1; index <= 25; index++) {
+    const created = await request.post('/api/projects/e2e/bugs', {
+      headers,
+      data: { title: `${prefix} Nr. ${String(index).padStart(2, '0')}` },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    ids.push((await created.json()).bug.id as string);
+  }
+
+  await login(page);
+  // Der zuerst angelegte Bug liegt hinten (Seite 2): Der Link blättert dorthin und öffnet ihn sichtbar.
+  await page.goto(`/#bugs/${ids[0]}`);
+  await expect(page.locator('tr.row-open').filter({ hasText: `${prefix} Nr. 01` })).toBeVisible();
+
+  await page.getByRole('searchbox', { name: /durchsuchen/ }).fill(prefix);
+  const table = page.locator('.dt').filter({ has: page.getByRole('navigation', { name: 'Seiten' }) });
+  const pager = table.getByRole('navigation', { name: 'Seiten' });
+  await expect(table.locator('.dt-count')).toHaveText(/^1–20 von 25 Einträgen/);
+  await expect(table.locator('tbody tr').filter({ hasText: prefix })).toHaveCount(20);
+  await expect(pager.getByRole('button', { name: 'Vorherige Seite' })).toBeDisabled();
+
+  await pager.getByRole('button', { name: 'Nächste Seite' }).click();
+  await expect(table.locator('.dt-count')).toHaveText(/^21–25 von 25 Einträgen/);
+  await expect(table.locator('tbody tr').filter({ hasText: prefix })).toHaveCount(5);
+  await expect(pager.getByRole('button', { name: 'Nächste Seite' })).toBeDisabled();
+  if (isMobile) {
+    // Handy: statt Seitenzahlen nur „2 / 2“.
+    await expect(pager.getByText('2 / 2')).toBeVisible();
+    await expect(pager.getByRole('button', { name: 'Seite 1' })).toBeHidden();
+  } else {
+    await expect(pager.getByRole('button', { name: 'Seite 2' })).toHaveAttribute('aria-current', 'page');
+  }
+
+  // Schärfere Suche: zurück auf Seite 1, und unter 21 Treffern verschwindet das Blättern.
+  await page.getByRole('searchbox', { name: /durchsuchen/ }).fill(`${prefix} Nr. 1`);
+  await expect(page.locator('.dt-count').first()).toHaveText(/^10 von \d+ Einträgen$/);
+  await expect(page.getByRole('navigation', { name: 'Seiten' })).toHaveCount(0);
+
+  for (const id of ids) await request.delete(`/api/bugs/${id}`, { headers });
+});
+
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {
   const manifest = await (await request.get('/manifest.webmanifest')).json();
   expect(manifest.display).toBe('standalone');
