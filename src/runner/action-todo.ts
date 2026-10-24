@@ -35,11 +35,36 @@ export function humanActionFor(text: string): string | null {
   return HUMAN_ACTIONS.find(([pattern]) => pattern.test(tail))?.[1] ?? null;
 }
 
+/** Beginn der Aktion aus den manuellen Abnahmepunkten: ein Hinweis zu einem bestandenen Test, kein Grund zu warten. */
+export const MANUAL_TODO_PREFIX = 'Selbst prüfen: ';
+
 /** Kurzform aus den manuellen Abnahmepunkten des Testers. */
 export function manualTodo(checks: string[]): string | null {
   if (!checks.length) return null;
   const short = checks.map((check) => check.replace(/\s+/g, ' ').trim().slice(0, 60)).join('; ');
-  return shorten(`Selbst prüfen: ${short}`);
+  return shorten(`${MANUAL_TODO_PREFIX}${short}`);
+}
+
+/**
+ * Der Auftrag ist fertig und getestet, nur der Merge in den Sprint scheiterte – nicht an Konflikten, sondern z. B. an
+ * einer Sperre, die nicht verwaist war, einem Hook oder voller Platte. Die Arbeit liegt auf dem Auftrags-Branch; der
+ * Sprint wartet auf sie (sprintSettled), statt ohne sie live zu gehen.
+ */
+export const MERGE_TODO = 'Merge in den Sprint fehlgeschlagen – Ursache im Auftrag beheben, dann „Erneut versuchen“';
+
+/**
+ * Gescheiterter Auftrag: Ein Abnahmehinweis aus einem früheren, bestandenen Testschritt gilt nicht mehr. Sonst hielte
+ * der Autopilot den Auftrag für „wartet auf einen Menschen“ und den Sprint für fertig, obwohl die Behebung noch läuft.
+ */
+export async function clearManualTodo(pool: Pool, itemId: string): Promise<void> {
+  const changed = (
+    await pool.query<{ sprintId: string | null }>(
+      `UPDATE development_items SET action_todo = NULL WHERE id = $1 AND starts_with(action_todo, $2)
+       RETURNING sprint_id AS "sprintId"`,
+      [itemId, MANUAL_TODO_PREFIX],
+    )
+  ).rows[0];
+  if (changed?.sprintId) await generateSprintReport(pool, changed.sprintId).catch(logged('action-todo'));
 }
 
 /** „Budget erreicht“: Limit erhöhen oder warten (beim Tageslimit bis zum Folgetag); `detail` nennt Limit und Stand. */

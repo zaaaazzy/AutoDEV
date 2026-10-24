@@ -7,7 +7,7 @@ import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import { awaitsBugApprovalSql } from '../core/bug-trust.js';
-import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
+import { backfillFailures, detachFromClosedSprints, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { loadFollowUpContext } from './follow-up.js';
 import { markSprintReady, sprintAutopilot } from './sprint-autopilot.js';
@@ -221,7 +221,7 @@ export async function runWorkItem(
         AND (d.retry_after IS NULL OR d.retry_after <= NOW()) AND (
         d.agent_id IS NOT NULL OR (
           NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
-          AND (d.auto_run OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
+          AND ((d.auto_run AND d.sprint_id IS NULL) OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
       [item.id, Boolean(options.itemId)],
     )
     .catch(async (error: unknown) => {
@@ -516,6 +516,8 @@ export async function runWorkflow(
   await recoverStuckItems(pool, options.project).catch(logged('runner', 0));
   // Budget wieder frei (Folgetag, Limit erhöht oder entfernt): wegen Budget blockierte Aufträge laufen weiter.
   await releaseBudgetBlocks(pool, options.project).catch(logged('runner', []));
+  // Erst danach: Was eben neu eingeplant wurde, aber noch an einem geschlossenen Sprint hängt, kommt in den aktiven.
+  await detachFromClosedSprints(pool, options.project).catch(logged('runner', 0));
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
   await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
     console.error('Freigabe fehlgeschlagen:', error);

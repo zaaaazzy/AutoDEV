@@ -41,7 +41,8 @@ function boardPool(tables: { ideation_items: Row[]; development_items: Row[] }):
   return {
     query: async (sql: string, values: unknown[] = []) => {
       const table = /FROM (ideation_items|development_items)\b/.exec(sql)?.[1] as keyof typeof tables | undefined;
-      if (!table || sql.includes('ideation_comments')) return { rows: [] };
+      // Kommentare und die Schätzungs-Kalibrierung (loadCalibration) liefern hier nichts.
+      if (!table || sql.includes('ideation_comments') || sql.includes('"hourSamples"')) return { rows: [] };
       // DEV_COLUMNS enthält ein Unter-Select mit eigenem „LIMIT 1“; es betrifft nicht die Zeilenauswahl.
       const parts = sql.replace(/\(SELECT f\.status[\s\S]*?\) AS "fixStatus"/g, '').split('UNION ALL');
       const rows = parts.flatMap((part) => select(table, tables[table], part, values));

@@ -99,7 +99,7 @@
       <ol class="routing-rules plain-list">
         @if (rules.length) {
           <li class="routing-rule routing-head" aria-hidden="true">
-            <span>#</span><span>Kategorien</span><span>Schätzung &gt; h</span><span>Schätzung &lt; h</span
+            <span>#</span><span>Kategorien</span><span>Schätzung &gt; Agent-h</span><span>Schätzung &lt; Agent-h</span
             ><span>retry ≥</span><span>Budget &gt; %</span><span>Stufe</span><span></span>
           </li>
         }
@@ -116,22 +116,22 @@
               />
             </label>
             <label
-              ><span class="rule-label">Schätzung &gt; h</span>
+              ><span class="rule-label">Schätzung &gt; Agent-h</span>
               <input
                 type="number"
                 min="0"
-                step="0.5"
+                step="0.05"
                 [name]="'rule-min-hours-' + index"
                 [(ngModel)]="rule.minHours"
                 (ngModelChange)="routing.customized = true"
               />
             </label>
             <label
-              ><span class="rule-label">Schätzung &lt; h</span>
+              ><span class="rule-label">Schätzung &lt; Agent-h</span>
               <input
                 type="number"
                 min="0"
-                step="0.5"
+                step="0.05"
                 [name]="'rule-max-hours-' + index"
                 [(ngModel)]="rule.maxHours"
                 (ngModelChange)="routing.customized = true"

@@ -1,4 +1,29 @@
 import { Pipe, type PipeTransform } from '@angular/core';
+import { escapeHtml } from './html.js';
+
+/** Platzhalter für schon erzeugtes HTML (Zeichen aus dem privaten Unicode-Bereich, aus der Eingabe entfernt). */
+const SLOT_START = '\uE000';
+const SLOT_END = '\uE001';
+const SLOT_CHARS = /[\uE000\uE001]/g;
+const SLOT_PATTERN = /\uE000(\d+)\uE001/g;
+const APP_LINK = /^#[a-z]+(?:\/[0-9a-f-]{36})?$/i;
+const HTTPS_LINK = /^https:\/\/[^\s\uE000\uE001]+$/;
+/** Freistehende URLs; Satzzeichen am Ende gehören nicht dazu. */
+const URL_PATTERN = /\bhttps?:\/\/[^\s<>()"'\uE000\uE001]*[^\s<>()"'.,;:!?\uE000\uE001]/g;
+/** Dateipfade wie „src/app.ts“ als Code, auch in Fettschrift (**src/app.ts**). */
+const PATH = String.raw`(?:[\w.-]+\/)+[\w.-]+\.[a-z][a-z0-9]{0,5}`;
+const PATH_PATTERN = new RegExp(String.raw`(^|[\s(„"*])(${PATH})(?=[\s).,;:!?“"*]|$)`, 'gi');
+const FILE_PATH = new RegExp(`^${PATH}$`, 'i');
+const pathCode = (path: string): string => `<code class="path">${escapeHtml(path)}</code>`;
+
+/** Fett und kursiv auf bereits escaptem Text. */
+const emphasis = (html: string): string =>
+  html
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,:;]|$)/g, '$1<em>$2</em>');
+
+const externalLink = (href: string, html: string): string =>
+  `<a class="ext-link" href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${html}</a>`;
 
 interface ListItem {
   text: string[];
@@ -58,10 +83,10 @@ export class MarkdownPipe implements PipeTransform {
       // ```mermaid: Quelltext bleibt sichtbar, bis MermaidDirective ihn als Diagramm zeichnet.
       if (codeLines.length && codeLanguage === 'mermaid')
         blocks.push(
-          `<div class="mermaid-diagram"><pre class="mermaid-source">${codeLines.map((line) => this.escape(line)).join('\n')}</pre></div>`,
+          `<div class="mermaid-diagram"><pre class="mermaid-source">${codeLines.map((line) => escapeHtml(line)).join('\n')}</pre></div>`,
         );
       else if (codeLines.length)
-        blocks.push(`<pre><code>${codeLines.map((line) => this.escape(line)).join('\n')}</code></pre>`);
+        blocks.push(`<pre><code>${codeLines.map((line) => escapeHtml(line)).join('\n')}</code></pre>`);
       codeLines = [];
     };
 
@@ -113,7 +138,7 @@ export class MarkdownPipe implements PipeTransform {
       if (command) {
         flushParagraph();
         flushList();
-        blocks.push(`<p class="cmd-line"><code>$ ${this.escape(command[1]!)}</code></p>`);
+        blocks.push(`<p class="cmd-line"><code>$ ${escapeHtml(command[1]!)}</code></p>`);
         continue;
       }
       const heading = line.match(/^(#{1,6})\s+(.*)$/);
@@ -169,64 +194,36 @@ export class MarkdownPipe implements PipeTransform {
     return blocks.join('') || '<p>Keine Inhalte vorhanden.</p>';
   }
 
+  /**
+   * Inline-Formatierung. Code, Links, URLs und Dateipfade werden im Rohtext erkannt und durch Platzhalter ersetzt,
+   * erst danach wird der Rest escaped und hervorgehoben. So landet nie erzeugtes HTML (etwa <strong>) in einem
+   * Attribut, und kein Muster greift in ein schon erzeugtes Tag.
+   */
   private inline(text: string): string {
-    const code: string[] = [];
-    const html = this.escape(text)
-      .replace(/`([^`]+)`/g, (_match, value: string) => `@@CODE${code.push(value) - 1}@@`)
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/(^|[\s(])\*([^*\s][^*]*)\*(?=[\s).,:;]|$)/g, '$1<em>$2</em>')
+    const slots: string[] = [];
+    const slot = (html: string): string => `${SLOT_START}${slots.push(html) - 1}${SLOT_END}`;
+    const raw = text
+      // Platzhalterzeichen aus der Eingabe entfernen, damit niemand fremde Platzhalter einschleust.
+      .replace(SLOT_CHARS, '')
+      .replace(/`([^`]+)`/g, (_match, code: string) => slot(`<code>${escapeHtml(code)}</code>`))
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, target: string) => slot(this.link(label, target)))
+      .replace(URL_PATTERN, (url) => slot(externalLink(url, escapeHtml(url))))
+      .replace(PATH_PATTERN, (_match, before: string, path: string) => `${before}${slot(pathCode(path))}`);
+    const html = emphasis(escapeHtml(raw))
       .replace(/^\[ \] /, '☐ ')
-      .replace(/^\[x\] /i, '☑ ')
-      // Links innerhalb der App (z. B. #development/<id>) und https-Links sind klickbar, andere bleiben reiner Text.
-      .replace(/\[([^\]]+)\]\((#[a-z]+(?:\/[0-9a-f-]{36})?)\)/gi, '<a class="doc-link app-link" href="$2">$1</a>')
-      .replace(
-        /\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g,
-        '<a class="ext-link" href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
-      )
-      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="doc-link">$1<span class="doc-link-url"> ($2)</span></span>');
-    return this.highlight(html).replace(
-      /@@CODE(\d+)@@/g,
-      (_match, index: string) => `<code>${code[Number(index)]}</code>`,
-    );
+      .replace(/^\[x\] /i, '☑ ');
+    // Link-Texte können Code enthalten: Platzhalter in Platzhaltern mit auflösen.
+    const restore = (value: string): string =>
+      value.replace(SLOT_PATTERN, (_match, index: string) => restore(slots[Number(index)] ?? ''));
+    return restore(html);
   }
 
-  /** Links (http/https) klickbar, Dateipfade als Code – nur im Text, nie in bereits erzeugten Tags oder Links. */
-  private highlight(html: string): string {
-    let insideLink = false;
-    return html
-      .split(/(<[^>]+>)/)
-      .map((part) => {
-        if (part.startsWith('<')) {
-          if (/^<a\b/i.test(part)) insideLink = true;
-          if (/^<\/a>/i.test(part)) insideLink = false;
-          return part;
-        }
-        if (insideLink) return part;
-        return part
-          .replace(
-            /\bhttps?:\/\/[^\s<>()"']+[^\s<>()"'.,;:!?]/g,
-            (url) => `<a class="ext-link" href="${url}" target="_blank" rel="noopener noreferrer">${url}</a>`,
-          )
-          .replace(
-            /(^|[\s(„"])((?:[\w.-]+\/)+[\w.-]+\.[a-z][a-z0-9]{0,5})(?=[\s).,;:!?“"]|$)/gi,
-            (_match, before: string, path: string) =>
-              /^https?:/i.test(path) ? `${before}${path}` : `${before}<code class="path">${path}</code>`,
-          );
-      })
-      .join('');
-  }
-
-  private escape(value: string): string {
-    return value.replace(
-      /[&<>"']/g,
-      (character) =>
-        ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-          "'": '&#39;',
-        })[character] ?? character,
-    );
+  /** Links innerhalb der App (z. B. #development/<id>) und https-Links sind klickbar, andere bleiben reiner Text. */
+  private link(label: string, target: string): string {
+    const text = emphasis(escapeHtml(label));
+    if (APP_LINK.test(target)) return `<a class="doc-link app-link" href="${target}">${text}</a>`;
+    if (HTTPS_LINK.test(target)) return externalLink(target, text);
+    const shown = FILE_PATH.test(target) ? pathCode(target) : escapeHtml(target);
+    return `<span class="doc-link">${text}<span class="doc-link-url"> (${shown})</span></span>`;
   }
 }

@@ -92,7 +92,9 @@
     <dl class="detail-stats">
       <div>
         <dt>Aufwand</dt>
-        <dd>{{ idea.effortHours != null ? idea.effortHours + ' Std.' : 'wird geschätzt …' }}</dd>
+        <dd>
+          {{ idea.effortHours != null ? (idea.calibratedHours ?? idea.effortHours | hours) : 'wird geschätzt …' }}
+        </dd>
       </div>
       <div>
         <dt>Token</dt>

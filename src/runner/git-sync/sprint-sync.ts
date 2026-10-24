@@ -217,6 +217,15 @@ async function pushSprint(
         }
         log.push(`${MAIN_BRANCH} nach GitHub gepusht.`);
       }
+      // Agent-Ordner nicht auf dem abgeschlossenen Sprint-Branch stehen lassen: Aufträge ohne Sprint (Erneut versuchen,
+      // Bugfix, einzelner Agent) zweigten sonst davon ab und landeten dort statt in main. Losgelöst, weil main drüben
+      // ausgecheckt ist; der Ordner ist sauber (oben committet).
+      const detached = await git('checkout', '--detach', MAIN_BRANCH);
+      log.push(
+        detached.exitCode === 0
+          ? `Agent-Ordner losgelöst auf ${MAIN_BRANCH}.`
+          : `Agent-Ordner bleibt auf ${branch}: ${detached.output.slice(-200)}`,
+      );
     } else if (await branchExists(git, MAIN_BRANCH)) {
       await must('checkout', MAIN_BRANCH);
       const before = await must('rev-parse', 'HEAD');

@@ -979,3 +979,69 @@ test('Review-Freigabe: Basis main in anderem Worktree ausgecheckt → dort gemer
   assert.equal(run(agents, 'branch', '--list', branch), '');
   assert.equal(run(agents, 'rev-parse', 'HEAD'), run(human, 'rev-parse', 'main'));
 });
+
+// A7: Nach dem Abschluss blieb der Agent-Ordner auf sprint/…; ein Auftrag ohne Sprint (Erneut versuchen, Bugfix) zweigte
+// davon ab, wurde dorthin gemergt und kam nie in main.
+test('Sprint-Sicherung: nach dem Merge in den Ordner der Menschen steht der Agent-Ordner losgelöst auf main', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
+  const agents = `${human}-agents`;
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    })
+      .toString()
+      .trim();
+  run(human, 'init', '-q', '-b', 'main');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '-b', 'sprint/sprint-1-apfel', agents, 'main');
+  await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'sprint');
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+  assert.equal(await syncSprintToGit(pool, 'p', agents), 1);
+  assert.ok(updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
+  assert.equal(run(human, 'show', 'main:sprint.txt'), 'sprint');
+  assert.equal(run(agents, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD', 'losgelöst');
+  assert.equal(run(agents, 'rev-parse', 'HEAD'), run(human, 'rev-parse', 'main'));
+
+  // Der nächste Auftrag ohne Sprint zweigt von main ab und wird am Ende in main gemergt.
+  const item = { id: 'dddddddd-0000-4000-8000-000000000004', title: 'Retry ohne Sprint' };
+  const branch = await enterOrderBranch(agents, item, null);
+  assert.equal(branch?.base, 'main');
+});
+
+test('Auftrag ohne Sprint auf altem Sprint-Branch: setzt auf main auf, nicht auf dem Sprint', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-no-sprint-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, stdio: 'pipe' })
+      .toString()
+      .trim();
+  git('init', '-q', '-b', 'main');
+  await writeFile(join(cwd, 'a.txt'), 'a\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'eins');
+  git('switch', '-q', '-c', 'sprint/sprint-7');
+  await writeFile(join(cwd, 'alt.txt'), 'alter Sprint\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'sprint');
+  const branch = await enterOrderBranch(cwd, { id: 'eeeeeeee-0000-4000-8000-000000000005', title: 'Bugfix' }, null);
+  assert.equal(branch?.base, 'main');
+  assert.equal(git('rev-parse', 'HEAD'), git('rev-parse', 'main'), 'vom Stand von main, ohne den alten Sprint');
+
+  // Branches der Menschen bleiben, wie sie sind (dort arbeitet der Auftrag wie bisher auf ihrem Branch).
+  git('switch', '-q', 'main');
+  git('branch', '-q', '-D', branch!.branch);
+  git('switch', '-q', '-c', 'feature/eigenes');
+  const human = await enterOrderBranch(cwd, { id: 'ffffffff-0000-4000-8000-000000000006', title: 'Auf Feature' }, null);
+  assert.equal(human?.base, 'feature/eigenes');
+});

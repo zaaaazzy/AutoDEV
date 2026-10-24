@@ -11,6 +11,16 @@ import {
   proposeSprint,
   type SprintProposal,
 } from '../core/sprint-planner.js';
+import {
+  calibratedHours,
+  calibratedTokens,
+  type CalibrationFactor,
+  ESTIMATE_SOURCE_LABELS,
+  ESTIMATE_SOURCES,
+  type EstimateSource,
+  loadCalibration,
+  sourceOf,
+} from '../core/estimate-calibration.js';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { describeWorkingHours, type WorkingHours, withinWorkingHours } from '../core/working-hours.js';
 import { generateSprintReport } from './reports.js';
@@ -20,7 +30,7 @@ import { completedSprintUsage, costOfTokens, tokenPriceUsd } from './usage.js';
 /** Modus der Sprintplanung je Projekt: manuell (Standard), vorschlagen, Autopilot. */
 export const SPRINT_MODES = ['manual', 'suggest', 'autopilot'] as const;
 export type SprintMode = (typeof SPRINT_MODES)[number];
-export const DEFAULT_CAPACITY_HOURS = 40;
+export const DEFAULT_CAPACITY_HOURS = 4;
 export const ROADMAP_SPRINTS = 3;
 
 /**
@@ -37,12 +47,19 @@ export interface AutopilotGuard {
   autoLive: boolean;
 }
 
+/** Kalibrierung einer Herkunft, die unter den Kandidaten vorkommt (für die Anzeige auf der Vorschlagskarte). */
+export interface CalibrationSummary extends CalibrationFactor {
+  source: EstimateSource;
+  label: string;
+}
+
 export interface LoadedProposal extends SprintProposal {
   mode: SprintMode;
   name: string;
   totals: { hours: number; tokens: number; costUsd: number | null };
   /** Durchschnittspreis je Token aus den gemessenen Kosten; null ohne Messwerte. */
   tokenPriceUsd: number | null;
+  calibration: CalibrationSummary[];
   autopilot: AutopilotGuard;
 }
 
@@ -53,6 +70,7 @@ interface PlanningInput {
   done: Set<string>;
   capacity: Capacity;
   tokenPriceUsd: number | null;
+  calibration: CalibrationSummary[];
 }
 
 /** Offene Aufträge ausserhalb eines laufenden oder geplanten Sprints sind Kandidaten; „Aktion notwendig“ wird übernommen. */
@@ -80,12 +98,14 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
       cost: number | null;
       effortHours: number | null;
       tokenEstimate: string | null;
+      estimateSource: string | null;
       followUpOf: string | null;
       troubled: boolean;
       actionTodo: string | null;
     }>(
       `SELECT d.id, d.title, d.description, d.status, d.priority, d.kind, d.benefit, d.cost,
-              d.effort_hours AS "effortHours", d.token_estimate AS "tokenEstimate", d.follow_up_of AS "followUpOf",
+              d.effort_hours AS "effortHours", d.token_estimate AS "tokenEstimate",
+              d.estimate_source AS "estimateSource", d.follow_up_of AS "followUpOf",
               (d.retry_count > 0 OR d.removed_from_sprint_at IS NOT NULL OR d.status = 'blocked') AS troubled,
               d.action_todo AS "actionTodo"
          FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
@@ -102,8 +122,18 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
       ])
     ).rows.map((row) => row.id),
   );
-  // Ist-Werte statt Schätzungen: gemessene Laufzeit und Tokens der erledigten Aufträge der letzten 3 Sprints.
-  const [history, price] = await Promise.all([completedSprintUsage(pool, project, 3), tokenPriceUsd(pool, project)]);
+  // Schätzungen auf gemessene Agent-Stunden und Tokens umrechnen; die Ist-Werte der letzten 3 Sprints nur zur Anzeige.
+  const [history, price, calibration, sprintBudget] = await Promise.all([
+    completedSprintUsage(pool, project, 3),
+    tokenPriceUsd(pool, project),
+    loadCalibration(pool, project),
+    pool.query<{ maxTokens: string | null }>(
+      `SELECT max_tokens AS "maxTokens" FROM budgets WHERE project_slug = $1 AND period = 'sprint'`,
+      [project],
+    ),
+  ]);
+  const sprintTokens = sprintBudget.rows[0]?.maxTokens;
+  const used = new Set(rows.map((row) => sourceOf(row.estimateSource)));
   const candidates: PlanCandidate[] = rows.map((row) => ({
     id: row.id,
     title: row.title,
@@ -111,8 +141,13 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
     kind: row.kind === 'bug' ? 'bug' : 'feature',
     benefit: row.benefit,
     cost: row.cost,
-    effortHours: row.effortHours,
-    tokenEstimate: row.tokenEstimate === null ? null : Number(row.tokenEstimate),
+    effortHours: calibratedHours(row.effortHours, row.estimateSource, calibration),
+    tokenEstimate: calibratedTokens(
+      row.tokenEstimate === null ? null : Number(row.tokenEstimate),
+      row.estimateSource,
+      calibration,
+    ),
+    rawEffortHours: row.effortHours,
     followUpOf: row.followUpOf,
     troubled: row.troubled,
     // Nur „Aktion notwendig“ wartet auf einen Menschen und wandert fest mit; andere Blockierte werden normal bewertet.
@@ -124,8 +159,17 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
     sprintCount: Number(settings.sprints),
     candidates,
     done,
-    capacity: capacityFrom(history, Number(settings.capacity ?? DEFAULT_CAPACITY_HOURS)),
+    capacity: capacityFrom(
+      history,
+      Number(settings.capacity ?? DEFAULT_CAPACITY_HOURS),
+      sprintTokens === null || sprintTokens === undefined ? null : Number(sprintTokens),
+    ),
     tokenPriceUsd: price,
+    calibration: ESTIMATE_SOURCES.filter((source) => used.has(source)).map((source) => ({
+      source,
+      label: ESTIMATE_SOURCE_LABELS[source],
+      ...calibration[source],
+    })),
   };
 }
 
@@ -215,6 +259,7 @@ export async function loadProposal(pool: Pool, project: string): Promise<LoadedP
     mode: input.mode,
     name: `Sprint ${input.sprintCount + 1}`,
     tokenPriceUsd: input.tokenPriceUsd,
+    calibration: input.calibration,
     autopilot,
   };
 }
@@ -277,14 +322,26 @@ export async function applyProposal(
         ],
       )
     ).rows[0]!.id;
+    // Blockierte Aufträge (z. B. aus einem gescheiterten Sprint) werden wie bei „In Sprint übernehmen“ zurückgesetzt:
+    // Sonst landeten sie blockiert samt altem Vermerk im neuen Sprint, liefen nie und hielten ihn offen (Sprint 21).
+    // auto_run folgt dem Sprint: ein geplanter wartet auf seinen Start.
     await client.query(
       `UPDATE development_items d
           SET sprint_id = $2, sprint_rank = picked.rank,
-              status = CASE WHEN d.status = 'backlog' THEN 'planned' ELSE d.status END,
+              status = CASE WHEN d.status IN ('backlog', 'blocked') THEN 'planned' ELSE d.status END,
+              auto_run = $4,
+              agent_id = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.agent_id END,
+              failure = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.failure END,
+              action_todo = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.action_todo END,
+              retry_after = CASE WHEN d.status = 'blocked' THEN NULL ELSE d.retry_after END,
+              retry_count = d.retry_count + CASE WHEN d.status = 'blocked' THEN 1 ELSE 0 END,
+              analysis_status = CASE WHEN d.status <> 'blocked' OR d.analysis_status IN ('requested', 'running')
+                                     THEN d.analysis_status ELSE NULL END,
+              budget_since = CASE WHEN d.status = 'blocked' THEN NOW() ELSE d.budget_since END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
          FROM unnest($1::uuid[]) WITH ORDINALITY AS picked(id, rank)
         WHERE d.id = picked.id AND d.project_slug = $3`,
-      [ids, sprintId, project],
+      [ids, sprintId, project, shouldStart],
     );
     await client.query('DELETE FROM sprint_proposal_comments WHERE project_slug = $1', [project]);
     await client.query('COMMIT');

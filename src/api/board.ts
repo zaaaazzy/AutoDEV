@@ -6,6 +6,7 @@ import { COMMENT_COLUMNS } from './idea-comments.js';
 import { IDEA_COLUMNS, IDEA_SOURCES } from './ideation.js';
 import { CLOSED_DEVELOPMENT_STATUSES, CLOSED_IDEATION_STATUSES } from '../core/status.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { loadCalibration, withCalibratedHours } from '../core/estimate-calibration.js';
 
 /** Höchstzahl abgeschlossener Einträge je Liste im Board; offene werden immer vollständig geladen. */
 const CLOSED_LIMIT = 200;
@@ -21,7 +22,7 @@ async function openAndRecentClosed(
   filter: string,
   params: unknown[],
   closed: readonly string[],
-): Promise<unknown[]> {
+): Promise<{ effortHours?: number | null; estimateSource?: string | null }[]> {
   const status = `status = ANY($${params.length + 1}::text[])`;
   const result = await pool.query(
     `(SELECT ${columns} FROM ${table} WHERE ${filter} AND (${status}) IS NOT TRUE)
@@ -44,7 +45,7 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
     const source =
       typeof request.query.source === 'string' && IDEA_SOURCES.has(request.query.source) ? request.query.source : null;
     const ideaFilter = 'project_slug = $1 AND ($2::text IS NULL OR source = $2)';
-    const [ideas, development, comments] = await Promise.all([
+    const [ideas, development, comments, calibration] = await Promise.all([
       openAndRecentClosed(pool, 'ideation_items', IDEA_COLUMNS, ideaFilter, [slug, source], CLOSED_IDEATION_STATUSES),
       openAndRecentClosed(
         pool,
@@ -60,8 +61,14 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
           WHERE i.project_slug = $1 ORDER BY c.created_at`,
         [slug],
       ),
+      loadCalibration(pool, slug),
     ]);
-    response.json({ ideas, development, comments: comments.rows });
+    // Aufwand wird in kalibrierten Agent-Stunden angezeigt; effortHours bleibt die gespeicherte Schätzung.
+    response.json({
+      ideas: withCalibratedHours(ideas, calibration),
+      development: withCalibratedHours(development, calibration),
+      comments: comments.rows,
+    });
   });
 
   app.get('/projects/:slug/agent-runs', access({ tenant: 'project' }), async (request, response) => {

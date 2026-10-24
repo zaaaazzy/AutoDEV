@@ -324,7 +324,12 @@ function splitDisallowed(parts: readonly string[]): { own: string[]; others: str
     }
     const value = match[1] ?? parts[++index] ?? '';
     // Nur an Kommas ausserhalb von Klammern trennen: Regeln wie „Bash(git status:*)“ enthalten Leerzeichen.
-    own.push(...value.split(/,(?![^(]*\))/).map((tool) => tool.trim()).filter(Boolean));
+    own.push(
+      ...value
+        .split(/,(?![^(]*\))/)
+        .map((tool) => tool.trim())
+        .filter(Boolean),
+    );
   }
   return { own, others };
 }

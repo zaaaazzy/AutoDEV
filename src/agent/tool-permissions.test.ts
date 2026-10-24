@@ -499,9 +499,13 @@ test('withAgentPermissions: eigene Sperren im Befehl bleiben, der Wächter erlau
 
 test('withAgentPermissions: --disallowedTools im Befehl schaltet keine Datei-Rechte frei (Regression)', () => {
   for (const flags of [['--disallowedTools', 'WebFetch'], ['--disallowedTools=WebFetch']]) {
-    const command = withAgentPermissions(['claude', ...flags, '-p', '{prompt}'], 'developer', all, ['files:create'], [
-      'frontend',
-    ]);
+    const command = withAgentPermissions(
+      ['claude', ...flags, '-p', '{prompt}'],
+      'developer',
+      all,
+      ['files:create'],
+      ['frontend'],
+    );
     const label = flags.join(' ');
     // Der Hook selbst trägt die Richtlinie samt Ordner, nicht nur das Objekt im Code.
     assert.deepEqual(policyOf(command), { create: true, edit: false, scopes: ['frontend'] }, label);

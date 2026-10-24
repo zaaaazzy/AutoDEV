@@ -194,10 +194,14 @@ test('In Sprint übernehmen: abgebrochener Auftrag in geplantem Sprint startet n
   assert.match(update.sql, /s\.project_slug = d\.project_slug\s+AND s\.status IN \('planned', 'active'\)/);
 });
 
-test('In Sprint übernehmen: selectItems startet geplante Aufträge nur im aktiven Sprint, per Hand oder mit auto_run', async () => {
+test('In Sprint übernehmen: selectItems startet geplante Aufträge nur im aktiven Sprint, per Hand oder mit auto_run ohne Sprint', async () => {
   const source = await readFile(new URL('../runner/runner-selection.ts', import.meta.url), 'utf8');
-  // Mit auto_run = FALSE und agent_id = NULL bleibt ein Auftrag im geplanten Sprint liegen.
-  assert.match(source, /AND \(s\.status = 'active' OR d\.agent_id IS NOT NULL OR d\.auto_run\)/);
+  // Mit agent_id = NULL bleibt ein Auftrag im geplanten Sprint liegen, auch mit auto_run (Verhalten auf PostgreSQL:
+  // runner/sprint-requeue.test.ts).
+  assert.match(
+    source,
+    /AND \(s\.status = 'active' OR d\.agent_id IS NOT NULL OR \(d\.auto_run AND d\.sprint_id IS NULL\)\)/,
+  );
 });
 
 test('In Sprint übernehmen: aktiver Ziel-Sprint bleibt erlaubt', async () => {

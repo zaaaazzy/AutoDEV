@@ -45,8 +45,12 @@ test('Agent-Compose: Projekt aideation-agent teilt keine Container, Volumes oder
   const project = agentComposeProject('/Coding/AIdeation/agent');
   assert.equal(project, 'aideation-agent');
   const { names, portsFile } = composeNames(project);
-  for (const live of [...LIVE_CONTAINERS, ...LIVE_VOLUMES]) assert.ok(!names.includes(live), `${live} im Agent-Projekt`);
-  assert.ok(names.every((name) => name.startsWith('aideation-agent_')), names.join(', '));
+  for (const live of [...LIVE_CONTAINERS, ...LIVE_VOLUMES])
+    assert.ok(!names.includes(live), `${live} im Agent-Projekt`);
+  assert.ok(
+    names.every((name) => name.startsWith('aideation-agent_')),
+    names.join(', '),
+  );
   assert.ok(existsSync(join(ROOT, portsFile)), `${portsFile} fehlt`);
   assert.deepEqual(publishedPorts(portsFile), [], 'das Agent-Projekt veröffentlicht keine Host-Ports');
 });

@@ -3,16 +3,18 @@ import type { Pool } from 'pg';
 import { applyProposal, autopilotGuard, completeSprintIn, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 import { loadGitState, problemsFor } from '../api/git-state.js';
-import { ENVIRONMENT_TODO } from './autofix.js';
+import { ENVIRONMENT_TODO, GIT_FOLDER_TODO } from './autofix.js';
+import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
 
 export type AutopilotStep =
   'off' | 'paused' | 'working' | 'review' | 'completed' | 'started' | 'outside_hours' | 'idle';
+
+export { GIT_FOLDER_TODO };
 
 /**
  * „Aktion notwendig“, die nichts mit dem Auftrag zu tun hat, sondern mit der Umgebung (Arbeitsordner, Laufwerk): Der
  * Auftrag ist nicht bearbeitet, nur aufgehalten. Ältere Läufe setzten den Git-Hinweis noch je Auftrag.
  */
-export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
 const ENVIRONMENT_TODOS = [GIT_FOLDER_TODO, ENVIRONMENT_TODO];
 
 /**
@@ -32,6 +34,10 @@ export function sprintSettled(
         ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
         (item.status === 'blocked' &&
           (!item.actionTodo ||
+            // Abnahmehinweis eines früheren, bestandenen Tests: kein Warten auf einen Menschen, sondern ein Fehler.
+            item.actionTodo.startsWith(MANUAL_TODO_PREFIX) ||
+            // Fertige Arbeit, nur der Merge scheiterte: Ohne sie ginge der Sprint unvollständig live.
+            item.actionTodo === MERGE_TODO ||
             // Tages- und Sprint-Budget geben von selbst wieder frei; das Budget je Auftrag nie (nur „Erneut versuchen“
             // setzt es zurück) – dieser Auftrag wartet also auf einen Menschen und hält den Sprint nicht ewig offen.
             (Boolean(item.budgetBlocked) && item.budgetBlocked !== 'order') ||

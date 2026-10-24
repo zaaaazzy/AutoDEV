@@ -21,6 +21,7 @@ import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { TestRequest, VisionaryRun } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { type RestartState, RestartStatusService } from '../../core/restart-status.service.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import { ConfirmService } from '../../core/confirm.service.js';
 import { VISIONARY_DIRECTION } from '../ideation/idea-options.js';
@@ -49,18 +50,6 @@ export interface MenuEntry {
   /** Startet AIdeation neu (Container neu bauen, Worker neu starten). */
   restart?: boolean;
 }
-
-/** Stand des Neustarts von AIdeation (GET/POST /api/system/restart). */
-export interface RestartState {
-  status: 'requested' | 'building' | 'restarting' | 'done' | 'failed';
-  requestedAt: string;
-  requestedBy: string | null;
-  finishedAt?: string | null;
-  message?: string | null;
-  log?: string | null;
-}
-
-const RESTART_OPEN = ['requested', 'building', 'restarting'];
 
 /** AIdeation neu starten: neuer Code und neue Agents werden geladen (nur Administration). */
 const RESTART_ENTRY: MenuEntry = {
@@ -178,8 +167,9 @@ export class AgentTasksComponent {
     ['requested', 'running'].includes(this.latestVisionary()?.status ?? ''),
   );
   /** Letzter Neustart von AIdeation; solange er läuft, ist der Eintrag gesperrt. */
-  protected readonly latestRestart = signal<RestartState | null>(null);
-  protected readonly restartOpen = computed(() => RESTART_OPEN.includes(this.latestRestart()?.status ?? ''));
+  private readonly restartStatus = inject(RestartStatusService);
+  protected readonly latestRestart = this.restartStatus.state;
+  protected readonly restartOpen = this.restartStatus.open;
   /** Formular: null = geschlossen, id null = neue Aktion. */
   protected readonly editing = signal<ActionForm | null>(null);
   /** Zeitplan im Formular: Auswahl, Uhrzeit, Wochentag, eigener Cron, Zeitfenster, Ziel und aktiv. */
@@ -275,7 +265,6 @@ export class AgentTasksComponent {
       visibleInterval(() => {
         if (this.open() && ['requested', 'running'].includes(this.latestTest()?.status ?? '')) void this.loadTests();
         if (this.open() && this.visionaryOpen()) void this.loadVisionary();
-        if (this.open() && this.restartOpen()) void this.loadRestart();
       }, POLL_MS),
     );
   }
@@ -294,7 +283,7 @@ export class AgentTasksComponent {
     void this.actions.load();
     if (this.auth.can('run')) void this.loadTests();
     if (this.auth.can('plan')) void this.loadVisionary();
-    if (this.auth.can('admin')) void this.loadRestart();
+    if (this.auth.can('admin')) void this.restartStatus.load();
     setTimeout(() => this.search()?.nativeElement.focus());
   }
 
@@ -509,20 +498,11 @@ export class AgentTasksComponent {
     await this.store.perform(
       async () => {
         const { restart } = await this.api.post<{ restart: RestartState }>('/api/system/restart', { comment });
-        this.latestRestart.set(restart);
+        this.restartStatus.set(restart);
       },
       'Neustart angefordert – der Worker baut die Container neu und startet danach selbst neu.',
       false,
     );
-  }
-
-  private async loadRestart(): Promise<void> {
-    try {
-      const { restart } = await this.api.get<{ restart: RestartState | null }>('/api/system/restart');
-      this.latestRestart.set(restart);
-    } catch {
-      /* während des Neustarts ist die API kurz weg – nächster Versuch beim nächsten Takt */
-    }
   }
 
   private visionaryPath(): string {

@@ -31,17 +31,18 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 
 Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnungen sind dieselben wie die Badges („Visionär“ steht für Ideen vom Visionär, `source = visionary`):
 
-| Wert | Bedeutung |
-|---|---|
-| Mensch | von Hand erfasst; ältere Ideen ohne Angabe gelten ebenfalls als „Mensch“ |
-| Visionär | vom Visionär-Agenten vorgeschlagen (Badge „Visionär“) |
-| Routine | von einer Routine angelegt |
-| Produktion | Idee mit Herkunft Produktion |
-| GitHub | Idee mit Herkunft GitHub |
+| Wert       | Bedeutung                                                                |
+| ---------- | ------------------------------------------------------------------------ |
+| Mensch     | von Hand erfasst; ältere Ideen ohne Angabe gelten ebenfalls als „Mensch“ |
+| Visionär   | vom Visionär-Agenten vorgeschlagen (Badge „Visionär“)                    |
+| Routine    | von einer Routine angelegt                                               |
+| Produktion | Idee mit Herkunft Produktion                                             |
+| GitHub     | Idee mit Herkunft GitHub                                                 |
 
 **So filtern Sie:** Auf den Trichter neben dem Spaltenkopf „Herkunft“ klicken. Das Menü zeigt „Alle“ und jede Herkunft mit der Anzahl der Ideen. Auch Herkunften ohne Treffer stehen in fester Reihenfolge darin, mit der Anzahl 0.
 
 **Bedingungen:**
+
 - Mehrere Herkünfte gleichzeitig wählen: Die Liste zeigt Ideen, die mindestens eine der gewählten Herkünfte haben (z. B. Visionär und GitHub).
 - Der Herkunft-Filter lässt sich mit allen anderen Spaltenfiltern kombinieren, etwa Herkunft „Visionär“ mit einem Status-Filter. Dann erscheinen nur Ideen, die beide Bedingungen erfüllen. Dabei kann die Liste leer bleiben.
 - „Alle“ hebt den Herkunft-Filter auf. Ist kein Filter gesetzt, ist „Alle“ ausgewählt und nicht anklickbar.
@@ -91,8 +92,10 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 
 - Kandidaten: Aufträge `backlog`, `planned` und `blocked` ohne Sprint oder aus abgeschlossenen Sprints.
 - Score = Prioritätsgewicht (hoch 3, mittel 2, niedrig 1) × (Nutzen + 1) / (Kosten + 1); +2 für Bugs, +1 für Folgeaufträge mit erledigtem Vorgänger, −1,5 für Aufträge, die blockiert waren oder aus einem Sprint genommen wurden.
-- **Kapazität** = Median der Ist-Werte der letzten 3 abgeschlossenen Sprints: gemessene Laufzeit (Stunden) und Tokens aller Agent-Schritte erledigter Aufträge (`completedSprintUsage` in `src/api/usage.ts`). Ohne solche Sprints gilt `sprint_capacity_hours` (Standard 40 h); die Karte zeigt das als „Einstellung – noch keine Sprint-Historie“.
-- Aufgefüllt wird nach Score, solange Stunden (Schätzung `effort_hours`, sonst 2 h) und Tokens (`token_estimate`) in die Kapazität passen; der erste Auftrag passt immer.
+- **Einheit:** Planer, Routing und Statistik rechnen in **Agent-Stunden** (gemessene Laufzeit aller Agent-Schritte eines Auftrags) und gemessenen Tokens, nicht in Menschenstunden. Schnellschätzung und Auftragsautor schätzen in dieser Einheit und bekommen dafür die Ist-Werte ähnlicher Aufträge.
+- **Kalibrierung** (`src/core/estimate-calibration.ts`): Jede Schätzung merkt sich ihre Herkunft (`estimate_source`: `manual` von Hand, `quick` Schnellschätzung, `author` Auftragsautor, leer = Altbestand in Menschenstunden). Je Herkunft gilt ein Faktor = Median von Ist ÷ Schätzung der letzten 20 erledigten Aufträge mit Messung, getrennt für Stunden und Tokens; ab 5 Messwerten der Projektwert, sonst der Wert aller Projekte, sonst 1 (begrenzt auf 0,01–10). Der Planer rechnet mit den kalibrierten Werten; die Karte zeigt die Faktoren („Altbestand ×0,04 (19 Aufträge)“), ein Tooltip die gespeicherte Schätzung. Der Auftragsautor ersetzt Schnellschätzung und Altbestand, von Hand eingetragene Werte nie.
+- **Kapazität** = `sprint_capacity_hours` in Agent-Stunden (Standard 4 h; ein Auftrag braucht gemessen meist 0,2–0,5 h). Ein Sprint-Budget in Tokens (Einstellungen → Budget) ist zusätzlich die Token-Grenze. Die Historie bestimmt die Kapazität nicht – ein Sprint ohne Zeitfenster schafft genau, was eingeplant war –, die Karte zeigt aber den Median der gemessenen Agent-Stunden der letzten 3 Sprints (`completedSprintUsage` in `src/api/usage.ts`).
+- Aufgefüllt wird nach Score, solange die kalibrierten Stunden (ohne Schätzung 0,5 h) und Tokens in die Kapazität passen; der erste Auftrag passt immer.
 - Reihenfolge (`sprint_rank`): Ein Folgeauftrag kommt nur mit oder nach seinem Vorgänger in den Sprint und steht immer dahinter. Aufträge mit denselben betroffenen Dateien (Abschnitt „Technische Hinweise“ der Anforderung) stehen direkt hintereinander und laufen damit nacheinander unter der Projektsperre.
 - „Aktion notwendig“-Aufträge (`blocked` mit `action_todo`) aus dem vorigen Sprint werden immer übernommen. Andere blockierte Aufträge werden normal bewertet.
 
@@ -112,7 +115,7 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 **Grenzen:**
 
 - **Budget:** Der Autopilot selbst prüft kein Budget; die Läufe, die er anstößt, halten aber die Budget-Limits ein (Abschnitt 4, „Budget“). Eine eigene Prüfung im Autopiloten gehört in `autopilotGuard` (`src/api/sprint-planning.ts`, eigener Auftrag).
-- Die Kapazität vergleicht gemessene Agent-Laufzeit mit geschätzten Stunden der Kandidaten. Bei wenig Historie ist der Median ungenau. Sprints ohne gemessene Laufzeit (z. B. von Hand erledigt) zählen nicht als Historie.
+- Die Kalibrierung ist nur so gut wie die Messung: Solange Cache-Tokens nicht mitgezählt werden, sind gemessene Tokens zu niedrig, der Token-Faktor gleicht das nur bei gleichbleibender Messung aus. Mit unter 5 erledigten Aufträgen einer Herkunft gilt der Wert aller Projekte bzw. 1.
 - Die Roadmap rechnet mit der heutigen Kapazität und nimmt an, dass alle eingeplanten Aufträge erledigt werden.
 - Bereits geplante, noch nicht gestartete Sprints und ihre Aufträge fliessen nicht in Vorschlag und Roadmap ein.
 
@@ -135,7 +138,7 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
   - **ab 80 %:** genau eine Push-Warnung je Projekt, Zeitraum und Periode (gemerkt in `budget_warnings`);
   - **ab 100 %:** kein neuer Schritt; ein laufender Schritt endet regulär (das Limit kann um einen Schritt überschritten werden). Der Auftrag wird `blocked` mit „Aktion notwendig: Budget erreicht: erhöhen oder warten (…)“ – ohne Bug und ohne Bugfix; `budget_blocked` merkt den Zeitraum. Ist das Tages- oder Sprintbudget vor dem nächsten Auftrag erreicht – vor dem Durchgang oder mitten darin –, wartet genau ein Auftrag sichtbar, die übrigen bleiben eingeplant und starten keinen Lauf.
   - **Freigabe:** Zu Beginn jedes Durchgangs und nach dem Speichern der Limits (`releaseBudgetBlocks`) laufen Aufträge weiter, deren Zeitraum wieder Luft hat – das Tageslimit am Folgetag, sonst nach Erhöhen oder Entfernen des Limits; die Aktion verschwindet. „Erneut versuchen“ gibt einem Auftrag weiterhin ein neues Auftragsbudget.
-- **Modell-Routing:** Regeln je Projekt (`routing_rules`, Reihenfolge = Priorität; ohne eigene Regeln die Standardregeln) wählen je Schritt die Stufe „lokal“ (Ollama-Modell) oder „stark“ (CLI-Befehl, z. B. Claude): `docs` → lokal, Schätzung < 1 h → lokal, `backend` und Schätzung > 4 h → stark, `retry_count ≥ 1` → eine Stufe höher, Budget > 80 % → eine Stufe tiefer. Die erste Regel mit fester Stufe bestimmt die Grundstufe, danach verschieben alle zutreffenden „höher/tiefer“-Regeln sie in ihrer Reihenfolge – bei zwei Stufen gewinnt also die letzte zutreffende Verschiebung (Budget-Bremse vor Retry-Eskalation). Ist für die Stufe kein Modell konfiguriert, bleibt die Modellwahl je Rolle; der Tester wird nie umgeleitet. Jeder Schritt speichert `model` und `routing_rule`; das Lauf-Detail zeigt z. B. „Modell: qwen3.5:9b (Regel: docs → lokal)“ (`src/agent/model-routing.ts`).
+- **Modell-Routing:** Regeln je Projekt (`routing_rules`, Reihenfolge = Priorität; ohne eigene Regeln die Standardregeln) wählen je Schritt die Stufe „lokal“ (Ollama-Modell) oder „stark“ (CLI-Befehl, z. B. Claude): `docs` → lokal, Schätzung < 0,1 h → lokal, `backend` und Schätzung > 0,5 h → stark (kalibrierte Agent-Stunden, siehe Abschnitt 3a), `retry_count ≥ 1` → eine Stufe höher, Budget > 80 % → eine Stufe tiefer. Die erste Regel mit fester Stufe bestimmt die Grundstufe, danach verschieben alle zutreffenden „höher/tiefer“-Regeln sie in ihrer Reihenfolge – bei zwei Stufen gewinnt also die letzte zutreffende Verschiebung (Budget-Bremse vor Retry-Eskalation). Ist für die Stufe kein Modell konfiguriert, bleibt die Modellwahl je Rolle; der Tester wird nie umgeleitet. Jeder Schritt speichert `model` und `routing_rule`; das Lauf-Detail zeigt z. B. „Modell: qwen3.5:9b (Regel: docs → lokal)“ (`src/agent/model-routing.ts`).
 - **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 - **Visuelle Abnahme (`visual_tester`, nach dem Tester):** Nur bei Kategorie Frontend oder Fullstack und gesetzter Vorschau-Adresse (Einstellungen → Visuelle Prüfung), sonst ohne Fehler übersprungen. Playwright (Chromium, Profile „Desktop Chrome“ und „Pixel 7“ wie in `e2e/playwright.config.ts`) nimmt jede konfigurierte Seite auf; der Vergleich läuft gegen die zuletzt gespeicherte Aufnahme derselben Seite und desselben Geräts (kein zweiter Checkout) mit `pixelmatch`, solange es nicht installiert ist mit einem eingebauten Vergleich nach demselben Farbabstand. Masken (CSS-Selektoren) und Passwortfelder werden vor der Aufnahme abgedeckt. Geprüft werden Überbreite auf dem Handy (dieselbe Messung wie `?layoutcheck`, `src/core/layout-measure.ts`), Konsolenfehler, Ressourcen mit HTTP-Fehler oder fehlende Bilder, leere Seiten und abgeschnittene Texte (nur zur Ansicht). Die Befunde stehen als `@@CHECK`-Zeilen in der Ausgabe und als Prüfpunkte „Visuelle Prüfung“ in der Abnahme; manuelle Punkte wie „auf dem Handy prüfen“ hakt der Schritt ab, wenn alle Handy-Prüfungen bestanden sind. Optional beurteilt ein Bildmodell (Befehl des Agents, z. B. Claude-CLI, sonst ein Ollama-Bildmodell) jedes Akzeptanzkriterium. Der Schritt blockiert den Auftrag nie: Nach 3 Minuten oder bei technischen Fehlern erscheint „visuelle Prüfung nicht möglich“. Test-Logins stammen nur aus der `.env.example` des Projekts und erscheinen nie in Bildern, Logs oder Prüftexten. Im Auftrag zeigt der Reiter „Ansicht“ Vorher, Nachher und Diff je Gerät; „Optisch freigeben“ speichert Person und Zeitpunkt. Chromium prüft und installiert der Einrichtungsassistent (`npx --no-install playwright install chromium`).
@@ -199,6 +202,7 @@ Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Be
 **Wann gescannt wird:** Alle 15 Minuten und nach jedem erfolgreichen Deploy, mit derselben Logik.
 
 **Bedingungen:**
+
 - **Ohne Dienste kein Scan.** Ist für das Projekt kein Dienst eingetragen, findet kein Aufruf statt. Die Einstellungen zeigen dann keine Scan-Angaben.
 - **Lückenloses Fenster.** Jeder Scan liest ab dem Zeitpunkt des letzten erfolgreichen Scans. Ein verspäteter Lauf erfasst die Zeit dazwischen vollständig. Zeilen, die ein früherer Scan schon gezählt hat, zählen nicht noch einmal.
 - **Begrenzung auf 1 Stunde.** Liegt der letzte Scan mehr als eine Stunde zurück, wird das Fenster auf die letzte Stunde gekürzt. Die übersprungene Zeit steht in den Einstellungen unter „Lücke“. Zeilen gehen nicht stillschweigend verloren.
@@ -212,6 +216,7 @@ Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Be
 **Anzeige in den Einstellungen „Betrieb“:** Zeitpunkt des letzten Scans, letzter Fehler, Anzahl erfasster Ereignisse mit Vorkommen und, falls vorhanden, die Lücke. Vor dem ersten Scan steht dort „Noch kein Scan“.
 
 **Bug-Detail:** Der Abschnitt „Betrieb: Verlauf und Deploy-Verdacht“ zeigt:
+
 - **Verlauf:** die Vorkommen je Stunde für die letzten 48 Stunden, mit Summe und Spitzenwert.
 - **Ereignisse:** Quelle, Anzahl, Zeitpunkte des ersten und letzten Auftretens sowie das gekürzte, maskierte Beispiel und der Fingerabdruck.
 - **Deploy-Verdacht:** Tritt ein Ereignis erstmals innerhalb von 30 Minuten nach einem Deploy auf, nennt Dev Log den Deploy-Zeitpunkt, die seit dem vorigen Deploy erledigten Aufträge und die zugehörigen Sprints. Ohne solchen Zusammenhang steht dort „Kein Deploy-Verdacht“.
@@ -227,6 +232,7 @@ Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, biet
 **Was der Vorschlag nennt:** „Zuletzt ausgerollt“ mit dem Sprint-Tag des letzten Deploys und dessen Zeitpunkt, „davor“ den unmittelbar vorherigen Sprint-Tag. Es wird immer nur ein Schritt zurück angeboten.
 
 **Knopf deaktiviert (mit Grund unter dem Knopf):**
+
 - Der Sprint-Tag des letzten Deploys ist nicht bekannt.
 - Es gibt keinen vorherigen Sprint-Tag.
 - Es läuft bereits ein Deploy des Projekts.
@@ -244,7 +250,7 @@ Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, biet
 
 **Der Bug bleibt offen:** Nach einem Rollback ändert Dev Log den Bug nicht auf „Behoben“. Das entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag, bis das nächste „Live schalten“ ihn wieder auf `main` zieht.
 
-*[Printscreens für diesen Abschnitt fehlen noch: Knopf aktiv, Knopf deaktiviert mit Grund, Bestätigungsdialog mit Migrationswarnung, Rollback-Protokoll.]*
+_[Printscreens für diesen Abschnitt fehlen noch: Knopf aktiv, Knopf deaktiviert mit Grund, Bestätigungsdialog mit Migrationswarnung, Rollback-Protokoll.]_
 
 ## 6. Git im Sprint
 
