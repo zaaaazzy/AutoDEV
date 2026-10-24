@@ -97,12 +97,14 @@ Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (
 | Testbefehle (Live schalten) | `npm run build`, `npm test`, `npm run test:smoke` |
 | Testbefehle je Auftrag | `npm run typecheck`, `npx vitest run {tests}`, `npm run test:smoke` |
 | Review-Befehl | `npm run review` (baut und liefert im Review-Container auf `REVIEW_FRONTEND_PORT` aus) |
-| Vorschau-Adresse (visuelle Prüfung) | `http://localhost:5173` |
+| Vorschau-Adresse (visuelle Prüfung) | `http://localhost:5180` |
 | Regeln für die Agents | Spiellogik in `src/logic/` getrennt von den Phaser-Szenen, Tests neben der Logik |
 
 **Version ansehen** in der Sprint-Ansicht startet damit den gewählten Stand des Spiels im Review-Container. Für die
-visuelle Prüfung starte im Projektordner einmal `npm run dev`: Der Vite-Dev-Server auf Port 5173 lädt jede Änderung
-sofort neu (Hot Reload), die Prüfung zeigt also immer den neuesten Stand.
+visuelle Prüfung starte im Projektordner einmal `npm run dev`: Der Vite-Dev-Server auf Port 5180 lädt jede Änderung
+sofort neu (Hot Reload), die Prüfung zeigt also immer den neuesten Stand. Port 5180 statt des Vite-Standards 5173,
+damit das Spiel nicht mit anderen Vite-Projekten kollidiert; ein anderer Port geht mit `GAME_DEV_PORT=<port> npm run dev`
+(dann die Vorschau-Adresse in den Einstellungen anpassen).
 
 **Linux:** Fehlen Chromium Systembibliotheken (Smoke-Test bricht mit „missing dependencies“ ab), einmalig
 `sudo npx playwright install-deps chromium` ausführen. Liegen die Playwright-Browser an einem eigenen Ort

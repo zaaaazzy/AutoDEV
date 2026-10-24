@@ -155,7 +155,7 @@ export function folderFiles(folder: string, name: string, root = TEMPLATE_FOLDER
 }
 
 /** Vorschau-Port des Phaser-Dev-Servers (vite.config.ts der Vorlage, strictPort). */
-export const PHASER_DEV_URL = 'http://localhost:5173';
+export const PHASER_DEV_URL = 'http://localhost:5180';
 
 export const TEMPLATES: ProjectTemplate[] = [
   {

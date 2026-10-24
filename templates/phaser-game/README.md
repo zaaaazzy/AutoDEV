@@ -8,7 +8,7 @@ dauert 30 Sekunden.
 
 | Befehl | Zweck |
 |---|---|
-| `npm run dev` | Entwicklungsserver mit Hot Reload auf http://localhost:5173 |
+| `npm run dev` | Entwicklungsserver mit Hot Reload auf http://localhost:5180 (anderer Port: `GAME_DEV_PORT`) |
 | `npm run build` | Typprüfung und Produktions-Build nach `dist/` |
 | `npm test` | Unit-Tests der Spiellogik (Vitest, ohne Browser) |
 | `npm run test:smoke` | Baut und prüft im Browser (Playwright), dass der Canvas zeichnet und keine Konsolenfehler auftreten |
