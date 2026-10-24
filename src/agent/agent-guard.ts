@@ -112,6 +112,10 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   return policy.edit ? null : 'Dateien ändern ist für diesen Agent nicht freigegeben.';
 }
 
+/** Relativer Pfad im Projekt: nicht absolut, ohne „..“-Segment, keine URL (data:, file: …). */
+const projectRelativeFile = (path: string): boolean =>
+  !!path && !isAbsolute(path) && !path.split(/[\\/]/).includes('..') && !/^[A-Za-z][\w+.-]*:/.test(path);
+
 /** Nennt ein Pfadteil ein Geheimnis (SECRET_NAME) oder einen Schlüssel-Ordner? Auch Glob-Muster wie *.{pem,key}. */
 const secretPart = (part: string): boolean =>
   SECRET_DIRECTORIES.has(part.toLowerCase()) ||
@@ -157,11 +161,18 @@ export function secretReadProblem(input: GuardInput, projectRoot: string): strin
   return hit === undefined ? null : `${hit}: Geheimnisse (.env, Schlüssel, Zertifikate) sind für Agents gesperrt.`;
 }
 
-/** node --version oder node --check mit genau einer Datei (kein Optionswort, keine Shell-Erweiterung). */
+/** node --version oder node --check mit genau einer relativen Projektdatei (kein Optionswort, keine Shell-Erweiterung). */
 function nodeCheckOnly(words: readonly ShellWord[]): boolean {
   const [, option, file] = words;
   if (words.length === 2) return option?.text === '--version';
-  return words.length === 3 && option?.text === '--check' && !!file && !file.expanded && !file.text.startsWith('-');
+  return (
+    words.length === 3 &&
+    option?.text === '--check' &&
+    !!file &&
+    !file.expanded &&
+    !file.text.startsWith('-') &&
+    projectRelativeFile(file.text)
+  );
 }
 
 /**
@@ -224,7 +235,7 @@ export function bashProblem(
     }
     // node lädt auch unter --check Module aus --import/-r und führt sie aus: nur genau diese zwei Formen.
     if (program === 'node' && !nodeCheckOnly(words)) {
-      return `„${part}“: erlaubt sind nur „node --version“ und „node --check <datei>“ ohne weitere Optionen.`;
+      return `„${part}“: erlaubt sind nur „node --version“ und „node --check <relative Projektdatei>“ ohne weitere Optionen.`;
     }
     if (
       (program === 'docker-compose' && subcommand.startsWith('-')) ||
