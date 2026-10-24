@@ -154,11 +154,79 @@
 .dt-chip button:hover {
   background: rgb(54 96 143 / 15%);
 }
+.dt-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 16px;
+}
 .dt-count {
   margin: 0;
   color: #8a938c;
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Blättern ab 20 Zeilen: ruhige Knöpfe im Stil der Filter-Chips, aktuelle Seite grün */
+.dt-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+}
+.dt-page {
+  display: inline-grid;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 8px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #4a554d;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+.dt-page:hover:not(:disabled, .active) {
+  background: var(--green-soft);
+  color: var(--green);
+}
+.dt-page:focus-visible {
+  outline: 2px solid var(--green-light);
+  outline-offset: 1px;
+}
+.dt-page.active {
+  background: var(--green);
+  color: var(--surface);
+  font-weight: 650;
+}
+.dt-page:disabled {
+  color: var(--line-strong);
+  cursor: default;
+}
+.dt-page-step {
+  padding: 0;
+}
+.dt-page-gap {
+  min-width: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.dt-page-of {
+  display: none;
+  padding: 0 6px;
+  color: #4a554d;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
 }
 .dt-reset-all {
   margin-left: auto;
@@ -638,7 +706,25 @@ input.dt-select:disabled {
     }
 }
 
+/* Schmale Handys: statt Seitenzahlen nur ‹ 2 / 7 › – Zählzeile und Blättern teilen sich die Breite */
+@media (max-width: 480px) {
+  .dt-footer {
+    justify-content: space-between;
+  }
+  .dt-pager .dt-page:not(.dt-page-step),
+  .dt-pager .dt-page-gap {
+    display: none;
+  }
+  .dt-page-of {
+    display: inline;
+  }
+}
+
 @media (pointer: coarse) {
+  .dt-page {
+    min-width: 40px;
+    height: 40px;
+  }
   .dt-expand {
       min-width: 40px;
       min-height: 40px;
