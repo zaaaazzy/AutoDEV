@@ -1,0 +1,9 @@
+# Agent-Projekt "aideation-agent" (Agent-Worktree): keine Host-Ports, damit es nie die Ports des Live-Stacks
+# (5433, 3100, 80, 443) belegt. Erreichbar sind die Dienste nur im Compose-Netz bzw. über docker compose exec.
+services:
+  db-ports:
+    restart: unless-stopped
+  frontend-ports:
+    restart: unless-stopped
+  https-ports:
+    restart: unless-stopped
