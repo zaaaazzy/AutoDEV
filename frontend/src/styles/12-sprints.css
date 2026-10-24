@@ -99,10 +99,6 @@
 .sprint-pool:not([open]) > summary {
   margin-bottom: 0;
 }
-.sprint-pool-bar {
-  flex-wrap: wrap;
-  margin-bottom: 8px;
-}
 
 /* Zähler und Rang-Kreis (Workflow der Agents) */
 .kanban-count {
