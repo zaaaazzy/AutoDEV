@@ -488,12 +488,55 @@ test('withAgentPermissions: Visionär (nur lesen) ohne Datei-Werkzeuge und ohne 
   assert.deepEqual(policyOf(custom), { create: false, edit: false, shell: false, scopes: [] });
 });
 
-test('withAgentPermissions: eigene Werkzeug-Regeln im Befehl bleiben, der Wächter erlaubt Dateien', () => {
-  const command = withAgentPermissions(['claude', '--disallowed-tools', 'WebFetch', '-p'], 'developer', all, []);
-  assert.deepEqual(command.slice(-3), ['--disallowed-tools', 'WebFetch', '-p']);
-  assert.equal(command.includes('--disallowedTools'), false, 'keine zusätzlichen Sperren');
+test('withAgentPermissions: eigene Sperren im Befehl bleiben, der Wächter erlaubt Dateien nach Zuweisung', () => {
+  const command = withAgentPermissions(['claude', '--disallowed-tools', 'WebFetch', '-p'], 'developer', all, ['files']);
+  assert.equal(option(command, '--disallowedTools'), 'WebFetch');
+  assert.equal(command.includes('--disallowed-tools'), false, 'in einem einzigen --disallowedTools zusammengeführt');
+  assert.deepEqual(command.slice(-1), ['-p']);
   assert.equal(command.includes('--allowedTools'), false);
   assert.deepEqual(policyOf(command), { create: true, edit: true, scopes: [] });
+});
+
+test('withAgentPermissions: --disallowedTools im Befehl schaltet keine Datei-Rechte frei (Regression)', () => {
+  for (const flags of [['--disallowedTools', 'WebFetch'], ['--disallowedTools=WebFetch']]) {
+    const command = withAgentPermissions(['claude', ...flags, '-p', '{prompt}'], 'developer', all, ['files:create'], [
+      'frontend',
+    ]);
+    const label = flags.join(' ');
+    // Der Hook selbst trägt die Richtlinie samt Ordner, nicht nur das Objekt im Code.
+    assert.deepEqual(policyOf(command), { create: true, edit: false, scopes: ['frontend'] }, label);
+    assert.equal(command.filter((part) => /^--disallowed-?tools/i.test(part)).length, 1, label);
+    const disallowed = (option(command, '--disallowedTools') ?? '').split(',');
+    for (const tool of ['Edit', 'MultiEdit', 'WebFetch']) assert.ok(disallowed.includes(tool), `${label}: ${tool}`);
+    assert.ok(!disallowed.includes('Write'), `${label}: Anlegen bleibt erlaubt`);
+    assert.deepEqual(command.slice(-2), ['-p', '{prompt}'], label);
+  }
+  // Mehrere eigene Sperren und Regeln mit Leerzeichen bleiben vollständig erhalten.
+  const several = withAgentPermissions(
+    ['claude', '--disallowedTools', 'WebFetch,Bash(git log:*)', '--disallowed-tools=Edit', '-p'],
+    'developer',
+    all,
+    [],
+  );
+  assert.deepEqual(option(several, '--disallowedTools')?.split(','), [
+    'Write',
+    'Edit',
+    'NotebookEdit',
+    'MultiEdit',
+    'WebFetch',
+    'Bash(git log:*)',
+  ]);
+});
+
+test('withAgentPermissions: --allowedTools im Befehl weitet keine Datei-Rechte auf', () => {
+  for (const flags of [['--allowedTools', 'Write,Edit,Bash'], ['--allowed-tools=Write,Edit']]) {
+    const command = withAgentPermissions(['claude', ...flags, '-p'], 'developer', all, ['files:create'], ['frontend']);
+    const label = flags.join(' ');
+    assert.deepEqual(policyOf(command), { create: true, edit: false, scopes: ['frontend'] }, label);
+    assert.deepEqual(option(command, '--disallowedTools')?.split(','), ['Edit', 'NotebookEdit', 'MultiEdit'], label);
+    // Die eigenen Freigaben des Admins bleiben, AIdeation hängt keine weiteren an.
+    assert.equal(command.filter((part) => /^--allowed-?tools/i.test(part)).length, 1, label);
+  }
 });
 
 test('withAgentPermissions: genau die zugewiesenen und im Projekt verfügbaren Befehle', () => {
@@ -515,7 +558,7 @@ test('withAgentPermissions: Logs als zusätzlicher Ordner, Dienste mit Benutzer-
   const command = withAgentPermissions(CLAUDE, 'developer', all, ['logs', 'services', 'database'], [], ['/logs']);
   assert.equal(option(command, '--add-dir'), '/logs');
   assert.match(option(command, '--allowedTools') ?? '', /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/);
-  assert.equal(option(command, '--disallowedTools'), 'Write,Edit,NotebookEdit');
+  assert.equal(option(command, '--disallowedTools'), 'Write,Edit,NotebookEdit,MultiEdit');
   // Ohne Logs-Recht kein zusätzlicher Ordner.
   assert.equal(withAgentPermissions(CLAUDE, 'developer', all, [], [], ['/logs']).includes('--add-dir'), false);
 });
