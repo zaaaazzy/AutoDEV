@@ -3,7 +3,12 @@ import { setActionTodo } from '../runner/action-todo.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
-import { canSetDevelopmentStatus, isAssignableSprintStatus } from '../core/development-transitions.js';
+import {
+  SPRINT_LOCKED_DEVELOPMENT_STATUSES,
+  canSetDevelopmentStatus,
+  isAssignableSprintStatus,
+  isSprintLockedDevelopmentStatus,
+} from '../core/development-transitions.js';
 import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
 import { developmentPatchRole } from './roles.js';
@@ -320,7 +325,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
               updated_at = NOW()
         WHERE id = $1 AND sprint_id IS NOT NULL
-          AND status NOT IN ('${DEVELOPMENT_STATUS.inProgress}', '${DEVELOPMENT_STATUS.done}')
+          AND status NOT IN (${SPRINT_LOCKED_DEVELOPMENT_STATUSES.map((status) => `'${status}'`).join(', ')})
         RETURNING ${DEV_COLUMNS}`,
         [request.params.id],
       );
@@ -414,26 +419,39 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         return;
       }
       const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+      const sprintChange = fields.find((field) => field.column === 'sprint_id');
       let from: string | undefined;
-      if (target) {
-        const current = await pool.query<{ status: string }>(`SELECT status FROM development_items WHERE id = $1`, [
-          request.params.id,
-        ]);
+      let sprintUnchanged = false;
+      if (target || sprintChange) {
+        const current = await pool.query<{ status: string; sprintId: string | null }>(
+          `SELECT status, sprint_id AS "sprintId" FROM development_items WHERE id = $1`,
+          [request.params.id],
+        );
         from = current.rows[0]?.status;
         if (!from) {
           response.status(404).json({ message: 'Auftrag nicht gefunden.' });
           return;
         }
-        if (!canSetDevelopmentStatus(from, target)) {
+        if (target && !canSetDevelopmentStatus(from, target)) {
           response.status(409).json({
             message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
           });
           return;
         }
+        // Erst der Auftragsstatus, dann der Ziel-Sprint. Derselbe Sprint wie bisher ist keine Änderung (Formular speichert
+        // ihn mit), sonst bräche das Speichern anderer Felder bei laufenden Aufträgen.
+        sprintUnchanged = sprintChange?.value === (current.rows[0].sprintId ?? null);
+        if (sprintChange && !sprintUnchanged && isSprintLockedDevelopmentStatus(from)) {
+          response.status(409).json({
+            message: 'Aufträge in Arbeit, in Freigabe oder erledigt lassen sich keinem anderen Sprint zuordnen.',
+          });
+          return;
+        }
       }
-      const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
+      const sprintId = sprintChange?.value;
       let targetSprintStatus: string | undefined;
-      if (typeof sprintId === 'string') {
+      // Der bisherige Sprint darf inzwischen im Review oder abgeschlossen sein (wie bei Bugs).
+      if (typeof sprintId === 'string' && !sprintUnchanged) {
         const sprint = await pool.query<{ sprintStatus: string }>(
           `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
           WHERE s.id = $1 AND e.id = $2`,
@@ -465,9 +483,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
           return;
         }
       }
-      const sprintField = fields.find((field) => field.column === 'sprint_id');
+      const sprintField = sprintChange;
       const agentField = fields.find((field) => field.column === 'agent_id');
-      // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
+      // Status oder Sprint nur ändern, wenn der Status seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
       const update = buildUpdate(
         'development_items',
         request.params.id,

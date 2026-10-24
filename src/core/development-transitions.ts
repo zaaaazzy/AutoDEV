@@ -18,6 +18,16 @@ export function canSetDevelopmentStatus(from: string, to: string): boolean {
   return from === to || (MANUAL_DEVELOPMENT_TRANSITIONS[from]?.includes(to) ?? false);
 }
 
+/**
+ * In Arbeit, in Freigabe oder erledigt hängt ein Auftrag fest an seinem Sprint (Sprint-Branch, Fortschritt, Bericht):
+ * weder Sprint-Auswahl (PATCH) noch „Aus dem Sprint nehmen“ dürfen ihn umhängen.
+ */
+export const SPRINT_LOCKED_DEVELOPMENT_STATUSES: readonly string[] = ['in_progress', 'approval', 'done'];
+
+export function isSprintLockedDevelopmentStatus(status: string): boolean {
+  return SPRINT_LOCKED_DEVELOPMENT_STATUSES.includes(status);
+}
+
 /** Aufträge lassen sich nur Sprints zuordnen, die noch laufen können (nicht im Review, nicht abgeschlossen). */
 export const ASSIGNABLE_SPRINT_STATUSES: readonly string[] = ['planned', 'active'];
 

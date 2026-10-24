@@ -25,6 +25,8 @@
             [ngModel]="item.sprintId"
             (ngModelChange)="update(item.id, { sprintId: $event || null })"
             [name]="'sprint-' + item.id"
+            [disabled]="sprintLocked()"
+            [title]="sprintLocked() ? 'In Arbeit, in Freigabe oder erledigt bleibt der Auftrag in seinem Sprint.' : ''"
           >
             <option [ngValue]="null">Kein Sprint</option>
             @for (sprint of sprintOptions(); track sprint.id) {
