@@ -130,108 +130,7 @@
   border-color: #f1d8b5;
   background: linear-gradient(180deg, #fffaf3, var(--surface) 120px);
 }
-.attention-list {
-  display: grid;
-  gap: 10px;
-  margin: 12px 0 0;
-  padding: 0;
-  list-style: none;
-}
-.attention-card {
-  display: grid;
-  gap: 8px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface);
-}
-.attention-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-.attention-title {
-  font-size: 15px;
-  text-align: left;
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font-weight: 650;
-}
-.attention-reasons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.attention-reason {
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-}
-.attention-reason.error {
-  background: #fbe9e6;
-  color: #a33d26;
-}
-.attention-reason.warn {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-.attention-reason.info {
-  background: #e7eff7;
-  color: var(--blue);
-}
 
-/* „Was ist passiert?“ und „Das musst du tun“: zwei klar getrennte Blöcke je Karte. */
-.attention-block {
-  display: grid;
-  gap: 6px;
-  padding: 10px 14px;
-  border-radius: 10px;
-}
-.attention-block h3 {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.attention-block p,
-.attention-block ol,
-.attention-block ul {
-  margin: 0;
-}
-.attention-block ol,
-.attention-block ul.attention-steps {
-  display: grid;
-  gap: 4px;
-  padding-left: 20px;
-}
-.attention-what {
-  background: #f6f6f3;
-}
-.attention-what h3 {
-  color: var(--muted);
-}
-.attention-task {
-  border-left: 3px solid #e0a03a;
-  background: #fdf6ec;
-}
-.attention-task h3 {
-  color: var(--warn);
-}
-.attention-next {
-  font-weight: 600;
-}
-.attention-next a {
-  margin-left: 6px;
-  font-weight: 400;
-}
-.attention-task .todo-list {
-  margin: 0;
-}
 .attention-actions {
   display: flex;
   flex-wrap: wrap;
@@ -293,38 +192,6 @@
   white-space: pre-wrap;
 }
 
-/* Karte unter „Aktionen“: ein Grund („Warum“), ein nächster Schritt („Was jetzt“), eine Hauptaktion, Rest unter „Mehr“. */
-.attention-card.focused {
-  border-color: #e0a03a;
-  box-shadow: 0 0 0 3px var(--warn-soft);
-}
-.attention-label {
-  display: block;
-  margin-bottom: 2px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-.attention-why {
-  margin: 0;
-}
-.attention-now {
-  display: grid;
-  gap: 6px;
-  padding: 10px 14px;
-  border-left: 3px solid #e0a03a;
-  border-radius: 10px;
-  background: #fdf6ec;
-}
-.attention-now .attention-label {
-  color: var(--warn);
-}
-.attention-now p,
-.attention-now .todo-list {
-  margin: 0;
-}
 .attention-suggestion {
   margin: 0;
   padding: 8px 12px;
@@ -775,41 +642,41 @@ app-wait-status {
 
 @media (max-width: 720px) {
   .git-meta,
-    .git-ref-remote,
-    .git-ref-tag {
-      display: none;
-    }
+  .git-ref-remote,
+  .git-ref-tag {
+    display: none;
+  }
   .git-ref {
-      max-width: 120px;
-    }
+    max-width: 120px;
+  }
   .running-kind {
-      min-width: 0;
-    }
+    min-width: 0;
+  }
   .attention-table .attention-body {
-      grid-template-columns: 1fr;
-      padding: 12px 10px;
-    }
+    grid-template-columns: 1fr;
+    padding: 12px 10px;
+  }
   .attention-table .attention-actions .button.danger {
-      margin-left: 0;
-    }
+    margin-left: 0;
+  }
 }
 
 @media (max-width: 600px) {
   .attention-actions .button {
-      flex: 1 1 calc(50% - 4px);
-      justify-content: center;
-    }
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+  }
   .quality-agents th:nth-child(2),
-    .quality-agents td:nth-child(2) {
-      display: none;
-    }
+  .quality-agents td:nth-child(2) {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .test-live-dot {
-      animation: none;
-    }
+    animation: none;
+  }
   .wait-status-bar.indeterminate span {
-      animation: none;
-    }
+    animation: none;
+  }
 }

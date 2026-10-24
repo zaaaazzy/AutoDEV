@@ -14,12 +14,6 @@
   border-radius: 9px;
   background: #f7f8f5;
 }
-.group-title {
-  margin: 18px 0 5px;
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-}
 .doc-link {
   display: block;
   width: 100%;
@@ -45,12 +39,6 @@
 /* ── Dokumentation: Suche, Gruppen, Buch-Modus ───────────────────────── */
 .docs-layout.collapsed {
   grid-template-columns: minmax(0, 1fr);
-}
-.docs-index-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
 }
 .book-toggle {
   display: inline-flex;
@@ -79,9 +67,6 @@
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-.book-open {
-  justify-self: start;
 }
 .doc-group {
   margin-top: 10px;
@@ -366,63 +351,63 @@ a.doc-link {
 
 @media (min-width: 721px) {
   .docs-index.is-collapsed {
-      display: none;
-    }
+    display: none;
+  }
 }
 
 @media (max-width: 720px) {
   .docs-layout {
-      grid-template-columns: minmax(0, 1fr);
-    }
+    grid-template-columns: minmax(0, 1fr);
+  }
   .docs-layout aside {
-      padding: 0;
-      border: 0;
-    }
+    padding: 0;
+    border: 0;
+  }
   .book-toggle {
-      display: none !important;
-    }
+    display: none !important;
+  }
   .docs-layout aside.docs-index {
-      padding: 0 0 12px;
-      border: 0;
-      border-bottom: 1px solid var(--line);
-    }
+    padding: 0 0 12px;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+  }
   .docs-index-bar {
-      display: flex;
-      width: 100%;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #f7f8f5;
-      color: var(--ink);
-      font-weight: 700;
-      text-align: left;
-    }
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #f7f8f5;
+    color: var(--ink);
+    font-weight: 700;
+    text-align: left;
+  }
   .docs-index-current {
-      flex: 1;
-      overflow: hidden;
-      font-weight: 500;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+    flex: 1;
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .docs-index-chevron {
-      transition: transform 0.2s;
-    }
+    transition: transform 0.2s;
+  }
   .docs-index.is-collapsed .docs-index-chevron {
-      transform: rotate(180deg);
-    }
+    transform: rotate(180deg);
+  }
   .docs-index-body {
-      margin-top: 10px;
-    }
+    margin-top: 10px;
+  }
   .docs-index.is-collapsed .docs-index-body {
-      display: none;
-    }
+    display: none;
+  }
   .docs-layout.collapsed aside.docs-index {
-      padding-bottom: 0;
-      border-bottom: 0;
-    }
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
   .doc-head-meta {
-      justify-content: flex-start;
-    }
+    justify-content: flex-start;
+  }
 }

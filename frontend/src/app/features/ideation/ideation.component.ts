@@ -119,9 +119,9 @@ export class IdeationComponent {
     },
     {
       id: 'effortHours',
-      header: 'Aufwand',
-      value: (idea) => formatHours(idea.effortHours),
-      sortValue: (idea) => idea.effortHours ?? -1,
+      header: 'Aufwand (Agent-Std.)',
+      value: (idea) => formatHours(idea.calibratedHours ?? idea.effortHours),
+      sortValue: (idea) => idea.calibratedHours ?? idea.effortHours ?? -1,
     },
     {
       id: 'createdAt',

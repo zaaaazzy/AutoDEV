@@ -475,15 +475,6 @@
 .chat-msg.mine .chat-text {
   white-space: pre-wrap;
 }
-.agent-task-agent {
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--green-soft);
-  color: var(--green);
-  font-size: 0.72rem;
-  font-weight: 600;
-}
 
 /* Chat-Eingabe: „/“ Agent, „@“ Verweis – Vorschläge als Bubbles, Auswahl als Chips */
 .composer {
@@ -842,54 +833,54 @@ body.chat-docked .chat-bubble-window:not(:has(.chat-docked)) {
 
 @media (max-width: 720px) {
   .chat .section-heading {
-      position: relative;
-      flex-direction: row;
-      align-items: center;
-    }
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+  }
   .agent-tasks {
-      position: static;
-    }
+    position: static;
+  }
   .agent-tasks-menu {
-      right: 0;
-      left: 0;
-      width: auto;
-    }
+    right: 0;
+    left: 0;
+    width: auto;
+  }
   .agent-tasks-list {
-      max-height: 45vh;
-    }
+    max-height: 45vh;
+  }
   .agent-task-detail {
-      position: static;
-      width: auto;
-      max-height: 30vh;
-      margin-bottom: 6px;
-      box-shadow: none;
-    }
+    position: static;
+    width: auto;
+    max-height: 30vh;
+    margin-bottom: 6px;
+    box-shadow: none;
+  }
   .chat-clear-label {
-      display: none;
-    }
+    display: none;
+  }
   .chat-clear {
-      padding: 6px 9px;
-    }
+    padding: 6px 9px;
+  }
   .chat-bubble {
-      right: 12px;
-      bottom: 12px;
-      width: 50px;
-      height: 50px;
-    }
+    right: 12px;
+    bottom: 12px;
+    width: 50px;
+    height: 50px;
+  }
   .chat-bubble-window {
-      right: 12px;
-      bottom: 72px;
-      height: min(520px, calc(100vh - 100px));
-    }
+    right: 12px;
+    bottom: 72px;
+    height: min(520px, calc(100vh - 100px));
+  }
   .chat.chat-modal {
-      width: calc(100vw - 16px);
-      height: calc(100vh - 16px);
-      padding: 12px;
-    }
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    padding: 12px;
+  }
 }
 
 @media (hover: none) {
   .agent-task-icon {
-      opacity: 1;
-    }
+    opacity: 1;
+  }
 }

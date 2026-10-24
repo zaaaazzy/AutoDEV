@@ -1,10 +1,5 @@
 import { logged } from '../core/log.js';
-import {
-  EXTERNAL_TEXT_END,
-  EXTERNAL_TEXT_START,
-  UNTRUSTED_BUG_SOURCES_SQL,
-  unapprovedBugSql,
-} from '../core/bug-trust.js';
+import { fencedBugDescriptionSql, unapprovedBugSql } from '../core/bug-trust.js';
 import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
@@ -278,14 +273,13 @@ export async function queueBugFix(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
-     SELECT b.project_slug, $2, 'Bug: ' || b.title,
+     SELECT b.project_slug, $2, left('Bug: ' || b.title, 180),
             COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
-            CASE WHEN b.source IN ${UNTRUSTED_BUG_SOURCES_SQL} AND strpos(b.description, $5) = 0 AND strpos(b.description, $7) = 0
-                 THEN $5 || E'\n' || b.description || E'\n' || $6 ELSE b.description END,
+            ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
             'planned', 'high', 'bug', b.id, TRUE
        FROM bugs b WHERE b.id = $1 AND NOT ${unapprovedBugSql('b')}
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO NOTHING`,
-    [bugId, item.sprintId ?? null, item.title, intro ?? null, EXTERNAL_TEXT_START, EXTERNAL_TEXT_END, UNTRUSTED_START],
+    [bugId, item.sprintId ?? null, item.title, intro ?? null],
   );
 }
 
