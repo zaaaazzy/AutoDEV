@@ -8,6 +8,8 @@ export const IDEATION_STATUS = {
   rejected: 'rejected',
 } as const;
 export type IdeationStatus = (typeof IDEATION_STATUS)[keyof typeof IDEATION_STATUS];
+/** Abgeschlossene Ideen: alle anderen (auch ohne Status) gelten als offen. */
+export const CLOSED_IDEATION_STATUSES: readonly string[] = [IDEATION_STATUS.accepted, IDEATION_STATUS.rejected];
 export const EDITABLE_IDEATION_STATUSES = new Set<string>([
   IDEATION_STATUS.idea,
   IDEATION_STATUS.considering,
@@ -27,6 +29,8 @@ export const DEVELOPMENT_STATUS = {
 } as const;
 export type DevelopmentStatus = (typeof DEVELOPMENT_STATUS)[keyof typeof DEVELOPMENT_STATUS];
 export const DEVELOPMENT_STATUSES = new Set<string>(Object.values(DEVELOPMENT_STATUS));
+/** Abgeschlossene Aufträge: alle anderen (auch ohne Status) gelten als offen. */
+export const CLOSED_DEVELOPMENT_STATUSES: readonly string[] = [DEVELOPMENT_STATUS.done, DEVELOPMENT_STATUS.rejected];
 
 export const BUG_STATUS = {
   open: 'open',

@@ -59,7 +59,13 @@ test('Bugs zu einem Auftrag kommen auf den Friedhof, sobald er erledigt ist (Mig
 
     const client8 = await pool.connect();
     try {
-      assert.deepEqual(await runMigrations(client8), [8]);
+      assert.deepEqual(
+        await runMigrations(
+          client8,
+          MIGRATIONS.filter((migration) => migration.version <= 8),
+        ),
+        [8],
+      );
     } finally {
       client8.release();
     }

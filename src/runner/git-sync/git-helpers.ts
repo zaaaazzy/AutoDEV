@@ -8,6 +8,7 @@ import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
 import { clearStaleIndexLock, isIndexLockError } from './stale-lock.js';
+import { checkoutTarget, dropReportCopies } from './report-copies.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -177,6 +178,9 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
     return { ...result, output: redactOutput(result.output, process.env).trim() };
   };
   const git = async (...args: string[]) => {
+    // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
+    const target = args[0] === 'checkout' ? checkoutTarget(args) : null;
+    if (target) await dropReportCopies((...inner) => run(inner), cwd, target);
     const result = await run(args);
     // Verwaiste index.lock (git wurde hart beendet): wegräumen, wenn niemand sie hält, und einmal neu versuchen.
     if (result.exitCode !== 0 && isIndexLockError(result.output) && (await clearStaleIndexLock(cwd))) {

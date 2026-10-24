@@ -1,6 +1,6 @@
 import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
-import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
+import { applyProposal, autopilotGuard, completeSprintIn, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 import { loadGitState, problemsFor } from '../api/git-state.js';
 import { ENVIRONMENT_TODO } from './autofix.js';
@@ -120,15 +120,30 @@ async function goLiveAutomatically(
     );
     return false;
   }
-  const claimed = await pool.query(
-    `UPDATE sprints s SET status = 'completed'
-      WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'in_progress')
-      RETURNING s.id`,
-    [sprint.id],
-  );
-  if (!claimed.rows[0]) return false;
-  await completeSprint(pool, sprint.id);
+  // Status setzen und Abschluss (Bericht, Git-Sicherung) in einer Transaktion: scheitert der Abschluss, bleibt der
+  // Sprint aktiv statt „abgeschlossen ohne Bericht“.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimed = await client.query(
+      `UPDATE sprints s SET status = 'completed'
+        WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'in_progress')
+        RETURNING s.id`,
+      [sprint.id],
+    );
+    if (!claimed.rows[0]) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await completeSprintIn(client, sprint.id);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
   console.info(`[${project}] Autopilot: „${sprint.name}“ fertig – wird live geschaltet (Test-Gate, Merge, Push).`);
   await sendPush(
     pool,

@@ -3,7 +3,7 @@
     @let attached = attachment(row.workflow);
     @let step = row.workflow.step;
     @if (step?.status === 'running' && step?.progress) {
-      <p class="live-progress"><span class="live-dot"></span>{{ step?.progress }}</p>
+      <p class="live-progress row"><span class="live-dot"></span>{{ step?.progress }}</p>
     }
     @if (attached) {
       <details class="run-step" open>

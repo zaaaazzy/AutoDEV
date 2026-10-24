@@ -27,7 +27,7 @@
           <span class="menu-badge">≡</span>
         </span>
       </button>
-      <a class="brand" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
+      <a class="brand row" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
         <span class="brand-mark">m</span>
         <span>AIdeation</span>
       </a>
@@ -160,7 +160,7 @@
         <div class="topbar-status">
           <div class="agent-indicator">
             <a
-              class="worker-status"
+              class="worker-status truncate"
               [class.busy]="store.activeAgentCount() > 0"
               [class.online]="worker().online"
               [class.offline]="!worker().online"
@@ -267,7 +267,7 @@
                   >
                     <span [style.width.%]="sprint.total ? (sprint.done / sprint.total) * 100 : 0"></span>
                   </div>
-                  <ul class="sprint-popover-orders" aria-label="Nächste offene Aufträge">
+                  <ul class="sprint-popover-orders plain-list" aria-label="Nächste offene Aufträge">
                     @for (item of sprintPreview(); track item.id) {
                       <li>
                         <button

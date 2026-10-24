@@ -10,7 +10,7 @@ import {
   type WorkerStatus,
 } from './models.js';
 import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Section } from './navigation.js';
-import { fetchProjectData, keepFailedSections } from './project-loader.js';
+import { fetchProjectData, keepFailedSections, runningOrdersChanged, runStepFinished } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
 import { visibleInterval } from './visible-interval.js';
@@ -244,9 +244,13 @@ export class ProjectStore {
         const current = new Set((status.drafts ?? []).map((draft) => draft.id));
         const previous = this.workerSlug === slug ? (this.worker().drafts ?? []) : [];
         const finished = previous.some((draft) => !current.has(draft.id));
+        // Auftrag fertig oder neu gestartet: Status, Sprint und Läufe nachladen. Der Reload ruft refreshWorker erneut
+        // auf, vergleicht dann aber mit diesem Stand und löst keinen weiteren Reload aus.
+        const ordersChanged =
+          this.workerSlug === slug && runningOrdersChanged(this.worker().running ?? [], status.running ?? []);
         this.worker.set(status);
         this.workerSlug = slug;
-        if (finished) this.refreshActiveProject();
+        if (finished || ordersChanged) this.refreshActiveProject();
         this.workerFailure.set(false);
       }
     } catch {
@@ -297,7 +301,11 @@ export class ProjectStore {
       const { runs } = await this.api.get<{ runs?: ProjectData['agentRuns'] }>(
         `${this.api.projectPath(slug)}/agent-runs`,
       );
-      if (slug === this.activeProject()) this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));
+      if (slug !== this.activeProject() || slug !== this.loadedSlug) return;
+      const finished = runStepFinished(this.data().agentRuns, runs ?? []);
+      this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));
+      // Letzter Schritt fertig: Danach pollt hier nichts mehr, also jetzt Auftrag, Sprint und Berichte nachladen.
+      if (finished) this.refreshActiveProject();
     } catch {
       /* nächster Versuch in 3 s */
     }

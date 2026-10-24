@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import type { CommandExecutor } from '../core/command.js';
+import { type CommandExecutor, runCommand } from '../core/command.js';
+import { conflictSection, remainingConflicts } from './runner-steps.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
 import {
@@ -698,6 +699,66 @@ test('Ungelöste Konflikte werden am Ende verworfen statt mit Markern committet'
   assert.match(await readFile(patch, 'utf8'), /\+entwickler-arbeit/);
 });
 
+test('Fortsetzen auf dem Auftrags-Branch behält offene Merge-Konflikte (Neustart des Workers)', async () => {
+  const { cwd, git, item } = await conflictingOrder();
+  const first = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(first?.conflicts, ['liste.txt']);
+  const conflicted = await readFile(join(cwd, 'liste.txt'), 'utf8');
+
+  // Neustart: Der Ordner steht schon auf dem Auftrags-Branch, der Merge ist noch offen.
+  const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(resumed, { branch: 'auftrag/99999999-liste', base: 'sprint/sprint-1', conflicts: ['liste.txt'] });
+  // Der Prompt des nächsten Agents (runStep) beginnt mit dem Konfliktabschnitt.
+  assert.match(conflictSection(resumed), /^## Zuerst: Merge-Konflikte lösen[\s\S]*`liste.txt`[\s\S]*\n\n$/);
+  // Weder Abort noch Reset: MERGE_HEAD und die Marker bleiben stehen.
+  assert.ok(git('rev-parse', '-q', '--verify', 'MERGE_HEAD'));
+  assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), conflicted);
+  assert.equal(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true), null);
+  // Lässt der Agent die Marker stehen, ist der Schritt nicht bestanden (Prüfung nach dem Schritt in runStep).
+  assert.deepEqual(await remainingConflicts(cwd, runCommand), ['liste.txt']);
+
+  // Ohne offenen Merge bleibt das Ergebnis wie bisher (kein leeres conflicts-Feld).
+  await writeFile(join(cwd, 'liste.txt'), 'basis\nauftrag\nanderer auftrag\n');
+  assert.deepEqual(await remainingConflicts(cwd, runCommand), []);
+  assert.ok(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true));
+  assert.deepEqual(await enterOrderBranch(cwd, item, 'Sprint 1'), {
+    branch: 'auftrag/99999999-liste',
+    base: 'sprint/sprint-1',
+  });
+});
+
+test('unresolvedConflicts wirft, wenn git scheitert, statt „keine Konflikte“ zu melden', async () => {
+  const execute = (async () => ({
+    exitCode: 128,
+    durationMs: 0,
+    output: 'fatal: index kaputt',
+  })) as unknown as CommandExecutor;
+  await assert.rejects(unresolvedConflicts('/repo', execute), /Konfliktprüfung fehlgeschlagen/);
+  // Nach dem Schritt gilt das als offener Konflikt: der Schritt scheitert, statt zu bestehen.
+  const remaining = await remainingConflicts('/repo', execute);
+  assert.equal(remaining.length, 1);
+  assert.match(remaining[0]!, /Prüfung fehlgeschlagen: Konfliktprüfung fehlgeschlagen: fatal: index kaputt/);
+});
+
+test('Fortsetzen ohne offenen Merge liefert keine Konflikte und keinen Konfliktabschnitt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-resume-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'liste.txt'), 'basis\n');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  const item = { id: '99999999-6666-7777-8888-999999999999', title: 'Sauber' };
+  await enterOrderBranch(cwd, item, 'Sprint 1');
+  // Abbruch mitten im Schritt: offene Änderung, aber kein Merge.
+  await writeFile(join(cwd, 'liste.txt'), 'basis\nangefangen\n');
+  const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(resumed, { branch: 'auftrag/99999999-sauber', base: 'sprint/sprint-1' });
+  assert.equal(conflictSection(resumed), '');
+  assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), 'basis\nangefangen\n');
+});
+
 test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderungen im Ordner hat', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'git-wait-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
@@ -720,6 +781,49 @@ test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderunge
   assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/12345678-halb-fertig');
   // Committet oder auf einem anderen Branch: die Sicherung läuft wieder.
   git('commit', '-am', 'wip');
+  assert.equal(await orderWorkInProgress(cwd), false);
+});
+
+test('Git-Sicherung wartet auch, wenn der unterbrochene Auftrag nur neue Dateien angelegt hat', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-new-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-nur-neue-datei');
+  await mkdir(join(cwd, 'src'), { recursive: true });
+  await writeFile(join(cwd, 'src', 'halb-fertig.ts'), 'export const x = 1;');
+  assert.equal(await orderWorkInProgress(cwd), true);
+  const { pool, updates } = fakePool(null);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
+  assert.equal(
+    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('60 minutes')),
+    false,
+    'nichts übernommen, Sprint bleibt pending',
+  );
+  // Kein Checkout, kein Commit: die neue Datei bleibt unversioniert auf dem Auftrags-Branch.
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/12345678-nur-neue-datei');
+  assert.equal(git('status', '--porcelain', '--untracked-files=all'), '?? src/halb-fertig.ts');
+  assert.equal(git('rev-list', '--count', 'HEAD'), '1');
+});
+
+test('Testberichte und Agent-Ablage allein halten die Git-Sicherung nicht auf', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-ignored-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-nur-ablage');
+  await mkdir(join(cwd, '.dev-log'), { recursive: true });
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, '.dev-log', 'notiz.md'), 'notiz');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'bericht');
   assert.equal(await orderWorkInProgress(cwd), false);
 });
 

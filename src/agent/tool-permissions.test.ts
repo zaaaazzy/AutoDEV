@@ -457,9 +457,17 @@ test('withAgentPermissions: andere CLIs und leere Befehle bleiben unverändert',
   assert.ok(withAgentPermissions(['/usr/local/bin/claude', '-p'], 'developer', all, null).includes('--settings'));
 });
 
-test('withAgentPermissions: voller Zugriff des Assistenten ohne Wächter', () => {
+test('withAgentPermissions: voller Zugriff des Assistenten ohne Wächter – nur Geheimnisse bleiben gesperrt', () => {
   const full = ['claude', '--dangerously-skip-permissions', '-p'];
-  assert.deepEqual(withAgentPermissions(full, 'assistant', all, ['files']), full);
+  const command = withAgentPermissions(full, 'assistant', all, ['files']);
+  assert.deepEqual([command[0], ...command.slice(3)], full);
+  assert.equal(command[1], '--settings');
+  const settings = JSON.parse(command[2]!) as {
+    permissions: { deny: string[] };
+    hooks: { PreToolUse: { matcher: string }[] };
+  };
+  assert.ok(settings.permissions.deny.includes('Read(**/.env*)'));
+  assert.equal(settings.hooks.PreToolUse[0]!.matcher, 'Read|Grep|Glob|NotebookRead');
 });
 
 test('withAgentPermissions: Visionär (nur lesen) ohne Datei-Werkzeuge und ohne Shell – trotz Zuweisung', () => {

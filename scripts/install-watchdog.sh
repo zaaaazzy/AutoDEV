@@ -9,7 +9,8 @@ source "$ROOT/scripts/lib/service-env.sh"
 LABEL="com.aideation.watchdog"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENV_FILE="$SERVICE_ENV_DIR/watchdog.env"
-NODE_BIN="$(dirname "$(command -v node)")"
+# Echter Pfad statt Shim/Sitzungspfad (fnm, Volta): der Dienst startet später ohne die Shell-Umgebung.
+NODE_BIN="$(dirname "$(node -p process.execPath)")"
 DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \

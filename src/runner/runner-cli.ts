@@ -35,7 +35,7 @@ import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions 
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
-import { acceptsNewWork, completeRestart, processRestart, readRestart } from './system-restart.js';
+import { acceptsNewWork, completeRestart, processRestart, readRestart, RESTART_EXIT_CODE } from './system-restart.js';
 import { sendPush } from '../core/push.js';
 import { listenForWork, WorkSignal } from './work-signal.js';
 import { runDueJobs } from './scheduler.js';
@@ -257,7 +257,8 @@ export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     )
     .catch(logged('runner-cli'));
   await pool.query(
-    `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
+    `UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE,
+            output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
   );
   await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
   // Eine laufende Git-Lösung endet mit dem Worker; „läuft“ bliebe sonst stehen und sperrte jede weitere Anfrage (409).
@@ -567,7 +568,7 @@ async function main(): Promise<void> {
       }
     };
     // „AIdeation neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
-    // launchd startet ihn mit dem neuen Code wieder.
+    // launchd/systemd bzw. der Windows-Wrapper starten ihn mit dem neuen Code wieder.
     let restartActive = false;
     // Wartungs-Jobs (scheduled_jobs): im Arbeitszyklus angestossen, aber im Hintergrund – jeder Job hat sein
     // Zeitlimit, der Zyklus wartet nie darauf. Höchstens ein Durchgang gleichzeitig je Worker.
@@ -616,9 +617,11 @@ async function main(): Promise<void> {
           // Ein gescheiterter Neustart meldet sich selbst per Push (writeRestart → notifyRestart).
           if (result !== 'restart') return;
           console.info('Container neu gebaut – Worker beendet sich und startet mit dem neuen Code neu.');
+          // RESTART_EXIT_CODE: Daran erkennt der Windows-Wrapper (run-with-env.ps1), dass er neu starten soll.
+          process.exitCode = RESTART_EXIT_CODE;
           stop();
-          // Falls noch etwas den Prozess offen hält: spätestens nach einer Minute beenden, damit launchd neu startet.
-          setTimeout(() => process.exit(0), 60_000).unref();
+          // Falls noch etwas den Prozess offen hält: spätestens nach einer Minute beenden, damit der Dienst neu startet.
+          setTimeout(() => process.exit(RESTART_EXIT_CODE), 60_000).unref();
         })
         .catch((error: unknown) => logOnce('restart', `Neustart fehlgeschlagen: ${describeError(error)}`))
         .finally(() => (restartActive = false));

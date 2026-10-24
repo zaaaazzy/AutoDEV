@@ -20,17 +20,25 @@ export const MAX_STEP_MS = 2 * MAX_TIMEOUT_MINUTES * 60_000 + TRANSIENT_RETRY_DE
  */
 export const ABANDONED_RUN_MS = MAX_STEP_MS + 60 * 60_000;
 
-/** Claim an order run; a running run without any sign of life for ABANDONED_RUN_MS is treated as abandoned. */
+/**
+ * Claim an order run; a running run without any sign of life for ABANDONED_RUN_MS is treated as abandoned. Sein noch
+ * laufender Schritt (Absturz des Workers) gilt als unterbrochen: Der nächste Lauf setzt beim selben Agent fort.
+ */
 export async function claimRun(pool: Pool, item: WorkItem): Promise<string | null> {
   await pool.query(
-    `UPDATE agent_runs r SET status = '${AGENT_RUN_STATUS.failed}', completed_at = NOW()
-      WHERE r.development_id = $1 AND r.status = '${AGENT_RUN_STATUS.running}'
-        AND GREATEST(
-              r.started_at,
-              (SELECT MAX((event->>'at')::timestamptz)
-                 FROM agent_run_steps s CROSS JOIN LATERAL jsonb_array_elements(s.events) event
-                WHERE s.run_id = r.id)
-            ) < NOW() - $2 * INTERVAL '1 millisecond'`,
+    `WITH abandoned AS (
+       UPDATE agent_runs r SET status = '${AGENT_RUN_STATUS.failed}', completed_at = NOW()
+        WHERE r.development_id = $1 AND r.status = '${AGENT_RUN_STATUS.running}'
+          AND GREATEST(
+                r.started_at,
+                (SELECT MAX((event->>'at')::timestamptz)
+                   FROM agent_run_steps s CROSS JOIN LATERAL jsonb_array_elements(s.events) event
+                  WHERE s.run_id = r.id)
+              ) < NOW() - $2 * INTERVAL '1 millisecond'
+       RETURNING r.id)
+     UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE,
+            output = COALESCE(output, '') || E'\\nUnterbrochen: Der Lauf hatte kein Lebenszeichen mehr (Absturz).'
+      WHERE status = 'running' AND run_id IN (SELECT id FROM abandoned)`,
     [item.id, ABANDONED_RUN_MS],
   );
   const claim = await pool.query<{ id: string }>(

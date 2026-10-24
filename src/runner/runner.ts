@@ -103,8 +103,9 @@ async function resumePosition(
       phase: string;
       status: string;
       output: string;
+      interrupted?: boolean | null;
     }>(
-      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output
+      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output, interrupted
          FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
       [previous.id],
     )
@@ -135,9 +136,16 @@ async function resumePosition(
     position += 1;
   }
   // Lehnen Tester oder Reviewer ab, beginnt der nächste Versuch wieder beim Entwickler – mit deren Rückmeldung.
+  // Wurde der Schritt nur unterbrochen (Worker beendet, Ordner weg, Nutzungslimit), setzt derselbe Agent fort.
   const failed = steps[position];
   const failedAgent = ordered[position];
-  if (failed && failed.status !== AGENT_STEP_STATUS.passed && failedAgent && LOOP_BACK_ROLES.has(failedAgent.role)) {
+  if (
+    failed &&
+    failed.status !== AGENT_STEP_STATUS.passed &&
+    !failed.interrupted &&
+    failedAgent &&
+    LOOP_BACK_ROLES.has(failedAgent.role)
+  ) {
     const restart = ordered.findIndex((agent) => agent.phase === 'while_task');
     if (restart >= 0 && restart < position) {
       done.splice(restart);

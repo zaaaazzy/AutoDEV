@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SECRET_NAME } from './tool-paths.js';
 import {
   COMPOSE_STARTING,
   composeViolation,
@@ -46,6 +48,9 @@ const PROTECTED_PATH =
   /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead']);
+/** Ordner mit Schlüsseln und Zugangsdaten – wie PROTECTED_PATH, aber für das Lesen. */
+const SECRET_DIRECTORIES = new Set(['.ssh', '.aws', '.gnupg']);
 
 /** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
 const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
@@ -105,6 +110,51 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
     return policy.create ? null : 'Dateien anlegen ist für diesen Agent nicht freigegeben.';
   }
   return policy.edit ? null : 'Dateien ändern ist für diesen Agent nicht freigegeben.';
+}
+
+/** Nennt ein Pfadteil ein Geheimnis (SECRET_NAME) oder einen Schlüssel-Ordner? Auch Glob-Muster wie *.{pem,key}. */
+const secretPart = (part: string): boolean =>
+  SECRET_DIRECTORIES.has(part.toLowerCase()) ||
+  part
+    .replace(/[{}]/g, '')
+    .split(',')
+    .some((alternative) => SECRET_NAME.test(alternative));
+
+/** Pfad samt aufgelöster Links und „~“ – im Projekt relativ zum Projekt, sonst ganz – auf Geheimnisse prüfen. */
+function secretPath(raw: string, cwd: string, root: string): boolean {
+  const expanded = raw === '~' || raw.startsWith('~/') ? homedir() + raw.slice(1) : raw;
+  const lexical = resolve(cwd, expanded);
+  const candidates = [lexical];
+  try {
+    const real = realTarget(lexical);
+    if (real) candidates.push(real);
+  } catch {
+    // Nicht auflösbar (z. B. keine Rechte): dann zählt der Pfad, wie er dasteht.
+  }
+  return candidates.some((path) =>
+    (inside(path, root) ? path.slice(root.length) : path).split(/[\\/]/).filter(Boolean).some(secretPart),
+  );
+}
+
+/**
+ * Lesende Werkzeuge (Read, Grep, Glob): keine Geheimnisse wie .env, *.pem, *.key, SSH-Schlüssel – für jede Rolle,
+ * unabhängig von der Richtlinie. Gemeldet wird nur der Pfad, nie ein Inhalt. Grep über einen ganzen Ordner prüft der
+ * Wächter nicht Datei für Datei; dort greifen die Deny-Regeln der CLI (SECRET_READ_DENY).
+ */
+export function secretReadProblem(input: GuardInput, projectRoot: string): string | null {
+  const root = realpathSync(projectRoot);
+  const cwd = input.cwd ?? root;
+  const tool = input.tool_input ?? {};
+  const paths = [tool.file_path, tool.notebook_path, tool.path].filter(
+    (value): value is string => typeof value === 'string' && value !== '',
+  );
+  const patterns = [tool.glob, input.tool_name === 'Glob' ? tool.pattern : undefined].filter(
+    (value): value is string => typeof value === 'string' && value !== '',
+  );
+  const hit =
+    paths.find((path) => secretPath(path, cwd, root)) ??
+    patterns.find((pattern) => pattern.split(/[\\/]/).some(secretPart));
+  return hit === undefined ? null : `${hit}: Geheimnisse (.env, Schlüssel, Zertifikate) sind für Agents gesperrt.`;
 }
 
 /** node --version oder node --check mit genau einer Datei (kein Optionswort, keine Shell-Erweiterung). */
@@ -204,6 +254,7 @@ export function bashProblem(
 
 /** Gesamtentscheidung für einen Hook-Aufruf. */
 export function guardProblem(input: GuardInput, policy: GuardPolicy, projectRoot: string): string | null {
+  if (READ_TOOLS.has(input.tool_name ?? '')) return secretReadProblem(input, projectRoot);
   if (WRITE_TOOLS.has(input.tool_name ?? '')) return fileProblem(input, policy, projectRoot);
   if (input.tool_name === 'Bash') {
     if (policy.shell === false) return 'Befehle sind für diesen Agent nicht freigegeben (nur lesen).';

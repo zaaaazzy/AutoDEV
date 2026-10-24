@@ -137,7 +137,7 @@
         </form>
       } @else if (history(); as view) {
         <section class="agent-task-history" aria-label="Verlauf der Aufgabe">
-          <header class="agent-task-history-head">
+          <header class="agent-task-history-head row">
             <strong>Verlauf: {{ view.action.title }}</strong>
             <button type="button" class="button secondary small" (click)="history.set(null)">Zurück</button>
           </header>
@@ -191,7 +191,7 @@
           }
         </section>
       } @else {
-        <label class="agent-tasks-search">
+        <label class="agent-tasks-search row">
           <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
             <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2" />
             <path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
@@ -418,7 +418,7 @@
             </p>
           }
         }
-        <div class="agent-tasks-footer">
+        <div class="agent-tasks-footer row">
           <button type="button" class="agent-tasks-new" (click)="startNew()">
             + {{ query().trim() ? 'Neue Aktion „' + query().trim() + '“' : 'Neue Aktion definieren' }}
           </button>
