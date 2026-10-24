@@ -257,7 +257,8 @@ export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
     )
     .catch(logged('runner-cli'));
   await pool.query(
-    `UPDATE agent_run_steps SET status = 'failed', output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
+    `UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE,
+            output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
   );
   await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
   // Eine laufende Git-Lösung endet mit dem Worker; „läuft“ bliebe sonst stehen und sperrte jede weitere Anfrage (409).
