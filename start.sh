@@ -11,10 +11,12 @@ need() {
     exit 1
   fi
 }
-need node "Bitte Node.js 22 oder neuer installieren: https://nodejs.org/"
+need node "Bitte Node.js 22.12 oder neuer installieren: https://nodejs.org/"
+need npm "npm gehört zu Node.js – bitte Node.js neu installieren: https://nodejs.org/"
 need docker "Bitte Docker Desktop installieren und starten: https://docs.docker.com/get-docker/"
-if [ "$(node -p 'process.versions.node.split(".")[0]')" -lt 22 ]; then
-  echo "✕ Node.js $(node -v) ist zu alt – bitte Version 22 oder neuer installieren."
+# 22.12: Mindestversion von Angular 20 und Vite 8 (Projektvorlage für Browser-Spiele).
+if ! node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)'; then
+  echo "✕ Node.js $(node -v) ist zu alt – bitte Version 22.12 oder neuer installieren."
   exit 1
 fi
 if ! docker info >/dev/null 2>&1; then
@@ -35,6 +37,11 @@ elif [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_mo
   # Der Worker läuft mit diesen node_modules (nicht im Container): nach einem Update sonst ERR_MODULE_NOT_FOUND.
   echo "→ package-lock.json hat sich geändert – aktualisiere Abhängigkeiten …"
   npm ci
+fi
+
+# Chromium für Playwright (optische Abnahme, Smoke-Test der Phaser-Vorlage). Ist er da, ist das nach Sekunden fertig.
+if ! npx --no-install playwright install chromium; then
+  echo "! Chromium konnte nicht geladen werden – optische Abnahme und Spiel-Smoke-Tests fehlen bis „npx playwright install chromium“."
 fi
 
 if [ ! -f .env ] || [ "${1:-}" = "--setup" ]; then

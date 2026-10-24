@@ -6,9 +6,12 @@ Set-Location (Join-Path $PSScriptRoot '..')
 function Need($command, $hint) {
   if (-not (Get-Command $command -ErrorAction SilentlyContinue)) { Write-Host "x $command fehlt. $hint"; exit 1 }
 }
-Need node 'Bitte Node.js 22 oder neuer installieren: https://nodejs.org/'
+Need node 'Bitte Node.js 22.12 oder neuer installieren: https://nodejs.org/'
+Need npm 'npm gehoert zu Node.js - bitte Node.js neu installieren: https://nodejs.org/'
 Need docker 'Bitte Docker Desktop installieren und starten: https://docs.docker.com/get-docker/'
-if ([int](node -p "process.versions.node.split('.')[0]") -lt 22) { Write-Host 'x Node.js ist zu alt - bitte Version 22 oder neuer.'; exit 1 }
+# 22.12: Mindestversion von Angular 20 und Vite 8 (Projektvorlage fuer Browser-Spiele).
+$nodeVersion = [version](node -p "process.versions.node")
+if ($nodeVersion -lt [version]'22.12.0') { Write-Host "x Node.js $nodeVersion ist zu alt - bitte Version 22.12 oder neuer."; exit 1 }
 docker info *> $null
 if ($LASTEXITCODE -ne 0) { Write-Host 'x Docker laeuft nicht - bitte Docker Desktop starten.'; exit 1 }
 docker compose version *> $null
@@ -20,6 +23,9 @@ if (-not (Test-Path node_modules)) {
   if ($LASTEXITCODE -ne 0) { Write-Host 'x npm ci ist fehlgeschlagen.'; exit 1 }
 }
 New-Item -ItemType Directory -Force -Path backups | Out-Null
+# Chromium fuer Playwright (optische Abnahme, Smoke-Test der Phaser-Vorlage); ist er da, ist das schnell fertig.
+npx --no-install playwright install chromium
+if ($LASTEXITCODE -ne 0) { Write-Host '! Chromium konnte nicht geladen werden - spaeter: npx playwright install chromium' }
 
 if (-not (Test-Path .env) -or $Setup -or $args -contains '--setup') {
   Write-Host '-> Starte den Einrichtungs-Assistenten ...'

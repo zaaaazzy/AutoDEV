@@ -25,6 +25,8 @@ interface TemplateInfo {
   description: string;
   group: 'featured' | 'frontend' | 'fullstack' | 'backend' | 'other';
   stack: string[];
+  /** Projekt-Einstellungen, die die Vorlage beim Anlegen vorbelegt. */
+  project?: { testCommands?: string[][]; reviewCommand?: string[]; previewUrl?: string };
 }
 interface PermissionInfo {
   id: string;
@@ -150,6 +152,8 @@ export class ProjectWizardComponent implements OnDestroy {
   protected readonly templateGroups = signal<Record<string, string>>({});
   protected readonly template = signal<string>('none');
   protected readonly templateUrl = signal('');
+  /** Zuletzt angewendete Vorlage: template() fällt danach auf „none“ zurück, weil der Ordner nicht mehr leer ist. */
+  private readonly appliedTemplate = signal<string | null>(null);
   protected readonly gitMode = signal<GitMode>('local');
   protected readonly repoName = signal('');
   protected readonly visibility = signal<'private' | 'public'>('private');
@@ -199,6 +203,17 @@ export class ProjectWizardComponent implements OnDestroy {
       templates: this.templates().filter((entry) => entry.group === group),
     })),
   );
+  /** Hinweis, welche Einstellungen die gewählte Vorlage vorbelegt. */
+  protected readonly templatePreset = computed(() => {
+    const project = this.templates().find((entry) => entry.id === this.template())?.project;
+    if (!project) return '';
+    const parts = [
+      project.testCommands?.length ? 'Testbefehle' : '',
+      project.reviewCommand?.length ? `Review-Befehl „${project.reviewCommand.join(' ')}“` : '',
+      project.previewUrl ? `Vorschau-Adresse ${project.previewUrl}` : '',
+    ].filter(Boolean);
+    return parts.length ? `Beim Anlegen vorbelegt: ${parts.join(', ')}.` : '';
+  });
   protected readonly isMoreTemplate = computed(() =>
     this.moreGroups().some((group) => group.templates.some((entry) => entry.id === this.template())),
   );
@@ -403,6 +418,7 @@ export class ProjectWizardComponent implements OnDestroy {
           (update) => this.gitLog.set(update.log),
         );
         if (job.status === 'failed') throw new Error(job.result?.error ?? 'Vorlage fehlgeschlagen.');
+        this.appliedTemplate.set(this.template());
         templateLog = job.log;
       }
       const mode = this.gitMode() === 'keep' ? 'local' : this.gitMode();
@@ -465,6 +481,7 @@ export class ProjectWizardComponent implements OnDestroy {
         gitRemote: ['github-new', 'github-existing', 'keep'].includes(this.gitMode()) ? this.remote() || null : null,
         agent: { provider: this.provider(), model: this.model() },
         permissions: this.permissions(),
+        ...(this.appliedTemplate() ? { template: this.appliedTemplate() } : {}),
       });
       this.created.set(result.project.slug);
       this.projectCreated.emit(result.project.slug);
