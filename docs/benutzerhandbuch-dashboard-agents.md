@@ -707,6 +707,45 @@ Dieser Abschnitt betrifft die Seite **Dokumentation**. Eine Änderung an Titel o
 
 ---
 
+## 15. Auftragsautor: Anforderung und Schätzung trennen
+
+Dieser Abschnitt betrifft den Agent **Auftragsautor** (Rolle `author`). Er schreibt aus einer Idee die Anforderung und die Schätzung. Die Anforderung endet vor dem letzten Abschnitt „Schätzung“, die Schätzung steht darin.
+
+> **Printscreens:** keine. Die Änderung betrifft nur, wie der Worker die Antwort des Agents liest. Im Auftrag sieht man das Ergebnis als Text und Schätzwerte. Ein Bildschirmfoto lässt sich nur mit laufendem Docker-Stack und einem Auftrag mit Auftragsautor-Lauf aufnehmen. Platzhalter: `[Bild 10] Auftrag nach Auftragsautor-Lauf mit vollständiger Anforderung (Diagramme und Abgrenzung) und ausgefüllten Schätzwerten`.
+
+### 15.1 Was sich geändert hat
+
+Bisher nahm der Worker die erste Überschrift, die mit „Schätzung“ beginnt. Steht in den Technischen Hinweisen eine Überschrift „Schätzungsgrundlage“, schnitt das die Anforderung dort ab. Diagramme und Abgrenzung fehlten im Auftrag, und die Schätzung blieb leer, weil das JSON-Muster Mermaid-Klammern als Schätzung las. Jetzt gilt:
+
+- Der **letzte** passende Abschnitt zählt. Frühere Abschnitte bleiben Teil der Anforderung.
+- Nur diese Überschriften zählen: „Schätzung“, „Schätzung (…)“ und „Schätzung:“, Ebene 1 bis 4, Groß- und Kleinschreibung egal.
+- Das JSON-Objekt wird nur innerhalb dieses Abschnitts gelesen.
+
+### 15.2 Bedingungen
+
+| Ausgabe des Auftragsautors | Ergebnis |
+| --- | --- |
+| `### Schätzungsgrundlage` in den Hinweisen, danach `## Schätzung` mit JSON | Anforderung bis einschließlich „Abgrenzung“, Schätzung wird gelesen. |
+| Mehrere `## Schätzung`-Abschnitte | Der letzte gilt. |
+| Nur `### Schätzungsgrundlage`, kein `Schätzung`-Abschnitt | Schätzung leer, Anforderung vollständig. |
+| Überschrift „Schätzung des Aufwands“ | Gilt nicht als Schätzungsabschnitt. Die Anforderung bleibt vollständig, die Schätzung ist leer. |
+| JSON-Objekt mit Mermaid-Klammern vor der Schätzung | Die Klammern werden ignoriert, es zählt nur das JSON im Schätzungsabschnitt. |
+
+**Bedingungen:**
+
+- Hält sich der Auftragsautor an das Format `## Schätzung` am Ende, merkst du keinen Unterschied.
+- Schätzwerte, die du von Hand eingetragen hast, überschreibt der Auftragsautor nicht.
+- Ungültige Werte (z. B. negative Stunden oder ein Benefit über 10) werden verworfen. Die übrigen Werte bleiben.
+
+### 15.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Anforderung endet bei „Schätzungsgrundlage“ | Die alte Fassung. Auf den aktuellen Stand bringen und den Auftragsautor neu laufen lassen. |
+| Schätzung ist leer, obwohl ein JSON steht | Die Überschrift passt nicht zum Format (z. B. „Schätzung des Aufwands“). Sie in `## Schätzung` ändern. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
