@@ -37,6 +37,7 @@ import { SprintReviewComponent } from './features/sprints/sprint-review.componen
 import { HeaderReviewComponent } from './features/sprints/header-review.component.js';
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 import { GitAlertComponent } from './shared/git-alert.component.js';
+import { RestartBannerComponent } from './shared/restart-banner.component.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
   development: 'Neuer Auftrag',
@@ -52,6 +53,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   standalone: true,
   imports: [
     GitAlertComponent,
+    RestartBannerComponent,
     FormsModule,
     ConfirmDialogComponent,
     LoginComponent,
