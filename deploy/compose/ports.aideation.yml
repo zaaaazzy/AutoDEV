@@ -1,0 +1,14 @@
+# Host-Ports des Live-Stacks (Projekt "aideation", Quellordner). docker-compose.yml wählt diese Datei über
+# ${COMPOSE_PROJECT_NAME}; das Agent-Projekt "aideation-agent" lädt ports.aideation-agent.yml ohne Host-Ports.
+services:
+  db-ports:
+    ports:
+      - "127.0.0.1:5433:5432"
+  frontend-ports:
+    ports:
+      # Direkt nur vom eigenen Rechner aus; von aussen geht es über HTTPS (Dienst https).
+      - "127.0.0.1:3100:8080"
+  https-ports:
+    ports:
+      - "80:80"
+      - "443:443"
