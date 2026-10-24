@@ -78,6 +78,23 @@ export function shouldRetry(result: AgentResult): boolean {
   return result.exitCode !== 0 && !result.fromTests && isTransientFailure(result.output);
 }
 
+/**
+ * Unterbrochener Schritt (Worker beendet, Ordner weg, Nutzungslimit): bleibt „failed“, trägt aber das Kennzeichen
+ * `interrupted`, damit der nächste Lauf beim selben Agent fortsetzt. Tokens und Kosten des Versuchs bleiben erhalten.
+ */
+async function markInterrupted(
+  pool: RunContext['pool'],
+  stepId: string,
+  result: AgentResult,
+  output: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4,
+            tokens = $5, cost_usd = $6, interrupted = TRUE WHERE id = $1`,
+    [stepId, result.exitCode, result.durationMs, output, result.tokens ?? 0, result.costUsd ?? 0],
+  );
+}
+
 /** Befehle für die eigene Abdeckungsmessung: dieselben wie im Tester-Schritt (nie der volle Lauf fürs Live schalten). */
 async function coverageCommands(ctx: RunContext): Promise<string[][]> {
   const plan = await testerPlan(ctx.pool, ctx.item.projectSlug, ctx.options.cwd, await orderFilePaths(ctx));
@@ -273,10 +290,7 @@ export async function runStep(
   if (limitReset) {
     const until = limitReset.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
     const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${until} Uhr wieder.`;
-    await pool.query(
-      `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
-    );
+    await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     await pool
       .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, limitReset, reason])
       .catch(logged('runner-steps'));
@@ -291,10 +305,7 @@ export async function runStep(
     const reason = folderLost
       ? `Unterbrochen: ${missingFolderMessage(ctx.options.cwd)} Der Auftrag wird erneut eingeplant.`
       : 'Unterbrochen: Der Worker wurde beendet.';
-    await pool.query(
-      `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
-    );
+    await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     return { passed: false, interrupted: true };
   }
   // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.

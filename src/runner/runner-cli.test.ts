@@ -59,6 +59,8 @@ test('recoverInterruptedRuns: plant unterbrochene Aufträge neu, bevor die Läuf
   // Erst neu einplanen (braucht die noch laufenden Läufe), dann Schritte und Läufe beenden.
   assert.ok(requeue < runs && steps < runs);
   assert.match(queries[steps] ?? '', /Unterbrochen: Der Worker wurde beendet/);
+  // Kennzeichen „unterbrochen“: der nächste Lauf setzt beim selben Agent fort, nicht beim Entwickler.
+  assert.match(queries[steps] ?? '', /interrupted = TRUE/);
   assert.ok(index("UPDATE test_requests SET status = 'failed'") >= 0, 'Testanforderungen gelten als abgebrochen');
   assert.ok(index("UPDATE acceptance_checks SET status = 'verifying'") >= 0);
   // Ohne verwaiste Prozesse gehen unterbrochene Chat-Anfragen zurück auf „pending“ (Status als Parameter).

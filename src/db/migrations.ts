@@ -217,6 +217,18 @@ export const MIGRATIONS: readonly Migration[] = [
          AND s.status = 'completed' AND s.git_sync = 'done' AND b.title = 'CI rot im Pull Request von „' || s.name || '“';
     `,
   },
+  // Unterbrochene Schritte (Worker beendet, Ordner weg, Nutzungslimit) bleiben „failed“, tragen aber ein eigenes
+  // Kennzeichen: Der nächste Lauf setzt beim selben Agent fort statt wie nach einer Ablehnung beim Entwickler.
+  // Bestehende Schritte erkennt einmalig die bisher angehängte Zeile „Unterbrochen: …“.
+  {
+    version: 9,
+    name: 'agent-run-steps-unterbrochen',
+    sql: `
+      ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS interrupted BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE agent_run_steps SET interrupted = TRUE
+       WHERE status = 'failed' AND NOT interrupted AND output LIKE E'%\\nUnterbrochen: %';
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
