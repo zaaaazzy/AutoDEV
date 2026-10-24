@@ -649,7 +649,7 @@ Die Prüfung läuft alle 2 Minuten.
 | Sprint bleibt im Review, obwohl alles stimmt | Der Worker prüft nur Sprints mit gesetztem Pull Request (`pr_url`). Ohne ihn greift diese Prüfung nicht. Die Oberfläche zeigt diesen Wert nicht; Abhilfe nur über Entwicklung oder Datenbank. |
 | CI rot, Sprint wartet | Ein Bug mit dem gekürzten CI-Auszug ist entstanden. Behebe den Fehler, dann läuft die Prüfung weiter. |
 
-Hinweis: Die automatischen Tests für dieses Verhalten sind in `src/runner/git-sync.test.ts` beschrieben. Ob sie in deiner Umgebung grün laufen, steht im Testlauf des Auftrags.
+Hinweis: Die Tests für dieses Verhalten stehen in `src/runner/git-sync.test.ts` (Tests „Brücke aus: …“). Der Projekt-Testlauf 6b47961d hat `git-sync.test.ts` und `github-sync.test.ts` mit 51 von 51 grünen Tests ausgeführt. Die Tests sind mit dem alten Code nicht rot gesehen worden; dass sie dort scheitern würden, folgt aus dem Code (Abbruch mit `skipped: 'Modus aus'`).
 
 ## Verwandte Dokumente
 
