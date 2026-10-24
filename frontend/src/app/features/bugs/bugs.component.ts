@@ -22,6 +22,7 @@ import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { type BugStatRow, type BugStats, bugStats, isBuried } from './bug-stats.js';
 import { ProductionDetailComponent } from './production-detail.component.js';
+import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
 import {
   CategoryLabelPipe,
   SeverityLabelPipe,
@@ -153,8 +154,9 @@ export class BugsComponent {
     this.openBug.update((current) => (current === id ? null : id));
   }
 
-  protected availableSprints(): Sprint[] {
-    return this.data().sprints.filter((sprint) => sprint.status !== 'completed');
+  /** Nur geplante und aktive Sprints; der aktuell zugeordnete bleibt sichtbar, auch wenn er nicht mehr zuordenbar ist. */
+  protected availableSprints(current: string | null = null): Sprint[] {
+    return this.data().sprints.filter((sprint) => sprint.id === current || isAssignableSprintStatus(sprint.status));
   }
 
   protected async createBug(form: HTMLFormElement): Promise<void> {

@@ -2,7 +2,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
 import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
-import { relatedResourceBelongsToProject } from './resource.js';
+import { isAssignableSprintStatus } from '../core/development-transitions.js';
 import { isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
 import type { Principal } from './roles.js';
@@ -22,6 +22,7 @@ import {
 } from '../core/validation.js';
 
 const SEVERITIES = new Set(['low', 'medium', 'high', 'critical']);
+const SPRINT_NOT_ASSIGNABLE = 'Der Sprint ist nicht mehr zuordenbar. Bugs nur geplanten oder aktiven Sprints zuordnen.';
 const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, severity, status, source,
   sprint_id AS "sprintId", fix_notes AS "fixNotes", created_at AS "createdAt", fixed_at AS "fixedAt", category,
   external_ref AS "externalRef",
@@ -148,6 +149,23 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       return;
     }
     const sprintId = (values.get('sprint_id') as string | null | undefined) ?? null;
+    if (sprintId) {
+      const sprint = (
+        await pool.query<{ status: string }>('SELECT status FROM sprints WHERE id = $1 AND project_slug = $2', [
+          sprintId,
+          slug,
+        ])
+      ).rows[0];
+      if (!sprint) {
+        response.status(400).json({ message: 'Sprint gehört zu einem anderen Projekt.' });
+        return;
+      }
+      // Abgeschlossene, abgebrochene und Sprints im Review nimmt der Worker nie mehr auf: Der Bugfix-Auftrag liefe nie.
+      if (!isAssignableSprintStatus(sprint.status)) {
+        response.status(409).json({ message: SPRINT_NOT_ASSIGNABLE });
+        return;
+      }
+    }
     const result = await pool.query(
       `INSERT INTO bugs (project_slug, title, description, severity, sprint_id, category)
        SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id, $6
@@ -183,9 +201,21 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
     }
     const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
     if (typeof sprintId === 'string') {
-      const sameProject = await relatedResourceBelongsToProject(pool, 'bugs', sprintId, request.params.id);
-      if (!sameProject) {
+      const sprint = (
+        await pool.query<{ sprintStatus: string; currentSprintId: string | null }>(
+          `SELECT s.status AS "sprintStatus", b.sprint_id AS "currentSprintId"
+             FROM sprints s JOIN bugs b ON b.project_slug = s.project_slug
+            WHERE s.id = $1 AND b.id = $2`,
+          [sprintId, request.params.id],
+        )
+      ).rows[0];
+      if (!sprint) {
         response.status(400).json({ message: 'Sprint gehört zu einem anderen Projekt.' });
+        return;
+      }
+      // Nur eine neue Zuordnung prüfen: Titel oder Status eines Bugs im toten Sprint bleiben änderbar.
+      if (sprint.currentSprintId !== sprintId && !isAssignableSprintStatus(sprint.sprintStatus)) {
+        response.status(409).json({ message: SPRINT_NOT_ASSIGNABLE });
         return;
       }
     }
