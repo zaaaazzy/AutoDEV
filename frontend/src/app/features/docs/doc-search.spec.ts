@@ -53,7 +53,7 @@ test('Suche: Ausschnitte markieren Treffer und escapen den Text', () => {
   assert.equal(hit.snippets.length, 1);
   assert.match(hit.snippets[0]!, /<mark>Größe<\/mark>/, 'Markierung im Originaltext, auch bei Umlaut');
   assert.doesNotMatch(hit.snippets[0]!, /<script>/);
-  assert.match(hit.snippets[0]!, /&#60;script/);
+  assert.match(hit.snippets[0]!, /&lt;script/);
 });
 
 test('Suche: Tippfehler in längeren Wörtern findet trotzdem, Markdown stört die Ausschnitte nicht', () => {
