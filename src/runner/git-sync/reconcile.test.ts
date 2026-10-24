@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, open, readdir, utimes, writeFile } from 'node:fs/promises';
+import { mkdtemp, open, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import { gitHelpers } from './git-helpers.js';
+import { briefGitError, gitHelpers } from './git-helpers.js';
 import { reconcileWorkingTree } from './reconcile.js';
 import { clearStaleIndexLock } from './stale-lock.js';
 import { runCommand } from '../../core/command.js';
@@ -117,4 +117,29 @@ test('index.lock in Benutzung oder ganz frisch: bleibt liegen', async () => {
     await handle.close();
   }
   assert.ok(existsSync(lock));
+});
+
+test('index.lock kurz von einem anderen Prozess gehalten: git wartet und schafft es danach', async () => {
+  const { agents, git } = await setup();
+  const lock = join(git(agents, 'rev-parse', '--absolute-git-dir'), 'index.lock');
+  await writeFile(join(agents, 'c.txt'), 'c\n');
+  // Wie ein `git status` von Editor oder App: Sperre angelegt und offen gehalten, nach kurzer Zeit wieder frei.
+  await writeFile(lock, '');
+  const handle = await open(lock, 'r');
+  setTimeout(() => {
+    void handle.close().then(() => rm(lock, { force: true }));
+  }, 400);
+  const { git: helperGit } = gitHelpers(runCommand, agents);
+  const added = await helperGit('add', 'c.txt');
+  assert.equal(added.exitCode, 0, added.output);
+  assert.equal(git(agents, 'diff', '--cached', '--name-only'), 'c.txt');
+});
+
+test('Git-Fehler gekürzt: Ursache am Anfang und Ergebnis am Ende bleiben erhalten', () => {
+  const output = `fatal: Unable to create '/repo/.git/index.lock': File exists.\n${'x'.repeat(600)}\nMerge with strategy ort failed.`;
+  const brief = briefGitError(output);
+  assert.ok(brief.length <= 303);
+  assert.match(brief, /index\.lock/);
+  assert.match(brief, /strategy ort failed\.$/);
+  assert.equal(briefGitError('kurz'), 'kurz');
 });

@@ -11,7 +11,23 @@ import { clearStaleIndexLock, isIndexLockError } from './stale-lock.js';
 import { checkoutTarget, dropReportCopies } from './report-copies.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
+/**
+ * Wartezeiten, wenn ein anderer git-Prozess die index.lock gerade hält (z. B. ein `git status` von Editor oder App,
+ * der den Index kurz auffrischt). Auf der langsamen Platte dauert das bis zu Sekunden; zusammen knapp 8 s.
+ */
+export const LOCK_RETRY_DELAYS_MS = [200, 500, 1000, 2000, 4000];
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
+
+/**
+ * Kurzfassung einer git-Fehlerausgabe: Anfang (dort steht die Ursache, z. B. welche Sperrdatei) und Ende (Ergebnis,
+ * z. B. „Merge mit Strategie ort fehlgeschlagen“). Nur das Ende verschluckte bisher die Ursache.
+ */
+export function briefGitError(output: string, max = 300): string {
+  const text = output.trim();
+  if (text.length <= max) return text;
+  const head = Math.ceil(max * 0.6);
+  return `${text.slice(0, head)} … ${text.slice(-(max - head))}`;
+}
 
 export function isValidGitRemote(value: string): boolean {
   return value.length <= 300 && REMOTE_PATTERN.test(value);
@@ -181,10 +197,13 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
     // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
     const target = args[0] === 'checkout' ? checkoutTarget(args) : null;
     if (target) await dropReportCopies((...inner) => run(inner), cwd, target);
-    const result = await run(args);
-    // Verwaiste index.lock (git wurde hart beendet): wegräumen, wenn niemand sie hält, und einmal neu versuchen.
-    if (result.exitCode !== 0 && isIndexLockError(result.output) && (await clearStaleIndexLock(cwd))) {
-      return run(args);
+    let result = await run(args);
+    // Sperre belegt: Verwaiste index.lock (git wurde hart beendet) wegräumen und sofort neu versuchen; hält sie gerade
+    // ein anderer Prozess, kurz warten. git bricht bei belegter Sperre ab, bevor es etwas ändert – neu versuchen ist sicher.
+    for (const delay of LOCK_RETRY_DELAYS_MS) {
+      if (result.exitCode === 0 || !isIndexLockError(result.output)) break;
+      if (!(await clearStaleIndexLock(cwd))) await new Promise((resolve) => setTimeout(resolve, delay));
+      result = await run(args);
     }
     return result;
   };

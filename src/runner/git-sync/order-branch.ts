@@ -7,6 +7,7 @@ import { type CommandExecutor, runCommand } from '../../core/command.js';
 import {
   backupWorkingTree,
   branchExists,
+  briefGitError,
   CHANGED_FILES_IGNORED,
   checkedOutElsewhere,
   checkoutSprintBranch,
@@ -272,7 +273,7 @@ export async function finishOrderBranch(
           commit: null,
           message: conflicts.length
             ? `Merge-Konflikt mit ${target.base} (${conflicts.slice(0, 5).join(', ')}) – Branch ${target.branch} bleibt bestehen.${patchNote}`
-            : `Merge nach ${target.base} fehlgeschlagen: ${merged.output.slice(-300)} – Branch ${target.branch} bleibt bestehen.${patchNote}`,
+            : `Merge nach ${target.base} fehlgeschlagen: ${briefGitError(merged.output)} – Branch ${target.branch} bleibt bestehen.${patchNote}`,
         };
       }
       return {
