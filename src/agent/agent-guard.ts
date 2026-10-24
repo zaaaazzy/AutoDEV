@@ -11,6 +11,7 @@ import {
   forbiddenSubcommand,
   gitOptionProblem,
   gitPathProblem,
+  gitRemoteProblem,
   npmOptionProblem,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
@@ -42,10 +43,29 @@ export const SCOPE_PATTERN = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@][\w@.+-]*(?:\/[\w@
 
 /**
  * Nie beschreibbar: Git-Interna und Git-Hooks (.husky), Agent-Einstellungen (.claude, .mcp.json – sonst könnte sich ein
- * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen) und Geheimnisse.
+ * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen), Geheimnisse und .npmrc (Registry,
+ * Proxy und Skript-Shell liessen sich dort am Wächter vorbei umstellen).
  */
 const PROTECTED_PATH =
-  /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
+  /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.npmrc|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
+
+/** npm-Unterbefehle (samt Aliassen), die Paketangaben installieren – nur Namen aus der Registry. */
+const NPM_INSTALL_SUBCOMMANDS = new Set([
+  ...['install', 'i', 'in', 'ins', 'inst', 'insta', 'instal', 'isnt', 'isnta', 'isntal', 'isntall', 'add'],
+  ...['update', 'up', 'upgrade', 'udpate'],
+]);
+
+/** Eingerichtete Git-Remotes des Projekts (git remote); origin gilt immer, ohne Abfrage nur origin. */
+function gitRemotes(projectRoot: string, run: typeof spawnSync | null): string[] {
+  const remotes = new Set(['origin']);
+  const result = run?.('git', ['remote'], { cwd: projectRoot, encoding: 'utf8', timeout: 10_000 });
+  if (result?.status === 0) {
+    for (const name of String(result.stdout).split('\n')) {
+      if (/^[\w][\w.-]*$/.test(name.trim())) remotes.add(name.trim());
+    }
+  }
+  return [...remotes];
+}
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead']);
@@ -221,10 +241,14 @@ export function bashProblem(
     }
     const gitProblem = gitPathProblem(words, root);
     if (gitProblem) return gitProblem;
+    if (program === 'git' && (subcommand === 'fetch' || subcommand === 'pull')) {
+      const remoteProblem = gitRemoteProblem(words, gitRemotes(projectRoot, run));
+      if (remoteProblem) return remoteProblem;
+    }
     if (program === 'npm') {
       const npmProblem = npmOptionProblem(words, root);
       if (npmProblem) return npmProblem;
-      if (['install', 'i', 'add'].includes(subcommand)) {
+      if (NPM_INSTALL_SUBCOMMANDS.has(subcommand)) {
         const specs = words.slice(2).filter((word) => !word.text.startsWith('-'));
         const foreign = specs.find((spec) => !REGISTRY_SPEC.test(spec.text));
         if (foreign) return `„${foreign.text}“: nur Pakete aus der npm-Registry, keine Git-, Datei- oder URL-Quellen.`;
