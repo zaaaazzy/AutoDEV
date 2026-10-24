@@ -448,12 +448,12 @@
 
 @media (max-width: 720px) {
   .test-kpis {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .test-viewer {
-      padding: 12px;
-    }
+    padding: 12px;
+  }
   .run-picker select {
-      max-width: 100%;
-    }
+    max-width: 100%;
+  }
 }

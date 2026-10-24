@@ -552,6 +552,6 @@ a.github-link:hover {
 
 @media (max-width: 900px) {
   .sprint-layout {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
 }

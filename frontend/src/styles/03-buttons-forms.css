@@ -387,28 +387,28 @@ label.check > input[type='checkbox'] {
 
 @media (max-width: 720px) {
   .inline-form.dev-create {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 480px) {
   .form-grid,
   .inline-form {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
   .form-grid h2,
   .form-grid h3 {
-      grid-column: auto;
-    }
+    grid-column: auto;
+  }
   .inline-form {
-      align-items: stretch;
-    }
+    align-items: stretch;
+  }
 }
 
 @media (pointer: coarse) {
   /* Touch: kleine Symbolknöpfe (Bearbeiten, Aufklappen, Filter) mindestens 40 px, damit sie mit dem Finger treffbar sind. */
   .icon-button {
-      min-width: 40px;
-      min-height: 40px;
-    }
+    min-width: 40px;
+    min-height: 40px;
+  }
 }

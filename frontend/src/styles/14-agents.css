@@ -536,19 +536,19 @@
 
 @media (max-width: 600px) {
   .agent-settings-list {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
   .agent-settings-list dd {
-      margin-bottom: 6px;
-    }
+    margin-bottom: 6px;
+  }
   .workflow-steps {
-      margin-left: 6px;
-      padding-left: 12px;
-    }
+    margin-left: 6px;
+    padding-left: 12px;
+  }
   .workflow-step-instruction,
-    .workflow-step-actions,
-    .workflow-step-edit,
-    .workflow-step-settings {
-      padding-left: 0;
-    }
+  .workflow-step-actions,
+  .workflow-step-edit,
+  .workflow-step-settings {
+    padding-left: 0;
+  }
 }

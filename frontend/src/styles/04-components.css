@@ -377,8 +377,8 @@ a.summary-card:hover {
 
 @media (max-width: 480px) {
   .summary-grid {
-      gap: 8px;
-    }
+    gap: 8px;
+  }
 }
 
 .gallery {
@@ -1142,14 +1142,30 @@ button.share-key:hover {
   height: 9px;
   border-radius: 50%;
 }
-.tone-ok { background: #2b9a66; }
-.tone-active { background: #2f7de1; }
-.tone-info { background: #8bb6ee; }
-.tone-wait { background: #f0b44c; }
-.tone-warn { background: #e8590c; }
-.tone-bad { background: #d6453d; }
-.tone-neutral { background: #b9c1b5; }
-.tone-plain { background: #a48fd9; }
+.tone-ok {
+  background: #2b9a66;
+}
+.tone-active {
+  background: #2f7de1;
+}
+.tone-info {
+  background: #8bb6ee;
+}
+.tone-wait {
+  background: #f0b44c;
+}
+.tone-warn {
+  background: #e8590c;
+}
+.tone-bad {
+  background: #d6453d;
+}
+.tone-neutral {
+  background: #b9c1b5;
+}
+.tone-plain {
+  background: #a48fd9;
+}
 .metric-links {
   margin-top: 18px;
 }
@@ -1327,9 +1343,9 @@ a.app-link {
 
 @media (max-width: 600px) {
   .mermaid-diagram.rendered svg {
-      max-width: none;
-      min-width: 560px;
-    }
+    max-width: none;
+    min-width: 560px;
+  }
 }
 
 .mermaid-diagram.rendered {
@@ -1580,95 +1596,95 @@ a.app-link {
 
 @media (min-width: 1250px) {
   .flow {
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-    }
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
   .flow-step:nth-child(3n):not(:last-child)::after {
-      content: '→';
-      position: absolute;
-      top: 50%;
-      right: -25px;
-      transform: translateY(-50%);
-      color: var(--green);
-      font-size: 24px;
-      font-weight: 700;
-    }
+    content: '→';
+    position: absolute;
+    top: 50%;
+    right: -25px;
+    transform: translateY(-50%);
+    color: var(--green);
+    font-size: 24px;
+    font-weight: 700;
+  }
 }
 
 @media (max-width: 980px) {
   .summary-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .summary-grid .production-tile {
-      grid-column: 1 / -1;
-    }
+    grid-column: 1 / -1;
+  }
   .item-card {
-      grid-template-columns: minmax(0, 1fr) 190px;
-    }
+    grid-template-columns: minmax(0, 1fr) 190px;
+  }
 }
 
 @media (max-width: 720px) {
   .view-grid,
   .report-columns {
-      grid-template-columns: minmax(0, 1fr);
-    }
+    grid-template-columns: minmax(0, 1fr);
+  }
   .item-card {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
   .item-controls {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .detail-stats {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .panel.fold-panel > summary.section-heading:first-child {
-      flex-direction: row;
-      padding: 12px 12px 12px 34px;
-    }
+    flex-direction: row;
+    padding: 12px 12px 12px 34px;
+  }
   .fold-panel > summary::before {
-      top: 12px;
-      left: 6px;
-    }
+    top: 12px;
+    left: 6px;
+  }
   .fold-panel > summary::after {
-      top: 20px;
-      left: 14px;
-    }
+    top: 20px;
+    left: 14px;
+  }
   .fold-panel[open] > summary::after {
-      top: 18px;
-    }
+    top: 18px;
+  }
   .fold-panel > :not(summary) {
-      margin-inline: 12px;
-    }
+    margin-inline: 12px;
+  }
 }
 
 @media (max-width: 560px) {
   .flow {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
   .flow-step:not(:last-child)::after {
-      content: '↓';
-      top: auto;
-      right: 50%;
-      bottom: -30px;
-      transform: translateX(50%);
-    }
+    content: '↓';
+    top: auto;
+    right: 50%;
+    bottom: -30px;
+    transform: translateX(50%);
+  }
 }
 
 @media (max-width: 480px) {
   .summary-card {
-      padding: 11px;
-    }
+    padding: 11px;
+  }
   .summary-card strong {
-      font-size: 21px;
-    }
+    font-size: 21px;
+  }
   .metric-grid,
   .item-controls {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
   .panel {
-      padding: 13px;
-    }
+    padding: 13px;
+  }
   .section-heading {
-      align-items: flex-start;
-      flex-direction: column;
-    }
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }

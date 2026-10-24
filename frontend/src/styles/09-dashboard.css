@@ -775,41 +775,41 @@ app-wait-status {
 
 @media (max-width: 720px) {
   .git-meta,
-    .git-ref-remote,
-    .git-ref-tag {
-      display: none;
-    }
+  .git-ref-remote,
+  .git-ref-tag {
+    display: none;
+  }
   .git-ref {
-      max-width: 120px;
-    }
+    max-width: 120px;
+  }
   .running-kind {
-      min-width: 0;
-    }
+    min-width: 0;
+  }
   .attention-table .attention-body {
-      grid-template-columns: 1fr;
-      padding: 12px 10px;
-    }
+    grid-template-columns: 1fr;
+    padding: 12px 10px;
+  }
   .attention-table .attention-actions .button.danger {
-      margin-left: 0;
-    }
+    margin-left: 0;
+  }
 }
 
 @media (max-width: 600px) {
   .attention-actions .button {
-      flex: 1 1 calc(50% - 4px);
-      justify-content: center;
-    }
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+  }
   .quality-agents th:nth-child(2),
-    .quality-agents td:nth-child(2) {
-      display: none;
-    }
+  .quality-agents td:nth-child(2) {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .test-live-dot {
-      animation: none;
-    }
+    animation: none;
+  }
   .wait-status-bar.indeterminate span {
-      animation: none;
-    }
+    animation: none;
+  }
 }

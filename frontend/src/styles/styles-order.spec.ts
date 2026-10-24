@@ -85,10 +85,15 @@ test('Stylesheets nach Bereich: jeder Selektor steht je Medienkontext in genau e
     for (const { context, selector } of selectors(readFileSync(join(STYLES_DIR, file), 'utf8'))) {
       const key = `${context} ${selector}`;
       const first = seen.get(key);
-      if (first && first !== file) duplicates.push(`${selector}${context ? ` (${context})` : ''}: ${first} und ${file}`);
+      if (first && first !== file)
+        duplicates.push(`${selector}${context ? ` (${context})` : ''}: ${first} und ${file}`);
       else seen.set(key, file);
     }
-  assert.deepEqual(duplicates, [], 'Überschreibungen gehören in die Grundregel des Bereichs, nicht in eine zweite Datei');
+  assert.deepEqual(
+    duplicates,
+    [],
+    'Überschreibungen gehören in die Grundregel des Bereichs, nicht in eine zweite Datei',
+  );
 });
 
 test('Hilfsklassen .plain-list, .truncate und .row stehen in 01-base.css', () => {

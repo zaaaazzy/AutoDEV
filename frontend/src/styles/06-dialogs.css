@@ -315,24 +315,24 @@
 
 @media (max-width: 720px) {
   .tour-card:not(.centered) {
-      right: 12px;
-      bottom: calc(12px + env(safe-area-inset-bottom));
-      left: 12px;
-    }
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 12px;
+  }
 }
 
 @media (max-width: 600px) {
   .guide-backdrop {
-      align-items: end;
-      padding: 0;
-    }
+    align-items: end;
+    padding: 0;
+  }
   .guide-sheet {
-      width: 100%;
-      border-radius: 22px 22px 0 0;
-      padding-bottom: calc(22px + env(safe-area-inset-bottom));
-      animation-name: sheet-in;
-    }
+    width: 100%;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: calc(22px + env(safe-area-inset-bottom));
+    animation-name: sheet-in;
+  }
   .guide-foot .button {
-      flex: 1;
-    }
+    flex: 1;
+  }
 }
