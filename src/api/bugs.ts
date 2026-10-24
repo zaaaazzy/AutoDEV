@@ -1,10 +1,11 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
-import { BUG_STATUSES, BUG_STATUS, type BugStatus } from '../core/status.js';
+import { BUG_STATUSES, BUG_STATUS, DEVELOPMENT_STATUS, type BugStatus } from '../core/status.js';
 import { relatedResourceBelongsToProject } from './resource.js';
-import { isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
+import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
+import { UNTRUSTED_START } from '../runner/hoster.js';
 import type { Principal } from './roles.js';
 import {
   buildUpdate,
@@ -40,15 +41,21 @@ const BUG_FIELDS = {
   category: { column: 'category', parse: parseCategory },
 };
 
-/** Keeps the development order of a bug in line with the sprint the bug was added to. */
+/**
+ * Keeps the development order of a bug in line with the sprint the bug was added to. Bugs aus fremden Quellen bekommen
+ * erst nach der Freigabe einen Auftrag (sonst stünde ihr Text schon vorher in einem Auftrag, der beim Löschen des Bugs
+ * seine Sperre verlöre), ihr Text kommt als Fremdtext eingefasst hinein. Automatisch laufende Behebungsaufträge
+ * (auto_run, z. B. aus dem Betrieb) hängen an keinem Sprint und gehen beim Entfernen aus dem Sprint nicht ins Backlog.
+ */
 export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id)
-     SELECT b.project_slug, b.sprint_id, 'Bug: ' || b.title, b.description, 'planned',
+     SELECT b.project_slug, b.sprint_id, 'Bug: ' || b.title, ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, 'planned',
             CASE b.severity WHEN 'critical' THEN 'high' WHEN 'high' THEN 'high' WHEN 'medium' THEN 'medium' ELSE 'low' END,
             'bug', b.id
        FROM bugs b
       WHERE b.id = $1 AND b.sprint_id IS NOT NULL AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
+        AND NOT ${unapprovedBugSql('b')}
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO UPDATE
        SET sprint_id = EXCLUDED.sprint_id,
            status = CASE WHEN development_items.status IN ('backlog', 'done') THEN 'planned' ELSE development_items.status END,
@@ -58,7 +65,7 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
   await pool.query(
     `UPDATE development_items d SET sprint_id = NULL, status = 'backlog', updated_at = NOW()
        FROM bugs b
-      WHERE d.bug_id = b.id AND b.id = $1 AND b.sprint_id IS NULL AND d.status IN ('planned', 'backlog')`,
+      WHERE d.bug_id = b.id AND b.id = $1 AND b.sprint_id IS NULL AND d.status IN ('planned', 'backlog') AND NOT d.auto_run`,
     [bugId],
   );
   await pool.query(
@@ -114,6 +121,49 @@ export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40)
     [projectSlug, limit],
   );
   return result.rows;
+}
+
+/**
+ * Löscht einen Bug samt Aufträgen, die noch nie liefen (geplant, Backlog). Ohne Bug verlöre ein solcher Auftrag die
+ * Freigabe-Sperre (development_items.bug_id wird NULL) und liefe als gewöhnlicher Auftrag weiter. Bei fremden, nicht
+ * freigegebenen Bugs gehen alle Aufträge mit. Läuft gerade einer, bleibt der Bug stehen.
+ */
+async function deleteBug(pool: Pool, bugId: string): Promise<'deleted' | 'missing' | 'running'> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const bug = (
+      await client.query<{ unapproved: boolean }>(
+        `SELECT ${unapprovedBugSql('b')} AS unapproved FROM bugs b WHERE b.id = $1 FOR UPDATE`,
+        [bugId],
+      )
+    ).rows[0];
+    if (!bug) {
+      await client.query('ROLLBACK');
+      return 'missing';
+    }
+    const running = await client.query(
+      `SELECT 1 FROM development_items WHERE bug_id = $1 AND status = '${DEVELOPMENT_STATUS.inProgress}' FOR UPDATE`,
+      [bugId],
+    );
+    if (running.rowCount) {
+      await client.query('ROLLBACK');
+      return 'running';
+    }
+    await client.query(
+      `DELETE FROM development_items
+        WHERE bug_id = $1 AND (status IN ('${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.backlog}') OR $2)`,
+      [bugId, bug.unapproved],
+    );
+    await client.query('DELETE FROM bugs WHERE id = $1', [bugId]);
+    await client.query('COMMIT');
+    return 'deleted';
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export function registerBugRoutes(app: Router, pool: Pool): void {
@@ -218,9 +268,10 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       return;
     }
     const bug = (
-      await pool.query<{ source: string; status: BugStatus }>('SELECT source, status FROM bugs WHERE id = $1', [
-        request.params.id,
-      ])
+      await pool.query<{ source: string; status: BugStatus; approvedAt: Date | null }>(
+        'SELECT source, status, approved_at AS "approvedAt" FROM bugs WHERE id = $1',
+        [request.params.id],
+      )
     ).rows[0];
     if (!bug) {
       response.status(404).json({ message: 'Bug nicht gefunden.' });
@@ -234,12 +285,25 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       response.status(409).json({ message: 'Nur offene Bugs können freigegeben werden.' });
       return;
     }
+    if (bug.approvedAt) {
+      response.status(409).json({ message: 'Bug ist bereits freigegeben.' });
+      return;
+    }
     const principal = response.locals.principal as Principal | undefined;
+    // Atomar: Bei zwei gleichzeitigen Freigaben gewinnt eine, die andere startet keinen zweiten Behebungsauftrag.
     const result = await pool.query(
-      `UPDATE bugs SET approved_at = NOW(), approved_by = $2, updated_at = NOW() WHERE id = $1 RETURNING ${BUG_COLUMNS}`,
+      `UPDATE bugs SET approved_at = NOW(), approved_by = $2, updated_at = NOW()
+        WHERE id = $1 AND approved_at IS NULL AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
+        RETURNING ${BUG_COLUMNS}`,
       [request.params.id, (principal?.displayName || principal?.username || 'Nutzer').slice(0, 80)],
     );
+    if (!result.rows[0]) {
+      response.status(409).json({ message: 'Bug wurde inzwischen geändert oder schon freigegeben.' });
+      return;
+    }
     if (bug.source === 'production') await startProductionFix(pool, request.params.id);
+    // Lag der Bug schon in einem Sprint, entsteht sein Sprint-Auftrag erst jetzt (syncBugOrder wartet auf die Freigabe).
+    if (result.rows[0].sprintId) await syncBugOrder(pool, request.params.id);
     response.json({ bug: result.rows[0] });
   });
 
@@ -248,9 +312,15 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
-    const result = await pool.query('DELETE FROM bugs WHERE id = $1 RETURNING id', [request.params.id]);
-    if (!result.rows[0]) {
+    const outcome = await deleteBug(pool, request.params.id);
+    if (outcome === 'missing') {
       response.status(404).json({ message: 'Bug nicht gefunden.' });
+      return;
+    }
+    if (outcome === 'running') {
+      response
+        .status(409)
+        .json({ message: 'Zu diesem Bug läuft gerade ein Auftrag. Den Auftrag erst abbrechen, dann den Bug löschen.' });
       return;
     }
     response.status(204).end();
