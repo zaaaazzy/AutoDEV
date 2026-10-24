@@ -21,8 +21,8 @@ AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich:
 ## Entwicklung
 
 - Node.js 22.12 oder neuer (Projektversion: `.nvmrc`, Docker: `22.22.3`).
-- `npm run dev` startet die API auf Port 3100.
-- `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` an die API weiter.
+- `npm run dev` startet die API auf Port 3101 und läuft damit neben dem Compose-Stack (3100, 5433, 80, 443 gehören dem Live-Stack). Sie braucht eine eigene Datenbank, z. B. `DEV_LOG_DATABASE_URL=postgresql://devlog:<passwort>@127.0.0.1:5433/aideation_dev DEV_LOG_AUTH=off npm run dev`; die Datenbank wird beim Start angelegt. Auf `PORT=3100` oder die Live-Datenbank `aideation` startet die Dev-API nicht (`src/core/dev-environment.ts`).
+- `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` und `/health` an die Dev-API auf Port 3101 weiter (`frontend/proxy.conf.json`), nie an den Live-Stack.
 - `npm run build` baut die Angular-Oberfläche und kompiliert anschließend das Backend.
 - `npm test` baut die Oberfläche und führt die Backend-Tests aus.
 - `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen. `typecheck` prüft auch die Test-Dateien (`tsconfig.test.json`, `frontend/tsconfig.spec.json`), denn `tsx` allein prüft keine Typen.
