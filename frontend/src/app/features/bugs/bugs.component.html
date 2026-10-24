@@ -145,7 +145,7 @@
                   [name]="'bug-sprint-' + bug.id"
                 >
                   <option [ngValue]="null">Kein Sprint</option>
-                  @for (sprint of data().sprints; track sprint.id) {
+                  @for (sprint of availableSprints(bug.sprintId); track sprint.id) {
                     <option [value]="sprint.id">{{ sprint.name }}</option>
                   }
                 </select>
@@ -214,7 +214,7 @@
                 <label
                   >Sprint<select name="sprintId" [ngModel]="bug.sprintId">
                     <option value="">Kein Sprint</option>
-                    @for (sprint of data().sprints; track sprint.id) {
+                    @for (sprint of availableSprints(bug.sprintId); track sprint.id) {
                       <option [value]="sprint.id">{{ sprint.name }}</option>
                     }
                   </select>
@@ -271,7 +271,7 @@
                   @for (row of group.rows; track row.label) {
                     <tr>
                       <td>
-                        <span class="bug-stats-label" [title]="row.label">{{ row.label }}</span>
+                        <span class="bug-stats-label truncate" [title]="row.label">{{ row.label }}</span>
                         <span class="bug-stats-bar" aria-hidden="true">
                           <span class="open" [style.width.%]="(row.open / group.max) * 100"></span>
                           <span class="buried" [style.width.%]="(row.buried / group.max) * 100"></span>

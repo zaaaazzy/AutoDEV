@@ -468,6 +468,11 @@ function sprintPool(sprint: { status: string; running?: number } | null) {
       if (sql.startsWith('UPDATE sprints SET')) return { rows: [{ id: SPRINT_ID, status: sprint.status }] };
       return { rows: [] };
     },
+    // Abschluss läuft in einer Transaktion auf eigener Verbindung: Statements gehen an pool.query (auch überschrieben).
+    connect: async () => ({
+      query: (sql: string, values?: unknown[]) => (pool as unknown as { query: typeof pool.query }).query(sql, values),
+      release: () => undefined,
+    }),
   } as unknown as Pool;
   return { pool, queries };
 }

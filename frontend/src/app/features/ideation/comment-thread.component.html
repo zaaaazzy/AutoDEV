@@ -17,11 +17,11 @@
         </header>
         <div class="bubble-body markdown" [innerHTML]="body(comment)"></div>
         @if (comment.agentStatus === 'pending' || comment.agentStatus === 'processing') {
-          <p class="bubble-working">
+          <p class="bubble-working row">
             <span class="typing"><i></i><i></i><i></i></span> Agent arbeitet an der Antwort …
           </p>
         } @else if (comment.agentStatus === 'failed') {
-          <p class="bubble-working failed">Agent-Anfrage fehlgeschlagen – Details im Chat.</p>
+          <p class="bubble-working row failed">Agent-Anfrage fehlgeschlagen – Details im Chat.</p>
         }
       </div>
     </article>
@@ -47,7 +47,7 @@
             (mouseenter)="active.set(index)"
           >
             <span class="mention-icon" aria-hidden="true">{{ option.type === 'agent' ? '⚙︎' : '👤' }}</span>
-            <span class="mention-label">{{ option.name }}</span>
+            <span class="mention-label truncate">{{ option.name }}</span>
             <small>{{ option.type === 'agent' ? 'Agent' : 'Person' }}</small>
           </button>
         }

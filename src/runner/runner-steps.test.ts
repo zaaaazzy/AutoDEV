@@ -123,6 +123,11 @@ test('claimRun: räumt zuerst verwaiste Läufe des Auftrags ab und meldet null, 
   assert.equal(await claimRun(free.pool, item), 'run-9');
   assert.match(free.queries[0]?.sql ?? '', /UPDATE agent_runs r SET status = 'failed'/);
   assert.deepEqual(free.queries[0]?.values, [item.id, ABANDONED_RUN_MS]);
+  // Absturz-Recovery: der hängende Schritt des verwaisten Laufs gilt als unterbrochen, nicht als Ablehnung.
+  assert.match(
+    free.queries[0]?.sql ?? '',
+    /UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE[\s\S]*WHERE status = 'running' AND run_id IN \(SELECT id FROM abandoned\)/,
+  );
   assert.match(free.queries[1]?.sql ?? '', /ON CONFLICT \(development_id\) WHERE status = 'running' DO NOTHING/);
   assert.deepEqual(free.queries[1]?.values, [item.projectSlug, item.id]);
 
