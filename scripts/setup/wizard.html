@@ -392,16 +392,17 @@
         const c = state.check;
         const install = {
           docker: 'Docker Desktop installieren und starten: https://docs.docker.com/get-docker/',
-          node: 'Node.js 22 oder neuer: https://nodejs.org/',
+          node: 'Node.js 22.12 oder neuer: https://nodejs.org/',
         };
         $('body').innerHTML = `
           <p class="intro">AIdeation läuft in Docker; der Worker, der die Agents startet, läuft direkt auf deinem Rechner.</p>
           <ul class="checks">
-            ${item(c ? c.node.ok : null, 'Node.js 22+', c ? `gefunden: ${escape(c.node.version)}` : 'wird geprüft …')}
+            ${item(c ? c.node.ok : null, 'Node.js 22.12+', c ? (c.node.ok ? `gefunden: ${escape(c.node.version)}` : `gefunden: ${escape(c.node.version)} – ${install.node}`) : 'wird geprüft …')}
             ${item(c ? c.docker.ok : null, 'Docker läuft', c ? (c.docker.ok ? `Version ${escape(c.docker.version)}` : install.docker) : 'wird geprüft …')}
             ${item(c ? c.compose.ok : null, 'Docker Compose', c ? (c.compose.ok ? escape(c.compose.version) : 'Teil von Docker Desktop') : 'wird geprüft …')}
             ${item(c ? c.git.ok : null, 'Git', c ? (c.git.ok ? escape(c.git.version) : 'https://git-scm.com/downloads') : 'wird geprüft …')}
             ${item(c ? c.claude.ok : null, 'Claude Code (optional)', c ? (c.claude.ok ? escape(c.claude.version) : 'Für die besten Ergebnisse: https://claude.com/claude-code') : '…', true)}
+            ${item(c ? c.chromium.ok : null, 'Chromium für Playwright (optional)', c ? (c.chromium.ok ? 'installiert' : 'Wird bei der Installation geladen – für die optische Abnahme und Browser-Spiele (Phaser)') : '…', true)}
             ${item(c ? c.ollama.ok : null, 'Ollama (optional, kostenlos)', c ? (c.ollama.ok ? escape(c.ollama.version) : 'Lokales Modell: https://ollama.com') : '…', true)}
           </ul>
           ${c && c.envExists ? '<p class="hint">Es gibt bereits eine Konfiguration (.env). Sie wird gesichert (<code>.env.bak-…</code>) und ergänzt: Zugang und ausgefüllte Optionen werden gesetzt, alle anderen Werte – auch der Secret Key – bleiben erhalten.</p>' : ''}`;
@@ -457,6 +458,7 @@
           docker: 'Container bauen und starten',
           health: 'AIdeation antwortet',
           demo: 'Beispieldaten',
+          game: 'Spiele-Werkzeuge (Chromium, Phaser-Vorlage)',
           worker: 'Worker einrichten',
         };
         const status = {};
