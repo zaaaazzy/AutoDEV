@@ -1,0 +1,886 @@
+/* Assistenten-Chat: Verlauf, Eingabe, Agent-Aufgaben, Vergrößern */
+.chat {
+  margin-bottom: 16px;
+}
+.chat-offline {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+}
+.chat-offline .link-button {
+  margin-left: 6px;
+  font-weight: 600;
+}
+.chat-log {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  min-height: 80px;
+  overflow-y: auto;
+  padding: 4px 2px 10px;
+}
+.chat-msg {
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: #eceee8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  align-self: flex-start;
+}
+.chat-msg.mine {
+  align-self: flex-end;
+  background: #e2efe7;
+  color: var(--ink);
+  white-space: normal;
+}
+.chat-msg.failed {
+  outline: 1px solid var(--danger);
+}
+
+/* Assistenten-Antworten in derselben Schrittansicht wie Agents (Live-Zeile, Verlauf, Ausgabe) */
+.chat-msg.assistant {
+  width: min(100%, 860px);
+  max-width: 100%;
+  padding: 6px 10px 10px;
+  background: var(--paper);
+  white-space: normal;
+}
+.chat-msg.assistant .step-output {
+  /* Chat: Antworten von Assistent, Agents und Aktionen als einfarbige Bubble – ohne weisse Innenbox */
+  max-height: none;
+  overflow: visible;
+  overscroll-behavior: auto;
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.chat-msg.typing {
+  color: var(--muted);
+  font-style: italic;
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+.chat-form {
+  display: flex;
+  gap: 8px;
+}
+.chat-form input {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 999px;
+  border: 1px solid #d5dbd0;
+  min-width: 0;
+}
+@keyframes chat-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+.chat-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid #d5dbd0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: #4a554d;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.chat-clear:hover:not(:disabled) {
+  background: #fbeceb;
+  color: #b3372b;
+  border-color: #e6b8b3;
+}
+.chat-clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.chat-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--green-light);
+  color: var(--surface);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    transform 0.1s;
+}
+.chat-send:hover:not(:disabled) {
+  background: #265c41;
+}
+.chat-send:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.chat-send:disabled {
+  background: var(--line-strong);
+  cursor: default;
+}
+
+/* Rückfrage des Dashboard-Assistenten */
+.chat-question {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 3px solid #e08a1e;
+  border-radius: 6px;
+  background: #fdf3e4;
+}
+.chat-question p {
+  margin: 2px 0 0;
+  font-weight: 600;
+}
+.chat-question-label {
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.chat-msg.assistant.asking {
+  outline: 2px solid #e08a1e;
+}
+.question-badge {
+  display: inline-grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  margin-left: 4px;
+  border-radius: 50%;
+  background: #e08a1e;
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+/* Agent-Aufgaben im Assistenten: Dropdown mit Suche, Start mit einem Klick */
+.agent-tasks {
+  position: relative;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.agent-tasks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  background: var(--green);
+  color: var(--surface);
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.agent-tasks-toggle.open .agent-tasks-caret {
+  transform: rotate(180deg);
+}
+.agent-tasks-menu {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(420px, calc(100vw - 32px));
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.agent-tasks-search {
+  padding: 0 10px;
+  border: 1px solid #d5dbd0;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+/* Das Feld selbst ist rahmenlos; der Fokus-Ring sitzt am Rahmen drumherum. */
+.agent-tasks-search:focus-within {
+  border-color: var(--green);
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.agent-tasks-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+}
+.agent-tasks-list {
+  max-height: 320px;
+  margin: 6px 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.agent-tasks-group {
+  padding: 8px 8px 4px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agent-task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.agent-task.active {
+  background: var(--paper);
+}
+.agent-task-run {
+  flex: none;
+  color: var(--green);
+  font-size: 0.8rem;
+}
+.agent-task-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.agent-task-text strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+.agent-task-text small,
+.agent-task-text strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-task-count {
+  flex: none;
+  font-size: 0.75rem;
+}
+.agent-task-icon {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+}
+.agent-task.active .agent-task-icon,
+.agent-task-icon:focus-visible {
+  opacity: 1;
+}
+.agent-task-icon:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.agent-tasks-empty {
+  padding: 10px 8px;
+}
+.agent-tasks-list .agent-tasks-group {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  background: var(--surface);
+}
+.agent-task.disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* Hover-Details: neben dem Menü, auf schmalen Bildschirmen darunter. */
+.agent-task-detail {
+  position: absolute;
+  top: 0;
+  right: calc(100% + 8px);
+  width: 320px;
+  max-height: min(520px, 80vh);
+  padding: 12px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 0.85rem;
+}
+.agent-task-detail dl {
+  display: grid;
+  gap: 2px;
+  margin: 8px 0 0;
+}
+.agent-task-detail dt {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agent-task-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.agent-task-detail-prompt {
+  white-space: pre-wrap;
+}
+.agent-task-detail-commands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.agent-task-detail-commands code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--paper);
+  font-size: 0.78rem;
+}
+.agent-tasks-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0 8px;
+  font-size: 0.8rem;
+}
+.agent-tasks-footer .agent-tasks-new {
+  flex: 1;
+  min-width: 0;
+}
+.agent-tasks-manage {
+  flex: none;
+  font-size: 0.85rem;
+}
+.agent-tasks-new {
+  width: 100%;
+  padding: 8px;
+  border: 1px dashed #c9d1c4;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--green);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-task-form {
+  display: grid;
+  gap: 8px;
+}
+.agent-task-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+.agent-task-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Zeitplan einer Aufgabe (Routine): Uhr-Symbol in der Liste, Auswahl im Formular, Verlauf der Läufe. */
+.agent-task-clock {
+  flex: none;
+  font-size: 0.8rem;
+}
+.agent-task-clock.paused {
+  color: var(--muted);
+}
+.agent-task-schedule {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.agent-task-schedule legend {
+  padding: 0 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.agent-task-form .agent-task-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.agent-task-preview {
+  font-weight: 600;
+}
+.agent-task-history {
+  display: grid;
+  gap: 8px;
+  max-height: min(520px, 70vh);
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.agent-task-history-head {
+  justify-content: space-between;
+}
+.agent-task-runs {
+  width: 100%;
+  border-collapse: collapse;
+}
+.agent-task-runs th,
+.agent-task-runs td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.agent-task-runs td small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.agent-task-runs tr.failed td {
+  background: #fff4f2;
+}
+.agent-task-run-error {
+  color: #a3341f;
+}
+.agent-task-sort {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Kennzeichnung, welcher Agent eine Nachricht übernimmt bzw. beantwortet */
+.chat-agent-name {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--green);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.chat-msg.mine .chat-text {
+  white-space: pre-wrap;
+}
+
+/* Chat-Eingabe: „/“ Agent, „@“ Verweis – Vorschläge als Bubbles, Auswahl als Chips */
+.composer {
+  /* Nur über dem Chat-Verlauf, nie über Seitenleiste oder Menüs (die liegen ab z-index 5). */
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 6px;
+}
+.mention-pop {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 6px);
+  left: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(32 40 36 / 16%);
+  animation: mention-in 0.14s ease-out;
+}
+@keyframes mention-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.mention-title {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.mention-bubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+  /* Verweis-Auswahl: hervorgehobene Bubble wird oben nicht mehr abgeschnitten */
+  padding: 3px 2px 2px;
+}
+.mention-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid #d5dbd0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.86rem;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    transform 0.12s;
+}
+.mention-bubble small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.mention-bubble.active {
+  border-color: var(--green);
+  background: var(--green-soft);
+  transform: translateY(-1px);
+}
+.composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: #eef1ec;
+  font-size: 0.82rem;
+}
+.composer-chip.agent {
+  background: #e2efe7;
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* Agent-Symbol wie in der Kopfzeile: einfarbig, Textgrösse */
+.mention-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.mention-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.chat-agent-name .mention-icon {
+  vertical-align: -2px;
+}
+.composer-chip .chip-label {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-chip button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 8%);
+  color: inherit;
+  cursor: pointer;
+  line-height: 1;
+}
+.composer-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+.composer-hint kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--surface);
+  font: inherit;
+  font-weight: 700;
+}
+.chat-refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.chat-ref {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid #c9dccf;
+  font-size: 0.75rem;
+}
+
+/* ── Rückfragen im Chat: Antworten zum Anklicken, Antwort-Hinweis ─────── */
+.chat-answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chat-answer {
+  padding: 6px 12px;
+  border: 1px solid #e0a03a;
+  border-radius: 999px;
+  background: var(--surface);
+  color: #8a5a00;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.chat-answer:hover,
+.chat-answer:focus-visible {
+  background: var(--warn-soft);
+}
+.chat-answer.own {
+  border-style: dashed;
+  font-weight: 500;
+}
+.chat-answer.own.selected {
+  border-style: solid;
+  background: var(--warn-soft);
+}
+.chat-reply-to {
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin: 0 0 6px;
+  padding: 6px 12px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 8px;
+  background: #fdf6ec;
+  font-size: 13px;
+}
+.chat-msg.assistant .run-step {
+  background: transparent;
+  padding: 4px 0 0;
+}
+
+/* Mausrad über einer Antwort scrollt den Chat weiter (keine eingeschlossene Scroll-Kette) */
+.chat-msg.assistant .timeline {
+  overscroll-behavior: auto;
+}
+
+/* Symbole in Verweis- und Agent-Bubbles: einfarbig wie die Navigation */
+.mention-bubble .mention-icon,
+.composer-chip .mention-icon {
+  color: var(--green);
+}
+.chat-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  border: 1px solid #d5dbd0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: #4a554d;
+  font-size: 14px;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.chat-icon-button:hover {
+  background: #e2efe7;
+  color: var(--green);
+  border-color: #b9d3c4;
+}
+.chat-icon-button[aria-pressed='true'] {
+  background: var(--green);
+  color: var(--surface);
+  border-color: var(--green);
+}
+.chat .section-heading {
+  gap: 8px;
+}
+
+/* Gemeinsam für alle vergrößerten bzw. schwebenden Varianten: Verlauf füllt die Höhe. */
+.chat.chat-docked,
+.chat.chat-modal,
+.chat.chat-bubble-panel {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  background: var(--surface);
+}
+.chat.chat-docked .chat-log,
+.chat.chat-modal .chat-log,
+.chat.chat-bubble-panel .chat-log {
+  flex: 1;
+  max-height: none;
+  min-height: 0;
+}
+.chat.chat-docked .chat-msg.assistant,
+.chat.chat-bubble-panel .chat-msg.assistant {
+  width: 100%;
+}
+
+/* Angedockt: volle Höhe am rechten Rand, der Hauptbereich weicht aus. */
+.chat.chat-docked {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  width: var(--chat-dock-width);
+  border-width: 0 0 0 1px;
+  border-radius: 0;
+  box-shadow: -8px 0 28px rgb(32 40 36 / 10%);
+}
+body.chat-docked .main {
+  padding-right: var(--chat-dock-width);
+}
+
+/* Angedockt: Sprechblase ausblenden; ein Fenster bleibt nur, wenn es selbst der angedockte Chat ist. */
+body.chat-docked .chat-bubble,
+body.chat-docked .chat-bubble-window:not(:has(.chat-docked)) {
+  display: none;
+}
+.chat-bubble-window:has(.chat-docked) {
+  animation: none;
+}
+.chat.chat-docked.chat-bubble-panel {
+  padding: 14px;
+  box-shadow: -8px 0 28px rgb(32 40 36 / 10%);
+}
+
+/* Modal: zentriert über allem, Hintergrund abgedunkelt. */
+.chat-zoom-backdrop {
+  z-index: 55;
+}
+.chat.chat-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 56;
+  width: min(960px, calc(100vw - 32px));
+  height: min(88vh, 960px);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 28%);
+}
+
+/* Sprechblase unten rechts */
+.chat-bubble {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 44;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green);
+  color: var(--surface);
+  font-size: 20px;
+  box-shadow: 0 10px 24px rgb(36 99 78 / 35%);
+  cursor: pointer;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.chat-bubble:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px rgb(36 99 78 / 42%);
+}
+.chat-bubble-window {
+  position: fixed;
+  right: 20px;
+  bottom: 88px;
+  z-index: 44;
+  display: flex;
+  width: min(400px, calc(100vw - 24px));
+  height: min(560px, calc(100vh - 120px));
+  animation: wizard-in 0.2s ease-out;
+}
+
+/* Als Modal geöffnet: das Fenster darf die Modal-Ebene nicht nach unten begrenzen. */
+.chat-bubble-window:has(.chat-modal) {
+  z-index: 56;
+  animation: none;
+}
+.chat-bubble-panel {
+  flex: 1;
+  min-width: 0;
+  padding: 14px;
+  box-shadow: 0 18px 40px rgb(0 0 0 / 22%);
+}
+.chat-bubble-panel .chat-clear-label {
+  display: none;
+}
+.chat-bubble-panel .chat-clear {
+  padding: 6px 9px;
+}
+
+@media (max-width: 720px) {
+  .chat .section-heading {
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+  }
+  .agent-tasks {
+    position: static;
+  }
+  .agent-tasks-menu {
+    right: 0;
+    left: 0;
+    width: auto;
+  }
+  .agent-tasks-list {
+    max-height: 45vh;
+  }
+  .agent-task-detail {
+    position: static;
+    width: auto;
+    max-height: 30vh;
+    margin-bottom: 6px;
+    box-shadow: none;
+  }
+  .chat-clear-label {
+    display: none;
+  }
+  .chat-clear {
+    padding: 6px 9px;
+  }
+  .chat-bubble {
+    right: 12px;
+    bottom: 12px;
+    width: 50px;
+    height: 50px;
+  }
+  .chat-bubble-window {
+    right: 12px;
+    bottom: 72px;
+    height: min(520px, calc(100vh - 100px));
+  }
+  .chat.chat-modal {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 16px);
+    padding: 12px;
+  }
+}
+
+@media (hover: none) {
+  .agent-task-icon {
+    opacity: 1;
+  }
+}

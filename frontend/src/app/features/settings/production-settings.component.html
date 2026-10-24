@@ -89,7 +89,7 @@
     }
   </div>
   @if (token(); as fresh) {
-    <div class="production-token" role="status">
+    <div class="production-token row" role="status">
       <strong>Neues Token – jetzt kopieren, es wird nicht mehr angezeigt:</strong>
       <code data-testid="ingest-token">{{ fresh }}</code>
       <button class="button secondary" type="button" (click)="copy('token', fresh)">

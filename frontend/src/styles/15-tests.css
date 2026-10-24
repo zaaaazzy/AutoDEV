@@ -1,0 +1,434 @@
+/* Testläufe */
+/* Testläufe: Übersicht je Kategorie, Befunde, Screenshots und Videos aus Playwright */
+.test-overview .section-heading p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.run-picker {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.run-picker select {
+  max-width: 260px;
+}
+.test-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.test-kpis > div {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.test-kpis strong {
+  font-size: 22px;
+  line-height: 1.2;
+}
+.test-kpis span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.test-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.test-category {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.test-category:hover {
+  border-color: var(--green);
+}
+.test-category.active {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px rgb(36 99 78 / 18%);
+}
+.test-category.has-failures {
+  border-left: 4px solid #c2604b;
+}
+.test-category.idle {
+  background: var(--surface-soft);
+  color: var(--muted);
+}
+.test-category-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.test-category-count {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+}
+.test-category-count small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.test-bar {
+  display: flex;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+.test-bar .pass {
+  background: #3f8a63;
+}
+.test-bar .fail {
+  background: #c2604b;
+}
+.test-bar .skip {
+  background: #b9c0b8;
+}
+.test-filter-note {
+  margin: 12px 0 0;
+}
+.test-findings {
+  display: grid;
+  gap: 10px;
+}
+.test-findings > li {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #f0d8d0;
+  border-radius: 12px;
+  background: #fdf8f6;
+}
+.test-finding-head {
+  flex-wrap: wrap;
+}
+.test-finding-head .link-button {
+  font-weight: 700;
+  text-align: left;
+}
+.test-errors {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.test-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.test-thumb {
+  display: grid;
+  width: 120px;
+  height: 80px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  place-items: center;
+}
+.test-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+.test-thumb.video {
+  background: var(--ink);
+  color: var(--surface);
+  font-weight: 700;
+}
+.test-thumbs video {
+  width: 240px;
+  max-width: 100%;
+  border-radius: 8px;
+}
+.test-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px;
+}
+.test-gallery figure {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.test-gallery .test-thumb {
+  width: 100%;
+  height: 130px;
+}
+.test-gallery video {
+  width: 100%;
+  border-radius: 8px;
+  background: var(--ink);
+}
+.test-gallery figcaption {
+  display: grid;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.test-videos {
+  margin-top: 16px;
+}
+.test-videos summary {
+  margin-bottom: 12px;
+  font-weight: 700;
+}
+.test-viewer {
+  position: fixed;
+  z-index: 200;
+  display: grid;
+  padding: 24px;
+  inset: 0;
+  background: rgb(20 26 23 / 82%);
+  place-items: center;
+}
+.test-viewer figure {
+  display: grid;
+  max-width: min(1200px, 100%);
+  max-height: 100%;
+  gap: 10px;
+  margin: 0;
+}
+.test-viewer img,
+.test-viewer video {
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  border-radius: 10px;
+  background: var(--surface);
+  object-fit: contain;
+}
+.test-viewer figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--surface);
+  font-size: 13px;
+}
+.test-viewer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Testläufe: Prüfinhalt und Verlauf je Kategorie, aufbereitete Schritte, klickbare Zeilen */
+.test-category-checks {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.test-history {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  font-size: 11px;
+}
+.test-history-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+}
+.test-history-bars {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+}
+.test-history-bars small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.test-history-bars small:first-child {
+  margin-right: 4px;
+}
+.test-history-bars small:last-child {
+  margin-left: 4px;
+}
+.test-history-bars .bar {
+  width: 10px;
+  height: 14px;
+  border-radius: 3px;
+}
+.test-history-bars .bar.passed {
+  background: #3f8a63;
+}
+.test-history-bars .bar.failed {
+  background: #c2604b;
+}
+
+/* Der gerade angezeigte Lauf: höher und mit Markierung darunter */
+.test-history-bars .bar.current {
+  position: relative;
+  height: 20px;
+}
+.test-history-bars .bar.current::after {
+  position: absolute;
+  bottom: -6px;
+  left: 2px;
+  width: 6px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--ink);
+  content: '';
+}
+
+/* Der Titel-Button deckt die ganze Karte ab (Klickfläche wie bisher, bedienbar per Tastatur). */
+.test-findings > li.clickable {
+  position: relative;
+  cursor: pointer;
+}
+.test-findings > li.clickable .finding-open::after {
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  content: '';
+}
+.test-findings > li.clickable :is(button, a, video):not(.finding-open) {
+  position: relative;
+  z-index: 1;
+}
+.test-findings > li.clickable:hover {
+  border-color: #e3b9ad;
+}
+.test-finding-summary {
+  margin: 0;
+  font-size: 13px;
+}
+.step-summary {
+  display: block;
+  margin-bottom: 8px;
+}
+.step-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.step-card > summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 14px;
+}
+.step-card[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+.step-card > :not(summary) {
+  margin: 12px 14px;
+}
+.step-command {
+  font-size: 13px;
+}
+.step-headline {
+  flex-basis: 100%;
+  color: var(--ink);
+  font-size: 13px;
+}
+.step-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.step-facts > div {
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--paper);
+}
+.step-facts dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.step-facts dd {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.step-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.step-table caption {
+  margin-bottom: 4px;
+  font-weight: 700;
+  text-align: left;
+}
+.step-table th,
+.step-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.step-table tr.step-total td {
+  font-weight: 700;
+}
+.step-issues {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.step-issues li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-left: 3px solid #d7a64e;
+  border-radius: 6px;
+  background: #fbf7ee;
+  overflow-wrap: anywhere;
+}
+.step-issues li.issue-error {
+  border-left-color: #c2604b;
+  background: #fdf3f0;
+}
+.issue-level {
+  font-size: 11px;
+  font-weight: 700;
+}
+.issue-location {
+  color: var(--muted);
+}
+.step-raw > summary {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 720px) {
+  .test-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .test-viewer {
+    padding: 12px;
+  }
+  .run-picker select {
+    max-width: 100%;
+  }
+}

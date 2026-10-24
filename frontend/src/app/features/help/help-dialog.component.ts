@@ -1,8 +1,10 @@
 import { Component, output } from '@angular/core';
+import { ModalComponent } from '../../shared/modal.component.js';
 
 @Component({
   selector: 'app-help-dialog',
   standalone: true,
+  imports: [ModalComponent],
   templateUrl: './help-dialog.component.html',
   host: { style: 'display: contents' },
 })

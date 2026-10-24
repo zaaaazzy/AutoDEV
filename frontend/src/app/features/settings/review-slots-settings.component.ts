@@ -29,7 +29,7 @@ const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
           </p>
         </div>
       </summary>
-      <ul class="review-slot-list">
+      <ul class="review-slot-list plain-list">
         @for (slot of slots(); track slot.slot) {
           <li>
             <label class="check">

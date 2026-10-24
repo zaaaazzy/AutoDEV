@@ -1,20 +1,31 @@
-/* Farben, Grundelemente, Typografie */
+/* Farben, Grundelemente (Text, Felder, Dropdowns), Hilfsklassen */
 :root {
   color-scheme: light;
   font-family: Inter, 'Segoe UI', system-ui, sans-serif;
-  color: #202824;
-  background: #f4f5f1;
+  color: var(--ink);
+  background: var(--paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: #202824;
   --muted: #6d766f;
   --paper: #f4f5f1;
+  /* Flächen: Karten, Panels, Eingabefelder */
+  --surface: #fff;
+  --surface-soft: #fafbf8;
   --line: #e2e7df;
+  --line-strong: #c9d1c6;
   --green: #24634e;
+  --green-light: #2f6f4f;
+  --green-soft: #e8f1ec;
   --orange: #d7864e;
+  /* Zustände: Warnung, Fehler, Info */
+  --warn: #a0610d;
+  --warn-soft: #fdf1e0;
+  --danger: #c0392b;
+  --blue: #36608f;
   --shadow: 0 10px 28px rgb(32 40 36 / 8%);
+  --chat-dock-width: min(560px, 38vw);
 }
-
 * {
   box-sizing: border-box;
 }
@@ -24,6 +35,7 @@ body {
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
+  overflow-x: clip;
 }
 button,
 input,
@@ -60,6 +72,164 @@ textarea {
   padding: 8px 10px;
   border: 1px solid #cfd8ce;
   border-radius: 7px;
-  background: white;
+  background: var(--surface);
   color: var(--ink);
+  /* Nichts darf die Seite breiter machen: Felder und Rasterzellen dürfen schrumpfen, seitliches Verschieben ist gesperrt. */
+  max-width: 100%;
+}
+
+/* Einheitliche Dropdowns: eigener Pfeil, ruhiger Rahmen, deutlicher Hover/Fokus */
+select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%235b665e' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 11px center;
+  background-repeat: no-repeat;
+  background-size: 12px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+select:hover {
+  border-color: #9fb3a5;
+}
+select:focus {
+  border-color: var(--green-light);
+  box-shadow: 0 0 0 3px rgb(47 111 79 / 14%);
+}
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+label {
+  display: grid;
+  gap: 5px;
+  color: #4b554e;
+  font-size: 12px;
+  font-weight: 600;
+}
+h1,
+h2,
+h3,
+h4,
+p {
+  margin-top: 0;
+}
+h2 {
+  margin-bottom: 0;
+  font-size: 18px;
+}
+h3 {
+  margin-bottom: 8px;
+  font-size: 15px;
+}
+h4 {
+  margin-bottom: 6px;
+}
+.eyebrow {
+  margin-bottom: 7px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Datei-Auswahl (Bilder an Ideen/Bugs) im Stil der übrigen Knöpfe statt des Browser-Standards. */
+input[type='file']::file-selector-button {
+  min-height: 32px;
+  margin-right: 10px;
+  padding: 0 12px;
+  border: 1px solid #d8ddd7;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+input[type='file']::file-selector-button:hover {
+  border-color: var(--green);
+  color: var(--green);
+}
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.wide {
+  grid-column: 1 / -1;
+}
+
+/* Fehler direkt am Formularfeld (FieldErrors) */
+input[aria-invalid='true'],
+select[aria-invalid='true'],
+textarea[aria-invalid='true'] {
+  border-color: #c9573f;
+  box-shadow: 0 0 0 2px rgb(201 87 63 / 18%);
+}
+details > summary {
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 650;
+}
+.small {
+  font-size: 11px;
+}
+.clamp {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  text-align: left;
+}
+html {
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
+@media (max-width: 720px) {
+  html,
+  body {
+    touch-action: pan-y pinch-zoom;
+  }
+}
+
+@media (max-width: 480px) {
+  .wide {
+    grid-column: auto;
+  }
+}
+
+@media (pointer: coarse), (max-width: 720px) {
+  /*
+   * iPhone: Safari zoomt beim Antippen von Feldern unter 16 px hinein; danach lässt sich die Seite seitlich schieben
+   * und rechts fehlt Rand. Auf Touch-Geräten daher mindestens 16 px, und seitliches Verschieben ist abgeschnitten.
+   */
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Liste ohne Aufzählungszeichen und ohne Einzug (Abstände setzt die Liste selbst) */
+.plain-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Text einzeilig abschneiden („…“); braucht eine begrenzte Breite */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Elemente nebeneinander, senkrecht zentriert */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }

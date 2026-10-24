@@ -126,9 +126,9 @@ export class OrderTableComponent {
     { id: 'agent', header: 'Agent', value: (item) => orderAgentName(item, this.store.data().agents) },
     {
       id: 'effortHours',
-      header: 'Aufwand',
-      value: (item) => formatHours(item.effortHours),
-      sortValue: (item) => item.effortHours ?? -1,
+      header: 'Aufwand (Agent-Std.)',
+      value: (item) => formatHours(item.calibratedHours ?? item.effortHours),
+      sortValue: (item) => item.calibratedHours ?? item.effortHours ?? -1,
     },
   ];
   protected readonly columns = computed(() => {
