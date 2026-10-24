@@ -4,7 +4,10 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 import {
+  REPLANNABLE_DEVELOPMENT_STATUSES,
+  RETRYABLE_DEVELOPMENT_STATUSES,
   SPRINT_LOCKED_DEVELOPMENT_STATUSES,
+  SPRINT_POOL_DEVELOPMENT_STATUSES,
   canSetDevelopmentStatus,
   isAssignableSprintStatus,
   isSprintLockedDevelopmentStatus,
@@ -57,6 +60,9 @@ const DEV_FIELDS = {
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   agentId: { column: 'agent_id', parse: parseNullableUuid },
 };
+
+/** Feste Statusliste aus development-transitions für `IN (…)` (eigene Konstanten, keine Benutzereingabe). */
+const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
 
 const parseUuid: Parser = (value) => (isUuid(value) ? value : INVALID);
 const NEW_ORDER_FIELDS = {
@@ -241,8 +247,8 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
                 ELSE (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)
               END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()
-        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
-              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
+        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN (${sqlList(RETRYABLE_DEVELOPMENT_STATUSES)})
+              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN (${sqlList(REPLANNABLE_DEVELOPMENT_STATUSES)})))
         RETURNING ${DEV_COLUMNS}`,
       [request.params.id, comment],
     );
@@ -288,7 +294,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               budget_since = CASE WHEN ${aborted} THEN NOW() ELSE d.budget_since END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
         WHERE d.id = $1 AND d.sprint_id IS NULL AND d.kind <> 'express'
-          AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.blocked}')
+          AND d.status IN (${sqlList(SPRINT_POOL_DEVELOPMENT_STATUSES)})
           AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
                          AND s.status IN ('planned', 'active'))
         RETURNING ${DEV_COLUMNS}`,
@@ -325,7 +331,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
               updated_at = NOW()
         WHERE id = $1 AND sprint_id IS NOT NULL
-          AND status NOT IN (${SPRINT_LOCKED_DEVELOPMENT_STATUSES.map((status) => `'${status}'`).join(', ')})
+          AND status NOT IN (${sqlList(SPRINT_LOCKED_DEVELOPMENT_STATUSES)})
         RETURNING ${DEV_COLUMNS}`,
         [request.params.id],
       );

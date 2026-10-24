@@ -46,6 +46,11 @@ const SPRINT_FIELDS = {
  * Schritt ab), offene Aufträge verlassen den Sprint wie „aus dem laufenden Sprint genommen“: geplante zurück ins
  * Backlog, laufende schließt der Worker ab (settleItem). Mit dem Vermerk stehen sie unter „Aktionen“ und zur Auswahl für
  * den nächsten Sprint. Erledigte und abgelehnte bleiben beim Sprint; Git-Sicherung und Merge gibt es nicht.
+ *
+ * Aufträge in Freigabe gehen ebenfalls zurück ins Backlog (statt wie erledigte beim Sprint zu bleiben): Ihre Freigabe
+ * mergte in den Sprint-Branch (review_base), der nach dem Abbruch nie in main kommt. Ohne Rücksetzen hingen sie ohne
+ * Sprint in Freigabe fest, und „Wieder einplanen“ (/retry nur aus backlog/planned) scheiterte mit 409. Die Arbeit
+ * bleibt auf dem Auftrags-Branch; der nächste Lauf setzt dort fort.
  */
 export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stopped: number; released: number }> {
   const stopped = await pool.query(
@@ -57,7 +62,8 @@ export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stop
   const released = await pool.query(
     `UPDATE development_items SET removed_from_sprint = (SELECT name FROM sprints WHERE id = $1),
             removed_from_sprint_at = NOW(), sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
-            status = CASE WHEN status = 'planned' THEN 'backlog' ELSE status END, updated_at = NOW()
+            status = CASE WHEN status IN ('planned', 'approval') THEN 'backlog' ELSE status END,
+            review_branch = NULL, review_base = NULL, review_since = NULL, review_approved_at = NULL, updated_at = NOW()
       WHERE sprint_id = $1 AND status NOT IN ('done', 'rejected')`,
     [sprintId],
   );

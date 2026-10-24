@@ -3,8 +3,10 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from 'express';
 import type { Pool } from 'pg';
+import { canRetryDevelopment, canTakeIntoSprint } from '../core/development-transitions.js';
+import { createDevLogApp } from './app.js';
 import { completeSprint } from './sprint-planning.js';
-import { registerSprintRoutes } from './sprints.js';
+import { cancelSprint, registerSprintRoutes } from './sprints.js';
 
 const SPRINT_ID = '22222222-2222-4222-8222-222222222222';
 
@@ -81,7 +83,7 @@ const releasedOrders = (queries: string[]) =>
   queries.some(
     (sql) =>
       sql.includes('removed_from_sprint_at = NOW(), sprint_id = NULL') &&
-      sql.includes("status = CASE WHEN status = 'planned' THEN 'backlog' ELSE status END") &&
+      sql.includes("status = CASE WHEN status IN ('planned', 'approval') THEN 'backlog' ELSE status END") &&
       sql.includes("status NOT IN ('done', 'rejected')"),
   );
 
@@ -103,6 +105,120 @@ test('Sprint-PATCH: Abgeschlossene lassen sich nicht abbrechen, abgebrochene nur
   const { status, queries } = await patchSprint('cancelled', { status: 'planned' });
   assert.equal(status, 200);
   assert.equal(stoppedAgents(queries), false, 'Wieder planen bricht nichts ab');
+});
+
+interface OrderRow {
+  id: string;
+  status: string;
+  sprintId: string | null;
+  removedFromSprintAt: string | null;
+  kind: string;
+}
+
+const statusList = (text: string | undefined): string[] =>
+  (text ?? '').split(',').map((part) => part.trim().replace(/^'|'$/g, ''));
+
+/**
+ * Datenbank-Attrappe für Aufträge: wertet die Statuslisten aus dem SQL von cancelSprint, /retry und take-into-sprint
+ * aus (CASE … THEN 'backlog', NOT IN, IN), damit der Test die tatsächlich geschriebenen Bedingungen prüft.
+ */
+function orderDb(rows: OrderRow[]) {
+  const query = async (sql: string, params: unknown[] = []) => {
+    if (sql.includes('UPDATE development_items SET removed_from_sprint =')) {
+      const keep = statusList(/status NOT IN \(([^)]*)\)/.exec(sql)?.[1]);
+      const reset = /CASE WHEN status (?:= '(\w+)'|IN \(([^)]*)\)) THEN 'backlog'/.exec(sql);
+      const toBacklog = reset?.[1] ? [reset[1]] : statusList(reset?.[2]);
+      const hit = rows.filter((row) => row.sprintId === params[0] && !keep.includes(row.status));
+      for (const row of hit) {
+        Object.assign(row, { sprintId: null, removedFromSprintAt: TODAY });
+        if (toBacklog.includes(row.status)) row.status = 'backlog';
+      }
+      return { rows: [], rowCount: hit.length };
+    }
+    const row = rows.find((candidate) => candidate.id === params[0]);
+    const lists = [...sql.matchAll(/d\.status IN \(([^)]*)\)/g)].map((match) => statusList(match[1]));
+    if (sql.includes('UPDATE development_items d SET') && row) {
+      const isRetry = sql.includes('retry_count = retry_count');
+      const allowed = isRetry
+        ? (lists[0]?.includes(row.status) ?? false) ||
+          (!!row.removedFromSprintAt && (lists[1]?.includes(row.status) ?? false))
+        : !row.sprintId && (lists[0]?.includes(row.status) ?? false);
+      if (row.kind === 'express' || !allowed) return { rows: [], rowCount: 0 };
+      Object.assign(row, { status: 'planned', removedFromSprintAt: null, sprintId: isRetry ? null : params[1] });
+      return { rows: [{ ...row }], rowCount: 1 };
+    }
+    return { rows: [], rowCount: 0 };
+  };
+  return { query } as unknown as Pool;
+}
+
+async function postOrder(pool: Pool, id: string, action: 'retry' | 'take-into-sprint') {
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/development/${id}/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(action === 'retry' ? {} : { sprintId: NEXT_SPRINT_ID }),
+    });
+    return response.status;
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+const NEXT_SPRINT_ID = '33333333-3333-4333-8333-333333333333';
+const orderId = (n: number) => `4444444${n}-4444-4444-8444-444444444444`;
+
+function cancelledSprintOrders(): OrderRow[] {
+  return ['approval', 'in_progress', 'planned', 'backlog', 'blocked', 'done', 'rejected'].map((status, index) => ({
+    id: orderId(index),
+    status,
+    sprintId: SPRINT_ID,
+    removedFromSprintAt: null,
+    kind: 'feature',
+  }));
+}
+
+test('Sprint-Abbruch: jede angebotene Aktion für dessen Aufträge klappt ohne 409 (auch aus Freigabe)', async () => {
+  for (const action of ['retry', 'take-into-sprint'] as const) {
+    const rows = cancelledSprintOrders();
+    const pool = orderDb(rows);
+    await cancelSprint(pool, SPRINT_ID);
+    const offered = action === 'retry' ? canRetryDevelopment : canTakeIntoSprint;
+    const byStatus = new Map(cancelledSprintOrders().map((row, index) => [row.status, rows[index]!]));
+    // Aus Freigabe: nicht ohne Sprint in Freigabe festhängen, sondern wie geplante zurück ins Backlog.
+    assert.equal(byStatus.get('approval')!.status, 'backlog', 'Freigabe geht beim Abbruch ins Backlog');
+    for (const status of ['approval', 'planned', 'backlog', 'blocked']) {
+      assert.equal(offered(byStatus.get(status)!), true, `${action}: ${status} wird angeboten`);
+    }
+    // Laufender Auftrag: wird erst angeboten, wenn der Worker ihn nach dem Agent-Ende ins Backlog setzt.
+    const running = byStatus.get('in_progress')!;
+    assert.equal(offered(running), false, `${action}: laufender Auftrag wird nicht angeboten`);
+    assert.equal(await postOrder(pool, running.id, action), 409, 'echter Konflikt bleibt 409');
+    running.status = 'backlog'; // settleItem: leftItsSprint → Backlog
+    assert.equal(offered(running), true);
+    for (const row of rows.filter((candidate) => offered(candidate))) {
+      assert.equal(await postOrder(pool, row.id, action), 200, `${action} für ${row.id} (${row.status})`);
+    }
+    // Erledigte bleiben beim Sprint und werden nicht angeboten; ein Aufruf bleibt ein echter Konflikt.
+    const done = byStatus.get('done')!;
+    assert.equal(done.sprintId, SPRINT_ID);
+    assert.equal(offered(done), false);
+    assert.equal(await postOrder(pool, done.id, action), 409);
+  }
+});
+
+test('Oberfläche und /retry: laufende und Aufträge in Freigabe mit Vermerk bieten kein „Wieder einplanen“ an', () => {
+  for (const status of ['approval', 'in_progress', 'done']) {
+    const item = { status, kind: 'feature', removedFromSprintAt: TODAY, sprintId: null };
+    assert.equal(canRetryDevelopment(item), false, status);
+    assert.equal(canTakeIntoSprint(item), false, status);
+  }
+  assert.equal(canRetryDevelopment({ status: 'backlog', removedFromSprintAt: TODAY }), true);
+  assert.equal(canRetryDevelopment({ status: 'backlog', removedFromSprintAt: null }), false);
+  assert.equal(canRetryDevelopment({ status: 'blocked', kind: 'express' }), false);
 });
 
 // „Heute“ der simulierten Datenbank ist fest vorgegeben (21.10.2026), damit der Test nicht vom Kalender abhängt.

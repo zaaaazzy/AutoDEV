@@ -12,6 +12,7 @@ test('Erneut versuchen wie die Route /retry: blockiert, abgelehnt oder aus dem S
   assert.equal(canRetry(order({ status: 'backlog', removedFromSprintAt: '2026-10-22' })), true);
   assert.equal(canRetry(order({ status: 'backlog' })), false);
   assert.equal(canRetry(order({ status: 'in_progress', removedFromSprintAt: '2026-10-22' })), false);
+  assert.equal(canRetry(order({ status: 'approval', removedFromSprintAt: '2026-10-22' })), false);
   assert.equal(canRetry(order({ status: 'blocked', kind: 'express' })), false);
 });
 
