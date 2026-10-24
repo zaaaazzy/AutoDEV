@@ -51,9 +51,12 @@ async function bugOf(db: Pick<pg.Pool, 'query'>, id: string): Promise<Bug> {
 }
 
 async function bugOrder(db: Pick<pg.Pool, 'query'>, orderStatus: string): Promise<{ bug: string; order: string }> {
-  await db.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop') ON CONFLICT DO NOTHING`);
-  const bug = (await db.query<{ id: string }>(`INSERT INTO bugs (project_slug, title) VALUES ('shop', 'Bug') RETURNING id`))
-    .rows[0].id;
+  await db.query(
+    `INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop') ON CONFLICT DO NOTHING`,
+  );
+  const bug = (
+    await db.query<{ id: string }>(`INSERT INTO bugs (project_slug, title) VALUES ('shop', 'Bug') RETURNING id`)
+  ).rows[0].id;
   const order = (
     await db.query<{ id: string }>(
       `INSERT INTO development_items (project_slug, title, kind, status, bug_id) VALUES ('shop', 'Bug: x', 'bug', $1, $2)
@@ -69,7 +72,8 @@ async function bugOrder(db: Pick<pg.Pool, 'query'>, orderStatus: string): Promis
 test('Bug-Trigger: rejected → planned → in_progress → done behebt den Bug, auch beim zweiten Versuch', async (t) => {
   await withMigratedDatabase(t, 'devlog_bug_retry', async (db) => {
     const { bug, order } = await bugOrder(db, 'in_progress');
-    const move = (status: string) => db.query('UPDATE development_items SET status = $2 WHERE id = $1', [order, status]);
+    const move = (status: string) =>
+      db.query('UPDATE development_items SET status = $2 WHERE id = $1', [order, status]);
     await db.query(`UPDATE bugs SET status = 'in_progress' WHERE id = $1`, [bug]);
 
     await move('rejected');
@@ -134,13 +138,19 @@ test('Migration 11: ersetzt den Bug-Trigger auf Version 10 und zieht abgelehnte 
   await admin.query(`CREATE DATABASE ${name}`);
   const db = new pg.Pool({ connectionString: databaseUrl(name), max: 2 });
   try {
-    await runMigrations(db, MIGRATIONS.filter((migration) => migration.version <= 10));
+    await runMigrations(
+      db,
+      MIGRATIONS.filter((migration) => migration.version <= 10),
+    );
     const stale = await bugOrder(db, 'done');
     await db.query(`UPDATE bugs SET status = 'rejected' WHERE id = $1`, [stale.bug]);
     const open = await bugOrder(db, 'rejected');
     await db.query(`UPDATE bugs SET status = 'rejected' WHERE id = $1`, [open.bug]);
 
-    assert.deepEqual(await runMigrations(db), MIGRATIONS.filter((m) => m.version > 10).map((m) => m.version));
+    assert.deepEqual(
+      await runMigrations(db),
+      MIGRATIONS.filter((m) => m.version > 10).map((m) => m.version),
+    );
     const fixed = await bugOf(db, stale.bug);
     assert.equal(fixed.status, 'fixed');
     assert.ok(fixed.fixed_at);
