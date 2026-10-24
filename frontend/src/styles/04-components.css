@@ -1234,6 +1234,38 @@ a.app-link {
   color: var(--surface);
   font-weight: 700;
 }
+/* Schmale Variante (app-bulk-bar): eine Zeile wie die Auswahl unter „Aufträge hinzufügen“. */
+.bulk-bar.compact {
+  gap: 8px;
+  margin: 6px 0 8px;
+  padding: 4px 6px 4px 8px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+.bulk-bar.compact .bulk-count {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 0.78rem;
+}
+.bulk-bar.compact .bulk-label {
+  font-size: 0.86rem;
+}
+.bulk-actions {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.bulk-actions select {
+  width: auto;
+  min-height: 0;
+  /* rechts Platz für den Pfeil (Hintergrundbild des Selects) */
+  padding: 3px 26px 3px 8px;
+  background-position: right 8px center;
+  font-size: 0.82rem;
+}
 
 /* Diagramme in Dokumenten (```mermaid): zuerst Quelltext, dann gezeichnet; breite Diagramme scrollen seitlich. */
 .mermaid-diagram {
