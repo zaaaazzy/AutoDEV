@@ -49,6 +49,29 @@ test('splitEstimate keeps the text when the estimate is missing or invalid', () 
   assert.equal(splitEstimate('## Ziel\nX\n## Schätzung\n{"effortHours": -5}').estimate, null);
 });
 
+test('splitEstimate: „### Schätzungsgrundlage“ und Mermaid-Klammern beenden die Anforderung nicht', () => {
+  const requirement = [
+    '## Ziel\nLogin',
+    '## Technische Hinweise\n### Schätzungsgrundlage\nÄhnlich wie der Export.',
+    '## Diagramme\n```mermaid\nflowchart LR\n  A{Login?} --> B[Start]\n```',
+    '## Abgrenzung\nKein SSO.',
+  ].join('\n\n');
+  const output = `${requirement}\n\n## Schätzung (zuletzt, nur ein JSON-Objekt)\n{"effortHours": 2, "cost": 3}`;
+  assert.deepEqual(splitEstimate(output), {
+    requirement,
+    estimate: { effortHours: 2, tokenEstimate: null, benefit: null, cost: 3 },
+  });
+  // Mehrere Schätzungsabschnitte: der letzte zählt.
+  assert.equal(splitEstimate('## Ziel\nX\n## Schätzung\n{"cost": 1}\n## Schätzung\n{"cost": 2}').estimate?.cost, 2);
+  // Nur eine „Schätzungsgrundlage“: kein Schätzungsabschnitt, der Text bleibt vollständig.
+  assert.deepEqual(splitEstimate('## Ziel\nX\n### Schätzungsgrundlage\n{"cost": 1}'), {
+    requirement: '## Ziel\nX\n### Schätzungsgrundlage\n{"cost": 1}',
+    estimate: null,
+  });
+  // Überschrift mit Doppelpunkt und JSON im Codeblock.
+  assert.equal(splitEstimate('## Ziel\nX\n## Schätzung:\n```json\n{"benefit": 5}\n```').estimate?.benefit, 5);
+});
+
 test('parseEstimate reads a bare JSON answer', () => {
   assert.equal(parseEstimate('{"effortHours": 2, "tokenEstimate": 5000}')?.effortHours, 2);
   assert.equal(parseEstimate('kein json'), null);
