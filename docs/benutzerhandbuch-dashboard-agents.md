@@ -651,6 +651,62 @@ Die Prüfung läuft alle 2 Minuten.
 
 Hinweis: Die Tests für dieses Verhalten stehen in `src/runner/git-sync.test.ts` (Tests „Brücke aus: …“). Der Projekt-Testlauf 6b47961d hat `git-sync.test.ts` und `github-sync.test.ts` mit 51 von 51 grünen Tests ausgeführt. Die Tests sind mit dem alten Code nicht rot gesehen worden; dass sie dort scheitern würden, folgt aus dem Code (Abbruch mit `skipped: 'Modus aus'`).
 
+## 14. Dokumente ändern: nur über Revisionen
+
+Dieser Abschnitt betrifft die Seite **Dokumentation**. Eine Änderung an Titel oder Inhalt eines Dokuments gilt erst, wenn eine zweite Person sie freigibt. Eine Schnittstelle, die ein Dokument ohne Prüfung überschreibt, gibt es nicht mehr.
+
+> **Printscreens:** keine. Die Seite lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Die Beschriftungen unten stammen aus `frontend/src/app/features/docs/docs.component.html` und sind am laufenden System zu prüfen. Platzhalter: `[Bild 8] Karte „Änderung wartet auf die Redaktion“ mit Diff`, `[Bild 9] Bearbeiten-Formular mit „Zur Prüfung einreichen“`.
+
+### 14.1 Ablauf
+
+1. Dokument öffnen und „✎ Bearbeiten“ klicken. Der Button erscheint nur mit dem Recht „Dokumentation bearbeiten“.
+2. Titel und Inhalt ändern. Optional unter „Was wurde geändert? (optional)“ eine Notiz eintragen.
+3. „Zur Prüfung einreichen“ klicken. Es erscheint die Karte „Änderung wartet auf die Redaktion“ mit dem Diff. Das Dokument bleibt bis dahin unverändert.
+4. Eine Person mit der Rolle „Redaktion“ klickt „Freigeben“ oder „Ablehnen“. Eine Anmerkung ist optional.
+5. Bei Freigabe übernimmt das Dokument Titel und Inhalt. Bei Ablehnung bleibt es unverändert. Beides steht im Abschnitt „Änderungsverlauf“ des Dokuments.
+
+### 14.2 Wer darf was
+
+| Aktion | Nötige Berechtigung | Hinweis |
+| --- | --- | --- |
+| Bearbeiten und einreichen | Recht „Dokumentation bearbeiten“ | Fehlt bei Repo-, Anfrage-, Test-, Einstellungs- und Workflow-Dokumenten. |
+| Freigeben oder ablehnen | Rolle „Redaktion“ | Ohne die Rolle steht dort: „Freigeben kann nur jemand mit der Rolle „Redaktion“.“ |
+| Eigene Änderung freigeben | Nur Administrator | Für alle anderen 403: „Eigene Änderungen muss jemand anderes aus der Redaktion freigeben.“ Die Schaltfläche erscheint trotzdem. |
+| Neues Dokument anlegen | Recht „Dokumentation bearbeiten“ | Legt nur an. Ein bestehendes Dokument gleichen Titels bleibt unverändert (409). |
+
+### 14.3 Bedingungen und Fehlermeldungen
+
+| Eingabe | Ergebnis |
+| --- | --- |
+| Titel leer oder länger als 180 Zeichen, Inhalt länger als 30 000 Zeichen | 400. Nichts wird gespeichert. |
+| Titel und Inhalt wie im Dokument | 400: „Es gibt keine Änderung zum Einreichen.“ |
+| Einreichen bei einem Repo- oder Anfrage-Dokument | 400: „… schreibgeschützt.“ |
+| Freigabe, obwohl das Dokument seit dem Einreichen geändert wurde | 409: „… ist veraltet, bitte neu einreichen.“ Das Dokument wird nicht überschrieben. Die Änderung bleibt offen, bis jemand sie ablehnt. |
+| Freigabe, obwohl ein anderes Dokument den Titel schon trägt | 409: „Ein anderes Dokument trägt schon diesen Titel.“ |
+| Freigabe oder Ablehnung einer schon geprüften Änderung | 409: „Diese Änderung wurde bereits geprüft.“ |
+
+**Bedingungen:**
+
+- Mehrere offene Änderungen je Dokument sind möglich. Wird eine freigegeben, werden die anderen veraltet und lassen sich nicht mehr freigeben.
+- Eine Ablehnung ändert das Dokument nie. Der Verlauf zeigt sie mit der Anmerkung der Redaktion.
+- Die Freigabe prüft den Stand bei der Einreichung. Ein Dokument, das inzwischen anders ist, wird also nicht durch eine ältere Änderung überschrieben.
+
+### 14.4 Noch offen
+
+- **Löschen:** Die Redaktion kann jedes Dokument löschen (Button „Löschen“ beim Bearbeiten), auch Repo- und Anfrage-Dokumente, ohne zweite Person. Dafür ist ein eigener Auftrag vorgesehen. Bis dahin ist das Löschen kein Schutz.
+- **Alte Schnittstelle:** `PATCH /api/docs/:id` gibt es nicht mehr. Wer ein eigenes Skript damit geschrieben hat, muss auf `POST /api/docs/:id/revisions` umstellen.
+
+### 14.5 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| „Bearbeiten“ fehlt | Dir fehlt das Recht „Dokumentation bearbeiten“, oder das Dokument ist schreibgeschützt (Abschnitt 14.3). |
+| Freigabe meldet „veraltet“ | Ein anderer Eintrag hat das Dokument inzwischen geändert. Die alte Änderung ablehnen und den Inhalt neu einreichen. |
+| Freigabe meldet 403 bei eigener Änderung | Jemand anderes aus der Redaktion muss freigeben. |
+| Anlegen meldet 409 | Ein Dokument mit diesem Titel gibt es schon. Die Änderung als Überarbeitung einreichen. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
