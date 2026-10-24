@@ -28,12 +28,13 @@ test('Standardregel: Kategorie docs läuft lokal', () => {
   });
 });
 
-test('Standardregel: Schätzung unter 1 h läuft lokal, backend über 4 h stark', () => {
-  assert.equal(routeModel(DEFAULT_RULES, input({ category: 'frontend', effortHours: 0.5 })).tier, 'local');
-  const backend = routeModel(DEFAULT_RULES, input({ category: 'backend', effortHours: 6 }));
-  assert.deepEqual(backend, { tier: 'strong', rule: 'backend, Schätzung > 4 h → stark' });
+test('Standardregel (Agent-Stunden): unter 0,1 h läuft lokal, backend über 0,5 h stark', () => {
+  assert.equal(routeModel(DEFAULT_RULES, input({ category: 'frontend', effortHours: 0.05 })).tier, 'local');
+  assert.equal(routeModel(DEFAULT_RULES, input({ category: 'frontend', effortHours: 0.3 })).tier, null);
+  const backend = routeModel(DEFAULT_RULES, input({ category: 'backend', effortHours: 0.8 }));
+  assert.deepEqual(backend, { tier: 'strong', rule: 'backend, Schätzung > 0,5 h → stark' });
   // Ohne Schätzung oder an der Grenze greift keine Stufen-Regel: die Modellwahl je Rolle bleibt.
-  assert.deepEqual(routeModel(DEFAULT_RULES, input({ category: 'backend', effortHours: 4 })), {
+  assert.deepEqual(routeModel(DEFAULT_RULES, input({ category: 'backend', effortHours: 0.5 })), {
     tier: null,
     rule: null,
   });

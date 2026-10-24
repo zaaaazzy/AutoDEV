@@ -67,9 +67,11 @@ const FORMAT = [
   '## Diagramme (Mermaid-Codeblock, z. B. Ablauf oder ER-Diagramm, wenn hilfreich)',
   '## Abgrenzung',
   '## Schätzung (zuletzt, nur ein JSON-Objekt)',
-  '{"effortHours": Stunden, "tokenEstimate": Tokens, "benefit": 0-10, "cost": 0-10}',
-  'tokenEstimate: erwarteter Tokenverbrauch aller Agent-Läufe des Auftrags (Entwickler, Tester, Dokumentation), ' +
-    'grob aus Anzahl und Größe der betroffenen Dateien berechnet; cost: Aufwand relativ 0 (gering) bis 10 (hoch).',
+  '{"effortHours": Agent-Stunden, "tokenEstimate": Tokens, "benefit": 0-10, "cost": 0-10}',
+  'effortHours: erwartete Agent-Laufzeit in Stunden (Summe aller Agent-Schritte, z. B. 0.3), nicht die Arbeitszeit ' +
+    'eines Menschen. tokenEstimate: erwarteter Tokenverbrauch aller Agent-Läufe des Auftrags (Entwickler, Tester, ' +
+    'Dokumentation), grob aus Anzahl und Größe der betroffenen Dateien berechnet; cost: Aufwand relativ 0 (gering) ' +
+    'bis 10 (hoch).',
   'Erfinde keine Dateien. Beschreibe nur, was umgesetzt werden soll – ändere selbst nichts.',
 ].join('\n');
 
@@ -301,6 +303,36 @@ async function draftProgress(pool: Pool, ideaId: string, agent: string, message:
     .catch(logged('requirements'));
 }
 
+/**
+ * Schätzung des Auftragsautors speichern: Von Hand eingetragene Werte bleiben; Schnellschätzung und Altbestand ersetzt
+ * er, denn er kennt die Anforderung und die Ist-Werte ähnlicher Aufträge. Nutzen und Kosten bleiben, wenn gesetzt.
+ */
+export const AUTHOR_ESTIMATE_SQL = `
+  UPDATE ideation_items SET
+        effort_hours = CASE WHEN estimate_source = 'manual' AND effort_hours IS NOT NULL THEN effort_hours
+                            ELSE COALESCE($2, effort_hours) END,
+        token_estimate = CASE WHEN estimate_source = 'manual' AND token_estimate IS NOT NULL THEN token_estimate
+                              ELSE COALESCE($3, token_estimate) END,
+        benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5),
+        estimate_source = CASE WHEN estimate_source = 'manual' THEN 'manual'
+                               WHEN $2::float8 IS NOT NULL OR $3::bigint IS NOT NULL THEN 'author'
+                               ELSE estimate_source END
+  WHERE id = $1
+`;
+
+/** Überarbeitete Anforderung in den bestehenden Auftrag übernehmen; eine Schätzung von Hand am Auftrag bleibt. */
+export const REDRAFT_ORDER_SQL = `
+  UPDATE development_items d SET description = $2, risks = $3, project_context = $4,
+       effort_hours = CASE WHEN d.estimate_source = 'manual' AND d.effort_hours IS NOT NULL THEN d.effort_hours
+                           ELSE COALESCE(i.effort_hours, d.effort_hours) END,
+       token_estimate = CASE WHEN d.estimate_source = 'manual' AND d.token_estimate IS NOT NULL THEN d.token_estimate
+                             ELSE COALESCE(i.token_estimate, d.token_estimate) END,
+       estimate_source = CASE WHEN d.estimate_source = 'manual' THEN 'manual'
+                              ELSE COALESCE(i.estimate_source, d.estimate_source) END,
+       benefit = COALESCE(d.benefit, i.benefit), cost = COALESCE(d.cost, i.cost), updated_at = NOW()
+  FROM ideation_items i WHERE d.id = $1 AND i.id = d.ideation_id
+`;
+
 /** Turns one requested idea into a backlog order. Sprint assignment stays a manual decision. */
 export async function draftRequirements(
   pool: Pool,
@@ -369,12 +401,13 @@ export async function draftRequirements(
     return 0;
   }
   if (estimate) {
-    // Values entered by the user stay untouched.
-    await pool.query(
-      `UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
-              benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5) WHERE id = $1`,
-      [idea.id, estimate.effortHours, estimate.tokenEstimate, estimate.benefit, estimate.cost],
-    );
+    await pool.query(AUTHOR_ESTIMATE_SQL, [
+      idea.id,
+      estimate.effortHours,
+      estimate.tokenEstimate,
+      estimate.benefit,
+      estimate.cost,
+    ]);
   }
   await draftProgress(pool, idea.id, 'bug_reviewer', 'Prüft bekannte Bugs auf Bezug zum Auftrag …');
   const risks = await assessRisks(
@@ -402,18 +435,13 @@ export async function draftRequirements(
       );
       return 0;
     }
-    await pool.query(
-      `UPDATE development_items d SET description = $2, risks = $3, project_context = $4,
-              effort_hours = COALESCE(d.effort_hours, i.effort_hours), token_estimate = COALESCE(d.token_estimate, i.token_estimate),
-              benefit = COALESCE(d.benefit, i.benefit), cost = COALESCE(d.cost, i.cost), updated_at = NOW()
-         FROM ideation_items i WHERE d.id = $1 AND i.id = d.ideation_id`,
-      [existing.id, output.slice(0, 10_000), risks, projectContext],
-    );
+    await pool.query(REDRAFT_ORDER_SQL, [existing.id, output.slice(0, 10_000), risks, projectContext]);
   } else
     await pool.query(
       `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
-                                    effort_hours, token_estimate, benefit, cost, risks, project_context)
-     SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4
+                                    effort_hours, token_estimate, benefit, cost, risks, project_context, estimate_source)
+     SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4,
+            i.estimate_source
        FROM ideation_items i
       WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)`,
       // Neuer Auftrag: kurzer Titel des Auftragsautors; ein bestehender behält seinen (evtl. von Hand gesetzten) Titel.
