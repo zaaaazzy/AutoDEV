@@ -160,6 +160,56 @@ test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtli
   assert.equal(run(encodePolicy(all), write('src/x.ts')).status, 0);
   assert.equal(run('kaputt', write('src/x.ts')).status, 2);
   assert.equal(run(encodePolicy(all), { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } }).status, 0);
+  const secret = run(encodePolicy(all), { tool_name: 'Read', tool_input: { file_path: '.env' }, cwd: root });
+  assert.equal(secret.status, 2);
+  assert.match(secret.stderr, /\.env: Geheimnisse/);
+});
+
+test('Wächter: Read, Grep und Glob auf Geheimnisse sind für jede Richtlinie gesperrt, nur der Pfad wird gemeldet', () => {
+  mkdirSync(join(root, 'config'));
+  mkdirSync(join(root, 'certs'));
+  writeFileSync(join(root, '.env'), 'GEHEIM=hunter2');
+  writeFileSync(join(root, 'config', '.env.production'), 'GEHEIM=hunter2');
+  writeFileSync(join(root, 'certs', 'server.key'), 'GEHEIM=hunter2');
+  symlinkSync(join(root, '.env'), join(root, 'docs', 'notizen.txt'));
+  const readOnly: GuardPolicy = { create: false, edit: false, scopes: [], shell: false };
+  const read = (file_path: string, cwd = root) => ({ tool_name: 'Read', tool_input: { file_path }, cwd });
+  for (const policy of [readOnly, all]) {
+    for (const input of [
+      read('.env'),
+      read('config/.env.production'),
+      read('certs/server.key'),
+      read(join(root, '.env')),
+      read('../.env', join(root, 'docs')),
+      read('docs/../certs/server.key'),
+      read('docs/notizen.txt'),
+      read('CERTS/Server.KEY'),
+      read('tls/server.pem'),
+      read('~/.ssh/id_ed25519'),
+      read('/home/x/.ssh/config'),
+      { tool_name: 'NotebookRead', tool_input: { notebook_path: '.env' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: 'GEHEIM', path: 'config/.env.production' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: 'GEHEIM', glob: '*.{pem,key}' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: 'GEHEIM', glob: '**/.env*' }, cwd: root },
+      { tool_name: 'Glob', tool_input: { pattern: 'certs/*.key' }, cwd: root },
+      { tool_name: 'Glob', tool_input: { pattern: '*', path: '.ssh' }, cwd: root },
+    ]) {
+      const problem = guardProblem(input, policy, root);
+      assert.match(problem ?? '', /Geheimnisse/, JSON.stringify(input));
+      assert.doesNotMatch(problem ?? '', /hunter2/);
+    }
+  }
+  // Kein Überblocken: gewöhnliche Dateien, Ordner und Muster bleiben lesbar.
+  for (const input of [
+    read('docs/alt.md'),
+    read('docs/env.md'),
+    read('/etc/hosts'),
+    { tool_name: 'Grep', tool_input: { pattern: 'env', path: 'docs', glob: '*.md' }, cwd: root },
+    { tool_name: 'Grep', tool_input: { pattern: '.env' }, cwd: root },
+    { tool_name: 'Glob', tool_input: { pattern: 'src/**/*.ts' }, cwd: root },
+  ]) {
+    assert.equal(guardProblem(input, readOnly, root), null, JSON.stringify(input));
+  }
 });
 
 test('Wächter: ohne Dateipfad gesperrt; Notebook-Pfade und relative Pfade ohne cwd', () => {
@@ -426,10 +476,40 @@ test('Wächter: node nur als --version oder --check <datei>, ohne Lade-Optionen'
     'node -e 1',
     'node a.js',
     'export NODE_OPTIONS=--import=./x.js; node --check a.js',
+    // Fundfall des Auftrags und weitere Lade-Optionen, auch ohne Leerzeichen, mit = und in Anführungszeichen.
+    `node --check --import "data:text/javascript,import('node:child_process').then(c=>c.execSync('id'))" ok.js`,
+    'node --check -r ./x.js ok.js',
+    'node --check -r./x.js ok.js',
+    'node --check --import=./x.mjs ok.js',
+    'node --check --loader ./x.mjs ok.js',
+    'node --check --experimental-loader=./x.mjs ok.js',
+    'node --check "--import" ./x.mjs ok.js',
+    'node --check ok.js --import ./x.mjs',
+    'node -r ./x.js --check ok.js',
+    'node -c ok.js',
+    'node --check -',
+    'node --check',
+    // Datei muss eine relative Projektdatei sein.
+    'node --check /etc/x.js',
+    'node --check ../x.js',
+    'node --check src/../../x.js',
+    'node --check data:text/javascript,1',
+    'node --check file:///tmp/x.js',
+    'node --check $F',
+    // Umgebung und Verkettung.
+    'NODE_OPTIONS=--require=./x.js node --check ok.js',
+    'env NODE_OPTIONS=--import=./x.mjs node --check ok.js',
+    'node --check ok.js && node --import ./x.mjs ok.js',
   ]) {
     assert.match(bashProblem(command, root) ?? '', /gesperrt|erlaubt sind nur/, command);
   }
-  for (const command of ['node --check src/x.js', 'node --version']) {
+  for (const command of [
+    'node --check src/x.js',
+    'node --check src/a.js',
+    'node --check ./src/a.js',
+    'node --check "src/a b.js"',
+    'node --version',
+  ]) {
     assert.equal(bashProblem(command, root), null, command);
   }
 });

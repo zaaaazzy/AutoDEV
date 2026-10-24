@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOllamaAgent } from './ollama-agent.js';
-import { splitQuestion, buildChatPrompt, loadChatHistory } from './chat.js';
+import { splitQuestion, buildChatPrompt, findOpenQuestion, loadChatHistory } from './chat.js';
 
 test('reports concrete tool activity through the progress callback', async () => {
   const progress: string[] = [];
@@ -89,4 +89,84 @@ test('Verlauf endet bei der übernommenen Nachricht und lässt wartende Nutzerna
   const sql = call.sql.replace(/\s+/g, ' ');
   assert.match(sql, /created_at <= \(SELECT created_at FROM chat_messages WHERE id = \$3\)/);
   assert.match(sql, /\(role <> 'user' OR status NOT IN \('pending', 'processing'\) OR id = \$3\)/);
+});
+
+test('Verlauf: Antwort auf Nachricht 1 nach der schon wartenden Nachricht 2 steht davor (N1, A1, N2)', async () => {
+  // Nachricht 1 (t1), Nachricht 2 wartet (t2), Antwort A1 (t3) – die Datenbank liefert nach created_at sortiert.
+  const calls: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      calls.push(sql.replace(/\s+/g, ' '));
+      return {
+        rows: [
+          { id: 'n1', role: 'user', content: 'Nachricht 1' },
+          { id: 'n2', role: 'user', content: 'Nachricht 2' },
+          { id: 'a1', role: 'assistant', content: 'A1' },
+        ],
+      };
+    },
+  } as unknown as Parameters<typeof loadChatHistory>[0];
+  const history = await loadChatHistory(pool, 'demo', 'n2');
+  assert.deepEqual(history.rows, [
+    { role: 'user', content: 'Nachricht 1' },
+    { role: 'assistant', content: 'A1' },
+    { role: 'user', content: 'Nachricht 2' },
+  ]);
+  const [sql] = calls;
+  assert.ok(sql);
+  // Zeitfilter nur für Nutzernachrichten; die übernommene Nachricht fällt nie aus dem Limit; Sitzung bleibt das Projekt.
+  assert.match(sql, /\(role <> 'user' OR created_at <= \(SELECT created_at FROM chat_messages WHERE id = \$3\)\)/);
+  assert.match(sql, /ORDER BY id = \$3 DESC, created_at DESC LIMIT \$2/);
+  assert.match(sql, /project_slug = \$1/);
+});
+
+/** Wertet die Zeitbedingungen der Rückfrage-Suche auf einem kleinen Datenbestand aus – nur die, die im SQL stehen. */
+function questionPool(messages: { id: string; role: string; question?: string; at: number }[]) {
+  return {
+    query: async (sql: string, params: unknown[]) => {
+      const text = sql.replace(/\s+/g, ' ');
+      const beforeClaimed = text.includes('created_at < (SELECT created_at FROM chat_messages WHERE id = $2)');
+      const afterLastUser = text.includes('created_at > COALESCE(');
+      const claimedAt = messages.find((message) => message.id === params[1])?.at ?? 0;
+      const otherUsers = messages.filter((m) => m.role === 'user' && m.id !== params[1]);
+      const lastUser = Math.max(-Infinity, ...otherUsers.map((m) => m.at));
+      const rows = messages
+        .filter((m) => m.role === 'assistant' && m.question)
+        .filter((m) => !beforeClaimed || m.at < claimedAt)
+        .filter((m) => !afterLastUser || m.at > lastUser)
+        .sort((a, b) => b.at - a.at)
+        .slice(0, 1)
+        .map((m) => ({ id: m.id, question: m.question, sessionId: `session-${m.id}` }));
+      return { rows };
+    },
+  } as unknown as Parameters<typeof findOpenQuestion>[0];
+}
+
+test('Rückfrage nach der übernommenen Nachricht setzt die Sitzung nicht fort', async () => {
+  // N1 (t1), N2 wartet (t2), A1 mit @@FRAGE (t3): N2 wurde vor der Rückfrage geschrieben.
+  const pool = questionPool([
+    { id: 'n1', role: 'user', at: 1 },
+    { id: 'n2', role: 'user', at: 2 },
+    { id: 'a1', role: 'assistant', question: 'Welche Variante?', at: 3 },
+  ]);
+  assert.equal(await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null }), undefined);
+});
+
+test('Rückfrage vor der übernommenen Nachricht setzt die Sitzung weiterhin fort', async () => {
+  const pool = questionPool([
+    { id: 'n1', role: 'user', at: 1 },
+    { id: 'a1', role: 'assistant', question: 'Welche Variante?', at: 2 },
+    { id: 'n2', role: 'user', at: 3 },
+  ]);
+  const open = await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null });
+  assert.deepEqual(open, { id: 'a1', question: 'Welche Variante?', sessionId: 'session-a1' });
+});
+
+test('Rückfrage mit gleichem Zeitstempel wie die übernommene Nachricht zählt nicht', async () => {
+  const pool = questionPool([
+    { id: 'n1', role: 'user', at: 1 },
+    { id: 'a1', role: 'assistant', question: 'Welche Variante?', at: 2 },
+    { id: 'n2', role: 'user', at: 2 },
+  ]);
+  assert.equal(await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null }), undefined);
 });

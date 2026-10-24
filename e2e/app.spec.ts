@@ -798,8 +798,8 @@ test('Mehrfachauswahl: mehrere Aufträge markieren, Priorität setzen und gemein
   await expect(bar).toContainText('2 Aufträge ausgewählt');
   await expect(bar.getByRole('button', { name: /Erneut versuchen \(0\)/ })).toBeDisabled();
   await bar.getByLabel('Priorität der gewählten setzen').selectOption('high');
-  await expect.poll(async () => (await statusOf(ids[1]!))?.priority).toBe('high');
-  expect((await statusOf(ids[0]!))?.priority).toBe('high');
+  // Die Leiste ändert nacheinander in Tabellenreihenfolge (neueste zuerst): auf beide warten.
+  for (const id of ids) await expect.poll(async () => (await statusOf(id))?.priority).toBe('high');
   await bar.getByRole('button', { name: 'Auswahl aufheben' }).click();
   await expect(bar).toHaveCount(0);
 
@@ -813,8 +813,7 @@ test('Mehrfachauswahl: mehrere Aufträge markieren, Priorität setzen und gemein
   await expect(dialog).toContainText('2 Aufträge erneut versuchen?');
   await expect(dialog).toContainText(titles[0]!);
   await dialog.getByRole('button', { name: 'Erneut versuchen' }).click();
-  await expect.poll(async () => (await statusOf(ids[0]!))?.status).toBe('planned');
-  expect((await statusOf(ids[1]!))?.status).toBe('planned');
+  for (const id of ids) await expect.poll(async () => (await statusOf(id))?.status).toBe('planned');
   for (const id of ids) await request.delete(`/api/development/${id}`, { headers });
 });
 

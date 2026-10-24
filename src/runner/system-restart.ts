@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { sendPush } from '../core/push.js';
@@ -7,7 +9,8 @@ import { gitEnvironment } from './project-command.js';
 /**
  * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
  * holt den neuesten Stand per Fast-Forward von origin (pullBranch), baut die Container mit
- * `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive) startet ihn sofort wieder –
+ * `docker compose up -d --build` neu und beendet sich danach selbst (RESTART_EXIT_CODE). launchd (KeepAlive),
+ * systemd (Restart=always) bzw. unter Windows die Schleife in scripts\run-with-env.ps1 starten ihn sofort wieder –
  * mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
  */
 export const RESTART_KEY = 'system:restart';
@@ -16,6 +19,17 @@ const BUILD_TIMEOUT_MS = 20 * 60_000;
 /** Höchstens so lange auf laufende Aufträge warten; danach werden sie unterbrochen und nach dem Start fortgesetzt. */
 export const MAX_WAIT_MS = 15 * 60_000;
 const MAX_LOG_CHARS = 4_000;
+/**
+ * Exit-Code des Workers nach einem erfolgreichen Neubau (75 = EX_TEMPFAIL). launchd und systemd starten ihn bei
+ * jedem Code neu; unter Windows startet scripts\run-with-env.ps1 den Worker genau bei diesem Code wieder – die
+ * geplante Aufgabe selbst läuft nur bei der Anmeldung an.
+ */
+export const RESTART_EXIT_CODE = 75;
+/**
+ * Steht „restarting“ länger, ist der Worker nicht wiedergekommen (z. B. Windows-Aufgabe ohne Neustart-Schleife):
+ * Dann darf ein neuer Neustart angefordert werden, statt dauerhaft 409 zu bekommen.
+ */
+export const RESTARTING_STALE_MS = 10 * 60_000;
 
 /**
  * Umgebung für Compose-Aufrufe (Neubau, Rollback, Abbilder): ohne `DEV_LOG_*` und `COMPOSE_*`. Bei Compose gehen
@@ -35,6 +49,8 @@ export interface RestartState {
   requestedBy: string | null;
   startedAt?: string | null;
   finishedAt?: string | null;
+  /** Seit wann der Worker sich zum Neustart beendet (Status „restarting“). */
+  restartingAt?: string | null;
   /** Kurze Meldung für die Oberfläche (z. B. „Wartet auf 1 laufenden Auftrag“). */
   message?: string | null;
   /** Ende der Ausgabe von docker compose. */
@@ -103,6 +119,13 @@ async function writeRestart(
   return state;
 }
 
+/** „restarting“ seit mehr als RESTARTING_STALE_MS: Der Worker hat sich beendet, ist aber nicht wieder gestartet. */
+function restartStale(state: RestartState, now: Date): boolean {
+  if (state.status !== 'restarting') return false;
+  const since = Date.parse(state.restartingAt ?? state.startedAt ?? state.requestedAt);
+  return Number.isFinite(since) && now.getTime() - since > RESTARTING_STALE_MS;
+}
+
 /** Neustart anfordern; läuft schon einer, wird dieser zurückgegeben (created = false). */
 export async function requestRestart(
   pool: Queryable,
@@ -111,7 +134,8 @@ export async function requestRestart(
   comment: string | null = null,
 ): Promise<{ state: RestartState; created: boolean }> {
   const current = await readRestart(pool);
-  if (current && OPEN_STATUSES.includes(current.status)) return { state: current, created: false };
+  if (current && OPEN_STATUSES.includes(current.status) && !restartStale(current, now))
+    return { state: current, created: false };
   const state = await writeRestart(pool, {
     status: 'requested',
     requestedAt: now.toISOString(),
@@ -177,6 +201,49 @@ export interface RestartOptions {
   healthIntervalMs?: number;
   /** Meldung bei Ende (fertig/fehlgeschlagen); Standard: Push an alle Geräte. */
   notify?: RestartNotifier;
+  /** Liest eine Datei im Installationsordner (null, wenn sie fehlt); Standard: Dateisystem. */
+  readText?: (path: string) => Promise<string | null>;
+}
+
+/**
+ * Der Worker läuft per tsx direkt aus dem Installationsordner mit dessen node_modules – nicht im Container. Ohne
+ * `npm ci` auf dem Host startet er nach einer neuen Laufzeitabhängigkeit nicht (ERR_MODULE_NOT_FOUND, KeepAlive-Schleife).
+ */
+export const DEPENDENCY_COMMAND = ['npm', 'ci', '--ignore-scripts'];
+const DEPENDENCY_TIMEOUT_MS = 10 * 60_000;
+
+async function readTextFile(path: string): Promise<string | null> {
+  return readFile(path, 'utf8').catch(() => null);
+}
+
+/**
+ * Passt node_modules nicht mehr zu package-lock.json? Verglichen wird mit dem versteckten Lockfile, das npm beim
+ * Installieren in node_modules/.package-lock.json schreibt. Fehlt es oder ist es unlesbar, gilt der Stand als veraltet.
+ * Optionale Pakete fremder Plattformen (z. B. esbuild für Linux) stehen nur im Lockfile und zählen nicht.
+ */
+export function dependenciesOutdated(lockfile: string, installed: string | null): boolean {
+  type Packages = Record<string, { version?: string; optional?: boolean } | undefined>;
+  const packagesOf = (text: string): Packages | null => {
+    try {
+      const packages = (JSON.parse(text) as { packages?: unknown }).packages;
+      return typeof packages === 'object' && packages !== null ? (packages as Packages) : null;
+    } catch {
+      return null;
+    }
+  };
+  const wanted = packagesOf(lockfile);
+  const present = installed === null ? null : packagesOf(installed);
+  if (!wanted || !present) return true;
+  for (const [path, entry] of Object.entries(wanted)) {
+    if (!path) continue;
+    const have = present[path];
+    if (!have) {
+      if (entry?.optional) continue;
+      return true;
+    }
+    if (have.version !== entry?.version) return true;
+  }
+  return Object.keys(present).some((path) => path && !wanted[path]);
 }
 
 async function defaultHealth(): Promise<boolean> {
@@ -334,6 +401,41 @@ export async function processRestart(
     startedAt: now().toISOString(),
     message: `${pulled} Baut die Container neu: ${RESTART_COMMAND.join(' ')}`,
   });
+  // Vor dem Neubau: node_modules des Workers auf den Stand des Lockfiles bringen. Scheitert das, geht nichts live
+  // und der Worker beendet sich nicht – sonst stürzte er nach dem Neustart in einer Schleife ab.
+  const readText = options.readText ?? readTextFile;
+  const lockfile = await readText(join(installRoot, 'package-lock.json'));
+  if (
+    lockfile !== null &&
+    dependenciesOutdated(lockfile, await readText(join(installRoot, 'node_modules', '.package-lock.json')))
+  ) {
+    await writeRestart(pool, {
+      ...building,
+      message: `Aktualisiert die Abhängigkeiten des Workers: ${DEPENDENCY_COMMAND.join(' ')}`,
+    });
+    const install = await execute(DEPENDENCY_COMMAND, installRoot, {
+      timeoutMs: DEPENDENCY_TIMEOUT_MS,
+      env: composeEnvironment(),
+    }).catch((error: unknown) => ({
+      exitCode: 1,
+      durationMs: 0,
+      output: error instanceof Error ? error.message : String(error),
+    }));
+    if (install.exitCode !== 0) {
+      await writeRestart(
+        pool,
+        {
+          ...building,
+          status: 'failed',
+          finishedAt: now().toISOString(),
+          message: `${DEPENDENCY_COMMAND.join(' ')} ist fehlgeschlagen (Exit-Code ${install.exitCode}). Container nicht neu gebaut, der Worker läuft weiter. Bitte im AIdeation-Ordner „npm ci“ prüfen.`,
+          log: redactOutput(install.output, process.env).trim().slice(-MAX_LOG_CHARS),
+        },
+        options.notify,
+      );
+      return 'failed';
+    }
+  }
   const previous = parseComposeImages(
     (
       await execute(['docker', 'compose', 'images', ...BUILT_SERVICES, '--format', 'json'], installRoot, {
@@ -403,6 +505,7 @@ export async function processRestart(
   await writeRestart(pool, {
     ...building,
     status: 'restarting',
+    restartingAt: now().toISOString(),
     message: 'Container laufen mit dem neuen Code. Der Worker startet neu …',
     log,
   });

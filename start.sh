@@ -31,6 +31,10 @@ mkdir -p backups
 if [ ! -d node_modules ]; then
   echo "→ Installiere Abhängigkeiten (einmalig) …"
   npm ci
+elif [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  # Der Worker läuft mit diesen node_modules (nicht im Container): nach einem Update sonst ERR_MODULE_NOT_FOUND.
+  echo "→ package-lock.json hat sich geändert – aktualisiere Abhängigkeiten …"
+  npm ci
 fi
 
 if [ ! -f .env ] || [ "${1:-}" = "--setup" ]; then

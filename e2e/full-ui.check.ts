@@ -544,8 +544,9 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await button(detail, 'Änderungen speichern').click();
   await expect(page.getByText('Bug wurde gespeichert.')).toBeVisible();
   await snap(page, info, 'Bug bearbeitet', false);
-  page.once('dialog', (dialog) => void dialog.accept());
   await button(detail, 'Löschen').click();
+  // Löschen fragt im eigenen Bestätigungsdialog nach.
+  await page.getByRole('dialog').getByRole('button', { name: 'Löschen' }).click();
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
 });
 

@@ -45,8 +45,14 @@ test('Bug bearbeiten: nur geänderte Felder, leere Auswahl als null', () => {
   assert.deepEqual(bugChanges(bug, { ...unchanged, title: ' Neu ' }), { title: 'Neu' });
 });
 
-test('Sprints: keine abgeschlossenen oder abgebrochenen, ausser dem aktuellen des Bugs', () => {
-  const sprints = [sprint('a', 'active'), sprint('p', 'planned'), sprint('c', 'completed'), sprint('x', 'cancelled')];
+test('Sprints: nur geplante und aktive (kein Review, kein Abschluss), ausser dem aktuellen des Bugs', () => {
+  const sprints = [
+    sprint('a', 'active'),
+    sprint('p', 'planned'),
+    sprint('c', 'completed'),
+    sprint('x', 'cancelled'),
+    sprint('r', 'review'),
+  ];
   assert.deepEqual(
     selectableSprints(sprints).map((entry) => entry.id),
     ['a', 'p'],

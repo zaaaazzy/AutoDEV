@@ -11,7 +11,9 @@ import { runOllamaAgent } from './ollama-agent.js';
 import {
   agentRights,
   loadProjectPermissions,
+  FULL_ACCESS_ROLES,
   READ_ONLY_PERMISSION_ROLE,
+  READ_ONLY_ROLES,
   withAgentPermissions,
 } from './tool-permissions.js';
 import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
@@ -44,6 +46,18 @@ interface AgentRights {
   command: string[] | null;
   allowedCommands: string[] | null;
   fileScope: string[];
+  role?: string | null;
+}
+
+/**
+ * Rolle, deren Rechte ein Lauf bekommt. Ein gewählter Agent bringt Befehl und Freigaben mit; läuft er unter einer
+ * Vollzugriffs-Rolle (Chat-Assistent), gelten seine eigenen Rollenrechte – sonst hätte etwa ein Entwickler mit
+ * `--dangerously-skip-permissions` im Chat keinen Wächter. Lesende oder fehlende Rollen: nur lesen (fail-closed).
+ */
+function permissionRole(role: string, agentId: string | null | undefined, author: AgentRights | undefined): string {
+  if (!agentId || !FULL_ACCESS_ROLES.has(role) || author?.role === role) return role;
+  if (!author?.role || READ_ONLY_ROLES.has(author.role)) return READ_ONLY_PERMISSION_ROLE;
+  return author.role;
 }
 
 export function splitTitle(output: string): { title: string | null; text: string } {
@@ -129,7 +143,10 @@ export async function runAuthorAgent(
   onProgress?: (message: string) => void,
   /** Setzt eine frühere Claude-Sitzung mit einer kurzen Nachricht fort (nur Claude-CLI, sonst voller Prompt). */
   resume?: { sessionId: string; prompt: string },
-  /** Vom Nutzer gewählter Agent des Projekts (Name, Beschreibung, Modell); Rechte bleiben die der Rolle `role`. */
+  /**
+   * Vom Nutzer gewählter Agent des Projekts (Name, Beschreibung, Modell). Unter einer Vollzugriffs-Rolle gelten die
+   * Rechte seiner eigenen Rolle (siehe permissionRole), sonst die der Rolle `role`.
+   */
   agentId?: string | null,
   /** Bricht den Lauf ab (z. B. „Abbrechen“ beim Visionär): beendet die CLI bzw. das lokale Modell. */
   signal?: AbortSignal,
@@ -143,7 +160,7 @@ export async function runAuthorAgent(
   const author = (
     agentId
       ? await pool.query<AgentRights>(
-          `SELECT instructions, command, allowed_commands AS "allowedCommands", file_scope AS "fileScope"
+          `SELECT instructions, command, allowed_commands AS "allowedCommands", file_scope AS "fileScope", role
              FROM agents WHERE project_slug = $1 AND id = $2`,
           [options.project, agentId],
         )
@@ -170,16 +187,11 @@ export async function runAuthorAgent(
     : ((await dashboardCommand(pool, role)) ?? defaultAgentCommand());
   // Rechte: die des gewählten bzw. zuständigen Agents (eigene Zuweisung), sonst der Projektstandard der Rolle.
   const permissions = await loadProjectPermissions(pool, options.project);
+  // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
+  const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
   const command =
     configured &&
-    withAgentPermissions(
-      configured,
-      // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
-      readOnly ? READ_ONLY_PERMISSION_ROLE : role,
-      permissions,
-      author?.allowedCommands ?? null,
-      author?.fileScope ?? [],
-    );
+    withAgentPermissions(configured, rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =
@@ -219,12 +231,7 @@ export async function runAuthorAgent(
           signal,
           readOnly,
           // Dieselben Datei- und Befehlsrechte wie bei der Claude-CLI (sonst liefe der Chat ohne Wächter).
-          ...agentRights(
-            readOnly ? READ_ONLY_PERMISSION_ROLE : role,
-            permissions,
-            author?.allowedCommands ?? null,
-            author?.fileScope ?? [],
-          ),
+          ...agentRights(rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []),
         });
     await pool
       .query(

@@ -1,5 +1,6 @@
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import type { FormValues } from '../../shared/forms.js';
+import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
 
 /** Reihenfolge überall gleich: aufsteigend nach Schwere. */
 export const SEVERITIES: { value: Bug['severity']; label: string }[] = [
@@ -16,13 +17,11 @@ export const BURYING_STATUSES = new Set<BugStatus>(['fixed', 'wontfix', 'rejecte
 export const EDIT_TITLE_MAX = 180;
 
 /**
- * Sprints, denen ein Bug zugeordnet werden kann: keine abgeschlossenen oder abgebrochenen. Der aktuelle Sprint des
+ * Sprints, denen ein Bug zugeordnet werden kann: nur geplante und aktive (wie die API). Der aktuelle Sprint des
  * Bugs bleibt auswählbar, sonst zeigte die Auswahl ein leeres Feld.
  */
 export function selectableSprints(sprints: Sprint[], currentId: string | null = null): Sprint[] {
-  return sprints.filter(
-    (sprint) => sprint.id === currentId || (sprint.status !== 'completed' && sprint.status !== 'cancelled'),
-  );
+  return sprints.filter((sprint) => sprint.id === currentId || isAssignableSprintStatus(sprint.status));
 }
 
 type BugChanges = Partial<Pick<Bug, 'title' | 'description' | 'severity' | 'sprintId' | 'fixNotes' | 'category'>>;

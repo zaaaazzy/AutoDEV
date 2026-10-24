@@ -43,10 +43,13 @@ const CONFLICT_END = /^>{7} /m;
 /**
  * Dateien mit ungelöstem Merge-Konflikt, die noch Konfliktmarker enthalten. Ohne laufenden Merge: leer.
  * Gelöste, aber noch nicht gestagte Dateien zählen nicht (der Commit nach dem Agent schliesst den Merge ab).
+ * Scheitert git, wirft sie: „keine Konflikte“ darf nie aus einem Fehler folgen.
  */
 export async function unresolvedConflicts(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<string[]> {
   const { git } = gitHelpers(rawExecute, cwd);
-  const unmerged = (await git('diff', '--name-only', '--diff-filter=U')).output
+  const diff = await git('diff', '--name-only', '--diff-filter=U');
+  if (diff.exitCode !== 0) throw new Error(`Konfliktprüfung fehlgeschlagen: ${diff.output.slice(-200)}`);
+  const unmerged = diff.output
     .split('\n')
     .map((file) => file.trim())
     .filter(Boolean);
@@ -114,7 +117,10 @@ export async function enterOrderBranch(
     const branch = orderBranch(item);
     if ((await currentBranch(git)) === branch) {
       // Nach einem Abbruch steht der Ordner noch auf dem Auftrags-Branch (samt offener Änderungen): fortsetzen.
-      return { branch, base: sprintName ? sprintBranch(sprintName) : MAIN_BRANCH };
+      // Ein offener Merge bleibt unangetastet (kein Abort, kein Reset); seine Konflikte löst der nächste Agent.
+      const base = sprintName ? sprintBranch(sprintName) : MAIN_BRANCH;
+      const conflicts = await unresolvedConflicts(cwd, execute);
+      return conflicts.length ? { branch, base, conflicts } : { branch, base };
     }
     // Was jetzt noch offen ist, stammt nicht von diesem Auftrag (Assistent, Mensch, abgebrochener anderer Auftrag)
     // und würde sonst mit „git add -A“ in seinen Commits landen.
@@ -455,7 +461,10 @@ export async function commitAgentStep(
   }
 }
 
-/** Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch) mergen und löschen. */
+/**
+ * Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch oder main) mergen und löschen. Ist die Basis
+ * in einem anderen Worktree ausgecheckt, wird dort gemergt (wie in finishOrderBranch).
+ */
 export async function mergeApprovedBranch(
   cwd: string,
   item: { title: string },
@@ -475,6 +484,18 @@ export async function mergeApprovedBranch(
         merged: false,
         message: `Offene Änderungen im Arbeitsordner (${open.slice(0, 5).join(', ')}) – ${branch} nicht gemergt.`,
       };
+    // Basis im Ordner eines anderen Worktrees ausgecheckt (losgelöster Agent-Worktree, main beim Menschen): dort mergen.
+    const elsewhere = await checkedOutElsewhere(git, base, cwd);
+    if (elsewhere) {
+      const result = await mergeIntoOtherWorktree(
+        { git, must },
+        rawExecute,
+        elsewhere,
+        { branch, base },
+        `Merge ${branch}: ${item.title.slice(0, 72)}`,
+      );
+      return { merged: result.merged, message: result.merged ? `Freigegeben. ${result.message}` : result.message };
+    }
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output !== base) await must('checkout', base);
     const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: ${item.title.slice(0, 72)}`);
     if (merged.exitCode !== 0) {
@@ -509,13 +530,16 @@ export async function followPreview(
     : `Vorschau nicht nachgezogen: ${moved.output.slice(-200)}`;
 }
 
-/** Steht der Ordner auf einem Auftrags-Branch mit nicht committeten Änderungen? */
+/**
+ * Steht der Ordner auf einem Auftrags-Branch mit nicht committeten Änderungen? Neue, unversionierte Dateien zählen mit
+ * (sonst nähme die Sprint-Sicherung sie beim Checkout mit und pushte sie); Testberichte und Agent-Ablage nicht.
+ */
 export async function orderWorkInProgress(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<boolean> {
   if (!existsSync(join(cwd, '.git'))) return false;
   const { git } = gitHelpers(rawExecute, cwd);
   const branch = (await git('rev-parse', '--abbrev-ref', 'HEAD')).output.trim();
   if (!branch.startsWith('auftrag/')) return false;
-  return Boolean((await git('status', '--porcelain', '--untracked-files=no')).output.trim());
+  return (await foreignChanges(git)).length > 0;
 }
 
 export interface ChangedFile {

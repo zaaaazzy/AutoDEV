@@ -111,7 +111,8 @@ function finishedSprintPool(autoLive: boolean, items = [{ status: 'done', action
     if (sql.includes("UPDATE sprints s SET status = 'completed'")) return completable ? [{ id: 'sprint-9' }] : [];
     return [];
   };
-  const pool = { query: async (sql: string) => ({ rows: answer(sql) }) } as unknown as Pool;
+  const query = async (sql: string) => ({ rows: answer(sql) });
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return {
     pool,
     completed: () => statements.some((sql) => sql.includes("UPDATE sprints s SET status = 'completed'")),
