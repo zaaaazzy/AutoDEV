@@ -37,35 +37,99 @@ const BLOCKED_FOLDERS = [
   '/proc',
 ];
 
-/** Projektbereich: Ordner, in denen AIdeation Projekte anlegen, löschen und bearbeiten darf (DEV_LOG_PROJECT_ROOTS, mit „:“ getrennt). */
-export function projectRoots(environment: NodeJS.ProcessEnv = process.env): string[] {
-  return (environment.DEV_LOG_PROJECT_ROOTS ?? '')
-    .split(':')
-    .map((root) => root.trim().replace(/\/+$/, ''))
-    .filter((root) => root.startsWith('/'));
+/** Windows-Systemordner direkt unter einem Laufwerk (klein geschrieben, Windows unterscheidet keine Gross-/Kleinschreibung). */
+const BLOCKED_WINDOWS_FOLDERS = [
+  'windows',
+  'program files',
+  'program files (x86)',
+  'programdata',
+  'recovery',
+  'perflogs',
+  '$recycle.bin',
+  'system volume information',
+];
+
+/** Pfad eines Windows-Rechners (Laufwerksbuchstabe), unabhängig davon, auf welchem System die Prüfung läuft. */
+export const isWindowsPath = (path: string): boolean => /^[A-Za-z]:[\\/]/.test(path);
+
+/**
+ * Normalisiert einen absoluten Ordnerpfad des Rechners: `/a/b` (macOS/Linux) oder `C:\a\b` (Windows, Laufwerk gross,
+ * Backslashes). Null bei relativen Pfaden, „.“/„..“, doppelten Trennern oder unter Windows unzulässigen Zeichen.
+ * Bewusst ohne node:path – der Server prüft im Linux-Container Pfade eines Windows-Rechners.
+ */
+export function normalizeFolder(value: string): string | null {
+  if (isWindowsPath(value)) {
+    const parts = value.slice(3).split(/[\\/]/);
+    if (parts.at(-1) === '') parts.pop();
+    // Windows entfernt Punkte und Leerzeichen am Namensende („..“ hiesse sonst auch „.. “ oder „...“).
+    if (parts.some((part) => !part || /[<>:"|?*]/.test(part) || /[. ]$/.test(part))) return null;
+    return `${value[0]!.toUpperCase()}:\\${parts.join('\\')}`;
+  }
+  if (!value.startsWith('/') || value.includes('//')) return null;
+  const parts = value.split('/').filter(Boolean);
+  if (parts.some((part) => part === '..' || part === '.')) return null;
+  return `/${parts.join('/')}`;
 }
 
-/** Projektordner müssen absolut, normalisiert und unterhalb eines Benutzer-/Datenträgerordners liegen (optional per DEV_LOG_PROJECT_ROOTS begrenzt). */
+/** Liegt `path` (normalisiert) in `root` oder ist er `root` selbst? Windows-Pfade ohne Gross-/Kleinschreibung. */
+export function insideFolder(path: string, root: string, strict = false): boolean {
+  if (isWindowsPath(path) !== isWindowsPath(root)) return false;
+  const [a, b] = isWindowsPath(path) ? [path.toLowerCase(), root.toLowerCase()] : [path, root];
+  const separator = isWindowsPath(path) ? '\\' : '/';
+  return (!strict && a === b) || a.startsWith(b.endsWith(separator) ? b : `${b}${separator}`);
+}
+
+/**
+ * Projektbereich: Ordner, in denen AIdeation Projekte anlegen, löschen und bearbeiten darf (DEV_LOG_PROJECT_ROOTS).
+ * Getrennt mit „:“ (macOS/Linux) oder „;“ (Windows); der Doppelpunkt nach einem Laufwerksbuchstaben trennt nicht.
+ */
+export function projectRoots(environment: NodeJS.ProcessEnv = process.env): string[] {
+  return (environment.DEV_LOG_PROJECT_ROOTS ?? '')
+    .split(';')
+    .flatMap((entry) => entry.match(/\s*[A-Za-z]:[\\/][^:]*|[^:]+/g) ?? [])
+    .map((root) => root.trim())
+    .map((root) => (isWindowsPath(root) ? normalizeFolder(root) : root.replace(/\/+$/, '')))
+    .filter((root): root is string => Boolean(root && (root.startsWith('/') || isWindowsPath(root))));
+}
+
+function blockedWindowsFolder(folder: string): boolean {
+  const parts = folder.slice(3).toLowerCase().split('\\').filter(Boolean);
+  return (
+    parts.length === 0 ||
+    BLOCKED_WINDOWS_FOLDERS.includes(parts[0]!) ||
+    (parts[0] === 'users' && (parts.length <= 2 || parts[2] === 'appdata'))
+  );
+}
+
+function blockedPosixFolder(folder: string): boolean {
+  return (
+    BLOCKED_FOLDERS.includes(folder) ||
+    /^\/(?:Users|home)\/[^/]+$/.test(folder) ||
+    /^\/Volumes\/[^/]+$/.test(folder) ||
+    /^\/(?:etc|usr|bin|sbin|System|Library|private|dev|proc|root)(?:\/|$)/.test(folder)
+  );
+}
+
+/**
+ * Projektordner müssen absolut, normalisiert und unterhalb eines Benutzer-/Datenträgerordners liegen (optional per
+ * DEV_LOG_PROJECT_ROOTS begrenzt). Gilt für macOS/Linux-Pfade und Windows-Pfade mit Laufwerksbuchstaben.
+ */
 export function projectFolderError(value: unknown, environment: NodeJS.ProcessEnv = process.env): string | null {
   const folder = typeof value === 'string' ? value.trim() : '';
-  if (!folder.startsWith('/') || folder.length > 500 || folder.includes('\0')) {
-    return 'Projektordner muss ein absoluter Pfad sein, z. B. /Users/name/projekte/mein-projekt.';
+  if ((!folder.startsWith('/') && !isWindowsPath(folder)) || folder.length > 500 || folder.includes('\0')) {
+    return 'Projektordner muss ein absoluter Pfad sein, z. B. /Users/name/projekte/mein-projekt oder C:\\Users\\name\\projekte\\mein-projekt.';
   }
-  const parts = folder.split('/').filter(Boolean);
-  if (parts.some((part) => part === '..' || part === '.') || folder.includes('//')) {
-    return 'Projektordner darf keine "." oder ".." enthalten.';
+  const normalized = normalizeFolder(folder);
+  if (!normalized) {
+    return isWindowsPath(folder)
+      ? 'Projektordner darf keine "." oder "..", leeren Namen oder Zeichen wie <>:"|?* enthalten.'
+      : 'Projektordner darf keine "." oder ".." enthalten.';
   }
-  const normalized = `/${parts.join('/')}`;
-  if (
-    BLOCKED_FOLDERS.includes(normalized) ||
-    /^\/(?:Users|home)\/[^/]+$/.test(normalized) ||
-    /^\/Volumes\/[^/]+$/.test(normalized) ||
-    /^\/(?:etc|usr|bin|sbin|System|Library|private|dev|proc|root)(?:\/|$)/.test(normalized)
-  ) {
+  if (isWindowsPath(normalized) ? blockedWindowsFolder(normalized) : blockedPosixFolder(normalized)) {
     return 'Dieser Ordner ist als Projektordner nicht erlaubt (zu breit oder Systemordner). Wähle den Projektunterordner.';
   }
   const roots = projectRoots(environment);
-  if (roots.length && !roots.some((root) => normalized.startsWith(`${root}/`))) {
+  if (roots.length && !roots.some((root) => insideFolder(normalized, root, true))) {
     return `Projektordner muss unterhalb von ${roots.join(' oder ')} liegen (DEV_LOG_PROJECT_ROOTS).`;
   }
   return null;

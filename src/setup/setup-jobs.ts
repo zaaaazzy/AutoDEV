@@ -1,12 +1,12 @@
 import { logged } from '../core/log.js';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { commitProjectSetup, isValidGitRemote, pushRemote } from '../runner/git-sync.js';
-import { projectFolderError } from '../core/validation.js';
+import { normalizeFolder, projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
 import { listFolders } from './folders.js';
 
@@ -38,7 +38,7 @@ function folderOf(params: Params): string {
   const folder = text(params.path);
   const error = projectFolderError(folder);
   if (error) throw new Error(error);
-  return folder.replace(/\/+$/, '');
+  return normalizeFolder(folder) ?? folder;
 }
 
 const ENV = {
@@ -63,9 +63,14 @@ async function run(
   return { ok: result.exitCode === 0, output: redactOutput(result.output, process.env).trim() };
 }
 
+/** Befehl, der den Pfad eines Programms ausgibt: `where` unter Windows (kein /bin/sh), sonst `command -v`. */
+export function whichCommand(binary: string, platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'win32' ? ['where', binary] : ['/bin/sh', '-c', `command -v ${binary}`];
+}
+
 async function which(execute: CommandExecutor, binary: string): Promise<string | null> {
-  const result = await run(execute, ['/bin/sh', '-c', `command -v ${binary}`], process.cwd());
-  return result.ok && result.output ? result.output.split('\n')[0]! : null;
+  const result = await run(execute, whichCommand(binary), process.cwd());
+  return result.ok && result.output ? result.output.split(/\r?\n/)[0]! : null;
 }
 
 /** Ordner, Leere und Git-Zustand (Branch, Remote, Commits). */
@@ -176,12 +181,9 @@ async function applyTemplate(params: Params, execute: CommandExecutor, log: Log)
     const clone = await run(execute, ['git', 'clone', '--depth', '1', url, temp], folder, STEP_TIMEOUT_MS);
     if (!clone.ok) throw new Error(`Klonen fehlgeschlagen: ${clone.output.slice(-400)}`);
     await rm(join(temp, '.git'), { recursive: true, force: true });
-    const moved = await run(
-      execute,
-      ['/bin/sh', '-c', 'cp -R .devlog-template/. . && rm -rf .devlog-template'],
-      folder,
-    );
-    if (!moved.ok) throw new Error(moved.output);
+    // Ohne Shell (gibt es unter Windows nicht): Einträge verschieben, der Ordner ist bis auf .git leer.
+    for (const entry of await readdir(temp)) await rename(join(temp, entry), join(folder, entry));
+    await rm(temp, { recursive: true, force: true });
     await log('Vorlage übernommen (ohne fremde Git-Historie).');
     return { template: template.id };
   }
