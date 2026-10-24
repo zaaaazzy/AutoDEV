@@ -7,7 +7,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../../core/comma
 import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
-import { clearStaleIndexLock, isIndexLockError } from './stale-lock.js';
+import { clearStaleGitLocks, isGitLockError } from './stale-lock.js';
 import { checkoutTarget, dropReportCopies } from './report-copies.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
@@ -165,6 +165,9 @@ export const BOT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'dev-log@mainty.local',
 };
 
+/** Befehle, die über AUTO_MERGE/ORIG_HEAD mergen und an einer verwaisten Sperre halb fertig liegen bleiben. */
+const MERGING_COMMANDS = new Set(['merge', 'pull', 'rebase', 'cherry-pick', 'revert']);
+
 export function gitHelpers(execute: CommandExecutor, cwd: string) {
   // Gefiltert und ohne Hooks: Agents können im Projekt Hooks oder fsmonitor setzen, die sonst beim Commit liefen.
   const env = gitEnvironment({
@@ -181,9 +184,16 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
     // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
     const target = args[0] === 'checkout' ? checkoutTarget(args) : null;
     if (target) await dropReportCopies((...inner) => run(inner), cwd, target);
+    // Ein Merge an einer verwaisten AUTO_MERGE.lock scheitert erst nach dem Schreiben der Dateien und hinterlässt sie
+    // unversioniert im Ordner: Sperren daher vorher prüfen, nicht erst nach dem Fehler.
+    if (MERGING_COMMANDS.has(args[0]!)) await clearStaleGitLocks(cwd).catch(() => null);
     const result = await run(args);
-    // Verwaiste index.lock (git wurde hart beendet): wegräumen, wenn niemand sie hält, und einmal neu versuchen.
-    if (result.exitCode !== 0 && isIndexLockError(result.output) && (await clearStaleIndexLock(cwd))) {
+    // Verwaiste Sperre (git wurde hart beendet): die genannte wegräumen, wenn niemand sie hält, und einmal neu versuchen.
+    if (
+      result.exitCode !== 0 &&
+      isGitLockError(result.output) &&
+      (await clearStaleGitLocks(cwd, Date.now(), { fromError: result.output }))
+    ) {
       return run(args);
     }
     return result;
