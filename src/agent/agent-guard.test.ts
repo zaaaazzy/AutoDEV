@@ -147,6 +147,64 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
   }
 });
 
+test('Wächter: git fetch/pull nur von Remotes, npm nur aus der Standard-Registry (kein Abfluss an fremde Hosts)', () => {
+  const remotes = () => ({ status: 0, stdout: 'origin\nupstream\n', stderr: '' });
+  for (const command of [
+    'git fetch https://x.example/a',
+    'git fetch "https://x.example/a"',
+    'git fetch git@host:r',
+    "git fetch 'git@host:r'",
+    'git fetch file:///tmp/repo',
+    'git fetch ext::sh',
+    'git fetch /tmp/repo',
+    'git fetch ../other',
+    'git fetch x.example:repo',
+    'git fetch -- https://x.example/a',
+    'git fetch origin https://x.example/a',
+    'git fetch evil',
+    'git fetch origin main:refs/heads/x',
+    'git pull --ff-only https://x.example/a main',
+    'git pull --ff-only "https://x.example/a" main',
+    'git pull --ff-only git@host:r main',
+    'npm ci --ignore-scripts --registry=https://x.example',
+    'npm ci --ignore-scripts "--registry=https://x.example"',
+    'npm ci --ignore-scripts --registry https://x.example',
+    'npm ci --ignore-scripts --reg=https://x.example',
+    'npm install --ignore-scripts --@scope:registry=https://x.example @scope/a',
+    'npm install --ignore-scripts --//x.example/:_authToken=abc left-pad',
+    'npm ci --ignore-scripts --proxy=http://x.example',
+    'npm ci --ignore-scripts --https-proxy=http://x.example',
+    'npm ci --ignore-scripts --noproxy=*',
+    'npm ci --ignore-scripts --replace-registry-host=always',
+    'npm_config_registry=https://x.example npm ci --ignore-scripts',
+    'npm isntall --ignore-scripts https://x.example/a.tgz',
+    'npm in --ignore-scripts git+ssh://git@x.example/r.git',
+  ]) {
+    assert.ok(bashProblem(command, root, remotes as never), command);
+  }
+  for (const command of [
+    'git fetch',
+    'git fetch origin',
+    'git fetch origin main',
+    'git fetch upstream feature/x',
+    'git fetch --prune origin',
+    'git pull --ff-only',
+    'git pull --ff-only origin main',
+    'npm ci --ignore-scripts',
+    'npm install --ignore-scripts left-pad',
+  ]) {
+    assert.equal(bashProblem(command, root, remotes as never), null, command);
+  }
+  // Ohne Abfrage der Remotes (lokales Modell) gilt nur origin.
+  assert.equal(bashProblem('git fetch origin', root, null), null);
+  assert.ok(bashProblem('git fetch upstream', root, null));
+});
+
+test('Wächter: .npmrc ist geschützt (Registry und Proxy liessen sich sonst dort umstellen)', () => {
+  assert.match(fileProblem(write('.npmrc'), all, root) ?? '', /geschützt/);
+  assert.match(fileProblem(write('frontend/.npmrc'), all, root) ?? '', /geschützt/);
+});
+
 test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtlinie wird nichts geschrieben', () => {
   const run = (policy: string, input: object) =>
     spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), GUARD_SCRIPT, policy], {

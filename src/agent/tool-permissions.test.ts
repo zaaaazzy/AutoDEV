@@ -18,6 +18,7 @@ import {
   forbiddenSubcommand,
   FULL_ACCESS_ROLES,
   gitPathProblem,
+  gitRemoteProblem,
   guardHookCommand,
   hasFullAccess,
   isAllowedCommand,
@@ -798,6 +799,59 @@ test('npmOptionProblem: --ignore-scripts lässt sich nicht wieder abschalten', (
   ]) {
     assert.equal(npmOptionProblem(command), null, command);
   }
+});
+
+test('npmOptionProblem: Registry, Proxy und Einstellungen je Scope/Host sind gesperrt, auch abgekürzt', () => {
+  for (const command of [
+    'npm ci --ignore-scripts --registry=https://x.example',
+    'npm ci --ignore-scripts --registry https://x.example',
+    'npm ci --ignore-scripts --reg=https://x.example',
+    'npm install --ignore-scripts --@scope:registry=https://x.example @scope/a',
+    'npm install --ignore-scripts --//x.example/:_authToken=abc left-pad',
+    'npm ci --ignore-scripts --proxy=http://x.example',
+    'npm ci --ignore-scripts --https-proxy http://x.example',
+    'npm ci --ignore-scripts --noproxy=*',
+    'npm ci --ignore-scripts --replace-registry-host=always',
+  ]) {
+    assert.ok(npmOptionProblem(command), command);
+    assert.ok(!isAllowedCommand(command), command);
+  }
+  for (const command of ['npm ci --ignore-scripts', 'npm ci --production --no-audit', 'npm test -- --registry=x']) {
+    assert.equal(npmOptionProblem(command), null, command);
+  }
+});
+
+test('gitRemoteProblem: fetch/pull nur von eingerichteten Remotes, Refs ohne URL, Host, Pfad oder „:“', () => {
+  for (const command of [
+    'git fetch https://x.example/a',
+    'git fetch git@host:r',
+    'git fetch file:///tmp/r',
+    'git fetch ext::sh',
+    'git fetch /tmp/r',
+    'git fetch ./r',
+    'git fetch host:r',
+    'git fetch upstream',
+    'git fetch --depth 1 origin',
+    'git fetch --multiple origin ../r',
+    'git fetch --mul origin r',
+    'git fetch origin main:main',
+    'git fetch origin ../x',
+    'git pull --ff-only https://x.example/a main',
+  ]) {
+    assert.ok(gitRemoteProblem(command), command);
+  }
+  for (const command of [
+    'git fetch',
+    'git fetch --all --prune',
+    'git fetch origin',
+    'git fetch --depth=1 origin main',
+    'git pull --ff-only',
+    'git pull --ff-only origin feature/x',
+    'git status https://x.example',
+  ]) {
+    assert.equal(gitRemoteProblem(command), null, command);
+  }
+  assert.equal(gitRemoteProblem('git fetch upstream', ['origin', 'upstream']), null);
 });
 
 test('loadProjectPermissions: zu breite eigene Regeln aus älteren Zeilen gelten beim Laden nicht mehr', async () => {

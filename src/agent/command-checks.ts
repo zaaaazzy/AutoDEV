@@ -82,6 +82,12 @@ const DANGEROUS_NPM_OPTIONS = [
   'init-module',
   'editor',
   'git',
+  // Fremde Hosts: Registry, Proxy und Umschreiben der Tarball-Adressen (Abfluss von Daten in der URL).
+  'registry',
+  'replace-registry-host',
+  'proxy',
+  'https-proxy',
+  'noproxy',
 ];
 /** Kurzoptionen: -g (global), -L (location); -C (prefix) wird wie --prefix geprüft. */
 const DANGEROUS_NPM_SHORT = /[gL]/;
@@ -134,7 +140,10 @@ export function npmOptionProblem(input: CommandInput, root?: string): string | n
         if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
       } else if (
         name &&
-        ('prefix'.startsWith(name) || DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)))
+        ('prefix'.startsWith(name) ||
+          DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)) ||
+          // Einstellungen je Scope oder Host: --@scope:registry=…, --//host/:_authToken=…
+          /[:@/]/.test(name))
       ) {
         return `„${command}“: diese npm-Option ist gesperrt.`;
       }
@@ -204,6 +213,34 @@ export function gitPathProblem(input: CommandInput, root?: string): string | nul
     if (outside) return `„${command}“: nur Pfade im Projektordner (Git liest sonst fremde Dateien).`;
   }
   return null;
+}
+
+/** Remote-Name bzw. Ref (main, feature/x): keine URL (://, @, ::), kein Host (:), kein Pfad (/…, ./, ..). */
+const GIT_REF_ARGUMENT = /^(?![./])(?!.*\.\.)[\w][\w./-]*$/;
+
+/**
+ * git fetch/pull holen nur von einem eingerichteten Remote (remotes, sonst origin): Eine URL, ein Host oder ein Pfad
+ * schickte Daten im Pfad an einen fremden Host bzw. holte fremde Commits in den Branch. Weitere Argumente sind nur
+ * Refs ohne „:“ (keine Refspecs, die lokale Branches überschreiben). Optionen mit Wert nur als --option=wert.
+ */
+export function gitRemoteProblem(input: CommandInput, remotes: readonly string[] = ['origin']): string | null {
+  const words = toWords(input);
+  const command = label(input);
+  if (words[0]?.text !== 'git' || !['fetch', 'pull'].includes(words[1]?.text ?? '')) return null;
+  // --multiple (auch abgekürzt): dann wären alle Argumente Remotes bzw. Pfade.
+  if (words.some(({ text }) => /^--mu/.test(text) && 'multiple'.startsWith(text.slice(2).split('=')[0] ?? ''))) {
+    return `„${command}“: --multiple ist gesperrt – ein Remote je Befehl oder --all.`;
+  }
+  const positional = words
+    .slice(2)
+    .map((word) => word.text)
+    .filter((word) => word === '' || !word.startsWith('-'));
+  const [remote, ...refs] = positional;
+  if (remote !== undefined && !remotes.includes(remote)) {
+    return `„${command}“: nur eingerichtete Remotes (${remotes.join(', ')}), keine URLs, Hosts oder Pfade.`;
+  }
+  const foreign = refs.find((ref) => !GIT_REF_ARGUMENT.test(ref));
+  return foreign === undefined ? null : `„${command}“: „${foreign}“ ist kein einfacher Branch-Name.`;
 }
 
 /**

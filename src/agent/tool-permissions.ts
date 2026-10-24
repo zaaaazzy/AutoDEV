@@ -49,6 +49,7 @@ export {
   forbiddenSubcommand,
   gitOptionProblem,
   gitPathProblem,
+  gitRemoteProblem,
   isAllowedCommand,
   isAssistantServiceCommand,
   npmOptionProblem,
