@@ -92,20 +92,56 @@ export function buildChatPrompt(
 /**
  * Gesprächsverlauf bis einschließlich der übernommenen Nachricht. Später eingegangene und noch wartende bzw. gerade
  * bearbeitete Nutzernachrichten bleiben draussen – sonst beantwortet der Lauf für Nachricht 1 schon Nachricht 2.
+ * Fertige Antworten zählen unabhängig vom Zeitpunkt: Die Antwort auf Nachricht 1 entsteht oft erst, nachdem Nachricht 2
+ * schon wartete. Die übernommene Nachricht steht deshalb immer am Ende.
  */
 export async function loadChatHistory(
   pool: Pick<Pool, 'query'>,
   project: string,
   claimedId: string,
 ): Promise<{ rows: { role: string; content: string }[] }> {
-  return pool.query<{ role: string; content: string }>(
-    `SELECT role, content FROM (SELECT role, content, created_at FROM chat_messages
+  const { rows } = await pool.query<{ id: string; role: string; content: string }>(
+    `SELECT id, role, content FROM (SELECT id, role, content, created_at FROM chat_messages
       WHERE project_slug = $1 AND status <> 'failed' AND NOT (role = 'assistant' AND status = 'processing')
-        AND created_at <= (SELECT created_at FROM chat_messages WHERE id = $3)
+        AND (role <> 'user' OR created_at <= (SELECT created_at FROM chat_messages WHERE id = $3))
         AND (role <> 'user' OR status NOT IN ('pending', 'processing') OR id = $3)
-      ORDER BY created_at DESC LIMIT $2) recent ORDER BY created_at`,
+      ORDER BY id = $3 DESC, created_at DESC LIMIT $2) recent ORDER BY created_at`,
     [project, HISTORY_LIMIT, claimedId],
   );
+  const claimed = rows.filter((row) => row.id === claimedId);
+  return {
+    rows: [...rows.filter((row) => row.id !== claimedId), ...claimed].map(({ role, content }) => ({ role, content })),
+  };
+}
+
+/**
+ * Antwort auf eine Rückfrage: dieselbe Claude-Sitzung fortsetzen, damit der Agent den Kontext behält. Verweist die
+ * Antwort ausdrücklich auf eine Rückfrage, gilt diese – auch wenn inzwischen anderes im Chat stand. Sonst zählt nur
+ * eine Rückfrage, die vor der übernommenen Nachricht entstand: Eine schon wartende Nachricht ist keine Antwort auf
+ * eine Rückfrage, die erst danach gestellt wurde.
+ */
+export async function findOpenQuestion(
+  pool: Pick<Pool, 'query'>,
+  project: string,
+  claimed: { id: string; agentId: string | null; replyTo: string | null },
+): Promise<{ id: string; question: string; sessionId: string | null } | undefined> {
+  const result = claimed.replyTo
+    ? await pool.query<{ id: string; question: string; sessionId: string | null }>(
+        `SELECT id, question, session_id AS "sessionId" FROM chat_messages
+        WHERE id = $1 AND project_slug = $2 AND question IS NOT NULL`,
+        [claimed.replyTo, project],
+      )
+    : await pool.query<{ id: string; question: string; sessionId: string | null }>(
+        `SELECT id, question, session_id AS "sessionId" FROM chat_messages
+        WHERE project_slug = $1 AND role = 'assistant' AND status = 'done' AND question IS NOT NULL
+          AND agent_id IS NOT DISTINCT FROM $3
+          AND created_at < (SELECT created_at FROM chat_messages WHERE id = $2)
+          AND created_at > COALESCE((SELECT max(created_at) FROM chat_messages
+                                      WHERE project_slug = $1 AND role = 'user' AND id <> $2), '-infinity')
+        ORDER BY created_at DESC LIMIT 1`,
+        [project, claimed.id, claimed.agentId],
+      );
+  return result.rows[0];
 }
 
 /**
@@ -158,26 +194,7 @@ export async function processChat(
   const history = routine
     ? { rows: [{ role: 'user', content: claimed.content }] }
     : await loadChatHistory(pool, options.project, claimed.id);
-  // Antwort auf eine Rückfrage: dieselbe Claude-Sitzung fortsetzen, damit der Agent den Kontext behält. Verweist die
-  // Antwort ausdrücklich auf eine Rückfrage, gilt diese – auch wenn inzwischen anderes im Chat stand.
-  const openQuestion = routine
-    ? undefined
-    : (claimed.replyTo
-        ? await pool.query<{ id: string; question: string; sessionId: string | null }>(
-            `SELECT id, question, session_id AS "sessionId" FROM chat_messages
-            WHERE id = $1 AND project_slug = $2 AND question IS NOT NULL`,
-            [claimed.replyTo, options.project],
-          )
-        : await pool.query<{ id: string; question: string; sessionId: string | null }>(
-            `SELECT id, question, session_id AS "sessionId" FROM chat_messages
-            WHERE project_slug = $1 AND role = 'assistant' AND status = 'done' AND question IS NOT NULL
-              AND agent_id IS NOT DISTINCT FROM $3
-              AND created_at > COALESCE((SELECT max(created_at) FROM chat_messages
-                                          WHERE project_slug = $1 AND role = 'user' AND id <> $2), '-infinity')
-            ORDER BY created_at DESC LIMIT 1`,
-            [options.project, claimed.id, claimed.agentId],
-          )
-      ).rows[0];
+  const openQuestion = routine ? undefined : await findOpenQuestion(pool, options.project, claimed);
   const resume = openQuestion?.sessionId
     ? {
         sessionId: openQuestion.sessionId,

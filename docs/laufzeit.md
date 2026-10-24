@@ -324,6 +324,8 @@ sequenceDiagram
   W-->>M: Push-Nachricht
 ```
 
+**Verlauf im Prompt:** Der Assistent bekommt den Chat in zeitlicher Reihenfolge, mit allen fertigen Antworten desselben Chats (begrenzt durch die Verlaufsgröße), auch wenn eine Antwort erst entstanden ist, nachdem eine spätere Nachricht schon wartete. Beispiel: Nachricht 1, dann Nachricht 2 (wartet), dann die Antwort auf Nachricht 1. Im Lauf für Nachricht 2 steht die Reihenfolge Nachricht 1, Antwort 1, Nachricht 2. Eine offene Rückfrage setzt die Sitzung nur fort, wenn sie vor der übernommenen Nachricht entstanden ist. Eine Nachricht, die erst nach der Rückfrage geschrieben wurde, gilt nicht als Antwort darauf. Bei einer ausdrücklichen Verweisung (`replyTo`) gilt die genannte Rückfrage unabhängig vom Zeitpunkt.
+
 Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen“) öffnet zuerst ein Bestätigungsfenster mit optionalem Kommentar, der mitgegeben wird.
 
 | Knopf im Dashboard                                 | Schreibt                                 | Abgeholt von                                                                            |
