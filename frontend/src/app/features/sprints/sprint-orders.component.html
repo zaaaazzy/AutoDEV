@@ -52,7 +52,7 @@
     </summary>
     @if (poolOpen()) {
       @if (selection().length) {
-        <div class="sprint-pool-bar" role="status">
+        <div class="sprint-pool-bar row" role="status">
           <strong>{{ selection().length }} ausgewählt</strong>
           <button class="button primary small" type="button" [disabled]="store.busy()" (click)="takeSelected()">
             → In den Sprint ({{ selection().length }})

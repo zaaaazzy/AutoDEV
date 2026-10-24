@@ -24,9 +24,11 @@ Code-Review des Angular-Frontends (`frontend/src`) vom 22.10.2026. Stand: Branch
 
 ### Offen (Empfehlung)
 
-1. **CSS nach Bereich statt nach Datum ordnen.** 58 Selektoren werden in mehreren Dateien definiert und überschrieben, z. B. `.topbar` (02, 08, 09), `.order-panel` (03, 06, 23), `.sidebar`/`.menu-toggle` (02, 08), `.timeline`/`.step-output` (03, 08), `.idea-table tr.row-open` (03, 06). Wer eine Regel ändert, muss alle Stellen und die Ladereihenfolge kennen.
+> Punkte 1 und 2 sind am 23.10. umgesetzt: [styles-nach-bereich-2026-10-23.md](styles-nach-bereich-2026-10-23.md).
+
+1. **CSS nach Bereich statt nach Datum ordnen.** *(erledigt)* 58 Selektoren werden in mehreren Dateien definiert und überschrieben, z. B. `.topbar` (02, 08, 09), `.order-panel` (03, 06, 23), `.sidebar`/`.menu-toggle` (02, 08), `.timeline`/`.step-output` (03, 08), `.idea-table tr.row-open` (03, 06). Wer eine Regel ändert, muss alle Stellen und die Ladereihenfolge kennen.
    - Vorschlag: pro Bereich eine Datei (`layout`, `buttons-forms`, `tables`, `dialogs`, `dashboard`, `orders`, `ideas`, `chat`, `sprints`, `settings`, …) und die Überschreibungen dabei in die Grundregel ziehen. Das verschiebt die Kaskade und braucht pro Bereich einen Vorher/Nachher-Vergleich (Screenshots aus `e2e/full-ui.check.ts`). Eigener Auftrag.
-2. **Wiederholte Muster ohne gemeinsame Klasse.** Identische Deklarationsblöcke unter verschiedenen Namen, z. B.
+2. **Wiederholte Muster ohne gemeinsame Klasse.** *(erledigt)* Identische Deklarationsblöcke unter verschiedenen Namen, z. B.
    - Liste ohne Aufzählungszeichen als Raster (`display:grid; list-style:none; margin:0; padding:0` mit gap 4/6/8): `.permission-list`, `.review-slot-list`, `.running-list`, `.routing-rules`, `.risk-list`, `.changed-files`, `.file-list`, `.agent-action-list`, `.draft-list`, `.user-list` u. a.
    - Text abschneiden (`overflow:hidden; text-overflow:ellipsis; white-space:nowrap`): 10 Stellen.
    - Kopfzeile als Flex-Reihe (`align-items:center; display:flex; gap:8px` ± `flex-wrap`/`space-between`): ~12 Stellen.

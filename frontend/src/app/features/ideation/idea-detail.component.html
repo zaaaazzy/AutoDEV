@@ -111,16 +111,16 @@
     </dl>
     @if (idea.status === 'rejected' && idea.rejectionReason) {
       <section class="detail-alert rejected">
-        <h3 class="detail-heading">Abgelehnt</h3>
+        <h3 class="detail-heading row">Abgelehnt</h3>
         <p>{{ idea.rejectionReason }}</p>
       </section>
     }
     <section class="detail-section">
-      <h3 class="detail-heading">Auftrag</h3>
+      <h3 class="detail-heading row">Auftrag</h3>
       @if (linkedOrder(idea.id); as order) {
         <div class="linked-order">
           <div class="linked-order-text">
-            <p class="linked-order-title">
+            <p class="linked-order-title row">
               <strong>{{ order.title }}</strong>
               <span class="status {{ order.status | statusClass }}">{{ order.status | statusLabel }}</span>
             </p>
@@ -174,12 +174,12 @@
     </section>
     @if (idea.source === 'visionary' && idea.agentNote) {
       <section class="detail-section">
-        <h3 class="detail-heading">Begründung des Visionärs</h3>
+        <h3 class="detail-heading row">Begründung des Visionärs</h3>
         <p>{{ idea.agentNote }}</p>
       </section>
     }
     <section class="detail-section">
-      <h3 class="detail-heading">Beschreibung</h3>
+      <h3 class="detail-heading row">Beschreibung</h3>
       <article
         class="idea-description markdown"
         [innerHTML]="idea.description || 'Keine Beschreibung' | markdown"
@@ -188,14 +188,14 @@
   }
   <section class="detail-section">
     @if (imageCount(idea.id); as count) {
-      <h3 class="detail-heading">
+      <h3 class="detail-heading row">
         Bilder &amp; Folien <span class="count">{{ count }}</span>
       </h3>
     }
     <app-gallery [ideationId]="idea.id" [removable]="editing()" />
   </section>
   <section class="detail-section">
-    <h3 class="detail-heading">
+    <h3 class="detail-heading row">
       Kommentare <span class="count">{{ commentCount(idea.id) }}</span>
     </h3>
     <app-comment-thread [ideationId]="idea.id" />

@@ -138,10 +138,10 @@
             <p class="muted">Fehlgeschlagene und wackelige Tests dieses Laufs</p>
           </div>
         </div>
-        <ul class="test-findings">
+        <ul class="test-findings plain-list">
           @for (step of failedChecks(); track step.position) {
             <li class="clickable">
-              <div class="test-finding-head">
+              <div class="test-finding-head row">
                 <button type="button" class="link-button finding-open" (click)="openFailedStep(step.position)">
                   {{ step.command }}
                 </button>
@@ -153,7 +153,7 @@
           }
           @for (testCase of findings(); track testCase.id) {
             <li class="clickable">
-              <div class="test-finding-head">
+              <div class="test-finding-head row">
                 <button type="button" class="link-button finding-open" (click)="showCase(testCase)">
                   {{ testCase.title }}
                 </button>
