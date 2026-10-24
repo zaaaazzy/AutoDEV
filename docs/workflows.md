@@ -68,6 +68,15 @@ Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnunge
 - **Ablehnung:** Passt ein Auftrag oder Sprint nicht, meldet die Oberfläche „Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen …“. Ein Sammel-Hinweis nennt dann die nicht übernommenen Titel.
 - **Bekannte Einschränkung:** Die Liste „Aufträge hinzufügen“ zeigt Aufträge im Status „Freigabe“ ohne Sprint noch an. Sie lassen sich nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch.
 
+**Aktiven Sprint mit Startdatum in der Zukunft abschließen:** Wer einen Sprint vorzeitig startet (Startdatum liegt nach heute), kann ihn schon am selben Tag abschließen.
+
+- **Bedingungen:** Der Sprint muss aktiv sein. Es darf kein Auftrag mehr laufen (409 „Im Sprint laufen noch Aufträge …“) und keiner auf die Review-Freigabe oder den Merge warten (409). Diese Regeln gelten unverändert.
+- **Ergebnis:** Der Abschluss antwortet mit 200. Der Sprint steht auf „Abgeschlossen“, bekommt einen Sprintbericht und wird für die Git-Sicherung eingereiht.
+- **Enddatum:** Ist kein Enddatum gesetzt, trägt Dev Log das Startdatum ein, wenn es in der Zukunft liegt, sonst heute. Das Enddatum liegt nie vor dem Startdatum.
+- **Scheitert der Abschluss:** Status, Bericht und Git-Sicherung werden gemeinsam geschrieben oder gar nicht. Der Sprint bleibt dann aktiv, ohne Bericht und ohne Git-Sicherung, und der Abschluss lässt sich wiederholen. Der Worker mergt und pusht in diesem Fall nichts.
+- **Grenze:** Ist ein Enddatum gesetzt, das vor dem Startdatum liegt, bleibt die Antwort 400 „Enddatum vor Startdatum“. Dann bleibt der Sprint ebenfalls aktiv; das Enddatum muss von Hand korrigiert werden.
+- **Printscreens:** Keine. Die Änderung betrifft nur die Antwort des Abschlusses und den Inhalt der Daten. Die Oberfläche wurde nicht im Browser geprüft.
+
 ## 3a. Sprintplanung und Autopilot
 
 Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`):
