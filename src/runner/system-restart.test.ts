@@ -4,6 +4,8 @@ import type { CommandExecutor } from '../core/command.js';
 import {
   completeRestart,
   composeEnvironment,
+  DEPENDENCY_COMMAND,
+  dependenciesOutdated,
   processRestart,
   readRestart,
   requestRestart,
@@ -229,6 +231,117 @@ test('Neustart und Rollback: Compose läuft ohne DEV_LOG_*/COMPOSE_* aus der Wor
       else process.env[key] = saved[key];
     }
   }
+});
+
+/** Lockfile im Installationsordner und (optional) das versteckte Lockfile, das npm in node_modules schreibt. */
+function lockfiles(lockfile: object, installed: object | null) {
+  return async (path: string) =>
+    path === '/srv/package-lock.json'
+      ? JSON.stringify(lockfile)
+      : path === '/srv/node_modules/.package-lock.json' && installed
+        ? JSON.stringify(installed)
+        : null;
+}
+
+const LOCK = {
+  packages: {
+    '': { name: 'dev-log', dependencies: { neu: '^1.0.0' } },
+    'node_modules/pg': { version: '8.16.3' },
+    'node_modules/neu': { version: '1.0.0' },
+    'node_modules/@esbuild/linux-x64': { version: '0.25.0', optional: true },
+  },
+};
+const INSTALLED_OLD = { packages: { 'node_modules/pg': { version: '8.16.3' } } };
+const INSTALLED_NEW = {
+  packages: { 'node_modules/pg': { version: '8.16.3' }, 'node_modules/neu': { version: '1.0.0' } },
+};
+
+test('Neustart: abweichendes Lockfile – npm ci --ignore-scripts auf dem Host vor dem Neubau, danach „done“', async () => {
+  const saved = process.env.DEV_LOG_SECRET_KEY;
+  process.env.DEV_LOG_SECRET_KEY = 'platzhalter';
+  try {
+    for (const installed of [INSTALLED_OLD, null]) {
+      const pool = memoryPool();
+      const calls: { command: string[]; cwd: string; env: NodeJS.ProcessEnv | undefined }[] = [];
+      const execute: CommandExecutor = async (command, cwd, options) => {
+        calls.push({ command, cwd, env: options?.env });
+        return ok(command, cwd);
+      };
+      await requestRestart(pool, 'Patrick');
+      const result = await processRestart(pool, '/srv', () => 0, execute, undefined, {
+        health: async () => true,
+        readText: lockfiles(LOCK, installed),
+      });
+      assert.equal(result, 'restart', installed ? 'veraltete node_modules' : 'node_modules/.package-lock.json fehlt');
+      const npm = calls.findIndex((call) => call.command.join(' ') === DEPENDENCY_COMMAND.join(' '));
+      assert.ok(npm >= 0, 'npm ci läuft');
+      assert.deepEqual(DEPENDENCY_COMMAND, ['npm', 'ci', '--ignore-scripts']);
+      assert.equal(calls[npm].cwd, '/srv');
+      assert.ok(calls[npm].env, 'eigene Umgebung');
+      assert.equal(calls[npm].env.DEV_LOG_SECRET_KEY, undefined, 'ohne DEV_LOG_* (composeEnvironment)');
+      assert.ok(npm < calls.findIndex((call) => call.command.includes('--build')), 'vor dem Neubau');
+      assert.equal((await completeRestart(pool))?.status, 'done');
+    }
+  } finally {
+    if (saved === undefined) delete process.env.DEV_LOG_SECRET_KEY;
+    else process.env.DEV_LOG_SECRET_KEY = saved;
+  }
+});
+
+test('Neustart: passendes Lockfile – kein npm ci', async () => {
+  const pool = memoryPool();
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push(command);
+    return ok(command, cwd);
+  };
+  await requestRestart(pool, 'Patrick');
+  const result = await processRestart(pool, '/srv', () => 0, execute, undefined, {
+    health: async () => true,
+    readText: lockfiles(LOCK, INSTALLED_NEW),
+  });
+  assert.equal(result, 'restart');
+  assert.ok(!calls.some((call) => call[0] === 'npm'), 'fremde optionale Pakete lösen keine Installation aus');
+});
+
+test('Neustart: npm ci scheitert – „failed“, kein Neubau, Worker beendet sich nicht, nächster Neustart möglich', async () => {
+  const pool = memoryPool();
+  const seen: string[] = [];
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push(command);
+    return command[0] === 'npm'
+      ? { exitCode: 1, durationMs: 1, output: 'npm error code ETARGET neu@1.0.0' }
+      : ok(command, cwd);
+  };
+  await requestRestart(pool, 'Patrick');
+  const result = await processRestart(pool, '/srv', () => 0, execute, undefined, {
+    health: async () => true,
+    readText: lockfiles(LOCK, INSTALLED_OLD),
+    notify: async (_pool, state) => {
+      seen.push(state.status);
+    },
+  });
+  assert.equal(result, 'failed');
+  assert.ok(!calls.some((call) => call.includes('--build')), 'Container werden nicht neu gebaut');
+  const state = await readRestart(pool);
+  assert.equal(state?.status, 'failed');
+  assert.match(state?.message ?? '', /npm ci --ignore-scripts ist fehlgeschlagen \(Exit-Code 1\)/);
+  assert.match(state?.log ?? '', /ETARGET/);
+  assert.deepEqual(seen, ['failed'], 'Push-Meldung');
+  assert.equal((await requestRestart(pool, 'Patrick')).created, true, 'kein 409 beim nächsten Versuch');
+});
+
+test('dependenciesOutdated: Versionen, fehlende und überzählige Pakete, kaputtes JSON', () => {
+  const lock = JSON.stringify(LOCK);
+  assert.equal(dependenciesOutdated(lock, JSON.stringify(INSTALLED_NEW)), false);
+  assert.equal(dependenciesOutdated(lock, JSON.stringify(INSTALLED_OLD)), true);
+  assert.equal(dependenciesOutdated(lock, null), true);
+  assert.equal(dependenciesOutdated(lock, '{kaputt'), true);
+  const older = { packages: { ...INSTALLED_NEW.packages, 'node_modules/neu': { version: '0.9.0' } } };
+  assert.equal(dependenciesOutdated(lock, JSON.stringify(older)), true);
+  const extra = { packages: { ...INSTALLED_NEW.packages, 'node_modules/alt': { version: '1.0.0' } } };
+  assert.equal(dependenciesOutdated(lock, JSON.stringify(extra)), true);
 });
 
 test('composeEnvironment: entfernt DEV_LOG_* und COMPOSE_* (auch leere Werte), lässt den Rest', () => {

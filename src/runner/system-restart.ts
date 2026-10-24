@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { sendPush } from '../core/push.js';
@@ -176,6 +178,49 @@ export interface RestartOptions {
   healthIntervalMs?: number;
   /** Meldung bei Ende (fertig/fehlgeschlagen); Standard: Push an alle Geräte. */
   notify?: RestartNotifier;
+  /** Liest eine Datei im Installationsordner (null, wenn sie fehlt); Standard: Dateisystem. */
+  readText?: (path: string) => Promise<string | null>;
+}
+
+/**
+ * Der Worker läuft per tsx direkt aus dem Installationsordner mit dessen node_modules – nicht im Container. Ohne
+ * `npm ci` auf dem Host startet er nach einer neuen Laufzeitabhängigkeit nicht (ERR_MODULE_NOT_FOUND, KeepAlive-Schleife).
+ */
+export const DEPENDENCY_COMMAND = ['npm', 'ci', '--ignore-scripts'];
+const DEPENDENCY_TIMEOUT_MS = 10 * 60_000;
+
+async function readTextFile(path: string): Promise<string | null> {
+  return readFile(path, 'utf8').catch(() => null);
+}
+
+/**
+ * Passt node_modules nicht mehr zu package-lock.json? Verglichen wird mit dem versteckten Lockfile, das npm beim
+ * Installieren in node_modules/.package-lock.json schreibt. Fehlt es oder ist es unlesbar, gilt der Stand als veraltet.
+ * Optionale Pakete fremder Plattformen (z. B. esbuild für Linux) stehen nur im Lockfile und zählen nicht.
+ */
+export function dependenciesOutdated(lockfile: string, installed: string | null): boolean {
+  type Packages = Record<string, { version?: string; optional?: boolean } | undefined>;
+  const packagesOf = (text: string): Packages | null => {
+    try {
+      const packages = (JSON.parse(text) as { packages?: unknown }).packages;
+      return typeof packages === 'object' && packages !== null ? (packages as Packages) : null;
+    } catch {
+      return null;
+    }
+  };
+  const wanted = packagesOf(lockfile);
+  const present = installed === null ? null : packagesOf(installed);
+  if (!wanted || !present) return true;
+  for (const [path, entry] of Object.entries(wanted)) {
+    if (!path) continue;
+    const have = present[path];
+    if (!have) {
+      if (entry?.optional) continue;
+      return true;
+    }
+    if (have.version !== entry?.version) return true;
+  }
+  return Object.keys(present).some((path) => path && !wanted[path]);
 }
 
 async function defaultHealth(): Promise<boolean> {
@@ -300,6 +345,41 @@ export async function processRestart(
     startedAt: now().toISOString(),
     message: `Baut die Container neu: ${RESTART_COMMAND.join(' ')}`,
   });
+  // Vor dem Neubau: node_modules des Workers auf den Stand des Lockfiles bringen. Scheitert das, geht nichts live
+  // und der Worker beendet sich nicht – sonst stürzte er nach dem Neustart in einer Schleife ab.
+  const readText = options.readText ?? readTextFile;
+  const lockfile = await readText(join(installRoot, 'package-lock.json'));
+  if (
+    lockfile !== null &&
+    dependenciesOutdated(lockfile, await readText(join(installRoot, 'node_modules', '.package-lock.json')))
+  ) {
+    await writeRestart(pool, {
+      ...building,
+      message: `Aktualisiert die Abhängigkeiten des Workers: ${DEPENDENCY_COMMAND.join(' ')}`,
+    });
+    const install = await execute(DEPENDENCY_COMMAND, installRoot, {
+      timeoutMs: DEPENDENCY_TIMEOUT_MS,
+      env: composeEnvironment(),
+    }).catch((error: unknown) => ({
+      exitCode: 1,
+      durationMs: 0,
+      output: error instanceof Error ? error.message : String(error),
+    }));
+    if (install.exitCode !== 0) {
+      await writeRestart(
+        pool,
+        {
+          ...building,
+          status: 'failed',
+          finishedAt: now().toISOString(),
+          message: `${DEPENDENCY_COMMAND.join(' ')} ist fehlgeschlagen (Exit-Code ${install.exitCode}). Container nicht neu gebaut, der Worker läuft weiter. Bitte im AIdeation-Ordner „npm ci“ prüfen.`,
+          log: redactOutput(install.output, process.env).trim().slice(-MAX_LOG_CHARS),
+        },
+        options.notify,
+      );
+      return 'failed';
+    }
+  }
   const previous = parseComposeImages(
     (
       await execute(['docker', 'compose', 'images', ...BUILT_SERVICES, '--format', 'json'], installRoot, {
