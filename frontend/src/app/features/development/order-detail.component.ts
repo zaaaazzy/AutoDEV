@@ -14,6 +14,7 @@ import {
   MANUAL_DEVELOPMENT_TRANSITIONS,
   canSetDevelopmentStatus,
   isAssignableSprintStatus,
+  isSprintLockedDevelopmentStatus,
 } from '../../../../../src/core/development-transitions.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
@@ -77,6 +78,8 @@ export class OrderDetailComponent {
     const current = this.order().sprintId;
     return this.data().sprints.filter((sprint) => sprint.id === current || isAssignableSprintStatus(sprint.status));
   });
+  /** In Arbeit, Freigabe und Erledigt hängt der Auftrag fest am Sprint (dieselbe Liste wie der Server). */
+  protected readonly sprintLocked = computed(() => isSprintLockedDevelopmentStatus(this.order().status));
   readonly editing = input(false);
   /** Agent-Ansicht gleich aufgeklappt zeigen (z. B. auf der Agents-Seite). */
   readonly agentsOpen = input(false);
