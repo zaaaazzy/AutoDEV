@@ -208,6 +208,10 @@ test('Chat mit Agent ohne Rolle: nur lesen (fail-closed)', async () => {
 
 test('Gegenprobe: Assistent-Agent mit Vollzugriffs-Flag behält den Vollzugriff', async () => {
   const command = await chatCommand(agentWith('assistant'));
-  assert.ok(!command.includes('--settings'));
+  // Kein Wächter für Schreiben und Shell; --settings bringt nur die Sperre für Geheimnisse (Read, Grep, Glob).
+  const settings = command[command.indexOf('--settings') + 1] ?? '';
+  assert.doesNotMatch(settings, /Write|Bash/);
+  assert.match(settings, /Read\(\*\*\/\.env\*\)/);
+  assert.ok(!command.includes('--allowedTools') && !command.includes('--disallowedTools'));
   assert.ok(command.includes('--dangerously-skip-permissions'));
 });
