@@ -21,8 +21,8 @@ AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich:
 ## Entwicklung
 
 - Node.js 22.12 oder neuer (Projektversion: `.nvmrc`, Docker: `22.22.3`).
-- `npm run dev` startet die API auf Port 3100.
-- `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` an die API weiter.
+- `npm run dev` startet die API auf Port 3101 und läuft damit neben dem Compose-Stack (3100, 5433, 80, 443 gehören dem Live-Stack). Sie braucht eine eigene Datenbank, z. B. `DEV_LOG_DATABASE_URL=postgresql://devlog:<passwort>@127.0.0.1:5433/aideation_dev DEV_LOG_AUTH=off npm run dev`; die Datenbank wird beim Start angelegt. Auf `PORT=3100` oder die Live-Datenbank `aideation` startet die Dev-API nicht (`src/core/dev-environment.ts`).
+- `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` und `/health` an die Dev-API auf Port 3101 weiter (`frontend/proxy.conf.json`), nie an den Live-Stack.
 - `npm run build` baut die Angular-Oberfläche und kompiliert anschließend das Backend.
 - `npm test` baut die Oberfläche und führt die Backend-Tests aus.
 - `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen. `typecheck` prüft auch die Test-Dateien (`tsconfig.test.json`, `frontend/tsconfig.spec.json`), denn `tsx` allein prüft keine Typen.
@@ -83,6 +83,6 @@ Datenmodell: [docs/erm.md](docs/erm.md).
 
 Jeder Sprint arbeitet auf einem eigenen Branch `sprint/<name>`. Nach jedem erfolgreich erledigten Sprint-Auftrag erstellt der Worker dort einen lokalen Commit (Conventional Commits, z. B. `feat(Sprint 1): Titel`, Bugs als `fix`); Änderungen fehlgeschlagener Aufträge werden geparkt statt mitcommittet. Die Sprint-Sicherung pusht nur bei grünen Projekttests; beim Abschluss wird nach `main` gemergt, erneut getestet, gepusht und getaggt. `.env`, `.dev-log/`, Agent-Sicherungen und Dateien, die nach Zugangsdaten aussehen, werden nie committet. Details: [Workflows](docs/workflows.md#6-git-im-sprint).
 
-Dokumentation: [Agents und Rechte](docs/agents-und-rechte.md), [Agent-Tests](docs/agent-tests.md), [Workflows](docs/workflows.md).
+Dokumentation: [Agents und Rechte](docs/agents-und-rechte.md), [Agent-Tests](docs/agent-tests.md), [Workflows](docs/workflows.md), [Seiten-Vorlage](docs/seiten-vorlage.md) (wie eine Seite gebaut und geprüft wird).
 
 Im Dashboard zeigt Dokumentation → Marketing → „Agents, Aufgaben und Rechte“ (`#docs/marketing/agent-permissions`, nur mit dem Recht „Dokumentation bearbeiten“) die Rollen aus `agents.role` mit Phase, Aufgabe, Datei- und Befehlsrechten, den Ablauf als Diagramm und die Sicherheitsgrenzen. Die Inhalte stehen statisch in `frontend/src/app/features/docs/marketing/agent-permissions.ts` und stammen aus [Agents und Rechte](docs/agents-und-rechte.md), Abschnitt 3. Ändert sich dort die Tabelle „Workflow-Agents“, schlägt `npm test` fehl, bis die Seite nachgezogen ist.

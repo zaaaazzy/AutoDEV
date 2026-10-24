@@ -1,10 +1,5 @@
 import { logged } from '../core/log.js';
-import {
-  EXTERNAL_TEXT_END,
-  EXTERNAL_TEXT_START,
-  UNTRUSTED_BUG_SOURCES_SQL,
-  unapprovedBugSql,
-} from '../core/bug-trust.js';
+import { fencedBugDescriptionSql, unapprovedBugSql } from '../core/bug-trust.js';
 import { folderAvailable } from '../core/folder-guard.js';
 import { summarizeTestFailure } from '../core/test-results.js';
 import { humanActionFor, setActionTodo } from './action-todo.js';
@@ -119,6 +114,13 @@ const ENVIRONMENT_PATTERNS = [
 export const ENVIRONMENT_TODO =
   'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen, der Auftrag startet dann neu';
 
+/**
+ * Ältere Läufe blockierten bei unsauberem Arbeitsordner jeden Auftrag einzeln mit diesem Vermerk (heute: Sprint-Pause,
+ * siehe pauseForFolderProblem). Auch solche Aufträge starten von selbst wieder: Ist der Ordner noch nicht sauber, pausiert
+ * der erste Versuch den Sprint, statt erneut zu blockieren.
+ */
+export const GIT_FOLDER_TODO = 'Arbeitsordner aufräumen (Git)';
+
 /** Ein Agent hat wegen einer Projektregel (Do's and Don'ts) abgelehnt: „@@REGEL: <Regel>“. */
 export function ruleRefusal(output: string): string | null {
   return output.match(/^\s*@@REGEL:\s*(.+)$/m)?.[1]?.trim() || null;
@@ -208,6 +210,7 @@ export async function registerFailure(pool: Pool, item: FailedItem, agentName: s
     // Kurz: Agent und Auftrag; die Fehlerausgabe steht in der Beschreibung.
     title: `${agentName}: ${shortTitle(item.title)}`,
     description: detail,
+    developmentId: item.id,
   });
   // Bevor ein Behebungsauftrag entsteht, prüft die Problemanalyse (ein zweiter Agent), ob die Diagnose stimmt.
   await pool.query(
@@ -251,16 +254,35 @@ export async function delegateAfterAnalysis(
 }
 
 /**
- * Ist der Projektordner wieder erreichbar, starten Aufträge, die nur darauf gewartet haben, erneut – höchstens
- * MAX_AUTO_RETRIES-mal (retry_count), damit ein falsch erkannter Umgebungsfehler keine Endlosschleife auslöst.
+ * Ist der Projektordner wieder erreichbar, starten Aufträge, die nur auf die Umgebung gewartet haben (Laufwerk,
+ * Arbeitsordner), erneut – höchstens MAX_AUTO_RETRIES-mal (retry_count), damit ein falsch erkannter Umgebungsfehler
+ * keine Endlosschleife auslöst.
  */
 export async function resumeAfterEnvironment(pool: Pool, project: string, cwd?: string): Promise<void> {
   if (cwd !== undefined && !folderAvailable(cwd)) return;
   await pool.query(
     `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, action_todo = NULL, retry_count = retry_count + 1, updated_at = NOW()
-      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = $2 AND retry_count < $3`,
-    [project, ENVIRONMENT_TODO, MAX_AUTO_RETRIES],
+      WHERE project_slug = $1 AND status = 'blocked' AND action_todo = ANY($2::text[]) AND retry_count < $3`,
+    [project, [ENVIRONMENT_TODO, GIT_FOLDER_TODO], MAX_AUTO_RETRIES],
   );
+}
+
+/**
+ * Von selbst neu eingeplante Aufträge (Bugfix, Wiederaufnahme nach Bug, Umgebung oder Budget) behalten ihren Sprint.
+ * Ist der inzwischen abgeschlossen oder abgebrochen, liefe der Auftrag nie (der Sprint-Branch ist schon gesichert) –
+ * oder drehte sich endlos zwischen „In Arbeit“ und „Geplant“. Wie bei „Erneut versuchen“: in den aktiven Sprint bzw.
+ * ohne Sprint auf main. Ein Sprint im Review (wartet auf den PR) behält seine Aufträge, bis er abgeschlossen ist.
+ */
+export async function detachFromClosedSprints(pool: Pool, project: string): Promise<number> {
+  const result = await pool.query(
+    `UPDATE development_items d
+        SET sprint_id = (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1),
+            sprint_rank = NULL, updated_at = NOW()
+      WHERE d.project_slug = $1 AND d.status = 'planned' AND d.auto_run
+        AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status IN ('completed', 'cancelled'))`,
+    [project],
+  );
+  return result.rowCount ?? 0;
 }
 
 /**
@@ -277,14 +299,13 @@ export async function queueBugFix(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
-     SELECT b.project_slug, $2, 'Bug: ' || b.title,
+     SELECT b.project_slug, $2, left('Bug: ' || b.title, 180),
             COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
-            CASE WHEN b.source IN ${UNTRUSTED_BUG_SOURCES_SQL} AND strpos(b.description, $5) = 0 AND strpos(b.description, $7) = 0
-                 THEN $5 || E'\n' || b.description || E'\n' || $6 ELSE b.description END,
+            ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
             'planned', 'high', 'bug', b.id, TRUE
        FROM bugs b WHERE b.id = $1 AND NOT ${unapprovedBugSql('b')}
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO NOTHING`,
-    [bugId, item.sprintId ?? null, item.title, intro ?? null, EXTERNAL_TEXT_START, EXTERNAL_TEXT_END, UNTRUSTED_START],
+    [bugId, item.sprintId ?? null, item.title, intro ?? null],
   );
 }
 

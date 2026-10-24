@@ -1,4 +1,4 @@
-import { warnDefaultDatabasePassword } from '../core/default-credentials.js';
+import { refuseDefaultDatabasePassword } from '../core/default-credentials.js';
 import { logged } from '../core/log.js';
 import { Pool } from 'pg';
 import { ensureDefaultAgents, ensureReviewer } from '../api/agents.js';
@@ -16,7 +16,7 @@ export function readDatabaseConfig(environment: NodeJS.ProcessEnv = process.env)
   if (!databaseUrl) {
     throw new Error('DEV_LOG_DATABASE_URL must point to the dedicated AIdeation database.');
   }
-  warnDefaultDatabasePassword(databaseUrl);
+  refuseDefaultDatabasePassword(databaseUrl, environment);
   const adminDatabaseUrl = environment.DEV_LOG_ADMIN_DATABASE_URL?.trim();
   if (adminDatabaseUrl) {
     return { databaseUrl, adminDatabaseUrl };

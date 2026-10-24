@@ -1,5 +1,5 @@
 import { PermissionGroupsSettingsComponent } from './permission-groups-settings.component.js';
-import { Component, effect, inject, untracked } from '@angular/core';
+import { Component, DestroyRef, effect, inject, untracked } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ReviewSlotsSettingsComponent } from './review-slots-settings.component.js';
 import { FolderPickerComponent } from '../../shared/folder-picker.component.js';
@@ -14,6 +14,8 @@ import { SecuritySettingsComponent } from './security-settings.component.js';
 import { UsersSettingsComponent } from './users-settings.component.js';
 import { BudgetSettingsComponent } from './budget-settings.component.js';
 import { AuthService } from '../../core/auth.service.js';
+import { PageSearchService } from '../../core/page-search.service.js';
+import { SettingsGroupDirective, SettingsGroups } from './settings-group.js';
 
 @Component({
   selector: 'app-settings',
@@ -30,6 +32,7 @@ import { AuthService } from '../../core/auth.service.js';
     SecuritySettingsComponent,
     UsersSettingsComponent,
     BudgetSettingsComponent,
+    SettingsGroupDirective,
   ],
   templateUrl: './settings.component.html',
   host: { style: 'display: contents' },
@@ -38,6 +41,7 @@ export class SettingsComponent {
   private readonly api = inject(ApiService);
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
+  protected readonly groups = inject(SettingsGroups);
   protected readonly busy = this.store.busy;
   protected settings = {
     repository: '',
@@ -55,7 +59,7 @@ export class SettingsComponent {
     reviewCommand: '',
     restartAfterSprint: false,
     sprintMode: 'manual' as 'manual' | 'suggest' | 'autopilot',
-    sprintCapacityHours: 40,
+    sprintCapacityHours: 4,
     autopilotStart: '08:00',
     autopilotEnd: '18:00',
     autopilotDays: [1, 2, 3, 4, 5] as number[],
@@ -108,6 +112,8 @@ export class SettingsComponent {
   }
 
   constructor() {
+    // Die Suche im Seitenkopf klappt passende Gruppen auf (SettingsGroupDirective).
+    inject(DestroyRef).onDestroy(inject(PageSearchService).register());
     effect(() => {
       this.store.foregroundLoads();
       untracked(() => this.fillSettings());
@@ -204,7 +210,7 @@ export class SettingsComponent {
       reviewCommand: (project?.reviewCommand ?? []).join(' '),
       restartAfterSprint: project?.restartAfterSprint ?? false,
       sprintMode: project?.sprintMode ?? 'manual',
-      sprintCapacityHours: project?.sprintCapacityHours ?? 40,
+      sprintCapacityHours: project?.sprintCapacityHours ?? 4,
       autopilotStart: project?.autopilotStart ?? '08:00',
       autopilotEnd: project?.autopilotEnd ?? '18:00',
       autopilotDays: [...(project?.autopilotDays ?? [1, 2, 3, 4, 5])],

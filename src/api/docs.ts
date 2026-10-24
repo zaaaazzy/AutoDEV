@@ -1,14 +1,22 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Router } from 'express';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import { generatedDocs } from './generated-docs.js';
 import { publicBaseUrl } from './production-snippets.js';
 import type { Principal } from './roles.js';
 import { isAdmin } from './tenancy.js';
 import { readProjectText } from '../core/project-paths.js';
-import { INVALID, buildUpdate, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
+import {
+  INVALID,
+  buildUpdate,
+  invalidInput,
+  isUuid,
+  parseFields,
+  parseProjectSlug,
+  parseTitle,
+} from '../core/validation.js';
 
 const MAX_API_CONTENT = 30_000;
 const MAX_STORED_CONTENT = 200_000;
@@ -25,7 +33,7 @@ const DOC_FIELDS = {
 const clip = (content: string): string => content.slice(0, MAX_STORED_CONTENT);
 
 export async function upsertDoc(
-  pool: Pool,
+  pool: Pool | PoolClient,
   doc: {
     projectSlug: string;
     kind: 'manual' | 'sprint' | 'repo';
@@ -97,7 +105,7 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/docs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -121,7 +129,9 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
     const fields = parseFields(request.body, DOC_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     if (!slug || !fields || !values.get('title')) {
-      response.status(400).json({ message: 'Invalid document.' });
+      response
+        .status(400)
+        .json(slug ? invalidInput(request.body, DOC_FIELDS, ['title']) : { message: 'Ungültiges Projekt.' });
       return;
     }
     // Nur anlegen: ein bestehendes Handbuch gleichen Titels bleibt unverändert. Änderungen laufen über
@@ -135,7 +145,7 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
     if (!result.rows[0]) {
       response
         .status(409)
-        .json({ message: 'A document with this title already exists. Submit a revision to change it.' });
+        .json({ message: 'Ein Dokument mit diesem Titel gibt es schon. Änderungen als Überarbeitung einreichen.' });
       return;
     }
     response.status(201).json({ doc: result.rows[0] });
@@ -143,18 +153,18 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
 
   app.patch('/docs/:id', access({ role: 'editor', tenant: 'docs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const fields = parseFields(request.body, DOC_FIELDS);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid document update.' });
+      response.status(400).json(invalidInput(request.body, DOC_FIELDS));
       return;
     }
     const update = buildUpdate('docs', request.params.id, fields, DOC_COLUMNS);
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Document not found.' });
+      response.status(404).json({ message: 'Dokument nicht gefunden.' });
       return;
     }
     response.json({ doc: result.rows[0] });
@@ -162,12 +172,12 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
 
   app.delete('/docs/:id', access({ role: 'editor', tenant: 'docs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query('DELETE FROM docs WHERE id = $1 RETURNING id', [request.params.id]);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Document not found.' });
+      response.status(404).json({ message: 'Dokument nicht gefunden.' });
       return;
     }
     response.status(204).end();

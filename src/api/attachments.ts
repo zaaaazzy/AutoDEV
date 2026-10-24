@@ -25,7 +25,7 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/attachments', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -53,7 +53,7 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
     app.post(owner.path, access({ role: 'plan', tenant: owner.tenant }), rawImage, async (request, response) => {
       const data: unknown = request.body;
       if (!isUuid(request.params.id)) {
-        response.status(404).json({ message: 'Not found.' });
+        response.status(404).json({ message: 'Nicht gefunden.' });
         return;
       }
       if (!Buffer.isBuffer(data) || data.length === 0) {
@@ -85,7 +85,7 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
       : { rows: [] };
     const row = result.rows[0] as { mime: string; data: Buffer } | undefined;
     if (!row) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     response.set({
@@ -102,7 +102,7 @@ export function registerAttachmentRoutes(app: Router, pool: Pool): void {
       ? await pool.query(`DELETE FROM ideation_attachments WHERE id = $1`, [request.params.id])
       : { rowCount: 0 };
     if (!result.rowCount) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     response.status(204).end();

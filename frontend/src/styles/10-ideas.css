@@ -20,14 +20,6 @@
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-.idea-detail .promote {
-  margin: 4px 0 8px;
-}
-.idea-detail .estimate {
-  padding: 12px 16px;
-  border-radius: 9px;
-  background: #f7f8f5;
-}
 .idea-detail .form-grid label {
   display: grid;
   gap: 5px;
@@ -357,9 +349,9 @@
 
 @media (max-width: 720px) {
   .idea-detail > :not(.idea-hero) {
-      margin-right: 16px;
-      margin-left: 16px;
-    }
+    margin-right: 16px;
+    margin-left: 16px;
+  }
 }
 
 /* ── Visionär: Lauf-Leiste, Herkunfts-Badge, Ablehnen mit Grund ───────── */
@@ -477,16 +469,16 @@
 
 @media (max-width: 720px) {
   .idea-hero {
-      padding: 18px 16px 14px;
-    }
+    padding: 18px 16px 14px;
+  }
   .idea-description.markdown {
-      padding: 16px;
-    }
+    padding: 16px;
+  }
   .bubble-row {
-      max-width: 100%;
-    }
+    max-width: 100%;
+  }
   .linked-order .button {
-      width: 100%;
-      justify-content: center;
-    }
+    width: 100%;
+    justify-content: center;
+  }
 }

@@ -18,6 +18,7 @@ import {
   forbiddenSubcommand,
   FULL_ACCESS_ROLES,
   gitPathProblem,
+  gitRemoteProblem,
   guardHookCommand,
   hasFullAccess,
   isAllowedCommand,
@@ -505,9 +506,17 @@ test('withAgentPermissions: andere CLIs und leere Befehle bleiben unverändert',
   assert.ok(withAgentPermissions(['/usr/local/bin/claude', '-p'], 'developer', all, null).includes('--settings'));
 });
 
-test('withAgentPermissions: voller Zugriff des Assistenten ohne Wächter', () => {
+test('withAgentPermissions: voller Zugriff des Assistenten ohne Wächter – nur Geheimnisse bleiben gesperrt', () => {
   const full = ['claude', '--dangerously-skip-permissions', '-p'];
-  assert.deepEqual(withAgentPermissions(full, 'assistant', all, ['files']), full);
+  const command = withAgentPermissions(full, 'assistant', all, ['files']);
+  assert.deepEqual([command[0], ...command.slice(3)], full);
+  assert.equal(command[1], '--settings');
+  const settings = JSON.parse(command[2]!) as {
+    permissions: { deny: string[] };
+    hooks: { PreToolUse: { matcher: string }[] };
+  };
+  assert.ok(settings.permissions.deny.includes('Read(**/.env*)'));
+  assert.equal(settings.hooks.PreToolUse[0]!.matcher, 'Read|Grep|Glob|NotebookRead');
 });
 
 test('withAgentPermissions: Visionär (nur lesen) ohne Datei-Werkzeuge und ohne Shell – trotz Zuweisung', () => {
@@ -528,12 +537,59 @@ test('withAgentPermissions: Visionär (nur lesen) ohne Datei-Werkzeuge und ohne 
   assert.deepEqual(policyOf(custom), { create: false, edit: false, shell: false, scopes: [] });
 });
 
-test('withAgentPermissions: eigene Werkzeug-Regeln im Befehl bleiben, der Wächter erlaubt Dateien', () => {
-  const command = withAgentPermissions(['claude', '--disallowed-tools', 'WebFetch', '-p'], 'developer', all, []);
-  assert.deepEqual(command.slice(-3), ['--disallowed-tools', 'WebFetch', '-p']);
-  assert.equal(command.includes('--disallowedTools'), false, 'keine zusätzlichen Sperren');
+test('withAgentPermissions: eigene Sperren im Befehl bleiben, der Wächter erlaubt Dateien nach Zuweisung', () => {
+  const command = withAgentPermissions(['claude', '--disallowed-tools', 'WebFetch', '-p'], 'developer', all, ['files']);
+  assert.equal(option(command, '--disallowedTools'), 'WebFetch');
+  assert.equal(command.includes('--disallowed-tools'), false, 'in einem einzigen --disallowedTools zusammengeführt');
+  assert.deepEqual(command.slice(-1), ['-p']);
   assert.equal(command.includes('--allowedTools'), false);
   assert.deepEqual(policyOf(command), { create: true, edit: true, scopes: [] });
+});
+
+test('withAgentPermissions: --disallowedTools im Befehl schaltet keine Datei-Rechte frei (Regression)', () => {
+  for (const flags of [['--disallowedTools', 'WebFetch'], ['--disallowedTools=WebFetch']]) {
+    const command = withAgentPermissions(
+      ['claude', ...flags, '-p', '{prompt}'],
+      'developer',
+      all,
+      ['files:create'],
+      ['frontend'],
+    );
+    const label = flags.join(' ');
+    // Der Hook selbst trägt die Richtlinie samt Ordner, nicht nur das Objekt im Code.
+    assert.deepEqual(policyOf(command), { create: true, edit: false, scopes: ['frontend'] }, label);
+    assert.equal(command.filter((part) => /^--disallowed-?tools/i.test(part)).length, 1, label);
+    const disallowed = (option(command, '--disallowedTools') ?? '').split(',');
+    for (const tool of ['Edit', 'MultiEdit', 'WebFetch']) assert.ok(disallowed.includes(tool), `${label}: ${tool}`);
+    assert.ok(!disallowed.includes('Write'), `${label}: Anlegen bleibt erlaubt`);
+    assert.deepEqual(command.slice(-2), ['-p', '{prompt}'], label);
+  }
+  // Mehrere eigene Sperren und Regeln mit Leerzeichen bleiben vollständig erhalten.
+  const several = withAgentPermissions(
+    ['claude', '--disallowedTools', 'WebFetch,Bash(git log:*)', '--disallowed-tools=Edit', '-p'],
+    'developer',
+    all,
+    [],
+  );
+  assert.deepEqual(option(several, '--disallowedTools')?.split(','), [
+    'Write',
+    'Edit',
+    'NotebookEdit',
+    'MultiEdit',
+    'WebFetch',
+    'Bash(git log:*)',
+  ]);
+});
+
+test('withAgentPermissions: --allowedTools im Befehl weitet keine Datei-Rechte auf', () => {
+  for (const flags of [['--allowedTools', 'Write,Edit,Bash'], ['--allowed-tools=Write,Edit']]) {
+    const command = withAgentPermissions(['claude', ...flags, '-p'], 'developer', all, ['files:create'], ['frontend']);
+    const label = flags.join(' ');
+    assert.deepEqual(policyOf(command), { create: true, edit: false, scopes: ['frontend'] }, label);
+    assert.deepEqual(option(command, '--disallowedTools')?.split(','), ['Edit', 'NotebookEdit', 'MultiEdit'], label);
+    // Die eigenen Freigaben des Admins bleiben, AIdeation hängt keine weiteren an.
+    assert.equal(command.filter((part) => /^--allowed-?tools/i.test(part)).length, 1, label);
+  }
 });
 
 test('withAgentPermissions: genau die zugewiesenen und im Projekt verfügbaren Befehle', () => {
@@ -555,7 +611,7 @@ test('withAgentPermissions: Logs als zusätzlicher Ordner, Dienste mit Benutzer-
   const command = withAgentPermissions(CLAUDE, 'developer', all, ['logs', 'services', 'database'], [], ['/logs']);
   assert.equal(option(command, '--add-dir'), '/logs');
   assert.match(option(command, '--allowedTools') ?? '', /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/);
-  assert.equal(option(command, '--disallowedTools'), 'Write,Edit,NotebookEdit');
+  assert.equal(option(command, '--disallowedTools'), 'Write,Edit,NotebookEdit,MultiEdit');
   // Ohne Logs-Recht kein zusätzlicher Ordner.
   assert.equal(withAgentPermissions(CLAUDE, 'developer', all, [], [], ['/logs']).includes('--add-dir'), false);
 });
@@ -791,6 +847,59 @@ test('npmOptionProblem: --ignore-scripts lässt sich nicht wieder abschalten', (
   ]) {
     assert.equal(npmOptionProblem(command), null, command);
   }
+});
+
+test('npmOptionProblem: Registry, Proxy und Einstellungen je Scope/Host sind gesperrt, auch abgekürzt', () => {
+  for (const command of [
+    'npm ci --ignore-scripts --registry=https://x.example',
+    'npm ci --ignore-scripts --registry https://x.example',
+    'npm ci --ignore-scripts --reg=https://x.example',
+    'npm install --ignore-scripts --@scope:registry=https://x.example @scope/a',
+    'npm install --ignore-scripts --//x.example/:_authToken=abc left-pad',
+    'npm ci --ignore-scripts --proxy=http://x.example',
+    'npm ci --ignore-scripts --https-proxy http://x.example',
+    'npm ci --ignore-scripts --noproxy=*',
+    'npm ci --ignore-scripts --replace-registry-host=always',
+  ]) {
+    assert.ok(npmOptionProblem(command), command);
+    assert.ok(!isAllowedCommand(command), command);
+  }
+  for (const command of ['npm ci --ignore-scripts', 'npm ci --production --no-audit', 'npm test -- --registry=x']) {
+    assert.equal(npmOptionProblem(command), null, command);
+  }
+});
+
+test('gitRemoteProblem: fetch/pull nur von eingerichteten Remotes, Refs ohne URL, Host, Pfad oder „:“', () => {
+  for (const command of [
+    'git fetch https://x.example/a',
+    'git fetch git@host:r',
+    'git fetch file:///tmp/r',
+    'git fetch ext::sh',
+    'git fetch /tmp/r',
+    'git fetch ./r',
+    'git fetch host:r',
+    'git fetch upstream',
+    'git fetch --depth 1 origin',
+    'git fetch --multiple origin ../r',
+    'git fetch --mul origin r',
+    'git fetch origin main:main',
+    'git fetch origin ../x',
+    'git pull --ff-only https://x.example/a main',
+  ]) {
+    assert.ok(gitRemoteProblem(command), command);
+  }
+  for (const command of [
+    'git fetch',
+    'git fetch --all --prune',
+    'git fetch origin',
+    'git fetch --depth=1 origin main',
+    'git pull --ff-only',
+    'git pull --ff-only origin feature/x',
+    'git status https://x.example',
+  ]) {
+    assert.equal(gitRemoteProblem(command), null, command);
+  }
+  assert.equal(gitRemoteProblem('git fetch upstream', ['origin', 'upstream']), null);
 });
 
 test('loadProjectPermissions: zu breite eigene Regeln aus älteren Zeilen gelten beim Laden nicht mehr', async () => {

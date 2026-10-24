@@ -38,6 +38,12 @@ async function saveWorkInProgress(folder: string, execute: CommandExecutor, now:
     .slice(0, 16)
     .replace(/[-:T]/g, '')
     .replace(/^(\d{8})/, '$1-');
+  // Zurück an den Ausgangspunkt: auf main bzw. auf denselben losgelösten Commit (Agent-Worktree, Vorschau), nie auf
+  // dem wip-Branch stehen bleiben – sonst zweigte der nächste Auftrag davon ab.
+  const start = branch ?? (await must('rev-parse', 'HEAD'));
+  const returnToStart = async (): Promise<void> => {
+    await must('switch', ...(branch ? [branch] : ['--detach', start]));
+  };
   let target = branch;
   if (!branch || branch === MAIN) {
     target = `wip/${stamp}`;
@@ -46,7 +52,10 @@ async function saveWorkInProgress(folder: string, execute: CommandExecutor, now:
   const held = await stageAll(git, must, []);
   const staged = await git('diff', '--cached', '--name-only');
   if (!staged.output) {
-    if (target !== branch && branch) await must('switch', branch);
+    if (target !== branch) {
+      await returnToStart();
+      await git('branch', '-d', target as string);
+    }
     return held.length
       ? `Nichts gesichert: Die offenen Dateien sehen nach Zugangsdaten aus (${held.join(', ')}) und bleiben unversioniert.`
       : 'Nichts zu sichern – der Ordner hat keine offenen Änderungen.';
@@ -61,10 +70,12 @@ async function saveWorkInProgress(folder: string, execute: CommandExecutor, now:
     'Von AIdeation auf Knopfdruck gesichert, damit der Projektordner wieder sauber ist.',
   );
   const commit = await must('rev-parse', '--short', 'HEAD');
-  if (target !== branch && branch) await must('switch', branch);
+  if (target !== branch) await returnToStart();
   return [
     `${count} Datei${count === 1 ? '' : 'en'} auf ${target} gesichert (Commit ${commit}).`,
-    target !== branch ? `Der Ordner steht wieder sauber auf ${MAIN}.` : '',
+    target !== branch
+      ? `Der Ordner steht wieder sauber ${branch ? `auf ${branch}` : `auf dem vorherigen Stand ${start.slice(0, 7)} (losgelöst)`}.`
+      : '',
     held.length ? `Nicht gesichert, weil sie nach Zugangsdaten aussehen: ${held.join(', ')}.` : '',
   ]
     .filter(Boolean)

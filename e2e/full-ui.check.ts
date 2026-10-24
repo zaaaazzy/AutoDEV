@@ -456,7 +456,14 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await button(firstPanel, 'Details').click();
   await expect(firstPanel.locator('app-order-detail')).toBeVisible();
   await snap(page, info, 'Auftrag Details', false);
-  await firstPanel.getByRole('combobox').first().selectOption({ label: 'Backlog' });
+  // Unter „Aktionen“ keine Status-/Sprint-/Agent-Zeile mehr: den Status ändert man auf der Seite „Aufträge“.
+  await expect(firstPanel.locator('app-order-detail .order-controls')).toHaveCount(0);
+  const firstId = (await firstPanel.locator('.attention-body').getAttribute('id'))?.replace(/^order-/, '');
+  expect(
+    (await page.request.patch(`/api/development/${firstId}`, { headers: auth, data: { status: 'backlog' } })).ok(),
+  ).toBe(true);
+  await page.reload();
+  await open(page, 'actions');
   await expect(rows.filter({ hasText: firstTitle })).toHaveCount(0);
 
   const retry = blocked.first();
@@ -480,11 +487,9 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect
     .soft(button(analysePanel, 'Neu analysieren'), '„Neu analysieren“ ist gesperrt, solange die Analyse läuft')
     .toBeDisabled();
-  await button(analysePanel, 'Löschen').click();
-  const remove = confirmIn('Auftrag löschen?');
-  await expect(remove).toBeVisible();
-  await button(remove, 'Abbrechen').click();
-  await expect(remove).toHaveCount(0);
+  // Löschen gibt es unter „Aktionen“ nicht; jeder Knopf erklärt sich per Hover-Text.
+  await expect(button(analysePanel, 'Löschen')).toHaveCount(0);
+  await expect(button(analysePanel, 'Neu analysieren')).toHaveAttribute('title', /kein Code/);
   await expect(analyse).toBeVisible();
 });
 
@@ -539,8 +544,9 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await button(detail, 'Änderungen speichern').click();
   await expect(page.getByText('Bug wurde gespeichert.')).toBeVisible();
   await snap(page, info, 'Bug bearbeitet', false);
-  page.once('dialog', (dialog) => void dialog.accept());
   await button(detail, 'Löschen').click();
+  // Löschen fragt im eigenen Bestätigungsdialog nach.
+  await page.getByRole('dialog').getByRole('button', { name: 'Löschen' }).click();
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
 });
 
@@ -659,6 +665,7 @@ test('Agents: „Was machen die Rollen?“ auf- und zuklappen', async ({ page },
 test('Einstellungen: Validierungen, Benutzer anlegen, Projekt löschen gesperrt', async ({ page, isMobile }, info) => {
   await login(page);
   await open(page, 'settings');
+  await button(page, 'Alle aufklappen').click();
   if (isMobile) {
     const remove = button(page, 'Projekt endgültig löschen');
     await remove.scrollIntoViewIfNeeded();

@@ -1,5 +1,5 @@
 import type { Router } from 'express';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import { upsertDoc } from './docs.js';
 import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
@@ -65,7 +65,7 @@ function toMarkdown(name: string, goal: string, report: SprintReport): string {
 }
 
 /** Builds the sprint documentation from the real state of orders, agent runs, bugs and test runs. */
-export async function generateSprintReport(pool: Pool, sprintId: string): Promise<SprintReport | null> {
+export async function generateSprintReport(pool: Pool | PoolClient, sprintId: string): Promise<SprintReport | null> {
   const sprint = await pool.query<{
     projectSlug: string;
     name: string;
@@ -172,7 +172,7 @@ export function registerReportRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/sprint-reports', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -187,12 +187,12 @@ export function registerReportRoutes(app: Router, pool: Pool): void {
 
   app.post('/sprints/:id/report', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const report = await generateSprintReport(pool, request.params.id);
     if (!report) {
-      response.status(404).json({ message: 'Sprint not found.' });
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
     }
     response.status(201).json({ report });
@@ -201,7 +201,7 @@ export function registerReportRoutes(app: Router, pool: Pool): void {
   app.patch('/sprints/:id/report', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     const body = request.body as unknown;
     if (!isUuid(request.params.id) || !isRecord(body) || typeof body.notes !== 'string' || body.notes.length > 10_000) {
-      response.status(400).json({ message: 'Invalid report notes.' });
+      response.status(400).json({ message: 'Notizen ungültig (Text, höchstens 10 000 Zeichen).' });
       return;
     }
     const result = await pool.query('UPDATE sprint_reports SET notes = $2 WHERE sprint_id = $1 RETURNING sprint_id', [

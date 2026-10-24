@@ -84,6 +84,12 @@ const DANGEROUS_NPM_OPTIONS = [
   'init-module',
   'editor',
   'git',
+  // Fremde Hosts: Registry, Proxy und Umschreiben der Tarball-Adressen (Abfluss von Daten in der URL).
+  'registry',
+  'replace-registry-host',
+  'proxy',
+  'https-proxy',
+  'noproxy',
 ];
 /** Kurzoptionen: -g (global), -L (location); -C (prefix) wird wie --prefix geprüft. */
 const DANGEROUS_NPM_SHORT = /[gL]/;
@@ -136,7 +142,10 @@ export function npmOptionProblem(input: CommandInput, root?: string): string | n
         if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
       } else if (
         name &&
-        ('prefix'.startsWith(name) || DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)))
+        ('prefix'.startsWith(name) ||
+          DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)) ||
+          // Einstellungen je Scope oder Host: --@scope:registry=…, --//host/:_authToken=…
+          /[:@/]/.test(name))
       ) {
         return `„${command}“: diese npm-Option ist gesperrt.`;
       }
@@ -216,6 +225,34 @@ export function gitPathProblem(input: CommandInput, root?: string): string | nul
   return null;
 }
 
+/** Remote-Name bzw. Ref (main, feature/x): keine URL (://, @, ::), kein Host (:), kein Pfad (/…, ./, ..). */
+const GIT_REF_ARGUMENT = /^(?![./])(?!.*\.\.)[\w][\w./-]*$/;
+
+/**
+ * git fetch/pull holen nur von einem eingerichteten Remote (remotes, sonst origin): Eine URL, ein Host oder ein Pfad
+ * schickte Daten im Pfad an einen fremden Host bzw. holte fremde Commits in den Branch. Weitere Argumente sind nur
+ * Refs ohne „:“ (keine Refspecs, die lokale Branches überschreiben). Optionen mit Wert nur als --option=wert.
+ */
+export function gitRemoteProblem(input: CommandInput, remotes: readonly string[] = ['origin']): string | null {
+  const words = toWords(input);
+  const command = label(input);
+  if (words[0]?.text !== 'git' || !['fetch', 'pull'].includes(words[1]?.text ?? '')) return null;
+  // --multiple (auch abgekürzt): dann wären alle Argumente Remotes bzw. Pfade.
+  if (words.some(({ text }) => /^--mu/.test(text) && 'multiple'.startsWith(text.slice(2).split('=')[0] ?? ''))) {
+    return `„${command}“: --multiple ist gesperrt – ein Remote je Befehl oder --all.`;
+  }
+  const positional = words
+    .slice(2)
+    .map((word) => word.text)
+    .filter((word) => word === '' || !word.startsWith('-'));
+  const [remote, ...refs] = positional;
+  if (remote !== undefined && !remotes.includes(remote)) {
+    return `„${command}“: nur eingerichtete Remotes (${remotes.join(', ')}), keine URLs, Hosts oder Pfade.`;
+  }
+  const foreign = refs.find((ref) => !GIT_REF_ARGUMENT.test(ref));
+  return foreign === undefined ? null : `„${command}“: „${foreign}“ ist kein einfacher Branch-Name.`;
+}
+
 /**
  * Allow safe fixed commands and validated package names/options for npm installs. Mit Projektordner (root) wird ein
  * --prefix samt symbolischer Links aufgelöst; ohne ist er nur als einfacher relativer Ordner erlaubt.
@@ -254,7 +291,7 @@ export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMAND_NAMES =
-  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
+  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|export|declare|typeset|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
 const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
 /**
  * Befehle, die Dateien anlegen, ändern oder löschen. Die ersten sieben gibt die CLI mit --permission-mode acceptEdits

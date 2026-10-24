@@ -168,7 +168,35 @@ export async function waitForCi(
   log.push(`CI grün (Lauf ${runId}).`);
 }
 
-/** Führt die Testbefehle des Projekts aus; wirft mit dem Ausgabe-Ende, sobald einer fehlschlägt. */
+/** Zeilen, die einen Befund benennen (Prettier, Playwright, node:test, TypeScript, ESLint-Fehler, Jest/Vitest). */
+const FINDING =
+  /^\s*(?:\[warn\] |✘|not ok \d|FAIL\b|×|✗)|error TS\d|^\s*\d+:\d+\s+error\b|Error: expect\(|^\s*Error: |Test timeout of/;
+/** Zusammenfassungen ohne Befund, die trotzdem wie einer aussehen (z. B. „0 errors“, „0 failed“). */
+const NO_FINDING = /\(0 errors?\b|\b0 failed\b|# fail 0\b/;
+const SUMMARY_LINES = 8;
+const SUMMARY_CHARS = 1_000;
+
+/**
+ * Kurzfassung eines roten Test-Gates für Meldung und Autopilot-Pause: welche Schritte rot sind (test:full markiert sie
+ * mit „━━ Name: rot ━━“) und die ersten Befund-Zeilen. Nur wenn nichts davon erkennbar ist, das Ende der Ausgabe –
+ * das bestand sonst oft aus bestandenen Tests vom Ende des Laufs und verschwieg die Ursache.
+ */
+export function gateFailureSummary(output: string): string {
+  const red = [...new Set([...output.matchAll(/━━ (.+?): rot ━━/g)].map((match) => match[1]!.trim()))];
+  const findings = [
+    ...new Set(
+      output
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => FINDING.test(line) && !NO_FINDING.test(line)),
+    ),
+  ].slice(0, SUMMARY_LINES);
+  if (!red.length && !findings.length) return output.slice(-600);
+  const parts = [red.length ? `Rot: ${red.join(', ')}.` : '', findings.join(' | ')].filter(Boolean);
+  return parts.join(' ').slice(0, SUMMARY_CHARS);
+}
+
+/** Führt die Testbefehle des Projekts aus; wirft mit einer Kurzfassung (rote Schritte, Befunde), sobald einer fehlschlägt. */
 export async function runTestGate(
   execute: CommandExecutor,
   cwd: string,
@@ -181,7 +209,7 @@ export async function runTestGate(
     const result = await runProjectCommand(command, cwd, { timeoutMs: TEST_TIMEOUT_MS }, execute);
     if (result.exitCode !== 0) {
       throw new Error(
-        `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${redactOutput(result.output, process.env).slice(-600)}`,
+        `Push abgelehnt: \`${command.join(' ')}\` ist fehlgeschlagen (Exit-Code ${result.exitCode}). ${gateFailureSummary(redactOutput(result.output, process.env))}`,
       );
     }
   }

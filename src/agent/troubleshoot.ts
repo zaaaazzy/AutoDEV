@@ -98,16 +98,21 @@ export async function analyzeBlocked(
     kind: string;
     sprintId: string | null;
     failureBugId: string | null;
+    budgetReason: string | null;
   }>(
     `UPDATE development_items SET analysis_status = 'running'
       WHERE id = (SELECT id FROM development_items WHERE project_slug = $1 AND analysis_status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, title, description, bug_id AS "bugId", kind, sprint_id AS "sprintId", failure_bug_id AS "failureBugId"`,
+      RETURNING id, title, description, bug_id AS "bugId", kind, sprint_id AS "sprintId", failure_bug_id AS "failureBugId",
+                CASE WHEN budget_blocked IS NOT NULL THEN failure END AS "budgetReason"`,
     [options.project],
   );
   const item = claimed.rows[0];
   if (!item) return 0;
   const failures = await collectFailures(pool, item.id);
+  // Budget-Blockade (Projekt- oder Rollen-Limit) vor dem Schritt: Der Grund steht schon als Blockiergrund oben, hier
+  // nur die Einordnung, damit die Analyse ihn nicht für einen Code-Fehler hält.
+  if (item.budgetReason) failures.unshift('### Budget-Blockade\nDer Blockiergrund ist ein Projekt- oder Rollen-Limit.');
   const known = (await loadKnownBugs(pool, options.project, 30).catch(logged('troubleshoot', []))).map(
     (bug) => `- [${bug.status}] ${bug.title}`,
   );
@@ -141,14 +146,15 @@ export async function analyzeBlocked(
     ]);
   } else {
     await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes)
-       SELECT $1, $2, $3, 'high', 'agent', 'open', $4
+      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes, development_id)
+       SELECT $1, $2, $3, 'high', 'agent', 'open', $4, $5
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)`,
       [
         options.project,
         title,
         `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000),
         body.slice(0, 3000),
+        item.id,
       ],
     );
   }

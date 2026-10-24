@@ -128,7 +128,7 @@
           @if (group.label) {
             <tr class="dt-group">
               <td [attr.colspan]="columnCount()">
-                {{ group.label }} <span class="muted">({{ group.rows.length }})</span>
+                {{ group.label }} <span class="muted">({{ group.total }})</span>
               </td>
             </tr>
           }
@@ -211,13 +211,65 @@
     </table>
   </div>
   @if (rows().length) {
-    <p class="dt-count">
-      {{
-        model.getRowModel().rows.length === rows().length
-          ? rows().length
-          : model.getRowModel().rows.length + ' von ' + rows().length
-      }}
-      {{ rows().length === 1 ? 'Eintrag' : 'Einträge' }}
-    </p>
+    <div class="dt-footer">
+      <p class="dt-count" aria-live="polite">{{ countText() }}</p>
+      @if (paged()) {
+        <nav class="dt-pager" aria-label="Seiten">
+          <button
+            type="button"
+            class="dt-page dt-page-step"
+            aria-label="Vorherige Seite"
+            [disabled]="page() === 0"
+            (click)="goToPage(page() - 1)"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M10 3.5 5.5 8l4.5 4.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+          @for (item of pages(); track $index) {
+            @if (item === 'gap') {
+              <span class="dt-page-gap" aria-hidden="true">…</span>
+            } @else {
+              <button
+                type="button"
+                class="dt-page"
+                [class.active]="item === page()"
+                [attr.aria-current]="item === page() ? 'page' : null"
+                [attr.aria-label]="'Seite ' + (item + 1)"
+                (click)="goToPage(item)"
+              >
+                {{ item + 1 }}
+              </button>
+            }
+          }
+          <span class="dt-page-of">{{ page() + 1 }} / {{ lastPage() + 1 }}</span>
+          <button
+            type="button"
+            class="dt-page dt-page-step"
+            aria-label="Nächste Seite"
+            [disabled]="page() === lastPage()"
+            (click)="goToPage(page() + 1)"
+          >
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                d="M6 3.5 10.5 8 6 12.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+        </nav>
+      }
+    </div>
   }
 </div>

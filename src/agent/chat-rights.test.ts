@@ -3,7 +3,10 @@ import { access, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import type { Pool } from 'pg';
+import type { CommandExecutor } from '../core/command.js';
 import { BACKUP_DIRECTORY, executeTool, runOllamaAgent } from './ollama-agent.js';
+import { runAuthorAgent } from './requirements.js';
 
 /** Modell, das genau einen Werkzeugaufruf versucht und danach antwortet. */
 function scripted(name: string, args: Record<string, unknown>): typeof fetch {
@@ -146,4 +149,69 @@ test('Chat-Assistent ohne Kontext führt keine Befehle aus (fail-closed)', async
     },
   });
   assert.deepEqual(ran, []);
+});
+
+/** Startet den Chat (Rolle „assistant“, Ordner gehalten) mit einem gewählten Agent und liefert die CLI-Befehlszeile. */
+async function chatCommand(agent: Record<string, unknown>): Promise<string[]> {
+  const pool = {
+    query: async (sql: string) => ({
+      rows: /FROM agents WHERE project_slug = \$1 AND id = \$2/.test(sql) ? [agent] : [],
+    }),
+  } as unknown as Pool;
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const options = { project: 'p', cwd: '/nicht/benutzt', timeoutMs: 1000 };
+  await runAuthorAgent(
+    pool,
+    options,
+    () => 'x',
+    execute,
+    'assistant',
+    undefined,
+    undefined,
+    'agent-1',
+    undefined,
+    false,
+  );
+  return calls[0]!;
+}
+
+const agentWith = (role: string | null) => ({
+  instructions: '',
+  command: ['claude', '--dangerously-skip-permissions', '-p', '{prompt}'],
+  allowedCommands: null,
+  fileScope: ['docs'],
+  role,
+});
+const READ_ONLY = /--disallowedTools Write,Edit,NotebookEdit,MultiEdit,Bash/;
+
+test('Chat mit Entwickler-Agent und Vollzugriffs-Flag läuft mit Wächter, ohne Vollzugriff', async () => {
+  const command = await chatCommand(agentWith('developer'));
+  const settings = command[command.indexOf('--settings') + 1] ?? '';
+  assert.ok(command.includes('--settings'), 'Wächter-Hook gesetzt');
+  assert.match(settings, /PreToolUse/);
+  assert.match(settings, /agent-guard/);
+});
+
+test('Chat mit Visionär-Agent und Vollzugriffs-Flag bekommt nur die Nur-lesen-Rechte', async () => {
+  const command = await chatCommand(agentWith('visionary'));
+  assert.ok(command.includes('--settings'), 'Wächter-Hook gesetzt');
+  assert.match(command.join(' '), READ_ONLY, 'weder Datei-Werkzeuge noch Shell');
+});
+
+test('Chat mit Agent ohne Rolle: nur lesen (fail-closed)', async () => {
+  assert.match((await chatCommand(agentWith(null))).join(' '), READ_ONLY);
+});
+
+test('Gegenprobe: Assistent-Agent mit Vollzugriffs-Flag behält den Vollzugriff', async () => {
+  const command = await chatCommand(agentWith('assistant'));
+  // Kein Wächter für Schreiben und Shell; --settings bringt nur die Sperre für Geheimnisse (Read, Grep, Glob).
+  const settings = command[command.indexOf('--settings') + 1] ?? '';
+  assert.doesNotMatch(settings, /Write|Bash/);
+  assert.match(settings, /Read\(\*\*\/\.env\*\)/);
+  assert.ok(!command.includes('--allowedTools') && !command.includes('--disallowedTools'));
+  assert.ok(command.includes('--dangerously-skip-permissions'));
 });

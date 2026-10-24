@@ -1,7 +1,8 @@
 export function formatHours(value: number | null | undefined): string {
   return value === null || value === undefined
     ? '–'
-    : `${Number(value).toLocaleString('de-DE', { maximumFractionDigits: 1 })} h`;
+    : // Agent-Stunden sind oft Bruchteile einer Stunde (0,25 h): unter 1 h zwei Nachkommastellen.
+      `${Number(value).toLocaleString('de-DE', { maximumFractionDigits: Math.abs(Number(value)) < 1 ? 2 : 1 })} h`;
 }
 
 export function formatNumber(value: number | null | undefined): string {

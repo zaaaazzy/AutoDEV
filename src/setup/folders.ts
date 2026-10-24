@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { projectFolderError, projectRoots } from '../core/validation.js';
+import { join, posix, win32 } from 'node:path';
+import { insideFolder, isWindowsPath, normalizeFolder, projectFolderError, projectRoots } from '../core/validation.js';
 
 export interface FolderEntry {
   name: string;
@@ -29,10 +29,9 @@ const SKIPPED = new Set(['node_modules', 'dist', 'build', 'coverage']);
 /** Bereiche, in denen gewählt werden darf: DEV_LOG_PROJECT_ROOTS, sonst Benutzerordner und Laufwerke. */
 function browseRoots(environment: NodeJS.ProcessEnv): string[] {
   const roots = projectRoots(environment);
-  return roots.length ? roots : [homedir(), '/Volumes'];
+  if (roots.length) return roots;
+  return process.platform === 'win32' ? [normalizeFolder(homedir()) ?? homedir()] : [homedir(), '/Volumes'];
 }
-
-const inside = (path: string, root: string): boolean => path === root || path.startsWith(`${root}/`);
 
 /**
  * Ordnerauswahl für den Projektordner: listet die Unterordner eines Ordners im Projektbereich (läuft auf dem Rechner,
@@ -44,9 +43,9 @@ export async function listFolders(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<FolderListing> {
   const roots = browseRoots(environment);
-  const raw = typeof requested === 'string' ? requested.trim().replace(/\/+$/, '') : '';
+  const raw = typeof requested === 'string' ? requested.trim() : '';
   const entry = async (path: string): Promise<FolderEntry> => ({
-    name: path.split('/').pop() || path,
+    name: path.split(/[\\/]/).pop() || path,
     path,
     git: existsSync(join(path, '.git')),
   });
@@ -63,12 +62,10 @@ export async function listFolders(
       reason: null,
     };
   }
-  const parts = raw.split('/').filter(Boolean);
-  if (!raw.startsWith('/') || parts.some((part) => part === '.' || part === '..')) {
-    throw new Error('Ungültiger Ordner.');
-  }
-  const path = `/${parts.join('/')}`;
-  const root = roots.find((candidate) => inside(path, candidate));
+  // Doppelte Trenner wie bisher tolerieren, alles andere (relativ, „.“, „..“) ist ungültig.
+  const path = normalizeFolder(isWindowsPath(raw) ? raw : raw.replace(/\/{2,}/g, '/'));
+  if (!path) throw new Error('Ungültiger Ordner.');
+  const root = roots.find((candidate) => insideFolder(path, candidate));
   if (!root) throw new Error(`Ordner liegt ausserhalb des Projektbereichs (${roots.join(', ')}).`);
   const info = await stat(path).catch(() => null);
   if (!info?.isDirectory()) throw new Error(`Ordner nicht gefunden: ${path}`);
@@ -81,7 +78,7 @@ export async function listFolders(
   const reason = projectFolderError(path, environment);
   return {
     path,
-    parent: path === root ? null : dirname(path),
+    parent: insideFolder(root, path) ? null : (isWindowsPath(path) ? win32 : posix).dirname(path),
     roots,
     folders: await Promise.all(names.map((name) => entry(join(path, name)))),
     selectable: !reason,

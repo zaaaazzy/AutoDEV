@@ -18,6 +18,7 @@ import {
   type Sprint,
   type SprintReport,
   type TestRun,
+  type WorkerStatus,
 } from './models.js';
 
 export interface LoadedProject {
@@ -124,6 +125,28 @@ export function keepFailedSections(previous: ProjectData, loaded: LoadedProject)
   const data = { ...loaded.data };
   for (const field of loaded.failed) (data as Record<string, unknown>)[field] = previous[field];
   return data;
+}
+
+function runningSteps(runs: ProjectData['agentRuns']): Set<string> {
+  return new Set(
+    runs.flatMap((run) =>
+      run.steps.filter((step) => step.status === 'running').map((step) => `${run.id}:${step.position}`),
+    ),
+  );
+}
+
+/** Ist ein zuvor laufender Schritt nicht mehr `running`? Dann haben sich Auftrag, Sprint und Berichte geändert. */
+export function runStepFinished(previous: ProjectData['agentRuns'], next: ProjectData['agentRuns']): boolean {
+  const still = runningSteps(next);
+  return [...runningSteps(previous)].some((key) => !still.has(key));
+}
+
+/** Hat sich die Menge laufender Aufträge im Worker-Status geändert (Auftrag fertig oder neu gestartet)? */
+export function runningOrdersChanged(previous: WorkerStatus['running'], next: WorkerStatus['running']): boolean {
+  const key = (order: WorkerStatus['running'][number]): string => `${order.title}\u0000${order.startedAt}`;
+  const before = new Set(previous.map(key));
+  const after = new Set(next.map(key));
+  return before.size !== after.size || [...after].some((entry) => !before.has(entry));
 }
 
 function withoutOrphanedBugOrders(data: ProjectData): ProjectData {

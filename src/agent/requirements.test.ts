@@ -423,7 +423,8 @@ test('draftRequirements: neuer Auftrag mit kurzem Titel, Schätzung und geprüft
   assert.match(reviewerPrompt, /- \[offen \/ high\] Export bricht ab – Bei Umlauten/);
   assert.match(reviewerPrompt, /- \[behoben \/ low\] Alter Fehler \| Lösung: Encoding gesetzt/);
 
-  const [estimate] = find(/SET effort_hours = COALESCE/);
+  const [estimate] = find(/UPDATE ideation_items SET\s+effort_hours = CASE WHEN estimate_source = 'manual'/);
+  assert.match(authorPrompt, /effortHours: erwartete Agent-Laufzeit in Stunden/);
   assert.deepEqual(estimate?.values, ['i1', 2, 90000, 7, 3]);
   const [insert] = find(/INSERT INTO development_items/);
   assert.equal(insert?.values[0], 'i1');

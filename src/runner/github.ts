@@ -65,7 +65,28 @@ export function runIdFromLink(link: string | undefined): string | null {
 }
 
 /** Wertet die Checks eines Pull Requests aus: rot vor laufend vor grün; ohne Checks gilt „laufend“. */
-export function evaluateChecks(checks: { bucket?: string; state?: string; link?: string }[]): PullRequestChecks {
+export interface CheckRun {
+  bucket?: string;
+  state?: string;
+  link?: string;
+  name?: string;
+  workflow?: string;
+  /** Auslöser des Laufs: push oder pull_request (GitHub prüft einen PR-Branch oft doppelt). */
+  event?: string;
+}
+
+/**
+ * Läuft derselbe Job für den Pull Request und für den Push auf seinen Branch, zählt der Pull-Request-Lauf. Sonst
+ * blockierte ein Ausreisser im (gleichwertigen) Push-Lauf den Merge, obwohl die Prüfung des PR grün ist.
+ */
+export function relevantChecks(checks: CheckRun[]): CheckRun[] {
+  const key = (check: CheckRun): string => `${check.workflow ?? ''}\u0000${check.name ?? ''}`;
+  const forPullRequest = new Set(checks.filter((check) => check.event === 'pull_request').map(key));
+  return checks.filter((check) => check.event !== 'push' || !forPullRequest.has(key(check)));
+}
+
+export function evaluateChecks(all: CheckRun[]): PullRequestChecks {
+  const checks = relevantChecks(all);
   const bucket = (check: { bucket?: string; state?: string }): string =>
     (check.bucket ?? check.state ?? '').toLowerCase();
   const failed = checks.find((check) =>
@@ -248,12 +269,12 @@ export function createGithubAdapter(
       const output = await gh(
         'pr',
         'checks',
-        [pullRequest(url), '--json', 'name,state,bucket,link'],
+        [pullRequest(url), '--json', 'name,state,bucket,link,workflow,event'],
         (code, text) =>
           code === 0 || code === 8 || (code === 1 && /^\s*[[{]/.test(text)) || /no checks reported/i.test(text),
       );
       if (/no checks reported/i.test(output)) return { status: 'pending', failedRun: null };
-      return evaluateChecks(parseJson<{ bucket?: string; state?: string; link?: string }[]>(output));
+      return evaluateChecks(parseJson<CheckRun[]>(output));
     },
 
     async pullRequestState(url): Promise<PullRequestState> {

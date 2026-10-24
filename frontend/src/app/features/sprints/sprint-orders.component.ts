@@ -1,12 +1,12 @@
 import { Component, computed, inject, input, signal } from '@angular/core';
+import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import type { SortingState } from '@tanstack/angular-table';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { DataColumn } from '../../shared/data-table/data-table.component.js';
-import { isFinished } from '../../shared/labels.js';
-import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+import { canTakeIntoSprint, isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { pickInOrder, poolOpenState } from './pool-selection.js';
 import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from './sprint-phases.js';
@@ -19,7 +19,7 @@ import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from 
 @Component({
   selector: 'app-sprint-orders',
   standalone: true,
-  imports: [OrderTableComponent, OrderActionsDirective],
+  imports: [OrderTableComponent, OrderActionsDirective, BulkBarComponent],
   templateUrl: './sprint-orders.component.html',
 })
 export class SprintOrdersComponent {
@@ -54,11 +54,12 @@ export class SprintOrdersComponent {
     },
   ];
 
-  /** Zur Auswahl: offene (noch in keinem Sprint) und abgebrochene (aus einem Sprint genommen oder gescheitert). */
+  /**
+   * Zur Auswahl: offene (noch in keinem Sprint) und abgebrochene (aus einem Sprint genommen oder gescheitert) – dieselbe
+   * Regel wie die Route take-into-sprint. Laufende oder in Freigabe stehen nicht zur Wahl (sonst 409).
+   */
   protected readonly free = computed(() => {
-    const free = this.store
-      .data()
-      .development.filter((item) => !item.sprintId && !isFinished(item.status) && item.status !== 'in_progress');
+    const free = this.store.data().development.filter(canTakeIntoSprint);
     const aborted = (item: DevelopmentItem): boolean => !!item.removedFromSprintAt || item.status === 'blocked';
     return [...byRank(free.filter((item) => !aborted(item))), ...byRank(free.filter(aborted))];
   });

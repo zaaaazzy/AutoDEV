@@ -88,21 +88,20 @@ export function registerPermissionGroupRoutes(app: Router, pool: Pool): void {
         if (!CUSTOM_GROUP_ID.test(id) || PERMISSION_GROUPS.some((builtIn) => builtIn.id === id)) {
           return void response.status(400).json({ message: 'Bitte einen anderen Namen wählen.' });
         }
-        const row = (
-          await pool
-            .query(
-              `INSERT INTO project_permission_groups (project_slug, id, label, description, rules)
+        const result = await pool
+          .query(
+            `INSERT INTO project_permission_groups (project_slug, id, label, description, rules)
              SELECT slug, $2, $3, $4, $5 FROM projects WHERE slug = $1 RETURNING id, label, description, rules`,
-              [slug, id, group.label, group.description, group.rules],
-            )
-            .catch((error: { code?: string }) => {
-              if (error.code === '23505') return null;
-              throw error;
-            })
-        )?.rows[0];
-        if (row === undefined) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
-        if (row === null)
+            [slug, id, group.label, group.description, group.rules],
+          )
+          .catch((error: { code?: string }) => {
+            if (error.code === '23505') return null;
+            throw error;
+          });
+        if (result === null)
           return void response.status(409).json({ message: 'Eine Kategorie mit diesem Namen gibt es schon.' });
+        const row = result.rows[0];
+        if (!row) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
         response.status(201).json({ group: { ...row, builtIn: false, available: true } });
       } catch (error) {
         next(error);

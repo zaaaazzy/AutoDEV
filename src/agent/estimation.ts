@@ -103,6 +103,14 @@ export async function loadActualReference(
   };
 }
 
+/**
+ * Einheit der Schätzung für beide Prompts (Schnellschätzung und Auftragsautor): gemessen und eingeplant wird die
+ * Laufzeit der Agents, nicht die Arbeitszeit eines Menschen.
+ */
+export const ESTIMATE_UNIT_HINT =
+  'effortHours: erwartete Agent-Laufzeit in Stunden (Summe aller Agent-Schritte des Auftrags, z. B. 0.3), ' +
+  'nicht die Arbeitszeit eines Menschen; tokenEstimate: Tokens aller Agent-Läufe des Auftrags.';
+
 /** Abschnitt für den Autor-Prompt: die Schätzung an echten Ist-Werten ausrichten. */
 export function referenceSection(reference: ActualReference): string {
   const scope = reference.category ? `der Kategorie „${reference.category}“` : 'ohne Kategorie';
@@ -156,6 +164,16 @@ async function estimateWithCommand(command: string[], prompt: string): Promise<E
   }
 }
 
+/** Schnellschätzung speichern: füllt nur leere Felder; eine neue Stunden- oder Token-Schätzung gilt als `quick`. */
+export const QUICK_ESTIMATE_SQL = `
+  UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
+        benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5),
+        estimate_source = CASE WHEN estimate_source IS NULL AND effort_hours IS NULL AND token_estimate IS NULL
+                                 AND ($2::float8 IS NOT NULL OR $3::bigint IS NOT NULL) THEN 'quick'
+                               ELSE estimate_source END
+  WHERE id = $1
+`;
+
 /**
  * Estimates ideas that have no values yet; values entered by users are kept. Failures are noted once, not retried.
  * A passed estimator always wins; otherwise the CLI chosen in the dashboard or the local model is used.
@@ -166,8 +184,8 @@ export async function estimateNewIdeas(
   estimate?: (prompt: string) => Promise<Estimate | null>,
 ): Promise<number> {
   const ideas = (
-    await pool.query<{ id: string; title: string; description: string }>(
-      `SELECT id, title, description FROM ideation_items
+    await pool.query<{ id: string; title: string; description: string; category: string | null }>(
+      `SELECT id, title, description, category FROM ideation_items
         WHERE project_slug = $1 AND status IN ('idea', 'considering', 'review', 'requested') AND agent_note IS NULL
           AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
         ORDER BY created_at LIMIT 5`,
@@ -178,10 +196,19 @@ export async function estimateNewIdeas(
   const context = (await loadProjectContext(pool, project)).slice(0, 600);
   const external = estimate ? null : await restrictedSystemCommand(pool, 'author');
   const run = estimate ?? (external ? (prompt: string) => estimateWithCommand(external, prompt) : quickEstimate);
+  const references = new Map<string | null, ActualReference | null>();
   for (const idea of ideas) {
+    if (!references.has(idea.category))
+      references.set(
+        idea.category,
+        await loadActualReference(pool, project, idea.category).catch(logged('estimation', null)),
+      );
+    const reference = references.get(idea.category);
     const prompt = [
       'Schätze Aufwand eines Entwicklungsauftrags. Antworte nur mit einem JSON-Objekt:',
-      '{"effortHours": Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',
+      '{"effortHours": Agent-Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',
+      ESTIMATE_UNIT_HINT,
+      reference ? referenceSection(reference) : '',
       context ? `Projekt: ${context}` : '',
       `Titel: ${idea.title}\n${idea.description.slice(0, 1500)}`,
       // Aus GitHub übernommene Ideen: fremder Text, nur Daten.
@@ -197,11 +224,13 @@ export async function estimateNewIdeas(
       );
       continue;
     }
-    await pool.query(
-      `UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
-              benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5) WHERE id = $1`,
-      [idea.id, result.effortHours, result.tokenEstimate, result.benefit, result.cost],
-    );
+    await pool.query(QUICK_ESTIMATE_SQL, [
+      idea.id,
+      result.effortHours,
+      result.tokenEstimate,
+      result.benefit,
+      result.cost,
+    ]);
   }
   return ideas.length;
 }

@@ -1,6 +1,6 @@
 import { Component, computed, inject, input } from '@angular/core';
 import { ProjectStore } from '../core/project-store.js';
-import { repositoryWebUrl } from './changed-files.component.js';
+import { repositoryWebUrl } from './repository-url.js';
 
 /** Dateipfad als hervorgehobener Link auf die Datei im Git-Repository (z. B. GitHub). */
 @Component({

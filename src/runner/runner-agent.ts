@@ -15,6 +15,7 @@ import {
 } from '../agent/tool-permissions.js';
 import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
 import { describeCommand, loadRouting, routable, routeModel } from '../agent/model-routing.js';
+import { calibratedHours, loadCalibration } from '../core/estimate-calibration.js';
 import { runTestAgent } from './test-agent.js';
 import { projectEnvironment } from './project-command.js';
 import { agentEnvironment, buildInvocation } from './runner-prompts.js';
@@ -120,9 +121,15 @@ export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<
   if (!routable(agent.role)) return { rule: null };
   if (ctx.routing === undefined) ctx.routing = await loadRouting(ctx.pool, ctx.item.projectSlug).catch(() => null);
   if (!ctx.routing) return { rule: null };
+  // Die Regeln vergleichen Agent-Stunden: Schätzung mit dem gemessenen Faktor ihrer Herkunft umrechnen.
+  const estimate = ctx.item.effortHours ?? null;
+  if (ctx.routedHours === undefined)
+    ctx.routedHours = await loadCalibration(ctx.pool, ctx.item.projectSlug)
+      .then((calibration) => calibratedHours(estimate, ctx.item.estimateSource, calibration))
+      .catch(() => estimate);
   const decision = routeModel(ctx.routing.rules, {
     category: ctx.item.category ?? null,
-    effortHours: ctx.item.effortHours ?? null,
+    effortHours: ctx.routedHours,
     retryCount: ctx.item.retryCount ?? 0,
     budgetPercent: ctx.budgetPercent ?? 0,
   });

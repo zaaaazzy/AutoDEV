@@ -118,6 +118,7 @@ export class StatsComponent {
   protected readonly prompts = signal<PromptEntry[]>([]);
   protected readonly error = signal('');
   protected readonly ratioText = ratioText;
+  protected readonly shortRatio = shortRatio;
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;
   protected readonly categoryLabel = (key: string): string => (key === 'none' ? 'Ohne Bereich' : categoryLabel(key));
 

@@ -4,6 +4,7 @@ import { logged } from '../core/log.js';
 import { sendPush } from '../core/push.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { saveOrderDoc, upsertDoc } from '../api/docs.js';
+import { clearManualTodo, MERGE_TODO, setActionTodo } from './action-todo.js';
 import { resumeBlockedByBug } from './autofix.js';
 import { commitTaskToGit, finishOrderBranch } from './git-sync.js';
 import {
@@ -56,8 +57,38 @@ async function notifySettled(pool: Pool, item: WorkItem, succeeded: boolean, pro
 }
 
 /** Settle the order status and trigger follow-up actions such as commits or bugfix retries. */
+/**
+ * Wurde der Auftrag während des Laufs aus seinem Sprint genommen (Sprint abgebrochen, von Hand entfernt)? Dann darf er
+ * nicht mehr in den Sprint-Branch gemergt werden – der Sprint wird nie mehr gesichert, die Arbeit käme nicht in main.
+ */
+export async function leftItsSprint(pool: RunContext['pool'], item: RunContext['item']): Promise<boolean> {
+  if (!item.sprintId) return false;
+  const row = (
+    await pool.query<{ sprintId: string | null }>(
+      'SELECT sprint_id AS "sprintId" FROM development_items WHERE id = $1',
+      [item.id],
+    )
+  ).rows[0];
+  // Nur eine echte, geänderte Zuordnung zählt (fehlt die Spalte, wurde nichts geändert).
+  return Boolean(row && 'sprintId' in row && row.sprintId !== item.sprintId);
+}
+
 export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
   const { pool, item, options, execute } = ctx;
+  if (await leftItsSprint(pool, item).catch(() => false)) {
+    // Zwischenstand auf dem Auftrags-Branch sichern (nichts mergen); der Auftrag bleibt im Backlog bzw. unter „Aktionen“.
+    if (ctx.branch) {
+      const saved = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', false, execute).catch(
+        (error: unknown) => ({ message: error instanceof Error ? error.message : String(error) }),
+      );
+      console.info(`[${item.id}] Aus dem Sprint genommen – ${saved.message}`);
+    }
+    await pool.query(
+      `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.backlog}', updated_at = NOW() WHERE id = $1`,
+      [item.id],
+    );
+    return;
+  }
   if (interrupted) {
     // Arbeitsordner freigeben: Zwischenstand als WIP-Commit auf dem Auftrags-Branch sichern und zur Basis zurück.
     // Sonst bliebe der Ordner (oft stundenlang, z. B. beim Nutzungslimit) auf diesem Branch stehen, und jeder andere
@@ -111,6 +142,11 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     await pool
       .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, mergeProblem])
       .catch(logged('runner-steps'));
+    // Kein Konflikt (die gehen oben in einen neuen Versuch): Ohne Vermerk wartete der Sprint still auf eine Behebung,
+    // die niemand startet – sichtbar machen, was zu tun ist.
+    if (!isMergeConflict(mergeProblem)) await setActionTodo(pool, item.id, MERGE_TODO).catch(logged('runner-steps'));
+  } else if (!succeeded) {
+    await clearManualTodo(pool, item.id).catch(logged('runner-steps'));
   }
   if (item.agentId) {
     // A one-agent play restores the previous status; a blocked order resumes normally after success.

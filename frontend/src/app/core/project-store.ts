@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { ApiService } from './api.service.js';
-import { errorMessage } from './errors.js';
+import { errorMessage, FieldError } from './errors.js';
 import {
   emptyProjectData,
   type DevelopmentItem,
@@ -10,7 +10,7 @@ import {
   type WorkerStatus,
 } from './models.js';
 import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Section } from './navigation.js';
-import { fetchProjectData, keepFailedSections } from './project-loader.js';
+import { fetchProjectData, keepFailedSections, runningOrdersChanged, runStepFinished } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
 import { visibleInterval } from './visible-interval.js';
@@ -202,11 +202,24 @@ export class ProjectStore {
     void this.refreshWorker();
   }
 
+  /**
+   * Antwort des Servers zu einem Auftrag sofort übernehmen (Freigabe, erneuter Versuch …), bevor das ganze Projekt
+   * nachgeladen ist: Die Rückmeldung unter „Aktionen“ verschwindet damit gleich beim Klick.
+   */
+  applyItem(response: unknown): void {
+    const item = (response as { item?: Partial<DevelopmentItem> & { id?: string } } | null)?.item;
+    if (!item?.id) return;
+    this.data.update((data) => ({
+      ...data,
+      development: data.development.map((entry) => (entry.id === item.id ? { ...entry, ...item } : entry)),
+    }));
+  }
+
   async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<void> {
     this.busy.set(true);
     this.notice.set('');
     try {
-      await action();
+      this.applyItem(await action());
       // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
       this.notice.set(success);
@@ -214,7 +227,8 @@ export class ProjectStore {
         if (this.notice() === success) this.notice.set('');
       }, NOTICE_MS);
     } catch (error) {
-      this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
+      // Steht die Meldung schon am Formularfeld, nicht zusätzlich oben anzeigen.
+      if (!(error instanceof FieldError && error.shown)) this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
     } finally {
       this.busy.set(false);
     }
@@ -230,9 +244,13 @@ export class ProjectStore {
         const current = new Set((status.drafts ?? []).map((draft) => draft.id));
         const previous = this.workerSlug === slug ? (this.worker().drafts ?? []) : [];
         const finished = previous.some((draft) => !current.has(draft.id));
+        // Auftrag fertig oder neu gestartet: Status, Sprint und Läufe nachladen. Der Reload ruft refreshWorker erneut
+        // auf, vergleicht dann aber mit diesem Stand und löst keinen weiteren Reload aus.
+        const ordersChanged =
+          this.workerSlug === slug && runningOrdersChanged(this.worker().running ?? [], status.running ?? []);
         this.worker.set(status);
         this.workerSlug = slug;
-        if (finished) this.refreshActiveProject();
+        if (finished || ordersChanged) this.refreshActiveProject();
         this.workerFailure.set(false);
       }
     } catch {
@@ -264,7 +282,10 @@ export class ProjectStore {
       return;
     }
     if (section === this.section()) return;
+    // Wie navigate(): neue Seite oben beginnen und ein offenes Anlegeformular der alten Seite nicht mitnehmen.
+    globalThis.scrollTo?.({ top: 0 });
     this.section.set(section);
+    this.showCreate.set(false);
     this.refreshActiveProject();
   }
 
@@ -280,7 +301,11 @@ export class ProjectStore {
       const { runs } = await this.api.get<{ runs?: ProjectData['agentRuns'] }>(
         `${this.api.projectPath(slug)}/agent-runs`,
       );
-      if (slug === this.activeProject()) this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));
+      if (slug !== this.activeProject() || slug !== this.loadedSlug) return;
+      const finished = runStepFinished(this.data().agentRuns, runs ?? []);
+      this.data.update((data) => ({ ...data, agentRuns: runs ?? [] }));
+      // Letzter Schritt fertig: Danach pollt hier nichts mehr, also jetzt Auftrag, Sprint und Berichte nachladen.
+      if (finished) this.refreshActiveProject();
     } catch {
       /* nächster Versuch in 3 s */
     }

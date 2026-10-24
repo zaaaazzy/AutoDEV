@@ -35,7 +35,9 @@ export function orderAttention(development: DevelopmentItem[], acceptance: Accep
     .map((item) => {
       const reasons: AttentionReason[] = [];
       // Wartet der Auftrag auf einen Menschen, ist er nicht gescheitert, sondern braucht eine Aktion.
-      if (item.status === 'approval') reasons.push({ label: 'Wartet auf Freigabe', tone: 'info' });
+      // Schon freigegeben: wartet nur noch auf den Merge – steht unter „Läuft gerade“, nicht mehr bei dir.
+      if (item.status === 'approval' && !item.reviewApprovedAt)
+        reasons.push({ label: 'Wartet auf Freigabe', tone: 'info' });
       else if (item.status === 'rejected')
         reasons.push({ label: 'Abgelehnt – verstösst gegen Projektregel', tone: 'error' });
       else if (item.status === 'blocked' || (item.actionTodo && !isFinished(item.status)))

@@ -8,9 +8,11 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { acquireTree, treeBusy } from '../core/project-lock.js';
 import {
   BOT_IDENTITY,
+  checkoutSprintBranch,
   commitAgentStep,
   enterOrderBranch,
   finishOrderBranch,
+  mergeApprovedBranch,
   OrderBranchError,
   unresolvedConflicts,
 } from './git-sync.js';
@@ -179,4 +181,94 @@ test('Auftrag ohne Sprint im losgelösten Worktree landet in main, während main
   assert.equal(result.merged, true);
   assert.notEqual(git('rev-parse', 'main'), mainBefore);
   assert.match(git('ls-tree', '-r', '--name-only', 'main'), /fix\.ts/);
+});
+
+// Die getrimmte Ausgabe von „git status“ kostete den ersten Pfad ein Zeichen („docs/tests/…“ → „ocs/tests/…“): Dann
+// galten ignorierte Testberichte als fremde Änderung und blockierten jeden Auftrag.
+test('Geänderter Testbericht in docs/tests als erste Statuszeile blockiert keinen Auftrag', async () => {
+  const { cwd, git } = await project();
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'alt\n');
+  git('add', '-A');
+  git('commit', '-m', 'bericht');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'neu\n');
+  const branch = await enterOrderBranch(cwd, item, null);
+  assert.ok(branch, 'Auftrags-Branch wurde angelegt');
+});
+
+test('Fremde Änderung wird mit vollständigem Pfad gemeldet', async () => {
+  const { cwd } = await project();
+  await mkdir(join(cwd, 'docs'), { recursive: true });
+  await writeFile(join(cwd, 'base.txt'), 'geändert\n');
+  await assert.rejects(enterOrderBranch(cwd, item, null), /\(base\.txt\)/);
+});
+
+// Ein neuer Sprint zweigte vom lokalen main ab, auch wenn GitHub weiter war (z. B. gemergter Pull Request des
+// Vorgänger-Sprints) – dann fehlte ihm dessen Arbeit.
+test('Neuer Sprint-Branch startet vom neueren origin/main, wenn das lokale main nur zurückliegt', async () => {
+  const { cwd: remote } = await project();
+  const clone = await mkdtemp(join(tmpdir(), 'git-safety-clone-'));
+  execFileSync('git', ['clone', '-q', remote, clone]);
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: clone, stdio: 'pipe' }).toString().trim();
+  // GitHub (hier: remote) bekommt einen neuen Commit, den das lokale main nicht hat.
+  await writeFile(join(remote, 'vorgaenger.txt'), 'Sprint davor\n');
+  execFileSync('git', ['add', '-A'], { cwd: remote });
+  execFileSync('git', ['commit', '-q', '-m', 'Sprint davor'], { cwd: remote });
+  const branch = await checkoutSprintBranch(clone, 'Sprint 2');
+  assert.equal(branch, 'sprint/sprint-2');
+  assert.equal(git('show', 'HEAD:vorgaenger.txt'), 'Sprint davor');
+});
+
+// Früher kam main erst beim Sprint-Abschluss in den Sprint-Branch; Korrekturen auf main stauten sich zu grossen
+// Konflikten. Jetzt holt jeder neue Auftrag den aktuellen main zuerst in den Sprint-Branch.
+test('Neuer Auftrag im Sprint: aktueller main kommt vorher in den Sprint-Branch; bei Konflikt bleibt alles wie es war', async () => {
+  const { cwd, git } = await project();
+  git('checkout', '-q', '-b', 'sprint/sprint-1');
+  await writeFile(join(cwd, 'sprint.txt'), 'sprint\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'sprint-arbeit');
+  git('checkout', '-q', 'main');
+  await writeFile(join(cwd, 'fix.txt'), 'hotfix auf main\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'hotfix');
+  const first = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.equal(first?.base, 'sprint/sprint-1');
+  assert.equal(git('show', 'sprint/sprint-1:fix.txt'), 'hotfix auf main');
+
+  // Konflikt: main und Sprint ändern dieselbe Zeile – der Sprint-Branch bleibt unverändert, der Auftrag startet trotzdem.
+  git('checkout', '-q', 'sprint/sprint-1');
+  await writeFile(join(cwd, 'base.txt'), 'sprint-version\n');
+  git('commit', '-q', '-am', 'sprint ändert base');
+  git('checkout', '-q', 'main');
+  await writeFile(join(cwd, 'base.txt'), 'main-version\n');
+  git('commit', '-q', '-am', 'main ändert base');
+  const before = git('rev-parse', 'sprint/sprint-1');
+  const second = await enterOrderBranch(cwd, { id: '9f9f9f9f-0000', title: 'Zweiter Auftrag' }, 'Sprint 1');
+  assert.ok(second);
+  assert.equal(git('rev-parse', 'sprint/sprint-1'), before);
+  assert.equal(git('status', '--porcelain'), '');
+});
+
+// Auftrags-Commits nehmen Testberichte (docs/tests) bewusst nicht mit; ein neu geschriebener Bericht sperrte deshalb
+// jede Freigabe mit „Offene Änderungen im Arbeitsordner“.
+test('Freigabe-Merge: geänderter Testbericht in docs/tests sperrt nicht, echte offene Änderungen schon', async () => {
+  const { cwd, git } = await project();
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'alt\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'bericht');
+  git('checkout', '-q', '-b', 'auftrag/aa11bb22-feature');
+  await writeFile(join(cwd, 'feature.txt'), 'neu\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'feature');
+  git('checkout', '-q', 'main');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'neu geschrieben\n');
+  const merged = await mergeApprovedBranch(cwd, { title: 'Feature' }, 'auftrag/aa11bb22-feature', 'main');
+  assert.equal(merged.merged, true, merged.message);
+  await writeFile(join(cwd, 'base.txt'), 'offen\n');
+  git('checkout', '-q', '-b', 'auftrag/cc33dd44-zweites');
+  git('checkout', '-q', 'main');
+  const blocked = await mergeApprovedBranch(cwd, { title: 'Zweites' }, 'auftrag/cc33dd44-zweites', 'main');
+  assert.equal(blocked.merged, false);
+  assert.match(blocked.message, /Offene Änderungen im Arbeitsordner \(base\.txt\)/);
 });

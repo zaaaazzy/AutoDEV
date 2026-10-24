@@ -31,7 +31,9 @@
     <article class="panel">
       <div class="section-heading">
         <h2>Projektübersicht</h2>
-        <span class="muted">{{ store.currentProject()?.repository }}</span>
+        @if (store.currentProject()?.repository; as folder) {
+          <span class="muted" [title]="folder">Ordner: {{ folderName(folder) }}</span>
+        }
       </div>
       <div class="share-stack">
         <app-share-bar

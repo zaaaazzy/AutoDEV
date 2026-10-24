@@ -1,3 +1,5 @@
+import { escapeHtml, replaceInText } from '../../shared/html.js';
+
 /**
  * @-Erwähnungen in Kommentaren: „@“ schlägt Agents und Personen vor, die Auswahl wird als „@Name“ in den Text
  * übernommen und zusätzlich als Erwähnung (Typ + ID) mitgeschickt. Reine Logik ohne Angular, damit sie testbar ist.
@@ -55,26 +57,25 @@ export function activeMentions(text: string, mentions: CommentMention[]): Commen
   );
 }
 
-const escapeHtml = (value: string): string => value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Hebt „@Name“ im bereits gerenderten (escapten) HTML als Bubble hervor – Agents und Personen unterschiedlich. */
+/**
+ * Hebt „@Name“ im bereits gerenderten (escapten) HTML als Bubble hervor – Agents und Personen unterschiedlich. Nur im
+ * Text, nie in Attributen oder Links (sonst schlösse die Bubble ein href-Attribut), und in einem Durchgang, damit ein
+ * kürzerer Name („@Patrick“) nicht in der Bubble eines längeren („@Patrick Moser“) noch einmal hervorgehoben wird.
+ */
 export function highlightMentions(html: string, mentions: CommentMention[]): string {
-  return [...mentions]
-    .sort((a, b) => b.name.length - a.name.length)
-    .reduce((result, mention) => {
-      const escaped = escapeHtml(mention.name).replace(
-        /&#(\d+);/g,
-        (entity, code: string) =>
-          // Der Markdown-Renderer schreibt benannte Entities; beide Formen erkennen.
-          ({ 38: '&amp;', 60: '&lt;', 62: '&gt;', 34: '&quot;', 39: '&#39;' })[Number(code)] ?? entity,
-      );
-      const pattern = new RegExp(`@${escapeRegExp(escaped)}(?![\\w-])`, 'g');
-      return result.replace(
-        pattern,
-        `<span class="mention-chip ${mention.type}">${mention.type === 'agent' ? '⚙︎' : '@'}${escaped}</span>`,
-      );
-    }, html);
+  if (!mentions.length) return html;
+  const byName = new Map(mentions.map((mention) => [escapeHtml(mention.name), mention]));
+  const names = [...byName.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp);
+  const pattern = new RegExp(`@(${names.join('|')})(?![\\w-])`, 'g');
+  return replaceInText(html, (text) =>
+    text.replace(pattern, (match, name: string) => {
+      const mention = byName.get(name);
+      if (!mention) return match;
+      return `<span class="mention-chip ${mention.type}">${mention.type === 'agent' ? '⚙︎' : '@'}${name}</span>`;
+    }),
+  );
 }
 
 /** Initialen für den Avatar („Patrick Moser“ → „PM“). */

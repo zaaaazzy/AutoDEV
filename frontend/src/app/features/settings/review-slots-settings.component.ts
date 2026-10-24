@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { ReviewSlot } from '../../core/models.js';
+import { SettingsGroupDirective } from './settings-group.js';
 
 const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
   idle: 'frei',
@@ -15,9 +16,10 @@ const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
 @Component({
   selector: 'app-review-slots-settings',
   standalone: true,
+  imports: [SettingsGroupDirective],
   template: `
-    <section class="panel">
-      <div class="section-heading">
+    <details appSettingsGroup="review-container">
+      <summary class="section-heading">
         <div>
           <h2>Review-Container</h2>
           <p class="muted">
@@ -26,13 +28,15 @@ const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
             erreichbar.
           </p>
         </div>
-      </div>
-      <ul class="review-slot-list">
+      </summary>
+      <ul class="review-slot-list plain-list">
         @for (slot of slots(); track slot.slot) {
           <li>
             <label class="check">
               <input type="checkbox" [checked]="slot.enabled" (change)="toggle(slot, $any($event.target).checked)" />
-              Review {{ slot.slot }} · <code>{{ slot.url }}</code>
+              <span
+                >Review {{ slot.slot }} · <code>{{ slot.url }}</code></span
+              >
             </label>
             <span class="muted">
               {{ statusText(slot) }}
@@ -46,7 +50,7 @@ const STATUS_TEXT: Record<ReviewSlot['status'], string> = {
           </li>
         }
       </ul>
-    </section>
+    </details>
   `,
 })
 export class ReviewSlotsSettingsComponent {

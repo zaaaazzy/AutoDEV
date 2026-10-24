@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computed, signal } from '@angular/core';
+import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
 import { pickInOrder, poolOpenState } from './pool-selection.js';
 
 test('Auswahl: in Anzeige-Reihenfolge, nicht mehr verfügbare fallen weg', () => {
@@ -74,4 +75,16 @@ test('„Aufträge hinzufügen“: Wechsel leer ↔ nicht leer setzt auf die Vor
   // Sprint wieder leer: Vorgabe „offen“.
   view.data.update((data) => ({ ...data, development: [{ id: 'a' }, { id: 'b' }] }));
   assert.equal(view.poolOpen(), true);
+});
+
+test('Pool „Aufträge hinzufügen“: laufende und freizugebende Aufträge nach Sprint-Abbruch fehlen (Route lehnt sie ab)', () => {
+  const removed = { sprintId: null, kind: 'feature', removedFromSprintAt: '2026-10-21' };
+  for (const status of ['in_progress', 'approval', 'done', 'rejected']) {
+    assert.equal(canTakeIntoSprint({ status, ...removed }), false, status);
+  }
+  for (const status of ['backlog', 'planned', 'blocked']) {
+    assert.equal(canTakeIntoSprint({ status, ...removed }), true, status);
+  }
+  assert.equal(canTakeIntoSprint({ status: 'backlog', sprintId: 'sprint', kind: 'feature' }), false, 'schon im Sprint');
+  assert.equal(canTakeIntoSprint({ status: 'backlog', sprintId: null, kind: 'express' }), false, 'Express');
 });

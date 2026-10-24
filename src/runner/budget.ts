@@ -13,6 +13,22 @@ export const PERIOD_LABELS: Record<BudgetPeriod, string> = {
   order: 'Auftragslimit',
 };
 
+/** Agent-Rollen mit eigenem Token-Limit (agents.role ohne „custom“: dort gibt es keine feste Zuordnung). */
+export const BUDGET_ROLES = [
+  'author',
+  'developer',
+  'tester',
+  'reviewer',
+  'documenter',
+  'bug_reviewer',
+  'manual_writer',
+  'user_manual_writer',
+] as const;
+export type BudgetRole = (typeof BUDGET_ROLES)[number];
+
+export const isBudgetRole = (value: unknown): value is BudgetRole =>
+  typeof value === 'string' && (BUDGET_ROLES as readonly string[]).includes(value);
+
 /** Ab diesem Anteil kommt einmal je Periode eine Push-Warnung, und das Routing schaltet in den Sparmodus. */
 export const WARN_PERCENT = 80;
 
@@ -21,6 +37,8 @@ export interface BudgetLimit {
   /** null = unbegrenzt */
   maxTokens: number | null;
   maxCostUsd: number | null;
+  /** Gesetzt = Limit einer Agent-Rolle (budget_role_limits), sonst Projektlimit (budgets). */
+  role?: BudgetRole;
 }
 
 export interface Spend {
@@ -37,12 +55,16 @@ export interface BudgetState {
   spend: Spend;
   /** Höchster Anteil von Tokens und Kosten am jeweiligen Limit, in Prozent. */
   percent: number;
+  /** Gesetzt = Stand eines Rollen-Limits; key trägt dann das Präfix „rolle:<role>:“. */
+  role?: BudgetRole;
 }
 
 /** Bereich eines Laufs: der Auftrag (für Auftrags- und Sprintlimit) oder nur das Projekt (Chat, Autor, Visionär). */
 export interface BudgetScope {
   itemId?: string | null;
   sprintId?: string | null;
+  /** Agent-Rolle des anstehenden Schritts: prüft zusätzlich deren Limits. Ohne Rolle nur die Projektlimits. */
+  role?: string | null;
 }
 
 /** Leere oder ungültige Werte bedeuten unbegrenzt. */
@@ -66,6 +88,23 @@ export async function loadBudgets(pool: Pool, project: string): Promise<BudgetLi
       maxCostUsd: limitValue(row.maxCostUsd),
     }))
     .filter(hasLimit);
+}
+
+/** Token-Limits je Agent-Rolle (optional nur einer Rolle); fehlende Zeile = keine Grenze für die Rolle. */
+export async function loadRoleLimits(pool: Pool, project: string, role?: string | null): Promise<BudgetLimit[]> {
+  const rows = (
+    await pool.query<{ role: string; period: BudgetPeriod; maxTokens: string | null }>(
+      `SELECT role, period, max_tokens AS "maxTokens" FROM budget_role_limits
+        WHERE project_slug = $1 AND ($2::text IS NULL OR role = $2) ORDER BY role, period`,
+      [project, role ?? null],
+    )
+  ).rows;
+  return rows.flatMap((row) => {
+    const maxTokens = limitValue(row.maxTokens);
+    return isBudgetRole(row.role) && maxTokens !== null
+      ? [{ period: row.period, maxTokens, maxCostUsd: null, role: row.role }]
+      : [];
+  });
 }
 
 /** Anteil am Limit in Prozent (der höhere von Tokens und Kosten); 0 ohne Limit. */
@@ -98,6 +137,49 @@ async function spendSince(pool: Pool, project: string, since: string): Promise<S
   return spendRow(row);
 }
 
+/**
+ * Verbrauch je Agent-Rolle seit einem Zeitpunkt: Workflow-Schritte über agent_id → agents.role und agent_usage.role.
+ * Schritte ohne agent_id (eingebaute Agents, gelöschter Agent) zählen zu keiner Rolle, nur zum Projekt.
+ */
+export async function spendByRole(
+  pool: Pool,
+  project: string,
+  since: string,
+  roles: readonly string[] = BUDGET_ROLES,
+): Promise<Map<string, Spend>> {
+  const rows = (
+    await pool.query<{ role: string; tokens: string; cost: string }>(
+      `SELECT role, COALESCE(SUM(tokens), 0) AS tokens, COALESCE(SUM(cost), 0) AS cost FROM (
+         SELECT a.role, s.tokens, s.cost_usd AS cost FROM agent_run_steps s
+           JOIN agent_runs r ON r.id = s.run_id JOIN agents a ON a.id = s.agent_id
+          WHERE r.project_slug = $1 AND COALESCE(s.started_at, r.started_at) >= $2::timestamptz AND a.role = ANY($3)
+         UNION ALL
+         SELECT role, tokens, cost_usd FROM agent_usage
+          WHERE project_slug = $1 AND created_at >= $2::timestamptz AND role = ANY($3)
+       ) spent GROUP BY role`,
+      [project, since, [...roles]],
+    )
+  ).rows;
+  return new Map(rows.map((row) => [row.role, spendRow(row)]));
+}
+
+/** Verbrauch einer Rolle in einem Auftrag seit dem letzten manuellen Start (nur Schritte mit agent_id). */
+async function loadRoleOrderSpend(pool: Pool, itemId: string, role: string): Promise<Spend & { since: string | null }> {
+  const row = (
+    await pool.query<{ tokens: string | null; cost: string | null; since: string | null }>(
+      `SELECT COALESCE(SUM(s.tokens), 0) AS tokens, COALESCE(SUM(s.cost_usd), 0) AS cost,
+              (SELECT budget_since::text FROM development_items WHERE id = $1) AS since
+         FROM agent_run_steps s
+         JOIN agent_runs r ON r.id = s.run_id
+         JOIN development_items d ON d.id = r.development_id
+         JOIN agents a ON a.id = s.agent_id
+        WHERE r.development_id = $1 AND a.role = $2 AND (d.budget_since IS NULL OR r.started_at >= d.budget_since)`,
+      [itemId, role],
+    )
+  ).rows[0];
+  return { ...spendRow(row), since: row?.since ?? null };
+}
+
 /** Verbrauch eines Auftrags über alle Läufe seit dem letzten manuellen Start („Erneut versuchen“). */
 export async function loadOrderSpend(pool: Pool, itemId: string): Promise<Spend & { since: string | null }> {
   const row = (
@@ -114,36 +196,59 @@ export async function loadOrderSpend(pool: Pool, itemId: string): Promise<Spend 
   return { ...spendRow(row), since: row?.since ?? null };
 }
 
-/** Periode und Verbrauch eines Zeitraums; null, wenn er für diesen Lauf nicht gilt (kein Sprint, kein Auftrag). */
+/** Beginn des Sprints (des Auftrags, sonst des aktiven Sprints); null ohne Sprint. */
+export async function sprintStart(
+  pool: Pool,
+  project: string,
+  sprintId: string | null | undefined,
+): Promise<{ id: string; since: string } | null> {
+  return (
+    (
+      await pool.query<{ id: string; since: string }>(
+        `SELECT id, COALESCE(start_date::timestamp AT TIME ZONE $3::text, created_at)::text AS since FROM sprints
+          WHERE project_slug = $1 AND (id = $2::uuid OR ($2::uuid IS NULL AND status = 'active'))
+          ORDER BY status = 'active' DESC LIMIT 1`,
+        [project, sprintId ?? null, localTimeZone()],
+      )
+    ).rows[0] ?? null
+  );
+}
+
+/** Kennung der Periode eines Rollen-Limits in budget_warnings (Tabelle bleibt unverändert). */
+export const roleKey = (role: string, key: string): string => `rolle:${role}:${key}`;
+
+/**
+ * Periode und Verbrauch eines Zeitraums; null, wenn er für diesen Lauf nicht gilt (kein Sprint, kein Auftrag).
+ * Mit Rolle: nur der Verbrauch dieser Agent-Rolle.
+ */
 async function periodSpend(
   pool: Pool,
   project: string,
   period: BudgetPeriod,
   scope: BudgetScope,
+  role?: BudgetRole,
 ): Promise<{ key: string; spend: Spend } | null> {
+  const since = async (from: string): Promise<Spend> =>
+    role
+      ? ((await spendByRole(pool, project, from, [role])).get(role) ?? { tokens: 0, costUsd: 0 })
+      : spendSince(pool, project, from);
+  const keyed = (key: string) => (role ? roleKey(role, key) : key);
   if (period === 'day') {
     // Budget-Tag in Ortszeit (DEV_LOG_TIMEZONE): beginnt um Mitternacht vor Ort, nicht um Mitternacht UTC.
     const day = localDay();
-    return { key: day.key, spend: await spendSince(pool, project, day.since) };
+    return { key: keyed(day.key), spend: await since(day.since) };
   }
   if (period === 'sprint') {
     // Sprint des Auftrags, sonst der aktive Sprint des Projekts.
-    const sprint = (
-      await pool.query<{ id: string; since: string }>(
-        `SELECT id, COALESCE(start_date::timestamp AT TIME ZONE $3::text, created_at)::text AS since FROM sprints
-          WHERE project_slug = $1 AND (id = $2::uuid OR ($2::uuid IS NULL AND status = 'active'))
-          ORDER BY status = 'active' DESC LIMIT 1`,
-        [project, scope.sprintId ?? null, localTimeZone()],
-      )
-    ).rows[0];
-    return sprint ? { key: sprint.id, spend: await spendSince(pool, project, sprint.since) } : null;
+    const sprint = await sprintStart(pool, project, scope.sprintId);
+    return sprint ? { key: keyed(sprint.id), spend: await since(sprint.since) } : null;
   }
   if (!scope.itemId) return null;
-  const order = await loadOrderSpend(pool, scope.itemId);
-  return { key: `${scope.itemId}:${order.since ?? ''}`, spend: order };
+  const order = role ? await loadRoleOrderSpend(pool, scope.itemId, role) : await loadOrderSpend(pool, scope.itemId);
+  return { key: keyed(`${scope.itemId}:${order.since ?? ''}`), spend: order };
 }
 
-/** Stand aller begrenzten Zeiträume, die für den Lauf gelten. */
+/** Stand aller begrenzten Zeiträume, die für den Lauf gelten (Projekt- und übergebene Rollen-Limits). */
 export async function budgetStates(
   pool: Pool,
   project: string,
@@ -152,10 +257,19 @@ export async function budgetStates(
 ): Promise<BudgetState[]> {
   const states: BudgetState[] = [];
   for (const limit of limits ?? (await loadBudgets(pool, project))) {
-    const current = await periodSpend(pool, project, limit.period, scope);
-    if (current) states.push({ ...current, period: limit.period, limit, percent: usagePercent(current.spend, limit) });
+    const current = await periodSpend(pool, project, limit.period, scope, limit.role);
+    if (!current) continue;
+    const state: BudgetState = { ...current, period: limit.period, limit, percent: usagePercent(current.spend, limit) };
+    if (limit.role) state.role = limit.role;
+    states.push(state);
   }
   return states;
+}
+
+/** Projektlimits und – mit Rolle im Bereich – die Limits dieser Rolle. */
+async function scopeLimits(pool: Pool, project: string, role: string | null | undefined): Promise<BudgetLimit[]> {
+  const limits = await loadBudgets(pool, project);
+  return isBudgetRole(role) ? [...limits, ...(await loadRoleLimits(pool, project, role))] : limits;
 }
 
 const formatTokens = (tokens: number): string =>
@@ -174,7 +288,8 @@ export function describeState(state: BudgetState): string {
     tokenShare >= costShare
       ? `${formatTokens(spend.tokens)} von ${formatTokens(limit.maxTokens ?? 0)}`
       : `${spend.costUsd.toFixed(2)} USD von ${(limit.maxCostUsd ?? 0).toFixed(2)} USD`;
-  return `${PERIOD_LABELS[state.period]}: ${detail}`;
+  const label = state.role ? `${PERIOD_LABELS[state.period]} der Rolle „${state.role}“` : PERIOD_LABELS[state.period];
+  return `${label}: ${detail}`;
 }
 
 /** Erster erreichter Zeitraum (≥ 100 %) – sonst null. */
@@ -209,10 +324,10 @@ export async function warnThresholds(
     await send(
       pool,
       {
-        title: `💰 Budget zu ${Math.min(Math.round(state.percent), 999)} % verbraucht · ${project}`,
-        body: `${describeState(state)}. Ab 100 % starten keine neuen Agent-Schritte mehr.`,
+        title: `💰 Budget${state.role ? ` (${state.role})` : ''} zu ${Math.min(Math.round(state.percent), 999)} % verbraucht · ${project}`,
+        body: `${describeState(state)}. Ab 100 % starten keine neuen ${state.role ? 'Schritte dieser Rolle' : 'Agent-Schritte'} mehr.`,
         url: `#settings?project=${encodeURIComponent(project)}`,
-        tag: `budget-${project}-${state.period}`,
+        tag: `budget-${project}-${state.period}${state.role ? `-${state.role}` : ''}`,
       },
       { project },
     ).catch(logged('budget', 0));
@@ -229,11 +344,11 @@ export interface BudgetCheck {
 }
 
 /**
- * Prüfpunkt vor jedem Lauf und Schritt: Stand aller Limits, Warnung ab 80 %. Ohne Limits keine Abfrage des
- * Verbrauchs (Verhalten wie ohne Budget).
+ * Prüfpunkt vor jedem Lauf und Schritt: Stand aller Limits (Projekt, mit scope.role auch die der Rolle), Warnung ab
+ * 80 %. Ohne Limits keine Abfrage des Verbrauchs (Verhalten wie ohne Budget).
  */
 export async function checkBudget(pool: Pool, project: string, scope: BudgetScope = {}): Promise<BudgetCheck> {
-  const limits = await loadBudgets(pool, project);
+  const limits = await scopeLimits(pool, project, scope.role);
   if (!limits.length) return { states: [], exceeded: null, percent: 0 };
   const states = await budgetStates(pool, project, scope, limits);
   await warnThresholds(pool, project, states).catch(logged('budget', []));
@@ -254,11 +369,11 @@ export async function projectBudgetExceeded(pool: Pool, project: string): Promis
 /** Blockiert einen Auftrag wegen Budget: „Aktion notwendig“ mit Hinweis; der Zeitraum gibt ihn später wieder frei. */
 export async function blockForBudget(pool: Pool, itemId: string, state: BudgetState): Promise<string> {
   const todo = budgetTodo(state);
-  await pool.query(`UPDATE development_items SET failure = $2, budget_blocked = $3 WHERE id = $1`, [
-    itemId,
-    todo,
-    state.period,
-  ]);
+  // Der Grund (Rolle, Zeitraum, Grenzwert, Verbrauch) steht am Auftrag – auch ohne fehlgeschlagenen Schritt.
+  await pool.query(
+    `UPDATE development_items SET failure = $2, budget_blocked = $3, budget_blocked_role = $4 WHERE id = $1`,
+    [itemId, todo, state.period, state.role ?? null],
+  );
   return todo;
 }
 
@@ -274,7 +389,8 @@ export async function holdForBudget(
 ): Promise<boolean> {
   const todo = budgetTodo(state);
   const held = await pool.query(
-    `UPDATE development_items d SET status = 'blocked', failure = $2, budget_blocked = $3, updated_at = NOW()
+    `UPDATE development_items d SET status = 'blocked', failure = $2, budget_blocked = $3, budget_blocked_role = NULL,
+            updated_at = NOW()
       WHERE d.id = $1 AND NOT EXISTS (
         SELECT 1 FROM development_items o WHERE o.project_slug = d.project_slug AND o.status = 'blocked'
            AND o.budget_blocked IN ('day', 'sprint'))
@@ -299,21 +415,25 @@ export async function holdForBudget(
 
 /**
  * Gibt wegen Budget blockierte Aufträge frei, sobald ihr Zeitraum wieder Luft hat (Tageslimit am Folgetag, nach
- * Erhöhen oder Entfernen des Limits). Die Aktion „Budget“ verschwindet dabei.
+ * Erhöhen oder Entfernen des Limits). Hat ein Rollen-Limit blockiert, zählen zusätzlich die Limits dieser Rolle.
+ * Die Aktion „Budget“ verschwindet dabei.
  */
 export async function releaseBudgetBlocks(pool: Pool, project: string): Promise<string[]> {
   const blocked = (
-    await pool.query<{ id: string; sprintId: string | null; period: BudgetPeriod }>(
-      `SELECT id, sprint_id AS "sprintId", budget_blocked AS period FROM development_items
+    await pool.query<{ id: string; sprintId: string | null; period: BudgetPeriod; role: string | null }>(
+      `SELECT id, sprint_id AS "sprintId", budget_blocked AS period, budget_blocked_role AS role
+         FROM development_items
         WHERE project_slug = $1 AND status = 'blocked' AND budget_blocked IS NOT NULL`,
       [project],
     )
   ).rows;
   if (!blocked.length) return [];
   const limits = await loadBudgets(pool, project);
+  const roleLimits = blocked.some((item) => isBudgetRole(item.role)) ? await loadRoleLimits(pool, project) : [];
   const released: string[] = [];
   for (const item of blocked) {
-    const states = await budgetStates(pool, project, { itemId: item.id, sprintId: item.sprintId }, limits);
+    const ownLimits = [...limits, ...roleLimits.filter((limit) => limit.role === item.role)];
+    const states = await budgetStates(pool, project, { itemId: item.id, sprintId: item.sprintId }, ownLimits);
     if (exceededState(states)) continue;
     const result = await pool.query(
       `UPDATE development_items SET status = 'planned', auto_run = TRUE, failure = NULL, budget_blocked = NULL,

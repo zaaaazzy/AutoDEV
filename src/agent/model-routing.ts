@@ -51,8 +51,9 @@ export interface RoutingDecision {
 export const DEFAULT_RULES: RoutingRule[] = [
   { condition: { categories: ['security'] }, tier: 'strong' },
   { condition: { categories: ['docs'] }, tier: 'local' },
-  { condition: { maxHours: 1 }, tier: 'local' },
-  { condition: { categories: ['backend'], minHours: 4 }, tier: 'strong' },
+  // Agent-Stunden (kalibrierte Schätzung): gemessen braucht ein Auftrag im Median 0,2–0,4 h.
+  { condition: { maxHours: 0.1 }, tier: 'local' },
+  { condition: { categories: ['backend'], minHours: 0.5 }, tier: 'strong' },
   { condition: { minRetries: 1 }, tier: 'up' },
   { condition: { minBudgetPercent: 80 }, tier: 'down' },
 ];
@@ -66,7 +67,7 @@ const EFFECT_LABELS: Record<RuleEffect, string> = {
 
 const hours = (value: number): string => `${String(value).replace('.', ',')} h`;
 
-/** Kurzform einer Regel für Lauf-Detail und Einstellungen, z. B. „backend, Schätzung > 4 h → stark“. */
+/** Kurzform einer Regel für Lauf-Detail und Einstellungen, z. B. „backend, Schätzung > 0,5 h → stark“. */
 export function ruleLabel(rule: RoutingRule): string {
   const { categories, minHours, maxHours, minRetries, minBudgetPercent } = rule.condition;
   const parts = [

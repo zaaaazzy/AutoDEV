@@ -9,7 +9,8 @@ source "$ROOT/scripts/lib/service-env.sh"
 LABEL="com.aideation.watchdog"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENV_FILE="$SERVICE_ENV_DIR/watchdog.env"
-NODE_BIN="$(dirname "$(command -v node)")"
+# Echter Pfad statt Shim/Sitzungspfad (fnm, Volta): der Dienst startet später ohne die Shell-Umgebung.
+NODE_BIN="$(dirname "$(node -p process.execPath)")"
 DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
@@ -24,9 +25,8 @@ write_private_file "$PLIST" <<P
 <key>Label</key><string>$LABEL</string>
 <key>WorkingDirectory</key><string>$(xml_escape "$ROOT")</string>
 <key>ProgramArguments</key><array>
-<string>/bin/bash</string><string>$(xml_escape "$ROOT/scripts/run-with-env.sh")</string>
-<string>$(xml_escape "$ENV_FILE")</string>
-<string>$(xml_escape "$NODE_BIN/npm")</string><string>run</string><string>--silent</string><string>watchdog</string></array>
+<string>$(xml_escape "$NODE_BIN/node")</string><string>--env-file=$(xml_escape "$ENV_FILE")</string>
+<string>$(xml_escape "$ROOT/node_modules/tsx/dist/cli.mjs")</string><string>src/runner/watchdog-cli.ts</string></array>
 <key>EnvironmentVariables</key><dict>
 <key>PATH</key><string>$(xml_escape "$NODE_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin")</string>
 </dict>

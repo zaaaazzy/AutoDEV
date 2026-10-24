@@ -75,7 +75,7 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
 
   app.get('/bugs/:id/production', access({ tenant: 'bugs' }), async (request, response, next) => {
     try {
-      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Nicht gefunden.' });
       const events = (
         await pool.query(
           `SELECT id, source, origin, fingerprint, first_seen AS "firstSeen", last_seen AS "lastSeen",
@@ -102,7 +102,7 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
   // Rollback-Vorschlag eines Betriebs-Bugs und Protokoll der ausgelösten Rollbacks (Bug-Verlauf).
   app.get('/bugs/:id/rollback', access({ tenant: 'bugs' }), async (request, response, next) => {
     try {
-      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Nicht gefunden.' });
       const loaded = await loadRollbackFacts(pool, request.params.id);
       if (!loaded) return void response.status(404).json({ message: 'Bug nicht gefunden.' });
       const rollbacks = (
@@ -121,7 +121,7 @@ export function registerProductionRoutes(app: Router, pool: Pool): void {
   // „Live schalten“; ausgeführt wird im Worker über deployProject. Der Bug bleibt unverändert.
   app.post('/bugs/:id/rollback', access({ role: 'plan', tenant: 'bugs' }), async (request, response, next) => {
     try {
-      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Nicht gefunden.' });
       const body = isRecord(request.body) ? request.body : {};
       const confirmed = typeof body.toTag === 'string' ? body.toTag : '';
       if (!SPRINT_TAG.test(confirmed)) {

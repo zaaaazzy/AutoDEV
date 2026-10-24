@@ -44,3 +44,25 @@ test('Erwähnung: im Text als Bubble hervorgehoben, Initialen für den Avatar', 
   assert.equal(initials('Patrick Moser'), 'PM');
   assert.equal(initials('Visionär'), 'V');
 });
+
+test('Erwähnung: nie in Attributen oder Links, kürzerer Name nicht in der Bubble eines längeren', () => {
+  const patrickKurz: CommentMention = { type: 'user', id: 'u2', name: 'Patrick' };
+  const html = highlightMentions(
+    '<p><a class="ext-link" href="https://x.com/@Tester">https://x.com/@Tester</a> @Patrick Moser, @Patrick</p>',
+    [tester, patrick, patrickKurz],
+  );
+  assert.match(html, /href="https:\/\/x\.com\/@Tester">https:\/\/x\.com\/@Tester<\/a>/);
+  assert.equal((html.match(/mention-chip/g) ?? []).length, 2);
+  assert.match(
+    html,
+    /<span class="mention-chip user">@Patrick Moser<\/span>, <span class="mention-chip user">@Patrick<\/span>/,
+  );
+});
+
+test('Erwähnung: Namen mit Sonderzeichen werden wie im escapten HTML erkannt', () => {
+  const odd: CommentMention = { type: 'user', id: 'u3', name: 'Q&A <Team>' };
+  assert.equal(
+    highlightMentions('<p>@Q&amp;A &lt;Team&gt;</p>', [odd]),
+    '<p><span class="mention-chip user">@Q&amp;A &lt;Team&gt;</span></p>',
+  );
+});

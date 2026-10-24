@@ -2,11 +2,13 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
 import type { Principal } from './roles.js';
-import { completeSprint } from './sprint-planning.js';
+import { completeSprintIn } from './sprint-planning.js';
 import { guardGit } from './git-state.js';
+import { sprintBranch } from '../runner/git-sync/git-helpers.js';
 import {
   buildUpdate,
   isRecord,
+  invalidInput,
   isUuid,
   parseFields,
   parseLongText,
@@ -44,6 +46,11 @@ const SPRINT_FIELDS = {
  * Schritt ab), offene Aufträge verlassen den Sprint wie „aus dem laufenden Sprint genommen“: geplante zurück ins
  * Backlog, laufende schließt der Worker ab (settleItem). Mit dem Vermerk stehen sie unter „Aktionen“ und zur Auswahl für
  * den nächsten Sprint. Erledigte und abgelehnte bleiben beim Sprint; Git-Sicherung und Merge gibt es nicht.
+ *
+ * Aufträge in Freigabe gehen ebenfalls zurück ins Backlog (statt wie erledigte beim Sprint zu bleiben): Ihre Freigabe
+ * mergte in den Sprint-Branch (review_base), der nach dem Abbruch nie in main kommt. Ohne Rücksetzen hingen sie ohne
+ * Sprint in Freigabe fest, und „Wieder einplanen“ (/retry nur aus backlog/planned) scheiterte mit 409. Die Arbeit
+ * bleibt auf dem Auftrags-Branch; der nächste Lauf setzt dort fort.
  */
 export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stopped: number; released: number }> {
   const stopped = await pool.query(
@@ -55,13 +62,30 @@ export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stop
   const released = await pool.query(
     `UPDATE development_items SET removed_from_sprint = (SELECT name FROM sprints WHERE id = $1),
             removed_from_sprint_at = NOW(), sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
-            status = CASE WHEN status = 'planned' THEN 'backlog' ELSE status END, updated_at = NOW()
+            status = CASE WHEN status IN ('planned', 'approval') THEN 'backlog' ELSE status END,
+            review_branch = NULL, review_base = NULL, review_since = NULL, review_approved_at = NULL, updated_at = NOW()
       WHERE sprint_id = $1 AND status NOT IN ('done', 'rejected')`,
     [sprintId],
   );
   // Eine Pause ist mit dem Abbruch erledigt; wieder geplant startet der Sprint sonst pausiert.
   await pool.query(`UPDATE sprints SET paused_at = NULL, paused_by = NULL WHERE id = $1`, [sprintId]);
   return { stopped: stopped.rowCount ?? 0, released: released.rowCount ?? 0 };
+}
+
+const SAME_BRANCH_MESSAGE =
+  'Ein anderer Sprint dieses Projekts hat schon einen gleichwertigen Namen (gleicher Git-Branch) – bitte anders benennen.';
+
+/**
+ * Zwei Sprints mit gleichem Branch-Namen (z. B. „Sprint 5“ und „sprint-5“, oder Namen, die nach 40 Zeichen gleich
+ * werden) teilten sich einen Sprint-Branch: Der neue setzte dann die ungesicherte Arbeit des alten fort.
+ */
+async function branchNameTaken(pool: Pool, project: string, name: string, exceptId?: string): Promise<boolean> {
+  const branch = sprintBranch(name);
+  const others = await pool.query<{ name: string }>(
+    'SELECT name FROM sprints WHERE project_slug = $1 AND ($2::uuid IS NULL OR id <> $2::uuid)',
+    [project, exceptId ?? null],
+  );
+  return others.rows.some((sprint) => typeof sprint.name === 'string' && sprintBranch(sprint.name) === branch);
 }
 
 function databaseCode(error: unknown): string | undefined {
@@ -74,7 +98,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/sprints', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -91,7 +115,13 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     // Neue Sprints starten immer als geplant: aktiv und abgeschlossen gibt es nur über die Statuswechsel.
     if (!slug || !fields || !values.get('name') || (values.get('status') ?? 'planned') !== 'planned') {
-      response.status(400).json({ message: 'Invalid sprint.' });
+      response
+        .status(400)
+        .json(slug ? invalidInput(request.body, SPRINT_FIELDS, ['name']) : { message: 'Ungültiges Projekt.' });
+      return;
+    }
+    if (await branchNameTaken(pool, slug, String(values.get('name')))) {
+      response.status(409).json({ field: 'name', message: SAME_BRANCH_MESSAGE });
       return;
     }
     try {
@@ -111,7 +141,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(201).json({ sprint: result.rows[0] });
     } catch (error) {
       if (databaseCode(error) === '23514') {
-        response.status(400).json({ message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
+        response.status(400).json({ field: 'endDate', message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
         return;
       }
       throw error;
@@ -120,22 +150,36 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.patch('/sprints/:id', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const fields = parseFields(request.body, SPRINT_FIELDS);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid sprint update.' });
+      response.status(400).json(invalidInput(request.body, SPRINT_FIELDS));
       return;
     }
     const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+    const rename = fields.find((field) => field.column === 'name')?.value as string | undefined;
+    if (rename) {
+      const owner = (
+        await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM sprints WHERE id = $1', [
+          request.params.id,
+        ])
+      ).rows[0];
+      if (owner && (await branchNameTaken(pool, owner.slug, rename, request.params.id))) {
+        response.status(409).json({ field: 'name', message: SAME_BRANCH_MESSAGE });
+        return;
+      }
+    }
     try {
       let from: string | undefined;
       if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string; running: number; slug: string }>(
+        const current = await pool.query<{ status: string; running: number; waiting: number; slug: string }>(
           `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
-                            WHERE sprint_id = s.id AND status = 'in_progress') AS running
+                            WHERE sprint_id = s.id AND status = 'in_progress') AS running,
+                  (SELECT COUNT(*)::int FROM development_items
+                    WHERE sprint_id = s.id AND status = 'approval') AS waiting
              FROM sprints s WHERE id = $1`,
           [request.params.id],
         );
@@ -152,7 +196,10 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
             ? `Statuswechsel ${from} → ${target} ist für Sprints nicht erlaubt.`
             : target === 'completed' && Number(current.rows[0]?.running) > 0
               ? 'Im Sprint laufen noch Aufträge – erst abwarten oder stoppen, dann abschließen.'
-              : null;
+              : target === 'completed' && Number(current.rows[0]?.waiting) > 0
+                ? // Freigaben werden später in den Sprint-Branch gemergt – nach dem Abschluss kämen sie nie mehr in main.
+                  `${current.rows[0]?.waiting} Auftrag/Aufträge warten auf die Review-Freigabe oder den Merge danach – erst freigeben bzw. zurückweisen und den Merge abwarten, dann abschliessen.`
+                : null;
         if (conflict) {
           response.status(409).json({ message: conflict });
           return;
@@ -171,18 +218,40 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         SPRINT_COLUMNS,
         from ? { column: 'status', values: [from] } : undefined,
       );
-      const result = await pool.query(update.sql, update.values);
-      if (!result.rows[0]) {
-        response
-          .status(from ? 409 : 404)
-          .json({ message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint not found.' });
-        return;
-      }
       // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
-      // Merge und Push nicht erneut auslösen. Das UPDATE oben war an den gelesenen Status gebunden, der Wechsel also echt.
-      if (target === 'completed' && from !== undefined && from !== 'completed') {
-        // Sprintende: Bericht, dann Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
-        await completeSprint(pool, request.params.id);
+      // Merge und Push nicht erneut auslösen. Das UPDATE ist an den gelesenen Status gebunden, der Wechsel also echt.
+      const completing = target === 'completed' && from !== undefined && from !== 'completed';
+      let result;
+      if (completing) {
+        // Status-UPDATE und Abschluss in einer Transaktion: scheitert der Abschluss (z. B. CHECK end_date >= start_date),
+        // bleibt der Sprint aktiv statt „abgeschlossen ohne Bericht“ – und der Worker mergt nichts.
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          result = await client.query(update.sql, update.values);
+          if (result.rows[0]) {
+            // Sprintende: Bericht, dann Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
+            await completeSprintIn(client, request.params.id);
+            const fresh = await client.query(`SELECT ${SPRINT_COLUMNS} FROM sprints WHERE id = $1`, [
+              request.params.id,
+            ]);
+            result = fresh.rows[0] ? fresh : result;
+          }
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      } else {
+        result = await pool.query(update.sql, update.values);
+      }
+      if (!result.rows[0]) {
+        response.status(from ? 409 : 404).json({
+          message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint nicht gefunden.',
+        });
+        return;
       }
       if (target === 'cancelled' && from !== undefined && from !== 'cancelled') {
         await cancelSprint(pool, request.params.id);
@@ -195,7 +264,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         return;
       }
       if (code === '23514') {
-        response.status(400).json({ message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
+        response.status(400).json({ field: 'endDate', message: 'Das Enddatum darf nicht vor dem Startdatum liegen.' });
         return;
       }
       throw error;
@@ -204,7 +273,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.post('/sprints/:id/git-sync', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const action = isRecord(request.body) && request.body.action === 'pull' ? 'pull' : 'push';
@@ -224,7 +293,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
   // Angefangene Aufträge bleiben „Geplant“ und machen nach dem Fortsetzen beim nächsten Agent weiter.
   app.post('/sprints/:id/pause', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const principal = response.locals.principal as Principal | undefined;
@@ -242,7 +311,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.post('/sprints/:id/resume', access({ role: 'run', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query(
@@ -250,7 +319,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       [request.params.id],
     );
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Sprint not found.' });
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
     }
     response.json({ sprint: result.rows[0] });
@@ -278,7 +347,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
 
   app.delete('/sprints/:id', access({ role: 'plan', tenant: 'sprints' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     // Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Aufträge und ohne laufende Git-Sicherung:
@@ -307,7 +376,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         });
         return;
       }
-      response.status(404).json({ message: 'Sprint not found.' });
+      response.status(404).json({ message: 'Sprint nicht gefunden.' });
       return;
     }
     response.status(204).end();

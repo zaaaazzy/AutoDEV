@@ -103,6 +103,19 @@ Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `
 `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it aideation_database_postgres psql -U devlog aideation`.
 
+Im Agent-Ordner läuft Compose als eigenes Projekt `aideation-agent` (`COMPOSE_PROJECT_NAME`). Container und Volumes
+heissen dort `aideation-agent_…` (eigene, leere Datenbank), und es werden keine Host-Ports veröffentlicht – die Ports
+5433, 3100, 80 und 443 bleiben dem Live-Stack. Welche Host-Ports ein Projekt bekommt, steht in
+`deploy/compose/ports.<Projekt>.yml`; ein anderer Projektname ohne eigene Datei bricht mit einer Fehlermeldung ab.
+Die Agent-Datenbank ist beim ersten Start leer und hat mit dem Live-Stack keine gemeinsamen Daten. Bevor du den Live-Stack
+neu startest, lohnt sich ein Blick mit `docker compose config` im Quellordner: Dort müssen die Namen `aideation_…` und die
+Ports 5433, 3100, 80 und 443 stehen. Ohne `COMPOSE_PROJECT_NAME` in der `.env` ist das der Fall.
+
+Entwickeln ohne Container (`npm run dev`, `npm run dev:ui`) läuft neben dem Live-Stack: Die Dev-API lauscht auf Port
+3101, und `ng serve` leitet `/api` und `/health` dorthin weiter (`frontend/proxy.conf.json`). Die Dev-API braucht eine
+eigene Datenbank, z. B. `DEV_LOG_DATABASE_URL=postgresql://devlog:<passwort>@127.0.0.1:5433/aideation_dev`; sie wird beim
+Start angelegt. Mit `PORT=3100` oder der Live-Datenbank `aideation` bricht `npm run dev` mit einer Meldung ab.
+
 ## Hintergrunddienste und Zugänge
 
 Die Installationsskripte (`scripts/install-worker.sh`, `install-watchdog.sh`, `install-worker-linux.sh`,
@@ -121,13 +134,22 @@ mit einer Meldung im Log ab.
 Werte ändern: Skript mit neuen Werten erneut ausführen, z. B. `DEV_LOG_DATABASE_URL=… ./scripts/install-worker.sh`.
 Ohne Angabe übernimmt ein erneuter Lauf die Werte aus der bestehenden Env-Datei.
 
+**Neustart unter Windows:** Nach „AIdeation neu starten“ beendet sich der Worker mit Exit-Code 75. launchd
+(KeepAlive) und systemd (`Restart=always`) starten ihn ohnehin neu. Unter Windows startet die Aufgabe nur bei der
+Anmeldung, deshalb übernimmt `run-with-env.ps1` den Neustart: Bei Exit-Code 75 wartet das Skript 5 s
+(`AIDEATION_RESTART_DELAY_SECONDS`), liest `worker.env` neu ein und startet den Worker wieder. Jeder andere Exit-Code
+(bewusster Stopp, echter Fehler) beendet die Aufgabe, ohne neu zu starten. Die Aufgabe hat kein Zeitlimit (vorher galt
+der Standard von 72 Stunden). Ältere Installationen: `scripts\install-worker.ps1` einmal erneut ausführen. Kommt der
+Worker trotzdem nicht wieder, steht der Status auf „restarting“. Nach 10 Minuten lässt sich dann ein neuer Neustart
+anfordern, statt dauerhaft „Ein Neustart läuft bereits“ zu sehen.
+
 **Umstieg von älteren Installationen:** Ältere Skripte schrieben die Zugänge direkt in Plist bzw. Unit (für alle lesbar)
 und unter Windows in die Befehlszeile der Aufgabe. Führe das passende Skript einmal erneut aus. Es ersetzt die alte
 Plist bzw. Unit, unter Windows die Aufgabe. Danach stehen keine Zugänge mehr darin. Wurde das Datenbank-Passwort früher
 in einer Plist oder Unit gespeichert, solltest du es ändern.
 
 **Standardpasswort:** Ohne `DEV_LOG_DB_PASSWORD` in der `.env` nutzt die Datenbank das bekannte Passwort
-`devlog_local_dev`. Server, Wächter und Installationsskripte warnen dann. Zum Wechseln setzt du das Passwort in
+`devlog_local_dev`. Server und Worker starten dann nicht (Wächter und Installationsskripte warnen). Zum Wechseln setzt du das Passwort in
 PostgreSQL (`ALTER USER devlog PASSWORD '…'`), trägst es in die `.env` ein, startest mit `docker compose up -d` neu
 und installierst den Worker mit der neuen `DEV_LOG_DATABASE_URL` erneut.
 
@@ -163,4 +185,6 @@ ein. Unter macOS ist nichts zu tun.
 | Nach dem Update überall abgemeldet | Gewollt: Sitzungen von vor der Passwort-Bindung gelten nicht mehr, einmal neu anmelden |
 | Nach neuem `DEV_LOG_PASSWORD` abgemeldet | Gewollt: Eine Passwortrotation beendet alle Sitzungen des Systemadministrators |
 | Zu viele Fehlversuche | Die Meldung nennt die Wartezeit (1 bis höchstens 15 Minuten). Gebremst wird nur dieses Konto von dieser Adresse aus, von einem anderen Gerät oder Netz geht die Anmeldung weiter |
+| Start bricht ab: „Standardpasswort … Start abgebrochen“ | `./start.sh --setup` erneut ausführen (setzt `DEV_LOG_DB_PASSWORD` und ändert es in PostgreSQL), danach den Worker neu installieren. Nur für Wegwerf-Umgebungen: `DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD=1` |
+| „Unbekannter Host“ (Status 421) | AIdeation wird über einen Namen aufgerufen, der weder IP, `localhost`, `*.local` noch `DEV_LOG_DOMAIN` ist (Schutz vor DNS-Rebinding). Namen in `DEV_LOG_ALLOWED_HOSTS` der `.env` eintragen (Komma-getrennt) und neu starten |
 | Alle Geräte werden gemeinsam gebremst | Das Backend sieht nur die Proxy-Adresse. `DEV_LOG_TRUST_PROXY` muss den Proxy abdecken (Compose: `uniquelocal`), `true` wird abgelehnt (Warnung im Log von `dev-log`) |

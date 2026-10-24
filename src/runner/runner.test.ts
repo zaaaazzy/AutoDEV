@@ -731,6 +731,98 @@ test('Fortsetzung nach Nachbesserung und frühem Abbruch: der Entwickler bekommt
   assert.doesNotMatch(calls[0]?.at(-1) ?? '', /erste Rückmeldung/);
 });
 
+/** Ein Schritt dieses Laufs wird als unterbrochen markiert (nicht: claimRun räumt verwaiste Läufe ab). */
+const marksStepInterrupted = (sql: string) => sql.includes('interrupted = TRUE') && sql.includes('WHERE id = $1');
+
+/** Vorheriger, gescheiterter Lauf: Entwickler bestanden, danach `last` (Tester oder Reviewer) gescheitert. */
+function previousRunPool(last: { role: string; interrupted: boolean }) {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-2' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [{ id: 'run-1', status: 'failed' }] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) {
+        return {
+          rows: [
+            { agent_id: 'dev-id', agent_name: 'dev', phase: 'while_task', status: 'passed', output: 'gebaut' },
+            {
+              agent_id: `${last.role}-id`,
+              agent_name: last.role,
+              phase: 'after_task',
+              status: 'failed',
+              output: last.interrupted ? 'halb fertig\nUnterbrochen: Der Worker wurde beendet.' : 'Test X rot',
+              interrupted: last.interrupted,
+            },
+          ],
+        };
+      }
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  return { pool, queries };
+}
+
+for (const role of ['tester', 'reviewer']) {
+  const agents = [
+    { ...agent('dev', 'while_task', 1, ['dev']), role: 'developer' },
+    { ...agent(role, 'after_task', 1, [role]), role },
+  ];
+  const ok = role === 'reviewer' ? '@@REVIEW: FREIGEGEBEN' : 'ok';
+
+  test(`Unterbrechung im ${role}-Schritt: der nächste Lauf setzt beim selben Agent fort, der Entwickler bleibt übernommen`, async () => {
+    const { pool } = previousRunPool({ role, interrupted: true });
+    const calls: string[][] = [];
+    const execute: CommandExecutor = async (command) => {
+      calls.push(command);
+      return { exitCode: 0, durationMs: 1, output: ok };
+    };
+    await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+    // Der Tester führt danach die Projekttests aus (hier ohne Projekt rot); entscheidend ist, wer zuerst startet.
+    assert.equal(calls[0]?.[0], role, 'derselbe Agent setzt fort, nicht der Entwickler');
+    assert.match(calls[0]?.at(-1) ?? '', /gebaut/);
+    assert.doesNotMatch(calls[0]?.at(-1) ?? '', /bitte beheben/);
+  });
+
+  test(`echte Ablehnung im ${role}-Schritt: der nächste Lauf beginnt beim Entwickler mit der Rückmeldung`, async () => {
+    const { pool } = previousRunPool({ role, interrupted: false });
+    const calls: string[][] = [];
+    const execute: CommandExecutor = async (command) => {
+      calls.push(command);
+      return { exitCode: 0, durationMs: 1, output: ok };
+    };
+    await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+    assert.deepEqual(
+      calls.slice(0, 2).map((call) => call[0]),
+      ['dev', role],
+    );
+    assert.match(calls[0]?.at(-1) ?? '', /bitte beheben:\nTest X rot/);
+  });
+}
+
+test('nach der Fortsetzung lehnt der Tester wirklich ab: zurück an den Entwickler, das Kennzeichen bleibt nicht hängen', async () => {
+  const { pool, queries } = previousRunPool({ role: 'tester', interrupted: true });
+  const calls: string[][] = [];
+  let testerRuns = 0;
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command);
+    if (command[0] !== 'tester') return { exitCode: 0, durationMs: 1, output: 'ok' };
+    testerRuns += 1;
+    return { exitCode: testerRuns === 1 ? 1 : 0, durationMs: 1, output: testerRuns === 1 ? 'Test Y rot' : 'ok' };
+  };
+  const agents = [
+    { ...agent('dev', 'while_task', 1, ['dev']), role: 'developer' },
+    { ...agent('tester', 'after_task', 1, ['tester']), role: 'tester' },
+  ];
+  await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+  assert.deepEqual(
+    calls.slice(0, 3).map((call) => call[0]),
+    ['tester', 'dev', 'tester'],
+  );
+  assert.match(calls[1]?.at(-1) ?? '', /Rückmeldung von tester[\s\S]*Test Y rot/);
+  assert.ok(!queries.some((query) => marksStepInterrupted(query.sql)), 'kein Schritt als unterbrochen markiert');
+});
+
 test('ausgewählter Auftrag inzwischen abgelehnt oder aus dem Sprint genommen: er startet nicht, der Lauf wird verworfen', async () => {
   const queries: { sql: string; values: unknown[] }[] = [];
   const pool = {
@@ -933,6 +1025,10 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   assert.ok(retry?.values[1] instanceof Date, 'Startzeit nach dem Reset gespeichert');
   assert.match(String(retry?.values[2]), /Nutzungslimit .* ab \d\d:\d\d Uhr/);
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
+  // Der Schritt ist als unterbrochen gekennzeichnet; Tokens und Kosten des Versuchs bleiben erhalten.
+  const step = queries.find((query) => marksStepInterrupted(query.sql));
+  assert.ok(step, 'Schritt als unterbrochen markiert');
+  assert.match(step.sql, /tokens = \$5, cost_usd = \$6/);
 });
 
 test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; danach geht es normal weiter', async () => {
@@ -955,4 +1051,39 @@ test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; dan
     setDraining(false);
   }
   assert.equal((await runSelectedItems(items, async () => 'passed')).length, 2);
+});
+
+// Sprint abgebrochen, während der Auftrag lief: Er darf nicht mehr in den Sprint-Branch gemergt und nicht „erledigt“
+// werden (der Sprint wird nie mehr gesichert), sondern geht zurück ins Backlog.
+test('Sprint während des Laufs abgebrochen: nächster Agent startet nicht, Auftrag ins Backlog statt erledigt', async () => {
+  let removed = false;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: `run-${queries.length}` }] };
+      if (sql.includes('paused_at IS NOT NULL AS paused')) return { rows: [{ paused: false }] };
+      if (sql.includes('SELECT sprint_id AS "sprintId"')) return { rows: [{ sprintId: removed ? null : 'sprint-1' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) return { rows: [] };
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    calls.push(command[0] ?? '');
+    if (command[0] === 'dev') removed = true;
+    return { exitCode: 0, durationMs: 1, output: 'erledigt' };
+  };
+  const agents = [agent('dev', 'while_task', 1, ['dev']), agent('tester', 'after_task', 1, ['tester'])];
+  assert.equal(
+    await runWorkItem(pool, { ...item, sprintId: 'sprint-1' }, agents, { cwd: '/r', timeoutMs: 1, execute }),
+    'failed',
+  );
+  assert.deepEqual(calls, ['dev']);
+  assert.ok(
+    queries.some((query) => /SET status = 'backlog'/.test(query.sql)),
+    'zurück ins Backlog',
+  );
+  assert.ok(!queries.some((query) => query.values.includes('done')), 'nicht erledigt');
 });

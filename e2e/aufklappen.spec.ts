@@ -81,6 +81,12 @@ test('Aufklappbereiche bleiben offen, während Agent-Läufe nachladen (Aktionen,
     await page.waitForTimeout(8_000);
     await expect(panel.locator('.attention-body')).toBeVisible();
     await expect(panel.locator('app-order-detail')).toBeVisible();
+    // Unter „Aktionen“: keine Status-/Sprint-/Agent-Zeile in den Auftragsdetails, die Analyse steht nur einmal da.
+    await expect(panel.locator('app-order-detail .order-controls')).toHaveCount(0);
+    await panel.locator('details.attention-tech summary').click();
+    await expect(panel.locator('app-order-detail').getByText('Kaputt.')).toHaveCount(0);
+    await expect(panel.locator('details.attention-tech').getByText('Kaputt.')).toHaveCount(1);
+    if (process.env.E2E_SCREENSHOT) await panel.screenshot({ path: process.env.E2E_SCREENSHOT });
     // 2) Sprint: „Aufträge hinzufügen“ öffnen
     await page.goto('/#sprints?project=zz-aufklappen');
     const pool = page.locator('details.sprint-pool').first();

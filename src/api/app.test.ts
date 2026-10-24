@@ -406,7 +406,13 @@ test('stores image attachments for bugs', async () => {
 });
 
 test('manages sprints with validation and a single active sprint', async () => {
-  const { pool, queries } = recordingPool([{ id: SPRINT_ID, name: 'Sprint 1' }]);
+  const recording = recordingPool([{ id: SPRINT_ID, name: 'Sprint 1' }]);
+  const { queries } = recording;
+  // Noch kein anderer Sprint im Projekt (Namensprüfung), sonst wie gehabt.
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) =>
+      sql.startsWith('SELECT name FROM sprints') ? { rows: [] } : recording.pool.query(sql, values),
+  } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const created = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
       method: 'POST',
@@ -414,7 +420,7 @@ test('manages sprints with validation and a single active sprint', async () => {
       body: JSON.stringify({ name: 'Sprint 1', startDate: '2026-10-19', endDate: '2026-11-01' }),
     });
     assert.equal(created.status, 201);
-    assert.equal(queries[0]?.values[4], '2026-10-19');
+    assert.equal(queries.find((query) => query.sql.includes('INSERT INTO sprints'))?.values[4], '2026-10-19');
 
     const badDate = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
       method: 'POST',
@@ -462,6 +468,11 @@ function sprintPool(sprint: { status: string; running?: number } | null) {
       if (sql.startsWith('UPDATE sprints SET')) return { rows: [{ id: SPRINT_ID, status: sprint.status }] };
       return { rows: [] };
     },
+    // Abschluss läuft in einer Transaktion auf eigener Verbindung: Statements gehen an pool.query (auch überschrieben).
+    connect: async () => ({
+      query: (sql: string, values?: unknown[]) => (pool as unknown as { query: typeof pool.query }).query(sql, values),
+      release: () => undefined,
+    }),
   } as unknown as Pool;
   return { pool, queries };
 }
@@ -1171,4 +1182,20 @@ test('with a second factor, cached basic credentials neither count as failures n
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('Sprint-Name mit gleichem Git-Branch wie ein anderer Sprint wird abgelehnt', async () => {
+  const pool = {
+    query: async (sql: string) =>
+      sql.startsWith('SELECT name FROM sprints') ? { rows: [{ name: 'Sprint 5' }] } : { rows: [{ id: SPRINT_ID }] },
+  } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'sprint-5' }),
+    });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).message, /gleicher Git-Branch/);
+  });
 });

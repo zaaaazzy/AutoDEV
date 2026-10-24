@@ -57,6 +57,12 @@ function pointsInto(link: string, folder: string): boolean {
  * (z. B. @mainty/contracts → ../../contracts). Die bekommen denselben relativen Link, zeigen also auf den Code im
  * Arbeitsordner statt auf den Stand im Hauptordner.
  */
+/**
+ * Ordner-Link: Unter Windows als Junction (braucht weder Admin-Rechte noch den Entwicklermodus, anders als ein
+ * symbolischer Link), sonst ein normaler Ordner-Link.
+ */
+const DIRECTORY_LINK = process.platform === 'win32' ? 'junction' : 'dir';
+
 function mirrorModules(source: string, target: string, folder: string): void {
   mkdirSync(target, { recursive: true });
   for (const entry of readdirSync(source, { withFileTypes: true })) {
@@ -64,11 +70,13 @@ function mirrorModules(source: string, target: string, folder: string): void {
     const to = join(target, entry.name);
     if (existsSync(to) || isLink(to)) continue;
     if (entry.isSymbolicLink() && pointsInto(from, folder)) {
-      symlinkSync(readlinkSync(from), to);
+      // Junctions brauchen ein absolutes Ziel; anderswo bleibt der relative Link (zeigt in den Arbeitsordner).
+      const link = readlinkSync(from);
+      symlinkSync(process.platform === 'win32' ? resolve(dirname(to), link) : link, to, DIRECTORY_LINK);
     } else if (entry.isDirectory() && entry.name.startsWith('@')) {
       mirrorModules(from, to, folder);
     } else {
-      symlinkSync(from, to);
+      symlinkSync(from, to, entry.isDirectory() ? DIRECTORY_LINK : 'file');
     }
   }
 }
@@ -104,7 +112,7 @@ export function linkDependencies(folder: string, workspace: string): void {
     try {
       lstatSync(target);
     } catch {
-      symlinkSync(source, target, 'dir');
+      symlinkSync(source, target, DIRECTORY_LINK);
     }
   }
 }

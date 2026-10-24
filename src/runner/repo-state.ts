@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { gitHelpers } from './git-sync.js';
+import { CHANGED_FILES_IGNORED, porcelainPath } from './git-sync/git-helpers.js';
 
 /**
  * Git-Zustand der Projektordner, wie ihn der Worker jede Minute sieht: Branch, offene Änderungen und wie weit das
@@ -83,12 +84,27 @@ export async function readFolder(
   if (!existsSync(join(folder, '.git'))) return empty;
   const { git } = gitHelpers(execute, folder);
   const head = await git('symbolic-ref', '--short', '-q', 'HEAD');
-  const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=normal');
+  // Nur lesen, nie den Index auffrischen: Ohne --no-optional-locks nimmt „git status“ kurz index.lock und kann so
+  // einen gleichzeitigen Commit oder Checkout der Agents scheitern lassen („index.lock: File exists“).
+  const status = await git(
+    '--no-optional-locks',
+    '-c',
+    'core.quotePath=false',
+    'status',
+    '--porcelain',
+    '--untracked-files=normal',
+  );
   const lines = status.exitCode === 0 ? status.output.split('\n').filter(Boolean) : [];
-  // Die erste Zeile verliert durch das Trimmen ihr führendes Leerzeichen („ M a.txt“ → „M a.txt“).
-  const path = (line: string): string => line.replace(/^[ MADRCUT?!]{1,2}\s+/, '').replace(/^.* -> /, '');
-  const untracked = lines.filter((line) => line.startsWith('??')).map(path);
-  const changed = lines.filter((line) => !line.startsWith('??')).map(path);
+  // Testberichte und Agent-Ablage zählen nicht (wie bei der Prüfung vor jedem Auftrag).
+  const counted = (path: string): boolean => !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix));
+  const untracked = lines
+    .filter((line) => line.startsWith('??'))
+    .map(porcelainPath)
+    .filter(counted);
+  const changed = lines
+    .filter((line) => !line.startsWith('??'))
+    .map(porcelainPath)
+    .filter(counted);
   let mainAhead: number | null = null;
   let mainBehind: number | null = null;
   const remote = await git('rev-parse', '--verify', '--quiet', `refs/remotes/origin/${MAIN}`);
@@ -159,7 +175,8 @@ export function assessFolder(snapshot: FolderSnapshot, context: FolderContext): 
     problems.push({
       ...base,
       code: 'untracked',
-      severity: 'warn',
+      // Wo die Agents arbeiten, blockiert jede neue Datei den nächsten Auftrag („fremde Änderungen“): dort sperrend.
+      severity: snapshot.role === 'agents' || context.agentsWorkHere ? 'block' : 'warn',
       title: `${snapshot.untrackedCount} neue, nicht versionierte Datei${snapshot.untrackedCount === 1 ? '' : 'en'}`,
       detail: `In ${where}: ${list(snapshot.untracked, snapshot.untrackedCount)}.`,
       fixes: ['save_wip'],

@@ -1,12 +1,14 @@
 // Git-Grundlagen: Befehlsausführung, Remotes, Branch-Namen, Zugangsdaten-Schutz und Sprint-Branch.
 import { existsSync, realpathSync } from 'node:fs';
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
 import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
+import { clearStaleLock, lockedFile } from './stale-lock.js';
+import { checkoutTarget, dropReportCopies } from './report-copies.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -77,12 +79,55 @@ const INTERNAL_EXCLUDES = [
 export const SECRET_CONTENT = SECRET_PATTERNS;
 
 /** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
+/**
+ * Pfad aus einer Diff-Kopfzeile („+++ b/pfad“). Git hängt bei Namen mit Leerzeichen einen Tab an und setzt Namen mit
+ * Sonderzeichen in Anführungszeichen mit C-Escapes („+++ "b/zug\303\244nge.txt"“) – beides muss gelesen werden, sonst
+ * rutschen Dateien mit Zugangsdaten durch die Prüfung.
+ */
+export function diffTargetPath(header: string): string | null {
+  let rest = header.slice(4);
+  if (rest.startsWith('"') && rest.endsWith('"')) {
+    const bytes: number[] = [];
+    const inner = rest.slice(1, -1);
+    for (let index = 0; index < inner.length; index++) {
+      const char = inner[index]!;
+      if (char !== '\\') {
+        bytes.push(...Buffer.from(char, 'utf8'));
+        continue;
+      }
+      const next = inner[index + 1] ?? '';
+      if (/[0-7]/.test(next)) {
+        bytes.push(parseInt(inner.slice(index + 1, index + 4), 8));
+        index += 3;
+      } else {
+        const escapes: Record<string, string> = {
+          t: '\t',
+          n: '\n',
+          '"': '"',
+          '\\': '\\',
+          a: '\x07',
+          b: '\b',
+          f: '\f',
+          r: '\r',
+          v: '\v',
+        };
+        bytes.push(...Buffer.from(escapes[next] ?? next, 'utf8'));
+        index += 1;
+      }
+    }
+    rest = Buffer.from(bytes).toString('utf8');
+  } else {
+    rest = rest.replace(/\t$/, '');
+  }
+  return rest.startsWith('b/') ? rest.slice(2) : null;
+}
+
 export function filesWithSecrets(diff: string): string[] {
   const found = new Set<string>();
   let file: string | null = null;
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
-      file = line.startsWith('+++ b/') ? line.slice(6) : null;
+      file = diffTargetPath(line);
     } else if (file && line.startsWith('+') && SECRET_CONTENT.some((pattern) => pattern.test(line))) {
       found.add(file);
     }
@@ -120,6 +165,46 @@ export const BOT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'dev-log@mainty.local',
 };
 
+type GitRun = (args: string[]) => Promise<{ exitCode: number; output: string }>;
+
+/** Wartezeit vor dem zweiten Versuch, wenn ein anderer Prozess die Sperre gerade hält. */
+export const LOCK_RETRY_DELAY_MS = 2_000;
+
+/** Branches bzw. Commits, die ein `git merge …` übernehmen soll (ohne Optionen und die Nachricht nach `-m`). */
+export function mergeSources(args: readonly string[]): string[] {
+  const sources: string[] = [];
+  let message = false;
+  for (const arg of args.slice(1)) {
+    if (message) message = false;
+    else if (arg === '-m') message = true;
+    else if (!arg.startsWith('-')) sources.push(arg);
+  }
+  return sources;
+}
+
+/**
+ * Ein Merge (Strategie ort), der an einer Sperre scheitert, hat die neuen Dateien des Quell-Branchs schon in den Ordner
+ * geschrieben, aber nicht in den Index: Sie bleiben unversioniert liegen, „merge --abort“ greift nicht (kein MERGE_HEAD),
+ * und jeder weitere Merge scheitert an „untracked working tree files would be overwritten“ – oder „git add -A“ nimmt sie
+ * in den nächsten Commit. Entfernt werden nur unversionierte Dateien, deren Inhalt genau dem Quell-Branch entspricht.
+ */
+async function removeMergeLeftovers(run: GitRun, cwd: string, sources: string[]): Promise<void> {
+  if (!sources.length) return;
+  const untracked = await run(['ls-files', '-z', '--others', '--exclude-standard']);
+  if (untracked.exitCode !== 0) return;
+  for (const path of untracked.output.split('\0').filter(Boolean).slice(0, 500)) {
+    const here = await run(['hash-object', '--', path]);
+    if (here.exitCode !== 0) continue;
+    for (const source of sources) {
+      const blob = await run(['rev-parse', '-q', '--verify', `${source}:${path}`]);
+      if (blob.exitCode === 0 && blob.output === here.output) {
+        await unlink(join(cwd, path)).catch(() => undefined);
+        break;
+      }
+    }
+  }
+}
+
 export function gitHelpers(execute: CommandExecutor, cwd: string) {
   // Gefiltert und ohne Hooks: Agents können im Projekt Hooks oder fsmonitor setzen, die sonst beim Commit liefen.
   const env = gitEnvironment({
@@ -128,9 +213,28 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
     GCM_INTERACTIVE: 'never',
     GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
   });
-  const git = async (...args: string[]) => {
+  const run = async (args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
     return { ...result, output: redactOutput(result.output, process.env).trim() };
+  };
+  const git = async (...args: string[]) => {
+    // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
+    const target = args[0] === 'checkout' ? checkoutTarget(args) : null;
+    if (target) await dropReportCopies((...inner) => run(inner), cwd, target);
+    let result = await run(args);
+    // Sperrdatei (index.lock, AUTO_MERGE.lock, Ref-Sperre): verwaist (git wurde hart beendet) → wegräumen, sonst kurz
+    // warten; dann einmal neu versuchen. Ein so gescheiterter Merge hinterlässt Dateien, die vorher weg müssen.
+    const lock = result.exitCode === 0 ? null : lockedFile(result.output);
+    if (!lock) return result;
+    if (args[0] === 'merge') await removeMergeLeftovers(run, cwd, mergeSources(args));
+    if (!(await clearStaleLock(cwd, { file: lock }).catch(() => null))) {
+      await new Promise((done) => setTimeout(done, LOCK_RETRY_DELAY_MS));
+    }
+    result = await run(args);
+    if (result.exitCode !== 0 && args[0] === 'merge' && lockedFile(result.output)) {
+      await removeMergeLeftovers(run, cwd, mergeSources(args));
+    }
+    return result;
   };
   const must = async (...args: string[]): Promise<string> => {
     const result = await git(...args);
@@ -163,11 +267,15 @@ export async function stageAll(
     if ((await git('check-ignore', '-q', '--no-index', path)).exitCode !== 0) excluded.push(`:(exclude)${path}`);
   }
   await must('add', '-A', ...(options.orderOnly ? ['--', '.', ...excluded] : []));
-  const diff = await git('diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
+  const diff = await git('-c', 'core.quotePath=false', 'diff', '--cached', '--no-color', '--no-ext-diff', '-U0');
   const held = diff.exitCode === 0 ? filesWithSecrets(diff.output) : [];
   if (!held.length) return held;
   const hasHead = (await git('rev-parse', '--verify', '--quiet', 'HEAD')).exitCode === 0;
-  await must(...(hasHead ? ['reset', '-q', '--'] : ['rm', '--cached', '-q', '--']), ...held);
+  // Wörtliche Pfade: Sonderzeichen wie * oder [ im Namen dürfen keinen Mustervergleich auslösen.
+  await must(
+    ...(hasHead ? ['reset', '-q', '--'] : ['rm', '--cached', '-q', '--']),
+    ...held.map((file) => `:(literal)${file}`),
+  );
   const message = `Nicht committet, weil sie nach Zugangsdaten aussehen: ${held.join(', ')}`;
   if (log) log.push(message);
   else console.warn(message);
@@ -230,6 +338,38 @@ export async function branchExists(git: GitHelpers['git'], branch: string): Prom
  * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
  * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
  */
+/**
+ * Basis für einen neuen Sprint-Branch: der neueste Stand von main. Liegt GitHub vorn (z. B. ein gemergter Pull
+ * Request des Vorgänger-Sprints) und hat das lokale main nichts Eigenes, zählt origin/main – sonst fehlte dem neuen
+ * Sprint die Arbeit des vorigen. Ohne Remote oder bei eigenen lokalen Commits bleibt es beim lokalen main.
+ */
+export async function freshestMain(git: GitHelpers['git']): Promise<string> {
+  if (!(await git('remote')).output.split('\n').includes('origin')) return MAIN_BRANCH;
+  await git('fetch', '-q', 'origin', MAIN_BRANCH);
+  const remote = `refs/remotes/origin/${MAIN_BRANCH}`;
+  if ((await git('rev-parse', '--verify', '--quiet', remote)).exitCode !== 0) return MAIN_BRANCH;
+  const behindOnly = (await git('merge-base', '--is-ancestor', MAIN_BRANCH, remote)).exitCode === 0;
+  return behindOnly ? remote : MAIN_BRANCH;
+}
+
+/**
+ * Den Sprint-Branch laufend auf dem Stand von main halten (vor jedem neuen Auftrag des Sprints). Früher kam main erst
+ * beim Abschluss hinein – bis dahin hatten sich Korrekturen, PR-Merges und Doku auf main angesammelt und prallten
+ * auf einmal aufeinander („main lässt sich nicht konfliktfrei übernehmen“). Ohne Konflikt wird gemergt; mit Konflikt
+ * bleibt der Sprint-Branch wie er war (der Auftrag läuft weiter), und die Meldung steht im Log.
+ */
+export async function refreshSprintFromMain(git: GitHelpers['git'], branch: string): Promise<string | null> {
+  if (!(await branchExists(git, MAIN_BRANCH))) return null;
+  const main = await freshestMain(git);
+  if ((await git('merge-base', '--is-ancestor', main, 'HEAD')).exitCode === 0) return null;
+  const merged = await git('merge', '--no-edit', main, '-m', `Merge ${MAIN_BRANCH} in ${branch}`);
+  if (merged.exitCode === 0) return `Aktuellen ${MAIN_BRANCH} in ${branch} übernommen.`;
+  await git('merge', '--abort');
+  const message = `${MAIN_BRANCH} lässt sich gerade nicht konfliktfrei in ${branch} übernehmen – der Sprint läuft weiter, beim Abschluss muss zusammengeführt werden.`;
+  console.warn(message);
+  return message;
+}
+
 export async function checkoutSprintBranch(
   cwd: string,
   sprintName: string,
@@ -243,7 +383,8 @@ export async function checkoutSprintBranch(
     await ensureRepository(git, must, cwd);
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output === branch) return branch;
     if (await branchExists(git, branch)) await must('checkout', branch);
-    else if (await branchExists(git, MAIN_BRANCH)) await must('checkout', '-b', branch, MAIN_BRANCH);
+    else if (await branchExists(git, MAIN_BRANCH))
+      await must('checkout', '--no-track', '-b', branch, await freshestMain(git));
     else await must('checkout', '-b', branch);
     return branch;
   } catch (error) {
@@ -274,4 +415,32 @@ export function taskCommitMessage(
     `${type}(${scope}): ${subject}`,
     `Auftrag: ${itemId}\nSprint: ${sprintName}\nAutomatisch erstellt vom AIdeation.`,
   ];
+}
+
+/**
+ * Pfad aus einer Zeile von `git status --porcelain` (mit `core.quotePath=false`). Robust gegen das Trimmen der
+ * Ausgabe durch `gitHelpers`: Die erste Zeile verliert dort ihr führendes Leerzeichen („ M docs/a.md“ → „M docs/a.md“),
+ * ein festes `slice(3)` schnitte dann den ersten Buchstaben des Pfads ab („ocs/a.md“) – und ignorierte Pfade wie
+ * docs/tests/ gälten als fremd. Bei Umbenennungen zählt das Ziel.
+ */
+export function porcelainPath(line: string): string {
+  return line
+    .replace(/^[ MADRCUT?!]{1,2}\s+/, '')
+    .replace(/^.* -> /, '')
+    .trim();
+}
+
+/**
+ * Geänderte versionierte Dateien, ohne Testberichte und Agent-Ablage (CHANGED_FILES_IGNORED). Auftrags-Commits nehmen
+ * diese Pfade bewusst nicht mit (die Sprint-Sicherung tut es) – zählten sie hier, sperrte ein neu geschriebener
+ * Testbericht jede Freigabe („Offene Änderungen im Arbeitsordner“).
+ */
+export async function trackedChanges(git: GitHelpers['git']): Promise<string[]> {
+  const status = await git('-c', 'core.quotePath=false', 'status', '--porcelain', '--untracked-files=no');
+  if (status.exitCode !== 0) return ['(git status fehlgeschlagen)'];
+  return status.output
+    .split('\n')
+    .filter(Boolean)
+    .map(porcelainPath)
+    .filter((path) => path && !CHANGED_FILES_IGNORED.some((prefix) => path.startsWith(prefix)));
 }

@@ -9,9 +9,13 @@ import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { OrderQuestionComponent } from '../../shared/order-question.component.js';
 import { OrderApprovalComponent } from '../development/order-approval.component.js';
 import { OrderDetailComponent } from '../development/order-detail.component.js';
+import { OrderVisualComponent } from '../development/order-visual.component.js';
+import { actionHint } from './action-hints.js';
+import { needsVisual } from '../development/needs-visual.js';
 import { OrderDetailSlotDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { OrderService } from '../development/order.service.js';
 import { AcceptanceReviewComponent } from './acceptance-review.component.js';
+import { RunningPanelComponent } from './running-panel.component.js';
 
 /**
  * Seite „Aktionen“: Rückmeldungen der Agents und alles, was auf dich wartet – Rückfragen, blockierte oder
@@ -22,6 +26,8 @@ import { AcceptanceReviewComponent } from './acceptance-review.component.js';
   selector: 'app-actions',
   standalone: true,
   imports: [
+    RunningPanelComponent,
+    OrderVisualComponent,
     AcceptanceReviewComponent,
     MarkdownPipe,
     OrderApprovalComponent,
@@ -80,8 +86,9 @@ export class ActionsComponent {
     return this.orders.analyze(item);
   }
 
-  protected deleteOrder(item: DevelopmentItem): Promise<void> {
-    return this.orders.remove(item);
+  /** Hover-Text eines Knopfs (was der Klick bewirkt). */
+  protected hint(label: string): string {
+    return actionHint(label);
   }
 
   protected confirmOrder(item: DevelopmentItem): Promise<void> {
@@ -90,6 +97,25 @@ export class ActionsComponent {
 
   protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
     return this.orders.checkPoint(item, check, true);
+  }
+
+  /** „Ansicht“ samt „Optisch freigeben“ oben in der Karte (dieselbe Regel wie in der Auftragsansicht). */
+  protected showVisual(item: DevelopmentItem): boolean {
+    const visual = this.data().acceptance.filter((check) => check.developmentId === item.id && check.kind === 'visual');
+    return needsVisual(item, visual.length);
+  }
+
+  /** Meldung des Agents nur zeigen, wenn sie mehr sagt als „Warum“ oben (sonst stünde derselbe Satz zweimal da). */
+  protected repeatsWhy(report: string, why: string): boolean {
+    const plain = (text: string): string =>
+      text
+        .replace(/[`*_#>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/[.…]+$/, '');
+    const shown = plain(why);
+    const full = plain(report);
+    return !full || full === shown || shown.startsWith(full);
   }
 
   protected entryOf(id: string): AttentionEntry | null {

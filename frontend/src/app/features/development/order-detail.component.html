@@ -2,60 +2,65 @@
 <div class="order-panel">
   <!-- „Stand“ (worauf der Auftrag wartet) steht über der Status-/Sprint-/Agent-Zeile; die Zeitleiste ganz unten. -->
   <app-order-timeline [order]="item" [showWaiting]="!embedded()">
-    <div class="order-controls">
-      <label class="control"
-        ><span>Status</span
-        ><select
-          [ngModel]="item.status"
-          (ngModelChange)="update(item.id, { status: $event })"
-          [name]="'status-' + item.id"
-          [disabled]="statusLocked()"
-          [title]="statusLocked() ? 'Diesen Status setzt der Worker – ändern über die Aktionen des Auftrags.' : ''"
-        >
-          @for (status of statusOptions(); track status) {
-            <option [value]="status">{{ status | statusLabel }}</option>
-          }
-        </select>
-      </label>
-      <label class="control"
-        ><span>Sprint</span
-        ><select
-          [ngModel]="item.sprintId"
-          (ngModelChange)="update(item.id, { sprintId: $event || null })"
-          [name]="'sprint-' + item.id"
-        >
-          <option [ngValue]="null">Kein Sprint</option>
-          @for (sprint of sprintOptions(); track sprint.id) {
-            <option [value]="sprint.id">{{ sprint.name }}</option>
-          }
-        </select>
-      </label>
-      @if (item.kind !== 'express') {
-        <label class="control control-agent"
-          ><span>Agent</span
+    <!-- Unter „Aktionen“ ohne Status-, Sprint- und Agent-Wahl: dort führen die Aktionen der Karte weiter. -->
+    @if (!embedded()) {
+      <div class="order-controls">
+        <label class="control"
+          ><span>Status</span
           ><select
-            [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
-            (ngModelChange)="manualAgent[item.id] = $event"
-            [name]="'agent-' + item.id"
+            [ngModel]="item.status"
+            (ngModelChange)="update(item.id, { status: $event })"
+            [name]="'status-' + item.id"
+            [disabled]="statusLocked()"
+            [title]="statusLocked() ? 'Diesen Status setzt der Worker – ändern über die Aktionen des Auftrags.' : ''"
           >
-            <option value="">Einzeln starten …</option>
-            @for (agent of data().agents; track agent.id) {
-              <option [value]="agent.id">{{ agent.name }}</option>
+            @for (status of statusOptions(); track status) {
+              <option [value]="status">{{ status | statusLabel }}</option>
             }
           </select>
-          <button
-            class="button primary run-agent"
-            type="button"
-            title="Mit gewähltem Agent starten"
-            aria-label="Agent starten"
-            [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
-            (click)="startWithAgent(item)"
-          >
-            ▶
-          </button>
         </label>
-      }
-    </div>
+        <label class="control"
+          ><span>Sprint</span
+          ><select
+            [ngModel]="item.sprintId"
+            (ngModelChange)="update(item.id, { sprintId: $event || null })"
+            [name]="'sprint-' + item.id"
+            [disabled]="sprintLocked()"
+            [title]="sprintLocked() ? 'In Arbeit, in Freigabe oder erledigt bleibt der Auftrag in seinem Sprint.' : ''"
+          >
+            <option [ngValue]="null">Kein Sprint</option>
+            @for (sprint of sprintOptions(); track sprint.id) {
+              <option [value]="sprint.id">{{ sprint.name }}</option>
+            }
+          </select>
+        </label>
+        @if (item.kind !== 'express') {
+          <label class="control control-agent"
+            ><span>Agent</span
+            ><select
+              [ngModel]="manualAgent[item.id] ?? item.agentId ?? ''"
+              (ngModelChange)="manualAgent[item.id] = $event"
+              [name]="'agent-' + item.id"
+            >
+              <option value="">Einzeln starten …</option>
+              @for (agent of data().agents; track agent.id) {
+                <option [value]="agent.id">{{ agent.name }}</option>
+              }
+            </select>
+            <button
+              class="button primary run-agent"
+              type="button"
+              title="Mit gewähltem Agent starten"
+              aria-label="Agent starten"
+              [disabled]="busy() || !(manualAgent[item.id] || item.agentId)"
+              (click)="startWithAgent(item)"
+            >
+              ▶
+            </button>
+          </label>
+        }
+      </div>
+    }
     @if (!embedded() && item.kind === 'express' && item.status === 'blocked' && item.actionTodo) {
       <app-order-question [order]="item" />
     }
@@ -64,7 +69,7 @@
     }
     @if (!embedded() && (item.status === 'blocked' || item.status === 'rejected')) {
       <section class="detail-alert" [class.rejected]="item.status === 'rejected'">
-        <h3 class="detail-heading">
+        <h3 class="detail-heading row">
           {{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}
         </h3>
         @if (item.failure) {
@@ -122,7 +127,7 @@
     }
     @if (editing()) {
       <form class="form-grid detail-card" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
-        <h3 class="detail-heading wide">Auftrag bearbeiten</h3>
+        <h3 class="detail-heading row wide">Auftrag bearbeiten</h3>
         <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
         <label class="wide"
           >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
@@ -143,7 +148,13 @@
           </select>
         </label>
         <label
-          >Aufwand (Std.)<input name="effortHours" type="number" min="0" step="0.5" [ngModel]="item.effortHours" />
+          >Aufwand (Agent-Std.)<input
+            name="effortHours"
+            type="number"
+            min="0"
+            step="0.05"
+            [ngModel]="item.effortHours"
+          />
         </label>
         <label
           >Token-Schätzung<input
@@ -234,8 +245,13 @@
         <dd>{{ store.sprintOf(item)?.name ?? 'Kein Sprint' }}</dd>
       </div>
       <div>
-        <dt>Aufwand</dt>
-        <dd>{{ item.effortHours | hours }}</dd>
+        <dt>Aufwand (Agent-Std.)</dt>
+        <dd>
+          {{ item.calibratedHours ?? item.effortHours | hours }}
+          @if (item.calibratedHours != null && item.calibratedHours !== item.effortHours) {
+            <small class="muted">geschätzt {{ item.effortHours | hours }}, kalibriert</small>
+          }
+        </dd>
       </div>
       @if (item.benefit != null || item.cost != null) {
         <div>
@@ -244,7 +260,12 @@
         </div>
       }
     </dl>
-    <app-order-brief [description]="item.description" [ideationId]="item.ideationId" [bugId]="item.bugId" />
+    <app-order-brief
+      [description]="item.description"
+      [ideationId]="item.ideationId"
+      [bugId]="item.bugId"
+      [open]="true"
+    />
     @if (acceptance().total) {
       <ng-template #checkLine let-check>
         <li [class]="'acceptance-' + check.status">
@@ -270,7 +291,7 @@
         </summary>
         @if (acceptance().criteria.length) {
           <h4>Akzeptanzkriterien</h4>
-          <ul class="acceptance-list">
+          <ul class="acceptance-list plain-list">
             @for (check of acceptance().criteria; track check.position) {
               <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
             }
@@ -278,13 +299,13 @@
         }
         @if (acceptance().done.length) {
           <h4>Definition of Done</h4>
-          <ul class="acceptance-list">
+          <ul class="acceptance-list plain-list">
             @for (check of acceptance().done; track check.position) {
               <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
               @if (coversCriteria(check)) {
                 <li class="acceptance-nested">
                   @if (acceptance().criteria.length) {
-                    <ul class="acceptance-list">
+                    <ul class="acceptance-list plain-list">
                       @for (criterion of acceptance().criteria; track criterion.position) {
                         <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: criterion }" />
                       }
@@ -349,7 +370,7 @@
       }
       @if (acceptance().visual.length) {
         <h4>Visuelle Prüfung</h4>
-        <ul class="acceptance-list">
+        <ul class="acceptance-list plain-list">
           @for (check of acceptance().visual; track check.position) {
             <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
           }
@@ -357,7 +378,14 @@
       }
     }
     <details class="run-step order-brief" [open]="agentsOpen()">
-      <summary>Agents</summary>
+      <summary>
+        Agents
+        @for (end of agentEnds(); track end.name) {
+          <span [class]="'agent-end ' + end.tone" [title]="end.name + ': ' + end.label"
+            >{{ end.name }} {{ end.icon }}{{ end.tone === 'ok' ? '' : ' ' + end.label }}</span
+          >
+        }
+      </summary>
       <app-agent-workflow [order]="item" />
     </details>
     @let files = item.changedFiles ?? [];
@@ -371,13 +399,14 @@
         </ul>
       </details>
     }
-    @if (item.analysis) {
+    @if (item.analysis && !embedded()) {
       <details class="run-step order-brief">
         <summary>Analyse des Assistenten</summary>
         <article class="markdown" [innerHTML]="item.analysis | markdown"></article>
       </details>
     }
-    @if (showVisual()) {
+    <!-- Unter „Aktionen“ steht die Ansicht samt „Optisch freigeben“ oben in der Karte. -->
+    @if (showVisual() && !embedded()) {
       <app-order-visual [order]="item" />
     }
     @if (item.risks?.trim()) {
@@ -395,7 +424,7 @@
           <p class="muted small risk-intro">{{ parsed.intro }}</p>
         }
         @if (parsed.items.length) {
-          <ul class="risk-list">
+          <ul class="risk-list plain-list">
             @for (risk of parsed.items; track $index) {
               <li class="risk-item">
                 <span class="risk-icon" aria-hidden="true">⚠</span>

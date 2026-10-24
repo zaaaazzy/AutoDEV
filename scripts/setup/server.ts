@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { platform } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -164,6 +164,8 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
     }
     dbPasswordPending = false;
   }
+  // Fehlt ./backups, legt Docker den Ordner unter Linux als root an – der Backup-Container (ohne root) kann dann nicht schreiben.
+  await mkdir(join(ROOT, 'backups'), { recursive: true });
   log('Baue und starte die Container (beim ersten Mal einige Minuten) …');
   const up = await run('docker', ['compose', 'up', '-d', '--build'], log);
   if (!up.ok) {

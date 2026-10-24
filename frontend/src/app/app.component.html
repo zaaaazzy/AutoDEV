@@ -27,11 +27,9 @@
           <span class="menu-badge">≡</span>
         </span>
       </button>
-      <a class="brand" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
+      <a class="brand row" href="#dashboard" (click)="store.navigate('dashboard'); mobileMenu.set(false)">
         <span class="brand-mark">m</span>
-        <span>mainty</span>
-        <span class="brand-divider">/</span>
-        <small>dev log</small>
+        <span>AIdeation</span>
       </a>
       <div class="mobile-tools">
         <select
@@ -100,7 +98,7 @@
       </div>
       <p class="nav-label">Arbeitsbereich</p>
       <nav id="main-navigation" aria-label="AIdeation-Navigation">
-        <div class="nav-brand"><span class="brand-mark">m</span><span>mainty</span><small>dev log</small></div>
+        <div class="nav-brand"><span class="brand-mark">m</span><span>AIdeation</span></div>
         @for (item of navigation; track item.id) {
           <a
             class="nav-link"
@@ -152,7 +150,9 @@
 
     <main class="main">
       <header class="topbar">
-        <div class="breadcrumb">Arbeitsbereich <span>/</span> <strong>AIdeation</strong></div>
+        <div class="breadcrumb">
+          AIdeation <span>/</span> <strong>{{ activeSectionLabel() }}</strong>
+        </div>
         <app-project-switcher (create)="showProjectForm.set(true)" />
         @if (store.currentProject()?.reviewCommand?.length) {
           <app-header-review />
@@ -160,7 +160,7 @@
         <div class="topbar-status">
           <div class="agent-indicator">
             <a
-              class="worker-status"
+              class="worker-status truncate"
               [class.busy]="store.activeAgentCount() > 0"
               [class.online]="worker().online"
               [class.offline]="!worker().online"
@@ -267,7 +267,7 @@
                   >
                     <span [style.width.%]="sprint.total ? (sprint.done / sprint.total) * 100 : 0"></span>
                   </div>
-                  <ul class="sprint-popover-orders" aria-label="Nächste offene Aufträge">
+                  <ul class="sprint-popover-orders plain-list" aria-label="Nächste offene Aufträge">
                     @for (item of sprintPreview(); track item.id) {
                       <li>
                         <button
@@ -305,6 +305,7 @@
           </button>
         </div>
       </header>
+      <app-restart-banner />
 
       <div class="content">
         <section class="page-heading">
@@ -408,7 +409,7 @@
             }
           }
         }
-        <footer class="footer">{{ store.currentProject()?.name ?? 'AIdeation' }} <span>/</span> DEV LOG</footer>
+        <footer class="footer">{{ store.currentProject()?.name ?? 'AIdeation' }} <span>/</span> AIdeation</footer>
       </div>
     </main>
   </div>

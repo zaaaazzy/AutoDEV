@@ -116,6 +116,22 @@ export function reviewSlotDatabase(config: ReviewDatabaseConfig, slot: number): 
 }
 
 /** Prüft das Env für den Container: kein Haupt-DB-Passwort, kein Haupt-User, keine Verbindung zur DB „postgres“. */
+/**
+ * Ursache eines beendeten Review-Containers aus seinem Protokoll: die erste Zeile, die nach einem Fehler aussieht
+ * (z. B. „Backend startup failed: …“). Steht in der ersten Zeile der Meldung, die die Kopfzeile anzeigt.
+ */
+export function exitCause(logs: string): string | null {
+  const line = logs
+    .split('\n')
+    .map((entry) => entry.trim())
+    .find((entry) =>
+      /startup failed|^error\b|^npm (?:error|ERR!)|^\w*Error:|fehlgeschlagen|failed to|cannot find module|EADDRINUSE|exited with/i.test(
+        entry,
+      ),
+    );
+  return line ? line.slice(0, 240) : null;
+}
+
 export function containerEnvProblem(env: string[], mainUrl: string | null): string | null {
   const main = parseUrl(mainUrl);
   const password = main ? decodeURIComponent(main.password) : '';
@@ -141,10 +157,15 @@ export const reviewNpmVolume = (projectSlug: string): string =>
 /**
  * Legt die Slot-Datenbank mit dem Review-User an (im Postgres-Container unter `sh -c`). Verbindet sich nur mit der
  * eigenen Basis-Datenbank, nie mit „postgres“; der Name ist vorher auf [a-z0-9_] geprüft.
+ * Gehört eine vorhandene Slot-Datenbank einem anderen User (z. B. vor dem eigenen Review-User mit den Haupt-Zugängen
+ * angelegt), darf der Review-User in „public“ nichts anlegen und der Container scheitert später an den Migrationen
+ * („permission denied for schema public“). Das wird hier mit Lösung gemeldet, statt den Container zu starten.
  */
 export const REVIEW_DATABASE_SCRIPT = [
   'export PGHOST=$R_HOST PGPORT=$R_PORT PGUSER=$R_USER PGPASSWORD=$R_PASSWORD PGDATABASE=$R_BASE',
   `{ [ "$(psql -tAq -v ON_ERROR_STOP=1 -c "SELECT 1 FROM pg_database WHERE datname = '$R_DB'")" = 1 ] || psql -q -v ON_ERROR_STOP=1 -c "CREATE DATABASE $R_DB"; }`,
+  `OWNER=$(psql -tAq -v ON_ERROR_STOP=1 -c "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = '$R_DB'")`,
+  `{ [ "$OWNER" = "$R_USER" ] || { echo "Die Datenbank $R_DB gehört „$OWNER“, nicht dem Review-User „$R_USER“; der Container dürfte dort keine Tabellen anlegen. Datenbank löschen (dropdb $R_DB), beim nächsten Start legt der Review-User sie neu an."; exit 1; }; }`,
 ].join(' && ');
 
 /**
@@ -352,10 +373,11 @@ export class ReviewSlots {
     if (slot.status === 'starting' || slot.status === 'running') {
       const state = await this.docker(['inspect', '-f', '{{.State.Running}}', name], 15_000);
       if (state.output.trim() !== 'true') {
-        const logs = await this.docker(['logs', '--tail', '12', name], 15_000);
+        const logs = await this.docker(['logs', '--tail', '40', name], 15_000);
+        const cause = exitCause(logs.output);
         await update(this.pool, slot.slot, {
           status: 'failed',
-          message: `Container beendet.\n${logs.output.trim().slice(-800)}`,
+          message: `Container beendet${cause ? `: ${cause}` : '.'}\n${logs.output.trim().slice(-800)}`,
         });
         return;
       }
@@ -481,7 +503,7 @@ export class ReviewSlots {
       ],
       60_000,
     );
-    return result.exitCode === 0 ? null : `Review-Datenbank nicht angelegt: ${maskSecrets(result.output.slice(-400))}`;
+    return result.exitCode === 0 ? null : `Review-Datenbank nicht bereit: ${maskSecrets(result.output.slice(-400))}`;
   }
 
   /** Kopie der Projektdatenbank (pg_dump | psql) in einem kurzlebigen Postgres-Container. */

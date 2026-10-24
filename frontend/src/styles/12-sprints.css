@@ -8,11 +8,6 @@
 .sprint-title h3 {
   margin: 0;
 }
-.sprint-links {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
 .gh-link {
   display: inline-flex;
   align-items: center;
@@ -68,57 +63,6 @@
 .sprint-goal {
   margin: 14px 0 18px;
 }
-.sprint-tasks .sprint-task:last-child {
-  margin-bottom: 0;
-}
-.sprint-task-retry {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 10px 8px 28px;
-  font-size: 12.5px;
-}
-.sprint-task {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-bottom: 6px;
-  background: var(--surface);
-}
-.sprint-task-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  background: none;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-.sprint-task-head .task-chevron {
-  margin-left: 0;
-}
-.sprint-task-body {
-  padding: 0 10px 10px 28px;
-}
-.sprint-task-head:disabled {
-  cursor: default;
-}
-.sprint-task-head:disabled .task-chevron {
-  visibility: hidden;
-}
-.sprint-task-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-right: 10px;
-}
-.sprint-task-row .sprint-task-head {
-  width: auto;
-  flex: 0 1 auto;
-  min-width: 0;
-}
 .remove-from-sprint {
   white-space: nowrap;
 }
@@ -154,10 +98,6 @@
 }
 .sprint-pool:not([open]) > summary {
   margin-bottom: 0;
-}
-.sprint-pool-bar {
-  flex-wrap: wrap;
-  margin-bottom: 8px;
 }
 
 /* Zähler und Rang-Kreis (Workflow der Agents) */
@@ -274,11 +214,6 @@
   color: var(--warn);
   font-weight: 600;
 }
-.attention-failure-details > summary {
-  color: var(--muted);
-  font-size: 0.82rem;
-  cursor: pointer;
-}
 
 /* Sprintplanung: Vorschlag mit Begründung, Summen und Auswahl */
 .sprint-propose {
@@ -379,9 +314,8 @@
   display: block;
   font-size: 0.78rem;
 }
-.capacity-fallback {
-  color: var(--orange);
-  font-weight: 600;
+.proposal-calibration {
+  font-size: 0.78rem;
 }
 .autopilot-hours {
   display: flex;
@@ -552,6 +486,6 @@ a.github-link:hover {
 
 @media (max-width: 900px) {
   .sprint-layout {
-      grid-template-columns: 1fr;
-    }
+    grid-template-columns: 1fr;
+  }
 }

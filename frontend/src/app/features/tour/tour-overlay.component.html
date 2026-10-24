@@ -24,9 +24,9 @@
       <h3>{{ step.title }}</h3>
       <p>{{ step.text }}</p>
       @if (waiting() && step.waitHint) {
-        <p class="tour-wait"><span class="live-dot"></span>{{ step.waitHint }}</p>
+        <p class="tour-wait row"><span class="live-dot"></span>{{ step.waitHint }}</p>
       }
-      <div class="tour-actions">
+      <div class="tour-actions row">
         <button type="button" class="link-button" (click)="tour.finish()">Tour beenden</button>
         @if (tour.index() > 0) {
           <button type="button" class="button secondary" (click)="tour.back()">Zurück</button>
