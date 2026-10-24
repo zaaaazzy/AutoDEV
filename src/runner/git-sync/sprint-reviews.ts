@@ -48,8 +48,9 @@ async function reportCiFailure(
 }
 
 /**
- * Nach dem Merge auf GitHub: main holen, den Sprint-Tag wie bisher setzen und pushen und das lokale main nachziehen,
- * sofern es nicht in einem anderen Ordner ausgecheckt ist (dort bleibt es beim Hinweis).
+ * Nach dem Merge auf GitHub: main holen, den Sprint-Tag wie bisher setzen und pushen und das lokale main nachziehen.
+ * Ist main in einem anderen Ordner ausgecheckt (Live-Ordner), wird es dort per Fast-Forward nachgezogen, wenn dort
+ * nichts offen ist; sonst bleibt es beim Hinweis.
  */
 export async function tagMergedSprint(
   cwd: string,
@@ -60,7 +61,7 @@ export async function tagMergedSprint(
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
   const log: string[] = [];
-  let mainUpdated = false;
+  let mainUpdated: boolean;
   const remoteMain = `refs/remotes/origin/${MAIN_BRANCH}`;
   await must('fetch', 'origin', `+refs/heads/${MAIN_BRANCH}:${remoteMain}`);
   const tag = sprintTag(sprint.name, sprint.id);
@@ -70,7 +71,18 @@ export async function tagMergedSprint(
   const head = (await git('rev-parse', '--abbrev-ref', 'HEAD')).output;
   const elsewhere = head === MAIN_BRANCH ? null : await checkedOutElsewhere(git, MAIN_BRANCH, cwd);
   if (elsewhere) {
-    log.push(`${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt – dort mit „git pull“ übernehmen.`);
+    // Live-Ordner der Menschen: nur bei sauberem Stand und nur per Fast-Forward, offene Änderungen bleiben unberührt.
+    const live = gitHelpers(execute, elsewhere).git;
+    const status = await live('status', '--porcelain', '--untracked-files=no');
+    const clean = status.exitCode === 0 && !status.output;
+    mainUpdated = clean && (await live('merge', '--ff-only', remoteMain)).exitCode === 0;
+    log.push(
+      mainUpdated
+        ? `${MAIN_BRANCH} in ${elsewhere} aktualisiert.`
+        : clean
+          ? `${MAIN_BRANCH} in ${elsewhere} weicht ab – dort mit „git pull“ übernehmen.`
+          : `${MAIN_BRANCH} ist in ${elsewhere} ausgecheckt und hat offene Änderungen – dort mit „git pull“ übernehmen.`,
+    );
   } else {
     // Nur Fast-Forward: lokale Commits auf main gehen nie verloren.
     const updated =
