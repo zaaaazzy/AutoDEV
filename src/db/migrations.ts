@@ -287,6 +287,17 @@ export const MIGRATIONS: readonly Migration[] = [
        WHERE d.bug_id = b.id AND d.status = 'done' AND b.status = 'rejected';
     `,
   },
+  // Sprint-Abbruch setzt Aufträge in Freigabe jetzt ins Backlog zurück (cancelSprint). Altfälle hängen ohne Sprint in
+  // Freigabe fest – ihre Freigabe mergte in den toten Sprint-Branch, „Wieder einplanen“ scheiterte mit 409.
+  {
+    version: 12,
+    name: 'freigabe-nach-sprint-abbruch-ins-backlog',
+    sql: `
+      UPDATE development_items SET status = 'backlog', review_branch = NULL, review_base = NULL, review_since = NULL,
+             review_approved_at = NULL, updated_at = NOW()
+       WHERE status = 'approval' AND sprint_id IS NULL AND removed_from_sprint_at IS NOT NULL;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

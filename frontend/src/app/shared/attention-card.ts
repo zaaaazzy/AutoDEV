@@ -1,4 +1,5 @@
 import type { DevelopmentItem } from '../core/models.js';
+import { canRetryDevelopment } from '../../../../src/core/development-transitions.js';
 import { failureParts, orderGuide } from './order-problem.js';
 
 /**
@@ -150,7 +151,17 @@ function buildCard(item: CardSource, manualChecks: number): AttentionCard {
     };
   }
   if (item.status !== 'blocked') {
-    if (item.removedFromSprintAt) {
+    // Nach einem Sprint-Abbruch läuft der Agent noch: erst nach seinem Ende ist der Auftrag im Backlog und lässt sich
+    // wieder einplanen (vorher lehnt /retry mit 409 ab).
+    if (item.removedFromSprintAt && item.status === 'in_progress') {
+      return {
+        why: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen – der Agent wird gerade beendet.`,
+        step: 'wait',
+        next: 'Danach kannst du ihn wieder einplanen.',
+        detail: null,
+      };
+    }
+    if (item.removedFromSprintAt && canRetryDevelopment(item)) {
       return {
         why: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen – in keinem Sprint mehr eingeplant.`,
         step: 'replan',
