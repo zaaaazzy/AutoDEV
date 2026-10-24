@@ -387,6 +387,46 @@ Die Angaben stammen aus `src/agent/chat.ts`, `src/agent/requirements.ts` (Standa
 
 ---
 
+## 9. Board: offene Aufträge und Ideen immer vollständig
+
+Das Board (Sprint, Backlog, Aktionen und Ideen) zeigt jetzt alle **offenen** Einträge des aktiven Projekts. Früher wurden nur die 200 neuesten Einträge geladen, unabhängig vom Status. Bei mehr als 200 Aufträgen fehlten daher ältere geplante, blockierte oder laufende Aufträge. Die Sprintplanung hat sie trotzdem vorgeschlagen, und du konntest sie nicht sehen oder bearbeiten. Das ist behoben. Du musst dafür nichts einstellen.
+
+### 9.1 Was geladen wird
+
+| Art | Wird immer vollständig geladen | Wird begrenzt auf die 200 neuesten |
+|-----|-------------------------------|-------------------------------------|
+| Aufträge | Status `backlog`, `planned`, `in_progress`, `blocked`, `approval` und alle ohne Status | Status `done` und `rejected` |
+| Ideen | Status `idea`, `considering`, `review`, `requested`, `drafting` und alle ohne Status | Status `accepted` und `rejected` |
+
+- „Offen“ heißt: alles, was **nicht** im Status „abgeschlossen“ steht. Ein Eintrag ohne Status gilt als offen und erscheint.
+- Die Sortierung bleibt wie bisher: neueste zuerst (nach Anlagedatum).
+- Jeder Eintrag erscheint nur einmal.
+- Was die Sprintplanung vorschlagen kann, siehst du jetzt auch im Board.
+
+### 9.2 Herkunftsfilter bei Ideen
+
+- Der Filter „Herkunft“ (z. B. `visionary`) gilt weiterhin für Ideen.
+- Er wirkt auf offene und auf die 200 neuesten abgeschlossenen Ideen gleichermaßen.
+- Ein unbekannter Filterwert zeigt alle Ideen, wie bisher.
+
+### 9.3 Bedingungen und Grenzen
+
+- Die Grenze von 200 gilt nur für erledigte, abgelehnte und angenommene Einträge. Ältere abgeschlossene Einträge erscheinen nicht im Board, bleiben aber in der Datenbank erhalten.
+- Bei sehr vielen offenen Einträgen wird die Antwort entsprechend größer. Eine Seitenaufteilung (Paginierung) gibt es noch nicht.
+- Ein neuer Endstatus muss in die Liste der abgeschlossenen Status aufgenommen werden (`src/core/status.ts`). Sonst gilt er als offen und bleibt dauerhaft sichtbar.
+
+### 9.4 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+|---------|--------------------|
+| Ein älterer Auftrag fehlt noch | Prüfe den Status. Nur erledigte und abgelehnte Aufträge sind auf die 200 neuesten begrenzt. Offene erscheinen immer. |
+| Ein Auftrag mit Status `done` ist nicht zu sehen | Gewollt, wenn er zu den älteren erledigten gehört. Er bleibt in der Datenbank. |
+| Die Ideenliste ist nach einem Filter leer | Der Herkunftsfilter schränkt ein. Stelle den Filter zurück auf alle Herkünfte. |
+
+**Hinweis:** Für diesen Abschnitt liegen keine Printscreens vor. Die Board-Oberfläche lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Printscreens sollten nachgereicht werden, wenn der Stack verfügbar ist. Bilder wurden nicht erfunden.
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
