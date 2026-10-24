@@ -113,7 +113,8 @@ function bugRoutes(bug: BugRow) {
         bug.approvedAt = new Date();
         return { rows: [{ id: bug.id, approvedBy: values[1] }] };
       }
-      if (sql.startsWith('INSERT INTO development_items')) {
+      // Der Sprint-Auftrag (syncBugOrder) entsteht nur mit Sprint; der Bug hier hat keinen.
+      if (sql.startsWith('INSERT INTO development_items') && !sql.includes('b.sprint_id IS NOT NULL')) {
         orders.push(String(values[0]));
         return { rows: [], rowCount: 1 };
       }

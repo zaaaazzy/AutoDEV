@@ -273,7 +273,7 @@ export async function queueBugFix(
 ): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
-     SELECT b.project_slug, $2, 'Bug: ' || b.title,
+     SELECT b.project_slug, $2, left('Bug: ' || b.title, 180),
             COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
             ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
             'planned', 'high', 'bug', b.id, TRUE

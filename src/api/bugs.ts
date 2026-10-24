@@ -31,6 +31,8 @@ const BUG_COLUMNS = `id, project_slug AS "projectSlug", title, description, seve
 const PRODUCTION_COUNT = `CASE WHEN source = 'production' THEN (
     SELECT COALESCE(SUM(k.count), 0)::int FROM production_events e JOIN production_event_buckets k ON k.event_id = e.id
      WHERE e.bug_id = bugs.id AND k.hour >= date_trunc('hour', NOW() - INTERVAL '24 hours')) END AS "productionCount"`;
+/** Spalten, deren Änderung den Auftrag zum Bug betrifft (Sprint, Status, Text, Priorität). */
+const ORDER_COLUMNS = new Set(['sprint_id', 'status', 'title', 'description', 'severity']);
 const BUG_FIELDS = {
   title: { column: 'title', parse: parseTitle(180) },
   description: { column: 'description', parse: parseLongText },
@@ -41,18 +43,21 @@ const BUG_FIELDS = {
   category: { column: 'category', parse: parseCategory },
 };
 
+/** Priorität des Auftrags aus dem Schweregrad des Bugs (Alias b). */
+const ORDER_PRIORITY = `CASE b.severity WHEN 'critical' THEN 'high' WHEN 'high' THEN 'high' WHEN 'medium' THEN 'medium' ELSE 'low' END`;
+
 /**
  * Keeps the development order of a bug in line with the sprint the bug was added to. Bugs aus fremden Quellen bekommen
  * erst nach der Freigabe einen Auftrag (sonst stünde ihr Text schon vorher in einem Auftrag, der beim Löschen des Bugs
  * seine Sperre verlöre), ihr Text kommt als Fremdtext eingefasst hinein. Automatisch laufende Behebungsaufträge
  * (auto_run, z. B. aus dem Betrieb) hängen an keinem Sprint und gehen beim Entfernen aus dem Sprint nicht ins Backlog.
+ * Solange der Auftrag nicht begonnen hat, folgt er Titel, Beschreibung und Schweregrad des Bugs.
  */
 export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id)
-     SELECT b.project_slug, b.sprint_id, 'Bug: ' || b.title, ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, 'planned',
-            CASE b.severity WHEN 'critical' THEN 'high' WHEN 'high' THEN 'high' WHEN 'medium' THEN 'medium' ELSE 'low' END,
-            'bug', b.id
+     SELECT b.project_slug, b.sprint_id, left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, 'planned',
+            ${ORDER_PRIORITY}, 'bug', b.id
        FROM bugs b
       WHERE b.id = $1 AND b.sprint_id IS NOT NULL AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
         AND NOT ${unapprovedBugSql('b')}
@@ -60,6 +65,18 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
        SET sprint_id = EXCLUDED.sprint_id,
            status = CASE WHEN development_items.status IN ('backlog', 'done') THEN 'planned' ELSE development_items.status END,
            updated_at = NOW()`,
+    [bugId],
+  );
+  // Behebungsaufträge (auto_run) haben einen eigenen Einstiegstext und bleiben, wie sie angelegt wurden.
+  await pool.query(
+    `UPDATE development_items d
+        SET title = left('Bug: ' || b.title, 180), description = ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
+            priority = ${ORDER_PRIORITY}, updated_at = NOW()
+       FROM bugs b
+      WHERE d.bug_id = b.id AND b.id = $1 AND d.status IN ('planned', 'backlog') AND NOT d.auto_run
+        AND NOT ${unapprovedBugSql('b')}
+        AND (d.title, d.description, d.priority) IS DISTINCT FROM
+            (left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, ${ORDER_PRIORITY})`,
     [bugId],
   );
   await pool.query(
@@ -254,7 +271,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Bug nicht gefunden.' });
       return;
     }
-    if (fields.some((field) => field.column === 'sprint_id' || field.column === 'status')) {
+    if (fields.some((field) => ORDER_COLUMNS.has(field.column))) {
       await syncBugOrder(pool, request.params.id);
     }
     response.json({ bug: result.rows[0] });

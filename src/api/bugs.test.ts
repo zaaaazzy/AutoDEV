@@ -195,6 +195,39 @@ test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async 
         assert.equal((await api.call('DELETE', `/bugs/${MISSING}`)).status, 404);
         assert.equal((await api.call('DELETE', '/bugs/keine-uuid')).status, 404);
       });
+
+      await t.test('Auftrag folgt Titel, Beschreibung und Schweregrad, solange er nicht begonnen hat', async () => {
+        const id = await bug('manual', 'alt');
+        await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint });
+        const patch = { title: 'Neuer Titel', description: 'neu', severity: 'critical' };
+        assert.equal((await api.call('PATCH', `/bugs/${id}`, patch)).status, 200);
+        const [order] = (
+          await pool.query<{ id: string; title: string; description: string; priority: string }>(
+            'SELECT id, title, description, priority FROM development_items WHERE bug_id = $1',
+            [id],
+          )
+        ).rows;
+        assert.deepEqual(
+          { title: order?.title, description: order?.description, priority: order?.priority },
+          { title: 'Bug: Neuer Titel', description: 'neu', priority: 'high' },
+        );
+        // Läuft der Auftrag, ändert ein neuer Bug-Text ihn nicht mehr.
+        await pool.query(`UPDATE development_items SET status = 'in_progress' WHERE id = $1`, [order!.id]);
+        await api.call('PATCH', `/bugs/${id}`, { description: 'später' });
+        assert.equal((await orders(id))[0]?.description, 'neu');
+      });
+
+      await t.test('langer Titel (180 Zeichen): Auftrag entsteht trotzdem, Titel gekürzt', async () => {
+        const id = await bug('manual');
+        assert.equal(
+          (await api.call('PATCH', `/bugs/${id}`, { title: 'x'.repeat(180), sprintId: sprint })).status,
+          200,
+        );
+        const titles = (
+          await pool.query<{ title: string }>('SELECT title FROM development_items WHERE bug_id = $1', [id])
+        ).rows.map((row) => row.title.length);
+        assert.deepEqual(titles, [180]);
+      });
     } finally {
       await api.close();
     }
