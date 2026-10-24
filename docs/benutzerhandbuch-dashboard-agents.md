@@ -428,6 +428,33 @@ Das Board (Sprint, Backlog, Aktionen und Ideen) zeigt jetzt alle **offenen** Ein
 
 **Hinweis:** Für diesen Abschnitt liegen keine Printscreens vor. Die Board-Oberfläche lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Printscreens sollten nachgereicht werden, wenn der Stack verfügbar ist. Bilder wurden nicht erfunden.
 
+## 10. Bugs einem Sprint zuordnen
+
+Du kannst einen Bug einem Sprint zuordnen. Das geht im Anlegen-Formular, in der Bug-Zeile und unter „Bug bearbeiten“. Ordnest du einen Bug zu, legt AIdeation einen Auftrag „Bug: …“ im Sprint an. Der Auftrag läuft nur, wenn der Sprint läuft.
+
+### 10.1 Welche Sprints zur Auswahl stehen
+
+- **Zur Auswahl:** nur geplante und aktive Sprints.
+- **Nicht zur Auswahl:** abgebrochene, in Prüfung befindliche und abgeschlossene Sprints.
+- **Ausnahme:** Ist der Bug schon einem solchen Sprint zugeordnet, bleibt dieser Sprint in der Auswahl sichtbar. So verlierst du die Zuordnung nicht, wenn du nur Titel oder Status änderst.
+
+### 10.2 Was die Schnittstelle prüft
+
+- Eine Zuordnung zu einem abgebrochenen, in Prüfung befindlichen oder abgeschlossenen Sprint wird mit **409** abgelehnt. Es wird weder der Bug gespeichert noch ein Auftrag angelegt.
+- Die Prüfung greift nur, wenn sich die Sprint-Zuordnung ändert. Ein Bug, der schon an einem solchen Sprint hängt, bleibt bei anderen Änderungen bearbeitbar.
+- Das Entfernen der Zuordnung ist immer erlaubt.
+- Der Sprint muss zum selben Projekt gehören wie der Bug. Sonst kommt **400**.
+
+### 10.3 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+|---------|--------------------|
+| Ein Bug ist einem abgebrochenen oder abgeschlossenen Sprint zugeordnet, und sein Auftrag läuft nie | Ältere Zuordnungen werden nicht automatisch umgehängt. Ordne den Bug einem geplanten oder aktiven Sprint zu. Sonst bleibt sein Auftrag liegen. |
+| Der gewünschte Sprint fehlt in der Auswahl | Der Sprint ist abgebrochen, in Prüfung oder abgeschlossen. Wähle einen geplanten oder aktiven Sprint. |
+| Speichern schlägt mit 409 fehl | Der Sprint ist nicht mehr zuordenbar. Wähle einen geplanten oder aktiven Sprint. |
+
+**Hinweis:** Für diesen Abschnitt liegen keine Printscreens vor. Die Bug-Seite lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Printscreens sollten nachgereicht werden, wenn der Stack verfügbar ist.
+
 ---
 
 ## Verwandte Dokumente
