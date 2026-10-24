@@ -10,6 +10,7 @@ import {
   readRestart,
   requestRestart,
   RESTART_COMMAND,
+  RESTARTING_STALE_MS,
 } from './system-restart.js';
 
 /** app_settings im Speicher: genug für SELECT value … WHERE key und INSERT … ON CONFLICT. */
@@ -57,6 +58,39 @@ test('Neustart: anfordern, Container neu bauen, nach dem Worker-Start abschließ
   assert.equal((await readRestart(pool))?.status, 'restarting');
   assert.equal((await completeRestart(pool))?.status, 'done');
   assert.equal((await requestRestart(pool, 'Patrick')).created, true, 'nach Abschluss wieder möglich');
+});
+
+test('Neustart: kommt der Worker nicht wieder, bleibt „restarting“ nicht für immer gesperrt', async () => {
+  const pool = memoryPool();
+  const requested = new Date('2026-10-21T10:00:00Z');
+  await requestRestart(pool, 'Patrick', requested);
+  const built = new Date(requested.getTime() + 3 * 60_000);
+  assert.equal(
+    await processRestart(
+      pool,
+      '/x',
+      () => 0,
+      ok,
+      () => built,
+      { health: async () => true },
+    ),
+    'restart',
+  );
+  assert.equal((await readRestart(pool))?.restartingAt, built.toISOString());
+  const soon = new Date(built.getTime() + RESTARTING_STALE_MS - 1_000);
+  assert.equal((await requestRestart(pool, 'Patrick', soon)).created, false, 'kurz danach: 409');
+  const late = new Date(built.getTime() + RESTARTING_STALE_MS + 1_000);
+  const again = await requestRestart(pool, 'Patrick', late);
+  assert.equal(again.created, true, 'nach dem Grenzwert: neuer Neustart möglich');
+  assert.equal(again.state.status, 'requested');
+});
+
+test('Neustart: „requested“ und „building“ sperren unabhängig vom Alter', async () => {
+  const pool = memoryPool();
+  const requested = new Date('2026-10-21T10:00:00Z');
+  await requestRestart(pool, null, requested);
+  const late = new Date(requested.getTime() + 2 * RESTARTING_STALE_MS);
+  assert.equal((await requestRestart(pool, null, late)).created, false);
 });
 
 test('Neustart: wartet auf laufende Aufgaben, aber nicht unbegrenzt', async () => {
