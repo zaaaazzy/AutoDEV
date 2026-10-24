@@ -6,9 +6,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
-import type { CommandExecutor } from '../core/command.js';
+import { type CommandExecutor, runCommand } from '../core/command.js';
+import { conflictSection, remainingConflicts } from './runner-steps.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
+import { syncGitHub } from './github-sync.js';
 import {
   ciLogExcerpt,
   maskSecrets,
@@ -28,6 +30,7 @@ import {
   pushRemote,
   enterOrderBranch,
   finishOrderBranch,
+  mergeApprovedBranch,
   orderBranch,
   sprintBranch,
   sprintTag,
@@ -581,6 +584,73 @@ test('red CI never merges and files one bug per run with a masked, shortened log
   }
 });
 
+/** Review-Pool mit Projekteinstellungen für syncGitHub; die GitHub-Brücke steht auf `aus`. */
+function bridgeOffPool(sprint: ReviewRow) {
+  const review = reviewPool(sprint);
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('FROM projects WHERE slug')) {
+        review.updates.push({ sql, values });
+        return {
+          rows: [
+            {
+              mode: 'aus',
+              remote: 'https://github.com/a/b.git',
+              requireApproval: false,
+              syncedAt: null,
+              auth: 'ok',
+              authCheckedAt: new Date(),
+            },
+          ],
+        };
+      }
+      return review.pool.query(sql, values);
+    },
+  } as unknown as Pool;
+  return { ...review, pool };
+}
+
+test('Brücke aus: Sprint im Review wird nach grüner CI trotzdem gemergt, getaggt und abgeschlossen', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const sprint = { ...REVIEW };
+  const { pool, updates } = bridgeOffPool(sprint);
+  const { adapter, merged } = reviewAdapter({ checks: 'success' });
+  const listed: string[] = [];
+  adapter.listIssues = async (label) => (listed.push(label), []);
+  adapter.mergePullRequest = async (url) => {
+    merged.push(url);
+    await mergeOnGithub(remote);
+  };
+  const result = await syncGitHub(pool, 'bruecke-aus-ci', cwd, runCommand, new Date(), () => adapter);
+  assert.equal(result.skipped, undefined);
+  assert.equal(result.finished, 1);
+  assert.deepEqual(merged, ['https://github.com/a/b/pull/42']);
+  assert.equal(sprint.status, 'completed');
+  assert.ok(execFileSync('git', ['tag', '-l', 'sprint-sprint-1-apfel-abcdef'], { cwd: remote }).toString().trim());
+  // Der Issue-Import bleibt im Modus „aus“ abgeschaltet.
+  assert.deepEqual(listed, []);
+  assert.ok(!updates.some((update) => update.sql.includes('SET github_synced_at')));
+  // Zweiter Takt nach dem Intervall: nichts mehr im Review, also kein gh-Aufruf und kein zweiter Merge.
+  const later = new Date(Date.now() + 10 * 60_000);
+  assert.equal((await syncGitHub(pool, 'bruecke-aus-ci', cwd, runCommand, later, () => adapter)).skipped, 'Modus aus');
+  assert.equal(merged.length, 1);
+});
+
+test('Brücke aus: von Hand gemergter Pull Request schliesst den Sprint ab', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  await mergeOnGithub(remote);
+  const sprint = { ...REVIEW };
+  const { pool } = bridgeOffPool(sprint);
+  const { adapter, merged } = reviewAdapter({ checks: 'success', pr: 'merged' });
+  const result = await syncGitHub(pool, 'bruecke-aus-hand', cwd, runCommand, new Date(), () => adapter);
+  assert.equal(result.finished, 1);
+  assert.deepEqual(merged, []);
+  assert.equal(sprint.status, 'completed');
+  assert.ok(execFileSync('git', ['tag', '-l', 'sprint-sprint-1-apfel-abcdef'], { cwd: remote }).toString().trim());
+});
+
 test('a pull request closed without merge ends the review as failed sync', async () => {
   const { cwd } = await sprintRepository();
   const sprint = { ...REVIEW };
@@ -698,6 +768,66 @@ test('Ungelöste Konflikte werden am Ende verworfen statt mit Markern committet'
   assert.match(await readFile(patch, 'utf8'), /\+entwickler-arbeit/);
 });
 
+test('Fortsetzen auf dem Auftrags-Branch behält offene Merge-Konflikte (Neustart des Workers)', async () => {
+  const { cwd, git, item } = await conflictingOrder();
+  const first = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(first?.conflicts, ['liste.txt']);
+  const conflicted = await readFile(join(cwd, 'liste.txt'), 'utf8');
+
+  // Neustart: Der Ordner steht schon auf dem Auftrags-Branch, der Merge ist noch offen.
+  const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(resumed, { branch: 'auftrag/99999999-liste', base: 'sprint/sprint-1', conflicts: ['liste.txt'] });
+  // Der Prompt des nächsten Agents (runStep) beginnt mit dem Konfliktabschnitt.
+  assert.match(conflictSection(resumed), /^## Zuerst: Merge-Konflikte lösen[\s\S]*`liste.txt`[\s\S]*\n\n$/);
+  // Weder Abort noch Reset: MERGE_HEAD und die Marker bleiben stehen.
+  assert.ok(git('rev-parse', '-q', '--verify', 'MERGE_HEAD'));
+  assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), conflicted);
+  assert.equal(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true), null);
+  // Lässt der Agent die Marker stehen, ist der Schritt nicht bestanden (Prüfung nach dem Schritt in runStep).
+  assert.deepEqual(await remainingConflicts(cwd, runCommand), ['liste.txt']);
+
+  // Ohne offenen Merge bleibt das Ergebnis wie bisher (kein leeres conflicts-Feld).
+  await writeFile(join(cwd, 'liste.txt'), 'basis\nauftrag\nanderer auftrag\n');
+  assert.deepEqual(await remainingConflicts(cwd, runCommand), []);
+  assert.ok(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true));
+  assert.deepEqual(await enterOrderBranch(cwd, item, 'Sprint 1'), {
+    branch: 'auftrag/99999999-liste',
+    base: 'sprint/sprint-1',
+  });
+});
+
+test('unresolvedConflicts wirft, wenn git scheitert, statt „keine Konflikte“ zu melden', async () => {
+  const execute = (async () => ({
+    exitCode: 128,
+    durationMs: 0,
+    output: 'fatal: index kaputt',
+  })) as unknown as CommandExecutor;
+  await assert.rejects(unresolvedConflicts('/repo', execute), /Konfliktprüfung fehlgeschlagen/);
+  // Nach dem Schritt gilt das als offener Konflikt: der Schritt scheitert, statt zu bestehen.
+  const remaining = await remainingConflicts('/repo', execute);
+  assert.equal(remaining.length, 1);
+  assert.match(remaining[0]!, /Prüfung fehlgeschlagen: Konfliktprüfung fehlgeschlagen: fatal: index kaputt/);
+});
+
+test('Fortsetzen ohne offenen Merge liefert keine Konflikte und keinen Konfliktabschnitt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-resume-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'liste.txt'), 'basis\n');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  const item = { id: '99999999-6666-7777-8888-999999999999', title: 'Sauber' };
+  await enterOrderBranch(cwd, item, 'Sprint 1');
+  // Abbruch mitten im Schritt: offene Änderung, aber kein Merge.
+  await writeFile(join(cwd, 'liste.txt'), 'basis\nangefangen\n');
+  const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(resumed, { branch: 'auftrag/99999999-sauber', base: 'sprint/sprint-1' });
+  assert.equal(conflictSection(resumed), '');
+  assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), 'basis\nangefangen\n');
+});
+
 test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderungen im Ordner hat', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'git-wait-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
@@ -720,6 +850,49 @@ test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderunge
   assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/12345678-halb-fertig');
   // Committet oder auf einem anderen Branch: die Sicherung läuft wieder.
   git('commit', '-am', 'wip');
+  assert.equal(await orderWorkInProgress(cwd), false);
+});
+
+test('Git-Sicherung wartet auch, wenn der unterbrochene Auftrag nur neue Dateien angelegt hat', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-new-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-nur-neue-datei');
+  await mkdir(join(cwd, 'src'), { recursive: true });
+  await writeFile(join(cwd, 'src', 'halb-fertig.ts'), 'export const x = 1;');
+  assert.equal(await orderWorkInProgress(cwd), true);
+  const { pool, updates } = fakePool(null);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
+  assert.equal(
+    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('60 minutes')),
+    false,
+    'nichts übernommen, Sprint bleibt pending',
+  );
+  // Kein Checkout, kein Commit: die neue Datei bleibt unversioniert auf dem Auftrags-Branch.
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/12345678-nur-neue-datei');
+  assert.equal(git('status', '--porcelain', '--untracked-files=all'), '?? src/halb-fertig.ts');
+  assert.equal(git('rev-list', '--count', 'HEAD'), '1');
+});
+
+test('Testberichte und Agent-Ablage allein halten die Git-Sicherung nicht auf', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-ignored-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-nur-ablage');
+  await mkdir(join(cwd, '.dev-log'), { recursive: true });
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, '.dev-log', 'notiz.md'), 'notiz');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'bericht');
   assert.equal(await orderWorkInProgress(cwd), false);
 });
 
@@ -820,4 +993,123 @@ test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gesch
   assert.ok(!updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
   assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
   assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
+});
+
+// Früher scheiterte die Freigabe eines Auftrags ohne Sprint im losgelösten Agent-Worktree mit „already used by
+// worktree“ (git checkout main, während main im Ordner der Menschen ausgecheckt ist) – jede Freigabe endete blockiert.
+test('Review-Freigabe: Basis main in anderem Worktree ausgecheckt → dort gemergt, bei offenen Änderungen nichts angefasst', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-review-'));
+  const agents = `${human}-agents`;
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    })
+      .toString()
+      .trim();
+  run(human, 'init', '-q', '-b', 'main');
+  run(human, 'config', 'user.email', 't@t');
+  run(human, 'config', 'user.name', 't');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '--detach', agents, 'main');
+  const branch = 'auftrag/aa11bb22-betrieb';
+  run(agents, 'checkout', '-q', '-b', branch);
+  await writeFile(join(agents, 'betrieb.txt'), 'betrieb\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'betrieb');
+  run(agents, 'checkout', '-q', '--detach', 'main');
+
+  // Ordner der Menschen hat offene Änderungen: nicht mergen, dort nichts verändern, Branch bleibt.
+  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
+  const blocked = await mergeApprovedBranch(agents, { title: 'Betrieb' }, branch, 'main');
+  assert.equal(blocked.merged, false);
+  assert.doesNotMatch(blocked.message, /already used by worktree/);
+  assert.match(blocked.message, /Änderungen offen/);
+  assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+  assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
+  assert.ok(run(agents, 'branch', '--list', branch));
+
+  // Sauberer Ordner: Merge im Ordner der Menschen, Branch gelöscht, Agent-Ordner folgt main losgelöst.
+  run(human, 'checkout', '-q', '--', 'a.txt');
+  const merged = await mergeApprovedBranch(agents, { title: 'Betrieb' }, branch, 'main');
+  assert.equal(merged.merged, true, merged.message);
+  assert.equal(await readFile(join(human, 'betrieb.txt'), 'utf8'), 'betrieb\n');
+  assert.equal(run(human, 'status', '--porcelain'), '');
+  assert.equal(run(agents, 'branch', '--list', branch), '');
+  assert.equal(run(agents, 'rev-parse', 'HEAD'), run(human, 'rev-parse', 'main'));
+});
+
+// A7: Nach dem Abschluss blieb der Agent-Ordner auf sprint/…; ein Auftrag ohne Sprint (Erneut versuchen, Bugfix) zweigte
+// davon ab, wurde dorthin gemergt und kam nie in main.
+test('Sprint-Sicherung: nach dem Merge in den Ordner der Menschen steht der Agent-Ordner losgelöst auf main', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
+  const agents = `${human}-agents`;
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    })
+      .toString()
+      .trim();
+  run(human, 'init', '-q', '-b', 'main');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '-b', 'sprint/sprint-1-apfel', agents, 'main');
+  await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'sprint');
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+  assert.equal(await syncSprintToGit(pool, 'p', agents), 1);
+  assert.ok(updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
+  assert.equal(run(human, 'show', 'main:sprint.txt'), 'sprint');
+  assert.equal(run(agents, 'rev-parse', '--abbrev-ref', 'HEAD'), 'HEAD', 'losgelöst');
+  assert.equal(run(agents, 'rev-parse', 'HEAD'), run(human, 'rev-parse', 'main'));
+
+  // Der nächste Auftrag ohne Sprint zweigt von main ab und wird am Ende in main gemergt.
+  const item = { id: 'dddddddd-0000-4000-8000-000000000004', title: 'Retry ohne Sprint' };
+  const branch = await enterOrderBranch(agents, item, null);
+  assert.equal(branch?.base, 'main');
+});
+
+test('Auftrag ohne Sprint auf altem Sprint-Branch: setzt auf main auf, nicht auf dem Sprint', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-no-sprint-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd, stdio: 'pipe' })
+      .toString()
+      .trim();
+  git('init', '-q', '-b', 'main');
+  await writeFile(join(cwd, 'a.txt'), 'a\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'eins');
+  git('switch', '-q', '-c', 'sprint/sprint-7');
+  await writeFile(join(cwd, 'alt.txt'), 'alter Sprint\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'sprint');
+  const branch = await enterOrderBranch(cwd, { id: 'eeeeeeee-0000-4000-8000-000000000005', title: 'Bugfix' }, null);
+  assert.equal(branch?.base, 'main');
+  assert.equal(git('rev-parse', 'HEAD'), git('rev-parse', 'main'), 'vom Stand von main, ohne den alten Sprint');
+
+  // Branches der Menschen bleiben, wie sie sind (dort arbeitet der Auftrag wie bisher auf ihrem Branch).
+  git('switch', '-q', 'main');
+  git('branch', '-q', '-D', branch!.branch);
+  git('switch', '-q', '-c', 'feature/eigenes');
+  const human = await enterOrderBranch(cwd, { id: 'ffffffff-0000-4000-8000-000000000006', title: 'Auf Feature' }, null);
+  assert.equal(human?.base, 'feature/eigenes');
 });

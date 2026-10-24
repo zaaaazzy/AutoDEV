@@ -7,7 +7,7 @@ import type { Pool } from 'pg';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { loadKnownBugs } from '../api/bugs.js';
 import { awaitsBugApprovalSql } from '../core/bug-trust.js';
-import { backfillFailures, resumeAfterEnvironment } from './autofix.js';
+import { backfillFailures, detachFromClosedSprints, resumeAfterEnvironment } from './autofix.js';
 import { loadProjectContext } from '../core/project-context.js';
 import { loadFollowUpContext } from './follow-up.js';
 import { markSprintReady, sprintAutopilot } from './sprint-autopilot.js';
@@ -103,8 +103,9 @@ async function resumePosition(
       phase: string;
       status: string;
       output: string;
+      interrupted?: boolean | null;
     }>(
-      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output
+      `SELECT agent_id, workflow_step_id, agent_name, phase, status, output, interrupted
          FROM agent_run_steps WHERE run_id = $1 ORDER BY position`,
       [previous.id],
     )
@@ -135,9 +136,16 @@ async function resumePosition(
     position += 1;
   }
   // Lehnen Tester oder Reviewer ab, beginnt der nächste Versuch wieder beim Entwickler – mit deren Rückmeldung.
+  // Wurde der Schritt nur unterbrochen (Worker beendet, Ordner weg, Nutzungslimit), setzt derselbe Agent fort.
   const failed = steps[position];
   const failedAgent = ordered[position];
-  if (failed && failed.status !== AGENT_STEP_STATUS.passed && failedAgent && LOOP_BACK_ROLES.has(failedAgent.role)) {
+  if (
+    failed &&
+    failed.status !== AGENT_STEP_STATUS.passed &&
+    !failed.interrupted &&
+    failedAgent &&
+    LOOP_BACK_ROLES.has(failedAgent.role)
+  ) {
     const restart = ordered.findIndex((agent) => agent.phase === 'while_task');
     if (restart >= 0 && restart < position) {
       done.splice(restart);
@@ -213,7 +221,7 @@ export async function runWorkItem(
         AND (d.retry_after IS NULL OR d.retry_after <= NOW()) AND (
         d.agent_id IS NOT NULL OR (
           NOT EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.paused_at IS NOT NULL)
-          AND (d.auto_run OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
+          AND ((d.auto_run AND d.sprint_id IS NULL) OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id AND s.status = 'active'))))))`,
       [item.id, Boolean(options.itemId)],
     )
     .catch(async (error: unknown) => {
@@ -305,8 +313,8 @@ export async function runWorkItem(
         interrupted = true;
         break;
       }
-      // Budget: Ist ein Limit (Tag, Sprint, Auftrag) erreicht, startet kein weiterer Agent.
-      budgetStop = await budgetGate(ctx).catch(logged('runner', null));
+      // Budget: Ist ein Limit (Tag, Sprint, Auftrag) des Projekts oder der Rolle des Agents erreicht, startet er nicht.
+      budgetStop = await budgetGate(ctx, agent.role).catch(logged('runner', null));
       if (budgetStop) {
         passed = false;
         break;
@@ -359,7 +367,10 @@ export async function runWorkItem(
         : `Gescheitert bei „${last?.agentName ?? 'einem Agent'}“:\n${last?.output.slice(-1500) ?? ''}`;
       for (const [index, agent] of observers.entries()) {
         // Auch „Bei abgeschlossen/abgelehnt“ starten nicht mehr, wenn das Budget erreicht ist (ohne Blockade).
-        if (await budgetGate(ctx).catch(logged('runner', null))) break;
+        // Nur das Limit der eigenen Rolle erreicht: dieser Agent fällt aus, die übrigen laufen.
+        const stop = await budgetGate(ctx, agent.role).catch(logged('runner', null));
+        if (stop?.role) continue;
+        if (stop) break;
         if (!releaseTree && changesWorkingTree(agent)) {
           releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
           ctx.sprintName = await sprintNameOf(pool, item);
@@ -508,6 +519,8 @@ export async function runWorkflow(
   await recoverStuckItems(pool, options.project).catch(logged('runner', 0));
   // Budget wieder frei (Folgetag, Limit erhöht oder entfernt): wegen Budget blockierte Aufträge laufen weiter.
   await releaseBudgetBlocks(pool, options.project).catch(logged('runner', []));
+  // Erst danach: Was eben neu eingeplant wurde, aber noch an einem geschlossenen Sprint hängt, kommt in den aktiven.
+  await detachFromClosedSprints(pool, options.project).catch(logged('runner', 0));
   // Freigegebene Aufträge (Review-Freigabe) zwischen zwei Aufträgen mergen; danach ggf. deployen.
   await processApprovals(pool, options.project, options.cwd, execute).catch((error) => {
     console.error('Freigabe fehlgeschlagen:', error);

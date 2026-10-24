@@ -10,9 +10,11 @@ import {
   HostListener,
   inject,
   input,
+  linkedSignal,
   model,
   signal,
   TemplateRef,
+  untracked,
 } from '@angular/core';
 import {
   type ColumnDef,
@@ -28,6 +30,7 @@ import {
 } from '@tanstack/angular-table';
 import { PageSearchService } from '../../core/page-search.service.js';
 import { filterFacets, matchesSelection } from './filter.js';
+import { clampPage, countText, PAGE_SIZE, pageCount, pageItems, pageRange } from './pagination.js';
 import { selectionState, toggleAll } from './selection.js';
 
 export interface DataColumn<T> {
@@ -107,6 +110,8 @@ export class DataTableComponent<T> {
   readonly selection = model<ReadonlySet<string>>(new Set());
   /** VorleseText des Häkchens einer Zeile. */
   readonly selectLabel = input<(row: T) => string>(() => 'Zeile auswählen');
+  /** Ab mehr Zeilen als hier wird in Seiten geblättert; null zeigt immer alle. */
+  readonly pageSize = input<number | null>(PAGE_SIZE);
 
   private readonly cellTemplates = contentChildren(DataCellDirective);
   protected readonly detail = contentChild(DataDetailDirective);
@@ -119,7 +124,23 @@ export class DataTableComponent<T> {
     effect((onCleanup) => {
       if (this.searchable()) onCleanup(this.pageSearch.register());
     });
+    // Von außen geöffnete Zeile (Deep-Link, Auswahl auf der Seite) liegt evtl. auf einer anderen Seite: dorthin blättern.
+    // Nur einmal je Zeile, damit ein Daten-Refresh nicht zurückspringt, wenn man weitergeblättert hat.
+    effect(() => {
+      const id = this.expanded();
+      const size = this.pageSize();
+      if (!id || !size) {
+        this.revealed = null;
+        return;
+      }
+      if (id === this.revealed) return;
+      const index = this.orderedRows().findIndex((row) => row.id === id);
+      if (index < 0) return;
+      this.revealed = id;
+      untracked(() => this.requestedPage.set(Math.floor(index / size)));
+    });
   }
+  private revealed: string | null = null;
   protected readonly sorting = signal<SortingState | null>(null);
   protected readonly filters = signal<ColumnFiltersState | null>(null);
   protected readonly openFilter = signal<string | null>(null);
@@ -214,13 +235,13 @@ export class DataTableComponent<T> {
     this.selection.set(toggleAll(this.selectableIds(), this.selection()));
   }
 
-  /** Sichtbare Zeilen, bei groupBy in Gruppen mit Überschrift zusammengefasst. */
-  protected readonly groups = computed(() => {
+  /** Alle gefilterten Zeilen, bei groupBy in Gruppen mit Überschrift zusammengefasst. */
+  private readonly allGroups = computed(() => {
     const rows = this.table.getRowModel().rows;
     const id = this.groupBy();
     const column = id ? this.column(id) : undefined;
     if (!rows.length) return [];
-    if (!column) return [{ key: '', label: '', rows }];
+    if (!column) return [{ key: '', label: '', rank: '', rows }];
     const groups = new Map<string, { key: string; label: string; rank: string | number; rows: typeof rows }>();
     for (const row of rows) {
       const label = String(column.value(row.original) ?? '');
@@ -239,6 +260,51 @@ export class DataTableComponent<T> {
         : String(a.rank).localeCompare(String(b.rank), 'de'),
     );
   });
+
+  /** Zeilen in Anzeigereihenfolge (Gruppen hintereinander) – darüber wird geblättert. */
+  private readonly orderedRows = computed(() => this.allGroups().flatMap((group) => group.rows));
+
+  /** Blättern nur, wenn die gefilterten Zeilen nicht auf eine Seite passen. */
+  protected readonly paged = computed(() => {
+    const size = this.pageSize();
+    return !!size && this.orderedRows().length > size;
+  });
+  /** Neue Suche, Filter, Sortierung oder Gruppierung beginnt wieder auf Seite 1. */
+  private readonly requestedPage = linkedSignal({
+    source: () => [this.search(), this.effectiveFilters(), this.effectiveSorting(), this.groupBy()],
+    computation: () => 0,
+  });
+  private readonly size = computed(() => this.pageSize() ?? Number.MAX_SAFE_INTEGER);
+  protected readonly page = computed(() => clampPage(this.requestedPage(), this.orderedRows().length, this.size()));
+  protected readonly pages = computed(() => pageItems(this.page(), pageCount(this.orderedRows().length, this.size())));
+  protected readonly lastPage = computed(() => pageCount(this.orderedRows().length, this.size()) - 1);
+  protected readonly range = computed(() => pageRange(this.page(), this.orderedRows().length, this.size()));
+
+  /** Zeilen der aktuellen Seite, weiter nach Gruppen; die Überschrift zählt die ganze Gruppe. */
+  protected readonly groups = computed(() => {
+    const groups = this.allGroups().map((group) => ({ ...group, total: group.rows.length }));
+    if (!this.paged()) return groups;
+    const { from, to } = this.range();
+    let offset = 0;
+    return groups
+      .map((group) => {
+        const start = offset;
+        offset += group.rows.length;
+        return { ...group, rows: group.rows.slice(Math.max(0, from - 1 - start), Math.max(0, to - start)) };
+      })
+      .filter((group) => group.rows.length);
+  });
+
+  protected readonly countText = computed(() =>
+    countText(this.paged() ? this.range() : null, this.orderedRows().length, this.rows().length),
+  );
+
+  protected goToPage(page: number): void {
+    this.requestedPage.set(clampPage(page, this.orderedRows().length, this.size()));
+    // Blättern unten an der Tabelle: zum Tabellenanfang, damit man nicht mitten in der neuen Seite landet.
+    const table = this.host.nativeElement.querySelector<HTMLElement>('.dt');
+    if (table && table.getBoundingClientRect().top < 0) table.scrollIntoView({ block: 'start' });
+  }
 
   protected template(id: string): TemplateRef<{ $implicit: unknown }> | null {
     return this.cellTemplates().find((cell) => cell.appDataCell() === id)?.template ?? null;

@@ -6,6 +6,7 @@
   [hiddenColumns]="['sprint']"
   [initialSort]="sort"
   [sortable]="false"
+  [bulk]="true"
   emptyText="Noch keine Aufträge in diesem Sprint."
 >
   <ng-template appOrderActions let-item>
@@ -52,13 +53,11 @@
     </summary>
     @if (poolOpen()) {
       @if (selection().length) {
-        <div class="sprint-pool-bar" role="status">
-          <strong>{{ selection().length }} ausgewählt</strong>
+        <app-bulk-bar [count]="selection().length" one="Auftrag" many="Aufträge" (cleared)="clearSelection()">
           <button class="button primary small" type="button" [disabled]="store.busy()" (click)="takeSelected()">
             → In den Sprint ({{ selection().length }})
           </button>
-          <button class="button secondary small" type="button" (click)="clearSelection()">Auswahl aufheben</button>
-        </div>
+        </app-bulk-bar>
       }
       <app-order-table
         [items]="free()"

@@ -1,0 +1,740 @@
+/* Einstellungen, Login, Benutzer und Rollen, Budget, GitHub */
+/* Rechte als Schalter-Karten */
+.permission-list {
+  /* Rechte-Gruppen in den Einstellungen */
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.permission-list label {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1.5px solid #e1e6de;
+  border-radius: 16px;
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+.permission-list label:has(input:checked) {
+  border-color: #b9d3c3;
+  background: #f6fbf8;
+}
+.permission-list input {
+  position: relative;
+  flex: none;
+  order: 2;
+  width: 46px;
+  height: 28px;
+  min-height: 0;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #d5dcd3;
+  appearance: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.permission-list input::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  content: '';
+  transition: transform 0.2s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+.permission-list input:checked {
+  background: var(--wz-accent);
+}
+.permission-list input:checked::after {
+  transform: translateX(18px);
+}
+.permission-list span {
+  display: grid;
+  gap: 2px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+.permission-list small {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ── Login ───────────────────────────────────────────────────────────── */
+.login-screen {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(70% 50% at 10% 0%, rgb(215 134 78 / 30%), transparent 60%),
+    radial-gradient(60% 50% at 100% 100%, rgb(47 138 87 / 38%), transparent 65%),
+    linear-gradient(165deg, #22302a, #141b18);
+}
+.login-card {
+  display: grid;
+  gap: 16px;
+  width: min(400px, 100%);
+  padding: 32px 28px 24px;
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 35%);
+  animation: wizard-in 0.35s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.login-brand .brand-mark {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px 13px 13px 4px;
+  font-size: 28px;
+  box-shadow: 0 8px 18px rgb(215 134 78 / 35%);
+}
+.login-brand .eyebrow {
+  margin: 0;
+}
+.login-brand h1 {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+.login-lead {
+  margin: 0;
+  color: var(--muted);
+}
+.login-card input {
+  min-height: 46px;
+  border-radius: 12px;
+  font-size: 16px;
+}
+.login-card input:focus {
+  border-color: var(--green);
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px rgb(47 111 79 / 14%);
+}
+.login-code {
+  font-size: 22px !important;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+.login-error {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #fbefec;
+  color: #a33d26;
+}
+.login-submit {
+  min-height: 48px;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 16px;
+  box-shadow: 0 8px 20px rgb(47 111 79 / 28%);
+}
+.login-foot {
+  margin: 0;
+  color: #8a938c;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* ── Sicherheit in den Einstellungen ─────────────────────────────────── */
+.security-grid {
+  display: grid;
+  gap: 14px;
+}
+.security-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.security-item h3 {
+  margin: 0 0 2px;
+}
+.security-item p {
+  margin: 0;
+}
+.security-badge {
+  display: inline-grid;
+  flex: none;
+  min-width: 52px;
+  padding: 4px 10px;
+  place-items: center;
+  border-radius: 999px;
+  background: #eef0ea;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.security-badge.on {
+  background: #e3f2e9;
+  color: var(--green-light);
+}
+.totp-setup {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px 20px;
+  align-items: start;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface-soft);
+}
+.totp-setup img {
+  border-radius: 12px;
+  background: var(--surface);
+}
+.totp-setup ol {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+.totp-setup .totp-confirm {
+  grid-column: 1 / -1;
+}
+.totp-secret {
+  word-break: break-all;
+  user-select: all;
+}
+.totp-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.totp-confirm input {
+  flex: 1 1 160px;
+  max-width: 220px;
+  letter-spacing: 0.2em;
+}
+.security-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ── Einstellungszeilen mit Schalter rechts ──────────────────────────── */
+.setting-rows {
+  display: grid;
+  gap: 10px;
+}
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.setting-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.setting-text strong {
+  font-size: 14.5px;
+}
+.setting-text small {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.setting-row-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ── Benutzer & Rollen ───────────────────────────────────────────────── */
+.user-form,
+.user-edit {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+.user-edit {
+  grid-column: 1 / -1;
+}
+.role-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.role-grid legend {
+  margin-bottom: 6px;
+  color: #4b554e;
+  font-size: 12px;
+  font-weight: 600;
+}
+.role-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.role-option:has(input:checked) {
+  border-color: #b9d3c3;
+  background: #f3faf6;
+}
+.role-option input {
+  width: auto;
+  min-height: 0;
+  margin-top: 2px;
+}
+.role-option span {
+  display: grid;
+  gap: 2px;
+}
+.role-option small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.user-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.user-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.user-row.system {
+  background: #f7f8f5;
+}
+.user-row.inactive {
+  opacity: 0.6;
+}
+.user-avatar {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--green);
+  font-weight: 800;
+}
+.user-row.system .user-avatar {
+  background: var(--orange);
+  color: var(--ink);
+}
+.user-main {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.role-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.role-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eef0ea;
+  color: #4b554e;
+  font-size: 11px;
+  font-weight: 650;
+}
+.role-chip.admin {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.danger-zone {
+  border-color: #efc2b8;
+}
+.danger-zone h2 {
+  color: #a33d26;
+}
+.permission-list li {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.permission-list li.custom {
+  border-color: #cfe0d5;
+  background: #f6faf7;
+}
+.permission-head {
+  flex-wrap: wrap;
+}
+.permission-actions {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.permission-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.permission-rules code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #eef1ec;
+  font-size: 0.74rem;
+}
+.permission-form {
+  margin-top: 10px;
+}
+.role-chip.project {
+  background: #eef1ec;
+  color: var(--ink);
+}
+.system-tools {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12.5px;
+}
+#production-settings h3 {
+  margin-top: 18px;
+  margin-bottom: 4px;
+}
+#production-settings .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.budget-limits {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) repeat(2, minmax(120px, 1fr));
+  gap: 8px 12px;
+  align-items: end;
+}
+.routing-rules {
+  display: grid;
+  gap: 8px;
+}
+.routing-rule {
+  display: grid;
+  grid-template-columns: 34px minmax(130px, 1.5fr) repeat(4, minmax(72px, 1fr)) minmax(140px, 1.3fr) 86px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #edf0eb;
+  font-size: 12px;
+}
+
+/* Eine Kopfzeile statt der Beschriftung in jeder Zeile (die bleibt für Screenreader und das Handy). */
+.routing-rule.routing-head {
+  padding: 0 0 6px;
+  border-bottom-color: var(--line);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.routing-rule .rule-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.routing-rule:not(.routing-head):hover {
+  background: var(--surface-soft);
+}
+.routing-rule .rule-rank {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef3ef;
+  color: var(--green);
+  font-size: 12px;
+}
+.routing-rule label {
+  display: grid;
+  gap: 2px;
+}
+.routing-rule input,
+.routing-rule select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+}
+.routing-rule .rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.routing-rule .rule-actions .link-button {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+.routing-rule .rule-actions .link-button:hover:not(:disabled) {
+  background: #eef2ed;
+  color: var(--green);
+}
+.routing-rule .rule-actions .link-button:disabled {
+  opacity: 0.3;
+}
+.routing-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.github-bridge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.github-auth {
+  flex-basis: 100%;
+  margin: 0;
+}
+.github-auth.ok {
+  color: var(--green);
+}
+.github-auth.missing {
+  color: #b54708;
+}
+.settings-page {
+  display: grid;
+  max-width: 1080px;
+  gap: 10px;
+}
+.settings-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.settings-bar p {
+  margin: 0;
+}
+.settings-bar-actions {
+  display: flex;
+  gap: 14px;
+}
+.settings-cluster {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.settings-form {
+  display: grid;
+  gap: 10px;
+}
+
+/* In den Einstellungen liegen die Gruppen dicht untereinander; der Abstand kommt vom Raster. */
+.settings-page .settings-group {
+  margin: 0;
+}
+.settings-group .form-grid {
+  align-items: start;
+}
+
+/* Knöpfe in der Feldreihe nicht auf Spaltenbreite ziehen. */
+.settings-group .form-grid > .button {
+  justify-self: start;
+  align-self: end;
+  width: auto;
+  min-width: 140px;
+}
+.settings-group .form-grid > p.muted {
+  margin: -4px 0 4px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.settings-group label.check {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-group fieldset {
+  min-width: 0;
+}
+.settings-group legend {
+  padding: 0 4px;
+  color: #4b554e;
+  font-size: 12px;
+  font-weight: 650;
+}
+.settings-group .autopilot-days {
+  align-self: center;
+  gap: 12px;
+}
+.settings-group .autopilot-days label.check {
+  align-items: center;
+}
+.settings-tools {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Ein Zahlenfeld mit Speichern daneben statt zwei halbe Zeilen. */
+.settings-inline {
+  grid-template-columns: minmax(0, 220px) auto;
+  justify-content: start;
+  align-items: end;
+}
+.settings-save {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 -4px 14px rgb(0 0 0 / 5%);
+}
+
+/* Abschnitte innerhalb einer Gruppe (z. B. Budget: Limits, Anzeige, Modell-Routing). */
+.settings-block {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0;
+}
+.settings-block + .settings-block {
+  border-top: 1px solid var(--line);
+}
+.settings-block:first-child {
+  padding-top: 4px;
+}
+.settings-block h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.settings-block p {
+  margin: 0;
+}
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+/* Zahlenfelder ohne Pfeile: ruhiger, getippt wird ohnehin. */
+.settings-page input[type='number'] {
+  appearance: textfield;
+}
+.settings-page input[type='number']::-webkit-inner-spin-button,
+.settings-page input[type='number']::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+@media (max-width: 760px) {
+  /* Handy: Nummer und Pfeile in einer Kopfzeile, die Felder mit Beschriftung zu zweit darunter. */
+  .routing-rule {
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 0;
+  }
+  .routing-rule.routing-head {
+    display: none;
+  }
+  .routing-rule .rule-label {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+    color: #4b554e;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .routing-rule > :first-child {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .routing-rule .rule-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .budget-limits {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-inline {
+    grid-template-columns: 1fr;
+  }
+  .settings-save .button {
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 600px) {
+  .totp-setup {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .totp-confirm input {
+    max-width: none;
+  }
+}

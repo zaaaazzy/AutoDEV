@@ -1,5 +1,5 @@
 import type { Router } from 'express';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import { upsertDoc } from './docs.js';
 import { isUuid, isRecord, parseProjectSlug } from '../core/validation.js';
@@ -65,7 +65,7 @@ function toMarkdown(name: string, goal: string, report: SprintReport): string {
 }
 
 /** Builds the sprint documentation from the real state of orders, agent runs, bugs and test runs. */
-export async function generateSprintReport(pool: Pool, sprintId: string): Promise<SprintReport | null> {
+export async function generateSprintReport(pool: Pool | PoolClient, sprintId: string): Promise<SprintReport | null> {
   const sprint = await pool.query<{
     projectSlug: string;
     name: string;

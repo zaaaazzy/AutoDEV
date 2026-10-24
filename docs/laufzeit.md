@@ -34,7 +34,7 @@ flowchart TB
 | ------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 0,5 s         | Einrichtung        | Host-Aufgaben des Projekt-Assistenten (Ordner, Git, GitHub, Vorlagen, Agent-Tests), bis zu 4 parallel.                                                                                                                                                                                                                                |
 | 1,5 s         | Chat-Takt          | Nacheinander angestoßen, jede Spur höchstens einmal gleichzeitig: Testanforderung → _falls kein Chat läuft:_ Schnellschätzung → Auftragsautor (Ideen) → KI-Kommentar zum Sprintvorschlag → Visionär → Chat-Nachricht → Problemanalyse, danach Abnahmeprüfung.                                                                         |
-| 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), prüft Branch `main` und sauberen Stand, `docker compose up -d --build`, prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker, launchd startet ihn neu. |
+| 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), prüft Branch `main` und sauberen Stand, bei geändertem Lockfile `npm ci --ignore-scripts` auf dem Host (scheitert es: „fehlgeschlagen“, kein Neubau), `docker compose up -d --build`, prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker (Exit-Code 75), launchd/systemd bzw. unter Windows `run-with-env.ps1` starten ihn neu. |
 | 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; jede Minute Git-Verlauf, alle 5 min Favicon.                                                                                                                                                                                                                                 |
 | 30 s · sofort | Arbeitszyklus      | Sofort, wenn die Datenbank neue Arbeit meldet (`NOTIFY devlog_work`: Auftrag eingeplant, Sprint gestartet) oder ein Platz frei wird; sonst alle 30 s. `runWorkflow` je Projekt, höchstens **2 Projekte gleichzeitig** (Einstellung, max. 8); wer am längsten wartet, kommt zuerst. Ablauf in Abschnitt 4.                             |
 | 30 s · Job    | Wartungs-Jobs      | Projektübergreifend, nach jedem Arbeitszyklus im Hintergrund (nie zwei Durchgänge gleichzeitig): fällige aktive Zeilen aus `scheduled_jobs` beanspruchen (`FOR UPDATE SKIP LOCKED`, `next_run_at` + Intervall, Sperre `locked_until`), dann mit Zeitlimit (Standard 20–120 s, max. 300 s) ausführen. Nur feste Job-Arten aus `src/runner/scheduler.ts`; Status und Meldung landen in der Zeile. Einstellbar über `GET`/`PATCH /api/scheduled-jobs` (nur Administration). |
@@ -203,7 +203,7 @@ flowchart TB
 - Erneuter Versuch: bereits bestandene Agents werden übersprungen, ihre Ausgabe geht weiter.
 - Zeitlimit je Schritt 30 min (Standard).
 - Abbruch („Abbrechen“ in der Oberfläche, Zeitlimit, Worker-Ende): Ein Signal erreicht Modellanfragen, jedes Werkzeug des lokalen Modells und laufende Befehle samt Prozessgruppe. Nach dem Abbruch startet kein weiteres Werkzeug (`write_file`, `replace_in_file`, `run_command`, `run_sql`), auch ein schon abgebrochenes Signal wird geprüft. Der Schritt wartet auf das echte Ende des Agents, bevor Commit oder `checkout` laufen. Tokens und Kosten des abgebrochenen Laufs bleiben erhalten. Ein Abbruch von aussen meldet „Abgebrochen: Der Agent wurde gestoppt.“ und gilt weder als vorübergehender Fehler noch als Erfolg.
-- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
+- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit des Projekts und der Agent-Rolle geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
 - Modell-Routing: Die Regeln des Projekts wählen je Schritt lokal (Ollama) oder stark (CLI); Modell und Regel stehen am Schritt.
 
 ## 6 · Fehler, Problemanalyse und Bugfix
@@ -324,6 +324,8 @@ sequenceDiagram
   W-->>M: Push-Nachricht
 ```
 
+**Verlauf im Prompt:** Der Assistent bekommt den Chat in zeitlicher Reihenfolge, mit allen fertigen Antworten desselben Chats (begrenzt durch die Verlaufsgröße), auch wenn eine Antwort erst entstanden ist, nachdem eine spätere Nachricht schon wartete. Beispiel: Nachricht 1, dann Nachricht 2 (wartet), dann die Antwort auf Nachricht 1. Im Lauf für Nachricht 2 steht die Reihenfolge Nachricht 1, Antwort 1, Nachricht 2. Eine offene Rückfrage setzt die Sitzung nur fort, wenn sie vor der übernommenen Nachricht entstanden ist. Eine Nachricht, die erst nach der Rückfrage geschrieben wurde, gilt nicht als Antwort darauf. Bei einer ausdrücklichen Verweisung (`replyTo`) gilt die genannte Rückfrage unabhängig vom Zeitpunkt.
+
 Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen“) öffnet zuerst ein Bestätigungsfenster mit optionalem Kommentar, der mitgegeben wird.
 
 | Knopf im Dashboard                                 | Schreibt                                 | Abgeholt von                                                                            |
@@ -408,6 +410,17 @@ Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. D
 
 Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
 
+#### Token-Limits je Agent-Rolle
+
+Zusätzlich zu den Projektlimits kann je Agent-Rolle (`author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`; nicht `custom`) und Zeitraum (`day`, `sprint`, `order`) ein Token-Limit gelten (Tabelle `budget_role_limits`). Keine Zeile bedeutet keine Grenze. Eine Oberfläche gibt es noch nicht, nur die API:
+
+- `GET /api/projects/:slug/budget/roles`: alle Rollen mit `maxTokens`, Verbrauch (`spend`) und Anteil (`percent`) je Zeitraum. Der Verbrauch ist der von heute bzw. vom aktiven Sprint. Beim Auftragslimit ist `spend` `null`, weil der Verbrauch dort am einzelnen Auftrag hängt.
+- `PUT /api/projects/:slug/budget/roles/:role` (nur „admin“): Body `{ "day": { "maxTokens": 500000 }, "sprint": null }`. Eine Zahl setzt die Grenze, `null` bzw. `{ "maxTokens": null }` entfernt sie, ein fehlender Zeitraum bleibt unverändert. Unbekannte Rolle oder unbekannter Zeitraum und eine Grenze, die keine positive Zahl ist, ergeben 400. Danach werden wegen Budget blockierte Aufträge freigegeben, wenn ihr Limit wieder reicht.
+
+Verbrauch je Rolle: Workflow-Schritte über `agent_run_steps.agent_id → agents.role`, dazu `agent_usage.role` (Autor, Bug-Wächter). Schritte ohne `agent_id` (eingebaute Agents) und Schritte eines gelöschten Agents (`ON DELETE SET NULL`) zählen zu keiner Rolle, bleiben aber im Projektverbrauch. Ältere Schritte werden nicht nachträglich zugeordnet.
+
+Vor jedem Agent-Schritt (`budgetGate` mit der Rolle des Agents) und vor Autor bzw. Bug-Wächter gilt zuerst das Projektlimit, dann das Limit der Rolle. Ist ein Rollen-Limit erreicht, startet der Schritt nicht. Der Auftrag wird `blocked` mit dem Grund in `failure` bzw. „Aktion notwendig“, etwa „Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens“. Dazu kommt die Rolle in `budget_blocked_role`. Die Problemanalyse zeigt diesen Grund auch ohne fehlgeschlagenen Schritt. Bei „Bei abgeschlossen/abgelehnt“ fällt nur der Agent mit erreichtem Rollen-Limit aus. Die 80-%-Warnung kommt je Rolle und Periode genau einmal; in `budget_warnings` steht dafür `period_key = rolle:<role>:<key>`.
+
 ### Zeitleiste und Rückfragen im Auftrag
 
 Der Auftrag zeigt, worauf er wartet, wer wann was gemacht hat, und nimmt Antworten auf Rückfragen direkt entgegen; die Push-Nachricht öffnet das Antwortfeld.
@@ -417,6 +430,10 @@ Der Auftrag zeigt, worauf er wartet, wer wann was gemacht hat, und nimmt Antwort
 Optional nach dem Sprint-Abschluss automatisch; nach dem Neubau Gesundheitsprüfung und bei Bedarf Rücksetzen auf das vorherige Abbild. Auswertung „Was klappt“ unter Verbrauch.
 
 Alle Compose-Aufrufe dabei (`images`, `up -d --build`, Rücksetzen mit `up -d --no-build`) laufen ohne `DEV_LOG_*`- und `COMPOSE_*`-Variablen aus der Worker-Umgebung (`composeEnvironment` in `src/runner/system-restart.ts`). Compose zieht Shell-Variablen der `.env` vor, auch leere; so gilt für die Container allein die `.env`, etwa der `DEV_LOG_SECRET_KEY`, und nicht der Wert aus `worker.env` oder das vom Worker gesetzte `DEV_LOG_PROJECT_ROOTS`.
+
+Abhängigkeiten des Workers: Der Worker läuft per `tsx` direkt aus dem AIdeation-Ordner mit dessen `node_modules`, nicht im Container. Vor dem Neubau vergleicht `processRestart` darum `package-lock.json` mit `node_modules/.package-lock.json` (`dependenciesOutdated`). Weicht ein Paket ab, fehlt eines oder fehlt die zweite Datei, läuft auf dem Host `npm ci --ignore-scripts`, ebenfalls mit `composeEnvironment`. Optionale Pakete fremder Plattformen zählen nicht. Scheitert `npm ci`, ist der Neustart „fehlgeschlagen“ (mit Push und gekürzter, bereinigter Ausgabe): Die Container werden nicht neu gebaut, und der Worker beendet sich nicht. So kann eine neue Laufzeitabhängigkeit keine Absturzschleife mit `ERR_MODULE_NOT_FOUND` auslösen. `start.sh` führt `npm ci` ebenfalls aus, wenn `package-lock.json` neuer ist als `node_modules/.package-lock.json`.
+
+Neustart des Workers: Nach „restarting“ beendet sich der Worker mit `RESTART_EXIT_CODE` (75, `src/runner/system-restart.ts`). launchd und systemd starten ihn bei jedem Exit-Code neu. Unter Windows startet `scripts/run-with-env.ps1` den Befehl genau bei 75 nach 5 s erneut, bei jedem anderen Exit-Code endet die Aufgabe. Beim Start setzt `completeRestart` den Status auf „done“. Steht „restarting“ länger als `RESTARTING_STALE_MS` (10 min, gemessen ab `restartingAt`), ist der Worker nicht wiedergekommen, und `requestRestart` nimmt einen neuen Neustart an statt 409.
 
 ### Fehlversuch-Bremse bei der Anmeldung
 
@@ -452,4 +469,6 @@ Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code
 
 ## Parallele Testläufe
 
-E2E- und Oberflächentest suchen sich einen freien Port, wenn 3195 bzw. 3196 belegt ist (in 100er-Schritten: 3295, 3395 …), und nutzen dann eine eigene Testdatenbank mit dem Port als Endung (z. B. `dev_log_e2e_3295`). So stören sich Gate, Tester-Agent und Handläufe nicht mehr (`e2e/test-ports.ts`). Feste Werte gehen weiterhin über `E2E_PORT`/`E2E_DATABASE` bzw. `FULL_UI_PORT`/`FULL_UI_DATABASE`.
+E2E- und Oberflächentest suchen sich einen freien Port, wenn 3195 bzw. 3196 belegt ist (in 100er-Schritten: 3295, 3395 …), und nutzen dann eine eigene Testdatenbank mit dem Port als Endung (z. B. `dev_log_e2e_3295`). So stören sich Gate, Tester-Agent und Handläufe nicht mehr (`e2e/test-ports.ts`).
+
+Jeder Lauf reserviert seinen Port, sobald Playwright die Konfiguration lädt, und hält ihn bis zum Ende: Sperrdatei `dev-log-test-port-<port>.lock` im Temp-Verzeichnis mit PID und Zufallswert. Ein Lauf, der kurz danach startet, nimmt deshalb den nächsten Port, auch wenn der Testserver des ersten noch nicht lauscht. Damit bekommt er auch eine andere Datenbank, und `e2e/serve.ts` löscht nie die eines laufenden Laufs. Beim Beenden gibt der Lauf seine Sperre frei, auch bei Strg+C. Die Sperre eines abgestürzten Laufs (PID nicht mehr am Leben) wird übernommen. Liegengebliebene Testdatenbanken mit Port-Endung bleiben bis zum nächsten Lauf auf diesem Port, der sie neu anlegt. Sperrordner für Tests: `E2E_LOCK_DIR`. Feste Werte gehen weiterhin über `E2E_PORT`/`E2E_DATABASE` bzw. `FULL_UI_PORT`/`FULL_UI_DATABASE`.

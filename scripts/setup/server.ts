@@ -6,7 +6,7 @@
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { platform } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -19,6 +19,8 @@ import {
   writeEnvFile,
 } from '../../src/core/env-file.js';
 import { projectRoots } from '../../src/core/validation.js';
+import { MIN_NODE, nodeVersionOk, prepareGameTools } from '../../src/setup/game-tools.js';
+import { checkChromium } from '../../src/setup/setup-jobs.js';
 import { installDemoProject } from './demo-data.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -67,17 +69,23 @@ async function version(command: string, args: string[]): Promise<string | null> 
 }
 
 async function checks() {
-  const [docker, compose, git, claude, ollama] = await Promise.all([
+  const [docker, compose, git, claude, ollama, chromium] = await Promise.all([
     version('docker', ['version', '--format', '{{.Server.Version}}']),
     version('docker', ['compose', 'version', '--short']),
     version('git', ['--version']),
     version('claude', ['--version']),
     version('ollama', ['--version']),
+    checkChromium(),
   ]);
-  const nodeMajor = Number(process.versions.node.split('.')[0]);
   return {
     platform: platform(),
-    node: { ok: nodeMajor >= 22, version: process.versions.node },
+    node: {
+      ok: nodeVersionOk(process.versions.node),
+      version: process.versions.node,
+      min: `${MIN_NODE.major}.${MIN_NODE.minor}`,
+    },
+    // Chromium für Playwright: Smoke-Test der Phaser-Vorlage und optische Abnahme; fehlt er, lädt ihn die Installation.
+    chromium: { ok: chromium.installed },
     docker: { ok: Boolean(docker), version: docker },
     compose: { ok: Boolean(compose), version: compose },
     git: { ok: Boolean(git), version: git },
@@ -164,6 +172,8 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
     }
     dbPasswordPending = false;
   }
+  // Fehlt ./backups, legt Docker den Ordner unter Linux als root an – der Backup-Container (ohne root) kann dann nicht schreiben.
+  await mkdir(join(ROOT, 'backups'), { recursive: true });
   log('Baue und starte die Container (beim ersten Mal einige Minuten) …');
   const up = await run('docker', ['compose', 'up', '-d', '--build'], log);
   if (!up.ok) {
@@ -203,6 +213,11 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
   } else {
     step('demo', 'skipped', 'Ohne Beispieldaten – du startest mit einem leeren AIdeation.');
   }
+
+  // Spiele-Werkzeuge (Phaser-Vorlage): Chromium und npm-Pakete vorladen. Kein Abbruch, AIdeation läuft auch ohne.
+  step('game', 'running');
+  const tools = await prepareGameTools((command, args) => run(command, args, log), log);
+  step('game', tools.notes.length ? 'error' : 'ok', tools.notes.join(' '));
 
   if (!body.installWorker) {
     step('worker', 'skipped', 'Den Worker startest du später mit „npm run worker“.');

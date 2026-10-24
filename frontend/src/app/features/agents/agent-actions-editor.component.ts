@@ -11,7 +11,7 @@ import { type AgentAction, AgentActionsService } from '../../core/agent-actions.
       <span class="permission-title"
         >Aktionen <small class="muted">– erscheinen im Dashboard als Quick Actions</small></span
       >
-      <ul class="agent-action-list">
+      <ul class="agent-action-list plain-list">
         @for (action of mine(); track action.id) {
           <li>
             @if (editing() === action.id) {

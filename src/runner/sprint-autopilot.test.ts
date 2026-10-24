@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
+import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
 import { sprintAutopilot, sprintSettled } from './sprint-autopilot.js';
 
 // Montag, 19.10.2026 (Ortszeit): 10:00 liegt in den Arbeitszeiten Mo–Fr 08:00–18:00, 22:00 nicht.
@@ -110,7 +111,8 @@ function finishedSprintPool(autoLive: boolean, items = [{ status: 'done', action
     if (sql.includes("UPDATE sprints s SET status = 'completed'")) return completable ? [{ id: 'sprint-9' }] : [];
     return [];
   };
-  const pool = { query: async (sql: string) => ({ rows: answer(sql) }) } as unknown as Pool;
+  const query = async (sql: string) => ({ rows: answer(sql) });
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return {
     pool,
     completed: () => statements.some((sql) => sql.includes("UPDATE sprints s SET status = 'completed'")),
@@ -147,4 +149,17 @@ test('„Selbst live“ nur in den Arbeitszeiten, nie mit offener Arbeit, nie be
   const paused = finishedSprintPool(true, undefined, false);
   assert.equal(await sprintAutopilot(paused.pool, 'demo', MONDAY_10), 'review');
   assert.equal(paused.queuedSync(), false);
+});
+
+test('Sprint nicht fertig bei altem Abnahmehinweis oder gescheitertem Merge (beides wartet nicht auf einen Menschen)', () => {
+  const done = { status: 'done', actionTodo: null };
+  // Tester bestand mit manuellen Punkten, danach scheiterte der Reviewer: kein „Aktion notwendig“, sondern ein Fehler.
+  assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: `${MANUAL_TODO_PREFIX}Login am Handy` }]), false);
+  // Fertige Arbeit, die nur nicht in den Sprint-Branch kam: ohne sie ginge der Sprint unvollständig live.
+  assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: MERGE_TODO }]), false);
+  // „Selbst prüfen (nicht automatisch prüfbar)“ aus einem Fehler ist dagegen eine echte Aktion für einen Menschen.
+  assert.equal(
+    sprintSettled([done, { status: 'blocked', actionTodo: 'Selbst prüfen (nicht automatisch prüfbar)' }]),
+    true,
+  );
 });

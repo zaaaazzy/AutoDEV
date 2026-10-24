@@ -5,6 +5,7 @@ import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { RESTART_EXIT_CODE } from '../runner/system-restart.js';
 
 // Installationsskripte (scripts/install-*.sh, install-worker.ps1) im Probelauf: Dateien schreiben, Dienst nicht
 // registrieren. Zugänge stehen nur in der Env-Datei (600), Plist/Unit sind wohlgeformt und enthalten keine Geheimnisse.
@@ -146,6 +147,28 @@ test('Linux-Worker: Unit ohne Geheimnisse, Rechte 600, Sonderzeichen für system
   assert.ok((await readFile(envFile, 'utf8')).split('\n').includes(`DEV_LOG_DATABASE_URL=${DATABASE_URL}`));
 });
 
+test('Worker-Dienst übernimmt einen eigenen Ablageort der Playwright-Browser (Smoke-Tests der Spiele)', async () => {
+  const browsers = '/opt/browser cache/ms-playwright';
+  const scripts = ['install-worker-linux.sh', ...(isMac ? ['install-worker.sh'] : [])];
+  for (const script of scripts) {
+    const { root, home } = await sandbox();
+    const envFile = join(home, '.config', 'aideation', 'worker.env');
+    const env = { HOME: home, DEV_LOG_DATABASE_URL: DATABASE_URL, DEV_LOG_SECRET_KEY: SECRET_KEY };
+    const first = run('bash', [join(root, 'scripts', script)], { ...env, PLAYWRIGHT_BROWSERS_PATH: browsers });
+    assert.equal(first.status, 0, first.output);
+    assert.ok((await readFile(envFile, 'utf8')).split('\n').includes(`PLAYWRIGHT_BROWSERS_PATH=${browsers}`), script);
+    // Erneuter Lauf ohne die Variable behält den Wert; ohne Angabe steht er gar nicht in der Datei.
+    assert.equal(run('bash', [join(root, 'scripts', script)], env).status, 0);
+    assert.match(await readFile(envFile, 'utf8'), /PLAYWRIGHT_BROWSERS_PATH=\/opt\/browser cache/);
+    const fresh = await sandbox();
+    run('bash', [join(fresh.root, 'scripts', script)], { ...env, HOME: fresh.home });
+    assert.doesNotMatch(
+      await readFile(join(fresh.home, '.config', 'aideation', 'worker.env'), 'utf8'),
+      /PLAYWRIGHT_BROWSERS_PATH/,
+    );
+  }
+});
+
 test('run-with-env.sh: setzt Werte unverändert, bricht ohne oder mit offener Env-Datei ab', async () => {
   const { base } = await sandbox();
   const envFile = join(base, 'worker.env');
@@ -222,6 +245,14 @@ test(
     assert.ok(lines.includes(`DEV_LOG_SECRET_KEY=${SECRET_KEY}`));
     const task = result.output.split('\n').find((line) => line.startsWith('Aufgabe: '));
     assert.ok(task?.includes('run-with-env.ps1') && task.includes(envFile), result.output);
+    // Aufgabe läuft ohne Zeitlimit (Standard: nach 72 Stunden beendet). Kein RestartCount: Neu gestartet wird nur
+    // über die Schleife in run-with-env.ps1 (Exit-Code 75), ein bewusster Stopp bleibt ein Stopp.
+    const settings = result.output
+      .split('\n')
+      .filter((line) => line.startsWith('Einstellung: '))
+      .map((line) => line.slice('Einstellung: '.length).trim());
+    assert.ok(settings.includes('ExecutionTimeLimit=00:00:00'), result.output);
+    assert.ok(!settings.some((line) => line.startsWith('RestartCount=')), result.output);
     assert.ok(
       !result.output.includes(PASSWORD) && !result.output.includes(SECRET_KEY),
       'keine Geheimnisse in der Ausgabe',
@@ -245,5 +276,69 @@ test(
       {},
     );
     assert.equal(missing.status, 78);
+  },
+);
+
+test('Windows-Worker: run-with-env.ps1 kennt den Exit-Code des Neustarts aus runner-cli', async () => {
+  const code = (await readFile(join(SCRIPTS, 'run-with-env.ps1'), 'utf8'))
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('#'));
+  assert.ok(code.includes(`$RestartExitCode = ${RESTART_EXIT_CODE}`), 'Exit-Code-Vertrag mit runner-cli.ts');
+  assert.ok(
+    code.some((line) => /^\s*while \(\$true\)/.test(line)),
+    'Neustart-Schleife',
+  );
+  assert.ok(
+    code.some((line) => /Start-Sleep -Seconds \$delay/.test(line)),
+    'Wartezeit vor dem Neustart',
+  );
+});
+
+test(
+  'Windows-Worker: nach „AIdeation neu starten“ startet run-with-env.ps1 den Worker binnen 30 s neu, sonst nicht',
+  { skip: !hasPwsh },
+  async () => {
+    const { base } = await sandbox();
+    const envFile = join(base, 'worker.env');
+    await writeFile(envFile, `DEV_LOG_DATABASE_URL=${DATABASE_URL}\n`);
+    const counter = join(base, 'starts.txt');
+    // Ersatz für runner-cli: Der n-te Start endet mit dem n-ten Exit-Code aus der Befehlszeile.
+    const worker = join(base, 'worker.mjs');
+    await writeFile(
+      worker,
+      [
+        "import { appendFileSync, readFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(counter)}, 'x');`,
+        `const starts = readFileSync(${JSON.stringify(counter)}, 'utf8').length;`,
+        'process.exit(Number(process.argv[1 + starts] ?? 99));',
+      ].join('\n'),
+    );
+    const wrapper = join(SCRIPTS, 'run-with-env.ps1');
+    const start = async (codes: number[], env: Record<string, string> = {}) => {
+      await writeFile(counter, '');
+      const begin = Date.now();
+      const args = ['-NoProfile', '-File', wrapper, envFile, process.execPath, worker, ...codes.map(String)];
+      const result = run('pwsh', args, env);
+      return { ...result, starts: (await readFile(counter, 'utf8')).length, seconds: (Date.now() - begin) / 1000 };
+    };
+
+    // Standard-Wartezeit (5 s): Nach dem Neustart-Code läuft der Worker deutlich vor 30 s wieder.
+    const restarted = await start([RESTART_EXIT_CODE, 0]);
+    assert.equal(restarted.status, 0, restarted.output);
+    assert.equal(restarted.starts, 2, 'nach Exit-Code 75 genau ein Neustart');
+    assert.ok(restarted.seconds >= 4 && restarted.seconds < 30, `Neustart nach ${restarted.seconds} s`);
+    assert.match(restarted.stderr, /startet in 5 s neu/);
+
+    // Mehrere Neustarts hintereinander funktionieren ebenso.
+    const twice = await start([RESTART_EXIT_CODE, RESTART_EXIT_CODE, 0], { AIDEATION_RESTART_DELAY_SECONDS: '0' });
+    assert.equal(twice.status, 0, twice.output);
+    assert.equal(twice.starts, 3);
+
+    // Bewusstes Beenden oder echter Fehler: kein Neustart, der Exit-Code geht an die Aufgabe weiter.
+    for (const code of [0, 1, 3]) {
+      const ended = await start([code, 0], { AIDEATION_RESTART_DELAY_SECONDS: '0' });
+      assert.equal(ended.status, code, ended.output);
+      assert.equal(ended.starts, 1, `Exit-Code ${code}: kein Neustart`);
+    }
   },
 );

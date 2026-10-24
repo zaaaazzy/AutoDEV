@@ -9,14 +9,18 @@ source "$ROOT/scripts/lib/service-env.sh"
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 UNIT="$UNIT_DIR/aideation-worker.service"
 ENV_FILE="$SERVICE_ENV_DIR/worker.env"
-NODE_BIN="$(dirname "$(command -v node)")"
+# Echter Pfad statt Shim/Sitzungspfad (fnm, Volta): der Dienst startet später ohne die Shell-Umgebung.
+NODE_BIN="$(dirname "$(node -p process.execPath)")"
+# Eigener Ablageort der Playwright-Browser (falls gesetzt) gilt auch im Dienst: Sonst finden optische Abnahme und
+# Smoke-Tests der Spielprojekte (Phaser-Vorlage) Chromium nicht.
 DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
   "DEV_LOG_DATABASE_URL=$DATABASE_URL" \
   "DEV_LOG_REVIEW_DATABASE_URL=$(resolve_value DEV_LOG_REVIEW_DATABASE_URL "$ENV_FILE")" \
   "DEV_LOG_OLLAMA_MODEL=$(resolve_value DEV_LOG_OLLAMA_MODEL "$ENV_FILE" "qwen3.5:9b")" \
-  "DEV_LOG_SECRET_KEY=$(resolve_value DEV_LOG_SECRET_KEY "$ENV_FILE")"
+  "DEV_LOG_SECRET_KEY=$(resolve_value DEV_LOG_SECRET_KEY "$ENV_FILE")" \
+  "PLAYWRIGHT_BROWSERS_PATH=$(resolve_value PLAYWRIGHT_BROWSERS_PATH "$ENV_FILE")"
 write_private_file "$UNIT" <<UNIT
 [Unit]
 Description=AIdeation Worker

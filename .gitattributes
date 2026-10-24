@@ -1,0 +1,7 @@
+# Shell-Skripte laufen in Linux-Containern (backup.sh ist eingebunden, review/*.sh im Image) und unter macOS/Linux:
+# mit CRLF (Git für Windows, core.autocrlf=true) bricht /bin/sh ab. Deshalb immer LF.
+*.sh text eol=lf
+deploy/Caddyfile text eol=lf
+deploy/**/*.conf text eol=lf
+# cmd.exe liest Batch-Dateien zeilenweise und erwartet CRLF.
+*.cmd text eol=crlf

@@ -69,6 +69,18 @@ Ein Agent ohne bekannte Rolle erscheint als **„Eigene Rolle“**.
 
 **Wichtig:** Die Rechte beschreiben **Agents**, nicht Benutzerrollen. Ob du selbst einen Auftrag anlegen oder einen Agent ändern darfst, hängt von deiner Benutzerrolle ab, nicht von diesen Chips.
 
+### 1.4 Geheimnisse sind für alle Agents gesperrt
+
+Zugangsdaten und Schlüssel im Projekt bleiben für jeden Claude-Agent unlesbar, unabhängig von der Rolle. Das gilt auch für den Visionär (nur lesend) und für den Chat-Assistenten mit Vollzugriff. Gesperrt sind unter anderem:
+
+- Umgebungsdateien (`.env`, `.env.example`, `config/.env.production`), auch in Unterordnern,
+- Zertifikate und Schlüssel (`*.pem`, `*.key`) sowie private SSH-Schlüssel (`id_rsa`, `id_ed25519`, `id_ecdsa`),
+- SSH-, AWS- und GnuPG-Ordner im Projekt und im Benutzerordner.
+
+Die Sperre greift beim Lesen, Suchen (Grep) und Auflisten von Dateien (Glob). Bei Suchen über einen ganzen Ordner prüft AIdeation nicht jede Datei einzeln. Dort wirken nur die Sperren der Claude-CLI.
+
+Shell-Befehle wie `cat .env` oder `grep … .env` sperrt AIdeation ebenfalls. Die Meldung nennt nur den Pfad, nie den Inhalt.
+
 ---
 
 ## 2. Diagramm „Offene Aufträge je Agent“
@@ -97,14 +109,26 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 
 ## 3. Bedienung und Grenzen
 
-- **Aktualisierung:** Die Daten folgen dem bestehenden Polling. Es gibt keine Live-Animation und kein Echtzeit-Streaming. Der Worker wird etwa alle 10 Sekunden abgefragt.
+- **Aktualisierung:** Die Daten folgen dem bestehenden Polling. Es gibt keine Live-Animation und kein Echtzeit-Streaming. Der Worker wird etwa alle 10 Sekunden abgefragt, die Schritte eines laufenden Agents alle 3 Sekunden.
+- **Nachladen nach einem Agent-Lauf:** Endet ein Schritt (oder startet ein neuer Auftrag), lädt die Oberfläche das Projekt im Hintergrund nach, ohne dass du die Seite wechseln musst. Das gilt, wenn ein laufender Schritt fertig wird (Erkennung nach höchstens 3 s) oder wenn sich die Menge der laufenden Aufträge im Worker ändert (höchstens 10 s). Danach zeigen Auftragsstatus, Sprint-Kopfzeile und das Banner „Alle Aufträge sind durch – der Sprint wartet auf dein Go“ den neuen Stand. Offene Zeilen, Dialoge und Eingaben in „Aufträge hinzufügen“ bleiben dabei stehen. Schlägt das stille Nachladen fehl, erscheint keine Fehlermeldung, und die bisherigen Daten bleiben sichtbar. Wechselst du während des Nachladens das Projekt, wird die Antwort des alten Projekts verworfen.
 - **Keine Auswertung von Aufwand, Tokens oder Kosten** pro Agent. Dafür gibt es die Verbrauchsansicht.
 - **Dateibefehle in der Shell sind gesperrt:** Agents können Dateien nicht mehr über Shell-Befehle anlegen, ändern oder löschen. Gesperrt sind `mkdir`, `touch`, `rm`, `rmdir`, `mv`, `cp`, `sed`, außerdem `ln`, `tee`, `truncate`, `install`, `unlink`, `shred`, `patch`, `dd` sowie `find` mit `-delete`, `-exec` oder `-fprint`. Das gilt für jeden Teil einer Befehlskette (`;`, `&&`, `||`, `|`) und auch, wenn der Befehl mit Pfad (`/bin/rm`), in Anführungszeichen oder mit Präfix (`xargs`, `command`, `sudo`) geschrieben ist. `sed` ist ganz gesperrt, also auch zum bloßen Lesen. Dateien ändern Agents nur über die Datei-Werkzeuge; dort prüft AIdeation die Rechte der Rolle und den erlaubten Ordner. Grund: Die Claude-CLI gibt die ersten sieben Befehle im Modus „Dateien bearbeiten ohne Rückfrage“ ohne Prüfung frei, also auch außerhalb des erlaubten Ordners. Eigene Agent-Befehle und Routinen, die einen dieser Befehle nutzen, schlagen deshalb fehl. Lesen geht über das Lese-Werkzeug.
 - **Befehle werden wie in Bash zerlegt:** Anführungszeichen und Escapes zählen. `'…'`, `"…"` und `$'…'` löst AIdeation wie die Shell auf, damit Quoting keinen Dateibefehl oder keine Umleitung versteckt. Gesperrt sind: escapte Anführungszeichen (`\'`, `\"`), offene Anführungszeichen, ein Backslash am Zeilenende, `$(…)`, Backticks, Subshells, `&` am Ende, Heredocs (`<<`), `${…}` und Shell-Schlüsselwörter an Befehlsposition (`if`, `for`, `while`, `!`, `{ … }`). Wer einen eigenen Agent-Befehl schreibt, setzt Argumente mit Leerzeichen in ganze Anführungszeichen, z. B. `git log --grep='a b'`, und verzichtet auf Escapes.
+- **Werkzeug-Regeln im Agent-Befehl (nur Administratoren):** Ein Agent-Befehl kann `--allowedTools` bzw. `--disallowedTools` enthalten (auch als `--allowed-tools=…`). Die Datei-Rechte und der erlaubte Ordner kommen trotzdem immer aus der Zuweisung des Agents (z. B. „Dateien anlegen“ mit Ordner `frontend`). Ein `--disallowedTools` allein gibt also keine vollen Datei-Rechte frei; es sperrt nur zusätzliche Werkzeuge. Mit eigenem `--allowedTools` werden keine zusätzlichen Freigaben angehängt, und Datei-Rechte werden dadurch nicht erweitert. Eigene Sperren werden mit den Sperren von AIdeation zu einem einzigen `--disallowedTools` zusammengeführt. Die Oberfläche zeigt diese Regeln nicht an; Grundlage ist `docs/agents-und-rechte.md`, Abschnitt „Eigene Werkzeug-Regeln im Befehl“.
 - **Rechte gelten für den Pfad, nicht für die Schreibweise:** Ein Schrägstrich am Ende der Adresse ändert an den Rechten nichts. Wer nur die Rolle „Planung“ hat, bekommt für `PATCH …/development/<id>/` mit `agentId` (Agent starten), für `…/approve/` (Freigabe) und für `…/git-sync/` (Sprint-Sync) dieselbe Antwort wie ohne Schrägstrich: 403. Zum Starten eines Agents oder zum Freigeben braucht es die Rolle „Ausführen“.
 - **Abbrechen und Zeitlimit stoppen den Agent wirklich:** Über „■ Abbrechen“ (nur bei einem aktiven Agent) oder nach dem Zeitlimit je Schritt (Standard 30 min) erhält der Agent ein Stopp-Signal. Es erreicht das laufende Modell, jedes Datei-Werkzeug und laufende Befehle samt ihren Prozessen, etwa Dev-Server oder Testläufer. Danach startet kein weiteres Werkzeug, und es wird keine Datei mehr geschrieben. Commit und Rückkehr auf den Basis-Branch laufen erst, wenn der Agent wirklich beendet ist. Dafür wartet der Schritt ohne zeitliche Obergrenze. Tokens und Kosten des abgebrochenen Laufs bleiben erhalten. Ein Abbruch gilt weder als Erfolg noch wird er wiederholt. Ein Zeitlimit wird wie ein vorübergehender Fehler einmal nach 30 s wiederholt, wenn das Budget es erlaubt.
 - **Bestehende Funktionen bleiben:** Die Share-Bar der Prüfergebnisse, der Abbrechen-Button und der Klick auf die Agent-Aktivität funktionieren wie bisher.
 - **Review-Container (nur Administratoren):** Der Container sieht weder die `.env` noch die Haupt-Datenbank. Er bekommt nur einen eigenen Review-DB-User ohne Superuser-Rechte und einen Projekt-Cache. Für Projekte mit eigener Datenbank schlägt der Review-Slot derzeit fehl, statt auf die Haupt-Zugänge zurückzufallen. Eine Lösung ist noch offen.
+- **AIdeation neu starten (nur Administratoren):** Aktionen → System → „AIdeation neu starten“. Neuer Code und neue Agents werden erst mit dem Neustart geladen. Bedingungen:
+  - **Start:** Der Worker wartet, bis keine Aufgabe mehr läuft, höchstens 15 Minuten. Danach startet der Neustart auch dann, und was noch läuft, wird nach dem Neustart fortgesetzt.
+  - **Arbeitsordner:** AIdeation muss auf `main` ausgecheckt sein (oder auf dem Branch in `DEV_LOG_RESTART_BRANCH`; `*` erlaubt jeden Branch). Nicht committete Änderungen an versionierten Dateien verhindern den Neubau. Der Fehler steht im Menü, AIdeation läuft unverändert weiter. Nicht versionierte Dateien stören nicht.
+  - **Abhängigkeiten:** Stimmt der installierte Stand des Workers nicht mit `package-lock.json` überein, fehlt er ganz oder fehlt ein Paket, läuft vor dem Neubau `npm ci --ignore-scripts` im AIdeation-Ordner (höchstens 10 Minuten). Optionale Pakete fremder Plattformen zählen nicht als Abweichung. Das Menü zeigt dann „Aktualisiert die Abhängigkeiten des Workers“.
+  - **Scheitert `npm ci`:** Der Neustart ist „fehlgeschlagen“. Es wird nichts neu gebaut, der Worker beendet sich nicht, und die Ausgabe steht gekürzt im Menü. Ein neuer Neustart ist sofort möglich.
+  - **Neubau:** Danach `docker compose up -d --build`. Scheitert er, läuft AIdeation mit dem bisherigen Stand weiter.
+  - **Gesundheitsprüfung:** Nach dem Neubau prüft der Worker bis zu 2 Minuten, ob AIdeation antwortet. Wenn nicht, kehrt er auf das vorherige Abbild zurück und schickt eine Push-Nachricht. Der Worker startet sich dann nicht neu.
+  - **Erfolg:** Der Worker startet neu und lädt dabei den neuen Code und die neuen Agents. Das Menü zeigt danach den Abschluss des Neustarts.
+  - **Unter Windows:** Der Worker startet über `scripts\run-with-env.ps1` neu, das nach dem Beenden 5 Sekunden wartet und dann weiterläuft. Bewusste Stopps und Fehler starten den Worker nicht neu. Ob der Worker nach einem Neustart innerhalb von 30 Sekunden wieder läuft, ist auf einem echten Windows-Rechner noch nicht geprüft. Ältere Installationen brauchen einmal `scripts\install-worker.ps1` (siehe [`installation.md`](installation.md), Abschnitt „Neustart unter Windows“).
+  - **Neustart hängt:** Bleibt der Status auf „restarting“, kommt der Worker nicht zurück. Ein neuer Neustart ist erst 10 Minuten nach dem Beginn möglich. Bis dahin meldet AIdeation „Ein Neustart läuft bereits.“
 
 ---
 
@@ -119,10 +143,12 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 | Agent-Lauf meldet „Escapte Anführungszeichen (\' bzw. \") sind gesperrt“, „Offene Anführungszeichen …“ oder „Der Befehl lässt sich nicht eindeutig zerlegen …“ | Der Befehl ist so geschrieben, dass AIdeation ihn nicht sicher lesen kann (siehe Abschnitt 3). Argumente in ganze Anführungszeichen setzen (`'…'` oder `"…"`), statt mit `\'` oder `\"` zu escapen, Backslashes am Zeilenende entfernen und Befehle in einfache Teilbefehle aufteilen. Die Meldung nennt den Grund. |
 | Agent-Lauf meldet „Abgebrochen: Der Agent wurde gestoppt.“ | Jemand hat „■ Abbrechen“ genutzt, oder der Worker wurde beendet. Der Lauf gilt nicht als Erfolg und wird nicht automatisch wiederholt. Prüfe vor einem neuen Start, welche Dateien der Agent bereits geschrieben hat. |
 | Agent-Lauf meldet „Zeitlimit erreicht“ | Der Schritt lief länger als das Zeitlimit (Standard 30 min je Schritt). Er wird einmal nach 30 s wiederholt, wenn das Budget es erlaubt. Scheitert auch der zweite Versuch, den Auftrag in kleinere Teile aufteilen. |
+| „AIdeation neu starten“ endet mit „fehlgeschlagen“ und der Meldung „npm ci --ignore-scripts ist fehlgeschlagen (Exit-Code …)“ | Die Abhängigkeiten des Workers konnten nicht auf den Stand von `package-lock.json` gebracht werden. Nichts wurde neu gebaut, AIdeation läuft unverändert weiter. Die gekürzte Ausgabe steht im Menü. Im AIdeation-Ordner `npm ci --ignore-scripts` von Hand ausführen und die Fehlermeldung prüfen, etwa Netzzugang, Registry oder ein Lockfile, das nicht zu `package.json` passt. Danach den Neustart erneut anfordern. |
+| „AIdeation neu starten“ endet mit „fehlgeschlagen“ und dem Hinweis „Nicht neu gebaut: … Nicht committete Änderungen …“ oder „Im AIdeation-Ordner ist „…“ ausgecheckt, live gehen darf nur „…““ | Der AIdeation-Ordner ist nicht bereit für den Live-Stand. Änderungen committen oder verwerfen bzw. den erlaubten Branch auschecken (`main` oder der Branch in `DEV_LOG_RESTART_BRANCH`). Danach den Neustart erneut anfordern. |
+| „AIdeation neu starten“ steht auf „restarting“, und der Worker läuft nicht wieder (Windows) | Die Aufgabe `AIdeationWorker` startet den Worker nach dem Beenden nur über `run-with-env.ps1`. Ist dieses Skript nicht mehr die Startdatei der Aufgabe (ältere Installation), führe `scripts\install-worker.ps1` einmal erneut aus. Ein Stopp per Hand oder ein Fehler startet den Worker nicht neu, dann die Aufgabe in der Aufgabenplanung manuell starten. Nach 10 Minuten lässt sich der Neustart erneut anfordern. |
 | Agent-Start, Freigabe oder Sprint-Sync per API endet mit 403, obwohl die Adresse stimmt (auch mit Schrägstrich am Ende) | Die Sitzung hat nur die Rolle „Planung“. Starten, Freigeben und Git-Sync brauchen „Ausführen“ (siehe `agents-und-rechte.md`, Abschnitt 6.1). Ein anderer Pfad oder ein Schrägstrich hilft nicht. |
 | Review-Slot zeigt „failed“ mit der Meldung „Kein Review-DB-User eingerichtet (DEV_LOG_REVIEW_DATABASE_URL …)“ | Nur für Administratoren. Der Review-Container bekommt keine Haupt-Zugänge. Ohne eigenen Review-DB-User startet er nicht. Lösung: `bash scripts/setup-review-db.sh` ausführen, den ausgegebenen Wert als `DEV_LOG_REVIEW_DATABASE_URL` setzen und den Worker neu installieren (siehe [`laufzeit.md`](laufzeit.md)). |
 | Review-Slot zeigt „failed“ mit „Der Review-DB-User muss ein eigener User …“ oder „DEV_LOG_REVIEW_DATABASE_URL braucht User, Passwort …“ | Nur für Administratoren. Die Review-URL zeigt auf die Haupt-Datenbank oder ist unvollständig. Eine eigene Basis-Datenbank (z. B. `aideation_review`) mit eigenem User und Passwort eintragen. |
-
 | Test- oder Coverage-Schritt zeigt „Abdeckung nicht gemessen: Vorbereitungsschritt „…“ im test-Skript … ist nicht erlaubt“ | Die Tests laufen trotzdem. Nur die Messung entfällt, weil das `test`-Skript einen Vorbereitungsschritt enthält, der nicht erlaubt ist (erlaubt: `npm run`, `npm ci`, `tsc`, `ng build`, `vite build`). Kein Fehler des Auftrags. Abhilfe: Testbefehl je Auftrag mit `npx tsx --test <Dateien>` verwenden, dann misst AIdeation direkt. |
 | Test schlägt fehl, obwohl der Code stimmt, und die Ausgabe nennt eine fehlende Umgebungsvariable (z. B. Datenbank-URL) | Projektcode bekommt nur eine feste Liste von Variablen (Abschnitt 5). Geheimnisse wie `DEV_LOG_*` oder `DATABASE_URL` fehlen immer. Die Variable muss in die Allowlist (`src/runner/project-command.ts`) aufgenommen werden, ein Rückfall auf die Worker-Umgebung gibt es nicht. Das ist eine Entwicklungsaufgabe, nicht etwas, das du in der Oberfläche einstellst. |
 
@@ -275,7 +301,7 @@ Bilder einer Idee oder eines Bugs werden vor dem Lauf nach `.dev-log/attachments
 
 ---
 
-## 6. Datenbank-Abfragen (`run_sql`) für Entwickler und Chat-Assistenten
+## 6a. Datenbank-Abfragen (`run_sql`) für Entwickler und Chat-Assistenten
 
 Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Datenbank** ausführen. Das Werkzeug heißt `run_sql`. Du siehst das Ergebnis im Verlauf des Laufs bzw. im Chat, nicht als eigenen Bildschirm.
 
@@ -375,6 +401,255 @@ Die Angaben stammen aus `src/agent/chat.ts`, `src/agent/requirements.ts` (Standa
 - `verifyAcceptance` (Abnahme) läuft weiterhin ohne Shell. Es kann keine Befehle ausführen.
 
 ---
+
+## 9. Board: offene Aufträge und Ideen immer vollständig
+
+Das Board (Sprint, Backlog, Aktionen und Ideen) zeigt jetzt alle **offenen** Einträge des aktiven Projekts. Früher wurden nur die 200 neuesten Einträge geladen, unabhängig vom Status. Bei mehr als 200 Aufträgen fehlten daher ältere geplante, blockierte oder laufende Aufträge. Die Sprintplanung hat sie trotzdem vorgeschlagen, und du konntest sie nicht sehen oder bearbeiten. Das ist behoben. Du musst dafür nichts einstellen.
+
+### 9.1 Was geladen wird
+
+| Art | Wird immer vollständig geladen | Wird begrenzt auf die 200 neuesten |
+|-----|-------------------------------|-------------------------------------|
+| Aufträge | Status `backlog`, `planned`, `in_progress`, `blocked`, `approval` und alle ohne Status | Status `done` und `rejected` |
+| Ideen | Status `idea`, `considering`, `review`, `requested`, `drafting` und alle ohne Status | Status `accepted` und `rejected` |
+
+- „Offen“ heißt: alles, was **nicht** im Status „abgeschlossen“ steht. Ein Eintrag ohne Status gilt als offen und erscheint.
+- Die Sortierung bleibt wie bisher: neueste zuerst (nach Anlagedatum).
+- Jeder Eintrag erscheint nur einmal.
+- Was die Sprintplanung vorschlagen kann, siehst du jetzt auch im Board.
+
+### 9.2 Herkunftsfilter bei Ideen
+
+- Der Filter „Herkunft“ (z. B. `visionary`) gilt weiterhin für Ideen.
+- Er wirkt auf offene und auf die 200 neuesten abgeschlossenen Ideen gleichermaßen.
+- Ein unbekannter Filterwert zeigt alle Ideen, wie bisher.
+
+### 9.3 Bedingungen und Grenzen
+
+- Die Grenze von 200 gilt nur für erledigte, abgelehnte und angenommene Einträge. Ältere abgeschlossene Einträge erscheinen nicht im Board, bleiben aber in der Datenbank erhalten.
+- Bei sehr vielen offenen Einträgen wird die Antwort entsprechend größer. Eine Seitenaufteilung (Paginierung) gibt es noch nicht.
+- Ein neuer Endstatus muss in die Liste der abgeschlossenen Status aufgenommen werden (`src/core/status.ts`). Sonst gilt er als offen und bleibt dauerhaft sichtbar.
+
+### 9.4 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+|---------|--------------------|
+| Ein älterer Auftrag fehlt noch | Prüfe den Status. Nur erledigte und abgelehnte Aufträge sind auf die 200 neuesten begrenzt. Offene erscheinen immer. |
+| Ein Auftrag mit Status `done` ist nicht zu sehen | Gewollt, wenn er zu den älteren erledigten gehört. Er bleibt in der Datenbank. |
+| Die Ideenliste ist nach einem Filter leer | Der Herkunftsfilter schränkt ein. Stelle den Filter zurück auf alle Herkünfte. |
+
+**Hinweis:** Für diesen Abschnitt liegen keine Printscreens vor. Die Board-Oberfläche lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Printscreens sollten nachgereicht werden, wenn der Stack verfügbar ist. Bilder wurden nicht erfunden.
+
+## 10. Bugs einem Sprint zuordnen
+
+Du kannst einen Bug einem Sprint zuordnen. Das geht im Anlegen-Formular, in der Bug-Zeile und unter „Bug bearbeiten“. Ordnest du einen Bug zu, legt AIdeation einen Auftrag „Bug: …“ im Sprint an. Der Auftrag läuft nur, wenn der Sprint läuft.
+
+### 10.1 Welche Sprints zur Auswahl stehen
+
+- **Zur Auswahl:** nur geplante und aktive Sprints.
+- **Nicht zur Auswahl:** abgebrochene, in Prüfung befindliche und abgeschlossene Sprints.
+- **Ausnahme:** Ist der Bug schon einem solchen Sprint zugeordnet, bleibt dieser Sprint in der Auswahl sichtbar. So verlierst du die Zuordnung nicht, wenn du nur Titel oder Status änderst.
+
+### 10.2 Was die Schnittstelle prüft
+
+- Eine Zuordnung zu einem abgebrochenen, in Prüfung befindlichen oder abgeschlossenen Sprint wird mit **409** abgelehnt. Es wird weder der Bug gespeichert noch ein Auftrag angelegt.
+- Die Prüfung greift nur, wenn sich die Sprint-Zuordnung ändert. Ein Bug, der schon an einem solchen Sprint hängt, bleibt bei anderen Änderungen bearbeitbar.
+- Das Entfernen der Zuordnung ist immer erlaubt.
+- Der Sprint muss zum selben Projekt gehören wie der Bug. Sonst kommt **400**.
+
+### 10.3 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+|---------|--------------------|
+| Ein Bug ist einem abgebrochenen oder abgeschlossenen Sprint zugeordnet, und sein Auftrag läuft nie | Ältere Zuordnungen werden nicht automatisch umgehängt. Ordne den Bug einem geplanten oder aktiven Sprint zu. Sonst bleibt sein Auftrag liegen. |
+| Der gewünschte Sprint fehlt in der Auswahl | Der Sprint ist abgebrochen, in Prüfung oder abgeschlossen. Wähle einen geplanten oder aktiven Sprint. |
+| Speichern schlägt mit 409 fehl | Der Sprint ist nicht mehr zuordenbar. Wähle einen geplanten oder aktiven Sprint. |
+
+**Hinweis:** Für diesen Abschnitt liegen keine Printscreens vor. Die Bug-Seite lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Printscreens sollten nachgereicht werden, wenn der Stack verfügbar ist.
+
+---
+
+## 11. Chat mit gewähltem Agent: welche Rechte gelten
+
+Im Chat kannst du einen bestimmten Agent ansprechen. Dann bekommt die Antwort die Rechte **dieses Agents**, nicht pauschal die des Assistenten. Das gilt auch dann, wenn der Befehl des Agents `--dangerously-skip-permissions` enthält.
+
+### 11.1 Agent wählen
+
+- Tippe im Chat-Feld `@` und wähle den Agent aus der Liste.
+- Der gewählte Agent erscheint als Chip mit dem Namen. Mit dem Kreuz (`×`) auf dem Chip entfernst du die Auswahl.
+- Ohne Auswahl antwortet der Chat-Assistent mit seinen eigenen Rechten.
+
+### 11.2 Welche Rechte gelten
+
+| Rolle des gewählten Agents | Rechte im Chat | Was der Befehl mit `--dangerously-skip-permissions` bewirkt |
+| --- | --- | --- |
+| Assistent | Vollzugriff: Dateien und Befehle wie beim Chat-Assistenten | Der Lauf startet ohne Wächter. Geheimnisse bleiben trotzdem gesperrt (Abschnitt 1.4). |
+| Entwickler, Tester, Reviewer, Dokumentierer und andere Rollen | Wächter ist aktiv (Hook, Ordnergrenze, Freigaben des Agents) | Wirkungslos. Der Wächter bleibt aktiv. |
+| Visionär, Vor-dem-Sprint-Agents | Nur lesen: keine Datei-Werkzeuge, keine Shell | Wirkungslos. |
+| Ohne Rolle oder unbekannte Rolle | Nur lesen | Wirkungslos. |
+
+**Bedingungen:**
+
+- Die Rolle bestimmt die Rechte, nicht der Name des Agents. Einen Agent „Assistent“ nennen, ohne die Rolle Assistent, bringt keinen Vollzugriff.
+- Eine fehlende Rolle führt zu „nur lesen“, nie zu Vollzugriff.
+- Die Befehle und Freigaben des Agents gelten im Chat weiterhin: Die Ordnergrenze, die Freigaben und die Liste der Dateibefehle (Abschnitt 3) bleiben bestehen.
+- Die Ordnersperre aus Abschnitt 8 gilt auch hier. Ist der Arbeitsordner belegt, antwortet der Agent nur lesend.
+- Die Rolle eines Agents ändert nur die Administration. Ändert sich die Rolle, gelten die Rechte beim nächsten Chat-Befehl.
+
+**Bekannte Lücke:** Bei einem lokalen Modell (Ollama) hängt das Verwalten von Diensten weiter an der Rolle Assistent. Ein gewählter Entwickler-Agent darf dort also Dienste verwalten. Dafür ist ein eigener Auftrag vorgesehen.
+
+**Printscreens:** keine. Die Chat-Seite lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Die Beschriftungen oben stammen aus dem Code (`chat-composer.component.ts`, `agent-tasks.component.html`). Sie sollten am laufenden System geprüft werden.
+
+### 11.3 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+| --- | --- |
+| Der Agent im Chat darf keine Dateien ändern | Seine Rolle ist Visionär, Vor-dem-Sprint oder keine Rolle. Das ist gewollt. Schreiben darf nur ein Agent mit schreibender Rolle, etwa Entwickler. Die Rolle ändert die Administration. |
+| Der Befehl des Agents hat `--dangerously-skip-permissions`, der Chat fragt aber nach Freigaben | Gewollt. Vollzugriff gibt es nur für die Rolle Assistent. |
+| Der Agent meldet „Arbeitsordner belegt“ oder antwortet nur lesend | Ein Auftrag oder Testlauf hält den Ordner. Stelle die Frage nach dem Lauf erneut (Abschnitt 8.2). |
+| Im Chat ist kein Agent auswählbar | Der Agent gehört zu einem anderen Projekt. Prüfe, ob das richtige Projekt aktiv ist. |
+
+---
+
+## 12. Token-Limits je Agent-Rolle (nur API)
+
+Zusätzlich zum Projektbudget (Einstellungen → Budget) kannst du je **Agent-Rolle** und Zeitraum ein Token-Limit setzen. Ein Entwickler-Agent kann so ein Tageslimit haben, ohne dass der Tester, Reviewer oder Dokumentierer davon betroffen sind. Das Projektlimit bleibt wie bisher. Die Rollen-Limits kommen dazu und ersetzen es nicht.
+
+**Printscreens:** keine. Das Feature hat noch keine Oberfläche; Einstellungen, Dashboard und Statistik folgen in einem eigenen Auftrag. Die Beispiele unten zeigen Anfrage und Antwort der API in der Form, die der Code erzeugt. Sie wurden nicht gegen ein laufendes System geprüft.
+
+### 12.1 Was du einstellen kannst
+
+- **Rollen:** `author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`. Die Rolle `custom` hat kein Limit, weil sie keiner festen Aufgabe entspricht.
+- **Zeiträume:** `day` (heute, Tageswechsel nach `DEV_LOG_TIMEZONE`), `sprint` (aktiver Sprint) und `order` (ein einzelner Auftrag).
+- **Limit:** eine positive Zahl in Tokens oder `null`. `null` entfernt das Limit. Eine fehlende Zeile bedeutet **keine Grenze**: Für diese Rolle und diesen Zeitraum prüft der Worker nichts.
+- **Wer:** Lesen ist für angemeldete Benutzer mit Projektzugriff vorgesehen. Ändern darf nur die Rolle **admin**. Ohne sie antwortet die API mit 403 und speichert nichts.
+
+### 12.2 Endpunkte
+
+**Lesen:** `GET /api/projects/:slug/budget/roles`
+
+Die Antwort enthält je Rolle und Zeitraum den Grenzwert und den Verbrauch. Beispiel (Werte erfunden):
+
+```json
+{
+  "warnPercent": 80,
+  "sprintId": "sprint-23",
+  "roles": [
+    {
+      "role": "developer",
+      "limits": {
+        "day": { "maxTokens": 500000, "spend": { "tokens": 420000, "costUsd": 3.1 }, "percent": 84 },
+        "sprint": { "maxTokens": null, "spend": { "tokens": 1900000, "costUsd": 14.2 }, "percent": null },
+        "order": { "maxTokens": null, "spend": null, "percent": null }
+      }
+    }
+  ]
+}
+```
+
+- `spend` ist der Verbrauch heute bzw. im aktiven Sprint. Beim Auftragslimit ist er `null`, weil der Verbrauch am einzelnen Auftrag hängt.
+- `percent` ist `null`, wenn kein Limit gesetzt ist oder kein Verbrauch ermittelt wird.
+- Ohne aktiven Sprint ist `sprintId` `null`.
+
+**Ändern:** `PUT /api/projects/:slug/budget/roles/:role` (nur admin)
+
+Der Body enthält die Zeiträume, die du ändern willst. Ein fehlender Zeitraum bleibt unverändert.
+
+```json
+{ "day": { "maxTokens": 500000 }, "sprint": null }
+```
+
+- `{ "maxTokens": 500000 }` setzt die Grenze, `null` oder `{ "maxTokens": null }` entfernt sie.
+- Die Antwort hat dasselbe Format wie das GET.
+- Nach dem Speichern gibt der Worker wegen Budget blockierte Aufträge sofort frei, wenn ihr Limit wieder reicht.
+
+### 12.3 Fehlermeldungen
+
+| Eingabe | Antwort | Meldung (Auszug) |
+|---------|---------|------------------|
+| Rolle unbekannt, z. B. `custom`, `foo`, `admin` | 400 | „Unbekannte Agent-Rolle „foo“: erlaubt sind author, developer, …“ |
+| Zeitraum unbekannt, z. B. `week` | 400 | „Unbekannter Zeitraum „week“: erlaubt sind day, sprint und order.“ |
+| Grenze keine positive Zahl, z. B. `-5` oder `"abc"` | 400 | „day: maxTokens muss eine positive Zahl sein (oder null für unbegrenzt).“ |
+| Body ohne Zeitraum, z. B. `{}` | 400 | „Mindestens einen Zeitraum (day, sprint oder order) angeben.“ |
+| Kein admin | 403 | Zugriff verweigert |
+| Projekt existiert nicht | 404 | „Projekt nicht gefunden.“ |
+
+Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
+
+### 12.4 Was der Worker damit macht
+
+- **Prüfung vor jedem Schritt:** Zuerst gilt das Projektlimit, dann das Limit der Rolle des Schritts. Ist ein Rollen-Limit erreicht, startet der Schritt nicht.
+- **Blockade:** Der Auftrag wird „blocked“ mit „Aktion notwendig“. Der Grund steht am Auftrag, etwa „Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens“. Er erscheint auch dann, wenn kein Schritt fehlgeschlagen ist. Die Problemanalyse zeigt ihn als „Budget-Blockade“.
+- **Warnung ab 80 %:** Eine Push-Nachricht je Rolle, Zeitraum und Periode, z. B. „💰 Budget (developer) zu 85 % verbraucht“. Die Warnung kommt beim nächsten Prüfpunkt, also vor dem nächsten Schritt, nicht sofort bei jeder Zahl. Am nächsten Tag bzw. im nächsten Sprint kommt sie wieder.
+- **Freigabe:** Der Auftrag wird wieder „geplant“, sobald sein Zeitraum wieder Luft hat: am Folgetag, im neuen Sprint oder nach dem Erhöhen bzw. Entfernen des Limits.
+- **Laufender Schritt:** Ein laufender Schritt wird nicht abgebrochen. Das Limit kann daher um höchstens einen Schritt überschritten werden.
+
+### 12.5 Bedingungen und Grenzen
+
+- **Verbrauch je Rolle:** Er zählt Schritte, deren Agent eine Rolle hat (über `agent_id`), und den Verbrauch in `agent_usage` mit dieser Rolle.
+- **Ohne Rolle:** Schritte ohne Agent (eingebaute Agents wie Chat, Auftragsautor und Visionär) zählen zu keiner Rolle. Sie bleiben nur im Projektverbrauch.
+- **Gelöschter Agent:** Sein früherer Verbrauch geht in den Projekttopf über, weil die Zuordnung zur Rolle wegfällt. Das ist gewollt.
+- **Historische Daten:** Schritte ohne `agent_id` werden nicht nachträglich einer Rolle zugeordnet.
+- **Kosten:** Es gibt nur Token-Limits je Rolle. Kosten-Limits (USD/CHF) je Rolle kommen später.
+- **Projektlimit:** Es bleibt unverändert. Ein Rollen-Limit ersetzt es nicht, es kommt zusätzlich.
+
+### 12.6 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+|---------|--------------------|
+| Ein Rollen-Limit ist gesetzt, der Schritt läuft trotzdem | Der Verbrauch der Rolle liegt noch unter dem Limit, oder der Schritt lief schon, als das Limit erreicht wurde (siehe 12.4). Prüfe mit `GET …/budget/roles`, ob `percent` über 100 liegt. |
+| Verbrauch einer Rolle wirkt zu niedrig | Schritte ohne Agent oder eines gelöschten Agents zählen zu keiner Rolle (siehe 12.5). |
+| Auftrag bleibt blockiert, obwohl das Limit erhöht ist | Die Freigabe läuft nach dem PUT. Liegt der Verbrauch noch über dem neuen Limit, bleibt er blockiert. Prüfe das `percent` im GET. |
+| Keine Warnung, obwohl der Verbrauch über 80 % liegt | Die Warnung kommt beim nächsten Prüfpunkt. Sie wird je Periode nur einmal gesendet. Im neuen Tag bzw. Sprint kommt sie wieder. |
+| 400 beim Speichern | Rolle, Zeitraum oder Grenze prüfen (Tabelle 12.3). |
+| 403 beim Speichern | Dein Konto hat nicht die Rolle admin. |
+
+---
+
+## 13. Sprint im Review bei ausgeschalteter GitHub-Brücke
+
+Ein Sprint kann im Status **Review** stehen, während die GitHub-Brücke des Projekts auf **„aus“** steht. Das passiert, wenn der Sprint mit einem Pull Request (Modus „Issues + PR“) abgeschlossen wurde und die Brücke danach ausgeschaltet wird. Früher blieb ein solcher Sprint für immer im Review. Jetzt verfolgt der Worker ihn weiter, auch bei „aus“.
+
+> **Printscreens:** keine. Die Oberfläche wurde nicht im Browser aufgenommen. Beschrieben ist das Verhalten des Workers und der Statuswerte.
+
+### 13.1 Was der Worker weiter tut
+
+Bei Modus „aus“ läuft nur noch die Prüfung der Sprints im Review. Sie prüft den Pull Request des Sprints:
+
+- **Grüne CI und Freigabe:** Ist die CI grün (und bei „Freigabe erforderlich“ freigegeben), merged der Worker den Pull Request.
+- **Von Hand gemergt:** Wurde der Pull Request schon von einem Menschen gemergt, übernimmt der Worker den Stand.
+- **Danach:** Tag auf dem gemergten `main`, lokaler `main` wird nachgezogen, Live schalten, ein eventueller CI-Bug wird geschlossen und der Sprint steht auf **Abgeschlossen**.
+- **Rot:** Schlägt die CI fehl, entsteht höchstens ein Bug je CI-Lauf.
+
+Die Prüfung läuft alle 2 Minuten.
+
+### 13.2 Bedingungen
+
+| Bedingung | Ergebnis |
+| --- | --- |
+| Sprint im Status **Review** und mit gesetztem Pull Request | Der Worker prüft ihn, auch bei Modus „aus“. |
+| Modus „aus“, kein Sprint im Review | Der Worker ruft `gh` nicht auf. Der Takt endet mit „Modus aus“. |
+| Modus „aus“, Sprint im Review ohne Pull Request | Nicht erfasst. Ein Sprint ohne Pull Request wird über die normale Git-Sicherung abgeschlossen, nicht über die Review-Prüfung. |
+| Kein GitHub-Remote (`git_remote` nicht auf github.com) | Die Prüfung wird übersprungen, der Grund „kein GitHub-Remote“ steht in den Projekteinstellungen. Der Sprint bleibt im Review. |
+| Keine Anmeldung bei `gh` | Die Prüfung wird übersprungen, der Sprint bleibt im Review, bis die Anmeldung stimmt. |
+| Rate-Limit von GitHub | Das Projekt pausiert bis zum nächsten Intervall. |
+| Sprint ist schon **Abgeschlossen** | Wird nicht noch einmal gemergt oder getaggt. |
+
+### 13.3 Was du nicht erwarten solltest
+
+- **Der Issue-Import bleibt aus.** Es werden keine neuen Issues als Bugs oder Ideen übernommen, und Statusmeldungen gehen nicht ins Issue. Dafür muss die Brücke auf „Issues“ oder „Issues + PR“ stehen.
+- **Der Sprint lässt sich nicht von Hand ändern**, solange er im Review ist. Die Schnittstelle antwortet mit 409. Abschließen kann ihn nur der Worker nach dem Merge.
+- **Der Autopilot startet keinen neuen Sprint**, solange ein Sprint im Review ist.
+
+### 13.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Sprint bleibt im Review, obwohl der Pull Request gemergt ist | Prüfe, ob das Projekt ein GitHub-Remote hat und `gh` angemeldet ist (`gh auth status` auf dem Worker-Rechner). Ohne beides wird die Prüfung übersprungen. Danach wartet der Worker auf den nächsten Takt. |
+| Sprint bleibt im Review, obwohl alles stimmt | Der Worker prüft nur Sprints mit gesetztem Pull Request (`pr_url`). Ohne ihn greift diese Prüfung nicht. Die Oberfläche zeigt diesen Wert nicht; Abhilfe nur über Entwicklung oder Datenbank. |
+| CI rot, Sprint wartet | Ein Bug mit dem gekürzten CI-Auszug ist entstanden. Behebe den Fehler, dann läuft die Prüfung weiter. |
+
+Hinweis: Die Tests für dieses Verhalten stehen in `src/runner/git-sync.test.ts` (Tests „Brücke aus: …“). Der Projekt-Testlauf 6b47961d hat `git-sync.test.ts` und `github-sync.test.ts` mit 51 von 51 grünen Tests ausgeführt. Die Tests sind mit dem alten Code nicht rot gesehen worden; dass sie dort scheitern würden, folgt aus dem Code (Abbruch mit `skipped: 'Modus aus'`).
 
 ## Verwandte Dokumente
 

@@ -8,9 +8,15 @@ import { isTransientFailure, registerFailure, ruleRefusal, usageLimitReset } fro
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
-import { type CommandResult, redactOutput } from '../core/command.js';
+import { type CommandExecutor, type CommandResult, redactOutput } from '../core/command.js';
 import { readManual } from '../api/docs.js';
-import { changedFilesSection, commitAgentStep, conflictPrompt, unresolvedConflicts } from './git-sync.js';
+import {
+  changedFilesSection,
+  commitAgentStep,
+  conflictPrompt,
+  type OrderBranch,
+  unresolvedConflicts,
+} from './git-sync.js';
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
@@ -78,6 +84,38 @@ export function shouldRetry(result: AgentResult): boolean {
   return result.exitCode !== 0 && !result.fromTests && isTransientFailure(result.output);
 }
 
+/**
+ * Unterbrochener Schritt (Worker beendet, Ordner weg, Nutzungslimit): bleibt „failed“, trägt aber das Kennzeichen
+ * `interrupted`, damit der nächste Lauf beim selben Agent fortsetzt. Tokens und Kosten des Versuchs bleiben erhalten.
+ */
+async function markInterrupted(
+  pool: RunContext['pool'],
+  stepId: string,
+  result: AgentResult,
+  output: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4,
+            tokens = $5, cost_usd = $6, interrupted = TRUE WHERE id = $1`,
+    [stepId, result.exitCode, result.durationMs, output, result.tokens ?? 0, result.costUsd ?? 0],
+  );
+}
+
+/** Konfliktabschnitt am Anfang des Prompts, solange der Auftrags-Branch offene Merge-Konflikte hat; sonst leer. */
+export function conflictSection(branch: OrderBranch | null | undefined): string {
+  return branch?.conflicts?.length ? `${conflictPrompt(branch)}\n\n` : '';
+}
+
+/**
+ * Nach einem Schritt, der Konflikte lösen sollte: Dateien, die noch Marker enthalten. Scheitert die Prüfung selbst,
+ * gelten die Konflikte als offen (nie stillschweigend bestanden).
+ */
+export async function remainingConflicts(cwd: string, execute: CommandExecutor): Promise<string[]> {
+  return unresolvedConflicts(cwd, execute).catch((error: unknown) => [
+    `(Prüfung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)})`,
+  ]);
+}
+
 /** Befehle für die eigene Abdeckungsmessung: dieselben wie im Tester-Schritt (nie der volle Lauf fürs Live schalten). */
 async function coverageCommands(ctx: RunContext): Promise<string[][]> {
   const plan = await testerPlan(ctx.pool, ctx.item.projectSlug, ctx.options.cwd, await orderFilePaths(ctx));
@@ -128,7 +166,7 @@ export async function runStep(
   const conflicts = ctx.branch?.conflicts?.length ? ctx.branch : null;
   const prompt = withProjectContext(
     ctx.projectContext,
-    (conflicts ? `${conflictPrompt(conflicts)}\n\n` : '') +
+    conflictSection(conflicts) +
       buildPrompt(agent, item, done, {
         bugs: ctx.bugs,
         manual,
@@ -237,7 +275,7 @@ export async function runStep(
   // Vorübergehender Fehler des Agents (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen –
   // aber nur, wenn das Budget den zweiten Versuch noch erlaubt.
   if (!cancelled && !isShuttingDown() && shouldRetry(result)) {
-    budgetStop = await budgetGate(ctx).catch(logged('runner-steps', null));
+    budgetStop = await budgetGate(ctx, agent.role).catch(logged('runner-steps', null));
     if (budgetStop) {
       await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht');
     } else {
@@ -273,10 +311,7 @@ export async function runStep(
   if (limitReset) {
     const until = limitReset.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
     const reason = `Unterbrochen: Nutzungslimit des Agent-Kontos erreicht – der Auftrag startet ab ${until} Uhr wieder.`;
-    await pool.query(
-      `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
-    );
+    await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     await pool
       .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, limitReset, reason])
       .catch(logged('runner-steps'));
@@ -291,10 +326,7 @@ export async function runStep(
     const reason = folderLost
       ? `Unterbrochen: ${missingFolderMessage(ctx.options.cwd)} Der Auftrag wird erneut eingeplant.`
       : 'Unterbrochen: Der Worker wurde beendet.';
-    await pool.query(
-      `UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', exit_code = $2, duration_ms = $3, output = $4 WHERE id = $1`,
-      [stepId, result.exitCode, result.durationMs, `${output}\n${reason}`],
-    );
+    await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     return { passed: false, interrupted: true };
   }
   // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.
@@ -347,7 +379,7 @@ export async function runStep(
   const refusedByRule = ruleRefusal(output) !== null;
   if (refusedByRule) await logEvent(pool, stepId, 'Abgelehnt wegen Projektregel');
   // Sollte der Agent Konflikte lösen und sind noch Marker übrig, gilt der Schritt als nicht bestanden.
-  const unresolved = conflicts && !cancelled ? await unresolvedConflicts(options.cwd, execute).catch(() => []) : [];
+  const unresolved = conflicts && !cancelled ? await remainingConflicts(options.cwd, execute) : [];
   if (unresolved.length) {
     output += `\n\nMerge-Konflikte nicht gelöst: ${unresolved.join(', ')}`;
     await logEvent(pool, stepId, `Merge-Konflikte offen: ${unresolved.join(', ')}`);

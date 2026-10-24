@@ -11,7 +11,7 @@ AIdeation besteht aus drei Teilen:
 ## Voraussetzungen
 
 - **Docker Desktop** (macOS, Windows) bzw. Docker Engine mit Compose (Linux) – läuft beim Start.
-- **Node.js 22** oder neuer – für Worker und Einrichtung.
+- **Node.js 22.12** oder neuer (mit npm) – für Worker, Einrichtung und die Projektvorlagen (Vite 8, Angular 20).
 - **Git**.
 - Mindestens ein KI-Werkzeug für die Agents:
   - **Claude Code** (`claude`) – beste Ergebnisse, Anmeldung über dein Claude-Konto, oder
@@ -33,16 +33,20 @@ cd AIdeation/source
 
 Beim **ersten Start** installiert das Skript die Abhängigkeiten und öffnet den **Einrichtungs-Assistenten** im Browser:
 
-1. **System** – prüft Node, Docker, Git, Claude Code und Ollama.
+1. **System** – prüft Node, Docker, Git, Claude Code, Ollama und Chromium für Playwright.
 2. **Zugang** – Benutzername und Passwort des Systemadministrators (ein sicheres Passwort wird vorgeschlagen).
 3. **Optionen** – eigene Domain für HTTPS von unterwegs (optional), erlaubte Projektordner, Worker-Autostart.
 4. **Installation** – schreibt die `.env`, baut und startet die Container, richtet den Worker ein
-   (macOS: launchd, Linux: systemd-Benutzerdienst, Windows: Aufgabenplanung). Das Protokoll läuft live mit.
+   (macOS: launchd, Linux: systemd-Benutzerdienst, Windows: Aufgabenplanung). Dazu lädt sie die
+   **Spiele-Werkzeuge**: Chromium für Playwright (falls er fehlt) und die npm-Pakete der Phaser-Vorlage in den
+   npm-Cache. Schlägt das fehl (z. B. offline), läuft AIdeation trotzdem; das Protokoll nennt den Befehl zum
+   Nachholen. Das Protokoll läuft live mit.
 
 Danach öffnet sich AIdeation unter `http://localhost:3100`. Nach der Anmeldung begrüßt dich AIdeation und bietet an,
 das erste Projekt anzulegen.
 
-Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet AIdeation.
+Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet AIdeation. Vorher prüft es,
+ob Chromium für Playwright da ist, und lädt ihn sonst nach (ist er da, dauert das nur Sekunden).
 Mit `./start.sh --setup` (Windows: `start.cmd --setup`) öffnest du den Assistenten erneut. Die bisherige `.env`
 wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**:
 
@@ -78,6 +82,34 @@ wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**
 Ausprobierte Projekte lassen sich unter **Einstellungen → Projekt löschen** wieder entfernen – auf Wunsch samt
 Ordner auf deinem Rechner.
 
+## Browser-Spiele mit Phaser
+
+Im Projekt-Assistenten steht unter **Vorlage** die Karte **Browser-Spiel (Phaser 3)**: Vite, TypeScript, Phaser 3,
+eine Beispielszene („Sterne sammeln“), Unit-Tests der Spiellogik mit Vitest und ein Playwright-Smoke-Test, der prüft,
+dass der Canvas zeichnet und keine Konsolenfehler auftreten. Die Dateien liegen in `templates/phaser-game/`. Phaser
+kommt als Abhängigkeit ins Spielprojekt, nicht in AIdeation. Die Vorlage installiert die Pakete (`npm install`) und
+Chromium in der Playwright-Version von AIdeation, ist er schon da, entfällt der Download.
+
+Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (änderbar unter **Einstellungen**):
+
+| Einstellung | Wert |
+|---|---|
+| Testbefehle (Live schalten) | `npm run build`, `npm test`, `npm run test:smoke` |
+| Testbefehle je Auftrag | `npm run typecheck`, `npx vitest run {tests}`, `npm run test:smoke` |
+| Review-Befehl | `npm run review` (baut und liefert im Review-Container auf `REVIEW_FRONTEND_PORT` aus) |
+| Vorschau-Adresse (visuelle Prüfung) | `http://localhost:5180` |
+| Regeln für die Agents | Spiellogik in `src/logic/` getrennt von den Phaser-Szenen, Tests neben der Logik |
+
+**Version ansehen** in der Sprint-Ansicht startet damit den gewählten Stand des Spiels im Review-Container. Für die
+visuelle Prüfung starte im Projektordner einmal `npm run dev`: Der Vite-Dev-Server auf Port 5180 lädt jede Änderung
+sofort neu (Hot Reload), die Prüfung zeigt also immer den neuesten Stand. Port 5180 statt des Vite-Standards 5173,
+damit das Spiel nicht mit anderen Vite-Projekten kollidiert; ein anderer Port geht mit `GAME_DEV_PORT=<port> npm run dev`
+(dann die Vorschau-Adresse in den Einstellungen anpassen).
+
+**Linux:** Fehlen Chromium Systembibliotheken (Smoke-Test bricht mit „missing dependencies“ ab), einmalig
+`sudo npx playwright install-deps chromium` ausführen. Liegen die Playwright-Browser an einem eigenen Ort
+(`PLAYWRIGHT_BROWSERS_PATH`), übernehmen die Worker-Installationsskripte die Variable in die Env-Datei des Dienstes.
+
 ## Zugriff von unterwegs (optional)
 
 Mit eigener Domain im Assistenten startet zusätzlich der Dienst `https` (Caddy) und holt automatisch ein
@@ -103,6 +135,19 @@ Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `
 `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it aideation_database_postgres psql -U devlog aideation`.
 
+Im Agent-Ordner läuft Compose als eigenes Projekt `aideation-agent` (`COMPOSE_PROJECT_NAME`). Container und Volumes
+heissen dort `aideation-agent_…` (eigene, leere Datenbank), und es werden keine Host-Ports veröffentlicht – die Ports
+5433, 3100, 80 und 443 bleiben dem Live-Stack. Welche Host-Ports ein Projekt bekommt, steht in
+`deploy/compose/ports.<Projekt>.yml`; ein anderer Projektname ohne eigene Datei bricht mit einer Fehlermeldung ab.
+Die Agent-Datenbank ist beim ersten Start leer und hat mit dem Live-Stack keine gemeinsamen Daten. Bevor du den Live-Stack
+neu startest, lohnt sich ein Blick mit `docker compose config` im Quellordner: Dort müssen die Namen `aideation_…` und die
+Ports 5433, 3100, 80 und 443 stehen. Ohne `COMPOSE_PROJECT_NAME` in der `.env` ist das der Fall.
+
+Entwickeln ohne Container (`npm run dev`, `npm run dev:ui`) läuft neben dem Live-Stack: Die Dev-API lauscht auf Port
+3101, und `ng serve` leitet `/api` und `/health` dorthin weiter (`frontend/proxy.conf.json`). Die Dev-API braucht eine
+eigene Datenbank, z. B. `DEV_LOG_DATABASE_URL=postgresql://devlog:<passwort>@127.0.0.1:5433/aideation_dev`; sie wird beim
+Start angelegt. Mit `PORT=3100` oder der Live-Datenbank `aideation` bricht `npm run dev` mit einer Meldung ab.
+
 ## Hintergrunddienste und Zugänge
 
 Die Installationsskripte (`scripts/install-worker.sh`, `install-watchdog.sh`, `install-worker-linux.sh`,
@@ -120,6 +165,15 @@ mit einer Meldung im Log ab.
 
 Werte ändern: Skript mit neuen Werten erneut ausführen, z. B. `DEV_LOG_DATABASE_URL=… ./scripts/install-worker.sh`.
 Ohne Angabe übernimmt ein erneuter Lauf die Werte aus der bestehenden Env-Datei.
+
+**Neustart unter Windows:** Nach „AIdeation neu starten“ beendet sich der Worker mit Exit-Code 75. launchd
+(KeepAlive) und systemd (`Restart=always`) starten ihn ohnehin neu. Unter Windows startet die Aufgabe nur bei der
+Anmeldung, deshalb übernimmt `run-with-env.ps1` den Neustart: Bei Exit-Code 75 wartet das Skript 5 s
+(`AIDEATION_RESTART_DELAY_SECONDS`), liest `worker.env` neu ein und startet den Worker wieder. Jeder andere Exit-Code
+(bewusster Stopp, echter Fehler) beendet die Aufgabe, ohne neu zu starten. Die Aufgabe hat kein Zeitlimit (vorher galt
+der Standard von 72 Stunden). Ältere Installationen: `scripts\install-worker.ps1` einmal erneut ausführen. Kommt der
+Worker trotzdem nicht wieder, steht der Status auf „restarting“. Nach 10 Minuten lässt sich dann ein neuer Neustart
+anfordern, statt dauerhaft „Ein Neustart läuft bereits“ zu sehen.
 
 **Umstieg von älteren Installationen:** Ältere Skripte schrieben die Zugänge direkt in Plist bzw. Unit (für alle lesbar)
 und unter Windows in die Befehlszeile der Aufgabe. Führe das passende Skript einmal erneut aus. Es ersetzt die alte
@@ -154,6 +208,8 @@ ein. Unter macOS ist nichts zu tun.
 | Problem | Lösung |
 |---|---|
 | „Docker läuft nicht“ | Docker Desktop starten, dann erneut `./start.sh` |
+| „Node.js … ist zu alt“ | Node.js 22.12 oder neuer installieren (Vite 8 und Angular 20 verlangen es) |
+| Smoke-Test eines Spiels: „Executable doesn't exist“ | `npx playwright install chromium` im AIdeation-Ordner oder im Spielprojekt |
 | Seite lädt nicht | `docker compose logs dev-log` – meist fehlt `DEV_LOG_PASSWORD` (mind. 16 Zeichen) in `.env` |
 | Agents starten nicht | Worker-Status oben in AIdeation prüfen; `npm run worker` zeigt Fehler direkt |
 | Worker-Log: „Env-Datei … fehlt“ oder „für andere lesbar“ | Installationsskript erneut ausführen bzw. `chmod 600` auf die Env-Datei |

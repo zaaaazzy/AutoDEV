@@ -1,20 +1,25 @@
 name: aideation
-# Containernamen: aideation_<Aufgabe>_<Technik>. Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
+# Containernamen: <Projekt>_<Aufgabe>_<Technik>, im Live-Stack (Projekt aideation) also aideation_database_postgres usw.
+# Container, Volumes und Host-Ports hängen am Compose-Projekt: das Agent-Projekt (COMPOSE_PROJECT_NAME=aideation-agent)
+# bekommt eigene Namen und Volumes und veröffentlicht keine Host-Ports (deploy/compose/ports.<Projekt>.yml).
+# Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
 # Härtung: jeder Dienst hat Grenzen für Speicher, CPU und Prozesse (deploy.resources.limits) und einen Healthcheck;
 # frontend (nginx), https (Caddy) und backup laufen ohne root und ohne Linux-Capabilities.
 # Ohne DEV_LOG_DB_PASSWORD in der .env gilt das bekannte Standardpasswort devlog_local_dev – der Server warnt dann beim Start.
 services:
   db:
     image: postgres:17-alpine
-    container_name: aideation_database_postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_database_postgres
     environment:
       POSTGRES_DB: aideation
       POSTGRES_USER: ${DEV_LOG_DB_USER:-devlog}
       POSTGRES_PASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
     volumes:
       - aideation_pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5433:5432"
+    # Host-Ports je Compose-Projekt: der Live-Stack veröffentlicht 127.0.0.1:5433, das Agent-Projekt nichts.
+    extends:
+      file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
+      service: db-ports
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DEV_LOG_DB_USER:-devlog} -d aideation"]
@@ -27,7 +32,7 @@ services:
 
   dev-log:
     build: .
-    container_name: aideation_backend_nodejs
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_backend_nodejs
     # Kein Port nach aussen: erreichbar über das Frontend (aideation_frontend_angular), das /api weiterleitet.
     restart: unless-stopped
     environment:
@@ -66,10 +71,11 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend/Dockerfile
-    container_name: aideation_frontend_angular
-    ports:
-      # Direkt nur vom eigenen Rechner aus; von aussen geht es über HTTPS (Dienst https).
-      - "127.0.0.1:3100:8080"
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_frontend_angular
+    # Live: 127.0.0.1:3100, nur vom eigenen Rechner aus; von aussen über HTTPS (Dienst https). Agent-Projekt: kein Port.
+    extends:
+      file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
+      service: frontend-ports
     restart: unless-stopped
     depends_on:
       dev-log:
@@ -88,7 +94,7 @@ services:
 
   backup:
     image: postgres:17-alpine
-    container_name: aideation_backup_postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_backup_postgres
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/backup.sh"]
     # Benutzer postgres (70:70) des Images. Unter Linux muss ./backups für ihn beschreibbar sein – oder
@@ -128,10 +134,11 @@ services:
     # Caddy als Benutzer caddy (deploy/caddy/Dockerfile); Ports 80/443 im Container ohne root erlaubt (sysctl).
     build: deploy/caddy
     image: aideation-caddy:2.8.4
-    container_name: aideation_proxy_caddy
-    ports:
-      - "80:80"
-      - "443:443"
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_proxy_caddy
+    # Live: 80/443; das Agent-Projekt veröffentlicht keine Ports.
+    extends:
+      file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
+      service: https-ports
     restart: unless-stopped
     sysctls:
       net.ipv4.ip_unprivileged_port_start: 0
@@ -167,7 +174,7 @@ services:
     profiles: ["https"]
     build: deploy/caddy
     image: aideation-caddy:2.8.4
-    container_name: aideation_proxy_caddy_volumes
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_proxy_caddy_volumes
     user: root
     entrypoint: ["chown", "-R", "caddy:caddy", "/data", "/config"]
     network_mode: none
@@ -179,10 +186,12 @@ services:
       - aideation_caddy_data:/data
       - aideation_caddy_config:/config
 
+# Die Schlüssel bleiben (Compose-Labels der bestehenden Live-Volumes); massgeblich ist der Docker-Name unter name:.
+# Der Live-Stack behält so aideation_pgdata usw., andere Projekte bekommen eigene, leere Volumes.
 volumes:
   aideation_pgdata:
-    name: aideation_pgdata
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_pgdata
   aideation_caddy_data:
-    name: aideation_caddy_data
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_caddy_data
   aideation_caddy_config:
-    name: aideation_caddy_config
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_caddy_config

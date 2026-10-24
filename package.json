@@ -7,7 +7,7 @@
     "build": "npm run build:ui && tsc -p tsconfig.json",
     "build:ui": "ng build --configuration production",
     "start": "node dist/server.js",
-    "dev": "tsx watch src/server.ts",
+    "dev": "tsx watch src/dev-server.ts",
     "dev:ui": "ng serve --proxy-config frontend/proxy.conf.json",
     "lint": "eslint .",
     "format": "prettier --write src frontend/src",
@@ -22,6 +22,7 @@
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
     "test:full": "tsx scripts/test-full.ts",
+    "check:styles": "playwright test -c e2e/styles.config.ts",
     "check:diagrams": "tsx scripts/check-diagrams.ts"
   },
   "dependencies": {

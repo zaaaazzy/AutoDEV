@@ -1,65 +1,63 @@
 import { Component, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { ConfirmService } from '../core/confirm.service.js';
+import { ModalComponent } from './modal.component.js';
 
 /** Eigener Bestätigungsdialog mit optionalem Kommentar; einmal in der App eingebunden, gesteuert vom ConfirmService. */
 @Component({
   selector: 'app-confirm-dialog',
   standalone: true,
+  imports: [ModalComponent],
   template: `
     @if (confirm.pending(); as pending) {
-      <div class="modal-backdrop confirm-backdrop" (click)="cancel()">
-        <section
-          class="confirm-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="confirm-title"
-          aria-describedby="confirm-message"
-          (click)="$event.stopPropagation()"
-          (keydown.escape)="cancel()"
-        >
-          <h2 id="confirm-title">{{ pending.options.title }}</h2>
-          <p id="confirm-message" class="confirm-message">{{ pending.options.message }}</p>
-          @if (pending.options.details?.length) {
-            <ul class="confirm-details">
-              @for (detail of pending.options.details; track $index) {
-                <li>{{ detail }}</li>
-              }
-            </ul>
-          }
-          <form class="confirm-form" (submit)="$event.preventDefault(); accept()">
-            @if (!pending.options.withoutComment) {
-              <label for="confirm-comment">{{ pending.options.commentLabel ?? 'Kommentar (optional)' }}</label>
-              <textarea
-                #field
-                id="confirm-comment"
-                rows="3"
-                maxlength="2000"
-                [placeholder]="pending.options.commentPlaceholder ?? ''"
-                [required]="!!pending.options.commentRequired"
-                [value]="comment()"
-                (input)="comment.set($any($event.target).value)"
-                (keydown.control.enter)="accept()"
-                (keydown.meta.enter)="accept()"
-              ></textarea>
-              @if (pending.options.commentHint) {
-                <small class="muted">{{ pending.options.commentHint }}</small>
-              }
+      <app-modal
+        panelClass="confirm-dialog"
+        backdropClass="confirm-backdrop"
+        labelledBy="confirm-title"
+        describedBy="confirm-message"
+        (closed)="cancel()"
+      >
+        <h2 id="confirm-title">{{ pending.options.title }}</h2>
+        <p id="confirm-message" class="confirm-message">{{ pending.options.message }}</p>
+        @if (pending.options.details?.length) {
+          <ul class="confirm-details">
+            @for (detail of pending.options.details; track $index) {
+              <li>{{ detail }}</li>
             }
-            <div class="confirm-actions">
-              <button class="button secondary" type="button" (click)="cancel()">Abbrechen</button>
-              <button
-                #submit
-                class="button primary"
-                type="submit"
-                [class.danger]="!!pending.options.danger"
-                [disabled]="missingComment()"
-              >
-                {{ pending.options.confirmLabel }}
-              </button>
-            </div>
-          </form>
-        </section>
-      </div>
+          </ul>
+        }
+        <form class="confirm-form" (submit)="$event.preventDefault(); accept()">
+          @if (!pending.options.withoutComment) {
+            <label for="confirm-comment">{{ pending.options.commentLabel ?? 'Kommentar (optional)' }}</label>
+            <textarea
+              #field
+              id="confirm-comment"
+              rows="3"
+              maxlength="2000"
+              [placeholder]="pending.options.commentPlaceholder ?? ''"
+              [required]="!!pending.options.commentRequired"
+              [value]="comment()"
+              (input)="comment.set($any($event.target).value)"
+              (keydown.control.enter)="accept()"
+              (keydown.meta.enter)="accept()"
+            ></textarea>
+            @if (pending.options.commentHint) {
+              <small class="muted">{{ pending.options.commentHint }}</small>
+            }
+          }
+          <div class="confirm-actions">
+            <button class="button secondary" type="button" (click)="cancel()">Abbrechen</button>
+            <button
+              #submit
+              class="button primary"
+              type="submit"
+              [class.danger]="!!pending.options.danger"
+              [disabled]="missingComment()"
+            >
+              {{ pending.options.confirmLabel }}
+            </button>
+          </div>
+        </form>
+      </app-modal>
     }
   `,
 })

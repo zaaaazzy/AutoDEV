@@ -1,7 +1,7 @@
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Router } from 'express';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import { generatedDocs } from './generated-docs.js';
 import { publicBaseUrl } from './production-snippets.js';
@@ -32,7 +32,7 @@ const DOC_FIELDS = {
 const clip = (content: string): string => content.slice(0, MAX_STORED_CONTENT);
 
 export async function upsertDoc(
-  pool: Pool,
+  pool: Pool | PoolClient,
   doc: {
     projectSlug: string;
     kind: 'manual' | 'sprint' | 'repo';

@@ -10,20 +10,24 @@ source "$ROOT/scripts/lib/service-env.sh"
 LABEL="com.aideation.worker"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENV_FILE="$SERVICE_ENV_DIR/worker.env"
-NODE_BIN="$(dirname "$(command -v node)")"
+# Echter Pfad statt Shim/Sitzungspfad (fnm, Volta): der Dienst startet später ohne die Shell-Umgebung.
+NODE_BIN="$(dirname "$(node -p process.execPath)")"
 # launchd startet mit minimalem PATH; externe Agent-CLIs (claude, copilot, gemini) liegen oft in
 # ~/.local/bin oder /opt/homebrew/bin. Deshalb den PATH der aufrufenden Shell übernehmen.
 WORKER_PATH="$NODE_BIN:$HOME/.local/bin:/opt/homebrew/bin:$PATH:/usr/local/bin:/usr/bin:/bin"
 for cli in claude copilot gemini; do
   if command -v "$cli" >/dev/null 2>&1; then echo "Gefunden: $cli → $(command -v "$cli")"; fi
 done
+# Eigener Ablageort der Playwright-Browser (falls gesetzt) gilt auch im Dienst: Sonst finden optische Abnahme und
+# Smoke-Tests der Spielprojekte (Phaser-Vorlage) Chromium nicht.
 DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
   "DEV_LOG_DATABASE_URL=$DATABASE_URL" \
   "DEV_LOG_REVIEW_DATABASE_URL=$(resolve_value DEV_LOG_REVIEW_DATABASE_URL "$ENV_FILE")" \
   "DEV_LOG_OLLAMA_MODEL=$(resolve_value DEV_LOG_OLLAMA_MODEL "$ENV_FILE" "qwen3.5:9b")" \
-  "DEV_LOG_SECRET_KEY=$(resolve_value DEV_LOG_SECRET_KEY "$ENV_FILE")"
+  "DEV_LOG_SECRET_KEY=$(resolve_value DEV_LOG_SECRET_KEY "$ENV_FILE")" \
+  "PLAYWRIGHT_BROWSERS_PATH=$(resolve_value PLAYWRIGHT_BROWSERS_PATH "$ENV_FILE")"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 LOG="$HOME/Library/Logs/aideation-worker.log"
 # Node startet direkt und liest die Zugänge selbst (--env-file): Unter macOS darf ein Hintergrunddienst /bin/bash

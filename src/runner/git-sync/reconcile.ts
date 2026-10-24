@@ -16,7 +16,7 @@ import {
   sprintBranch,
   stageAll,
 } from './git-helpers.js';
-import { clearStaleIndexLock } from './stale-lock.js';
+import { clearStaleLocks } from './stale-lock.js';
 
 /**
  * Aufräumen des Agent-Arbeitsordners beim Start des Workers. Wurde der Worker mitten in einem Commit oder Merge
@@ -44,13 +44,17 @@ async function abortInProgress(git: GitHelpers['git'], gitDir: string, actions: 
   }
 }
 
-/** Basis eines Auftrags-Branchs: Sprint-Branch seines Sprints (falls vorhanden), sonst main. */
+/**
+ * Basis eines Auftrags-Branchs: Sprint-Branch seines Sprints (falls vorhanden und der Sprint noch offen), sonst main.
+ * Ein abgeschlossener oder abgebrochener Sprint ist schon gesichert: Wer dorthin zurückkehrte, arbeitete am alten Stand.
+ */
 async function baseOf(pool: Pool, project: string, branch: string, git: GitHelpers['git']): Promise<string> {
   const prefix = /^auftrag\/([0-9a-f]{8})-/.exec(branch)?.[1];
   if (prefix) {
     const row = (
       await pool.query<{ name: string | null }>(
-        `SELECT s.name FROM development_items d LEFT JOIN sprints s ON s.id = d.sprint_id
+        `SELECT s.name FROM development_items d
+           LEFT JOIN sprints s ON s.id = d.sprint_id AND s.status NOT IN ('completed', 'cancelled')
           WHERE d.project_slug = $1 AND d.id::text LIKE $2 LIMIT 1`,
         [project, `${prefix}%`],
       )
@@ -89,8 +93,7 @@ export async function reconcileWorkingTree(
   const separate = repository !== agentFolder;
   // Beim Start laufen keine alten git-Prozesse mehr (killPreviousProcesses): jede ungehaltene Sperre ist verwaist.
   for (const folder of separate ? [agentFolder, repository] : [agentFolder]) {
-    const cleared = await clearStaleIndexLock(folder, now.getTime(), { minAgeMs: 0 }).catch(() => null);
-    if (cleared) actions.push(cleared);
+    actions.push(...(await clearStaleLocks(folder, now.getTime(), { minAgeMs: 0 }).catch((): string[] => [])));
   }
   if (!separate || !existsSync(join(agentFolder, '.git'))) return { actions };
   const execute: CommandExecutor = (command, directory, options) =>

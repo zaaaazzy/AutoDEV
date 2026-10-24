@@ -1,7 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SECRET_NAME } from './tool-paths.js';
 import {
   COMPOSE_STARTING,
   composeViolation,
@@ -9,6 +11,7 @@ import {
   forbiddenSubcommand,
   gitOptionProblem,
   gitPathProblem,
+  gitRemoteProblem,
   npmOptionProblem,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
@@ -40,12 +43,34 @@ export const SCOPE_PATTERN = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@][\w@.+-]*(?:\/[\w@
 
 /**
  * Nie beschreibbar: Git-Interna und Git-Hooks (.husky), Agent-Einstellungen (.claude, .mcp.json – sonst könnte sich ein
- * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen) und Geheimnisse.
+ * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen), Geheimnisse und .npmrc (Registry,
+ * Proxy und Skript-Shell liessen sich dort am Wächter vorbei umstellen).
  */
 const PROTECTED_PATH =
-  /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
+  /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.npmrc|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
+
+/** npm-Unterbefehle (samt Aliassen), die Paketangaben installieren – nur Namen aus der Registry. */
+const NPM_INSTALL_SUBCOMMANDS = new Set([
+  ...['install', 'i', 'in', 'ins', 'inst', 'insta', 'instal', 'isnt', 'isnta', 'isntal', 'isntall', 'add'],
+  ...['update', 'up', 'upgrade', 'udpate'],
+]);
+
+/** Eingerichtete Git-Remotes des Projekts (git remote); origin gilt immer, ohne Abfrage nur origin. */
+function gitRemotes(projectRoot: string, run: typeof spawnSync | null): string[] {
+  const remotes = new Set(['origin']);
+  const result = run?.('git', ['remote'], { cwd: projectRoot, encoding: 'utf8', timeout: 10_000 });
+  if (result?.status === 0) {
+    for (const name of String(result.stdout).split('\n')) {
+      if (/^[\w][\w.-]*$/.test(name.trim())) remotes.add(name.trim());
+    }
+  }
+  return [...remotes];
+}
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead']);
+/** Ordner mit Schlüsseln und Zugangsdaten – wie PROTECTED_PATH, aber für das Lesen. */
+const SECRET_DIRECTORIES = new Set(['.ssh', '.aws', '.gnupg']);
 
 /** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
 const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
@@ -107,11 +132,67 @@ export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot:
   return policy.edit ? null : 'Dateien ändern ist für diesen Agent nicht freigegeben.';
 }
 
-/** node --version oder node --check mit genau einer Datei (kein Optionswort, keine Shell-Erweiterung). */
+/** Relativer Pfad im Projekt: nicht absolut, ohne „..“-Segment, keine URL (data:, file: …). */
+const projectRelativeFile = (path: string): boolean =>
+  !!path && !isAbsolute(path) && !path.split(/[\\/]/).includes('..') && !/^[A-Za-z][\w+.-]*:/.test(path);
+
+/** Nennt ein Pfadteil ein Geheimnis (SECRET_NAME) oder einen Schlüssel-Ordner? Auch Glob-Muster wie *.{pem,key}. */
+const secretPart = (part: string): boolean =>
+  SECRET_DIRECTORIES.has(part.toLowerCase()) ||
+  part
+    .replace(/[{}]/g, '')
+    .split(',')
+    .some((alternative) => SECRET_NAME.test(alternative));
+
+/** Pfad samt aufgelöster Links und „~“ – im Projekt relativ zum Projekt, sonst ganz – auf Geheimnisse prüfen. */
+function secretPath(raw: string, cwd: string, root: string): boolean {
+  const expanded = raw === '~' || raw.startsWith('~/') ? homedir() + raw.slice(1) : raw;
+  const lexical = resolve(cwd, expanded);
+  const candidates = [lexical];
+  try {
+    const real = realTarget(lexical);
+    if (real) candidates.push(real);
+  } catch {
+    // Nicht auflösbar (z. B. keine Rechte): dann zählt der Pfad, wie er dasteht.
+  }
+  return candidates.some((path) =>
+    (inside(path, root) ? path.slice(root.length) : path).split(/[\\/]/).filter(Boolean).some(secretPart),
+  );
+}
+
+/**
+ * Lesende Werkzeuge (Read, Grep, Glob): keine Geheimnisse wie .env, *.pem, *.key, SSH-Schlüssel – für jede Rolle,
+ * unabhängig von der Richtlinie. Gemeldet wird nur der Pfad, nie ein Inhalt. Grep über einen ganzen Ordner prüft der
+ * Wächter nicht Datei für Datei; dort greifen die Deny-Regeln der CLI (SECRET_READ_DENY).
+ */
+export function secretReadProblem(input: GuardInput, projectRoot: string): string | null {
+  const root = realpathSync(projectRoot);
+  const cwd = input.cwd ?? root;
+  const tool = input.tool_input ?? {};
+  const paths = [tool.file_path, tool.notebook_path, tool.path].filter(
+    (value): value is string => typeof value === 'string' && value !== '',
+  );
+  const patterns = [tool.glob, input.tool_name === 'Glob' ? tool.pattern : undefined].filter(
+    (value): value is string => typeof value === 'string' && value !== '',
+  );
+  const hit =
+    paths.find((path) => secretPath(path, cwd, root)) ??
+    patterns.find((pattern) => pattern.split(/[\\/]/).some(secretPart));
+  return hit === undefined ? null : `${hit}: Geheimnisse (.env, Schlüssel, Zertifikate) sind für Agents gesperrt.`;
+}
+
+/** node --version oder node --check mit genau einer relativen Projektdatei (kein Optionswort, keine Shell-Erweiterung). */
 function nodeCheckOnly(words: readonly ShellWord[]): boolean {
   const [, option, file] = words;
   if (words.length === 2) return option?.text === '--version';
-  return words.length === 3 && option?.text === '--check' && !!file && !file.expanded && !file.text.startsWith('-');
+  return (
+    words.length === 3 &&
+    option?.text === '--check' &&
+    !!file &&
+    !file.expanded &&
+    !file.text.startsWith('-') &&
+    projectRelativeFile(file.text)
+  );
 }
 
 /**
@@ -160,10 +241,14 @@ export function bashProblem(
     }
     const gitProblem = gitPathProblem(words, root);
     if (gitProblem) return gitProblem;
+    if (program === 'git' && (subcommand === 'fetch' || subcommand === 'pull')) {
+      const remoteProblem = gitRemoteProblem(words, gitRemotes(projectRoot, run));
+      if (remoteProblem) return remoteProblem;
+    }
     if (program === 'npm') {
       const npmProblem = npmOptionProblem(words, root);
       if (npmProblem) return npmProblem;
-      if (['install', 'i', 'add'].includes(subcommand)) {
+      if (NPM_INSTALL_SUBCOMMANDS.has(subcommand)) {
         const specs = words.slice(2).filter((word) => !word.text.startsWith('-'));
         const foreign = specs.find((spec) => !REGISTRY_SPEC.test(spec.text));
         if (foreign) return `„${foreign.text}“: nur Pakete aus der npm-Registry, keine Git-, Datei- oder URL-Quellen.`;
@@ -174,7 +259,7 @@ export function bashProblem(
     }
     // node lädt auch unter --check Module aus --import/-r und führt sie aus: nur genau diese zwei Formen.
     if (program === 'node' && !nodeCheckOnly(words)) {
-      return `„${part}“: erlaubt sind nur „node --version“ und „node --check <datei>“ ohne weitere Optionen.`;
+      return `„${part}“: erlaubt sind nur „node --version“ und „node --check <relative Projektdatei>“ ohne weitere Optionen.`;
     }
     if (
       (program === 'docker-compose' && subcommand.startsWith('-')) ||
@@ -204,6 +289,7 @@ export function bashProblem(
 
 /** Gesamtentscheidung für einen Hook-Aufruf. */
 export function guardProblem(input: GuardInput, policy: GuardPolicy, projectRoot: string): string | null {
+  if (READ_TOOLS.has(input.tool_name ?? '')) return secretReadProblem(input, projectRoot);
   if (WRITE_TOOLS.has(input.tool_name ?? '')) return fileProblem(input, policy, projectRoot);
   if (input.tool_name === 'Bash') {
     if (policy.shell === false) return 'Befehle sind für diesen Agent nicht freigegeben (nur lesen).';

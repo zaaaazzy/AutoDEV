@@ -3,12 +3,21 @@ import { setActionTodo } from '../runner/action-todo.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
-import { canSetDevelopmentStatus, isAssignableSprintStatus } from '../core/development-transitions.js';
+import {
+  REPLANNABLE_DEVELOPMENT_STATUSES,
+  RETRYABLE_DEVELOPMENT_STATUSES,
+  SPRINT_LOCKED_DEVELOPMENT_STATUSES,
+  SPRINT_POOL_DEVELOPMENT_STATUSES,
+  canSetDevelopmentStatus,
+  isAssignableSprintStatus,
+  isSprintLockedDevelopmentStatus,
+} from '../core/development-transitions.js';
 import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
 import { developmentPatchRole } from './roles.js';
 import {
   buildUpdate,
+  manualEstimateSql,
   isRecord,
   INVALID,
   invalidInput,
@@ -33,7 +42,7 @@ import {
  */
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
   title, description, status, priority, created_at AS "createdAt",
-  effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
+  effort_hours AS "effortHours", token_estimate AS "tokenEstimate", estimate_source AS "estimateSource", benefit, cost,
   kind, category, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
   failure, failure_bug_id AS "failureBugId", action_todo AS "actionTodo",
@@ -51,6 +60,9 @@ const DEV_FIELDS = {
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   agentId: { column: 'agent_id', parse: parseNullableUuid },
 };
+
+/** Feste Statusliste aus development-transitions für `IN (…)` (eigene Konstanten, keine Benutzereingabe). */
+const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
 
 const parseUuid: Parser = (value) => (isUuid(value) ? value : INVALID);
 const NEW_ORDER_FIELDS = {
@@ -85,9 +97,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     }
     const result = await pool.query(
       `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
-                                      effort_hours, token_estimate, benefit, cost)
+                                      effort_hours, token_estimate, benefit, cost, estimate_source)
        SELECT i.project_slug, i.id, i.title, i.description, '${DEVELOPMENT_STATUS.backlog}', i.priority,
-              i.effort_hours, i.token_estimate, i.benefit, i.cost
+              i.effort_hours, i.token_estimate, i.benefit, i.cost, i.estimate_source
          FROM ideation_items i
         WHERE i.id = $1
           AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)
@@ -235,8 +247,8 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
                 ELSE (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)
               END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()
-        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
-              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
+        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN (${sqlList(RETRYABLE_DEVELOPMENT_STATUSES)})
+              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN (${sqlList(REPLANNABLE_DEVELOPMENT_STATUSES)})))
         RETURNING ${DEV_COLUMNS}`,
       [request.params.id, comment],
     );
@@ -282,7 +294,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               budget_since = CASE WHEN ${aborted} THEN NOW() ELSE d.budget_since END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
         WHERE d.id = $1 AND d.sprint_id IS NULL AND d.kind <> 'express'
-          AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.blocked}')
+          AND d.status IN (${sqlList(SPRINT_POOL_DEVELOPMENT_STATUSES)})
           AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
                          AND s.status IN ('planned', 'active'))
         RETURNING ${DEV_COLUMNS}`,
@@ -319,7 +331,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
               updated_at = NOW()
         WHERE id = $1 AND sprint_id IS NOT NULL
-          AND status NOT IN ('${DEVELOPMENT_STATUS.inProgress}', '${DEVELOPMENT_STATUS.done}')
+          AND status NOT IN (${sqlList(SPRINT_LOCKED_DEVELOPMENT_STATUSES)})
         RETURNING ${DEV_COLUMNS}`,
         [request.params.id],
       );
@@ -413,26 +425,39 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         return;
       }
       const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+      const sprintChange = fields.find((field) => field.column === 'sprint_id');
       let from: string | undefined;
-      if (target) {
-        const current = await pool.query<{ status: string }>(`SELECT status FROM development_items WHERE id = $1`, [
-          request.params.id,
-        ]);
+      let sprintUnchanged = false;
+      if (target || sprintChange) {
+        const current = await pool.query<{ status: string; sprintId: string | null }>(
+          `SELECT status, sprint_id AS "sprintId" FROM development_items WHERE id = $1`,
+          [request.params.id],
+        );
         from = current.rows[0]?.status;
         if (!from) {
           response.status(404).json({ message: 'Auftrag nicht gefunden.' });
           return;
         }
-        if (!canSetDevelopmentStatus(from, target)) {
+        if (target && !canSetDevelopmentStatus(from, target)) {
           response.status(409).json({
             message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
           });
           return;
         }
+        // Erst der Auftragsstatus, dann der Ziel-Sprint. Derselbe Sprint wie bisher ist keine Änderung (Formular speichert
+        // ihn mit), sonst bräche das Speichern anderer Felder bei laufenden Aufträgen.
+        sprintUnchanged = sprintChange?.value === (current.rows[0].sprintId ?? null);
+        if (sprintChange && !sprintUnchanged && isSprintLockedDevelopmentStatus(from)) {
+          response.status(409).json({
+            message: 'Aufträge in Arbeit, in Freigabe oder erledigt lassen sich keinem anderen Sprint zuordnen.',
+          });
+          return;
+        }
       }
-      const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
+      const sprintId = sprintChange?.value;
       let targetSprintStatus: string | undefined;
-      if (typeof sprintId === 'string') {
+      // Der bisherige Sprint darf inzwischen im Review oder abgeschlossen sein (wie bei Bugs).
+      if (typeof sprintId === 'string' && !sprintUnchanged) {
         const sprint = await pool.query<{ sprintStatus: string }>(
           `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
           WHERE s.id = $1 AND e.id = $2`,
@@ -464,9 +489,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
           return;
         }
       }
-      const sprintField = fields.find((field) => field.column === 'sprint_id');
+      const sprintField = sprintChange;
       const agentField = fields.find((field) => field.column === 'agent_id');
-      // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
+      // Status oder Sprint nur ändern, wenn der Status seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
       const update = buildUpdate(
         'development_items',
         request.params.id,
@@ -474,6 +499,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
         from ? { column: 'status', values: [from] } : undefined,
       );
+      update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
       const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
       if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
         // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.

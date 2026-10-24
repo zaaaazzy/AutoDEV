@@ -31,17 +31,18 @@ Idee ──schätzen──► Idee ──ausarbeiten (Auftragsautor)──► Au
 
 Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnungen sind dieselben wie die Badges („Visionär“ steht für Ideen vom Visionär, `source = visionary`):
 
-| Wert | Bedeutung |
-|---|---|
-| Mensch | von Hand erfasst; ältere Ideen ohne Angabe gelten ebenfalls als „Mensch“ |
-| Visionär | vom Visionär-Agenten vorgeschlagen (Badge „Visionär“) |
-| Routine | von einer Routine angelegt |
-| Produktion | Idee mit Herkunft Produktion |
-| GitHub | Idee mit Herkunft GitHub |
+| Wert       | Bedeutung                                                                |
+| ---------- | ------------------------------------------------------------------------ |
+| Mensch     | von Hand erfasst; ältere Ideen ohne Angabe gelten ebenfalls als „Mensch“ |
+| Visionär   | vom Visionär-Agenten vorgeschlagen (Badge „Visionär“)                    |
+| Routine    | von einer Routine angelegt                                               |
+| Produktion | Idee mit Herkunft Produktion                                             |
+| GitHub     | Idee mit Herkunft GitHub                                                 |
 
 **So filtern Sie:** Auf den Trichter neben dem Spaltenkopf „Herkunft“ klicken. Das Menü zeigt „Alle“ und jede Herkunft mit der Anzahl der Ideen. Auch Herkunften ohne Treffer stehen in fester Reihenfolge darin, mit der Anzahl 0.
 
 **Bedingungen:**
+
 - Mehrere Herkünfte gleichzeitig wählen: Die Liste zeigt Ideen, die mindestens eine der gewählten Herkünfte haben (z. B. Visionär und GitHub).
 - Der Herkunft-Filter lässt sich mit allen anderen Spaltenfiltern kombinieren, etwa Herkunft „Visionär“ mit einem Status-Filter. Dann erscheinen nur Ideen, die beide Bedingungen erfüllen. Dabei kann die Liste leer bleiben.
 - „Alle“ hebt den Herkunft-Filter auf. Ist kein Filter gesetzt, ist „Alle“ ausgewählt und nicht anklickbar.
@@ -57,16 +58,27 @@ Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnunge
 | Geplant       | Sprint angelegt, Aufträge zuordenbar; der Worker arbeitet nichts ab.                                                                                                                                                                                                                                 |
 | Aktiv         | Maximal **ein** aktiver Sprint pro Projekt (DB-Constraint). Backlog-Aufträge des Sprints werden automatisch auf „Geplant“ gesetzt und abgearbeitet.                                                                                                                                                  |
 | Abgeschlossen | Sprint-Bericht wird erzeugt; die Git-Sicherung wird automatisch eingereiht (DB-Trigger).                                                                                                                                                                                                             |
-| Abgebrochen   | Aus „Geplant“ oder „Aktiv“ („Abbrechen“). Laufende Agents der Sprint-Aufträge werden beendet, offene Aufträge verlassen den Sprint mit Vermerk (Backlog, unter „Aktionen“ wieder einplanbar), Erledigtes bleibt beim Sprint. Keine Git-Sicherung, kein Merge. Lässt sich wieder planen oder löschen. |
+| Abgebrochen   | Aus „Geplant“ oder „Aktiv“ („Abbrechen“). Laufende Agents der Sprint-Aufträge werden beendet, offene Aufträge verlassen den Sprint mit Vermerk (Backlog, unter „Aktionen“ wieder einplanbar), Erledigtes bleibt beim Sprint. Aufträge in Freigabe gehen ebenfalls ins Backlog (ihr Merge-Ziel war der Sprint-Branch), laufende erst nach dem Ende ihres Agents – bis dahin bietet die Oberfläche kein „Wieder einplanen“ an. Keine Git-Sicherung, kein Merge. Lässt sich wieder planen oder löschen. |
 
 **Aufträge in einen Sprint nehmen („Aufträge hinzufügen“):** Auf der Sprintseite lassen sich offene und abgebrochene Aufträge in den Sprint übernehmen.
 
-- **Welche Aufträge:** Status „Backlog“, „Geplant“ oder „Blockiert“ ohne Sprint, dazu Aufträge, die aus einem Sprint genommen wurden. Express-Anfragen und Aufträge im Review („Freigabe“) werden nicht übernommen.
+- **Welche Aufträge:** Status „Backlog“, „Geplant“ oder „Blockiert“ ohne Sprint, dazu Aufträge, die aus einem Sprint genommen wurden und wieder in einem dieser Status sind. Express-Anfragen, laufende Aufträge und Aufträge im Review („Freigabe“) stehen nicht zur Auswahl. Oberfläche und Server lesen dieselbe Statusliste (`src/core/development-transitions.ts`).
 - **Wohin:** Nur in einen Sprint **desselben Projekts**, der geplant oder aktiv ist. Abgeschlossene oder abgebrochene Sprints nehmen nichts auf.
 - **Was passiert:** Der Auftrag ist sofort im Ziel-Sprint, nicht erst im aktiven. Bei abgebrochenen oder blockierten Aufträgen werden Vermerk, Fehler und ein von Hand zugewiesener Agent zurückgesetzt. Blockierte zählen dabei als erneuter Versuch.
 - **Start:** Nur in einem **aktiven** Sprint startet der Worker den Auftrag. In einem **geplanten** Sprint wartet er, bis der Sprint gestartet wird. Auch ein Verschieben per PATCH in einen nicht aktiven Sprint setzt das automatische Starten zurück.
 - **Ablehnung:** Passt ein Auftrag oder Sprint nicht, meldet die Oberfläche „Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen …“. Ein Sammel-Hinweis nennt dann die nicht übernommenen Titel.
-- **Bekannte Einschränkung:** Die Liste „Aufträge hinzufügen“ zeigt Aufträge im Status „Freigabe“ ohne Sprint noch an. Sie lassen sich nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch.
+- **Freigabe und laufende Aufträge:** Sie stehen nicht unter „Aufträge hinzufügen“, weil ihre Arbeit an den Sprint gebunden ist und nicht umgehängt wird.
+
+**„Wieder einplanen“ (unter „Aktionen“):** Der Schritt wird nur angeboten, wenn der Auftrag aus einem Sprint genommen wurde und im Status „Backlog“ oder „Geplant“ ist. Die Bedingung steht in `src/core/development-transitions.ts` und gilt genauso für `/retry`. Ein Auftrag in „Freigabe“ oder ein laufender Auftrag bietet ihn nicht an. Ein laufender Auftrag wird erst nach dem Ende seines Agent-Laufs frei und landet dann im Backlog. Freigaben aus einem abgebrochenen Sprint, die vor dieser Änderung ohne Sprint hängen geblieben sind, setzt die Migration `freigabe-nach-sprint-abbruch-ins-backlog` einmalig ins Backlog.
+
+**Aktiven Sprint mit Startdatum in der Zukunft abschließen:** Wer einen Sprint vorzeitig startet (Startdatum liegt nach heute), kann ihn schon am selben Tag abschließen.
+
+- **Bedingungen:** Der Sprint muss aktiv sein. Es darf kein Auftrag mehr laufen (409 „Im Sprint laufen noch Aufträge …“) und keiner auf die Review-Freigabe oder den Merge warten (409). Diese Regeln gelten unverändert.
+- **Ergebnis:** Der Abschluss antwortet mit 200. Der Sprint steht auf „Abgeschlossen“, bekommt einen Sprintbericht und wird für die Git-Sicherung eingereiht.
+- **Enddatum:** Ist kein Enddatum gesetzt, trägt Dev Log das Startdatum ein, wenn es in der Zukunft liegt, sonst heute. Das Enddatum liegt nie vor dem Startdatum.
+- **Scheitert der Abschluss:** Status, Bericht und Git-Sicherung werden gemeinsam geschrieben oder gar nicht. Der Sprint bleibt dann aktiv, ohne Bericht und ohne Git-Sicherung, und der Abschluss lässt sich wiederholen. Der Worker mergt und pusht in diesem Fall nichts.
+- **Grenze:** Ist ein Enddatum gesetzt, das vor dem Startdatum liegt, bleibt die Antwort 400 „Enddatum vor Startdatum“. Dann bleibt der Sprint ebenfalls aktiv; das Enddatum muss von Hand korrigiert werden.
+- **Printscreens:** Keine. Die Änderung betrifft nur die Antwort des Abschlusses und den Inhalt der Daten. Die Oberfläche wurde nicht im Browser geprüft.
 
 ## 3a. Sprintplanung und Autopilot
 
@@ -82,8 +94,10 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 
 - Kandidaten: Aufträge `backlog`, `planned` und `blocked` ohne Sprint oder aus abgeschlossenen Sprints.
 - Score = Prioritätsgewicht (hoch 3, mittel 2, niedrig 1) × (Nutzen + 1) / (Kosten + 1); +2 für Bugs, +1 für Folgeaufträge mit erledigtem Vorgänger, −1,5 für Aufträge, die blockiert waren oder aus einem Sprint genommen wurden.
-- **Kapazität** = Median der Ist-Werte der letzten 3 abgeschlossenen Sprints: gemessene Laufzeit (Stunden) und Tokens aller Agent-Schritte erledigter Aufträge (`completedSprintUsage` in `src/api/usage.ts`). Ohne solche Sprints gilt `sprint_capacity_hours` (Standard 40 h); die Karte zeigt das als „Einstellung – noch keine Sprint-Historie“.
-- Aufgefüllt wird nach Score, solange Stunden (Schätzung `effort_hours`, sonst 2 h) und Tokens (`token_estimate`) in die Kapazität passen; der erste Auftrag passt immer.
+- **Einheit:** Planer, Routing und Statistik rechnen in **Agent-Stunden** (gemessene Laufzeit aller Agent-Schritte eines Auftrags) und gemessenen Tokens, nicht in Menschenstunden. Schnellschätzung und Auftragsautor schätzen in dieser Einheit und bekommen dafür die Ist-Werte ähnlicher Aufträge.
+- **Kalibrierung** (`src/core/estimate-calibration.ts`): Jede Schätzung merkt sich ihre Herkunft (`estimate_source`: `manual` von Hand, `quick` Schnellschätzung, `author` Auftragsautor, leer = Altbestand in Menschenstunden). Je Herkunft gilt ein Faktor = Median von Ist ÷ Schätzung der letzten 20 erledigten Aufträge mit Messung, getrennt für Stunden und Tokens; ab 5 Messwerten der Projektwert, sonst der Wert aller Projekte, sonst 1 (begrenzt auf 0,01–10). Der Planer rechnet mit den kalibrierten Werten; die Karte zeigt die Faktoren („Altbestand ×0,04 (19 Aufträge)“), ein Tooltip die gespeicherte Schätzung. Der Auftragsautor ersetzt Schnellschätzung und Altbestand, von Hand eingetragene Werte nie.
+- **Kapazität** = `sprint_capacity_hours` in Agent-Stunden (Standard 4 h; ein Auftrag braucht gemessen meist 0,2–0,5 h). Ein Sprint-Budget in Tokens (Einstellungen → Budget) ist zusätzlich die Token-Grenze. Die Historie bestimmt die Kapazität nicht – ein Sprint ohne Zeitfenster schafft genau, was eingeplant war –, die Karte zeigt aber den Median der gemessenen Agent-Stunden der letzten 3 Sprints (`completedSprintUsage` in `src/api/usage.ts`).
+- Aufgefüllt wird nach Score, solange die kalibrierten Stunden (ohne Schätzung 0,5 h) und Tokens in die Kapazität passen; der erste Auftrag passt immer.
 - Reihenfolge (`sprint_rank`): Ein Folgeauftrag kommt nur mit oder nach seinem Vorgänger in den Sprint und steht immer dahinter. Aufträge mit denselben betroffenen Dateien (Abschnitt „Technische Hinweise“ der Anforderung) stehen direkt hintereinander und laufen damit nacheinander unter der Projektsperre.
 - „Aktion notwendig“-Aufträge (`blocked` mit `action_todo`) aus dem vorigen Sprint werden immer übernommen. Andere blockierte Aufträge werden normal bewertet.
 
@@ -103,7 +117,7 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
 **Grenzen:**
 
 - **Budget:** Der Autopilot selbst prüft kein Budget; die Läufe, die er anstößt, halten aber die Budget-Limits ein (Abschnitt 4, „Budget“). Eine eigene Prüfung im Autopiloten gehört in `autopilotGuard` (`src/api/sprint-planning.ts`, eigener Auftrag).
-- Die Kapazität vergleicht gemessene Agent-Laufzeit mit geschätzten Stunden der Kandidaten. Bei wenig Historie ist der Median ungenau. Sprints ohne gemessene Laufzeit (z. B. von Hand erledigt) zählen nicht als Historie.
+- Die Kalibrierung ist nur so gut wie die Messung: Solange Cache-Tokens nicht mitgezählt werden, sind gemessene Tokens zu niedrig, der Token-Faktor gleicht das nur bei gleichbleibender Messung aus. Mit unter 5 erledigten Aufträgen einer Herkunft gilt der Wert aller Projekte bzw. 1.
 - Die Roadmap rechnet mit der heutigen Kapazität und nimmt an, dass alle eingeplanten Aufträge erledigt werden.
 - Bereits geplante, noch nicht gestartete Sprints und ihre Aufträge fliessen nicht in Vorschlag und Roadmap ein.
 
@@ -126,8 +140,9 @@ Pro Projekt einstellbar (Einstellungen → Sprintplanung, `projects.sprint_mode`
   - **ab 80 %:** genau eine Push-Warnung je Projekt, Zeitraum und Periode (gemerkt in `budget_warnings`);
   - **ab 100 %:** kein neuer Schritt; ein laufender Schritt endet regulär (das Limit kann um einen Schritt überschritten werden). Der Auftrag wird `blocked` mit „Aktion notwendig: Budget erreicht: erhöhen oder warten (…)“ – ohne Bug und ohne Bugfix; `budget_blocked` merkt den Zeitraum. Ist das Tages- oder Sprintbudget vor dem nächsten Auftrag erreicht – vor dem Durchgang oder mitten darin –, wartet genau ein Auftrag sichtbar, die übrigen bleiben eingeplant und starten keinen Lauf.
   - **Freigabe:** Zu Beginn jedes Durchgangs und nach dem Speichern der Limits (`releaseBudgetBlocks`) laufen Aufträge weiter, deren Zeitraum wieder Luft hat – das Tageslimit am Folgetag, sonst nach Erhöhen oder Entfernen des Limits; die Aktion verschwindet. „Erneut versuchen“ gibt einem Auftrag weiterhin ein neues Auftragsbudget.
-- **Modell-Routing:** Regeln je Projekt (`routing_rules`, Reihenfolge = Priorität; ohne eigene Regeln die Standardregeln) wählen je Schritt die Stufe „lokal“ (Ollama-Modell) oder „stark“ (CLI-Befehl, z. B. Claude): `docs` → lokal, Schätzung < 1 h → lokal, `backend` und Schätzung > 4 h → stark, `retry_count ≥ 1` → eine Stufe höher, Budget > 80 % → eine Stufe tiefer. Die erste Regel mit fester Stufe bestimmt die Grundstufe, danach verschieben alle zutreffenden „höher/tiefer“-Regeln sie in ihrer Reihenfolge – bei zwei Stufen gewinnt also die letzte zutreffende Verschiebung (Budget-Bremse vor Retry-Eskalation). Ist für die Stufe kein Modell konfiguriert, bleibt die Modellwahl je Rolle; der Tester wird nie umgeleitet. Jeder Schritt speichert `model` und `routing_rule`; das Lauf-Detail zeigt z. B. „Modell: qwen3.5:9b (Regel: docs → lokal)“ (`src/agent/model-routing.ts`).
+- **Modell-Routing:** Regeln je Projekt (`routing_rules`, Reihenfolge = Priorität; ohne eigene Regeln die Standardregeln) wählen je Schritt die Stufe „lokal“ (Ollama-Modell) oder „stark“ (CLI-Befehl, z. B. Claude): `docs` → lokal, Schätzung < 0,1 h → lokal, `backend` und Schätzung > 0,5 h → stark (kalibrierte Agent-Stunden, siehe Abschnitt 3a), `retry_count ≥ 1` → eine Stufe höher, Budget > 80 % → eine Stufe tiefer. Die erste Regel mit fester Stufe bestimmt die Grundstufe, danach verschieben alle zutreffenden „höher/tiefer“-Regeln sie in ihrer Reihenfolge – bei zwei Stufen gewinnt also die letzte zutreffende Verschiebung (Budget-Bremse vor Retry-Eskalation). Ist für die Stufe kein Modell konfiguriert, bleibt die Modellwahl je Rolle; der Tester wird nie umgeleitet. Jeder Schritt speichert `model` und `routing_rule`; das Lauf-Detail zeigt z. B. „Modell: qwen3.5:9b (Regel: docs → lokal)“ (`src/agent/model-routing.ts`).
 - **Zeitleiste:** Die Detailansicht zeigt oben in einem Satz, worauf der Auftrag gerade wartet (z. B. „Wartet auf die Problemanalyse“, „Wartet auf deine Antwort“, „Wartet auf den Start des Sprints“), und aufklappbar, wann welcher Agent lief, Statuswechsel, Analyse, Rückfragen und Bugfix (`GET /api/development/:id/timeline`; Statuswechsel speichert ein Trigger in `development_events`).
+- **Sprint-Auswahl:** In Arbeit, in Freigabe und erledigt bleibt ein Auftrag in seinem Sprint (Sprint-Branch, Fortschritt, Bericht). Die Sprint-Auswahl im Auftragsdetail ist dann gesperrt; `PATCH /api/development/:id` lehnt einen anderen `sprintId` (auch „Kein Sprint“) mit 409 ab, derselbe Sprint wie bisher bleibt erlaubt. „Aus dem Sprint nehmen“ nutzt dieselbe Liste (`SPRINT_LOCKED_DEVELOPMENT_STATUSES`, `src/core/development-transitions.ts`).
 - **Einzelner Agent (Play-Knopf):** Läuft nur dieser Agent; danach wird der frühere Status wiederhergestellt. Es gibt dabei **keinen** Auftrags-Commit und keine automatische Wiederaufnahme.
 - **Visuelle Abnahme (`visual_tester`, nach dem Tester):** Nur bei Kategorie Frontend oder Fullstack und gesetzter Vorschau-Adresse (Einstellungen → Visuelle Prüfung), sonst ohne Fehler übersprungen. Playwright (Chromium, Profile „Desktop Chrome“ und „Pixel 7“ wie in `e2e/playwright.config.ts`) nimmt jede konfigurierte Seite auf; der Vergleich läuft gegen die zuletzt gespeicherte Aufnahme derselben Seite und desselben Geräts (kein zweiter Checkout) mit `pixelmatch`, solange es nicht installiert ist mit einem eingebauten Vergleich nach demselben Farbabstand. Masken (CSS-Selektoren) und Passwortfelder werden vor der Aufnahme abgedeckt. Geprüft werden Überbreite auf dem Handy (dieselbe Messung wie `?layoutcheck`, `src/core/layout-measure.ts`), Konsolenfehler, Ressourcen mit HTTP-Fehler oder fehlende Bilder, leere Seiten und abgeschnittene Texte (nur zur Ansicht). Die Befunde stehen als `@@CHECK`-Zeilen in der Ausgabe und als Prüfpunkte „Visuelle Prüfung“ in der Abnahme; manuelle Punkte wie „auf dem Handy prüfen“ hakt der Schritt ab, wenn alle Handy-Prüfungen bestanden sind. Optional beurteilt ein Bildmodell (Befehl des Agents, z. B. Claude-CLI, sonst ein Ollama-Bildmodell) jedes Akzeptanzkriterium. Der Schritt blockiert den Auftrag nie: Nach 3 Minuten oder bei technischen Fehlern erscheint „visuelle Prüfung nicht möglich“. Test-Logins stammen nur aus der `.env.example` des Projekts und erscheinen nie in Bildern, Logs oder Prüftexten. Im Auftrag zeigt der Reiter „Ansicht“ Vorher, Nachher und Diff je Gerät; „Optisch freigeben“ speichert Person und Zeitpunkt. Chromium prüft und installiert der Einrichtungsassistent (`npx --no-install playwright install chromium`).
 
@@ -164,6 +179,7 @@ ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; ge
 0. **Nachbesserung im selben Lauf:** Sind die Tests rot oder lehnt der Reviewer ab, geht der Auftrag zuerst einmal direkt zurück an den Entwickler – mit der Ausgabe von Tester bzw. Reviewer als Rückmeldung. Danach laufen Entwickler, Tester und Reviewer erneut. Erst wenn auch dieser Versuch scheitert, greift der folgende Ablauf. Die erste Rückmeldung bleibt als fehlgeschlagener Schritt im Lauf sichtbar („Zurück an den Entwickler zur Nachbesserung“). Bei einem einzelnen Agent (Play-Knopf) gibt es keine Nachbesserung.
 1. Ein Schritt scheitert → Auftrag wird **Blockiert**, der Fehler am Auftrag gespeichert, ein **Bug-Bericht** angelegt. Das gilt in allen Phasen, also auch für Tester und Reviewer in `after_task`; nur Fehler der Doku-Agents (Dokumentierer, Handbuch-Autoren) blockieren den Auftrag ohne Bug.
    Ausnahme: Scheitert der Agent selbst (Zeitlimit, Schleife, Schrittlimit, keine Dateien geändert, Modell nicht erreichbar, Befehl nicht gefunden), entsteht **kein** Bug und kein Bug-Auftrag – der Auftrag bleibt blockiert und die Problemanalyse wird angefordert. Meldet die Claude-CLI ihr Nutzungslimit („You've hit your session limit · resets …“), gilt das als Unterbrechung: der Auftrag bleibt geplant und startet erst nach der gemeldeten Reset-Zeit wieder (`retry_after`).
+   **Unterbrechung ist keine Ablehnung:** Unterbrochen werden kann durch Shutdown des Workers, einen nicht erreichbaren Projektordner, einen Absturz-Neustart oder das Nutzungslimit. Der Schritt bleibt zwar `failed`, bekommt aber die Markierung `interrupted`. Beim nächsten Lauf übernimmt der Lauf bestandene Schritte davor und setzt beim selben Agent fort. Wurde der unterbrochene Schritt von Tester oder Reviewer ausgeführt, startet der Entwickler nicht. Nur eine echte Ablehnung durch Tester oder Reviewer führt zurück zum Entwickler, mit dessen Ausgabe als Rückmeldung.
 2. Danach prüft die Problemanalyse (Rolle `analyst`, nur lesend) den Fehler. Erst wenn sie einen **Code-Fehler bestätigt** und `auto_bugfix` am Projekt aktiv ist (für neue Projekte standardmäßig aus), entsteht **einmalig** ein Bug-Auftrag (hohe Priorität, `auto_run`, auch ohne Sprint). Findet sie keinen Code-Fehler, bleibt der Auftrag mit „Aktion notwendig“ und ihrem Vermerk blockiert.
 3. Ist der Bug-Auftrag erfolgreich, wird der Ursprungsauftrag erneut geplant (`auto_run`). **Höchstens 2 automatische Wiederholungen** (`retry_count`).
 
@@ -189,6 +205,7 @@ Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Be
 **Wann gescannt wird:** Alle 15 Minuten und nach jedem erfolgreichen Deploy, mit derselben Logik.
 
 **Bedingungen:**
+
 - **Ohne Dienste kein Scan.** Ist für das Projekt kein Dienst eingetragen, findet kein Aufruf statt. Die Einstellungen zeigen dann keine Scan-Angaben.
 - **Lückenloses Fenster.** Jeder Scan liest ab dem Zeitpunkt des letzten erfolgreichen Scans. Ein verspäteter Lauf erfasst die Zeit dazwischen vollständig. Zeilen, die ein früherer Scan schon gezählt hat, zählen nicht noch einmal.
 - **Begrenzung auf 1 Stunde.** Liegt der letzte Scan mehr als eine Stunde zurück, wird das Fenster auf die letzte Stunde gekürzt. Die übersprungene Zeit steht in den Einstellungen unter „Lücke“. Zeilen gehen nicht stillschweigend verloren.
@@ -202,6 +219,7 @@ Der Log-Scan liest die Container-Logs des Projekts und erfasst Fehler aus dem Be
 **Anzeige in den Einstellungen „Betrieb“:** Zeitpunkt des letzten Scans, letzter Fehler, Anzahl erfasster Ereignisse mit Vorkommen und, falls vorhanden, die Lücke. Vor dem ersten Scan steht dort „Noch kein Scan“.
 
 **Bug-Detail:** Der Abschnitt „Betrieb: Verlauf und Deploy-Verdacht“ zeigt:
+
 - **Verlauf:** die Vorkommen je Stunde für die letzten 48 Stunden, mit Summe und Spitzenwert.
 - **Ereignisse:** Quelle, Anzahl, Zeitpunkte des ersten und letzten Auftretens sowie das gekürzte, maskierte Beispiel und der Fingerabdruck.
 - **Deploy-Verdacht:** Tritt ein Ereignis erstmals innerhalb von 30 Minuten nach einem Deploy auf, nennt Dev Log den Deploy-Zeitpunkt, die seit dem vorigen Deploy erledigten Aufträge und die zugehörigen Sprints. Ohne solchen Zusammenhang steht dort „Kein Deploy-Verdacht“.
@@ -217,6 +235,7 @@ Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, biet
 **Was der Vorschlag nennt:** „Zuletzt ausgerollt“ mit dem Sprint-Tag des letzten Deploys und dessen Zeitpunkt, „davor“ den unmittelbar vorherigen Sprint-Tag. Es wird immer nur ein Schritt zurück angeboten.
 
 **Knopf deaktiviert (mit Grund unter dem Knopf):**
+
 - Der Sprint-Tag des letzten Deploys ist nicht bekannt.
 - Es gibt keinen vorherigen Sprint-Tag.
 - Es läuft bereits ein Deploy des Projekts.
@@ -234,7 +253,7 @@ Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, biet
 
 **Der Bug bleibt offen:** Nach einem Rollback ändert Dev Log den Bug nicht auf „Behoben“. Das entscheidet ein Mensch. Der Projektordner steht danach auf dem Zieltag, bis das nächste „Live schalten“ ihn wieder auf `main` zieht.
 
-*[Printscreens für diesen Abschnitt fehlen noch: Knopf aktiv, Knopf deaktiviert mit Grund, Bestätigungsdialog mit Migrationswarnung, Rollback-Protokoll.]*
+_[Printscreens für diesen Abschnitt fehlen noch: Knopf aktiv, Knopf deaktiviert mit Grund, Bestätigungsdialog mit Migrationswarnung, Rollback-Protokoll.]_
 
 ## 6. Git im Sprint
 
@@ -252,9 +271,15 @@ Tritt im Produktivbetrieb kurz nach einem Deploy ein kritischer Fehler auf, biet
 
 **Eigener Agent-Worktree (z. B. AIdeation selbst):** Arbeiten die Agents in einem eigenen Worktree, ist `main` im Arbeitsordner der Menschen ausgecheckt. Die Git-Sicherung übernimmt den abgeschlossenen Sprint dort – aber nur, wenn im Ordner keine Änderungen offen sind und `main` ausgecheckt ist. Danach läuft das Test-Gate in diesem Ordner; ist es rot, wird der Merge mit `git reset --keep` zurückgenommen. Klappt alles, wird `main` gepusht (falls ein Repository hinterlegt ist; scheitert der Push, gilt die Sicherung als gescheitert). Ist der Ordner nicht sauber oder nicht auf `main`, gilt die Sicherung als **gescheitert** (nicht mehr „done“): Der Sprint ist noch nicht in `main`, der Autopilot pausiert und startet keinen Sprint vom alten `main`. Nach dem Aufräumen „Git-Sicherung“ erneut starten. Mit „Nach dem Sprint-Abschluss AIdeation neu starten“ (`restart_after_sprint`) wird danach zusätzlich „AIdeation neu starten“ angefordert. Ab der Anforderung startet der Worker nichts Neues mehr (Drain: keine Aufträge, Chats, Tests, Jobs oder Git-Sicherungen) und bringt Laufendes zu Ende; ein Test-Gate, das der Neustart trotzdem beendet, wird wieder eingereiht statt als gescheitert zu gelten. Ein unterbrochener Auftrag (Neustart, Nutzungslimit, Sprint-Pause) sichert seinen Stand als WIP-Commit auf dem Auftrags-Branch und gibt den Arbeitsordner frei.
 
+**Freigabe eines Auftrags im eigenen Agent-Worktree:** Ein Auftrag ohne Sprint (Basis `main`) landet nach dem Lauf in der Freigabe. Gibt ein Mensch ihn frei, merged AIdeation ihn in den Arbeitsordner der Menschen, auch wenn `main` dort ausgecheckt ist, und setzt ihn auf „Erledigt“. Dort gelten dieselben Sicherungen wie bei der Git-Sicherung: Liegen Änderungen offen, läuft ein Merge oder entsteht ein Konflikt, wird der Merge nicht erzwungen. Der Auftrag bleibt dann blockiert, sein Branch bleibt bestehen, und die Meldung nennt den Schritt „git merge <Branch>“ für Hand. Der Ordner der Menschen wird dabei nie mit `reset` oder einem Wechsel der Ausgangsbasis angefasst. Implementierung: `mergeApprovedBranch` in `src/runner/git-sync/order-branch.ts`; Regressionstest in `src/runner/git-sync.test.ts` (echter zweiter Worktree).
+
+**Sprint-Sicherung wartet bei unterbrochenen Aufträgen:** Steht der Projektordner auf einem Auftrags-Branch (`auftrag/…`) und hat nicht committete Änderungen, wartet die Sicherung. Der Sprint bleibt auf `pending` (ausstehend). Es wird dann nichts ausgecheckt, nichts committet und nichts gepusht. Das gilt auch, wenn der unterbrochene Auftrag nur neue, noch nicht versionierte Dateien angelegt hat; sie gehören sonst ungeprüft in den Sprint-Branch und auf GitHub. Nicht gezählt werden Testberichte und die Agent-Ablage (`.dev-log/`, `docs/tests/`). Ein sauberer Auftrags-Branch ohne offene Änderungen hält die Sicherung nicht auf. Ist die Sicherung wegen eines Auftrags wartend, läuft sie am Ende desselben Durchlaufs erneut. Bleibt sie länger stehen, liegt meist ein unterbrochener Auftrag im Ordner: Den Auftrag erneut einplanen oder den Worker neu starten; beim Neustart sichert der Worker dessen Stand als WIP-Commit (siehe Laufzeit).
+
+**Fortsetzen mit offenem Merge-Konflikt:** Steht der Arbeitsordner nach einem Abbruch (z. B. Worker-Neustart während des Entwicklers) noch auf dem Auftrags-Branch und ist ein Merge mit Konfliktmarkern offen, bleibt der Konflikt erhalten. Der nächste Agent, der Dateien ändert (meist der Entwickler), bekommt vor seiner Aufgabe den Abschnitt „Zuerst: Merge-Konflikte lösen“ mit den betroffenen Dateien. AIdeation bricht den Merge nicht ab und setzt ihn nicht zurück. Der Schritt besteht erst, wenn in den betroffenen Dateien keine Konfliktmarker mehr stehen. Scheitert die Prüfung selbst (git-Fehler), gilt der Konflikt als offen, nicht als gelöst. Nach dem Lösen läuft der Auftrag normal weiter. Implementierung: `src/runner/git-sync/order-branch.ts`, `src/runner/runner-steps.ts`. Printscreens gibt es dafür keine, weil sich in der Oberfläche nichts ändert.
+
 ### GitHub-Brücke (`github_mode`)
 
-Projekteinstellung „GitHub-Brücke“ mit den Modi `aus` (Standard), `issues` und `issues+pr`; nur mit einem `git_remote` auf github.com. Dev Log speichert kein Token, sondern nutzt die Anmeldung der GitHub CLI des Worker-Benutzers (`gh auth login`). Der Worker prüft sie mit `gh auth status` und zeigt das Ergebnis in den Einstellungen; ohne Anmeldung bleibt der Modus wirkungslos und Git-Sicherung, Merge und Tag laufen wie oben. Im Modus `aus` ruft die Brücke `gh` nicht auf (das bestehende Warten auf die CI beim direkten Merge bleibt unverändert).
+Projekteinstellung „GitHub-Brücke“ mit den Modi `aus` (Standard), `issues` und `issues+pr`; nur mit einem `git_remote` auf github.com. Dev Log speichert kein Token, sondern nutzt die Anmeldung der GitHub CLI des Worker-Benutzers (`gh auth login`). Der Worker prüft sie mit `gh auth status` und zeigt das Ergebnis in den Einstellungen; ohne Anmeldung bleibt der Modus wirkungslos und Git-Sicherung, Merge und Tag laufen wie oben. Im Modus `aus` ruft die Brücke `gh` nicht auf (das bestehende Warten auf die CI beim direkten Merge bleibt unverändert). Ausnahme: Steht noch ein Sprint mit geöffnetem Pull Request im Review (z. B. weil die Brücke nach dem Abschluss auf `aus` gestellt wurde), verfolgt der Worker ihn weiter wie im PR-Modus (Merge nach grüner CI bzw. Erkennen eines von Hand gemergten PR, Tag, `main` nachziehen, Live schalten, CI-Bug schliessen, Sprint `completed`). Der Issue-Import und die Rückmeldung bleiben aus.
 
 - **Issue-Import** (`src/runner/github-sync.ts`, alle 5 Minuten im Worker-Takt): offene Issues mit Label `bug` bzw. `idea` werden zu Bug bzw. Idee mit `source='github'` und `external_ref='owner/repo#N'`; nach dem ersten Lauf nur die seit dem letzten Lauf geänderten (`--search updated:>=…`). Der eindeutige Index `(project_slug, external_ref)` verhindert Doppelimporte, ein Issue mit beiden Labels wird zum Bug. Bilder werden nie geladen, nur als Link übernommen. Der Issue-Text steht zwischen Markierungen für fremden Text; Auftragsautor, Schätzung und Entwickler bekommen dann einen Hinweis gegen Prompt-Injection.
 - **Rückmeldung:** Wechselt der Stand eines importierten Eintrags (ausgearbeitet, im Sprint, blockiert, erledigt), schreibt Dev Log genau einen gebündelten Kommentar ins Issue und vermerkt den Stand in `github_synced_status`. Bei „erledigt“ wird das Issue mit Verweis auf Commit (`development_items.git_commit`) bzw. Sprint-Tag geschlossen.

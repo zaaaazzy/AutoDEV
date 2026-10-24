@@ -1,13 +1,14 @@
 // Git-Grundlagen: Befehlsausführung, Remotes, Branch-Namen, Zugangsdaten-Schutz und Sprint-Branch.
 import { existsSync, realpathSync } from 'node:fs';
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
 import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
-import { clearStaleIndexLock, isIndexLockError } from './stale-lock.js';
+import { clearStaleLock, lockedFile } from './stale-lock.js';
+import { checkoutTarget, dropReportCopies } from './report-copies.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -164,6 +165,46 @@ export const BOT_IDENTITY = {
   GIT_COMMITTER_EMAIL: 'dev-log@mainty.local',
 };
 
+type GitRun = (args: string[]) => Promise<{ exitCode: number; output: string }>;
+
+/** Wartezeit vor dem zweiten Versuch, wenn ein anderer Prozess die Sperre gerade hält. */
+export const LOCK_RETRY_DELAY_MS = 2_000;
+
+/** Branches bzw. Commits, die ein `git merge …` übernehmen soll (ohne Optionen und die Nachricht nach `-m`). */
+export function mergeSources(args: readonly string[]): string[] {
+  const sources: string[] = [];
+  let message = false;
+  for (const arg of args.slice(1)) {
+    if (message) message = false;
+    else if (arg === '-m') message = true;
+    else if (!arg.startsWith('-')) sources.push(arg);
+  }
+  return sources;
+}
+
+/**
+ * Ein Merge (Strategie ort), der an einer Sperre scheitert, hat die neuen Dateien des Quell-Branchs schon in den Ordner
+ * geschrieben, aber nicht in den Index: Sie bleiben unversioniert liegen, „merge --abort“ greift nicht (kein MERGE_HEAD),
+ * und jeder weitere Merge scheitert an „untracked working tree files would be overwritten“ – oder „git add -A“ nimmt sie
+ * in den nächsten Commit. Entfernt werden nur unversionierte Dateien, deren Inhalt genau dem Quell-Branch entspricht.
+ */
+async function removeMergeLeftovers(run: GitRun, cwd: string, sources: string[]): Promise<void> {
+  if (!sources.length) return;
+  const untracked = await run(['ls-files', '-z', '--others', '--exclude-standard']);
+  if (untracked.exitCode !== 0) return;
+  for (const path of untracked.output.split('\0').filter(Boolean).slice(0, 500)) {
+    const here = await run(['hash-object', '--', path]);
+    if (here.exitCode !== 0) continue;
+    for (const source of sources) {
+      const blob = await run(['rev-parse', '-q', '--verify', `${source}:${path}`]);
+      if (blob.exitCode === 0 && blob.output === here.output) {
+        await unlink(join(cwd, path)).catch(() => undefined);
+        break;
+      }
+    }
+  }
+}
+
 export function gitHelpers(execute: CommandExecutor, cwd: string) {
   // Gefiltert und ohne Hooks: Agents können im Projekt Hooks oder fsmonitor setzen, die sonst beim Commit liefen.
   const env = gitEnvironment({
@@ -177,10 +218,21 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
     return { ...result, output: redactOutput(result.output, process.env).trim() };
   };
   const git = async (...args: string[]) => {
-    const result = await run(args);
-    // Verwaiste index.lock (git wurde hart beendet): wegräumen, wenn niemand sie hält, und einmal neu versuchen.
-    if (result.exitCode !== 0 && isIndexLockError(result.output) && (await clearStaleIndexLock(cwd))) {
-      return run(args);
+    // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
+    const target = args[0] === 'checkout' ? checkoutTarget(args) : null;
+    if (target) await dropReportCopies((...inner) => run(inner), cwd, target);
+    let result = await run(args);
+    // Sperrdatei (index.lock, AUTO_MERGE.lock, Ref-Sperre): verwaist (git wurde hart beendet) → wegräumen, sonst kurz
+    // warten; dann einmal neu versuchen. Ein so gescheiterter Merge hinterlässt Dateien, die vorher weg müssen.
+    const lock = result.exitCode === 0 ? null : lockedFile(result.output);
+    if (!lock) return result;
+    if (args[0] === 'merge') await removeMergeLeftovers(run, cwd, mergeSources(args));
+    if (!(await clearStaleLock(cwd, { file: lock }).catch(() => null))) {
+      await new Promise((done) => setTimeout(done, LOCK_RETRY_DELAY_MS));
+    }
+    result = await run(args);
+    if (result.exitCode !== 0 && args[0] === 'merge' && lockedFile(result.output)) {
+      await removeMergeLeftovers(run, cwd, mergeSources(args));
     }
     return result;
   };

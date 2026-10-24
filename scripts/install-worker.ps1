@@ -36,6 +36,8 @@ function Resolve-Value([string]$Key, [string]$Default = '') {
 $values = [ordered]@{
   DEV_LOG_DATABASE_URL = Resolve-Value 'DEV_LOG_DATABASE_URL' 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation'
   DEV_LOG_SECRET_KEY = Resolve-Value 'DEV_LOG_SECRET_KEY'
+  # Eigener Ablageort der Playwright-Browser gilt auch fuer den Worker (Smoke-Tests der Spielprojekte, optische Abnahme).
+  PLAYWRIGHT_BROWSERS_PATH = Resolve-Value 'PLAYWRIGHT_BROWSERS_PATH'
 }
 if ($values.DEV_LOG_DATABASE_URL.Contains('devlog_local_dev')) {
   Write-Warning 'Die Datenbank-URL nutzt das Standardpasswort devlog_local_dev. Setze DEV_LOG_DB_PASSWORD in der .env und installiere mit DEV_LOG_DATABASE_URL erneut (siehe docs/installation.md).'
@@ -56,13 +58,22 @@ Protect-Path $envFile 'F'
 
 $wrapper = Join-Path (Join-Path $root 'scripts') 'run-with-env.ps1'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`" `"$envFile`" npm run worker"
+# Neustart nach "AIdeation neu starten" (Exit-Code 75) uebernimmt die Schleife in run-with-env.ps1.
+# Bewusst ohne RestartCount: Ein bewusster Stopp oder echter Fehler (Exit-Code ungleich 75) soll den Worker nicht neu
+# starten. Kein Zeitlimit (Standard waeren 72 Stunden, danach beendet die Aufgabenplanung den Worker).
+$settings = [ordered]@{
+  ExecutionTimeLimit = [TimeSpan]::Zero
+  MultipleInstances = 'IgnoreNew'
+}
 if ($env:AIDEATION_INSTALL_DRY_RUN -eq '1') {
   Write-Host "Probelauf: $envFile geschrieben, Aufgabe nicht registriert."
   Write-Host "Aufgabe: powershell.exe $arguments"
+  foreach ($key in $settings.Keys) { Write-Host "Einstellung: $key=$($settings[$key])" }
   exit 0
 }
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
-Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -RunLevel Limited -Force | Out-Null
+$taskSettings = New-ScheduledTaskSettingsSet @settings -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -Settings $taskSettings -RunLevel Limited -Force | Out-Null
 Start-ScheduledTask -TaskName 'AIdeationWorker'
 Write-Host "Worker installiert (Aufgabenplanung: AIdeationWorker, Zugaenge: $envFile)"

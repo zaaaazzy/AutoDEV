@@ -217,6 +217,87 @@ export const MIGRATIONS: readonly Migration[] = [
          AND s.status = 'completed' AND s.git_sync = 'done' AND b.title = 'CI rot im Pull Request von „' || s.name || '“';
     `,
   },
+  // Schätzungen in Agent-Stunden: woher ein Wert stammt (von Hand, Schnellschätzung, Auftragsautor; NULL = Altbestand
+  // in Menschenstunden), damit der Planer jede Herkunft getrennt kalibriert und der Autor nur Maschinenwerte ersetzt.
+  // Die Sprint-Kapazität zählt jetzt Agent-Stunden; der alte Standard 40 (Menschenstunden) wird zu 4.
+  {
+    version: 9,
+    name: 'schaetzung-in-agent-stunden',
+    sql: `
+      ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS estimate_source TEXT
+        CHECK (estimate_source IN ('manual', 'quick', 'author'));
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS estimate_source TEXT
+        CHECK (estimate_source IN ('manual', 'quick', 'author'));
+      -- Altbestand unter 1 h stammt schon vom Auftragsautor mit Ist-Werten (gemessen: Ist ÷ Schätzung im Median
+      -- 0,79 statt 0,02–0,08 bei grösseren Werten) und wird wie eine Autorschätzung kalibriert; der Rest bleibt NULL.
+      UPDATE ideation_items SET estimate_source = 'author' WHERE estimate_source IS NULL AND effort_hours < 1;
+      UPDATE development_items SET estimate_source = 'author' WHERE estimate_source IS NULL AND effort_hours < 1;
+      ALTER TABLE projects ALTER COLUMN sprint_capacity_hours SET DEFAULT 4;
+      UPDATE projects SET sprint_capacity_hours = 4 WHERE sprint_capacity_hours = 40;
+    `,
+  },
+  // Unterbrochene Schritte (Worker beendet, Ordner weg, Nutzungslimit) bleiben „failed“, tragen aber ein eigenes
+  // Kennzeichen: Der nächste Lauf setzt beim selben Agent fort statt wie nach einer Ablehnung beim Entwickler.
+  // Bestehende Schritte erkennt einmalig die bisher angehängte Zeile „Unterbrochen: …“.
+  {
+    version: 10,
+    name: 'agent-run-steps-unterbrochen',
+    sql: `
+      ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS interrupted BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE agent_run_steps SET interrupted = TRUE
+       WHERE status = 'failed' AND NOT interrupted AND output LIKE E'%\\nUnterbrochen: %';
+    `,
+  },
+  // Abgelehnter Bug-Auftrag erneut versucht: Der Bug folgt dem Auftrag wieder (rejected → open/in_progress) und wird
+  // beim Erledigen auch aus rejected heraus behoben. Nur der eigene Bug (bug_id); Fehlschlag-Meldungen, die jemand
+  // abgelehnt hat, bleiben abgelehnt. Altfälle (Auftrag erledigt, Bug noch abgelehnt) einmalig nachziehen.
+  {
+    version: 11,
+    name: 'bug-folgt-erneut-versuchtem-auftrag',
+    sql: `
+      CREATE OR REPLACE FUNCTION development_items_sync_bug() RETURNS trigger AS $fn$
+      BEGIN
+        IF OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'done' THEN
+          -- Behebungsauftrag erledigt oder Auftrag mit Fehlschlag-Meldungen doch noch fertig: auf den Friedhof.
+          UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+           WHERE (id = NEW.bug_id OR id = NEW.failure_bug_id OR development_id = NEW.id)
+             AND (status IN ('open', 'in_progress') OR (id = NEW.bug_id AND status = 'rejected'));
+        ELSIF NEW.bug_id IS NOT NULL AND OLD.status IS DISTINCT FROM NEW.status THEN
+          IF NEW.status = 'in_progress' THEN
+            UPDATE bugs SET status = 'in_progress', updated_at = NOW()
+             WHERE id = NEW.bug_id AND (status = 'open' OR (status = 'rejected' AND OLD.status = 'rejected'));
+          ELSIF NEW.status = 'rejected' THEN
+            UPDATE bugs SET status = 'rejected', updated_at = NOW() WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
+          ELSIF NEW.status IN ('planned', 'backlog', 'blocked') THEN
+            -- Abgelehnter Auftrag wieder eingeplant: Bug ist wieder offen.
+            UPDATE bugs SET status = 'open', updated_at = NOW()
+             WHERE id = NEW.bug_id AND (status = 'in_progress' OR (status = 'rejected' AND OLD.status = 'rejected'));
+          END IF;
+        END IF;
+        RETURN NULL;
+      END;
+      $fn$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS development_items_bug_trigger ON development_items;
+      CREATE TRIGGER development_items_bug_trigger AFTER UPDATE ON development_items
+        FOR EACH ROW EXECUTE FUNCTION development_items_sync_bug();
+
+      UPDATE bugs b SET status = 'fixed', fixed_at = COALESCE(d.completed_at, NOW()), updated_at = NOW(),
+             fix_notes = concat_ws(E'\\n\\n', NULLIF(b.fix_notes, ''), 'Auftrag nach erneutem Versuch erledigt – automatisch auf den Friedhof.')
+        FROM development_items d
+       WHERE d.bug_id = b.id AND d.status = 'done' AND b.status = 'rejected';
+    `,
+  },
+  // Sprint-Abbruch setzt Aufträge in Freigabe jetzt ins Backlog zurück (cancelSprint). Altfälle hängen ohne Sprint in
+  // Freigabe fest – ihre Freigabe mergte in den toten Sprint-Branch, „Wieder einplanen“ scheiterte mit 409.
+  {
+    version: 12,
+    name: 'freigabe-nach-sprint-abbruch-ins-backlog',
+    sql: `
+      UPDATE development_items SET status = 'backlog', review_branch = NULL, review_base = NULL, review_since = NULL,
+             review_approved_at = NULL, updated_at = NOW()
+       WHERE status = 'approval' AND sprint_id IS NULL AND removed_from_sprint_at IS NOT NULL;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
