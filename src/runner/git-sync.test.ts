@@ -723,6 +723,49 @@ test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderunge
   assert.equal(await orderWorkInProgress(cwd), false);
 });
 
+test('Git-Sicherung wartet auch, wenn der unterbrochene Auftrag nur neue Dateien angelegt hat', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-new-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-nur-neue-datei');
+  await mkdir(join(cwd, 'src'), { recursive: true });
+  await writeFile(join(cwd, 'src', 'halb-fertig.ts'), 'export const x = 1;');
+  assert.equal(await orderWorkInProgress(cwd), true);
+  const { pool, updates } = fakePool(null);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
+  assert.equal(
+    updates.some((update) => update.sql.includes("git_sync = 'running'") && !update.sql.includes('60 minutes')),
+    false,
+    'nichts übernommen, Sprint bleibt pending',
+  );
+  // Kein Checkout, kein Commit: die neue Datei bleibt unversioniert auf dem Auftrags-Branch.
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/12345678-nur-neue-datei');
+  assert.equal(git('status', '--porcelain', '--untracked-files=all'), '?? src/halb-fertig.ts');
+  assert.equal(git('rev-list', '--count', 'HEAD'), '1');
+});
+
+test('Testberichte und Agent-Ablage allein halten die Git-Sicherung nicht auf', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-wait-ignored-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'a.txt'), 'a');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  git('checkout', '-b', 'auftrag/12345678-nur-ablage');
+  await mkdir(join(cwd, '.dev-log'), { recursive: true });
+  await mkdir(join(cwd, 'docs', 'tests'), { recursive: true });
+  await writeFile(join(cwd, '.dev-log', 'notiz.md'), 'notiz');
+  await writeFile(join(cwd, 'docs', 'tests', 'bericht.md'), 'bericht');
+  assert.equal(await orderWorkInProgress(cwd), false);
+});
+
 test('geänderte Dateien eines Auftrags: Commits seit der Basis plus offene, neue und gelöschte Dateien', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'git-changed-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
