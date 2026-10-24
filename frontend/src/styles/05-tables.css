@@ -1,0 +1,650 @@
+/* Datentabellen (Desktop und Handy als Karten), Listen mit Aufklappzeilen */
+.table-wrap {
+  overflow-x: auto;
+}
+.idea-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.92rem;
+}
+.idea-table th,
+.idea-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line, #e3e7e3);
+  text-align: left;
+  vertical-align: top;
+}
+.idea-table .summary-cell {
+  min-width: 260px;
+  max-width: 420px;
+  color: var(--muted, #5b665e);
+}
+.idea-table .title-cell {
+  min-width: 150px;
+  max-width: 260px;
+}
+.idea-table th {
+  white-space: nowrap;
+}
+.th-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.col-filter summary {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 5px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  list-style: none;
+}
+.col-filter summary::-webkit-details-marker {
+  display: none;
+}
+.col-filter summary:hover,
+.col-filter[open] summary {
+  background: #eef1ee;
+}
+.col-filter.active summary {
+  background: #dcebe1;
+  color: #1f6b43;
+}
+.filter-menu {
+  position: absolute;
+  z-index: 20;
+  top: 28px;
+  left: 0;
+  display: grid;
+  min-width: 170px;
+  max-height: 260px;
+  gap: 2px;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  font-weight: 400;
+}
+.filter-menu input[type='search'] {
+  width: 100%;
+}
+.filter-menu .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.filter-menu .check:hover {
+  background: #f3f5f3;
+}
+.closed-detail td[colspan] {
+  max-width: 0;
+}
+.idea-table .expand-cell {
+  width: 1%;
+  text-align: right;
+}
+.idea-table tr.row-open > td {
+  /* Geöffnete Listenzeile und Detailbereich bilden einen gemeinsamen Rahmen */
+  border-top: 1px solid var(--line-strong);
+  border-bottom: 0;
+  background: var(--surface-soft);
+}
+.idea-table .closed-detail > td {
+  padding-top: 0;
+}
+.idea-table tr.row-open > td:first-child {
+  border-left: 1px solid var(--line-strong);
+  border-top-left-radius: 10px;
+}
+.idea-table tr.row-open > td:last-child {
+  border-right: 1px solid var(--line-strong);
+  border-top-right-radius: 10px;
+}
+.idea-table tr.row-open + .closed-detail > td {
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--surface-soft);
+}
+.idea-table tr.row-open + .closed-detail + tr > td {
+  border-top: 0;
+}
+
+/* Einheitliche Datentabelle (TanStack Table): Suche, Filter-Chips, Sortierung, Filtermenüs */
+.dt {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.dt-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.dt-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 10px;
+  border-radius: 999px;
+  background: #e7eff7;
+  color: var(--blue);
+  font-size: 12px;
+}
+.dt-chip button {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  line-height: 1;
+}
+.dt-chip button:hover {
+  background: rgb(54 96 143 / 15%);
+}
+.dt-count {
+  margin: 0;
+  color: #8a938c;
+  font-size: 12px;
+  text-align: right;
+}
+.dt-reset-all {
+  margin-left: auto;
+}
+.dt-reset {
+  padding: 4px 10px;
+  border: 1px solid #dfe3da;
+  border-radius: 999px;
+  background: var(--surface);
+  color: #4a554d;
+  font-size: 12px;
+}
+.dt-reset:hover {
+  border-color: #9fb3a5;
+}
+.dt-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-soft);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  color: #5b665e;
+  text-transform: uppercase;
+}
+.dt-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.dt-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.dt-sort:hover {
+  background: #eef0ea;
+}
+.dt-sort-icon {
+  color: #b3bcb3;
+  font-size: 11px;
+}
+.dt-sort-icon.active {
+  color: var(--green-light);
+}
+.dt-filter {
+  position: relative;
+}
+.dt-filter-button {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: #b3bcb3;
+}
+.dt-filter-button:hover {
+  background: #eef0ea;
+  color: #5b665e;
+}
+.dt-filter-button.active {
+  background: #e7eff7;
+  color: var(--blue);
+}
+.dt-filter-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  gap: 2px;
+  min-width: 200px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #dfe3da;
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+.dt-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.dt-option:hover {
+  background: var(--paper);
+}
+.dt-option input {
+  width: auto;
+  min-height: 0;
+}
+.dt-option span {
+  flex: 1;
+}
+.dt-option small {
+  color: var(--muted);
+}
+.dt-table tbody tr:not(.closed-detail):hover > td {
+  background: var(--surface-soft);
+}
+.sprint-progress-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4a554d;
+  font-variant-numeric: tabular-nums;
+}
+.sprint-progress-cell .sprint-bar {
+  display: inline-block;
+  width: 44px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8ebe4;
+}
+.sprint-progress-cell .sprint-bar span {
+  display: block;
+  height: 100%;
+  background: var(--green-light);
+}
+.closed-detail .sprint-card {
+  margin: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 4px 0;
+}
+
+/* Titelspalte nimmt in allen Tabellen denselben Anteil ein, damit gestapelte Tabellen bündig sind */
+.dt-table th.title-cell,
+.dt-table td.title-cell {
+  width: 45%;
+  max-width: none;
+}
+
+/* Aufklapp-Knopf der Tabellen: kompakt, dreht sich beim Öffnen */
+.dt-expand {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #dfe3da;
+  border-radius: 7px;
+  background: var(--surface);
+  color: #5b665e;
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+.dt-expand:hover {
+  border-color: #9fb3a5;
+  background: var(--paper);
+}
+.dt-expand svg {
+  transition: transform 0.15s;
+}
+.dt-expand.open {
+  border-color: var(--green-light);
+  background: var(--green-light);
+  color: var(--surface);
+}
+.dt-expand.open svg {
+  transform: rotate(90deg);
+}
+.dt .row-actions {
+  align-items: center;
+}
+.dt .row-actions .icon-button {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  place-items: center;
+  padding: 0;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.dt-table td {
+  vertical-align: middle;
+}
+
+/* Gruppenüberschrift in Tabellen (z. B. Agents nach Kategorie) */
+.dt-table tr.dt-group > td {
+  padding: 14px 12px 6px;
+  border-bottom: 1px solid #dfe3da;
+  background: transparent;
+  color: #26312a;
+  font-size: 13px;
+  font-weight: 700;
+}
+.dt-table tbody tr.dt-group:hover > td {
+  background: transparent;
+}
+
+@media (max-width: 720px) {
+  .dt-table tbody tr:not(.closed-detail):hover > td {
+      background: transparent;
+    }
+}
+
+.stats-table .dt-table th.title-cell,
+.stats-table .dt-table td.title-cell {
+  width: auto;
+  min-width: 160px;
+}
+
+/* Tabellen: aktive Sortierung bzw. aktiver Filter farbig hervorheben */
+.dt-table thead th.dt-sorted,
+.dt-table thead th.dt-filtered {
+  color: var(--green-light);
+}
+.dt-table thead th.dt-filtered {
+  background: #e3efe7;
+}
+.dt-table th.dt-filtered .dt-filter-button {
+  background: var(--green-light);
+  color: var(--surface);
+}
+.dt-table th.dt-sorted .dt-sort {
+  color: var(--green-light);
+}
+
+/* ── Auftragsliste: einzeilige Titel, kompakter ──────────────────────── */
+app-order-table {
+  display: block;
+}
+.dt-table tbody tr.dt-clickable {
+  cursor: pointer;
+}
+.dt-table tbody tr.dt-clickable:hover > td {
+  background: rgb(36 99 78 / 4%);
+}
+
+/* ── Tabellen: Häkchen-Spalte für Mehrfachauswahl ── */
+.dt-select-cell {
+  width: 36px;
+  text-align: center;
+}
+input.dt-select {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--green);
+  cursor: pointer;
+}
+input.dt-select:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+@media (min-width: 721px) {
+  .order-table .dt-table {
+      font-size: 13px;
+    }
+  .order-table .dt-table th,
+    .order-table .dt-table td {
+      padding: 8px 10px;
+    }
+  .order-table .dt-table td.title-cell {
+      max-width: 0;
+    }
+
+  /* Bis zu zwei Zeilen statt nach wenigen Wörtern „…“: In engen Tabellen (Sprint) bleibt der Titel lesbar. */
+  .order-table .order-title {
+      display: -webkit-box;
+      width: 100%;
+      overflow: hidden;
+      font-size: 13.5px;
+      text-align: left;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+    }
+  .order-table .dt-table td:not(.title-cell):not(.expand-cell) {
+      white-space: nowrap;
+    }
+  .order-table .dt-table .tag,
+    .order-table .dt-table .status {
+      font-size: 11px;
+    }
+}
+
+@media (max-width: 720px) {
+  /* Handy: Tabellen werden zu Karten, Spaltenköpfe zu einer wischbaren Sortier-/Filterleiste */
+  .dt .table-wrap {
+      overflow: visible;
+    }
+  .dt-table,
+    .dt-table thead,
+    .dt-table tbody {
+      display: block;
+      width: 100%;
+    }
+
+  /* Filter in einer Zeile, seitlich wischbar, ohne sichtbaren Scrollbalken. */
+  .dt-table thead tr {
+      display: flex;
+      gap: 6px;
+      padding: 2px 0 8px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      scrollbar-width: none;
+      touch-action: pan-x pan-y;
+    }
+  .dt-table thead tr::-webkit-scrollbar {
+      display: none;
+    }
+  .dt-table thead th,
+    .dt-table th.title-cell {
+      position: static;
+      flex: none;
+      width: auto;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: none;
+    }
+  .dt-table thead th.expand-cell,
+    .dt-table thead th:not(:has(button)) {
+      display: none;
+    }
+  .dt-table .dt-head {
+      padding: 3px 4px 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      font-size: 11px;
+    }
+  .dt-table tbody tr {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px 12px;
+      margin-bottom: 10px;
+      padding: 14px 14px 12px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
+    }
+  .dt-table tbody tr > td,
+    .dt-table tbody td.title-cell,
+    .idea-table tr.row-open > td,
+    .idea-table tr.row-open + .closed-detail > td {
+      display: flex;
+      grid-column: 1 / -1;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: auto;
+      min-width: 0;
+      max-width: none;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      text-align: right;
+    }
+  .dt-table tbody td::before {
+      flex: none;
+      color: var(--muted);
+      content: attr(data-label);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+  .dt-table tbody td:first-child {
+      display: block;
+      grid-column: 1;
+      grid-row: 1;
+      padding-bottom: 6px;
+      color: var(--ink);
+      font-size: 15px;
+      font-weight: 650;
+      line-height: 1.35;
+      text-align: left;
+    }
+  .dt-table tbody td:first-child::before,
+    .dt-table tbody td.expand-cell::before,
+    .dt-table tbody td[colspan]::before {
+      display: none;
+    }
+  .dt-table tbody td.expand-cell {
+      grid-column: 2;
+      grid-row: 1;
+      align-self: start;
+    }
+  .dt-table tbody td[colspan] {
+      display: block;
+      text-align: left;
+    }
+  .dt-table .clamp {
+      text-align: right;
+    }
+  .dt-table tbody tr.row-open {
+      margin-bottom: 0;
+      border-color: var(--line-strong);
+      border-bottom: 0;
+      border-radius: 14px 14px 0 0;
+      background: var(--surface-soft);
+    }
+  .dt-table tbody tr.closed-detail {
+      display: block;
+      padding: 4px 12px 14px;
+      border-color: var(--line-strong);
+      border-top: 0;
+      border-radius: 0 0 14px 14px;
+      background: var(--surface-soft);
+    }
+  .dt-table tbody tr.dt-group {
+      display: block;
+      margin: 14px 0 6px;
+      padding: 0;
+      border: 0;
+      background: none;
+      box-shadow: none;
+    }
+  .dt-table tbody tr:has(> td.empty-state) {
+      display: block;
+      border-style: dashed;
+      box-shadow: none;
+    }
+  .dt-filter-menu {
+      max-width: calc(100vw - 24px);
+    }
+  .dt-table tbody td:first-child,
+    .dt-table tbody td:first-child .link-button,
+    .idea-table tr.row-open > td:first-child,
+    .idea-table tr.row-open > td:last-child {
+      border: 0;
+      border-radius: 0;
+      text-align: left;
+    }
+  .idea-table tr.row-open + .closed-detail > td {
+      display: block;
+      min-width: 0;
+      text-align: left;
+    }
+  .dt-table tbody td.empty-state {
+      padding: 6px 0;
+      color: var(--muted);
+      font-size: 13.5px;
+      font-weight: 500;
+      text-align: center;
+    }
+  .dt-table th.dt-sorted .dt-head,
+    .dt-table th.dt-filtered .dt-head {
+      border-color: var(--green-light);
+      background: #e3efe7;
+      color: var(--green-light);
+    }
+  .order-table .order-title {
+      text-align: left;
+    }
+}
+
+@media (pointer: coarse) {
+  .dt-expand {
+      min-width: 40px;
+      min-height: 40px;
+    }
+  .dt-filter-button {
+      width: 32px;
+      height: 32px;
+    }
+}

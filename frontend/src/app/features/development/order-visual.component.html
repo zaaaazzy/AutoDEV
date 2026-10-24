@@ -1,0 +1,222 @@
+<details class="run-step order-brief order-visual" [open]="open()" (toggle)="toggled($event)">
+  <summary>
+    Optische Abnahme
+    <span class="visual-info" tabindex="0" role="note" [attr.aria-label]="why" [title]="why">ⓘ</span>
+    @if (approval().approvedAt) {
+      <span class="tag visual-approved">✓ optisch freigegeben</span>
+    } @else {
+      <span class="tag visual-open">wartet auf Abnahme</span>
+    }
+  </summary>
+
+  <p class="visual-intro">Den Auftrag in einer Umgebung ansehen, die Änderungen optisch prüfen und danach freigeben.</p>
+
+  <ol class="visual-steps plain-list">
+    <li class="visual-step">
+      <h4><span class="visual-step-no" aria-hidden="true">1</span> In einer Umgebung ansehen</h4>
+      @if (!slotsLoaded()) {
+        <p class="muted">Umgebungen werden geladen …</p>
+      } @else if (!slots().length) {
+        <p class="visual-hint">
+          Es ist keine Umgebung eingerichtet. Ein Administrator legt die Review-Container unter Einstellungen →
+          Review-Container an.
+        </p>
+      } @else {
+        <div class="visual-env-bar">
+          <label class="visual-env-select">
+            <span>Umgebung</span>
+            <select title="Umgebung wählen, in die der Auftrag geladen wird" (change)="pick($any($event.target).value)">
+              @for (slot of slots(); track slot.slot) {
+                <option [value]="slot.slot" [disabled]="!slot.enabled" [selected]="slot.slot === chosen()">
+                  {{ optionText(slot) }}
+                </option>
+              }
+            </select>
+          </label>
+          <button
+            class="button primary"
+            type="button"
+            [disabled]="busy() || !canSpawn()"
+            [title]="spawnHint()"
+            (click)="spawn()"
+          >
+            {{ spawnText() }}
+          </button>
+          @if (ownSlot(); as own) {
+            @if (own.status === 'running' && own.url) {
+              <a
+                class="button secondary"
+                [href]="own.url"
+                target="_blank"
+                rel="noopener"
+                [title]="'Umgebung ' + own.slot + ' in neuem Tab öffnen'"
+                >Öffnen ↗</a
+              >
+            }
+          }
+        </div>
+
+        <ul class="visual-env-list" aria-label="Umgebungen">
+          @for (slot of slots(); track slot.slot) {
+            <li
+              class="visual-env"
+              [class.own]="isOwn(slot)"
+              [class.chosen]="slot.slot === chosen()"
+              [class.selectable]="slot.enabled"
+              (click)="slot.enabled && pick(slot.slot)"
+            >
+              <span class="visual-env-dot" [class]="'visual-env-dot ' + tone(slot)" aria-hidden="true"></span>
+              <div class="visual-env-text">
+                <strong>Umgebung {{ slot.slot }}</strong>
+                <span class="visual-env-status">{{ statusText(slot) }}</span>
+                @if (slot.status !== 'idle') {
+                  <span class="visual-env-loaded" [title]="slot.commit ?? ''">
+                    Geladen: {{ loadedText(slot) }}
+                    @if (slot.startedAt) {
+                      <span class="muted">· seit {{ slot.startedAt | dateTime }}</span>
+                    }
+                  </span>
+                }
+              </div>
+              @if (isOwn(slot)) {
+                <span class="tag visual-env-own">dieser Auftrag</span>
+              }
+              @if (slot.status === 'running' && slot.url && slot.projectSlug) {
+                <a
+                  class="visual-env-link"
+                  [href]="slot.url"
+                  target="_blank"
+                  rel="noopener"
+                  [title]="'Umgebung ' + slot.slot + ' in neuem Tab öffnen'"
+                  (click)="$event.stopPropagation()"
+                  >Öffnen ↗</a
+                >
+              }
+              @if (slot.projectSlug && slot.status !== 'idle' && slot.status !== 'stopping' && auth.can('run')) {
+                <button
+                  class="button secondary small"
+                  type="button"
+                  [disabled]="busy()"
+                  title="Beendet den Container; die Umgebung wird wieder frei."
+                  (click)="$event.stopPropagation(); stop(slot)"
+                >
+                  ■ Beenden
+                </button>
+              }
+            </li>
+          }
+        </ul>
+      }
+    </li>
+
+    <li class="visual-step">
+      <h4><span class="visual-step-no" aria-hidden="true">2</span> Geänderte Dateien</h4>
+      <p class="muted small">Ein Klick öffnet die Datei im Git-Repository, im Stand dieses Auftrags.</p>
+      <app-changed-files [order]="order()" [sprint]="sprint()" [ref]="fileRef()" />
+    </li>
+
+    <li class="visual-step">
+      <h4><span class="visual-step-no" aria-hidden="true">3</span> Screenshots: vorher, nachher, Unterschied</h4>
+      @if (loading()) {
+        <p class="muted">Screenshots werden geladen …</p>
+      } @else if (error()) {
+        <p class="muted">{{ error() }}</p>
+      } @else if (!snapshots().length) {
+        <p class="visual-hint">
+          Noch keine Screenshots. Die visuelle Prüfung nimmt nach dem Tester die Seiten der Vorschau auf – einrichten
+          unter <strong>Einstellungen → Visuelle Prüfung</strong> (Vorschau-Adresse und Seiten). Bis dahin: den Auftrag
+          oben in einer Umgebung ansehen.
+        </p>
+      } @else {
+        <div class="visual-toolbar">
+          <div class="segmented" role="group" aria-label="Gerät">
+            <button
+              type="button"
+              [class.active]="device() === 'desktop'"
+              title="Aufnahmen in Desktop-Breite"
+              (click)="device.set('desktop')"
+            >
+              Desktop
+            </button>
+            <button
+              type="button"
+              [class.active]="device() === 'mobile'"
+              title="Aufnahmen in Handy-Breite"
+              (click)="device.set('mobile')"
+            >
+              Handy
+            </button>
+          </div>
+        </div>
+        @for (entry of pages(); track entry.page) {
+          <section class="visual-page">
+            <h5>
+              {{ entry.page }}
+              @if (entry.after.diffPercent !== null) {
+                <span class="muted">· {{ percent(entry.after.diffPercent) }} geändert</span>
+              } @else {
+                <span class="muted">· erster Stand</span>
+              }
+            </h5>
+            <div class="visual-grid">
+              <figure>
+                <figcaption>Vorher</figcaption>
+                @if (entry.before) {
+                  <a [href]="image(entry.before)" target="_blank" rel="noopener"
+                    ><img [src]="image(entry.before)" alt="Vorher: {{ entry.page }}" loading="lazy"
+                  /></a>
+                } @else {
+                  <p class="muted">Kein früherer Stand</p>
+                }
+              </figure>
+              <figure>
+                <figcaption>Nachher</figcaption>
+                <a [href]="image(entry.after)" target="_blank" rel="noopener"
+                  ><img [src]="image(entry.after)" alt="Nachher: {{ entry.page }}" loading="lazy"
+                /></a>
+              </figure>
+              <figure>
+                <figcaption>Diff</figcaption>
+                @if (entry.diff) {
+                  <a [href]="image(entry.diff)" target="_blank" rel="noopener"
+                    ><img [src]="image(entry.diff)" alt="Unterschiede: {{ entry.page }}" loading="lazy"
+                  /></a>
+                } @else {
+                  <p class="muted">Ab dem zweiten Lauf</p>
+                }
+              </figure>
+            </div>
+          </section>
+        } @empty {
+          <p class="muted">Für dieses Gerät gibt es keine Aufnahmen.</p>
+        }
+      }
+    </li>
+
+    <li class="visual-step">
+      <h4><span class="visual-step-no" aria-hidden="true">4</span> Freigeben</h4>
+      <div class="visual-approval" [class.done]="approval().approvedAt">
+        @if (approval().approvedAt) {
+          <p>
+            <strong>✓ Optisch freigegeben</strong> von {{ approval().approvedBy || 'Unbekannt' }} am
+            {{ approval().approvedAt | dateTime }}
+          </p>
+          <button
+            class="button secondary small"
+            type="button"
+            [disabled]="busy()"
+            title="Nimmt die optische Freigabe zurück; die Version geht dann nicht weiter in die produktive Umgebung."
+            (click)="approve(false)"
+          >
+            Freigabe zurücknehmen
+          </button>
+        } @else {
+          <p>Sieht alles richtig aus? Mit der Freigabe geht diese Version weiter in die produktive Umgebung.</p>
+          <button class="button primary" type="button" [disabled]="busy()" [title]="why" (click)="approve(true)">
+            ✓ Optisch freigeben
+          </button>
+        }
+      </div>
+    </li>
+  </ol>
+</details>

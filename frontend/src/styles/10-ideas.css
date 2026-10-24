@@ -1,0 +1,492 @@
+/* Ideen: Dialog, Kommentare, Visionär */
+.idea-detail .detail-text {
+  margin: 14px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.idea-detail .gallery img {
+  width: 100%;
+  max-width: none;
+  height: auto;
+  max-height: none;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  transition:
+    transform 0.15s,
+    box-shadow 0.15s;
+}
+.idea-detail .form-actions {
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.idea-detail .promote {
+  margin: 4px 0 8px;
+}
+.idea-detail .estimate {
+  padding: 12px 16px;
+  border-radius: 9px;
+  background: #f7f8f5;
+}
+.idea-detail .form-grid label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* Aufgeklappte Idee: Kurzfassung unter dem Titel, Auftrag über die volle Breite */
+.idea-summary {
+  margin: 0 0 12px;
+  color: #3f4a43;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.idea-summary > :first-child {
+  margin-top: 0;
+}
+.idea-summary > :last-child {
+  margin-bottom: 0;
+}
+
+/* Ideen-Dialog: Kopf mit Aktionen nebeneinander, Kennzahlen, formatierte Beschreibung. */
+.idea-detail {
+  padding: 0;
+}
+.idea-detail > :not(.idea-hero) {
+  margin-right: 28px;
+  margin-left: 28px;
+}
+.idea-detail > :last-child {
+  margin-bottom: 28px;
+}
+.idea-hero {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 24px 28px 18px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 14px 14px 0 0;
+  background: linear-gradient(135deg, #eef5f0 0%, #fbfaf6 60%, #fdf3ea 100%);
+}
+.idea-hero h2 {
+  margin: 0;
+  font-size: 1.45rem;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.idea-hero .eyebrow {
+  margin: 0 0 6px;
+}
+.idea-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.idea-hero-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+.idea-hero-actions .icon-button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 16px;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    transform 0.12s;
+}
+.idea-hero-actions .icon-button:hover {
+  border-color: var(--green);
+  background: var(--green-soft);
+  transform: translateY(-1px);
+}
+.priority-high {
+  border-color: #f0c9ad;
+  background: #fdf0e6;
+  color: #9a4b17;
+}
+.idea-description.markdown {
+  margin-top: 18px;
+  padding: 22px 26px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 0.95rem;
+  line-height: 1.65;
+}
+.idea-description h2 {
+  margin: 22px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 1.1rem;
+}
+.idea-description h2:first-child,
+.idea-description hr + h2 {
+  margin-top: 0;
+}
+.idea-description h3 {
+  margin: 16px 0 8px;
+  font-size: 1rem;
+}
+.idea-description hr {
+  margin: 20px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+.idea-description li + li {
+  margin-top: 3px;
+}
+.idea-description pre {
+  font-size: 12px;
+}
+.idea-detail .subheading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.idea-detail .gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+.idea-detail .gallery a:hover img {
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+
+/* Kommentare als Gesprächsverlauf. */
+.thread {
+  display: grid;
+  gap: 14px;
+  margin: 12px 0 16px;
+}
+.bubble-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  max-width: 88%;
+}
+.bubble-row.own {
+  flex-direction: row-reverse;
+  margin-left: auto;
+}
+.avatar {
+  display: grid;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfe9e2;
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 700;
+}
+.avatar.agent {
+  background: #fde8d7;
+  color: #9a4b17;
+  font-size: 16px;
+}
+.bubble {
+  min-width: 0;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 16px 16px 16px 4px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgb(32 40 36 / 5%);
+}
+.own .bubble {
+  border-color: #c7dccf;
+  border-radius: 16px 16px 4px 16px;
+  background: #eaf4ee;
+}
+.bubble-row.agent .bubble {
+  border-color: #f2d6c0;
+  background: #fff8f2;
+}
+.bubble-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+.bubble-meta time,
+.bubble-reply {
+  color: var(--muted);
+}
+.bubble-badge {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #fde8d7;
+  color: #9a4b17;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.bubble-body.markdown {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.bubble-body.markdown > :last-child {
+  margin-bottom: 0;
+}
+.mention-chip {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #e1eee6;
+  color: var(--green);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.mention-chip.agent {
+  background: #fde8d7;
+  color: #9a4b17;
+}
+.bubble-working {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.bubble-working.failed {
+  color: #a3361f;
+}
+.typing {
+  display: inline-flex;
+  gap: 3px;
+}
+.typing i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orange);
+  animation: typing 1.1s infinite ease-in-out;
+}
+.typing i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.thread-empty {
+  margin: 0;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.comment-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 2px 8px rgb(32 40 36 / 5%);
+}
+.comment-form:focus-within {
+  border-color: #9cc3ad;
+}
+
+/* Das Textfeld ist rahmenlos; bei Tastaturfokus zeigt der Rahmen des Formulars den Ring. */
+.comment-form:has(textarea:focus-visible) {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+.comment-form textarea {
+  flex: 1;
+  min-height: 40px;
+  max-height: 180px;
+  padding: 9px 6px;
+  border: 0;
+  outline: 0;
+  resize: vertical;
+  background: none;
+}
+.comment-form .chat-send {
+  height: 40px;
+}
+.comment-at {
+  display: grid;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--green-soft);
+  color: var(--green);
+  font-size: 18px;
+  font-weight: 700;
+}
+.comment-at:hover {
+  background: #d6e8dd;
+}
+
+@media (max-width: 720px) {
+  .idea-detail > :not(.idea-hero) {
+      margin-right: 16px;
+      margin-left: 16px;
+    }
+}
+
+/* ── Visionär: Lauf-Leiste, Herkunfts-Badge, Ablehnen mit Grund ───────── */
+/* Visionär: Lauf-Fortschritt in Ideation und Herkunfts-Badge an Ideen. */
+.visionary-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border: 1px solid #d6c8ef;
+  border-radius: 14px;
+  background: #f6f2fd;
+}
+.visionary-bar p {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+.visionary-bar.done {
+  border-color: #b9d3c4;
+  background: #f0f7f2;
+}
+.visionary-bar.failed {
+  border-color: #efc4c4;
+  background: #fdf2f2;
+}
+.visionary-bar .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #c9b6ec;
+  border-top-color: #6b46c1;
+  border-radius: 50%;
+  animation: check-spin 0.9s linear infinite;
+}
+.source-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.source-badge.visionary {
+  background: #ede6fb;
+  color: #553c9a;
+}
+.idea-reject {
+  display: grid;
+  gap: 8px;
+}
+.idea-reject textarea {
+  min-height: 70px;
+}
+
+/* ── Express-Anfragen aus dem Dashboard: ungeplant im Sprint ──────────── */
+.express-badge {
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff3cd;
+  color: #8a5a00;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.idea-detail .detail-stats {
+  margin-top: 20px;
+}
+.idea-detail .detail-stats dd {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+/* ── Idee: Auftrag, der daraus entstanden ist ── */
+.linked-order {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.linked-order-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.linked-order-title {
+  flex-wrap: wrap;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.idea-promote-card p {
+  margin: 0 0 10px;
+}
+.idea-promote-card .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.idea-promote-card .idea-reject {
+  margin-top: 12px;
+}
+.idea-detail .idea-description.markdown {
+  margin-top: 0;
+  padding: 18px 22px;
+  border: 1px solid var(--line);
+}
+
+@media (max-width: 720px) {
+  .idea-hero {
+      padding: 18px 16px 14px;
+    }
+  .idea-description.markdown {
+      padding: 16px;
+    }
+  .bubble-row {
+      max-width: 100%;
+    }
+  .linked-order .button {
+      width: 100%;
+      justify-content: center;
+    }
+}
