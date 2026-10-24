@@ -39,7 +39,7 @@ interface FolderListing {
           <p class="muted">Ordner werden gelesen …</p>
         } @else if (listing(); as current) {
           @if (current.folders.length) {
-            <ul class="folder-picker-list">
+            <ul class="folder-picker-list plain-list">
               @for (folder of current.folders; track folder.path) {
                 <li>
                   <button class="link-button" type="button" (click)="go(folder.path)">📁 {{ folder.name }}</button>

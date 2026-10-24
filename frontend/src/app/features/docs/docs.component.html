@@ -12,7 +12,7 @@
       </div>
     </div>
 
-    <div class="docs-toolbar">
+    <div class="docs-toolbar row">
       <button
         class="book-toggle"
         type="button"
@@ -80,7 +80,7 @@
                     [class.selected]="selectedDoc()?.id === hit.doc.id"
                     (click)="select(hit.doc)"
                   >
-                    <span class="search-hit-head">
+                    <span class="search-hit-head row">
                       <strong>{{ hit.doc.title }}</strong>
                       <span class="tag">{{ documentKindLabel(hit.doc.kind) }}</span>
                     </span>

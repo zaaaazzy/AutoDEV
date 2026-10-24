@@ -1,0 +1,414 @@
+/* Knöpfe, Formulare, Schalter, Häkchen, Ordnerauswahl */
+.button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid #d8ddd7;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+}
+.button:hover:not(:disabled) {
+  border-color: var(--green);
+  color: var(--green);
+}
+.button.primary {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--surface);
+}
+.button.primary:hover:not(:disabled) {
+  background: #1d523f;
+  color: var(--surface);
+}
+.button.danger {
+  border-color: #ecc9c0;
+  color: #9d4938;
+}
+.button.danger:hover:not(:disabled) {
+  border-color: #c9573f;
+  background: #fbeeea;
+}
+
+/* Hauptaktion, die etwas zerstört (Bestätigungsdialog): rot gefüllt statt grün. */
+.button.primary.danger {
+  border-color: #9d4938;
+  background: #9d4938;
+  color: var(--surface);
+}
+.button.primary.danger:hover:not(:disabled) {
+  border-color: #823a2c;
+  background: #823a2c;
+  color: var(--surface);
+}
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+.form-grid h2,
+.form-grid h3 {
+  grid-column: 1 / -1;
+}
+.field-error {
+  display: block;
+  margin-top: 4px;
+  color: #9d4938;
+  font-size: 12px;
+  font-weight: 600;
+}
+.inline-form .field {
+  display: grid;
+  min-width: 0;
+}
+.create-form {
+  margin: 16px 0 20px;
+  padding: 15px;
+  border-radius: 9px;
+  background: #f7f8f5;
+}
+.inline-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 150px auto;
+  align-items: end;
+  gap: 9px;
+  margin: 15px 0 18px;
+  padding: 14px;
+  border-radius: 9px;
+  background: #f7f8f5;
+}
+.project-form {
+  margin-bottom: 16px;
+}
+.filter {
+  display: flex;
+  max-width: 270px;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 15px;
+}
+.filter select {
+  margin-left: auto;
+}
+.upload {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 0.9em;
+}
+.help-button {
+  width: 36px;
+  padding: 0;
+  border-radius: 50%;
+  font-weight: 700;
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--green);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+h3 .link-button {
+  color: var(--ink);
+}
+.link-button:hover {
+  text-decoration: underline;
+}
+.icon-button {
+  padding: 4px 10px;
+}
+.collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+.chev {
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.chev.open {
+  transform: rotate(90deg);
+}
+.button.git-blocked {
+  outline: 2px solid #c9573f;
+  outline-offset: 1px;
+}
+
+/* Checkbox und Text nebeneinander (label ist sonst ein Raster: Kästchen und Text untereinander). */
+label.check {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.45;
+}
+.check input {
+  width: auto;
+}
+label.check > input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 1px 0 0;
+  padding: 0;
+}
+.form-actions {
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.retry-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 2px 9px;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.retry-button app-nav-icon {
+  width: 13px;
+  height: 13px;
+}
+.row-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.inline-form.dev-create {
+  grid-template-columns: minmax(180px, 1fr) 160px 140px auto;
+  /* Oben ausrichten: eine Fehlermeldung unter dem Titel verschiebt sonst die übrigen Felder. */
+  align-items: start;
+}
+
+/* Prüfstatus (Einrichtungsassistent): drehende Pfeile, grüner Haken wie beim Sprint-Status */
+.check-state {
+  display: inline-grid;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--surface);
+  font-size: 11px;
+  font-weight: 800;
+}
+.check-state.ok {
+  background: #2f8a57;
+}
+.check-state.error {
+  background: var(--danger);
+}
+.check-state.warn {
+  background: #e08a1e;
+}
+.check-state.loading {
+  color: var(--blue);
+  animation: check-spin 0.9s linear infinite;
+}
+@keyframes check-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.input-with-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.button.small {
+  min-height: 28px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+.check-state.big {
+  width: 48px;
+  height: 48px;
+  font-size: 24px;
+}
+.switch {
+  position: relative;
+  flex: none;
+  width: 50px;
+  height: 30px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #d5dcd3;
+  appearance: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.switch::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+  content: '';
+  transition: transform 0.22s cubic-bezier(0.3, 1.4, 0.5, 1);
+}
+.switch:checked {
+  background: var(--green);
+}
+.switch:checked::after {
+  transform: translateX(20px);
+}
+.switch:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+/* Projektordner: Ordner-Knopf rechts neben dem Pfad auf derselben Höhe, die Auswahl klappt darunter auf. */
+.path-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 8px;
+}
+.path-row > input {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.path-row > app-folder-picker {
+  display: contents;
+}
+.path-row > app-folder-picker > .button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.path-row > app-folder-picker > .folder-picker {
+  flex-basis: 100%;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Ordnerauswahl (Projektordner) */
+.folder-picker-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.folder-picker {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.folder-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.folder-picker-head code {
+  overflow-wrap: anywhere;
+}
+.folder-picker-list {
+  max-height: 260px;
+  overflow: auto;
+}
+.folder-picker-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.folder-picker-git {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--green-soft);
+  color: var(--green);
+}
+.folder-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.folder-picker-error {
+  margin: 4px 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+.segmented {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.segmented button {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+}
+.segmented button + button {
+  border-left: 1px solid var(--line);
+}
+.segmented button.active {
+  background: var(--green);
+  color: var(--surface);
+}
+
+@media (max-width: 720px) {
+  .inline-form.dev-create {
+      grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+  .form-grid,
+  .inline-form {
+      grid-template-columns: 1fr;
+    }
+  .form-grid h2,
+  .form-grid h3 {
+      grid-column: auto;
+    }
+  .inline-form {
+      align-items: stretch;
+    }
+}
+
+@media (pointer: coarse) {
+  /* Touch: kleine Symbolknöpfe (Bearbeiten, Aufklappen, Filter) mindestens 40 px, damit sie mit dem Finger treffbar sind. */
+  .icon-button {
+      min-width: 40px;
+      min-height: 40px;
+    }
+}
