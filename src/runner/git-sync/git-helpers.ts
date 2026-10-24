@@ -7,7 +7,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../../core/comma
 import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
-import { clearStaleIndexLock, isIndexLockError } from './stale-lock.js';
+import { clearStaleLock, lockedFile } from './stale-lock.js';
 import { checkoutTarget, dropReportCopies } from './report-copies.js';
 
 export const GIT_TIMEOUT_MS = 120_000;
@@ -221,10 +221,18 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
     // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
     const target = args[0] === 'checkout' ? checkoutTarget(args) : null;
     if (target) await dropReportCopies((...inner) => run(inner), cwd, target);
-    const result = await run(args);
-    // Verwaiste index.lock (git wurde hart beendet): wegräumen, wenn niemand sie hält, und einmal neu versuchen.
-    if (result.exitCode !== 0 && isIndexLockError(result.output) && (await clearStaleIndexLock(cwd))) {
-      return run(args);
+    let result = await run(args);
+    // Sperrdatei (index.lock, AUTO_MERGE.lock, Ref-Sperre): verwaist (git wurde hart beendet) → wegräumen, sonst kurz
+    // warten; dann einmal neu versuchen. Ein so gescheiterter Merge hinterlässt Dateien, die vorher weg müssen.
+    const lock = result.exitCode === 0 ? null : lockedFile(result.output);
+    if (!lock) return result;
+    if (args[0] === 'merge') await removeMergeLeftovers(run, cwd, mergeSources(args));
+    if (!(await clearStaleLock(cwd, { file: lock }).catch(() => null))) {
+      await new Promise((done) => setTimeout(done, LOCK_RETRY_DELAY_MS));
+    }
+    result = await run(args);
+    if (result.exitCode !== 0 && args[0] === 'merge' && lockedFile(result.output)) {
+      await removeMergeLeftovers(run, cwd, mergeSources(args));
     }
     return result;
   };
