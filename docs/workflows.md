@@ -67,7 +67,9 @@ Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnunge
 - **Was passiert:** Der Auftrag ist sofort im Ziel-Sprint, nicht erst im aktiven. Bei abgebrochenen oder blockierten Aufträgen werden Vermerk, Fehler und ein von Hand zugewiesener Agent zurückgesetzt. Blockierte zählen dabei als erneuter Versuch.
 - **Start:** Nur in einem **aktiven** Sprint startet der Worker den Auftrag. In einem **geplanten** Sprint wartet er, bis der Sprint gestartet wird. Auch ein Verschieben per PATCH in einen nicht aktiven Sprint setzt das automatische Starten zurück.
 - **Ablehnung:** Passt ein Auftrag oder Sprint nicht, meldet die Oberfläche „Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen …“. Ein Sammel-Hinweis nennt dann die nicht übernommenen Titel.
-- **Bekannte Einschränkung:** Die Liste „Aufträge hinzufügen“ zeigt Aufträge im Status „Freigabe“ ohne Sprint noch an. Sie lassen sich nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch.
+- **Freigabe und laufende Aufträge:** Sie stehen nicht unter „Aufträge hinzufügen“, weil ihre Arbeit an den Sprint gebunden ist und nicht umgehängt wird.
+
+**„Wieder einplanen“ (unter „Aktionen“):** Der Schritt wird nur angeboten, wenn der Auftrag aus einem Sprint genommen wurde und im Status „Backlog“ oder „Geplant“ ist. Die Bedingung steht in `src/core/development-transitions.ts` und gilt genauso für `/retry`. Ein Auftrag in „Freigabe“ oder ein laufender Auftrag bietet ihn nicht an. Ein laufender Auftrag wird erst nach dem Ende seines Agent-Laufs frei und landet dann im Backlog. Freigaben aus einem abgebrochenen Sprint, die vor dieser Änderung ohne Sprint hängen geblieben sind, setzt die Migration `freigabe-nach-sprint-abbruch-ins-backlog` einmalig ins Backlog.
 
 **Aktiven Sprint mit Startdatum in der Zukunft abschließen:** Wer einen Sprint vorzeitig startet (Startdatum liegt nach heute), kann ihn schon am selben Tag abschließen.
 
