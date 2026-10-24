@@ -454,7 +454,10 @@ export async function commitAgentStep(
   }
 }
 
-/** Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch) mergen und löschen. */
+/**
+ * Nach der Review-Freigabe: Auftrags-Branch in seine Basis (Sprint-Branch oder main) mergen und löschen. Ist die Basis
+ * in einem anderen Worktree ausgecheckt, wird dort gemergt (wie in finishOrderBranch).
+ */
 export async function mergeApprovedBranch(
   cwd: string,
   item: { title: string },
@@ -474,6 +477,18 @@ export async function mergeApprovedBranch(
         merged: false,
         message: `Offene Änderungen im Arbeitsordner (${open.slice(0, 5).join(', ')}) – ${branch} nicht gemergt.`,
       };
+    // Basis im Ordner eines anderen Worktrees ausgecheckt (losgelöster Agent-Worktree, main beim Menschen): dort mergen.
+    const elsewhere = await checkedOutElsewhere(git, base, cwd);
+    if (elsewhere) {
+      const result = await mergeIntoOtherWorktree(
+        { git, must },
+        rawExecute,
+        elsewhere,
+        { branch, base },
+        `Merge ${branch}: ${item.title.slice(0, 72)}`,
+      );
+      return { merged: result.merged, message: result.merged ? `Freigegeben. ${result.message}` : result.message };
+    }
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output !== base) await must('checkout', base);
     const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: ${item.title.slice(0, 72)}`);
     if (merged.exitCode !== 0) {
