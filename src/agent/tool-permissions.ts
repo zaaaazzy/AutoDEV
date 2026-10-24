@@ -168,6 +168,28 @@ export function guardHookCommand(policy: {
   return `${[process.execPath, ...loader, script, encoded].map(shellQuote).join(' ')} || exit 2`;
 }
 
+/**
+ * Geheimnisse, die kein Claude-Agent lesen darf – jede Rolle, auch mit Vollzugriff. Deny-Regeln der CLI (gelten auch
+ * für Grep und Glob); dieselben Namen wie SECRET_NAME bzw. die geschützten Ordner des Wächters, der sie zusätzlich prüft.
+ */
+export const SECRET_READ_DENY = [
+  'Read(**/.env*)',
+  'Read(**/*.pem)',
+  'Read(**/*.key)',
+  'Read(**/id_rsa*)',
+  'Read(**/id_ed25519*)',
+  'Read(**/id_ecdsa*)',
+  'Read(**/.ssh/**)',
+  'Read(**/.aws/**)',
+  'Read(**/.gnupg/**)',
+  'Read(~/.ssh/**)',
+  'Read(~/.aws/**)',
+  'Read(~/.gnupg/**)',
+];
+
+/** Werkzeuge, die Dateien lesen – der Wächter prüft bei ihnen die Pfade auf Geheimnisse. */
+const READ_MATCHER = 'Read|Grep|Glob|NotebookRead';
+
 /** Rollen, denen der Admin per Befehl vollen Zugriff geben kann (ohne Wächter). */
 export const FULL_ACCESS_ROLES = new Set(['assistant']);
 
@@ -217,10 +239,19 @@ export function agentRights(
   };
 }
 
+/** Einstellungen für --settings: Deny-Regeln für Geheimnisse und (falls startbar) der Wächter als PreToolUse-Hook. */
+function agentSettings(hook: string | null, matcher: string): object {
+  return {
+    permissions: { deny: SECRET_READ_DENY },
+    ...(hook ? { hooks: { PreToolUse: [{ matcher, hooks: [{ type: 'command', command: hook, timeout: 90 }] }] } } : {}),
+  };
+}
+
 /**
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
- * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern.
+ * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern
+ * sowie jeden Lesezugriff auf Geheimnisse.
  */
 export function withAgentPermissions(
   command: string[],
@@ -234,8 +265,11 @@ export function withAgentPermissions(
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
   if (!isClaude) return command;
   // Voller Zugriff nur für den Dashboard-Assistenten und nur, wenn der Admin ihn im Befehl ausdrücklich verlangt:
-  // dann weder Wächter noch Sperrlisten – der Assistent arbeitet mit allen Rechten des Workers.
-  if (hasFullAccess(command, role)) return command;
+  // dann weder Wächter für Schreiben und Shell noch Sperrlisten – nur Geheimnisse bleiben auch hier unlesbar.
+  if (hasFullAccess(command, role)) {
+    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [] });
+    return [binary, '--settings', JSON.stringify(agentSettings(secretHook, READ_MATCHER)), ...rest];
+  }
   const readOnly = READ_ONLY_ROLES.has(role);
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
   const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
@@ -255,21 +289,11 @@ export function withAgentPermissions(
     ...(readOnly ? ['MultiEdit'] : []),
     ...(hook && !readOnly ? [] : ['Bash']),
   ];
-  const guard = hook
-    ? [
-        '--settings',
-        JSON.stringify({
-          hooks: {
-            PreToolUse: [
-              {
-                matcher: 'Write|Edit|MultiEdit|NotebookEdit|Bash',
-                hooks: [{ type: 'command', command: hook, timeout: 90 }],
-              },
-            ],
-          },
-        }),
-      ]
-    : [];
+  // Die Deny-Regeln für Geheimnisse kommen immer mit, auch wenn der Wächter nicht startet.
+  const guard = [
+    '--settings',
+    JSON.stringify(agentSettings(hook, `Write|Edit|MultiEdit|NotebookEdit|Bash|${READ_MATCHER}`)),
+  ];
   if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...rest];
   const rules = [...chosen.filter(isToolRule), ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : [])];
   const directories = chosen.includes(LOGS_COMMAND)
