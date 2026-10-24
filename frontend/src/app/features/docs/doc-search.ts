@@ -1,3 +1,4 @@
+import { escapeHtml } from '../../shared/html.js';
 import type { DocumentEntry } from '../../core/models.js';
 
 /** Suche über alle Dokumente: unabhängig von Gross-/Kleinschreibung und Umlauten, Wortanfänge, kleine Tippfehler. */
@@ -68,10 +69,6 @@ export function closeEnough(a: string, b: string): boolean {
     }
   }
   return edits + (a.length - i) + (b.length - j) <= 1;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
 
 /** Markdown-Zeichen entfernen, damit Ausschnitte lesbar sind. */

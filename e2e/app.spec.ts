@@ -973,6 +973,154 @@ test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und 
   await request.delete(`/api/bugs/${bug.id}`, { headers });
 });
 
+test('Bugs: Deep-Link, Markdown escaped, nur Geändertes speichern, Friedhof und Löschen mit Rückfrage', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `E2E-Bug Vorlage ${isMobile ? 'Handy' : 'Desktop'}`;
+  const created = await request.post('/api/projects/e2e/bugs', {
+    headers,
+    data: {
+      title,
+      severity: 'medium',
+      description: 'Fehler <img src=x onerror="window.hacked=1"> und [a](https://x.com/[b](https://y.com))',
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).bug.id as string;
+
+  await login(page);
+  // Link auf den Bug: Zeile ist offen, Rohes HTML erscheint als Text, nicht als Element.
+  await page.goto(`/#bugs/${id}`);
+  const description = page.locator('.row-open + tr .markdown, .closed-detail .markdown').filter({ hasText: 'Fehler' });
+  await expect(description.first()).toContainText('<img src=x onerror="window.hacked=1">');
+  await expect(description.first().locator('img')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as { hacked?: number }).hacked)).toBeUndefined();
+  const panel = page
+    .locator('.order-panel')
+    .filter({ has: page.getByText('Fehler <img', { exact: false }) })
+    .first();
+
+  // Bearbeiten: leerer Titel bleibt am Feld hängen, gespeichert wird nur das geänderte Feld.
+  await panel.getByText('Bug bearbeiten').click();
+  const form = panel.locator('form');
+  await form.getByLabel('Titel').fill('');
+  await form.getByRole('button', { name: 'Änderungen speichern' }).click();
+  await expect(form.getByRole('alert')).toHaveText('Bitte einen Titel angeben.');
+  await form.getByLabel('Titel').fill(title);
+  await form.getByLabel('Schweregrad').selectOption('high');
+  const patch = page.waitForRequest((sent) => sent.method() === 'PATCH' && sent.url().endsWith(`/api/bugs/${id}`));
+  await form.getByRole('button', { name: 'Änderungen speichern' }).click();
+  expect((await patch).postDataJSON()).toEqual({ severity: 'high' });
+  await expect(page.getByText('Bug wurde gespeichert.')).toBeVisible();
+
+  // Friedhof nur nach Rückfrage; Abbrechen lässt den Status stehen.
+  const status = panel.getByLabel('Status');
+  await status.selectOption('fixed');
+  const bury = page.getByRole('dialog', { name: 'Bug auf den Friedhof legen?' });
+  await expect(bury).toBeVisible();
+  await bury.getByRole('button', { name: 'Abbrechen' }).click();
+  await expect(status).toHaveValue('open');
+
+  // Löschen nur nach Rückfrage.
+  await panel.getByRole('button', { name: 'Löschen' }).click();
+  const remove = page.getByRole('dialog', { name: 'Bug löschen?' });
+  await expect(remove).toContainText(title);
+  await remove.getByRole('button', { name: 'Löschen' }).click();
+  await expect(page.getByText('Bug gelöscht.')).toBeVisible();
+  const bugs = (await (await request.get('/api/projects/e2e/bugs', { headers })).json()).bugs;
+  expect(bugs.some((bug: { id: string }) => bug.id === id)).toBe(false);
+});
+
+test('Bugs: Wer nur lesen darf, sieht keine Bearbeiten- und Löschknöpfe', async ({ browser, request, isMobile }) => {
+  const admin = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const reader = `leserin${Date.now() % 100000}${isMobile ? 'h' : 'd'}`;
+  const readerPassword = 'leserin-passwort-123';
+  const user = await request.post('/api/users', {
+    headers: admin,
+    data: {
+      username: reader,
+      displayName: 'Lea Leserin',
+      password: readerPassword,
+      roles: ['docs'],
+      projects: ['e2e'],
+    },
+  });
+  expect(user.ok(), await user.text()).toBeTruthy();
+  const bug = await request.post('/api/projects/e2e/bugs', { headers: admin, data: { title: `Nur lesen ${reader}` } });
+  const id = (await bug.json()).bug.id as string;
+
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
+  await page.goto('/');
+  await page.getByLabel('Benutzername').fill(reader);
+  await page.getByLabel('Passwort').fill(readerPassword);
+  await page.getByRole('button', { name: 'Anmelden' }).click();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  await page.goto(`/#bugs/${id}`);
+  const panel = page.locator('.order-panel').first();
+  await expect(panel).toContainText('Offen');
+  await expect(panel.getByRole('button', { name: 'Löschen' })).toHaveCount(0);
+  await expect(panel.getByText('Bug bearbeiten')).toHaveCount(0);
+  await expect(panel.getByLabel('Status')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Neuer Bug' })).toHaveCount(0);
+  expect((await page.request.delete(`/api/bugs/${id}`)).status()).toBe(403);
+  await context.close();
+  await request.delete(`/api/bugs/${id}`, { headers: admin });
+});
+
+test('Tabellen: ab 20 Einträgen blättern, Suche beginnt auf Seite 1, Deep-Link springt auf die richtige Seite', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const prefix = `Blättern${isMobile ? 'H' : 'D'}${Date.now() % 100000}`;
+  const ids: string[] = [];
+  for (let index = 1; index <= 25; index++) {
+    const created = await request.post('/api/projects/e2e/bugs', {
+      headers,
+      data: { title: `${prefix} Nr. ${String(index).padStart(2, '0')}` },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    ids.push((await created.json()).bug.id as string);
+  }
+
+  await login(page);
+  // Der zuerst angelegte Bug liegt hinten (Seite 2): Der Link blättert dorthin und öffnet ihn sichtbar.
+  await page.goto(`/#bugs/${ids[0]}`);
+  await expect(page.locator('tr.row-open').filter({ hasText: `${prefix} Nr. 01` })).toBeVisible();
+
+  await page.getByRole('searchbox', { name: /durchsuchen/ }).fill(prefix);
+  const table = page.locator('.dt').filter({ has: page.getByRole('navigation', { name: 'Seiten' }) });
+  const pager = table.getByRole('navigation', { name: 'Seiten' });
+  await expect(table.locator('.dt-count')).toHaveText(/^1–20 von 25 Einträgen/);
+  await expect(table.locator('tbody tr').filter({ hasText: prefix })).toHaveCount(20);
+  await expect(pager.getByRole('button', { name: 'Vorherige Seite' })).toBeDisabled();
+
+  await pager.getByRole('button', { name: 'Nächste Seite' }).click();
+  await expect(table.locator('.dt-count')).toHaveText(/^21–25 von 25 Einträgen/);
+  await expect(table.locator('tbody tr').filter({ hasText: prefix })).toHaveCount(5);
+  await expect(pager.getByRole('button', { name: 'Nächste Seite' })).toBeDisabled();
+  if (isMobile) {
+    // Handy: statt Seitenzahlen nur „2 / 2“.
+    await expect(pager.getByText('2 / 2')).toBeVisible();
+    await expect(pager.getByRole('button', { name: 'Seite 1' })).toBeHidden();
+  } else {
+    await expect(pager.getByRole('button', { name: 'Seite 2' })).toHaveAttribute('aria-current', 'page');
+  }
+
+  // Schärfere Suche: zurück auf Seite 1, und unter 21 Treffern verschwindet das Blättern.
+  await page.getByRole('searchbox', { name: /durchsuchen/ }).fill(`${prefix} Nr. 1`);
+  await expect(page.locator('.dt-count').first()).toHaveText(/^10 von \d+ Einträgen$/);
+  await expect(page.getByRole('navigation', { name: 'Seiten' })).toHaveCount(0);
+
+  for (const id of ids) await request.delete(`/api/bugs/${id}`, { headers });
+});
+
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {
   const manifest = await (await request.get('/manifest.webmanifest')).json();
   expect(manifest.display).toBe('standalone');
