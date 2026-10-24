@@ -731,6 +731,9 @@ test('Fortsetzung nach Nachbesserung und frühem Abbruch: der Entwickler bekommt
   assert.doesNotMatch(calls[0]?.at(-1) ?? '', /erste Rückmeldung/);
 });
 
+/** Ein Schritt dieses Laufs wird als unterbrochen markiert (nicht: claimRun räumt verwaiste Läufe ab). */
+const marksStepInterrupted = (sql: string) => sql.includes('interrupted = TRUE') && sql.includes('WHERE id = $1');
+
 /** Vorheriger, gescheiterter Lauf: Entwickler bestanden, danach `last` (Tester oder Reviewer) gescheitert. */
 function previousRunPool(last: { role: string; interrupted: boolean }) {
   const queries: { sql: string; values: unknown[] }[] = [];
@@ -817,10 +820,7 @@ test('nach der Fortsetzung lehnt der Tester wirklich ab: zurück an den Entwickl
     ['tester', 'dev', 'tester'],
   );
   assert.match(calls[1]?.at(-1) ?? '', /Rückmeldung von tester[\s\S]*Test Y rot/);
-  assert.ok(
-    !queries.some((query) => query.sql.includes('interrupted = TRUE')),
-    'kein Schritt als unterbrochen markiert',
-  );
+  assert.ok(!queries.some((query) => marksStepInterrupted(query.sql)), 'kein Schritt als unterbrochen markiert');
 });
 
 test('ausgewählter Auftrag inzwischen abgelehnt oder aus dem Sprint genommen: er startet nicht, der Lauf wird verworfen', async () => {
@@ -1026,7 +1026,7 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   assert.match(String(retry?.values[2]), /Nutzungslimit .* ab \d\d:\d\d Uhr/);
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
   // Der Schritt ist als unterbrochen gekennzeichnet; Tokens und Kosten des Versuchs bleiben erhalten.
-  const step = queries.find((query) => query.sql.includes('interrupted = TRUE'));
+  const step = queries.find((query) => marksStepInterrupted(query.sql));
   assert.ok(step, 'Schritt als unterbrochen markiert');
   assert.match(step.sql, /tokens = \$5, cost_usd = \$6/);
 });
