@@ -347,7 +347,13 @@ export async function runStep(
   const refusedByRule = ruleRefusal(output) !== null;
   if (refusedByRule) await logEvent(pool, stepId, 'Abgelehnt wegen Projektregel');
   // Sollte der Agent Konflikte lösen und sind noch Marker übrig, gilt der Schritt als nicht bestanden.
-  const unresolved = conflicts && !cancelled ? await unresolvedConflicts(options.cwd, execute).catch(() => []) : [];
+  // Scheitert die Prüfung selbst, gelten die Konflikte als offen (nie stillschweigend bestanden).
+  const unresolved =
+    conflicts && !cancelled
+      ? await unresolvedConflicts(options.cwd, execute).catch((error: unknown) => [
+          `(Prüfung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)})`,
+        ])
+      : [];
   if (unresolved.length) {
     output += `\n\nMerge-Konflikte nicht gelöst: ${unresolved.join(', ')}`;
     await logEvent(pool, stepId, `Merge-Konflikte offen: ${unresolved.join(', ')}`);

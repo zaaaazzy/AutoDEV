@@ -698,6 +698,39 @@ test('Ungelöste Konflikte werden am Ende verworfen statt mit Markern committet'
   assert.match(await readFile(patch, 'utf8'), /\+entwickler-arbeit/);
 });
 
+test('Fortsetzen auf dem Auftrags-Branch behält offene Merge-Konflikte (Neustart des Workers)', async () => {
+  const { cwd, git, item } = await conflictingOrder();
+  const first = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(first?.conflicts, ['liste.txt']);
+  const conflicted = await readFile(join(cwd, 'liste.txt'), 'utf8');
+
+  // Neustart: Der Ordner steht schon auf dem Auftrags-Branch, der Merge ist noch offen.
+  const resumed = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.deepEqual(resumed, { branch: 'auftrag/99999999-liste', base: 'sprint/sprint-1', conflicts: ['liste.txt'] });
+  assert.match(conflictPrompt(resumed!), /Merge-Konflikte lösen[\s\S]*`liste.txt`/);
+  // Weder Abort noch Reset: MERGE_HEAD und die Marker bleiben stehen.
+  assert.ok(git('rev-parse', '-q', '--verify', 'MERGE_HEAD'));
+  assert.equal(await readFile(join(cwd, 'liste.txt'), 'utf8'), conflicted);
+  assert.equal(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true), null);
+
+  // Ohne offenen Merge bleibt das Ergebnis wie bisher (kein leeres conflicts-Feld).
+  await writeFile(join(cwd, 'liste.txt'), 'basis\nauftrag\nanderer auftrag\n');
+  assert.ok(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true));
+  assert.deepEqual(await enterOrderBranch(cwd, item, 'Sprint 1'), {
+    branch: 'auftrag/99999999-liste',
+    base: 'sprint/sprint-1',
+  });
+});
+
+test('unresolvedConflicts wirft, wenn git scheitert, statt „keine Konflikte“ zu melden', async () => {
+  const execute = (async () => ({
+    exitCode: 128,
+    durationMs: 0,
+    output: 'fatal: index kaputt',
+  })) as unknown as Parameters<typeof unresolvedConflicts>[1];
+  await assert.rejects(unresolvedConflicts('/repo', execute), /Konfliktprüfung fehlgeschlagen/);
+});
+
 test('Git-Sicherung wartet, solange ein unterbrochener Auftrag offene Änderungen im Ordner hat', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'git-wait-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();

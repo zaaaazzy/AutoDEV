@@ -43,10 +43,13 @@ const CONFLICT_END = /^>{7} /m;
 /**
  * Dateien mit ungelöstem Merge-Konflikt, die noch Konfliktmarker enthalten. Ohne laufenden Merge: leer.
  * Gelöste, aber noch nicht gestagte Dateien zählen nicht (der Commit nach dem Agent schliesst den Merge ab).
+ * Scheitert git, wirft sie: „keine Konflikte“ darf nie aus einem Fehler folgen.
  */
 export async function unresolvedConflicts(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<string[]> {
   const { git } = gitHelpers(rawExecute, cwd);
-  const unmerged = (await git('diff', '--name-only', '--diff-filter=U')).output
+  const diff = await git('diff', '--name-only', '--diff-filter=U');
+  if (diff.exitCode !== 0) throw new Error(`Konfliktprüfung fehlgeschlagen: ${diff.output.slice(-200)}`);
+  const unmerged = diff.output
     .split('\n')
     .map((file) => file.trim())
     .filter(Boolean);
@@ -109,7 +112,10 @@ export async function enterOrderBranch(
     const branch = orderBranch(item);
     if ((await currentBranch(git)) === branch) {
       // Nach einem Abbruch steht der Ordner noch auf dem Auftrags-Branch (samt offener Änderungen): fortsetzen.
-      return { branch, base: sprintName ? sprintBranch(sprintName) : MAIN_BRANCH };
+      // Ein offener Merge bleibt unangetastet (kein Abort, kein Reset); seine Konflikte löst der nächste Agent.
+      const base = sprintName ? sprintBranch(sprintName) : MAIN_BRANCH;
+      const conflicts = await unresolvedConflicts(cwd, execute);
+      return conflicts.length ? { branch, base, conflicts } : { branch, base };
     }
     // Was jetzt noch offen ist, stammt nicht von diesem Auftrag (Assistent, Mensch, abgebrochener anderer Auftrag)
     // und würde sonst mit „git add -A“ in seinen Commits landen.
