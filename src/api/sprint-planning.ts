@@ -1,5 +1,5 @@
 import type { Router } from 'express';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import {
   affectedFiles,
@@ -297,16 +297,34 @@ export async function applyProposal(
   }
 }
 
-/** Sprint abschliessen: Bericht, danach testet, merged und pusht der Worker (Git-Sicherung). */
+/**
+ * Sprint abschliessen: Bericht, danach testet, merged und pusht der Worker (Git-Sicherung). Alles in einer
+ * Transaktion – scheitert ein Schritt, bleibt der Sprint im alten Status (kein „abgeschlossen ohne Bericht“).
+ */
 export async function completeSprint(pool: Pool, sprintId: string): Promise<void> {
-  await pool.query(
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await completeSprintIn(client, sprintId);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/** Abschluss innerhalb einer schon offenen Transaktion des Aufrufers (z. B. zusammen mit dem Status-PATCH). */
+export async function completeSprintIn(client: PoolClient, sprintId: string): Promise<void> {
+  await client.query(
     // Ein vorzeitig gestarteter Sprint hat ein Startdatum in der Zukunft: das Ende nie davor legen (CHECK end >= start).
     `UPDATE sprints SET status = 'completed', end_date = COALESCE(end_date, GREATEST(start_date, CURRENT_DATE))
       WHERE id = $1`,
     [sprintId],
   );
-  await generateSprintReport(pool, sprintId);
-  await pool.query(
+  await generateSprintReport(client, sprintId);
+  await client.query(
     `UPDATE sprints SET git_sync = 'pending', git_action = 'push', git_message = NULL
       WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))`,
     [sprintId],

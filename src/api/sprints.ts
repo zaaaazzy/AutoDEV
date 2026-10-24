@@ -2,7 +2,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
 import type { Principal } from './roles.js';
-import { completeSprint } from './sprint-planning.js';
+import { completeSprintIn } from './sprint-planning.js';
 import { guardGit } from './git-state.js';
 import { sprintBranch } from '../runner/git-sync/git-helpers.js';
 import {
@@ -212,18 +212,40 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
         SPRINT_COLUMNS,
         from ? { column: 'status', values: [from] } : undefined,
       );
-      const result = await pool.query(update.sql, update.values);
+      // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
+      // Merge und Push nicht erneut auslösen. Das UPDATE ist an den gelesenen Status gebunden, der Wechsel also echt.
+      const completing = target === 'completed' && from !== undefined && from !== 'completed';
+      let result;
+      if (completing) {
+        // Status-UPDATE und Abschluss in einer Transaktion: scheitert der Abschluss (z. B. CHECK end_date >= start_date),
+        // bleibt der Sprint aktiv statt „abgeschlossen ohne Bericht“ – und der Worker mergt nichts.
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          result = await client.query(update.sql, update.values);
+          if (result.rows[0]) {
+            // Sprintende: Bericht, dann Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
+            await completeSprintIn(client, request.params.id);
+            const fresh = await client.query(`SELECT ${SPRINT_COLUMNS} FROM sprints WHERE id = $1`, [
+              request.params.id,
+            ]);
+            result = fresh.rows[0] ? fresh : result;
+          }
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      } else {
+        result = await pool.query(update.sql, update.values);
+      }
       if (!result.rows[0]) {
         response.status(from ? 409 : 404).json({
           message: from ? 'Der Sprint wurde inzwischen geändert – bitte neu laden.' : 'Sprint nicht gefunden.',
         });
         return;
-      }
-      // Nur beim Übergang ≠ abgeschlossen → abgeschlossen: Name oder Ziel eines alten Sprints zu ändern darf Bericht,
-      // Merge und Push nicht erneut auslösen. Das UPDATE oben war an den gelesenen Status gebunden, der Wechsel also echt.
-      if (target === 'completed' && from !== undefined && from !== 'completed') {
-        // Sprintende: Bericht, dann Sprint-Branch testen, pushen und nach main mergen (übernimmt der Worker).
-        await completeSprint(pool, request.params.id);
       }
       if (target === 'cancelled' && from !== undefined && from !== 'cancelled') {
         await cancelSprint(pool, request.params.id);
