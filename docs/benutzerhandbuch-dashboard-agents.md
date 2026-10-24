@@ -606,6 +606,51 @@ Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
 
 ---
 
+## 13. Sprint im Review bei ausgeschalteter GitHub-Brücke
+
+Ein Sprint kann im Status **Review** stehen, während die GitHub-Brücke des Projekts auf **„aus“** steht. Das passiert, wenn der Sprint mit einem Pull Request (Modus „Issues + PR“) abgeschlossen wurde und die Brücke danach ausgeschaltet wird. Früher blieb ein solcher Sprint für immer im Review. Jetzt verfolgt der Worker ihn weiter, auch bei „aus“.
+
+> **Printscreens:** keine. Die Oberfläche wurde nicht im Browser aufgenommen. Beschrieben ist das Verhalten des Workers und der Statuswerte.
+
+### 13.1 Was der Worker weiter tut
+
+Bei Modus „aus“ läuft nur noch die Prüfung der Sprints im Review. Sie prüft den Pull Request des Sprints:
+
+- **Grüne CI und Freigabe:** Ist die CI grün (und bei „Freigabe erforderlich“ freigegeben), merged der Worker den Pull Request.
+- **Von Hand gemergt:** Wurde der Pull Request schon von einem Menschen gemergt, übernimmt der Worker den Stand.
+- **Danach:** Tag auf dem gemergten `main`, lokaler `main` wird nachgezogen, Live schalten, ein eventueller CI-Bug wird geschlossen und der Sprint steht auf **Abgeschlossen**.
+- **Rot:** Schlägt die CI fehl, entsteht höchstens ein Bug je CI-Lauf.
+
+Die Prüfung läuft alle 2 Minuten.
+
+### 13.2 Bedingungen
+
+| Bedingung | Ergebnis |
+| --- | --- |
+| Sprint im Status **Review** und mit gesetztem Pull Request | Der Worker prüft ihn, auch bei Modus „aus“. |
+| Modus „aus“, kein Sprint im Review | Der Worker ruft `gh` nicht auf. Der Takt endet mit „Modus aus“. |
+| Modus „aus“, Sprint im Review ohne Pull Request | Nicht erfasst. Ein Sprint ohne Pull Request wird über die normale Git-Sicherung abgeschlossen, nicht über die Review-Prüfung. |
+| Kein GitHub-Remote (`git_remote` nicht auf github.com) | Die Prüfung wird übersprungen, der Grund „kein GitHub-Remote“ steht in den Projekteinstellungen. Der Sprint bleibt im Review. |
+| Keine Anmeldung bei `gh` | Die Prüfung wird übersprungen, der Sprint bleibt im Review, bis die Anmeldung stimmt. |
+| Rate-Limit von GitHub | Das Projekt pausiert bis zum nächsten Intervall. |
+| Sprint ist schon **Abgeschlossen** | Wird nicht noch einmal gemergt oder getaggt. |
+
+### 13.3 Was du nicht erwarten solltest
+
+- **Der Issue-Import bleibt aus.** Es werden keine neuen Issues als Bugs oder Ideen übernommen, und Statusmeldungen gehen nicht ins Issue. Dafür muss die Brücke auf „Issues“ oder „Issues + PR“ stehen.
+- **Der Sprint lässt sich nicht von Hand ändern**, solange er im Review ist. Die Schnittstelle antwortet mit 409. Abschließen kann ihn nur der Worker nach dem Merge.
+- **Der Autopilot startet keinen neuen Sprint**, solange ein Sprint im Review ist.
+
+### 13.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Sprint bleibt im Review, obwohl der Pull Request gemergt ist | Prüfe, ob das Projekt ein GitHub-Remote hat und `gh` angemeldet ist (`gh auth status` auf dem Worker-Rechner). Ohne beides wird die Prüfung übersprungen. Danach wartet der Worker auf den nächsten Takt. |
+| Sprint bleibt im Review, obwohl alles stimmt | Der Worker prüft nur Sprints mit gesetztem Pull Request (`pr_url`). Ohne ihn greift diese Prüfung nicht. Die Oberfläche zeigt diesen Wert nicht; Abhilfe nur über Entwicklung oder Datenbank. |
+| CI rot, Sprint wartet | Ein Bug mit dem gekürzten CI-Auszug ist entstanden. Behebe den Fehler, dann läuft die Prüfung weiter. |
+
+Hinweis: Die automatischen Tests für dieses Verhalten sind in `src/runner/git-sync.test.ts` beschrieben. Ob sie in deiner Umgebung grün laufen, steht im Testlauf des Auftrags.
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
