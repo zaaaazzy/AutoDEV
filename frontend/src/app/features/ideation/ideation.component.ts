@@ -1,4 +1,5 @@
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
+import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
@@ -59,6 +60,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
   selector: 'app-ideation',
   standalone: true,
   imports: [
+    BulkBarComponent,
     GithubLinkComponent,
     NgClass,
     NgTemplateOutlet,

@@ -1,4 +1,5 @@
 import { Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
+import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import type { SortingState } from '@tanstack/angular-table';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -19,7 +20,7 @@ import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from 
 @Component({
   selector: 'app-sprint-orders',
   standalone: true,
-  imports: [OrderTableComponent, OrderActionsDirective],
+  imports: [OrderTableComponent, OrderActionsDirective, BulkBarComponent],
   templateUrl: './sprint-orders.component.html',
 })
 export class SprintOrdersComponent {

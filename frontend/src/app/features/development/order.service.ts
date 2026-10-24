@@ -71,6 +71,54 @@ export class OrderService {
     return created;
   }
 
+  /**
+   * Mehrere Aufträge auf einmal erneut versuchen bzw. wieder einplanen: eine Rückfrage, ein gemeinsamer Hinweis für
+   * die Agents, dann je Auftrag die Route /retry. Nicht übernommene nennt die Meldung danach mit Titel.
+   */
+  async retryMany(items: DevelopmentItem[]): Promise<void> {
+    if (!items.length) return;
+    const titles = items.map((item) => `„${item.title}“`);
+    const answer = await this.confirm.ask({
+      title: `${items.length} ${items.length === 1 ? 'Auftrag' : 'Aufträge'} erneut versuchen?`,
+      message: 'Die Aufträge werden wieder eingeplant; der Worker übernimmt sie nacheinander.',
+      details: titles.length > 8 ? [...titles.slice(0, 8), `… und ${titles.length - 8} weitere`] : titles,
+      confirmLabel: 'Erneut versuchen',
+      commentLabel: 'Hinweis für die Agents (optional, gilt für alle)',
+      commentPlaceholder: 'z. B. „Der Arbeitsordner ist aufgeräumt – einfach neu starten.“',
+      commentHint: 'Wird mit Datum an die Beschreibung jedes Auftrags angehängt.',
+    });
+    if (!answer) return;
+    await this.forEach(items, 'erneut eingeplant', (item) =>
+      this.api.post(`/api/development/${encodeURIComponent(item.id)}/retry`, { comment: answer.comment }),
+    );
+  }
+
+  /** Priorität mehrerer Aufträge setzen (ohne Rückfrage: lässt sich jederzeit zurückstellen). */
+  async setPriorityMany(items: DevelopmentItem[], priority: DevelopmentItem['priority']): Promise<void> {
+    await this.forEach(items, 'aktualisiert', (item) =>
+      this.api.patch(`/api/development/${encodeURIComponent(item.id)}`, { priority }),
+    );
+  }
+
+  /** Sammelaktion: nacheinander je Auftrag, ein Nachladen am Ende; Fehlschläge werden gesammelt gemeldet. */
+  private async forEach(
+    items: DevelopmentItem[],
+    done: string,
+    action: (item: DevelopmentItem) => Promise<unknown>,
+  ): Promise<void> {
+    const failed: string[] = [];
+    await this.store.perform(
+      async () => {
+        for (const item of items) await action(item).catch(() => failed.push(item.title));
+      },
+      `${items.length} ${items.length === 1 ? 'Auftrag' : 'Aufträge'} ${done}.`,
+    );
+    if (failed.length)
+      this.store.notice.set(
+        `${items.length - failed.length} von ${items.length} ${done} – nicht möglich bei: ${failed.join(', ')}.`,
+      );
+  }
+
   /** Erneut versuchen bzw. wieder einplanen – erst nach Bestätigung, optional mit Hinweis für die Agents. */
   async retry(item: DevelopmentItem): Promise<void> {
     const blocked = item.status === 'blocked';
