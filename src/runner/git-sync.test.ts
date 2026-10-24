@@ -29,6 +29,7 @@ import {
   pushRemote,
   enterOrderBranch,
   finishOrderBranch,
+  mergeApprovedBranch,
   orderBranch,
   sprintBranch,
   sprintTag,
@@ -924,4 +925,57 @@ test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gesch
   assert.ok(!updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
   assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
   assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
+});
+
+// Früher scheiterte die Freigabe eines Auftrags ohne Sprint im losgelösten Agent-Worktree mit „already used by
+// worktree“ (git checkout main, während main im Ordner der Menschen ausgecheckt ist) – jede Freigabe endete blockiert.
+test('Review-Freigabe: Basis main in anderem Worktree ausgecheckt → dort gemergt, bei offenen Änderungen nichts angefasst', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-review-'));
+  const agents = `${human}-agents`;
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, {
+      cwd,
+      stdio: 'pipe',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't',
+        GIT_AUTHOR_EMAIL: 't@t',
+        GIT_COMMITTER_NAME: 't',
+        GIT_COMMITTER_EMAIL: 't@t',
+      },
+    })
+      .toString()
+      .trim();
+  run(human, 'init', '-q', '-b', 'main');
+  run(human, 'config', 'user.email', 't@t');
+  run(human, 'config', 'user.name', 't');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '--detach', agents, 'main');
+  const branch = 'auftrag/aa11bb22-betrieb';
+  run(agents, 'checkout', '-q', '-b', branch);
+  await writeFile(join(agents, 'betrieb.txt'), 'betrieb\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'betrieb');
+  run(agents, 'checkout', '-q', '--detach', 'main');
+
+  // Ordner der Menschen hat offene Änderungen: nicht mergen, dort nichts verändern, Branch bleibt.
+  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
+  const blocked = await mergeApprovedBranch(agents, { title: 'Betrieb' }, branch, 'main');
+  assert.equal(blocked.merged, false);
+  assert.doesNotMatch(blocked.message, /already used by worktree/);
+  assert.match(blocked.message, /Änderungen offen/);
+  assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+  assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
+  assert.ok(run(agents, 'branch', '--list', branch));
+
+  // Sauberer Ordner: Merge im Ordner der Menschen, Branch gelöscht, Agent-Ordner folgt main losgelöst.
+  run(human, 'checkout', '-q', '--', 'a.txt');
+  const merged = await mergeApprovedBranch(agents, { title: 'Betrieb' }, branch, 'main');
+  assert.equal(merged.merged, true, merged.message);
+  assert.equal(await readFile(join(human, 'betrieb.txt'), 'utf8'), 'betrieb\n');
+  assert.equal(run(human, 'status', '--porcelain'), '');
+  assert.equal(run(agents, 'branch', '--list', branch), '');
+  assert.equal(run(agents, 'rev-parse', 'HEAD'), run(human, 'rev-parse', 'main'));
 });
