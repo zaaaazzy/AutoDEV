@@ -502,13 +502,16 @@ export async function followPreview(
     : `Vorschau nicht nachgezogen: ${moved.output.slice(-200)}`;
 }
 
-/** Steht der Ordner auf einem Auftrags-Branch mit nicht committeten Änderungen? */
+/**
+ * Steht der Ordner auf einem Auftrags-Branch mit nicht committeten Änderungen? Neue, unversionierte Dateien zählen mit
+ * (sonst nähme die Sprint-Sicherung sie beim Checkout mit und pushte sie); Testberichte und Agent-Ablage nicht.
+ */
 export async function orderWorkInProgress(cwd: string, rawExecute: CommandExecutor = runCommand): Promise<boolean> {
   if (!existsSync(join(cwd, '.git'))) return false;
   const { git } = gitHelpers(rawExecute, cwd);
   const branch = (await git('rev-parse', '--abbrev-ref', 'HEAD')).output.trim();
   if (!branch.startsWith('auftrag/')) return false;
-  return Boolean((await git('status', '--porcelain', '--untracked-files=no')).output.trim());
+  return (await foreignChanges(git)).length > 0;
 }
 
 export interface ChangedFile {
