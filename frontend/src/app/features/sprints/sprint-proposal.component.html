@@ -61,7 +61,7 @@
     </header>
     @if (plan.autopilot.message) {
       <div
-        class="autopilot-notice"
+        class="autopilot-notice row"
         [class.paused]="plan.autopilot.state === 'paused'"
         [attr.role]="plan.autopilot.state === 'paused' ? 'alert' : 'status'"
       >
@@ -182,7 +182,7 @@
         <h4>Roadmap – die nächsten 3 Sprints (Vorschau, nichts wird angelegt)</h4>
         @if (roadmap(); as map) {
           @if (map.sprints.length) {
-            <ol class="roadmap-sprints">
+            <ol class="roadmap-sprints plain-list">
               @for (sprint of map.sprints; track sprint.name) {
                 <li class="roadmap-sprint">
                   <strong>{{ sprint.name }}</strong>

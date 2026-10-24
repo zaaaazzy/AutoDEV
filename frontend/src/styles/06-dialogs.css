@@ -1,0 +1,338 @@
+/* Dialoge: Modal, Hilfe, Bestätigung, geführte Einrichtung, Tour, Begrüßung */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(32 40 36 / 45%);
+}
+.help-dialog {
+  width: min(1100px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 24px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.help-dialog:has(.workflow[open]) {
+  max-width: 1000px;
+}
+
+/* ── Geführte Einrichtung (Sheet) ────────────────────────────────────── */
+.guide-backdrop {
+  backdrop-filter: blur(4px);
+}
+.guide-sheet {
+  display: grid;
+  gap: 18px;
+  width: min(460px, 100%);
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  padding: 22px;
+  border-radius: 22px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 30%);
+  animation: wizard-in 0.3s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.guide-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.guide-head > div {
+  flex: 1;
+}
+.guide-head h3 {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 22px;
+  font-weight: 400;
+}
+.guide-head .eyebrow {
+  margin: 0 0 2px;
+}
+.guide-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: none;
+  place-items: center;
+  border-radius: 14px;
+  background: #fdf1e8;
+  font-size: 24px;
+}
+.guide-steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  counter-reset: guide;
+  list-style: none;
+}
+.guide-steps li {
+  position: relative;
+  display: grid;
+  gap: 2px;
+  padding: 10px 0 14px 46px;
+  counter-increment: guide;
+}
+.guide-steps li::before {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--green);
+  color: var(--surface);
+  content: counter(guide);
+  font-size: 13px;
+  font-weight: 700;
+}
+.guide-steps li:not(:last-child)::after {
+  position: absolute;
+  top: 42px;
+  bottom: -4px;
+  left: 14px;
+  width: 2px;
+  background: #e3e8e0;
+  content: '';
+}
+.guide-steps small {
+  color: var(--muted);
+}
+.guide-key {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid #d9e0d6;
+  border-radius: 6px;
+  background: #f6f7f4;
+  font-weight: 600;
+}
+.guide-warn {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid #f1d8b5;
+  border-radius: 14px;
+  background: #fdf6ec;
+}
+.guide-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.guide-foot .button {
+  min-height: 44px;
+  padding-inline: 20px;
+  border-radius: 999px;
+}
+
+/* ── Interaktive Tour: Spotlight und Erklärkarte ──────────────────────── */
+.tour-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  pointer-events: none;
+}
+.tour-shade {
+  position: fixed;
+  background: rgb(15 20 18 / 62%);
+  pointer-events: auto;
+  transition: all 0.25s ease;
+}
+.tour-spotlight {
+  position: fixed;
+  border: 2px solid var(--orange);
+  border-radius: 12px;
+  box-shadow: 0 0 0 4px rgb(215 134 78 / 30%);
+  pointer-events: none;
+  transition: all 0.25s ease;
+  animation: tour-pulse 1.8s ease-in-out infinite;
+}
+.tour-spotlight.circle {
+  border-radius: 50%;
+}
+@keyframes tour-pulse {
+  50% {
+    box-shadow: 0 0 0 10px rgb(215 134 78 / 12%);
+  }
+}
+.tour-card {
+  position: fixed;
+  z-index: 81;
+  display: grid;
+  gap: 8px;
+  padding: 18px 18px 14px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 24px 60px rgb(0 0 0 / 30%);
+  pointer-events: auto;
+  animation: wizard-in 0.25s ease-out;
+}
+.tour-card.centered {
+  top: 50%;
+  left: 50%;
+  width: min(420px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+}
+.tour-card h3 {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 21px;
+  font-weight: 400;
+}
+.tour-card p {
+  margin: 0;
+  color: #46524a;
+}
+.tour-progress {
+  color: var(--green) !important;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.tour-wait {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fdf6ec;
+  color: var(--warn) !important;
+  font-size: 13px;
+}
+.tour-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.tour-actions .link-button {
+  margin-right: auto;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* ── Begrüßung ───────────────────────────────────────────────────────── */
+.welcome-backdrop {
+  backdrop-filter: blur(6px);
+}
+.welcome-card {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(460px, 100%);
+  padding: 32px 28px 24px;
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 30%);
+  text-align: center;
+  animation: wizard-in 0.3s cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+.welcome-card h2 {
+  margin: 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 26px;
+  font-weight: 400;
+}
+.welcome-card p {
+  margin: 0;
+  color: #56625a;
+}
+.welcome-mark {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px 16px 16px 4px;
+  font-size: 34px;
+  box-shadow: 0 10px 24px rgb(215 134 78 / 35%);
+}
+.welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.welcome-actions .button {
+  min-height: 44px;
+  padding-inline: 20px;
+  border-radius: 999px;
+}
+
+/* Bestätigung mit Kommentar (Erneut versuchen, Sprint übernehmen, Schnellaktionen) */
+.confirm-backdrop {
+  z-index: 70;
+}
+.confirm-dialog {
+  display: grid;
+  gap: 12px;
+  width: min(520px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 22px 22px 18px;
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 30px 80px rgb(0 0 0 / 25%);
+}
+.confirm-dialog h2 {
+  margin: 0;
+  font-size: 19px;
+}
+.confirm-message {
+  margin: 0;
+  color: var(--ink);
+}
+.confirm-details {
+  margin: 0;
+  padding: 10px 12px 10px 28px;
+  border-radius: 10px;
+  background: var(--paper);
+  color: var(--muted);
+  font-size: 13px;
+}
+.confirm-form {
+  display: grid;
+  gap: 6px;
+}
+.confirm-form label {
+  font-size: 13px;
+  font-weight: 600;
+}
+.confirm-form textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+}
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+@media (max-width: 720px) {
+  .tour-card:not(.centered) {
+      right: 12px;
+      bottom: calc(12px + env(safe-area-inset-bottom));
+      left: 12px;
+    }
+}
+
+@media (max-width: 600px) {
+  .guide-backdrop {
+      align-items: end;
+      padding: 0;
+    }
+  .guide-sheet {
+      width: 100%;
+      border-radius: 22px 22px 0 0;
+      padding-bottom: calc(22px + env(safe-area-inset-bottom));
+      animation-name: sheet-in;
+    }
+  .guide-foot .button {
+      flex: 1;
+    }
+}

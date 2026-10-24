@@ -1,0 +1,428 @@
+/* Dokumentation */
+.docs-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 290px) minmax(0, 1fr);
+  gap: 20px;
+}
+.docs-layout aside {
+  padding-right: 16px;
+  border-right: 1px solid var(--line);
+}
+.docs-layout aside form {
+  margin-bottom: 20px;
+  padding: 13px;
+  border-radius: 9px;
+  background: #f7f8f5;
+}
+.group-title {
+  margin: 18px 0 5px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+.doc-link {
+  display: block;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.doc-link:hover,
+.doc-link.selected {
+  border-color: #cbdacf;
+  background: #f0f5f1;
+}
+.doc-reader {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+/* ── Dokumentation: Suche, Gruppen, Buch-Modus ───────────────────────── */
+.docs-layout.collapsed {
+  grid-template-columns: minmax(0, 1fr);
+}
+.docs-index-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.book-toggle {
+  display: inline-flex;
+  flex: none;
+  height: 36px;
+  min-width: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--green);
+  font-weight: 650;
+}
+.book-toggle:hover {
+  border-color: #a9c2b1;
+  background: #f0f5f1;
+}
+.book-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.book-open {
+  justify-self: start;
+}
+.doc-group {
+  margin-top: 10px;
+}
+.doc-group > summary {
+  padding: 6px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.doc-group[open] > summary {
+  color: var(--ink);
+}
+.search-hits {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.search-hit {
+  display: grid;
+  width: 100%;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+.search-hit:hover,
+.search-hit.selected {
+  border-color: #b9d3c3;
+  background: #f6fbf8;
+}
+.search-hit-head {
+  justify-content: space-between;
+}
+.search-hit-head .tag {
+  flex: none;
+  font-size: 10px;
+}
+.search-snippet {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+.search-snippet mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  background: #fdf1d6;
+  color: var(--ink);
+}
+.doc-reader .meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.doc-edit {
+  margin-left: auto;
+}
+.doc-title {
+  margin: 4px 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+/* Dokumentation: Desktop Buch-Modus, Handy einklappbares Inhaltsverzeichnis oben */
+.docs-index-bar {
+  display: none;
+}
+
+/* ── Dokumentation: Suche oben, Änderungen mit Redaktionsprüfung ─────── */
+.docs-toolbar {
+  margin: 4px 0 14px;
+}
+.pending-badge {
+  color: var(--warn);
+  font-weight: 650;
+}
+.pending-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: #e08a1e;
+  vertical-align: 1px;
+}
+.revision-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid #f1d8b5;
+  border-radius: 14px;
+  background: #fffaf3;
+}
+.revision-card header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.revision-note {
+  margin: 0;
+  font-style: italic;
+}
+.revision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.revision-actions input {
+  flex: 1 1 220px;
+}
+.diff {
+  max-height: 420px;
+  margin: 8px 0 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.diff > span {
+  display: block;
+}
+.diff-added {
+  background: #e6f4ea;
+  color: #1e5c33;
+}
+.diff-removed {
+  background: #fbe9e6;
+  color: #8a2f1c;
+  text-decoration: line-through;
+  text-decoration-color: rgb(138 47 28 / 40%);
+}
+.diff-same {
+  color: var(--muted);
+}
+.diff-gap {
+  color: #9aa39c;
+  font-style: italic;
+  text-align: center;
+}
+.history-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.history-list li {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.history-status {
+  flex: none;
+  min-width: 86px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+.history-approved .history-status {
+  background: #e3f2e9;
+  color: var(--green-light);
+}
+.history-rejected .history-status {
+  background: #fbe9e6;
+  color: #a33d26;
+}
+.history-pending .history-status {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+/* ── Dokumentation: Titel links, Kategorie, Datum und Knöpfe rechts auf einer Zeile ── */
+.doc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.doc-head .doc-title {
+  flex: 1 1 260px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.doc-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+}
+.doc-head-meta .doc-edit {
+  margin-left: 0;
+}
+.doc-updated {
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.doc-reader .doc-editor {
+  margin-top: 14px;
+}
+a.doc-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+.agent-permissions section {
+  margin-top: 22px;
+}
+.ap-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+  padding: 0;
+  list-style: none;
+}
+.ap-card {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface);
+}
+.ap-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+.ap-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+}
+.ap-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.ap-table caption {
+  padding-bottom: 6px;
+  text-align: left;
+}
+.ap-table th,
+.ap-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.ap-table thead th {
+  background: #eef2ec;
+}
+.ap-table tbody th {
+  min-width: 170px;
+  font-weight: 600;
+}
+.ap-table tbody th .ap-icon {
+  margin-right: 4px;
+  font-size: 1.1rem;
+}
+.ap-diagram {
+  overflow-x: auto;
+}
+
+@media (min-width: 721px) {
+  .docs-index.is-collapsed {
+      display: none;
+    }
+}
+
+@media (max-width: 720px) {
+  .docs-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  .docs-layout aside {
+      padding: 0;
+      border: 0;
+    }
+  .book-toggle {
+      display: none !important;
+    }
+  .docs-layout aside.docs-index {
+      padding: 0 0 12px;
+      border: 0;
+      border-bottom: 1px solid var(--line);
+    }
+  .docs-index-bar {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f7f8f5;
+      color: var(--ink);
+      font-weight: 700;
+      text-align: left;
+    }
+  .docs-index-current {
+      flex: 1;
+      overflow: hidden;
+      font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+  .docs-index-chevron {
+      transition: transform 0.2s;
+    }
+  .docs-index.is-collapsed .docs-index-chevron {
+      transform: rotate(180deg);
+    }
+  .docs-index-body {
+      margin-top: 10px;
+    }
+  .docs-index.is-collapsed .docs-index-body {
+      display: none;
+    }
+  .docs-layout.collapsed aside.docs-index {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+  .doc-head-meta {
+      justify-content: flex-start;
+    }
+}

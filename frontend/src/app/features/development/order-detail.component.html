@@ -67,7 +67,7 @@
     }
     @if (!embedded() && (item.status === 'blocked' || item.status === 'rejected')) {
       <section class="detail-alert" [class.rejected]="item.status === 'rejected'">
-        <h3 class="detail-heading">
+        <h3 class="detail-heading row">
           {{ item.status === 'rejected' ? 'Abgelehnt – verstösst gegen eine Projektregel' : 'Blockiert' }}
         </h3>
         @if (item.failure) {
@@ -125,7 +125,7 @@
     }
     @if (editing()) {
       <form class="form-grid detail-card" (ngSubmit)="saved.emit(developmentEdit.value)" #developmentEdit="ngForm">
-        <h3 class="detail-heading wide">Auftrag bearbeiten</h3>
+        <h3 class="detail-heading row wide">Auftrag bearbeiten</h3>
         <label class="wide">Titel<input name="title" [ngModel]="item.title" required maxlength="180" /> </label>
         <label class="wide"
           >Beschreibung<textarea name="description" rows="12" [ngModel]="item.description" maxlength="10000"></textarea>
@@ -289,7 +289,7 @@
         </summary>
         @if (acceptance().criteria.length) {
           <h4>Akzeptanzkriterien</h4>
-          <ul class="acceptance-list">
+          <ul class="acceptance-list plain-list">
             @for (check of acceptance().criteria; track check.position) {
               <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
             }
@@ -297,13 +297,13 @@
         }
         @if (acceptance().done.length) {
           <h4>Definition of Done</h4>
-          <ul class="acceptance-list">
+          <ul class="acceptance-list plain-list">
             @for (check of acceptance().done; track check.position) {
               <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
               @if (coversCriteria(check)) {
                 <li class="acceptance-nested">
                   @if (acceptance().criteria.length) {
-                    <ul class="acceptance-list">
+                    <ul class="acceptance-list plain-list">
                       @for (criterion of acceptance().criteria; track criterion.position) {
                         <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: criterion }" />
                       }
@@ -368,7 +368,7 @@
       }
       @if (acceptance().visual.length) {
         <h4>Visuelle Prüfung</h4>
-        <ul class="acceptance-list">
+        <ul class="acceptance-list plain-list">
           @for (check of acceptance().visual; track check.position) {
             <ng-container *ngTemplateOutlet="checkLine; context: { $implicit: check }" />
           }
@@ -422,7 +422,7 @@
           <p class="muted small risk-intro">{{ parsed.intro }}</p>
         }
         @if (parsed.items.length) {
-          <ul class="risk-list">
+          <ul class="risk-list plain-list">
             @for (risk of parsed.items; track $index) {
               <li class="risk-item">
                 <span class="risk-icon" aria-hidden="true">⚠</span>
