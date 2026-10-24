@@ -56,13 +56,23 @@ Protect-Path $envFile 'F'
 
 $wrapper = Join-Path (Join-Path $root 'scripts') 'run-with-env.ps1'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`" `"$envFile`" npm run worker"
+# Neustart nach "AIdeation neu starten" (Exit-Code 75) uebernimmt die Schleife in run-with-env.ps1. Die Aufgabe startet
+# zusaetzlich neu, falls sie selbst scheitert, und hat kein Zeitlimit (Standard waeren 72 Stunden, danach beendet).
+$settings = [ordered]@{
+  RestartCount = 999
+  RestartInterval = New-TimeSpan -Minutes 1
+  ExecutionTimeLimit = [TimeSpan]::Zero
+  MultipleInstances = 'IgnoreNew'
+}
 if ($env:AIDEATION_INSTALL_DRY_RUN -eq '1') {
   Write-Host "Probelauf: $envFile geschrieben, Aufgabe nicht registriert."
   Write-Host "Aufgabe: powershell.exe $arguments"
+  foreach ($key in $settings.Keys) { Write-Host "Einstellung: $key=$($settings[$key])" }
   exit 0
 }
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
-Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -RunLevel Limited -Force | Out-Null
+$taskSettings = New-ScheduledTaskSettingsSet @settings -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -Settings $taskSettings -RunLevel Limited -Force | Out-Null
 Start-ScheduledTask -TaskName 'AIdeationWorker'
 Write-Host "Worker installiert (Aufgabenplanung: AIdeationWorker, Zugaenge: $envFile)"

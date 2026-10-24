@@ -8,8 +8,9 @@ import { gitEnvironment } from './project-command.js';
 
 /**
  * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
- * baut die Container mit `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive)
- * startet ihn sofort wieder – mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
+ * baut die Container mit `docker compose up -d --build` neu und beendet sich danach selbst (RESTART_EXIT_CODE).
+ * launchd (KeepAlive), systemd (Restart=always) bzw. unter Windows die Schleife in scripts\run-with-env.ps1 starten
+ * ihn sofort wieder – mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
  */
 export const RESTART_KEY = 'system:restart';
 export const RESTART_COMMAND = ['docker', 'compose', 'up', '-d', '--build'];
@@ -17,6 +18,17 @@ const BUILD_TIMEOUT_MS = 20 * 60_000;
 /** Höchstens so lange auf laufende Aufträge warten; danach werden sie unterbrochen und nach dem Start fortgesetzt. */
 export const MAX_WAIT_MS = 15 * 60_000;
 const MAX_LOG_CHARS = 4_000;
+/**
+ * Exit-Code des Workers nach einem erfolgreichen Neubau (75 = EX_TEMPFAIL). launchd und systemd starten ihn bei
+ * jedem Code neu; unter Windows startet scripts\run-with-env.ps1 den Worker genau bei diesem Code wieder – die
+ * geplante Aufgabe selbst läuft nur bei der Anmeldung an.
+ */
+export const RESTART_EXIT_CODE = 75;
+/**
+ * Steht „restarting“ länger, ist der Worker nicht wiedergekommen (z. B. Windows-Aufgabe ohne Neustart-Schleife):
+ * Dann darf ein neuer Neustart angefordert werden, statt dauerhaft 409 zu bekommen.
+ */
+export const RESTARTING_STALE_MS = 10 * 60_000;
 
 /**
  * Umgebung für Compose-Aufrufe (Neubau, Rollback, Abbilder): ohne `DEV_LOG_*` und `COMPOSE_*`. Bei Compose gehen
@@ -36,6 +48,8 @@ export interface RestartState {
   requestedBy: string | null;
   startedAt?: string | null;
   finishedAt?: string | null;
+  /** Seit wann der Worker sich zum Neustart beendet (Status „restarting“). */
+  restartingAt?: string | null;
   /** Kurze Meldung für die Oberfläche (z. B. „Wartet auf 1 laufenden Auftrag“). */
   message?: string | null;
   /** Ende der Ausgabe von docker compose. */
@@ -104,6 +118,13 @@ async function writeRestart(
   return state;
 }
 
+/** „restarting“ seit mehr als RESTARTING_STALE_MS: Der Worker hat sich beendet, ist aber nicht wieder gestartet. */
+function restartStale(state: RestartState, now: Date): boolean {
+  if (state.status !== 'restarting') return false;
+  const since = Date.parse(state.restartingAt ?? state.startedAt ?? state.requestedAt);
+  return Number.isFinite(since) && now.getTime() - since > RESTARTING_STALE_MS;
+}
+
 /** Neustart anfordern; läuft schon einer, wird dieser zurückgegeben (created = false). */
 export async function requestRestart(
   pool: Queryable,
@@ -112,7 +133,8 @@ export async function requestRestart(
   comment: string | null = null,
 ): Promise<{ state: RestartState; created: boolean }> {
   const current = await readRestart(pool);
-  if (current && OPEN_STATUSES.includes(current.status)) return { state: current, created: false };
+  if (current && OPEN_STATUSES.includes(current.status) && !restartStale(current, now))
+    return { state: current, created: false };
   const state = await writeRestart(pool, {
     status: 'requested',
     requestedAt: now.toISOString(),
@@ -446,6 +468,7 @@ export async function processRestart(
   await writeRestart(pool, {
     ...building,
     status: 'restarting',
+    restartingAt: now().toISOString(),
     message: 'Container laufen mit dem neuen Code. Der Worker startet neu …',
     log,
   });
