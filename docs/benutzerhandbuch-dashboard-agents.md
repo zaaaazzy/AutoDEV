@@ -457,6 +457,48 @@ Du kannst einen Bug einem Sprint zuordnen. Das geht im Anlegen-Formular, in der 
 
 ---
 
+## 11. Chat mit gewähltem Agent: welche Rechte gelten
+
+Im Chat kannst du einen bestimmten Agent ansprechen. Dann bekommt die Antwort die Rechte **dieses Agents**, nicht pauschal die des Assistenten. Das gilt auch dann, wenn der Befehl des Agents `--dangerously-skip-permissions` enthält.
+
+### 11.1 Agent wählen
+
+- Tippe im Chat-Feld `@` und wähle den Agent aus der Liste.
+- Der gewählte Agent erscheint als Chip mit dem Namen. Mit dem Kreuz (`×`) auf dem Chip entfernst du die Auswahl.
+- Ohne Auswahl antwortet der Chat-Assistent mit seinen eigenen Rechten.
+
+### 11.2 Welche Rechte gelten
+
+| Rolle des gewählten Agents | Rechte im Chat | Was der Befehl mit `--dangerously-skip-permissions` bewirkt |
+| --- | --- | --- |
+| Assistent | Vollzugriff: Dateien und Befehle wie beim Chat-Assistenten | Der Lauf startet ohne Wächter. |
+| Entwickler, Tester, Reviewer, Dokumentierer und andere Rollen | Wächter ist aktiv (Hook, Ordnergrenze, Freigaben des Agents) | Wirkungslos. Der Wächter bleibt aktiv. |
+| Visionär, Vor-dem-Sprint-Agents | Nur lesen: keine Datei-Werkzeuge, keine Shell | Wirkungslos. |
+| Ohne Rolle oder unbekannte Rolle | Nur lesen | Wirkungslos. |
+
+**Bedingungen:**
+
+- Die Rolle bestimmt die Rechte, nicht der Name des Agents. Einen Agent „Assistent“ nennen, ohne die Rolle Assistent, bringt keinen Vollzugriff.
+- Eine fehlende Rolle führt zu „nur lesen“, nie zu Vollzugriff.
+- Die Befehle und Freigaben des Agents gelten im Chat weiterhin: Die Ordnergrenze, die Freigaben und die Liste der Dateibefehle (Abschnitt 3) bleiben bestehen.
+- Die Ordnersperre aus Abschnitt 8 gilt auch hier. Ist der Arbeitsordner belegt, antwortet der Agent nur lesend.
+- Die Rolle eines Agents ändert nur die Administration. Ändert sich die Rolle, gelten die Rechte beim nächsten Chat-Befehl.
+
+**Bekannte Lücke:** Bei einem lokalen Modell (Ollama) hängt das Verwalten von Diensten weiter an der Rolle Assistent. Ein gewählter Entwickler-Agent darf dort also Dienste verwalten. Dafür ist ein eigener Auftrag vorgesehen.
+
+**Printscreens:** keine. Die Chat-Seite lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Die Beschriftungen oben stammen aus dem Code (`chat-composer.component.ts`, `agent-tasks.component.html`). Sie sollten am laufenden System geprüft werden.
+
+### 11.3 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+| --- | --- |
+| Der Agent im Chat darf keine Dateien ändern | Seine Rolle ist Visionär, Vor-dem-Sprint oder keine Rolle. Das ist gewollt. Schreiben darf nur ein Agent mit schreibender Rolle, etwa Entwickler. Die Rolle ändert die Administration. |
+| Der Befehl des Agents hat `--dangerously-skip-permissions`, der Chat fragt aber nach Freigaben | Gewollt. Vollzugriff gibt es nur für die Rolle Assistent. |
+| Der Agent meldet „Arbeitsordner belegt“ oder antwortet nur lesend | Ein Auftrag oder Testlauf hält den Ordner. Stelle die Frage nach dem Lauf erneut (Abschnitt 8.2). |
+| Im Chat ist kein Agent auswählbar | Der Agent gehört zu einem anderen Projekt. Prüfe, ob das richtige Projekt aktiv ist. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
