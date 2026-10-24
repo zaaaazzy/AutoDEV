@@ -231,21 +231,42 @@ test('Review-Container: Env-Prüfung erkennt Haupt-Passwort, Haupt-User und DB p
   assert.equal(typeof reviewSlotDatabase({ reviewUrl: REVIEW_URL, mainUrl: null }, 2), 'object');
 });
 
-test('Review-Datenbank anlegen: nur über die eigene Basis-Datenbank, nie über „postgres“', async () => {
+/** Führt REVIEW_DATABASE_SCRIPT mit einem nachgebauten psql aus; owner = Besitzer, den die Besitzer-Abfrage meldet. */
+async function runSlotDatabaseScript(owner: string) {
   const bin = await mkdtemp(join(tmpdir(), 'review-slotdb-'));
   const log = join(bin, 'psql.log');
-  // Erster Aufruf (Existenz-Abfrage) liefert nichts, also wird angelegt.
-  await writeFile(join(bin, 'psql'), `#!/bin/sh\necho "$PGDATABASE|$*" >> '${log}'\nexit 0\n`);
+  // Existenz-Abfrage liefert nichts (also wird angelegt), die Besitzer-Abfrage den vorgegebenen Besitzer.
+  await writeFile(
+    join(bin, 'psql'),
+    `#!/bin/sh\necho "$PGDATABASE|$*" >> '${log}'\ncase "$*" in *datdba*) echo '${owner}' ;; esac\nexit 0\n`,
+  );
   await chmod(join(bin, 'psql'), 0o755);
   const result = spawnSync('sh', ['-c', REVIEW_DATABASE_SCRIPT], {
-    env: { PATH: `${bin}:${process.env.PATH ?? ''}`, R_BASE: 'aideation_review', R_DB: 'aideation_review_3' },
+    env: {
+      PATH: `${bin}:${process.env.PATH ?? ''}`,
+      R_USER: 'aideation_review',
+      R_BASE: 'aideation_review',
+      R_DB: 'aideation_review_3',
+    },
+    encoding: 'utf8',
   });
+  return { result, calls: (await readFile(log, 'utf8')).trim().split('\n') };
+}
+
+test('Review-Datenbank anlegen: nur über die eigene Basis-Datenbank, nie über „postgres“', async () => {
+  const { result, calls } = await runSlotDatabaseScript('aideation_review');
   assert.equal(result.status, 0);
-  const calls = (await readFile(log, 'utf8')).trim().split('\n');
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.ok(calls.every((call) => call.startsWith('aideation_review|')));
   assert.match(calls[1]!, /CREATE DATABASE aideation_review_3/);
   assert.ok(!calls.join('\n').includes('postgres'));
+});
+
+test('Review-Datenbank eines anderen Users: klare Meldung statt „permission denied for schema public“', async () => {
+  const { result } = await runSlotDatabaseScript('devlog');
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /aideation_review_3 gehört „devlog“, nicht dem Review-User „aideation_review“/);
+  assert.match(result.stdout, /dropdb aideation_review_3/);
 });
 
 test('Beendeter Review-Container: die Ursache steht in der ersten Zeile der Meldung', () => {
