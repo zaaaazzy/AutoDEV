@@ -248,6 +248,45 @@ export const MIGRATIONS: readonly Migration[] = [
        WHERE status = 'failed' AND NOT interrupted AND output LIKE E'%\\nUnterbrochen: %';
     `,
   },
+  // Abgelehnter Bug-Auftrag erneut versucht: Der Bug folgt dem Auftrag wieder (rejected → open/in_progress) und wird
+  // beim Erledigen auch aus rejected heraus behoben. Nur der eigene Bug (bug_id); Fehlschlag-Meldungen, die jemand
+  // abgelehnt hat, bleiben abgelehnt. Altfälle (Auftrag erledigt, Bug noch abgelehnt) einmalig nachziehen.
+  {
+    version: 11,
+    name: 'bug-folgt-erneut-versuchtem-auftrag',
+    sql: `
+      CREATE OR REPLACE FUNCTION development_items_sync_bug() RETURNS trigger AS $fn$
+      BEGIN
+        IF OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'done' THEN
+          -- Behebungsauftrag erledigt oder Auftrag mit Fehlschlag-Meldungen doch noch fertig: auf den Friedhof.
+          UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+           WHERE (id = NEW.bug_id OR id = NEW.failure_bug_id OR development_id = NEW.id)
+             AND (status IN ('open', 'in_progress') OR (id = NEW.bug_id AND status = 'rejected'));
+        ELSIF NEW.bug_id IS NOT NULL AND OLD.status IS DISTINCT FROM NEW.status THEN
+          IF NEW.status = 'in_progress' THEN
+            UPDATE bugs SET status = 'in_progress', updated_at = NOW()
+             WHERE id = NEW.bug_id AND (status = 'open' OR (status = 'rejected' AND OLD.status = 'rejected'));
+          ELSIF NEW.status = 'rejected' THEN
+            UPDATE bugs SET status = 'rejected', updated_at = NOW() WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
+          ELSIF NEW.status IN ('planned', 'backlog', 'blocked') THEN
+            -- Abgelehnter Auftrag wieder eingeplant: Bug ist wieder offen.
+            UPDATE bugs SET status = 'open', updated_at = NOW()
+             WHERE id = NEW.bug_id AND (status = 'in_progress' OR (status = 'rejected' AND OLD.status = 'rejected'));
+          END IF;
+        END IF;
+        RETURN NULL;
+      END;
+      $fn$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS development_items_bug_trigger ON development_items;
+      CREATE TRIGGER development_items_bug_trigger AFTER UPDATE ON development_items
+        FOR EACH ROW EXECUTE FUNCTION development_items_sync_bug();
+
+      UPDATE bugs b SET status = 'fixed', fixed_at = COALESCE(d.completed_at, NOW()), updated_at = NOW(),
+             fix_notes = concat_ws(E'\\n\\n', NULLIF(b.fix_notes, ''), 'Auftrag nach erneutem Versuch erledigt – automatisch auf den Friedhof.')
+        FROM development_items d
+       WHERE d.bug_id = b.id AND d.status = 'done' AND b.status = 'rejected';
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
