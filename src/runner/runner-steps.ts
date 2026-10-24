@@ -275,7 +275,7 @@ export async function runStep(
   // Vorübergehender Fehler des Agents (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen –
   // aber nur, wenn das Budget den zweiten Versuch noch erlaubt.
   if (!cancelled && !isShuttingDown() && shouldRetry(result)) {
-    budgetStop = await budgetGate(ctx).catch(logged('runner-steps', null));
+    budgetStop = await budgetGate(ctx, agent.role).catch(logged('runner-steps', null));
     if (budgetStop) {
       await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht');
     } else {

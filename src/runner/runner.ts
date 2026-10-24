@@ -313,8 +313,8 @@ export async function runWorkItem(
         interrupted = true;
         break;
       }
-      // Budget: Ist ein Limit (Tag, Sprint, Auftrag) erreicht, startet kein weiterer Agent.
-      budgetStop = await budgetGate(ctx).catch(logged('runner', null));
+      // Budget: Ist ein Limit (Tag, Sprint, Auftrag) des Projekts oder der Rolle des Agents erreicht, startet er nicht.
+      budgetStop = await budgetGate(ctx, agent.role).catch(logged('runner', null));
       if (budgetStop) {
         passed = false;
         break;
@@ -367,7 +367,10 @@ export async function runWorkItem(
         : `Gescheitert bei „${last?.agentName ?? 'einem Agent'}“:\n${last?.output.slice(-1500) ?? ''}`;
       for (const [index, agent] of observers.entries()) {
         // Auch „Bei abgeschlossen/abgelehnt“ starten nicht mehr, wenn das Budget erreicht ist (ohne Blockade).
-        if (await budgetGate(ctx).catch(logged('runner', null))) break;
+        // Nur das Limit der eigenen Rolle erreicht: dieser Agent fällt aus, die übrigen laufen.
+        const stop = await budgetGate(ctx, agent.role).catch(logged('runner', null));
+        if (stop?.role) continue;
+        if (stop) break;
         if (!releaseTree && changesWorkingTree(agent)) {
           releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
           ctx.sprintName = await sprintNameOf(pool, item);

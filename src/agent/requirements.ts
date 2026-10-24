@@ -175,7 +175,8 @@ export async function runAuthorAgent(
     buildPrompt(author?.instructions ?? ''),
   );
   // Budget-Prüfpunkt auch für Chat, Auftragsautor, Visionär & Co.: ist Tag oder Sprint erreicht, startet kein Lauf.
-  const budget = await checkBudget(pool, options.project).catch(logged('requirements', null));
+  // Agent-Rollen (Autor, Bug-Wächter) zählen über agent_usage.role zusätzlich gegen ihr Rollen-Limit.
+  const budget = await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
   if (budget?.exceeded) {
     return {
       exitCode: 1,
@@ -250,7 +251,7 @@ export async function runAuthorAgent(
       )
       .catch(logged('requirements'));
     // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
-    if (budget?.states.length) await checkBudget(pool, options.project).catch(logged('requirements', null));
+    if (budget?.states.length) await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
     return {
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
