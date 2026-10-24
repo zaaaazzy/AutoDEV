@@ -73,8 +73,8 @@ Ein Agent ohne bekannte Rolle erscheint als **„Eigene Rolle“**.
 
 Zugangsdaten und Schlüssel im Projekt bleiben für jeden Claude-Agent unlesbar, unabhängig von der Rolle. Das gilt auch für den Visionär (nur lesend) und für den Chat-Assistenten mit Vollzugriff. Gesperrt sind unter anderem:
 
-- Umgebungsdateien (`.env`, `config/.env.production`), auch in Unterordnern,
-- Zertifikate und Schlüssel (`*.pem`, `*.key`),
+- Umgebungsdateien (`.env`, `.env.example`, `config/.env.production`), auch in Unterordnern,
+- Zertifikate und Schlüssel (`*.pem`, `*.key`) sowie private SSH-Schlüssel (`id_rsa`, `id_ed25519`, `id_ecdsa`),
 - SSH-, AWS- und GnuPG-Ordner im Projekt und im Benutzerordner.
 
 Die Sperre greift beim Lesen, Suchen (Grep) und Auflisten von Dateien (Glob). Bei Suchen über einen ganzen Ordner prüft AIdeation nicht jede Datei einzeln. Dort wirken nur die Sperren der Claude-CLI.
