@@ -93,6 +93,11 @@ async function foreignChanges(git: GitHelpers['git']): Promise<string[]> {
  * Gelingt das nicht, wirft sie OrderBranchError – nie arbeitet ein Auftrag auf main, dem Sprint oder einem fremden
  * Auftrags-Branch weiter. Projekte ohne Git: null.
  */
+/** Ordner, die ein Auftrag ohne Sprint verlassen muss, um auf main aufzusetzen (nie Branches der Menschen). */
+export function leavesForMain(branch: string): boolean {
+  return branch === 'HEAD' || branch.startsWith('sprint/') || branch.startsWith('wip/');
+}
+
 export async function enterOrderBranch(
   cwd: string,
   item: { id: string; title: string },
@@ -129,8 +134,10 @@ export async function enterOrderBranch(
       // Vor jedem neuen Auftrag: aktuellen main in den Sprint-Branch holen (Konflikte früh und klein statt am Ende).
       const refreshed = await refreshSprintFromMain(git, sprintBranch(sprintName));
       if (refreshed) console.info(`[${item.id}] ${refreshed}`);
-    } else if ((await currentBranch(git)) === 'HEAD' && (await branchExists(git, MAIN_BRANCH))) {
-      // Losgelöst (z. B. nach dem kompletten Test): der Auftrag ohne Sprint arbeitet auf main auf.
+    } else if (leavesForMain(await currentBranch(git)) && (await branchExists(git, MAIN_BRANCH))) {
+      // Losgelöst (z. B. nach dem kompletten Test) oder noch auf einem eigenen Branch von AIdeation (Sprint-Branch nach
+      // dem Abschluss, geparkter wip/…): Der Auftrag ohne Sprint arbeitet auf main auf. Sonst zweigte er vom alten
+      // Sprint-Branch ab, würde dorthin gemergt und käme nie in main.
       if (await checkedOutElsewhere(git, MAIN_BRANCH, cwd)) detachedBase = MAIN_BRANCH;
       else await must('checkout', MAIN_BRANCH);
     }
