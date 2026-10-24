@@ -36,6 +36,8 @@ function Resolve-Value([string]$Key, [string]$Default = '') {
 $values = [ordered]@{
   DEV_LOG_DATABASE_URL = Resolve-Value 'DEV_LOG_DATABASE_URL' 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation'
   DEV_LOG_SECRET_KEY = Resolve-Value 'DEV_LOG_SECRET_KEY'
+  # Eigener Ablageort der Playwright-Browser gilt auch fuer den Worker (Smoke-Tests der Spielprojekte, optische Abnahme).
+  PLAYWRIGHT_BROWSERS_PATH = Resolve-Value 'PLAYWRIGHT_BROWSERS_PATH'
 }
 if ($values.DEV_LOG_DATABASE_URL.Contains('devlog_local_dev')) {
   Write-Warning 'Die Datenbank-URL nutzt das Standardpasswort devlog_local_dev. Setze DEV_LOG_DB_PASSWORD in der .env und installiere mit DEV_LOG_DATABASE_URL erneut (siehe docs/installation.md).'

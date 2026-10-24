@@ -147,6 +147,28 @@ test('Linux-Worker: Unit ohne Geheimnisse, Rechte 600, Sonderzeichen für system
   assert.ok((await readFile(envFile, 'utf8')).split('\n').includes(`DEV_LOG_DATABASE_URL=${DATABASE_URL}`));
 });
 
+test('Worker-Dienst übernimmt einen eigenen Ablageort der Playwright-Browser (Smoke-Tests der Spiele)', async () => {
+  const browsers = '/opt/browser cache/ms-playwright';
+  const scripts = ['install-worker-linux.sh', ...(isMac ? ['install-worker.sh'] : [])];
+  for (const script of scripts) {
+    const { root, home } = await sandbox();
+    const envFile = join(home, '.config', 'aideation', 'worker.env');
+    const env = { HOME: home, DEV_LOG_DATABASE_URL: DATABASE_URL, DEV_LOG_SECRET_KEY: SECRET_KEY };
+    const first = run('bash', [join(root, 'scripts', script)], { ...env, PLAYWRIGHT_BROWSERS_PATH: browsers });
+    assert.equal(first.status, 0, first.output);
+    assert.ok((await readFile(envFile, 'utf8')).split('\n').includes(`PLAYWRIGHT_BROWSERS_PATH=${browsers}`), script);
+    // Erneuter Lauf ohne die Variable behält den Wert; ohne Angabe steht er gar nicht in der Datei.
+    assert.equal(run('bash', [join(root, 'scripts', script)], env).status, 0);
+    assert.match(await readFile(envFile, 'utf8'), /PLAYWRIGHT_BROWSERS_PATH=\/opt\/browser cache/);
+    const fresh = await sandbox();
+    run('bash', [join(fresh.root, 'scripts', script)], { ...env, HOME: fresh.home });
+    assert.doesNotMatch(
+      await readFile(join(fresh.home, '.config', 'aideation', 'worker.env'), 'utf8'),
+      /PLAYWRIGHT_BROWSERS_PATH/,
+    );
+  }
+});
+
 test('run-with-env.sh: setzt Werte unverändert, bricht ohne oder mit offener Env-Datei ab', async () => {
   const { base } = await sandbox();
   const envFile = join(base, 'worker.env');
