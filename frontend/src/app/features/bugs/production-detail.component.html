@@ -83,7 +83,7 @@
   }
   @for (event of events(); track event.id) {
     <article class="production-event">
-      <div class="production-event-head">
+      <div class="production-event-head row">
         <span class="tag">{{ sourceLabel[event.source] }}</span>
         @if (event.origin) {
           <code>{{ event.origin }}</code>

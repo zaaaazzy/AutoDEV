@@ -14,6 +14,8 @@ interface ProposalItem {
   score: number;
   reason: string;
   hours: number;
+  /** Gespeicherte Schätzung vor der Kalibrierung. */
+  rawHours: number | null;
   tokens: number | null;
   selected: boolean;
   rank: number | null;
@@ -23,7 +25,16 @@ interface ProposalItem {
 interface Capacity {
   hours: number;
   tokens: number | null;
-  source: 'history' | 'setting';
+  historyHours: number | null;
+}
+
+interface CalibrationSummary {
+  source: 'manual' | 'quick' | 'author' | 'legacy';
+  label: string;
+  hours: number;
+  tokens: number;
+  samples: number;
+  scope: 'project' | 'all' | 'default';
 }
 
 interface Totals {
@@ -38,6 +49,7 @@ interface Proposal {
   capacity: Capacity;
   items: ProposalItem[];
   tokenPriceUsd: number | null;
+  calibration: CalibrationSummary[];
   autopilot: {
     state: 'off' | 'paused' | 'finishing' | 'outside_hours' | 'ready';
     message: string | null;
@@ -53,6 +65,21 @@ interface ProposalComment {
 interface Roadmap {
   capacity: Capacity;
   sprints: { name: string; items: ProposalItem[]; totals: Totals }[];
+}
+
+const factor = (value: number): string => value.toLocaleString('de-DE', { maximumFractionDigits: 3 });
+
+/** „Altbestand ×0,04 (19 Aufträge) · Auftragsautor ×1 (zu wenig Messwerte)“ für die Kapazitätszeile. */
+export function calibrationText(calibration: readonly CalibrationSummary[]): string {
+  return calibration
+    .map((entry) => {
+      const basis =
+        entry.scope === 'default'
+          ? 'zu wenig Messwerte'
+          : `${entry.samples} Aufträge${entry.scope === 'all' ? ', alle Projekte' : ''}`;
+      return `${entry.label} ×${factor(entry.hours)} (${basis})`;
+    })
+    .join(' · ');
 }
 
 /**
@@ -74,6 +101,11 @@ export class SprintProposalComponent {
   private readonly gitGuard = inject(GitGuardService);
   protected readonly formatHours = formatHours;
   protected readonly formatUsd = formatUsd;
+  protected readonly calibrationText = calibrationText;
+  protected readonly rawHoursTitle = (item: ProposalItem): string | null =>
+    item.rawHours === null || item.rawHours === item.hours
+      ? null
+      : `Geschätzt ${formatHours(item.rawHours)}, kalibriert auf gemessene Agent-Stunden`;
 
   protected readonly proposal = signal<Proposal | null>(null);
   protected readonly picked = signal<ReadonlySet<string>>(new Set());

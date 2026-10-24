@@ -36,6 +36,8 @@ export interface RunContext {
   budgetPercent?: number;
   /** Routing-Regeln und Stufen-Modelle des Projekts (einmal je Lauf geladen). */
   routing?: ProjectRouting | null;
+  /** Kalibrierte Schätzung des Auftrags in Agent-Stunden fürs Routing (einmal je Lauf berechnet). */
+  routedHours?: number | null;
   /** Zuletzt ermittelte geänderte Dateien des Auftrags (für den Abschnitt „Geänderte Dateien“). */
   changedFiles?: string[];
   /** Grund, warum der Lauf angehalten wurde (z. B. Budget), für die Push-Nachricht. */

@@ -10,7 +10,8 @@ source "$ROOT/scripts/lib/service-env.sh"
 LABEL="com.aideation.worker"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 ENV_FILE="$SERVICE_ENV_DIR/worker.env"
-NODE_BIN="$(dirname "$(command -v node)")"
+# Echter Pfad statt Shim/Sitzungspfad (fnm, Volta): der Dienst startet später ohne die Shell-Umgebung.
+NODE_BIN="$(dirname "$(node -p process.execPath)")"
 # launchd startet mit minimalem PATH; externe Agent-CLIs (claude, copilot, gemini) liegen oft in
 # ~/.local/bin oder /opt/homebrew/bin. Deshalb den PATH der aufrufenden Shell übernehmen.
 WORKER_PATH="$NODE_BIN:$HOME/.local/bin:/opt/homebrew/bin:$PATH:/usr/local/bin:/usr/bin:/bin"

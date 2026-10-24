@@ -32,7 +32,7 @@ const KIND_LABEL = { git: 'Git', agent: 'Agent', user: 'Deine Aktion' } as const
       </summary>
       <app-wait-status #wait [card]="true" />
       @if (activities().length) {
-        <ul class="running-list">
+        <ul class="running-list plain-list">
           @for (activity of activities(); track $index) {
             <li [class]="'running-item ' + activity.kind">
               <span class="review-spinner" aria-hidden="true"></span>

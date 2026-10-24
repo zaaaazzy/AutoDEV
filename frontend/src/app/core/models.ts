@@ -29,7 +29,7 @@ export interface Project {
   restartAfterSprint?: boolean;
   /** Sprintplanung: manuell (Standard), vorschlagen oder Autopilot. */
   sprintMode?: 'manual' | 'suggest' | 'autopilot';
-  /** Kapazität eines Sprints in Stunden, solange es keine abgeschlossenen Sprints gibt. */
+  /** Kapazität eines Sprints in Agent-Stunden (gemessene Laufzeit der Agents). */
   sprintCapacityHours?: number;
   /** Arbeitszeiten des Sprint-Autopilots (HH:MM, Wochentage 1 = Montag … 7 = Sonntag). */
   autopilotStart?: string;
@@ -106,7 +106,11 @@ export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' |
 export interface Estimate {
   /** Bereich der Arbeit; Aufträge erben ihn von Idee bzw. Bug. */
   category?: Category | null;
+  /** Gespeicherte Schätzung; `calibratedHours` ist sie in gemessenen Agent-Stunden (vom Board geliefert). */
   effortHours?: number | null;
+  calibratedHours?: number | null;
+  /** Herkunft der Schätzung: von Hand, Schnellschätzung, Auftragsautor; null = Altbestand. */
+  estimateSource?: 'manual' | 'quick' | 'author' | null;
   tokenEstimate?: number | null;
   benefit?: number | null;
   cost?: number | null;

@@ -1,9 +1,7 @@
 import { Pipe, type PipeTransform } from '@angular/core';
+import { escapeHtml } from './html.js';
 import { MarkdownPipe } from './markdown.pipe.js';
 import { splitTestSteps, type TestStep } from './test-output.js';
-
-const escape = (value: string): string =>
-  value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 
 interface ToolCall {
   failed: boolean;
@@ -32,10 +30,10 @@ export class AgentOutputPipe implements PipeTransform {
     const ok = step.status === 'passed';
     return (
       `<div class="test-step ${ok ? 'passed' : 'failed'}"><span class="test-icon" aria-hidden="true">${ok ? '✓' : '✕'}</span>` +
-      `<div class="test-body"><div class="test-head"><code>${escape(step.command)}</code>` +
-      `<span class="test-summary">${escape(step.summary)}</span></div>` +
+      `<div class="test-body"><div class="test-head"><code>${escapeHtml(step.command)}</code>` +
+      `<span class="test-summary">${escapeHtml(step.summary)}</span></div>` +
       (step.raw
-        ? `<details class="test-raw"><summary>Ausgabe</summary><pre>${escape(step.raw.slice(-6000))}</pre></details>`
+        ? `<details class="test-raw"><summary>Ausgabe</summary><pre>${escapeHtml(step.raw.slice(-6000))}</pre></details>`
         : '') +
       '</div></div>'
     );
@@ -93,8 +91,8 @@ export class AgentOutputPipe implements PipeTransform {
     const icon = failed ? '✕' : '›';
     return (
       `<div class="tool-call${failed ? ' failed' : ''}"><span class="tool-icon" aria-hidden="true">${icon}</span>` +
-      `<div class="tool-body"><code title="${escape(command)}">${escape(command.slice(0, 400))}</code>` +
-      (call.result ? `<span class="tool-result">${escape(call.result)}</span>` : '') +
+      `<div class="tool-body"><code title="${escapeHtml(command)}">${escapeHtml(command.slice(0, 400))}</code>` +
+      (call.result ? `<span class="tool-result">${escapeHtml(call.result)}</span>` : '') +
       '</div></div>'
     );
   }
