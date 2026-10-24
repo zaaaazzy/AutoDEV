@@ -47,11 +47,13 @@ export interface RunContext {
 /**
  * Budget-Prüfpunkt vor jedem Agent-Schritt (Tag, Sprint, Auftrag): liefert den erreichten Zeitraum oder null. Ein
  * bereits laufender Schritt wird nie abgebrochen; das Limit kann daher um höchstens einen Schritt überschritten werden.
+ * Mit `role` (agents.role des Schritts) gelten zusätzlich die Limits dieser Agent-Rolle.
  */
-export async function budgetGate(ctx: RunContext): Promise<BudgetState | null> {
+export async function budgetGate(ctx: RunContext, role?: string | null): Promise<BudgetState | null> {
   const check = await checkBudget(ctx.pool, ctx.item.projectSlug, {
     itemId: ctx.item.id,
     sprintId: ctx.item.sprintId ?? null,
+    role: role ?? null,
   });
   ctx.budgetPercent = check.percent;
   return check.exceeded;

@@ -2,16 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import {
+  blockForBudget,
   type BudgetState,
+  budgetStates,
   budgetTodo,
   checkBudget,
   exceededState,
   holdForBudget,
   loadBudgets,
+  loadRoleLimits,
   releaseBudgetBlocks,
+  spendByRole,
   usagePercent,
   warnThresholds,
 } from './budget.js';
+import { budgetGate, type RunContext } from './runner-context.js';
 import { localDay, localTimeZone } from '../core/time-zone.js';
 
 interface Query {
@@ -203,4 +208,145 @@ test('Sprintlimit: Sprintbeginn ist Mitternacht Ortszeit', async () => {
   const sprint = queries.find((query) => query.sql.includes('FROM sprints'));
   assert.match(sprint?.sql ?? '', /start_date::timestamp AT TIME ZONE \$3/);
   assert.equal(sprint?.values[2], localTimeZone());
+});
+
+// ── Token-Limits je Agent-Rolle ──────────────────────────────────────────────────────────────────────────────────
+
+/** Projekt ohne Projektlimit; Rollen-Limits und Verbrauch je Rolle aus den übergebenen Tabellen. */
+function rolePool(roleLimits: { role: string; period: string; maxTokens: string }[], spent: Record<string, number>) {
+  return fakePool((sql, values) => {
+    if (sql.includes('FROM budget_role_limits')) {
+      const role = values[1] as string | null;
+      return { rows: roleLimits.filter((row) => role === null || row.role === role) };
+    }
+    if (sql.includes('GROUP BY role')) {
+      const roles = values[2] as string[];
+      return {
+        rows: roles.filter((role) => spent[role] !== undefined).map((role) => ({ role, tokens: spent[role], cost: 0 })),
+      };
+    }
+    return undefined;
+  });
+}
+
+test('Rollen-Verbrauch: Schritte über agent_id → agents.role und agent_usage.role; ohne agent_id nur im Projekttopf', async () => {
+  const { pool, queries } = rolePool([{ role: 'developer', period: 'day', maxTokens: '1000' }], { developer: 400 });
+  const spend = await spendByRole(pool, 'mainty', localDay().since, ['developer']);
+  assert.deepEqual(spend.get('developer'), { tokens: 400, costUsd: 0 });
+  const sql = queries.find((query) => query.sql.includes('GROUP BY role'))?.sql ?? '';
+  // Inner Join: Schritte ohne agent_id (eingebaute Agents, gelöschter Agent mit ON DELETE SET NULL) zählen zu keiner Rolle.
+  assert.match(sql, /JOIN agents a ON a\.id = s\.agent_id[\s\S]*a\.role = ANY\(\$3\)/);
+  assert.match(sql, /FROM agent_usage[\s\S]*role = ANY\(\$3\)/);
+  // Der Projektverbrauch filtert nicht nach Rolle: dieselben Schritte bleiben dort enthalten (weder doppelt noch verloren).
+  const project = fakePool((query) =>
+    query.includes('FROM budgets') ? { rows: [{ period: 'day', maxTokens: '1000', maxCostUsd: null }] } : undefined,
+  );
+  await checkBudget(project.pool, 'mainty', { role: 'developer' });
+  const projectSpend = project.queries.find((query) => query.sql.includes('UNION ALL'));
+  assert.ok(projectSpend);
+  assert.doesNotMatch(projectSpend.sql, /agents a|agent_id/);
+});
+
+test('Rollen-Limit erreicht: Schritt der Rolle developer startet nicht, tester mit freiem Limit läuft weiter', async () => {
+  const { pool } = rolePool(
+    [
+      { role: 'developer', period: 'day', maxTokens: '500000' },
+      { role: 'tester', period: 'day', maxTokens: '500000' },
+    ],
+    { developer: 500000, tester: 1000 },
+  );
+  const developer = await checkBudget(pool, 'mainty', { itemId: 'item-1', role: 'developer' });
+  assert.ok(developer.exceeded);
+  assert.equal(developer.exceeded.role, 'developer');
+  assert.equal(developer.exceeded.key, `rolle:developer:${localDay().key}`);
+  assert.match(budgetTodo(developer.exceeded),/Tageslimit der Rolle „developer“: 500k Tokens von 500k Tokens/);
+  const tester = await checkBudget(pool, 'mainty', { itemId: 'item-1', role: 'tester' });
+  assert.equal(tester.exceeded, null);
+  assert.equal(tester.states[0]?.role, 'tester');
+  // Ohne Rolle (Chat, Visionär) und für „custom“ gelten nur die Projektlimits.
+  assert.deepEqual((await checkBudget(pool, 'mainty')).states, []);
+  assert.deepEqual((await checkBudget(pool, 'mainty', { role: 'custom' })).states, []);
+});
+
+test('budgetGate prüft vor dem Schritt das Limit seiner Rolle', async () => {
+  const { pool } = rolePool([{ role: 'developer', period: 'day', maxTokens: '100' }], { developer: 100, tester: 5 });
+  const ctx = { pool, item: { id: 'item-1', projectSlug: 'mainty', sprintId: null } } as unknown as RunContext;
+  assert.equal((await budgetGate(ctx, 'developer'))?.role, 'developer');
+  assert.equal(await budgetGate(ctx, 'tester'), null);
+});
+
+test('Rollen-Limit entfernt (keine Zeile): keine Prüfung und keine Verbrauchsabfrage der Rolle', async () => {
+  const { pool, queries } = rolePool([], { developer: 10_000_000 });
+  assert.deepEqual(await checkBudget(pool, 'mainty', { role: 'developer' }), {
+    states: [],
+    exceeded: null,
+    percent: 0,
+  });
+  assert.ok(!queries.some((query) => query.sql.includes('GROUP BY role')));
+});
+
+test('80-%-Warnung je Rolle und Zeitraum genau einmal (Präfix rolle:<role>: in budget_warnings)', async () => {
+  const warned = new Set<string>();
+  const inserts: unknown[][] = [];
+  const pushes: string[] = [];
+  const { pool } = fakePool((sql, values) => {
+    if (sql.includes('FROM budget_role_limits'))
+      return { rows: [{ role: 'developer', period: 'day', maxTokens: '1000' }] };
+    if (sql.includes('GROUP BY role')) return { rows: [{ role: 'developer', tokens: 850, cost: 0 }] };
+    if (!sql.includes('INSERT INTO budget_warnings')) return undefined;
+    inserts.push(values);
+    const key = values.join('|');
+    if (warned.has(key)) return { rows: [] };
+    warned.add(key);
+    return { rows: [{}] };
+  });
+  const send = async (_pool: Pool, message: { title: string }) => {
+    pushes.push(message.title);
+    return 1;
+  };
+  const check = async () =>
+    warnThresholds(pool, 'mainty', await budgetStates(pool, 'mainty', {}, await loadRoleLimits(pool, 'mainty')), send);
+  assert.equal((await check()).length, 1);
+  assert.equal((await check()).length, 0);
+  assert.deepEqual(pushes, ['💰 Budget (developer) zu 85 % verbraucht · mainty']);
+  assert.deepEqual(inserts[0], ['mainty', 'day', `rolle:developer:${localDay().key}`, 80]);
+});
+
+test('Blockade durch Rollen-Limit: Grund am Auftrag; nach Erhöhen des Limits wieder „geplant“', async () => {
+  let limit = '500000';
+  const { pool, queries } = fakePool((sql, values) => {
+    if (sql.includes('budget_blocked IS NOT NULL') && sql.startsWith('SELECT'))
+      return { rows: [{ id: 'item-1', sprintId: null, period: 'day', role: 'developer' }] };
+    if (sql.includes('FROM budget_role_limits'))
+      return {
+        rows: [{ role: 'developer', period: 'day', maxTokens: limit }].filter(
+          (row) => !values[1] || row.role === values[1],
+        ),
+      };
+    if (sql.includes('GROUP BY role')) return { rows: [{ role: 'developer', tokens: 600000, cost: 0 }] };
+    if (sql.includes("SET status = 'planned'")) return { rows: [], rowCount: 1 };
+    if (sql.includes('SET action_todo')) return { rows: [{ sprintId: null }] };
+    return undefined;
+  });
+  const exceeded = (await checkBudget(pool, 'mainty', { itemId: 'item-1', role: 'developer' })).exceeded;
+  assert.ok(exceeded);
+  await blockForBudget(pool, 'item-1', exceeded);
+  const block = queries.find((query) => query.sql.includes('budget_blocked_role = $4'));
+  assert.deepEqual(block?.values.slice(2), ['day', 'developer']);
+  assert.match(String(block?.values[1]), /Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens/);
+  assert.deepEqual(await releaseBudgetBlocks(pool, 'mainty'), []);
+  limit = '1000000';
+  assert.deepEqual(await releaseBudgetBlocks(pool, 'mainty'), ['item-1']);
+});
+
+test('Freigabe: Projektlimit-Blockade hängt nicht am Rollen-Limit einer anderen Rolle', async () => {
+  const { pool } = fakePool((sql) => {
+    if (sql.includes('budget_blocked IS NOT NULL') && sql.startsWith('SELECT'))
+      return { rows: [{ id: 'item-1', sprintId: null, period: 'day', role: null }] };
+    if (sql.includes('FROM budget_role_limits')) return { rows: [{ role: 'tester', period: 'day', maxTokens: '1' }] };
+    if (sql.includes('GROUP BY role')) return { rows: [{ role: 'tester', tokens: 99, cost: 0 }] };
+    if (sql.includes("SET status = 'planned'")) return { rows: [], rowCount: 1 };
+    return undefined;
+  });
+  assert.deepEqual(await releaseBudgetBlocks(pool, 'mainty'), ['item-1']);
 });

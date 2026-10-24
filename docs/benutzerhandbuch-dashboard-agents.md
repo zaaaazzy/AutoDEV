@@ -511,6 +511,101 @@ Im Chat kannst du einen bestimmten Agent ansprechen. Dann bekommt die Antwort di
 
 ---
 
+## 12. Token-Limits je Agent-Rolle (nur API)
+
+Zusätzlich zum Projektbudget (Einstellungen → Budget) kannst du je **Agent-Rolle** und Zeitraum ein Token-Limit setzen. Ein Entwickler-Agent kann so ein Tageslimit haben, ohne dass der Tester, Reviewer oder Dokumentierer davon betroffen sind. Das Projektlimit bleibt wie bisher. Die Rollen-Limits kommen dazu und ersetzen es nicht.
+
+**Printscreens:** keine. Das Feature hat noch keine Oberfläche; Einstellungen, Dashboard und Statistik folgen in einem eigenen Auftrag. Die Beispiele unten zeigen Anfrage und Antwort der API in der Form, die der Code erzeugt. Sie wurden nicht gegen ein laufendes System geprüft.
+
+### 12.1 Was du einstellen kannst
+
+- **Rollen:** `author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`. Die Rolle `custom` hat kein Limit, weil sie keiner festen Aufgabe entspricht.
+- **Zeiträume:** `day` (heute, Tageswechsel nach `DEV_LOG_TIMEZONE`), `sprint` (aktiver Sprint) und `order` (ein einzelner Auftrag).
+- **Limit:** eine positive Zahl in Tokens oder `null`. `null` entfernt das Limit. Eine fehlende Zeile bedeutet **keine Grenze**: Für diese Rolle und diesen Zeitraum prüft der Worker nichts.
+- **Wer:** Lesen ist für angemeldete Benutzer mit Projektzugriff vorgesehen. Ändern darf nur die Rolle **admin**. Ohne sie antwortet die API mit 403 und speichert nichts.
+
+### 12.2 Endpunkte
+
+**Lesen:** `GET /api/projects/:slug/budget/roles`
+
+Die Antwort enthält je Rolle und Zeitraum den Grenzwert und den Verbrauch. Beispiel (Werte erfunden):
+
+```json
+{
+  "warnPercent": 80,
+  "sprintId": "sprint-23",
+  "roles": [
+    {
+      "role": "developer",
+      "limits": {
+        "day": { "maxTokens": 500000, "spend": { "tokens": 420000, "costUsd": 3.1 }, "percent": 84 },
+        "sprint": { "maxTokens": null, "spend": { "tokens": 1900000, "costUsd": 14.2 }, "percent": null },
+        "order": { "maxTokens": null, "spend": null, "percent": null }
+      }
+    }
+  ]
+}
+```
+
+- `spend` ist der Verbrauch heute bzw. im aktiven Sprint. Beim Auftragslimit ist er `null`, weil der Verbrauch am einzelnen Auftrag hängt.
+- `percent` ist `null`, wenn kein Limit gesetzt ist oder kein Verbrauch ermittelt wird.
+- Ohne aktiven Sprint ist `sprintId` `null`.
+
+**Ändern:** `PUT /api/projects/:slug/budget/roles/:role` (nur admin)
+
+Der Body enthält die Zeiträume, die du ändern willst. Ein fehlender Zeitraum bleibt unverändert.
+
+```json
+{ "day": { "maxTokens": 500000 }, "sprint": null }
+```
+
+- `{ "maxTokens": 500000 }` setzt die Grenze, `null` oder `{ "maxTokens": null }` entfernt sie.
+- Die Antwort hat dasselbe Format wie das GET.
+- Nach dem Speichern gibt der Worker wegen Budget blockierte Aufträge sofort frei, wenn ihr Limit wieder reicht.
+
+### 12.3 Fehlermeldungen
+
+| Eingabe | Antwort | Meldung (Auszug) |
+|---------|---------|------------------|
+| Rolle unbekannt, z. B. `custom`, `foo`, `admin` | 400 | „Unbekannte Agent-Rolle „foo“: erlaubt sind author, developer, …“ |
+| Zeitraum unbekannt, z. B. `week` | 400 | „Unbekannter Zeitraum „week“: erlaubt sind day, sprint und order.“ |
+| Grenze keine positive Zahl, z. B. `-5` oder `"abc"` | 400 | „day: maxTokens muss eine positive Zahl sein (oder null für unbegrenzt).“ |
+| Body ohne Zeitraum, z. B. `{}` | 400 | „Mindestens einen Zeitraum (day, sprint oder order) angeben.“ |
+| Kein admin | 403 | Zugriff verweigert |
+| Projekt existiert nicht | 404 | „Projekt nicht gefunden.“ |
+
+Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
+
+### 12.4 Was der Worker damit macht
+
+- **Prüfung vor jedem Schritt:** Zuerst gilt das Projektlimit, dann das Limit der Rolle des Schritts. Ist ein Rollen-Limit erreicht, startet der Schritt nicht.
+- **Blockade:** Der Auftrag wird „blocked“ mit „Aktion notwendig“. Der Grund steht am Auftrag, etwa „Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens“. Er erscheint auch dann, wenn kein Schritt fehlgeschlagen ist. Die Problemanalyse zeigt ihn als „Budget-Blockade“.
+- **Warnung ab 80 %:** Eine Push-Nachricht je Rolle, Zeitraum und Periode, z. B. „💰 Budget (developer) zu 85 % verbraucht“. Die Warnung kommt beim nächsten Prüfpunkt, also vor dem nächsten Schritt, nicht sofort bei jeder Zahl. Am nächsten Tag bzw. im nächsten Sprint kommt sie wieder.
+- **Freigabe:** Der Auftrag wird wieder „geplant“, sobald sein Zeitraum wieder Luft hat: am Folgetag, im neuen Sprint oder nach dem Erhöhen bzw. Entfernen des Limits.
+- **Laufender Schritt:** Ein laufender Schritt wird nicht abgebrochen. Das Limit kann daher um höchstens einen Schritt überschritten werden.
+
+### 12.5 Bedingungen und Grenzen
+
+- **Verbrauch je Rolle:** Er zählt Schritte, deren Agent eine Rolle hat (über `agent_id`), und den Verbrauch in `agent_usage` mit dieser Rolle.
+- **Ohne Rolle:** Schritte ohne Agent (eingebaute Agents wie Chat, Auftragsautor und Visionär) zählen zu keiner Rolle. Sie bleiben nur im Projektverbrauch.
+- **Gelöschter Agent:** Sein früherer Verbrauch geht in den Projekttopf über, weil die Zuordnung zur Rolle wegfällt. Das ist gewollt.
+- **Historische Daten:** Schritte ohne `agent_id` werden nicht nachträglich einer Rolle zugeordnet.
+- **Kosten:** Es gibt nur Token-Limits je Rolle. Kosten-Limits (USD/CHF) je Rolle kommen später.
+- **Projektlimit:** Es bleibt unverändert. Ein Rollen-Limit ersetzt es nicht, es kommt zusätzlich.
+
+### 12.6 Fehlerbehebung
+
+| Problem | Ursache und Lösung |
+|---------|--------------------|
+| Ein Rollen-Limit ist gesetzt, der Schritt läuft trotzdem | Der Verbrauch der Rolle liegt noch unter dem Limit, oder der Schritt lief schon, als das Limit erreicht wurde (siehe 12.4). Prüfe mit `GET …/budget/roles`, ob `percent` über 100 liegt. |
+| Verbrauch einer Rolle wirkt zu niedrig | Schritte ohne Agent oder eines gelöschten Agents zählen zu keiner Rolle (siehe 12.5). |
+| Auftrag bleibt blockiert, obwohl das Limit erhöht ist | Die Freigabe läuft nach dem PUT. Liegt der Verbrauch noch über dem neuen Limit, bleibt er blockiert. Prüfe das `percent` im GET. |
+| Keine Warnung, obwohl der Verbrauch über 80 % liegt | Die Warnung kommt beim nächsten Prüfpunkt. Sie wird je Periode nur einmal gesendet. Im neuen Tag bzw. Sprint kommt sie wieder. |
+| 400 beim Speichern | Rolle, Zeitraum oder Grenze prüfen (Tabelle 12.3). |
+| 403 beim Speichern | Dein Konto hat nicht die Rolle admin. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln

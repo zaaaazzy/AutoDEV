@@ -203,7 +203,7 @@ flowchart TB
 - Erneuter Versuch: bereits bestandene Agents werden übersprungen, ihre Ausgabe geht weiter.
 - Zeitlimit je Schritt 30 min (Standard).
 - Abbruch („Abbrechen“ in der Oberfläche, Zeitlimit, Worker-Ende): Ein Signal erreicht Modellanfragen, jedes Werkzeug des lokalen Modells und laufende Befehle samt Prozessgruppe. Nach dem Abbruch startet kein weiteres Werkzeug (`write_file`, `replace_in_file`, `run_command`, `run_sql`), auch ein schon abgebrochenes Signal wird geprüft. Der Schritt wartet auf das echte Ende des Agents, bevor Commit oder `checkout` laufen. Tokens und Kosten des abgebrochenen Laufs bleiben erhalten. Ein Abbruch von aussen meldet „Abgebrochen: Der Agent wurde gestoppt.“ und gilt weder als vorübergehender Fehler noch als Erfolg.
-- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
+- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit des Projekts und der Agent-Rolle geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
 - Modell-Routing: Die Regeln des Projekts wählen je Schritt lokal (Ollama) oder stark (CLI); Modell und Regel stehen am Schritt.
 
 ## 6 · Fehler, Problemanalyse und Bugfix
@@ -409,6 +409,17 @@ Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. D
 ### Budget und Modell-Routing
 
 Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
+
+#### Token-Limits je Agent-Rolle
+
+Zusätzlich zu den Projektlimits kann je Agent-Rolle (`author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`; nicht `custom`) und Zeitraum (`day`, `sprint`, `order`) ein Token-Limit gelten (Tabelle `budget_role_limits`). Keine Zeile bedeutet keine Grenze. Eine Oberfläche gibt es noch nicht, nur die API:
+
+- `GET /api/projects/:slug/budget/roles`: alle Rollen mit `maxTokens`, Verbrauch (`spend`) und Anteil (`percent`) je Zeitraum. Der Verbrauch ist der von heute bzw. vom aktiven Sprint. Beim Auftragslimit ist `spend` `null`, weil der Verbrauch dort am einzelnen Auftrag hängt.
+- `PUT /api/projects/:slug/budget/roles/:role` (nur „admin“): Body `{ "day": { "maxTokens": 500000 }, "sprint": null }`. Eine Zahl setzt die Grenze, `null` bzw. `{ "maxTokens": null }` entfernt sie, ein fehlender Zeitraum bleibt unverändert. Unbekannte Rolle oder unbekannter Zeitraum und eine Grenze, die keine positive Zahl ist, ergeben 400. Danach werden wegen Budget blockierte Aufträge freigegeben, wenn ihr Limit wieder reicht.
+
+Verbrauch je Rolle: Workflow-Schritte über `agent_run_steps.agent_id → agents.role`, dazu `agent_usage.role` (Autor, Bug-Wächter). Schritte ohne `agent_id` (eingebaute Agents) und Schritte eines gelöschten Agents (`ON DELETE SET NULL`) zählen zu keiner Rolle, bleiben aber im Projektverbrauch. Ältere Schritte werden nicht nachträglich zugeordnet.
+
+Vor jedem Agent-Schritt (`budgetGate` mit der Rolle des Agents) und vor Autor bzw. Bug-Wächter gilt zuerst das Projektlimit, dann das Limit der Rolle. Ist ein Rollen-Limit erreicht, startet der Schritt nicht. Der Auftrag wird `blocked` mit dem Grund in `failure` bzw. „Aktion notwendig“, etwa „Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens“. Dazu kommt die Rolle in `budget_blocked_role`. Die Problemanalyse zeigt diesen Grund auch ohne fehlgeschlagenen Schritt. Bei „Bei abgeschlossen/abgelehnt“ fällt nur der Agent mit erreichtem Rollen-Limit aus. Die 80-%-Warnung kommt je Rolle und Periode genau einmal; in `budget_warnings` steht dafür `period_key = rolle:<role>:<key>`.
 
 ### Zeitleiste und Rückfragen im Auftrag
 

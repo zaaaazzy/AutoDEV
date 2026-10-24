@@ -9,7 +9,8 @@ export type Role = (typeof ROLES)[number];
 export const ROLE_INFO: Record<Role, { label: string; description: string }> = {
   admin: {
     label: 'Administration',
-    description: 'Benutzer und Rollen, Projekte anlegen und einstellen, Agent-Rechte, globale Einstellungen.',
+    description:
+      'Benutzer und Rollen, Projekte anlegen und einstellen, Budget und Token-Limits je Agent-Rolle, Agent-Rechte, globale Einstellungen.',
   },
   agents: { label: 'Agents verwalten', description: 'Agents anlegen, ändern, löschen und ordnen.' },
   run: {
