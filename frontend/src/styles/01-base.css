@@ -190,15 +190,15 @@ html {
 
 @media (max-width: 720px) {
   html,
-    body {
-      touch-action: pan-y pinch-zoom;
-    }
+  body {
+    touch-action: pan-y pinch-zoom;
+  }
 }
 
 @media (max-width: 480px) {
   .wide {
-      grid-column: auto;
-    }
+    grid-column: auto;
+  }
 }
 
 @media (pointer: coarse), (max-width: 720px) {
@@ -207,29 +207,29 @@ html {
    * und rechts fehlt Rand. Auf Touch-Geräten daher mindestens 16 px, und seitliches Verschieben ist abgeschnitten.
    */
   input,
-    select,
-    textarea {
-      font-size: 16px !important;
-    }
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
 }
 
 /* Liste ohne Aufzählungszeichen und ohne Einzug (Abstände setzt die Liste selbst) */
 .plain-list {
-    margin: 0;
-    padding: 0;
-    list-style: none
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 /* Text einzeilig abschneiden („…“); braucht eine begrenzte Breite */
 .truncate {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Elemente nebeneinander, senkrecht zentriert */
 .row {
-    display: flex;
-    align-items: center;
-    gap: 8px
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
