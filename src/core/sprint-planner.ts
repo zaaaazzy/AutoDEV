@@ -1,6 +1,6 @@
 /**
  * Autopilot-Sprintplanung (deterministisch, ohne Modell): bewertet offene Aufträge, füllt den Sprint bis zur
- * gemessenen Kapazität und legt die Reihenfolge fest – Folgeaufträge nach ihrem Vorgänger, Aufträge mit
+ * Kapazität in Agent-Stunden (Schätzungen kalibriert, siehe `estimate-calibration.ts`) und legt die Reihenfolge fest – Folgeaufträge nach ihrem Vorgänger, Aufträge mit
  * denselben Dateien direkt hintereinander (passt zur Projektsperre).
  */
 export interface PlanCandidate {
@@ -10,8 +10,10 @@ export interface PlanCandidate {
   kind: 'feature' | 'bug';
   benefit: number | null;
   cost: number | null;
+  /** Kalibrierte Agent-Stunden bzw. Tokens; `rawEffortHours` ist die gespeicherte Schätzung. */
   effortHours: number | null;
   tokenEstimate: number | null;
+  rawEffortHours?: number | null;
   followUpOf: string | null;
   /** War schon einmal blockiert oder aus einem Sprint genommen. */
   troubled: boolean;
@@ -26,6 +28,8 @@ export interface PlannedItem {
   score: number;
   reason: string;
   hours: number;
+  /** Gespeicherte, nicht kalibrierte Schätzung (null = keine). */
+  rawHours: number | null;
   tokens: number | null;
   selected: boolean;
   rank: number | null;
@@ -34,9 +38,12 @@ export interface PlannedItem {
 }
 
 export interface Capacity {
+  /** Sprint-Größe aus der Einstellung, in Agent-Stunden. */
   hours: number;
+  /** Token-Grenze aus dem Sprint-Budget; null ohne Token-Limit. */
   tokens: number | null;
-  source: 'history' | 'setting';
+  /** Median der gemessenen Agent-Stunden der letzten 3 abgeschlossenen Sprints, nur zur Anzeige; null ohne Historie. */
+  historyHours: number | null;
 }
 
 export interface SprintProposal {
@@ -47,8 +54,8 @@ export interface SprintProposal {
 
 const PRIORITY_WEIGHT = { high: 3, medium: 2, low: 1 } as const;
 const PRIORITY_LABEL = { high: 'hoch', medium: 'mittel', low: 'niedrig' } as const;
-/** Ohne Schätzung zählt ein Auftrag mit diesem Aufwand gegen die Kapazität. */
-export const DEFAULT_ORDER_HOURS = 2;
+/** Ohne Schätzung zählt ein Auftrag mit diesem Aufwand (Agent-Stunden) gegen die Kapazität. */
+export const DEFAULT_ORDER_HOURS = 0.5;
 
 export function scoreOf(candidate: PlanCandidate, predecessorDone: boolean): number {
   const benefit = candidate.benefit ?? 5;
@@ -68,18 +75,23 @@ function median(values: number[]): number | null {
 }
 
 /**
- * Kapazität = Median der erledigten Ist-Stunden (bzw. Ist-Tokens) der letzten 3 abgeschlossenen Sprints, aber nie
- * weniger als die Einstellung. Sonst schrumpft sie von selbst: Ein Sprint schafft höchstens, was eingeplant war, und
- * die Ist-Stunden sind Rechenzeit der Agents (ein auf 2 h geschätzter Auftrag ist oft in 15 Minuten fertig) – nach
- * wenigen Sprints passte kein Auftrag mehr hinein. Die Historie hebt die Kapazität also nur an. Sprints ohne gemessene
- * Stunden zählen nicht als Historie; eine Token-Grenze gilt nur, wenn die Historie die Kapazität bestimmt.
+ * Kapazität = Einstellung in Agent-Stunden, Token-Grenze = Sprint-Budget. Die Historie bestimmt sie nicht: Ein
+ * Sprint ohne Zeitfenster schafft genau, was eingeplant war, die Kapazität würde sich also nur selbst bestätigen oder
+ * schrumpfen. Die Ist-Werte fliessen stattdessen über die Kalibrierung in die Schätzungen ein; der Median der letzten
+ * 3 Sprints (ohne Sprints ohne Messung) wird nur angezeigt.
  */
-export function capacityFrom(history: { hours: number; tokens: number }[], settingHours: number): Capacity {
+export function capacityFrom(
+  history: { hours: number; tokens: number }[],
+  settingHours: number,
+  sprintTokenBudget: number | null = null,
+): Capacity {
   const recent = history.filter((sprint) => sprint.hours > 0).slice(0, 3);
-  const hours = median(recent.map((sprint) => sprint.hours));
-  if (hours === null || hours <= settingHours) return { hours: settingHours, tokens: null, source: 'setting' };
-  const tokens = median(recent.map((sprint) => sprint.tokens).filter((value) => value > 0));
-  return { hours, tokens, source: 'history' };
+  const historyHours = median(recent.map((sprint) => sprint.hours));
+  return {
+    hours: settingHours,
+    tokens: sprintTokenBudget !== null && sprintTokenBudget > 0 ? sprintTokenBudget : null,
+    historyHours: historyHours === null ? null : Math.round(historyHours * 100) / 100,
+  };
 }
 
 /** Dateien aus „Technische Hinweise (betroffene Dateien …)“ bzw. in Backticks gesetzte Pfade der Beschreibung. */
@@ -203,6 +215,7 @@ export function proposeSprint(
       score,
       reason: selected ? reason : `${reason} – nicht eingeplant: ${skipped.get(candidate.id) ?? 'Kapazität erreicht'}`,
       hours: itemHours,
+      rawHours: candidate.rawEffortHours ?? candidate.effortHours,
       tokens: candidate.tokenEstimate,
       selected,
       rank: rankOf.get(candidate.id) ?? null,
@@ -210,7 +223,7 @@ export function proposeSprint(
     };
   });
   items.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9) || b.score - a.score);
-  return { capacity, items, totals: { hours: Math.round(hours * 10) / 10, tokens } };
+  return { capacity, items, totals: { hours: Math.round(hours * 100) / 100, tokens } };
 }
 
 export interface RoadmapSprint {

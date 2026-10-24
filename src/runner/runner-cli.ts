@@ -193,15 +193,38 @@ async function notifyFolders(pool: Pool, targets: Target[], volume: string, back
 /** Schlüssel der Datenbank-Sperre „ein Dauer-Worker für alle Projekte“ (beliebig, aber fest). */
 const WORKER_LOCK_KEY = 727_402;
 
-/** Nimmt die Worker-Sperre auf einer eigenen Verbindung, die offen bleibt (endet der Prozess, endet die Sperre). */
-async function holdWorkerLock(pool: Pool): Promise<boolean> {
+/**
+ * Nimmt die Worker-Sperre auf einer eigenen Verbindung, die bis zum Ende offen bleibt (endet der Prozess, endet die
+ * Sperre). Liefert die Freigabe oder null, wenn ein anderer Worker die Sperre hält. Die Freigabe muss vor pool.end()
+ * laufen: pool.end() wartet auf jede ausgeliehene Verbindung – sonst hing der Worker nach dem Neubau, bis ihn die
+ * Notbremse nach einer Minute beendete.
+ */
+export async function holdWorkerLock(pool: Pool): Promise<(() => Promise<void>) | null> {
   const client = await pool.connect();
   // Bricht die Verbindung ab (Datenbank-Neustart), darf das den Worker nicht beenden; die Sperre ist dann frei.
-  client.on('error', (error) => console.warn('Worker-Sperre: Verbindung getrennt –', error.message));
+  const lost = (error: Error): void => console.warn('Worker-Sperre: Verbindung getrennt –', error.message);
+  client.on('error', lost);
   const held = (await client.query<{ ok: boolean }>('SELECT pg_try_advisory_lock($1) AS ok', [WORKER_LOCK_KEY])).rows[0]
     ?.ok;
-  if (!held) client.release();
-  return held === true;
+  if (!held) {
+    client.off('error', lost);
+    client.release();
+    return null;
+  }
+  let released = false;
+  return async () => {
+    if (released) return;
+    released = true;
+    try {
+      await client.query('SELECT pg_advisory_unlock($1)', [WORKER_LOCK_KEY]);
+      client.off('error', lost);
+      client.release();
+    } catch (error) {
+      // Verbindung verwerfen statt zurückgeben: Mit ihr endet auch die Sperre.
+      client.off('error', lost);
+      client.release(error instanceof Error ? error : true);
+    }
+  };
 }
 
 export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
@@ -266,6 +289,8 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
+  let releaseWorkerLock: (() => Promise<void>) | null = null;
+  let registry: ReturnType<typeof databaseProcessStore> | null = null;
   try {
     if (!options.watch) {
       const targets = await resolveTargets(pool, options);
@@ -282,7 +307,8 @@ async function main(): Promise<void> {
     }
     // Nur ein Dauer-Worker für alle Projekte: Ein zweiter (z. B. „npm run worker“ neben dem Dienst) setzte beim Start
     // die laufenden Aufträge des ersten zurück und führte sie doppelt aus. Die Sperre hält die Verbindung bis zum Ende.
-    if (options.all && !(await holdWorkerLock(pool))) {
+    if (options.all) releaseWorkerLock = await holdWorkerLock(pool);
+    if (options.all && !releaseWorkerLock) {
       console.error(
         'Ein anderer Worker für alle Projekte läuft bereits – dieser beendet sich, damit Aufträge nicht doppelt laufen.',
       );
@@ -292,7 +318,8 @@ async function main(): Promise<void> {
     await recoverInterruptedRuns(pool);
     // Erst nach dem Aufräumen: ab jetzt landet jeder gestartete Prozess im Register (nur der Dauer-Worker, damit ein
     // einmaliger Lauf nicht beim nächsten Start als Altprozess gilt).
-    setProcessStore(databaseProcessStore(pool));
+    registry = databaseProcessStore(pool);
+    setProcessStore(registry);
     // Ein angeforderter Neustart („AIdeation neu starten“) ist mit diesem Start abgeschlossen.
     await completeRestart(pool).catch((error: unknown) =>
       console.error('Neustart-Status konnte nicht gesetzt werden:', describeError(error)),
@@ -676,6 +703,11 @@ async function main(): Promise<void> {
       clearInterval(setupTimer);
     }
   } finally {
+    // Register abmelden, bevor der Pool schliesst: Prozesse, die erst danach enden, räumt der nächste Start auf
+    // (killPreviousProcesses) – statt „Cannot use a pool after calling end on the pool“ zu melden.
+    setProcessStore(null);
+    await registry?.flush();
+    await releaseWorkerLock?.();
     await pool.end();
   }
 }

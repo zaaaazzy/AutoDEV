@@ -5,6 +5,7 @@ import { DEV_COLUMNS } from './development.js';
 import { COMMENT_COLUMNS } from './idea-comments.js';
 import { IDEA_COLUMNS, IDEA_SOURCES } from './ideation.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { loadCalibration, withCalibratedHours } from '../core/estimate-calibration.js';
 
 export function registerBoardRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/board', access({ tenant: 'project' }), async (request, response) => {
@@ -16,7 +17,7 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
     // Optionaler Filter „Herkunft“ (?source=visionary); unbekannte Werte zeigen alle Ideen.
     const source =
       typeof request.query.source === 'string' && IDEA_SOURCES.has(request.query.source) ? request.query.source : null;
-    const [ideas, development, comments] = await Promise.all([
+    const [ideas, development, comments, calibration] = await Promise.all([
       pool.query(
         `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1 AND ($2::text IS NULL OR source = $2)
           ORDER BY created_at DESC LIMIT 200`,
@@ -33,8 +34,14 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
           WHERE i.project_slug = $1 ORDER BY c.created_at`,
         [slug],
       ),
+      loadCalibration(pool, slug),
     ]);
-    response.json({ ideas: ideas.rows, development: development.rows, comments: comments.rows });
+    // Aufwand wird in kalibrierten Agent-Stunden angezeigt; effortHours bleibt die gespeicherte Schätzung.
+    response.json({
+      ideas: withCalibratedHours(ideas.rows, calibration),
+      development: withCalibratedHours(development.rows, calibration),
+      comments: comments.rows,
+    });
   });
 
   app.get('/projects/:slug/agent-runs', access({ tenant: 'project' }), async (request, response) => {

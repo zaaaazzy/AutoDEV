@@ -151,7 +151,7 @@
     }
   </div>
   @if (replyTarget(); as reply) {
-    <div class="chat-reply-to" role="status">
+    <div class="chat-reply-to row" role="status">
       <span
         >↩ Antwort an <strong>{{ reply.agentName ?? 'Assistent' }}</strong
         >: {{ reply.question }}</span

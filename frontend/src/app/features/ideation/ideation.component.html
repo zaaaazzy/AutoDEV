@@ -99,17 +99,17 @@
       }
     }
     @if (pickedIdeas().length) {
-      <div class="bulk-bar" role="region" aria-label="Auswahl">
-        <span class="bulk-count">{{ pickedIdeas().length }}</span>
-        <p>
-          <strong>{{ pickedIdeas().length === 1 ? 'Idee' : 'Ideen' }} ausgewählt.</strong>
-          Je Idee entsteht ein eigener Auftrag – der Auftragsautor arbeitet sie nacheinander ab.
-        </p>
-        <button type="button" class="button secondary" (click)="clearPicks()">Auswahl aufheben</button>
-        <button type="button" class="button primary" (click)="promotePicked()" [disabled]="busy()">
+      <app-bulk-bar [count]="pickedIdeas().length" one="Idee" many="Ideen" (cleared)="clearPicks()">
+        <button
+          type="button"
+          class="button primary small"
+          title="Je Idee entsteht ein eigener Auftrag – der Auftragsautor arbeitet sie nacheinander ab."
+          (click)="promotePicked()"
+          [disabled]="busy()"
+        >
           {{ pickedIdeas().length === 1 ? 'Auftrag erstellen' : pickedIdeas().length + ' Aufträge erstellen' }}
         </button>
-      </div>
+      </app-bulk-bar>
     }
     <app-data-table
       [rows]="openIdeas()"

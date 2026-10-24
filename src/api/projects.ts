@@ -348,7 +348,8 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
     }
     if (body.sprintCapacityHours !== undefined) {
       const hours = Number(body.sprintCapacityHours);
-      if (!Number.isFinite(hours) || hours <= 0 || hours > 1000) return fail('Kapazität: Stunden zwischen 1 und 1000.');
+      if (!Number.isFinite(hours) || hours <= 0 || hours > 1000)
+        return fail('Kapazität: Agent-Stunden über 0 und höchstens 1000.');
       values.push(hours);
       sets.push(`sprint_capacity_hours = $${values.length}`);
     }

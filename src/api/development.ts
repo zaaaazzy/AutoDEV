@@ -9,6 +9,7 @@ import { IDEA_FIELDS } from './ideation.js';
 import { developmentPatchRole } from './roles.js';
 import {
   buildUpdate,
+  manualEstimateSql,
   isRecord,
   INVALID,
   invalidInput,
@@ -33,7 +34,7 @@ import {
  */
 export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "testRunId", sprint_id AS "sprintId",
   title, description, status, priority, created_at AS "createdAt",
-  effort_hours AS "effortHours", token_estimate AS "tokenEstimate", benefit, cost,
+  effort_hours AS "effortHours", token_estimate AS "tokenEstimate", estimate_source AS "estimateSource", benefit, cost,
   kind, category, bug_id AS "bugId", completed_at AS "completedAt", agent_id AS "agentId", risks, project_context AS "projectContext",
   retry_count AS "retryCount", analysis_status AS "analysisStatus", analysis,
   failure, failure_bug_id AS "failureBugId", action_todo AS "actionTodo",
@@ -85,9 +86,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     }
     const result = await pool.query(
       `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
-                                      effort_hours, token_estimate, benefit, cost)
+                                      effort_hours, token_estimate, benefit, cost, estimate_source)
        SELECT i.project_slug, i.id, i.title, i.description, '${DEVELOPMENT_STATUS.backlog}', i.priority,
-              i.effort_hours, i.token_estimate, i.benefit, i.cost
+              i.effort_hours, i.token_estimate, i.benefit, i.cost, i.estimate_source
          FROM ideation_items i
         WHERE i.id = $1
           AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)
@@ -474,6 +475,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
         from ? { column: 'status', values: [from] } : undefined,
       );
+      update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
       const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
       if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
         // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.

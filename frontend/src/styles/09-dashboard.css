@@ -1,0 +1,682 @@
+/* Dashboard, Aktionen und Statistik */
+/* Testabdeckung im Dashboard */
+.coverage-panel {
+  grid-column: 1 / -1;
+}
+.coverage-table td,
+.coverage-table th {
+  white-space: nowrap;
+}
+.coverage-table .coverage-total td {
+  border-top: 2px solid #dfe3da;
+  background: var(--surface-soft);
+}
+.coverage-failed {
+  display: block;
+  color: #b4472f;
+  font-size: 11px;
+}
+.coverage-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.coverage-bar {
+  display: inline-block;
+  width: 44px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8ebe4;
+}
+.coverage-bar span {
+  display: block;
+  height: 100%;
+}
+.coverage-value.good .coverage-bar span {
+  background: #2f8a57;
+}
+.coverage-value.warn .coverage-bar span {
+  background: #e08a1e;
+}
+.coverage-value.bad .coverage-bar span {
+  background: var(--danger);
+}
+.coverage-value.bad {
+  color: #b4472f;
+}
+
+/* ── Statistik ───────────────────────────────────────────────────────── */
+.usage-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.usage-row:last-of-type {
+  border-bottom: 0;
+}
+.usage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.usage-note {
+  margin: 10px 0 0;
+}
+
+/* ── Aufträge in Entstehung ──────────────────────────────────────────── */
+.drafts-panel {
+  border-color: #cfe5d8;
+  background: linear-gradient(180deg, #f6fbf8, var(--surface) 120px);
+}
+.draft-list {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.draft-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.draft-card.active {
+  border-color: #b9d3c3;
+  box-shadow: 0 0 0 3px rgb(47 111 79 / 8%);
+}
+.draft-state {
+  display: grid;
+  width: 26px;
+  flex: none;
+  place-items: center;
+}
+.draft-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid #d5e6dc;
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+.draft-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.draft-text small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.draft-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Besondere Aufmerksamkeit ────────────────────────────────────────── */
+.attention-panel {
+  border-color: #f1d8b5;
+  background: linear-gradient(180deg, #fffaf3, var(--surface) 120px);
+}
+
+.attention-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.attention-detail {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* Ausführliche Meldung und Analyse: gegliedert, lang, aber innerhalb der Karte scrollbar. */
+.attention-failure-body,
+.attention-analysis {
+  display: grid;
+  gap: 6px;
+  max-height: 60vh;
+  margin-top: 8px;
+  padding: 10px 14px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fafaf8;
+  font-size: 14px;
+  overscroll-behavior: contain;
+}
+.attention-analysis {
+  display: block;
+}
+.attention-failure-body h4 {
+  margin: 6px 0 0;
+  font-size: 13px;
+}
+.attention-failure-body p {
+  margin: 0;
+}
+.attention-unmet {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+}
+.attention-unmet small {
+  display: block;
+  color: var(--muted);
+}
+.attention-failure-body .markdown {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.attention-report > :first-child {
+  margin-top: 0;
+}
+.attention-log {
+  max-height: 240px;
+  margin: 6px 0 0;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.attention-suggestion {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.attention-suggestion span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.attention-answer {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.attention-answer textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+}
+
+/* Live-Anzeige eines laufenden Testlaufs (Testläufe, Test-Gate der Sprint-Sicherung). */
+.test-live {
+  border-color: #b9d6c7;
+}
+.test-live h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.test-live-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #2f8f5b;
+  animation: test-live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes test-live-pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+.test-live-steps {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.test-live-step {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.test-live-step.running {
+  background: #eef6f1;
+}
+.test-live-name {
+  font-weight: 600;
+}
+.test-live-time {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.test-live-progress,
+.test-live-output {
+  grid-column: 2 / -1;
+  font-size: 13px;
+}
+.test-live-output pre {
+  max-height: 240px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 8px;
+  background: #1f2620;
+  color: #e7ede9;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+/* „Aktionen“ als Auftragstabelle wie unter „Aufträge“; aufgeklappt Warum, Lösungsvorschlag, Ergänzung, Aktionen
+ und – erst über „Details“ – die Auftragsdetails. */
+.attention-body {
+  display: grid;
+  gap: 12px;
+  padding: 4px 4px 8px;
+  /* Die Detailzeile steht in einer Tabellenzelle mit nowrap: Texte (Pfade, Vorschläge) hier wieder umbrechen. */
+  white-space: normal;
+}
+.attention-section h3,
+.attention-detail > h3 {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.attention-section p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.attention-solution .attention-suggestion {
+  padding: 8px 12px;
+  border-left: 3px solid #e0a03a;
+  border-radius: 8px;
+  background: #fdf6ec;
+}
+.attention-solution .small {
+  margin-top: 4px;
+}
+.attention-details-toggle[aria-expanded='true'] {
+  border-color: var(--green-light);
+}
+.attention-tech {
+  margin-top: 10px;
+}
+
+/* Git-Verlauf im Dashboard */
+.git-graph {
+  display: grid;
+  overflow: hidden;
+}
+.git-row {
+  display: flex;
+  align-items: center;
+  height: 30px;
+  min-width: 0;
+}
+.git-lanes {
+  flex: none;
+}
+.git-commit {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+}
+a.git-commit[href]:hover {
+  background: var(--paper);
+}
+.git-commit.local {
+  cursor: default;
+}
+.git-commit.local .git-hash {
+  opacity: 0.55;
+}
+.git-hash {
+  flex: none;
+  color: var(--green);
+  font-size: 0.82rem;
+}
+.git-subject {
+  flex: 1;
+  min-width: 0;
+}
+.git-meta {
+  flex: none;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+.git-ref {
+  flex: none;
+  max-width: 220px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.74rem;
+}
+.git-ref-head {
+  border-color: var(--green);
+  background: var(--green);
+  color: var(--surface);
+}
+.git-ref-branch {
+  border-color: var(--green);
+  color: var(--green);
+}
+.git-ref-remote {
+  color: var(--muted);
+}
+.git-ref-tag {
+  border-color: var(--orange);
+  color: #9a4f1c;
+}
+.git-ref-tag::before {
+  content: '🏷 ';
+}
+.git-more {
+  margin-top: 8px;
+}
+
+/* Auswertung „Was klappt“ auf der Verbrauchsseite. */
+.quality-panel {
+  margin-bottom: 1rem;
+}
+.quality-agents {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+}
+.quality-agents caption {
+  text-align: left;
+  padding-bottom: 0.25rem;
+}
+.quality-agents th,
+.quality-agents td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Test, Test-Gate oder Push laufen noch: Restzeit und Fortschritt statt „Review läuft“ */
+app-wait-status {
+  display: contents;
+}
+.wait-status {
+  display: grid;
+  flex-basis: 100%;
+  gap: 5px;
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--warn);
+}
+
+/* Dashboard: eigene Karte über den Kennzahlen, solange Test, Merge, Push oder CI laufen */
+.wait-status.wait-status-card {
+  margin: 0 0 18px;
+  padding: 14px 18px;
+  border: 1px solid #ecd9b8;
+  border-radius: 11px;
+  background: #fffaf2;
+  box-shadow: 0 1px 2px rgb(32 40 36 / 4%);
+  font-size: 14px;
+}
+.wait-status-card .wait-status-bar {
+  height: 8px;
+}
+.wait-status-detail {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.wait-status-bar {
+  display: block;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f1e6d4;
+}
+.wait-status-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #d08a1e;
+  transition: width 0.6s ease;
+}
+.wait-status-bar.indeterminate span {
+  animation: wait-status-slide 1.6s ease-in-out infinite;
+}
+@keyframes wait-status-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+/* Aktionen: „Läuft gerade“ (Git, Tests, Agents, eigene Aktionen) */
+.running-panel .wait-status.wait-status-card {
+  /* app-wait-status hat display: contents – der Innenabstand des Panels muss hier stehen. */
+  margin: 14px 18px 12px;
+}
+.running-list {
+  display: grid;
+  gap: 8px;
+}
+.running-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fbfcfb;
+  font-size: 13.5px;
+}
+.running-kind {
+  flex: none;
+  min-width: 86px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.running-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.running-text small {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+}
+.production-tile {
+  border-left: 4px solid var(--line);
+}
+.production-tile.tone-healthy {
+  border-left-color: #2b9a66;
+  background: #eef8f2;
+}
+.production-tile.tone-healthy strong {
+  color: #1f6e49;
+}
+.production-tile.tone-failing {
+  border-left-color: #d6453d;
+  background: #fbeeea;
+}
+.production-tile.tone-failing strong {
+  color: #a8322b;
+}
+.production-tile.tone-idle {
+  border-left-color: var(--line);
+  background: var(--surface);
+}
+.production-tile.tone-idle strong {
+  color: var(--muted);
+}
+.production-icon {
+  font-family: Inter, 'Segoe UI', system-ui, sans-serif;
+}
+.production-badge {
+  background: #e3f3ea;
+  color: #1f6e49;
+  white-space: nowrap;
+}
+.budget-meter {
+  display: grid;
+  gap: 10px;
+}
+.budget-meter-row {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+.budget-meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.budget-meter .bar-track {
+  height: 9px;
+}
+.budget-meter .bar-track span.warn {
+  background: #e8590c;
+}
+.budget-meter .bar-track span.bad {
+  background: #d6453d;
+}
+
+/* ── Seite „Aktionen“ ── */
+.actions-empty .empty-state {
+  margin: 0;
+  padding: 28px 12px;
+  text-align: center;
+}
+
+/* Aufgeklappte Rückmeldung: „Warum“ und „Lösung“ als zwei Karten nebeneinander, darunter Ansicht, Ergänzung und
+ Knöpfe. Lange Pfade brechen um, statt die Tabellenzeile zu sprengen. */
+.attention-table .attention-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.attention-table .attention-body > * {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.attention-table .attention-body > .attention-section:not(.attention-visual) {
+  grid-column: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #e0a03a;
+  border-radius: 10px;
+  background: #fffaf2;
+}
+.attention-table .attention-solution :is(app-order-approval, app-order-question) {
+  display: block;
+  min-width: 0;
+}
+
+/* Die Freigabe steht schon in der grünen Karte: kein zweiter Rahmen darin. */
+.attention-table .attention-solution .approval-box {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.attention-table .attention-body > .attention-section.attention-solution {
+  border-left-color: var(--green);
+  background: #f4f9f5;
+}
+
+/* Überschriften aus Markdown (Analyse) nicht grösser als die Abschnittstitel. */
+.attention-table .attention-tech :is(h1, h2, h3, h4) {
+  margin: 10px 0 4px;
+  font-size: 13.5px;
+}
+.attention-table .attention-section h3 {
+  margin-bottom: 6px;
+}
+.attention-table .attention-section p {
+  line-height: 1.55;
+}
+.attention-table .attention-visual {
+  padding: 0;
+}
+.attention-table .attention-answer {
+  color: #4b554e;
+  font-weight: 600;
+}
+.attention-table .attention-answer textarea {
+  min-height: 64px;
+  font-weight: 400;
+}
+.attention-table .attention-actions {
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* Löschen abgesetzt rechts, damit es nicht neben „Erneut versuchen“ angeklickt wird. */
+.attention-table .attention-actions .button.danger {
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .git-meta,
+  .git-ref-remote,
+  .git-ref-tag {
+    display: none;
+  }
+  .git-ref {
+    max-width: 120px;
+  }
+  .running-kind {
+    min-width: 0;
+  }
+  .attention-table .attention-body {
+    grid-template-columns: 1fr;
+    padding: 12px 10px;
+  }
+  .attention-table .attention-actions .button.danger {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .attention-actions .button {
+    flex: 1 1 calc(50% - 4px);
+    justify-content: center;
+  }
+  .quality-agents th:nth-child(2),
+  .quality-agents td:nth-child(2) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .test-live-dot {
+    animation: none;
+  }
+  .wait-status-bar.indeterminate span {
+    animation: none;
+  }
+}

@@ -7,6 +7,7 @@ import { acquireTree, withProjectLock } from '../core/project-lock.js';
 import { adminDatabaseUrl } from '../core/local-database.js';
 import { sendPush } from '../core/push.js';
 import { fileBugs, stepBug } from '../core/test-bugs.js';
+import { dropReportCopies } from './git-sync/report-copies.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
@@ -38,6 +39,7 @@ export async function useLatestMain(cwd: string, execute: CommandExecutor): Prom
   const status = await git('status', '--porcelain', '--untracked-files=no');
   if (status.exitCode !== 0 || status.output.trim()) return null;
   const branch = await git('symbolic-ref', '--short', '-q', 'HEAD');
+  await dropReportCopies(git, cwd, 'main');
   const moved = await git('checkout', '-q', '--detach', 'main');
   return moved.exitCode === 0 && branch.exitCode === 0 ? branch.output.trim() || null : null;
 }

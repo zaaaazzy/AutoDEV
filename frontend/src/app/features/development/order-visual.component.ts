@@ -1,8 +1,22 @@
-import { Component, computed, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
-import type { DevelopmentItem, VisualApproval, VisualDevice, VisualSnapshot } from '../../core/models.js';
+import { AuthService } from '../../core/auth.service.js';
+import type { DevelopmentItem, ReviewSlot, VisualApproval, VisualDevice, VisualSnapshot } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
 import { DateTimePipe } from '../../shared/pipes.js';
+import { OrderService } from './order.service.js';
+import {
+  defaultSlot,
+  showsOrder,
+  type SlotTone,
+  slotLoadedText,
+  slotOptionText,
+  slotStatusText,
+  slotTone,
+  spawnLabel,
+  VISUAL_REVIEW_WHY,
+} from './visual-review.js';
 
 export interface VisualPage {
   page: string;
@@ -33,105 +47,30 @@ export function visualPages(snapshots: VisualSnapshot[], orderId: string, device
   }));
 }
 
-/** Reiter „Ansicht“: Vorher, Nachher und Diff je Seite, Umschalter Desktop/Handy und „Optisch freigeben“. */
+/** Abfrage der Umgebungen, solange die Abnahme offen ist; schneller, solange eine startet. */
+const SLOTS_REFRESH_MS = 15_000;
+const SLOTS_STARTING_MS = 3_000;
+
+/**
+ * Optische Abnahme eines Auftrags: in einer der Umgebungen (Review-Container) starten und ansehen, geänderte Dateien
+ * mit Link ins Repository, Vorher/Nachher/Diff je Seite und zuletzt „Optisch freigeben“.
+ */
 @Component({
   selector: 'app-order-visual',
   standalone: true,
-  imports: [DateTimePipe],
-  template: `
-    <details class="run-step order-brief order-visual" [open]="open()" (toggle)="toggled($event)">
-      <summary>
-        Ansicht
-        @if (approval().approvedAt) {
-          <span class="tag visual-approved">✓ optisch freigegeben</span>
-        }
-      </summary>
-      @if (loading()) {
-        <p class="muted">Screenshots werden geladen …</p>
-      } @else if (error()) {
-        <p class="muted">{{ error() }}</p>
-      } @else if (!snapshots().length) {
-        <p class="muted">
-          Noch keine Screenshots. Die visuelle Prüfung nimmt nach dem Tester die Seiten der Vorschau auf (Einstellungen
-          → Visuelle Prüfung: Vorschau-Adresse und Seiten).
-        </p>
-      } @else {
-        <div class="visual-toolbar">
-          <div class="segmented" role="group" aria-label="Gerät">
-            <button type="button" [class.active]="device() === 'desktop'" (click)="device.set('desktop')">
-              Desktop
-            </button>
-            <button type="button" [class.active]="device() === 'mobile'" (click)="device.set('mobile')">Handy</button>
-          </div>
-        </div>
-        @for (entry of pages(); track entry.page) {
-          <section class="visual-page">
-            <h4>
-              {{ entry.page }}
-              @if (entry.after.diffPercent !== null) {
-                <span class="muted">· {{ percent(entry.after.diffPercent) }} geändert</span>
-              } @else {
-                <span class="muted">· erster Stand</span>
-              }
-            </h4>
-            <div class="visual-grid">
-              <figure>
-                <figcaption>Vorher</figcaption>
-                @if (entry.before) {
-                  <a [href]="image(entry.before)" target="_blank" rel="noopener"
-                    ><img [src]="image(entry.before)" alt="Vorher: {{ entry.page }}" loading="lazy"
-                  /></a>
-                } @else {
-                  <p class="muted">Kein früherer Stand</p>
-                }
-              </figure>
-              <figure>
-                <figcaption>Nachher</figcaption>
-                <a [href]="image(entry.after)" target="_blank" rel="noopener"
-                  ><img [src]="image(entry.after)" alt="Nachher: {{ entry.page }}" loading="lazy"
-                /></a>
-              </figure>
-              <figure>
-                <figcaption>Diff</figcaption>
-                @if (entry.diff) {
-                  <a [href]="image(entry.diff)" target="_blank" rel="noopener"
-                    ><img [src]="image(entry.diff)" alt="Unterschiede: {{ entry.page }}" loading="lazy"
-                  /></a>
-                } @else {
-                  <p class="muted">Ab dem zweiten Lauf</p>
-                }
-              </figure>
-            </div>
-          </section>
-        } @empty {
-          <p class="muted">Für dieses Gerät gibt es keine Aufnahmen.</p>
-        }
-      }
-      <div class="actions visual-approval">
-        @if (approval().approvedAt) {
-          <span
-            >✓ Optisch freigegeben von {{ approval().approvedBy || 'Unbekannt' }} am
-            {{ approval().approvedAt | dateTime }}</span
-          >
-          <button class="button secondary small" type="button" [disabled]="busy()" (click)="approve(false)">
-            Freigabe zurücknehmen
-          </button>
-        } @else {
-          <button class="button primary" type="button" [disabled]="busy()" (click)="approve(true)">
-            ✓ Optisch freigeben
-          </button>
-        }
-      </div>
-    </details>
-  `,
+  imports: [DateTimePipe, ChangedFilesComponent],
+  templateUrl: './order-visual.component.html',
 })
 export class OrderVisualComponent {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  private readonly orders = inject(OrderService);
+  protected readonly auth = inject(AuthService);
 
   readonly order = input.required<DevelopmentItem>();
   /** Gleich aufgeklappt (oben unter „Aktionen“), sonst erst beim Klick. */
   readonly open = input(false);
+  protected readonly why = VISUAL_REVIEW_WHY;
   protected readonly snapshots = signal<VisualSnapshot[]>([]);
   protected readonly loaded = signal<VisualApproval | null>(null);
   protected readonly loading = signal(false);
@@ -148,8 +87,41 @@ export class OrderVisualComponent {
       },
   );
 
+  /** Umgebungen (Review-Container) mit Status und geladenem Stand. */
+  protected readonly slots = signal<ReviewSlot[]>([]);
+  protected readonly slotsLoaded = signal(false);
+  private readonly picked = signal<number | null>(null);
+  protected readonly chosen = computed(() => this.picked() ?? defaultSlot(this.slots(), this.order().id));
+  protected readonly chosenSlot = computed(() => this.slots().find((slot) => slot.slot === this.chosen()) ?? null);
+  /** Umgebung, die diesen Auftrag gerade zeigt (für Link und Git-Stand der Dateien). */
+  protected readonly ownSlot = computed(() => this.slots().find((slot) => showsOrder(slot, this.order().id)) ?? null);
+  protected readonly sprint = computed(() => this.store.sprintOf(this.order()));
+  protected readonly fileRef = computed(() => this.ownSlot()?.commit ?? this.order().reviewBranch ?? null);
+  protected readonly canSpawn = computed(
+    () => this.auth.can('run') && this.order().status !== 'in_progress' && !!this.chosenSlot()?.enabled,
+  );
+  private stopTimer: ReturnType<typeof setTimeout> | null = null;
+  private active = false;
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.stopSlots());
+    // Gleich aufgeklappt (Aktionen): sofort laden, ohne auf das toggle-Ereignis zu warten.
+    effect(() => {
+      if (this.open()) untracked(() => this.activate());
+    });
+  }
+
   protected toggled(event: Event): void {
-    if ((event.target as HTMLDetailsElement).open) void this.load();
+    if ((event.target as HTMLDetailsElement).open) this.activate();
+    else this.stopSlots();
+  }
+
+  private activate(): void {
+    if (!this.snapshots().length && !this.loading()) void this.load();
+    if (!this.active) {
+      this.active = true;
+      void this.pollSlots();
+    }
   }
 
   private path(): string {
@@ -168,6 +140,80 @@ export class OrderVisualComponent {
     } finally {
       this.loading.set(false);
     }
+  }
+
+  /** Umgebungen laden und im Takt nachfragen; schneller, solange eine startet oder angefordert ist. */
+  private async pollSlots(): Promise<void> {
+    if (!this.active) return;
+    if (!document.hidden) await this.loadSlots();
+    if (!this.active) return;
+    const starting = this.slots().some((slot) => slot.status === 'requested' || slot.status === 'starting');
+    this.stopTimer = setTimeout(() => void this.pollSlots(), starting ? SLOTS_STARTING_MS : SLOTS_REFRESH_MS);
+  }
+
+  private async loadSlots(): Promise<void> {
+    try {
+      const result = await this.api.get<{ slots: ReviewSlot[] }>('/api/review-slots');
+      this.slots.set(result.slots);
+    } catch {
+      // Alten Stand behalten, nächster Versuch im Takt.
+    } finally {
+      this.slotsLoaded.set(true);
+    }
+  }
+
+  private stopSlots(): void {
+    this.active = false;
+    if (this.stopTimer) clearTimeout(this.stopTimer);
+    this.stopTimer = null;
+  }
+
+  protected pick(value: string | number): void {
+    this.picked.set(Number(value) || null);
+  }
+
+  /** Diesen Auftrag in der gewählten Umgebung laden; danach schneller nachfragen, bis sie läuft. */
+  protected async spawn(): Promise<void> {
+    const slot = this.chosen();
+    if (!slot || !this.canSpawn()) return;
+    if (await this.orders.showReview(this.order(), slot)) {
+      this.picked.set(slot);
+      this.stopSlots();
+      this.active = true;
+      void this.pollSlots();
+    }
+  }
+
+  /** Umgebung beenden (wird wieder frei). */
+  protected async stop(slot: ReviewSlot): Promise<void> {
+    await this.api.post(`/api/review-slots/${slot.slot}/stop`).catch(() => undefined);
+    await this.loadSlots();
+  }
+
+  protected tone(slot: ReviewSlot): SlotTone {
+    return slotTone(slot);
+  }
+  protected statusText(slot: ReviewSlot): string {
+    return slotStatusText(slot);
+  }
+  protected loadedText(slot: ReviewSlot): string {
+    return slotLoadedText(slot);
+  }
+  protected optionText(slot: ReviewSlot): string {
+    return slotOptionText(slot, this.order().id);
+  }
+  protected isOwn(slot: ReviewSlot): boolean {
+    return showsOrder(slot, this.order().id);
+  }
+  protected spawnText(): string {
+    return spawnLabel(this.chosenSlot(), this.order().id);
+  }
+  protected spawnHint(): string {
+    if (!this.auth.can('run')) return 'Umgebungen starten braucht das Recht, Agents zu starten.';
+    if (this.order().status === 'in_progress') return 'Der Auftrag läuft gerade – erst danach ladbar.';
+    if (!this.chosenSlot()?.enabled)
+      return 'Diese Umgebung ist gesperrt – ein Administrator gibt sie unter Einstellungen frei.';
+    return 'Startet den Stand dieses Auftrags in der gewählten Umgebung. Ein dort geladener anderer Stand wird ersetzt.';
   }
 
   protected image(snapshot: VisualSnapshot): string {

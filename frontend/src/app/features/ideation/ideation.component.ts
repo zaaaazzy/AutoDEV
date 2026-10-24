@@ -1,4 +1,5 @@
 import { OrderBriefComponent } from '../../shared/order-brief.component.js';
+import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { NgClass, NgTemplateOutlet } from '@angular/common';
 import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
@@ -59,6 +60,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
   selector: 'app-ideation',
   standalone: true,
   imports: [
+    BulkBarComponent,
     GithubLinkComponent,
     NgClass,
     NgTemplateOutlet,
@@ -117,9 +119,9 @@ export class IdeationComponent {
     },
     {
       id: 'effortHours',
-      header: 'Aufwand',
-      value: (idea) => formatHours(idea.effortHours),
-      sortValue: (idea) => idea.effortHours ?? -1,
+      header: 'Aufwand (Agent-Std.)',
+      value: (idea) => formatHours(idea.calibratedHours ?? idea.effortHours),
+      sortValue: (idea) => idea.calibratedHours ?? idea.effortHours ?? -1,
     },
     {
       id: 'createdAt',

@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { calibratedSql, loadCalibration } from '../core/estimate-calibration.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
 
 type CountRow = { key: string; count: string };
@@ -54,6 +55,8 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
 }
 
 export async function collectStats(pool: Pool, slug: string): Promise<Record<string, unknown>> {
+  // Geschätzte Stunden und Tokens in Agent-Stunden bzw. gemessenen Tokens (kalibriert), vergleichbar mit „actual“.
+  const calibration = await loadCalibration(pool, slug);
   const [orders, kinds, ideas, bugs, severities, effort, tests, agentSteps, sprint, velocity, actual, testTotal] =
     await Promise.all([
       pool.query<CountRow>(
@@ -78,9 +81,9 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
         [slug],
       ),
       pool.query<{ planned: string; done: string; tokens: string }>(
-        `SELECT COALESCE(SUM(effort_hours), 0) AS planned,
-              COALESCE(SUM(effort_hours) FILTER (WHERE status = 'done'), 0) AS done,
-              COALESCE(SUM(token_estimate), 0) AS tokens
+        `SELECT COALESCE(SUM(${calibratedSql('effort_hours', calibration)}), 0) AS planned,
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration)}) FILTER (WHERE status = 'done'), 0) AS done,
+              COALESCE(SUM(${calibratedSql('token_estimate', calibration)}), 0) AS tokens
          FROM development_items WHERE project_slug = $1`,
         [slug],
       ),
@@ -101,7 +104,7 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       sprintStats(pool, slug),
       pool.query<{ name: string; status: string; total: string; done: string; hours: string }>(
         `SELECT s.name, s.status, COUNT(d.id) AS total, COUNT(d.id) FILTER (WHERE d.status = 'done') AS done,
-              COALESCE(SUM(d.effort_hours) FILTER (WHERE d.status = 'done'), 0) AS hours
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = 'done'), 0) AS hours
          FROM sprints s LEFT JOIN development_items d ON d.sprint_id = s.id
         WHERE s.project_slug = $1 GROUP BY s.id ORDER BY s.created_at DESC LIMIT 8`,
         [slug],
