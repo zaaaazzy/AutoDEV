@@ -223,14 +223,14 @@ test(
     assert.ok(lines.includes(`DEV_LOG_SECRET_KEY=${SECRET_KEY}`));
     const task = result.output.split('\n').find((line) => line.startsWith('Aufgabe: '));
     assert.ok(task?.includes('run-with-env.ps1') && task.includes(envFile), result.output);
-    // Aufgabe startet nach einem Fehlschlag neu und läuft ohne Zeitlimit (Standard: nach 72 Stunden beendet).
+    // Aufgabe läuft ohne Zeitlimit (Standard: nach 72 Stunden beendet). Kein RestartCount: Neu gestartet wird nur
+    // über die Schleife in run-with-env.ps1 (Exit-Code 75), ein bewusster Stopp bleibt ein Stopp.
     const settings = result.output
       .split('\n')
       .filter((line) => line.startsWith('Einstellung: '))
       .map((line) => line.slice('Einstellung: '.length).trim());
     assert.ok(settings.includes('ExecutionTimeLimit=00:00:00'), result.output);
-    assert.ok(settings.includes('RestartInterval=00:01:00'), result.output);
-    assert.ok(Number(settings.find((line) => line.startsWith('RestartCount='))?.split('=')[1]) > 0, result.output);
+    assert.ok(!settings.some((line) => line.startsWith('RestartCount=')), result.output);
     assert.ok(
       !result.output.includes(PASSWORD) && !result.output.includes(SECRET_KEY),
       'keine Geheimnisse in der Ausgabe',

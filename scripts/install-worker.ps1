@@ -56,11 +56,10 @@ Protect-Path $envFile 'F'
 
 $wrapper = Join-Path (Join-Path $root 'scripts') 'run-with-env.ps1'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`" `"$envFile`" npm run worker"
-# Neustart nach "AIdeation neu starten" (Exit-Code 75) uebernimmt die Schleife in run-with-env.ps1. Die Aufgabe startet
-# zusaetzlich neu, falls sie selbst scheitert, und hat kein Zeitlimit (Standard waeren 72 Stunden, danach beendet).
+# Neustart nach "AIdeation neu starten" (Exit-Code 75) uebernimmt die Schleife in run-with-env.ps1.
+# Bewusst ohne RestartCount: Ein bewusster Stopp oder echter Fehler (Exit-Code ungleich 75) soll den Worker nicht neu
+# starten. Kein Zeitlimit (Standard waeren 72 Stunden, danach beendet die Aufgabenplanung den Worker).
 $settings = [ordered]@{
-  RestartCount = 999
-  RestartInterval = New-TimeSpan -Minutes 1
   ExecutionTimeLimit = [TimeSpan]::Zero
   MultipleInstances = 'IgnoreNew'
 }
