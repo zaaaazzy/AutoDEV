@@ -34,10 +34,6 @@
   font-family: Georgia, serif;
   font-size: 20px;
 }
-.brand-divider {
-  color: #778078;
-  font-weight: 400;
-}
 .brand small {
   color: #aab3ab;
   font-size: 10px;
@@ -265,55 +261,6 @@ body:has(.tour-layer) .agent-indicator .agent-popover {
 .worker-count {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-}
-.project-picker {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  white-space: nowrap;
-}
-.sprint-status {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  padding: 5px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  color: inherit;
-  font-size: 13px;
-  text-decoration: none;
-  white-space: nowrap;
-}
-.sprint-status + .project-picker {
-  margin-left: auto;
-}
-.sprint-status.idle {
-  color: var(--muted);
-}
-.sprint-status .sprint-name {
-  overflow: hidden;
-  max-width: 180px;
-  text-overflow: ellipsis;
-}
-.sprint-status .sprint-bar {
-  display: inline-block;
-  width: 48px;
-  height: 5px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #e8ebe4;
-}
-.sprint-status .sprint-bar span {
-  display: block;
-  height: 100%;
-  background: var(--green-light);
-}
-.project-picker select {
-  width: auto;
-  min-width: 150px;
 }
 .worker-status {
   display: inline-flex;
@@ -553,26 +500,12 @@ body:has(.tour-layer) .agent-indicator .agent-popover {
   border-radius: 999px;
   background: var(--surface);
 }
-.sprint-status .sprint-done {
-  display: inline-grid;
-  width: 16px;
-  height: 16px;
-  place-items: center;
-  border-radius: 50%;
-  background: #2f8a57;
-  color: var(--surface);
-  font-size: 10px;
-  font-weight: 800;
-}
 .agent-line.waiting .agent-dot {
   background: #e08a1e;
   box-shadow: 0 0 0 3px rgb(224 138 30 / 20%);
 }
 .agent-line.waiting small {
   color: var(--warn);
-}
-.topbar .new-project {
-  gap: 4px;
 }
 
 /* ── Handy-Kopfzeile: Projektwahl, Agents und Sprint immer sichtbar ──── */
@@ -1338,10 +1271,6 @@ span.review-live.failed {
 }
 
 @media (max-width: 720px) {
-  .sprint-status .sprint-name,
-  .sprint-status .sprint-bar {
-    display: none;
-  }
   .sidebar {
     position: sticky;
     top: 0;
@@ -1373,7 +1302,6 @@ span.review-live.failed {
     font-size: 16px;
   }
   .brand small,
-  .brand-divider,
   .nav-label,
   .sidebar-foot {
     display: none;
@@ -1439,40 +1367,7 @@ span.review-live.failed {
     background: none;
     backdrop-filter: none;
   }
-  .breadcrumb,
-  .project-picker > :not(select) {
-    display: none;
-  }
-  .sprint-status {
-    margin-left: 0;
-    padding: 5px 10px;
-  }
-  .project-picker {
-    order: -3;
-    flex: 1 1 calc(100% - 100px);
-    min-width: 0;
-    margin-left: 0;
-    font-size: 0;
-  }
-  .topbar .help-button {
-    order: -2;
-  }
-  .topbar .new-project {
-    order: -1;
-    width: 38px;
-    padding: 0;
-    font-size: 18px;
-  }
-  .sprint-status + .project-picker {
-    margin-left: 0;
-  }
-  .project-picker select {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    font-size: 14px;
-  }
-  .topbar .new-project .button-label {
+  .breadcrumb {
     display: none;
   }
   .speech-bubble {

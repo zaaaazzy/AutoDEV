@@ -475,15 +475,6 @@
 .chat-msg.mine .chat-text {
   white-space: pre-wrap;
 }
-.agent-task-agent {
-  margin-left: 6px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: var(--green-soft);
-  color: var(--green);
-  font-size: 0.72rem;
-  font-weight: 600;
-}
 
 /* Chat-Eingabe: „/“ Agent, „@“ Verweis – Vorschläge als Bubbles, Auswahl als Chips */
 .composer {

@@ -69,15 +69,11 @@
   background: var(--surface-soft);
   color: var(--muted);
 }
-.test-category-head,
-.test-category-foot {
+.test-category-head {
   display: flex;
   gap: 8px;
   align-items: center;
   justify-content: space-between;
-}
-.test-category-foot {
-  font-size: 11px;
 }
 .test-category-count {
   font-size: 26px;
@@ -104,27 +100,6 @@
 }
 .test-bar .skip {
   background: #b9c0b8;
-}
-.test-trend {
-  display: inline-flex;
-  flex-shrink: 0;
-  gap: 3px;
-}
-.test-trend .dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--line);
-}
-.test-trend .dot.passed {
-  background: #3f8a63;
-}
-.test-trend .dot.failed {
-  background: #c2604b;
-}
-.test-trend .dot.current {
-  outline: 2px solid var(--ink);
-  outline-offset: 1px;
 }
 .test-filter-note {
   margin: 12px 0 0;

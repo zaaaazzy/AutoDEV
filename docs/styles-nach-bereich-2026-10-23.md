@@ -121,8 +121,8 @@ Vorher | Nachher, jeweils der erste Bildschirm (vollständige Aufnahmen erzeugt 
 
 ## Offen
 
-- **Ungenutzte Regeln.** Einige Klassen kommen in keinem Template und keinem Code vor, z. B. `.item-card`,
-  `.brand-divider`, `.sprint-task`, `.sprint-links`, `.project-picker`, `.agent-status-list`, `.docs-index-head`,
-  `.workflow-card-head`. Sie sind beim Umbau unverändert mitgezogen und könnten in einem eigenen Schritt entfallen.
+- ~~**Ungenutzte Regeln.**~~ Am 24.10. entfernt: 179 Selektoren (162 ganze Regeln, ~840 Zeilen), deren Klassen in
+  keinem Template und keinem Code vorkommen, z. B. `.item-card`, `.sprint-task`, `.workflow-board`, `.attention-card`.
+  `npm run check:styles` zeigt in allen 62 Zuständen keine Abweichung.
 - Punkte 3–5 aus dem Bericht vom 22.10. (Skalen für Radius, Schrift und Breakpoints, restliche Farbtöne, leere
   Zustände) bleiben offen. `npm run check:styles` macht die dabei gewollten kleinen Änderungen sichtbar.

@@ -10,9 +10,6 @@
   flex-basis: 100%;
   padding-left: 26px;
 }
-.agent-table .closed-detail > td {
-  padding-left: 38px;
-}
 .agent-detail-body {
   display: grid;
   gap: 8px;
@@ -187,67 +184,6 @@
   margin: 4px 0 0;
 }
 
-/* ── Workflow-Board (Agents): Spalten je Phase, Karten ziehen, Einstellungen per Klick ── */
-.workflow-board {
-  grid-auto-columns: minmax(215px, 1fr);
-}
-
-/* Karten bleiben in ihrer Spalte, auch bei langen Namen wie „Benutzerhandbuch-Autor“. */
-.workflow-lane .kanban-list {
-  grid-template-columns: minmax(0, 1fr);
-}
-.workflow-card,
-.workflow-card .kanban-meta {
-  min-width: 0;
-}
-.workflow-card .kanban-title {
-  /* Silbentrennung statt Bruch mitten im Wort („Auftrags-autor“). */
-  overflow-wrap: break-word;
-  hyphens: auto;
-}
-.workflow-lane header {
-  position: relative;
-  padding-right: 40px;
-}
-
-/* „+“ immer oben rechts in der Spalte, auch bei langen Spaltennamen. */
-.workflow-add {
-  position: absolute;
-  top: -2px;
-  right: 0;
-}
-.workflow-add-menu {
-  position: absolute;
-  z-index: 20;
-  top: 100%;
-  right: 0;
-  left: 0;
-  display: grid;
-  gap: 8px;
-  margin-top: 6px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface);
-  box-shadow: 0 12px 28px rgb(32 40 36 / 18%);
-  font-size: 13px;
-}
-.workflow-add-menu h4 {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-.workflow-add-menu form {
-  display: grid;
-  gap: 6px;
-}
-.workflow-add-menu input,
-.workflow-add-menu select {
-  width: 100%;
-  min-width: 0;
-}
 .workflow-add-existing {
   display: grid;
   gap: 4px;
@@ -266,31 +202,6 @@
 .workflow-add-existing button:hover {
   background: #eef6f1;
 }
-.workflow-lane.lane-pre_sprint {
-  background: #f3f0fb;
-}
-.workflow-lane.lane-on_rejected {
-  background: #fdf2ef;
-}
-.workflow-lane.lane-on_done {
-  background: #eef6f1;
-}
-.workflow-card {
-  cursor: pointer;
-}
-.workflow-card-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.workflow-card-head .kanban-title {
-  flex: 1;
-}
-.workflow-card-head app-model-icon {
-  flex: none;
-  margin-left: auto;
-}
 .workflow-live {
   flex: none;
   width: 9px;
@@ -299,43 +210,7 @@
   background: #2e9e5b;
   box-shadow: 0 0 0 3px rgb(46 158 91 / 20%);
 }
-.workflow-model {
-  padding-left: 30px;
-  font-size: 12px;
-}
 
-/* Deaktivierte Agents: ganze Karte ausgegraut. */
-.workflow-card.disabled {
-  border-color: #e3e3df;
-  background: #f1f1ee;
-  color: #8a8a85;
-  filter: grayscale(1);
-  opacity: 0.65;
-}
-.workflow-card.selected {
-  border-color: var(--accent, #2f6b4f);
-  box-shadow: 0 0 0 2px rgb(47 107 79 / 25%);
-}
-.workflow-card.running {
-  border-color: #6a9bd8;
-}
-.workflow-card:focus-visible {
-  outline: 2px solid var(--accent, #2f6b4f);
-  outline-offset: 2px;
-}
-.workflow-handoff {
-  color: #6b4fa0;
-  font-size: 12px;
-}
-.workflow-settings {
-  position: relative;
-  margin-top: 12px;
-}
-.workflow-settings-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-}
 .agent-settings {
   display: grid;
   gap: 10px;

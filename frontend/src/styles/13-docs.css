@@ -14,12 +14,6 @@
   border-radius: 9px;
   background: #f7f8f5;
 }
-.group-title {
-  margin: 18px 0 5px;
-  color: var(--muted);
-  font-size: 11px;
-  text-transform: uppercase;
-}
 .doc-link {
   display: block;
   width: 100%;
@@ -45,12 +39,6 @@
 /* ── Dokumentation: Suche, Gruppen, Buch-Modus ───────────────────────── */
 .docs-layout.collapsed {
   grid-template-columns: minmax(0, 1fr);
-}
-.docs-index-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
 }
 .book-toggle {
   display: inline-flex;
@@ -79,9 +67,6 @@
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
-}
-.book-open {
-  justify-self: start;
 }
 .doc-group {
   margin-top: 10px;
