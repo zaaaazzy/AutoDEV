@@ -131,6 +131,34 @@ export function stripAcceptance(output: string): string {
   return output.replace(MARKER, '').trimEnd();
 }
 
+const COVERAGE = /abdeckung|coverage/i;
+const NOT_MEASURED = /nicht\s+(?:selbst\s+)?(?:ge)?mess|nicht\s+ermittel|blockiert|gesperrt|wächter|freigabe|\bnull\b/i;
+/** Hinweise auf echte Lücken: rote Tests oder ein Kriterium ohne Test. Solche Punkte bleiben nicht erfüllt. */
+const REAL_GAP = /\brot(?:e[nm]?)?\b|fehlgeschlagen|\bfail|ungetestet|ohne\s+(?:einen\s+)?test|kein(?:en)?\s+test/i;
+
+/**
+ * DoD-Punkte, die der Tester nur deshalb als nicht erfüllt meldet, weil er die Abdeckung nicht selbst messen konnte:
+ * Die Abdeckung misst AIdeation nach dem Tester selbst. Solche Punkte gelten als erfüllt, sofern jedes
+ * Akzeptanzkriterium erfüllt (also belegt) ist. Rote Tests oder unbelegte Kriterien bleiben ein Ablehnungsgrund.
+ */
+export function waiveUnmeasuredCoverage(
+  result: { criteria: Checked[]; done: Checked[] },
+  criteriaCount: number,
+): { result: { criteria: Checked[]; done: Checked[] }; waived: number[] } {
+  const allMet = Array.from({ length: criteriaCount }, (_, index) => index + 1).every(
+    (nr) => result.criteria.find((check) => check.nr === nr)?.met,
+  );
+  const waived: number[] = [];
+  if (!allMet) return { result, waived };
+  const done = result.done.map((check) => {
+    if (check.met || check.manual) return check;
+    if (!COVERAGE.test(check.note) || !NOT_MEASURED.test(check.note) || REAL_GAP.test(check.note)) return check;
+    waived.push(check.nr);
+    return { ...check, met: true, note: `${check.note} (Abdeckung misst AIdeation selbst)`.slice(0, 500) };
+  });
+  return { result: { ...result, done }, waived };
+}
+
 /** Nicht erfüllte oder fehlende Prüfungen, als lesbare Liste für den Entwickler. */
 export function acceptanceProblems(
   result: { criteria: Checked[]; done: Checked[] },

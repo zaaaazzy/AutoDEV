@@ -6,8 +6,8 @@ export const COVERAGE_TARGET = 75;
 const MARKER = /^@@COVERAGE\s+(\{.*\})\s*$/gm;
 
 /** Anweisung an den Tester: Abdeckung messen, Lücken mit Tests schließen, Ergebnis maschinenlesbar melden. */
-export const COVERAGE_INSTRUCTIONS = `## Testabdeckung (Pflicht für den Tester)
-1. Ermittle pro Bereich des Projekts (z. B. Frontend, Backend, Contracts/Shared) die Testabdeckung. Gibt es ein npm-Skript \`test:coverage\`, nutze zuerst \`npm run test:coverage\`; sonst die Werkzeuge des Projekts (z. B. \`ng test --watch=false --coverage\`, \`tsx --test --experimental-test-coverage\`, \`vitest --coverage\`). Fehlt ein Coverage-Werkzeug, richte es als devDependency ein.
+export const COVERAGE_INSTRUCTIONS = `## Testabdeckung (wenn möglich; AIdeation misst nach deinem Schritt selbst)
+1. Ermittle, soweit deine Rechte das erlauben, pro Bereich des Projekts (z. B. Frontend, Backend, Contracts/Shared) die Testabdeckung. Gibt es ein npm-Skript \`test:coverage\`, nutze zuerst \`npm run test:coverage\`; sonst die Werkzeuge des Projekts (z. B. \`ng test --watch=false --coverage\`, \`tsx --test --experimental-test-coverage\`, \`vitest --coverage\`). Fehlt ein Coverage-Werkzeug, richte es als devDependency ein.
 2. Zähle die Testfälle je Bereich nach Testart: Unit-Tests (isolierte Funktionen/Services), Komponententests (UI-Komponenten mit TestBed o. Ä.), Integrationstests (mehrere Schichten, z. B. HTTP-Route mit Datenbank) und End-to-End-Tests (E2E, Browser über die ganze Anwendung).
 3. Liegt die Zeilenabdeckung eines Bereichs unter ${COVERAGE_TARGET} % oder ist der geänderte Code des Auftrags ungetestet, schreibe gezielt Tests für die ungetesteten, fachlich wichtigen Pfade und miss danach erneut.
 4. Lässt sich die Abdeckung nicht messen (Werkzeug fehlt, Befehl vom Wächter gesperrt), melde die Prozentwerte als null und arbeite weiter – das ist kein Fehler und kein Grund, die Abnahme abzulehnen. AIdeation misst die Abdeckung nach deinem Schritt selbst.
