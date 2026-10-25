@@ -1389,7 +1389,9 @@ So gehst du bei der Aktion vor:
 
 ### 26.4 Stand der Prüfung
 
-- **Getestet laut Entwicklerbericht:** `src/runner/git-sync/secret-holdback.test.ts` mit Fällen für Platzhalter, Testdateien, echte Schlüssel, Markierung, `stageAll` und den Ablauf bis zur Sperre des Merges. Ich habe die Tests nicht selbst ausgeführt. Der Tester prüft sie noch.
+- **Getestet, Nachweis aus dem Testlauf cd40dd2b:** `npm run typecheck` grün. `src/runner/action-todo.test.ts` und `src/runner/git-sync/secret-holdback.test.ts` 12/12 grün, darunter der Ablauf bis zur Sperre des Merges. `npm test` ohne Abdeckungs-Flags meldet laut Entwicklerbericht 1500/1500 grün. Diese Läufe habe ich nicht selbst wiederholt.
+- **Tester-Abnahme:** Sie ist nur an der fehlenden Freigabe für `npx --no-install tsx --test …` gescheitert, nicht an den Tests.
+- **Printscreens:** nicht erstellt. Ich habe keinen Zugriff auf eine laufende App: Netzwerkabfragen sind für Agents gesperrt, und ein Browser stand mir nicht zur Verfügung. Die Platzhalter oben bleiben für eine Aufnahme mit laufender App.
 - **Offen, Sicherheit:** Die Markierung hebt echte Schlüssel in der markierten Zeile auf (26.2). Der Test legt das fest, der Bericht sagt etwas anderes. Die Entwicklung muss entscheiden.
 - **Offen:** Ob die zurückgehaltenen Testdateien aus Auftrag 87704371 (`src/agent/tool-sql.test.ts`, `src/core/command.test.ts`) wiederhergestellt werden müssen. Nicht geprüft.
 - **Offen:** Ob „Erneut versuchen“ die Datei aus der Sicherung braucht oder nur den Branch verwendet. Im Code nicht geprüft.
