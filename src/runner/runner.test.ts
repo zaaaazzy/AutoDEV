@@ -1135,6 +1135,80 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   assert.equal(saved.values[6], 0.4);
 });
 
+/** Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). */
+async function testerAcceptanceRun(acceptance: object) {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const query = async (sql: string, values: unknown[] = []) => {
+    queries.push({ sql, values });
+    if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+    if (sql.includes('SELECT test_commands')) return { rows: [{ commands: [['npx', 'tsx', '--test', 'src/a.test.ts']] }] };
+    return { rows: [{ id: 'step-row' }] };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
+  // Wie im gemeldeten Fall: Tests grün, aber kein @@COVERAGE vom Tester, weil der Wächter die Messung sperrt.
+  const output = `75 von 75 Tests grün.\n@@ACCEPTANCE ${JSON.stringify(acceptance)}`;
+  const execute: CommandExecutor = async (command, _cwd, options) => {
+    if (command.includes('--experimental-test-coverage')) {
+      return { exitCode: 0, durationMs: 1, output: '# pass 75\n# fail 0\n# all files | 82.5 | 70.1 | 90.2 |' };
+    }
+    options?.onChunk?.(JSON.stringify({ type: 'result', result: output }));
+    return { exitCode: 0, durationMs: 1, output };
+  };
+  const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
+  const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
+  const order = { ...item, description: '## Akzeptanzkriterien\n- A ist belegt\n- B ist belegt' };
+  const result = await runWorkItem(pool, order, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin });
+  return { result, queries };
+}
+
+const NOT_MEASURED = 'Tests grün, aber die Abdeckung konnte nicht gemessen werden (Wächter blockiert den Befehl)';
+const DONE_WITH_UNMEASURED = [1, 2, 3, 4, 5].map((nr) =>
+  nr === 4 ? { nr, met: false, note: NOT_MEASURED } : { nr, met: true },
+);
+
+test('Abnahme: grüne Tests, alle Kriterien belegt, nur die Abdeckungsmessung des Testers fehlt → bestanden', async () => {
+  const { result, queries } = await testerAcceptanceRun({
+    criteria: [
+      { nr: 1, met: true, note: 'Test a' },
+      { nr: 2, met: true, note: 'Test b' },
+    ],
+    done: DONE_WITH_UNMEASURED,
+  });
+  assert.equal(result, 'passed');
+  const dod4 = queries.find(
+    (query) => query.sql.includes('INSERT INTO acceptance_checks') && query.values[1] === 'done' && query.values[2] === 4,
+  );
+  assert.equal(dod4?.values[4], 'met', 'DoD-Punkt gilt als erfüllt');
+  // Die von AIdeation gemessene Abdeckung wird weiterhin gespeichert – mit echten Werten, nicht null.
+  const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
+  assert.ok(area, 'Abdeckung gespeichert');
+  assert.equal(area.values[8], 82.5);
+  assert.notEqual(area.values[8], null);
+});
+
+test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs-Hinweis abgelehnt', async () => {
+  const unbelegt = await testerAcceptanceRun({
+    criteria: [
+      { nr: 1, met: true, note: 'Test a' },
+      { nr: 2, met: false, note: 'kein Test vorhanden' },
+    ],
+    done: DONE_WITH_UNMEASURED,
+  });
+  assert.equal(unbelegt.result, 'failed');
+  const rot = await testerAcceptanceRun({
+    criteria: [
+      { nr: 1, met: true, note: '' },
+      { nr: 2, met: true, note: '' },
+    ],
+    done: [1, 2, 3, 4, 5].map((nr) =>
+      nr === 2 ? { nr, met: false, note: '2 Tests rot; Abdeckung nicht gemessen (Wächter blockiert)' } : { nr, met: true },
+    ),
+  });
+  assert.equal(rot.result, 'failed');
+  // Auch abgelehnt bleibt die gemessene Abdeckung gespeichert.
+  assert.ok(rot.queries.some((query) => query.sql.includes('INSERT INTO test_coverage_areas')));
+});
+
 test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach dem Reset, kein Bug', async () => {
   const { pool, queries } = fakePool();
   const execute: CommandExecutor = async (command) => ({
