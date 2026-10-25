@@ -17,7 +17,7 @@ import {
   type GitHelpers,
   MAIN_BRANCH,
   pushRemote,
-  sprintBranch,
+  sprintBranchOf,
   sprintTag,
   stageAll,
   taskCommitMessage,
@@ -79,6 +79,10 @@ export async function commitProjectSetup(
 interface PendingSprint {
   id: string;
   name: string;
+  /** Beim Start festgehaltener Sprint-Branch (sprints.branch); unabhängig vom aktuellen Namen. */
+  branch?: string | null;
+  /** Der Sprint hat erledigte Aufträge: Dann muss es seinen Branch geben. */
+  hasDone?: boolean;
   action: 'push' | 'pull' | null;
   remote: string | null;
   status: string;
@@ -128,10 +132,16 @@ async function pushSprint(
   },
 ): Promise<SyncResult> {
   const { git, must } = helpers;
-  const branch = sprintBranch(sprint.name);
+  const branch = sprintBranchOf(sprint);
   let mergedMain = false;
   if (await branchExists(git, branch)) {
     if ((await must('rev-parse', '--abbrev-ref', 'HEAD')) !== branch) await must('checkout', branch);
+  } else if (sprint.status === 'completed' && sprint.hasDone) {
+    // Erledigte Aufträge, aber kein Sprint-Branch: Früher wurde dann der aktuelle Branch gesichert, getaggt und „done“
+    // gemeldet – main bekam die Aufträge nie, der Tag zeigte auf einen fremden Stand.
+    throw new Error(
+      `Sprint-Branch ${branch} fehlt, obwohl der Sprint erledigte Aufträge hat – nichts nach ${MAIN_BRANCH} übernommen. Branch wiederherstellen, dann „Git-Sicherung“ erneut starten.`,
+    );
   } else if ((await currentBranch(git)) === 'HEAD') {
     // Losgelöst (Agent-Worktree): Ohne Branch landete der Sicherungs-Commit nur am Tag und nie in main.
     await must('checkout', '-b', branch);
@@ -377,7 +387,8 @@ export async function syncSprintToGit(
     `UPDATE sprints s SET git_sync = 'running', updated_at = NOW()
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING s.id, s.name, s.status, s.git_action AS action, s.pr_url AS "prUrl",
+      RETURNING s.id, s.name, s.branch, s.status, s.git_action AS action, s.pr_url AS "prUrl",
+                EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'done') AS "hasDone",
                 (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
   );

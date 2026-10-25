@@ -13,7 +13,7 @@ import { loadFollowUpContext } from './follow-up.js';
 import { markSprintReady, sprintAutopilot } from './sprint-autopilot.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { syncRepoDocs } from '../api/docs.js';
-import { enterOrderBranch, OrderBranchError, syncSprintToGit } from './git-sync.js';
+import { enterOrderBranch, OrderBranchError, type SprintRef, syncSprintToGit } from './git-sync.js';
 import { extractCriteria, loadDefinitions } from './acceptance.js';
 import { goLive } from './go-live.js';
 import { acquireTree } from '../core/project-lock.js';
@@ -167,17 +167,28 @@ async function resumePosition(
 }
 
 /**
- * Name des Sprints eines Auftrags (für Sprint-Branch und Commit-Nachrichten). Ein abgeschlossener oder abgebrochener
- * Sprint zählt nicht: Sein Branch ist schon gesichert, ein Merge dorthin käme nie mehr in main. Der Auftrag arbeitet
- * dann wie einer ohne Sprint auf main.
+ * Sprint eines Auftrags: Name (Commit-Nachrichten) und festgehaltener Branch (sprints.branch). Der Branch kommt nie aus
+ * dem aktuellen Namen – nach einer Umbenennung zweigte sonst ein neuer Sprint-Branch von main ab. Hat ein noch
+ * geplanter Sprint keinen (einzelner Agent von Hand), wird er hier einmal vergeben. Ein abgeschlossener oder
+ * abgebrochener Sprint zählt nicht: Sein Branch ist schon gesichert, ein Merge dorthin käme nie mehr in main. Der
+ * Auftrag arbeitet dann wie einer ohne Sprint auf main.
  */
-async function sprintNameOf(pool: Pool, item: WorkItem): Promise<string | null> {
+async function sprintOf(pool: Pool, item: WorkItem): Promise<SprintRef | null> {
   if (!item.sprintId) return null;
   const sprint = await pool
-    .query<{ name: string; status: string }>('SELECT name, status FROM sprints WHERE id = $1', [item.sprintId])
+    .query<{ name: string; status: string; branch: string | null }>(
+      `WITH fixed AS (
+         UPDATE sprints SET branch = sprint_branch_for(project_slug, id, name)
+          WHERE id = $1 AND branch IS NULL AND status NOT IN ('completed', 'cancelled') RETURNING id, branch)
+       SELECT s.name, s.status, COALESCE(f.branch, s.branch) AS branch
+         FROM sprints s LEFT JOIN fixed f ON f.id = s.id WHERE s.id = $1`,
+      [item.sprintId],
+    )
     .catch(logged('runner', null));
   const row = sprint?.rows[0];
-  return row && row.status !== 'completed' && row.status !== 'cancelled' ? row.name : null;
+  return typeof row?.name === 'string' && row.status !== 'completed' && row.status !== 'cancelled'
+    ? { name: row.name, branch: row.branch ?? null }
+    : null;
 }
 
 /** Ist der Sprint des Auftrags pausiert? Ein von Hand gestarteter einzelner Agent läuft trotzdem. */
@@ -325,8 +336,9 @@ export async function runWorkItem(
       if (!releaseTree && changesWorkingTree(agent)) {
         releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
         // Ab dem ersten Agent, der Dateien ändert, arbeitet der Auftrag auf seinem eigenen Branch.
-        ctx.sprintName = await sprintNameOf(pool, item);
-        ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
+        const sprint = await sprintOf(pool, item);
+        ctx.sprintName = sprint?.name ?? null;
+        ctx.branch = await enterOrderBranch(options.cwd, item, sprint, ctx.execute);
       }
       const canCorrect =
         !corrected && !item.agentId && LOOP_BACK_ROLES.has(agent.role) && developerAt >= 0 && developerAt < position;
@@ -376,8 +388,9 @@ export async function runWorkItem(
         if (stop) break;
         if (!releaseTree && changesWorkingTree(agent)) {
           releaseTree = await acquireTree(options.cwd, waitingForTree(item.id, options.cwd));
-          ctx.sprintName = await sprintNameOf(pool, item);
-          ctx.branch = await enterOrderBranch(options.cwd, item, ctx.sprintName, ctx.execute);
+          const sprint = await sprintOf(pool, item);
+          ctx.sprintName = sprint?.name ?? null;
+          ctx.branch = await enterOrderBranch(options.cwd, item, sprint, ctx.execute);
         }
         await runStep(ctx, agent, ordered.length + index, ordered.length + observers.length, {
           stepPosition,

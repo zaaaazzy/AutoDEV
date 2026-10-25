@@ -56,6 +56,20 @@ export function sprintBranch(name: string): string {
   return `sprint/${slugify(name)}`;
 }
 
+/** Sprint mit dem beim Start festgehaltenen Branch (sprints.branch); der Name dient nur noch der Anzeige. */
+export interface SprintRef {
+  name: string;
+  branch?: string | null;
+}
+
+/**
+ * Branch eines Sprints: der gespeicherte (beim Start vergeben, ändert sich beim Umbenennen nicht). Nur ohne
+ * gespeicherten Branch (geplanter Sprint, reiner Name in Tests) wird er aus dem Namen gebildet.
+ */
+export function sprintBranchOf(sprint: SprintRef | string): string {
+  return typeof sprint === 'string' ? sprintBranch(sprint) : sprint.branch || sprintBranch(sprint.name);
+}
+
 export const MAIN_BRANCH = 'main';
 
 const INTERNAL_EXCLUDES = [
@@ -463,13 +477,13 @@ export async function refreshSprintFromMain(git: GitHelpers['git'], branch: stri
 
 export async function checkoutSprintBranch(
   cwd: string,
-  sprintName: string,
+  sprint: SprintRef | string,
   rawExecute: CommandExecutor = runCommand,
 ): Promise<string | null> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
-  const branch = sprintBranch(sprintName);
+  const branch = sprintBranchOf(sprint);
   try {
     await ensureRepository(git, must, cwd);
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output === branch) return branch;
