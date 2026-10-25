@@ -118,7 +118,10 @@ ausführen.
 Mit eigener Domain im Assistenten startet zusätzlich der Dienst `https` (Caddy) und holt automatisch ein
 Let's-Encrypt-Zertifikat. Dafür muss dein Router **Port 443** (TCP) an diesen Rechner weiterleiten und die Domain
 auf deine öffentliche IP zeigen. AIdeation ist dann installierbar als App (Handy: „Zum Home-Bildschirm“) und schickt
-Push-Nachrichten.
+Push-Nachrichten. Angenommen werden nur Geräte-Endpunkte der Push-Dienste der Browser (FCM, Mozilla, Apple, Windows,
+per https ohne eigenen Port); andere Adressen fragt der Server nie an. Ein Gerät gehört dem Benutzer, der es angemeldet
+hat; nur er kann es ändern oder abmelden. Beim Abmelden („Abmelden“ in den Einstellungen) wird auch das Push-Abo des
+Geräts entfernt.
 
 ## Nützliche Befehle
 

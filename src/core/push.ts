@@ -26,6 +26,28 @@ export interface PushSubscriptionRow {
 }
 
 const VAPID_KEY = 'push_vapid_keys';
+
+/** Push-Dienste der Browser: exakte Hosts (Chrome/Edge über FCM, Firefox) und Domains mit Unterdomänen (Safari, Windows). */
+const PUSH_HOSTS = new Set(['fcm.googleapis.com', 'updates.push.services.mozilla.com']);
+const PUSH_DOMAINS = ['push.apple.com', 'notify.windows.com'];
+
+/**
+ * Nur Endpunkte bekannter Push-Dienste – sonst schickt der Server POST-Anfragen an beliebige Ziele (SSRF, z. B. ins
+ * LAN). Allowlist statt IP-Blocklist, weil DNS-Rebinding eine Blocklist umgeht. Gilt beim Anmelden und beim Senden.
+ */
+export function isAllowedPushEndpoint(endpoint: unknown): endpoint is string {
+  if (typeof endpoint !== 'string' || endpoint.length > 1000) return false;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  // `new URL` normalisiert Port 443 zu '' und Hosts zu Kleinbuchstaben.
+  if (url.protocol !== 'https:' || url.username || url.password || url.port !== '') return false;
+  const host = url.hostname;
+  return PUSH_HOSTS.has(host) || PUSH_DOMAINS.some((domain) => host.endsWith(`.${domain}`));
+}
 /** Wert aus der .env der Installation (Worker und Wächter laufen über launchd ohne diese Umgebung). */
 function installEnv(key: string): string | undefined {
   try {
@@ -97,20 +119,22 @@ export async function loadSubscriptions(pool: Pool, audience: PushAudience = {})
 
 /**
  * Sendet an die übergebenen Geräte. Liefert die Zahl erfolgreicher Zustellungen und die Endpunkte, die der
- * Push-Dienst als abgemeldet meldet (404/410) – diese sollte der Aufrufer löschen.
+ * Push-Dienst als abgemeldet meldet (404/410) – diese sollte der Aufrufer löschen. Endpunkte außerhalb der
+ * Allowlist (Altdaten, Zwischenspeicher des Wächters) werden nie angefragt und ebenfalls als `gone` gemeldet.
  */
 export async function deliverPush(
   keys: VapidKeys,
   subscriptions: PushSubscriptionRow[],
   message: PushMessage,
+  send: typeof webpush.sendNotification = webpush.sendNotification.bind(webpush),
 ): Promise<{ sent: number; gone: string[] }> {
   const payload = JSON.stringify({ ...message, title: message.title.slice(0, 120), body: message.body.slice(0, 400) });
   let sent = 0;
-  const gone: string[] = [];
+  const gone = subscriptions.filter((s) => !isAllowedPushEndpoint(s.endpoint)).map((s) => s.endpoint);
   await Promise.all(
-    subscriptions.map(async (subscription) => {
+    subscriptions.filter((s) => isAllowedPushEndpoint(s.endpoint)).map(async (subscription) => {
       try {
-        await webpush.sendNotification(
+        await send(
           { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
           payload,
           { vapidDetails: { subject: SUBJECT, ...keys }, TTL: 6 * 3600, urgency: 'normal', timeout: 10_000 },
