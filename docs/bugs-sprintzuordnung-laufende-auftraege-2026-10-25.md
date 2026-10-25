@@ -43,4 +43,4 @@ Einen gemeinsamen Helfer `assignSprint` für PATCH `/development`, Folgeauftrag,
 - Neue Aufrufer von `syncBugOrder` können einen Client der eigenen Transaktion übergeben. Mit einem Pool läuft die Funktion in einer eigenen Transaktion.
 - Ändert sich der Sprint eines Bugs, während ein Auftrag läuft oder in Freigabe ist, antwortet die API mit 409 und schreibt nichts.
 - Offen: ein gemeinsamer Helfer `assignSprint` für alle Zuordnungsstellen (eigener Auftrag nötig).
-- Die Tests waren im Entwickler-Schritt noch nicht gelaufen. Starten ohne Abdeckungs-Flag: `npx --no-install tsx --test src/api/bugs.test.ts`.
+- Bestätigt im Testlauf 25b803e4 (25.10.2026): `npx tsx --test src/api/bugs.test.ts` mit 16 von 16 Tests grün, `npm run typecheck` grün.
