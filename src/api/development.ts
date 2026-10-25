@@ -65,8 +65,11 @@ const DEV_FIELDS = {
 const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
 
 const parseUuid: Parser = (value) => (isUuid(value) ? value : INVALID);
+/** Neue Aufträge nur in Backlog oder Geplant; alle weiteren Status entstehen über PATCH bzw. den Worker. */
+const NEW_ORDER_STATUSES = new Set<string>([DEVELOPMENT_STATUS.backlog, DEVELOPMENT_STATUS.planned]);
 const NEW_ORDER_FIELDS = {
   ...DEV_FIELDS,
+  status: { column: 'status', parse: parseOption(NEW_ORDER_STATUSES) },
   ideationId: { column: 'ideation_id', parse: parseUuid },
   testRunId: { column: 'test_run_id', parse: parseUuid },
 };
@@ -125,7 +128,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       !isRecord(body) ||
       !validText(body.title, TITLE_MAX) ||
       (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000)) ||
-      (body.status !== undefined && !validStatus(body.status, DEVELOPMENT_STATUSES)) ||
+      (body.status !== undefined && !validStatus(body.status, NEW_ORDER_STATUSES)) ||
       (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
       (body.ideationId !== undefined && !isUuid(body.ideationId)) ||
       (body.testRunId !== undefined && !isUuid(body.testRunId)) ||
