@@ -58,7 +58,9 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false, ha
         description:
           'Führt SQL in der Datenbank dieses Projekts aus (lesen und schreiben, eine Transaktion, max. 50 ' +
           'Ergebniszeilen). Schema vorher mit information_schema prüfen. Keine Zugangsdaten raten oder erfinden.',
-        properties: { sql: parameter('SQL-Anweisung(en); UPDATE/DELETE nur mit WHERE') },
+        properties: {
+          sql: parameter('Eine SQL-Anweisung; UPDATE/DELETE nur mit WHERE und bis 500 Zeilen, ALTER TABLE nur ADD'),
+        },
         required: ['sql'],
       });
     }

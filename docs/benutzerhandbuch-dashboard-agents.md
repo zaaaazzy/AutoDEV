@@ -336,16 +336,19 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 **Was erlaubt ist**
 
 - Eine Anweisung pro Aufruf. Mehrere Anweisungen in einem Aufruf werden abgelehnt.
-- Lesen und Daten ändern (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) sowie additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`).
-- `UPDATE` und `DELETE` nur mit echter `WHERE`-Bedingung. Abgelehnt werden u. a. `WHERE true`, `WHERE 1=1`, `WHERE 2>1` und `WHERE id IS NOT NULL`.
+- Nur diese Anweisungsarten (Allowlist): `SELECT`, `WITH`, `VALUES`, `TABLE`, `SHOW`, `INSERT`, `UPDATE`, `DELETE`, `EXPLAIN` sowie additive DDL: `CREATE TABLE`/`INDEX`/`VIEW`/`MATERIALIZED VIEW`/`SEQUENCE`/`SCHEMA`/`TYPE` (ohne `OR REPLACE`) und `ALTER TABLE …`, wenn jede Aktion ein `ADD` ist. Alles andere wird abgelehnt, z. B. `DROP INDEX`, `LOAD`, `MERGE`, `VACUUM`, `ALTER INDEX`.
+- `UPDATE` und `DELETE` nur mit echter `WHERE`-Bedingung. Abgelehnt werden u. a. `WHERE true`, `WHERE (true)`, `WHERE 1=1`, `WHERE 2>1` und `WHERE id IS NOT NULL`.
+- `UPDATE` und `DELETE` nur als eigene Anweisung, nicht in `WITH (…)` und nicht hinter `EXPLAIN`. Ein `WITH` davor (`WITH x AS (SELECT …) DELETE … WHERE …`) ist erlaubt.
+- Höchstens 500 geänderte Zeilen pro `UPDATE` oder `DELETE`. Trifft die Anweisung mehr, wird sie zurückgerollt. Für `INSERT` gilt keine Grenze.
 
 **Was gesperrt ist**
 
 - Die AIdeation-Datenbank selbst. Ist die hinterlegte Adresse diese Datenbank, wird sie nicht verwendet.
 - Transaktions- und Sitzungsbefehle am Anfang einer Anweisung (`BEGIN`, `COMMIT`, `ROLLBACK`, `SET`, `RESET` …). Der Lauf verwaltet die Transaktion selbst.
-- `DROP` auf Datenbank, Rolle, Erweiterung, Schema, Tabelle, Sicht, Sequenz oder Typ, `TRUNCATE`, `ALTER … DROP`, `ALTER SYSTEM`, `ALTER`/`CREATE` von Datenbank, Rolle oder Erweiterung.
+- Jedes `DROP`, `TRUNCATE`, `ALTER TABLE` mit anderen Aktionen als `ADD` (`RENAME`, `OWNER TO`, `ALTER COLUMN … TYPE`, `DISABLE TRIGGER`, `DISABLE ROW LEVEL SECURITY` …), `ALTER SYSTEM`, `ALTER`/`CREATE` von Datenbank, Rolle oder Erweiterung.
 - `DO`-Blöcke, `EXECUTE`, eigene Funktionen, Prozeduren und Trigger, `GRANT`/`REVOKE`, `COPY`, Rollenwechsel.
 - Server- und Dateifunktionen (z. B. `pg_read_file`, `lo_import`, `pg_terminate_backend`, `dblink`).
+- Funktionen, die SQL aus einem String ausführen: `query_to_xml`, `query_to_xmlschema`, `cursor_to_xml`, `table_to_xml` (und verwandte `…_to_xml…`), `ts_stat`, `ts_rewrite`. Auch mit Schema (`pg_catalog.query_to_xml`) oder in Anführungszeichen (`"query_to_xml"`).
 - Unicode-Escapes `U&'…'` und `U&"…"`, offene Strings oder Kommentare.
 
 **Grenzen beim Ergebnis**
@@ -371,13 +374,18 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 | --- | --- |
 | „Nicht erlaubt: mehrere Anweisungen …“ | Die Abfrage in einzelne Aufrufe aufteilen. |
 | „UPDATE und DELETE brauchen eine echte WHERE-Bedingung …“ | Eine Bedingung angeben, die nur die betroffenen Zeilen trifft. |
+| „Nicht erlaubt: ALTER TABLE nur mit ADD …“ | Eine andere Aktion als `ADD` (z. B. `RENAME`, `OWNER TO`, `DISABLE TRIGGER`). Strukturänderungen außer `ADD` über eine Migration im Projekt machen. |
+| „Nicht erlaubt: DROP INDEX. Erlaubt sind SELECT, WITH, …“ | Die Anweisungsart steht nicht auf der Allowlist. Die Meldung nennt alle erlaubten Arten. |
+| „Nicht erlaubt: UPDATE und DELETE in WITH (…) oder hinter EXPLAIN …“ | Die Änderung als eigene Anweisung senden, ohne `WITH` davor oder `EXPLAIN` davor. Dann greift die Zeilengrenze von 500. |
+| „Nicht erlaubt: Funktionen, die SQL aus einem String ausführen …“ | `query_to_xml`, `cursor_to_xml`, `table_to_xml`, `ts_stat` o. ä. sind gesperrt. Die Abfrage direkt schreiben. |
+| „Zu viele Zeilen: UPDATE hätte … Zeilen geändert (Grenze 500) …“ | Die `WHERE`-Bedingung enger fassen oder die Änderung in Teilen machen. |
 | „Ergebnis zu groß: mehr als 50 Zeilen …“ | Mit `WHERE` oder `LIMIT` eingrenzen oder Spalten weglassen. Bei `UPDATE … RETURNING` gilt dasselbe: Die Änderung wird dann nicht gespeichert. |
 | „SQL-Zeitlimit: …“ | Die Abfrage ist zu langsam. Index prüfen oder Umfang verringern. |
 | „Der hinterlegte Datenbank-Zugang zeigt auf die AIdeation-Datenbank …“ | In den Projekteinstellungen die richtige Projekt-Datenbank eintragen. |
 
 **Wichtig:** `run_sql` ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze. Die eigentliche Grenze ist ein Datenbank-Benutzer des Projekts mit eingeschränkten Rechten (lesend, wo möglich). Den Benutzer richtest du in der Projekt-Datenbank ein, nicht in AIdeation.
 
-**Bilder:** Für diesen Abschnitt gibt es noch keine Printscreens. Dafür müssten App, Projekt-Datenbank und ein Agent-Lauf mit `run_sql` laufen. Platzhalter: `[Bild 4] Verlauf eines Laufs mit einer abgelehnten Abfrage` und `[Bild 5] Ergebnisausgabe mit gekürzter Zelle`.
+**Bilder:** Die Änderung vom 25.10.2026 (Allowlist, nur `ADD`, Zeilengrenze) hat keine neue Oberfläche, deshalb gibt es dafür keine neuen Printscreens. Sichtbar ist sie nur im Verlauf eines Laufs. Dafür müssten App, Projekt-Datenbank und ein Agent-Lauf mit `run_sql` laufen. Platzhalter bleiben: `[Bild 4] Verlauf eines Laufs mit einer abgelehnten Abfrage` und `[Bild 5] Ergebnisausgabe mit gekürzter Zelle`.
 
 ---
 
@@ -1095,6 +1103,7 @@ Es gibt keine neuen Felder oder Schaltflächen. Du musst nichts einstellen. Die 
 
 ## Verwandte Dokumente
 
+- [`sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md`](sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md): Entwicklerbericht zu Abschnitt 6a (Allowlist, nur ADD, Zeilengrenze, String-Funktionen)
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
