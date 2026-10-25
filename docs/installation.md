@@ -104,7 +104,10 @@ Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (
 visuelle Prüfung starte im Projektordner einmal `npm run dev`: Der Vite-Dev-Server auf Port 5180 lädt jede Änderung
 sofort neu (Hot Reload), die Prüfung zeigt also immer den neuesten Stand. Port 5180 statt des Vite-Standards 5173,
 damit das Spiel nicht mit anderen Vite-Projekten kollidiert; ein anderer Port geht mit `GAME_DEV_PORT=<port> npm run dev`
-(dann die Vorschau-Adresse in den Einstellungen anpassen).
+(dann die Vorschau-Adresse in den Einstellungen anpassen). Der Dev-Server lauscht im ganzen Netzwerk: Auf Handy oder Tablet
+öffnest du `http://<IP des Rechners>:5180` oder `http://<rechner>.local:5180`. Die Review-Container von „Version
+ansehen“ bleiben dagegen bewusst nur auf diesem Rechner erreichbar (`127.0.0.1`), weil sie Code aus Agent-Commits
+ausführen.
 
 **Linux:** Fehlen Chromium Systembibliotheken (Smoke-Test bricht mit „missing dependencies“ ab), einmalig
 `sudo npx playwright install-deps chromium` ausführen. Liegen die Playwright-Browser an einem eigenen Ort
