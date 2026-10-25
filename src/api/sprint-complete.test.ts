@@ -318,6 +318,121 @@ test('Sprint-PATCH: scheitert der Abschluss, bleibt der Sprint aktiv – ohne Be
   assert.equal((await sendPatch(retry.pool, { status: 'completed' })).status, 200);
 });
 
+interface OpenSprint {
+  status: string;
+  orders: string[];
+  report: boolean;
+  gitSync: string | null;
+  deleted: boolean;
+}
+
+/**
+ * Datenbank-Attrappe für Abschluss und Löschen: wertet die Auftragsstatus aus, die das SQL als blockierend zählt
+ * (`AND status = '…'` bzw. `AND status IN (…)`), damit der Test die tatsächlich geschriebenen Bedingungen prüft.
+ */
+function openSprintDb(initial: Omit<OpenSprint, 'report' | 'gitSync' | 'deleted'>) {
+  const sprint: OpenSprint = { ...initial, orders: [...initial.orders], report: false, gitSync: null, deleted: false };
+  const count = (single: string | undefined, list: string | undefined) => {
+    const statuses = single ? [single] : statusList(list);
+    return sprint.orders.filter((status) => statuses.includes(status)).length;
+  };
+  const deletable = (sql: string) => {
+    const blocking = /NOT EXISTS \(SELECT 1 FROM development_items WHERE sprint_id = s\.id AND status (?:= '(\w+)'|IN \(([^)]*)\))/.exec(sql);
+    return (
+      !sprint.deleted &&
+      statusList(/status IN \(([^)]*)\)/.exec(sql)?.[1]).includes(sprint.status) &&
+      count(blocking?.[1], blocking?.[2]) === 0
+    );
+  };
+  const query = async (sql: string) => {
+    const text = sql.trim();
+    const view = () => ({ id: SPRINT_ID, status: sprint.status });
+    if (text.startsWith('SELECT status')) {
+      const row: Record<string, unknown> = { status: sprint.status, slug: 'demo' };
+      for (const match of text.matchAll(/AND status (?:= '(\w+)'|IN \(([^)]*)\))\) AS (\w+)/g)) {
+        row[match[3]!] = count(match[1], match[2]);
+      }
+      return { rows: [row] };
+    }
+    if (text.startsWith("UPDATE development_items SET status = 'backlog'")) {
+      if (deletable(text)) sprint.orders = sprint.orders.map((status) => (status === 'planned' ? 'backlog' : status));
+      return { rows: [] };
+    }
+    if (text.startsWith('DELETE FROM sprints')) {
+      if (!deletable(text)) return { rows: [] };
+      sprint.deleted = true;
+      return { rows: [{ id: SPRINT_ID }] };
+    }
+    if (text.startsWith('SELECT 1 FROM sprints')) return { rows: sprint.deleted ? [] : [{ '?column?': 1 }] };
+    if (text.includes("UPDATE sprints SET status = 'completed'") || text.startsWith('UPDATE sprints SET status = $2')) {
+      sprint.status = 'completed';
+      return { rows: [view()] };
+    }
+    if (text.includes("git_sync = 'pending'")) {
+      sprint.gitSync = 'pending';
+      return { rows: [] };
+    }
+    if (text.includes('AS "projectSlug", name, goal, COALESCE(start_date'))
+      return { rows: [{ projectSlug: 'demo', name: 'Sprint 23', goal: '', startedAt: new Date(TODAY) }] };
+    if (text.includes('INSERT INTO sprint_reports')) {
+      sprint.report = true;
+      return { rows: [] };
+    }
+    if (text.includes('to_char(start_date')) return { rows: [view()] };
+    if (text.includes('COUNT(*) FILTER')) return { rows: [{ failed: '0', total: '0' }] };
+    return { rows: [] };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
+  return { pool, sprint };
+}
+
+async function deleteSprint(pool: Pool) {
+  const app = express();
+  const api = express.Router();
+  registerSprintRoutes(api, pool);
+  app.use('/api', api);
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/sprints/${SPRINT_ID}`;
+    const response = await fetch(url, { method: 'DELETE' });
+    return { status: response.status, json: (await response.json().catch(() => null)) as { message?: string } | null };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('Sprint mit Auftrag in Freigabe: Abschluss und Löschen liefern 409 und ändern nichts', async () => {
+  // Abschluss (= Live schalten): ohne den Riegel mergte „Freigeben“ später in einen abgeschlossenen Sprint.
+  const active = openSprintDb({ status: 'active', orders: ['done', 'approval'] });
+  assert.equal((await sendPatch(active.pool, { status: 'completed' })).status, 409);
+  assert.deepEqual(
+    { status: active.sprint.status, report: active.sprint.report, gitSync: active.sprint.gitSync },
+    { status: 'active', report: false, gitSync: null },
+    'kein Abschluss, kein Bericht, kein Git-Sync (Tag)',
+  );
+  // Löschen: ein geplanter Sprint mit einzeln gestartetem Auftrag, der auf Freigabe wartet.
+  for (const waiting of ['approval', 'in_progress']) {
+    const planned = openSprintDb({ status: 'planned', orders: ['planned', waiting] });
+    const { status, json } = await deleteSprint(planned.pool);
+    assert.equal(status, 409, `DELETE mit Auftrag in ${waiting}`);
+    assert.match(json?.message ?? '', /laufen oder auf Freigabe warten/);
+    assert.equal(planned.sprint.deleted, false, 'Sprint bleibt erhalten');
+    assert.deepEqual(planned.sprint.orders, ['planned', waiting], 'geplante Aufträge bleiben geplant');
+  }
+});
+
+test('Sprint ohne laufenden oder wartenden Auftrag: Abschluss und Löschen klappen weiter', async () => {
+  const active = openSprintDb({ status: 'active', orders: ['done', 'rejected'] });
+  assert.equal((await sendPatch(active.pool, { status: 'completed' })).status, 200);
+  assert.equal(active.sprint.report, true);
+  assert.equal(active.sprint.gitSync, 'pending');
+  const planned = openSprintDb({ status: 'planned', orders: ['planned', 'done'] });
+  assert.equal((await deleteSprint(planned.pool)).status, 204);
+  assert.equal(planned.sprint.deleted, true);
+  assert.deepEqual(planned.sprint.orders, ['backlog', 'done'], 'geplante Aufträge gehen ins Backlog');
+});
+
 test('completeSprint (Worker/Autopilot): Startdatum in der Zukunft, Abschluss atomar mit Bericht', async () => {
   const ok = sprintDb(futureSprint());
   await completeSprint(ok.pool, SPRINT_ID);
