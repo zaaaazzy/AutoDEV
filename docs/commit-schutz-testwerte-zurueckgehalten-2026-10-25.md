@@ -25,6 +25,30 @@ im Arbeitsordner, wanderten beim Checkout auf den Sprint-Branch mit, und der nä
 ## Hinweis für Tests
 Echt aussehende Tokens im Testcode weiter zusammensetzen (`'ghp_' + '…'`) oder mit `dev-log: testwert` markieren.
 
+## Auftrag
+Auftrag 1784060f (Bugfix, 25.10.2026). Auslöser war Auftrag 87704371 (Redaction mit Token-Mustern): Seine Testdateien
+`src/agent/tool-sql.test.ts` und `src/core/command.test.ts` blieben zurückgehalten und fehlen weiter.
+
+## Sprint
+| Auftrag | Zustand | Details |
+|---|---|---|
+| 1784060f Commit-Schutz hält Testdateien zurück | umgesetzt, Entwickler bestanden | Tester prüft `secret-holdback.test.ts` |
+| 87704371 Redaction mit Token-Mustern | offen zu prüfen | Testdateien nie committet |
+
+## Anfrage / TODO
+- Prüfen, ob die Testdateien aus Auftrag 87704371 wiederhergestellt werden müssen. Der Entwickler hat das nicht geprüft.
+  Neue Tokens dort zusammensetzen oder mit `dev-log: testwert` markieren.
+- Bei Auftrag-Aktion „Dateien wegen Zugangsdaten zurückgehalten“: Dateien in `.dev-log-backups/` ansehen, dann
+  „Erneut versuchen“.
+
+## Technische Dokumentation
+- Ablauf: `stageAll` liefert `held`; `finishOrderBranch` setzt die Dateien beiseite (`setAsideFiles`), committet den Rest
+  auf dem Auftrags-Branch, mergt nicht und liefert `secrets`. `runner-settle.ts` setzt dann `SECRETS_TODO` statt
+  `MERGE_TODO` und blockiert den Auftrag.
+- Die Prüfung läuft pro Fundstelle (`filesWithSecrets`); Ausnahmen nur für Testdateien. `secret-mask.ts` blieb unverändert.
+- Sonderzeichen in Dateinamen (Leerzeichen, Umlaute, `*[1]`) werden weiter unterstützt.
+- Tests einzeln starten, ohne Coverage-Flags.
+
 ## Geänderte Stellen
 - `src/runner/git-sync/git-helpers.ts`: `filesWithSecrets` mit Testwert-Ausnahme, `isPlaceholderToken`,
   `setAsideFiles`.
