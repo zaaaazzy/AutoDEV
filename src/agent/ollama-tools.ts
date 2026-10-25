@@ -33,6 +33,8 @@ const clip = (text: string, max = MAX_TOOL_OUTPUT): string =>
 export interface ToolContext {
   cwd: string;
   canWrite: boolean;
+  /** Shell-Befehle unter dem Wächter (run_command); ohne Angabe wie canWrite. Routinen: ja, ohne Schreibrecht. */
+  canRunCommands?: boolean;
   canManageServices?: boolean;
   /** Dateirechte des Agents; geprüft wie bei der Claude-CLI (Anlegen/Ändern, Ordner, geschützte Pfade). */
   files?: GuardPolicy;
@@ -146,7 +148,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       }
       case 'run_command': {
         const command = typeof args.command === 'string' ? args.command.trim() : '';
-        if (!context.canWrite) {
+        if (!(context.canRunCommands ?? context.canWrite)) {
           return 'Befehle sind für diese Rolle nicht erlaubt.';
         }
         const parts = command.split(/\s+/);

@@ -116,6 +116,10 @@ const COMMAND_HELP: Record<string, string> = {
   'Bash(docker compose pull:*)': 'Lädt neue Versionen der verwendeten Images.',
   'Bash(docker ps:*)': 'Listet alle laufenden Container (nur lesen).',
   'Bash(docker logs:*)': 'Zeigt die Logs eines Containers (nur lesen).',
+  'Bash(npm audit:*)': 'Prüft die Abhängigkeiten auf bekannte Sicherheitslücken (ohne „fix“, ändert nichts).',
+  'Bash(npm outdated:*)': 'Listet veraltete Abhängigkeiten (nur lesen).',
+  'Bash(git ls-files:*)': 'Listet die Dateien im Repository (nur lesen).',
+  'Bash(git grep:*)': 'Durchsucht die Dateien im Repository (ohne Pager, nur Pfade im Projekt).',
 };
 
 /** Erklärung eines Befehls; für eigene Befehle eine allgemeine Beschreibung. */
@@ -222,6 +226,20 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 ];
 
 export const DEFAULT_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => group.id);
+
+/**
+ * Eingebaute Prüf-Gruppe der Routinen (z. B. „Nächtlicher Sicherheits-Check“): nur lesende Befehle. Sie gehört zur
+ * Rolle, nicht zu den schaltbaren Projektgruppen – andere Rollen (auch Entwickler) bekommen sie nie. „npm audit fix“,
+ * „git grep -O“ und Pfade ausserhalb des Projekts sperrt der Wächter.
+ */
+export const CHECK_GROUP: PermissionGroup = {
+  id: 'checks',
+  label: 'Prüfbefehle',
+  description: 'npm audit, npm outdated, git ls-files und git grep – nur lesen, nur für Routinen.',
+  rules: prefixRules(['npm audit', 'npm outdated', 'git ls-files', 'git grep']),
+};
+/** Rollen, die die Prüf-Gruppe immer bekommen. */
+export const CHECK_ROLES = new Set(['routine']);
 
 /** Rollen mit erweiterten Rechten: Assistent, Entwickler, Tester (Tests, Coverage) und Reviewer (git diff). */
 export const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer', 'routine']);

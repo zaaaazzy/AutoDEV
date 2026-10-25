@@ -469,11 +469,175 @@ Typischer Fall: Ein Auftrag wartet nach dem Nutzungslimit mit Zwischenstand auf 
 
 ---
 
-## 9. Board: offene Aufträge und Ideen immer vollständig
+## 9. Routinen: Prüfbefehle (npm audit, git grep)
+
+Zeitgesteuerte Routinen (Agent-Rolle „Routine“) können jetzt die Prüfbefehle ausführen, die ihre Vorlagen verlangen. Vorher bekamen sie kein Befehlsrecht, oder die Claude-CLI verweigerte den Befehl im Hintergrund. Die Routine meldete dann „Messwert fehlt“ und legte keinen Bug an.
+
+[Bild 8: Routine „Nächtlicher Sicherheits-Check“ mit dem Schalter „aktiv“ und dem Ausgabeziel „Bugs“]
+
+### 9.1 Welche Befehle freigegeben sind
+
+Die Prüf-Gruppe ist eingebaut. Sie lässt nur diese Befehle zu:
+
+| Befehl | Zweck |
+| --- | --- |
+| `npm audit` (auch mit `--json`) | Sicherheitslücken in den Abhängigkeiten |
+| `npm outdated` | veraltete Abhängigkeiten |
+| `git ls-files` | Dateien im Repository auflisten |
+| `git grep` (z. B. `git grep -n TODO`) | Text im Repository suchen |
+
+Das ist eine Ausnahme nur für Routinen. Sie erscheint nicht als Projektgruppe, die man an- oder abschaltet.
+
+### 9.2 Bedingungen und Grenzen
+
+- **Nur die Rolle „Routine“.** Entwickler, Assistent und Tester bekommen diese Befehle nicht, auch nicht über eine eigene Zuweisung am Agent.
+- **Nur lesen.** Routinen bekommen keine Datei-Werkzeuge zum Schreiben. Sie ändern nichts im Projekt. Ergebnisse gehen nur über die Marker (`@@BUG`, `@@IDEA`, `@@ORDER`) weiter, und daraus entstehen Bugs, Ideen oder Aufträge.
+- **Gesperrt bleiben:**
+  - `npm audit fix` (auch `npm audit --json fix` und mit Anführungszeichen), weil es `package-lock.json` ändert.
+  - `git grep -O` und `--open-files-in-pager` (Pager bzw. Reihenfolge-Datei), auch in zusammengefassten Kurzoptionen wie `-iOless`.
+  - `git grep --no-index`, `--no-exclude-standard` und `-f`/`--file` mit einer Datei außerhalb des Projekts.
+  - Pfade außerhalb des Projektordners (absolute Pfade und `..`).
+  - Geheimnis-Dateien wie `.env`.
+  - Escapte Anführungszeichen (`\"`, `\'`) und die anderen Schreibweisen, die der Befehlswächter in Abschnitt 3 nennt.
+- **Lokales Modell (Standard ohne CLI):** Routinen bekommen `run_command`, aber kein `write_file` und kein `edit_file`. Ohne Rechte-Kontext (Datei- und Befehlsrechte) gibt es gar keine Shell. Das ist Absicht (fail-closed).
+- **Claude-CLI:** Die Freigabe läuft über dieselben Regeln wie die übrigen Befehle. Die Routine bekommt die Prüf-Gruppe auch dann, wenn ihre Projektgruppen eingeschränkt sind.
+- **Offen:** Routinen bekommen weiterhin alle Befehle der freigeschalteten Projektgruppen (z. B. `npm run`). Diese Einschränkung ist ein eigener Auftrag und noch nicht umgesetzt.
+
+### 9.3 Vorlagen, die diese Befehle nutzen
+
+Die Vorlagen werden einmal je Projekt angelegt. Sie sind immer deaktiviert und nur lesend. Du schaltest sie selbst ein.
+
+| Vorlage | Befehle | Ergebnis |
+| --- | --- | --- |
+| Nächtlicher Sicherheits-Check (02:00, Fenster 22–06 Uhr) | `npm audit`, `npm outdated` | Bug je Sicherheitslücke ab Schwere „moderate“ |
+| Wöchentlicher Doku-Abgleich | `git ls-files` | Aufträge |
+| Tote Dateien und TODOs finden | `git ls-files`, `git grep -n TODO` | Ideen mit Fundstellen |
+| Testabdeckung unter 75 % melden | Coverage-Messung | Aufträge; fehlende Messwerte gelten als Hinweis, nicht als bestanden |
+
+[Bild 9: Routine „Nächtlicher Sicherheits-Check“ nach einem Lauf mit einem neuen Bug aus `npm audit`]
+
+### 9.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Routine meldet „Messwert fehlt“ oder legt keinen Bug an | Die Routine hat keine Shell oder der Befehl wurde gesperrt. Prüfe die Meldung im Lauf. Bei einem Befehl mit `-O`, `fix` oder einem Pfad außerhalb des Projekts ist die Sperre richtig. Den Befehl ohne diese Teile neu formulieren. |
+| Lauf meldet „Escapte Anführungszeichen“ | Argumente in ganze Anführungszeichen setzen (`'…'` oder `"…"`), statt zu escapen. Siehe Abschnitt 4. |
+| `npm audit` liefert keine Ergebnisse oder einen Fehler | `npm audit` braucht Netzzugang zum Paketregister. Die Ausgabe des Laufs zeigt, ob der Befehl selbst fehlgeschlagen ist. Diesen Fall habe ich nicht gegen einen echten Lauf geprüft. |
+
+---
+
+## 10. Problemanalyse für blockierte Aufträge
+
+Ein Auftrag wird blockiert, wenn er nicht weiterlaufen kann. Das kann an einem fehlgeschlagenen Agent-Schritt liegen, aber auch an anderen Gründen: Git-Fehler beim Betreten des Auftrags-Branches (etwa „fremde, nicht committete Änderungen“), Budget, Merge-Konflikt oder ein gescheiterter Abschluss. Die Problemanalyse erklärt dann die Ursache und schlägt eine Lösung vor. Vorher sah die Analyse bei diesen Gründen nur „Keine Fehlerausgabe vorhanden“, weil sie nur fehlgeschlagene Schritte las. Das ist behoben.
+
+[Bild 10: Blockierter Auftrag im Detail mit dem Abschnitt „Blockiert“ und dem Button „🔎 Problem analysieren“]
+
+### 10.1 Wann der Button erscheint
+
+- **Ort:** Auftragsdetail, Abschnitt „Blockiert“. Er steht neben „↻ Erneut versuchen“. Der Abschnitt erscheint bei Status „blockiert“ und bei „abgelehnt“ (verstößt gegen eine Projektregel).
+- **Beschriftung:** „🔎 Problem analysieren“. Während die Analyse läuft, zeigt er „Assistent analysiert …“ und ist gesperrt.
+- **Bestätigung:** Vor dem Start fragt AIdeation „Neu analysieren?“. Mit „Analysieren“ startet sie.
+- **Nicht bei Express-Aufträgen:** Die Schaltfläche steht zwar da, aber der Server lehnt die Analyse für Express-Aufträge mit 409 ab.
+- **Nur bei blockierten Aufträgen:** Ist der Auftrag nicht blockiert oder läuft schon eine Analyse, antwortet der Server mit 409: „Der Auftrag ist nicht blockiert oder wird bereits analysiert.“
+
+### 10.2 Was die Analyse liest
+
+Die Analyse läuft im Chat-Takt des Workers (etwa alle 1,5 s). Sie nimmt jeweils den ältesten angeforderten Auftrag des Projekts. Der Analyse-Prompt enthält in dieser Reihenfolge:
+
+| Abschnitt im Prompt | Quelle | Bedingung und Kürzung |
+| --- | --- | --- |
+| Blockiergrund des Auftrags | Feld `failure` | Nur wenn gesetzt. Höchstens 2.500 Zeichen. Der **Anfang** bleibt erhalten, weil dort der Grund steht und Dateilisten erst danach folgen. |
+| Offene Aktion | Feld `action_todo` | Nur wenn gesetzt. Gleiche Grenze von 2.500 Zeichen. |
+| Ausgabe fehlgeschlagener Schritte | letzte drei Schritte mit Status „fehlgeschlagen“ | Je Schritt höchstens 2.500 Zeichen. Das **Ende** der Ausgabe bleibt erhalten. |
+
+- **Leere Felder** erzeugen keinen eigenen Abschnitt. Erst wenn weder Blockiergrund, offene Aktion noch fehlgeschlagener Schritt vorliegt, steht dort „Keine Fehlerausgabe vorhanden.“
+- **Geheimnisse** in Blockiergrund und offener Aktion werden vor dem Versand geschwärzt. Die Schwärzung betrifft diese beiden Felder, nicht die Schrittausgaben.
+- **Bekannte Bugs:** Die letzten 30 Bugs des Projekts gehen ebenfalls in den Prompt, damit die Analyse bekannte Ursachen erkennt.
+- **Nur lesen:** Die Analyse hat nur lesende Rechte (Rolle `analyst`). Sie ändert keinen Code und keine Datei.
+
+### 10.3 Was danach passiert
+
+| Ergebnis der Analyse | Folge |
+| --- | --- |
+| Antwort mit Titel und Ursache, kein Bug-Bericht zum Auftrag vorhanden | Ein Bug mit Schwere „hoch“ und Quelle „Agent“ wird angelegt. Gibt es im Projekt schon einen Bug mit demselben Titel, entsteht kein zweiter. Die Analyse steht im Auftrag unter „Analyse“. Ein Behebungsauftrag entsteht hier nicht. |
+| Antwort mit Titel und Ursache, Bug-Bericht zum Auftrag existiert schon (vom gescheiterten Agent) | Die Analyse ergänzt diesen Bug in den Fix-Notizen und legt keinen zweiten an. Ist die Zeile „AKTION“ leer („keine“), wird der Bug an die Behebung delegiert: Der Bug-Auftrag entsteht nur, wenn `auto_bugfix` am Projekt aktiv ist (siehe [`workflows.md`](workflows.md)). |
+| Zeile „AKTION: …“ mit einem Menschen-Schritt (z. B. „API-Schlüssel in .env eintragen“) | Der Auftrag zeigt „Aktion notwendig“ mit dem Schritt und wartet darauf. Gibt es einen Bug-Bericht zum Auftrag, bekommt er den Vermerk „Kein Code-Fehler“. Es entsteht in jedem Fall kein Behebungsauftrag. |
+| Antwort zu kurz (unter 60 Zeichen) oder Analyse mit Fehler | Die Analyse gilt als fehlgeschlagen. Der Text „Analyse fehlgeschlagen: …“ erscheint unter der Analyse, es entsteht kein Bug. Danach kannst du erneut analysieren lassen. |
+| Worker wird während der Analyse beendet | Die Analyse wird wieder als „angefordert“ eingetragen und beim nächsten Start neu ausgeführt. |
+
+Das Ergebnis steht im Auftragsdetail unter „Analyse“, die Bugs im Bereich „Bugs“.
+
+[Bild 11: Auftragsdetail nach der Analyse mit „**Bug:** …“ und dem Hinweis auf den neuen Bug]
+
+### 10.4 Grenzen
+
+- **Nur ein Auftrag je Projekt und Takt:** Mehrere angeforderte Analysen laufen nacheinander.
+- **Keine Schritte, die nicht fehlgeschlagen sind:** Die letzten erfolgreichen Schritte und die Läufe der Agents (`agent_runs`) gehen nicht in die Analyse. Die Analyse sieht nur den Blockiergrund, die offene Aktion und die fehlgeschlagenen Schritte.
+- **Kein Ersatz für Fehlerbehebung:** Die Analyse erklärt und schlägt vor. Umgesetzt wird sie nur über einen Bugfix-Auftrag oder eine Aktion, die ein Mensch ausführt.
+
+### 10.5 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Analyse nennt keine Ursache, obwohl der Auftrag blockiert ist | Prüfe, ob im Auftrag ein Blockiergrund steht. Fehlt er, war der Grund nicht im Auftrag gespeichert. Dann bleibt nur die Ausgabe der Schritte. |
+| Analyse zeigt „Analyse fehlgeschlagen: …“ | Der Analyse-Agent lief nicht durch (Modell nicht erreichbar, Zeitlimit, Befehl nicht gefunden). Die Meldung nennt den Grund. Behebe die Ursache und fordere die Analyse erneut an. |
+| Button ist grau und zeigt „Assistent analysiert …“ | Eine Analyse ist angefordert oder läuft gerade. Warte auf den Abschluss oder prüfe, ob der Worker läuft (siehe Abschnitt 4). |
+| „409: Der Auftrag ist nicht blockiert …“ | Der Auftrag hat den Status gewechselt, z. B. weil er neu gestartet wurde. Die Analyse ist nur für blockierte Aufträge da. |
+| Es gibt keinen neuen Bug, obwohl die Analyse lief | Ein Bug mit gleichem Titel existiert im Projekt schon, oder der Auftrag hatte einen Bug-Bericht, den die Analyse ergänzt hat. Die Analyse steht in beiden Fällen im Auftrag unter „Analyse“. |
+
+## 11. Aufträge in den Sprint nehmen („Aufträge hinzufügen“)
+
+Auf der Sprintseite lassen sich offene und abgebrochene Aufträge in den Sprint übernehmen, ohne sie einzeln anzulegen oder zu öffnen. Die Liste steht unter dem Auftragsbereich des Sprints.
+
+[Bild 12: Sprintseite mit zugeklappter Liste „Aufträge hinzufügen (n verfügbar)“ und mit geöffneter Liste samt Auswahl]
+
+### 11.1 Wann die Liste erscheint und was sie zeigt
+
+- **Ort:** Sprintseite, unter der Auftragstabelle, Eintrag „Aufträge hinzufügen (N verfügbar)“.
+- **Nur mit Recht „plan“:** Ohne dieses Recht fehlt die Liste ganz.
+- **Nur in geplanten oder aktiven Sprints:** In abgeschlossenen oder abgebrochenen Sprints fehlt sie. Auch im Review und danach wird nichts übernommen. Der Server prüft dieselbe Regel.
+- **Inhalt:** Offene Aufträge (noch in keinem Sprint) und abgebrochene Aufträge (aus einem Sprint genommen oder mit Status „blockiert“). Abgebrochene stehen unten, jeweils in Rangfolge. Die Spalte „Herkunft“ zeigt, welche Art es ist.
+- **Nicht enthalten:** Aufträge, die gerade laufen, abgeschlossen oder abgebrochen sind, und Aufträge, die schon in einem Sprint stehen.
+
+### 11.2 Offen und zu oder offen
+
+- **Vorgabe:** Ist der Sprint leer, ist die Liste beim Öffnen der Seite offen. Ist er nicht leer, ist sie zu.
+- **Von Hand:** Ein Klick auf den Eintrag öffnet oder schließt die Liste. Sie bleibt dann so, bis du sie wieder änderst.
+- **Bleibt offen:** Die Liste klappt nicht zu, wenn sich die Daten neu laden. Das passiert etwa alle 3 Sekunden, solange ein Agent läuft, und nach jedem Übernehmen. Auch Filter und Auswahl bleiben erhalten.
+- **Wechsel des Sprints:** Wird der Sprint leer oder ist er nicht mehr leer, gilt wieder die Vorgabe (siehe oben).
+
+### 11.3 Auswahl und Übernahme
+
+- **Einzeln:** Der Pfeil „→“ in einer Zeile übernimmt diesen Auftrag sofort in den Sprint.
+- **Mehrere:** Haken setzen. Oben erscheint „N ausgewählt“ mit „→ In den Sprint (N)“ und „Auswahl aufheben“.
+- **Nach der Übernahme:** Der Auftrag verschwindet aus der Liste. Die übrige Auswahl bleibt markiert.
+- **Sperre:** Während eine Aktion läuft, sind die Schaltflächen gesperrt.
+- **Wohin:** Ein übernommener Auftrag landet in der Auftragsliste des Sprints als „geplant“. Er wird in der angezeigten Reihenfolge abgearbeitet. Ob er sofort startet, hängt davon ab, ob der Sprint aktiv ist (siehe [`laufzeit.md`](laufzeit.md)).
+
+[Bild 13: Sprint mit geöffneter Liste, zwei markierten Aufträgen und Leiste „2 ausgewählt“]
+
+### 11.4 Grenzen
+
+- **Nur der Sprint in der Ansicht:** Die Liste bietet Aufträge für den Sprint an, den du gerade öffnest.
+- **Keine Filter nach Status:** Die Liste zeigt alle verfügbaren Aufträge. Aufträge im Status „Freigabe“ ohne Sprint erscheinen ebenfalls, lassen sich aber nicht übernehmen, weil laufende Arbeit nicht umgehängt wird. Ein Filter fehlt noch (siehe [`workflows.md`](workflows.md)).
+- **Inzwischen eingeplant:** Ein Auftrag, der nach dem Markieren schon in einem Sprint gelandet ist, fällt aus der Auswahl heraus.
+
+### 11.5 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Die Liste fehlt | Dir fehlt das Recht „plan“, oder der Sprint ist abgeschlossen oder abgebrochen. |
+| Die Liste klappt beim Übernehmen oder Nachladen trotzdem zu | Das sollte mit dem Fix nicht mehr passieren. Lade die Seite neu. Tritt es danach weiterhin auf, melde es als Fehler mit Sprint und Schritten. |
+| Ein Auftrag fehlt in der Liste | Er gehört schon zu einem Sprint, läuft gerade oder ist abgeschlossen. |
+| Übernahme schlägt fehl | Die Meldung nennt den Grund. Häufig ist der Sprint inzwischen abgeschlossen oder der Auftrag schon eingeplant. |
+
+---
+
+## 12. Board: offene Aufträge und Ideen immer vollständig
 
 Das Board (Sprint, Backlog, Aktionen und Ideen) zeigt jetzt alle **offenen** Einträge des aktiven Projekts. Früher wurden nur die 200 neuesten Einträge geladen, unabhängig vom Status. Bei mehr als 200 Aufträgen fehlten daher ältere geplante, blockierte oder laufende Aufträge. Die Sprintplanung hat sie trotzdem vorgeschlagen, und du konntest sie nicht sehen oder bearbeiten. Das ist behoben. Du musst dafür nichts einstellen.
 
-### 9.1 Was geladen wird
+### 12.1 Was geladen wird
 
 | Art | Wird immer vollständig geladen | Wird begrenzt auf die 200 neuesten |
 |-----|-------------------------------|-------------------------------------|
@@ -485,19 +649,19 @@ Das Board (Sprint, Backlog, Aktionen und Ideen) zeigt jetzt alle **offenen** Ein
 - Jeder Eintrag erscheint nur einmal.
 - Was die Sprintplanung vorschlagen kann, siehst du jetzt auch im Board.
 
-### 9.2 Herkunftsfilter bei Ideen
+### 12.2 Herkunftsfilter bei Ideen
 
 - Der Filter „Herkunft“ (z. B. `visionary`) gilt weiterhin für Ideen.
 - Er wirkt auf offene und auf die 200 neuesten abgeschlossenen Ideen gleichermaßen.
 - Ein unbekannter Filterwert zeigt alle Ideen, wie bisher.
 
-### 9.3 Bedingungen und Grenzen
+### 12.3 Bedingungen und Grenzen
 
 - Die Grenze von 200 gilt nur für erledigte, abgelehnte und angenommene Einträge. Ältere abgeschlossene Einträge erscheinen nicht im Board, bleiben aber in der Datenbank erhalten.
 - Bei sehr vielen offenen Einträgen wird die Antwort entsprechend größer. Eine Seitenaufteilung (Paginierung) gibt es noch nicht.
 - Ein neuer Endstatus muss in die Liste der abgeschlossenen Status aufgenommen werden (`src/core/status.ts`). Sonst gilt er als offen und bleibt dauerhaft sichtbar.
 
-### 9.4 Fehlerbehebung
+### 12.4 Fehlerbehebung
 
 | Problem | Ursache und Lösung |
 |---------|--------------------|
@@ -507,24 +671,24 @@ Das Board (Sprint, Backlog, Aktionen und Ideen) zeigt jetzt alle **offenen** Ein
 
 **Hinweis:** Für diesen Abschnitt liegen keine Printscreens vor. Die Board-Oberfläche lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Printscreens sollten nachgereicht werden, wenn der Stack verfügbar ist. Bilder wurden nicht erfunden.
 
-## 10. Bugs einem Sprint zuordnen
+## 13. Bugs einem Sprint zuordnen
 
 Du kannst einen Bug einem Sprint zuordnen. Das geht im Anlegen-Formular, in der Bug-Zeile und unter „Bug bearbeiten“. Ordnest du einen Bug zu, legt AIdeation einen Auftrag „Bug: …“ im Sprint an. Der Auftrag läuft nur, wenn der Sprint läuft.
 
-### 10.1 Welche Sprints zur Auswahl stehen
+### 13.1 Welche Sprints zur Auswahl stehen
 
 - **Zur Auswahl:** nur geplante und aktive Sprints.
 - **Nicht zur Auswahl:** abgebrochene, in Prüfung befindliche und abgeschlossene Sprints.
 - **Ausnahme:** Ist der Bug schon einem solchen Sprint zugeordnet, bleibt dieser Sprint in der Auswahl sichtbar. So verlierst du die Zuordnung nicht, wenn du nur Titel oder Status änderst.
 
-### 10.2 Was die Schnittstelle prüft
+### 13.2 Was die Schnittstelle prüft
 
 - Eine Zuordnung zu einem abgebrochenen, in Prüfung befindlichen oder abgeschlossenen Sprint wird mit **409** abgelehnt. Es wird weder der Bug gespeichert noch ein Auftrag angelegt.
 - Die Prüfung greift nur, wenn sich die Sprint-Zuordnung ändert. Ein Bug, der schon an einem solchen Sprint hängt, bleibt bei anderen Änderungen bearbeitbar.
 - Das Entfernen der Zuordnung ist immer erlaubt.
 - Der Sprint muss zum selben Projekt gehören wie der Bug. Sonst kommt **400**.
 
-### 10.3 Fehlerbehebung
+### 13.3 Fehlerbehebung
 
 | Problem | Ursache und Lösung |
 |---------|--------------------|
@@ -536,17 +700,17 @@ Du kannst einen Bug einem Sprint zuordnen. Das geht im Anlegen-Formular, in der 
 
 ---
 
-## 11. Chat mit gewähltem Agent: welche Rechte gelten
+## 14. Chat mit gewähltem Agent: welche Rechte gelten
 
 Im Chat kannst du einen bestimmten Agent ansprechen. Dann bekommt die Antwort die Rechte **dieses Agents**, nicht pauschal die des Assistenten. Das gilt auch dann, wenn der Befehl des Agents `--dangerously-skip-permissions` enthält.
 
-### 11.1 Agent wählen
+### 14.1 Agent wählen
 
 - Tippe im Chat-Feld `@` und wähle den Agent aus der Liste.
 - Der gewählte Agent erscheint als Chip mit dem Namen. Mit dem Kreuz (`×`) auf dem Chip entfernst du die Auswahl.
 - Ohne Auswahl antwortet der Chat-Assistent mit seinen eigenen Rechten.
 
-### 11.2 Welche Rechte gelten
+### 14.2 Welche Rechte gelten
 
 | Rolle des gewählten Agents | Rechte im Chat | Was der Befehl mit `--dangerously-skip-permissions` bewirkt |
 | --- | --- | --- |
@@ -567,7 +731,7 @@ Im Chat kannst du einen bestimmten Agent ansprechen. Dann bekommt die Antwort di
 
 **Printscreens:** keine. Die Chat-Seite lässt sich nur mit laufendem Docker-Stack und Anmeldung aufnehmen. Die Beschriftungen oben stammen aus dem Code (`chat-composer.component.ts`, `agent-tasks.component.html`). Sie sollten am laufenden System geprüft werden.
 
-### 11.3 Fehlerbehebung
+### 14.3 Fehlerbehebung
 
 | Problem | Ursache und Lösung |
 | --- | --- |
@@ -578,20 +742,20 @@ Im Chat kannst du einen bestimmten Agent ansprechen. Dann bekommt die Antwort di
 
 ---
 
-## 12. Token-Limits je Agent-Rolle (nur API)
+## 15. Token-Limits je Agent-Rolle (nur API)
 
 Zusätzlich zum Projektbudget (Einstellungen → Budget) kannst du je **Agent-Rolle** und Zeitraum ein Token-Limit setzen. Ein Entwickler-Agent kann so ein Tageslimit haben, ohne dass der Tester, Reviewer oder Dokumentierer davon betroffen sind. Das Projektlimit bleibt wie bisher. Die Rollen-Limits kommen dazu und ersetzen es nicht.
 
 **Printscreens:** keine. Das Feature hat noch keine Oberfläche; Einstellungen, Dashboard und Statistik folgen in einem eigenen Auftrag. Die Beispiele unten zeigen Anfrage und Antwort der API in der Form, die der Code erzeugt. Sie wurden nicht gegen ein laufendes System geprüft.
 
-### 12.1 Was du einstellen kannst
+### 15.1 Was du einstellen kannst
 
 - **Rollen:** `author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`. Die Rolle `custom` hat kein Limit, weil sie keiner festen Aufgabe entspricht.
 - **Zeiträume:** `day` (heute, Tageswechsel nach `DEV_LOG_TIMEZONE`), `sprint` (aktiver Sprint) und `order` (ein einzelner Auftrag).
 - **Limit:** eine positive Zahl in Tokens oder `null`. `null` entfernt das Limit. Eine fehlende Zeile bedeutet **keine Grenze**: Für diese Rolle und diesen Zeitraum prüft der Worker nichts.
 - **Wer:** Lesen ist für angemeldete Benutzer mit Projektzugriff vorgesehen. Ändern darf nur die Rolle **admin**. Ohne sie antwortet die API mit 403 und speichert nichts.
 
-### 12.2 Endpunkte
+### 15.2 Endpunkte
 
 **Lesen:** `GET /api/projects/:slug/budget/roles`
 
@@ -630,7 +794,7 @@ Der Body enthält die Zeiträume, die du ändern willst. Ein fehlender Zeitraum 
 - Die Antwort hat dasselbe Format wie das GET.
 - Nach dem Speichern gibt der Worker wegen Budget blockierte Aufträge sofort frei, wenn ihr Limit wieder reicht.
 
-### 12.3 Fehlermeldungen
+### 15.3 Fehlermeldungen
 
 | Eingabe | Antwort | Meldung (Auszug) |
 |---------|---------|------------------|
@@ -643,7 +807,7 @@ Der Body enthält die Zeiträume, die du ändern willst. Ein fehlender Zeitraum 
 
 Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
 
-### 12.4 Was der Worker damit macht
+### 15.4 Was der Worker damit macht
 
 - **Prüfung vor jedem Schritt:** Zuerst gilt das Projektlimit, dann das Limit der Rolle des Schritts. Ist ein Rollen-Limit erreicht, startet der Schritt nicht.
 - **Blockade:** Der Auftrag wird „blocked“ mit „Aktion notwendig“. Der Grund steht am Auftrag, etwa „Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens“. Er erscheint auch dann, wenn kein Schritt fehlgeschlagen ist. Die Problemanalyse zeigt ihn als „Budget-Blockade“.
@@ -651,7 +815,7 @@ Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
 - **Freigabe:** Der Auftrag wird wieder „geplant“, sobald sein Zeitraum wieder Luft hat: am Folgetag, im neuen Sprint oder nach dem Erhöhen bzw. Entfernen des Limits.
 - **Laufender Schritt:** Ein laufender Schritt wird nicht abgebrochen. Das Limit kann daher um höchstens einen Schritt überschritten werden.
 
-### 12.5 Bedingungen und Grenzen
+### 15.5 Bedingungen und Grenzen
 
 - **Verbrauch je Rolle:** Er zählt Schritte, deren Agent eine Rolle hat (über `agent_id`), und den Verbrauch in `agent_usage` mit dieser Rolle.
 - **Ohne Rolle:** Schritte ohne Agent (eingebaute Agents wie Chat, Auftragsautor und Visionär) zählen zu keiner Rolle. Sie bleiben nur im Projektverbrauch.
@@ -660,7 +824,7 @@ Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
 - **Kosten:** Es gibt nur Token-Limits je Rolle. Kosten-Limits (USD/CHF) je Rolle kommen später.
 - **Projektlimit:** Es bleibt unverändert. Ein Rollen-Limit ersetzt es nicht, es kommt zusätzlich.
 
-### 12.6 Fehlerbehebung
+### 15.6 Fehlerbehebung
 
 | Problem | Ursache und Lösung |
 |---------|--------------------|
@@ -673,13 +837,13 @@ Bei 400 wird nichts gespeichert, auch nicht für die anderen Zeiträume im Body.
 
 ---
 
-## 13. Sprint im Review bei ausgeschalteter GitHub-Brücke
+## 16. Sprint im Review bei ausgeschalteter GitHub-Brücke
 
 Ein Sprint kann im Status **Review** stehen, während die GitHub-Brücke des Projekts auf **„aus“** steht. Das passiert, wenn der Sprint mit einem Pull Request (Modus „Issues + PR“) abgeschlossen wurde und die Brücke danach ausgeschaltet wird. Früher blieb ein solcher Sprint für immer im Review. Jetzt verfolgt der Worker ihn weiter, auch bei „aus“.
 
 > **Printscreens:** keine. Die Oberfläche wurde nicht im Browser aufgenommen. Beschrieben ist das Verhalten des Workers und der Statuswerte.
 
-### 13.1 Was der Worker weiter tut
+### 16.1 Was der Worker weiter tut
 
 Bei Modus „aus“ läuft nur noch die Prüfung der Sprints im Review. Sie prüft den Pull Request des Sprints:
 
@@ -690,7 +854,7 @@ Bei Modus „aus“ läuft nur noch die Prüfung der Sprints im Review. Sie prü
 
 Die Prüfung läuft alle 2 Minuten.
 
-### 13.2 Bedingungen
+### 16.2 Bedingungen
 
 | Bedingung | Ergebnis |
 | --- | --- |
@@ -702,13 +866,13 @@ Die Prüfung läuft alle 2 Minuten.
 | Rate-Limit von GitHub | Das Projekt pausiert bis zum nächsten Intervall. |
 | Sprint ist schon **Abgeschlossen** | Wird nicht noch einmal gemergt oder getaggt. |
 
-### 13.3 Was du nicht erwarten solltest
+### 16.3 Was du nicht erwarten solltest
 
 - **Der Issue-Import bleibt aus.** Es werden keine neuen Issues als Bugs oder Ideen übernommen, und Statusmeldungen gehen nicht ins Issue. Dafür muss die Brücke auf „Issues“ oder „Issues + PR“ stehen.
 - **Der Sprint lässt sich nicht von Hand ändern**, solange er im Review ist. Die Schnittstelle antwortet mit 409. Abschließen kann ihn nur der Worker nach dem Merge.
 - **Der Autopilot startet keinen neuen Sprint**, solange ein Sprint im Review ist.
 
-### 13.4 Fehlerbehebung
+### 16.4 Fehlerbehebung
 
 | Beobachtung | Ursache und was zu tun ist |
 | --- | --- |

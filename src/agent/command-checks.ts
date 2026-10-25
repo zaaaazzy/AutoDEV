@@ -45,7 +45,9 @@ const INSTALL_FLAGS = new Set([
   '--ignore-scripts',
 ]);
 const SAFE_COMMANDS = [
-  /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev))*$/,
+  /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev|audit-level=[a-z]+))*$/,
+  // Prüfbefehl der Routinen; Optionen und Pfade prüfen zusätzlich Wächter und gitPathProblem.
+  /^git grep(?: (?:-[inlwcvEFIh]+|-e|--(?:line-number|ignore-case|count|files-with-matches|word-regexp|fixed-strings|extended-regexp|cached)|[\w@:./~^][\w@:./=~^-]*))*$/,
   /^npm (?:ci|install|i)(?: (?:--(?:legacy-peer-deps|no-audit|no-fund|ignore-scripts|omit=dev|production)|-[DE]))*$/,
   /^node (?:--version|--check [\w./-]+)$/,
   /^npx --no-install (?:tsc --noEmit|eslint [\w./*-]+|prettier --check [\w./*-]+|jest|vitest run)$/,
@@ -172,6 +174,8 @@ const DANGEROUS_GIT_OPTIONS = [
   'work-tree',
   'git-dir',
   'open-files-in-pager',
+  // git grep/ls-files würden sonst auch ignorierte Dateien (.env) durchsuchen.
+  'no-exclude-standard',
 ];
 /** Eigene Optionen, die zugleich Anfang einer gesperrten sind (git diff --text ≠ --textconv). */
 const SAFE_GIT_OPTIONS = new Set(['text']);
@@ -179,13 +183,14 @@ const SAFE_GIT_OPTIONS = new Set(['text']);
 /**
  * Gefährliche Option in einem git-Befehl? Git akzeptiert eindeutige Abkürzungen (--outp = --output, --upload-pa =
  * --upload-pack), darum ist jede lange Option gesperrt, deren Name der Anfang einer gesperrten ist. Dazu -c, -u und
- * -O (Pager bzw. Reihenfolge-Datei). Anführungszeichen und Backslashes werden wie in Bash entfernt.
+ * -O (Pager bzw. Reihenfolge-Datei), auch in zusammengefassten Kurzoptionen (git grep -iOless). Anführungszeichen
+ * und Backslashes werden wie in Bash entfernt.
  */
 export function gitOptionProblem(command: CommandInput): boolean {
   const words = toWords(command).map((word) => word.text);
   if (words[0] !== 'git') return false;
   return words.slice(1).some((word) => {
-    if (/^-[cu](?:=|$)/.test(word) || word.startsWith('-O')) return true;
+    if (/^-[cu](?:=|$)/.test(word) || /^-[a-zA-Z]*O/.test(word)) return true;
     if (!word.startsWith('--') || word === '--') return false;
     const name = word.slice(2).split('=')[0] ?? '';
     return !SAFE_GIT_OPTIONS.has(name) && DANGEROUS_GIT_OPTIONS.some((option) => option.startsWith(name));
@@ -196,15 +201,20 @@ export function gitOptionProblem(command: CommandInput): boolean {
  * Pfadangaben von „git diff“: Liegt ein Pfad ausserhalb des Arbeitsbaums, schaltet Git von selbst in den
  * No-Index-Modus und gibt beliebige Dateien aus (git diff /dev/null ~/.zshrc). Darum muss jedes Argument – samt
  * aufgelöster Links – im Projekt liegen; Shell-Ersetzungen ($, ~) und Ordner-Dateien (-O) sind gesperrt.
- * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt.
+ * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt. Dasselbe gilt für „git grep“ und „git ls-files“
+ * (Prüfbefehle der Routinen); bei git grep zusätzlich ohne Musterdatei (-f/--file), die ausserhalb liegen könnte.
  */
 export function gitPathProblem(input: CommandInput, root?: string): string | null {
   // Umleitungen (2>/dev/null, 2>&1) trennt der Tokenizer ab; sie sind keine Argumente.
   const words = toWords(input);
   const command = label(input);
-  if (words[0]?.text !== 'git' || words[1]?.text !== 'diff') return null;
+  const subcommand = words[1]?.text ?? '';
+  if (words[0]?.text !== 'git' || !['diff', 'grep', 'ls-files'].includes(subcommand)) return null;
   for (const { text: word, expanded } of words.slice(2)) {
     if (/^(?:-O|--orderfile)/.test(word)) return `„${command}“: -O/--orderfile ist gesperrt.`;
+    if (subcommand === 'grep' && /^(?:-[a-zA-Z]*f|--file(?:=|$))/.test(word)) {
+      return `„${command}“: -f/--file ist gesperrt.`;
+    }
     if (!word || word.startsWith('-')) continue;
     if (expanded || word.startsWith('~') || word.includes('$')) return `„${command}“: nur Pfade im Projektordner.`;
     const outside = root
@@ -464,6 +474,8 @@ export function forbiddenSubcommand(command: CommandInput): boolean {
   const words = tokens.map((word) => word.text);
   const normalized = words.join(' ');
   if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized)) return true;
+  // „npm audit fix“ installiert und ändert package-lock.json – auch mit Optionen davor (npm audit --json fix).
+  if (words[0] === 'npm' && words[1] === 'audit' && words.slice(2).includes('fix')) return true;
   // Befehlsname und Unterbefehl nur wörtlich: Variablen, Globs, Klammer-Erweiterung oder $'…' (git $X, git pus?,
   // git {push,}) setzt erst die Shell zusammen – und alle übrigen Prüfungen sähen den Befehl nicht.
   if (!CHECKED_PROGRAMS.has(words[0] ?? '')) return false;
