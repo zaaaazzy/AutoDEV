@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { sendPush } from '../core/push.js';
 import { DEVELOPMENT_STATUS, REVIEW_MODES } from '../core/status.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { acquireTree } from '../core/project-lock.js';
 import { resumeBlockedByBug } from './autofix.js';
 import { followPreview, mergeApprovedBranch, type OrderBranch } from './git-sync.js';
 
@@ -153,8 +154,25 @@ export async function processApprovals(
       ORDER BY review_approved_at`,
     [project],
   );
+  if (!approved.rows.length) return 0;
+  // Merge wechselt Branches und schreibt Dateien: kein paralleler Chat oder Auftrag darf dazwischen im Ordner ändern.
+  const releaseTree = await acquireTree(cwd);
+  try {
+    return await mergeApprovals(pool, project, cwd, approved.rows, execute);
+  } finally {
+    releaseTree();
+  }
+}
+
+async function mergeApprovals(
+  pool: Pool,
+  project: string,
+  cwd: string,
+  items: Approved[],
+  execute: CommandExecutor,
+): Promise<number> {
   let merged = 0;
-  for (const item of approved.rows) {
+  for (const item of items) {
     const result =
       item.branch && item.base
         ? await mergeApprovedBranch(cwd, item, item.branch, item.base, execute)
@@ -199,6 +217,8 @@ export async function processApprovals(
       },
       { project },
     );
+    // Fängt Fehler selbst ab: Eine Vorschau, die nicht nachzieht, macht den Merge nicht ungeschehen.
+    await followProjectPreview(pool, project, cwd, item.base!, execute);
     if (item.bugId) await resumeBlockedByBug(pool, item.bugId).catch(logged('review-gate'));
   }
   return merged;
