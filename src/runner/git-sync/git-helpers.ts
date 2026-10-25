@@ -8,7 +8,9 @@ import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
 import { clearStaleLock, lockedFile } from './stale-lock.js';
-import { checkoutTarget, dropReportCopies } from './report-copies.js';
+import { checkoutTarget, dropReportCopies, REPORT_DIRECTORIES } from './report-copies.js';
+
+export { REPORT_DIRECTORIES };
 
 export const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -258,7 +260,7 @@ export async function stageAll(
   log?: string[],
   options: { orderOnly?: boolean } = {},
 ): Promise<string[]> {
-  // Auftrags-Commits: Testberichte und Agent-Ablage gehören nicht zum Auftrag (sie kommen mit der Sprint-Sicherung).
+  // Auftrags-Commits: Berichte und Agent-Ablage gehören nicht zum Auftrag (sie kommen mit der Sprint-Sicherung).
   // Nur Pfade ausschliessen, die Git nicht ohnehin ignoriert: Ein ignorierter Pfad im Pathspec (z. B. .dev-log/ aus
   // info/exclude) lässt „git add“ mit Exit 1 abbrechen – der Stand bliebe dann gestagt liegen und blockierte jeden
   // weiteren Auftrag als „fremde Änderung“.
@@ -393,8 +395,11 @@ export async function checkoutSprintBranch(
   }
 }
 
-/** Interne Ordner, die nie als geänderte Datei eines Auftrags zählen (Agent-Ablage, Testberichte). */
-export const CHANGED_FILES_IGNORED = ['.dev-log/', 'docs/tests/'];
+/**
+ * Interne Ordner, die nie als geänderte Datei eines Auftrags zählen (Agent-Ablage, Berichte der Agents). Präfixe mit
+ * Schrägstrich am Ende: docs/risiken-x/ oder docs/tests-extra/ bleiben fremd.
+ */
+export const CHANGED_FILES_IGNORED = ['.dev-log/', ...REPORT_DIRECTORIES];
 
 /** Conventional-Commits-Betreff: Typ aus der Auftragsart, Sprint als Scope, Titel auf eine Zeile gekürzt. */
 export function taskCommitMessage(
