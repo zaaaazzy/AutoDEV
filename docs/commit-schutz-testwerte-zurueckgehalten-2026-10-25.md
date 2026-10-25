@@ -32,7 +32,7 @@ Auftrag 1784060f (Bugfix, 25.10.2026). Auslöser war Auftrag 87704371 (Redaction
 ## Sprint
 | Auftrag | Zustand | Details |
 |---|---|---|
-| 1784060f Commit-Schutz hält Testdateien zurück | umgesetzt, Entwickler bestanden | Tester prüft `secret-holdback.test.ts` |
+| 1784060f Commit-Schutz hält Testdateien zurück | umgesetzt, Tests grün | Testlauf cd40dd2b: Typecheck grün, `action-todo.test.ts` und `secret-holdback.test.ts` 12/12; `npm test` 1500/1500. Die Tester-Abnahme scheiterte nur, weil `npx --no-install tsx --test …` eine Freigabe braucht, nicht an den Tests. |
 | 87704371 Redaction mit Token-Mustern | offen zu prüfen | Testdateien nie committet |
 
 ## Anfrage / TODO
