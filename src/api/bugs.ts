@@ -1,8 +1,8 @@
 import type { Router } from 'express';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
 import { BUG_STATUSES, BUG_STATUS, DEVELOPMENT_STATUS, type BugStatus } from '../core/status.js';
-import { isAssignableSprintStatus } from '../core/development-transitions.js';
+import { isAssignableSprintStatus, SPRINT_POOL_DEVELOPMENT_STATUSES } from '../core/development-transitions.js';
 import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
 import { startProductionFix } from '../runner/production-events.js';
 import { UNTRUSTED_START } from '../runner/hoster.js';
@@ -44,6 +44,35 @@ const BUG_FIELDS = {
   category: { column: 'category', parse: parseCategory },
 };
 
+const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
+/** Auftragsstatus, in denen der Bug-Auftrag dem Sprint des Bugs folgt; erledigt wird beim Wiederöffnen neu geplant. */
+const BUG_ORDER_SPRINT_MOVABLE_SQL = sqlList([...SPRINT_POOL_DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS.done]);
+/** Laufende Bug-Aufträge: Der Sprint des Bugs (und damit der Ziel-Branch) lässt sich nicht ändern. */
+const BUG_ORDER_RUNNING_SQL = sqlList([DEVELOPMENT_STATUS.inProgress, DEVELOPMENT_STATUS.approval]);
+const ORDER_RUNNING = 'Zum Bug läuft gerade ein Auftrag oder wartet auf Freigabe. Den Sprint erst danach ändern.';
+
+interface BugOutcome {
+  status: number;
+  message?: string;
+  bug?: unknown;
+}
+
+/** Führt `work` in einer Transaktion aus; nur bei Status 200 wird übernommen, sonst (oder bei Fehler) verworfen. */
+async function withBugTransaction(pool: Pool, work: (client: PoolClient) => Promise<BugOutcome>): Promise<BugOutcome> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const outcome = await work(client);
+    await client.query(outcome.status === 200 ? 'COMMIT' : 'ROLLBACK');
+    return outcome;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 /** Priorität des Auftrags aus dem Schweregrad des Bugs (Alias b). */
 const ORDER_PRIORITY = `CASE b.severity WHEN 'critical' THEN 'high' WHEN 'high' THEN 'high' WHEN 'medium' THEN 'medium' ELSE 'low' END`;
 
@@ -52,10 +81,19 @@ const ORDER_PRIORITY = `CASE b.severity WHEN 'critical' THEN 'high' WHEN 'high' 
  * erst nach der Freigabe einen Auftrag (sonst stünde ihr Text schon vorher in einem Auftrag, der beim Löschen des Bugs
  * seine Sperre verlöre), ihr Text kommt als Fremdtext eingefasst hinein. Automatisch laufende Behebungsaufträge
  * (auto_run, z. B. aus dem Betrieb) hängen an keinem Sprint und gehen beim Entfernen aus dem Sprint nicht ins Backlog.
- * Solange der Auftrag nicht begonnen hat, folgt er Titel, Beschreibung und Schweregrad des Bugs.
+ * Solange der Auftrag nicht begonnen hat, folgt er Titel, Beschreibung und Schweregrad des Bugs. Den Sprint wechselt
+ * er nur in Backlog, geplant, blockiert oder erledigt (wird wieder geplant): Ein laufender Auftrag behält seinen Branch.
+ * Mit Pool in eigener Transaktion, mit Client in der des Aufrufers.
  */
-export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
-  await pool.query(
+export async function syncBugOrder(db: Pool | PoolClient, bugId: string): Promise<void> {
+  if (!('release' in db)) {
+    await withBugTransaction(db, async (client) => {
+      await syncBugOrder(client, bugId);
+      return { status: 200 };
+    });
+    return;
+  }
+  await db.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id)
      SELECT b.project_slug, b.sprint_id, left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, 'planned',
             ${ORDER_PRIORITY}, 'bug', b.id
@@ -63,13 +101,14 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
       WHERE b.id = $1 AND b.sprint_id IS NOT NULL AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
         AND NOT ${unapprovedBugSql('b')}
      ON CONFLICT (bug_id) WHERE bug_id IS NOT NULL DO UPDATE
-       SET sprint_id = EXCLUDED.sprint_id,
+       SET sprint_id = CASE WHEN development_items.status IN (${BUG_ORDER_SPRINT_MOVABLE_SQL}) AND NOT development_items.auto_run
+                            THEN EXCLUDED.sprint_id ELSE development_items.sprint_id END,
            status = CASE WHEN development_items.status IN ('backlog', 'done') THEN 'planned' ELSE development_items.status END,
            updated_at = NOW()`,
     [bugId],
   );
   // Behebungsaufträge (auto_run) haben einen eigenen Einstiegstext und bleiben, wie sie angelegt wurden.
-  await pool.query(
+  await db.query(
     `UPDATE development_items d
         SET title = left('Bug: ' || b.title, 180), description = ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
             priority = ${ORDER_PRIORITY}, updated_at = NOW()
@@ -80,13 +119,13 @@ export async function syncBugOrder(pool: Pool, bugId: string): Promise<void> {
             (left('Bug: ' || b.title, 180), ${fencedBugDescriptionSql('b', UNTRUSTED_START)}, ${ORDER_PRIORITY})`,
     [bugId],
   );
-  await pool.query(
+  await db.query(
     `UPDATE development_items d SET sprint_id = NULL, status = 'backlog', updated_at = NOW()
        FROM bugs b
       WHERE d.bug_id = b.id AND b.id = $1 AND b.sprint_id IS NULL AND d.status IN ('planned', 'backlog') AND NOT d.auto_run`,
     [bugId],
   );
-  await pool.query(
+  await db.query(
     `DELETE FROM development_items d USING bugs b
       WHERE d.bug_id = b.id AND b.id = $1 AND b.status IN ('${BUG_STATUS.fixed}', '${BUG_STATUS.wontfix}') AND d.status IN ('planned', 'backlog')`,
     [bugId],
@@ -234,27 +273,32 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
         return;
       }
     }
-    const result = await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, sprint_id, category)
-       SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id, $6
-         FROM (SELECT 1) seed LEFT JOIN sprints s ON s.id = $5 AND s.project_slug = $1
-        WHERE $5::uuid IS NULL OR s.id IS NOT NULL
-       RETURNING ${BUG_COLUMNS}`,
-      [
-        slug,
-        values.get('title'),
-        values.get('description') ?? '',
-        values.get('severity') ?? null,
-        sprintId,
-        values.get('category') ?? null,
-      ],
-    );
-    if (!result.rows[0]) {
-      response.status(400).json({ message: 'Sprint gehört zu einem anderen Projekt.' });
+    // Bug und Auftrag zusammen: Scheitert der Auftrag, entsteht auch kein Bug im Sprint ohne Auftrag.
+    const outcome = await withBugTransaction(pool, async (client) => {
+      const result = await client.query(
+        `INSERT INTO bugs (project_slug, title, description, severity, sprint_id, category)
+         SELECT $1, $2, $3, COALESCE($4, 'medium'), s.id, $6
+           FROM (SELECT 1) seed LEFT JOIN sprints s ON s.id = $5 AND s.project_slug = $1
+          WHERE $5::uuid IS NULL OR s.id IS NOT NULL
+         RETURNING ${BUG_COLUMNS}`,
+        [
+          slug,
+          values.get('title'),
+          values.get('description') ?? '',
+          values.get('severity') ?? null,
+          sprintId,
+          values.get('category') ?? null,
+        ],
+      );
+      if (!result.rows[0]) return { status: 400, message: 'Sprint gehört zu einem anderen Projekt.' };
+      await syncBugOrder(client, result.rows[0].id as string);
+      return { status: 200, bug: result.rows[0] as unknown };
+    });
+    if (outcome.status !== 200) {
+      response.status(outcome.status).json({ message: outcome.message });
       return;
     }
-    await syncBugOrder(pool, result.rows[0].id as string);
-    response.status(201).json({ bug: result.rows[0] });
+    response.status(201).json({ bug: outcome.bug });
   });
 
   app.patch('/bugs/:id', access({ role: 'plan', tenant: 'bugs' }), async (request, response) => {
@@ -267,26 +311,7 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       response.status(400).json(invalidInput(request.body, BUG_FIELDS));
       return;
     }
-    const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
-    if (typeof sprintId === 'string') {
-      const sprint = (
-        await pool.query<{ sprintStatus: string; currentSprintId: string | null }>(
-          `SELECT s.status AS "sprintStatus", b.sprint_id AS "currentSprintId"
-             FROM sprints s JOIN bugs b ON b.project_slug = s.project_slug
-            WHERE s.id = $1 AND b.id = $2`,
-          [sprintId, request.params.id],
-        )
-      ).rows[0];
-      if (!sprint) {
-        response.status(400).json({ message: 'Sprint gehört zu einem anderen Projekt.' });
-        return;
-      }
-      // Nur eine neue Zuordnung prüfen: Titel oder Status eines Bugs im toten Sprint bleiben änderbar.
-      if (sprint.currentSprintId !== sprintId && !isAssignableSprintStatus(sprint.sprintStatus)) {
-        response.status(409).json({ message: SPRINT_NOT_ASSIGNABLE });
-        return;
-      }
-    }
+    const sprintField = fields.find((field) => field.column === 'sprint_id');
     const withFixDate = fields.some((field) => field.column === 'status')
       ? [
           ...fields,
@@ -297,15 +322,46 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
         ]
       : fields;
     const update = buildUpdate('bugs', request.params.id, withFixDate, BUG_COLUMNS);
-    const result = await pool.query(update.sql, update.values);
-    if (!result.rows[0]) {
-      response.status(404).json({ message: 'Bug nicht gefunden.' });
+    // Prüfen, Bug ändern und Auftrag nachziehen in einer Transaktion: Bei 409 bleibt alles, wie es war.
+    const outcome = await withBugTransaction(pool, async (client) => {
+      const current = (
+        await client.query<{ sprintId: string | null }>(
+          'SELECT sprint_id AS "sprintId" FROM bugs WHERE id = $1 FOR UPDATE',
+          [request.params.id],
+        )
+      ).rows[0];
+      if (!current) return { status: 404, message: 'Bug nicht gefunden.' };
+      // Derselbe Sprint wie bisher ist keine Änderung: Titel oder Status eines Bugs im toten Sprint bleiben änderbar.
+      if (sprintField && sprintField.value !== current.sprintId) {
+        const sprintId = sprintField.value as string | null;
+        if (sprintId) {
+          const sprint = (
+            await client.query<{ status: string }>(
+              `SELECT s.status FROM sprints s JOIN bugs b ON b.project_slug = s.project_slug
+                WHERE s.id = $1 AND b.id = $2`,
+              [sprintId, request.params.id],
+            )
+          ).rows[0];
+          if (!sprint) return { status: 400, message: 'Sprint gehört zu einem anderen Projekt.' };
+          if (!isAssignableSprintStatus(sprint.status)) return { status: 409, message: SPRINT_NOT_ASSIGNABLE };
+        }
+        // Ein laufender Auftrag wechselte sonst mitten im Lauf Sprint und Ziel-Branch (oder verlöre den Bug-Sprint).
+        const running = await client.query(
+          `SELECT 1 FROM development_items
+            WHERE bug_id = $1 AND NOT auto_run AND status IN (${BUG_ORDER_RUNNING_SQL}) FOR UPDATE`,
+          [request.params.id],
+        );
+        if (running.rowCount) return { status: 409, message: ORDER_RUNNING };
+      }
+      const result = await client.query(update.sql, update.values);
+      if (fields.some((field) => ORDER_COLUMNS.has(field.column))) await syncBugOrder(client, request.params.id);
+      return { status: 200, bug: result.rows[0] as unknown };
+    });
+    if (outcome.status !== 200) {
+      response.status(outcome.status).json({ message: outcome.message });
       return;
     }
-    if (fields.some((field) => ORDER_COLUMNS.has(field.column))) {
-      await syncBugOrder(pool, request.params.id);
-    }
-    response.json({ bug: result.rows[0] });
+    response.json({ bug: outcome.bug });
   });
 
   // Freigabe eines Bugs aus fremder Quelle (Betrieb, GitHub) durch einen Menschen mit Recht „Ausführen“: erst danach

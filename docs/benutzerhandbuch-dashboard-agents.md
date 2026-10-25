@@ -1614,8 +1614,57 @@ Einzelheiten stehen im Entwicklerbericht [`aus-dem-sprint-nehmen-nur-geplant-ode
 
 ---
 
+## 28. Bugs im Sprint: laufende Aufträge bleiben im Sprint
+
+Ein Bug hängt über seinen Auftrag an einem Sprint. Bisher konnte sich der Sprint eines Bugs auch dann ändern, wenn der Auftrag gerade lief oder in Freigabe wartete. Der Agent hätte dann mitten im Lauf den Ziel-Branch gewechselt. Umgekehrt konnte ein Bug in einem abgeschlossenen Sprint landen, wo sein Auftrag nie mehr lief. Jetzt prüft die Schnittstelle beides.
+
+> **Printscreens:** keine. Die Oberfläche wurde nicht im Browser aufgenommen, weil dafür eine laufende App mit einem Sprint in den Status Geplant, Aktiv und Review nötig ist. Beschrieben sind die Bedingungen und die Meldungen der Schnittstelle.
+
+### 28.1 Was sich geändert hat
+
+- **Sprint im Status Abgeschlossen, Abgebrochen oder Review:** Ein Bug lässt sich diesem Sprint nicht mehr zuordnen. Anlegen und Ändern antworten mit 409.
+- **Laufender Auftrag oder Auftrag in Freigabe:** Ein Wechsel des Sprints, auch auf „kein Sprint“, antwortet mit 409. Titel, Beschreibung, Schweregrad und Status des Bugs lassen sich weiter ändern.
+- **Bug anlegen und sein Auftrag entstehen gemeinsam.** Scheitert der Auftrag, entsteht auch kein Bug.
+- **Auftrag folgt dem Bug nur in bestimmten Status:** Der Sprint eines Bug-Auftrags wird nur in Backlog, Geplant, Blockiert oder Erledigt mitgezogen. Erledigt wird beim Wiederöffnen neu geplant und folgt dann dem Sprint des Bugs.
+
+### 28.2 Bedingungen
+
+| Bug-Auftrag | Sprint des Bugs | Ergebnis |
+| --- | --- | --- |
+| Backlog, Geplant, Blockiert, Erledigt | Geplant oder Aktiv | Auftrag folgt dem neuen Sprint. Ein Bug ohne Sprint setzt den Auftrag ins Backlog zurück. |
+| In Arbeit oder Freigabe | beliebiger Wechsel, auch auf „kein Sprint“ | 409: „Zum Bug läuft gerade ein Auftrag oder wartet auf Freigabe. Den Sprint erst danach ändern.“ Nichts wird geschrieben. |
+| In Arbeit oder Freigabe | gleicher Sprint | Keine Änderung der Zuordnung. Titel oder Status lassen sich weiter ändern. |
+| egal | Abgeschlossen, Abgebrochen oder Review | 409: „Der Sprint ist nicht mehr zuordenbar. Bugs nur geplanten oder aktiven Sprints zuordnen.“ Nichts wird geschrieben. |
+| Behebungsauftrag aus dem Betrieb (automatisch gestartet) | egal | Behält seinen Sprint. Ein Sprintwechsel ändert ihn nicht. |
+
+### 28.3 Was du nicht erwarten solltest
+
+- **Der Sprint eines laufenden Bugs bleibt, bis der Auftrag fertig oder abgebrochen ist.** Dann lässt er sich ändern. Erst den Auftrag abbrechen oder abschließen, dann den Bug umhängen.
+- **Ein Bug ohne Sprint, dessen Auftrag geplant ist, geht ins Backlog.** Der Auftrag bleibt bestehen, nur ohne Sprint.
+- **Bugs aus fremden Quellen (Betrieb, GitHub)** bekommen erst nach der Freigabe einen Auftrag. Vorher gibt es für sie keinen Sprint-Auftrag, der sich umhängen ließe.
+- **Die Oberfläche** zeigt die Meldung als Fehlertext nach dem Speichern. Ein Feld, das vorab ausgegraut ist, gibt es für diese Prüfung nicht. Die Prüfung läuft auf dem Server.
+
+### 28.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| 409 „Zum Bug läuft gerade ein Auftrag …“ | Der Bug-Auftrag ist in Arbeit oder in Freigabe. Auftrag abschließen, freigeben oder abbrechen, dann den Sprint ändern. |
+| 409 „Der Sprint ist nicht mehr zuordenbar …“ | Der Ziel-Sprint ist abgeschlossen, abgebrochen oder im Review. Einen geplanten oder aktiven Sprint wählen. |
+| 400 „Sprint gehört zu einem anderen Projekt.“ | Der gewählte Sprint gehört nicht zum Projekt des Bugs. |
+
+### 28.5 Stand der Prüfung
+
+- **Tests grün:** Testlauf `25b803e4` hat `src/api/bugs.test.ts` mit 16 von 16 Tests bestanden, `npm run typecheck` ist grün. Der erste Lauf war rot (4 von 16 Subtests). Die Ursache lag im Testaufbau: Je Projekt ist nur ein aktiver Sprint erlaubt (`sprints_one_active_idx`). Der Entwickler hat die Ziel-Sprints der drei betroffenen Tests auf „Geplant“ umgestellt. Der Fix in `src/api/bugs.ts` war davon nicht betroffen. Den Lauf habe ich selbst nicht wiederholt. Ohne Abdeckungs-Flag auszuführen: `npx --no-install tsx --test src/api/bugs.test.ts`.
+- **Printscreens:** nicht erstellt. Es gab keinen Browser und keine laufende App.
+- **Offen:** Ein gemeinsamer Helfer `assignSprint` für alle Zuordnungsstellen (PATCH `/development`, Folgeauftrag, Erneut versuchen, `applyProposal`) ist nicht gebaut. Dafür braucht es einen eigenen Auftrag.
+
+Einzelheiten stehen im Entwicklerbericht [`bugs-sprintzuordnung-laufende-auftraege-2026-10-25.md`](bugs-sprintzuordnung-laufende-auftraege-2026-10-25.md).
+
+---
+
 ## Verwandte Dokumente
 
+- [`bugs-sprintzuordnung-laufende-auftraege-2026-10-25.md`](bugs-sprintzuordnung-laufende-auftraege-2026-10-25.md): Entwicklerbericht zu Abschnitt 28 (Sprintwechsel bei laufenden Bug-Aufträgen, abgeschlossene Sprints, offene Tests)
 - [`aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md`](aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md): Entwicklerbericht zu Abschnitt 27 (Herausnehmen nur aus Geplant oder Blockiert, Sprint-Status, offene Tests)
 
 - [`commit-schutz-testwerte-zurueckgehalten-2026-10-25.md`](commit-schutz-testwerte-zurueckgehalten-2026-10-25.md): Entwicklerbericht zu Abschnitt 26 (Testwerte, zurückgehaltene Dateien, offene Markierungs-Regel)
