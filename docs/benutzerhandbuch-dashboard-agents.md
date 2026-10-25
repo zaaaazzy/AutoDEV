@@ -1488,7 +1488,7 @@ Ein Bug hängt über seinen Auftrag an einem Sprint. Bisher konnte sich der Spri
 
 ### 28.5 Stand der Prüfung
 
-- **Nicht selbst ausgeführt:** Die Tests. Der Entwickler konnte sie nicht starten, weil die Freigabe fehlte. Ohne Abdeckungs-Flag auszuführen: `npx --no-install tsx --test src/api/bugs.test.ts`.
+- **Tests noch nicht bestätigt:** Der erste Lauf des Testers war rot (4 von 16 Subtests). Die Ursache lag im Testaufbau: Je Projekt ist nur ein aktiver Sprint erlaubt (`sprints_one_active_idx`). Der Entwickler hat die Ziel-Sprints der drei betroffenen Tests auf „Geplant“ umgestellt. Der Fix in `src/api/bugs.ts` war davon nicht betroffen. Ob der Lauf jetzt grün ist, ist nicht geprüft. Ohne Abdeckungs-Flag auszuführen: `npx --no-install tsx --test src/api/bugs.test.ts`.
 - **Printscreens:** nicht erstellt. Es gab keinen Browser und keine laufende App.
 - **Offen:** Ein gemeinsamer Helfer `assignSprint` für alle Zuordnungsstellen (PATCH `/development`, Folgeauftrag, Erneut versuchen, `applyProposal`) ist nicht gebaut. Dafür braucht es einen eigenen Auftrag.
 
