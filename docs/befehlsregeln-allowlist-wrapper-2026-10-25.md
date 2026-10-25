@@ -25,8 +25,15 @@ Auftrag 17b80f99 (Bugfix, Sprint 23, aus dem Code-Review vom 21.10.2026, Stand `
 - `src/agent/agent-guard.test.ts` (neu): `timeout`/`nice`/`stdbuf`/`ionice` vor gesperrten Befehlen (`sh -c`, `git push`), verschachtelte Wrapper, Fälle, die fail-closed sperren, Builtins, `awk`. Gegenproben bleiben erlaubt: `npx --no-install tsx --test …`, `npm run typecheck`, `git fetch origin main`, `npm ci --ignore-scripts`, `timeout 60 npm test`. Hook-Test: die Wurzel aus der Richtlinie gewinnt gegen `CLAUDE_PROJECT_DIR`.
 - `src/agent/tool-permissions.test.ts`: Allowlist lehnt die genannten Programme ab. Eine alte Regel in der DB (`Bash(timeout:*)`) wird beim Laden verworfen, ohne dass der Start abbricht.
 
+- `e2e/app.spec.ts` (Test „Agent-Rechte …“): Die API lehnt `Bash(timeout:*)`, `Bash(find:*)`, `Bash(awk:*)`, `Bash(tee:*)` und `Bash(cd:*)` mit 400 ab; die Meldung enthält „nicht freigegeben“ oder „gesperrt“.
+
+## Weitere Änderungen nach der Nachbesserung
+- **Handbuch:** `docs/benutzerhandbuch-dashboard-agents.md` beschreibt abgelehnte Regeln in eigenen Rechte-Kategorien, mit drei Bildern unter `docs/benutzerhandbuch-dashboard-agents/` (`rechte-kategorie-abgelehnt.png`, `rechte-kategorie-gespeichert.png`, `rechte-kategorien-uebersicht.png`).
+- **`e2e/playwright.config.ts`:** `testIgnore: ['**/tmp-*.spec.ts']`, damit Wegwerf-Skripte nicht im Testlauf landen.
+- **Wegwerf-Skript:** `e2e/tmp-befehlsregeln-shots.spec.ts` hat die Handbuch-Bilder erzeugt und legt bei jedem Lauf eine Kategorie in der E2E-Datenbank an. Es muss vor dem Merge mit `git rm` gelöscht werden; der Entwickler durfte es nicht löschen.
+
 ## Worauf zu achten ist
-- Stand der Übergabe: Der Entwickler konnte die Tests nicht starten (fehlende Freigabe). `npm run typecheck` lief fehlerfrei. Die Testläufe stehen beim Tester aus.
+- Stand der Übergabe: Weder der Entwickler noch ich konnten die Tests starten (fehlende Freigabe); Typecheck und Lint liefen ohne Fehler. Offen beim Tester: `npx --no-install tsx --test src/agent/agent-guard.test.ts src/agent/tool-permissions.test.ts src/agent/agent-permissions.test.ts` und `npm run test:e2e`. Der frühere E2E-Fehler kam nur vom Wegwerf-Skript.
 - `cd` ist jetzt gesperrt. Testbefehle von Agents also ohne `cd … &&` schreiben, sonst blockt der Wächter.
 - Bestehende eigene Gruppen mit nicht erlaubten Programmen (`find`, `sed`, `timeout` …) verlieren diese Regeln beim Laden stillschweigend. Wer sie braucht, muss eine enge Regel mit einem erlaubten Programm anlegen.
 - Der Speicherpfad in `permission-groups.ts` nutzt dieselbe `customRuleProblem`-Prüfung und antwortet mit 400 und deutscher Meldung.
