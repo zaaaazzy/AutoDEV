@@ -1,4 +1,4 @@
-import { Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
 import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import type { SortingState } from '@tanstack/angular-table';
 import { ApiService } from '../../core/api.service.js';
@@ -8,7 +8,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import type { DataColumn } from '../../shared/data-table/data-table.component.js';
 import { canTakeIntoSprint, isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
-import { pickInOrder } from './pool-selection.js';
+import { pickInOrder, poolOpenState } from './pool-selection.js';
 import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from './sprint-phases.js';
 
 /**
@@ -74,16 +74,12 @@ export class SprintOrdersComponent {
   ];
   protected readonly anyRow = (): boolean => true;
   /**
-   * Nur „leer ja/nein“ als Quelle: Die Auftragsliste wird bei jedem Nachladen (Agent-Läufe alle 3 s, Commits) neu
-   * berechnet. Hinge der Offen-Zustand direkt an ihr, klappte eine von Hand geöffnete Liste jedes Mal wieder zu.
-   */
-  private readonly sprintEmpty = computed(() => !this.orders().length);
-  /**
-   * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu. Die Liste wird nur gerendert, wenn sie offen ist:
+   * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu; eine von Hand geöffnete Liste bleibt beim Nachladen
+   * offen (siehe poolOpenState). Die Liste wird nur gerendert, wenn sie offen ist:
    * In einem zugeklappten <details> hätte sie eine Höhe, wäre aber nicht fokussierbar (Chrome rendert den Inhalt
    * mit content-visibility) – Filter und Prüfungen hielten sie für sichtbar.
    */
-  protected readonly poolOpen = linkedSignal(() => this.sprintEmpty());
+  protected readonly poolOpen = poolOpenState(() => this.orders());
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
   protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));
