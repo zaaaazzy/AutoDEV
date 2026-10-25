@@ -24,7 +24,8 @@ Auftrag d7054b90 (Bugfix, 25.10.2026). Gefunden im Code-Review vom 21.10.2026 (S
 ## Tests
 
 - `src/api/agents.test.ts`: Die Attrappe hat jetzt zwei Projekte („demo“, „fremd“). Ein Agent aus „fremd“ wird mit 400 abgelehnt und nichts geschrieben, sowohl mit der Rolle `agents` als auch als Admin. Ein Agent aus dem eigenen Projekt und `null` werden gespeichert.
-- Stand der Übergabe: Typecheck war grün. Die Tests ließen sich im Entwickler-Schritt nicht starten (Freigabe nötig). Bitte ohne Abdeckungs-Flags ausführen: `npx --no-install tsx --test src/api/agents.test.ts src/api/agent-tasks.test.ts`. Der 400-Test muss ohne die Prüfung scheitern.
+- **Testlauf `37c6c251`:** `npm run typecheck` grün. `npx tsx --test src/api/agent-tasks.test.ts src/api/agents.test.ts`: 18 von 18 Tests grün, darunter die beiden neuen `handoffTo`-Tests. Damit ist das Akzeptanzkriterium durch einen automatischen Test belegt.
+- **Gegenprobe (nicht gelaufen):** Dass der 400-Test ohne den Fix scheitert, ist nur durch Lesen des Codes begründet. Zum Prüfen die Bedingung `handoffTo ||` und den `agentInProject`-Block in `PATCH /agents/:id` kurz entfernen; der Test muss dann mit 200 statt 400 scheitern.
 
 ## Worauf zu achten ist
 
