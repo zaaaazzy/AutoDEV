@@ -604,6 +604,140 @@ test('PR-Modus: nach dem Merge des Pull Requests wird live geschaltet (Deploy un
   assert.match(String(updates.at(-1)?.values[1]), /Live geschaltet: .*deployt/);
 });
 
+/** Review-Pool mit Projektordner (projects.repository) und Deploy-Befehlen; zählt production_deploys-Einträge. */
+function livePool(repository: string, separate: boolean) {
+  const { pool: review, updates } = reviewPool({ ...REVIEW });
+  const deploys: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('SELECT repository')) return { rows: [{ repository, separate }] };
+      if (sql.includes('deploy_commands')) return { rows: [{ commands: [['true']] }] };
+      if (sql.includes('INSERT INTO production_deploys')) deploys.push(values);
+      return review.query(sql, values);
+    },
+  } as unknown as Pool;
+  return { pool, updates, deploys };
+}
+
+const finalMessage = (updates: { sql: string; values: unknown[] }[]) =>
+  String(updates.filter((entry) => /SET status = 'completed'/.test(entry.sql)).at(-1)?.values[1]);
+
+test('PR-Modus ohne eigenen Agent-Ordner: Projektordner wechselt vom Sprint-Branch auf main und geht live', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const { pool, updates, deploys } = livePool(cwd, false);
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, adapter, false, undefined, () => goLive(pool, 'p', cwd)), 1);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('rev-parse', 'HEAD'), execFileSync('git', ['rev-parse', 'main'], { cwd: remote }).toString().trim());
+  assert.equal(git('show', 'HEAD:feature.txt'), 'neu', 'deployt wird main mit dem Sprint, nicht der Sprint-Branch');
+  assert.equal(deploys.length, 1);
+  assert.match(finalMessage(updates), /Live geschaltet: .*deployt/);
+});
+
+test('PR-Modus ohne eigenen Agent-Ordner: offene Änderungen oder fremder Branch – kein Wechsel, kein Deploy', async () => {
+  // Offene Änderung auf dem Sprint-Branch: bleibt erhalten, nichts wird ausgecheckt oder deployt.
+  const dirty = await sprintRepository();
+  dirty.git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  await writeFile(join(dirty.cwd, 'feature.txt'), 'von Hand');
+  const first = livePool(dirty.cwd, false);
+  const one = reviewAdapter({ checks: 'success' });
+  one.adapter.mergePullRequest = () => mergeOnGithub(dirty.remote);
+  assert.equal(
+    await pollSprintReviews(first.pool, 'p', dirty.cwd, one.adapter, false, undefined, () =>
+      goLive(first.pool, 'p', dirty.cwd),
+    ),
+    1,
+  );
+  assert.equal(dirty.git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1-apfel');
+  assert.equal(await readFile(join(dirty.cwd, 'feature.txt'), 'utf8'), 'von Hand');
+  assert.deepEqual(first.deploys, []);
+  assert.match(finalMessage(first.updates), /offene Änderungen/);
+  assert.doesNotMatch(finalMessage(first.updates), /Live geschaltet/);
+
+  // Projektordner auf einem fremden Branch (nicht dem des Sprints): bleibt dort.
+  const foreign = await sprintRepository();
+  foreign.git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  foreign.git('checkout', '-q', '-b', 'feature/mensch', 'main');
+  const second = livePool(foreign.cwd, false);
+  const two = reviewAdapter({ checks: 'success' });
+  two.adapter.mergePullRequest = () => mergeOnGithub(foreign.remote);
+  assert.equal(
+    await pollSprintReviews(second.pool, 'p', foreign.cwd, two.adapter, false, undefined, () =>
+      goLive(second.pool, 'p', foreign.cwd),
+    ),
+    1,
+  );
+  assert.equal(foreign.git('rev-parse', '--abbrev-ref', 'HEAD'), 'feature/mensch');
+  assert.deepEqual(second.deploys, []);
+  assert.match(finalMessage(second.updates), /feature\/mensch/);
+});
+
+/** Eigener Agent-Ordner (Worktree auf dem Sprint-Branch); der Projektordner (Live-Ordner) steht auf main. */
+async function agentWorktreeLayout() {
+  const repo = await sprintRepository();
+  repo.git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  repo.git('checkout', '-q', 'main');
+  const agents = join(await mkdtemp(join(tmpdir(), 'git-agents-')), 'agents');
+  repo.git('worktree', 'add', '-q', agents, 'sprint/sprint-1-apfel');
+  return { ...repo, live: repo.cwd, agents };
+}
+
+test('PR-Modus mit eigenem Agent-Ordner: main im Live-Ordner nachgezogen, live geschaltet, production_deploys', async () => {
+  const { live, agents, remote, git } = await agentWorktreeLayout();
+  const { pool, updates, deploys } = livePool(live, true);
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(
+    await pollSprintReviews(pool, 'p', agents, adapter, false, undefined, () => goLive(pool, 'p', agents)),
+    1,
+  );
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('show', 'HEAD:feature.txt'), 'neu');
+  assert.equal(deploys.length, 1);
+  assert.match(finalMessage(updates), /Live geschaltet: .*deployt/);
+});
+
+test('PR-Modus mit eigenem Agent-Ordner: Live-Ordner als losgelöste Vorschau wird auf main gesetzt und deployt', async () => {
+  const { live, agents, remote, git } = await agentWorktreeLayout();
+  git('checkout', '-q', '--detach', 'sprint/sprint-1-apfel');
+  const { pool, deploys } = livePool(live, true);
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(
+    await pollSprintReviews(pool, 'p', agents, adapter, false, undefined, () => goLive(pool, 'p', agents)),
+    1,
+  );
+  assert.equal(git('rev-parse', 'HEAD'), execFileSync('git', ['rev-parse', 'main'], { cwd: remote }).toString().trim());
+  assert.equal(deploys.length, 1);
+});
+
+test('PR-Modus mit eigenem Agent-Ordner: Live-Ordner unsauber oder auf fremdem Branch – kein Deploy', async () => {
+  const dirty = await agentWorktreeLayout();
+  await writeFile(join(dirty.live, 'base.txt'), 'von Hand');
+  const first = livePool(dirty.live, true);
+  const one = reviewAdapter({ checks: 'success' });
+  one.adapter.mergePullRequest = () => mergeOnGithub(dirty.remote);
+  await pollSprintReviews(first.pool, 'p', dirty.agents, one.adapter, false, undefined, () =>
+    goLive(first.pool, 'p', dirty.agents),
+  );
+  assert.equal(await readFile(join(dirty.live, 'base.txt'), 'utf8'), 'von Hand');
+  assert.deepEqual(first.deploys, []);
+  assert.match(finalMessage(first.updates), /offene Änderungen/);
+
+  const foreign = await agentWorktreeLayout();
+  foreign.git('checkout', '-q', '-b', 'feature/mensch');
+  const second = livePool(foreign.live, true);
+  const two = reviewAdapter({ checks: 'success' });
+  two.adapter.mergePullRequest = () => mergeOnGithub(foreign.remote);
+  await pollSprintReviews(second.pool, 'p', foreign.agents, two.adapter, false, undefined, () =>
+    goLive(second.pool, 'p', foreign.agents),
+  );
+  assert.equal(foreign.git('rev-parse', '--abbrev-ref', 'HEAD'), 'feature/mensch');
+  assert.deepEqual(second.deploys, []);
+});
+
 test('required approval: green CI waits until a human approves', async () => {
   const { cwd, remote, git } = await sprintRepository();
   git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
