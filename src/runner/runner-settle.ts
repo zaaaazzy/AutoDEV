@@ -137,13 +137,23 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
     const review =
       passed && !item.agentId ? await loadReviewMode(pool, item.projectSlug).catch((): ReviewMode => 'off') : 'off';
     const hold = review === 'off' ? undefined : (files: string[]) => needsApproval(review, files);
-    const result = await finishOrderBranch(options.cwd, item, ctx.branch, ctx.sprintName ?? '', passed, execute, hold);
+    // Einzellauf: nur auf dem Auftrags-Branch committen, nicht mergen – ungeprüfter Code käme sonst direkt in die Basis.
+    const result = await finishOrderBranch(
+      options.cwd,
+      item,
+      ctx.branch,
+      ctx.sprintName ?? '',
+      passed,
+      execute,
+      hold,
+      Boolean(item.agentId),
+    );
     console.info(`[${item.id}] ${result.message}`);
     if (result.held) {
       await holdForReview(pool, item, ctx.branch);
       return;
     }
-    if (passed && !result.merged) mergeProblem = result.message;
+    if (passed && !result.merged && !result.kept) mergeProblem = result.message;
     secretsHeld = Boolean(result.secrets?.length);
     commit = result.commit;
   } else if (passed && ctx.sprintName) {

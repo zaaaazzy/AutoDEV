@@ -209,6 +209,7 @@ export async function enterOrderBranch(
  * Schließt den Auftrags-Branch ab. Erfolg: Commit, Merge (--no-ff) in den Basis-Branch, Branch löschen.
  * Misserfolg: Zwischenstand als WIP-Commit auf dem Auftrags-Branch sichern und zur Basis zurückkehren, damit der
  * nächste Auftrag sauber startet; der nächste Versuch setzt den Branch fort.
+ * `keep` (Einzellauf eines Agents): nur committen, Branch stehen lassen – gemergt wird erst im normalen Ablauf.
  */
 export async function finishOrderBranch(
   cwd: string,
@@ -218,9 +219,12 @@ export async function finishOrderBranch(
   passed: boolean,
   rawExecute: CommandExecutor = runCommand,
   hold?: (files: string[]) => boolean,
+  keep = false,
 ): Promise<{
   merged: boolean;
   held?: boolean;
+  /** Einzellauf: committet, Branch bleibt ungemergt bestehen. */
+  kept?: boolean;
   /** Zurückgehaltene Dateien (sehen nach Zugangsdaten aus): Der Auftrag ist dann nicht gemergt. */
   secrets?: string[];
   commit: string | null;
@@ -270,6 +274,16 @@ export async function finishOrderBranch(
           commit: null,
           secrets,
           message: `${heldNote} ${target.branch} wird nicht gemergt: erfundene Werte als Testwert markieren („dev-log: testwert“) bzw. echte Schlüssel entfernen, dann „Erneut versuchen“.`,
+        };
+      }
+      // Einzellauf: ohne Tester, Reviewer und Freigabe darf nichts in die Basis – der normale Ablauf setzt den Branch fort.
+      if (keep) {
+        await leaveOrderBranch({ git, must }, target.base, cwd);
+        return {
+          merged: false,
+          kept: true,
+          commit: null,
+          message: `${dirty ? `Auf ${target.branch} committet` : `Keine neuen Änderungen auf ${target.branch}`} – Einzellauf, wird erst im normalen Ablauf in ${target.base} gemergt.`,
         };
       }
       // Review-Freigabe: Branch bleibt bestehen und wird erst nach der Freigabe gemergt (mergeApprovedBranch).
