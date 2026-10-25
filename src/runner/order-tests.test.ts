@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -149,6 +149,74 @@ test('eingebauter Tester: keine passenden Tests – Befehl übersprungen, Schrit
   );
   assert.match(result.output, /übersprungen – keine passenden Tests zu den geänderten Dateien/);
   assert.match(result.output, /Alle Testbefehle übersprungen/);
+});
+
+test('Platzhalter {tests}: Playwright-Dateien nur für Playwright-Befehle, nie für Vitest & Co.', () => {
+  const commands = [
+    ['npx', 'vitest', 'run', '{tests}'],
+    ['npx', 'playwright', 'test', '{tests}'],
+    ['npm', 'run', 'test:smoke'],
+  ];
+  const tests = ['e2e/smoke.spec.ts', 'src/logic/game-state.test.ts'];
+  assert.deepEqual(expandOrderCommands(commands, [], tests), [
+    { command: ['npx', 'vitest', 'run', 'src/logic/game-state.test.ts'], skipped: false },
+    { command: ['npx', 'playwright', 'test', 'e2e/smoke.spec.ts'], skipped: false },
+    { command: ['npm', 'run', 'test:smoke'], skipped: false },
+  ]);
+  // Nur eine Playwright-Datei geändert (TowerField): Vitest wird übersprungen statt „No test files found“.
+  assert.deepEqual(expandOrderCommands(commands, [], ['e2e/smoke.spec.ts']), [
+    { command: ['npx', 'vitest', 'run', '{tests}'], skipped: true },
+    { command: ['npx', 'playwright', 'test', 'e2e/smoke.spec.ts'], skipped: false },
+    { command: ['npm', 'run', 'test:smoke'], skipped: false },
+  ]);
+  // Alter Befehl mit --passWithNoTests (von Hand umgestellt) bleibt gültig.
+  assert.deepEqual(expandOrderCommands([['npx', 'vitest', 'run', '--passWithNoTests', '{tests}']], [], tests), [
+    { command: ['npx', 'vitest', 'run', '--passWithNoTests', 'src/logic/game-state.test.ts'], skipped: false },
+  ]);
+});
+
+test('Tester-Plan: Playwright-Tests auch ausserhalb von e2e/ am Import von @playwright/test erkannt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'order-playwright-'));
+  await mkdir(join(cwd, 'e2e'));
+  await mkdir(join(cwd, 'tests'));
+  await writeFile(join(cwd, 'e2e/smoke.spec.ts'), "import { test } from '@playwright/test';");
+  await writeFile(join(cwd, 'tests/ui.spec.ts'), "import { expect, test } from '@playwright/test';");
+  await writeFile(join(cwd, 'tests/rules.test.ts'), "import { test } from 'vitest';");
+  const plan = await testerPlan(
+    poolWith([['npx', 'vitest', 'run', '{tests}']]).pool,
+    'p',
+    cwd,
+    ['e2e/smoke.spec.ts', 'tests/ui.spec.ts', 'tests/rules.test.ts'],
+  );
+  assert.deepEqual(plan.commands, [{ command: ['npx', 'vitest', 'run', 'tests/rules.test.ts'], skipped: false }]);
+});
+
+test('eingebauter Tester: nur Playwright-Datei geändert – Vitest-Befehl übersprungen, echte Unit-Test-Fehler bleiben rot', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'order-vitest-'));
+  await mkdir(join(cwd, 'e2e'));
+  await writeFile(join(cwd, 'e2e/smoke.spec.ts'), "import { test } from '@playwright/test';");
+  await writeFile(join(cwd, 'rules.test.ts'), '');
+  // Steht für `npx vitest run {tests}`: scheitert bei jeder übergebenen Datei.
+  const vitest = ['node', '-e', 'process.exit(1)', '{tests}'];
+  const run = (changedFiles: string[], pool: Pool) =>
+    runBuiltinAgent({
+      pool,
+      item: { id: 'item-1', projectSlug: 'p', title: 'T', description: '' },
+      agent: tester,
+      prompt: '',
+      cwd,
+      timeoutMs: 30_000,
+      changedFiles,
+    });
+  const onlyE2e = poolWith([vitest]);
+  const passed = await run(['e2e/smoke.spec.ts'], onlyE2e.pool);
+  assert.equal(passed.exitCode, 0, passed.output);
+  assert.deepEqual(
+    onlyE2e.steps.map((step) => step.status),
+    ['passed'],
+  );
+  const failing = await run(['e2e/smoke.spec.ts', 'rules.test.ts'], poolWith([vitest]).pool);
+  assert.notEqual(failing.exitCode, 0, failing.output);
 });
 
 test('der Entwickler-Prompt verlangt die Liste aller geänderten Dateien', async () => {

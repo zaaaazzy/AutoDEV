@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { loadOrderTestCommands, loadTestCommands } from './runner-selection.js';
@@ -43,6 +43,18 @@ export function relatedTestFiles(changed: string[], exists: (path: string) => bo
   return [...found].sort();
 }
 
+const PLAYWRIGHT_IMPORT = /from\s+['"]@playwright\/test['"]|require\(\s*['"]@playwright\/test['"]\s*\)/;
+
+/** Playwright-Test: liegt unter e2e/ oder importiert @playwright/test (Inhalt fehlt → nur der Pfad zählt). */
+export function isPlaywrightTest(path: string, content?: string): boolean {
+  return /(?:^|\/)e2e\//.test(path) || (content !== undefined && PLAYWRIGHT_IMPORT.test(content));
+}
+
+/** Befehl startet Playwright (`npx playwright test …`, `node_modules/.bin/playwright …`). */
+function runsPlaywright(command: string[]): boolean {
+  return command.some((part) => /(?:^|\/)playwright$/.test(part));
+}
+
 export interface PlannedCommand {
   command: string[];
   /** Ein Platzhalter ergab keine Datei: Befehl wird nicht ausgeführt. */
@@ -51,13 +63,22 @@ export interface PlannedCommand {
 
 /**
  * Setzt `{tests}` und `{files}` ein (je Datei ein Argument). Ein Befehl, dessen Platzhalter leer bleibt, wird
- * übersprungen; Befehle ohne Platzhalter laufen immer.
+ * übersprungen; Befehle ohne Platzhalter laufen immer. `{tests}` bekommt je Runner nur seine Dateien:
+ * Playwright-Befehle nur Playwright-Tests, alle anderen (Vitest, node --test, …) keine – sonst meldet etwa
+ * `vitest run e2e/x.spec.ts` „No test files found“ und der Schritt wird rot, ohne dass am Code etwas falsch ist.
  */
-export function expandOrderCommands(commands: string[][], files: string[], tests: string[]): PlannedCommand[] {
+export function expandOrderCommands(
+  commands: string[][],
+  files: string[],
+  tests: string[],
+  isPlaywright: (path: string) => boolean = (path) => isPlaywrightTest(path),
+): PlannedCommand[] {
   return commands.map((command) => {
     let skipped = false;
+    const playwright = runsPlaywright(command);
+    const runnerTests = tests.filter((path) => isPlaywright(path) === playwright);
     const expanded = command.flatMap((part) => {
-      const values = part === TESTS_PLACEHOLDER ? tests : part === FILES_PLACEHOLDER ? files : null;
+      const values = part === TESTS_PLACEHOLDER ? runnerTests : part === FILES_PLACEHOLDER ? files : null;
       if (!values) return [part];
       if (!values.length) skipped = true;
       return values;
@@ -92,7 +113,14 @@ export async function testerPlan(
   const exists = (path: string): boolean => existsSync(join(cwd, path));
   const files = changed.filter(exists);
   const tests = relatedTestFiles(changed, exists);
-  return { commands: expandOrderCommands(order, files, tests), scoped: true, files, tests };
+  const isPlaywright = (path: string): boolean => {
+    try {
+      return isPlaywrightTest(path, readFileSync(join(cwd, path), 'utf8'));
+    } catch {
+      return isPlaywrightTest(path);
+    }
+  };
+  return { commands: expandOrderCommands(order, files, tests, isPlaywright), scoped: true, files, tests };
 }
 
 /** Kurzer Hinweis über den Umfang des Testlaufs für die Ausgabe des Tester-Schritts. */
