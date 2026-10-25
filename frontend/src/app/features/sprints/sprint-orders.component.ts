@@ -6,10 +6,10 @@ import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { DataColumn } from '../../shared/data-table/data-table.component.js';
-import { canTakeIntoSprint, isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { pickInOrder, poolOpenState } from './pool-selection.js';
-import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from './sprint-phases.js';
+import { byRank, canEditSprintOrders, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from './sprint-phases.js';
 
 /**
  * Aufträge eines Sprints als Liste wie auf der Auftragsseite, nach Phase eingeordnet. „Geplant“ ist die
@@ -84,11 +84,8 @@ export class SprintOrdersComponent {
   /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
   protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));
 
-  protected readonly editable = computed(
-    () => !['completed', 'cancelled'].includes(this.sprint().status) && this.auth.can('plan'),
-  );
-  /** Hineinnehmen nur in geplante oder aktive Sprints (dieselbe Regel wie der Server); im Review und danach nicht. */
-  protected readonly canTakeIn = computed(() => this.editable() && isAssignableSprintStatus(this.sprint().status));
+  /** Umsortieren, Herausnehmen und Hineinnehmen (siehe canEditSprintOrders). */
+  protected readonly editable = computed(() => canEditSprintOrders(this.sprint().status, this.auth.can('plan')));
 
   protected clearSelection(): void {
     this.selectedIds.set(new Set());
@@ -161,7 +158,7 @@ export class SprintOrdersComponent {
    * sodass er auch in einem noch geplanten Sprint sofort startete.
    */
   private async takeIntoSprint(item: DevelopmentItem): Promise<void> {
-    if (!this.canTakeIn()) throw new Error('Aufträge lassen sich nur geplanten oder aktiven Sprints zuordnen.');
+    if (!this.editable()) throw new Error('Aufträge lassen sich nur geplanten oder aktiven Sprints zuordnen.');
     await this.api.post(`/api/development/${encodeURIComponent(item.id)}/take-into-sprint`, {
       sprintId: this.sprint().id,
     });

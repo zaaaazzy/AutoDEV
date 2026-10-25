@@ -7,8 +7,8 @@ import {
   ASSIGNABLE_SPRINT_STATUSES,
   REPLANNABLE_DEVELOPMENT_STATUSES,
   RETRYABLE_DEVELOPMENT_STATUSES,
-  SPRINT_LOCKED_DEVELOPMENT_STATUSES,
   SPRINT_POOL_DEVELOPMENT_STATUSES,
+  SPRINT_REMOVABLE_DEVELOPMENT_STATUSES,
   canSetDevelopmentStatus,
   isAssignableSprintStatus,
   isSprintLockedDevelopmentStatus,
@@ -364,6 +364,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       }
       // Aus einem noch geplanten Sprint nehmen ist reine Planung: kein Vermerk, also auch keine Karte unter „Aktionen“.
       // Erst aus einem laufenden Sprint gilt ein Auftrag als abgebrochen und wartet auf eine Entscheidung.
+      // Auftrags- und Sprint-Status in derselben Anweisung: Im Review steckt der Sprint-Branch schon im PR.
       const result = await pool.query(
         `UPDATE development_items SET
               removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id AND status <> 'planned'),
@@ -372,15 +373,17 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
               status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
               updated_at = NOW()
-        WHERE id = $1 AND sprint_id IS NOT NULL
-          AND status NOT IN (${sqlList(SPRINT_LOCKED_DEVELOPMENT_STATUSES)})
+        WHERE id = $1 AND status IN (${sqlList(SPRINT_REMOVABLE_DEVELOPMENT_STATUSES)})
+          AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = development_items.sprint_id
+                         AND s.status IN (${ASSIGNABLE_SPRINTS_SQL}))
         RETURNING ${DEV_COLUMNS}`,
         [request.params.id],
       );
       if (!result.rows[0]) {
-        response
-          .status(409)
-          .json({ message: 'Nur geplante oder blockierte Aufträge eines Sprints lassen sich herausnehmen.' });
+        response.status(409).json({
+          message:
+            'Nur geplante oder blockierte Aufträge lassen sich herausnehmen, und nur aus geplanten oder aktiven Sprints.',
+        });
         return;
       }
       response.json({ item: result.rows[0] });

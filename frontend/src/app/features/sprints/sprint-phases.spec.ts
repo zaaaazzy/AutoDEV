@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { moveId, orderSprint, phaseLabel, sprintPhase } from './sprint-phases.js';
+import { canEditSprintOrders, moveId, orderSprint, phaseLabel, sprintPhase } from './sprint-phases.js';
+
+test('Sprint-Aufträge: Umsortieren und Herausnehmen nur in geplanten oder aktiven Sprints mit Planungsrecht', () => {
+  assert.equal(canEditSprintOrders('planned', true), true);
+  assert.equal(canEditSprintOrders('active', true), true);
+  for (const status of ['review', 'completed', 'cancelled']) {
+    assert.equal(canEditSprintOrders(status, true), false, status);
+  }
+  assert.equal(canEditSprintOrders('active', false), false, 'ohne Planungsrecht');
+});
 
 test('Sprint-Phasen: Status werden eingeordnet, Backlog zählt als geplant', () => {
   assert.equal(sprintPhase({ status: 'in_progress' }), 'running');
