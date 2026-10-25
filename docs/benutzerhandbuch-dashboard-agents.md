@@ -928,8 +928,53 @@ Dieser Abschnitt betrifft **Einstellungen → App & Benachrichtigungen** (Schalt
 
 ---
 
+## 19. Agent-Berichte in `docs/tests/` und `docs/risiken/` pausieren den Sprint nicht mehr
+
+Dieser Abschnitt betrifft den Ablauf eines Auftrags und der Sprint-Sicherung. Es gibt keine neue Schaltfläche.
+
+> **Printscreens:** keine. Die Änderung wirkt nur im Git-Ablauf im Projektordner, nicht in der Oberfläche. Sichtbar ist sie im Verlauf des Auftrags und in der Sprint-Sicherung. Platzhalter: `[Bild 19] Auftragsverlauf mit dem nächsten Auftrag nach einem Tester-Bericht ohne Pause` (nur, wenn ein Browserlauf dafür freigegeben wird).
+
+### 19.1 Was sich geändert hat
+
+- **Berichte sind keine fremden Änderungen:** Der Tester und das Test-Gate legen ihre Berichte in `docs/tests/` ab, der Bug-Wächter in `docs/risiken/`. Diese Dateien sind neu und unversioniert. Bisher galten sie als fremde Änderung, und der nächste Auftrag brach mit „fremde, nicht committete Änderungen“ ab. Der Sprint pausierte. Das ist behoben.
+- **Der Auftrags-Commit nimmt sie nicht mit:** Die Berichte bleiben im Projektordner liegen und gehören nicht zum Stand des Auftrags.
+- **Die Sprint-Sicherung committet sie:** Sie kommen beim Abschluss des Sprints ins Repository.
+- **Eine Liste für alle Stellen:** Auftrags-Commit, Sauberkeits-Check und das Aufräumen loser Kopien nutzen dieselbe Liste der beiden Ordner.
+
+### 19.2 Bedienung
+
+Es ist keine Aktion nötig. Ein Agent schreibt seinen Bericht, der nächste Auftrag startet ohne Pause.
+
+| Was passiert | Ergebnis |
+| --- | --- |
+| Tester legt `docs/tests/<Datum>-….md` ab, Auftrag wird gemergt | Der nächste Auftrag startet ohne Hinweis auf fremde Änderungen. |
+| Bug-Wächter legt `docs/risiken/<Datum>-….md` ab | Wie oben. Der Bericht bleibt unversioniert liegen, bis die Sprint-Sicherung ihn committet. |
+| Sprint wird abgeschlossen (Sprint-Sicherung) | Die Berichte werden committet, sofern sie keine Zugangsdaten enthalten. |
+| Lose Kopie eines Berichts liegt im Arbeitsordner und ist im Ziel unverändert enthalten | Die Kopie wird vor dem Checkout entfernt. Der Checkout bricht nicht ab. |
+
+**Bedingungen und Grenzen:**
+
+- **Nur diese zwei Ordner:** Es zählen genau `docs/tests/` und `docs/risiken/`, jeweils mit dem Schrägstrich am Ende. `docs/risiken-x/`, `docs/tests-extra/`, `docs/andere.md` und `src/…` gelten weiter als fremde Änderung und brechen den Auftrag ab. Die Meldung nennt dann den fremden Pfad.
+- **Secret-Holdback:** Ein Bericht, der nach Zugangsdaten aussieht, wird bei der Sprint-Sicherung nicht committet. Er bleibt unversioniert liegen, bis er bereinigt ist.
+- **Die Sprint-Sicherung wartet nicht auf Berichte:** Sie zählt die Berichtsordner nicht als unterbrochene Änderung. Eine andere offene Datei im Ordner hält sie weiter an (siehe Abschnitt 8).
+- **Nur der Pfad zählt, nicht der Urheber:** Jede Datei in diesen beiden Ordnern gilt als Bericht, auch eine von Hand abgelegte. Dateien an anderen Stellen bleiben fremde Änderungen und brechen den nächsten Auftrag ab.
+
+### 19.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Nächster Auftrag bricht mit „fremde, nicht committete Änderungen (docs/tests/…)“ oder „(docs/risiken/…)“ ab | Der Stand ist nach dem Fix nicht mehr vorgesehen. Den Arbeitsordner prüfen, Worker mit dieser Version neu starten, dann den Auftrag erneut einplanen. Bleibt es so, die Administration informieren. |
+| Nächster Auftrag bricht mit einem Pfad außerhalb der beiden Ordner ab | Das ist gewollt. Die Datei committen oder verwerfen. |
+| Sprint-Sicherung wartet, obwohl nur Berichte offen sind | Ungewöhnlich. Den Arbeitsordner prüfen; liegt dort noch eine andere offene Änderung, steht sie in der Meldung. |
+| Bericht wurde bei der Sprint-Sicherung nicht committet | Er enthält vermutlich eine Zugangsdaten-Angabe. Den Bericht prüfen und die Angabe entfernen. |
+
+**Stand der Prüfung:** Grün im Projekttestlauf 4e9889b1: `report-copies.test.ts` und `report-folders.test.ts` (9 von 9). Dazu gehört der Ablauf in einem echten Git-Repo (Bericht, Merge, nächster Auftrag ohne Pause) sowie die Gegenproben für fremde Pfade. `npm run typecheck` ist grün. Noch nicht gelaufen: `git-helpers-porcelain.test.ts`, `secret-holdback.test.ts` und `git-sync.test.ts`. Ob der Ablauftest vor dem Fix scheitert, ist nicht belegt.
+
+---
+
 ## Verwandte Dokumente
 
+- [`agent-berichte-keine-fremden-aenderungen-2026-10-25.md`](agent-berichte-keine-fremden-aenderungen-2026-10-25.md): Entwicklerbericht zu Abschnitt 19 (Ursache, Umsetzung, offene Tests)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb
