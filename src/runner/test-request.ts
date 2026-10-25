@@ -28,6 +28,7 @@ interface Claimed {
  * Im eigenen Agenten-Worktree (siehe agent-workspace.ts) steht oft noch der Stand des letzten Auftrags.
  * Getestet werden soll der aktuelle Stand: ist der Worktree sauber, wird main ausgecheckt (losgelöst, ohne Branch).
  * Liefert den Branch, auf dem der Worktree vorher stand (für restoreBranch), sonst null.
+ * Offene Änderungen (oder ein gescheitertes git status) werfen: sonst prüfte der Lauf einen halbfertigen Auftrag.
  */
 export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<string | null> {
   const git = (...args: string[]) => execute(['git', ...args], cwd, { timeoutMs: 60_000, env: gitEnvironment() });
@@ -37,7 +38,12 @@ export async function useLatestMain(cwd: string, execute: CommandExecutor): Prom
   if (dirs.exitCode !== 0 || !own || own === common) return null;
   // Nicht versionierte Dateien stören den Checkout nicht; nur echte Änderungen verhindern ihn.
   const status = await git('status', '--porcelain', '--untracked-files=no');
-  if (status.exitCode !== 0 || status.output.trim()) return null;
+  if (status.exitCode !== 0)
+    throw new Error(
+      `git status im Agent-Worktree fehlgeschlagen – Test auf main nicht möglich: ${failureTail(status.output)}`,
+    );
+  if (status.output.trim())
+    throw new Error('Offene Änderungen im Agent-Worktree (wartender Auftrag?) – Test auf main nicht möglich.');
   const branch = await git('symbolic-ref', '--short', '-q', 'HEAD');
   await dropReportCopies(git, cwd, 'main');
   const moved = await git('checkout', '-q', '--detach', 'main');

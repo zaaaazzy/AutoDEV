@@ -59,7 +59,7 @@ test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüf
   assert.equal(requiredRole('POST', '/api/projects/dev-log/test-requests', {}), 'run');
 });
 
-test('Kompletter Test: im Agenten-Worktree wird bei sauberem Stand main ausgecheckt, sonst nichts', async () => {
+test('Kompletter Test: im Agenten-Worktree bei sauberem Stand main auschecken, offene Änderungen ablehnen', async () => {
   const calls: string[] = [];
   const execute =
     (status: string, dirs = '/repo/.git/worktrees/agent\n/repo/.git\n') =>
@@ -78,7 +78,7 @@ test('Kompletter Test: im Agenten-Worktree wird bei sauberem Stand main ausgeche
   assert.equal(await useLatestMain('/x/agent', execute('')), 'sprint/sprint-7');
   assert.ok(calls.includes('git checkout -q --detach main'));
   calls.length = 0;
-  assert.equal(await useLatestMain('/x/agent', execute(' M datei.ts')), null);
+  await assert.rejects(useLatestMain('/x/agent', execute(' M datei.ts')), /Offene Änderungen im Agent-Worktree/);
   assert.ok(!calls.some((call) => call.startsWith('git checkout')));
   calls.length = 0;
   // Hauptordner (eigenes = gemeinsames Git-Verzeichnis): nichts tun.
