@@ -1052,7 +1052,7 @@ Unabhängig von den eigenen Regeln gilt für jeden Agent-Befehl: Der Befehl wird
 - **Freigeben:** Eine Kategorie wirkt erst, wenn du sie einem Agent unter **Agents** freigibst. Die Oberfläche sagt das so: „Unter Agents gibst du jedem Agent die einzelnen Befehle frei.“
 - **Eine Prüfung, zwei Stellen:** Die Liste steht einmal im Code. Das Speichern und der Wächter beim Ausführen prüfen dieselbe Liste.
 - **Keine Sandbox:** Die Regeln verhindern Fehlgriffe und naheliegende Umgehungen. Ein freigegebenes Projektskript kann trotzdem jeden Code ausführen, den ein Agent geschrieben hat.
-- **Tests:** Die automatisierten Tests zu dieser Änderung sind zum Stand 25.10.2026 noch nicht gelaufen. Die Beschreibung stammt aus dem Code.
+- **Tests:** Grün im Testlauf des Testers vom 25.10.2026. Die Unit-Tests `agent-guard.test.ts`, `requirements.test.ts` und `tool-permissions.test.ts` liefen mit 99 von 99. Sie decken Wrapper, Builtins, awk, die Allowlist, alte DB-Regeln, die Projektwurzel aus der Richtlinie und die Gegenproben `git fetch origin main` und `npm ci --ignore-scripts` ab. In `e2e/app.spec.ts` lief die E2E-Prüfung mit 72 bestanden und 2 übersprungen. Dazu gehört die Ablehnung von `Bash(timeout:*)`, `Bash(find:*)`, `Bash(awk:*)`, `Bash(tee:*)` und `Bash(cd:*)` mit 400. `npm run typecheck` ist grün.
 
 ---
 
