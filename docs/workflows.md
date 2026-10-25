@@ -163,6 +163,12 @@ Projekte ohne Schritte übernehmen beim ersten Öffnen ihren bisherigen Ablauf (
 dahin gilt dieser auch im Worker. API: `GET /api/projects/:slug/workflow`, `POST …/workflow/steps`,
 `POST …/workflow/order`, `PATCH|DELETE /api/workflow-steps/:id` (Recht „Agents verwalten“).
 
+**Umbau während eines Laufs:** Ein laufender Auftrag arbeitet mit dem Workflow, der zu seinem Start galt, bis zum
+Ende weiter. Wurde ein Einsatz oder Agent inzwischen entfernt, speichert sein Schritt keinen Verweis darauf
+(`workflow_step_id` bzw. `agent_id` leer), Name und Phase bleiben sichtbar. Erst der nächste Lauf nutzt den neuen
+Workflow. Bricht ein Lauf aus einem anderen unerwarteten Grund ab, steht am blockierten Auftrag immer die Begründung
+„Lauf abgebrochen: …“.
+
 | Zeitpunkt         | Phase         | Wann                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ----------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Vor dem Sprint    | `pre_sprint`  | einmal, wenn ein Sprint aktiv wird, bevor sein erster Auftrag startet; nur lesend (Rolle `pre_sprint` in `READ_ONLY_ROLES`). Das Ergebnis steht in `sprints.pre_sprint_notes` und steht in jeder Agent-Anweisung der Aufträge dieses Sprints. Scheitert ein Agent, wird die Phase im nächsten Zyklus wiederholt (höchstens 3 Versuche, danach starten die Aufträge ohne sie); bei erreichtem Budget wird sie nachgeholt. Fehlermeldungen werden nie Sprint-Hinweis. |
