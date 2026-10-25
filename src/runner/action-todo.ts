@@ -72,12 +72,18 @@ export function budgetActionTodo(daily: boolean, detail: string): string {
   return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
 }
 
+/**
+ * „keine“, „nichts“, „-“ oder „n/a“ – allein oder mit Begründung hinter Satzzeichen, Gedankenstrich oder Klammer
+ * („keine – Agent behebt selbst“). „Keine Datenbank-URL hinterlegt“ ist dagegen eine Aktion.
+ */
+const NO_ACTION = /^(keine|nichts|-|n\/a)\s*($|[.,;:!]|[–—-](\s|$)|\()/i;
+
 /** Liest die AKTION-Zeile der Problemanalyse: Text, „keine“ (= null) oder undefined, wenn sie fehlt. */
 export function parseActionLine(output: string): string | null | undefined {
   const match = output.match(/^\s*AKTION:\s*(.+)$/im);
   if (!match) return undefined;
   const value = match[1]!.trim().replace(/^["„]|["“]$/g, '');
-  return /^(keine|nichts|-|n\/a)\.?$/i.test(value) ? null : shorten(value);
+  return NO_ACTION.test(value) ? null : shorten(value);
 }
 
 export function shorten(text: string): string {

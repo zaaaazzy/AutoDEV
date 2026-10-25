@@ -776,6 +776,52 @@ Bisher nahm der Worker die erste Überschrift, die mit „Schätzung“ beginnt.
 
 ---
 
+## 16. Problemanalyse: „keine“ mit Begründung ist keine offene Aktion
+
+Dieser Abschnitt betrifft die Problemanalyse eines Auftrags. Sie endet mit einer Zeile `AKTION:`. Sie sagt, was ein Mensch tun muss, oder „keine“, wenn die Agents es selbst beheben können. Nur eine echte Aktion landet unter „Aktionen“ als „Aktion notwendig“ am Auftrag.
+
+> **Printscreens:** keine neuen. Der Fall tritt nur auf, wenn eine Problemanalyse läuft, und dafür braucht es einen laufenden Docker-Stack mit einem fehlgeschlagenen Auftrag. Der vorhandene Printscreen `aktionen-desktop.png` stammt vom 23.10.2026 und zeigt den Fehler noch. Platzhalter: `[Bild 12] Auftrag mit „keine – …“ in der Problemanalyse, ohne Eintrag unter „Aktionen“`.
+
+### 16.1 Was sich geändert hat
+
+Bisher galt eine Zeile nur dann als „keine“, wenn dahinter genau „keine“, „nichts“, „-“ oder „n/a“ stand. Schrieb die Analyse eine Begründung dahinter, wurde der ganze Satz als offene Aktion gespeichert. Unter „Aktionen“ wirkte der Auftrag, als warte er auf einen Menschen.
+
+Jetzt gilt „keine“ auch mit Begründung, wenn direkt danach eines von diesen Zeichen folgt:
+
+- Satzzeichen (`.`, `,`, `;`, `:`, `!`), zum Beispiel „keine: …“
+- ein Gedankenstrich (`–` oder `—`) oder ein Bindestrich mit Leerzeichen dahinter, zum Beispiel „keine – …“
+- eine öffnende Klammer, zum Beispiel „keine (Agent kann selbst beheben)“
+
+Groß- und Kleinschreibung spielen keine Rolle. Umschließende Anführungszeichen um den Wert werden ignoriert.
+
+### 16.2 Bedingungen
+
+| Zeile `AKTION:` in der Problemanalyse | Ergebnis unter „Aktionen“ |
+| --- | --- |
+| `keine`, `nichts`, `-`, `n/a` (allein) | Keine Aktion. |
+| `keine – der Analyst dokumentiert den Befund …` | Keine Aktion. |
+| `keine (Agent kann selbst beheben)` | Keine Aktion. |
+| `Nichts – …`, `n/a (…)`, `keine: …` | Keine Aktion. |
+| `Keine Datenbank-URL hinterlegt – bitte eintragen` | Aktion „Aktion notwendig“ mit diesem Text. |
+| `keine Aktion nötig` (ohne Satzzeichen, Gedankenstrich oder Klammer) | Aktion „Aktion notwendig“ mit diesem Text. |
+| `Nichtsdestotrotz …`, `Keine-Ahnung-Modus …` | Aktion „Aktion notwendig“ mit diesem Text. |
+
+**Bedingungen:**
+
+- Die Regel gilt bei jeder Problemanalyse. Ein früherer Eintrag „Aktion notwendig: keine – …“ entfernt die nächste Analyse des Auftrags. Der Sprintbericht wird dann neu erzeugt. Du musst nichts tun.
+- Eine echte Aktion bleibt bestehen. Erkannt wird nur der Anfang der Zeile, der Rest des Satzes ist egal.
+- Die Länge ist begrenzt. Ein Text über 160 Zeichen wird gekürzt und endet mit „…“.
+
+### 16.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Unter „Aktionen“ steht „Aktion notwendig: keine …“ | Der Eintrag stammt aus einer Analyse vor dieser Änderung. Die nächste Analyse des Auftrags entfernt ihn. Ist er noch da, ist die Analyse nicht neu gelaufen. |
+| Unter „Aktionen“ steht „Aktion notwendig: keine Aktion nötig …“ | Hinter „keine“ fehlt ein Satzzeichen, ein Gedankenstrich oder eine Klammer. Das ist eine Aktion nach der Regel. Die Analyse so formulieren lassen, z. B. „keine – …“, oder den Eintrag am Auftrag von Hand entfernen. |
+| Ein Auftrag mit echter Aktion wird nicht mehr angezeigt | Eine echte Aktion beginnt nicht mit „keine“, „nichts“, „-“ oder „n/a“ gefolgt von einem der Zeichen aus 16.1. Den Text am Auftrag prüfen. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
