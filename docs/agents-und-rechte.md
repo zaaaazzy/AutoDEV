@@ -95,7 +95,7 @@ Er hat höhere Rechte als alle anderen, bleibt aber im Projektordner:
 
 **Visionär:** Läuft mit der Rolle `visionary` (`READ_ONLY_ROLES` in `tool-permissions.ts`) und darf nur lesen. Beim lokalen Modell bekommt er nur die Lese-Werkzeuge. Bei der Claude-CLI sind `Write`, `Edit`, `MultiEdit`, `NotebookEdit` und `Bash` gesperrt, und zwar auch dann, wenn am Agent eigene Befehle zugewiesen oder im Befehl eigene Werkzeug-Regeln gesetzt sind. Der Wächter-Hook lehnt Schreib- und Befehlsaufrufe zusätzlich ab (`shell: false`). Andere CLIs (Copilot, Gemini) bekommen ihre Befehlszeile unverändert; für sie gilt die Sperre nur über den Prompt. Ideen legt der Visionär nicht selbst an. Er gibt `@@IDEA {…}`-Zeilen aus, und der Worker legt daraus die Ideen an.
 
-**Nicht erlaubt (für alle Agents):** Dateien außerhalb des Projektordners, `.env`, Schlüssel, `.git`, `node_modules`, Backup-Ordner, Symlink-Ausbrüche, `docker run`, `docker compose down -v`, `git push`, `rm`, verkettete Befehle (`;`, `&&`, Pipes – Befehle laufen ohne Shell), `git clone` mit `file://`, Optionen oder Zielen außerhalb des Projekts.
+**Nicht erlaubt (für alle Agents):** Dateien außerhalb des Projektordners, `.env`, Schlüssel, `.git`, `node_modules`, Backup-Ordner, Symlink-Ausbrüche, `docker run`, `docker compose down -v`, `git push`, `rm`, Git-Hooks (`.git/hooks`, `.husky`, `.githooks`), verkettete Befehle (`;`, `&&`, Pipes – Befehle laufen ohne Shell), `git clone` mit `file://`, Optionen oder Zielen außerhalb des Projekts.
 
 Zusätzlich gilt: Ist `DEV_LOG_AGENT_COMMAND` oder ein eigener Agent-Befehl gesetzt, läuft dieser statt des lokalen Modells und die obigen Werkzeugregeln greifen dafür nicht.
 

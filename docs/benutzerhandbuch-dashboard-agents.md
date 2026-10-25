@@ -171,7 +171,11 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 
 **Was nie weitergegeben wird:** `DEV_LOG_*` sowie alle Namen mit SECRET, TOKEN, PASSWORD, API_KEY, DATABASE_URL, PRIVATE_KEY, ACCESS_KEY oder CREDENTIAL. Auch wenn ein Projekt so eine Variable für seine Tests braucht, bekommt es sie nicht.
 
-**Git des Workers:** Git und `gh` laufen mit derselben Allowlist. GitHub-Tokens bleiben erlaubt, damit der Push funktioniert. Git-Hooks sind aus (`core.hooksPath` zeigt auf `/dev/null`). Alle Commits des Workers entstehen mit `--no-verify`. Ein Pre-Commit-Hook im Projekt läuft daher nicht. Lint und Format müssen über das Test-Gate geprüft werden.
+**Git des Workers:** Git und `gh` laufen mit derselben Allowlist. GitHub-Tokens bleiben erlaubt, damit der Push funktioniert. Git-Hooks sind aus: Der Worker setzt `core.hooksPath` auf `/dev/null` und gibt git nur die gefilterte Umgebung mit (ohne `DEV_LOG_*`). Ein Hook im Projekt (`.git/hooks`, `.husky`, `.githooks`) läuft daher bei Commits und Merges des Workers nicht, auch nicht bei Merges. Lint und Format müssen über das Test-Gate geprüft werden.
+
+**Hook-Ordner sind für Agents gesperrt:** `.git/`, `.husky/` und `.githooks/` lassen sich weder anlegen noch ändern, auch nicht in Unterordnern oder über einen Link. Ein Agent, der es versucht, bekommt die Meldung „Zugriff auf diesen Pfad ist nicht erlaubt.“ (lokales Modell) bzw. „… ist geschützt (Git, Agent-Einstellungen oder Geheimnisse).“ (Claude-CLI). Die Datei wird nicht geschrieben; der Agent bekommt die Meldung zurück und kann weiterarbeiten.
+
+**Printscreens:** keine. Dieser Abschnitt hat keine Oberfläche; die Wirkung zeigt sich nur in den Meldungen eines Agent-Laufs und im Verhalten von Commits und Merges.
 
 **Agent-CLIs (Claude, Codex) und Deploy-Befehle** behalten ihre Umgebung. Nur `DEV_LOG_*` wird entfernt, weil sie ihre eigenen API-Schlüssel bzw. Hoster-Zugänge brauchen.
 
