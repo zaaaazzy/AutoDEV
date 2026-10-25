@@ -141,10 +141,14 @@ export async function runStep(
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const routed = await routeStep(ctx, agent);
   const model = stepModel(ctx, agent, routed);
+  // Der Workflow kann während des Laufs umgebaut werden: Gibt es den geladenen Schritt oder Agent nicht mehr, läuft der
+  // Schritt ohne Verweis (NULL) zu Ende, statt am Fremdschlüssel zu scheitern und den Lauf abzubrechen.
   const stepId = (
     await pool.query<{ id: string }>(
       `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status, workflow_step_id, model, routing_rule)
-     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}', $6, $7, $8) RETURNING id`,
+     VALUES ($1, $2, (SELECT id FROM agents WHERE id = $3::uuid), $4, $5, '${AGENT_STEP_STATUS.running}',
+             (SELECT id FROM workflow_steps WHERE id = $6::uuid), $7, $8)
+     RETURNING id`,
       [
         runId,
         stepOptions.stepPosition ?? position,

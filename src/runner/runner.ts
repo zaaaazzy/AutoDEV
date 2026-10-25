@@ -399,6 +399,13 @@ export async function runWorkItem(
       interrupted = true;
       ctx.stopReason = error.message;
       await pauseForFolderProblem(pool, item, error.message).catch(logged('runner'));
+    } else {
+      // Unerwarteter Fehler: Der Auftrag wird blockiert – nie ohne Begründung (sonst stünde sie nur im Worker-Log).
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.stopReason = `Lauf abgebrochen: ${message}`;
+      await pool
+        .query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [item.id, ctx.stopReason])
+        .catch(logged('runner'));
     }
     console.error(`Run ${runId} aborted:`, error);
   } finally {

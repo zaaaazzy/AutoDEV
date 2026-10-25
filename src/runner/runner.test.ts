@@ -115,6 +115,72 @@ test('stops at the first failing agent and blocks the order', async () => {
   ]);
 });
 
+test('Workflow während des Laufs umgebaut: der Lauf endet mit den geladenen Schritten, ohne Fremdschlüssel-Fehler', async () => {
+  // Bildet den Fremdschlüssel nach: Eine gelöschte Schritt-ID direkt einzufügen, scheitert wie in Postgres.
+  const existing = new Set(['step-dev', 'step-test']);
+  const inserted: unknown[] = [];
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('INSERT INTO agent_run_steps') && sql.includes('workflow_step_id')) {
+        const id = values[5] as string | null;
+        const checked = sql.includes('SELECT id FROM workflow_steps WHERE id = $6');
+        if (!checked && id && !existing.has(id)) {
+          throw new Error(
+            'insert or update on table "agent_run_steps" violates foreign key constraint "agent_run_steps_workflow_step_id_fkey"',
+          );
+        }
+        inserted.push(checked && id && !existing.has(id) ? null : id);
+      }
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => {
+    // Während der Entwickler arbeitet, baut jemand im Agents-Menü den Workflow um: der Tester-Schritt verschwindet.
+    if (command[0] === 'dev') existing.delete('step-test');
+    return { exitCode: 0, durationMs: 1, output: `ok ${command[0]}` };
+  };
+  const agents = [
+    { ...agent('Entwickler', 'while_task', 1, ['dev']), stepId: 'step-dev' },
+    { ...agent('Prüfer', 'after_task', 1, ['test']), stepId: 'step-test' },
+  ];
+  const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+  assert.equal(result, 'passed');
+  assert.deepEqual(inserted, ['step-dev', null]);
+  assert.deepEqual(queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1)?.values, [
+    'item-1',
+    'done',
+  ]);
+  assert.ok(!queries.some((query) => /SET failure = \$2/.test(query.sql)), 'keine Begründung für einen Abbruch');
+});
+
+test('unerwarteter Fehler im Lauf: der Auftrag wird nie ohne Begründung blockiert', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('INSERT INTO agent_run_steps')) throw new Error('Datenbank meldet etwas Unerwartetes');
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => ({ exitCode: 0, durationMs: 1, output: 'ok' });
+  const result = await runWorkItem(pool, item, [agent('Entwickler', 'while_task', 1, ['dev'])], {
+    cwd: '/repo',
+    timeoutMs: 1000,
+    execute,
+  });
+  assert.equal(result, 'failed');
+  const failure = queries.find((query) => /SET failure = \$2/.test(query.sql));
+  assert.deepEqual(failure?.values, ['item-1', 'Lauf abgebrochen: Datenbank meldet etwas Unerwartetes']);
+  assert.deepEqual(queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1)?.values, [
+    'item-1',
+    'blocked',
+  ]);
+});
+
 test('Laufwerk fällt während eines Agents weg: Auftrag wird neu eingeplant statt blockiert, kein Bug', async () => {
   const { mkdtempSync, renameSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
