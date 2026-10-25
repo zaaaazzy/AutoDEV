@@ -16,7 +16,7 @@ import {
   npmOptionProblem,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
-import { CHECKED_PROGRAMS } from './command-checks.js';
+import { CHECKED_PROGRAMS, SHELL_BUILTINS, unwrapCommand, WRAPPER_COMMANDS } from './command-checks.js';
 import { parseShell, renderWords, type ShellRedirect, type ShellWord } from './shell-parse.js';
 
 /**
@@ -31,6 +31,8 @@ export interface GuardPolicy {
   scopes: string[];
   /** false = keine Shell-Befehle (nur lesende Rollen wie der Visionär); fehlt die Angabe, gilt die CLI-Freigabe. */
   shell?: boolean;
+  /** Projektordner, den AIdeation beim Start festlegt; geht vor CLAUDE_PROJECT_DIR und dem cwd der Eingabe. */
+  root?: string;
 }
 
 export interface GuardInput {
@@ -185,9 +187,14 @@ export function bashProblem(
   }
   const root = realpathSync(projectRoot);
   // Je einfacher Befehl einer Kette (;, &&, ||, |, Zeilenumbruch), mit den Wörtern nach Bash-Quoting.
-  for (const { words, redirects } of parsed.commands) {
+  for (const { words: written, redirects } of parsed.commands) {
     if (redirects.some(writesFile)) {
       return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
+    }
+    // timeout 60 git push: geprüft wird der Befehl hinter den Wrappern, als stünde er allein da.
+    const words = unwrapCommand(written);
+    if (!words) {
+      return `„${renderWords(written)}“: Wrapper (${[...WRAPPER_COMMANDS].join(', ')}) nur mit einfachen Optionen und einem Befehl dahinter.`;
     }
     const part = renderWords(words);
     // Platzhalter treffen Geheimnisse, ohne den Namen zu nennen: cat .en? / cat .npm[r]c.
@@ -197,6 +204,9 @@ export function bashProblem(
     const [program = '', subcommand = '', third = ''] = words.map((word) => word.text);
     if (/^[A-Za-z_]\w*=/.test(program) || (WRAPPERS.has(program) && words.length > 1)) {
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
+    }
+    if (SHELL_BUILTINS.has(program)) {
+      return `„${part}“: Shell-Builtins wie cd, export, alias, source und eval sind gesperrt – jeden Befehl einzeln aufrufen.`;
     }
     // acceptEdits gibt mkdir, touch, rm, rmdir, mv, cp und sed ohne Regel frei – Rechte und Ordner prüft nur der Wächter.
     if (forbiddenCommand(words)) {
@@ -284,6 +294,7 @@ export function decodePolicy(value: string | undefined): GuardPolicy {
       create: parsed.create === true,
       edit: parsed.edit === true,
       ...(parsed.shell === false ? { shell: false } : {}),
+      ...(typeof parsed.root === 'string' && isAbsolute(parsed.root) ? { root: parsed.root } : {}),
       scopes: Array.isArray(parsed.scopes) ? parsed.scopes.filter((scope) => SCOPE_PATTERN.test(String(scope))) : [],
     };
   } catch {
@@ -303,10 +314,12 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(GUARD_SCRI
     process.stderr.write('AIdeation-Wächter: ungültige Eingabe.\n');
     process.exit(2);
   }
-  const root = process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
+  const policy = decodePolicy(process.argv[2]);
+  // Der Projektordner aus der Richtlinie: CLAUDE_PROJECT_DIR und cwd kann der Agent selbst beeinflussen (cd …).
+  const root = policy.root || process.env.CLAUDE_PROJECT_DIR || input.cwd || process.cwd();
   let problem: string | null;
   try {
-    problem = guardProblem(input, decodePolicy(process.argv[2]), root);
+    problem = guardProblem(input, policy, root);
   } catch (error) {
     problem = `Prüfung fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`;
   }

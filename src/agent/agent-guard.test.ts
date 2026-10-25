@@ -653,3 +653,110 @@ test('Wächter-Tokenizer: Escapes, Fortsetzungszeilen und Shell-Konstrukte verst
     assert.equal(bashProblem(command, root), null, JSON.stringify(command));
   }
 });
+
+test('Wächter: hinter timeout, nice, stdbuf und ionice wird der eigentliche Befehl geprüft', () => {
+  for (const command of [
+    "timeout 60 sh -c 'id'",
+    'timeout 60 git push',
+    'timeout 5 nice -n 5 git push',
+    'timeout 5 nice -n 5 stdbuf -o0 git push origin main',
+    'ionice -c2 -n7 git push',
+    'stdbuf -oL npm publish',
+    'timeout -k 3 60 git push',
+    'timeout --signal=KILL 60 git reset --hard',
+    'nice -5 docker run alpine',
+    '"timeout" 60 git push',
+    '\\timeout 60 git push',
+    '/usr/bin/timeout 60 git push',
+    't""imeout 60 git push',
+    '$X 60 git push',
+    'timeout $T git push',
+    'timeout 60 $X push',
+    'timeout 60 env X=1 git status',
+    'timeout 60 rm -rf src',
+    'timeout 60 find . -exec sh {} +',
+    'timeout 60 cd .git/hooks',
+    'timeout 60 npx tsc',
+    'timeout 60 git status > x',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt|Wrapper|nur mit/, command);
+  }
+  // Unklare Optionen, kein Befehl dahinter oder zu tiefe Verschachtelung: gesperrt (fail-closed).
+  for (const command of [
+    'timeout git status',
+    'timeout 60',
+    'timeout --kill-after 3 60 git status',
+    'nice --wild git status',
+    'ionice -p 1',
+    'stdbuf -o $M git status',
+    'timeout 1 timeout 1 timeout 1 timeout 1 timeout 1 git status',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /Wrapper/, command);
+  }
+  for (const command of [
+    'timeout 60 npm test',
+    'timeout 5 nice -n 5 git status',
+    'nice -n 10 npx --no-install tsx --test src/agent/agent-guard.test.ts',
+    'stdbuf -oL git log --oneline',
+    'timeout -s TERM 2m npm run typecheck',
+    'git status && timeout 30 git diff',
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
+test('Wächter: Shell-Builtins, die spätere Befehle verändern, sind gesperrt', () => {
+  for (const command of [
+    'export GIT_DIR=/tmp/x',
+    'declare -x A=1',
+    'unset PATH',
+    'set -o allexport',
+    'alias git=sh',
+    'cd .git/hooks && git status',
+    'cd frontend',
+    'pushd /tmp',
+    'source x.sh',
+    '. ./x.sh',
+    'eval git push',
+    "trap 'id' EXIT",
+    'hash -p /bin/sh git',
+    '"cd" /tmp',
+    'git status; cd /tmp',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt/, command);
+  }
+});
+
+test('Wächter: awk startet über system() Programme und ist gesperrt; Abnahme-Befehle bleiben erlaubt', () => {
+  for (const command of ["awk 'BEGIN{system(x)}'", 'gawk -f x.awk', "git log | awk '{print > x}'"]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt/, command);
+  }
+  for (const command of [
+    'npx --no-install tsx --test src/agent/agent-guard.test.ts',
+    'npm run typecheck',
+    'git fetch origin main',
+    'npm ci --ignore-scripts',
+  ]) {
+    assert.equal(bashProblem(command, root, null), null, command);
+  }
+});
+
+test('Wächter als Hook: Projektordner aus der Richtlinie geht vor CLAUDE_PROJECT_DIR und cwd', (t) => {
+  const other = mkdtempSync(join(tmpdir(), 'guard-other-'));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  const run = (policy: string, input: object) =>
+    spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), GUARD_SCRIPT, policy], {
+      input: JSON.stringify(input),
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: other },
+    });
+  const pinned = encodePolicy({ ...all, root });
+  // Ohne root in der Richtlinie gälte der fremde Ordner aus CLAUDE_PROJECT_DIR als Projekt.
+  assert.equal(run(encodePolicy(all), { ...write(join(other, 'x.md')), cwd: other }).status, 0);
+  const outside = run(pinned, { ...write(join(other, 'x.md')), cwd: other });
+  assert.equal(outside.status, 2);
+  assert.match(outside.stderr, /ausserhalb des Projektordners/);
+  assert.equal(run(pinned, write(join(root, 'docs', 'neu-hook.md'))).status, 0);
+  assert.equal(decodePolicy(pinned).root, root);
+  assert.equal(decodePolicy(encodePolicy({ ...all, root: 'relativ' })).root, undefined);
+});

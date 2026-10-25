@@ -972,9 +972,93 @@ Es ist keine Aktion nötig. Ein Agent schreibt seinen Bericht, der nächste Auft
 
 ---
 
+## 20. Eigene Befehlsregeln (Rechte-Kategorien)
+
+Unter **Einstellungen → Rechte-Kategorien** legst du eigene Befehlsgruppen für ein Projekt an. Du gibst sie danach einzelnen Agents frei. Eine Regel prüft AIdeation beim Speichern, und der Wächter prüft sie noch einmal, wenn ein Agent den Befehl ausführt.
+
+Früher verbot AIdeation bei eigenen Regeln nur bekannte Gefahren. Dadurch ließen sich Programme wie `timeout`, `find` oder `awk` freigeben, mit denen ein Agent Dateien außerhalb des Projekts schreiben oder eine beliebige Shell starten konnte. Jetzt gilt eine **Allowlist**: Erlaubt ist nur, was auf der Liste in Abschnitt 20.2 steht. Alles andere lehnt AIdeation ab.
+
+![Einstellungen → Rechte-Kategorien: Formular mit abgelehnter Regel „Bash(timeout:*)“ und roter Meldung](benutzerhandbuch-dashboard-agents/rechte-kategorie-abgelehnt.png)
+
+![Rechte-Kategorien: gespeicherte eigene Kategorie mit ihren Befehlen](benutzerhandbuch-dashboard-agents/rechte-kategorie-gespeichert.png)
+
+![Rechte-Kategorien: Übersicht mit eingebauten und eigenen Kategorien](benutzerhandbuch-dashboard-agents/rechte-kategorien-uebersicht.png)
+
+### 20.1 Wo, wer und wie
+
+- **Wo:** Einstellungen → Rechte-Kategorien. Der Bereich gehört zum aktiven Projekt.
+- **Wer:** Nur die Administration darf anlegen, ändern und löschen. Andere Benutzer sehen die Kategorien, dürfen aber nichts speichern (403).
+- **Geltungsbereich:** Eine eigene Kategorie gilt nur in dem Projekt, in dem du sie angelegt hast. Die eingebauten Kategorien lassen sich nicht ändern.
+- **Felder:**
+  - **Name:** 1 bis 80 Zeichen, Pflicht.
+  - **Beschreibung:** optional, bis 500 Zeichen.
+  - **Befehle:** einer pro Zeile, 1 bis 30 je Kategorie. Doppelte Zeilen entfallen.
+- **Speichern:** Wird eine Regel abgelehnt, speichert der Server nichts. Die Meldung steht im Formular, die übrigen Eingaben bleiben stehen.
+
+### 20.2 Erlaubte Regeln
+
+Eine Regel hat die Form `Bash(programm:*)` (alle Argumente), `Bash(programm unterbefehl:*)` oder `Bash(programm)` (genau dieser Befehl). Zusätzlich ist `WebFetch(domain:localhost)` erlaubt, ebenso `127.0.0.1`.
+
+**Erlaubte Programme:**
+
+| Gruppe | Programme |
+| --- | --- |
+| Entwicklung | `git`, `npm`, `docker`, `make` |
+| Lesen und auswerten | `ls`, `cat`, `head`, `tail`, `wc`, `grep`, `diff`, `cut`, `tr`, `jq`, `stat`, `du`, `df` |
+| Ausgabe und System | `pwd`, `echo`, `printf`, `date`, `which`, `basename`, `dirname`, `realpath`, `uname`, `whoami`, `ps`, `lsof` |
+
+**Bedingungen:**
+
+- Bei `git`, `npm` und `docker` prüft AIdeation jeden Unterbefehl einzeln. Ein freigegebenes `git` gibt also nicht `git push` frei. `git push` ist immer gesperrt.
+- `make` und `npm run` starten Projektskripte. Diese Skripte laufen mit den Rechten des Workers, die Prüfung der Regel erfasst deren Inhalt nicht.
+- Zeichen, die eine Shell auswertet, sind in einer Regel nicht erlaubt: Semikolon, Pipe, `&`, `$`, Backticks, Umleitungen, `*` und `?` (außer am Ende als `:*`), Klammern und Anführungszeichen. Erlaubt sind Buchstaben, Ziffern und `_ @ . / = : , + -`, Wörter durch einfache Leerzeichen getrennt.
+- Ein Befehl darf höchstens 120 Zeichen lang sein.
+- Regeln mit `..`, mit Geheimnissen (`.env`, `.ssh`, `.aws`, `.gnupg`) oder mit AIdeation-Pfaden (`AIdeation`, `DevLog`, `com.aideation`, `com.devlog`) sind gesperrt.
+- Immer gesperrt sind unter anderem `rm`, `sudo`, `kill`, `git push`, `curl`, Shells und Interpreter. Die Oberfläche nennt diese Liste ebenfalls.
+
+Nicht auf der Liste stehen zum Beispiel `timeout`, `nice`, `find`, `awk`, `sed`, `tee`, `cp` und `ln`. Mit ihnen lassen sich Dateien schreiben oder andere Programme starten.
+
+### 20.3 Wrapper und Shell-Builtins bei Agent-Befehlen
+
+Unabhängig von den eigenen Regeln gilt für jeden Agent-Befehl: Der Befehl wird wie in Bash zerlegt, und jeder Teilbefehl wird geprüft.
+
+- **Wrapper:** `timeout`, `nice`, `stdbuf` und `ionice` schält AIdeation ab, bis zu vier ineinander. Der Befehl dahinter wird geprüft, als stünde er allein da.
+  - `timeout 60 npm test` bleibt erlaubt.
+  - `timeout 60 sh -c '…'` und `timeout 5 nice -n 5 git push` sind gesperrt.
+  - Gesperrt sind auch unklare Optionen, Werte aus einer Variablen, fehlende Befehle hinter dem Wrapper und mehr als vier Wrapper.
+- **Builtins:** Diese Befehle sind immer gesperrt, weil sie spätere Befehle verändern: `export`, `declare`, `typeset`, `readonly`, `local`, `unset`, `set`, `shopt`, `alias`, `unalias`, `hash`, `cd`, `pushd`, `popd`, `source`, `.`, `eval`, `exec`, `trap`, `enable`, `builtin`, `command` und `let`.
+  - Folge für Testbefehle: ohne `cd … &&` schreiben, den Ordner gibt der Lauf vor.
+- **awk:** `awk`, `gawk`, `nawk` und `mawk` sind gesperrt, weil sie Programme starten können.
+
+### 20.4 Fehlerbehebung
+
+| Meldung (Auszug) | Ursache und was zu tun ist |
+| --- | --- |
+| „…: dieses Programm ist für eigene Regeln nicht freigegeben (erlaubt: …).“ | Das Programm steht nicht auf der Liste in 20.2, etwa `timeout`, `find` oder `sed`. Eine enge Regel mit einem erlaubten Programm wählen. |
+| „…: keine Shell-Sonderzeichen (…).“ | Die Regel enthält etwas, das eine Shell auswertet, etwa Semikolon, Pipe, `$` oder Anführungszeichen. Nur Programm, Unterbefehl und einfache Optionen eintragen. |
+| „…: dieser Befehl ist für Agents grundsätzlich gesperrt.“ | Der Befehl steht auf der Sperrliste, etwa `git push`, `rm`, `curl` oder `sudo`. Er lässt sich nicht freigeben. |
+| „…: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.“ | Die Regel verweist auf `..`, Geheimnisse oder AIdeation. Er lässt sich nicht freigeben. |
+| „…: erlaubt sind Bash(befehl:*), Bash(befehl) oder WebFetch(domain:localhost).“ | Die Schreibweise stimmt nicht, etwa eine fehlende Klammer. |
+| „…: Befehl zu lang.“ | Der Befehl ist länger als 120 Zeichen. Aufteilen oder kürzen. |
+| „Befehle: 1–30 pro Kategorie.“ oder „Name der Kategorie: 1–80 Zeichen.“ | Die Eingabe passt nicht zu den Grenzen aus 20.1. |
+| 403 beim Speichern | Dein Konto ist nicht Administrator. |
+| Befehle einer Kategorie sind nach dem Neuladen verschwunden | Eine Regel ist nicht mehr erlaubt, siehe 20.5. |
+| Agent meldet „Wrapper … nur mit einfachen Optionen …“ | Der Befehl hat einen Wrapper mit unklaren Optionen. Den Wrapper nur mit festen Optionswerten schreiben, etwa `timeout 60 …`, oder ganz weglassen. |
+| Agent meldet „Shell-Builtins wie cd, export, alias … sind gesperrt“ | Ein Builtin steht im Befehl. Jeden Befehl einzeln aufrufen, ohne `cd` und `export`. |
+
+### 20.5 Bedingungen und Grenzen
+
+- **Alte Regeln:** Gespeicherte Regeln, die heute nicht mehr erlaubt sind (etwa `Bash(timeout:*)`, `Bash(find:*)` oder `Bash(awk:*)`), übergeht AIdeation beim Laden **ohne Meldung**. Die übrigen Regeln derselben Kategorie bleiben wirksam, und der Start bricht nicht ab. Die Einträge bleiben in der Datenbank. Die Oberfläche zeigt das noch nicht an. Wer so eine Regel braucht, legt eine enge Regel mit einem erlaubten Programm an.
+- **Freigeben:** Eine Kategorie wirkt erst, wenn du sie einem Agent unter **Agents** freigibst. Die Oberfläche sagt das so: „Unter Agents gibst du jedem Agent die einzelnen Befehle frei.“
+- **Eine Prüfung, zwei Stellen:** Die Liste steht einmal im Code. Das Speichern und der Wächter beim Ausführen prüfen dieselbe Liste.
+- **Keine Sandbox:** Die Regeln verhindern Fehlgriffe und naheliegende Umgehungen. Ein freigegebenes Projektskript kann trotzdem jeden Code ausführen, den ein Agent geschrieben hat.
+- **Tests:** Grün im Testlauf des Testers vom 25.10.2026. Die Unit-Tests `agent-guard.test.ts`, `requirements.test.ts` und `tool-permissions.test.ts` liefen mit 99 von 99. Sie decken Wrapper, Builtins, awk, die Allowlist, alte DB-Regeln, die Projektwurzel aus der Richtlinie und die Gegenproben `git fetch origin main` und `npm ci --ignore-scripts` ab. In `e2e/app.spec.ts` lief die E2E-Prüfung mit 72 bestanden und 2 übersprungen. Dazu gehört die Ablehnung von `Bash(timeout:*)`, `Bash(find:*)`, `Bash(awk:*)`, `Bash(tee:*)` und `Bash(cd:*)` mit 400. `npm run typecheck` ist grün.
+
+---
+
 ## Verwandte Dokumente
 
-- [`agent-berichte-keine-fremden-aenderungen-2026-10-25.md`](agent-berichte-keine-fremden-aenderungen-2026-10-25.md): Entwicklerbericht zu Abschnitt 19 (Ursache, Umsetzung, offene Tests)
+- [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb

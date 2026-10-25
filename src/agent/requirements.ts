@@ -192,7 +192,15 @@ export async function runAuthorAgent(
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
   const command =
     configured &&
-    withAgentPermissions(configured, rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
+    withAgentPermissions(
+      configured,
+      rightsRole,
+      permissions,
+      author?.allowedCommands ?? null,
+      author?.fileScope ?? [],
+      undefined,
+      options.cwd,
+    );
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =

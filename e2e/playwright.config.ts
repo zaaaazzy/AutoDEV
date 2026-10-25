@@ -22,6 +22,8 @@ process.env.E2E_ADMIN_DATABASE_URL ??= localDatabaseUrl(
 
 export default defineConfig({
   testDir: '.',
+  // Wegwerf-Skripte (z. B. Printscreens fürs Handbuch) gehören nicht in den Testlauf.
+  testIgnore: ['**/tmp-*.spec.ts'],
   timeout: 30_000,
   fullyParallel: false,
   workers: 1,
