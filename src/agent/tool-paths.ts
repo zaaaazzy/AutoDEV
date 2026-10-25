@@ -17,15 +17,15 @@ export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)/i;
 
 export class ToolError extends Error {}
 
-/** Gesperrte Pfadteile: Git, Abhängigkeiten, Sicherungen und Geheimnisse (Pfad relativ zum Projekt). */
-function blockedPath(rel: string): boolean {
+/** Gesperrte Ordner: Git samt Hooks (.git/hooks, .husky, .githooks), Abhängigkeiten und Sicherungen. */
+const BLOCKED_PARTS = new Set(['.git', '.husky', '.githooks', 'node_modules', BACKUP_DIRECTORY]);
+
+/** Gesperrte Pfadteile: Git, Hooks, Abhängigkeiten, Sicherungen und Geheimnisse (Pfad relativ zum Projekt). */
+export function blockedPath(rel: string): boolean {
   return rel
-    .split(sep)
+    .split(/[\\/]/)
     .filter(Boolean)
-    .some((part) => {
-      const lower = part.toLowerCase();
-      return lower === '.git' || lower === 'node_modules' || lower === BACKUP_DIRECTORY || SECRET_NAME.test(part);
-    });
+    .some((part) => BLOCKED_PARTS.has(part.toLowerCase()) || SECRET_NAME.test(part));
 }
 
 export async function resolveInside(cwd: string, requested: unknown, forWrite = false): Promise<string> {

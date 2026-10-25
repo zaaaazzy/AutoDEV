@@ -429,6 +429,7 @@ export class ReviewSlots {
     const gitDir = await this.execute(
       ['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'],
       project.folder,
+      { env: gitEnvironment() },
     );
     if (gitDir.exitCode !== 0 || !gitDir.output.trim()) return fail('Projektordner ist kein Git-Repository.');
     const imageProblem = await this.ensureImage();
