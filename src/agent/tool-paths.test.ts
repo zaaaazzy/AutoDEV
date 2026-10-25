@@ -148,8 +148,12 @@ test('Konstanten: übersprungene Ordner und Geheimnis-Muster', () => {
   for (const name of ['node_modules', '.git', 'dist', BACKUP_DIRECTORY, 'coverage']) {
     assert.ok(SKIPPED_DIRECTORIES.has(name), name);
   }
-  for (const name of ['.env', '.env.production', 'a.pem', 'b.KEY', 'id_ecdsa']) assert.ok(SECRET_NAME.test(name), name);
-  for (const name of ['env.ts', 'keys.ts', 'readme.md']) assert.ok(!SECRET_NAME.test(name), name);
+  for (const name of ['.env', '.env.production', 'a.pem', 'b.KEY', 'id_ecdsa', '.npmrc', '.netrc', '.git-credentials']) {
+    assert.ok(SECRET_NAME.test(name), name);
+  }
+  for (const name of ['env.ts', 'keys.ts', 'readme.md', 'npmrc.md', '.npmrc.md', 'keyboard.ts']) {
+    assert.ok(!SECRET_NAME.test(name), name);
+  }
 });
 
 test('readProjectFile: liest Dateien im Projekt, folgt aber keinen Links', async () => {

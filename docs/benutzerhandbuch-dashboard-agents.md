@@ -71,15 +71,29 @@ Ein Agent ohne bekannte Rolle erscheint als **„Eigene Rolle“**.
 
 ### 1.4 Geheimnisse sind für alle Agents gesperrt
 
-Zugangsdaten und Schlüssel im Projekt bleiben für jeden Claude-Agent unlesbar, unabhängig von der Rolle. Das gilt auch für den Visionär (nur lesend) und für den Chat-Assistenten mit Vollzugriff. Gesperrt sind unter anderem:
+Zugangsdaten und Schlüssel im Projekt bleiben für jeden Claude-Agent unlesbar, unabhängig von der Rolle. Das gilt auch für den Visionär (nur lesend), für Routinen und für den Chat-Assistenten mit Vollzugriff. Gesperrt sind unter anderem:
 
 - Umgebungsdateien (`.env`, `.env.example`, `config/.env.production`), auch in Unterordnern,
 - Zertifikate und Schlüssel (`*.pem`, `*.key`) sowie private SSH-Schlüssel (`id_rsa`, `id_ed25519`, `id_ecdsa`),
+- Zugangsdaten-Dateien mit Tokens: `.npmrc` (Registry-Tokens), `.netrc` und `.git-credentials`, im Projekt und im Benutzerordner (`~/.npmrc` usw.),
 - SSH-, AWS- und GnuPG-Ordner im Projekt und im Benutzerordner.
 
-Die Sperre greift beim Lesen, Suchen (Grep) und Auflisten von Dateien (Glob). Bei Suchen über einen ganzen Ordner prüft AIdeation nicht jede Datei einzeln. Dort wirken nur die Sperren der Claude-CLI.
+Gezählt wird nur der ganze Dateiname. `npmrc.md`, `environment.ts` und `keyboard.ts` bleiben lesbar.
 
-Shell-Befehle wie `cat .env` oder `grep … .env` sperrt AIdeation ebenfalls. Die Meldung nennt nur den Pfad, nie den Inhalt.
+Die Sperre greift beim Lesen (Lese-Werkzeug), bei der Suche (Grep, auch über Pfad und Dateifilter) und beim Auflisten (Glob). Schreiben lässt sich keine dieser Dateien, auch `.npmrc` nicht. Agents können also keine Registry-Einstellungen oder Zugangsdaten anlegen.
+
+Shell-Befehle, die einen dieser Namen enthalten (`cat .env`, `grep … .npmrc`, `cat ~/.netrc`), lehnt AIdeation ab. Die Meldungen lauten:
+
+- Lesen oder Suchen: „<Pfad>: Geheimnisse (.env, Schlüssel, Zertifikate) sind für Agents gesperrt.“
+- Shell: „Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.“
+
+Die Meldung nennt nur den Pfad, nie den Inhalt. Der lokale Ollama-Agent nutzt dieselbe Namensliste für seine Datei-Werkzeuge.
+
+**Bedingungen und Grenzen:**
+
+- Bei einer Suche über einen ganzen Ordner (Grep ohne bestimmte Datei) prüft AIdeation nicht jede Datei einzeln. Dort wirken nur die Sperren der Claude-CLI.
+- Die Shell-Prüfung sucht den Namen im Befehlstext. Ein Befehl, der `.env` nur als Teil eines anderen Namens enthält (etwa `x.environment`), wird deshalb auch abgelehnt. Das ist bewusst strenger.
+- Braucht ein Auftrag einen Wert aus einer `.env`-Datei, formuliere ihn ohne Wert und trage den Wert selbst im Terminal ein. Ein Agent soll ihn nicht lesen.
 
 ---
 
@@ -148,6 +162,7 @@ Der zweite und dritte Zustand sind verschieden. „Keine offenen Aufträge“ he
 | Rechte-Chip zeigt „nein“, der Agent darf aber Befehle ausführen | Das Chip zeigt den Standardwert der Rolle. Der Befehl des Agents (Claude-CLI oder lokales Modell) kann abweichen. Der Hinweis „je nach Befehl“ weist darauf hin. |
 | Agent-Lauf meldet „ist für Agents gesperrt – Dateien nur mit den Datei-Werkzeugen anlegen, ändern oder löschen“ | Der Befehl enthält einen Dateibefehl wie `rm`, `mv`, `cp`, `sed` oder `touch` (siehe Abschnitt 3). Der Agent muss die Änderung über die Datei-Werkzeuge machen. Ändert sich ein eigener Agent-Befehl oder eine Routine, den Befehl umstellen oder den Schritt entfernen. Die Meldung nennt den Teilbefehl, der gesperrt ist. |
 | Agent-Lauf meldet „Escapte Anführungszeichen (\' bzw. \") sind gesperrt“, „Offene Anführungszeichen …“ oder „Der Befehl lässt sich nicht eindeutig zerlegen …“ | Der Befehl ist so geschrieben, dass AIdeation ihn nicht sicher lesen kann (siehe Abschnitt 3). Argumente in ganze Anführungszeichen setzen (`'…'` oder `"…"`), statt mit `\'` oder `\"` zu escapen, Backslashes am Zeilenende entfernen und Befehle in einfache Teilbefehle aufteilen. Die Meldung nennt den Grund. |
+| Agent-Lauf meldet „…: Geheimnisse (.env, Schlüssel, Zertifikate) sind für Agents gesperrt.“ oder „Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.“ | Der Agent wollte eine Datei mit Zugangsdaten lesen oder durchsuchen, etwa `.env`, `*.pem`, `.npmrc`, `.netrc` oder `.git-credentials`. Das ist gewollt. Den Auftrag so umformulieren, dass der Wert nicht gebraucht wird, und einen Wert selbst im Terminal eintragen (Abschnitt 1.4). Die Meldung nennt nur den Pfad, nie den Inhalt. |
 | Agent-Lauf meldet „Abgebrochen: Der Agent wurde gestoppt.“ | Jemand hat „■ Abbrechen“ genutzt, oder der Worker wurde beendet. Der Lauf gilt nicht als Erfolg und wird nicht automatisch wiederholt. Prüfe vor einem neuen Start, welche Dateien der Agent bereits geschrieben hat. |
 | Agent-Lauf meldet „Zeitlimit erreicht“ | Der Schritt lief länger als das Zeitlimit (Standard 30 min je Schritt). Er wird einmal nach 30 s wiederholt, wenn das Budget es erlaubt. Scheitert auch der zweite Versuch, den Auftrag in kleinere Teile aufteilen. |
 | „AIdeation neu starten“ endet mit „fehlgeschlagen“ und der Meldung „npm ci --ignore-scripts ist fehlgeschlagen (Exit-Code …)“ | Die Abhängigkeiten des Workers konnten nicht auf den Stand von `package-lock.json` gebracht werden. Nichts wurde neu gebaut, AIdeation läuft unverändert weiter. Die gekürzte Ausgabe steht im Menü. Im AIdeation-Ordner `npm ci --ignore-scripts` von Hand ausführen und die Fehlermeldung prüfen, etwa Netzzugang, Registry oder ein Lockfile, das nicht zu `package.json` passt. Danach den Neustart erneut anfordern. |
