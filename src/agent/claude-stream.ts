@@ -131,7 +131,7 @@ export function createStreamParser(
   let session: string | undefined;
   // Claude schickt eine Nachricht je Inhaltsblock erneut, mit derselben id: nur der letzte Stand zählt.
   const messageTokens = new Map<string, number>();
-  const action =(message: string): void => {
+  const action = (message: string): void => {
     if (message) onAction(message);
   };
   const addParagraph = (text: string): void => {
