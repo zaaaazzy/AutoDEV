@@ -37,7 +37,8 @@ Commit `e9208ae`.
 
 ## Worauf zu achten ist
 
-- **Test nicht gelaufen:** Der Entwickler durfte nur `npm run typecheck` starten (grün). Der Tester soll zuerst ohne Coverage-Flags laufen lassen: `npx --no-install tsx --test src/runner/git-sync/git-hooks.test.ts src/runner/git-sync/secret-holdback.test.ts src/agent/agent-guard.test.ts src/runner/project-command.test.ts src/runner/git-sync/stale-lock.test.ts`.
+- **Testlauf 40e2a746 (grün):** `npm run typecheck` bestanden. `npx tsx --test src/agent/agent-guard.test.ts src/agent/tool-paths.test.ts src/runner/git-sync/git-hooks.test.ts src/runner/git-sync/stale-lock.test.ts src/runner/review-slots.test.ts`: 56 Tests, 56 bestanden, 0 fehlgeschlagen. Der Code ist seitdem unverändert. Die Abnahme schlug nur fehl, weil der Tester den Lauf selbst nicht freigegeben bekam (DoD 1); das Ergebnis oben belegt den Hook-Test.
+- **Noch ungeprüft:** `secret-holdback.test.ts` und `project-command.test.ts` waren nicht Teil des Laufs. Start ohne Coverage-Flags: `npx --no-install tsx --test src/runner/git-sync/secret-holdback.test.ts src/runner/project-command.test.ts`.
 - **Test scheitert nicht vor dem Fix in allen Teilen:** Die Teile zu Commit und Merge waren schon grün, weil `gitHelpers` bereits `gitEnvironment` nutzte. Vor dem Fix scheitern nur die Prüfungen von `.githooks` und `.husky` in `blockedPath`.
 - **Nicht angefasst:** `measured-coverage.ts:125` gehört zum Auftrag „Projektcode nur mit gefiltertem Environment ausführen“.
 - **Offen:** Der Claude-Wächter sperrt `git config core.hooksPath` nicht gesondert (in `src/agent` kommt `hooksPath` nirgends vor). Für den Worker ist das unerheblich, da er `core.hooksPath=/dev/null` per `-c` setzt. Ein Agent kann aber die Git-Konfiguration ändern, wenn er sie über einen erlaubten Befehl erreicht.
@@ -46,10 +47,10 @@ Commit `e9208ae`.
 
 | Auftrag | Zustand | Details |
 | --- | --- | --- |
-| 3691a610 Git-Hooks des Projekts im Worker nie ausführen | umgesetzt, Test wartet auf Tester | `.githooks` gesperrt, `blockedPath` erweitert, weitere git-Aufrufe gefiltert, neuer Hook-Test |
+| 3691a610 Git-Hooks des Projekts im Worker nie ausführen | umgesetzt, 56/56 Tests grün (Lauf 40e2a746), Abnahme wartet auf Freigabe | `.githooks` gesperrt, `blockedPath` erweitert, weitere git-Aufrufe gefiltert, neuer Hook-Test |
 
 ## Anfrage / TODO
 
-- `git-hooks.test.ts` und die Nachbartests ausführen und Ergebnis bestätigen.
+- Ergebnis von Lauf 40e2a746 für die Abnahme (DoD 1) werten; `secret-holdback.test.ts` und `project-command.test.ts` zusätzlich laufen lassen.
 - Neuer Auftrag prüfen: `git config core.hooksPath` im Claude-Wächter sperren (Bereich backend, Schwere niedrig).
 - `measured-coverage.ts:125` im Auftrag „Projektcode nur mit gefiltertem Environment ausführen“ ergänzen.
