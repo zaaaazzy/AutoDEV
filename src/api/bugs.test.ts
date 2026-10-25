@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START } from '../core/bug-trust.js';
 import { withMigratedDatabase } from '../db/test-database.test.js';
-import { registerBugRoutes } from './bugs.js';
+import { registerBugRoutes, syncBugOrder } from './bugs.js';
 import type { Principal } from './roles.js';
 import { requiredRole } from './route-table.test.js';
 import { serveRoutes } from './serve-routes.test.js';
@@ -215,6 +215,70 @@ test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async 
         await pool.query(`UPDATE development_items SET status = 'in_progress' WHERE id = $1`, [order!.id]);
         await api.call('PATCH', `/bugs/${id}`, { description: 'später' });
         assert.equal((await orders(id))[0]?.description, 'neu');
+      });
+
+      await t.test('abgeschlossener Sprint: Anlegen und Zuordnen mit 409, nichts geschrieben', async () => {
+        const closed = (
+          await pool.query<{ id: string }>(
+            `INSERT INTO sprints (project_slug, name, status) VALUES ('shop', 'Alt', 'completed') RETURNING id`,
+          )
+        ).rows[0]!.id;
+        const bugsBefore = (await pool.query('SELECT 1 FROM bugs')).rowCount;
+        const created = await api.call('POST', '/projects/shop/bugs', { title: 'Toter Sprint', sprintId: closed });
+        assert.equal(created.status, 409);
+        assert.equal((await pool.query('SELECT 1 FROM bugs')).rowCount, bugsBefore);
+
+        const id = await bug('manual');
+        const moved = await api.call('PATCH', `/bugs/${id}`, { sprintId: closed, title: 'Neu' });
+        assert.equal(moved.status, 409);
+        const stored = (await pool.query('SELECT sprint_id, title FROM bugs WHERE id = $1', [id])).rows[0];
+        assert.deepEqual(stored, { sprint_id: null, title: 'manual' });
+        assert.deepEqual(await orders(id), []);
+      });
+
+      for (const running of ['in_progress', 'approval']) {
+        await t.test(`laufender Auftrag (${running}): Sprint des Bugs bleibt, 409, nichts geschrieben`, async () => {
+          const other = await sprintIn('shop');
+          const id = await bug('manual');
+          await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint });
+          const [order] = await orders(id);
+          await pool.query(`UPDATE development_items SET status = $2 WHERE id = $1`, [order!.id, running]);
+
+          for (const sprintId of [other, null]) {
+            const response = await api.call('PATCH', `/bugs/${id}`, { sprintId, title: 'Umgehängt' });
+            assert.equal(response.status, 409, String(sprintId));
+            const stored = (await pool.query('SELECT sprint_id, title FROM bugs WHERE id = $1', [id])).rows[0];
+            assert.deepEqual(stored, { sprint_id: sprint, title: 'manual' });
+            assert.deepEqual(
+              (await orders(id)).map((row) => [row.status, row.sprintId]),
+              [[running, sprint]],
+            );
+          }
+          // Gleicher Sprint wie bisher ist keine Änderung: andere Felder bleiben speicherbar.
+          assert.equal((await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint, title: 'Neu' })).status, 200);
+
+          // Auch ohne API (Sprint direkt geändert, danach Sync) hängt das Upsert den laufenden Auftrag nicht um.
+          await pool.query('UPDATE bugs SET sprint_id = $2 WHERE id = $1', [id, other]);
+          await syncBugOrder(pool, id);
+          assert.deepEqual(
+            (await orders(id)).map((row) => [row.status, row.sprintId]),
+            [[running, sprint]],
+          );
+        });
+      }
+
+      await t.test('geplanter oder blockierter Auftrag folgt dem neuen Sprint des Bugs', async () => {
+        const other = await sprintIn('shop');
+        for (const status of ['planned', 'blocked']) {
+          const id = await bug('manual');
+          await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint });
+          await pool.query(`UPDATE development_items SET status = $2 WHERE bug_id = $1`, [id, status]);
+          assert.equal((await api.call('PATCH', `/bugs/${id}`, { sprintId: other })).status, 200, status);
+          assert.deepEqual(
+            (await orders(id)).map((row) => [row.status, row.sprintId]),
+            [[status, other]],
+          );
+        }
       });
 
       await t.test('langer Titel (180 Zeichen): Auftrag entsteht trotzdem, Titel gekürzt', async () => {
