@@ -30,3 +30,16 @@ Einen gemeinsamen Helfer `assignSprint` für PATCH `/development`, Folgeauftrag,
   - Derselbe Sprint geht weiter durch.
   - Ein direkter `syncBugOrder` nach einer Sprintänderung in der DB hängt den Auftrag nicht um.
 - Gegenprobe: Ein geplanter oder blockierter Auftrag folgt dem neuen Sprint.
+
+## Geänderte Dateien
+
+- `src/api/bugs.ts`: Upsert, Transaktion (`withBugTransaction`), PATCH-Prüfung, POST in Transaktion.
+- `src/api/bugs.test.ts`: neue API-Tests.
+- `docs/bugs-sprintzuordnung-laufende-auftraege-2026-10-25.md`: diese Datei.
+
+## Worauf zu achten ist
+
+- Neue Aufrufer von `syncBugOrder` können einen Client der eigenen Transaktion übergeben. Mit einem Pool läuft die Funktion in einer eigenen Transaktion.
+- Ändert sich der Sprint eines Bugs, während ein Auftrag läuft oder in Freigabe ist, antwortet die API mit 409 und schreibt nichts.
+- Offen: ein gemeinsamer Helfer `assignSprint` für alle Zuordnungsstellen (eigener Auftrag nötig).
+- Die Tests waren im Entwickler-Schritt noch nicht gelaufen. Starten ohne Abdeckungs-Flag: `npx --no-install tsx --test src/api/bugs.test.ts`.
