@@ -24,9 +24,8 @@ Auftrag c010e86c (Bugfix, Sprint 23, aus dem Code-Review vom 21.10.2026, Stand `
 - `src/runner/runner.test.ts`: Erwartung an die Zeilen für „Bekannte Bugs“ angepasst.
 
 ## Worauf zu achten ist
-- Stand der Prüfung: Die Tests wurden im Entwicklerschritt nicht ausgeführt (Befehle gesperrt). Ob die neuen Tests ohne den Fix rot wären, ist nicht belegt. Der Tester soll einzeln laufen lassen: `npx --no-install tsx --test src/agent/chat-references.test.ts`, `src/runner/bug-approval.test.ts`, `src/runner/runner.test.ts`, dazu `npx --no-install prettier --check` auf die geänderten Dateien.
+- Stand der Prüfung (Projekttestlauf 311cbd48, 25.10.2026): `npm run typecheck` grün. `npx tsx --test` auf `chat-references.test.ts`, `requirements.test.ts`, `bugs.test.ts`, `bug-approval.test.ts` und `runner.test.ts`: 89 von 89 bestanden. Danach wurden in `chat-references.test.ts` nur zwei lange Zeilen umbrochen (Logik gleich); der Lauf wurde nicht wiederholt. `prettier --check` konnte nicht laufen (Freigabe fehlt), die Dateien wurden von Hand durchgesehen. Ob die neuen Tests ohne den Fix rot wären, ist nicht belegt.
 - Bei Verweisen auf einen Sprint stehen Auftragstitel wie „Bug: Betrieb: …“ weiter ohne Einfassung. Sie sind bereits bereinigt und auf 90 Zeichen gekürzt; bewusst so belassen.
-- Zeilenumbrüche in `chat-references.test.ts` können durch Prettier nachgezogen werden.
 - Abgrenzung: „Ingest-Bugs nicht automatisch an Code-Agents geben“ (Sprint 9) ist ein eigener Auftrag. Hier geht es nur um die Markierung im Prompt.
 - Der Hinweis schützt nur als Anweisung an das Modell; er ersetzt weder die Freigabe durch Menschen noch die Rechte-Prüfung der Agents.
 
