@@ -42,12 +42,12 @@ export interface GuardInput {
 export const SCOPE_PATTERN = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@][\w@.+-]*(?:\/[\w@][\w@.+-]*)*$/;
 
 /**
- * Nie beschreibbar: Git-Interna und Git-Hooks (.husky), Agent-Einstellungen (.claude, .mcp.json – sonst könnte sich ein
+ * Nie beschreibbar: Git-Interna und Git-Hooks (.git/hooks, .husky, .githooks), Agent-Einstellungen (.claude, .mcp.json – sonst könnte sich ein
  * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen), Geheimnisse und .npmrc (Registry,
  * Proxy und Skript-Shell liessen sich dort am Wächter vorbei umstellen).
  */
 const PROTECTED_PATH =
-  /(?:^|\/)(?:\.git|\.husky|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.npmrc|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
+  /(?:^|\/)(?:\.git|\.husky|\.githooks|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.npmrc|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
 
 /** npm-Unterbefehle (samt Aliassen), die Paketangaben installieren – nur Namen aus der Registry. */
 const NPM_INSTALL_SUBCOMMANDS = new Set([

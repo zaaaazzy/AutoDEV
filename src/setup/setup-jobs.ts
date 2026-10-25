@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { commitProjectSetup, isValidGitRemote, pushRemote } from '../runner/git-sync.js';
+import { gitEnvironment } from '../runner/project-command.js';
 import { normalizeFolder, projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
 import { listFolders } from './folders.js';
@@ -41,13 +42,20 @@ function folderOf(params: Params): string {
   return normalizeFolder(folder) ?? folder;
 }
 
-const ENV = {
-  ...process.env,
+const GIT_OPTIONS = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+};
+
+const ENV = {
+  ...process.env,
+  ...GIT_OPTIONS,
   CI: '1',
   npm_config_yes: 'true',
 };
+
+/** git und gh (startet git, z. B. bei „repo create --push“): gefiltert und ohne Hooks des Projekts. */
+const usesGit = (command: readonly string[]): boolean => command[0] === 'git' || command[0] === 'gh';
 
 async function run(
   execute: CommandExecutor,
@@ -55,7 +63,8 @@ async function run(
   cwd: string,
   timeoutMs = QUICK_TIMEOUT_MS,
 ): Promise<{ ok: boolean; output: string }> {
-  const result = await execute(command, cwd, { timeoutMs, env: ENV }).catch((error: unknown) => ({
+  const env = usesGit(command) ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' }) : ENV;
+  const result = await execute(command, cwd, { timeoutMs, env }).catch((error: unknown) => ({
     exitCode: 1,
     durationMs: 0,
     output: error instanceof Error ? error.message : String(error),
