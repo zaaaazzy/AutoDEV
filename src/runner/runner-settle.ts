@@ -2,11 +2,11 @@
 import type { Pool } from 'pg';
 import { logged } from '../core/log.js';
 import { sendPush } from '../core/push.js';
-import { DEVELOPMENT_STATUS } from '../core/status.js';
+import { AGENT_STEP_STATUS, DEVELOPMENT_STATUS } from '../core/status.js';
 import { saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { clearManualTodo, MERGE_TODO, setActionTodo } from './action-todo.js';
+import { clearManualTodo, MERGE_TODO, SECRETS_TODO, setActionTodo } from './action-todo.js';
 import { resumeBlockedByBug } from './autofix.js';
-import { commitTaskToGit, finishOrderBranch } from './git-sync.js';
+import { commitTaskToGit, finishOrderBranch, orderWorkInProgress } from './git-sync.js';
 import {
   holdForReview,
   isMergeConflict,
@@ -73,6 +73,23 @@ export async function leftItsSprint(pool: RunContext['pool'], item: RunContext['
   return Boolean(row && 'sprintId' in row && row.sprintId !== item.sprintId);
 }
 
+export const CLEANUP_STEP = 'Arbeitsordner aufräumen (Git)';
+
+/**
+ * Aufräumen nach einer Unterbrechung gescheitert: eigener, gescheiterter Schritt am Ende des Laufs mit der Meldung.
+ * Als `interrupted` markiert, damit der nächste Lauf beim unterbrochenen Agent fortsetzt (keine Nachbesserungsschleife).
+ */
+async function recordCleanupFailure(ctx: RunContext, message: string): Promise<void> {
+  const output = `Arbeitsordner ${ctx.options.cwd} steht nach der Unterbrechung noch mit offenen Änderungen auf einem Auftrags-Branch – der nächste Auftrag kann dort nicht starten. ${message}`;
+  await ctx.pool.query(
+    `INSERT INTO agent_run_steps (run_id, position, agent_name, phase, status, output, interrupted)
+     SELECT $1, COALESCE(MAX(position), -1) + 1, $2, 'after_task', '${AGENT_STEP_STATUS.failed}', $3, TRUE
+       FROM agent_run_steps WHERE run_id = $1`,
+    [ctx.runId, CLEANUP_STEP, output],
+  );
+  await ctx.pool.query(`UPDATE development_items SET failure = $2 WHERE id = $1`, [ctx.item.id, output]);
+}
+
 export async function settleItem(ctx: RunContext, passed: boolean, interrupted: boolean): Promise<void> {
   const { pool, item, options, execute } = ctx;
   if (await leftItsSprint(pool, item).catch(() => false)) {
@@ -98,6 +115,11 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
         (error: unknown) => ({ message: error instanceof Error ? error.message : String(error) }),
       );
       console.info(`[${item.id}] Unterbrochen – ${saved.message}`);
+      // Steht der Ordner danach noch mit offenen Änderungen auf einem Auftrags-Branch, scheitert der nächste Auftrag an
+      // „fremden Änderungen“: im Lauf als gescheiterten Schritt zeigen statt nur im Worker-Log.
+      if (await orderWorkInProgress(options.cwd, execute).catch(() => false)) {
+        await recordCleanupFailure(ctx, saved.message).catch(logged('runner-settle'));
+      }
     }
     // Return interrupted orders to planned while retaining their assignment so they can resume after restart.
     await pool.query(
@@ -109,6 +131,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
   let mergeProblem: string | null = null;
   let commit: string | null = null;
+  let secretsHeld = false;
   if (ctx.branch) {
     // Review-Freigabe (Projekteinstellung): nur ganze Abläufe, nicht das Ausführen eines einzelnen Agents.
     const review =
@@ -121,6 +144,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
       return;
     }
     if (passed && !result.merged) mergeProblem = result.message;
+    secretsHeld = Boolean(result.secrets?.length);
     commit = result.commit;
   } else if (passed && ctx.sprintName) {
     commit = await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
@@ -144,7 +168,9 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
       .catch(logged('runner-steps'));
     // Kein Konflikt (die gehen oben in einen neuen Versuch): Ohne Vermerk wartete der Sprint still auf eine Behebung,
     // die niemand startet – sichtbar machen, was zu tun ist.
-    if (!isMergeConflict(mergeProblem)) await setActionTodo(pool, item.id, MERGE_TODO).catch(logged('runner-steps'));
+    if (!isMergeConflict(mergeProblem)) {
+      await setActionTodo(pool, item.id, secretsHeld ? SECRETS_TODO : MERGE_TODO).catch(logged('runner-steps'));
+    }
   } else if (!succeeded) {
     await clearManualTodo(pool, item.id).catch(logged('runner-steps'));
   }

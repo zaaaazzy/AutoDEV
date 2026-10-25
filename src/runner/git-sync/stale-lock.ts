@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir, rename, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { runCommand } from '../../core/command.js';
+import { gitEnvironment } from '../project-command.js';
 
 /**
  * Verwaiste Sperrdatei (`index.lock`, `AUTO_MERGE.lock`, `HEAD.lock`, `refs/heads/….lock` …): Wird git hart beendet
@@ -27,7 +28,7 @@ async function gitDirsOf(cwd: string): Promise<{ gitDir: string; commonDir: stri
   const result = await runCommand(
     ['git', 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'],
     cwd,
-    { timeoutMs: 15_000 },
+    { timeoutMs: 15_000, env: gitEnvironment() },
   ).catch(() => null);
   const [gitDir, commonDir] = result?.exitCode === 0 ? result.output.trim().split('\n').slice(-2) : [];
   return gitDir && commonDir && isAbsolute(gitDir) && isAbsolute(commonDir)

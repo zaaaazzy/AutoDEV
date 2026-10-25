@@ -242,6 +242,17 @@ export async function invokeAgent(
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
+  // Rechte des Agents; der Wächter prüft gegen den Projektordner des Laufs, nicht gegen das cwd der CLI.
+  const withRights = (command: string[]): string[] =>
+    withAgentPermissions(
+      command,
+      agent.role,
+      permissions,
+      agent.allowedCommands ?? null,
+      agent.fileScope,
+      undefined,
+      options.cwd,
+    );
   // Visuelle Prüfung: Screenshots, Pixel-Vergleich und Browser-Prüfungen; der Befehl des Agents dient nur dem KI-Urteil.
   if (agent.role === 'visual_tester') {
     const visual = await runVisualStep({
@@ -251,23 +262,19 @@ export async function invokeAgent(
       criteria: ctx.criteria ?? [],
       signal: hooks.signal,
       onProgress: hooks.onAction,
-      judgeCommand:
-        configured &&
-        withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
+      judgeCommand: configured && withRights(configured),
       execute,
     });
     return { ...visual, fromTests: true };
   }
-  const command =
-    configured &&
-    withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope);
+  const command = configured && withRights(configured);
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
     const written = await executeAgentCommand(
       execute,
       buildInvocation(
         // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers.
-        withAgentPermissions(fallbackCommand, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
+        withRights(fallbackCommand),
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
       options.cwd,

@@ -208,6 +208,7 @@ export async function runWorkItem(
     console.info(`Skipping ${item.id}: a run is already in progress.`);
     return 'skipped';
   }
+  heldRuns.add(runId);
   // Ein neuer Lauf hebt eine frühere Budget-Blockade auf; reicht das Budget nicht, setzt die Prüfung sie neu.
   // Der Worker wählt mehrere Aufträge auf einmal und arbeitet sie nacheinander ab: Wurde dieser inzwischen
   // abgelehnt, zurückgestellt, aus dem Sprint genommen oder der Sprint pausiert, startet er nicht (wie selectItems).
@@ -226,10 +227,12 @@ export async function runWorkItem(
     )
     .catch(async (error: unknown) => {
       await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
+      heldRuns.delete(runId);
       throw error;
     });
   if (started.rowCount === 0) {
     await pool.query(`DELETE FROM agent_runs WHERE id = $1`, [runId]).catch(logged('runner'));
+    heldRuns.delete(runId);
     console.info(`Skipping ${item.id}: der Auftrag ist nicht mehr eingeplant.`);
     return 'skipped';
   }
@@ -407,24 +410,75 @@ export async function runWorkItem(
     }
     // Erst den Auftrag abschliessen, dann den Lauf: Stirbt der Worker dazwischen, gilt der Lauf als unterbrochen und
     // recoverInterruptedRuns plant den Auftrag wieder ein. Jeder Schritt ist einzeln abgesichert, damit ein kurzer
-    // Datenbank-Aussetzer den Auftrag nicht „In Arbeit“ hängen lässt.
+    // Datenbank-Aussetzer den Auftrag nicht „In Arbeit“ hängen lässt. settleItem selbst wird nicht wiederholt (Merge
+    // und Commit liefen sonst doppelt); nur die reinen Datenbank-Schritte danach, mit Pause.
+    const retryDelay = options.settleRetryDelayMs ?? SETTLE_RETRY_DELAY_MS;
+    let settleFailed = false;
     try {
       await settleItem(ctx, passed, interrupted);
     } catch (error) {
       passed = false;
+      settleFailed = true;
       console.error(`[${item.id}] Abschluss fehlgeschlagen:`, error);
-      await blockStuckItem(pool, item.id).catch(logged('runner'));
     } finally {
       releaseTree?.();
     }
-    await pool
-      .query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
-        runId,
-        passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
-      ])
-      .catch(logged('runner'));
+    try {
+      if (settleFailed) await retryOnDatabase(() => blockStuckItem(pool, item.id), retryDelay).catch(logged('runner'));
+      await retryOnDatabase(
+        () =>
+          pool.query(`UPDATE agent_runs SET status = $2, completed_at = NOW() WHERE id = $1`, [
+            runId,
+            passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed,
+          ]),
+        retryDelay,
+      ).catch(logged('runner'));
+    } finally {
+      // Ab hier hält dieser Worker den Lauf nicht mehr: Blieb er trotz allem „läuft“, räumt closeOrphanedRuns ihn auf.
+      heldRuns.delete(runId);
+    }
   }
   return passed ? AGENT_RUN_STATUS.passed : AGENT_RUN_STATUS.failed;
+}
+
+/** Läufe, die dieser Worker gerade selbst ausführt (von claimRun bis zum Schliessen des Laufs). */
+const heldRuns = new Set<string>();
+
+export function heldRunIds(): string[] {
+  return [...heldRuns];
+}
+
+/** Pause zwischen den Versuchen, einen Auftrag nach einem Datenbankfehler abzuschliessen. */
+export const SETTLE_RETRY_DELAY_MS = 15_000;
+const SETTLE_ATTEMPTS = 5;
+
+/** Datenbank nicht erreichbar (Verbindung abgelehnt, getrennt, Server fährt herunter) – im Gegensatz zu SQL-Fehlern. */
+export function isDatabaseUnavailable(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const { code, message, errors } = error as { code?: unknown; message?: unknown; errors?: unknown };
+  // pg meldet eine ausgefallene Datenbank oft als AggregateError (IPv4 und IPv6), der Code steckt dann in errors.
+  if (Array.isArray(errors) && errors.some(isDatabaseUnavailable)) return true;
+  if (typeof code === 'string' && DATABASE_DOWN_CODES.test(code)) return true;
+  return typeof message === 'string' && DATABASE_DOWN_MESSAGES.test(message);
+}
+
+const DATABASE_DOWN_CODES = /^(?:ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|08\w{3}|57P0[1-3])$/;
+const DATABASE_DOWN_MESSAGES = /Connection terminated|connect ECONNREFUSED|timeout exceeded when trying to connect/i;
+
+/** Wiederholt `work` bei Datenbankausfall einige Male mit Pause; andere Fehler gehen sofort weiter. */
+export async function retryOnDatabase<T>(
+  work: () => Promise<T>,
+  delayMs: number,
+  attempts = SETTLE_ATTEMPTS,
+): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      if (attempt >= attempts || !isDatabaseUnavailable(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
 }
 
 /** Hinweis an Aufträgen, deren Abschluss nicht durchlief (kein Code-Fehler, daher kein Bug-Bericht). */
@@ -454,6 +508,86 @@ export async function recoverStuckItems(pool: Pool, project: string | null): Pro
     [project, STUCK_FAILURE],
   );
   return result.rowCount ?? 0;
+}
+
+/** So lange ohne Lebenszeichen gilt ein Lauf, den dieser Worker nicht hält, als verwaist. */
+export const ORPHANED_RUN_MS = 5 * 60_000;
+/** Abgebrochener Schritt eines verwaisten Laufs: kurze Schonfrist nur gegen den Moment zwischen claimRun und Merken. */
+export const ORPHANED_CANCEL_MS = 30_000;
+/** So oft darf ein Auftrag verwaisen und wieder eingeplant werden; danach wird er blockiert statt endlos neu gestartet. */
+export const ORPHANED_REQUEUE_LIMIT = 2;
+
+export const ORPHANED_RUN_NOTE =
+  'Unterbrochen: Der Lauf hatte keinen Prozess mehr (Abschluss scheiterte, z. B. Datenbank nicht erreichbar).';
+export const ORPHANED_CANCEL_NOTE =
+  'Vom Benutzer abgebrochen. Der Lauf hatte keinen Prozess mehr – der Schritt wurde vom Worker direkt beendet.';
+
+/**
+ * Läufe „läuft“, die kein Auftrag dieses Workers mehr hält (Abschluss oder Lauf-Status scheiterten an der Datenbank):
+ * wie beim Start aufräumen, ohne Neustart. Schritte werden „Unterbrochen“, der Auftrag wieder eingeplant (höchstens
+ * ORPHANED_REQUEUE_LIMIT-mal, danach blockiert). Ein abgebrochener Schritt („Abbrechen“) endet sofort, der Auftrag
+ * wird blockiert wie bei cancelAgent. Nur Läufe der eigenen Projekte und ohne frisches Lebenszeichen (Start des Laufs
+ * oder eines Schritts, Eintrag im Verlauf). Eine einzige Anweisung: alles oder nichts, mehrfach ausführbar.
+ */
+export async function closeOrphanedRuns(
+  pool: Pool,
+  projects: string[],
+  held: string[] = heldRunIds(),
+  staleMs = ORPHANED_RUN_MS,
+): Promise<number> {
+  if (!projects.length) return 0;
+  const result = await pool.query<{ count: number }>(
+    `WITH candidates AS (
+       SELECT r.id, r.development_id,
+              EXISTS (SELECT 1 FROM agent_run_steps c
+                       WHERE c.run_id = r.id AND c.status = '${AGENT_STEP_STATUS.running}' AND c.cancel_requested) AS cancelled,
+              GREATEST(
+                r.started_at,
+                (SELECT MAX(s.started_at) FROM agent_run_steps s WHERE s.run_id = r.id),
+                (SELECT MAX((event->>'at')::timestamptz)
+                   FROM agent_run_steps s CROSS JOIN LATERAL jsonb_array_elements(s.events) event WHERE s.run_id = r.id)
+              ) AS alive_at
+         FROM agent_runs r
+        WHERE r.status = '${AGENT_RUN_STATUS.running}' AND r.project_slug = ANY($1::text[])
+          AND NOT (r.id::text = ANY($2::text[]))
+     ), orphans AS (
+       SELECT * FROM candidates
+        WHERE alive_at < NOW() - (CASE WHEN cancelled THEN $4 ELSE $3 END) * INTERVAL '1 millisecond'
+     ), runs AS (
+       UPDATE agent_runs r SET status = '${AGENT_RUN_STATUS.failed}', completed_at = NOW()
+         FROM orphans o WHERE r.id = o.id AND r.status = '${AGENT_RUN_STATUS.running}'
+       RETURNING r.id, o.development_id, o.cancelled
+     ), steps AS (
+       UPDATE agent_run_steps s SET status = '${AGENT_STEP_STATUS.failed}', interrupted = NOT runs.cancelled,
+              exit_code = CASE WHEN runs.cancelled THEN 130 ELSE s.exit_code END,
+              output = COALESCE(NULLIF(s.output, '') || E'\\n', '') || CASE WHEN runs.cancelled THEN $6 ELSE $5 END
+         FROM runs WHERE s.run_id = runs.id AND s.status = '${AGENT_STEP_STATUS.running}'
+       RETURNING s.id
+     ), settled AS (
+       SELECT runs.development_id, runs.cancelled OR (
+                SELECT count(*) FROM agent_run_steps p JOIN agent_runs pr ON pr.id = p.run_id
+                 WHERE pr.development_id = runs.development_id AND p.output LIKE '%' || $5) >= $7 AS block
+         FROM runs
+     ), items AS (
+       UPDATE development_items d SET updated_at = NOW(),
+              status = CASE WHEN st.block THEN '${DEVELOPMENT_STATUS.blocked}' ELSE '${DEVELOPMENT_STATUS.planned}' END,
+              failure = CASE WHEN st.block THEN COALESCE(d.failure, $8) ELSE d.failure END
+         FROM settled st WHERE d.id = st.development_id AND d.status = '${DEVELOPMENT_STATUS.inProgress}'
+       RETURNING d.id
+     )
+     SELECT (SELECT count(*) FROM runs)::int AS count`,
+    [
+      projects,
+      held,
+      staleMs,
+      ORPHANED_CANCEL_MS,
+      ORPHANED_RUN_NOTE,
+      ORPHANED_CANCEL_NOTE,
+      ORPHANED_REQUEUE_LIMIT,
+      STUCK_FAILURE,
+    ],
+  );
+  return result.rows[0]?.count ?? 0;
 }
 
 /**

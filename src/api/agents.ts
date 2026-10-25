@@ -1,6 +1,6 @@
 import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
-import { seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
+import { agentInProject, seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
 import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
@@ -373,7 +373,8 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       return;
     }
     let allowed = fields;
-    if (requested !== undefined || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
+    const handoffTo = fields.find((field) => field.column === 'handoff_to')?.value as string | null | undefined;
+    if (requested !== undefined || handoffTo || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
       const current = (
         await pool.query<{ slug: string; command: string[] | null; role: string }>(
           'SELECT project_slug AS slug, command, role FROM agents WHERE id = $1',
@@ -384,6 +385,10 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       const checked = adminFieldsCheck(principalOf(response), fields, current);
       if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
       allowed = checked;
+      // Nachrichten gehen nur an Agents desselben Projekts (Mandantentrennung); null = kein fester Empfänger.
+      if (handoffTo && !(await agentInProject(pool, handoffTo, current.slug))) {
+        return void response.status(400).json({ message: 'Der Empfänger gehört nicht zu diesem Projekt.' });
+      }
       if (requested !== undefined) {
         const commands = await validAgentCommands(pool, current.slug, requested);
         if (typeof commands === 'string') return void response.status(400).json({ message: commands });

@@ -1,6 +1,6 @@
 // Prüfungen von Shell-Befehlen (npm, git, Assistenten-Dienste, eigene Regeln) für Wächter und lokales Modell.
-import { existsSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
+import { realPath } from './path-policy.js';
 import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
 
 /** Ein Befehl als Text oder – im Wächter – schon zerlegt (Wörter eines einfachen Befehls). */
@@ -271,21 +271,6 @@ export function isAllowedCommand(command: string, root?: string): boolean {
   return SAFE_COMMANDS.some((pattern) => pattern.test(command));
 }
 
-/** Pfad samt symbolischer Links auflösen; für noch nicht vorhandene Pfade über den nächsten vorhandenen Ordner. */
-export function realPath(path: string): string {
-  let current = resolve(path);
-  const rest: string[] = [];
-  while (!existsSync(current) && dirname(current) !== current) {
-    rest.unshift(basename(current));
-    current = dirname(current);
-  }
-  try {
-    return resolve(realpathSync(current), ...rest);
-  } catch {
-    return resolve(path);
-  }
-}
-
 /** Gruppen-IDs eigener Gruppen: Kleinbuchstaben, Ziffern und Bindestriche. */
 export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
@@ -300,9 +285,86 @@ const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
  */
 const FILE_COMMAND_NAMES =
   'mkdir|touch|rm|rmdir|mv|cp|sed|gsed|ln|tee|truncate|install|unlink|shred|patch|chflags|ditto|command|builtin|nohup|time|nice|timeout';
+/**
+ * Shell-Builtins, die Variablen, Aliasse, Funktionen, den Suchpfad oder den Ordner ändern oder Code ausführen – sie
+ * verändern, was spätere Befehle derselben Kette bedeuten (cd .git/hooks, alias git=…, hash -p, trap …). Immer gesperrt.
+ */
+export const SHELL_BUILTINS = new Set([
+  ...['export', 'declare', 'typeset', 'readonly', 'local', 'unset', 'set', 'shopt', 'alias', 'unalias', 'hash'],
+  ...['cd', 'pushd', 'popd', 'source', '.', 'eval', 'exec', 'trap', 'enable', 'builtin', 'command', 'let'],
+]);
+/** awk und Verwandte: system(), „| getline“ und „print > datei“ starten Programme bzw. schreiben Dateien. */
+const SCRIPT_COMMAND_NAMES = 'awk|gawk|nawk|mawk';
 /** Gesperrte Befehle, die eingebaute Gruppen nur mit festem Präfix freigeben (node --check, npx --no-install …). */
 const GUARD_PREFIXED = new Set(['node', 'npx', 'launchctl']);
-const GUARD_FORBIDDEN = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES}|${FILE_COMMAND_NAMES})$`);
+const GUARD_FORBIDDEN = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES}|${FILE_COMMAND_NAMES}|${SCRIPT_COMMAND_NAMES})$`);
+
+/**
+ * Wrapper, die nur Laufzeit, Priorität oder Pufferung ändern und danach einen weiteren Befehl starten. Der Wächter
+ * schält sie ab und prüft den Befehl dahinter wie einen direkt aufgerufenen. Je Wrapper: Optionen ohne Wert, Optionen
+ * mit Wert (einzeln „-k 5“, angehängt „-k5“ oder „--kill-after=5“) und die Zahl der festen Argumente (timeout: Dauer).
+ */
+const WRAPPER_SYNTAX: Record<string, { flags: string[]; valued: string[]; long: string[]; positional: RegExp[] }> = {
+  timeout: {
+    flags: ['--foreground', '--preserve-status', '-v', '--verbose'],
+    valued: ['-k', '-s'],
+    long: ['--kill-after', '--signal'],
+    positional: [/^\d+(?:\.\d+)?[smhd]?$/],
+  },
+  nice: { flags: [], valued: ['-n'], long: ['--adjustment'], positional: [] },
+  stdbuf: { flags: [], valued: ['-i', '-o', '-e'], long: ['--input', '--output', '--error'], positional: [] },
+  ionice: { flags: ['-t'], valued: ['-c', '-n'], long: ['--class', '--classdata'], positional: [] },
+};
+/** Werte der Wrapper-Optionen: Zahlen, Dauern, Signal- und Puffernamen – nichts, was die Shell erweitert. */
+const WRAPPER_VALUE = /^[\w.+-]+$/;
+/** Höchstens so viele Wrapper ineinander; danach gilt der Befehl als unklar und ist gesperrt. */
+const WRAPPER_DEPTH = 4;
+export const WRAPPER_COMMANDS = new Set(Object.keys(WRAPPER_SYNTAX));
+
+/**
+ * Schält Wrapper (timeout, nice, stdbuf, ionice) in einer Schleife ab und liefert die Wörter des eigentlichen Befehls.
+ * Fail-closed: unbekannte Optionen, Werte aus Variablen, fehlender Befehl oder zu tiefe Verschachtelung → null.
+ */
+export function unwrapCommand(words: readonly ShellWord[]): readonly ShellWord[] | null {
+  let rest = words;
+  for (let depth = 0; ; depth++) {
+    const first = rest[0];
+    const program = first ? first.text.slice(first.text.lastIndexOf('/') + 1) : '';
+    const syntax = WRAPPER_SYNTAX[program];
+    if (!syntax) return rest;
+    if (depth >= WRAPPER_DEPTH) return null;
+    let index = 1;
+    const valueAt = (at: number): boolean => {
+      const word = rest[at];
+      return !!word && !word.expanded && !word.glob && WRAPPER_VALUE.test(word.text);
+    };
+    for (;;) {
+      const word = rest[index];
+      if (!word || word.expanded || word.glob) return null;
+      const text = word.text;
+      if (text === '--') {
+        index++;
+        break;
+      }
+      if (!text.startsWith('-')) break;
+      const attached = (option: string, separator = ''): boolean =>
+        text.startsWith(option + separator) && WRAPPER_VALUE.test(text.slice(option.length + separator.length));
+      // nice -5 ist die alte Schreibweise von nice -n 5.
+      if (syntax.flags.includes(text) || (program === 'nice' && /^-\d+$/.test(text))) index++;
+      else if (syntax.valued.includes(text) && valueAt(index + 1)) index += 2;
+      else if (syntax.valued.some((option) => attached(option)) || syntax.long.some((option) => attached(option, '=')))
+        index++;
+      else return null;
+    }
+    for (const pattern of syntax.positional) {
+      const word = rest[index];
+      if (!word || word.expanded || !pattern.test(word.text)) return null;
+      index++;
+    }
+    if (index >= rest.length) return null;
+    rest = rest.slice(index);
+  }
+}
 /** find-Optionen, die löschen, Programme starten oder in Dateien schreiben. */
 const FIND_WRITING = /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/;
 
@@ -318,6 +380,7 @@ export function forbiddenCommand(command: CommandInput): boolean {
   const name = first.text;
   if (first.expanded || first.glob || /[$*?[\]{}~]/.test(name)) return true;
   const program = name.slice(name.lastIndexOf('/') + 1);
+  if (SHELL_BUILTINS.has(name)) return true;
   if (program === 'find') return words.some((word) => FIND_WRITING.test(word.text));
   return GUARD_FORBIDDEN.test(program) && !(GUARD_PREFIXED.has(program) && program === name);
 }
@@ -453,8 +516,20 @@ const coversForbidden = (prefix: string): boolean =>
 const SAFE_PREFIX = /^[\w@./=:,+-]+(?: [\w@./=:,+-]+)*$/;
 
 /**
+ * Programme, die eine eigene Regel freigeben darf (Allowlist, gilt für Claude-CLI und lokales Modell). Nur Programme,
+ * die weder andere Programme starten noch Dateien schreiben – nicht etwa timeout, find, awk, sed, tee, cp, ln, sort -o,
+ * rg --pre. git, npm und docker prüft der Wächter Unterbefehl für Unterbefehl; make und npm run führen Projektskripte aus.
+ */
+export const CUSTOM_RULE_PROGRAMS = new Set([
+  ...['git', 'npm', 'docker', 'make'],
+  ...['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'diff', 'cut', 'tr', 'jq', 'stat', 'du', 'df'],
+  ...['pwd', 'echo', 'printf', 'date', 'which', 'basename', 'dirname', 'realpath', 'uname', 'whoami', 'ps', 'lsof'],
+]);
+
+/**
  * Prüft eine Regel einer eigenen Gruppe. Erlaubt sind nur „Bash(<Befehl>:*)“ bzw. „Bash(<Befehl>)“ ohne
- * Shell-Sonderzeichen und ohne gesperrte Befehle sowie WebFetch auf localhost. Liefert die Fehlermeldung oder null.
+ * Shell-Sonderzeichen, mit einem Programm aus CUSTOM_RULE_PROGRAMS und ohne gesperrte Unterbefehle sowie WebFetch auf
+ * localhost. Liefert die Fehlermeldung oder null.
  */
 export function customRuleProblem(rule: string): string | null {
   const web = /^WebFetch\(domain:(?:localhost|127\.0\.0\.1)\)$/.test(rule);
@@ -472,5 +547,8 @@ export function customRuleProblem(rule: string): string | null {
     /\.\./.test(command)
   )
     return `„${rule}“: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.`;
+  // Allowlist statt Sperrliste: timeout, nice, find, awk, sed, tee, cp, ln … starten Programme oder schreiben Dateien.
+  if (!CUSTOM_RULE_PROGRAMS.has(command.split(' ')[0]!))
+    return `„${rule}“: dieses Programm ist für eigene Regeln nicht freigegeben (erlaubt: ${[...CUSTOM_RULE_PROGRAMS].join(', ')}).`;
   return null;
 }

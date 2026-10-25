@@ -1,5 +1,15 @@
 /** Einordnung der Aufträge eines Sprints für die Liste auf der Sprint-Seite (Gruppen wie die Status-Etiketten). */
 
+import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+
+/**
+ * Umsortieren, Herausnehmen und Hineinnehmen nur in geplanten oder aktiven Sprints (dieselbe Regel wie der Server);
+ * im Review steckt der Sprint-Branch schon im PR, danach ist der Sprint abgeschlossen.
+ */
+export function canEditSprintOrders(sprintStatus: string, canPlan: boolean): boolean {
+  return canPlan && isAssignableSprintStatus(sprintStatus);
+}
+
 export type SprintPhase = 'running' | 'approval' | 'blocked' | 'planned' | 'done' | 'rejected';
 
 /** Reihenfolge der Gruppen: was gerade läuft oder auf dich wartet zuerst, Erledigtes am Ende. */

@@ -19,6 +19,7 @@ import {
   MAX_VISIONARY_LIMIT,
   normalizeTitle,
   parseIdeaLines,
+  parseMarkerLines,
   processVisionaryRun,
   readVisionaryLimit,
   requestVisionaryRun,
@@ -73,6 +74,39 @@ test('Visionär-Parser: liest @@IDEA-Zeilen zwischen Fliesstext und normalisiert
     description: 'Was entsteht.',
   });
   assert.equal(parsed.ideas[1]!.category, null, 'unbekannte Kategorie wird zu „ohne Kategorie“');
+});
+
+test('Marker-Zeilen: nur am Zeilenanfang und ausserhalb von Codeblöcken', () => {
+  const order = '@@ORDER {"title": "Echter Auftrag"}';
+  const parsed = parseMarkerLines(
+    [
+      'Die Datei enthält:',
+      '````md',
+      '@@ORDER {"title": "Aus zitierter Datei"}',
+      '```',
+      '@@BUG {"title": "Kürzerer Zaun schliesst den Block nicht"}',
+      '```',
+      '@@BUG {"title": "Auch zitiert"}',
+      '````',
+      '~~~',
+      '@@IDEA {"title": "Im Tilde-Block"}',
+      '~~~',
+      'Ich schreibe dann @@ORDER {"title": "Mitten in der Zeile"}',
+      '> @@BUG {"title": "Zitat"}',
+      '`@@IDEA {"title": "In Backticks"}`',
+      'src/a.ts:12: @@ORDER {"title": "Treffer aus search_text"}',
+      order,
+      '1. @@BUG {"title": "Mit Listenpunkt"}',
+    ].join('\n'),
+  );
+  assert.deepEqual(
+    parsed.lines.map((entry) => [entry.marker, entry.record.title, entry.line]),
+    [
+      ['@@ORDER', 'Echter Auftrag', order],
+      ['@@BUG', 'Mit Listenpunkt', '@@BUG {"title": "Mit Listenpunkt"}'],
+    ],
+  );
+  assert.deepEqual(parsed.discarded, []);
 });
 
 test('Visionär-Parser: kaputtes JSON und Begründungen ohne Datenbezug legen keine Idee an', () => {

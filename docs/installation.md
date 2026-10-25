@@ -11,7 +11,7 @@ AIdeation besteht aus drei Teilen:
 ## Voraussetzungen
 
 - **Docker Desktop** (macOS, Windows) bzw. Docker Engine mit Compose (Linux) – läuft beim Start.
-- **Node.js 22** oder neuer – für Worker und Einrichtung.
+- **Node.js 22.12** oder neuer (mit npm) – für Worker, Einrichtung und die Projektvorlagen (Vite 8, Angular 20).
 - **Git**.
 - Mindestens ein KI-Werkzeug für die Agents:
   - **Claude Code** (`claude`) – beste Ergebnisse, Anmeldung über dein Claude-Konto, oder
@@ -33,16 +33,20 @@ cd AIdeation/source
 
 Beim **ersten Start** installiert das Skript die Abhängigkeiten und öffnet den **Einrichtungs-Assistenten** im Browser:
 
-1. **System** – prüft Node, Docker, Git, Claude Code und Ollama.
+1. **System** – prüft Node, Docker, Git, Claude Code, Ollama und Chromium für Playwright.
 2. **Zugang** – Benutzername und Passwort des Systemadministrators (ein sicheres Passwort wird vorgeschlagen).
 3. **Optionen** – eigene Domain für HTTPS von unterwegs (optional), erlaubte Projektordner, Worker-Autostart.
 4. **Installation** – schreibt die `.env`, baut und startet die Container, richtet den Worker ein
-   (macOS: launchd, Linux: systemd-Benutzerdienst, Windows: Aufgabenplanung). Das Protokoll läuft live mit.
+   (macOS: launchd, Linux: systemd-Benutzerdienst, Windows: Aufgabenplanung). Dazu lädt sie die
+   **Spiele-Werkzeuge**: Chromium für Playwright (falls er fehlt) und die npm-Pakete der Phaser-Vorlage in den
+   npm-Cache. Schlägt das fehl (z. B. offline), läuft AIdeation trotzdem; das Protokoll nennt den Befehl zum
+   Nachholen. Das Protokoll läuft live mit.
 
 Danach öffnet sich AIdeation unter `http://localhost:3100`. Nach der Anmeldung begrüßt dich AIdeation und bietet an,
 das erste Projekt anzulegen.
 
-Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet AIdeation.
+Bei **späteren Starts** startet `./start.sh` bzw. `start.cmd` nur die Dienste und öffnet AIdeation. Vorher prüft es,
+ob Chromium für Playwright da ist, und lädt ihn sonst nach (ist er da, dauert das nur Sekunden).
 Mit `./start.sh --setup` (Windows: `start.cmd --setup`) öffnest du den Assistenten erneut. Die bisherige `.env`
 wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**:
 
@@ -78,12 +82,46 @@ wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**
 Ausprobierte Projekte lassen sich unter **Einstellungen → Projekt löschen** wieder entfernen – auf Wunsch samt
 Ordner auf deinem Rechner.
 
+## Browser-Spiele mit Phaser
+
+Im Projekt-Assistenten steht unter **Vorlage** die Karte **Browser-Spiel (Phaser 3)**: Vite, TypeScript, Phaser 3,
+eine Beispielszene („Sterne sammeln“), Unit-Tests der Spiellogik mit Vitest und ein Playwright-Smoke-Test, der prüft,
+dass der Canvas zeichnet und keine Konsolenfehler auftreten. Die Dateien liegen in `templates/phaser-game/`. Phaser
+kommt als Abhängigkeit ins Spielprojekt, nicht in AIdeation. Die Vorlage installiert die Pakete (`npm install`) und
+Chromium in der Playwright-Version von AIdeation, ist er schon da, entfällt der Download.
+
+Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (änderbar unter **Einstellungen**):
+
+| Einstellung | Wert |
+|---|---|
+| Testbefehle (Live schalten) | `npm run build`, `npm test`, `npm run test:smoke` |
+| Testbefehle je Auftrag | `npm run typecheck`, `npx vitest run {tests}`, `npm run test:smoke` |
+| Review-Befehl | `npm run review` (baut und liefert im Review-Container auf `REVIEW_FRONTEND_PORT` aus) |
+| Vorschau-Adresse (visuelle Prüfung) | `http://localhost:5180` |
+| Regeln für die Agents | Spiellogik in `src/logic/` getrennt von den Phaser-Szenen, Tests neben der Logik |
+
+**Version ansehen** in der Sprint-Ansicht startet damit den gewählten Stand des Spiels im Review-Container. Für die
+visuelle Prüfung starte im Projektordner einmal `npm run dev`: Der Vite-Dev-Server auf Port 5180 lädt jede Änderung
+sofort neu (Hot Reload), die Prüfung zeigt also immer den neuesten Stand. Port 5180 statt des Vite-Standards 5173,
+damit das Spiel nicht mit anderen Vite-Projekten kollidiert; ein anderer Port geht mit `GAME_DEV_PORT=<port> npm run dev`
+(dann die Vorschau-Adresse in den Einstellungen anpassen). Der Dev-Server lauscht im ganzen Netzwerk: Auf Handy oder Tablet
+öffnest du `http://<IP des Rechners>:5180` oder `http://<rechner>.local:5180`. Die Review-Container von „Version
+ansehen“ bleiben dagegen bewusst nur auf diesem Rechner erreichbar (`127.0.0.1`), weil sie Code aus Agent-Commits
+ausführen.
+
+**Linux:** Fehlen Chromium Systembibliotheken (Smoke-Test bricht mit „missing dependencies“ ab), einmalig
+`sudo npx playwright install-deps chromium` ausführen. Liegen die Playwright-Browser an einem eigenen Ort
+(`PLAYWRIGHT_BROWSERS_PATH`), übernehmen die Worker-Installationsskripte die Variable in die Env-Datei des Dienstes.
+
 ## Zugriff von unterwegs (optional)
 
 Mit eigener Domain im Assistenten startet zusätzlich der Dienst `https` (Caddy) und holt automatisch ein
 Let's-Encrypt-Zertifikat. Dafür muss dein Router **Port 443** (TCP) an diesen Rechner weiterleiten und die Domain
 auf deine öffentliche IP zeigen. AIdeation ist dann installierbar als App (Handy: „Zum Home-Bildschirm“) und schickt
-Push-Nachrichten.
+Push-Nachrichten. Angenommen werden nur Geräte-Endpunkte der Push-Dienste der Browser (FCM, Mozilla, Apple, Windows,
+per https ohne eigenen Port); andere Adressen fragt der Server nie an. Ein Gerät gehört dem Benutzer, der es angemeldet
+hat; nur er kann es ändern oder abmelden. Beim Abmelden („Abmelden“ in den Einstellungen) wird auch das Push-Abo des
+Geräts entfernt.
 
 ## Nützliche Befehle
 
@@ -176,6 +214,8 @@ ein. Unter macOS ist nichts zu tun.
 | Problem | Lösung |
 |---|---|
 | „Docker läuft nicht“ | Docker Desktop starten, dann erneut `./start.sh` |
+| „Node.js … ist zu alt“ | Node.js 22.12 oder neuer installieren (Vite 8 und Angular 20 verlangen es) |
+| Smoke-Test eines Spiels: „Executable doesn't exist“ | `npx playwright install chromium` im AIdeation-Ordner oder im Spielprojekt |
 | Seite lädt nicht | `docker compose logs dev-log` – meist fehlt `DEV_LOG_PASSWORD` (mind. 16 Zeichen) in `.env` |
 | Agents starten nicht | Worker-Status oben in AIdeation prüfen; `npm run worker` zeigt Fehler direkt |
 | Worker-Log: „Env-Datei … fehlt“ oder „für andere lesbar“ | Installationsskript erneut ausführen bzw. `chmod 600` auf die Env-Datei |

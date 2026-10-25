@@ -1,6 +1,6 @@
 // Prüfung der aufgelösten Docker-Compose-Konfiguration auf Pfade und Rechte ausserhalb des Projekts.
 import { isAbsolute, resolve, sep } from 'node:path';
-import { realPath } from './command-checks.js';
+import { realPath } from './path-policy.js';
 
 export const COMPOSE_STARTING = /^docker compose (?:up|start|restart|build)\b/;
 

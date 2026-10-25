@@ -921,3 +921,54 @@ test('loadProjectPermissions: zu breite eigene Regeln aus älteren Zeilen gelten
   const loaded = await loadProjectPermissions(pool, 'p');
   assert.deepEqual(loaded.custom[0]?.rules, ['Bash(docker compose ps:*)', 'Bash(npm run prisma:*)']);
 });
+
+test('customRuleProblem: nur Programme aus der Allowlist, keine Wrapper, Builtins oder Schreib-Werkzeuge', () => {
+  for (const rule of [
+    'Bash(timeout:*)',
+    'Bash(timeout 60 git status)',
+    'Bash(nice:*)',
+    'Bash(stdbuf:*)',
+    'Bash(ionice:*)',
+    'Bash(find:*)',
+    'Bash(awk:*)',
+    'Bash(sed:*)',
+    'Bash(tee:*)',
+    'Bash(cp:*)',
+    'Bash(ln:*)',
+    'Bash(cd:*)',
+    'Bash(alias:*)',
+    'Bash(set:*)',
+    'Bash(trap:*)',
+    'Bash(.:*)',
+    'Bash(/usr/bin/timeout:*)',
+    'Bash(sort:*)',
+    'Bash(rg:*)',
+    'Bash(prisma:*)',
+  ]) {
+    assert.ok(customRuleProblem(rule), rule);
+  }
+  assert.match(customRuleProblem('Bash(timeout:*)') ?? '', /nicht freigegeben/);
+  for (const rule of ['Bash(git status:*)', 'Bash(npm run typecheck)', 'Bash(make test)', 'Bash(ls:*)', 'Bash(jq:*)']) {
+    assert.equal(customRuleProblem(rule), null, rule);
+  }
+});
+
+test('loadProjectPermissions: alte Regeln mit Wrappern und Schreib-Werkzeugen gelten nicht mehr, der Start läuft weiter', async () => {
+  const pool = {
+    query: async <R>(sql: string): Promise<{ rows: R[] }> =>
+      sql.startsWith('SELECT agent_permissions')
+        ? { rows: [{ groups: null }] as R[] }
+        : {
+            rows: [
+              {
+                id: 'alt',
+                label: 'Alt',
+                description: '',
+                rules: ['Bash(timeout:*)', 'Bash(find:*)', 'Bash(awk:*)', 'Bash(git log:*)', 'Bash(tee:*)'],
+              },
+            ] as R[],
+          },
+  };
+  const loaded = await loadProjectPermissions(pool, 'p');
+  assert.deepEqual(loaded.custom[0]?.rules, ['Bash(git log:*)']);
+});

@@ -20,7 +20,14 @@ import {
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
-import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
+import {
+  acceptanceProblems,
+  manualChecks,
+  parseAcceptance,
+  saveAcceptance,
+  stripAcceptance,
+  waiveUnmeasuredCoverage,
+} from './acceptance.js';
 import type { BudgetState } from './budget.js';
 import { buildPrompt } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
@@ -333,7 +340,17 @@ export async function runStep(
   let accepted = true;
   if (agent.role === 'tester' && ctx.definitionOfDone && !stepOptions.observer) {
     const criteria = ctx.criteria ?? [];
-    const acceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
+    const reportedAcceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
+    // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund: AIdeation misst danach selbst.
+    const waiver = reportedAcceptance ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length) : null;
+    const acceptance = waiver?.result ?? null;
+    if (waiver?.waived.length) {
+      await logEvent(
+        pool,
+        stepId,
+        `Abnahme: DoD ${waiver.waived.join(', ')} trotz fehlender Abdeckungsmessung des Testers erfüllt (AIdeation misst selbst)`,
+      );
+    }
     await saveAcceptance(pool, item.id, criteria, ctx.definitionOfDone, acceptance).catch((error) =>
       console.error('Abnahme konnte nicht gespeichert werden:', error),
     );

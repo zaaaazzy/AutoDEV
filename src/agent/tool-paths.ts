@@ -1,8 +1,11 @@
-import { constants } from 'node:fs';
-import { lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { constants, existsSync } from 'node:fs';
+import { mkdir, open, readdir, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
+import { BACKUP_DIRECTORY, checkProjectPath, SECRET_NAME } from './path-policy.js';
 
-export const BACKUP_DIRECTORY = '.dev-log-backups';
+export { BACKUP_DIRECTORY, SECRET_NAME } from './path-policy.js';
+/** Beim Auflisten und Durchsuchen übersprungen (nicht dasselbe wie geschützt: dist und coverage bleiben beschreibbar). */
 export const SKIPPED_DIRECTORIES = new Set([
   'node_modules',
   '.git',
@@ -13,67 +16,122 @@ export const SKIPPED_DIRECTORIES = new Set([
   'coverage',
 ]);
 export const MAX_FILE_BYTES = 400_000;
-export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)/i;
+
+/** Beispielnamen: ein Glob-Segment, das einen davon trifft, kann ein Geheimnis lesen (.en? trifft .env). */
+const SECRET_SAMPLES = [
+  '.env',
+  '.env.local',
+  'a.pem',
+  'a.key',
+  'id_rsa',
+  'id_ed25519',
+  '.npmrc',
+  '.netrc',
+  '.git-credentials',
+];
+/** Gewöhnliche Namen: trifft das Segment auch einen davon (z. B. `*`, `*.md`), ist es kein gezielter Zugriff auf Geheimnisse. */
+const NEUTRAL_SAMPLES = ['x', 'index', 'a.ts', 'a.md', 'a.json'];
+
+/** Glob-Segment (*, ?, [..]) als Regex; null ohne Platzhalter oder bei ungültigem Muster. */
+function globRegex(part: string): RegExp | null {
+  if (!/[*?[]/.test(part)) return null;
+  const source = part
+    .replace(/[.+^$()|\\{}]/g, '\\$&')
+    .replace(/\*+/g, '.*')
+    .replace(/\?/g, '.');
+  try {
+    return new RegExp(`^${source}$`, 'i');
+  } catch {
+    return null;
+  }
+}
+
+/** Zielt ein Segment mit Platzhaltern auf Geheimnisse (`.en?`, `.e[n]v`, `*.pe?`)? `*` allein bleibt erlaubt. */
+export function secretGlob(part: string): boolean {
+  const regex = globRegex(part);
+  return (
+    !!regex && SECRET_SAMPLES.some((name) => regex.test(name)) && !NEUTRAL_SAMPLES.some((name) => regex.test(name))
+  );
+}
+
+/** Klammern wie `.{e,x}nv` zu allen Fassungen auflösen (verschachtelt, höchstens 64). */
+export function expandBraces(part: string): string[] {
+  const match = /^(.*?)\{([^{}]*)\}(.*)$/s.exec(part);
+  if (!match) return [part];
+  const [, head, body, tail] = match;
+  return body
+    .split(',')
+    .flatMap((alternative) => expandBraces(head + alternative + tail))
+    .slice(0, 64);
+}
+
+/** Ist das Segment (samt Klammern und Platzhaltern) ein Geheimnis? */
+export const secretSegment = (part: string): boolean =>
+  expandBraces(part).some((name) => SECRET_NAME.test(name) || secretGlob(name));
 
 export class ToolError extends Error {}
 
-/** Gesperrte Pfadteile: Git, Abhängigkeiten, Sicherungen und Geheimnisse (Pfad relativ zum Projekt). */
-function blockedPath(rel: string): boolean {
-  return rel
-    .split(sep)
-    .filter(Boolean)
-    .some((part) => {
-      const lower = part.toLowerCase();
-      return lower === '.git' || lower === 'node_modules' || lower === BACKUP_DIRECTORY || SECRET_NAME.test(part);
-    });
-}
-
+/**
+ * Pfad für die Datei-Werkzeuge des lokalen Modells: im Projekt (samt aufgelöster Links) und nicht geschützt – dieselbe
+ * Richtlinie wie im Claude-Wächter (checkProjectPath). Lesen verlangt eine vorhandene Datei.
+ */
 export async function resolveInside(cwd: string, requested: unknown, forWrite = false): Promise<string> {
   if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
     throw new ToolError('Ungültiger Pfad.');
   }
   const root = await realpath(cwd);
   const target = resolve(root, requested);
-  const rel = relative(root, target);
-  if (rel.startsWith('..') || resolve(root, rel) !== target) {
-    throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
-  }
-  if (blockedPath(rel)) {
-    throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
-  }
-  // Resolve symlinks of the nearest existing ancestor so they cannot point outside the project or at a blocked path
-  // (z. B. notes.txt -> .env oder hook -> .git/hooks/pre-commit).
-  let existing = target;
-  for (;;) {
-    try {
-      const real = await realpath(existing);
-      if (real !== root && !real.startsWith(root + sep)) {
-        throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
-      }
-      if (blockedPath(join(relative(root, real), relative(existing, target)))) {
-        throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
-      }
-      break;
-    } catch (error) {
-      if (error instanceof ToolError) {
-        throw error;
-      }
-      // Ein Link ins Leere würde beim Schreiben sein (ungeprüftes) Ziel anlegen.
-      if (
-        await lstat(existing).then(
-          (info) => info.isSymbolicLink(),
-          () => false,
-        )
-      ) {
-        throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
-      }
-      if (!forWrite && existing === target) {
-        throw new ToolError('Pfad existiert nicht.');
-      }
-      existing = dirname(existing);
-    }
+  checkedPath(root, target);
+  if (!forWrite && !existsSync(target)) {
+    throw new ToolError('Pfad existiert nicht.');
   }
   return target;
+}
+
+/** Wirklicher Pfad (samt Links) im Projekt und nicht geschützt, sonst ToolError. */
+function checkedPath(root: string, target: string): string {
+  const verdict = checkProjectPath(root, target);
+  if (!verdict.ok) {
+    throw new ToolError(
+      verdict.reason === 'outside'
+        ? 'Pfad liegt außerhalb des Projektverzeichnisses.'
+        : 'Zugriff auf diesen Pfad ist nicht erlaubt.',
+    );
+  }
+  return verdict.real;
+}
+
+/**
+ * Schreibt eine Datei im Projekt, ohne dass ein inzwischen gesetzter Link den Schreibvorgang umlenkt: Erst nach dem
+ * Anlegen der Ordner wird der wirkliche Pfad (realpath) geprüft, geschrieben wird in eine neue Temp-Datei im Zielordner
+ * (O_EXCL, folgt keinem Link), die dann per rename an ihren Platz kommt. Zeigt der Ordner vor dem rename woandershin,
+ * wird abgebrochen. Eine vorhandene Datei (auch über einen Link im Projekt) behält ihre Rechte. Liefert den Pfad.
+ */
+export async function writeProjectFile(cwd: string, target: string, content: string): Promise<string> {
+  const root = await realpath(cwd);
+  await mkdir(dirname(target), { recursive: true });
+  const destination = checkedPath(root, target);
+  const directory = dirname(destination);
+  const existing = await stat(destination).catch(() => null);
+  const temporary = join(directory, `.${basename(destination)}.${randomUUID()}.tmp`);
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  const handle = await open(temporary, flags);
+  try {
+    try {
+      await handle.writeFile(content, 'utf8');
+      if (existing) await handle.chmod(existing.mode & 0o7777);
+    } finally {
+      await handle.close();
+    }
+    if ((await realpath(directory)) !== directory) {
+      throw new ToolError('Der Zielordner wurde während des Schreibens umgehängt; nichts geschrieben.');
+    }
+    await rename(temporary, destination);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
+  return destination;
 }
 
 /**

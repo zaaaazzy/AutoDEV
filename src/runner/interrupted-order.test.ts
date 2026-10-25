@@ -74,3 +74,56 @@ test('Unterbrochener Auftrag (Nutzungslimit, Neustart, Pause): WIP gesichert, Or
   assert.equal(resumed?.branch, branch.branch);
   assert.equal(await readFile(join(cwd, 'login.ts'), 'utf8'), 'export const login = 1;\n');
 });
+
+function contextFor(cwd: string, pool: Pool, branch: unknown, execute = runCommand): RunContext {
+  return { pool, item: first, runId: 'run-1', options: { cwd, timeoutMs: 1 }, execute, branch } as unknown as RunContext;
+}
+
+test('Unterbrechung bei sauberem Ordner: kein leerer Commit, kein gescheiterter Schritt', async () => {
+  const { cwd, git } = await project();
+  const branch = await enterOrderBranch(cwd, first, null);
+  assert.ok(branch);
+  const { pool, queries } = recordingPool();
+  await settleItem(contextFor(cwd, pool, branch), false, true);
+  assert.equal(git('symbolic-ref', '--short', 'HEAD'), 'main');
+  assert.equal(git('rev-parse', branch.branch), git('rev-parse', 'main'));
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO agent_run_steps')));
+});
+
+test('Hart beendet nach dem Commit des Schritts: der nächste Auftrag ohne Sprint verlässt den sauberen Branch', async () => {
+  const { cwd, git } = await project();
+  const branch = await enterOrderBranch(cwd, first, null);
+  assert.ok(branch);
+  // Commit nach dem Agent lief noch, der Abschluss (settleItem) nicht mehr: Ordner sauber, aber auf auftrag/….
+  await writeFile(join(cwd, 'login.ts'), 'export const login = 1;\n');
+  git('add', '-A');
+  git('commit', '-m', 'Entwickler: Login-Seite');
+  const next = await enterOrderBranch(cwd, second, null);
+  assert.equal(next?.base, 'main');
+  assert.equal(git('symbolic-ref', '--short', 'HEAD'), next?.branch);
+  assert.ok(!(await readFile(join(cwd, 'login.ts'), 'utf8').catch(() => null)));
+  // Die Arbeit des ersten Auftrags bleibt auf seinem Branch.
+  assert.match(git('log', '--format=%s', branch.branch), /Entwickler: Login-Seite/);
+});
+
+test('Aufräumen nach der Unterbrechung scheitert: sichtbarer gescheiterter Schritt mit Meldung', async () => {
+  const { cwd, git } = await project();
+  const branch = await enterOrderBranch(cwd, first, null);
+  assert.ok(branch);
+  await writeFile(join(cwd, 'login.ts'), 'export const login = 1;\n');
+  // Z. B. ein voller Datenträger: jeder Commit scheitert, die Änderungen bleiben im Ordner.
+  const execute: typeof runCommand = (command, directory, options) =>
+    command[0] === 'git' && command.includes('commit')
+      ? Promise.resolve({ exitCode: 1, durationMs: 1, output: 'fatal: No space left on device' })
+      : runCommand(command, directory, options);
+  const { pool, queries } = recordingPool();
+  await settleItem(contextFor(cwd, pool, branch, execute), false, true);
+  assert.equal(git('symbolic-ref', '--short', 'HEAD'), branch.branch);
+  const step = queries.find((query) => query.sql.includes('INSERT INTO agent_run_steps'));
+  assert.ok(step, 'gescheiterter Aufräum-Schritt fehlt');
+  assert.equal(step.values[0], 'run-1');
+  assert.equal(step.values[1], 'Arbeitsordner aufräumen (Git)');
+  assert.match(String(step.values[2]), /offenen Änderungen auf einem Auftrags-Branch/);
+  // Der Auftrag bleibt trotzdem eingeplant (kein stummer Neustart, aber auch kein „blockiert“).
+  assert.ok(queries.some((query) => /status = 'planned'/.test(query.sql)));
+});

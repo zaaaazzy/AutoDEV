@@ -31,7 +31,13 @@ import { reconcileWorkingTree } from './git-sync/reconcile.js';
 import { processRollback } from './rollback.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
-import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
+import {
+  closeOrphanedRuns,
+  parseRunnerOptions,
+  recoverStuckItems,
+  runWorkflow,
+  type RunnerOptions,
+} from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
@@ -348,8 +354,20 @@ async function main(): Promise<void> {
     const githubActive = new Set<string>();
     const gitFixActive = new Set<string>();
     const rollbackActive = new Set<string>();
+    let orphanCheckActive = false;
     const heartbeat = setInterval(() => {
       beat();
+      // Läufe „läuft“ ohne Auftrag dieses Workers dahinter (Abschluss scheiterte an der Datenbank) aufräumen – auch
+      // abgebrochene, auf deren Abbruch kein Schritt mehr wartet. Sonst hingen sie bis zum nächsten Neustart.
+      if (!stopping && !orphanCheckActive && known.length) {
+        orphanCheckActive = true;
+        void closeOrphanedRuns(pool, known)
+          .then((count) => {
+            if (count) console.info(`${count} verwaiste Läufe beendet (kein laufender Auftrag dahinter).`);
+          })
+          .catch(logged('runner-cli'))
+          .finally(() => (orphanCheckActive = false));
+      }
       // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
       for (const target of chatTargets) {
         const slug = target.options.project;

@@ -46,7 +46,7 @@
     }
   </ng-template>
 </app-order-table>
-@if (canTakeIn()) {
+@if (editable()) {
   <details class="sprint-pool" [open]="poolOpen()" (toggle)="poolOpen.set($any($event.target).open)">
     <summary>
       Aufträge hinzufügen <span class="muted">({{ free().length }} verfügbar)</span>
