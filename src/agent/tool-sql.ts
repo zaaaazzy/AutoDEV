@@ -12,10 +12,13 @@ const IDLE_IN_TRANSACTION_TIMEOUT_MS = 20_000;
 const CONNECT_TIMEOUT_MS = 5_000;
 /** Zeitlimit auf der Client-Seite: greift auch, wenn Server oder Netz hängen. */
 const QUERY_TIMEOUT_MS = STATEMENT_TIMEOUT_MS + 5_000;
+/** UPDATE/DELETE, die mehr Zeilen treffen, werden zurückgerollt; INSERT fügt nur hinzu und ist nicht begrenzt. */
+export const MAX_DML_ROWS = 500;
 
 /**
  * Statements that would leave the project database, affect the server or destroy data in bulk.
- * Allowed: DML with real WHERE conditions and additive DDL (CREATE TABLE, ALTER TABLE ADD …).
+ * Erlaubt sind nur die Anweisungsarten in allowedStatement: Lesen, DML mit echter WHERE-Bedingung und additive DDL
+ * (CREATE TABLE/INDEX/VIEW …, ALTER TABLE … ADD). Diese Liste sperrt zusätzlich Namen an jeder Stelle im SQL.
  * Das ist ein Schutz gegen Fehlgriffe des Modells, keine Sicherheitsgrenze: Dafür gehört in die
  * Projekteinstellungen ein Datenbank-Benutzer mit eingeschränkten Rechten.
  */
@@ -29,8 +32,13 @@ const FORBIDDEN_SQL: [RegExp, string][] = [
   [/\bcopy\b/i, 'COPY'],
   [/\bset\s+(?:session\s+authorization|role)\b/i, 'Rollenwechsel'],
   [
-    /\b(?:pg_read_file|pg_read_binary_file|pg_ls_dir|lo_import|lo_export|pg_terminate_backend|dblink)\w*/i,
+    /\b(?:pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|pg_file_|lo_import|lo_export|pg_terminate_backend|pg_cancel_backend|pg_reload_conf|pg_promote|dblink)\w*/i,
     'Server-Funktionen',
+  ],
+  // Führen SQL aus einem String aus; Strings sind für alle Prüfungen zu '' geleert.
+  [
+    /\b(?:query_to_xml|cursor_to_xml|table_to_xml|schema_to_xml|database_to_xml)\w*|\bts_(?:stat|rewrite)\b/i,
+    'Funktionen, die SQL aus einem String ausführen (query_to_xml, ts_stat …)',
   ],
   [/\bdrop\s+schema\b/i, 'DROP SCHEMA'],
   [/\bdrop\s+(?:table|view|materialized\s+view|sequence|type|owned)\b/i, 'DROP (löscht Tabellen bzw. Daten)'],
@@ -53,20 +61,57 @@ const CONSTANT_WORDS = new Set(['true', 'false', 'not', 'and', 'or', 'is', 'null
 const SELF_COMPARISON =
   /^(?:([a-z_][\w.]*)\s*(?:=|>=|<=|is\s+not\s+distinct\s+from)\s*\1|[a-z_][\w.]*\s+is\s+not\s+null|[a-z_][\w.]*\s+notnull)$/i;
 
+/** Teilt text an den Treffern von separator (mit Flag g), die außerhalb jeder Klammer liegen. */
+function splitTopLevel(text: string, separator: RegExp): string[] {
+  // Je UTF-16-Stelle wie match.index.
+  const depth: number[] = [];
+  let level = 0;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === ')') level -= 1;
+    depth.push(level);
+    if (text[index] === '(') level += 1;
+  }
+  const parts: string[] = [];
+  let start = 0;
+  for (const match of text.matchAll(separator)) {
+    if (depth[match.index] !== 0) continue;
+    parts.push(text.slice(start, match.index));
+    start = match.index + match[0].length;
+  }
+  parts.push(text.slice(start));
+  return parts;
+}
+
+/** „(a)“ → „a“, wenn die erste Klammer erst am Ende schließt (bei „(a) OR (b)“ nicht); sonst null. */
+function unwrap(text: string): string | null {
+  if (!text.startsWith('(') || !text.endsWith(')')) return null;
+  const inner = text.slice(1, -1);
+  let depth = 0;
+  for (const char of inner) {
+    if (char === '(') depth += 1;
+    if (char === ')') depth -= 1;
+    if (depth < 0) return null;
+  }
+  return inner;
+}
+
 /**
  * WHERE-Bedingungen, die jede Zeile treffen: nur Konstanten („true“, „1=1“, „2>1“, „'a'='a'“, Strings sind hier schon
- * zu '' geleert), Vergleiche einer Spalte mit sich selbst oder „IS NOT NULL“ – auch als ein Zweig eines OR.
- * Klammern sind ausgeblendet („()“) und gelten als echte Bedingung. Das fängt Fehlgriffe ab, nicht jede Tautologie.
+ * zu '' geleert), Vergleiche einer Spalte mit sich selbst oder „IS NOT NULL“ – auch als ein Zweig eines OR, als
+ * Verknüpfung solcher Teile mit AND und in Klammern („WHERE (true)“). Das fängt Fehlgriffe ab, nicht jede Tautologie.
  */
-function trivialWhere(dml: string): boolean {
-  const condition = /\bwhere\b([\s\S]*?)(?:\breturning\b[\s\S]*)?$/i.exec(dml)?.[1] ?? '';
-  return condition.split(/\bor\b/i).some((branch) => {
-    const text = branch.trim();
-    if (!text) return true;
-    if (SELF_COMPARISON.test(text)) return true;
-    const words = text.match(/[a-z_][\w$]*/gi) ?? [];
-    return !text.includes('()') && words.every((word) => CONSTANT_WORDS.has(word.toLowerCase()));
-  });
+function trivialCondition(condition: string): boolean {
+  return splitTopLevel(condition, /\bor\b/gi).some((branch) =>
+    splitTopLevel(branch, /\band\b/gi).every((part) => {
+      const text = part.trim();
+      if (!text) return true;
+      const inner = unwrap(text);
+      if (inner !== null) return trivialCondition(inner);
+      if (SELF_COMPARISON.test(text)) return true;
+      const words = text.match(/[a-z_][\w$]*/gi) ?? [];
+      return words.every((word) => CONSTANT_WORDS.has(word.toLowerCase()));
+    }),
+  );
 }
 
 /** U& direkt vor einem String oder Bezeichner (Unicode-Escapes wie U&"\0073et_config"). */
@@ -157,9 +202,12 @@ function flatten(text: string): string {
   return flat;
 }
 
-/** Jede UPDATE/DELETE-Anweisung – auch in CTEs und hinter EXPLAIN – samt ihrem Text bis zum Ende ihrer Klammer. */
-function dmlStatements(statement: string): string[] {
-  const found: string[] = [];
+/**
+ * Jede UPDATE/DELETE-Anweisung – auch in CTEs und hinter EXPLAIN – samt ihrem Text bis zum Ende ihrer Klammer.
+ * nested: steht in einer Klammer (CTE); dort zählt rowCount ihre Zeilen nicht.
+ */
+function dmlStatements(statement: string): { text: string; nested: boolean }[] {
+  const found: { text: string; nested: boolean }[] = [];
   for (const match of statement.matchAll(/\b(?:update|delete)\b/gi)) {
     const before = /(\w+)\W*$/.exec(statement.slice(0, match.index))?.[1]?.toLowerCase() ?? '';
     if (NOT_DML_BEFORE.has(before)) continue;
@@ -170,9 +218,47 @@ function dmlStatements(statement: string): string[] {
       if (statement[end] === ')') depth -= 1;
       end += 1;
     }
-    found.push(flatten(statement.slice(match.index, depth < 0 ? end - 1 : end)).trim());
+    found.push({ text: statement.slice(match.index, depth < 0 ? end - 1 : end).trim(), nested: depth < 0 });
   }
   return found;
+}
+
+/** Fehler zu einer UPDATE/DELETE-Anweisung (WHERE fehlt oder trifft jede Zeile), sonst null. */
+function dmlViolation(dml: string): string | null {
+  const [, ...afterWhere] = splitTopLevel(dml, /\bwhere\b/gi);
+  if (!afterWhere.length) return 'UPDATE und DELETE brauchen eine WHERE-Bedingung.';
+  const condition = splitTopLevel(afterWhere.join(' where '), /\breturning\b/gi)[0] ?? '';
+  if (trivialCondition(condition)) {
+    return 'UPDATE und DELETE brauchen eine echte WHERE-Bedingung (nicht „WHERE true“, „id IS NOT NULL“ o. ä.).';
+  }
+  return null;
+}
+
+/** Anweisungsarten, die gar nicht oder nur lesend bzw. hinzufügend wirken. */
+const READ_OR_DML = /^(?:select|with|values|table|show|insert|update|delete)\b/i;
+/** Additive DDL ohne OR REPLACE (ersetzte Sichten verlieren ihre alte Definition). */
+const ADDITIVE_CREATE =
+  /^create\s+(?:(?:(?:global|local)\s+)?(?:temp|temporary)\s+|unlogged\s+)?table\b|^create\s+(?:unique\s+)?index\b|^create\s+(?:materialized\s+)?view\b|^create\s+(?:sequence|schema|type)\b/i;
+/** ALTER TABLE [IF EXISTS] [ONLY] name [*] Aktionen – Bezeichner in "…" sind hier schon zu Wörtern geworden. */
+const ALTER_TABLE = /^alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?[\w$]+(?:\s*\.\s*[\w$]+)*\s*\*?\s+([\s\S]*)$/i;
+/** Optionen nach EXPLAIN: „(…)“ ist schon ausgeblendet, sonst ANALYZE/VERBOSE. */
+const EXPLAIN_PREFIX = /^explain\b\s*(?:(?:\(\)|analy[sz]e|verbose)\s*)*/i;
+
+/** Allowlist der Anweisungsarten; statement ohne Kommentare und String-Inhalte. */
+function allowedStatement(statement: string): string | null {
+  const text = flatten(statement).trim().replace(EXPLAIN_PREFIX, '');
+  if (READ_OR_DML.test(text) || ADDITIVE_CREATE.test(text)) return null;
+  const alter = ALTER_TABLE.exec(text);
+  if (alter) {
+    // Jede Aktion muss ADD sein: kein RENAME, OWNER TO, DISABLE TRIGGER/ROW LEVEL SECURITY, ALTER COLUMN … TYPE.
+    if (alter[1]?.split(',').every((action) => /^\s*add\b/i.test(action))) return null;
+    return 'Nicht erlaubt: ALTER TABLE nur mit ADD (Spalten, Constraints, Indizes hinzufügen).';
+  }
+  const kind = /^\w+(?:\s+\w+)?/.exec(text)?.[0] ?? text.slice(0, 20);
+  return (
+    `Nicht erlaubt: ${kind.toUpperCase()}. Erlaubt sind SELECT, WITH, VALUES, TABLE, SHOW, INSERT, UPDATE, DELETE, ` +
+    'EXPLAIN, CREATE TABLE/INDEX/VIEW/SEQUENCE/SCHEMA/TYPE (ohne OR REPLACE) und ALTER TABLE … ADD.'
+  );
 }
 
 export function sqlViolation(sql: string): string | null {
@@ -192,11 +278,20 @@ export function sqlViolation(sql: string): string | null {
     if (SESSION_CONTROL.test(statement)) {
       return 'Nicht erlaubt: Transaktions-, Timeout- und Sitzungssteuerung (BEGIN, COMMIT, ROLLBACK, SET, RESET …).';
     }
+    const explain = EXPLAIN_PREFIX.test(statement.trim());
     for (const dml of dmlStatements(statement)) {
-      if (!/\bwhere\b/i.test(dml)) return 'UPDATE und DELETE brauchen eine WHERE-Bedingung.';
-      if (trivialWhere(dml)) {
-        return 'UPDATE und DELETE brauchen eine echte WHERE-Bedingung (nicht „WHERE true“, „id IS NOT NULL“ o. ä.).';
+      const problem = dmlViolation(dml.text);
+      if (problem) return problem;
+      if (dml.nested || explain) {
+        return (
+          'Nicht erlaubt: UPDATE und DELETE in WITH (…) oder hinter EXPLAIN – dort greift die Zeilengrenze ' +
+          `von ${MAX_DML_ROWS} nicht. Bitte als eigene Anweisung ausführen.`
+        );
       }
+    }
+    if (statement.trim()) {
+      const problem = allowedStatement(statement);
+      if (problem) return problem;
     }
   }
   // Eine Anweisung pro Aufruf: nur so gelten Transaktionsrahmen, Zeitlimit und Zeilengrenze für das ganze SQL.
@@ -328,7 +423,8 @@ const rowsText = (rows: unknown[]): string => (rows.length ? `\n${JSON.stringify
 /**
  * Executes one SQL statement in the project's own database inside one transaction (rolled back on any error).
  * Grenzen: Zeitlimit auf Verbindung und Client, höchstens MAX_ROWS Zeilen und MAX_RESULT_BYTES beim Lesen, Abbruch
- * über signal. Wird eine Grenze erreicht, bricht die Abfrage auf dem Server ab und nichts wird gespeichert.
+ * über signal, höchstens MAX_DML_ROWS geänderte Zeilen bei UPDATE/DELETE. Wird eine Grenze erreicht, bricht die
+ * Abfrage ab bzw. wird zurückgerollt, und nichts wird gespeichert.
  */
 export async function runProjectSql(
   databaseUrl: string,
@@ -397,6 +493,15 @@ export async function runProjectSql(
     await step(client.query('BEGIN'));
     await step(client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`));
     const result = await step(readRows(client, sql, onRow));
+    const changed = result.rowCount ?? 0;
+    if ((result.command === 'UPDATE' || result.command === 'DELETE') && changed > MAX_DML_ROWS) {
+      // Noch in der Transaktion aus BEGIN: ROLLBACK verwirft genau diese Änderung.
+      await step(client.query('ROLLBACK'));
+      return (
+        `Zu viele Zeilen: ${result.command} hätte ${changed} Zeilen geändert (Grenze ${MAX_DML_ROWS}). ` +
+        'Zurückgerollt, nichts gespeichert – bitte die WHERE-Bedingung enger fassen.'
+      );
+    }
     try {
       // SAVEPOINT scheitert außerhalb einer Transaktion: Ist der Rahmen weg, wird kein Erfolg gemeldet.
       await step(client.query('SAVEPOINT aideation_check'));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { connectionConfig, runProjectSql, sqlViolation, type SqlClient } from './tool-sql.js';
+import { connectionConfig, MAX_DML_ROWS, runProjectSql, sqlViolation, type SqlClient } from './tool-sql.js';
 
 test('SQL-Wächter: Kommentarzeichen in Strings verstecken keine Anweisung', () => {
   for (const sql of [
@@ -29,8 +29,168 @@ test('SQL-Wächter: DELETE/UPDATE in CTE und hinter EXPLAIN brauchen WHERE', () 
   ]) {
     assert.match(sqlViolation(sql) ?? '', /WHERE/, sql);
   }
-  assert.equal(sqlViolation('WITH d AS (DELETE FROM orders WHERE id = 1 RETURNING 1) SELECT count(*) FROM d'), null);
+  // Seit der Zeilengrenze für DML: in WITH (…) und hinter EXPLAIN auch mit WHERE nicht, rowCount zählte sie nicht.
+  for (const sql of [
+    'WITH d AS (DELETE FROM orders WHERE id = 1 RETURNING 1) SELECT count(*) FROM d',
+    'EXPLAIN ANALYZE UPDATE orders SET a = 1 WHERE id = 1',
+    'WITH a AS (SELECT 1), d AS (UPDATE orders SET a = 1 WHERE id = 1 RETURNING 1) SELECT * FROM d',
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /in WITH \(…\) oder hinter EXPLAIN/, sql);
+  }
+  assert.equal(sqlViolation('WITH x AS (SELECT id FROM o) DELETE FROM orders WHERE id IN (SELECT id FROM x)'), null);
   assert.equal(sqlViolation('EXPLAIN SELECT * FROM orders'), null);
+});
+
+test('SQL-Wächter: Funktionen, die SQL aus einem String ausführen, sind gesperrt', () => {
+  for (const sql of [
+    "SELECT query_to_xml('select pg_read_file(''/etc/passwd'')', true, false, '')",
+    "SELECT query_to_xmlschema('select pg_ls_dir(''.'')', true, false, '')",
+    "SELECT query_to_xml_and_xmlschema('select 1', true, false, '')",
+    "SELECT cursor_to_xml('c', 10, true, false, '')",
+    "SELECT table_to_xml('pg_authid', true, false, '')",
+    "SELECT * FROM ts_stat('select pg_read_file(''/etc/passwd'')::tsvector')",
+    "SELECT ts_rewrite('a'::tsquery, 'select pg_ls_dir(''.'')')",
+    `SELECT "query_to_xml"('select 1', true, false, '')`,
+    "SELECT pg_catalog.query_to_xml('select 1', true, false, '')",
+    `SELECT pg_catalog."ts_stat"('select 1')`,
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /SQL aus einem String/, sql);
+  }
+  // Der Name in einem String oder Kommentar ist kein Aufruf.
+  assert.equal(sqlViolation("SELECT 'query_to_xml' AS name -- ts_stat"), null);
+});
+
+test('SQL-Wächter: ALTER TABLE nur mit ADD', () => {
+  for (const sql of [
+    'ALTER TABLE orders DISABLE TRIGGER ALL',
+    'ALTER TABLE orders RENAME TO orders_old',
+    'ALTER TABLE orders RENAME COLUMN a TO b',
+    'ALTER TABLE orders ALTER COLUMN amount TYPE int USING 0',
+    'ALTER TABLE orders DISABLE ROW LEVEL SECURITY',
+    'ALTER TABLE orders OWNER TO someone',
+    'ALTER TABLE orders ADD COLUMN note text, OWNER TO someone',
+    'ALTER TABLE IF EXISTS ONLY public."Orders" ENABLE ALWAYS TRIGGER t',
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /ALTER TABLE nur mit ADD/, sql);
+  }
+  for (const sql of [
+    'ALTER TABLE orders ADD COLUMN note text',
+    'ALTER TABLE IF EXISTS public."Orders" ADD COLUMN amount numeric(10, 2), ADD CONSTRAINT c CHECK (amount IN (1, 2))',
+    'ALTER TABLE orders ADD CONSTRAINT fk FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE',
+  ]) {
+    assert.equal(sqlViolation(sql), null, sql);
+  }
+});
+
+test('SQL-Wächter: nur erlaubte Anweisungsarten (Allowlist)', () => {
+  for (const sql of [
+    'CREATE OR REPLACE VIEW v AS SELECT 1',
+    'DROP INDEX orders_idx',
+    'DROP FOREIGN TABLE remote_orders',
+    "LOAD 'plpgsql'",
+    'ALTER INDEX orders_idx RENAME TO x',
+    'ALTER VIEW v OWNER TO someone',
+    'VACUUM FULL orders',
+    'REINDEX TABLE orders',
+    'LOCK TABLE orders',
+    'CALL p()',
+    'MERGE INTO t USING s ON t.id = s.id WHEN NOT MATCHED THEN INSERT VALUES (s.id)',
+    'NOTIFY c',
+    'REFRESH MATERIALIZED VIEW mv',
+    'IMPORT FOREIGN SCHEMA s FROM SERVER x INTO public',
+    '(SELECT 1)',
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /Nicht erlaubt/, sql);
+  }
+  assert.match(sqlViolation('DROP INDEX orders_idx') ?? '', /DROP INDEX/);
+  // MERGE … THEN DELETE scheitert schon an der WHERE-Prüfung.
+  assert.ok(sqlViolation('MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN DELETE'));
+  for (const sql of [
+    'SELECT 1',
+    'select * from orders where id = 1 for update',
+    'VALUES (1), (2)',
+    'TABLE orders',
+    'SHOW search_path',
+    "INSERT INTO orders (a) VALUES ('x') RETURNING id",
+    'WITH x AS (SELECT 1) INSERT INTO t SELECT * FROM x',
+    'EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM orders',
+    'CREATE TABLE IF NOT EXISTS t (id int REFERENCES u (id) ON DELETE CASCADE)',
+    'CREATE TEMP TABLE t AS SELECT 1',
+    'CREATE UNIQUE INDEX t_idx ON t (id)',
+    'CREATE VIEW v AS SELECT 1',
+    'CREATE MATERIALIZED VIEW mv AS SELECT 1',
+    'CREATE SEQUENCE s',
+    'CREATE SCHEMA app',
+  ]) {
+    assert.equal(sqlViolation(sql), null, sql);
+  }
+});
+
+test('SQL-Wächter: Klammern verstecken keine triviale WHERE-Bedingung', () => {
+  for (const sql of [
+    'UPDATE t SET a = 1 WHERE (true)',
+    'UPDATE t SET a = 1 WHERE ((1 = 1))',
+    'DELETE FROM t WHERE (id = 5) OR (true)',
+    'DELETE FROM t WHERE (id IS NOT NULL)',
+    'DELETE FROM t WHERE NOT (false)',
+    'DELETE FROM t WHERE (true) AND (1 = 1) RETURNING id',
+    'UPDATE t SET a = (SELECT max(b) FROM u WHERE u.id = 1) WHERE (true)',
+  ]) {
+    assert.match(sqlViolation(sql) ?? '', /echte WHERE-Bedingung/, sql);
+  }
+  // WHERE nur in einer Unterabfrage gilt nicht als WHERE der Anweisung.
+  assert.match(sqlViolation('UPDATE t SET a = (SELECT b FROM u WHERE u.id = 1)') ?? '', /brauchen eine WHERE/);
+  for (const sql of [
+    'UPDATE t SET a = 1 WHERE (id = 5)',
+    'DELETE FROM t WHERE (true) AND id = 5',
+    'DELETE FROM t WHERE id IN (SELECT id FROM u WHERE u.x = 1)',
+    'DELETE FROM t WHERE (id = 1) OR (id = 2)',
+    'UPDATE t SET a = 1 WHERE id BETWEEN 1 AND 5',
+    'DELETE FROM t WHERE EXISTS (SELECT 1 FROM u WHERE u.id = t.id)',
+  ]) {
+    assert.equal(sqlViolation(sql), null, sql);
+  }
+});
+
+/** Fake-Client, der für das Nutzer-SQL `command` mit `rowCount` meldet und alle Aufrufe mitschreibt. */
+function dmlClient(command: string, rowCount: number) {
+  const calls: string[] = [];
+  const client: SqlClient = {
+    connect: async () => undefined,
+    query: async (text) => {
+      calls.push(text);
+      const own = /^(?:BEGIN|SET|SAVEPOINT|COMMIT|ROLLBACK)\b/.test(text);
+      return own ? { command: text.split(' ')[0] } : { command, rowCount, rows: [] };
+    },
+    end: async () => undefined,
+  };
+  return { client, calls };
+}
+
+test('runProjectSql: UPDATE/DELETE über der Zeilengrenze werden zurückgerollt, INSERT nicht', async () => {
+  assert.equal(MAX_DML_ROWS, 500);
+  const atLimit = dmlClient('UPDATE', 500);
+  const ok = await runProjectSql('postgres://x/proj', 'UPDATE t SET a = 1 WHERE b = 2', () => atLimit.client, {});
+  assert.match(ok, /^UPDATE: 500 Zeile/);
+  assert.ok(atLimit.calls.includes('COMMIT'));
+  assert.ok(!atLimit.calls.includes('ROLLBACK'));
+
+  for (const command of ['UPDATE', 'DELETE']) {
+    const over = dmlClient(command, 501);
+    const sql = command === 'UPDATE' ? 'UPDATE t SET a = 1 WHERE b = 2' : 'DELETE FROM t WHERE b = 2';
+    const result = await runProjectSql('postgres://x/proj', sql, () => over.client, {});
+    assert.match(result, new RegExp(`${command} hätte 501 Zeilen geändert \\(Grenze 500\\)`));
+    assert.match(result, /nichts gespeichert/);
+    // ROLLBACK in derselben Transaktion: nach BEGIN und dem Statement, kein COMMIT.
+    assert.deepEqual(over.calls.slice(0, 2), ['BEGIN', 'SET LOCAL statement_timeout = 15000']);
+    assert.deepEqual(over.calls.slice(2), [sql, 'ROLLBACK']);
+  }
+
+  // INSERT fügt nur hinzu: keine Grenze gewollt.
+  const insert = dmlClient('INSERT', 10_000);
+  const inserted = await runProjectSql('postgres://x/proj', 'INSERT INTO t SELECT * FROM u', () => insert.client, {});
+  assert.match(inserted, /^INSERT: 10000 Zeile/);
+  assert.ok(insert.calls.includes('COMMIT'));
 });
 
 test('SQL-Wächter: Transaktions- und Timeout-Steuerung im Nutzer-SQL ist verboten', () => {

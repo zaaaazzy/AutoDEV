@@ -336,16 +336,19 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 **Was erlaubt ist**
 
 - Eine Anweisung pro Aufruf. Mehrere Anweisungen in einem Aufruf werden abgelehnt.
-- Lesen und Daten ändern (`SELECT`, `INSERT`, `UPDATE`, `DELETE`) sowie additive DDL (`CREATE TABLE`, `ALTER TABLE … ADD`).
-- `UPDATE` und `DELETE` nur mit echter `WHERE`-Bedingung. Abgelehnt werden u. a. `WHERE true`, `WHERE 1=1`, `WHERE 2>1` und `WHERE id IS NOT NULL`.
+- Nur diese Anweisungsarten (Allowlist): `SELECT`, `WITH`, `VALUES`, `TABLE`, `SHOW`, `INSERT`, `UPDATE`, `DELETE`, `EXPLAIN` sowie additive DDL: `CREATE TABLE`/`INDEX`/`VIEW`/`MATERIALIZED VIEW`/`SEQUENCE`/`SCHEMA`/`TYPE` (ohne `OR REPLACE`) und `ALTER TABLE …`, wenn jede Aktion ein `ADD` ist. Alles andere wird abgelehnt, z. B. `DROP INDEX`, `LOAD`, `MERGE`, `VACUUM`, `ALTER INDEX`.
+- `UPDATE` und `DELETE` nur mit echter `WHERE`-Bedingung. Abgelehnt werden u. a. `WHERE true`, `WHERE (true)`, `WHERE 1=1`, `WHERE 2>1` und `WHERE id IS NOT NULL`.
+- `UPDATE` und `DELETE` nur als eigene Anweisung, nicht in `WITH (…)` und nicht hinter `EXPLAIN`. Ein `WITH` davor (`WITH x AS (SELECT …) DELETE … WHERE …`) ist erlaubt.
+- Höchstens 500 geänderte Zeilen pro `UPDATE` oder `DELETE`. Trifft die Anweisung mehr, wird sie zurückgerollt. Für `INSERT` gilt keine Grenze.
 
 **Was gesperrt ist**
 
 - Die AIdeation-Datenbank selbst. Ist die hinterlegte Adresse diese Datenbank, wird sie nicht verwendet.
 - Transaktions- und Sitzungsbefehle am Anfang einer Anweisung (`BEGIN`, `COMMIT`, `ROLLBACK`, `SET`, `RESET` …). Der Lauf verwaltet die Transaktion selbst.
-- `DROP` auf Datenbank, Rolle, Erweiterung, Schema, Tabelle, Sicht, Sequenz oder Typ, `TRUNCATE`, `ALTER … DROP`, `ALTER SYSTEM`, `ALTER`/`CREATE` von Datenbank, Rolle oder Erweiterung.
+- Jedes `DROP`, `TRUNCATE`, `ALTER TABLE` mit anderen Aktionen als `ADD` (`RENAME`, `OWNER TO`, `ALTER COLUMN … TYPE`, `DISABLE TRIGGER`, `DISABLE ROW LEVEL SECURITY` …), `ALTER SYSTEM`, `ALTER`/`CREATE` von Datenbank, Rolle oder Erweiterung.
 - `DO`-Blöcke, `EXECUTE`, eigene Funktionen, Prozeduren und Trigger, `GRANT`/`REVOKE`, `COPY`, Rollenwechsel.
 - Server- und Dateifunktionen (z. B. `pg_read_file`, `lo_import`, `pg_terminate_backend`, `dblink`).
+- Funktionen, die SQL aus einem String ausführen: `query_to_xml`, `query_to_xmlschema`, `cursor_to_xml`, `table_to_xml` (und verwandte `…_to_xml…`), `ts_stat`, `ts_rewrite`. Auch mit Schema (`pg_catalog.query_to_xml`) oder in Anführungszeichen (`"query_to_xml"`).
 - Unicode-Escapes `U&'…'` und `U&"…"`, offene Strings oder Kommentare.
 
 **Grenzen beim Ergebnis**
@@ -371,6 +374,8 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 | --- | --- |
 | „Nicht erlaubt: mehrere Anweisungen …“ | Die Abfrage in einzelne Aufrufe aufteilen. |
 | „UPDATE und DELETE brauchen eine echte WHERE-Bedingung …“ | Eine Bedingung angeben, die nur die betroffenen Zeilen trifft. |
+| „Nicht erlaubt: ALTER TABLE nur mit ADD …“ / „Nicht erlaubt: DROP INDEX …“ | Die Anweisung ist nicht auf der Allowlist. Strukturänderungen außer `ADD` über eine Migration im Projekt machen. |
+| „Zu viele Zeilen: UPDATE hätte … Zeilen geändert (Grenze 500) …“ | Die `WHERE`-Bedingung enger fassen oder die Änderung in Teilen machen. |
 | „Ergebnis zu groß: mehr als 50 Zeilen …“ | Mit `WHERE` oder `LIMIT` eingrenzen oder Spalten weglassen. Bei `UPDATE … RETURNING` gilt dasselbe: Die Änderung wird dann nicht gespeichert. |
 | „SQL-Zeitlimit: …“ | Die Abfrage ist zu langsam. Index prüfen oder Umfang verringern. |
 | „Der hinterlegte Datenbank-Zugang zeigt auf die AIdeation-Datenbank …“ | In den Projekteinstellungen die richtige Projekt-Datenbank eintragen. |
