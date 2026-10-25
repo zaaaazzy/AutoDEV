@@ -77,6 +77,7 @@ In der Sprint-Ansicht lässt sich ein Stand (Commit) des Projekts in einem Revie
 
 ## 3. Grenzen dieses Kapitels
 
-- Die Prüfung der Empfänger-Zuordnung wurde im Code nachgelesen. Der Testlauf dafür ist noch offen: `npx --no-install tsx --test src/api/agents.test.ts src/api/agent-tasks.test.ts`. Solange der Lauf nicht grün ist, gilt das Verhalten als **nicht bestätigt**.
+- Die Prüfung der Empfänger-Zuordnung ist durch den Testlauf `37c6c251` belegt: `src/api/agents.test.ts` und `src/api/agent-tasks.test.ts` sind mit 18 von 18 Tests grün, darunter die beiden Tests zu `handoffTo` (fremder Agent → 400, eigener Agent und `null` → gespeichert).
+- **Nicht ausgeführt:** die Gegenprobe. Dass der 400-Test ohne die Prüfung in `PATCH /agents/:id` scheitert, ist nur aus dem Code gelesen. Die Prüfung dafür: `handoffTo ||` und den `agentInProject`-Block in `src/api/agents.ts` kurz entfernen; dann muss der Test mit 200 statt 400 scheitern.
 - Ob der Freigabe-Schritt im Review-Container den Projektbezug schon prüft, ist im Code nicht gelesen worden.
 - Die Beschriftungen der Felder („Nachricht geht an“, „Ausführen“, „Planung“) stammen aus dem Code bzw. dem bestehenden Handbuch und sind nicht im Browser gegengeprüft.
