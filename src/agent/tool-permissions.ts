@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { sep } from 'node:path';
+import { isAbsolute, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { customRuleProblem } from './command-checks.js';
@@ -151,6 +151,7 @@ export function guardHookCommand(policy: {
   edit: boolean;
   scopes: string[];
   shell?: boolean;
+  root?: string;
 }): string | null {
   const typescript = import.meta.url.endsWith('.ts');
   const script = fileURLToPath(new URL(`./agent-guard.${typescript ? 'ts' : 'js'}`, import.meta.url));
@@ -258,7 +259,8 @@ function agentSettings(hook: string | null, matcher: string): object {
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
  * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern
- * sowie jeden Lesezugriff auf Geheimnisse.
+ * sowie jeden Lesezugriff auf Geheimnisse. projectRoot legt den Projektordner des Wächters fest (sonst
+ * CLAUDE_PROJECT_DIR bzw. das cwd des Aufrufs).
  */
 export function withAgentPermissions(
   command: string[],
@@ -267,14 +269,16 @@ export function withAgentPermissions(
   agentCommands: string[] | null,
   fileScopes: readonly string[] = [],
   readDirectories: string[] = extraReadDirectories(),
+  projectRoot?: string,
 ): string[] {
+  const root = projectRoot && isAbsolute(projectRoot) ? { root: projectRoot } : {};
   const [binary, ...rest] = command;
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
   if (!isClaude) return command;
   // Voller Zugriff nur für den Dashboard-Assistenten und nur, wenn der Admin ihn im Befehl ausdrücklich verlangt:
   // dann weder Wächter für Schreiben und Shell noch Sperrlisten – nur Geheimnisse bleiben auch hier unlesbar.
   if (hasFullAccess(command, role)) {
-    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [] });
+    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [], ...root });
     return [binary, '--settings', JSON.stringify(agentSettings(secretHook, READ_MATCHER)), ...rest];
   }
   const readOnly = READ_ONLY_ROLES.has(role);
@@ -289,7 +293,7 @@ export function withAgentPermissions(
     : noFileWrite
       ? { create: false, edit: false, scopes: [] }
       : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
-  const hook = guardHookCommand(policy);
+  const hook = guardHookCommand({ ...policy, ...root });
   // Eigene und selbst gesetzte Sperren in einem einzigen --disallowedTools, damit keine Sperre verloren geht.
   const blocked = [
     ...new Set([
