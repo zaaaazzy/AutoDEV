@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { type CommandExecutor, runCommand } from '../../core/command.js';
-import { blockedPath, resolveInside } from '../../agent/tool-paths.js';
+import { protectedPath } from '../../agent/path-policy.js';
+import { resolveInside } from '../../agent/tool-paths.js';
 import { fileProblem } from '../../agent/agent-guard.js';
 import { gitHelpers } from './git-helpers.js';
 
@@ -92,10 +93,10 @@ test('Hook-Ordner sind für die Datei-Werkzeuge und den Claude-Wächter gesperrt
     '.HUSKY/pre-commit',
     'pakete\\web\\.githooks\\pre-commit',
   ]) {
-    assert.equal(blockedPath(path), true, path);
+    assert.equal(protectedPath(path), true, path);
   }
-  assert.equal(blockedPath('docs/husky.md'), false);
-  assert.equal(blockedPath('src/githooks.ts'), false);
+  assert.equal(protectedPath('docs/husky.md'), false);
+  assert.equal(protectedPath('src/githooks.ts'), false);
 
   const root = await mkdtemp(join(tmpdir(), 'git-hooks-guard-'));
   const policy = { create: true, edit: true, scopes: [] };
