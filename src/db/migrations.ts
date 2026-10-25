@@ -298,6 +298,54 @@ export const MIGRATIONS: readonly Migration[] = [
        WHERE status = 'approval' AND sprint_id IS NULL AND removed_from_sprint_at IS NOT NULL;
     `,
   },
+  // Sprint-Branch beim Start festhalten statt bei jedem Zugriff aus dem (per PATCH änderbaren, nicht eindeutigen)
+  // Namen zu bilden: Nach einer Umbenennung zweigte sonst ein neuer Branch von main ab, und beim Abschluss kam nur der
+  // Teil danach nach main. sprint_branch_slug entspricht slugify() in git-helpers.ts (Marken vor lower() entfernt,
+  // damit es unabhängig von der Collation gleich bleibt). Altdaten: Laufende Sprints behalten ihren heutigen Branch;
+  // bei gleichem Namen („Sprint 5“ doppelt) bekommen die übrigen die ersten sechs Zeichen ihrer ID angehängt.
+  {
+    version: 13,
+    name: 'sprint-branch-beim-start-festhalten',
+    sql: `
+      ALTER TABLE sprints ADD COLUMN IF NOT EXISTS branch TEXT;
+      CREATE OR REPLACE FUNCTION sprint_branch_slug(p_name TEXT) RETURNS TEXT AS $fn$
+        SELECT COALESCE(NULLIF(left(btrim(regexp_replace(lower(regexp_replace(normalize(p_name, NFKD),
+                 '[\\u0300-\\u036f\\u1ab0-\\u1aff\\u1dc0-\\u1dff\\u20d0-\\u20ff\\ufe20-\\ufe2f]', '', 'g')),
+                 '[^a-z0-9]+', '-', 'g'), '-'), 40), ''), 'ohne-name')
+      $fn$ LANGUAGE sql IMMUTABLE;
+      CREATE OR REPLACE FUNCTION sprint_branch_for(p_project TEXT, p_id UUID, p_name TEXT) RETURNS TEXT AS $fn$
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM sprints WHERE project_slug = p_project AND id <> p_id
+                                  AND branch = 'sprint/' || sprint_branch_slug(p_name))
+               THEN 'sprint/' || sprint_branch_slug(p_name) || '-' || left(p_id::text, 6)
+               ELSE 'sprint/' || sprint_branch_slug(p_name) END
+      $fn$ LANGUAGE sql STABLE;
+
+      WITH ranked AS (
+        SELECT id, 'sprint/' || sprint_branch_slug(name) AS plain,
+               row_number() OVER (PARTITION BY project_slug, sprint_branch_slug(name)
+                                  ORDER BY status IN ('active', 'review') DESC, created_at DESC, id) AS rank
+          FROM sprints WHERE branch IS NULL AND status <> 'planned'
+      )
+      UPDATE sprints s SET branch = CASE WHEN r.rank = 1 AND NOT EXISTS (
+                 SELECT 1 FROM sprints o WHERE o.project_slug = s.project_slug AND o.branch = r.plain)
+               THEN r.plain ELSE r.plain || '-' || left(s.id::text, 6) END
+        FROM ranked r WHERE s.id = r.id;
+      CREATE UNIQUE INDEX IF NOT EXISTS sprints_branch_idx ON sprints (project_slug, branch) WHERE branch IS NOT NULL;
+
+      -- Beim Start (jeder Status ausser „geplant“) einmal vergeben; spätere Umbenennungen ändern ihn nicht mehr.
+      CREATE OR REPLACE FUNCTION sprints_fix_branch() RETURNS trigger AS $fn$
+      BEGIN
+        IF NEW.status <> 'planned' AND NEW.branch IS NULL THEN
+          NEW.branch := sprint_branch_for(NEW.project_slug, NEW.id, NEW.name);
+        END IF;
+        RETURN NEW;
+      END;
+      $fn$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS sprints_fix_branch ON sprints;
+      CREATE TRIGGER sprints_fix_branch BEFORE INSERT OR UPDATE OF status ON sprints
+        FOR EACH ROW EXECUTE FUNCTION sprints_fix_branch();
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

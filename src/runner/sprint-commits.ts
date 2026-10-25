@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
-import { orderBranch, sprintBranch } from './git-sync.js';
+import { orderBranch, sprintBranchOf } from './git-sync.js';
 import { gitEnvironment } from './project-command.js';
 
 /** Ein startbarer Stand eines Sprints: ein gemergter Auftrag im Sprint-Branch oder ein noch offener Auftrags-Branch. */
@@ -55,15 +55,16 @@ export async function syncSprintCommits(
   // Laufende Sprints zuerst, geplante gar nicht (sie haben noch keine Stände): Sonst schieben vorab angelegte Sprints
   // den aktiven Sprint aus dem Fenster und seine Auswahl bleibt auf einem alten Stand stehen.
   const sprints = (
-    await pool.query<{ id: string; name: string }>(
-      `SELECT id, name FROM sprints WHERE project_slug = $1 AND status <> 'planned'
+    await pool.query<{ id: string; name: string; branch: string | null }>(
+      `SELECT id, name, branch FROM sprints WHERE project_slug = $1 AND status <> 'planned'
         ORDER BY (status IN ('active', 'review')) DESC, created_at DESC LIMIT ${SPRINTS}`,
       [project],
     )
   ).rows;
   const format = `--format=%H${SEP}%s${SEP}%cI${RECORD}`;
   for (const sprint of sprints) {
-    const branch = sprintBranch(sprint.name);
+    // Festgehaltener Branch: nach einer Umbenennung gehören die früheren Aufträge weiter dazu.
+    const branch = sprintBranchOf(sprint);
     const items = (
       await pool.query<{ id: string; title: string; status: string; branch: string | null }>(
         `SELECT id, title, status, review_branch AS branch FROM development_items WHERE sprint_id = $1`,

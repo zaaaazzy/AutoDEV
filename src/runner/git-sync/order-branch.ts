@@ -20,7 +20,8 @@ import {
   setAsideFiles,
   trackedChanges,
   slugify,
-  sprintBranch,
+  type SprintRef,
+  sprintBranchOf,
   stageAll,
   taskCommitMessage,
 } from './git-helpers.js';
@@ -108,9 +109,11 @@ export function leavesForMain(branch: string): boolean {
 export async function enterOrderBranch(
   cwd: string,
   item: { id: string; title: string },
-  sprintName: string | null,
+  sprint: SprintRef | string | null,
   rawExecute: CommandExecutor = runCommand,
 ): Promise<OrderBranch | null> {
+  // Gespeicherter Branch des Sprints (sprints.branch): Eine Umbenennung darf keinen neuen Sprint-Branch anlegen.
+  const sprintBase = sprint ? sprintBranchOf(sprint) : null;
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
@@ -122,7 +125,7 @@ export async function enterOrderBranch(
     if ((await currentBranch(git)) === branch) {
       // Nach einem Abbruch steht der Ordner noch auf dem Auftrags-Branch (samt offener Änderungen): fortsetzen.
       // Ein offener Merge bleibt unangetastet (kein Abort, kein Reset); seine Konflikte löst der nächste Agent.
-      const base = sprintName ? sprintBranch(sprintName) : MAIN_BRANCH;
+      const base = sprintBase ?? MAIN_BRANCH;
       const conflicts = await unresolvedConflicts(cwd, execute);
       return conflicts.length ? { branch, base, conflicts } : { branch, base };
     }
@@ -137,12 +140,12 @@ export async function enterOrderBranch(
     // Losgelöster Agent-Worktree, main ist im Ordner der Menschen ausgecheckt: Der Auftrag ohne Sprint zweigt direkt
     // von main ab (ohne main hier auszuchecken); finishOrderBranch mergt am Ende in den anderen Ordner.
     let detachedBase: string | null = null;
-    if (sprintName) {
-      if (!(await checkoutSprintBranch(cwd, sprintName, rawExecute))) {
-        throw new OrderBranchError(`Sprint-Branch ${sprintBranch(sprintName)} lässt sich nicht auschecken.`);
+    if (sprint && sprintBase) {
+      if (!(await checkoutSprintBranch(cwd, sprint, rawExecute))) {
+        throw new OrderBranchError(`Sprint-Branch ${sprintBase} lässt sich nicht auschecken.`);
       }
       // Vor jedem neuen Auftrag: aktuellen main in den Sprint-Branch holen (Konflikte früh und klein statt am Ende).
-      const refreshed = await refreshSprintFromMain(git, sprintBranch(sprintName));
+      const refreshed = await refreshSprintFromMain(git, sprintBase);
       if (refreshed) console.info(`[${item.id}] ${refreshed}`);
     } else if (leavesForMain(await currentBranch(git)) && (await branchExists(git, MAIN_BRANCH))) {
       // Losgelöst (z. B. nach dem kompletten Test) oder noch auf einem eigenen Branch von AIdeation (Sprint-Branch nach
@@ -153,8 +156,8 @@ export async function enterOrderBranch(
     }
     const base = detachedBase ?? (await currentBranch(git));
     // Sprint-Aufträge zweigen nur vom Sprint-Branch ab: sonst landete der Merge am Ende z. B. direkt in main.
-    if (sprintName && base !== sprintBranch(sprintName)) {
-      throw new OrderBranchError(`Arbeitsordner ${cwd} steht auf ${base} statt auf ${sprintBranch(sprintName)}.`);
+    if (sprintBase && base !== sprintBase) {
+      throw new OrderBranchError(`Arbeitsordner ${cwd} steht auf ${base} statt auf ${sprintBase}.`);
     }
     // Nie von einem losgelösten Stand oder vom Branch eines anderen Auftrags abzweigen: der Merge am Ende ginge ins Leere
     // bzw. in den fremden Auftrag statt in den Sprint.

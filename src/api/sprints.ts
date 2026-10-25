@@ -77,7 +77,9 @@ const SAME_BRANCH_MESSAGE =
 
 /**
  * Zwei Sprints mit gleichem Branch-Namen (z. B. „Sprint 5“ und „sprint-5“, oder Namen, die nach 40 Zeichen gleich
- * werden) teilten sich einen Sprint-Branch: Der neue setzte dann die ungesicherte Arbeit des alten fort.
+ * werden) teilten sich einen Sprint-Branch: Der neue setzte dann die ungesicherte Arbeit des alten fort. Heute hält
+ * sprints.branch den Branch beim Start fest (bei Gleichstand mit ID-Zusatz); die Prüfung vermeidet weiter
+ * verwechselbare Namen. Umbenennen ändert den Branch nicht.
  */
 async function branchNameTaken(pool: Pool, project: string, name: string, exceptId?: string): Promise<boolean> {
   const branch = sprintBranch(name);

@@ -42,6 +42,7 @@ function fakePool(
   action: 'push' | 'pull' = 'push',
   testCommands: string[][] = [['true']],
   status = 'active',
+  sprint: { name?: string; branch?: string | null; hasDone?: boolean } = {},
 ): { pool: Pool; updates: { sql: string; values: unknown[] }[] } {
   const updates: { sql: string; values: unknown[] }[] = [];
   let claimed = false;
@@ -51,7 +52,16 @@ function fakePool(
       if (sql.includes("SET git_sync = 'running'") && !claimed) {
         claimed = true;
         return {
-          rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', action, remote, status }],
+          rows: [
+            {
+              id: 'abcdef12-0000-0000-0000-000000000000',
+              name: 'Sprint 1: Äpfel',
+              action,
+              remote,
+              status,
+              ...sprint,
+            },
+          ],
         };
       }
       if (sql.includes('test_commands')) return { rows: [{ commands: testCommands }] };
@@ -213,6 +223,67 @@ test('each order works on its own branch and is merged into the sprint branch on
   assert.equal(git('show', 'sprint/sprint-1:login.txt'), 'fertig');
   assert.match(git('log', '-1', '--format=%s'), /^Merge auftrag\/11111111-login-seite/);
   assert.equal(git('branch', '--list', 'auftrag/*'), '');
+});
+
+test('Sprint umbenennen nach dem ersten gemergten Auftrag: Abschluss enthält alle Aufträge', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-rename-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+
+  // Branch beim Start festgehalten (sprints.branch); danach wird der Sprint umbenannt.
+  const before = { name: 'Sprint 5', branch: 'sprint/sprint-5' };
+  const first = { id: 'aaaaaaaa-0000-4000-8000-000000000001', title: 'Erster Auftrag' };
+  const one = await enterOrderBranch(cwd, first, before);
+  assert.equal(one?.base, 'sprint/sprint-5');
+  await writeFile(join(cwd, 'eins.txt'), '1');
+  assert.equal((await finishOrderBranch(cwd, first, one!, before.name, true)).merged, true);
+
+  const renamed = { name: 'Sprint 5 – Zahlungen', branch: 'sprint/sprint-5' };
+  const second = { id: 'bbbbbbbb-0000-4000-8000-000000000002', title: 'Zweiter Auftrag' };
+  const two = await enterOrderBranch(cwd, second, renamed);
+  assert.equal(two?.base, 'sprint/sprint-5', 'nach dem Umbenennen kein neuer Branch von main');
+  await writeFile(join(cwd, 'zwei.txt'), '2');
+  assert.equal((await finishOrderBranch(cwd, second, two!, renamed.name, true)).merged, true);
+  assert.equal(git('branch', '--list', 'sprint/*'), '* sprint/sprint-5');
+
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed', { ...renamed, hasDone: true });
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 1);
+  assert.match(updates.at(-1)?.sql ?? '', /git_sync = 'done'/);
+  assert.equal(git('show', 'main:eins.txt'), '1', 'Auftrag vor der Umbenennung ist in main');
+  assert.equal(git('show', 'main:zwei.txt'), '2');
+  assert.match(git('log', 'main', '-1', '--format=%s'), /^Merge sprint\/sprint-5: Sprint Sprint 5 – Zahlungen/);
+  const tag = sprintTag(renamed.name, 'abcdef12-0000-0000-0000-000000000000');
+  assert.equal(git('rev-parse', `${tag}^{commit}`), git('rev-parse', 'main'), 'Tag zeigt auf den vollständigen Stand');
+});
+
+test('Sprint-Abschluss ohne Sprint-Branch, aber mit erledigten Aufträgen: gescheitert statt „done“', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-missing-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  await writeFile(join(cwd, 'lose.txt'), 'nicht vom Sprint');
+  const head = git('rev-parse', 'main');
+
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed', {
+    name: 'Sprint 7',
+    branch: 'sprint/sprint-7',
+    hasDone: true,
+  });
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
+  const final = updates.at(-1);
+  assert.match(final?.sql ?? '', /git_sync = 'failed'/);
+  assert.match(String(final?.values[1]), /Sprint-Branch sprint\/sprint-7 fehlt/);
+  assert.equal(git('rev-parse', 'main'), head, 'main unverändert, kein Sicherungs-Commit');
+  assert.equal(git('tag'), '', 'kein Tag auf einem fremden Stand');
 });
 
 test('ein gescheiterter Deploy wird nicht als „Live geschaltet“ gemeldet', async () => {
