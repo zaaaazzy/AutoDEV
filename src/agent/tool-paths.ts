@@ -16,6 +16,43 @@ export const MAX_FILE_BYTES = 400_000;
 /** Geheimnisse: .env*, Schlüssel und Zertifikate, SSH-Schlüssel sowie Zugangsdaten-Dateien (.npmrc-Tokens, .netrc …). */
 export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)|^\.(?:npmrc|netrc|git-credentials)$/i;
 
+/** Beispielnamen: ein Glob-Segment, das einen davon trifft, kann ein Geheimnis lesen (.en? trifft .env). */
+const SECRET_SAMPLES = ['.env', '.env.local', 'a.pem', 'a.key', 'id_rsa', 'id_ed25519', '.npmrc', '.netrc', '.git-credentials'];
+/** Gewöhnliche Namen: trifft das Segment auch einen davon (z. B. `*`, `*.md`), ist es kein gezielter Zugriff auf Geheimnisse. */
+const NEUTRAL_SAMPLES = ['x', 'index', 'a.ts', 'a.md', 'a.json'];
+
+/** Glob-Segment (*, ?, [..]) als Regex; null ohne Platzhalter oder bei ungültigem Muster. */
+function globRegex(part: string): RegExp | null {
+  if (!/[*?[]/.test(part)) return null;
+  const source = part.replace(/[.+^$()|\\{}]/g, '\\$&').replace(/\*+/g, '.*').replace(/\?/g, '.');
+  try {
+    return new RegExp(`^${source}$`, 'i');
+  } catch {
+    return null;
+  }
+}
+
+/** Zielt ein Segment mit Platzhaltern auf Geheimnisse (`.en?`, `.e[n]v`, `*.pe?`)? `*` allein bleibt erlaubt. */
+export function secretGlob(part: string): boolean {
+  const regex = globRegex(part);
+  return !!regex && SECRET_SAMPLES.some((name) => regex.test(name)) && !NEUTRAL_SAMPLES.some((name) => regex.test(name));
+}
+
+/** Klammern wie `.{e,x}nv` zu allen Fassungen auflösen (verschachtelt, höchstens 64). */
+export function expandBraces(part: string): string[] {
+  const match = /^(.*?)\{([^{}]*)\}(.*)$/s.exec(part);
+  if (!match) return [part];
+  const [, head, body, tail] = match;
+  return body
+    .split(',')
+    .flatMap((alternative) => expandBraces(head + alternative + tail))
+    .slice(0, 64);
+}
+
+/** Ist das Segment (samt Klammern und Platzhaltern) ein Geheimnis? */
+export const secretSegment = (part: string): boolean =>
+  expandBraces(part).some((name) => SECRET_NAME.test(name) || secretGlob(name));
+
 export class ToolError extends Error {}
 
 /** Gesperrte Ordner: Git samt Hooks (.git/hooks, .husky, .githooks), Abhängigkeiten und Sicherungen. */

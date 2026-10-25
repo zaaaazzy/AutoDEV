@@ -3,7 +3,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SECRET_NAME } from './tool-paths.js';
+import { secretGlob, secretSegment } from './tool-paths.js';
 import {
   COMPOSE_STARTING,
   composeViolation,
@@ -137,12 +137,7 @@ const projectRelativeFile = (path: string): boolean =>
   !!path && !isAbsolute(path) && !path.split(/[\\/]/).includes('..') && !/^[A-Za-z][\w+.-]*:/.test(path);
 
 /** Nennt ein Pfadteil ein Geheimnis (SECRET_NAME) oder einen Schlüssel-Ordner? Auch Glob-Muster wie *.{pem,key}. */
-const secretPart = (part: string): boolean =>
-  SECRET_DIRECTORIES.has(part.toLowerCase()) ||
-  part
-    .replace(/[{}]/g, '')
-    .split(',')
-    .some((alternative) => SECRET_NAME.test(alternative));
+const secretPart = (part: string): boolean => SECRET_DIRECTORIES.has(part.toLowerCase()) || secretSegment(part);
 
 /** Pfad samt aufgelöster Links und „~“ – im Projekt relativ zum Projekt, sonst ganz – auf Geheimnisse prüfen. */
 function secretPath(raw: string, cwd: string, root: string): boolean {
@@ -219,6 +214,10 @@ export function bashProblem(
       return 'Ausgabe in Dateien umleiten ist gesperrt – Dateien nur mit den Datei-Werkzeugen schreiben.';
     }
     const part = renderWords(words);
+    // Platzhalter treffen Geheimnisse, ohne den Namen zu nennen: cat .en? / cat .npm[r]c.
+    if (words.some((word) => word.text.split('/').some(secretGlob))) {
+      return 'Befehle mit Platzhaltern, die Geheimnisse (.env, Schlüssel) treffen, sind gesperrt.';
+    }
     const [program = '', subcommand = '', third = ''] = words.map((word) => word.text);
     if (/^[A-Za-z_]\w*=/.test(program) || (WRAPPERS.has(program) && words.length > 1)) {
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
