@@ -400,6 +400,36 @@ Die Angaben stammen aus `src/agent/chat.ts`, `src/agent/requirements.ts` (Standa
 - Eigene Befehle im Projekt, die den Branch wechseln, können die Sperre umgehen, wenn sie außerhalb von AIdeation laufen. Lass während eines Laufs keine manuellen Checkouts im Arbeitsordner machen.
 - `verifyAcceptance` (Abnahme) läuft weiterhin ohne Shell. Es kann keine Befehle ausführen.
 
+### 8.6 Kompletter Test bei offenen Änderungen im Arbeitsordner
+
+Der Knopf **Aktionen → Kompletter Test** prüft immer den Stand von `main`, nicht den halbfertigen Stand eines Auftrags. Dafür checkt AIdeation im Agent-Worktree `main` losgelöst aus. Hat der Worktree offene Änderungen, startet der Test nicht mehr.
+
+Typischer Fall: Ein Auftrag wartet nach dem Nutzungslimit mit Zwischenstand auf seinem Branch (`auftrag/…`). Kein Lauf ist aktiv, deshalb wäre der Komplette Test sonst gestartet. Bisher lief er dann gegen den halbfertigen Code, und rote Ergebnisse wurden als neue Bugs angelegt. Das ist behoben.
+
+| Zustand des Arbeitsordners | Ergebnis |
+| --- | --- |
+| Offene Änderungen an versionierten Dateien | Kein Testbefehl, kein Agent, keine Bugs. Die Anforderung steht auf **fehlgeschlagen** mit dem Grund „Offene Änderungen im Agent-Worktree (wartender Auftrag?) – Test auf main nicht möglich“. |
+| `git status` schlägt fehl | Wie oben, Grund „git status im Agent-Worktree fehlgeschlagen – Test auf main nicht möglich: …“ mit den letzten Zeilen der Git-Ausgabe. |
+| Sauber, Worktree schon auf `main` losgelöst | Test läuft wie bisher. |
+| Kein verknüpfter Worktree (Hauptordner) | Test läuft wie bisher. |
+| Nur nicht versionierte Dateien | Test läuft. Nicht versionierte Dateien zählen nicht als offene Änderung. |
+
+**Bedingungen:**
+
+- Die Anforderung wird **nicht** automatisch wieder eingereiht. Sonst würde sie sofort wieder beansprucht und in einer Schleife laufen.
+- Den Komplettlauf löst du neu aus, wenn der wartende Auftrag abgeschlossen oder verworfen ist und der Arbeitsordner sauber ist.
+- Ein fehlgeschlagener Checkout auf `main` bei sauberem Stand bricht den Test weiterhin nicht ab. Das ist bewusst so.
+
+**Printscreens:** keine. Der Fall tritt nur auf, wenn ein Auftrag im Arbeitsordner wartet. Ein Bildschirmfoto braucht laufenden Docker-Stack und einen solchen Zustand. Platzhalter: `[Bild 11] Testläufe mit fehlgeschlagener Anforderung „Offene Änderungen im Agent-Worktree …“`.
+
+### 8.7 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Kompletter Test ist „fehlgeschlagen“ mit „Offene Änderungen im Agent-Worktree“ | Ein Auftrag wartet mit Zwischenstand. Auftrag abschließen oder verwerfen, dann den Komplettlauf neu auslösen. |
+| „git status im Agent-Worktree fehlgeschlagen“ | Der Arbeitsordner ist beschädigt oder gesperrt. Den Grund in der Meldung prüfen und den Ordner im Terminal mit `git status` kontrollieren. |
+| Komplettlauf meldet rote Tests, obwohl `main` gesund ist | Alte Fassung. Nach dem Update die Anforderung neu auslösen. Bereits angelegte Bugs aus einem früheren Lauf auf halbfertigem Stand bitte prüfen und schließen. |
+
 ---
 
 ## 9. Board: offene Aufträge und Ideen immer vollständig
