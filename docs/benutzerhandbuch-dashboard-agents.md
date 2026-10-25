@@ -1058,11 +1058,9 @@ Unabhängig von den eigenen Regeln gilt für jeden Agent-Befehl: Der Befehl wird
 
 ## Verwandte Dokumente
 
-- [`agent-berichte-keine-fremden-aenderungen-2026-10-25.md`](agent-berichte-keine-fremden-aenderungen-2026-10-25.md): Entwicklerbericht zu Abschnitt 19 (Ursache, Umsetzung, offene Tests)
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb
 - [`installation.md`](installation.md): HTTPS und Push-Dienste bei eigener Domain
 - [`push-abos-ssrf-besitz-logout-2026-10-25.md`](push-abos-ssrf-besitz-logout-2026-10-25.md): Entwicklerbericht zu Abschnitt 18 (Ursache, Umsetzung, offener Test)
-- [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 19 (Ursache, Umsetzung, offene Tests)
