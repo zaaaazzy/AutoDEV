@@ -22,12 +22,15 @@ Neu: `src/runner/git-sync/report-folders.test.ts` (echtes Git-Repo).
 3. Ein Bericht mit Token in `docs/risiken/` wird bei der Sprint-Sicherung zurückgehalten.
 4. Eine lose Kopie eines Risikoberichts blockiert den Checkout nicht.
 
-Offen: Ob der Ablauftest vor dem Fix scheitert, ist nicht belegt (vor dem Fix bricht er schon beim Import ab, `REPORT_DIRECTORIES` gab es nicht). Läuft der Tester: `npx --no-install tsx --test src/runner/git-sync/report-folders.test.ts src/runner/git-sync/report-copies.test.ts src/runner/git-sync/git-helpers-porcelain.test.ts src/runner/git-sync/secret-holdback.test.ts src/runner/git-sync.test.ts` (ohne Abdeckungs-Flags, der Wächter sperrt sie).
+**Teststand (Projekttestlauf 4e9889b1):** `npm run typecheck` grün. `report-copies.test.ts` und `report-folders.test.ts` laufen grün, 9 von 9 Tests.
+
+**Offen:** Die Tester-Abnahme scheiterte an DoD 1, weil der Tester den Befehl nicht freigegeben bekam. Das ist ein Freigabe-Problem, kein Fehler im Code. Noch nicht gelaufen sind `git-helpers-porcelain.test.ts`, `secret-holdback.test.ts` und `git-sync.test.ts`. Sie prüfen, ob `porcelainPath`, der Secret-Holdback und `enterOrderBranch`/`finishOrderBranch` nach der Änderung an der Ordnerliste weiter funktionieren. Befehl: `npx --no-install tsx --test src/runner/git-sync/git-helpers-porcelain.test.ts src/runner/git-sync/secret-holdback.test.ts src/runner/git-sync.test.ts` (ohne Abdeckungs-Flags, der Wächter sperrt sie). Ob der Ablauftest vor dem Fix scheitert, ist nicht durch einen Lauf belegt: Vor dem Fix bricht er schon beim Import ab, weil `REPORT_DIRECTORIES` fehlte.
 
 ## Hinweis
 - Neue Berichtsordner nur in `REPORT_DIRECTORIES` eintragen, nicht in eine zweite Liste.
 - Pfade aus `git status` nur mit `porcelainPath` auswerten (die erste Statuszeile verliert sonst das führende Leerzeichen).
 
 ## Sprint 23 und Anfrage/TODO
-- Auftrag 97ad31e0: umgesetzt, wartet auf Tester-Lauf der genannten Tests.
-- TODO: Tester-Nachweis der fünf Testdateien, danach Review.
+- Auftrag 97ad31e0: umgesetzt. Die Auftragstests sind grün, die drei bestehenden Git-Sync-Tests stehen aus.
+- TODO: die drei Testdateien freigeben oder von Hand ausführen, danach Review.
+- Benutzerhandbuch: Abschnitt 19 in `docs/benutzerhandbuch-dashboard-agents.md` beschreibt die Änderung für Anwender.
