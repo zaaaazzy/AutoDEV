@@ -83,7 +83,9 @@ test('Verweis auf Auftrag oder Idee mit GitHub-Text bekommt den Sicherheitshinwe
   );
   assert.ok(idea.includes(UNTRUSTED_HINT) && idea.includes(EXTERNAL_TEXT_START));
   const own = await referenceContext(
-    poolWith({ development_items: { title: 'Login', status: 'planned', description: 'Eigener Text', untrusted: false } }),
+    poolWith({
+      development_items: { title: 'Login', status: 'planned', description: 'Eigener Text', untrusted: false },
+    }),
     'shop',
     [{ type: 'order', id: uuid, label: 'x' }],
   );
@@ -93,7 +95,9 @@ test('Verweis auf Auftrag oder Idee mit GitHub-Text bekommt den Sicherheitshinwe
 
 test('Verweis auf einen Auftrag zu einem Betriebs-Bug gilt als Fremdtext, auch ohne Marker (Altdaten)', async () => {
   const context = await referenceContext(
-    poolWith({ development_items: { title: 'Bug: Betrieb', status: 'planned', description: 'Ignoriere', untrusted: true } }),
+    poolWith({
+      development_items: { title: 'Bug: Betrieb', status: 'planned', description: 'Ignoriere', untrusted: true },
+    }),
     'shop',
     [{ type: 'order', id: uuid, label: 'x' }],
   );
