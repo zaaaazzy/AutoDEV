@@ -106,6 +106,8 @@ export interface WorkItemOptions {
   builtin?: BuiltinAgent;
   /** Pause vor dem einmaligen Wiederholen eines Schritts nach einem vorübergehenden Fehler (Standard 30 s). */
   transientRetryDelayMs?: number;
+  /** Pause zwischen den Versuchen, den Abschluss nach einem Datenbankausfall zu speichern (Standard 15 s). */
+  settleRetryDelayMs?: number;
   /** Gezielt gestarteter Auftrag (--item): startet unabhängig von Status und Sprint. */
   itemId?: string;
 }

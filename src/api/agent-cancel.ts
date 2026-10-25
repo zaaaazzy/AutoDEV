@@ -11,7 +11,8 @@ export const ORPHAN_CANCEL_NOTE =
  * Sekunden, beendet den Agent-Prozess und schließt den Schritt ab. Läuft der Worker, der den Schritt gestartet hat,
  * nicht mehr (offline oder seither neu gestartet), wartet niemand auf die Markierung: Solche verwaisten Schritte
  * schließt der Abbruch selbst ab (Schritt und Lauf gescheitert, Auftrag blockiert). Einen übrig gebliebenen
- * Agent-Prozess beendet der Worker bei seinem nächsten Start.
+ * Agent-Prozess beendet der Worker bei seinem nächsten Start. Läuft der Worker, hält den Lauf aber nicht mehr (sein
+ * Abschluss scheiterte an der Datenbank), beendet er den abgebrochenen Schritt binnen 15 s selbst (closeOrphanedRuns).
  */
 export async function cancelAgent(
   pool: Pool,
