@@ -606,7 +606,14 @@ test('new sprints can only be created as planned', async () => {
 });
 
 test('assigns development orders to sprints only within the same project', async () => {
-  const { pool, queries } = recordingPool([]);
+  const queries: { sql: string; values: unknown[] }[] = [];
+  // Erste Abfrage: der Auftrag (backlog, ohne Sprint) existiert; zweite: der Sprint gehört nicht zum Projekt.
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: queries.length === 1 ? [{ status: 'backlog', sprintId: null }] : [] };
+    },
+  } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/development/${ID}`, {
       method: 'PATCH',
@@ -614,8 +621,8 @@ test('assigns development orders to sprints only within the same project', async
       body: JSON.stringify({ sprintId: SPRINT_ID }),
     });
     assert.equal(response.status, 400);
-    assert.equal(queries.length, 1);
-    assert.match(queries[0]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
+    assert.equal(queries.length, 2);
+    assert.match(queries[1]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
   });
 });
 
