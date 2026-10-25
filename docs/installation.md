@@ -100,6 +100,12 @@ Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (
 | Vorschau-Adresse (visuelle Prüfung) | `http://localhost:5180` |
 | Regeln für die Agents | Spiellogik in `src/logic/` getrennt von den Phaser-Szenen, Tests neben der Logik |
 
+`{tests}` bekommt je Befehl nur die Testdateien, die der Runner auch ausführt. Playwright-Tests (unter `e2e/` oder mit
+Import von `@playwright/test`) gehen nur an Befehle mit `playwright`, alle anderen Testdateien an die übrigen Befehle
+(Vitest, `tsx --test`, …). Ändert ein Auftrag nur `e2e/smoke.spec.ts`, wird `npx vitest run {tests}` übersprungen statt
+mit „No test files found“ rot zu werden. Das gilt auch für bestehende Projekte, ohne Umstellung. `--passWithNoTests` ist
+nicht nötig, ein schon von Hand ergänztes Flag schadet aber nicht.
+
 **Version ansehen** in der Sprint-Ansicht startet damit den gewählten Stand des Spiels im Review-Container. Für die
 visuelle Prüfung starte im Projektordner einmal `npm run dev`: Der Vite-Dev-Server auf Port 5180 lädt jede Änderung
 sofort neu (Hot Reload), die Prüfung zeigt also immer den neuesten Stand. Port 5180 statt des Vite-Standards 5173,

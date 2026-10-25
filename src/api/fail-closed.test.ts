@@ -38,15 +38,18 @@ async function bugRequest(
   currentSprintId: string | null = null,
 ) {
   const queries: string[] = [];
-  const pool = {
-    query: async (sql: string) => {
-      queries.push(sql);
-      if (/FROM sprints/.test(sql)) {
-        return { rows: [{ status: sprintStatus, sprintStatus, currentSprintId }], rowCount: 1 };
-      }
-      return { rows: [{ id: BUG, projectSlug: 'dev-log', sprintId: SPRINT, 1: 1 }], rowCount: 1 };
-    },
-  } as unknown as Pool;
+  const query = async (sql: string) => {
+    queries.push(sql);
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK)/.test(sql)) return { rows: [], rowCount: 0 };
+    if (/FROM sprints/.test(sql)) return { rows: [{ status: sprintStatus }], rowCount: 1 };
+    // Bisheriger Sprint des Bugs (PATCH liest ihn in der Transaktion).
+    if (/^\s*SELECT sprint_id/.test(sql)) return { rows: [{ sprintId: currentSprintId }], rowCount: 1 };
+    // Kein laufender Auftrag zum Bug.
+    if (/FROM development_items\s+WHERE bug_id/.test(sql)) return { rows: [], rowCount: 0 };
+    return { rows: [{ id: BUG, projectSlug: 'dev-log', sprintId: SPRINT, 1: 1 }], rowCount: 1 };
+  };
+  // Die Bug-Routen laufen in einer Transaktion über pool.connect().
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
   try {
     await new Promise<void>((resolve) => server.once('listening', resolve));
