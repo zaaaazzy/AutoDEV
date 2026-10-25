@@ -16,7 +16,7 @@ Branch `fix/logik-audit` (Basis `main` 34bd5a0), zusammengeführt aus `fix/audit
 
 ## Ergebnis je Bereich
 
-**Git / Review (6):** Review-DB-Kopie scheitert bei fehlerhaftem `pg_dump`; Sprint-Auftrag zweigt nur vom Sprint-Branch ab; nach verworfenem Merge wird nur gemeldet, was wirklich gesichert ist (Patch-Pfad); im PR-Modus wird nach dem Merge live geschaltet (`src/runner/go-live.ts`); „Live geschaltet“ nur bei erfolgreichem Deploy. Bereits vorher behoben: rotes Test-Gate setzt `main` zurück.
+**Git / Review (6):** Review-DB-Kopie scheitert bei fehlerhaftem `pg_dump`; Sprint-Auftrag zweigt nur vom Sprint-Branch ab; nach verworfenem Merge wird nur gemeldet, was wirklich gesichert ist (Patch-Pfad); im PR-Modus wird nach dem Merge live geschaltet (`src/runner/go-live.ts`; Nachtrag 25.10.: galt damals nur teilweise – ohne eigenen Agent-Ordner blieb der Projektordner auf `sprint/…` und es wurde nicht deployt; behoben in `src/runner/git-sync/sprint-reviews.ts`, siehe `docs/workflows.md`, GitHub-Brücke); „Live geschaltet“ nur bei erfolgreichem Deploy. Bereits vorher behoben: rotes Test-Gate setzt `main` zurück.
 
 **Runner (8):** Abgebrochene Läufe erzeugen keinen Bug-Bericht; Fortsetzung nach Nachbesserung richtig zugeordnet; ausgewählte Aufträge werden vor dem Start erneut geprüft, ein Fehler stoppt nicht mehr den ganzen Zyklus; Budget wird vor jedem Auftrag geprüft; hängende Aufträge `in_progress` werden erkannt und blockiert (`recoverStuckItems`); „Vor dem Sprint“ wird bei Fehlschlag wiederholt (höchstens 3 Mal); gescheiterter Neustart meldet sich nur einmal, `docs/workflows.md` entspricht dem Code. Bereits vorher behoben: Erkennung des Worktrees `<Projekt>/agent`.
 

@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
@@ -333,3 +337,87 @@ test('imports at most every 5 minutes, only changes since the last run, and paus
   );
   assert.equal(paused.skipped, 'Rate-Limit-Pause');
 });
+
+/**
+ * Projekt mit GitHub (lokales Bare-Repository als origin) und Sprint im Review. Ohne eigenen Agent-Ordner steht der
+ * Projektordner auf dem Sprint-Branch; mit eigenem Agent-Ordner steht er auf main und die Agents in einem Worktree.
+ */
+async function reviewProject(ownWorktree: boolean) {
+  const base = await mkdtemp(join(tmpdir(), 'gh-live-'));
+  const remote = join(base, 'remote.git');
+  const live = join(base, 'project');
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remote]);
+  execFileSync('git', ['init', '-q', '-b', 'main', live]);
+  git(live, 'config', 'user.email', 'a@b.c');
+  git(live, 'config', 'user.name', 'a');
+  await writeFile(join(live, 'base.txt'), 'base');
+  git(live, 'add', '-A');
+  git(live, 'commit', '-qm', 'base');
+  git(live, 'remote', 'add', 'origin', remote);
+  git(live, 'push', '-q', '-u', 'origin', 'main');
+  git(live, 'checkout', '-q', '-b', 'sprint/sprint-1');
+  await writeFile(join(live, 'feature.txt'), 'neu');
+  git(live, 'add', '-A');
+  git(live, 'commit', '-qm', 'feat');
+  git(live, 'push', '-q', '-u', 'origin', 'sprint/sprint-1');
+  let cwd = live;
+  if (ownWorktree) {
+    git(live, 'checkout', '-q', 'main');
+    cwd = join(base, 'agents');
+    git(live, 'worktree', 'add', '-q', cwd, 'sprint/sprint-1');
+  }
+  const mergeOnGithub = async () => {
+    const clone = join(base, 'github');
+    execFileSync('git', ['clone', '-q', remote, clone]);
+    git(clone, 'config', 'user.email', 'gh@b.c');
+    git(clone, 'config', 'user.name', 'gh');
+    git(clone, 'fetch', '-q', 'origin', 'sprint/sprint-1');
+    git(clone, 'merge', '-q', '--no-ff', 'FETCH_HEAD', '-m', 'Merge pull request #1');
+    git(clone, 'push', '-q', 'origin', 'main');
+  };
+  const deploys: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('github_mode AS mode'))
+        return {
+          rows: [
+            {
+              mode: 'issues',
+              remote: 'git@github.com:a/b.git',
+              requireApproval: false,
+              syncedAt: new Date(),
+              auth: 'ok',
+              authCheckedAt: new Date(),
+            },
+          ],
+        };
+      if (sql.includes("status = 'review' AND pr_url IS NOT NULL"))
+        return {
+          rows: [{ id: 'abcdef12-0000', name: 'Sprint 1', branch: 'sprint/sprint-1', prUrl: 'pr/1', ciStatus: null }],
+        };
+      if (sql.includes('SELECT repository')) return { rows: [{ repository: live, separate: ownWorktree }] };
+      if (sql.includes('deploy_commands')) return { rows: [{ commands: [['true']] }] };
+      if (sql.includes('INSERT INTO production_deploys')) deploys.push(values);
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const adapter: HosterAdapter = {
+    ...fakeAdapter([]).adapter,
+    pullRequestChecks: async () => ({ status: 'success', failedRun: null }),
+    mergePullRequest: mergeOnGithub,
+  };
+  return { pool, adapter, cwd, live, remote, deploys, git };
+}
+
+for (const ownWorktree of [false, true]) {
+  const layout = ownWorktree ? 'eigener Agent-Ordner' : 'Projektordner auf sprint/…';
+  test(`PR gemergt (${layout}): main live und deployt`, async () => {
+    const { pool, adapter, cwd, live, remote, deploys, git } = await reviewProject(ownWorktree);
+    const result = await syncGitHub(pool, `live-${ownWorktree}`, cwd, undefined, new Date(), () => adapter);
+    assert.equal(result.finished, 1);
+    assert.equal(git(live, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+    assert.equal(git(live, 'rev-parse', 'HEAD'), git(remote, 'rev-parse', 'main'));
+    assert.equal(deploys.length, 1, 'genau ein production_deploys-Eintrag');
+  });
+}
