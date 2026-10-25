@@ -163,6 +163,8 @@ test('Phaser-Vorlage: Vite, TypeScript, Phaser 3, Tests und Agent-Richtlinien', 
   assert.doesNotMatch(files.get('src/logic/game-state.ts')!, /from 'phaser'/);
   // Review-Container: Host und Port kommen aus REVIEW_HOST/REVIEW_FRONTEND_PORT, der Dev-Server auf der Vorschau-Adresse.
   assert.match(files.get('vite.config.ts')!, /REVIEW_FRONTEND_PORT/);
+  // Dev-Server im Netzwerk erreichbar (Handy, Tablet), wie der Dev-Server von mainty.
+  assert.match(files.get('vite.config.ts')!, /server: \{ host: true,/);
   assert.match(files.get('vite.config.ts')!, new RegExp(`GAME_DEV_PORT \\?\\? ${new URL(PHASER_DEV_URL).port}\\)`));
 });
 
