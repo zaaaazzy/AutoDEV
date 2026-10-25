@@ -374,7 +374,10 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 | --- | --- |
 | „Nicht erlaubt: mehrere Anweisungen …“ | Die Abfrage in einzelne Aufrufe aufteilen. |
 | „UPDATE und DELETE brauchen eine echte WHERE-Bedingung …“ | Eine Bedingung angeben, die nur die betroffenen Zeilen trifft. |
-| „Nicht erlaubt: ALTER TABLE nur mit ADD …“ / „Nicht erlaubt: DROP INDEX …“ | Die Anweisung ist nicht auf der Allowlist. Strukturänderungen außer `ADD` über eine Migration im Projekt machen. |
+| „Nicht erlaubt: ALTER TABLE nur mit ADD …“ | Eine andere Aktion als `ADD` (z. B. `RENAME`, `OWNER TO`, `DISABLE TRIGGER`). Strukturänderungen außer `ADD` über eine Migration im Projekt machen. |
+| „Nicht erlaubt: DROP INDEX. Erlaubt sind SELECT, WITH, …“ | Die Anweisungsart steht nicht auf der Allowlist. Die Meldung nennt alle erlaubten Arten. |
+| „Nicht erlaubt: UPDATE und DELETE in WITH (…) oder hinter EXPLAIN …“ | Die Änderung als eigene Anweisung senden, ohne `WITH` davor oder `EXPLAIN` davor. Dann greift die Zeilengrenze von 500. |
+| „Nicht erlaubt: Funktionen, die SQL aus einem String ausführen …“ | `query_to_xml`, `cursor_to_xml`, `table_to_xml`, `ts_stat` o. ä. sind gesperrt. Die Abfrage direkt schreiben. |
 | „Zu viele Zeilen: UPDATE hätte … Zeilen geändert (Grenze 500) …“ | Die `WHERE`-Bedingung enger fassen oder die Änderung in Teilen machen. |
 | „Ergebnis zu groß: mehr als 50 Zeilen …“ | Mit `WHERE` oder `LIMIT` eingrenzen oder Spalten weglassen. Bei `UPDATE … RETURNING` gilt dasselbe: Die Änderung wird dann nicht gespeichert. |
 | „SQL-Zeitlimit: …“ | Die Abfrage ist zu langsam. Index prüfen oder Umfang verringern. |
@@ -382,7 +385,7 @@ Der Entwickler-Agent und der Chat-Assistent können SQL gegen die **Projekt-Date
 
 **Wichtig:** `run_sql` ist ein Schutz gegen Fehlgriffe, keine Sicherheitsgrenze. Die eigentliche Grenze ist ein Datenbank-Benutzer des Projekts mit eingeschränkten Rechten (lesend, wo möglich). Den Benutzer richtest du in der Projekt-Datenbank ein, nicht in AIdeation.
 
-**Bilder:** Für diesen Abschnitt gibt es noch keine Printscreens. Dafür müssten App, Projekt-Datenbank und ein Agent-Lauf mit `run_sql` laufen. Platzhalter: `[Bild 4] Verlauf eines Laufs mit einer abgelehnten Abfrage` und `[Bild 5] Ergebnisausgabe mit gekürzter Zelle`.
+**Bilder:** Die Änderung vom 25.10.2026 (Allowlist, nur `ADD`, Zeilengrenze) hat keine neue Oberfläche, deshalb gibt es dafür keine neuen Printscreens. Sichtbar ist sie nur im Verlauf eines Laufs. Dafür müssten App, Projekt-Datenbank und ein Agent-Lauf mit `run_sql` laufen. Platzhalter bleiben: `[Bild 4] Verlauf eines Laufs mit einer abgelehnten Abfrage` und `[Bild 5] Ergebnisausgabe mit gekürzter Zelle`.
 
 ---
 
@@ -1100,6 +1103,7 @@ Es gibt keine neuen Felder oder Schaltflächen. Du musst nichts einstellen. Die 
 
 ## Verwandte Dokumente
 
+- [`sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md`](sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md): Entwicklerbericht zu Abschnitt 6a (Allowlist, nur ADD, Zeilengrenze, String-Funktionen)
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
