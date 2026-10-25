@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkProjectPath, inside, realTarget, SECRET_DIRECTORIES } from './path-policy.js';
 import { secretGlob, secretSegment } from './tool-paths.js';
 import {
   COMPOSE_STARTING,
@@ -41,14 +42,6 @@ export interface GuardInput {
 /** Ordnerangabe für die Einschränkung: relativ, ohne „..“ und ohne Shell-Sonderzeichen. */
 export const SCOPE_PATTERN = /^(?!.*(?:^|\/)\.\.(?:\/|$))[\w@][\w@.+-]*(?:\/[\w@][\w@.+-]*)*$/;
 
-/**
- * Nie beschreibbar: Git-Interna und Git-Hooks (.git/hooks, .husky, .githooks), Agent-Einstellungen (.claude, .mcp.json – sonst könnte sich ein
- * Agent selbst Rechte geben oder einen Hook für den nächsten Agent hinterlegen), Geheimnisse und .npmrc (Registry,
- * Proxy und Skript-Shell liessen sich dort am Wächter vorbei umstellen).
- */
-const PROTECTED_PATH =
-  /(?:^|\/)(?:\.git|\.husky|\.githooks|\.claude|\.ssh|\.aws|\.gnupg)(?:\/|$)|(?:^|\/)(?:\.mcp\.json|\.npmrc|\.env[^/]*|[^/]+\.(?:pem|key))$/i;
-
 /** npm-Unterbefehle (samt Aliassen), die Paketangaben installieren – nur Namen aus der Registry. */
 const NPM_INSTALL_SUBCOMMANDS = new Set([
   ...['install', 'i', 'in', 'ins', 'inst', 'insta', 'instal', 'isnt', 'isnta', 'isntal', 'isntall', 'add'],
@@ -69,8 +62,6 @@ function gitRemotes(projectRoot: string, run: typeof spawnSync | null): string[]
 
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead']);
-/** Ordner mit Schlüsseln und Zugangsdaten – wie PROTECTED_PATH, aber für das Lesen. */
-const SECRET_DIRECTORIES = new Set(['.ssh', '.aws', '.gnupg']);
 
 /** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
 const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
@@ -95,33 +86,18 @@ function writesFile({ operator, target }: ShellRedirect): boolean {
   return target.text !== '/dev/null' || target.expanded || target.glob;
 }
 
-/**
- * Pfad samt symbolischer Links auflösen (für noch nicht vorhandene Dateien über den nächsten vorhandenen Ordner).
- * null bei einem Link ins Leere: Schreiben legte sein (ungeprüftes) Ziel an, womöglich ausserhalb des Projekts.
- */
-function realTarget(path: string): string | null {
-  let current = path;
-  const rest: string[] = [];
-  while (!existsSync(current) && dirname(current) !== current) {
-    if (lstatSync(current, { throwIfNoEntry: false })?.isSymbolicLink()) return null;
-    rest.unshift(current.slice(dirname(current).length + 1));
-    current = dirname(current);
-  }
-  return resolve(realpathSync(current), ...rest);
-}
-
-const inside = (path: string, root: string): boolean => path === root || path.startsWith(root + sep);
-
 /** Entscheidung für einen Datei-Zugriff; liefert den Grund der Sperre oder null. */
 export function fileProblem(input: GuardInput, policy: GuardPolicy, projectRoot: string): string | null {
   const raw = input.tool_input?.file_path ?? input.tool_input?.notebook_path;
   if (typeof raw !== 'string' || !raw) return 'Kein Dateipfad angegeben.';
   const root = realpathSync(projectRoot);
-  const target = realTarget(isAbsolute(raw) ? raw : resolve(input.cwd ?? root, raw));
-  if (!target) return `${raw} ist ein symbolischer Link ins Leere.`;
-  if (!inside(target, root)) return `${raw} liegt ausserhalb des Projektordners.`;
-  const relative = target.slice(root.length + 1);
-  if (PROTECTED_PATH.test(relative)) return `${relative} ist geschützt (Git, Agent-Einstellungen oder Geheimnisse).`;
+  const verdict = checkProjectPath(projectRoot, isAbsolute(raw) ? raw : resolve(input.cwd ?? root, raw));
+  if (!verdict.ok) {
+    if (verdict.reason === 'dangling') return `${raw} ist ein symbolischer Link ins Leere.`;
+    if (verdict.reason === 'outside') return `${raw} liegt ausserhalb des Projektordners.`;
+    return `${verdict.relative} ist geschützt (Git, Hooks, Abhängigkeiten, Sicherungen, Einstellungen oder Geheimnisse).`;
+  }
+  const { real: target, relative } = verdict;
   if (policy.scopes.length && !policy.scopes.some((scope) => inside(target, resolve(root, scope)))) {
     return `${relative} liegt ausserhalb der erlaubten Ordner (${policy.scopes.join(', ')}).`;
   }

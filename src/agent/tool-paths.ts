@@ -1,8 +1,10 @@
-import { constants } from 'node:fs';
-import { lstat, open, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { constants, existsSync } from 'node:fs';
+import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
+import { BACKUP_DIRECTORY, checkProjectPath, SECRET_NAME } from './path-policy.js';
 
-export const BACKUP_DIRECTORY = '.dev-log-backups';
+export { BACKUP_DIRECTORY, SECRET_NAME } from './path-policy.js';
+/** Beim Auflisten und Durchsuchen übersprungen (nicht dasselbe wie geschützt: dist und coverage bleiben beschreibbar). */
 export const SKIPPED_DIRECTORIES = new Set([
   'node_modules',
   '.git',
@@ -13,8 +15,6 @@ export const SKIPPED_DIRECTORIES = new Set([
   'coverage',
 ]);
 export const MAX_FILE_BYTES = 400_000;
-/** Geheimnisse: .env*, Schlüssel und Zertifikate, SSH-Schlüssel sowie Zugangsdaten-Dateien (.npmrc-Tokens, .netrc …). */
-export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)|^\.(?:npmrc|netrc|git-credentials)$/i;
 
 /** Beispielnamen: ein Glob-Segment, das einen davon trifft, kann ein Geheimnis lesen (.en? trifft .env). */
 const SECRET_SAMPLES = ['.env', '.env.local', 'a.pem', 'a.key', 'id_rsa', 'id_ed25519', '.npmrc', '.netrc', '.git-credentials'];
@@ -55,61 +55,26 @@ export const secretSegment = (part: string): boolean =>
 
 export class ToolError extends Error {}
 
-/** Gesperrte Ordner: Git samt Hooks (.git/hooks, .husky, .githooks), Abhängigkeiten und Sicherungen. */
-const BLOCKED_PARTS = new Set(['.git', '.husky', '.githooks', 'node_modules', BACKUP_DIRECTORY]);
-
-/** Gesperrte Pfadteile: Git, Hooks, Abhängigkeiten, Sicherungen und Geheimnisse (Pfad relativ zum Projekt). */
-export function blockedPath(rel: string): boolean {
-  return rel
-    .split(/[\\/]/)
-    .filter(Boolean)
-    .some((part) => BLOCKED_PARTS.has(part.toLowerCase()) || SECRET_NAME.test(part));
-}
-
+/**
+ * Pfad für die Datei-Werkzeuge des lokalen Modells: im Projekt (samt aufgelöster Links) und nicht geschützt – dieselbe
+ * Richtlinie wie im Claude-Wächter (checkProjectPath). Lesen verlangt eine vorhandene Datei.
+ */
 export async function resolveInside(cwd: string, requested: unknown, forWrite = false): Promise<string> {
   if (typeof requested !== 'string' || !requested || requested.includes('\0')) {
     throw new ToolError('Ungültiger Pfad.');
   }
   const root = await realpath(cwd);
   const target = resolve(root, requested);
-  const rel = relative(root, target);
-  if (rel.startsWith('..') || resolve(root, rel) !== target) {
-    throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
+  const verdict = checkProjectPath(root, target);
+  if (!verdict.ok) {
+    throw new ToolError(
+      verdict.reason === 'outside'
+        ? 'Pfad liegt außerhalb des Projektverzeichnisses.'
+        : 'Zugriff auf diesen Pfad ist nicht erlaubt.',
+    );
   }
-  if (blockedPath(rel)) {
-    throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
-  }
-  // Resolve symlinks of the nearest existing ancestor so they cannot point outside the project or at a blocked path
-  // (z. B. notes.txt -> .env oder hook -> .git/hooks/pre-commit).
-  let existing = target;
-  for (;;) {
-    try {
-      const real = await realpath(existing);
-      if (real !== root && !real.startsWith(root + sep)) {
-        throw new ToolError('Pfad liegt außerhalb des Projektverzeichnisses.');
-      }
-      if (blockedPath(join(relative(root, real), relative(existing, target)))) {
-        throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
-      }
-      break;
-    } catch (error) {
-      if (error instanceof ToolError) {
-        throw error;
-      }
-      // Ein Link ins Leere würde beim Schreiben sein (ungeprüftes) Ziel anlegen.
-      if (
-        await lstat(existing).then(
-          (info) => info.isSymbolicLink(),
-          () => false,
-        )
-      ) {
-        throw new ToolError('Zugriff auf diesen Pfad ist nicht erlaubt.');
-      }
-      if (!forWrite && existing === target) {
-        throw new ToolError('Pfad existiert nicht.');
-      }
-      existing = dirname(existing);
-    }
+  if (!forWrite && !existsSync(target)) {
+    throw new ToolError('Pfad existiert nicht.');
   }
   return target;
 }

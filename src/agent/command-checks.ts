@@ -1,6 +1,6 @@
 // Prüfungen von Shell-Befehlen (npm, git, Assistenten-Dienste, eigene Regeln) für Wächter und lokales Modell.
-import { existsSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
+import { isAbsolute, resolve, sep } from 'node:path';
+import { realPath } from './path-policy.js';
 import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
 
 /** Ein Befehl als Text oder – im Wächter – schon zerlegt (Wörter eines einfachen Befehls). */
@@ -259,21 +259,6 @@ export function isAllowedCommand(command: string, root?: string): boolean {
     return parts.slice(2).every((part) => (part.startsWith('-') ? INSTALL_FLAGS.has(part) : PACKAGE_SPEC.test(part)));
   }
   return SAFE_COMMANDS.some((pattern) => pattern.test(command));
-}
-
-/** Pfad samt symbolischer Links auflösen; für noch nicht vorhandene Pfade über den nächsten vorhandenen Ordner. */
-export function realPath(path: string): string {
-  let current = resolve(path);
-  const rest: string[] = [];
-  while (!existsSync(current) && dirname(current) !== current) {
-    rest.unshift(basename(current));
-    current = dirname(current);
-  }
-  try {
-    return resolve(realpathSync(current), ...rest);
-  } catch {
-    return resolve(path);
-  }
 }
 
 /** Gruppen-IDs eigener Gruppen: Kleinbuchstaben, Ziffern und Bindestriche. */
