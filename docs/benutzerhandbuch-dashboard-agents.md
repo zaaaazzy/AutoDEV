@@ -1401,7 +1401,56 @@ Einzelheiten stehen im Entwicklerbericht [`commit-schutz-testwerte-zurueckgehalt
 
 ---
 
+## 27. Aus dem Sprint nehmen: nur geplante oder blockierte Aufträge
+
+Ein Auftrag lässt sich nur aus einem Sprint nehmen, wenn er **Geplant** oder **Blockiert** ist und der Sprint noch **Geplant** oder **Aktiv** ist. Aufträge in Freigabe, abgelehnte, laufende und erledigte Aufträge bleiben im Sprint. Vorher ließ sich ein Auftrag in Freigabe aus dem Sprint nehmen und verlor dabei seinen Agent. Sein Branch blieb erhalten, und „Freigeben“ mergte ihn danach ohne Sprintbezug. Bei einem Sprint im Review verließ ein Auftrag den Sprint, obwohl sein Branch schon im Pull Request steckte.
+
+> **Printscreens:** keine. Die Oberfläche wurde nicht im Browser aufgenommen. Beschrieben sind die Bedingungen, die Oberfläche und die Schnittstelle.
+
+### 27.1 Was sich geändert hat
+
+- **Herausnehmen** (Schaltfläche „Aus dem Sprint nehmen“ in der Auftragsliste des Sprints) erscheint nur bei Aufträgen mit Status **Geplant** oder **Blockiert**.
+- **Umsortieren** (Pfeile ↑/↓) und **Herausnehmen** erscheinen nur, wenn der Sprint **Geplant** oder **Aktiv** ist und du die Rolle Planung hast. Dasselbe gilt für **Aufträge hinzufügen**.
+- Die Schnittstelle prüft Auftrags- und Sprint-Status in derselben Anweisung. Trifft eine Bedingung nicht zu, antwortet sie mit 409 und schreibt nichts.
+
+### 27.2 Bedingungen
+
+| Auftrag | Sprint | Ergebnis |
+| --- | --- | --- |
+| Geplant oder Blockiert | Geplant | Auftrag verlässt den Sprint ohne Vermerk. Status Geplant wird Backlog, Blockiert bleibt Blockiert. Agent und Auto-Start werden zurückgesetzt. |
+| Geplant oder Blockiert | Aktiv | Auftrag verlässt den Sprint und erscheint unter „Aktionen“ mit dem Vermerk des Sprints. „Wieder einplanen“ bleibt dort möglich (siehe Abschnitt 3). |
+| Freigabe, Abgelehnt, In Arbeit oder Erledigt | egal | 409: „Nur geplante oder blockierte Aufträge lassen sich herausnehmen, und nur aus geplanten oder aktiven Sprints.“ Nichts wird geschrieben. |
+| Geplant oder Blockiert | Review, Abgeschlossen oder Abgebrochen | 409, dieselbe Meldung. Die Oberfläche blendet die Aktionen dann aus. |
+
+### 27.3 Was du nicht erwarten solltest
+
+- **Auftrag in Freigabe:** Er bleibt im Sprint, bis du ihn freigibst oder zurückweist. Ein abgelehnter Auftrag bleibt ebenfalls im Sprint, bis er wieder planbar ist (etwa über „Erneut versuchen“, siehe Abschnitt 24).
+- **Sprint im Review:** Die Reihenfolge lässt sich nicht mehr ändern, auch nicht durch Umsortieren. Der Sprint wird nach dem Merge des Pull Requests vom Worker abgeschlossen (siehe Abschnitt 13).
+- **Backlog-Aufträge:** Die Oberfläche bietet „Aus dem Sprint nehmen“ nur für Geplant und Blockiert an. Die Schnittstelle würde auch Backlog annehmen. Diese Abweichung ist offen.
+
+### 27.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| 409 mit „Nur geplante oder blockierte Aufträge …“ | Der Auftrag ist in Freigabe, abgelehnt, laufend oder erledigt, oder der Sprint ist nicht mehr planbar. Status des Auftrags und des Sprints prüfen. |
+| Pfeile und „Aus dem Sprint nehmen“ fehlen bei einem Sprint im Review | Gewollt. Der Sprint ist nicht mehr planbar. |
+| „Aufträge hinzufügen“ fehlt | Gewollt, sobald der Sprint nicht mehr Geplant oder Aktiv ist. |
+
+### 27.5 Stand der Prüfung
+
+- **Nicht selbst ausgeführt:** Die Tests. Der Entwickler konnte sie nicht starten, weil die Freigabe fehlte. Der Typecheck war laut Bericht grün. Ohne Abdeckungs-Flags auszuführen:
+  - `npx --no-install tsx --test src/api/development-status.test.ts`
+  - `npx --no-install tsx --test frontend/src/app/features/sprints/sprint-phases.spec.ts`
+- **Printscreens:** nicht erstellt. Es gab keinen Browser und keine laufende App.
+- **Offen:** `POST /sprints/:id/order` (`src/api/sprints.ts:329`) prüft den Sprint-Status auf dem Server nicht. Nur die Oberfläche blendet das Umsortieren bei Sprints im Review aus. Dafür braucht es einen eigenen Auftrag.
+
+Einzelheiten stehen im Entwicklerbericht [`aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md`](aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md).
+
+---
+
 ## Verwandte Dokumente
+
+- [`aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md`](aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md): Entwicklerbericht zu Abschnitt 27 (Herausnehmen nur aus Geplant oder Blockiert, Sprint-Status, offene Tests)
 
 - [`commit-schutz-testwerte-zurueckgehalten-2026-10-25.md`](commit-schutz-testwerte-zurueckgehalten-2026-10-25.md): Entwicklerbericht zu Abschnitt 26 (Testwerte, zurückgehaltene Dateien, offene Markierungs-Regel)
 - [`sprint-loeschen-auftraege-in-freigabe-2026-10-25.md`](sprint-loeschen-auftraege-in-freigabe-2026-10-25.md): Entwicklerbericht zu Abschnitt 25 (Löschen und Abschluss mit Aufträgen in Freigabe)
