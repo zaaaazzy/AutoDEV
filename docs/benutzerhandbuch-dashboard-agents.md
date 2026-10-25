@@ -928,15 +928,63 @@ Dieser Abschnitt betrifft **Einstellungen → App & Benachrichtigungen** (Schalt
 
 ---
 
-## 19. Eigene Befehlsregeln (Rechte-Kategorien)
+## 19. Agent-Berichte in `docs/tests/` und `docs/risiken/` pausieren den Sprint nicht mehr
+
+Dieser Abschnitt betrifft den Ablauf eines Auftrags und der Sprint-Sicherung. Es gibt keine neue Schaltfläche.
+
+> **Printscreens:** keine. Die Änderung wirkt nur im Git-Ablauf im Projektordner, nicht in der Oberfläche. Sichtbar ist sie im Verlauf des Auftrags und in der Sprint-Sicherung. Platzhalter: `[Bild 19] Auftragsverlauf mit dem nächsten Auftrag nach einem Tester-Bericht ohne Pause` (nur, wenn ein Browserlauf dafür freigegeben wird).
+
+### 19.1 Was sich geändert hat
+
+- **Berichte sind keine fremden Änderungen:** Der Tester und das Test-Gate legen ihre Berichte in `docs/tests/` ab, der Bug-Wächter in `docs/risiken/`. Diese Dateien sind neu und unversioniert. Bisher galten sie als fremde Änderung, und der nächste Auftrag brach mit „fremde, nicht committete Änderungen“ ab. Der Sprint pausierte. Das ist behoben.
+- **Der Auftrags-Commit nimmt sie nicht mit:** Die Berichte bleiben im Projektordner liegen und gehören nicht zum Stand des Auftrags.
+- **Die Sprint-Sicherung committet sie:** Sie kommen beim Abschluss des Sprints ins Repository.
+- **Eine Liste für alle Stellen:** Auftrags-Commit, Sauberkeits-Check und das Aufräumen loser Kopien nutzen dieselbe Liste der beiden Ordner.
+
+### 19.2 Bedienung
+
+Es ist keine Aktion nötig. Ein Agent schreibt seinen Bericht, der nächste Auftrag startet ohne Pause.
+
+| Was passiert | Ergebnis |
+| --- | --- |
+| Tester legt `docs/tests/<Datum>-….md` ab, Auftrag wird gemergt | Der nächste Auftrag startet ohne Hinweis auf fremde Änderungen. |
+| Bug-Wächter legt `docs/risiken/<Datum>-….md` ab | Wie oben. Der Bericht bleibt unversioniert liegen, bis die Sprint-Sicherung ihn committet. |
+| Sprint wird abgeschlossen (Sprint-Sicherung) | Die Berichte werden committet, sofern sie keine Zugangsdaten enthalten. |
+| Lose Kopie eines Berichts liegt im Arbeitsordner und ist im Ziel unverändert enthalten | Die Kopie wird vor dem Checkout entfernt. Der Checkout bricht nicht ab. |
+
+**Bedingungen und Grenzen:**
+
+- **Nur diese zwei Ordner:** Es zählen genau `docs/tests/` und `docs/risiken/`, jeweils mit dem Schrägstrich am Ende. `docs/risiken-x/`, `docs/tests-extra/`, `docs/andere.md` und `src/…` gelten weiter als fremde Änderung und brechen den Auftrag ab. Die Meldung nennt dann den fremden Pfad.
+- **Secret-Holdback:** Ein Bericht, der nach Zugangsdaten aussieht, wird bei der Sprint-Sicherung nicht committet. Er bleibt unversioniert liegen, bis er bereinigt ist.
+- **Die Sprint-Sicherung wartet nicht auf Berichte:** Sie zählt die Berichtsordner nicht als unterbrochene Änderung. Eine andere offene Datei im Ordner hält sie weiter an (siehe Abschnitt 8).
+- **Nur der Pfad zählt, nicht der Urheber:** Jede Datei in diesen beiden Ordnern gilt als Bericht, auch eine von Hand abgelegte. Dateien an anderen Stellen bleiben fremde Änderungen und brechen den nächsten Auftrag ab.
+
+### 19.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Nächster Auftrag bricht mit „fremde, nicht committete Änderungen (docs/tests/…)“ oder „(docs/risiken/…)“ ab | Der Stand ist nach dem Fix nicht mehr vorgesehen. Den Arbeitsordner prüfen, Worker mit dieser Version neu starten, dann den Auftrag erneut einplanen. Bleibt es so, die Administration informieren. |
+| Nächster Auftrag bricht mit einem Pfad außerhalb der beiden Ordner ab | Das ist gewollt. Die Datei committen oder verwerfen. |
+| Sprint-Sicherung wartet, obwohl nur Berichte offen sind | Ungewöhnlich. Den Arbeitsordner prüfen; liegt dort noch eine andere offene Änderung, steht sie in der Meldung. |
+| Bericht wurde bei der Sprint-Sicherung nicht committet | Er enthält vermutlich eine Zugangsdaten-Angabe. Den Bericht prüfen und die Angabe entfernen. |
+
+**Stand der Prüfung:** Grün im Projekttestlauf 4e9889b1: `report-copies.test.ts` und `report-folders.test.ts` (9 von 9). Dazu gehört der Ablauf in einem echten Git-Repo (Bericht, Merge, nächster Auftrag ohne Pause) sowie die Gegenproben für fremde Pfade. `npm run typecheck` ist grün. Noch nicht gelaufen: `git-helpers-porcelain.test.ts`, `secret-holdback.test.ts` und `git-sync.test.ts`. Ob der Ablauftest vor dem Fix scheitert, ist nicht belegt.
+
+---
+
+## 20. Eigene Befehlsregeln (Rechte-Kategorien)
 
 Unter **Einstellungen → Rechte-Kategorien** legst du eigene Befehlsgruppen für ein Projekt an. Du gibst sie danach einzelnen Agents frei. Eine Regel prüft AIdeation beim Speichern, und der Wächter prüft sie noch einmal, wenn ein Agent den Befehl ausführt.
 
-Früher verbot AIdeation bei eigenen Regeln nur bekannte Gefahren. Dadurch ließen sich Programme wie `timeout`, `find` oder `awk` freigeben, mit denen ein Agent Dateien außerhalb des Projekts schreiben oder eine beliebige Shell starten konnte. Jetzt gilt eine **Allowlist**: Erlaubt ist nur, was auf der Liste in Abschnitt 19.2 steht. Alles andere lehnt AIdeation ab.
+Früher verbot AIdeation bei eigenen Regeln nur bekannte Gefahren. Dadurch ließen sich Programme wie `timeout`, `find` oder `awk` freigeben, mit denen ein Agent Dateien außerhalb des Projekts schreiben oder eine beliebige Shell starten konnte. Jetzt gilt eine **Allowlist**: Erlaubt ist nur, was auf der Liste in Abschnitt 20.2 steht. Alles andere lehnt AIdeation ab.
 
-> **Printscreens:** noch keine. Die Aufnahmen stehen aus, weil der Browserlauf dafür nicht freigegeben wurde. Platzhalter: `[Bild 17] Einstellungen → Rechte-Kategorien: Formular „Datenbank-Hilfen“ mit abgelehnter Regel „Bash(timeout:*)“ und roter Meldung`, `[Bild 18] Rechte-Kategorien: gespeicherte eigene Kategorie mit ihren Befehlen (Kennzeichnung „eigene“)`.
+![Einstellungen → Rechte-Kategorien: Formular mit abgelehnter Regel „Bash(timeout:*)“ und roter Meldung](benutzerhandbuch-dashboard-agents/rechte-kategorie-abgelehnt.png)
 
-### 19.1 Wo, wer und wie
+![Rechte-Kategorien: gespeicherte eigene Kategorie mit ihren Befehlen](benutzerhandbuch-dashboard-agents/rechte-kategorie-gespeichert.png)
+
+![Rechte-Kategorien: Übersicht mit eingebauten und eigenen Kategorien](benutzerhandbuch-dashboard-agents/rechte-kategorien-uebersicht.png)
+
+### 20.1 Wo, wer und wie
 
 - **Wo:** Einstellungen → Rechte-Kategorien. Der Bereich gehört zum aktiven Projekt.
 - **Wer:** Nur die Administration darf anlegen, ändern und löschen. Andere Benutzer sehen die Kategorien, dürfen aber nichts speichern (403).
@@ -947,7 +995,7 @@ Früher verbot AIdeation bei eigenen Regeln nur bekannte Gefahren. Dadurch ließ
   - **Befehle:** einer pro Zeile, 1 bis 30 je Kategorie. Doppelte Zeilen entfallen.
 - **Speichern:** Wird eine Regel abgelehnt, speichert der Server nichts. Die Meldung steht im Formular, die übrigen Eingaben bleiben stehen.
 
-### 19.2 Erlaubte Regeln
+### 20.2 Erlaubte Regeln
 
 Eine Regel hat die Form `Bash(programm:*)` (alle Argumente), `Bash(programm unterbefehl:*)` oder `Bash(programm)` (genau dieser Befehl). Zusätzlich ist `WebFetch(domain:localhost)` erlaubt, ebenso `127.0.0.1`.
 
@@ -970,7 +1018,7 @@ Eine Regel hat die Form `Bash(programm:*)` (alle Argumente), `Bash(programm unte
 
 Nicht auf der Liste stehen zum Beispiel `timeout`, `nice`, `find`, `awk`, `sed`, `tee`, `cp` und `ln`. Mit ihnen lassen sich Dateien schreiben oder andere Programme starten.
 
-### 19.3 Wrapper und Shell-Builtins bei Agent-Befehlen
+### 20.3 Wrapper und Shell-Builtins bei Agent-Befehlen
 
 Unabhängig von den eigenen Regeln gilt für jeden Agent-Befehl: Der Befehl wird wie in Bash zerlegt, und jeder Teilbefehl wird geprüft.
 
@@ -982,23 +1030,23 @@ Unabhängig von den eigenen Regeln gilt für jeden Agent-Befehl: Der Befehl wird
   - Folge für Testbefehle: ohne `cd … &&` schreiben, den Ordner gibt der Lauf vor.
 - **awk:** `awk`, `gawk`, `nawk` und `mawk` sind gesperrt, weil sie Programme starten können.
 
-### 19.4 Fehlerbehebung
+### 20.4 Fehlerbehebung
 
 | Meldung (Auszug) | Ursache und was zu tun ist |
 | --- | --- |
-| „…: dieses Programm ist für eigene Regeln nicht freigegeben (erlaubt: …).“ | Das Programm steht nicht auf der Liste in 19.2, etwa `timeout`, `find` oder `sed`. Eine enge Regel mit einem erlaubten Programm wählen. |
+| „…: dieses Programm ist für eigene Regeln nicht freigegeben (erlaubt: …).“ | Das Programm steht nicht auf der Liste in 20.2, etwa `timeout`, `find` oder `sed`. Eine enge Regel mit einem erlaubten Programm wählen. |
 | „…: keine Shell-Sonderzeichen (…).“ | Die Regel enthält etwas, das eine Shell auswertet, etwa Semikolon, Pipe, `$` oder Anführungszeichen. Nur Programm, Unterbefehl und einfache Optionen eintragen. |
 | „…: dieser Befehl ist für Agents grundsätzlich gesperrt.“ | Der Befehl steht auf der Sperrliste, etwa `git push`, `rm`, `curl` oder `sudo`. Er lässt sich nicht freigeben. |
 | „…: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.“ | Die Regel verweist auf `..`, Geheimnisse oder AIdeation. Er lässt sich nicht freigeben. |
 | „…: erlaubt sind Bash(befehl:*), Bash(befehl) oder WebFetch(domain:localhost).“ | Die Schreibweise stimmt nicht, etwa eine fehlende Klammer. |
 | „…: Befehl zu lang.“ | Der Befehl ist länger als 120 Zeichen. Aufteilen oder kürzen. |
-| „Befehle: 1–30 pro Kategorie.“ oder „Name der Kategorie: 1–80 Zeichen.“ | Die Eingabe passt nicht zu den Grenzen aus 19.1. |
+| „Befehle: 1–30 pro Kategorie.“ oder „Name der Kategorie: 1–80 Zeichen.“ | Die Eingabe passt nicht zu den Grenzen aus 20.1. |
 | 403 beim Speichern | Dein Konto ist nicht Administrator. |
-| Befehle einer Kategorie sind nach dem Neuladen verschwunden | Eine Regel ist nicht mehr erlaubt, siehe 19.5. |
+| Befehle einer Kategorie sind nach dem Neuladen verschwunden | Eine Regel ist nicht mehr erlaubt, siehe 20.5. |
 | Agent meldet „Wrapper … nur mit einfachen Optionen …“ | Der Befehl hat einen Wrapper mit unklaren Optionen. Den Wrapper nur mit festen Optionswerten schreiben, etwa `timeout 60 …`, oder ganz weglassen. |
 | Agent meldet „Shell-Builtins wie cd, export, alias … sind gesperrt“ | Ein Builtin steht im Befehl. Jeden Befehl einzeln aufrufen, ohne `cd` und `export`. |
 
-### 19.5 Bedingungen und Grenzen
+### 20.5 Bedingungen und Grenzen
 
 - **Alte Regeln:** Gespeicherte Regeln, die heute nicht mehr erlaubt sind (etwa `Bash(timeout:*)`, `Bash(find:*)` oder `Bash(awk:*)`), übergeht AIdeation beim Laden **ohne Meldung**. Die übrigen Regeln derselben Kategorie bleiben wirksam, und der Start bricht nicht ab. Die Einträge bleiben in der Datenbank. Die Oberfläche zeigt das noch nicht an. Wer so eine Regel braucht, legt eine enge Regel mit einem erlaubten Programm an.
 - **Freigeben:** Eine Kategorie wirkt erst, wenn du sie einem Agent unter **Agents** freigibst. Die Oberfläche sagt das so: „Unter Agents gibst du jedem Agent die einzelnen Befehle frei.“
@@ -1010,6 +1058,8 @@ Unabhängig von den eigenen Regeln gilt für jeden Agent-Befehl: Der Befehl wird
 
 ## Verwandte Dokumente
 
+- [`agent-berichte-keine-fremden-aenderungen-2026-10-25.md`](agent-berichte-keine-fremden-aenderungen-2026-10-25.md): Entwicklerbericht zu Abschnitt 19 (Ursache, Umsetzung, offene Tests)
+- [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb
