@@ -127,7 +127,9 @@ function bugRoutes(bug: BugRow) {
       if (sql.startsWith('UPDATE bugs SET')) return { rows: [{ id: bug.id }] };
       return { rows: [], rowCount: 0 };
     },
-  } as unknown as Pool;
+    // PATCH läuft in einer Transaktion über pool.connect(); der Client nutzt dieselbe Attrappe.
+    connect: async () => ({ query: (sql: string, values?: unknown[]) => pool.query(sql, values), release: () => undefined }),
+  } as unknown as Pool & { query: (sql: string, values?: unknown[]) => Promise<unknown> };
   registerBugRoutes(app as unknown as Router, pool);
   const call = async (key: string, body: unknown) => {
     const result = { status: 200, body: undefined as unknown };
