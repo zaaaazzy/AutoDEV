@@ -15,6 +15,15 @@ Der Tester sollte die Abdeckung messen und als `@@COVERAGE` melden. Sein Wächte
 - **Wächter** (`src/agent/tool-permissions.ts`): unverändert, nicht gelockert.
 - **Doku**: `docs/benutzerhandbuch-dashboard-agents.md` (Abschnitt zum Tester).
 
+## Zweite Runde: ausgelassene DoD-Punkte
+
+Der Tester-Lauf war formal grün (67/67 Tests, Typprüfung grün), die Abnahme scheiterte aber an „DoD 2 und 3: nicht geprüft“. Der Tester hatte diese Ablaufpunkte im `@@ACCEPTANCE`-Block ausgelassen, und ein ausgelassener Punkt zählt nie als erfüllt.
+
+- Die Anweisung an den Tester (`src/runner/acceptance.ts`) nennt die Zahl der DoD-Punkte und ein Beispiel mit jeder Nummer.
+- Punkte, die nur ein Mensch erledigen kann (etwa „Abgenommen wird per Freigabe in der Vorschau“), meldet der Tester als `"manual":true`. Sie blockieren nicht und erscheinen unter „Von dir zu prüfen“.
+- Test in `src/runner/acceptance.test.ts`: Beispiel enthält alle Nummern, ausgelassene Punkte bleiben abgelehnt, manuelle Punkte blockieren nicht.
+- Handbuch: neue Fehlerhilfe-Zeile „DoD …: nicht geprüft“ in `docs/benutzerhandbuch-dashboard-agents.md`.
+
 ## Tests
 
 Drei Tests „Abnahme: …“ in `src/runner/runner.test.ts`: bestanden bei grünen Tests ohne Tester-Messung (gespeicherte Abdeckung 82,5 % statt `null`), abgelehnt bei roten Tests oder unbelegtem Kriterium. Dazu `src/runner/acceptance.test.ts`.
@@ -22,7 +31,7 @@ Drei Tests „Abnahme: …“ in `src/runner/runner.test.ts`: bestanden bei grü
 ## Geänderte Dateien
 
 - `src/runner/acceptance.ts`, `src/runner/runner-steps.ts`, `src/runner/coverage.ts`
-- `src/runner/runner.test.ts`
+- `src/runner/runner.test.ts`, `src/runner/acceptance.test.ts`
 - `docs/benutzerhandbuch-dashboard-agents.md`
 
 ## Worauf zu achten ist
