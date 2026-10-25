@@ -101,9 +101,16 @@ export interface MarkerLine {
   record: Record<string, unknown>;
 }
 
+/** Beginn oder Ende eines Markdown-Codeblocks (``` oder ~~~, höchstens drei Leerzeichen eingerückt). */
+const CODE_FENCE = /^ {0,3}(`{3,}|~{3,})/;
+/** Was vor einem Marker stehen darf: Einrückung und ein Listenpunkt („- “, „* “, „1. “). */
+const LINE_START = /^[ \t]*(?:(?:[-*+]|\d{1,3}[.)])[ \t]+)?/;
+
 /**
  * Liest Marker-Zeilen (`@@IDEA {…}`, `@@BUG {…}`, `@@ORDER {…}`) aus der Antwort; Fliesstext dazwischen wird
- * ignoriert. Zeilen mit kaputtem JSON landen mit Grund unter `discarded`.
+ * ignoriert. Ein Marker zählt nur am Zeilenanfang (davor höchstens Einrückung und Listenpunkt) und ausserhalb von Codeblöcken –
+ * zitierter Dateiinhalt oder Fliesstext über Marker legt keine Einträge an. Zeilen mit kaputtem JSON landen mit Grund
+ * unter `discarded`.
  */
 export function parseMarkerLines(
   output: string,
@@ -111,14 +118,22 @@ export function parseMarkerLines(
 ): { lines: MarkerLine[]; discarded: { line: string; problem: string }[] } {
   const lines: MarkerLine[] = [];
   const discarded: { line: string; problem: string }[] = [];
+  let fence: string | null = null;
   for (const raw of output.split(/\r?\n/)) {
-    // Frühester Marker der Zeile; „@@IDEA“ trifft nicht „@@IDEAS“ o. ä.
-    const found = markers
-      .map((marker) => ({ marker, at: raw.search(new RegExp(`${marker}(?![A-Z_])`)) }))
-      .filter((entry) => entry.at >= 0)
-      .sort((a, b) => a.at - b.at)[0];
-    if (!found) continue;
-    const line = raw.slice(found.at).trim();
+    const fenceMatch = CODE_FENCE.exec(raw);
+    if (fenceMatch) {
+      // Ein Block endet nur mit demselben Zeichen, mindestens so lang wie beim Öffnen.
+      const marks = fenceMatch[1]!;
+      if (fence === null) fence = marks;
+      else if (marks[0] === fence[0] && marks.length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    // Vor dem Marker nur Einrückung und ein Listenpunkt; „@@IDEA“ trifft nicht „@@IDEAS“ o. ä.
+    const rest = raw.slice(LINE_START.exec(raw)![0].length);
+    const marker = markers.find((candidate) => new RegExp(`^${candidate}(?![A-Z_])`).test(rest));
+    if (!marker) continue;
+    const line = rest.trim();
     const start = line.indexOf('{');
     const end = line.lastIndexOf('}');
     let data: unknown;
@@ -131,7 +146,7 @@ export function parseMarkerLines(
       discarded.push({ line, problem: 'Kein gültiges JSON.' });
       continue;
     }
-    lines.push({ marker: found.marker, line, record: data as Record<string, unknown> });
+    lines.push({ marker, line, record: data as Record<string, unknown> });
   }
   return { lines, discarded };
 }

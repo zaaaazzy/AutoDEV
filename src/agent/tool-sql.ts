@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { maskTokens } from '../core/secret-mask.js';
 
 /** Höchstens so viele Zeilen werden gelesen und ausgegeben; die Zeile danach zeigt nur noch „mehr“ an. */
 const MAX_ROWS = 50;
@@ -402,15 +403,21 @@ async function readRows(client: SqlClient, sql: string, onRow: (row: unknown) =>
   return { command: result?.command, rowCount: result?.rowCount };
 }
 
-/** Eine Zelle für die Ausgabe: lange Texte, JSON und bytea gekürzt, mit Markierung. */
+/**
+ * Eine Zelle für die Ausgabe: Tokens maskiert (vor dem Kürzen, sonst bliebe ein angeschnittener Schlüssel stehen),
+ * lange Texte, JSON und bytea gekürzt, mit Markierung.
+ */
 function clipCell(value: unknown): unknown {
   let text: string;
-  if (typeof value === 'string') text = value;
+  if (typeof value === 'string') text = maskTokens(value);
   else if (Buffer.isBuffer(value)) text = `\\x${value.toString('hex', 0, MAX_CELL_CHARS)}`;
   else if (value !== null && typeof value === 'object' && !(value instanceof Date)) text = JSON.stringify(value);
   else return value;
   const length = Buffer.isBuffer(value) ? 2 + value.length * 2 : text.length;
-  return length > MAX_CELL_CHARS ? `${text.slice(0, MAX_CELL_CHARS)}… [gekürzt, ${length} Zeichen]` : value;
+  if (length > MAX_CELL_CHARS) {
+    return `${maskTokens(text).slice(0, MAX_CELL_CHARS)}… [gekürzt, ${length} Zeichen]`;
+  }
+  return typeof value === 'string' ? text : value;
 }
 
 const clipRow = (row: unknown): unknown =>
@@ -418,7 +425,8 @@ const clipRow = (row: unknown): unknown =>
     ? Object.fromEntries(Object.entries(row).map(([key, value]) => [key, clipCell(value)]))
     : clipCell(row);
 
-const rowsText = (rows: unknown[]): string => (rows.length ? `\n${JSON.stringify(rows.map(clipRow))}` : '');
+// Maskiert: das Ergebnis landet im Chat, in der Anfragen-Doku und im Prompt-Protokoll (Tokens aus der Projekt-DB).
+const rowsText = (rows: unknown[]): string => (rows.length ? `\n${maskTokens(JSON.stringify(rows.map(clipRow)))}` : '');
 
 /**
  * Executes one SQL statement in the project's own database inside one transaction (rolled back on any error).
@@ -518,7 +526,8 @@ export async function runProjectSql(
     if (stopped) return `${stopped}${rowsText(rows)}`;
     await client.query('ROLLBACK').catch(() => undefined);
     const message = error instanceof Error ? error.message : String(error);
-    return `SQL-Fehler: ${message.split(databaseUrl).join('[Datenbank-Zugang]')}`;
+    // Fehlermeldungen zitieren Werte („Key (token)=(…) already exists“).
+    return `SQL-Fehler: ${maskTokens(message.split(databaseUrl).join('[Datenbank-Zugang]'))}`;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);

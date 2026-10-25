@@ -217,7 +217,9 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
   });
   const run = async (args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
-    return { ...result, output: redactOutput(result.output, process.env).trim() };
+    // Diffs ohne Token-Maske: stageAll sucht darin nach Zugangsdaten (filesWithSecrets), sonst fände es keine mehr.
+    const tokens = !args.includes('diff');
+    return { ...result, output: redactOutput(result.output, process.env, { tokens }).trim() };
   };
   const git = async (...args: string[]) => {
     // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
