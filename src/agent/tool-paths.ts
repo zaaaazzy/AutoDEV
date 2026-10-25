@@ -13,7 +13,8 @@ export const SKIPPED_DIRECTORIES = new Set([
   'coverage',
 ]);
 export const MAX_FILE_BYTES = 400_000;
-export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)/i;
+/** Geheimnisse: .env*, Schlüssel und Zertifikate, SSH-Schlüssel sowie Zugangsdaten-Dateien (.npmrc-Tokens, .netrc …). */
+export const SECRET_NAME = /^\.env|\.(?:pem|key)$|^id_(?:rsa|ed25519|ecdsa)|^\.(?:npmrc|netrc|git-credentials)$/i;
 
 export class ToolError extends Error {}
 
