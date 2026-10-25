@@ -17,6 +17,7 @@ import {
   MAIN_BRANCH,
   porcelainPath,
   refreshSprintFromMain,
+  setAsideFiles,
   trackedChanges,
   slugify,
   sprintBranch,
@@ -211,7 +212,14 @@ export async function finishOrderBranch(
   passed: boolean,
   rawExecute: CommandExecutor = runCommand,
   hold?: (files: string[]) => boolean,
-): Promise<{ merged: boolean; held?: boolean; commit: string | null; message: string }> {
+): Promise<{
+  merged: boolean;
+  held?: boolean;
+  /** Zurückgehaltene Dateien (sehen nach Zugangsdaten aus): Der Auftrag ist dann nicht gemergt. */
+  secrets?: string[];
+  commit: string | null;
+  message: string;
+}> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
@@ -236,13 +244,27 @@ export async function finishOrderBranch(
       if (backup) console.warn(`Offener Merge von ${target.branch} verworfen, Arbeitsstand gesichert in ${backup}`);
       await git('merge', '--abort');
     }
-    // Wie bei allen Auftrags-Commits: Dateien, die nach Zugangsdaten aussehen, bleiben außen vor.
-    await stageAll(git, must, undefined, { orderOnly: true });
+    // Wie bei allen Auftrags-Commits: Dateien, die nach Zugangsdaten aussehen, bleiben außen vor – und verlassen den
+    // Arbeitsordner (gesichert), sonst blockierten sie als „fremde Änderungen“ den nächsten Auftrag.
+    const secrets = await stageAll(git, must, undefined, { orderOnly: true });
+    const heldNote = secrets.length
+      ? `Nicht committet, weil sie nach Zugangsdaten aussehen: ${secrets.join(', ')} – aus dem Arbeitsordner genommen, gesichert in ${await setAsideFiles(git, cwd, secrets, `zurueckgehalten-${item.id.slice(0, 8)}`)}.`
+      : '';
     const dirty = Boolean(await must('diff', '--cached', '--name-only'));
     if (passed) {
       if (dirty) {
         const [subject, body] = taskCommitMessage(item.kind, sprintName, item.title, item.id);
         await must('commit', '--no-verify', '-m', subject, '-m', body);
+      }
+      // Ohne die zurückgehaltenen Dateien ist der Auftrag nicht vollständig (z. B. fehlen seine Tests): nicht mergen.
+      if (secrets.length) {
+        await leaveOrderBranch({ git, must }, target.base, cwd);
+        return {
+          merged: false,
+          commit: null,
+          secrets,
+          message: `${heldNote} ${target.branch} wird nicht gemergt: erfundene Werte als Testwert markieren („dev-log: testwert“) bzw. echte Schlüssel entfernen, dann „Erneut versuchen“.`,
+        };
       }
       // Review-Freigabe: Branch bleibt bestehen und wird erst nach der Freigabe gemergt (mergeApprovedBranch).
       if (hold) {
@@ -309,6 +331,7 @@ export async function finishOrderBranch(
     const saved = [
       dirty ? `Zwischenstand auf ${target.branch} gesichert.` : '',
       backup ? `Offener Merge verworfen, Arbeitsstand als Patch gesichert in ${backup}.` : '',
+      heldNote,
     ]
       .filter(Boolean)
       .join(' ');
@@ -332,7 +355,8 @@ async function rescueOrderBranch(
 ): Promise<boolean> {
   if ((await currentBranch(git)) !== target.branch) return false;
   if ((await git('rev-parse', '-q', '--verify', 'MERGE_HEAD')).exitCode === 0) await git('merge', '--abort');
-  await stageAll(git, must, undefined, { orderOnly: true });
+  const secrets = await stageAll(git, must, undefined, { orderOnly: true });
+  if (secrets.length) await setAsideFiles(git, cwd, secrets, `zurueckgehalten-${item.id.slice(0, 8)}`);
   if ((await git('diff', '--cached', '--name-only')).output) {
     const committed = await git(
       'commit',

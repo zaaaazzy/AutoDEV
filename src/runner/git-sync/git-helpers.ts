@@ -1,6 +1,6 @@
 // Git-Grundlagen: Befehlsausführung, Remotes, Branch-Namen, Zugangsdaten-Schutz und Sprint-Branch.
 import { existsSync, realpathSync } from 'node:fs';
-import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
@@ -80,7 +80,6 @@ const INTERNAL_EXCLUDES = [
 /** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens); gemeinsam mit der Maskierung. */
 export const SECRET_CONTENT = SECRET_PATTERNS;
 
-/** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
 /**
  * Pfad aus einer Diff-Kopfzeile („+++ b/pfad“). Git hängt bei Namen mit Leerzeichen einen Tab an und setzt Namen mit
  * Sonderzeichen in Anführungszeichen mit C-Escapes („+++ "b/zug\303\244nge.txt"“) – beides muss gelesen werden, sonst
@@ -124,17 +123,105 @@ export function diffTargetPath(header: string): string | null {
   return rest.startsWith('b/') ? rest.slice(2) : null;
 }
 
+/** Testdateien, in denen eindeutige Testwerte (Platzhalter oder markiert) nicht als Zugangsdaten zählen. */
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+/** Markierung für einen erfundenen Wert in einer Testdatei: in derselben oder der Zeile direkt davor. */
+export const TEST_VALUE_MARKER = /dev-log:\s*testwert/i;
+const PLACEHOLDER_WORD = /example|beispiel|dummy|fake|placeholder|platzhalter|redacted|x{6,}/i;
+
+/** Mindestens `length` aufsteigende Zeichen am Stück („abcdef“, „AbCdEf“, „123456“) – in echten Schlüsseln praktisch nie. */
+function hasAscendingRun(text: string, length: number): boolean {
+  const lower = text.toLowerCase();
+  let run = 1;
+  for (let index = 1; index < lower.length; index++) {
+    const ascending =
+      /[a-z0-9]/.test(lower[index]!) && lower.charCodeAt(index) === lower.charCodeAt(index - 1) + 1;
+    run = ascending ? run + 1 : 1;
+    if (run >= length) return true;
+  }
+  return false;
+}
+
+/** Bekannte Platzhaltermuster: Wörter wie EXAMPLE/FAKE, lange Wiederholungen („aaaaaaaa“) oder Folgen („abcdef“). */
+export function isPlaceholderToken(token: string): boolean {
+  return PLACEHOLDER_WORD.test(token) || /(.)\1{7,}/.test(token) || hasAscendingRun(token, 6);
+}
+
+/** PEM-Kopf in einer Testzeile: nur ein Platzhalter, wenn der Block in derselben Zeile kurz bzw. erfunden endet. */
+function isPlaceholderPem(line: string, index: number, header: string): boolean {
+  const rest = line.slice(index + header.length);
+  const end = rest.search(/-----END [A-Z ]*PRIVATE KEY-----/);
+  if (end < 0) return false;
+  const body = rest.slice(0, end).replace(/\\n|\s/g, '');
+  return body.length < 40 || isPlaceholderToken(body);
+}
+
+/** Jede Fundstelle der Zeile ist ein eindeutiger Testwert (nur für Testdateien gefragt). */
+function onlyTestValues(line: string): boolean {
+  for (const pattern of SECRET_CONTENT) {
+    for (const match of line.matchAll(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`))) {
+      const placeholder = match[0].startsWith('-----BEGIN')
+        ? isPlaceholderPem(line, match.index, match[0])
+        : isPlaceholderToken(match[0]);
+      if (!placeholder) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. In *.test.ts/*.spec.ts zählen eindeutige
+ * Testwerte nicht: markierte Zeilen (TEST_VALUE_MARKER) und Fundstellen nach bekannten Platzhaltermustern. Echte
+ * Schlüssel bleiben auch dort zurückgehalten – geprüft wird jede Fundstelle einzeln.
+ */
 export function filesWithSecrets(diff: string): string[] {
   const found = new Set<string>();
   let file: string | null = null;
+  let previous = '';
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
       file = diffTargetPath(line);
-    } else if (file && line.startsWith('+') && SECRET_CONTENT.some((pattern) => pattern.test(line))) {
-      found.add(file);
+      previous = '';
+      continue;
     }
+    const added = line.startsWith('+') ? line : '';
+    if (file && added && SECRET_CONTENT.some((pattern) => pattern.test(added))) {
+      const testValue =
+        TEST_FILE.test(file) &&
+        (TEST_VALUE_MARKER.test(added) || TEST_VALUE_MARKER.test(previous) || onlyTestValues(added));
+      if (!testValue) found.add(file);
+    }
+    previous = added;
   }
   return [...found];
+}
+
+/**
+ * Zurückgehaltene Dateien aus dem Arbeitsordner nehmen: Kopie unter BACKUP_DIRECTORY, versionierte Dateien auf HEAD
+ * zurück, neue gelöscht. Sonst wanderten sie beim Checkout mit und der nächste Auftrag scheiterte an „fremden
+ * Änderungen“. Liefert den Sicherungsordner (relativ zum Projekt).
+ */
+export async function setAsideFiles(
+  git: GitHelpers['git'],
+  cwd: string,
+  files: string[],
+  label: string,
+): Promise<string> {
+  const folder = join(BACKUP_DIRECTORY, `${label}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  for (const file of files) {
+    const source = join(cwd, file);
+    if (existsSync(source)) {
+      const copy = join(cwd, folder, file);
+      await mkdir(dirname(copy), { recursive: true });
+      await copyFile(source, copy);
+    }
+    if ((await git('cat-file', '-e', `HEAD:${file}`)).exitCode === 0) {
+      await git('checkout', 'HEAD', '--', `:(literal)${file}`);
+    } else {
+      await unlink(source).catch(() => undefined);
+    }
+  }
+  return folder;
 }
 
 /**

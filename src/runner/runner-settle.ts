@@ -4,7 +4,7 @@ import { logged } from '../core/log.js';
 import { sendPush } from '../core/push.js';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { saveOrderDoc, upsertDoc } from '../api/docs.js';
-import { clearManualTodo, MERGE_TODO, setActionTodo } from './action-todo.js';
+import { clearManualTodo, MERGE_TODO, SECRETS_TODO, setActionTodo } from './action-todo.js';
 import { resumeBlockedByBug } from './autofix.js';
 import { commitTaskToGit, finishOrderBranch } from './git-sync.js';
 import {
@@ -109,6 +109,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   // Auftrags-Branch abschließen: bei Erfolg in den Sprint-/Basis-Branch mergen, sonst Zwischenstand sichern.
   let mergeProblem: string | null = null;
   let commit: string | null = null;
+  let secretsHeld = false;
   if (ctx.branch) {
     // Review-Freigabe (Projekteinstellung): nur ganze Abläufe, nicht das Ausführen eines einzelnen Agents.
     const review =
@@ -121,6 +122,7 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
       return;
     }
     if (passed && !result.merged) mergeProblem = result.message;
+    secretsHeld = Boolean(result.secrets?.length);
     commit = result.commit;
   } else if (passed && ctx.sprintName) {
     commit = await commitTaskToGit(options.cwd, item, ctx.sprintName, execute);
@@ -144,7 +146,9 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
       .catch(logged('runner-steps'));
     // Kein Konflikt (die gehen oben in einen neuen Versuch): Ohne Vermerk wartete der Sprint still auf eine Behebung,
     // die niemand startet – sichtbar machen, was zu tun ist.
-    if (!isMergeConflict(mergeProblem)) await setActionTodo(pool, item.id, MERGE_TODO).catch(logged('runner-steps'));
+    if (!isMergeConflict(mergeProblem)) {
+      await setActionTodo(pool, item.id, secretsHeld ? SECRETS_TODO : MERGE_TODO).catch(logged('runner-steps'));
+    }
   } else if (!succeeded) {
     await clearManualTodo(pool, item.id).catch(logged('runner-steps'));
   }

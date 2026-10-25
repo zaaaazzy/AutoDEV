@@ -1332,8 +1332,78 @@ Einzelheiten stehen im Entwicklerbericht [`sprint-loeschen-auftraege-in-freigabe
 
 ---
 
+## 26. Commit-Schutz: Testwerte in Testdateien und zurückgehaltene Dateien
+
+Der Commit-Schutz hält Dateien zurück, die nach Zugangsdaten aussehen. Bisher blieb eine solche Datei im Arbeitsordner liegen. Der nächste Auftrag pausierte dann den Sprint, und der Auftrag selbst galt trotzdem als erledigt, obwohl seine Tests fehlten. Das ist behoben: Ein zurückgehaltener Auftrag bekommt eine Aktion und wird nicht gemergt. Erfundene Testwerte in Testdateien gelten nicht mehr als Zugangsdaten.
+
+> **Printscreens:** keine. Dafür müssten App, Datenbank und Browser laufen; das wurde nicht gemacht. Platzhalter: `[Bild 26a] Auftrag mit Aktion „Dateien wegen Zugangsdaten zurückgehalten …“`, `[Bild 26b] Sprintbericht, ToDo-Kapitel mit derselben Aktion`.
+
+### 26.1 Was sich geändert hat
+
+- **Testwerte in Testdateien.** Für Dateien, deren Name auf `.test.` oder `.spec.` plus Endung endet (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), gilt eine Ausnahme. Eine Fundstelle zählt nicht als Zugangsdaten, wenn sie
+  - einem bekannten Platzhaltermuster folgt: ein Wort wie `EXAMPLE`, `FAKE`, `DUMMY`, `PLACEHOLDER`, `BEISPIEL`, `PLATZHALTER` oder `REDACTED`, sechs `x` in Folge, acht gleiche Zeichen in Folge oder sechs aufsteigende Buchstaben oder Ziffern (`abcdef`, `123456`). Ein PEM-Block zählt als Platzhalter, wenn er in derselben Zeile kurz endet, oder
+  - in derselben Zeile oder in der Zeile direkt davor im Diff mit `dev-log: testwert` markiert ist.
+- **Andere Dateien.** Dieselben Werte in anderen Dateien (z. B. `src/agent/tool-sql.ts`) gelten nie als Testwert. Die Markierung wirkt nur in Testdateien.
+- **Zurückgehaltene Dateien.** Am Ende des Auftrags werden sie nach `.dev-log-backups/zurueckgehalten-<Auftrags-Kurzid>-<Zeitstempel>/` kopiert und aus dem Arbeitsordner genommen. Versionierte Dateien gehen auf den letzten Commit zurück, neue Dateien werden gelöscht.
+- **Der Auftrag wird nicht gemergt.** Der übrige Stand wird auf dem Auftrags-Branch committet. Der Auftrag bekommt die Aktion „Dateien wegen Zugangsdaten zurückgehalten – Testwerte markieren bzw. Schlüssel entfernen, dann „Erneut versuchen““. Die Aktion steht am Auftrag und im ToDo-Kapitel des Sprintberichts. Der Sprint geht ohne den Auftrag nicht live.
+- **Der nächste Auftrag startet sauber.** Die Dateien wandern nicht mehr auf den Sprint-Branch mit, deshalb gibt es keine „fremden Änderungen“ mehr.
+
+### 26.2 Bedienung
+
+| Fall | Ergebnis |
+| --- | --- |
+| Testdatei mit erfundenem Wert nach einem Platzhaltermuster | Wird committet, kein Eintrag |
+| Erfundener Wert in einer Datei ohne `.test.`/`.spec.` | Datei zurückgehalten |
+| Echter Schlüssel in einer Testdatei, ohne Markierung | Datei zurückgehalten |
+| Zwei Fundstellen in einer Testdatei: Platzhalter und echter Schlüssel | Datei zurückgehalten |
+| Mehrzeiliger PEM-Block in einer Testdatei | Datei zurückgehalten |
+| Echter Schlüssel in einer Zeile mit `dev-log: testwert` | Wird committet, siehe 26.3 (offen) |
+
+So gehst du bei der Aktion vor:
+
+1. Am Auftrag die Aktion lesen. Die Meldung nennt die Dateien und den Sicherungsordner.
+2. Die Datei in `.dev-log-backups/` ansehen.
+3. Den Wert markieren (`// dev-log: testwert` in derselben oder der Zeile direkt davor), wenn er erfunden ist. Ist er echt, den Schlüssel aus der Datei entfernen und im Geheimnisspeicher hinterlegen.
+4. Ob die Datei dafür zurück in den Projektordner muss, ist offen (26.5).
+5. „Erneut versuchen“ auslösen. Der Sprint muss dafür geplant oder aktiv sein (Abschnitt 24).
+
+**Bedingungen und Grenzen:**
+
+- **Markierung hebt die ganze Zeile auf.** In Testdateien wird eine Zeile mit `dev-log: testwert` und die Zeile direkt danach nicht geprüft, auch wenn ein **echter Schlüssel** darin steht. Der Test `secret-holdback.test.ts` legt das so fest. Das widerspricht der Erwartung, dass echte Schlüssel auch in Testdateien zurückgehalten werden. Bis die Entwicklung das entschieden hat, nur Werte markieren, die sicher erfunden sind.
+- **Markierung nur in Diff-Zeilen.** Die Markierung zählt, wenn sie in einer neuen Zeile steht. Eine unveränderte Zeile zwischen Markierung und Wert hebt die „direkt davor“-Regel auf.
+- **Muster sind keine Garantie.** Ein echter Schlüssel, der zufällig ein solches Muster enthält (z. B. `…FAKE…` oder `abcdef`), zählt in Testdateien als Testwert.
+- **Platzhalter neben echtem Schlüssel.** Ohne Markierung wird jede Fundstelle einzeln geprüft. Ein Platzhalter in derselben Zeile macht einen echten Schlüssel daneben nicht harmlos.
+- **Sonderzeichen in Dateinamen** (Leerzeichen, Umlaute, `*[1]`) werden weiter unterstützt.
+- **Ausgaben bleiben geschwärzt.** Die Maske aus Abschnitt 22 ist unverändert. Die Prüfung vor dem Commit läuft auf dem ungeschwärzten Diff.
+- **Die Sicherung ist die einzige Kopie.** Nach dem Lauf liegt die Datei nicht mehr im Arbeitsordner.
+
+### 26.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Die Aktion „Dateien wegen Zugangsdaten zurückgehalten“ kommt nach „Erneut versuchen“ wieder | Die genannte Datei hat weiterhin einen Wert, der nicht als Testwert gilt. Die Datei prüfen, dann markieren oder den Wert entfernen. |
+| Eine Testdatei mit erfundenem Wert wird zurückgehalten | Das Muster ist nicht bekannt, oder die Markierung fehlt bzw. steht nicht in der Zeile oder direkt davor. Die Markierung in die Zeile setzen oder den Wert durch einen eindeutigen Platzhalter ersetzen. |
+| Eine Datei ohne `.test.`/`.spec.` wird zurückgehalten | Die Markierung wirkt außerhalb von Testdateien nicht. Den Wert entfernen oder ersetzen. |
+| Der Auftrag hat seine Tests nicht mehr im Arbeitsordner | Gewollt, solange die Aktion offen ist. Die Dateien liegen in `.dev-log-backups/`. |
+| Der Sprint wartet auf einen Auftrag mit dieser Aktion | Gewollt. Der Auftrag muss erst gemergt sein, bevor der Sprint live geht. |
+
+### 26.4 Stand der Prüfung
+
+- **Getestet, Nachweis aus dem Testlauf cd40dd2b:** `npm run typecheck` grün. `src/runner/action-todo.test.ts` und `src/runner/git-sync/secret-holdback.test.ts` 12/12 grün, darunter der Ablauf bis zur Sperre des Merges. `npm test` ohne Abdeckungs-Flags meldet laut Entwicklerbericht 1500/1500 grün. Diese Läufe habe ich nicht selbst wiederholt.
+- **Tester-Abnahme:** Sie ist nur an der fehlenden Freigabe für `npx --no-install tsx --test …` gescheitert, nicht an den Tests.
+- **Printscreens:** nicht erstellt. Ich habe keinen Zugriff auf eine laufende App: Netzwerkabfragen sind für Agents gesperrt, und ein Browser stand mir nicht zur Verfügung. Die Platzhalter oben bleiben für eine Aufnahme mit laufender App.
+- **Offen, Sicherheit:** Die Markierung hebt echte Schlüssel in der markierten Zeile auf (26.2). Der Test legt das fest, der Bericht sagt etwas anderes. Die Entwicklung muss entscheiden.
+- **Offen:** Ob die zurückgehaltenen Testdateien aus Auftrag 87704371 (`src/agent/tool-sql.test.ts`, `src/core/command.test.ts`) wiederhergestellt werden müssen. Nicht geprüft.
+- **Offen:** Ob „Erneut versuchen“ die Datei aus der Sicherung braucht oder nur den Branch verwendet. Im Code nicht geprüft.
+- **Nicht geprüft:** Die Oberfläche im Browser.
+
+Einzelheiten stehen im Entwicklerbericht [`commit-schutz-testwerte-zurueckgehalten-2026-10-25.md`](commit-schutz-testwerte-zurueckgehalten-2026-10-25.md).
+
+---
+
 ## Verwandte Dokumente
 
+- [`commit-schutz-testwerte-zurueckgehalten-2026-10-25.md`](commit-schutz-testwerte-zurueckgehalten-2026-10-25.md): Entwicklerbericht zu Abschnitt 26 (Testwerte, zurückgehaltene Dateien, offene Markierungs-Regel)
 - [`sprint-loeschen-auftraege-in-freigabe-2026-10-25.md`](sprint-loeschen-auftraege-in-freigabe-2026-10-25.md): Entwicklerbericht zu Abschnitt 25 (Löschen und Abschluss mit Aufträgen in Freigabe)
 
 - [`redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md`](redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md): Entwicklerbericht zu Abschnitt 22 (Muster, Schreiben über Temp-Datei, Marker, Aufrufer mit `tokens: false`)

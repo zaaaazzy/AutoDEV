@@ -53,6 +53,13 @@ export function manualTodo(checks: string[]): string | null {
 export const MERGE_TODO = 'Merge in den Sprint fehlgeschlagen – Ursache im Auftrag beheben, dann „Erneut versuchen“';
 
 /**
+ * Der Commit-Schutz hat Dateien des Auftrags zurückgehalten (sehen nach Zugangsdaten aus). Ohne sie ist der Auftrag
+ * unvollständig; sie liegen gesichert unter .dev-log-backups, der Auftrags-Branch bleibt ungemergt.
+ */
+export const SECRETS_TODO =
+  'Dateien wegen Zugangsdaten zurückgehalten – Testwerte markieren bzw. Schlüssel entfernen, dann „Erneut versuchen“';
+
+/**
  * Gescheiterter Auftrag: Ein Abnahmehinweis aus einem früheren, bestandenen Testschritt gilt nicht mehr. Sonst hielte
  * der Autopilot den Auftrag für „wartet auf einen Menschen“ und den Sprint für fertig, obwohl die Behebung noch läuft.
  */
