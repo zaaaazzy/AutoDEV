@@ -1274,9 +1274,10 @@ Die Oberfläche bietet beim Erneuten Versuchen keine Sprint-Wahl. Eine ausdrück
 
 ### 24.4 Stand der Prüfung
 
-- **Nicht bestätigt:** `src/api/development-retry.test.ts` ist nicht ausgeführt. Der Test braucht PostgreSQL. Ohne Datenbank wird er übersprungen. Aufruf: `npx --no-install tsx --test src/api/development-retry.test.ts src/api/development-status.test.ts src/api/sprint-complete.test.ts`.
+- **Getestet:** Projekttestlauf `dc145e41`. `src/api/development-retry.test.ts` und `src/api/review-routes.test.ts` bestehen zusammen 11 von 11, nichts wurde übersprungen. `npm run typecheck` ist grün. Die Abnahme wertet das noch nicht als belegt; die Agents haben die Tests nicht selbst bewertet.
+- **Nicht gelaufen:** `src/api/development-status.test.ts` und `src/api/sprint-complete.test.ts` brauchen PostgreSQL. Aufruf: `npx --no-install tsx --test src/api/development-status.test.ts src/api/sprint-complete.test.ts`.
+- **Oberfläche:** „Aufträge hinzufügen“ ruft nur `POST /api/development/:id/take-into-sprint` auf. Diese Route setzt Status, Sprint und `auto_run` in einem Schritt. Die Oberfläche hat deshalb keinen zweistufigen Ablauf mehr, und die Bedienung in 24.2 gilt unverändert. Die Route `/retry` mit `sprintId` ist zusätzlich verfügbar und getestet.
 - **Offen:** Die Auswahl im Worker (`src/runner/runner-selection.ts`) ist nicht geändert. Ob dort zusätzlich Aufträge in abgeschlossenen oder abgebrochenen Sprints ausgeschlossen werden sollen, ist offen. Das Laufzeit-Gate `sprintPaused` hält solche Aufträge derzeit an.
-- **Offen:** Die Sprint-Übernahme in der Oberfläche läuft über `take-into-sprint`, nicht über `/retry` mit `sprintId`. Das Verhalten für Nutzer ist dasselbe. Der Test dafür fehlt in diesem Auftrag.
 - **Offen:** Printscreens und die Bedienung in der laufenden App wurden nicht geprüft.
 
 ---
