@@ -1078,7 +1078,8 @@ Es gibt keine neuen Felder oder Schaltflächen. Du musst nichts einstellen. Die 
 - **Nur ein Hinweis an das Modell:** Die Markierung ist keine Sperre. Sie ersetzt weder die Prüfung durch einen Menschen noch die Rechte der Agents.
 - **Freigabe bleibt Pflicht:** Aufträge zu einem Bug aus Betrieb oder GitHub starten erst, wenn ein Mensch den Bug freigegeben hat. Das gilt unabhängig von „auto_bugfix“.
 - **Noch nicht umgesetzt:** Ob Ingest-Bugs gar nicht erst an Code-Agents gehen, regelt der Auftrag „Ingest-Bugs nicht automatisch an Code-Agents geben“ (Sprint 9). Er ist noch in Freigabe.
-- **Tests:** Die Tests zu dieser Änderung sind noch nicht im Testlauf belegt. Den Stand siehst du im Entwicklerbericht unten.
+- **Tests:** Der Projekttestlauf 311cbd48 hat `npm run typecheck` bestanden und die Tests `chat-references`, `requirements`, `bugs`, `bug-approval` und `runner` mit 89 von 89 bestanden. Danach wurden in `chat-references.test.ts` nur zwei lange Zeilen umbrochen, ohne Änderung der Logik; dieser Stand ist nicht erneut getestet. `prettier --check` ist nicht gelaufen. Offen ist außerdem der Nachweis, dass die neuen Tests ohne die Änderung rot wären.
+- **Markierungsname:** Der Code nutzt `<<<FREMDER-TEXT …>>>` statt `UNTRUSTED_START`/`UNTRUSTED_END`. Ob das bleibt, entscheidet das Review.
 
 ### 21.4 Fehlerbehebung
 
