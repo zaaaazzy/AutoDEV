@@ -281,7 +281,8 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const action = isRecord(request.body) && request.body.action === 'pull' ? 'pull' : 'push';
     const result = await pool.query(
       `UPDATE sprints SET git_sync = 'pending', git_action = $2, git_message = NULL
-        WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed')) RETURNING ${SPRINT_COLUMNS}`,
+        WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed', 'awaiting_merge'))
+        RETURNING ${SPRINT_COLUMNS}`,
       [request.params.id, action],
     );
     if (!result.rows[0]) {
@@ -356,7 +357,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     // oder auf Freigabe warten: sonst verlieren diese ihren Sprint (die Freigabe mergte danach ohne Sprint) bzw. ein
     // offener PR bleibt ohne Sprint zurück.
     const deletable = `status IN ('planned', 'completed', 'cancelled')
-          AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))
+          AND (git_sync IS NULL OR git_sync IN ('done', 'failed', 'awaiting_merge'))
           AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status IN ('in_progress', 'approval'))`;
     // Geplante Aufträge eines gelöschten Sprints sind nicht mehr geplant: zurück ins Backlog, sonst stünden sie als
     // „Geplant“ ohne Sprint in der Liste (den Sprint-Verweis löscht der Fremdschlüssel). Einzeln gestartete behalten

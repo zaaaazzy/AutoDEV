@@ -175,7 +175,8 @@ async function loadPlanningInput(pool: Pool, project: string): Promise<PlanningI
 
 /**
  * Was den Autopilot anhält: gescheiterte Git-Sicherung des letzten abgeschlossenen Sprints (bis zur Freigabe),
- * ein noch laufender Abschluss und die Arbeitszeiten (nur für das Starten neuer Sprints).
+ * ein noch laufender Abschluss, ein Sprint, der noch nicht in main ist („wartet auf Merge“), und die Arbeitszeiten
+ * (nur für das Starten neuer Sprints).
  * Budget: Der Autopilot prüft es (noch) nicht selbst; die Agent-Läufe, die er anstößt, halten die Budget-Limits
  * ein (src/runner/budget.ts). Eine eigene Prüfung hier ist ein eigener Auftrag.
  */
@@ -223,6 +224,14 @@ export async function autopilotGuard(pool: Pool, project: string, now = new Date
   }
   if (last?.sync === 'pending' || last?.sync === 'running') {
     return guard('finishing', `Abschluss von „${last.name}“ läuft (Test-Gate, Merge, Push).`);
+  }
+  // Ein neuer Sprint zweigt von main ab: Solange main den letzten nicht enthält, arbeitete er ohne dessen Code.
+  if (last?.sync === 'awaiting_merge') {
+    return guard(
+      'finishing',
+      `„${last.name}“ ist noch nicht in main – wartet auf den Merge${last.message ? ` (${last.message.slice(0, 400)})` : ''}. ` +
+        'Der nächste Sprint startet, sobald main den Sprint enthält.',
+    );
   }
   // PR-Modus: Der nächste Sprint startet erst, wenn der Pull Request gemergt ist (sonst fehlt der Stand in main).
   const review = (

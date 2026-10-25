@@ -346,6 +346,18 @@ export const MIGRATIONS: readonly Migration[] = [
         FOR EACH ROW EXECUTE FUNCTION sprints_fix_branch();
     `,
   },
+  // Sprint-Abschluss „wartet auf Merge“: main liegt in einem anderen Ordner mit offenen Änderungen, der Sprint ist noch
+  // nicht in main. Früher hiess das „done“, der Autopilot startete den nächsten Sprint vom alten main. Der Worker setzt
+  // „done“, sobald main den Sprint enthält (git merge-base --is-ancestor).
+  {
+    version: 14,
+    name: 'sprint-wartet-auf-merge',
+    sql: `
+      ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_git_sync_check;
+      ALTER TABLE sprints ADD CONSTRAINT sprints_git_sync_check
+        CHECK (git_sync IN ('pending', 'running', 'done', 'failed', 'awaiting_merge'));
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

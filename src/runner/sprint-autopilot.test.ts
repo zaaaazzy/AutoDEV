@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
+import { autopilotGuard } from '../api/sprint-planning.js';
 import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
 import { sprintAutopilot, sprintSettled } from './sprint-autopilot.js';
 
@@ -64,6 +65,17 @@ test('Autopilot pausiert nach gescheitertem Merge und startet keinen Sprint', as
   const { pool, started } = fakePool({ id: 'old', name: 'Sprint 1', sync: 'failed', message: 'Merge-Konflikt' });
   assert.equal(await sprintAutopilot(pool, 'demo', MONDAY_10), 'paused');
   assert.equal(started(), false);
+});
+
+// Früher meldete der Abschluss „done“, obwohl main (in einem anderen Ordner) den Sprint noch nicht enthielt – der
+// nächste Sprint zweigte vom alten main ab.
+test('Autopilot wartet, solange main den letzten Sprint nicht enthält, und nennt den Grund', async () => {
+  const { pool, started } = fakePool({ id: 'old', name: 'Sprint 1', sync: 'awaiting_merge', message: 'git merge' });
+  assert.equal(await sprintAutopilot(pool, 'demo', MONDAY_10), 'working');
+  assert.equal(started(), false);
+  const guard = await autopilotGuard(pool, 'demo', MONDAY_10);
+  assert.equal(guard?.state, 'finishing');
+  assert.match(guard?.message ?? '', /Sprint 1.*noch nicht in main/);
 });
 
 test('Sprint nicht fertig, wenn Aufträge nur am Arbeitsordner oder Laufwerk scheiterten (Sprint 20)', () => {

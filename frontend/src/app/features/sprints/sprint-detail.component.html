@@ -39,6 +39,15 @@
       <span>{{ sprint.gitMessage }}</span>
     </div>
   }
+  @if (sprint.status === 'completed' && sprint.gitSync === 'awaiting_merge') {
+    <div class="sprint-go paused">
+      <strong>⏳ Wartet auf Merge nach <code>main</code>.</strong>
+      <span
+        >{{ sprint.gitMessage }} Der Autopilot startet den nächsten Sprint erst, wenn <code>main</code> diesen Sprint
+        enthält; das prüft Dev Log von selbst.</span
+      >
+    </div>
+  }
   @if (sprint.status === 'cancelled') {
     <div class="sprint-go failed">
       <strong>⏹ Sprint abgebrochen.</strong>

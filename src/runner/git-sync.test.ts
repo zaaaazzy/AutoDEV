@@ -368,15 +368,22 @@ test('merges a finished sprint into main checked out elsewhere only when that fo
     return { calls, execute };
   };
   const clean = run('');
-  assert.equal(await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), true);
+  assert.equal(
+    await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []),
+    'merged',
+  );
   assert.ok(clean.calls.some((call) => call.startsWith('git merge --no-ff sprint/s1')));
 
+  // Offene Änderungen: Der Mensch übernimmt selbst (wartet auf Merge), nichts angefasst.
   const busy = run(' M src/app.ts\n');
-  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), false);
+  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), 'busy');
   assert.ok(!busy.calls.some((call) => call.startsWith('git merge')));
 
   const red = run('', true);
-  assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), false);
+  assert.equal(
+    await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []),
+    'failed',
+  );
   // Zurück auf den Stand vor dem Merge (nicht ORIG_HEAD, den das Test-Gate verschoben haben kann).
   assert.ok(red.calls.includes('git reset --keep abc1234'));
 });
@@ -1160,8 +1167,88 @@ test('Live schalten deployt nicht aus einem Projektordner auf fremdem Branch ode
 });
 
 // Früher hiess die Sicherung „done“, obwohl der Sprint nie in main ankam (main im Ordner der Menschen ausgecheckt, dort
-// offene Änderungen) – der nächste Sprint zweigte dann vom alten main ab.
-test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gescheitert statt „done“, dort nichts angefasst', async () => {
+// offene Änderungen) – der Autopilot meldete „ready“, und der nächste Sprint zweigte vom alten main ab. Jetzt wartet
+// der Sprint auf den Merge (auch mit restart_after_sprint: kein Neustart) und wird „done“, sobald main ihn enthält.
+test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → wartet auf Merge, danach „done“', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
+  const agents = `${human}-agents`;
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@t',
+  };
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, { cwd, stdio: 'pipe', env }).toString().trim();
+  run(human, 'init', '-q', '-b', 'main');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '-b', 'sprint/sprint-1-apfel', agents, 'main');
+  await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'sprint');
+  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
+  for (const restart of [false, true]) {
+    const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+    const query = pool.query.bind(pool) as (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }>;
+    (pool as unknown as { query: typeof query }).query = async (sql, values = []) => {
+      if (sql.includes('restart_after_sprint AS restart')) return { rows: [{ restart }] };
+      return query(sql, values);
+    };
+    assert.equal(await syncSprintToGit(pool, 'p', agents), 1);
+    const waiting = updates.find((entry) => /SET git_sync = 'awaiting_merge'/.test(entry.sql));
+    assert.ok(waiting, 'wartet auf Merge');
+    assert.match(String(waiting.values[1]), /git merge sprint\/sprint-1-apfel/);
+    assert.ok(!updates.some((entry) => /SET git_sync = '(done|failed)'/.test(entry.sql)), 'weder done noch failed');
+    assert.ok(!updates.some((entry) => /INSERT INTO app_settings/.test(entry.sql)), 'kein Neustart angefordert');
+    assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+    assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
+  }
+
+  // Noch nicht gemergt: Die Prüfung lässt den Sprint warten.
+  const commit = run(agents, 'rev-parse', '--short', 'sprint/sprint-1-apfel');
+  const settle = () => {
+    const updates: { sql: string; values: unknown[] }[] = [];
+    const pool = {
+      query: async (sql: string, values: unknown[] = []) => {
+        updates.push({ sql, values });
+        if (sql.includes("WHERE project_slug = $1 AND git_sync = 'awaiting_merge'"))
+          return { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', commit }] };
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+    return { pool, updates };
+  };
+  const still = settle();
+  assert.equal(await syncSprintToGit(still.pool, 'p', agents), 0);
+  assert.ok(!still.updates.some((entry) => /SET git_sync = '(done|failed)'/.test(entry.sql)));
+
+  // Der Mensch räumt auf und übernimmt den Sprint von Hand: Beim nächsten Durchlauf wird er „done“.
+  run(human, 'checkout', '-q', '--', 'a.txt');
+  run(human, 'merge', '-q', '--no-ff', '-m', 'Sprint übernommen', 'sprint/sprint-1-apfel');
+  const merged = settle();
+  await syncSprintToGit(merged.pool, 'p', agents);
+  const done = merged.updates.find((entry) => /SET git_sync = 'done'/.test(entry.sql));
+  assert.ok(done, 'nach dem Merge „done“');
+  assert.match(done.sql, /WHERE id = \$1 AND git_sync = 'awaiting_merge'/, 'nur aus „wartet auf Merge“ heraus');
+
+  // Ein Stand, den git nicht kennt, ist ein echter Fehler (Exit-Code ≠ 0/1): weder „done“ noch weiter „wartet“.
+  const unknown = settle();
+  const pool = unknown.pool as unknown as { query: (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }> };
+  const inner = pool.query;
+  pool.query = async (sql, values = []) =>
+    sql.includes("WHERE project_slug = $1 AND git_sync = 'awaiting_merge'")
+      ? { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', commit: 'deadbeef00' }] }
+      : inner(sql, values);
+  await syncSprintToGit(unknown.pool, 'p', agents);
+  assert.ok(unknown.updates.some((entry) => /SET git_sync = 'failed'/.test(entry.sql)));
+  assert.ok(!unknown.updates.some((entry) => /SET git_sync = 'done'/.test(entry.sql)));
+});
+
+// Konflikte oder rotes Test-Gate beim Merge in den Ordner der Menschen bleiben ein echter Fehler (Autopilot pausiert).
+test('Sprint-Sicherung: main in anderem Ordner, Test-Gate dort rot → gescheitert, Merge zurückgenommen', async () => {
   const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
   const agents = `${human}-agents`;
   const run = (cwd: string, ...args: string[]) =>
@@ -1186,8 +1273,10 @@ test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gesch
   await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
   run(agents, 'add', '-A');
   run(agents, 'commit', '-q', '-m', 'sprint');
-  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
-  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+  // Ungetrackte Datei zählt nicht als offene Änderung, lässt aber das Test-Gate nur im Ordner der Menschen scheitern.
+  await writeFile(join(human, 'rot.marker'), 'x');
+  const gate = ['node', '-e', "process.exit(require('fs').existsSync('rot.marker') ? 1 : 0)"];
+  const { pool, updates } = fakePool(null, 'push', [gate], 'completed');
   assert.equal(await syncSprintToGit(pool, 'p', agents), 0);
   const failed = updates.find((entry) => /git_sync = 'failed'/.test(entry.sql));
   assert.ok(failed, 'als gescheitert markiert');
@@ -1195,8 +1284,8 @@ test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gesch
     String(failed.values.find((value) => typeof value === 'string' && value.includes('main'))),
     /noch nicht in main/,
   );
-  assert.ok(!updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
-  assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+  assert.ok(!updates.some((entry) => /SET git_sync = '(done|awaiting_merge)'/.test(entry.sql)));
+  assert.equal(run(human, 'status', '--porcelain'), '?? rot.marker');
   assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
 });
 

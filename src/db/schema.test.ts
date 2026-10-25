@@ -44,6 +44,31 @@ test('Mehrfach definierte CHECK-Listen: jede Fassung erlaubt alle Werte der letz
   }
 });
 
+// Sprint-Abschluss, der noch nicht in main ist (main in anderem Ordner mit offenen Änderungen): eigener Zustand
+// „wartet auf Merge“, damit der Autopilot keinen Sprint vom alten main startet.
+test('sprints.git_sync: erlaubt awaiting_merge, Migration läuft mehrfach, Unsinn wird abgelehnt', async (t) => {
+  await withMigratedDatabase(t, 'devlog_awaiting_merge', async (db) => {
+    await runMigrations(db); // zweiter Start ohne Fehler
+    await db.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+    const sprint = (
+      await db.query<{ id: string }>(
+        `INSERT INTO sprints (project_slug, name, status) VALUES ('shop', 'Sprint 1', 'active') RETURNING id`,
+      )
+    ).rows[0].id;
+    for (const state of ['pending', 'running', 'done', 'failed', 'awaiting_merge']) {
+      await db.query('UPDATE sprints SET git_sync = $2 WHERE id = $1', [sprint, state]);
+    }
+    await assert.rejects(db.query(`UPDATE sprints SET git_sync = 'bogus' WHERE id = $1`, [sprint]), /check/);
+    // Ein PATCH auf den abgeschlossenen Sprint (Name, Ziel) reiht keine neue Git-Sicherung ein.
+    await db.query(`UPDATE sprints SET status = 'completed' WHERE id = $1`, [sprint]);
+    await db.query(`UPDATE sprints SET git_sync = 'awaiting_merge' WHERE id = $1`, [sprint]);
+    await db.query(`UPDATE sprints SET status = 'completed', name = 'Sprint 1b' WHERE id = $1`, [sprint]);
+    const row = (await db.query<{ sync: string }>('SELECT git_sync AS sync FROM sprints WHERE id = $1', [sprint]))
+      .rows[0];
+    assert.equal(row.sync, 'awaiting_merge');
+  });
+});
+
 type Bug = { status: string; fixed_at: Date | null };
 
 async function bugOf(db: Pick<pg.Pool, 'query'>, id: string): Promise<Bug> {

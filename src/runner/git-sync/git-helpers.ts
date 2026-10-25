@@ -440,9 +440,18 @@ export async function branchExists(git: GitHelpers['git'], branch: string): Prom
 }
 
 /**
- * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
- * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
+ * Enthält `target` (Standard main) den Stand `revision`? Exit 1 von `git merge-base --is-ancestor` heisst „nein“
+ * (noch nicht übernommen); jeder andere Fehler (unbekannter Stand, kaputtes Repository) wirft – er ist weder „ja“
+ * noch „nein“.
  */
+export async function mainContains(git: GitHelpers['git'], revision: string, target = MAIN_BRANCH): Promise<boolean> {
+  const result = await git('merge-base', '--is-ancestor', revision, target);
+  if (result.exitCode === 0) return true;
+  if (result.exitCode === 1) return false;
+  const detail = result.output.trim().slice(-200) || `Exit-Code ${result.exitCode}`;
+  throw new Error(`Prüfung, ob ${target} den Stand ${revision} enthält, fehlgeschlagen: ${detail}`);
+}
+
 /**
  * Basis für einen neuen Sprint-Branch: der neueste Stand von main. Liegt GitHub vorn (z. B. ein gemergter Pull
  * Request des Vorgänger-Sprints) und hat das lokale main nichts Eigenes, zählt origin/main – sonst fehlte dem neuen
@@ -475,6 +484,10 @@ export async function refreshSprintFromMain(git: GitHelpers['git'], branch: stri
   return message;
 }
 
+/**
+ * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
+ * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
+ */
 export async function checkoutSprintBranch(
   cwd: string,
   sprint: SprintRef | string,

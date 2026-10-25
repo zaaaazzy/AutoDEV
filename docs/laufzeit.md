@@ -274,9 +274,13 @@ stateDiagram-v2
     state "running" as gr
     state "done" as gd
     state "failed" as gf
+    state "awaiting_merge · Wartet auf Merge" as gw
     gp --> gr : Arbeitszyklus
     gr --> gd : Test-Gate grün, Merge, Push, Tag
     gr --> gf : Konflikt, rote Tests, Push-Fehler
+    gr --> gw : main in anderem Ordner mit offenen Änderungen
+    gw --> gd : main enthält den Sprint (merge-base --is-ancestor)
+    gw --> gf : Prüfung scheitert
   }
   [*] --> sp : Mensch oder Übernehmen
   sp --> sa : Starten oder Autopilot in Arbeitszeit
@@ -288,6 +292,7 @@ stateDiagram-v2
 
 - Sicherung gescheitert → pausiert, bis sie gelingt oder „Autopilot freigeben“.
 - Sicherung läuft → wartet.
+- Sicherung wartet auf Merge (letzter Sprint noch nicht in `main`) → wartet, startet keinen Sprint vom alten `main`.
 - Aktiver Sprint ohne backlog, planned, in_progress und nur noch Blockaden mit „Aktion notwendig“ → abschliessen (auch nachts).
 - Nächsten Vorschlag übernehmen und starten: nur in den Arbeitszeiten (Standard Mo–Fr 08–18 Uhr).
 
@@ -296,7 +301,7 @@ stateDiagram-v2
 - **Auftrag:** Branch `auftrag/…` vom Sprint-Branch; Erfolg → Merge, Misserfolg → WIP-Commit.
 - **Sprint:** Branch `sprint/…`; Sicherung committet Reste, Test-Gate, Push.
 - **Abschluss:** Merge nach `main` (--no-ff), erneutes Test-Gate, gegebenenfalls GitHub-Actions abwarten, Push, Tag `sprint-name-id`.
-- **AIdeation selbst:** `main` liegt im Arbeitsordner der Menschen. Mit „Nach dem Sprint-Abschluss neu starten“ merged der Worker dort nur, wenn nichts offen ist, prüft die Tests (rot → `reset --keep`) und fordert den Neustart an.
+- **AIdeation selbst:** `main` liegt im Arbeitsordner der Menschen. Mit „Nach dem Sprint-Abschluss neu starten“ merged der Worker dort nur, wenn nichts offen ist, prüft die Tests (rot → `reset --keep`) und fordert den Neustart an. Ist dort etwas offen, wartet der Sprint auf den Merge von Hand (kein Neustart) und wird „done“, sobald `main` ihn enthält.
 - Nie committet: `.env`, Backups, Schlüsseldateien, Zeilen mit Tokens.
 
 ## 8 · Chat, Aktionen und Anfragen auf Knopfdruck
