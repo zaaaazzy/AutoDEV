@@ -33,7 +33,8 @@ Auftrag 39ad59ba (Bugfix, 25.10.2026). Sprint 23. Gefunden im Code-Review vom 21
 
 ## Worauf zu achten ist
 
-- **Tests noch nicht gelaufen:** Der Wächter hielt alle Testläufe zurück. Der Tester soll gezielt `npx --no-install tsx --test src/api/development-create.test.ts src/api/development-status.test.ts` ohne Coverage-Flags und `npm run typecheck` starten.
+- **Testergebnis (Testlauf 78553ad7):** `npm run typecheck` grün, `src/api/development-create.test.ts` 8 von 8 bestanden. Die Agents konnten die Tests wegen des Wächters nicht selbst starten, der Lauf kam aus dem Test-Gate. `development-status.test.ts` lief nicht mit, weil der Auftrag die Datei nicht ändert; `DEV_FIELDS` ist unverändert.
+- **Diff gegen `main` ist größer als dieser Auftrag:** Der Zweig baut auf dem Sprint-Stand auf (u. a. Sprint-Sperre, Retry/Replan aus anderen Aufträgen). Zu diesem Auftrag gehören nur `src/api/development.ts`, `src/api/development-create.test.ts` und die Doku.
 - `DEV_FIELDS` nicht verengen, sonst bricht `PATCH`.
 - Wer künftig einen Auftrag in einem anderen Status braucht, legt ihn an und schaltet per `PATCH` (Übergangstabelle) weiter.
 
@@ -41,8 +42,8 @@ Auftrag 39ad59ba (Bugfix, 25.10.2026). Sprint 23. Gefunden im Code-Review vom 21
 
 | Auftrag | Zustand | Details |
 | --- | --- | --- |
-| 39ad59ba Auftrag anlegen nur mit Status backlog oder planned | umgesetzt, Tests warten auf Tester | POST erlaubt nur `backlog`/`planned`, sonst 400; neuer API-Test, Doku in `workflows.md` |
+| 39ad59ba Auftrag anlegen nur mit Status backlog oder planned | umgesetzt, Test-Gate grün (8/8) | POST erlaubt nur `backlog`/`planned`, sonst 400; neuer API-Test, Doku in `workflows.md` |
 
 ## Anfrage / TODO
 
-- Tester: die beiden genannten Testdateien und `npm run typecheck` ausführen und das Ergebnis bestätigen.
+- Tester: Ergebnis des Testlaufs 78553ad7 (8/8, typecheck grün) für DoD 1 werten; die Abnahme scheiterte zuvor nur, weil der Wächter eigene Testläufe sperrte.
