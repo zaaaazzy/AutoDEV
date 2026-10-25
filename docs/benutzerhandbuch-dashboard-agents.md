@@ -1219,8 +1219,9 @@ Zum Weiterschalten legst du den Auftrag an und änderst danach den Status per `P
 
 ### 23.4 Stand der Prüfung
 
-- **Im Code belegt, nicht getestet:** Die Einschränkung steht in `src/api/development.ts`. Die neuen Tests in `src/api/development-create.test.ts` und der bestehende Test `src/api/development-status.test.ts` sind noch nicht gelaufen. `npm run typecheck` ist ebenfalls noch nicht gelaufen.
-- **Offen:** Bis der Tester die Tests bestätigt, gilt die Angabe aus 23.1 nur als Stand des Codes.
+- **Getestet:** Testlauf `78553ad7` im Test-Gate. `src/api/development-create.test.ts` hat 8 von 8 Tests bestanden, `npm run typecheck` ist grün. Die Tests decken die Ablehnung von `done`, `approval` und `in_progress` mit 400 ab, ohne Status entsteht `backlog`, und `backlog` sowie `planned` werden angenommen.
+- **Nicht gelaufen:** `src/api/development-status.test.ts`. Der Auftrag ändert diese Datei nicht, und `DEV_FIELDS` (PATCH) bleibt unverändert.
+- **Offen:** Die Angaben in 23.1 und 23.2 stützen sich auf diesen Lauf. Die Schnittstelle selbst wurde nicht im laufenden System geprüft.
 
 ---
 
