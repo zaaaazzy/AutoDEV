@@ -215,6 +215,11 @@ Rechte 600. Unter **Linux** muss der Ordner für diesen Benutzer beschreibbar se
 `DEV_LOG_BACKUP_USER=<uid>:<gid>` deines Benutzers (`id -u`, `id -g`). Der Einrichtungs-Assistent trägt das selbst
 ein. Unter macOS ist nichts zu tun.
 
+Rotiert wird nur nach einem erfolgreichen Dump. Scheitert `pg_dump` (Passwort geändert, Laufwerk voll), bleiben alle
+alten Backups liegen. Die neuesten `DEV_LOG_BACKUP_MIN_KEEP` (Standard 7) `aideation-*.dump` bleiben immer. Ältere
+löscht das Skript erst, wenn sie älter als `DEV_LOG_BACKUP_KEEP_DAYS` (Standard 14) Tage sind. Andere Dateien in
+`./backups` (fremde Präfixe, Handkopien) fasst es nicht an. Ungültige Werte (keine positive Zahl) ergeben den Standard.
+
 ## Fehlerbehebung
 
 | Problem | Lösung |
