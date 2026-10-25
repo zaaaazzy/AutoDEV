@@ -25,7 +25,7 @@ Auftrag dc8e0e76 (Bugfix, Sprint 23, aus dem Code-Review vom 21.10.2026, Stand `
 
 ## Worauf zu achten ist
 - **Verhaltensänderung:** DML in `WITH (…)` oder hinter `EXPLAIN` wird immer abgelehnt. Agents müssen `UPDATE`/`DELETE` als eigene Anweisung senden.
-- **Stand der Prüfung:** Der Entwickler konnte die Tests nicht starten (Freigabe für den Befehl fehlte). Es liegt kein Lauf von `npx --no-install tsx --test src/agent/tool-sql-guard.test.ts src/agent/tool-sql.test.ts` vor; die Tester-Abnahme ist maßgeblich. Dabei keine Abdeckungs-Flags verwenden (der Dev-Log-Wächter sperrt `--experimental-test-coverage`).
+- **Stand der Prüfung:** Testlauf 2fc0f3f6: `npm run typecheck` grün, `npx tsx --test` auf `ollama-prompts.test.ts`, `tool-sql-guard.test.ts` und `tool-sql.test.ts` 32 von 32 bestanden. Die Tester-Abnahme war zuvor gescheitert (DoD 1), weil der Wächter den Testbefehl des Testers sperrte; der Testlauf belegt den Grünstand. Abdeckung wurde nicht gemessen; Befehle mit `--experimental-test-coverage` sperrt der Dev-Log-Wächter. Ob die neuen Tests ohne den Fix rot wären, ist nicht belegt.
 - Der Wächter bleibt ein Schutz gegen Fehlgriffe des Modells, keine Sicherheitsgrenze. Den eigentlichen Schutz bietet ein Datenbank-Benutzer mit eingeschränkten Rechten in den Projekteinstellungen.
 - Die Grenze zählt `rowCount` der Hauptanweisung. Ein `UPDATE`, das über Trigger weitere Zeilen ändert, wird nicht erfasst (eigene Trigger sind ohnehin gesperrt).
 - Die Allowlist ist eng: neue Anweisungsarten müssen in `READ_OR_DML` bzw. `ADDITIVE_CREATE` ergänzt werden.
