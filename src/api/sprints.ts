@@ -350,11 +350,12 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
-    // Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Aufträge und ohne laufende Git-Sicherung:
-    // sonst verlieren laufende Aufträge ihren Sprint bzw. ein offener PR bleibt ohne Sprint zurück.
+    // Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Git-Sicherung und ohne Aufträge, die laufen
+    // oder auf Freigabe warten: sonst verlieren diese ihren Sprint (die Freigabe mergte danach ohne Sprint) bzw. ein
+    // offener PR bleibt ohne Sprint zurück.
     const deletable = `status IN ('planned', 'completed', 'cancelled')
           AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))
-          AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status = 'in_progress')`;
+          AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status IN ('in_progress', 'approval'))`;
     // Geplante Aufträge eines gelöschten Sprints sind nicht mehr geplant: zurück ins Backlog, sonst stünden sie als
     // „Geplant“ ohne Sprint in der Liste (den Sprint-Verweis löscht der Fremdschlüssel). Einzeln gestartete behalten
     // ihren Status (agent_id), sie laufen ohne Sprint.
@@ -372,7 +373,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       if (exists) {
         response.status(409).json({
           message:
-            'Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Aufträge und Git-Sicherung lassen sich löschen.',
+            'Nur geplante, abgeschlossene oder abgebrochene Sprints ohne Git-Sicherung und ohne Aufträge, die laufen oder auf Freigabe warten, lassen sich löschen.',
         });
         return;
       }

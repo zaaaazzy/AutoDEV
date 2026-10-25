@@ -71,6 +71,8 @@ Jede Idee zeigt in der Spalte „Herkunft“, woher sie stammt. Die Bezeichnunge
 
 **„Wieder einplanen“ (unter „Aktionen“):** Der Schritt wird nur angeboten, wenn der Auftrag aus einem Sprint genommen wurde und im Status „Backlog“ oder „Geplant“ ist. Die Bedingung steht in `src/core/development-transitions.ts` und gilt genauso für `/retry`. Ein Auftrag in „Freigabe“ oder ein laufender Auftrag bietet ihn nicht an. Ein laufender Auftrag wird erst nach dem Ende seines Agent-Laufs frei und landet dann im Backlog. Freigaben aus einem abgebrochenen Sprint, die vor dieser Änderung ohne Sprint hängen geblieben sind, setzt die Migration `freigabe-nach-sprint-abbruch-ins-backlog` einmalig ins Backlog.
 
+**Abschließen und Löschen mit offenen Aufträgen:** Laufen in einem Sprint noch Aufträge oder warten sie auf Freigabe, lehnt die API Abschluss (Live schalten) und Löschen mit 409 ab. Die Freigabe mergt erst später in den Sprint-Branch. Sonst landete sie in einem abgeschlossenen Sprint, nach Bericht und Tag, bzw. ohne Sprint. Erst freigeben oder zurückweisen und den Merge abwarten, dann abschließen oder löschen. Löschen lässt sich nur ein geplanter, abgeschlossener oder abgebrochener Sprint ohne laufende Git-Sicherung.
+
 **Aktiven Sprint mit Startdatum in der Zukunft abschließen:** Wer einen Sprint vorzeitig startet (Startdatum liegt nach heute), kann ihn schon am selben Tag abschließen.
 
 - **Bedingungen:** Der Sprint muss aktiv sein. Es darf kein Auftrag mehr laufen (409 „Im Sprint laufen noch Aufträge …“) und keiner auf die Review-Freigabe oder den Merge warten (409). Diese Regeln gelten unverändert.
