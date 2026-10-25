@@ -1225,12 +1225,69 @@ Zum Weiterschalten legst du den Auftrag an und änderst danach den Status per `P
 
 ---
 
+## 24. Erneut versuchen: nur in geplante oder aktive Sprints
+
+Ein Auftrag, der erneut versucht wird oder nach der Review-Freigabe zurückkommt, landet nur in einem Sprint, der noch geplant oder aktiv ist. Sprints im Review, abgeschlossene und abgebrochene nehmen keine Aufträge mehr an. Die Auswahl findest du bei „Aufträge hinzufügen“ im Sprint.
+
+> **Printscreens:** keine. Dafür müssten App, Datenbank und Browser laufen; das wurde nicht gemacht. Platzhalter: keiner.
+
+### 24.1 Was sich geändert hat
+
+- **Vorher:** „Erneut versuchen“ behielt den bisherigen Sprint, solange er nicht abgeschlossen oder abgebrochen war. Ein Sprint im Review zählte also als gültig. Der Auftrag lief dann auf dem alten Sprint-Branch, und das Ergebnis erreichte `main` nie.
+  - „Zurückweisen“ in der Review-Freigabe startete den Auftrag sofort, ließ den Sprint aber unberührt.
+  - Ein abgebrochener Auftrag wurde in einen geplanten Sprint umgebucht, indem die Oberfläche zwei Aufrufe schickte. Der erste landete im aktiven Sprint. Scheiterte der zweite, blieb der Auftrag dort und konnte sofort starten.
+- **Jetzt:** Der Ziel-Sprint wird nur gewählt, wenn er geplant oder aktiv ist. Sonst kommt der Auftrag in den ältesten aktiven Sprint des Projekts, und wenn es keinen gibt, ohne Sprint auf `main`.
+  - Ein Auftrag startet sofort, wenn der Ziel-Sprint aktiv ist oder kein Sprint zugeordnet ist. In einem geplanten Sprint wartet er auf dessen Start.
+  - Das Umbuchen in einen geplanten Sprint geschieht in einem Schritt. Status und Sprint werden zusammen gesetzt.
+- **Weiter wie bisher:** Nur blockierte und abgelehnte Aufträge lassen sich erneut versuchen, und nur sie lassen sich über „Wieder einplanen“ zurückholen. Express-Aufträge bleiben ausgenommen.
+
+### 24.2 Bedienung
+
+| Situation | Ergebnis |
+| --- | --- |
+| „Erneut versuchen“, der bisherige Sprint ist geplant | Der Auftrag bleibt in diesem Sprint und startet mit dessen Start. |
+| „Erneut versuchen“, der bisherige Sprint ist aktiv | Der Auftrag bleibt in diesem Sprint und startet sofort. |
+| „Erneut versuchen“, der bisherige Sprint ist abgeschlossen, abgebrochen oder im Review | Der Auftrag wandert in den aktiven Sprint des Projekts und startet dort sofort. |
+| „Erneut versuchen“, es gibt keinen aktiven Sprint | Der Auftrag steht ohne Sprint auf `main` und startet sofort. |
+| „Zurückweisen“ in der Review-Freigabe | Dieselbe Regel wie bei „Erneut versuchen“. Ein Sprint im Review weicht auf den aktiven Sprint aus. |
+| „Aufträge hinzufügen“ im Sprint, ausgewählter Auftrag ist abgebrochen | Der Auftrag wird in diesen Sprint eingeplant. Fehler und Vermerk werden zurückgesetzt. |
+| „Aufträge hinzufügen“ im Sprint, ausgewählter Auftrag läuft, ist in Freigabe oder erledigt | Er steht nicht zur Auswahl. |
+
+Die Oberfläche bietet beim Erneuten Versuchen keine Sprint-Wahl. Eine ausdrücklich gewählte Sprint-ID ist nur über die Schnittstelle möglich: `POST /api/development/:id/retry` mit `{ "sprintId": "…" }`.
+
+**Bedingungen und Grenzen:**
+
+- **Ohne Wahl kein Fehler:** Ist der bisherige Sprint nicht planbar, weicht der Auftrag auf den aktiven Sprint aus. Es gibt dann keine 409-Antwort.
+- **Mit gewählter Sprint-ID:** Ist der Sprint im Review, abgeschlossen, abgebrochen oder gehört er zu einem anderen Projekt, antwortet die Schnittstelle mit 409. Dann wird nichts geschrieben.
+- **Ungültige Sprint-ID:** Keine UUID ergibt 400 mit „Ungültiger Sprint.“.
+- **Wer:** Dieselbe Rolle wie bisher, nämlich das Recht „run“ im Projekt.
+- **Laufende Aufträge:** Ein Auftrag, der gerade läuft, lässt sich nicht erneut versuchen (wie bisher, 409).
+
+### 24.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Der Auftrag landet im aktiven Sprint, obwohl ein Sprint geplant war. | Der bisherige Sprint war abgeschlossen, abgebrochen oder im Review. Gewollt. Im Sprint über „Aufträge hinzufügen“ in den gewünschten geplanten Sprint nehmen. |
+| Der Auftrag startet nach „Erneut versuchen“ nicht. | Der Ziel-Sprint ist geplant. Der Auftrag startet mit dessen Start. |
+| 409 mit „Erneut versuchen nur in geplante oder aktive Sprints desselben Projekts.“ | Nur bei einem API-Aufruf mit ausdrücklich gewählter Sprint-ID. Den Sprint wählen, der geplant oder aktiv ist und zum selben Projekt gehört. |
+| Im Sprint steht „nicht übernommen: …“ | Der Auftrag ist inzwischen laufend, in Freigabe oder erledigt, oder er gehört bereits zu einem anderen Sprint. Die Liste wird danach neu geladen. |
+
+### 24.4 Stand der Prüfung
+
+- **Nicht bestätigt:** `src/api/development-retry.test.ts` ist nicht ausgeführt. Der Test braucht PostgreSQL. Ohne Datenbank wird er übersprungen. Aufruf: `npx --no-install tsx --test src/api/development-retry.test.ts src/api/development-status.test.ts src/api/sprint-complete.test.ts`.
+- **Offen:** Die Auswahl im Worker (`src/runner/runner-selection.ts`) ist nicht geändert. Ob dort zusätzlich Aufträge in abgeschlossenen oder abgebrochenen Sprints ausgeschlossen werden sollen, ist offen. Das Laufzeit-Gate `sprintPaused` hält solche Aufträge derzeit an.
+- **Offen:** Die Sprint-Übernahme in der Oberfläche läuft über `take-into-sprint`, nicht über `/retry` mit `sprintId`. Das Verhalten für Nutzer ist dasselbe. Der Test dafür fehlt in diesem Auftrag.
+- **Offen:** Printscreens und die Bedienung in der laufenden App wurden nicht geprüft.
+
+---
+
 ## Verwandte Dokumente
 
 - [`redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md`](redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md): Entwicklerbericht zu Abschnitt 22 (Muster, Schreiben über Temp-Datei, Marker, Aufrufer mit `tokens: false`)
 - [`sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md`](sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md): Entwicklerbericht zu Abschnitt 6a (Allowlist, nur ADD, Zeilengrenze, String-Funktionen)
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`auftrag-anlegen-nur-backlog-planned-2026-10-25.md`](auftrag-anlegen-nur-backlog-planned-2026-10-25.md): Entwicklerbericht zu Abschnitt 23 (Anlegen nur mit Backlog oder Geplant, offene Tests)
+- [`erneut-versuchen-nur-planbare-sprints-2026-10-25.md`](erneut-versuchen-nur-planbare-sprints-2026-10-25.md): Entwicklerbericht zu Abschnitt 24 (Ziel-Sprint, Umbuchen in einem Schritt, offene Tests)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb
