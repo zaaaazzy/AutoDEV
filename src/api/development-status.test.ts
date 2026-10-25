@@ -133,10 +133,35 @@ test('PATCH /development: geplanter Auftrag lässt sich weiter umhängen, atomar
   assert.match(result.queries.find(isUpdate) ?? '', /AND status = ANY\(/);
 });
 
-test('Aus dem Sprint nehmen: dieselbe Sperrliste wie die Sprint-Auswahl (in Arbeit, Freigabe, erledigt)', async () => {
+test('Aus dem Sprint nehmen: Auftrags- und Sprint-Status in derselben Abfrage (Positivliste)', async () => {
   const result = await removeFromSprint();
-  assert.match(result.update, /status NOT IN \('in_progress', 'approval', 'done'\)/);
+  assert.match(result.update, /status IN \('backlog', 'planned', 'blocked'\)/);
+  assert.match(
+    result.update,
+    /EXISTS \(SELECT 1 FROM sprints s WHERE s\.id = development_items\.sprint_id\s+AND s\.status IN \('planned', 'active'\)\)/,
+  );
 });
+
+for (const itemStatus of ['approval', 'rejected', 'in_progress', 'done']) {
+  test(`Aus dem Sprint nehmen: Auftrag im Status ${itemStatus} wird mit 409 abgelehnt`, async () => {
+    const result = await removeFromSprint(itemStatus, 'active');
+    assert.equal(result.status, 409);
+  });
+}
+
+for (const sprintStatus of ['review', 'completed', 'cancelled']) {
+  test(`Aus dem Sprint nehmen: Sprint im Status ${sprintStatus} wird mit 409 abgelehnt`, async () => {
+    const result = await removeFromSprint('planned', sprintStatus);
+    assert.equal(result.status, 409);
+  });
+}
+
+for (const itemStatus of ['planned', 'blocked', 'backlog']) {
+  test(`Aus dem Sprint nehmen: Auftrag im Status ${itemStatus} aus aktivem Sprint bleibt erlaubt`, async () => {
+    const result = await removeFromSprint(itemStatus, 'active');
+    assert.equal(result.status, 200);
+  });
+}
 
 /** Folgeauftrag zu einem erledigten Auftrag, Ziel-Sprint im Status `sprintStatus`. */
 async function followUp(sprintStatus: string) {
@@ -175,13 +200,18 @@ test('Folgeauftrag: aktiver Sprint bleibt erlaubt', async () => {
   assert.ok(result.queries.some((sql) => /INSERT INTO development_items/i.test(sql)));
 });
 
-/** Auftrag aus dem Sprint nehmen; liefert die UPDATE-Abfrage. */
-async function removeFromSprint() {
+/**
+ * Auftrag im Status `itemStatus` aus einem Sprint im Status `sprintStatus` nehmen; liefert Status und UPDATE-Abfrage.
+ * Das UPDATE liefert nur eine Zeile, wenn beide Status passen (wie die WHERE-Bedingung in Postgres).
+ */
+async function removeFromSprint(itemStatus = 'planned', sprintStatus = 'active') {
   const queries: string[] = [];
   const pool = {
     query: async (sql: string) => {
       queries.push(sql);
-      return { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 };
+      const fits =
+        ['backlog', 'planned', 'blocked'].includes(itemStatus) && ['planned', 'active'].includes(sprintStatus);
+      return fits ? { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 } : { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
   const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');

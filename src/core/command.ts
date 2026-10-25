@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import { folderAvailable, missingFolderMessage } from './folder-guard.js';
+import { maskTokens } from './secret-mask.js';
 import { killGroup, trackChild } from './shutdown.js';
 
 export const MAX_CAPTURED_OUTPUT = 120_000;
@@ -57,9 +58,11 @@ function secretValues(environment: NodeJS.ProcessEnv): string[] {
   return [...secrets];
 }
 
+const REDACTED = '[REDACTED]';
+
 function redact(text: string, secrets: string[]): string {
   let safeText = text;
-  for (const secret of secrets) safeText = safeText.replaceAll(secret, '[REDACTED]');
+  for (const secret of secrets) safeText = safeText.replaceAll(secret, REDACTED);
   return safeText;
 }
 
@@ -117,13 +120,23 @@ function joinHeadAndTail(head: string, tail: string, omitted: number, secrets: s
   return `${safeHead}\n[… ${omitted} Zeichen der Ausgabe ausgelassen …]\n${safeTail}`;
 }
 
-/** Schwärzt Secrets und kürzt lange Ausgaben auf Kopf und Ende (das Ende enthält Fehler und Coverage). */
-export function redactOutput(output: string, environment: NodeJS.ProcessEnv): string {
+/**
+ * Schwärzt Secrets und kürzt lange Ausgaben auf Kopf und Ende (das Ende enthält Fehler und Coverage). Neben den Werten
+ * aus der Umgebung auch bekannte Token-Formate (maskTokens), etwa aus der Projekt-DB oder aus gelesenen Dateien.
+ * tokens: false nur für Ausgaben, die selbst nach Zugangsdaten durchsucht werden (Secret-Holdback des Git-Sync).
+ * runCommand schwärzt nur die Umgebung: seine Ausgabe wird noch ausgewertet, gespeichert wird sie über redactOutput.
+ */
+export function redactOutput(
+  output: string,
+  environment: NodeJS.ProcessEnv,
+  options: { tokens?: boolean } = {},
+): string {
   const secrets = secretValues(environment);
-  if (output.length <= MAX_CAPTURED_OUTPUT) return redact(output, secrets);
+  const finish = (text: string): string => (options.tokens === false ? text : maskTokens(text, REDACTED));
+  if (output.length <= MAX_CAPTURED_OUTPUT) return finish(redact(output, secrets));
   const head = headOf(output, HEAD_CHARS);
   const tail = tailOf(output.slice(head.length), TAIL_CHARS);
-  return joinHeadAndTail(head, tail, output.length - head.length - tail.length, secrets);
+  return finish(joinHeadAndTail(head, tail, output.length - head.length - tail.length, secrets));
 }
 
 export const runCommand: CommandExecutor = (command, cwd, options = {}) => {

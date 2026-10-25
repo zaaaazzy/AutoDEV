@@ -53,6 +53,13 @@ export function manualTodo(checks: string[]): string | null {
 export const MERGE_TODO = 'Merge in den Sprint fehlgeschlagen – Ursache im Auftrag beheben, dann „Erneut versuchen“';
 
 /**
+ * Der Commit-Schutz hat Dateien des Auftrags zurückgehalten (sehen nach Zugangsdaten aus). Ohne sie ist der Auftrag
+ * unvollständig; sie liegen gesichert unter .dev-log-backups, der Auftrags-Branch bleibt ungemergt.
+ */
+export const SECRETS_TODO =
+  'Dateien wegen Zugangsdaten zurückgehalten – Testwerte markieren bzw. Schlüssel entfernen, dann „Erneut versuchen“';
+
+/**
  * Gescheiterter Auftrag: Ein Abnahmehinweis aus einem früheren, bestandenen Testschritt gilt nicht mehr. Sonst hielte
  * der Autopilot den Auftrag für „wartet auf einen Menschen“ und den Sprint für fertig, obwohl die Behebung noch läuft.
  */
@@ -72,12 +79,18 @@ export function budgetActionTodo(daily: boolean, detail: string): string {
   return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
 }
 
+/**
+ * „keine“, „nichts“, „-“ oder „n/a“ – allein oder mit Begründung hinter Satzzeichen, Gedankenstrich oder Klammer
+ * („keine – Agent behebt selbst“). „Keine Datenbank-URL hinterlegt“ ist dagegen eine Aktion.
+ */
+const NO_ACTION = /^(keine|nichts|-|n\/a)\s*($|[.,;:!]|[–—-](\s|$)|\()/i;
+
 /** Liest die AKTION-Zeile der Problemanalyse: Text, „keine“ (= null) oder undefined, wenn sie fehlt. */
 export function parseActionLine(output: string): string | null | undefined {
   const match = output.match(/^\s*AKTION:\s*(.+)$/im);
   if (!match) return undefined;
   const value = match[1]!.trim().replace(/^["„]|["“]$/g, '');
-  return /^(keine|nichts|-|n\/a)\.?$/i.test(value) ? null : shorten(value);
+  return NO_ACTION.test(value) ? null : shorten(value);
 }
 
 export function shorten(text: string): string {

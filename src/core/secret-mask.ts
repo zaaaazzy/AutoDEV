@@ -19,6 +19,7 @@ export const MASK = '[MASKIERT]';
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g;
 const BEARER = /\b(Bearer|Basic|Token)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
+const TOKEN_LIKE_BEARER = /\b(Bearer|Basic|Token)\s+(?=[A-Za-z._~+/=-]*\d)[A-Za-z0-9._~+/=-]{16,}/gi;
 const URL_CREDENTIALS = /(\b[a-z][a-z0-9+.-]*:\/\/)[^\s:/@]+:[^\s/@]+@/gi;
 const KEY_VALUE =
   /(["']?\b[\w.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_-]?key|auth|session|cookie|credential)[\w.-]*["']?\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&"'}]+)/gi;
@@ -32,14 +33,25 @@ function globalPattern(pattern: RegExp): RegExp {
   return new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`);
 }
 
+/**
+ * Nur eindeutige Zugangsdaten: Token-Formate, PEM-Schlüssel, JWT, Bearer-/Basic-Werte und Passwörter in URLs. Ohne
+ * E-Mail, IP und „schlüssel=wert“: Agent- und Testausgaben (Pfade wie session.ts:12, „input_tokens“: 42) bleiben lesbar.
+ * Bearer zählt hier nur mit einem Wert, der nach Token aussieht (Ziffer, mindestens 16 Zeichen) – „Bearer authentication“
+ * bleibt stehen.
+ */
+export function maskTokens(text: string, mask: string = MASK): string {
+  let masked = text.replace(PRIVATE_KEY_BLOCK, mask);
+  for (const pattern of SECRET_PATTERNS) masked = masked.replace(globalPattern(pattern), mask);
+  return masked
+    .replace(JWT, mask)
+    .replace(TOKEN_LIKE_BEARER, (_match, scheme: string) => `${scheme} ${mask}`)
+    .replace(URL_CREDENTIALS, (_match, scheme: string) => `${scheme}${mask}@`);
+}
+
 /** Ersetzt Tokens, Passwörter, E-Mail-Adressen und IP-Adressen durch einen Platzhalter. */
 export function maskSecrets(text: string): string {
-  let masked = text.replace(PRIVATE_KEY_BLOCK, MASK);
-  for (const pattern of SECRET_PATTERNS) masked = masked.replace(globalPattern(pattern), MASK);
-  return masked
-    .replace(JWT, MASK)
+  return maskTokens(text)
     .replace(BEARER, (_match, scheme: string) => `${scheme} ${MASK}`)
-    .replace(URL_CREDENTIALS, (_match, scheme: string) => `${scheme}${MASK}@`)
     .replace(KEY_VALUE, (match, key: string, value: string) => (value.includes(MASK) ? match : `${key}${MASK}`))
     .replace(EMAIL, MASK)
     .replace(IPV4, MASK)

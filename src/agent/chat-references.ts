@@ -1,6 +1,8 @@
 import type { Pool } from 'pg';
 import { SYSTEM_PERSON } from '../api/idea-comments.js';
 import { isUuid } from '../core/validation.js';
+import { fenceExternalText, isUntrustedBugSource, UNTRUSTED_BUG_SOURCES_SQL } from '../core/bug-trust.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
 
 /**
  * Verweise im Chat („/auftrag/…“, „/git/…“, „@Person“): Der Server prüft, dass jeder Verweis zum Projekt gehört,
@@ -45,6 +47,17 @@ const clip = (text: string | null | undefined): string => {
   return value.length > MAX_TEXT ? `${value.slice(0, MAX_TEXT)}\n…` : value;
 };
 
+/**
+ * Kontext zu Auftrag, Idee oder Bug. Fremdtext (Quelle Betrieb oder GitHub, oder schon markiert) steht samt Titel
+ * eingefasst; `referenceContext` setzt dann den Sicherheitshinweis.
+ */
+function itemContext(kind: string, row: { title: string; status: string; description: string }, foreign: boolean) {
+  const description = clip(row.description);
+  return foreign || containsUntrusted(`${row.title}\n${row.description}`)
+    ? `${kind} (Status: ${row.status})\n${fenceExternalText(`„${row.title}“\n${description}`)}`
+    : `${kind} „${row.title}“ (Status: ${row.status})\n${description}`;
+}
+
 async function resolveOne(
   pool: Pool,
   project: string,
@@ -54,39 +67,28 @@ async function resolveOne(
     (await pool.query<T & object>(sql, [reference.id, project])).rows[0];
   switch (reference.type) {
     case 'order': {
-      const row = await one<{ title: string; status: string; description: string }>(
-        'SELECT title, status, description FROM development_items WHERE id = $1 AND project_slug = $2',
+      // Aufträge zu Bugs aus Betrieb oder GitHub gelten als Fremdtext, auch ohne Marker (Altdaten).
+      const row = await one<{ title: string; status: string; description: string; untrusted: boolean }>(
+        `SELECT d.title, d.status, d.description, COALESCE(b.source IN ${UNTRUSTED_BUG_SOURCES_SQL}, false) AS untrusted
+           FROM development_items d LEFT JOIN bugs b ON b.id = d.bug_id
+          WHERE d.id = $1 AND d.project_slug = $2`,
       );
-      return row
-        ? {
-            ...reference,
-            label: row.title,
-            context: `Auftrag „${row.title}“ (Status: ${row.status})\n${clip(row.description)}`,
-          }
-        : null;
+      return row ? { ...reference, label: row.title, context: itemContext('Auftrag', row, row.untrusted) } : null;
     }
     case 'idea': {
-      const row = await one<{ title: string; status: string; description: string }>(
-        'SELECT title, status, description FROM ideation_items WHERE id = $1 AND project_slug = $2',
+      const row = await one<{ title: string; status: string; description: string; source: string }>(
+        'SELECT title, status, description, source FROM ideation_items WHERE id = $1 AND project_slug = $2',
       );
       return row
-        ? {
-            ...reference,
-            label: row.title,
-            context: `Idee „${row.title}“ (Status: ${row.status})\n${clip(row.description)}`,
-          }
+        ? { ...reference, label: row.title, context: itemContext('Idee', row, isUntrustedBugSource(row.source)) }
         : null;
     }
     case 'bug': {
-      const row = await one<{ title: string; status: string; description: string }>(
-        'SELECT title, status, description FROM bugs WHERE id = $1 AND project_slug = $2',
+      const row = await one<{ title: string; status: string; description: string; source: string }>(
+        'SELECT title, status, description, source FROM bugs WHERE id = $1 AND project_slug = $2',
       );
       return row
-        ? {
-            ...reference,
-            label: row.title,
-            context: `Bug „${row.title}“ (Status: ${row.status})\n${clip(row.description)}`,
-          }
+        ? { ...reference, label: row.title, context: itemContext('Bug', row, isUntrustedBugSource(row.source)) }
         : null;
     }
     case 'sprint': {
@@ -156,7 +158,7 @@ export async function referenceContext(pool: Pool, project: string, references: 
   const resolved = (await Promise.all(references.map((reference) => resolveOne(pool, project, reference)))).filter(
     (entry): entry is Resolved => entry !== null,
   );
-  return resolved.length
-    ? `## Verweise des Nutzers (beziehe dich darauf)\n${resolved.map((entry) => `### ${entry.context}`).join('\n\n')}`
-    : '';
+  if (!resolved.length) return '';
+  const block = `## Verweise des Nutzers (beziehe dich darauf)\n${resolved.map((entry) => `### ${entry.context}`).join('\n\n')}`;
+  return containsUntrusted(block) ? `${block}\n\n${UNTRUSTED_HINT}` : block;
 }

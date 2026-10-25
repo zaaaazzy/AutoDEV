@@ -104,6 +104,26 @@ test('Bug-Trigger: rejected → planned → in_progress → done behebt den Bug,
   });
 });
 
+test('budget_role_limits: idempotent angelegt, Primärschlüssel und Prüfungen für Rolle, Zeitraum und Grenze', async (t) => {
+  await withMigratedDatabase(t, 'devlog_role_limits', async (db) => {
+    await runMigrations(db); // zweiter Start ohne Fehler
+    await db.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+    const insert = (role: string, period: string, max: number) =>
+      db.query(`INSERT INTO budget_role_limits (project_slug, role, period, max_tokens) VALUES ('shop', $1, $2, $3)`, [
+        role,
+        period,
+        max,
+      ]);
+    await insert('developer', 'day', 500000);
+    await assert.rejects(insert('developer', 'day', 1), /duplicate key/);
+    await assert.rejects(insert('custom', 'day', 1), /check/);
+    await assert.rejects(insert('tester', 'week', 1), /check/);
+    await assert.rejects(insert('tester', 'day', 0), /check/);
+    await db.query(`DELETE FROM projects WHERE slug = 'shop'`);
+    assert.equal((await db.query('SELECT 1 FROM budget_role_limits')).rowCount, 0);
+  });
+});
+
 test('Bug-Trigger: von Hand abgelehnter Bug bleibt abgelehnt, solange sein Auftrag nicht wieder eingeplant wird', async (t) => {
   await withMigratedDatabase(t, 'devlog_bug_manual', async (db) => {
     const { bug, order } = await bugOrder(db, 'planned');

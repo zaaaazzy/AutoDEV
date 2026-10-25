@@ -2,9 +2,19 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import type { Pool } from 'pg';
-import { collectProblems, evaluate, failureCause, failureProblem, problemKey } from './watchdog.js';
+import webpush from 'web-push';
+import {
+  collectProblems,
+  evaluate,
+  failureCause,
+  failureProblem,
+  problemKey,
+  readState,
+  runWatchdog,
+  writeState,
+} from './watchdog.js';
 
 const calm = { problems: [], notifiedAt: null };
 
@@ -79,6 +89,36 @@ test('Wächter: wechselnde Zahlen und Fehlermeldungen lösen keine neue Meldung 
     '⚠ AIdeation: Problem erkannt',
   );
   assert.equal(problemKey('Nur noch 4.2 GB frei.'), problemKey('Nur noch 12,5 GB frei.'));
+});
+
+test('Wächter: zwischengespeicherte Abos mit ungültigem Endpunkt werden nie angefragt und verworfen', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'watchdog-'));
+  const send = mock.method(webpush, 'sendNotification', async () => ({ statusCode: 201, body: '', headers: {} }));
+  t.after(async () => {
+    send.mock.restore();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const valid = { endpoint: 'https://web.push.apple.com/geraet', p256dh: 'p', auth: 'a' };
+  const lan = { endpoint: 'https://192.168.1.1/scan', p256dh: 'p', auth: 'a' };
+  const file = join(dir, 'state.json');
+  const keys = webpush.generateVAPIDKeys();
+  await writeState({ problems: [], notifiedAt: null, keys, subscriptions: [valid, lan] }, file);
+  // Datenbank aus: der Wächter greift auf den Zwischenspeicher zurück.
+  const pool = {
+    query: async () => {
+      throw new Error('DB weg');
+    },
+  } as unknown as Pool;
+  const state = await runWatchdog(
+    { pool, localUrl: 'http://127.0.0.1:1', publicUrl: null, backupDir: dir, dataDir: dir },
+    file,
+  );
+  assert.deepEqual(
+    send.mock.calls.map((call) => (call.arguments[0] as { endpoint: string }).endpoint),
+    [valid.endpoint],
+  );
+  assert.deepEqual(state.subscriptions, [valid]);
+  assert.deepEqual((await readState(file)).subscriptions, [valid]);
 });
 
 test('Wächter: ein verschwundener Backup-Dump bricht die Prüfung nicht ab', async () => {

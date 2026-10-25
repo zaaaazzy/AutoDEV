@@ -310,6 +310,9 @@ gh auth login   # GitHub.com → SSH → im Browser bestätigen</code></pre>
                     }
                   </select>
                 </label>
+                @if (templatePreset()) {
+                  <p class="muted">{{ templatePreset() }} Ändern kannst du sie später unter Einstellungen.</p>
+                }
                 @if (template() === 'custom') {
                   <label class="wide"
                     >Git-URL der Vorlage<input

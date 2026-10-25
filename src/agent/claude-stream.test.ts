@@ -95,6 +95,49 @@ test('an aborted claude run keeps readable text instead of raw JSON', async () =
   const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
   assert.equal(result.output, 'Prüfe den Stand.\n\nProcess ended by SIGKILL (timeout or kill).');
   assert.equal(result.exitCode, 1);
+  // Ohne usage in den assistant-Ereignissen gibt es nichts zu zählen (kein erfundener Wert).
+  assert.equal(result.tokens, undefined);
+});
+
+const assistant = (id: string, text: string, usage: Record<string, number>) =>
+  line({ type: 'assistant', message: { id, content: [{ type: 'text', text }], usage } });
+
+test('Abbruch ohne result: Tokens der assistant-Ereignisse werden gezählt, je message.id einmal', async () => {
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    const raw =
+      line({ type: 'system', subtype: 'init' }) +
+      // Dieselbe Nachricht kommt je Inhaltsblock erneut, mit wachsendem Stand: nur der letzte zählt.
+      assistant('msg_1', 'Lese.', { input_tokens: 3, cache_read_input_tokens: 1000, output_tokens: 2 }) +
+      assistant('msg_1', 'Plane.', { input_tokens: 3, cache_read_input_tokens: 1000, output_tokens: 40 }) +
+      assistant('msg_2', 'Ändere.', { input_tokens: 5, cache_creation_input_tokens: 200, output_tokens: 60 }) +
+      '\nProcess ended by SIGKILL (timeout or kill).\n';
+    options?.onChunk?.(raw);
+    return { exitCode: 137, durationMs: 1, output: raw, costUsd: 0 };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.exitCode, 137);
+  assert.equal(result.tokens, 1043 + 265);
+  // Kosten lassen sich aus usage nicht sicher ableiten: keine geschätzten Kosten.
+  assert.equal(result.costUsd, 0);
+});
+
+test('mit result-Ereignis gilt nur result, die assistant-usage wird nicht dazugezählt', async () => {
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onChunk?.(assistant('msg_1', 'Fertig.', { input_tokens: 500, output_tokens: 500 }) + RESULT);
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.tokens, 15);
+});
+
+test('fehlt result bei Exit 0, zählen die gestreamten Tokens trotzdem', async () => {
+  const execute: CommandExecutor = async (_command, _cwd, options) => {
+    options?.onChunk?.(assistant('msg_1', 'Halb fertig.', { input_tokens: 7, output_tokens: 3 }));
+    return { exitCode: 0, durationMs: 1, output: '' };
+  };
+  const result = await executeAgentCommand(execute, ['claude', '-p', 'Hi'], '/repo', {});
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.tokens, 10);
 });
 
 test('continues a claude session with --resume and reports the session id', async () => {

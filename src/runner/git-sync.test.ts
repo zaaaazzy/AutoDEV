@@ -10,6 +10,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { conflictSection, remainingConflicts } from './runner-steps.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
+import { syncGitHub } from './github-sync.js';
 import {
   ciLogExcerpt,
   maskSecrets,
@@ -581,6 +582,73 @@ test('red CI never merges and files one bug per run with a masked, shortened log
   } finally {
     delete process.env.DEVLOG_CI_TEST_SECRET;
   }
+});
+
+/** Review-Pool mit Projekteinstellungen für syncGitHub; die GitHub-Brücke steht auf `aus`. */
+function bridgeOffPool(sprint: ReviewRow) {
+  const review = reviewPool(sprint);
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('FROM projects WHERE slug')) {
+        review.updates.push({ sql, values });
+        return {
+          rows: [
+            {
+              mode: 'aus',
+              remote: 'https://github.com/a/b.git',
+              requireApproval: false,
+              syncedAt: null,
+              auth: 'ok',
+              authCheckedAt: new Date(),
+            },
+          ],
+        };
+      }
+      return review.pool.query(sql, values);
+    },
+  } as unknown as Pool;
+  return { ...review, pool };
+}
+
+test('Brücke aus: Sprint im Review wird nach grüner CI trotzdem gemergt, getaggt und abgeschlossen', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const sprint = { ...REVIEW };
+  const { pool, updates } = bridgeOffPool(sprint);
+  const { adapter, merged } = reviewAdapter({ checks: 'success' });
+  const listed: string[] = [];
+  adapter.listIssues = async (label) => (listed.push(label), []);
+  adapter.mergePullRequest = async (url) => {
+    merged.push(url);
+    await mergeOnGithub(remote);
+  };
+  const result = await syncGitHub(pool, 'bruecke-aus-ci', cwd, runCommand, new Date(), () => adapter);
+  assert.equal(result.skipped, undefined);
+  assert.equal(result.finished, 1);
+  assert.deepEqual(merged, ['https://github.com/a/b/pull/42']);
+  assert.equal(sprint.status, 'completed');
+  assert.ok(execFileSync('git', ['tag', '-l', 'sprint-sprint-1-apfel-abcdef'], { cwd: remote }).toString().trim());
+  // Der Issue-Import bleibt im Modus „aus“ abgeschaltet.
+  assert.deepEqual(listed, []);
+  assert.ok(!updates.some((update) => update.sql.includes('SET github_synced_at')));
+  // Zweiter Takt nach dem Intervall: nichts mehr im Review, also kein gh-Aufruf und kein zweiter Merge.
+  const later = new Date(Date.now() + 10 * 60_000);
+  assert.equal((await syncGitHub(pool, 'bruecke-aus-ci', cwd, runCommand, later, () => adapter)).skipped, 'Modus aus');
+  assert.equal(merged.length, 1);
+});
+
+test('Brücke aus: von Hand gemergter Pull Request schliesst den Sprint ab', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  await mergeOnGithub(remote);
+  const sprint = { ...REVIEW };
+  const { pool } = bridgeOffPool(sprint);
+  const { adapter, merged } = reviewAdapter({ checks: 'success', pr: 'merged' });
+  const result = await syncGitHub(pool, 'bruecke-aus-hand', cwd, runCommand, new Date(), () => adapter);
+  assert.equal(result.finished, 1);
+  assert.deepEqual(merged, []);
+  assert.equal(sprint.status, 'completed');
+  assert.ok(execFileSync('git', ['tag', '-l', 'sprint-sprint-1-apfel-abcdef'], { cwd: remote }).toString().trim());
 });
 
 test('a pull request closed without merge ends the review as failed sync', async () => {

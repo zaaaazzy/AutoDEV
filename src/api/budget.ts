@@ -4,13 +4,22 @@ import { access } from './access.js';
 import { isRecord, parseProjectSlug } from '../core/validation.js';
 import { asCommand } from '../agent/system-agents.js';
 import { DEFAULT_RULES, loadRouting, parseRules, ruleLabel, type RoutingRule } from '../agent/model-routing.js';
+import { localDay } from '../core/time-zone.js';
 import {
   BUDGET_PERIODS,
+  BUDGET_ROLES,
   type BudgetLimit,
   type BudgetPeriod,
+  type BudgetRole,
   budgetStates,
+  isBudgetRole,
   loadBudgets,
+  loadRoleLimits,
   releaseBudgetBlocks,
+  type Spend,
+  spendByRole,
+  sprintStart,
+  usagePercent,
   WARN_PERCENT,
 } from '../runner/budget.js';
 
@@ -184,7 +193,118 @@ export async function collectBudget(pool: Pool, project: string): Promise<Record
   };
 }
 
+/** Neue Token-Limits einer Rolle je Zeitraum: Zahl = Grenze, null = Grenze entfernen; fehlender Zeitraum = unverändert. */
+export type RoleLimitsInput = Partial<Record<BudgetPeriod, number | null>>;
+
+/** Prüft den Body von PUT /budget/roles/:role ({ day, sprint, order } mit { maxTokens } oder null). */
+export function parseRoleLimitsInput(body: unknown): RoleLimitsInput | string {
+  if (!isRecord(body)) return 'Ungültige Anfrage.';
+  const unknown = Object.keys(body).find((key) => !(BUDGET_PERIODS as readonly string[]).includes(key));
+  if (unknown !== undefined) return `Unbekannter Zeitraum „${unknown}“: erlaubt sind day, sprint und order.`;
+  const input: RoleLimitsInput = {};
+  for (const period of BUDGET_PERIODS) {
+    const raw = body[period];
+    if (raw === undefined) continue;
+    if (raw !== null && !isRecord(raw)) return `${period}: { "maxTokens": <Zahl> } oder null angeben.`;
+    const maxTokens = raw === null ? null : limitNumber(raw.maxTokens, MAX_TOKENS);
+    if (maxTokens === 'invalid') return `${period}: maxTokens muss eine positive Zahl sein (oder null für unbegrenzt).`;
+    input[period] = maxTokens === null ? null : Math.max(1, Math.round(maxTokens));
+  }
+  if (!Object.keys(input).length) return 'Mindestens einen Zeitraum (day, sprint oder order) angeben.';
+  return input;
+}
+
+/** Speichert die Limits einer Rolle in einer Transaktion; null entfernt die Zeile (= keine Grenze, keine Prüfung). */
+export async function saveRoleLimits(pool: Pool, project: string, role: BudgetRole, input: RoleLimitsInput) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [period, maxTokens] of Object.entries(input) as [BudgetPeriod, number | null][]) {
+      if (maxTokens === null)
+        await client.query(`DELETE FROM budget_role_limits WHERE project_slug = $1 AND role = $2 AND period = $3`, [
+          project,
+          role,
+          period,
+        ]);
+      else
+        await client.query(
+          `INSERT INTO budget_role_limits (project_slug, role, period, max_tokens) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (project_slug, role, period) DO UPDATE SET max_tokens = EXCLUDED.max_tokens`,
+          [project, role, period, maxTokens],
+        );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+interface RolePeriodStatus {
+  maxTokens: number | null;
+  /** Verbrauch der Rolle im laufenden Zeitraum; null beim Auftragslimit (hängt am einzelnen Auftrag) bzw. ohne Sprint. */
+  spend: Spend | null;
+  percent: number | null;
+}
+
+/** Limits und aktueller Verbrauch (heute, aktiver Sprint) aller Agent-Rollen des Projekts. */
+export async function collectRoleBudget(pool: Pool, project: string): Promise<Record<string, unknown>> {
+  const [limits, sprint] = await Promise.all([loadRoleLimits(pool, project), sprintStart(pool, project, null)]);
+  const [today, sprintSpend] = await Promise.all([
+    spendByRole(pool, project, localDay().since),
+    sprint ? spendByRole(pool, project, sprint.since) : Promise.resolve(null),
+  ]);
+  const status = (role: BudgetRole, period: BudgetPeriod): RolePeriodStatus => {
+    const limit = limits.find((entry) => entry.role === role && entry.period === period);
+    const spent = period === 'day' ? today : period === 'sprint' ? sprintSpend : null;
+    const spend = spent ? (spent.get(role) ?? { tokens: 0, costUsd: 0 }) : null;
+    return {
+      maxTokens: limit?.maxTokens ?? null,
+      spend,
+      percent: limit && spend ? usagePercent(spend, limit) : null,
+    };
+  };
+  return {
+    warnPercent: WARN_PERCENT,
+    sprintId: sprint?.id ?? null,
+    roles: BUDGET_ROLES.map((role) => ({
+      role,
+      limits: Object.fromEntries(BUDGET_PERIODS.map((period) => [period, status(role, period)])),
+    })),
+  };
+}
+
 export function registerBudgetRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/budget/roles', access({ tenant: 'project' }), async (request, response) => {
+    const slug = parseProjectSlug(request.params.slug ?? '');
+    if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+    response.json(await collectRoleBudget(pool, slug));
+  });
+
+  app.put(
+    '/projects/:slug/budget/roles/:role',
+    access({ role: 'admin', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+      const role = request.params.role;
+      if (!isBudgetRole(role))
+        return void response
+          .status(400)
+          .json({ message: `Unbekannte Agent-Rolle „${role ?? ''}“: erlaubt sind ${BUDGET_ROLES.join(', ')}.` });
+      const input = parseRoleLimitsInput(request.body);
+      if (typeof input === 'string') return void response.status(400).json({ message: input });
+      const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
+      if (!exists.rows.length) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      await saveRoleLimits(pool, slug, role, input);
+      // Wie beim Projektbudget: wegen Budget wartende Aufträge sofort freigeben, wenn das Limit wieder reicht.
+      await releaseBudgetBlocks(pool, slug);
+      response.json(await collectRoleBudget(pool, slug));
+    },
+  );
+
   app.get('/projects/:slug/budget', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });

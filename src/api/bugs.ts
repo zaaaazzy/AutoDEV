@@ -125,12 +125,13 @@ export interface KnownBug {
   severity: string;
   status: BugStatus;
   fixNotes: string;
+  source: string;
 }
 
 /** Bekannte Bugs für den Prompt; fremde, nicht freigegebene Bugs (Betrieb, GitHub) kommen nicht in den Prompt. */
 export async function loadKnownBugs(pool: Pool, projectSlug: string, limit = 40): Promise<KnownBug[]> {
   const result = await pool.query<KnownBug>(
-    `SELECT title, description, severity, status, fix_notes AS "fixNotes"
+    `SELECT title, description, severity, status, fix_notes AS "fixNotes", source
        FROM bugs
       WHERE project_slug = $1 AND status NOT IN ('${BUG_STATUS.wontfix}', '${BUG_STATUS.rejected}')
         AND NOT ${unapprovedBugSql('bugs')}
