@@ -863,8 +863,49 @@ Ein Agent-Lauf blieb bisher auf „läuft“, wenn die Datenbank ausfiel, währe
 
 ---
 
+## 18. Push-Abos: nur eigene Geräte, nur bekannte Push-Dienste, Abmelden entfernt das Abo
+
+Dieser Abschnitt betrifft **Einstellungen → App & Benachrichtigungen** (Schalter „Push-Nachrichten“) und **Einstellungen → Sicherheit** (Schaltfläche „Abmelden“). Die Regeln gelten für jeden Benutzer und für den Systemadministrator.
+
+> **Printscreens:** keine. Ein Browserlauf mit Push braucht eine HTTPS-Adresse, einen Service Worker und die Erlaubnis des Browsers. Platzhalter: `[Bild 15] Einstellungen → App & Benachrichtigungen mit eingeschaltetem Schalter „Push-Nachrichten“ und Schaltfläche „Testnachricht senden“` und `[Bild 16] Einstellungen → Sicherheit mit „Abmelden“`.
+
+### 18.1 Was sich geändert hat
+
+- **Nur bekannte Push-Dienste:** Der Server nimmt ein Gerät nur an, wenn sein Endpunkt von einem Browser-Push-Dienst stammt: Google (FCM, Chrome/Edge/Android), Mozilla (Firefox), Apple (Safari, iPhone) oder Windows. Andere Adressen werden abgelehnt, und der Server fragt sie nie an. Beim Senden gilt dieselbe Prüfung für alle gespeicherten Geräte.
+- **Ein Gerät gehört dem Benutzer, der es angemeldet hat:** Nur er kann das Gerät ändern oder abmelden. Meldet sich ein anderer Benutzer an, bleibt das fremde Gerät unverändert. Die Antwort ist dieselbe, es gibt keinen Hinweis auf fremde Geräte.
+- **Abmelden entfernt auch das Push-Abo:** Wer sich über „Abmelden“ abmeldet, entfernt das Abo dieses Geräts auf dem Server und im Browser. Danach endet die Sitzung, und die Seite lädt neu.
+- **Abos ohne Konto:** Ein Abo des Systemadministrators ohne Konto gehört zum Administrator-Konto der `.env`. Ein Logout ohne gültige Sitzung löscht nie ein Abo.
+- **Ungültige Altdaten:** Gespeicherte Geräte mit einer Adresse außerhalb der Liste werden beim nächsten Senden verworfen, ohne dass der Server sie anfragt.
+
+### 18.2 Bedienung
+
+| Aktion | Wo | Ergebnis |
+| --- | --- | --- |
+| Push-Nachrichten einschalten | Einstellungen → App & Benachrichtigungen → „Push-Nachrichten“ | Der Browser fragt nach der Erlaubnis. Nach „Erlauben“ ist das Gerät angemeldet. |
+| Testnachricht prüfen | „Testnachricht senden“ (nur sichtbar, wenn Push eingeschaltet ist) | Eine Nachricht kommt auf dem Gerät an. |
+| Dieses Gerät abmelden | Einstellungen → Sicherheit → „Abmelden“ | Das Push-Abo dieses Geräts endet, dann die Sitzung. |
+
+**Bedingungen und Grenzen:**
+
+- Push braucht HTTPS. Eine eigene Domain mit Caddy und Port 443 ist in `installation.md` beschrieben. Auf dem iPhone funktioniert Push nur in der installierten App.
+- Ein Gerät lässt sich nur mit dem Konto ändern, das es angemeldet hat. Abmelden mit einem anderen Konto entfernt das Abo nicht.
+- Scheitert der Browserteil beim Abmelden (z. B. kein Service Worker), wird trotzdem abgemeldet. Das Abo am Server entfernt der Logout nur, wenn sein Endpunkt bekannt war. Sonst bleibt es, bis der Push-Dienst es als abgemeldet meldet.
+- Der Server prüft die Adresse beim Anmelden und beim Senden. Die Liste der Push-Dienste wird im Code gepflegt. Neue Browser-Dienste nimmt die Administration hinzu.
+
+### 18.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| „Ungültige Push-Anmeldung.“ beim Einschalten | Die Adresse stammt nicht von einem bekannten Push-Dienst. Den Browser wechseln oder die Administration informieren. Die Prüfung nicht umgehen. |
+| Gerät bekommt nach Anmeldung mit einem anderen Konto keine Nachrichten | Das Gerät hat noch ein Abo des vorherigen Kontos, das nicht abgemeldet wurde (z. B. abgelaufene Sitzung). Ein fremdes Abo wird nicht übernommen. Mit dem vorherigen Konto abmelden, dann mit dem neuen Konto Push einschalten. Ist die alte Sitzung abgelaufen, die Benachrichtigungen dieser Seite in den Browser-Einstellungen zurücksetzen. |
+| Nach „Abmelden“ kommen trotzdem Nachrichten | Das Abo konnte nicht entfernt werden (z. B. Browserteil fehlgeschlagen, Endpunkt unbekannt). Die Administration informieren. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb
+- [`installation.md`](installation.md): HTTPS und Push-Dienste bei eigener Domain
+- [`push-abos-ssrf-besitz-logout-2026-10-25.md`](push-abos-ssrf-besitz-logout-2026-10-25.md): Entwicklerbericht zu Abschnitt 18 (Ursache, Umsetzung, offener Test)
