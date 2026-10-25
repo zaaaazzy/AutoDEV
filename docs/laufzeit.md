@@ -338,6 +338,8 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Sprint → KI-Kommentar                              | `sprint_proposal_comments`               | Auftragsautor, nur Text                                                                 |
 | Sprint → Git hoch / runter                         | `git_sync` pending, push oder pull       | Arbeitszyklus, Schritt 1 und 11                                                         |
 
+Der Komplettlauf prüft im Agent-Worktree immer `main` (losgelöst ausgecheckt). Hat der Worktree offene Änderungen, etwa weil ein Auftrag nach dem Nutzungslimit mit halbfertigem Stand wartet, startet kein Test und es werden keine Bugs angelegt. Die Anforderung steht dann auf „fehlgeschlagen“ mit dem Grund „Offene Änderungen im Agent-Worktree … – Test auf main nicht möglich“.
+
 ## 9 · Rechte je Agent
 
 Zwei Ausführungswege mit unterschiedlichen Grenzen. **Claude-CLI**: Rechte aus den freigeschalteten Gruppen des Projekts, AIdeation setzt sie als `--allowedTools`, der Wächter prüft jeden Schreib- und Shell-Zugriff. **Lokales Modell (Ollama)**: eingebaute Werkzeuge, Schreiben nur für Entwickler und Assistent. Die Standardrechte werden je Agent gespeichert und lassen sich im Agent-Formular einzeln ändern.
