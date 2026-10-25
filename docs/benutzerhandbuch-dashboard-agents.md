@@ -1654,7 +1654,7 @@ Ein Bug hängt über seinen Auftrag an einem Sprint. Bisher konnte sich der Spri
 
 ### 28.5 Stand der Prüfung
 
-- **Tests noch nicht bestätigt:** Der erste Lauf des Testers war rot (4 von 16 Subtests). Die Ursache lag im Testaufbau: Je Projekt ist nur ein aktiver Sprint erlaubt (`sprints_one_active_idx`). Der Entwickler hat die Ziel-Sprints der drei betroffenen Tests auf „Geplant“ umgestellt. Der Fix in `src/api/bugs.ts` war davon nicht betroffen. Ob der Lauf jetzt grün ist, ist nicht geprüft. Ohne Abdeckungs-Flag auszuführen: `npx --no-install tsx --test src/api/bugs.test.ts`.
+- **Tests grün:** Testlauf `25b803e4` hat `src/api/bugs.test.ts` mit 16 von 16 Tests bestanden, `npm run typecheck` ist grün. Der erste Lauf war rot (4 von 16 Subtests). Die Ursache lag im Testaufbau: Je Projekt ist nur ein aktiver Sprint erlaubt (`sprints_one_active_idx`). Der Entwickler hat die Ziel-Sprints der drei betroffenen Tests auf „Geplant“ umgestellt. Der Fix in `src/api/bugs.ts` war davon nicht betroffen. Den Lauf habe ich selbst nicht wiederholt. Ohne Abdeckungs-Flag auszuführen: `npx --no-install tsx --test src/api/bugs.test.ts`.
 - **Printscreens:** nicht erstellt. Es gab keinen Browser und keine laufende App.
 - **Offen:** Ein gemeinsamer Helfer `assignSprint` für alle Zuordnungsstellen (PATCH `/development`, Folgeauftrag, Erneut versuchen, `applyProposal`) ist nicht gebaut. Dafür braucht es einen eigenen Auftrag.
 
