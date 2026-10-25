@@ -115,6 +115,9 @@
       @if (sprint.status === 'completed' && sprint.gitSync === 'failed') {
         <span class="status status-blocked" title="Live schalten ist gescheitert">Live gescheitert</span>
       }
+      @if (sprint.status === 'completed' && sprint.gitSync === 'awaiting_merge') {
+        <span class="status status-review" title="Noch nicht in main – dort von Hand mergen">Wartet auf Merge</span>
+      }
     </ng-template>
     <ng-template appDataCell="progress" let-sprint>
       @let progress = sprintCounts(sprint.id);

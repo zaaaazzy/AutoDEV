@@ -567,7 +567,8 @@ test('deletes only planned or completed sprints without running work', async () 
     for (const query of blocked.slice(0, 2)) {
       assert.match(query.sql, /status IN \('planned', 'completed', 'cancelled'\)/);
       assert.match(query.sql, /in_progress/);
-      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+      // „Wartet auf Merge“ ist ein Ruhezustand wie „done“ oder „failed“ (es läuft nichts mehr).
+      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed', 'awaiting_merge'\)/);
     }
   });
 

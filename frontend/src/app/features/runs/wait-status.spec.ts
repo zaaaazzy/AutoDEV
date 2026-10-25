@@ -40,6 +40,7 @@ test('ohne frühere Läufe: unbestimmter Fortschritt', () => {
 test('ausstehender Push ohne laufenden Test; sonst nichts anzuzeigen', () => {
   assert.equal(waitStatus(null, { gitSync: 'pending' }, [])?.label, 'Push steht an');
   assert.equal(waitStatus(null, { gitSync: 'running' }, [])?.label, 'Merge und Push laufen');
+  assert.equal(waitStatus(null, { gitSync: 'awaiting_merge' }, [])?.label, 'Wartet auf Merge nach main');
   assert.equal(waitStatus(null, { gitSync: 'done' }, []), null);
   assert.equal(waitStatus(null, null, []), null);
 });
