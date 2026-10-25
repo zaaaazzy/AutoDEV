@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { decodePolicy } from './agent-guard.js';
+import { bashProblem, decodePolicy } from './agent-guard.js';
 import {
   availableCommands,
   availableGroups,
@@ -189,6 +189,54 @@ test('commandHelp: eingebaute Erklärung, allgemeine Erklärung für eigene Rege
   assert.equal(commandHelp('Bash(make test:*)'), 'Führt „make test“ aus, auch mit weiteren Argumenten.');
   assert.equal(commandHelp('Bash(make test)'), 'Führt genau „make test“ aus.');
   assert.equal(commandHelp('Read'), 'Read');
+});
+
+test('Claude-CLI: Routinen bekommen die Prüf-Gruppe, Entwickler nicht; der Wächter sperrt audit fix und Pager', () => {
+  const checks = ['Bash(npm audit:*)', 'Bash(npm outdated:*)', 'Bash(git ls-files:*)', 'Bash(git grep:*)'];
+  const restricted: ProjectPermissions = { enabled: ['git'], custom: [] };
+  // Auch mit eigener Zuweisung und eingeschränkten Projektgruppen.
+  for (const [permissions, assigned] of [
+    [all, null],
+    [restricted, ['Bash(git status:*)']],
+  ] as const) {
+    const routine = withAgentPermissions(CLAUDE, 'routine', permissions, assigned ? [...assigned] : null);
+    const allowed = (option(routine, '--allowedTools') ?? '').split(',');
+    for (const rule of checks) assert.ok(allowed.includes(rule), rule);
+    assert.deepEqual(policyOf(routine), { create: false, edit: false, scopes: [] });
+  }
+  for (const role of ['developer', 'assistant', 'tester']) {
+    const allowed = (option(withAgentPermissions(CLAUDE, role, all, null), '--allowedTools') ?? '').split(',');
+    for (const rule of checks) assert.ok(!allowed.includes(rule), `${role}: ${rule}`);
+  }
+  // Feste Liste des lokalen Modells.
+  assert.ok(isAllowedCommand('git grep -n TODO'));
+  assert.ok(isAllowedCommand('npm audit --audit-level=high'));
+  assert.ok(!isAllowedCommand('npm audit fix'));
+  const cwd = mkdtempSync(join(tmpdir(), 'checks-'));
+  for (const command of ['npm audit', 'npm audit --json', 'npm outdated', 'git ls-files', 'git grep -n TODO']) {
+    assert.equal(bashProblem(command, cwd, null), null, command);
+  }
+  for (const command of [
+    'npm audit fix',
+    'npm audit --json fix',
+    "npm audit 'fix'",
+    'npm audit \\"fix\\"',
+    'git grep -O less TODO',
+    'git grep -iOless TODO',
+    'git grep "-O" TODO',
+    'git grep --open-files-in-pager=less TODO',
+    'git grep --open TODO',
+    'git grep --no-index x /etc/passwd',
+    'git grep --no-exclude-standard SECRET',
+    'git grep TODO /etc',
+    'git grep TODO ../other',
+    'git grep -f /etc/passwd',
+    'git grep --file=/etc/passwd',
+    'git ls-files /etc',
+    'git grep KEY .env',
+  ]) {
+    assert.ok(bashProblem(command, cwd, null), command);
+  }
 });
 
 test('extraReadDirectories: Dienst-Logs nur mit HOME', () => {

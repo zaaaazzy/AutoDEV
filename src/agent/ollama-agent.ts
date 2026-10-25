@@ -1,6 +1,6 @@
 import type { GuardPolicy } from './agent-guard.js';
 import { join } from 'node:path';
-import { READ_ONLY_ROLES } from './tool-permissions.js';
+import { NO_FILE_WRITE_ROLES, READ_ONLY_ROLES } from './tool-permissions.js';
 import { shutdownSignal } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, runCommand } from '../core/command.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat } from './ollama-client.js';
@@ -41,6 +41,8 @@ export interface OllamaAgentOptions {
 
 const NO_CHANGE_NEEDED = /^\W*KEINE ÄNDERUNG NÖTIG:/i;
 const WRITE_ROLES = new Set(['developer', 'assistant']);
+/** Rollen mit Shell (run_command unter dem Wächter): die schreibenden und Routinen ohne Datei-Werkzeuge. */
+const COMMAND_ROLES = new Set([...WRITE_ROLES, ...NO_FILE_WRITE_ROLES]);
 const retryDelays = (): number[] => (process.env.DEV_LOG_OLLAMA_RETRY_MS === '0' ? [] : [3_000, 9_000]);
 
 /** Runs a local Ollama model as a tool-using agent. Without a CLI configured this makes agents work out of the box. */
@@ -53,12 +55,14 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const fetchImpl = options.fetchImpl ?? patientFetch;
   // Nur lesende Rollen (z. B. Visionär) bekommen nie Schreib-, Befehls- oder Datenbank-Werkzeuge.
   // Ohne Rechte-Kontext (Dateirechte und Befehle) fail-closed: nur lesen – sonst griffe kein Wächter.
-  const canWrite =
-    WRITE_ROLES.has(options.role) &&
+  const withRights =
     !READ_ONLY_ROLES.has(options.role) &&
     !options.readOnly &&
     options.files !== undefined &&
     options.commands !== undefined;
+  const canWrite = withRights && WRITE_ROLES.has(options.role) && !NO_FILE_WRITE_ROLES.has(options.role);
+  // Befehlsrecht getrennt vom Schreibrecht: Routinen führen Prüfbefehle aus (npm audit), ändern aber nichts.
+  const canRunCommands = withRights && COMMAND_ROLES.has(options.role);
   const configuredTurns = Number(process.env.DEV_LOG_MAX_TURNS);
   const maxTurns =
     options.maxTurns ??
@@ -70,6 +74,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     cwd: options.cwd,
     signal: controller.signal,
     canWrite,
+    canRunCommands,
     canManageServices: options.role === 'assistant' && !options.readOnly,
     databaseUrl: canWrite ? options.databaseUrl : null,
     files: options.files,
@@ -90,7 +95,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const loopGuard = new LoopGuard();
   let loopWarnings = 0;
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl)) },
+    { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl), canRunCommands) },
     { role: 'user', content: options.prompt },
   ];
   let timedOut = false;
@@ -132,7 +137,7 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
             tools:
               lastTurn && !canWrite
                 ? undefined
-                : toolDefinitions(canWrite, context.canManageServices, Boolean(context.databaseUrl)),
+                : toolDefinitions(canWrite, context.canManageServices, Boolean(context.databaseUrl), canRunCommands),
             stream: false,
             think: false,
             keep_alive: keepAlive,

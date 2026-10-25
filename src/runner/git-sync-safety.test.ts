@@ -88,10 +88,26 @@ test('kein Commit und kein Merge, wenn jemand den Branch gewechselt hat', async 
   assert.equal(git('rev-list', '--count', 'sprint/sprint-1'), '1');
 });
 
-test('nie vom Branch eines anderen Auftrags abzweigen', async () => {
+test('sauberer fremder Auftrags-Branch: der Auftrag ohne Sprint verlässt ihn und zweigt von main ab', async () => {
   const { cwd, git } = await project();
   git('checkout', '-b', 'auftrag/99999999-anderer');
-  await assert.rejects(enterOrderBranch(cwd, item, null), /fremden Auftrags-Branch/);
+  await writeFile(join(cwd, 'anderer.ts'), 'export {};\n');
+  git('add', '-A');
+  git('commit', '-m', 'anderer Auftrag');
+  const branch = await enterOrderBranch(cwd, item, null);
+  assert.equal(branch?.base, 'main');
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), branch?.branch);
+  // Nie vom fremden Auftrag abgezweigt: seine Arbeit bleibt auf seinem Branch.
+  assert.equal(git('rev-parse', 'HEAD'), git('rev-parse', 'main'));
+});
+
+test('fremder Auftrags-Branch mit offenen Änderungen: OrderBranchError, nichts wird angefasst', async () => {
+  const { cwd, git } = await project();
+  git('checkout', '-b', 'auftrag/99999999-anderer');
+  await writeFile(join(cwd, 'halb.ts'), 'export const halb = 1;\n');
+  await assert.rejects(enterOrderBranch(cwd, item, null), OrderBranchError);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'auftrag/99999999-anderer');
+  assert.equal(await readFile(join(cwd, 'halb.ts'), 'utf8'), 'export const halb = 1;\n');
 });
 
 test('losgelöster Stand ohne Sprint: der Auftrag arbeitet auf main auf statt auf „HEAD“', async () => {
