@@ -191,8 +191,9 @@ test('puts known bugs into the prompt so mistakes are not repeated', () => {
         severity: 'high',
         status: 'fixed',
         fixNotes: 'Prüfung ergänzt',
+        source: 'agent',
       },
-      { title: 'Export leer', description: '', severity: 'low', status: 'open', fixNotes: '' },
+      { title: 'Export leer', description: '', severity: 'low', status: 'open', fixNotes: '', source: 'human' },
     ],
   });
   assert.match(prompt, /\[behoben \/ high\] Login bricht ab – Null-Zeiger \| Lösung: Prüfung ergänzt/);

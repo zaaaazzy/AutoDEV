@@ -246,6 +246,9 @@ Das Ingest-Token steht im Browser-Snippet und ist damit praktisch öffentlich; G
 - Die Runner-Auswahl (`selectItems`, auch `--item`) und der Start im Runner überspringen jeden Auftrag, dessen Bug aus `production` oder `github` stammt und kein `approved_at` hat. Das gilt für alle Wege: Sprint, `auto_run`, Wiederholungen, Retries. Altdaten ohne Freigabe bleiben gesperrt.
 - Die Freigabe setzt ein Mensch mit Recht „Ausführen“ im Bug („Für Agents freigeben“, `POST /api/bugs/:id/approve`). Per `PATCH /api/bugs/:id` lässt sie sich nicht setzen. Bei Betriebs-Bugs entsteht mit der Freigabe der Behebungsauftrag (bzw. der erledigte Auftrag wird erneut eingeplant).
 - Meldung, Stack und Herkunft stehen in der Bug-Beschreibung nur im Block `<<<FREMDER-TEXT aus dem Produktions-Rückkanal …>>>`, ohne Steuerzeichen, auf 2000 Zeichen gekürzt. Prompts mit solchen Aufträgen bekommen den Sicherheitshinweis „fremder Text“. Nicht freigegebene fremde Bugs erscheinen nicht unter „Bekannte Bugs“ im Prompt.
+- Freigegebene fremde Bugs stehen unter „Bekannte Bugs“ (Agent-Prompt und Bug-Wächter) mit Titel, Beschreibung und Lösung im Fremdtext-Block. Der Prompt bekommt dann den Sicherheitshinweis.
+- Bei Chat-Verweisen auf einen Auftrag, eine Idee oder einen Bug gilt dasselbe, wenn der Inhalt fremd ist: Bug aus `production`/`github`, Auftrag zu einem solchen Bug, GitHub-Idee oder bereits markierter Text. Der Kontext für den Assistenten steht dann eingefasst und mit Sicherheitshinweis.
+- Marker im Fremdtext (`<<<`, `>>>`) werden entschärft (`‹‹‹`, `›››`). So kann der Text keinen Block öffnen oder vorzeitig schließen.
 
 ```mermaid
 flowchart LR

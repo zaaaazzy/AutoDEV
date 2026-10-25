@@ -5,6 +5,7 @@ import { loadProjectContext, loadProjectRules, withProjectContext } from '../cor
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../api/bugs.js';
+import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
@@ -284,10 +285,7 @@ async function assessRisks(
 ): Promise<string> {
   const bugs = await loadKnownBugs(pool, options.project, 60).catch(logged('requirements', []));
   if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
-  const list = bugs.map(
-    (bug) =>
-      `- [${bug.status === 'fixed' ? 'behoben' : 'offen'} / ${bug.severity}] ${bug.title}${bug.description ? ` – ${bug.description.slice(0, 200)}` : ''}${bug.fixNotes ? ` | Lösung: ${bug.fixNotes.slice(0, 300)}` : ''}`,
-  );
+  const list = bugs.map(knownBugLine);
   const { exitCode, output } = await runAuthorAgent(
     pool,
     options,
@@ -297,8 +295,11 @@ async function assessRisks(
         `## Anweisung\n${instructions}`,
         `## Auftrag\nTitel: ${title}\n${description}`,
         `## Alle bisherigen Bugs\n${list.join('\n')}`,
+        list.some(containsUntrusted) ? UNTRUSTED_HINT : '',
         'Antworte als Markdown-Liste nur mit den passenden Bugs: Bug, warum relevant, was nicht wiederholt werden darf. Passt keiner, schreibe "Keine relevanten Bugs." Ändere nichts.',
-      ].join('\n\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     execute,
     'bug_reviewer',
     onProgress,
