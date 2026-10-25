@@ -219,6 +219,7 @@ Dieser Abschnitt betrifft die Ausgabe, die ein Test- oder Befehlsschritt zurück
 - Umlaute und Emojis bleiben auch dann richtig, wenn sie über eine Chunk-Grenze der Ausgabe laufen. Es wird nie mitten in ein Emoji geschnitten.
 - Bei Claude-Schritten (`stream-json`) wird nur die Ausgabe von stdout als Ergebnis gelesen. Fehlermeldungen aus stderr landen in der Ausgabe, verfälschen aber nicht das Ergebnis.
 - **Ohne Ergebnis-Ereignis gilt ein Claude-Schritt als fehlgeschlagen.** Das gilt auch bei Exit-Code 0. Die Meldung „Die Claude-CLI hat kein Ergebnis gemeldet (result-Ereignis fehlt) …“ steht am Ende der Ausgabe. Die Kosten sind dann nicht 0, der Schritt ist nur nicht bewertbar.
+- **Tokens zählen auch ohne Ergebnis-Ereignis.** Bei Zeitlimit, „Abbrechen“ oder Absturz fehlt das Ergebnis-Ereignis der Claude-CLI. Dev Log zählt dann die Tokens aus den einzelnen Antworten des Agents, jede Antwort einmal. Sie gehen ins Tages- und Sprintbudget ein. Kosten in US-Dollar meldet die CLI nur im Ergebnis-Ereignis. Darum bleiben sie in diesem Fall offen, es werden keine Kosten geschätzt.
 - Die Live-Ausgabe aktualisiert sich höchstens alle 500 ms. Bei sehr langen Läufen sieht man den lesbaren Text der letzten rund 120 000 Zeichen.
 
 **Abhilfe, wenn die Coverage fehlt:** Die Zahlen stehen im Ende der Ausgabe. Fehlen sie dort, prüfe den Testbefehl gegen die Bedingungen in Abschnitt 5, Coverage-Messung.

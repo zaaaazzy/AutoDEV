@@ -33,18 +33,19 @@ export function withStreamJson(command: string[]): string[] {
 }
 
 type ContentBlock = { type?: string; name?: string; text?: string; input?: Record<string, unknown> };
+type Usage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+};
 type StreamEvent = {
   type?: string;
   session_id?: string;
-  message?: { content?: ContentBlock[] };
+  message?: { id?: string; content?: ContentBlock[]; usage?: Usage };
   result?: string;
   is_error?: boolean;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-  };
+  usage?: Usage;
   total_cost_usd?: number;
 };
 
@@ -105,6 +106,11 @@ export interface StreamParser {
   result(): { text: string; isError: boolean; tokens: number; costUsd: number } | null;
   /** Session of the run, reported in every event; used to continue the conversation. */
   sessionId(): string | undefined;
+  /**
+   * Rückfall ohne result-Ereignis (Timeout, Abbrechen, Absturz): Summe der usage aus den assistant-Ereignissen,
+   * je message.id nur der letzte Stand. Kosten gibt es dort nicht, darum nur Tokens.
+   */
+  streamedTokens(): number;
 }
 
 export function createStreamParser(
@@ -123,7 +129,9 @@ export function createStreamParser(
   let cached: string | undefined;
   let final: { text: string; isError: boolean; tokens: number; costUsd: number } | null = null;
   let session: string | undefined;
-  const action = (message: string): void => {
+  // Claude schickt eine Nachricht je Inhaltsblock erneut, mit derselben id: nur der letzte Stand zählt.
+  const messageTokens = new Map<string, number>();
+  const action =(message: string): void => {
     if (message) onAction(message);
   };
   const addParagraph = (text: string): void => {
@@ -153,6 +161,8 @@ export function createStreamParser(
       onSession?.(session);
     }
     if (event.type === 'assistant') {
+      const usage = event.message?.usage;
+      if (usage) messageTokens.set(event.message?.id ?? `ohne-id-${messageTokens.size}`, usageTokens(usage));
       for (const block of event.message?.content ?? []) {
         if (block.type === 'tool_use') action(describeToolUse(block, cwd));
         else if (block.type === 'text' && block.text?.trim()) {
@@ -193,6 +203,11 @@ export function createStreamParser(
       return cached;
     },
     sessionId: () => session,
+    streamedTokens() {
+      let sum = 0;
+      for (const tokens of messageTokens.values()) sum += tokens;
+      return sum;
+    },
     result() {
       // Die letzte Zeile ohne Zeilenumbruch gehört auch dazu (stdout zuerst: dort steht das result-Ereignis).
       for (const stream of ['stdout', 'stderr'] as const) {
@@ -248,11 +263,14 @@ export async function executeAgentCommand(
   showLive(true);
   // Without a result event (abort, crash) keep the readable text instead of raw JSON lines. Ein Lauf ohne Ergebnis
   // ist nie ein Erfolg: Kosten und is_error wären sonst unbekannt und der Schritt zählte mit Kosten 0 als bestanden.
+  // Verbrauchte Tokens zählen trotzdem zum Budget: Rückfall auf die usage der assistant-Ereignisse.
   if (!final) {
     const output = parser.transcript() || result.output;
-    if (result.exitCode !== 0) return { ...result, output, sessionId: parser.sessionId() };
+    const tokens = parser.streamedTokens() || result.tokens;
+    if (result.exitCode !== 0) return { ...result, output, tokens, sessionId: parser.sessionId() };
     return {
       ...result,
+      tokens,
       exitCode: 1,
       output: `${output}\n\nDie Claude-CLI hat kein Ergebnis gemeldet (result-Ereignis fehlt); der Lauf gilt als fehlgeschlagen.`,
       sessionId: parser.sessionId(),
