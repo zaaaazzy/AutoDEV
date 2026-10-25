@@ -1180,11 +1180,57 @@ Keine. Die Änderung hat keine neue Oberfläche. Sichtbar ist sie nur in Chat-An
 
 ---
 
+## 23. Neue Aufträge nur mit Status „Backlog“ oder „Geplant“
+
+Ein neuer Auftrag entsteht immer im Backlog oder als Geplant. Andere Status lassen sich beim Anlegen nicht mehr angeben. Das betrifft die Schnittstelle `POST /api/projects/:slug/development`; das Formular für neue Aufträge ist davon nicht betroffen.
+
+> **Printscreens:** keine. Das Formular schickt keinen Status, es verhält sich wie vorher. Die Änderung zeigt sich nur bei direkten Aufrufen der Schnittstelle. Platzhalter: keiner.
+
+### 23.1 Was sich geändert hat
+
+- **Vorher:** Die Schnittstelle prüfte den Status gegen alle Status des Auftrags. Wer neue Aufträge anlegen durfte (Rolle „plan“), konnte einen Auftrag direkt als `done`, `approval` oder `in_progress` erzeugen. Ein Auftrag als `done` hätte Velocity und Burndown verfälscht und Folgeaufträge freigegeben. Ein Auftrag als `approval` hätte in der Freigabeliste gestanden, und „Freigeben“ hätte den Worker einen nicht existierenden Branch mergen lassen.
+- **Jetzt:** Beim Anlegen sind nur `backlog` und `planned` erlaubt. Ohne Angabe entsteht `backlog`.
+- **Weiter wie bisher:** Die übrigen Status erreicht ein Auftrag nur über die Übergänge von `PATCH /api/development/:id` oder über den Worker. Bestehende Aufträge ändern sich nicht.
+
+### 23.2 Bedienung
+
+| Anfrage beim Anlegen | Ergebnis |
+| --- | --- |
+| ohne `status` | Auftrag mit Status „Backlog“ |
+| `status: "backlog"` | Auftrag mit Status „Backlog“ |
+| `status: "planned"` | Auftrag mit Status „Geplant“ |
+| `status: "done"`, `"approval"`, `"in_progress"` oder ein anderer Status | 400 mit Feld `status`; es wird nichts gespeichert |
+
+Zum Weiterschalten legst du den Auftrag an und änderst danach den Status per `PATCH`, soweit die Übergangstabelle es erlaubt.
+
+**Bedingungen und Grenzen:**
+
+- **Wer:** Dieselbe Rolle wie bisher, nämlich die mit dem Recht „plan“ im Projekt. Die Prüfung der Rechte ändert sich nicht.
+- **Übrige Felder:** Titel, Beschreibung, Priorität, Kategorie und Verknüpfungen werden wie bisher geprüft.
+- **Nur das Anlegen:** Die Liste der Status für `PATCH` bleibt vollständig. Ein Auftrag, der schon in einem anderen Status ist, lässt sich weiter bearbeiten, soweit die Übergänge es vorsehen.
+- **Aufrufer mit anderem Status:** Ein eigenes Skript oder ein Test, das mit `done` oder `approval` anlegt, bricht jetzt mit 400 ab. Der Aufruf ist anzupassen: anlegen, dann per `PATCH` weiterschalten.
+
+### 23.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| 400 mit Feld `status` beim Anlegen | Der Status ist beim Anlegen nicht erlaubt. Ohne Angabe oder mit „Backlog“ bzw. „Geplant“ anlegen, dann per `PATCH` weiterschalten. |
+| Ein Auftrag mit Status „Freigabe“ oder „Erledigt“ lässt sich nicht direkt anlegen | Gewollt. Diese Status entstehen nur über den Ablauf des Auftrags. |
+
+### 23.4 Stand der Prüfung
+
+- **Getestet:** Testlauf `78553ad7` im Test-Gate. `src/api/development-create.test.ts` hat 8 von 8 Tests bestanden, `npm run typecheck` ist grün. Die Tests decken die Ablehnung von `done`, `approval` und `in_progress` mit 400 ab, ohne Status entsteht `backlog`, und `backlog` sowie `planned` werden angenommen.
+- **Nicht gelaufen:** `src/api/development-status.test.ts`. Der Auftrag ändert diese Datei nicht, und `DEV_FIELDS` (PATCH) bleibt unverändert.
+- **Offen:** Die Angaben in 23.1 und 23.2 stützen sich auf diesen Lauf. Die Schnittstelle selbst wurde nicht im laufenden System geprüft.
+
+---
+
 ## Verwandte Dokumente
 
 - [`redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md`](redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md): Entwicklerbericht zu Abschnitt 22 (Muster, Schreiben über Temp-Datei, Marker, Aufrufer mit `tokens: false`)
 - [`sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md`](sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md): Entwicklerbericht zu Abschnitt 6a (Allowlist, nur ADD, Zeilengrenze, String-Funktionen)
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
+- [`auftrag-anlegen-nur-backlog-planned-2026-10-25.md`](auftrag-anlegen-nur-backlog-planned-2026-10-25.md): Entwicklerbericht zu Abschnitt 23 (Anlegen nur mit Backlog oder Geplant, offene Tests)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
 - [`workflows.md`](workflows.md): Ablauf der Agents im Auftrag
 - [`laufzeit.md`](laufzeit.md): Worker und Betrieb
