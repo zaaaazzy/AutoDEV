@@ -1282,7 +1282,59 @@ Die Oberfläche bietet beim Erneuten Versuchen keine Sprint-Wahl. Eine ausdrück
 
 ---
 
+## 25. Sprint abschließen und löschen: Aufträge in Freigabe halten den Sprint
+
+Ein Sprint lässt sich nicht löschen, solange ein Auftrag auf Freigabe wartet. Auch abschließen lässt er sich dann nicht. Der Grund: Die Freigabe mergt ihren Auftrag in den Sprint-Branch. Nach dem Abschluss oder Löschen käme dieser Merge nie in `main`, oder er liefe ohne Sprint.
+
+> **Printscreens:** keine. Dafür müssten App, Datenbank und Browser laufen; das wurde nicht gemacht. Platzhalter: keiner.
+
+### 25.1 Was sich geändert hat
+
+- **Vorher:** Das Löschen prüfte nur Aufträge `in_progress`. Ein Auftrag in Freigabe hielt den Sprint nicht auf. Nach „Freigeben“ mergte der Worker in einen gelöschten Sprint, obwohl Bericht und Tag schon erzeugt waren.
+  - Abschluss und Live-Schalten blockierten wartende Aufträge schon vorher. Dort gab es keine Änderung.
+- **Jetzt, Löschen:** Der Sprint lässt sich nur löschen, wenn keiner seiner Aufträge läuft oder auf Freigabe wartet. Sonst kommt 409 mit der Meldung: „Nur geplante, abgeschlossene oder abgebrochene Sprints ohne Git-Sicherung und ohne Aufträge, die laufen oder auf Freigabe warten, lassen sich löschen.“
+- **Jetzt, Abschluss:** Wartet ein Auftrag auf Freigabe, kommt 409 mit der Meldung: „N Auftrag/Aufträge warten auf die Review-Freigabe oder den Merge danach – erst freigeben bzw. zurückweisen und den Merge abwarten, dann abschliessen.“
+- **Jetzt, Abbrechen:** Aufträge in Freigabe gehen beim Abbrechen des Sprints zurück ins Backlog. Ihre Review-Angaben (Branch, Basis, Freigabe-Zeitpunkt) werden geleert. Die Arbeit bleibt auf dem Auftrags-Branch; der nächste Lauf setzt dort fort.
+- **Weiter wie bisher:** Erledigte und abgelehnte Aufträge bleiben beim Sprint. Der Merge-Pfad, „Wieder einplanen“ und „Erneut versuchen“ sind nicht geändert.
+
+### 25.2 Bedienung
+
+| Aktion am Sprint | Auftrag in Freigabe | Auftrag läuft | Keine offenen Aufträge |
+| --- | --- | --- | --- |
+| Abschließen | 409, Sprint bleibt aktiv | 409, Sprint bleibt aktiv | 200, mit Bericht und Git-Sicherung |
+| Löschen | 409, Sprint bleibt bestehen | 409, Sprint bleibt bestehen | 204, geplante Aufträge gehen ins Backlog |
+| Abbrechen | Auftrag geht ins Backlog | Der Worker schließt den Auftrag ab | Geplante Aufträge gehen ins Backlog |
+
+Mit einem Auftrag in Freigabe läuft also nur der Abbruch durch. Danach ist der Auftrag im Backlog und kann neu eingeplant werden.
+
+**Bedingungen und Grenzen:**
+
+- **Der Weg zum Abschluss:** Freigeben oder zurückweisen, den Merge abwarten, dann abschließen. Erst danach ist der Sprint frei.
+- **Nach dem Abbruch:** „Wieder einplanen“ funktioniert, weil der Auftrag nicht mehr im Status Freigabe steht. Der 409 bleibt für echte Konflikte erhalten.
+- **Die Prüfung gilt nur serverseitig:** Die Meldungen kommen von der Schnittstelle. Die Oberfläche zeigt sie wie bisher an; das ist im Browser nicht geprüft.
+
+### 25.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Löschen oder Abschließen liefert 409, obwohl im Sprint nichts zu laufen scheint. | Ein Auftrag wartet auf Freigabe. In der Review-Freigabe freigeben oder zurückweisen, den Merge abwarten und dann erneut versuchen. |
+| Der Sprint lässt sich nicht löschen, Auftrag ist „erledigt“. | Erledigte Aufträge blockieren nicht. Prüfen, ob ein anderer Auftrag im Sprint läuft oder wartet. |
+| Nach dem Abbruch fehlt der Auftrag im Sprint. | Gewollt. Er steht im Backlog und lässt sich über „Aufträge hinzufügen“ wieder einplanen. |
+
+### 25.4 Stand der Prüfung
+
+- **Getestet:** `src/api/sprint-complete.test.ts` mit neuen Tests am Ende. Abschluss und Löschen mit Auftrag in Freigabe liefern 409, der Sprint bleibt unverändert. Ohne solche Aufträge klappen beide. Der Löschen-Test schlug vor dem Fix mit „204 !== 409“ fehl.
+- **Komplettlauf:** Der Entwickler meldet `npm test` mit 1494 grünen Tests, ohne Abdeckungs-Flags. Diesen Lauf habe ich nicht selbst wiederholt.
+- **Nicht geprüft:** Die Abbruch-Regel (Freigabe-Aufträge ins Backlog) ist im Bericht nicht gesondert belegt. Die Oberfläche wurde nicht im Browser geprüft.
+- **Offen:** Abschluss und Löschen prüfen die Statuslisten getrennt in `src/api/sprints.ts`. Ändert sich die Liste, müssen beide Stellen angepasst werden.
+
+Einzelheiten stehen im Entwicklerbericht [`sprint-loeschen-auftraege-in-freigabe-2026-10-25.md`](sprint-loeschen-auftraege-in-freigabe-2026-10-25.md).
+
+---
+
 ## Verwandte Dokumente
+
+- [`sprint-loeschen-auftraege-in-freigabe-2026-10-25.md`](sprint-loeschen-auftraege-in-freigabe-2026-10-25.md): Entwicklerbericht zu Abschnitt 25 (Löschen und Abschluss mit Aufträgen in Freigabe)
 
 - [`redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md`](redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md): Entwicklerbericht zu Abschnitt 22 (Muster, Schreiben über Temp-Datei, Marker, Aufrufer mit `tokens: false`)
 - [`sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md`](sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md): Entwicklerbericht zu Abschnitt 6a (Allowlist, nur ADD, Zeilengrenze, String-Funktionen)
