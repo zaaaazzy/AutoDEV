@@ -822,6 +822,47 @@ Groß- und Kleinschreibung spielen keine Rolle. Umschließende Anführungszeiche
 
 ---
 
+## 17. Verwaiste Läufe: „läuft“ ohne Prozess räumt der Worker selbst auf
+
+Ein Agent-Lauf blieb bisher auf „läuft“, wenn die Datenbank ausfiel, während ein Auftrag abgeschlossen wurde. Dann lief kein Prozess mehr dahinter. Der Schritt ließ sich nicht abbrechen, und ein Neustart des Workers war die einzige Hilfe. Jetzt räumt der Worker solche Läufe selbst auf, ohne Neustart.
+
+> **Printscreens:** keine. Der Fall braucht eine Datenbank, die während eines Abschlusses ausfällt, also einen laufenden Docker-Stack mit gezielter Unterbrechung. Platzhalter: `[Bild 13] Agent-Liste: Schritt „Unterbrochen: Der Lauf hatte keinen Prozess mehr …“ im Verlauf, Auftrag wieder „Geplant“` und `[Bild 14] Schritt nach „■ Abbrechen“ ohne Prozess mit dem Hinweis „Vom Benutzer abgebrochen. Der Lauf hatte keinen Prozess mehr …“`.
+
+### 17.1 Was sich geändert hat
+
+- **Abschluss wird wiederholt:** Scheitert der Abschluss nur an der Verbindung zur Datenbank, versucht der Worker es bis zu fünfmal im Abstand von 15 s erneut. Fehler in einer Abfrage (z. B. ungültige Daten) werden nicht wiederholt.
+- **Verwaiste Läufe werden aufgeräumt:** Alle 15 s prüft der Worker die Läufe seiner Projekte. Ein Lauf auf „läuft“, den kein Auftrag dieses Workers mehr hält und der seit 5 Minuten kein Lebenszeichen hat, wird beendet. Der Schritt wird „fehlgeschlagen“ mit dem Vermerk „Unterbrochen: …“. Der Auftrag geht zurück auf „Geplant“.
+- **„■ Abbrechen“ wirkt wieder:** Auf einem Schritt ohne Prozess endet „■ Abbrechen“ beim nächsten Takt. Der Schritt erhält den Vermerk „Vom Benutzer abgebrochen …“ und den Exit-Code 130, der Auftrag wird blockiert.
+
+### 17.2 Bedingungen
+
+| Situation | Ergebnis |
+| --- | --- |
+| Datenbank fällt beim Abschluss kurz aus und ist danach wieder da | Der Abschluss gelingt beim Wiederholen. Der Lauf ist sofort geschlossen. |
+| Datenbank bleibt länger als rund 60 s weg | Die Wiederholungen geben auf, der Lauf bleibt zunächst auf „läuft“. Nach Rückkehr der Datenbank steht er spätestens nach etwa 5 min plus einem Takt (15 s) nicht mehr auf „läuft“. |
+| Verwaister Lauf ohne Abbruch | Schritt „fehlgeschlagen“ mit „Unterbrochen: …“, Auftrag wieder „Geplant“ und damit wie gewohnt neu einplanbar. |
+| Derselbe Auftrag verwaist ein drittes Mal | Auftrag „Blockiert“ statt erneut eingeplant. Der Fehler steht am Auftrag. |
+| „■ Abbrechen“ auf einem verwaisten Schritt | Der Schritt endet binnen 15 s nach dem Takt, frühestens 30 s nach dem letzten Lebenszeichen. Der Auftrag wird blockiert. |
+| Lauf läuft noch in einem Worker, der ihn hält | Bleibt unberührt. Der Worker räumt nur Läufe auf, die er nicht mehr hält. |
+| Tokens und Kosten eines verwaisten Laufs | Bleiben stehen, wie sie beim Abbruch waren. Es werden keine Werte geschätzt. |
+
+**Bedingungen:**
+
+- Ein Lebenszeichen ist der Start des Laufs, der Start eines Schritts oder der letzte Eintrag im Verlauf des Schritts. Schreibt ein Schritt länger als 5 Minuten keinen Verlaufseintrag, zählt er als verwaist, auch wenn er noch läuft. 
+- Die Aufräumung gilt nur für Projekte, die der Worker bedient. Läuft ein Auftrag bei einem anderen Worker, bleibt er bei diesem.
+- Der Worker muss laufen, damit der Takt greift. Ist er ganz offline, räumt er beim nächsten Start auf, wie bisher.
+
+### 17.3 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Schritt steht nach Rückkehr der Datenbank noch länger als 6 min auf „läuft“ | Der Worker läuft nicht oder nicht mit dieser Version. Den Worker-Status prüfen und neu starten, falls er nicht mehr läuft. |
+| Auftrag ist „Blockiert“ mit dem Hinweis auf eine Unterbrechung | Er hat dreimal hintereinander verwaist. Die Ursache beheben (z. B. Datenbankverbindung), dann den Auftrag prüfen und neu einplanen. |
+| „■ Abbrechen“ wirkt nach einer Minute noch nicht | Der Abbruch wartet auf den nächsten Takt und frühestens 30 s nach dem letzten Lebenszeichen. Spätestens nach etwa 45 s muss der Schritt beendet sein. Ist er es nicht, läuft der Worker nicht. |
+| Schritt wurde beendet, obwohl der Agent noch arbeitete | Er hat länger als 5 min keinen Verlaufseintrag geschrieben. Die Grenze ist bewusst gewählt. Den Auftrag prüfen und neu starten, falls Änderungen fehlen. |
+
+---
+
 ## Verwandte Dokumente
 
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln
