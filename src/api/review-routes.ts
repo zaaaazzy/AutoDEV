@@ -4,7 +4,7 @@ import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUS } from '../core/status.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
 import { access } from './access.js';
-import { DEV_COLUMNS, retryComment } from './development.js';
+import { DEV_COLUMNS, retryAutoRunSql, retryComment, retrySprintSql } from './development.js';
 import { guardGit } from './git-state.js';
 
 const PORT_BASE = 4200;
@@ -356,8 +356,10 @@ export function registerReviewRoutes(app: Router, pool: Pool): void {
         return;
       }
       // Zurück an die Agents: der Auftrag läuft erneut auf seinem Branch, die Rückmeldung steht in der Beschreibung.
+      // Sprint wie bei /retry: ein Sprint im Review oder abgeschlossen nimmt keine Arbeit mehr an.
       const result = await pool.query(
-        `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, review_approved_at = NULL,
+        `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = ${retryAutoRunSql()},
+              sprint_id = ${retrySprintSql()}, review_approved_at = NULL,
               review_since = NULL, failure = NULL, action_todo = NULL, budget_since = NOW(), updated_at = NOW(),
               description = COALESCE(d.description, '') || E'\\n\\n## Rückmeldung aus der Review-Freigabe (' ||
                 to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\\n' || $2::text
