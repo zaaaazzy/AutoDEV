@@ -177,7 +177,8 @@ aber sein Ergebnis nicht: kein Bug, keine Abnahme, kein Statuswechsel.
 
 **Nachrichten zwischen Agents:** Ein Agent schreibt `@@NACHRICHT: …` (an den nächsten Agent) oder
 `@@NACHRICHT an <Name>: …`. Ist beim Absender „Nachricht geht an“ (`agents.handoff_to`) gesetzt, geht eine Nachricht
-ohne Namen dorthin. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
+ohne Namen dorthin. Als Empfänger ist nur ein Agent desselben Projekts erlaubt; `PATCH /agents/:id` lehnt fremde
+IDs mit 400 ab, `null` hebt die feste Zuordnung auf. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
 `agent_run_steps.handoffs`. Implementierung: `src/core/workflow-phases.ts`, `src/runner/pre-sprint.ts`.
 
 ## 5. Fehlerbehandlung und Auto-Bugfix
