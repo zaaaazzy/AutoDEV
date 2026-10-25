@@ -9,6 +9,10 @@ type Handler = (request: unknown, response: unknown) => Promise<void>;
 
 const AGENT_ID = '11111111-1111-4111-8111-111111111111';
 const STORED = { slug: 'demo', command: ['claude', '-p'], role: 'developer' };
+const OWN_AGENT = '22222222-2222-4222-8222-222222222222';
+const FOREIGN_AGENT = '33333333-3333-4333-8333-333333333333';
+/** Zwei Projekte: der Agent unter Test und OWN_AGENT gehören zu „demo“, FOREIGN_AGENT zu „fremd“. */
+const PROJECT_AGENTS: Record<string, string[]> = { demo: [AGENT_ID, OWN_AGENT], fremd: [FOREIGN_AGENT] };
 const agentsUser: Principal = { id: 'u1', username: 'anna', displayName: 'Anna', roles: ['agents'] };
 const admin: Principal = { id: 'u2', username: 'root', displayName: 'Root', roles: ['admin'] };
 
@@ -31,6 +35,10 @@ function setup() {
     query: async (sql: string, values: unknown[] = []) => {
       queries.push({ sql, values });
       if (sql.startsWith('SELECT project_slug AS slug, command, role')) return { rows: [STORED], rowCount: 1 };
+      if (sql.startsWith('SELECT 1 FROM agents WHERE id = $1 AND project_slug = $2')) {
+        const own = PROJECT_AGENTS[values[1] as string]?.includes(values[0] as string);
+        return { rows: own ? [{ '?column?': 1 }] : [], rowCount: own ? 1 : 0 };
+      }
       return { rows: [{ id: AGENT_ID }], rowCount: 1 };
     },
   };
@@ -113,6 +121,27 @@ test('PATCH /agents/:id: Admin darf command und role ändern', async () => {
   assert.equal(status, 200);
   const update = writes(queries)[0];
   assert.ok(update && /command = \$\d/.test(update.sql) && /role = \$\d/.test(update.sql));
+});
+
+test('PATCH /agents/:id: handoffTo auf einen Agent eines fremden Projekts wird mit 400 abgelehnt', async () => {
+  for (const principal of [agentsUser, admin]) {
+    const { handlers, queries } = setup();
+    const patch = handlers.get('PATCH /agents/:id');
+    const status = await call(patch, principal, { id: AGENT_ID }, { handoffTo: FOREIGN_AGENT });
+    assert.equal(status, 400);
+    assert.deepEqual(writes(queries), []);
+  }
+});
+
+test('PATCH /agents/:id: handoffTo auf einen Agent desselben Projekts und null bleiben erlaubt', async () => {
+  for (const handoffTo of [OWN_AGENT, null]) {
+    const { handlers, queries } = setup();
+    const status = await call(handlers.get('PATCH /agents/:id'), agentsUser, { id: AGENT_ID }, { handoffTo });
+    assert.equal(status, 200, String(handoffTo));
+    const update = writes(queries)[0];
+    assert.ok(update && /handoff_to = \$2/.test(update.sql));
+    assert.equal(update.values[1], handoffTo);
+  }
 });
 
 test('POST /projects/:slug/agents: Rolle agents darf weder command noch eine Rolle setzen', async () => {

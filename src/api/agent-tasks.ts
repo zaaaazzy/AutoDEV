@@ -170,7 +170,7 @@ export function computeNextRun(
 }
 
 /** Der gewählte Agent muss zum Projekt gehören. */
-async function agentInProject(pool: Pool, agentId: string | null, slug: string): Promise<boolean> {
+export async function agentInProject(pool: Pool, agentId: string | null, slug: string): Promise<boolean> {
   if (!agentId) return true;
   return !!(await pool.query('SELECT 1 FROM agents WHERE id = $1 AND project_slug = $2', [agentId, slug])).rows[0];
 }
