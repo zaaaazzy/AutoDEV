@@ -1102,8 +1102,87 @@ Es gibt keine neuen Felder oder Schaltflächen. Du musst nichts einstellen. Die 
 
 ---
 
+## 22. Zugangsdaten in Ausgaben geschwärzt, sicheres Schreiben, Marker nur am Zeilenanfang
+
+Drei Änderungen betreffen, was du im Chat, im Lauf-Log und im Backlog siehst:
+
+- **Zugangsdaten** in Befehls- und SQL-Ausgaben werden erkannt und ersetzt, bevor sie gespeichert werden.
+- **Dateien schreiben** Agents über das lokale Modell so, dass ein Link im Projekt den Schreibvorgang nicht mehr umlenkt.
+- **Marker** (`@@BUG`, `@@IDEA`, `@@ORDER`) legen Einträge nur noch an, wenn sie am Zeilenanfang stehen und nicht in einem Codeblock.
+
+### 22.1 Was sich geändert hat
+
+- **Zugangsdaten in Ausgaben.** Gespeichert werden Befehlsausgaben (Test- und Build-Schritte, Log, Agent-Antworten) und Ergebnisse von `run_sql` (Zellen und Fehlermeldungen). Beide werden nach bekannten Token-Formaten durchsucht. Ein Fund wird ersetzt: in Befehlsausgaben durch `[REDACTED]`, in SQL-Ergebnissen durch `[MASKIERT]`.
+- **Erkannte Formate** (Mindestlänge in Klammern):
+  - Anthropic `sk-ant-` (20 Zeichen nach dem Präfix), OpenAI-artige `sk-` und `sk-proj-` (32 Zeichen),
+  - GitHub `ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_` (genau 36 Zeichen) und `github_pat_` (40 Zeichen),
+  - Slack `xoxb-`, `xoxa-`, `xoxp-`, `xoxr-`, `xoxs-` (10 Zeichen),
+  - AWS-Zugangsschlüssel `AKIA…` (16 Zeichen), Google-Schlüssel `AIza…` (35 Zeichen),
+  - private Schlüssel im PEM-Format (der ganze Block),
+  - JWT (drei Teile, die mit `eyJ` beginnen),
+  - `Bearer`, `Basic` und `Token` mit einem Wert, der mindestens 16 Zeichen lang ist und eine Ziffer enthält,
+  - Benutzer und Passwort in Adressen (`https://nutzer:passwort@host`). Ersetzt wird nur der Teil vor dem `@`.
+- **Bleibt lesbar:** E-Mail-Adressen, IP-Adressen, Zeilen wie `passwort=…` oder `token: …`, Token- und Kostenzahlen (etwa `input_tokens: 42`) und Pfade wie `session.ts:12`. Die Zahlen werden bewusst nicht verändert, damit Verbrauch und Kosten stimmen.
+- **Marker.** Ein Marker zählt nur, wenn er am Zeilenanfang steht. Davor dürfen Einrückung und ein Listenpunkt stehen (`- `, `* `, `+ `, `1. `, `1) `). Nicht gezählt werden Marker mitten im Satz, in Backticks, in Zitaten (`> `) oder in Codeblöcken (Zaun aus drei Backticks oder Tilden). Zitierter Dateiinhalt legt deshalb keine Einträge mehr an.
+- **Schreiben (lokales Modell).** `write_file` und `replace_in_file` gehen in dieser Reihenfolge vor:
+  1. Der Zielordner wird angelegt, wie bisher.
+  2. Der wirkliche Pfad wird erst jetzt geprüft, nach dem Anlegen. Liegt er außerhalb des Projekts oder auf einem geschützten Pfad, wird nichts geschrieben.
+  3. Der Inhalt landet in einer neuen Datei `.<Name>.<Zufallszahl>.tmp` im Zielordner.
+  4. Vor dem Umbenennen wird geprüft, dass der Zielordner noch an derselben Stelle liegt. Sonst bricht der Schritt ab.
+  5. Die Datei wird auf den Zielnamen umbenannt. Scheitert ein Schritt, wird die `.tmp`-Datei gelöscht.
+- **Rechte bleiben erhalten.** Eine bestehende Datei behält ihre Dateirechte. Ein Link im Projekt bleibt bestehen, geschrieben wird an sein Ziel.
+
+### 22.2 Bedienung
+
+Es gibt keine neuen Felder oder Schaltflächen. Du musst nichts einstellen. Die Wirkung siehst du an den Antworten im Chat, an den Meldungen eines Laufs und an den Einträgen im Backlog.
+
+| Beobachtung | Bedeutung |
+| --- | --- |
+| `[REDACTED]` in einer Befehlsausgabe | Ein Zugangsdaten-Muster oder ein Wert aus der Umgebung wurde ersetzt. Gewollt. |
+| `[MASKIERT]` in einer SQL-Zelle oder Fehlermeldung | Ein Token-Muster aus der Projekt-Datenbank wurde ersetzt. Gewollt. Den Wert bei Bedarf direkt in der Datenbank nachsehen, nicht über den Chat. |
+| Ein Marker erzeugt keinen Eintrag | Er steht nicht am Zeilenanfang, in einem Zitat oder in einem Codeblock (dann wird er still übergangen), oder sein JSON ist kaputt (dann steht er bei Routinen als verworfen im Lauf, siehe 22.4). |
+
+### 22.3 Bedingungen und Grenzen
+
+- **Nur bekannte Formate.** Ein Zugangsdaten-Format, das nicht in der Liste steht, bleibt sichtbar. Neue Formate kommen in `src/core/secret-mask.ts` dazu.
+- **Mindestlängen.** Ein Token, das kürzer ist als seine Mindestlänge, wird nicht ersetzt. Ein `ghp_`-Token mit 35 Zeichen bleibt also stehen.
+- **Schlüssel-Wert-Paare nicht im Chat.** Die Zeile `passwort=hunter2` in einer SQL-Zelle oder Befehlsausgabe wird **nicht** ersetzt. Dieses Muster gehört zur Maske des Git-Syncs und des Betriebs-Rückkanals, nicht zur Ausgabe im Chat. So bleiben Diagnosen lesbar.
+- **Kürzung.** Befehlsausgaben über 120 000 Zeichen werden erst gekürzt und dann nach Token-Mustern durchsucht. Ein Token, das genau über die Schnittkante reicht, wird deshalb nicht vollständig erkannt, und ein Bruchstück kann stehen bleiben. Passwörter aus der Umgebung sind davon nicht betroffen, sie werden an den Kanten sauber entfernt. SQL-Zellen werden vor dem Kürzen maskiert.
+- **Prüfung vor dem Commit.** Der `git diff` für die Prüfung auf Zugangsdaten bleibt ungeschwärzt, sonst fände die Prüfung nichts mehr. Die Sperre vor dem Commit greift also weiter auf die echten Zugangsdaten.
+- **Welche Marker gelten.** Der Visionär liest nur `@@IDEA`. Routinen lesen `@@BUG`, `@@IDEA` und `@@ORDER`.
+- **Grenze bei Codeblöcken.** Der Parser erkennt einen Zaun nur, wenn er höchstens drei Leerzeichen eingerückt ist. Ein Codeblock in einer verschachtelten Liste (mehr Einrückung) gilt deshalb nicht als Block. Ein Marker am Zeilenanfang darin zählt dann.
+- **Marker im Fließtext verlieren Einträge.** Ein Agent, der einen Marker nach einem Satz in derselben Zeile schreibt, erzeugt nichts mehr. Das ist beabsichtigt.
+- **Nur das lokale Modell.** Das Schreiben über `writeProjectFile` gilt für `write_file` und `replace_in_file` des lokalen Modells. Die Claude-CLI schreibt mit ihren eigenen Werkzeugen. Für sie gelten die Regeln aus Abschnitt 3 und 5.
+- **Ordner vor der Prüfung.** Der Zielordner wird vor der Pfadprüfung angelegt. Führt ein Ordner im Projekt per Link nach außen, können dort leere Ordner entstehen. Geschrieben wird dann trotzdem nichts.
+- **Überschreiben bleibt wie bisher.** Existiert das Ziel, wird es ersetzt. Die neue Funktion prüft das nicht. Ob der Agent überschreiben darf, entscheidet der Aufrufer wie vorher.
+- **Windows.** Die Schutzmaßnahme gegen Links (`O_NOFOLLOW`) und das Erhalten der Rechte sind unter Windows nicht geprüft.
+
+### 22.4 Fehlerbehebung
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| Ein Zugangsdaten-Wert steht unverändert in einer Ausgabe. | Das Format ist nicht bekannt, zu kurz oder ist ein Schlüssel-Wert-Paar (siehe 22.3). Die Entwicklung ergänzt das Muster. Den Wert vorerst aus der Ausgabe entfernen, bevor sie geteilt wird. |
+| Eine Routine meldet einen Marker als „verworfen“. | Das JSON ist kaputt. Die Meldung „Kein gültiges JSON.“ steht im Lauf. Ein Marker an falscher Stelle (mitten im Satz, im Zitat, im Codeblock) erscheint dagegen nirgends. Dann prüfen, ob er in einer eigenen Zeile am Zeilenanfang steht. |
+| Ein Agent meldet, dass eine Datei nicht geschrieben wurde: „Zugriff auf diesen Pfad ist nicht erlaubt.“ | Der Pfad liegt außerhalb des Projekts, auf einem geschützten Pfad oder über einen Link, der dorthin führt. Gewollt. Den Auftrag mit einem Pfad im Projekt neu formulieren. |
+| „Der Zielordner wurde während des Schreibens umgehängt; nichts geschrieben.“ | Während des Schreibens wurde ein Ordner des Ziels umgebogen. Es ist nichts geschrieben worden. Den Lauf erneut starten und den Projektordner prüfen. |
+| Eine `.tmp`-Datei bleibt im Projekt liegen. | Der Worker wurde genau zwischen Schreiben und Umbenennen beendet. Die Datei stammt aus keinem Lauf mehr und lässt sich von Hand löschen. |
+
+### 22.5 Printscreens
+
+Keine. Die Änderung hat keine neue Oberfläche. Sichtbar ist sie nur in Chat-Antworten, in Lauf-Logs und in den Einträgen des Backlogs. Dafür müssten App, Datenbank und Browser laufen. Das wurde nicht gemacht, deshalb gibt es keine Aufnahmen.
+
+### 22.6 Stand der Prüfung
+
+- **Nicht bestätigt:** Die Tests der Änderung wurden nicht von mir ausgeführt. Der Entwickler hat die Suite mit `npm test` laufen lassen; einzelne Läufe mit `npx --no-install tsx --test` brauchten eine Freigabe.
+- **Offen:** Die Tests der Secret-Prüfung im Git-Sync (`git-sync.test.ts`, `report-folders.test.ts`, `secret-holdback.test.ts`) sind nicht bestätigt.
+- **Offen:** Die Tests `tool-sql.test.ts` und `command.test.ts` sind im Arbeitsordner geändert, aber nicht eingecheckt.
+- **Offen:** Ob die neuen Tests ohne die Änderung rot wären, ist nicht belegt.
+
+---
+
 ## Verwandte Dokumente
 
+- [`redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md`](redaction-token-muster-sicheres-schreiben-marker-2026-10-25.md): Entwicklerbericht zu Abschnitt 22 (Muster, Schreiben über Temp-Datei, Marker, Aufrufer mit `tokens: false`)
 - [`sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md`](sql-waechter-strings-ddl-zeilengrenze-2026-10-25.md): Entwicklerbericht zu Abschnitt 6a (Allowlist, nur ADD, Zeilengrenze, String-Funktionen)
 - [`befehlsregeln-allowlist-wrapper-2026-10-25.md`](befehlsregeln-allowlist-wrapper-2026-10-25.md): Entwicklerbericht zu Abschnitt 20 (Allowlist, Wrapper, Builtins)
 - [`agents-und-rechte.md`](agents-und-rechte.md): Rechte-Tabelle, Trigger und Sicherheitsregeln

@@ -1,6 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
+import { mkdir, open, readdir, readFile, realpath, rename, stat, unlink } from 'node:fs/promises';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { BACKUP_DIRECTORY, checkProjectPath, SECRET_NAME } from './path-policy.js';
 
 export { BACKUP_DIRECTORY, SECRET_NAME } from './path-policy.js';
@@ -17,14 +18,27 @@ export const SKIPPED_DIRECTORIES = new Set([
 export const MAX_FILE_BYTES = 400_000;
 
 /** Beispielnamen: ein Glob-Segment, das einen davon trifft, kann ein Geheimnis lesen (.en? trifft .env). */
-const SECRET_SAMPLES = ['.env', '.env.local', 'a.pem', 'a.key', 'id_rsa', 'id_ed25519', '.npmrc', '.netrc', '.git-credentials'];
+const SECRET_SAMPLES = [
+  '.env',
+  '.env.local',
+  'a.pem',
+  'a.key',
+  'id_rsa',
+  'id_ed25519',
+  '.npmrc',
+  '.netrc',
+  '.git-credentials',
+];
 /** Gewöhnliche Namen: trifft das Segment auch einen davon (z. B. `*`, `*.md`), ist es kein gezielter Zugriff auf Geheimnisse. */
 const NEUTRAL_SAMPLES = ['x', 'index', 'a.ts', 'a.md', 'a.json'];
 
 /** Glob-Segment (*, ?, [..]) als Regex; null ohne Platzhalter oder bei ungültigem Muster. */
 function globRegex(part: string): RegExp | null {
   if (!/[*?[]/.test(part)) return null;
-  const source = part.replace(/[.+^$()|\\{}]/g, '\\$&').replace(/\*+/g, '.*').replace(/\?/g, '.');
+  const source = part
+    .replace(/[.+^$()|\\{}]/g, '\\$&')
+    .replace(/\*+/g, '.*')
+    .replace(/\?/g, '.');
   try {
     return new RegExp(`^${source}$`, 'i');
   } catch {
@@ -35,7 +49,9 @@ function globRegex(part: string): RegExp | null {
 /** Zielt ein Segment mit Platzhaltern auf Geheimnisse (`.en?`, `.e[n]v`, `*.pe?`)? `*` allein bleibt erlaubt. */
 export function secretGlob(part: string): boolean {
   const regex = globRegex(part);
-  return !!regex && SECRET_SAMPLES.some((name) => regex.test(name)) && !NEUTRAL_SAMPLES.some((name) => regex.test(name));
+  return (
+    !!regex && SECRET_SAMPLES.some((name) => regex.test(name)) && !NEUTRAL_SAMPLES.some((name) => regex.test(name))
+  );
 }
 
 /** Klammern wie `.{e,x}nv` zu allen Fassungen auflösen (verschachtelt, höchstens 64). */
@@ -65,6 +81,15 @@ export async function resolveInside(cwd: string, requested: unknown, forWrite = 
   }
   const root = await realpath(cwd);
   const target = resolve(root, requested);
+  checkedPath(root, target);
+  if (!forWrite && !existsSync(target)) {
+    throw new ToolError('Pfad existiert nicht.');
+  }
+  return target;
+}
+
+/** Wirklicher Pfad (samt Links) im Projekt und nicht geschützt, sonst ToolError. */
+function checkedPath(root: string, target: string): string {
   const verdict = checkProjectPath(root, target);
   if (!verdict.ok) {
     throw new ToolError(
@@ -73,10 +98,40 @@ export async function resolveInside(cwd: string, requested: unknown, forWrite = 
         : 'Zugriff auf diesen Pfad ist nicht erlaubt.',
     );
   }
-  if (!forWrite && !existsSync(target)) {
-    throw new ToolError('Pfad existiert nicht.');
+  return verdict.real;
+}
+
+/**
+ * Schreibt eine Datei im Projekt, ohne dass ein inzwischen gesetzter Link den Schreibvorgang umlenkt: Erst nach dem
+ * Anlegen der Ordner wird der wirkliche Pfad (realpath) geprüft, geschrieben wird in eine neue Temp-Datei im Zielordner
+ * (O_EXCL, folgt keinem Link), die dann per rename an ihren Platz kommt. Zeigt der Ordner vor dem rename woandershin,
+ * wird abgebrochen. Eine vorhandene Datei (auch über einen Link im Projekt) behält ihre Rechte. Liefert den Pfad.
+ */
+export async function writeProjectFile(cwd: string, target: string, content: string): Promise<string> {
+  const root = await realpath(cwd);
+  await mkdir(dirname(target), { recursive: true });
+  const destination = checkedPath(root, target);
+  const directory = dirname(destination);
+  const existing = await stat(destination).catch(() => null);
+  const temporary = join(directory, `.${basename(destination)}.${randomUUID()}.tmp`);
+  const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
+  const handle = await open(temporary, flags);
+  try {
+    try {
+      await handle.writeFile(content, 'utf8');
+      if (existing) await handle.chmod(existing.mode & 0o7777);
+    } finally {
+      await handle.close();
+    }
+    if ((await realpath(directory)) !== directory) {
+      throw new ToolError('Der Zielordner wurde während des Schreibens umgehängt; nichts geschrieben.');
+    }
+    await rename(temporary, destination);
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined);
+    throw error;
   }
-  return target;
+  return destination;
 }
 
 /**

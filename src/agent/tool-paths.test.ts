@@ -1,5 +1,18 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -12,6 +25,7 @@ import {
   SKIPPED_DIRECTORIES,
   ToolError,
   walkText,
+  writeProjectFile,
 } from './tool-paths.js';
 
 let root = '';
@@ -61,6 +75,46 @@ test('resolveInside: nichts ausserhalb des Projekts, auch nicht über symbolisch
   await rejectsWith(resolveInside(root, 'escape/secret.txt'), /außerhalb/);
   // Auch nicht zum Anlegen einer neuen Datei hinter dem Link.
   await rejectsWith(resolveInside(root, 'escape/neu.txt', true), /außerhalb/);
+});
+
+test('writeProjectFile: ein nach der Prüfung gesetzter Link lenkt den Schreibvorgang nicht um', async () => {
+  // Ordner: geprüft, solange es ihn nicht gibt; dann zeigt er als Link nach draussen.
+  const intoFolder = await resolveInside(root, 'race/neu.txt', true);
+  await symlink(outside, join(root, 'race'));
+  await rejectsWith(writeProjectFile(root, intoFolder, 'umgelenkt'), /außerhalb/);
+  assert.equal(existsSync(join(outside, 'neu.txt')), false);
+  // Datei: geprüft als neue Datei, dann als Link auf eine Datei draussen angelegt.
+  const intoFile = await resolveInside(root, 'race-file.txt', true);
+  await symlink(join(outside, 'secret.txt'), intoFile);
+  await rejectsWith(writeProjectFile(root, intoFile, 'überschrieben'), /außerhalb/);
+  assert.equal(await readFile(join(outside, 'secret.txt'), 'utf8'), 'needle');
+  // Geschützter Ordner hinter einem Link im Projekt.
+  await symlink(join(root, BACKUP_DIRECTORY), join(root, 'to-backup'));
+  await rejectsWith(writeProjectFile(root, join(root, 'to-backup', 'old.ts'), 'x'), /nicht erlaubt/);
+  assert.equal(await readFile(join(root, BACKUP_DIRECTORY, 'old.ts'), 'utf8'), 'needle');
+});
+
+test('writeProjectFile: legt Ordner an, behält Rechte und Links im Projekt, hinterlässt keine Temp-Datei', async () => {
+  const fresh = join(root, 'neu', 'tief', 'c.txt');
+  assert.equal(await writeProjectFile(root, fresh, 'hallo'), fresh);
+  assert.equal(await readFile(fresh, 'utf8'), 'hallo');
+  const script = join(root, 'run.sh');
+  await writeFile(script, 'echo alt\n');
+  await chmod(script, 0o755);
+  await writeProjectFile(root, script, 'echo neu\n');
+  assert.equal((await stat(script)).mode & 0o777, 0o755);
+  // Ein Link im Projekt bleibt Link; geschrieben wird sein Ziel.
+  await symlink(join(root, 'src', 'deep', 'b.md'), join(root, 'link.md'));
+  assert.equal(await writeProjectFile(root, join(root, 'link.md'), '# neu\n'), join(root, 'src', 'deep', 'b.md'));
+  assert.equal((await lstat(join(root, 'link.md'))).isSymbolicLink(), true);
+  assert.equal(await readFile(join(root, 'src', 'deep', 'b.md'), 'utf8'), '# neu\n');
+  for (const directory of [root, join(root, 'neu', 'tief'), join(root, 'src', 'deep')]) {
+    assert.deepEqual(
+      (await readdir(directory)).filter((name) => name.endsWith('.tmp')),
+      [],
+    );
+  }
+  await writeFile(join(root, 'src', 'deep', 'b.md'), '# needle\n');
 });
 
 test('resolveInside: Git, Abhängigkeiten, Sicherungen und Geheimnisse sind gesperrt', async () => {
@@ -148,7 +202,16 @@ test('Konstanten: übersprungene Ordner und Geheimnis-Muster', () => {
   for (const name of ['node_modules', '.git', 'dist', BACKUP_DIRECTORY, 'coverage']) {
     assert.ok(SKIPPED_DIRECTORIES.has(name), name);
   }
-  for (const name of ['.env', '.env.production', 'a.pem', 'b.KEY', 'id_ecdsa', '.npmrc', '.netrc', '.git-credentials']) {
+  for (const name of [
+    '.env',
+    '.env.production',
+    'a.pem',
+    'b.KEY',
+    'id_ecdsa',
+    '.npmrc',
+    '.netrc',
+    '.git-credentials',
+  ]) {
     assert.ok(SECRET_NAME.test(name), name);
   }
   for (const name of ['env.ts', 'keys.ts', 'readme.md', 'npmrc.md', '.npmrc.md', 'keyboard.ts']) {
