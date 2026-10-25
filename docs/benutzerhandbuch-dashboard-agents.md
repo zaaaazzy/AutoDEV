@@ -968,7 +968,7 @@ Es ist keine Aktion nötig. Ein Agent schreibt seinen Bericht, der nächste Auft
 | Sprint-Sicherung wartet, obwohl nur Berichte offen sind | Ungewöhnlich. Den Arbeitsordner prüfen; liegt dort noch eine andere offene Änderung, steht sie in der Meldung. |
 | Bericht wurde bei der Sprint-Sicherung nicht committet | Er enthält vermutlich eine Zugangsdaten-Angabe. Den Bericht prüfen und die Angabe entfernen. |
 
-**Stand der Prüfung:** Die Änderung ist im Code und in der Entwicklerdokumentation beschrieben. Die Tests der Änderung (Ablauf in einem echten Git-Repo, Gegenproben, Secret-Holdback) sind noch nicht gelaufen.
+**Stand der Prüfung:** Grün im Projekttestlauf 4e9889b1: `report-copies.test.ts` und `report-folders.test.ts` (9 von 9). Dazu gehört der Ablauf in einem echten Git-Repo (Bericht, Merge, nächster Auftrag ohne Pause) sowie die Gegenproben für fremde Pfade. `npm run typecheck` ist grün. Noch nicht gelaufen: `git-helpers-porcelain.test.ts`, `secret-holdback.test.ts` und `git-sync.test.ts`. Ob der Ablauftest vor dem Fix scheitert, ist nicht belegt.
 
 ---
 
