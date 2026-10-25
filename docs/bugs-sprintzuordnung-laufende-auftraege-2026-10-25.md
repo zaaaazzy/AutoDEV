@@ -30,6 +30,7 @@ Einen gemeinsamen Helfer `assignSprint` für PATCH `/development`, Folgeauftrag,
   - Derselbe Sprint geht weiter durch.
   - Ein direkter `syncBugOrder` nach einer Sprintänderung in der DB hängt den Auftrag nicht um.
 - Gegenprobe: Ein geplanter oder blockierter Auftrag folgt dem neuen Sprint.
+- Ziel-Sprints in diesen Tests sind `planned`, weil je Projekt nur ein aktiver Sprint erlaubt ist (`sprints_one_active_idx`). Im ersten Testlauf scheiterten drei Tests genau daran.
 
 ## Geänderte Dateien
 

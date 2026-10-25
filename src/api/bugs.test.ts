@@ -25,11 +25,12 @@ test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async 
     await pool.query(
       `INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop'), ('other', 'Other', '/tmp/o')`,
     );
-    const sprintIn = async (project: string): Promise<string> =>
+    // Je Projekt nur ein aktiver Sprint (sprints_one_active_idx); weitere Ziel-Sprints sind geplant.
+    const sprintIn = async (project: string, status = 'active'): Promise<string> =>
       (
         await pool.query<{ id: string }>(
-          `INSERT INTO sprints (project_slug, name, status) VALUES ($1, 'Sprint', 'active') RETURNING id`,
-          [project],
+          `INSERT INTO sprints (project_slug, name, status) VALUES ($1, 'Sprint', $2) RETURNING id`,
+          [project, status],
         )
       ).rows[0]!.id;
     const sprint = await sprintIn('shop');
@@ -238,7 +239,7 @@ test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async 
 
       for (const running of ['in_progress', 'approval']) {
         await t.test(`laufender Auftrag (${running}): Sprint des Bugs bleibt, 409, nichts geschrieben`, async () => {
-          const other = await sprintIn('shop');
+          const other = await sprintIn('shop', 'planned');
           const id = await bug('manual');
           await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint });
           const [order] = await orders(id);
@@ -268,7 +269,7 @@ test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async 
       }
 
       await t.test('geplanter oder blockierter Auftrag folgt dem neuen Sprint des Bugs', async () => {
-        const other = await sprintIn('shop');
+        const other = await sprintIn('shop', 'planned');
         for (const status of ['planned', 'blocked']) {
           const id = await bug('manual');
           await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint });
