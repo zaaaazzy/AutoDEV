@@ -33,3 +33,32 @@ Nur über `npm test`. Ohne erreichbare Datenbank wird der Test übersprungen, mi
 
 - **Laufende Bug-Aufträge nicht umhängen:** Der Fix dafür (Auftrag 172c4f29) liegt noch auf einem eigenen Zweig. Im aktuellen Stand hängt `syncBugOrder` einen Auftrag in `in_progress` beim Sprintwechsel des Bugs mit um. Ein Test dafür wäre hier rot und gehört zum Fix-Zweig.
 - **Bug im abgeschlossenen Sprint bearbeiten:** Ändert man den Titel eines solchen Bugs, legt `syncBugOrder` einen geplanten Auftrag im abgeschlossenen Sprint an, den der Worker nie mehr aufnimmt. Der Test prüft hier nur, dass das Speichern klappt. Das Verhalten sollte ein eigener Auftrag klären.
+
+## Geänderte Dateien
+
+- `src/api/order-sprint-bug-routes.test.ts` (neu, 12 Teiltests, PostgreSQL)
+- `docs/api-tests-auftraege-sprints-bugs-2026-10-25.md` (neu)
+
+Code unter `src/` ausser dem Test ist unverändert. Es gibt keine Schema- oder API-Änderung.
+
+## Sprint 23
+
+| Auftrag | Zustand | Details |
+| --- | --- | --- |
+| API-Tests für Aufträge, Sprints und Bugs (b8004e48) | Entwickler fertig, Tester und Review stehen aus | Letzter Auftrag des Sprints, damit die neuen Regeln mit abgedeckt sind. Entwicklerlauf: 1526/1526 Tests grün, 0 übersprungen. |
+
+Die anderen Aufträge des Sprints stehen in ihren eigenen Dokumenten (z. B. `aus-dem-sprint-nehmen-nur-geplant-oder-blockiert-2026-10-25.md`, `erneut-versuchen-nur-planbare-sprints-2026-10-25.md`, `sprint-loeschen-auftraege-in-freigabe-2026-10-25.md`). Der Test sichert deren Regeln gegen einen späteren Umbau.
+
+## Anfrage / TODO
+
+- **Offen, eigener Auftrag nötig:** Ein Bug im abgeschlossenen Sprint erzeugt beim Bearbeiten des Titels einen geplanten Auftrag, den der Worker nie aufnimmt (`syncBugOrder`).
+- **Wartet auf Zweig 172c4f29:** `syncBugOrder` hängt beim Sprintwechsel eines Bugs einen laufenden Auftrag mit um. Nach dem Merge des Fixes den Test „laufender Bug-Auftrag bleibt im Sprint“ ergänzen.
+- **Für den Tester:** Test nur über `npm test` starten, nicht mit `npx tsx --test` und nicht mit Abdeckungs-Flags (der Wächter blockiert beides).
+- Rund 29 von 44 Routen-Dateien haben weiter keine Tests (u. a. `auth.ts`, `projects.ts`, `agents.ts`). Dieser Auftrag deckt nur Aufträge, Sprints und Bugs ab.
+
+## Technik
+
+- `withMigratedDatabase` legt eine frische, migrierte Datenbank an. Jeder Teiltest legt ein eigenes Projekt an, also keine gemeinsame Datenbank oder Reihenfolge.
+- Geprüft wird der Datenbankstand, nicht nur der Statuscode. Bei 409 wird die komplette Zeile vor und nach dem Aufruf verglichen (auch `updated_at`, `git_sync`), damit keine Teilschreibvorgänge oder Git-Syncs unbemerkt bleiben.
+- Der Bug-Status wird über die Datenbank-Trigger mitgeprüft (Retry, review-reject).
+- Die Pool-Attrappen-Tests bleiben bestehen und prüfen weiter SQL-Text und Statuscodes.
