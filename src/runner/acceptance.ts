@@ -76,6 +76,8 @@ export function parseChecks(output: string): CheckResult[] {
 /** Anweisung an den Tester: Kriterien und Definition of Done einzeln prüfen und maschinenlesbar melden. */
 export function acceptanceInstructions(criteria: string[], definitionOfDone: string[]): string {
   const list = (items: string[]) => items.map((item, index) => `${index + 1}. ${item}`).join('\n');
+  // Beispiel mit jeder DoD-Nummer: ein ausgelassener Punkt gilt als „nicht geprüft“ und lehnt die Abnahme ab.
+  const done = JSON.stringify(definitionOfDone.map((_, index) => ({ nr: index + 1, met: true, note: '' })));
   return `## Abnahme (Pflicht für den Tester)
 Prüfe jedes Akzeptanzkriterium und jeden Punkt der Definition of Done einzeln – durch Tests, Ausführen oder Lesen des Codes.
 
@@ -88,13 +90,16 @@ ${list(definitionOfDone)}
 Lässt sich ein Punkt grundsätzlich nur durch einen Menschen prüfen (z. B. Login bei einem externen Anbieter, Verhalten
 auf einem echten Gerät, Einstellungen außerhalb des Projekts), setze "manual":true und beschreibe in "note", was der Mensch
 prüfen oder einstellen muss. Nutze das nie für Punkte, die du mit Tests oder durch Ausführen prüfen könntest.
+Melde jeden Punkt einzeln – alle ${criteria.length} Kriterien und alle ${definitionOfDone.length} DoD-Punkte, auch Punkte
+zum Ablauf (z. B. Freigabe durch einen Menschen in der Vorschau: "manual":true; Form des Auftragstexts: prüfe den
+Auftrag oben). Ein ausgelassener Punkt gilt als nicht geprüft und lehnt die Abnahme ab.
 Der DoD-Punkt „Alle Akzeptanzkriterien sind erfüllt“ gilt als erfüllt, wenn alle übrigen Kriterien erfüllt sind.
 Die Testabdeckung misst AIdeation nach deinem Schritt selbst. Konntest du sie nicht messen (Werkzeug fehlt, Befehl
 gesperrt), ist das allein kein Grund, einen Punkt als nicht erfüllt zu melden: Ein Punkt wie „durch einen automatischen
 Test belegt“ ist erfüllt, wenn es zu jedem Kriterium einen Test gibt und die Tests grün sind.
 
 Beende die Antwort (nach dem @@COVERAGE-Block) mit genau einer Zeile gültigem JSON:
-@@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"},{"nr":2,"met":false,"manual":true,"note":"Was der Mensch prüfen muss"}],"done":[{"nr":1,"met":true,"note":""}]}`;
+@@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"},{"nr":2,"met":false,"manual":true,"note":"Was der Mensch prüfen muss"}],"done":${done}}`;
 }
 
 function checks(value: unknown, count: number): Checked[] {
