@@ -44,6 +44,7 @@ write_private_file "$PLIST" <<P
 <string>--all</string><string>--watch</string><string>--limit</string><string>3</string></array>
 <key>EnvironmentVariables</key><dict>
 <key>PATH</key><string>$(xml_escape "$WORKER_PATH")</string>
+<key>DEV_LOG_LOG_FILE</key><string>$(xml_escape "$LOG")</string>
 </dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>30</integer>
@@ -52,6 +53,9 @@ write_private_file "$PLIST" <<P
 </dict></plist>
 P
 plutil -lint -s "$PLIST"
+# Ab 10 MB rotieren, 5 Stände behalten. Der Worker schreibt das Log selbst (DEV_LOG_LOG_FILE) und öffnet es danach
+# neu; StandardOutPath bleibt für Ausgaben vor dem Start und Abstürze von Node.
+install_log_rotation aideation-worker "$LOG" 5 10240 || true
 if install_dry_run; then
   echo "Probelauf: $PLIST und $ENV_FILE geschrieben, Dienst nicht registriert."
   exit 0

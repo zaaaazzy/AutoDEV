@@ -1,4 +1,5 @@
 import { logged } from '../core/log.js';
+import { followLogFile } from '../core/log-file.js';
 import { existsSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -271,6 +272,9 @@ export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
 const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function main(): Promise<void> {
+  // Dienst (scripts/install-worker.sh): Log selbst schreiben, damit es nach der Rotation durch newsyslog weitergeht.
+  const logFile = process.env.DEV_LOG_LOG_FILE?.trim();
+  if (logFile) followLogFile(logFile);
   // Env-Datei des Dienstes (--env-file) vor der .env der Installation; ohne Datenbank-URL Abbruch statt Dauerschleife.
   loadInstallEnv(INSTALL_ROOT);
   requireDatabaseUrl();

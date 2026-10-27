@@ -192,6 +192,70 @@ test('dotenv_get liest die .env nach denselben Regeln wie parseEnv', async () =>
   }
 });
 
+test('Log-Rotation: newsyslog-Regel ohne Signal, Rechte 600 für das neue Log, mehrfach ausführbar', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'aideation-newsyslog-'));
+  const rules = join(dir, 'newsyslog.d');
+  const lib = join(SCRIPTS, 'lib', 'service-env.sh');
+  const install = (log: string) =>
+    run('bash', ['-c', `. "${lib}" && install_log_rotation aideation-worker "${log}" 5 10240`], {
+      AIDEATION_NEWSYSLOG_DIR: rules,
+    });
+  const log = join(dir, 'Logs', 'aideation-worker.log');
+  const first = install(log);
+  assert.equal(first.status, 0, first.output);
+  const file = join(rules, 'aideation-worker.conf');
+  assert.equal(mode(file), 0o644);
+  const user = spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim();
+  const group = spawnSync('id', ['-gn'], { encoding: 'utf8' }).stdout.trim();
+  const rule = (await readFile(file, 'utf8')).split('\n').filter((line) => line && !line.startsWith('#'));
+  assert.deepEqual(rule, [[log, `${user}:${group}`, '600', '5', '10240', '*', 'NJ'].join('\t')]);
+  const again = install(log);
+  assert.equal(again.status, 0, again.output);
+  assert.match(again.stdout, /unverändert/);
+  // newsyslog trennt Felder an Leerzeichen: solchen Pfad nicht halb eintragen.
+  const spaced = run(
+    'bash',
+    ['-c', `. "${lib}" && install_log_rotation mit-leerzeichen "${join(dir, 'mit leer', 'x.log')}" 3 1024`],
+    { AIDEATION_NEWSYSLOG_DIR: rules },
+  );
+  assert.equal(spaced.status, 0, spaced.output);
+  assert.match(spaced.stderr, /WARNUNG: Log-Pfad mit Leerzeichen/);
+  assert.ok(!existsSync(join(rules, 'mit-leerzeichen.conf')));
+  // Probelauf ohne Testordner: /etc/newsyslog.d bleibt unberührt, kein sudo.
+  const dry = run('bash', ['-c', `. "${lib}" && install_log_rotation aideation-worker "${log}" 5 10240`], {});
+  assert.equal(dry.status, 0, dry.output);
+  assert.match(dry.stdout, /Probelauf: Log-Rotation \/etc\/newsyslog\.d\/aideation-worker\.conf nicht angelegt/);
+});
+
+test(
+  'macOS-Dienste: Worker und Wächter legen ihre Log-Rotation an, der Worker schreibt sein Log selbst',
+  { skip: !isMac },
+  async () => {
+    for (const [script, name, plistName] of [
+      ['install-worker.sh', 'aideation-worker', 'com.aideation.worker.plist'],
+      ['install-watchdog.sh', 'aideation-watchdog', 'com.aideation.watchdog.plist'],
+    ]) {
+      const { base, root, home } = await sandbox();
+      const rules = join(base, 'newsyslog.d');
+      const result = run('bash', [join(root, 'scripts', script)], {
+        HOME: home,
+        DEV_LOG_DATABASE_URL: DATABASE_URL,
+        AIDEATION_NEWSYSLOG_DIR: rules,
+      });
+      assert.equal(result.status, 0, result.output);
+      const log = join(home, 'Library', 'Logs', `${name}.log`);
+      const rule = await readFile(join(rules, `${name}.conf`), 'utf8');
+      assert.ok(rule.split('\n').some((line) => line.startsWith(`${log}\t`)), rule);
+      const plist = join(home, 'Library', 'LaunchAgents', plistName);
+      const parsed = JSON.parse(
+        spawnSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }).stdout,
+      );
+      assert.equal(parsed.StandardOutPath, log);
+      if (name === 'aideation-worker') assert.equal(parsed.EnvironmentVariables.DEV_LOG_LOG_FILE, log);
+    }
+  },
+);
+
 test('macOS-Wächter: Plist wohlgeformt, Rechte 600, ohne Datenbank-URL', { skip: !isMac }, async () => {
   const { root, home } = await sandbox();
   const result = run('bash', [join(root, 'scripts', 'install-watchdog.sh')], {

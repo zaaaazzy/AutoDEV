@@ -82,6 +82,17 @@ test('ENOENT in einem Test ist kein Umgebungsfehler (Auftrag ea3a49b1)', () => {
   assert.equal(isEnvironmentFailure('Path "/x/fixtures" does not exist'), false);
 });
 
+test('EROFS, EACCES und EPERM (z. B. read_only-Container) sind Code-Fehler, kein endloser Neustart als Umgebung', () => {
+  for (const out of [
+    "Error: EROFS: read-only file system, open '/app/uploads/a.png'",
+    "Error: EACCES: permission denied, mkdir '/home/node/.npm/_cacache'",
+    "Error: EPERM: operation not permitted, chown '/work/node_modules'",
+  ]) {
+    assert.equal(isEnvironmentFailure(out), false, out);
+    assert.equal(isAgentFailure(out), false, out);
+  }
+});
+
 test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach dem Reset', async () => {
   const { usageLimitReset } = await import('./autofix.js');
   const output = "Agent „Entwickler“ scheiterte:\n\nYou've hit your session limit · resets 12:40am (Europe/Zurich)";
