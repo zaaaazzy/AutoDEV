@@ -222,10 +222,37 @@ brechen sie mit einem Hinweis ab, statt das Standardpasswort zu versuchen.
 
 ### Container-Härtung
 
-Jeder Dienst in `docker-compose.yml` hat Grenzen für Speicher, CPU und Prozesse und einen Healthcheck. `frontend`
-(nginx, Port 8080 im Container), `https` (Caddy) und `backup` laufen ohne root und ohne Linux-Capabilities. Caddy
-behält nur `NET_BIND_SERVICE` für die Ports 80/443. Der einmalige Dienst `https-volumes` übergibt bestehende
-Zertifikats-Volumes an den Benutzer `caddy` und beendet sich danach. Der Review-Container läuft als Benutzer `node`.
+Jeder Dienst in `docker-compose.yml` hat Grenzen für Speicher, CPU und Prozesse und einen Healthcheck. Alle laufen mit
+`no-new-privileges` und verwerfen sämtliche Linux-Capabilities (`cap_drop: [ALL]`). Zurück bekommen nur:
+
+| Dienst | Capabilities | Grund |
+|---|---|---|
+| `db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | Der Entrypoint übergibt das Datenverzeichnis an `postgres` und wechselt dann zu diesem Benutzer |
+| `https` | `NET_BIND_SERVICE` | Caddy bindet die Ports 80/443 |
+| `https-volumes` | `CHOWN`, `DAC_OVERRIDE` | Übergibt bestehende Zertifikats-Volumes einmalig an `caddy` |
+
+`frontend` nutzt `nginxinc/nginx-unprivileged`: Auch der Master-Prozess läuft als `nginx`, auf Port 8080 (direkt) und
+8081 (Caddy) im Container. `frontend`, `https` und `backup` laufen ohne root mit schreibgeschütztem Dateisystem
+(`read_only`), beschreibbar sind nur `/tmp` (tmpfs) und ihre Volumes. `dev-log` (als `node`) schreibt Anhänge und Doku
+zur Laufzeit und bleibt deshalb beschreibbar, ebenso `db`.
+
+Der Review-Container läuft als Benutzer `node`. Jedes Projekt hat ein eigenes npm-Cache-Volume
+(`aideation_review_npm_<projekt>` unter `/home/node/.npm`), damit ein Projekt den Cache der anderen nicht vergiften kann.
+Das alte gemeinsame Volume `aideation_review_npm` wird nicht mehr benutzt und lässt sich mit
+`docker volume rm aideation_review_npm` löschen.
+
+### Log-Rotation (macOS)
+
+`install-worker.sh` und `install-watchdog.sh` legen je eine `newsyslog`-Regel an:
+`/etc/newsyslog.d/aideation-worker.conf` (ab 10 MB, 5 Stände) und `aideation-watchdog.conf` (ab 1 MB, 3 Stände). Die
+Stände werden mit bzip2 gepackt (`aideation-worker.log.0.bz2` usw.). Die Regeln gehören `root:wheel`, darum fragt das
+Skript einmal nach dem sudo-Passwort. Ein erneuter Lauf schreibt die Regel nur, wenn sie fehlt oder abweicht. Lehnst du
+sudo ab, läuft die Installation trotzdem weiter, nur ohne Rotation.
+
+Der Worker schreibt sein Log selbst (`DEV_LOG_LOG_FILE` in der Plist) und öffnet es nach der Rotation binnen 10 s neu.
+`~/Library/Logs/aideation-worker.log` enthält also immer die aktuelle Ausgabe. Der Wächter startet alle zwei Minuten neu
+und braucht das nicht. Liegt dein Home-Ordner unter einem Pfad mit Leerzeichen, legt das Skript keine Regel an (newsyslog
+kann solche Pfade nicht lesen) und gibt eine Warnung aus. Unter Linux rotiert journald das Log.
 
 ### Client-IP hinter nginx
 

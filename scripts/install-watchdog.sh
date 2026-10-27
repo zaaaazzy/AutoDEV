@@ -39,6 +39,8 @@ write_private_file "$PLIST" <<P
 </dict></plist>
 P
 plutil -lint -s "$PLIST"
+# Ab 1 MB rotieren, 3 Stände behalten. launchd öffnet das Log bei jedem Prüflauf (alle zwei Minuten) neu.
+install_log_rotation aideation-watchdog "$LOG" 3 1024 || true
 if install_dry_run; then
   echo "Probelauf: $PLIST und $ENV_FILE geschrieben, Dienst nicht registriert."
   exit 0

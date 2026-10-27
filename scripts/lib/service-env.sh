@@ -117,6 +117,52 @@ write_env_file() {
   } | write_private_file "$file"
 }
 
+# Ordner der newsyslog-Regeln (macOS). AIDEATION_NEWSYSLOG_DIR nur für Tests: dann ohne sudo und ohne root:wheel.
+NEWSYSLOG_DIR="${AIDEATION_NEWSYSLOG_DIR:-/etc/newsyslog.d}"
+
+# Legt die newsyslog-Regel <name>.conf für <log> an: rotiert ab <groesse> KB, behält <anzahl> komprimierte Stände.
+# Flag N: kein Signal (Worker öffnet das Log selbst neu, siehe src/core/log-file.ts; der Wächter startet alle zwei
+# Minuten neu). Die neue Datei gehört dem aufrufenden Benutzer mit Rechten 600. Mehrfach ausführbar: Nur wenn die
+# Regel fehlt oder abweicht, wird sie (per sudo, root:wheel, 644) geschrieben.
+install_log_rotation() {
+  local name="$1" log="$2" count="$3" size="$4" target tmp
+  target="$NEWSYSLOG_DIR/$name.conf"
+  case "$log" in
+    *[[:space:]]*)
+      echo "WARNUNG: Log-Pfad mit Leerzeichen ($log) – newsyslog kann ihn nicht rotieren, Regel nicht angelegt." >&2
+      return 0
+      ;;
+  esac
+  tmp="$(mktemp)"
+  {
+    echo "# AIdeation: Rotation von $(basename "$log") (erzeugt von scripts/install-*.sh)."
+    echo "# logfilename	[owner:group]	mode	count	size(KB)	when	flags"
+    printf '%s\t%s:%s\t600\t%s\t%s\t*\tNJ\n' "$log" "$(id -un)" "$(id -gn)" "$count" "$size"
+  } >"$tmp"
+  if [ -f "$target" ] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+    echo "Log-Rotation unverändert: $target"
+    return 0
+  fi
+  if [ -n "${AIDEATION_NEWSYSLOG_DIR:-}" ]; then
+    mkdir -p "$NEWSYSLOG_DIR"
+    install -m 644 "$tmp" "$target"
+  elif install_dry_run; then
+    rm -f "$tmp"
+    echo "Probelauf: Log-Rotation $target nicht angelegt."
+    return 0
+  else
+    echo "Log-Rotation: lege $target an (sudo, Besitzer root:wheel) …"
+    if ! sudo install -o root -g wheel -m 644 "$tmp" "$target"; then
+      rm -f "$tmp"
+      echo "WARNUNG: Log-Rotation nicht eingerichtet (sudo abgelehnt) – Skript später erneut ausführen." >&2
+      return 1
+    fi
+  fi
+  rm -f "$tmp"
+  echo "Log-Rotation eingerichtet: $target"
+}
+
 # XML-Escaping für Werte in einer Plist (& zuerst, sonst würde &lt; doppelt escapt).
 xml_escape() {
   printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"
