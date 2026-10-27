@@ -64,3 +64,17 @@ Die Tests laufen mit `npm test`:
 - Nicht gegen echtes Docker getestet. Ein Mensch sollte `bash scripts/restore.sh --probe backups/<neuestes>.dump` einmal laufen lassen. Den Ernstfall nur in einer Kopie der Installation ausprobieren.
 - `aideation_vor_restore_<zeit>` bleibt nach einem Restore liegen. Nach der Prüfung von Hand löschen (Befehl steht in der Ausgabe).
 - Die Backup-Rotation (`deploy/backup.sh`) ist unverändert.
+
+## Sprint 23
+
+| Auftrag | Zustand | Details |
+| --- | --- | --- |
+| 6f5cee71 Restore-Skript und regelmässige Restore-Probe | umgesetzt; Entwickler-Schritt bestanden (1597 von 1597 Tests über `npm test`), Abnahme durch den Tester steht aus | 15 Dateien: `scripts/restore.sh`, `scripts/restore.test.ts`, `src/db/secret-key-check*.ts`, `src/db/schema.ts`, `src/runner/scheduler*.ts`, `src/api/scheduled-jobs.test.ts`, `README.md`, fünf Dateien unter `docs/` |
+| Backup-Rotation nur nach erfolgreichem Dump | zuvor gemergt, hier unverändert | `deploy/backup.sh` |
+
+## Anfrage / TODO
+
+- Offen: `bash scripts/restore.sh --probe backups/<neuestes>.dump` einmal von Hand mit echtem Docker laufen lassen. Den Ernstfall nur in einer Kopie der Installation.
+- Offen: Auf dem Worker-Rechner `pg_restore` ab Version 17 bereitstellen und `DEV_LOG_PG_RESTORE` setzen, sonst meldet `backup_check` bei jedem Lauf einen Fehler.
+- Offen: Zeitlimit von `restore_probe` (300 s) bei grossen Datenbanken prüfen.
+- Technische Doku: `docs/laufzeit.md`, `docs/wartungs-jobs.md`, `docs/erm.md` und `docs/installation.md` (Abschnitt „Wiederherstellen“).
