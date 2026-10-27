@@ -72,11 +72,13 @@ Angenommen, der Dump scheitert zehn Tage lang, weil das Passwort geändert wurde
 
 ## Wiederherstellen
 
-Die Wiederherstellung ist unverändert (siehe README):
+Die Wiederherstellung läuft jetzt über das Skript `scripts/restore.sh` (siehe [Benutzerhandbuch: Restore-Skript und Restore-Probe](benutzerhandbuch-restore-skript-und-probe.md)):
 
 ```
-docker compose exec -T db pg_restore -U devlog -d aideation --clean < backups/<datei>.dump
+bash scripts/restore.sh backups/<datei>.dump
 ```
+
+Der frühere Befehl mit `pg_restore --clean` gegen die laufende Datenbank gilt nicht mehr.
 
 ## Noch offen
 
