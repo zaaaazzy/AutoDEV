@@ -37,7 +37,9 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3100
-      DEV_LOG_TRUST_PROXY: uniquelocal
+      # Genau ein Hop: nginx (deploy/frontend) setzt X-Forwarded-For auf eine einzige Adresse. Nicht uniquelocal –
+      # damit zählte eine vom Client vorangestellte Adresse, sobald die Kette nur private Proxys enthält.
+      DEV_LOG_TRUST_PROXY: "1"
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
       # Weitere eigene Domains für die Health-URL der betreuten Anwendungen (Komma-getrennt, inkl. Subdomains).
       DEV_LOG_OWN_DOMAINS: ${DEV_LOG_OWN_DOMAINS:-}

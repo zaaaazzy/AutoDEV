@@ -18,7 +18,10 @@ FROM nginx:1.27.3-alpine
 RUN sed -i -e '/^user /d' -e 's,^pid .*;,pid /tmp/nginx.pid;,' /etc/nginx/nginx.conf \
     && chown -R nginx:nginx /var/cache/nginx
 COPY deploy/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+# Ausserhalb von conf.d: wird nur in den server-Blöcken von nginx.conf eingebunden.
+COPY deploy/frontend/app-locations.conf /etc/nginx/app-locations.conf
 COPY deploy/frontend/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist/ui/browser /usr/share/nginx/html
 USER nginx
-EXPOSE 8080
+# 8080: direkter Zugriff (Host-Port), 8081: nur Caddy (siehe nginx.conf).
+EXPOSE 8080 8081
