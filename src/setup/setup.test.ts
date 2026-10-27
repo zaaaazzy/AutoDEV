@@ -7,7 +7,7 @@ import type { Pool } from 'pg';
 import { agentCommand, templateProjectColumns } from '../api/setup.js';
 import { processSetupJob, whichCommand } from './setup-jobs.js';
 import type { CommandExecutor } from '../core/command.js';
-import { findTemplate, folderFiles, PHASER_DEV_URL, TEMPLATES } from './templates.js';
+import { findTemplate, folderFiles, GENERATORS, PHASER_DEV_URL, TEMPLATES } from './templates.js';
 
 // Unabhängig vom Projektbereich der Umgebung (der Worker setzt ihn, z. B. im Test-Gate).
 delete process.env.DEV_LOG_PROJECT_ROOTS;
@@ -35,6 +35,31 @@ test('templates have unique ids and every non-custom template does something', (
     assert.ok(template.files || template.commands?.length, template.id);
   }
   assert.ok(TEMPLATES.filter((template) => template.group === 'featured').length >= 3);
+});
+
+test('Vorlagen: Generatoren mit fester Version, Installationen ohne Install-Skripte', () => {
+  const commands = TEMPLATES.flatMap((template) => (template.commands ?? []).map((command) => ({ template, command })));
+  for (const { template, command } of commands) {
+    const line = `${template.id}: ${command.join(' ')}`;
+    assert.ok(!command.some((word) => /@(latest|next)$/.test(word)), line);
+    // Paket für npx/npm create: genaue Version, kein Bereich wie @20.
+    const generator =
+      command[0] === 'npx' && command[1] === '-y' ? command[2] : command[1] === 'create' ? command[3] : null;
+    if (generator) assert.match(generator, /^(@[\w-]+\/)?[\w-]+@\d+\.\d+\.\d+$/, line);
+    if (command[0] === 'npm' && command.some((word) => ['install', 'i', 'ci'].includes(word))) {
+      assert.ok(command.includes('--ignore-scripts'), line);
+    }
+    // Generatoren, die sonst selbst installieren, überlassen das dem eigenen Schritt mit --ignore-scripts.
+    if (generator && /angular\/cli|create-next-app|nestjs\/cli/.test(generator)) {
+      assert.ok(command.includes('--skip-install'), line);
+    }
+    if (generator?.startsWith('nuxi@')) assert.ok(command.includes('--no-install'), line);
+  }
+  for (const id of ['angular', 'angular-node-postgres', 'nextjs', 'nestjs', 'react-vite', 'nuxt']) {
+    const steps = findTemplate(id)!.commands!;
+    assert.ok(steps.at(-1)!.includes('--ignore-scripts'), `${id}: zuletzt npm install --ignore-scripts`);
+  }
+  assert.ok(Object.values(GENERATORS).every((spec) => /@\d+\.\d+\.\d+$/.test(spec)));
 });
 
 test('agent commands per provider', () => {
@@ -171,17 +196,21 @@ test('Phaser-Vorlage: Vite, TypeScript, Phaser 3, Tests und Agent-Richtlinien', 
 test('Phaser-Vorlage wird angewendet: Dateien, npm install und Chromium für den Smoke-Test', async () => {
   const folder = join(await mkdtemp(join(tmpdir(), 'setup-')), 'spiel');
   const commands: string[][] = [];
-  const execute: CommandExecutor = async (command) => {
+  const ignoreScripts: (string | undefined)[] = [];
+  const execute: CommandExecutor = async (command, _cwd, options) => {
     commands.push(command);
+    ignoreScripts.push(options?.env?.npm_config_ignore_scripts);
     return { exitCode: 0, durationMs: 0, output: '' };
   };
   const { pool, updates } = jobPool('apply_template', { path: folder, template: 'phaser-game', name: 'Sternenjagd' });
   await processSetupJob(pool, execute);
   assert.ok(updates.some((update) => update.sql.includes("status = 'done'")));
   assert.deepEqual(commands, [
-    ['npm', 'install', '--no-audit', '--no-fund'],
+    ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
     ['npx', '--no-install', 'playwright', 'install', 'chromium'],
   ]);
+  // Auch Befehle ohne eigene Option (und npm-Aufrufe der Generatoren) laufen ohne Install-Skripte.
+  assert.deepEqual(ignoreScripts, ['true', 'true']);
   assert.match(await readFile(join(folder, 'src', 'scenes', 'main-scene.ts'), 'utf8'), /extends Phaser\.Scene/);
   assert.equal(JSON.parse(await readFile(join(folder, 'package.json'), 'utf8')).name, 'sternenjagd');
 });

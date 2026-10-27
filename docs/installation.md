@@ -5,7 +5,7 @@ AIdeation besteht aus drei Teilen:
 | Teil | Läuft | Aufgabe |
 |---|---|---|
 | **AIdeation** (Oberfläche + API) | in Docker | Projekte, Ideen, Aufträge, Sprints, Dokumentation |
-| **Datenbank** (PostgreSQL) + tägliche Backups | in Docker | alle Daten, Backups unter `backups/` |
+| **Datenbank** (PostgreSQL) + Backups (etwa täglich) | in Docker | alle Daten, Backups unter `backups/` |
 | **Worker** | direkt auf deinem Rechner | startet die Agents in deinen Projektordnern |
 
 ## Voraussetzungen
@@ -87,8 +87,16 @@ Ordner auf deinem Rechner.
 Im Projekt-Assistenten steht unter **Vorlage** die Karte **Browser-Spiel (Phaser 3)**: Vite, TypeScript, Phaser 3,
 eine Beispielszene („Sterne sammeln“), Unit-Tests der Spiellogik mit Vitest und ein Playwright-Smoke-Test, der prüft,
 dass der Canvas zeichnet und keine Konsolenfehler auftreten. Die Dateien liegen in `templates/phaser-game/`. Phaser
-kommt als Abhängigkeit ins Spielprojekt, nicht in AIdeation. Die Vorlage installiert die Pakete (`npm install`) und
-Chromium in der Playwright-Version von AIdeation, ist er schon da, entfällt der Download.
+kommt als Abhängigkeit ins Spielprojekt, nicht in AIdeation. Die Vorlage installiert die Pakete
+(`npm install --ignore-scripts`) und Chromium in der Playwright-Version von AIdeation. Ist Chromium schon da, entfällt
+der Download.
+
+Alle Vorlagen mit Befehlen laufen ohne Install-Skripte fremder Pakete: Jede Installation hat `--ignore-scripts`, und der
+Worker setzt zusätzlich `npm_config_ignore_scripts=true`. Generatoren, die sonst selbst installieren (Angular CLI,
+create-next-app, NestJS CLI, nuxi), laufen mit `--skip-install` bzw. `--no-install`. Danach folgt ein eigener
+`npm install --ignore-scripts`. Die Generator-Versionen sind fest eingetragen (`GENERATORS` in
+`src/setup/templates.ts`). Bei Nuxt entfällt dadurch `nuxt prepare` nach der Installation, das holt der erste
+`npm run dev` bzw. `npm run build` nach.
 
 Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (änderbar unter **Einstellungen**):
 
@@ -142,7 +150,7 @@ Jedes Projekt liegt in einem eigenen Ordner mit `source` (Code, z. B. mit laufen
 `agent` (Arbeitsordner der Agents, Git-Worktree) – AIdeation selbst ebenso: `AIdeation/source` und `AIdeation/agent`.
 
 Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `/api` weiter), `aideation_backend_nodejs`
-(API), `aideation_database_postgres` (Datenbank), `aideation_backup_postgres` (tägliche Sicherung) und
+(API), `aideation_database_postgres` (Datenbank), `aideation_backup_postgres` (Sicherung, etwa täglich) und
 `aideation_proxy_caddy` (HTTPS, optional). In den Befehlen oben stehen die Dienstnamen (`frontend`, `dev-log`, `db`,
 `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it aideation_database_postgres psql -U devlog aideation`.

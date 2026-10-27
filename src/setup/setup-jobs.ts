@@ -57,13 +57,22 @@ const ENV = {
 /** git und gh (startet git, z. B. bei „repo create --push“): gefiltert und ohne Hooks des Projekts. */
 const usesGit = (command: readonly string[]): boolean => command[0] === 'git' || command[0] === 'gh';
 
+/**
+ * Vorlagen-Befehle: Install-Skripte fremder Pakete laufen nicht (auch nicht in npm-Aufrufen der Generatoren selbst,
+ * die die Umgebung erben). Die Generatoren starten trotzdem, `npm exec` führt ihr Programm aus, kein Skript.
+ */
+export const TEMPLATE_ENV = { npm_config_ignore_scripts: 'true' };
+
 async function run(
   execute: CommandExecutor,
   command: string[],
   cwd: string,
   timeoutMs = QUICK_TIMEOUT_MS,
+  extraEnv: Record<string, string> = {},
 ): Promise<{ ok: boolean; output: string }> {
-  const env = usesGit(command) ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' }) : ENV;
+  const env = usesGit(command)
+    ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' })
+    : { ...ENV, ...extraEnv };
   const result = await execute(command, cwd, { timeoutMs, env }).catch((error: unknown) => ({
     exitCode: 1,
     durationMs: 0,
@@ -204,7 +213,7 @@ async function applyTemplate(params: Params, execute: CommandExecutor, log: Log)
   if (template.files) await log('Dateien der Vorlage geschrieben.');
   for (const command of template.commands ?? []) {
     await log(`$ ${command.join(' ')}`);
-    const result = await run(execute, command, folder, STEP_TIMEOUT_MS);
+    const result = await run(execute, command, folder, STEP_TIMEOUT_MS, TEMPLATE_ENV);
     await log(result.output.split('\n').slice(-6).join('\n'));
     if (!result.ok) throw new Error(`\`${command.join(' ')}\` ist fehlgeschlagen.`);
   }
