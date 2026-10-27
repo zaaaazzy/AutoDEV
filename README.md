@@ -45,7 +45,7 @@ Anmeldung über die Login-Seite (Sitzungs-Cookie, 30 Tage). Jede Sitzung ist an 
 
 Wichtig: Wer sich anmelden kann, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf dem Rechner des Workers ausführen. Deshalb ein starkes Passwort verwenden und AIdeation nie per HTTP ins Netz stellen.
 
-**Grenzen der Agent-Rechte:** Die Werkzeugregeln (Projektordner, gesperrte Dateien, erlaubte Befehle) schützen vor Fehlgriffen des Modells, sind aber keine Sandbox. Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen mit den Rechten des Workers auf dem Host. Installationen laufen immer mit `--ignore-scripts`. Für die Projekt-Datenbank einen eigenen Benutzer ohne `DROP`-/Superuser-Rechte hinterlegen.
+**Grenzen der Agent-Rechte:** Die Werkzeugregeln (Projektordner, gesperrte Dateien, erlaubte Befehle) schützen vor Fehlgriffen des Modells, sind aber keine Sandbox. Tests und npm-Skripte führen Code aus, den Agents geschrieben haben, und laufen mit den Rechten des Workers auf dem Host. Agents dürfen Pakete nur mit `npm install|ci --ignore-scripts` installieren. Die Projektvorlagen des Assistenten laufen ebenfalls ohne Install-Skripte (`--ignore-scripts` und `npm_config_ignore_scripts=true`) und mit fest eingetragenen Generator-Versionen (`GENERATORS` in `src/setup/templates.ts`). Den Generator selbst führt der Worker trotzdem auf dem Host aus. Andere Befehle (`npm test`, `npm run …`, Tests) führen weiterhin Code aus. Für die Projekt-Datenbank einen eigenen Benutzer ohne `DROP`-/Superuser-Rechte hinterlegen.
 
 ### Struktur
 

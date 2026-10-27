@@ -87,8 +87,16 @@ Ordner auf deinem Rechner.
 Im Projekt-Assistenten steht unter **Vorlage** die Karte **Browser-Spiel (Phaser 3)**: Vite, TypeScript, Phaser 3,
 eine Beispielszene („Sterne sammeln“), Unit-Tests der Spiellogik mit Vitest und ein Playwright-Smoke-Test, der prüft,
 dass der Canvas zeichnet und keine Konsolenfehler auftreten. Die Dateien liegen in `templates/phaser-game/`. Phaser
-kommt als Abhängigkeit ins Spielprojekt, nicht in AIdeation. Die Vorlage installiert die Pakete (`npm install`) und
-Chromium in der Playwright-Version von AIdeation, ist er schon da, entfällt der Download.
+kommt als Abhängigkeit ins Spielprojekt, nicht in AIdeation. Die Vorlage installiert die Pakete
+(`npm install --ignore-scripts`) und Chromium in der Playwright-Version von AIdeation. Ist Chromium schon da, entfällt
+der Download.
+
+Alle Vorlagen mit Befehlen laufen ohne Install-Skripte fremder Pakete: Jede Installation hat `--ignore-scripts`, und der
+Worker setzt zusätzlich `npm_config_ignore_scripts=true`. Generatoren, die sonst selbst installieren (Angular CLI,
+create-next-app, NestJS CLI, nuxi), laufen mit `--skip-install` bzw. `--no-install`. Danach folgt ein eigener
+`npm install --ignore-scripts`. Die Generator-Versionen sind fest eingetragen (`GENERATORS` in
+`src/setup/templates.ts`). Bei Nuxt entfällt dadurch `nuxt prepare` nach der Installation, das holt der erste
+`npm run dev` bzw. `npm run build` nach.
 
 Beim Anlegen mit dieser Vorlage belegt AIdeation die Projekt-Einstellungen vor (änderbar unter **Einstellungen**):
 
