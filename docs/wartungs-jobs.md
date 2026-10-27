@@ -8,6 +8,8 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf Zeitlimit + Reserve und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
 3. Die Job-Art wird in der festen Registry `JOB_KINDS` nachgeschlagen. Unbekannte Art: Status `failed`, andere Jobs laufen weiter. Es wird nie ein Pfad oder Befehl aus der Datenbank ausgeführt.
 4. Der Job läuft mit hartem Zeitlimit (`config.timeoutSeconds`, sonst Art-Standard, höchstens 300 s). Status, Zeitpunkt und Meldung werden in die Zeile zurückgeschrieben. Ein Fehler wird gespeichert und bricht weder den Durchgang noch den Worker-Zyklus ab.
+   - Beim Zeitlimit bekommt der Job das Abbruchsignal. `runWithTimeout` wartet danach noch bis zu 20 s (`TIMEOUT_GRACE_MS`) auf sein echtes Ende. Erst dann wird `locked_until` freigegeben.
+   - Läuft der Task danach noch, steht der Job als `failed` mit dem Hinweis „läuft noch“. Die Sperre bleibt stehen, und der Worker beansprucht den Job nicht erneut, auch nicht nach Ablauf der Sperre. Im Log steht eine Warnung. Endet der Task, gibt er die Sperre frei, aber nur, wenn sie noch seiner Beanspruchung gehört. Für andere Worker bleibt die Obergrenze die Sperrzeit (Zeitlimit + 30 s).
 5. Der Durchgang läuft im Hintergrund, höchstens einer gleichzeitig je Worker. Er zählt beim Neustart-Zähler (`busy`) mit und startet nicht mehr, sobald der Worker stoppt.
 
 ## Job-Arten
@@ -33,6 +35,8 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 - **pg_restore im Worker:** `backup_check` ruft `pg_restore --list` auf. Das Programm kommt aus `DEV_LOG_PG_RESTORE` in der `worker.env` oder aus dem PATH, nie aus der Datenbank. Es muss mindestens Version 17 haben, wie der Server. Fehlt es, meldet der Job „pg_restore --list nicht gefunden“ und schickt einen Push.
 - **Restore-Probe:** Sie braucht `docker` im PATH des Workers, `node_modules` im AIdeation-Ordner und `DEV_LOG_SECRET_KEY` in der `worker.env`. Sie läuft nie gegen die Live-Datenbank oder Port 5433. Die E2E-Tests nutzen die Datenbank `dev_log_e2e`; die Probe läuft getrennt davon. Ein Fehlschlag steht mit der letzten Skriptzeile in der Meldung des Jobs.
 - **Sprint-Abschluss** ändert den Status und ist darum standardmässig deaktiviert. Er schliesst nie einen Sprint mit offenen oder laufenden Aufträgen.
+  - `completeSprint` ist idempotent: Der Statuswechsel gilt nur für einen aktiven, nicht pausierten Sprint. War der Sprint schon abgeschlossen, entstehen kein zweiter Bericht, kein zweiter Git-Sync und keine zweite Push-Nachricht.
+  - `close_old_sprints` prüft das Abbruchsignal vor jedem Abschluss. Nach dem Zeitlimit wird kein weiterer Sprint geschlossen.
 - **Standardjobs** legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`). Änderungen der Administration bleiben bei einem Neustart erhalten.
 - **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach Zeitlimit + 30 s ab, danach ist der Job wieder beanspruchbar.
 - `watchdog-cli.ts` und `deploy/backup.sh` sind unverändert. `BACKUP_FILE` ist in `watchdog.ts` jetzt exportiert und wird von beiden Stellen genutzt.
