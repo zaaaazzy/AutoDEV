@@ -14,7 +14,8 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 | Art                 | Prüft                                                                                                   | Konfiguration (Auswahl)                    |
 | ------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| `backup_check`      | Neuestes `aideation-*.dump` in `./backups`: jung genug und plausible Grösse. Fehlender Ordner = Fehler + Push. | `dir`, `maxAgeHours`, `minBytes`           |
+| `backup_check`      | Neuestes `aideation-*.dump` in `./backups`: jung genug, plausible Grösse und für `pg_restore --list` lesbar (mit Tabellendaten). Fehlender Ordner, fehlendes `pg_restore` oder kaputter Dump = Fehler + Push. | `dir`, `maxAgeHours`, `minBytes`           |
+| `restore_probe`     | Wöchentlich: neuestes Backup mit `scripts/restore.sh --probe` in einen Wegwerf-Container (eigener Name, Port 5439) einspielen, Tabellen und `DEV_LOG_SECRET_KEY` prüfen, Container löschen. | `dir`, `timeoutSeconds` (Standard 300)     |
 | `watchdog_logs`     | Wächter-Probleme (`collectProblems`); gleiche Probleme erst nach `REMIND_MS` (6 h) erneut.               | `project`                                  |
 | `close_old_sprints` | Schliesst über `completeSprint` Sprints, die `sprintSettled` sind und `inactiveDays` inaktiv waren. Standardmässig **aus**. | `inactiveDays` (1–365)                     |
 | `push_alert`        | Push an den Projektkreis über `sendPush`, wenn ein beobachteter Job fehlgeschlagen ist.                  | `project`, `jobs`                          |
@@ -29,6 +30,8 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 ## Worauf zu achten ist
 
 - **Backup-Ordner:** Er ist nur im Backup-Container eingebunden. Ist er im Worker nicht sichtbar, meldet `backup_check` einen Fehler mit Push, statt still auszusetzen. Pfad bei Bedarf in `config.dir` setzen (muss im AIdeation-Ordner liegen).
+- **pg_restore im Worker:** `backup_check` ruft `pg_restore --list` auf. Das Programm kommt aus `DEV_LOG_PG_RESTORE` in der `worker.env` oder aus dem PATH, nie aus der Datenbank. Es muss mindestens Version 17 haben, wie der Server. Fehlt es, meldet der Job „pg_restore --list nicht gefunden“ und schickt einen Push.
+- **Restore-Probe:** Sie braucht `docker` im PATH des Workers, `node_modules` im AIdeation-Ordner und `DEV_LOG_SECRET_KEY` in der `worker.env`. Sie läuft nie gegen die Live-Datenbank oder Port 5433. Die E2E-Tests nutzen die Datenbank `dev_log_e2e`; die Probe läuft getrennt davon. Ein Fehlschlag steht mit der letzten Skriptzeile in der Meldung des Jobs.
 - **Sprint-Abschluss** ändert den Status und ist darum standardmässig deaktiviert. Er schliesst nie einen Sprint mit offenen oder laufenden Aufträgen.
 - **Standardjobs** legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`). Änderungen der Administration bleiben bei einem Neustart erhalten.
 - **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach Zeitlimit + 30 s ab, danach ist der Job wieder beanspruchbar.

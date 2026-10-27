@@ -1143,7 +1143,8 @@ export const SCHEMA = `
     ('backup_check', TRUE, 21600, 'backup_check', '{"dir": "backups", "maxAgeHours": 26, "minBytes": 1024}'),
     ('watchdog_logs', TRUE, 900, 'watchdog_logs', '{}'),
     ('close_old_sprints', FALSE, 86400, 'close_old_sprints', '{"inactiveDays": 14}'),
-    ('push_alert', TRUE, 3600, 'push_alert', '{}')
+    ('push_alert', TRUE, 3600, 'push_alert', '{}'),
+    ('restore_probe', TRUE, 604800, 'restore_probe', '{"dir": "backups"}')
   ON CONFLICT (key) DO NOTHING;
   -- Prozessregister des Workers: jeder gestartete Prozess (Agents, Chat, Autor, Visionär, Testläufe) mit Startzeit.
   -- Nach einem Absturz beendet der neue Worker diese Gruppen, bevor er Anfragen erneut einplant.
