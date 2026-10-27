@@ -163,6 +163,45 @@ export async function spendByRole(
   return new Map(rows.map((row) => [row.role, spendRow(row)]));
 }
 
+/**
+ * Verbrauch eines Sprints: nur Workflow-Läufe der Aufträge dieses Sprints seit Sprintbeginn. Chat, Autor und Visionär
+ * (agent_usage, ohne Auftrag) und Aufträge ausserhalb des Sprints zählen nicht. Ein Ende braucht es nicht: Das
+ * Sprintlimit gilt nur, solange der Sprint aktiv ist (sprintStart).
+ */
+export async function sprintSpendByRole(
+  pool: Pool,
+  project: string,
+  sprint: { id: string; since: string },
+  roles: readonly string[] = BUDGET_ROLES,
+): Promise<Map<string, Spend>> {
+  const rows = (
+    await pool.query<{ role: string; tokens: string; cost: string }>(
+      `SELECT a.role, COALESCE(SUM(s.tokens), 0) AS tokens, COALESCE(SUM(s.cost_usd), 0) AS cost
+         FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+         JOIN development_items d ON d.id = r.development_id JOIN agents a ON a.id = s.agent_id
+        WHERE r.project_slug = $1 AND d.sprint_id = $2::uuid AND COALESCE(s.started_at, r.started_at) >= $3::timestamptz
+          AND a.role = ANY($4)
+        GROUP BY a.role`,
+      [project, sprint.id, sprint.since, [...roles]],
+    )
+  ).rows;
+  return new Map(rows.map((row) => [row.role, spendRow(row)]));
+}
+
+/** Gesamtverbrauch eines Sprints (alle Schritte seiner Aufträge, auch ohne agent_id); siehe sprintSpendByRole. */
+async function sprintSpend(pool: Pool, project: string, sprint: { id: string; since: string }): Promise<Spend> {
+  const row = (
+    await pool.query<{ tokens: string; cost: string }>(
+      `SELECT COALESCE(SUM(s.tokens), 0) AS tokens, COALESCE(SUM(s.cost_usd), 0) AS cost
+         FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+         JOIN development_items d ON d.id = r.development_id
+        WHERE r.project_slug = $1 AND d.sprint_id = $2::uuid AND COALESCE(s.started_at, r.started_at) >= $3::timestamptz`,
+      [project, sprint.id, sprint.since],
+    )
+  ).rows[0];
+  return spendRow(row);
+}
+
 /** Verbrauch einer Rolle in einem Auftrag seit dem letzten manuellen Start (nur Schritte mit agent_id). */
 async function loadRoleOrderSpend(pool: Pool, itemId: string, role: string): Promise<Spend & { since: string | null }> {
   const row = (
@@ -196,7 +235,10 @@ export async function loadOrderSpend(pool: Pool, itemId: string): Promise<Spend 
   return { ...spendRow(row), since: row?.since ?? null };
 }
 
-/** Beginn des Sprints (des Auftrags, sonst des aktiven Sprints); null ohne Sprint. */
+/**
+ * Beginn des Sprints (des Auftrags, sonst des aktiven Sprints); null ohne Sprint. Nur ein aktiver Sprint hat ein
+ * Sprintlimit: Ist der Sprint des Auftrags geplant, im Review, abgeschlossen oder abgebrochen, gilt keins.
+ */
 export async function sprintStart(
   pool: Pool,
   project: string,
@@ -206,8 +248,8 @@ export async function sprintStart(
     (
       await pool.query<{ id: string; since: string }>(
         `SELECT id, COALESCE(start_date::timestamp AT TIME ZONE $3::text, created_at)::text AS since FROM sprints
-          WHERE project_slug = $1 AND (id = $2::uuid OR ($2::uuid IS NULL AND status = 'active'))
-          ORDER BY status = 'active' DESC LIMIT 1`,
+          WHERE project_slug = $1 AND status = 'active' AND ($2::uuid IS NULL OR id = $2::uuid)
+          ORDER BY created_at LIMIT 1`,
         [project, sprintId ?? null, localTimeZone()],
       )
     ).rows[0] ?? null
@@ -239,9 +281,13 @@ async function periodSpend(
     return { key: keyed(day.key), spend: await since(day.since) };
   }
   if (period === 'sprint') {
-    // Sprint des Auftrags, sonst der aktive Sprint des Projekts.
+    // Sprint des Auftrags, sonst der aktive Sprint des Projekts; es zählen nur die Läufe seiner Aufträge.
     const sprint = await sprintStart(pool, project, scope.sprintId);
-    return sprint ? { key: keyed(sprint.id), spend: await since(sprint.since) } : null;
+    if (!sprint) return null;
+    const spend = role
+      ? ((await sprintSpendByRole(pool, project, sprint, [role])).get(role) ?? { tokens: 0, costUsd: 0 })
+      : await sprintSpend(pool, project, sprint);
+    return { key: keyed(sprint.id), spend };
   }
   if (!scope.itemId) return null;
   const order = role ? await loadRoleOrderSpend(pool, scope.itemId, role) : await loadOrderSpend(pool, scope.itemId);

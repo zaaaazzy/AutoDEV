@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { backfillFailures, failureDetail, isAgentFailure, isEnvironmentFailure } from './autofix.js';
+import { backfillFailures, failureDetail, isAgentFailure, isEnvironmentFailure, queueBugFix } from './autofix.js';
 import { changesWorkingTree } from './runner.js';
 
 test('agent failures without code cause are recognised', () => {
@@ -74,6 +74,24 @@ test('Fehler-Nachtrag: ein vom Benutzer abgebrochener Lauf erzeugt keinen Bug-Be
     .map((query) => query.values[0]);
   assert.ok(failed.includes('kaputt'), 'echter Fehler bekommt den Bericht');
   assert.ok(!failed.includes('abgebrochen'), 'Abbruch bekommt keinen Bericht');
+});
+
+test('Bugfix-Auftrag erbt keinen abgeschlossenen oder abgebrochenen Sprint (sonst hängt er am Sprintlimit)', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  await queueBugFix(pool, { title: 'Doku', sprintId: 'sprint-alt' }, 'bug-1');
+  const insert = queries.find((query) => query.sql.includes('INSERT INTO development_items'));
+  assert.equal(insert?.values[1], 'sprint-alt');
+  // Offener Sprint bleibt, geschlossener wird durch den aktiven ersetzt; ohne Sprint bleibt es ohne.
+  assert.match(
+    insert?.sql ?? '',
+    /CASE WHEN \$2::uuid IS NOT NULL THEN COALESCE\(\s*\(SELECT s\.id FROM sprints s WHERE s\.id = \$2::uuid AND s\.status NOT IN \('completed', 'cancelled'\)\),\s*\(SELECT s\.id FROM sprints s WHERE s\.project_slug = b\.project_slug AND s\.status = 'active'/,
+  );
 });
 
 test('ENOENT in einem Test ist kein Umgebungsfehler (Auftrag ea3a49b1)', () => {

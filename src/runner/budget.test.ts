@@ -210,6 +210,59 @@ test('Sprintlimit: Sprintbeginn ist Mitternacht Ortszeit', async () => {
   assert.equal(sprint?.values[2], localTimeZone());
 });
 
+/** Sprints wie in der Datenbank: Sprintlimit nur für aktive Sprints (Bedingung muss im SQL stehen). */
+function sprintRows(sprints: { id: string; status: string }[]) {
+  return (sql: string, values: unknown[]) => {
+    assert.match(sql, /status = 'active' AND \(\$2::uuid IS NULL OR id = \$2::uuid\)/);
+    return {
+      rows: sprints
+        .filter((sprint) => sprint.status === 'active' && (values[1] == null || sprint.id === values[1]))
+        .map((sprint) => ({ id: sprint.id, since: '2026-10-19 00:00:00+02' })),
+    };
+  };
+}
+
+test('Sprintlimit zählt nur Läufe der Sprint-Aufträge – Chat, Visionär und fremde Aufträge nicht', async () => {
+  const sprints = sprintRows([{ id: 'sprint-1', status: 'active' }]);
+  const { pool, queries } = fakePool((sql, values) => {
+    if (sql.includes('FROM budgets')) return { rows: [{ period: 'sprint', maxTokens: '1000', maxCostUsd: null }] };
+    if (sql.includes('FROM sprints')) return sprints(sql, values);
+    // Projektverbrauch inkl. Chat (agent_usage) und Aufträgen ausserhalb des Sprints: darf nicht zählen.
+    if (sql.includes('UNION ALL')) return { rows: [{ tokens: '50000', cost: '0' }] };
+    if (sql.includes('d.sprint_id = $2')) return { rows: [{ tokens: '200', cost: '0' }] };
+    return undefined;
+  });
+  const check = await checkBudget(pool, 'mainty', { itemId: 'item-1', sprintId: 'sprint-1' });
+  assert.equal(check.exceeded, null);
+  assert.equal(check.states[0]?.key, 'sprint-1');
+  assert.equal(check.percent, 20);
+  const spend = queries.find((query) => query.sql.includes('d.sprint_id = $2'));
+  assert.deepEqual(spend?.values, ['mainty', 'sprint-1', '2026-10-19 00:00:00+02']);
+  assert.doesNotMatch(spend?.sql ?? '', /agent_usage/);
+  assert.ok(!queries.some((query) => query.sql.includes('UNION ALL')));
+});
+
+test('Abgeschlossener Sprint: kein Sprintlimit, wegen Sprintlimit blockierter Auftrag wird frei', async () => {
+  const sprints = sprintRows([
+    { id: 'sprint-alt', status: 'completed' },
+    { id: 'sprint-neu', status: 'active' },
+  ]);
+  const { pool, queries } = fakePool((sql, values) => {
+    if (sql.includes('budget_blocked IS NOT NULL') && sql.startsWith('SELECT'))
+      return { rows: [{ id: 'item-1', sprintId: 'sprint-alt', period: 'sprint', role: null }] };
+    if (sql.includes('FROM budgets')) return { rows: [{ period: 'sprint', maxTokens: '1000', maxCostUsd: null }] };
+    if (sql.includes('FROM sprints')) return sprints(sql, values);
+    // Seit Sprintbeginn wächst der Projektverbrauch (Chat, Visionär) immer weiter.
+    if (sql.includes('UNION ALL') || sql.includes('d.sprint_id = $2')) return { rows: [{ tokens: '99999', cost: '0' }] };
+    if (sql.includes("SET status = 'planned'")) return { rows: [], rowCount: 1 };
+    return undefined;
+  });
+  // Der Auftrag hängt am abgeschlossenen Sprint: kein Sprintlimit, auch nicht das des neuen aktiven Sprints.
+  assert.deepEqual((await checkBudget(pool, 'mainty', { itemId: 'item-1', sprintId: 'sprint-alt' })).states, []);
+  assert.deepEqual(await releaseBudgetBlocks(pool, 'mainty'), ['item-1']);
+  assert.ok(!queries.some((query) => query.sql.includes('d.sprint_id = $2')));
+});
+
 // ── Token-Limits je Agent-Rolle ──────────────────────────────────────────────────────────────────────────────────
 
 /** Projekt ohne Projektlimit; Rollen-Limits und Verbrauch je Rolle aus den übergebenen Tabellen. */
