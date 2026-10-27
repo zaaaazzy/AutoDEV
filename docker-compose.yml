@@ -107,6 +107,7 @@ services:
       PGUSER: ${DEV_LOG_DB_USER:-devlog}
       PGPASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
       BACKUP_KEEP_DAYS: ${DEV_LOG_BACKUP_KEEP_DAYS:-14}
+      BACKUP_MIN_KEEP: ${DEV_LOG_BACKUP_MIN_KEEP:-7}
     volumes:
       - ./backups:/backups
       - ./deploy/backup.sh:/backup.sh:ro
