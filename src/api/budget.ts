@@ -18,6 +18,7 @@ import {
   releaseBudgetBlocks,
   type Spend,
   spendByRole,
+  sprintSpendByRole,
   sprintStart,
   usagePercent,
   WARN_PERCENT,
@@ -254,7 +255,7 @@ export async function collectRoleBudget(pool: Pool, project: string): Promise<Re
   const [limits, sprint] = await Promise.all([loadRoleLimits(pool, project), sprintStart(pool, project, null)]);
   const [today, sprintSpend] = await Promise.all([
     spendByRole(pool, project, localDay().since),
-    sprint ? spendByRole(pool, project, sprint.since) : Promise.resolve(null),
+    sprint ? sprintSpendByRole(pool, project, sprint) : Promise.resolve(null),
   ]);
   const status = (role: BudgetRole, period: BudgetPeriod): RolePeriodStatus => {
     const limit = limits.find((entry) => entry.role === role && entry.period === period);

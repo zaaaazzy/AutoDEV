@@ -297,9 +297,15 @@ export async function queueBugFix(
   bugId: string,
   intro?: string,
 ): Promise<void> {
+  // Sprint des blockierten Auftrags nur, solange er offen ist; sonst wie detachFromClosedSprints der aktive Sprint.
   await pool.query(
     `INSERT INTO development_items (project_slug, sprint_id, title, description, status, priority, kind, bug_id, auto_run)
-     SELECT b.project_slug, $2, left('Bug: ' || b.title, 180),
+     SELECT b.project_slug,
+            CASE WHEN $2::uuid IS NOT NULL THEN COALESCE(
+              (SELECT s.id FROM sprints s WHERE s.id = $2::uuid AND s.status NOT IN ('completed', 'cancelled')),
+              (SELECT s.id FROM sprints s WHERE s.project_slug = b.project_slug AND s.status = 'active'
+                ORDER BY s.created_at LIMIT 1)) END,
+            left('Bug: ' || b.title, 180),
             COALESCE($4, 'Behebe den Fehler, der den Auftrag „' || $3 || '“ blockiert. Danach wird der Auftrag automatisch erneut gestartet.') || E'\n\n' ||
             ${fencedBugDescriptionSql('b', UNTRUSTED_START)},
             'planned', 'high', 'bug', b.id, TRUE
