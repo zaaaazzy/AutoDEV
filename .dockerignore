@@ -9,9 +9,12 @@ dist
 **/*.key
 # Laufzeitdaten, Sicherungen und Testergebnisse (Screenshots, Logs).
 .dev-log
+# Merge-Abbruch-Patches des Runners: können Projektcode samt Zugangsdaten enthalten.
+.dev-log-backups
 backups
 test-results
-e2e/test-results
+# Playwright-Tests: kein Dockerfile kopiert sie (API: src, Oberfläche: frontend).
+e2e
 docs/tests
 playwright-report
 out-tsc
