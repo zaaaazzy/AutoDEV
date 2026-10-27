@@ -74,13 +74,16 @@ test('FailureLimiter: abgelaufene Einträge werden beim Einfügen aufgeräumt', 
   assert.equal(limiter.size, 1);
 });
 
-test('trustProxySetting: nur benannte Netze oder IP/CIDR, nie true oder Hop-Zahlen', () => {
+test('trustProxySetting: benannte Netze, IP/CIDR oder genau ein Hop, nie true oder mehrere Hops', () => {
   assert.equal(trustProxySetting('uniquelocal'), 'uniquelocal');
   assert.equal(trustProxySetting(' loopback , 172.18.0.0/16 '), 'loopback,172.18.0.0/16');
   assert.equal(trustProxySetting('fd00::/8'), 'fd00::/8');
+  assert.equal(trustProxySetting(' 1 '), 1, 'als Zahl, sonst hielte Express "1" für eine Adresse');
   assert.equal(trustProxySetting('true'), null);
   assert.equal(trustProxySetting('*'), null);
-  assert.equal(trustProxySetting('1'), null);
+  assert.equal(trustProxySetting('0'), null);
+  assert.equal(trustProxySetting('2'), null);
+  assert.equal(trustProxySetting('1,loopback'), null);
   assert.equal(trustProxySetting('10.0.0.0/33'), null);
   assert.equal(trustProxySetting('loopback,true'), null, 'ein ungültiger Teil verwirft alles');
   assert.equal(trustProxySetting(''), null);

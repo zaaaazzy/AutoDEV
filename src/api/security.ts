@@ -94,16 +94,20 @@ export class RateLimiter {
 const TRUSTED_PROXY_NAMES = new Set(['loopback', 'linklocal', 'uniquelocal']);
 
 /**
- * DEV_LOG_TRUST_PROXY prüfen: nur benannte Netze (loopback, linklocal, uniquelocal) oder konkrete IP/CIDR. `true`, `*`
- * oder Hop-Zahlen würden jedem Absender ein selbst gesetztes X-Forwarded-For glauben – damit liesse sich die
+ * DEV_LOG_TRUST_PROXY prüfen: benannte Netze (loopback, linklocal, uniquelocal), konkrete IP/CIDR oder genau `1`.
+ * `1` (Compose) vertraut nur dem direkten Absender und nimmt den letzten Eintrag von X-Forwarded-For – das passt nur,
+ * wenn das Backend ausschliesslich hinter einem Proxy erreichbar ist, der den Header ersetzt (deploy/frontend/nginx.conf).
+ * `true`, `*` oder grössere Hop-Zahlen würden selbst gesetzte Einträge glauben – damit liesse sich die
  * Fehlversuch-Sperre mit jeder Anfrage umgehen. Ungültiges wird verworfen (null = kein Proxy vertraut).
  */
-export function trustProxySetting(value: string | undefined): string | null {
+export function trustProxySetting(value: string | undefined): string | number | null {
   const parts = (value ?? '')
     .split(',')
     .map((part) => part.trim())
     .filter(Boolean);
   if (parts.length === 0) return null;
+  // Als Zahl übergeben: Express liest einen String "1" als Adressliste und bricht ab.
+  if (parts.length === 1 && parts[0] === '1') return 1;
   const valid = parts.every((part) => {
     if (TRUSTED_PROXY_NAMES.has(part)) return true;
     const [address, bits, ...rest] = part.split('/');

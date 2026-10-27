@@ -227,6 +227,26 @@ Jeder Dienst in `docker-compose.yml` hat Grenzen für Speicher, CPU und Prozesse
 behält nur `NET_BIND_SERVICE` für die Ports 80/443. Der einmalige Dienst `https-volumes` übergibt bestehende
 Zertifikats-Volumes an den Benutzer `caddy` und beendet sich danach. Der Review-Container läuft als Benutzer `node`.
 
+### Client-IP hinter nginx
+
+nginx (`deploy/frontend/nginx.conf`) hat zwei Eingänge mit denselben Routen (`app-locations.conf`):
+
+- **Port 8080**, als `127.0.0.1:3100` veröffentlicht: für den direkten Zugriff vom eigenen Rechner. Die Client-IP ist
+  die Socket-Adresse, das Protokoll `$scheme`. Mitgeschickte `X-Forwarded-For`, `X-Forwarded-Proto`,
+  `X-Forwarded-Host`, `X-Real-IP` und `Forwarded` werden ersetzt bzw. entfernt.
+- **Port 8081**, nicht veröffentlicht: nur für Caddy (`reverse_proxy frontend:8081`). Caddy ersetzt
+  `X-Forwarded-For` durch die echte Client-IP. nginx übernimmt den letzten Eintrag (`set_real_ip_from` für private
+  Netze, `real_ip_recursive off`). `X-Forwarded-Proto` gilt nur, wenn es genau `https` ist.
+
+Das Backend bekommt in beiden Fällen genau eine Adresse in `X-Forwarded-For` und vertraut genau einem Hop
+(`DEV_LOG_TRUST_PROXY: "1"`). Die Fehlversuchs-Sperre zählt so je echtem Client. Ein gefälschter Header beim
+Direktzugriff ändert die Sperr-Adresse nicht.
+
+Warum zwei Ports statt einer Prüfung nach Absender: Direktzugriffe über den Host-Port kommen vom Gateway desselben
+Docker-Netzes, in dem auch Caddy läuft. Ein `set_real_ip_from` für dieses Netz würde also auch gefälschten Headern
+glauben. Früher galt `uniquelocal`, und nginx hängte nur an ein mitgeschicktes `X-Forwarded-For` an. Damit war eine
+vom Client vorangestellte Adresse die Client-IP. So ließ sich die Sperre mit wechselnden IPs umgehen.
+
 Der Backup-Container schreibt als `70:70` (Benutzer `postgres` des Images) nach `./backups`. Die Dumps haben die
 Rechte 600. Unter **Linux** muss der Ordner für diesen Benutzer beschreibbar sein. Sonst setzt du in der `.env`
 `DEV_LOG_BACKUP_USER=<uid>:<gid>` deines Benutzers (`id -u`, `id -g`). Der Einrichtungs-Assistent trägt das selbst
@@ -284,4 +304,4 @@ dabei weder gelöscht noch rotiert.
 | Zu viele Fehlversuche | Die Meldung nennt die Wartezeit (1 bis höchstens 15 Minuten). Gebremst wird nur dieses Konto von dieser Adresse aus, von einem anderen Gerät oder Netz geht die Anmeldung weiter |
 | Start bricht ab: „Standardpasswort … Start abgebrochen“ | `./start.sh --setup` erneut ausführen (setzt `DEV_LOG_DB_PASSWORD` und ändert es in PostgreSQL), danach den Worker neu installieren. Nur für Wegwerf-Umgebungen: `DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD=1` |
 | „Unbekannter Host“ (Status 421) | AIdeation wird über einen Namen aufgerufen, der weder IP, `localhost`, `*.local` noch `DEV_LOG_DOMAIN` ist (Schutz vor DNS-Rebinding). Namen in `DEV_LOG_ALLOWED_HOSTS` der `.env` eintragen (Komma-getrennt) und neu starten |
-| Alle Geräte werden gemeinsam gebremst | Das Backend sieht nur die Proxy-Adresse. `DEV_LOG_TRUST_PROXY` muss den Proxy abdecken (Compose: `uniquelocal`), `true` wird abgelehnt (Warnung im Log von `dev-log`) |
+| Alle Geräte werden gemeinsam gebremst | Das Backend sieht nur die Proxy-Adresse. `DEV_LOG_TRUST_PROXY` muss den Proxy abdecken (Compose: `1`), `true` wird abgelehnt (Warnung im Log von `dev-log`). Caddy muss an `frontend:8081` weiterleiten, nicht an 8080 (siehe „Client-IP hinter nginx“) |
