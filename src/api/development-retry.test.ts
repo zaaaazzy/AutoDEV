@@ -108,7 +108,8 @@ test('Erneut versuchen auf PostgreSQL: nur in planbare Sprints, Ziel-Sprint atom
       assert.equal((await read(running)).status, 'in_progress');
 
       // Zurückweisen in der Freigabe: dieselbe Sprint-Wahl, auto_run folgt dem Ziel-Sprint.
-      const reject = (id: string) => client.call('POST', `/development/${id}/review-reject`, { comment: 'Passt nicht' });
+      const reject = (id: string) =>
+        client.call('POST', `/development/${id}/review-reject`, { comment: 'Passt nicht' });
       const inReview = await order('approval', await sprint('review'));
       assert.equal((await reject(inReview)).status, 200);
       assert.deepEqual(await read(inReview), { status: 'planned', sprintId: active, autoRun: true });

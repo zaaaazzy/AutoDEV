@@ -75,12 +75,17 @@ test('Abnahme: ein ausgelassener DoD-Punkt bleibt „nicht geprüft“; die Anwe
   const instructions = acceptanceInstructions(['A'], done);
   // Das Beispiel nennt jede DoD-Nummer, damit kein Punkt wegfällt.
   const example = JSON.parse(/^@@ACCEPTANCE (.*)$/m.exec(instructions)?.[1] ?? '{}') as { done: { nr: number }[] };
-  assert.deepEqual(example.done.map((entry) => entry.nr), [1, 2, 3]);
+  assert.deepEqual(
+    example.done.map((entry) => entry.nr),
+    [1, 2, 3],
+  );
   assert.match(instructions, /alle 3 DoD-Punkte/);
   // Ausgelassen bleibt abgelehnt; als manuell gemeldet blockiert der Punkt nicht.
   const criteria = [{ nr: 1, met: true, note: '' }];
   assert.deepEqual(
-    acceptanceProblems({ criteria, done: [{ nr: 1, met: true, note: '' }] }, ['A'], done).map((line) => line.slice(0, 5)),
+    acceptanceProblems({ criteria, done: [{ nr: 1, met: true, note: '' }] }, ['A'], done).map((line) =>
+      line.slice(0, 5),
+    ),
     ['DoD 2', 'DoD 3'],
   );
   const reported = [

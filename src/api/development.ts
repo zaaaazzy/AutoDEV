@@ -290,7 +290,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         [request.params.id, sprintId],
       );
       if (!fits.rowCount) {
-        response.status(409).json({ message: 'Erneut versuchen nur in geplante oder aktive Sprints desselben Projekts.' });
+        response
+          .status(409)
+          .json({ message: 'Erneut versuchen nur in geplante oder aktive Sprints desselben Projekts.' });
         return;
       }
     }

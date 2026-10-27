@@ -35,7 +35,9 @@ export function protectedPath(rel: string): boolean {
   return rel
     .split(/[\\/]/)
     .filter(Boolean)
-    .some((part) => PROTECTED_DIRECTORIES.has(part.toLowerCase()) || PROTECTED_FILE.test(part) || SECRET_NAME.test(part));
+    .some(
+      (part) => PROTECTED_DIRECTORIES.has(part.toLowerCase()) || PROTECTED_FILE.test(part) || SECRET_NAME.test(part),
+    );
 }
 
 export const inside = (path: string, root: string): boolean => path === root || path.startsWith(root + sep);
@@ -86,5 +88,7 @@ export function checkProjectPath(projectRoot: string, path: string): PathVerdict
     .map((base) => relative(base, lexical))
     .filter((candidate) => !/^\.\.(?:[\\/]|$)/.test(candidate) && !isAbsolute(candidate));
   const hit = [rel, ...lexicalRels].find(protectedPath);
-  return hit === undefined ? { ok: true, real, relative: rel } : { ok: false, reason: 'protected', relative: rel || hit };
+  return hit === undefined
+    ? { ok: true, real, relative: rel }
+    : { ok: false, reason: 'protected', relative: rel || hit };
 }

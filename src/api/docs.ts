@@ -8,14 +8,7 @@ import { publicBaseUrl } from './production-snippets.js';
 import type { Principal } from './roles.js';
 import { isAdmin } from './tenancy.js';
 import { readProjectText } from '../core/project-paths.js';
-import {
-  INVALID,
-  invalidInput,
-  isUuid,
-  parseFields,
-  parseProjectSlug,
-  parseTitle,
-} from '../core/validation.js';
+import { INVALID, invalidInput, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
 
 const MAX_API_CONTENT = 30_000;
 const MAX_STORED_CONTENT = 200_000;

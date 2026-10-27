@@ -70,9 +70,7 @@ async function run(
   timeoutMs = QUICK_TIMEOUT_MS,
   extraEnv: Record<string, string> = {},
 ): Promise<{ ok: boolean; output: string }> {
-  const env = usesGit(command)
-    ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' })
-    : { ...ENV, ...extraEnv };
+  const env = usesGit(command) ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' }) : { ...ENV, ...extraEnv };
   const result = await execute(command, cwd, { timeoutMs, env }).catch((error: unknown) => ({
     exitCode: 1,
     durationMs: 0,

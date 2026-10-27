@@ -336,6 +336,72 @@
   filter: grayscale(1);
   opacity: 0.65;
 }
+
+/* Drag & Drop: gezogener Schritt mit weichem Schatten, Einfügemarke in der Lücke, Zielphase hervorgehoben. */
+.workflow-phase .workflow-steps {
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+.workflow-phase.drop-active .workflow-steps {
+  border-left-color: #2f6b4f;
+  border-radius: 0 10px 10px 0;
+  background: #f7faf8;
+}
+.workflow-phase.drop-active .workflow-phase-number {
+  background: #2f6b4f;
+  color: #fff;
+}
+.workflow-step {
+  position: relative;
+  transition:
+    box-shadow 0.15s,
+    opacity 0.15s;
+}
+.workflow-step.dragging {
+  box-shadow: 0 6px 18px rgb(32 40 36 / 10%);
+  opacity: 0.55;
+}
+.workflow-step.drop-before::before,
+.workflow-step.drop-after::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: #2f6b4f;
+  content: '';
+  pointer-events: none;
+}
+.workflow-step.drop-before::before {
+  top: -6px;
+}
+.workflow-step.drop-after::after {
+  bottom: -6px;
+}
+.workflow-empty.drop-here {
+  border: 2px dashed #a9c2b1;
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+.workflow-step-handle {
+  flex: none;
+  color: #8a8a85;
+  cursor: grab;
+  user-select: none;
+}
+.workflow-step-handle:active {
+  cursor: grabbing;
+}
+.workflow-step-handle.locked {
+  cursor: default;
+  opacity: 0.4;
+}
+.workflow-step-phase {
+  width: auto;
+  padding: 2px 6px;
+  font-size: 13px;
+}
 .workflow-step-head {
   min-width: 0;
 }

@@ -171,20 +171,22 @@ export async function deliverPush(
   let sent = 0;
   const gone = subscriptions.filter((s) => !isAllowedPushEndpoint(s.endpoint)).map((s) => s.endpoint);
   await Promise.all(
-    subscriptions.filter((s) => isAllowedPushEndpoint(s.endpoint)).map(async (subscription) => {
-      try {
-        await send(
-          { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
-          payload,
-          { vapidDetails: { subject: SUBJECT, ...keys }, TTL: 6 * 3600, urgency: 'normal', timeout: 10_000 },
-        );
-        sent += 1;
-      } catch (error) {
-        const status = (error as { statusCode?: number }).statusCode;
-        if (status === 404 || status === 410) gone.push(subscription.endpoint);
-        else console.warn('Push fehlgeschlagen:', (error as Error).message);
-      }
-    }),
+    subscriptions
+      .filter((s) => isAllowedPushEndpoint(s.endpoint))
+      .map(async (subscription) => {
+        try {
+          await send(
+            { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
+            payload,
+            { vapidDetails: { subject: SUBJECT, ...keys }, TTL: 6 * 3600, urgency: 'normal', timeout: 10_000 },
+          );
+          sent += 1;
+        } catch (error) {
+          const status = (error as { statusCode?: number }).statusCode;
+          if (status === 404 || status === 410) gone.push(subscription.endpoint);
+          else console.warn('Push fehlgeschlagen:', (error as Error).message);
+        }
+      }),
   );
   return { sent, gone };
 }

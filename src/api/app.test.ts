@@ -688,6 +688,28 @@ test('defines agents per workflow phase and persists their order', async () => {
   });
 });
 
+test('moves a workflow step to another phase with one order call per phase (drag & drop)', async () => {
+  const { pool, queries } = recordingPool();
+  await withServer(pool, async (baseUrl) => {
+    const order = (phase: string, ids: string[]) =>
+      fetch(`${baseUrl}/api/projects/mainty/workflow/order`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ phase, ids }),
+      });
+    // Zielphase mit dem Schritt, danach die Quellphase ohne ihn: beide lückenlos ab 1.
+    assert.equal((await order('after_task', [SPRINT_ID, ID])).status, 204);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'after_task', [SPRINT_ID, ID]]);
+    assert.equal((await order('while_task', [])).status, 204);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'while_task', []]);
+    const sql = queries.at(-1)?.sql ?? '';
+    assert.match(sql, /SET position = o\.ord, phase = \$2/);
+    // Pausiert bleibt pausiert: das Umordnen fasst `enabled` nicht an.
+    assert.doesNotMatch(sql, /enabled/);
+    assert.equal((await order('during', [ID])).status, 400);
+  });
+});
+
 test('serves the Angular bundle from the application shell', async () => {
   await withServer(recordingPool().pool, async (baseUrl) => {
     const html = await (await fetch(`${baseUrl}/`, { headers: { Authorization: basicAuth() } })).text();

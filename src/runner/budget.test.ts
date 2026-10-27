@@ -253,7 +253,8 @@ test('Abgeschlossener Sprint: kein Sprintlimit, wegen Sprintlimit blockierter Au
     if (sql.includes('FROM budgets')) return { rows: [{ period: 'sprint', maxTokens: '1000', maxCostUsd: null }] };
     if (sql.includes('FROM sprints')) return sprints(sql, values);
     // Seit Sprintbeginn wächst der Projektverbrauch (Chat, Visionär) immer weiter.
-    if (sql.includes('UNION ALL') || sql.includes('d.sprint_id = $2')) return { rows: [{ tokens: '99999', cost: '0' }] };
+    if (sql.includes('UNION ALL') || sql.includes('d.sprint_id = $2'))
+      return { rows: [{ tokens: '99999', cost: '0' }] };
     if (sql.includes("SET status = 'planned'")) return { rows: [], rowCount: 1 };
     return undefined;
   });
@@ -312,7 +313,7 @@ test('Rollen-Limit erreicht: Schritt der Rolle developer startet nicht, tester m
   assert.ok(developer.exceeded);
   assert.equal(developer.exceeded.role, 'developer');
   assert.equal(developer.exceeded.key, `rolle:developer:${localDay().key}`);
-  assert.match(budgetTodo(developer.exceeded),/Tageslimit der Rolle „developer“: 500k Tokens von 500k Tokens/);
+  assert.match(budgetTodo(developer.exceeded), /Tageslimit der Rolle „developer“: 500k Tokens von 500k Tokens/);
   const tester = await checkBudget(pool, 'mainty', { itemId: 'item-1', role: 'tester' });
   assert.equal(tester.exceeded, null);
   assert.equal(tester.states[0]?.role, 'tester');

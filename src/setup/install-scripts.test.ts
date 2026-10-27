@@ -245,7 +245,10 @@ test(
       assert.equal(result.status, 0, result.output);
       const log = join(home, 'Library', 'Logs', `${name}.log`);
       const rule = await readFile(join(rules, `${name}.conf`), 'utf8');
-      assert.ok(rule.split('\n').some((line) => line.startsWith(`${log}\t`)), rule);
+      assert.ok(
+        rule.split('\n').some((line) => line.startsWith(`${log}\t`)),
+        rule,
+      );
       const plist = join(home, 'Library', 'LaunchAgents', plistName);
       const parsed = JSON.parse(
         spawnSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }).stdout,
