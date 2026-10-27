@@ -11,6 +11,8 @@ import { serveRoutes } from './serve-routes.test.js';
 import { withMigratedDatabase } from '../db/test-database.test.js';
 
 delete process.env.DEV_LOG_PROJECT_ROOTS;
+// VAPID-Schlüssel werden nur verschlüsselt gespeichert; dafür braucht es einen Schlüssel.
+process.env.DEV_LOG_SECRET_KEY ??= 'ein-schluessel-nur-fuer-tests';
 
 // Endpunkt eines erlaubten Push-Dienstes (Allowlist in isAllowedPushEndpoint).
 const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/geraet-1';
@@ -43,6 +45,8 @@ test('Push auf PostgreSQL: Schlüssel, Anmeldung je Benutzer, Abmeldung', async 
         assert.equal(typeof first.body.publicKey, 'string');
         assert.equal(first.body.publicKey, second.body.publicKey);
         assert.deepEqual(Object.keys(first.body), ['publicKey']);
+        const { rows } = await pool.query("SELECT value FROM app_settings WHERE key = 'push_vapid_keys'");
+        assert.ok(String(rows[0]?.value).startsWith('enc:v1:'), 'privater Schlüssel liegt verschlüsselt in der Datenbank');
       });
 
       await t.test('Anmeldung wird geprüft', async () => {

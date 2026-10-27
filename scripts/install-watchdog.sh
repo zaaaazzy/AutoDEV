@@ -1,7 +1,8 @@
 #!/bin/bash
 # Installiert den Ausfall-Wächter als macOS LaunchAgent: alle zwei Minuten ein Prüflauf
 # (Dienst, HTTPS, Datenbank, Worker, Backups, Speicherplatz) mit Push-Nachricht bei Problemen.
-# Die Datenbank-URL steht in ~/.config/aideation/watchdog.env (Rechte 600), nicht in der Plist.
+# Datenbank-URL und DEV_LOG_SECRET_KEY (entschlüsselt den Push-Schlüssel) stehen in ~/.config/aideation/watchdog.env
+# (Rechte 600), nicht in der Plist.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/service-env.sh
@@ -15,6 +16,7 @@ DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABAS
 warn_default_password "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
   "DEV_LOG_DATABASE_URL=$DATABASE_URL" \
+  "DEV_LOG_SECRET_KEY=$(resolve_value DEV_LOG_SECRET_KEY "$ENV_FILE")" \
   "DEV_LOG_PUBLIC_URL=$(resolve_value DEV_LOG_PUBLIC_URL "$ENV_FILE")"
 mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
 LOG="$HOME/Library/Logs/aideation-watchdog.log"

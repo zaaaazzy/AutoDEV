@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import webpush from 'web-push';
+import { decryptSecret, encryptSecret, isEncrypted } from './secrets.js';
 
 /** Web-Push an alle registrierten Geräte. Server, Worker und Wächter teilen die VAPID-Schlüssel über die Datenbank. */
 export interface PushMessage {
@@ -76,17 +77,64 @@ export function pushSubject(environment: NodeJS.ProcessEnv = process.env, fromFi
 
 const SUBJECT = pushSubject();
 
-export async function vapidKeys(pool: Pool): Promise<VapidKeys> {
+/** Ohne DEV_LOG_SECRET_KEY wird kein privater VAPID-Schlüssel gespeichert. */
+export class VapidKeyMissingError extends Error {
+  constructor() {
+    super('Push-Schlüssel brauchen DEV_LOG_SECRET_KEY. Den Schlüssel in der .env setzen und neu starten.');
+  }
+}
+
+/** VAPID-Schlüssel kommen nur verschlüsselt in die Datenbank; ohne Schlüssel wird nichts geschrieben (fail-closed). */
+export function sealVapid(keys: VapidKeys, environment: NodeJS.ProcessEnv = process.env): string {
+  const sealed = encryptSecret(JSON.stringify(keys), environment);
+  if (!isEncrypted(sealed)) throw new VapidKeyMissingError();
+  return sealed;
+}
+
+/** Liest gespeicherte VAPID-Schlüssel; Klartext aus der Zeit vor der Verschlüsselung bleibt bis zum Start lesbar. */
+export function openVapid(stored: string, environment: NodeJS.ProcessEnv = process.env): VapidKeys {
+  return JSON.parse(decryptSecret(stored, environment)) as VapidKeys;
+}
+
+export async function vapidKeys(pool: Pool, environment: NodeJS.ProcessEnv = process.env): Promise<VapidKeys> {
   const stored = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
-  if (stored.rows[0]) return JSON.parse(stored.rows[0].value) as VapidKeys;
+  if (stored.rows[0]) return openVapid(stored.rows[0].value, environment);
   const generated = webpush.generateVAPIDKeys();
   await pool.query('INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING', [
     VAPID_KEY,
-    JSON.stringify(generated),
+    sealVapid(generated, environment),
   ]);
   // Bei gleichzeitiger Erzeugung gewinnt der zuerst gespeicherte Schlüssel.
   const winner = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
-  return JSON.parse(winner.rows[0]!.value) as VapidKeys;
+  return openVapid(winner.rows[0]!.value, environment);
+}
+
+/**
+ * Beim Start: VAPID-Schlüssel aus der Zeit vor der Verschlüsselung einmal verschlüsselt neu schreiben; vorhandene
+ * müssen sich mit dem Schlüssel lesen lassen. Liegt ein Schlüssel vor, aber kein DEV_LOG_SECRET_KEY, startet der
+ * Dienst nicht – gelöscht wird nichts. Gibt die Zahl der neu verschlüsselten Werte zurück (0 oder 1).
+ */
+export async function sealStoredVapidKeys(pool: Pool, environment: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const result = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
+  const stored = result.rows[0]?.value;
+  if (!stored) return 0;
+  if (!environment.DEV_LOG_SECRET_KEY?.trim()) throw new VapidKeyMissingError();
+  if (isEncrypted(stored)) {
+    try {
+      openVapid(stored, environment);
+    } catch {
+      throw new Error('Push-Schlüssel lassen sich mit dem gesetzten DEV_LOG_SECRET_KEY nicht lesen.');
+    }
+    return 0;
+  }
+  const value = sealVapid(openVapid(stored, environment), environment);
+  // Nur ersetzen, was noch der gelesene Klartext ist (ein gleichzeitiger Start hat es sonst schon erledigt).
+  const updated = await pool.query('UPDATE app_settings SET value = $2 WHERE key = $1 AND value = $3', [
+    VAPID_KEY,
+    value,
+    stored,
+  ]);
+  return updated.rowCount ?? 0;
 }
 
 /**

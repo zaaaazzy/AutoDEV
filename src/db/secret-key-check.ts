@@ -1,12 +1,13 @@
 import type { Pool } from 'pg';
 import { decryptSecret, isEncrypted } from '../core/secrets.js';
 
-/** Alle Stellen, an denen mit DEV_LOG_SECRET_KEY verschlüsselte Werte liegen (Projektzugänge, TOTP-Schlüssel). */
+/** Alle Stellen, an denen mit DEV_LOG_SECRET_KEY verschlüsselte Werte liegen (Projektzugänge, TOTP-, VAPID-Schlüssel). */
 const ENCRYPTED_VALUES = `
   SELECT 'projects.database_url' AS place, database_url AS value FROM projects WHERE database_url IS NOT NULL
   UNION ALL SELECT 'users.totp_secret', totp_secret FROM users WHERE totp_secret IS NOT NULL
   UNION ALL SELECT 'users.totp_pending', totp_pending FROM users WHERE totp_pending IS NOT NULL
-  UNION ALL SELECT 'app_settings.' || key, value FROM app_settings WHERE key IN ('auth_totp_secret', 'auth_totp_pending')`;
+  UNION ALL SELECT 'app_settings.' || key, value FROM app_settings
+    WHERE key IN ('auth_totp_secret', 'auth_totp_pending', 'push_vapid_keys')`;
 
 export interface SecretKeyCheck {
   /** Verschlüsselte Werte insgesamt. */

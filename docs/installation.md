@@ -228,9 +228,14 @@ Entschlüsselungs-Test, ob `DEV_LOG_SECRET_KEY` passt. Erst dann ersetzt es `aid
 `aideation_vor_restore_<zeit>` liegen. Scheitert ein Schritt, bleibt die Live-Datenbank unverändert. Backups werden
 dabei weder gelöscht noch rotiert.
 
-- **Schlüssel:** Der `DEV_LOG_SECRET_KEY` aus der Zeit des Backups muss in `.env` und `worker.env` stehen. Ohne ihn
-  sind die Projektzugänge und Zwei-Faktor-Schlüssel nicht lesbar. Bewahre ihn getrennt von den Backups auf, z. B. im
-  Passwortmanager.
+- **Schlüssel:** Der `DEV_LOG_SECRET_KEY` aus der Zeit des Backups muss in `.env`, `worker.env` und `watchdog.env`
+  stehen. Ohne ihn sind Projektzugänge, Zwei-Faktor-Schlüssel und der private Push-Schlüssel (VAPID) nicht lesbar.
+  Bewahre ihn getrennt von den Backups auf, z. B. im Passwortmanager. Liegt er im selben Backup (etwa eine Kopie der
+  `.env` in `./backups`), schützt die Verschlüsselung nichts.
+- **Was im Backup verschlüsselt ist:** nur die Datenbank-Zugänge der Projekte (`projects.database_url`), die
+  TOTP-Schlüssel (`users.totp_secret`/`totp_pending`, `app_settings.auth_totp_*`) und die VAPID-Schlüssel
+  (`app_settings.push_vapid_keys`). Alles andere – Aufträge, Bugs, Doku, Agent-Ausgaben, Benutzernamen,
+  Passwort-Hashes (scrypt), Push-Abos – steht lesbar im Dump. Behandle Backups deshalb wie die Datenbank selbst.
 - **Zweite Kopie außer Haus:** `./backups` liegt auf demselben Rechner wie die Datenbank. Kopiere den Ordner deshalb
   regelmäßig an einen anderen Ort, z. B. auf ein externes Laufwerk oder verschlüsselt in die Cloud.
 - **Probe:** `bash scripts/restore.sh --probe backups/<datei>.dump` spielt ein Backup in einen Wegwerf-Container
@@ -255,6 +260,8 @@ dabei weder gelöscht noch rotiert.
 | Restore: „Schlüssel-Test fehlgeschlagen“ | `DEV_LOG_SECRET_KEY` aus der Zeit des Backups in `.env` und `worker.env` eintragen |
 | Zwei-Faktor-Gerät verloren | siehe README, Abschnitt Sicherheit |
 | Start bricht ab: „Zwei-Faktor-Schlüssel brauchen DEV_LOG_SECRET_KEY“ | Den bisherigen `DEV_LOG_SECRET_KEY` in der `.env` wieder eintragen und neu starten |
+| Start bricht ab: „Push-Schlüssel brauchen DEV_LOG_SECRET_KEY“ | Wie oben. Ohne Schlüssel bleibt der alte VAPID-Schlüssel unverändert in der Datenbank, gelöscht wird nichts |
+| Wächter schickt nach dem Update keine Push-Nachricht | `DEV_LOG_SECRET_KEY` fehlt in `watchdog.env`: `DEV_LOG_SECRET_KEY=… ./scripts/install-watchdog.sh` erneut ausführen |
 | Nach dem Update überall abgemeldet | Gewollt: Sitzungen von vor der Passwort-Bindung gelten nicht mehr, einmal neu anmelden |
 | Nach neuem `DEV_LOG_PASSWORD` abgemeldet | Gewollt: Eine Passwortrotation beendet alle Sitzungen des Systemadministrators |
 | Zu viele Fehlversuche | Die Meldung nennt die Wartezeit (1 bis höchstens 15 Minuten). Gebremst wird nur dieses Konto von dieser Adresse aus, von einem anderen Gerät oder Netz geht die Anmeldung weiter |
