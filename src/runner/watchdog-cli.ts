@@ -1,12 +1,20 @@
 import { join } from 'node:path';
 import pg from 'pg';
-import { DEFAULT_DB_PASSWORD, warnDefaultDatabasePassword } from '../core/default-credentials.js';
+import { warnDefaultDatabasePassword } from '../core/default-credentials.js';
+import { loadInstallEnv, requireDatabaseUrl } from '../core/local-database.js';
 import { runWatchdog } from './watchdog.js';
 
 /** Einmaliger Wächter-Durchlauf; launchd startet ihn alle zwei Minuten (scripts/install-watchdog.sh). */
 const root = join(import.meta.dirname, '..', '..');
-const databaseUrl =
-  process.env.DEV_LOG_DATABASE_URL ?? `postgresql://devlog:${DEFAULT_DB_PASSWORD}@localhost:5433/aideation`;
+// Env-Datei des Dienstes (--env-file) vor der .env der Installation; ohne Datenbank-URL kein Standardpasswort.
+loadInstallEnv(root);
+let databaseUrl: string;
+try {
+  databaseUrl = requireDatabaseUrl();
+} catch (error) {
+  console.error(`Wächter: ${(error as Error).message}`);
+  process.exit(1);
+}
 warnDefaultDatabasePassword(databaseUrl);
 const pool = new pg.Pool({
   connectionString: databaseUrl,

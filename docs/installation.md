@@ -192,16 +192,25 @@ und unter Windows in die Befehlszeile der Aufgabe. Führe das passende Skript ei
 Plist bzw. Unit, unter Windows die Aufgabe. Danach stehen keine Zugänge mehr darin. Wurde das Datenbank-Passwort früher
 in einer Plist oder Unit gespeichert, solltest du es ändern.
 
+**Woher die Skripte den Zugang nehmen:** Die Installationsskripte (`install-worker.sh`, `install-worker-linux.sh`,
+`install-watchdog.sh`, `install-worker.ps1`) lesen jeden Wert in dieser Reihenfolge: Umgebung, `.env` der Installation,
+bestehende Env-Datei des Dienstes. Ein frisch installierter Dienst übernimmt so das Passwort, das der
+Einrichtungs-Assistent gesetzt hat, auch aus einer neuen Shell ohne exportierte Variablen. Fehlt
+`DEV_LOG_DATABASE_URL` überall, brechen die Skripte mit einer Meldung ab und schreiben weder Env-Datei noch Plist oder
+Unit. Worker und Wächter laden fehlende Werte beim Start selbst aus der `.env` (nur Datenbank-URLs, Secret Key,
+öffentliche Adresse, Domain und Projektbereich). Fehlt die URL, beenden sie sich mit einer Meldung im Log.
+
 **Standardpasswort:** Ohne `DEV_LOG_DB_PASSWORD` in der `.env` nutzt die Datenbank das bekannte Passwort
-`devlog_local_dev`. Server und Worker starten dann nicht (Wächter und Installationsskripte warnen). Zum Wechseln setzt du das Passwort in
-PostgreSQL (`ALTER USER devlog PASSWORD '…'`), trägst es in die `.env` ein, startest mit `docker compose up -d` neu
-und installierst den Worker mit der neuen `DEV_LOG_DATABASE_URL` erneut.
+`devlog_local_dev`. Server und Worker starten dann nicht, die Installationsskripte brechen ab, der Wächter warnt. Nur für
+Wegwerf-Umgebungen lässt sich das mit `DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD=1` erlauben. Zum Wechseln führst du
+`./start.sh --setup` erneut aus (setzt ein zufälliges Passwort und ändert es per `ALTER USER` in PostgreSQL) und
+installierst danach Worker und Wächter erneut.
 
 **Testläufe und E2E:** Der Komplettlauf (`npm run test:full`) bekommt vom Worker nur `DEV_LOG_DATABASE_URL` und das
 daraus abgeleitete Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle
-anderen `DEV_LOG_*`-Werte bleiben draußen. Von Hand gestartet, lesen `test:full` und die E2E-Konfiguration fehlende
-Zugänge aus `DEV_LOG_DB_USER` und `DEV_LOG_DB_PASSWORD` der `.env` (Port 5433). Das Standardpasswort gilt nur, wenn
-die `.env` kein eigenes Passwort enthält.
+anderen `DEV_LOG_*`-Werte bleiben draußen. Von Hand gestartet, lesen `test:full`, `seed:demo` und die E2E-Konfiguration
+fehlende Zugänge aus `DEV_LOG_DB_USER` und `DEV_LOG_DB_PASSWORD` der `.env` (Port 5433). Fehlt dort das Passwort,
+brechen sie mit einem Hinweis ab, statt das Standardpasswort zu versuchen.
 
 ### Container-Härtung
 

@@ -203,7 +203,8 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 **Testläufe mit eigenem Datenbank-Passwort:** Ein Testlauf, den du unter **Testläufe** anforderst, und der Komplettlauf (`npm run test:full`) funktionieren auch dann, wenn du in der `.env` ein eigenes `DEV_LOG_DB_PASSWORD` hast, zum Beispiel vom Einrichtungs-Assistenten erzeugt.
 - Der Worker gibt diesen Befehlen nur `DEV_LOG_DATABASE_URL` mit, dazu das Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle anderen `DEV_LOG_*`-Werte fehlen dort.
 - Startest du `test:full` oder den E2E-Webserver von Hand, lesen sie den Zugang aus `DEV_LOG_DB_USER` und `DEV_LOG_DB_PASSWORD` der `.env` (Port 5433).
-- Das Passwort `devlog_local_dev` gilt nur noch, wenn die `.env` kein eigenes Passwort enthält. Dann warnt der Server.
+- Fehlt `DEV_LOG_DB_PASSWORD` in der `.env`, brechen `test:full`, `seed:demo` und die E2E-Tests mit einem Hinweis ab. Sie versuchen nicht mehr still das Standardpasswort `devlog_local_dev`. Abhilfe: `./start.sh --setup` erneut ausführen.
+- Worker und Wächter lesen den Zugang beim Start selbst aus der `.env`, wenn ihre Env-Datei ihn nicht enthält. Die Installationsskripte übernehmen ihn ebenfalls daraus und brechen ab, wenn es nirgends eine `DEV_LOG_DATABASE_URL` gibt.
 - Ein Passwort mit Sonderzeichen wie `@`, `:` oder `/` funktioniert, weil die Adresse mit dem URL-Parser gebaut wird.
 - Die übrigen Befehle (Chat-Assistent, Coverage) bekommen weiterhin nur die Allowlist ohne `DEV_LOG_*`.
 
