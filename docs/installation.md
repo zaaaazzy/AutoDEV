@@ -5,7 +5,7 @@ AIdeation besteht aus drei Teilen:
 | Teil | Läuft | Aufgabe |
 |---|---|---|
 | **AIdeation** (Oberfläche + API) | in Docker | Projekte, Ideen, Aufträge, Sprints, Dokumentation |
-| **Datenbank** (PostgreSQL) + tägliche Backups | in Docker | alle Daten, Backups unter `backups/` |
+| **Datenbank** (PostgreSQL) + Backups (etwa täglich) | in Docker | alle Daten, Backups unter `backups/` |
 | **Worker** | direkt auf deinem Rechner | startet die Agents in deinen Projektordnern |
 
 ## Voraussetzungen
@@ -150,7 +150,7 @@ Jedes Projekt liegt in einem eigenen Ordner mit `source` (Code, z. B. mit laufen
 `agent` (Arbeitsordner der Agents, Git-Worktree) – AIdeation selbst ebenso: `AIdeation/source` und `AIdeation/agent`.
 
 Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `/api` weiter), `aideation_backend_nodejs`
-(API), `aideation_database_postgres` (Datenbank), `aideation_backup_postgres` (tägliche Sicherung) und
+(API), `aideation_database_postgres` (Datenbank), `aideation_backup_postgres` (Sicherung, etwa täglich) und
 `aideation_proxy_caddy` (HTTPS, optional). In den Befehlen oben stehen die Dienstnamen (`frontend`, `dev-log`, `db`,
 `backup`, `https`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it aideation_database_postgres psql -U devlog aideation`.
