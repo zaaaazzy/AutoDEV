@@ -11,6 +11,7 @@ import {
   type TestInfo,
 } from '@playwright/test';
 import pg from 'pg';
+import { e2eAdminUrl } from './admin-url.js';
 
 /**
  * Kompletter Oberflächentest: jede Seite, jede Tabelle (Sortieren, Filtern, Suchen, Zurücksetzen) und die
@@ -39,9 +40,7 @@ const IGNORED_CONSOLE = [/Service ?Worker/i, /status of 401/, /fetching the scri
 
 /** Testdatenbank des Oberflächentests (dieselbe wie im Webserver von full.config.ts). */
 function testDatabaseUrl(): string {
-  const url = new URL(
-    process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
-  );
+  const url = e2eAdminUrl();
   url.pathname = `/${process.env.FULL_UI_DATABASE ?? 'dev_log_full'}`;
   return url.toString();
 }

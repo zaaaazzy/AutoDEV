@@ -106,8 +106,8 @@ guard_probe_target() {
     die "Probe-Datenbank muss aideation_restore_probe_<name> heissen (nicht „$name“)."
   [[ "$port" =~ ^[0-9]{4,5}$ ]] && [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] ||
     die "RESTORE_PROBE_PORT „$port“ ist kein gültiger Port."
-  live_url="$(resolve_value DEV_LOG_DATABASE_URL "$SERVICE_ENV_DIR/worker.env" "$DEFAULT_DATABASE_URL")"
-  if [ "$port" = "$LIVE_PORT" ] || [ "$port" = "$(url_port "$live_url")" ]; then
+  live_url="$(resolve_value DEV_LOG_DATABASE_URL "$SERVICE_ENV_DIR/worker.env")"
+  if [ "$port" = "$LIVE_PORT" ] || { [ -n "$live_url" ] && [ "$port" = "$(url_port "$live_url")" ]; }; then
     die "Port $port gehört der Live-Datenbank – Probe abgelehnt."
   fi
 }
@@ -232,7 +232,11 @@ restore_live() {
     die "Einspielen fehlgeschlagen (siehe oben) – Live-Datenbank unverändert, Dienste starten wieder."
   fi
 
-  live_url="$(resolve_value DEV_LOG_DATABASE_URL "$SERVICE_ENV_DIR/worker.env" "$DEFAULT_DATABASE_URL")"
+  live_url="$(resolve_value DEV_LOG_DATABASE_URL "$SERVICE_ENV_DIR/worker.env")"
+  if [ -z "$live_url" ]; then
+    psql_admin -c "DROP DATABASE IF EXISTS $target" || true
+    die "DEV_LOG_DATABASE_URL fehlt (Umgebung, .env, worker.env) – Schlüssel-Test nicht möglich, Live-Datenbank unverändert."
+  fi
   case "$live_url" in *\?*) query="?${live_url#*\?}" live_url="${live_url%%\?*}" ;; esac
   check_url="${live_url%/*}/$target$query"
   if ! key_check "$check_url"; then

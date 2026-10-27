@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
 import { createDatabasePool } from '../src/db/database.js';
 import { DEMO_SLUG, seedDemoProject } from '../e2e/demo/seed.js';
 
@@ -13,10 +14,11 @@ if (!/^[a-z_][a-z0-9_]{0,62}$/.test(name) || name === 'aideation') {
   console.error(`Ungültige oder gesperrte Datenbank: ${name}`);
   process.exit(1);
 }
+// Ohne vorgegebene Adresse der Zugang aus der .env; fehlt dort das Passwort, Abbruch statt Standardpasswort.
 const admin = new URL(
   process.env.E2E_ADMIN_DATABASE_URL ??
     process.env.DEV_LOG_ADMIN_DATABASE_URL ??
-    'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
+    localDatabaseUrl(readEnvValues(join(import.meta.dirname, '..')), 'postgres', 'localhost'),
 );
 const database = new URL(admin);
 database.pathname = `/${name}`;

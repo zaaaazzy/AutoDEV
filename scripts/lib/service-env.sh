@@ -5,13 +5,14 @@
 # Ordner für die Env-Dateien der Dienste (nur für den Benutzer lesbar).
 SERVICE_ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aideation"
 
-# Standard-Zugang aus docker-compose.yml (ohne DEV_LOG_DB_PASSWORD in der .env).
-DEFAULT_DATABASE_URL="postgresql://devlog:devlog_local_dev@localhost:5433/aideation"
+# .env der Installation (vom Einrichtungs-Assistenten geschrieben); ROOT setzt das einbindende Skript.
+PROJECT_ENV_FILE="${ROOT:+$ROOT/.env}"
 
 # AIDEATION_INSTALL_DRY_RUN=1: nur Dateien schreiben, Dienst nicht registrieren (Tests).
 install_dry_run() { [ "${AIDEATION_INSTALL_DRY_RUN:-}" = "1" ]; }
 
-# Letzter Wert von <schluessel> in <datei> (leer, wenn Datei oder Schlüssel fehlt).
+# Letzter Wert von <schluessel> in der Env-Datei eines Dienstes <datei> (leer, wenn Datei oder Schlüssel fehlt).
+# Diese Dateien schreibt write_env_file unverändert, ohne Anführungszeichen – darum hier keine Auswertung.
 env_file_get() {
   local file="$1" key="$2" line value=""
   [ -f "$file" ] || return 0
@@ -21,20 +22,59 @@ env_file_get() {
   printf '%s' "$value"
 }
 
-# Wert für <schluessel>: Umgebung vor bestehender Env-Datei vor <standard>. So behält ein erneuter Lauf die Zugänge.
+# Letzter Wert von <schluessel> in der .env <datei>, nach denselben Regeln wie parseEnv (src/core/env-file.ts):
+# „export “ erlaubt, Kommentarzeilen übersprungen, Wert in '…' oder "…" ohne die Zeichen, sonst ohne „ #Kommentar“.
+dotenv_get() {
+  local file="$1" key="$2" line value="" found=""
+  local pattern='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$'
+  [ -n "$file" ] && [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "${line#"${line%%[![:space:]]*}"}" in '#'*) continue ;; esac
+    [[ "$line" =~ $pattern ]] && [ "${BASH_REMATCH[2]}" = "$key" ] || continue
+    found="${BASH_REMATCH[3]}"
+    found="${found#"${found%%[![:space:]]*}"}"
+    found="${found%"${found##*[![:space:]]}"}"
+    if [ "${#found}" -ge 2 ] && { [[ "$found" == \'*\' ]] || [[ "$found" == \"*\" ]]; }; then
+      value="${found:1:${#found}-2}"
+    else
+      value="${found%%[[:space:]]#*}"
+      value="${value%"${value##*[![:space:]]}"}"
+    fi
+  done <"$file"
+  printf '%s' "$value"
+}
+
+# Wert für <schluessel>: Umgebung vor .env der Installation vor bestehender Env-Datei des Dienstes vor <standard>.
+# Die .env geht vor: Setzt der Einrichtungs-Assistent ein neues DB-Passwort, übernimmt ein erneuter Lauf es.
 resolve_value() {
   local key="$1" file="$2" fallback="${3:-}" value
   value="${!key:-}"
+  [ -n "$value" ] || value="$(dotenv_get "$PROJECT_ENV_FILE" "$key")"
   [ -n "$value" ] || value="$(env_file_get "$file" "$key")"
   printf '%s' "${value:-$fallback}"
 }
 
-# Warnt (ohne den Wert auszugeben), wenn die Datenbank-URL das öffentlich bekannte Standardpasswort nutzt.
-warn_default_password() {
+# Bricht ab (ohne den Wert auszugeben), wenn die Datenbank-URL fehlt oder das öffentlich bekannte Standardpasswort
+# nutzt – Worker und Server würden sich damit nicht anmelden bzw. den Start verweigern. Das Standardpasswort nur mit
+# DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD=1 (Wegwerf-Umgebung), dann mit Warnung.
+require_database_url() {
+  if [ -z "$1" ]; then
+    echo "FEHLER: DEV_LOG_DATABASE_URL fehlt – weder in der Umgebung noch in der .env der Installation noch in der" \
+      "Env-Datei des Dienstes. Erst ./start.sh --setup ausführen (schreibt die .env), dann erneut installieren" \
+      "(siehe docs/installation.md)." >&2
+    exit 1
+  fi
   case "$1" in
     *devlog_local_dev*)
-      echo "WARNUNG: Die Datenbank-URL nutzt das Standardpasswort „devlog_local_dev“. Setze DEV_LOG_DB_PASSWORD in" \
-        "der .env und installiere mit DEV_LOG_DATABASE_URL=… erneut (siehe docs/installation.md)." >&2
+      if [ "${DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD:-}" = "1" ]; then
+        echo "WARNUNG: Die Datenbank-URL nutzt das Standardpasswort „devlog_local_dev“ (ausdrücklich erlaubt)." >&2
+        return 0
+      fi
+      echo "FEHLER: Die Datenbank-URL nutzt das öffentlich bekannte Standardpasswort „devlog_local_dev“. Erst" \
+        "./start.sh --setup ausführen (setzt DEV_LOG_DB_PASSWORD und ändert es in PostgreSQL), dann erneut installieren" \
+        "(siehe docs/installation.md)." >&2
+      exit 1
       ;;
   esac
 }

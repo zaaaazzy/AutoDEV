@@ -1,8 +1,8 @@
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import webpush from 'web-push';
+import { readEnvValues } from './local-database.js';
 import { decryptSecret, encryptSecret, isEncrypted } from './secrets.js';
 
 /** Web-Push an alle registrierten Geräte. Server, Worker und Wächter teilen die VAPID-Schlüssel über die Datenbank. */
@@ -51,17 +51,8 @@ export function isAllowedPushEndpoint(endpoint: unknown): endpoint is string {
 }
 /** Wert aus der .env der Installation (Worker und Wächter laufen über launchd ohne diese Umgebung). */
 function installEnv(key: string): string | undefined {
-  try {
-    const file = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../.env'), 'utf8');
-    return (
-      new RegExp(`^${key}=(.*)$`, 'm')
-        .exec(file)?.[1]
-        ?.trim()
-        .replace(/^["']|["']$/g, '') || undefined
-    );
-  } catch {
-    return undefined;
-  }
+  const values = readEnvValues(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
+  return values.get(key)?.trim() || undefined;
 }
 
 /**

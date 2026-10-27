@@ -12,7 +12,8 @@ process.env.E2E_SECRET_KEY ??= randomBytes(32).toString('hex');
 // Freier Port und passende Testdatenbank, auch wenn ein anderer Lauf 3195 belegt (siehe test-ports.ts).
 const PORT = reservePort('E2E_PORT', 3195);
 reserveDatabase('E2E_DATABASE', 'dev_log_e2e', PORT, 3195);
-// Admin-Zugang der lokalen Datenbank: vorgegeben (test:full, Worker) oder aus der .env, nie fest das Standardpasswort.
+// Admin-Zugang der lokalen Datenbank: vorgegeben (test:full, Worker) oder aus der .env, nie fest das Standardpasswort;
+// ohne beides bricht localDatabaseUrl mit Hinweis ab.
 // Hier gesetzt, damit auch die Tests selbst (gleiche Umgebung in den Playwright-Workern) denselben Zugang nutzen.
 process.env.E2E_ADMIN_DATABASE_URL ??= localDatabaseUrl(
   readEnvValues(join(import.meta.dirname, '..')),

@@ -20,8 +20,8 @@ for cli in claude copilot gemini; do
 done
 # Eigener Ablageort der Playwright-Browser (falls gesetzt) gilt auch im Dienst: Sonst finden optische Abnahme und
 # Smoke-Tests der Spielprojekte (Phaser-Vorlage) Chromium nicht.
-DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
-warn_default_password "$DATABASE_URL"
+DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE")"
+require_database_url "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
   "DEV_LOG_DATABASE_URL=$DATABASE_URL" \
   "DEV_LOG_REVIEW_DATABASE_URL=$(resolve_value DEV_LOG_REVIEW_DATABASE_URL "$ENV_FILE")" \

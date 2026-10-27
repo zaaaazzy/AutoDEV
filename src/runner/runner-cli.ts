@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
@@ -14,6 +14,7 @@ import { publishSystemAgents } from '../agent/system-agents.js';
 import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
 import { projectFolderError } from '../core/validation.js';
+import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local-database.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
 import { ReviewSlots } from './review-slots.js';
@@ -53,19 +54,7 @@ import { runDueJobs } from './scheduler.js';
 export function resolveProjectScope(environment: NodeJS.ProcessEnv, installDir: string): string {
   const configured = environment.DEV_LOG_PROJECT_ROOTS?.trim();
   if (configured) return configured;
-  try {
-    const line = readFileSync(resolve(installDir, '.env'), 'utf8')
-      .split(/\r?\n/)
-      .find((entry) => entry.startsWith('DEV_LOG_PROJECT_ROOTS='));
-    const value = line
-      ?.slice('DEV_LOG_PROJECT_ROOTS='.length)
-      .trim()
-      .replace(/^["']|["']$/g, '');
-    if (value) return value;
-  } catch {
-    // keine .env – Vorgabe unten
-  }
-  return dirname(installDir);
+  return readEnvValues(installDir).get('DEV_LOG_PROJECT_ROOTS')?.trim() || dirname(installDir);
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -282,6 +271,9 @@ export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
 const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function main(): Promise<void> {
+  // Env-Datei des Dienstes (--env-file) vor der .env der Installation; ohne Datenbank-URL Abbruch statt Dauerschleife.
+  loadInstallEnv(INSTALL_ROOT);
+  requireDatabaseUrl();
   process.env.DEV_LOG_PROJECT_ROOTS = resolveProjectScope(process.env, INSTALL_ROOT);
   console.log(`Projektbereich: ${process.env.DEV_LOG_PROJECT_ROOTS}`);
   const options = parseRunnerOptions(process.argv.slice(2));
