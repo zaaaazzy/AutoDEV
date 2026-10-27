@@ -220,6 +220,26 @@ alten Backups liegen. Die neuesten `DEV_LOG_BACKUP_MIN_KEEP` (Standard 7) `aidea
 löscht das Skript erst, wenn sie älter als `DEV_LOG_BACKUP_KEEP_DAYS` (Standard 14) Tage sind. Andere Dateien in
 `./backups` (fremde Präfixe, Handkopien) fasst es nicht an. Ungültige Werte (keine positive Zahl) ergeben den Standard.
 
+### Wiederherstellen
+
+Ein Backup spielst du mit `bash scripts/restore.sh backups/aideation-JJJJMMTT-HHMMSS.dump` ein. Das Skript stoppt
+Worker, Wächter, API, Oberfläche und Backup-Dienst. Dann füllt es eine neue Datenbank und prüft mit einem
+Entschlüsselungs-Test, ob `DEV_LOG_SECRET_KEY` passt. Erst dann ersetzt es `aideation`. Die alte Datenbank bleibt als
+`aideation_vor_restore_<zeit>` liegen. Scheitert ein Schritt, bleibt die Live-Datenbank unverändert. Backups werden
+dabei weder gelöscht noch rotiert.
+
+- **Schlüssel:** Der `DEV_LOG_SECRET_KEY` aus der Zeit des Backups muss in `.env` und `worker.env` stehen. Ohne ihn
+  sind die Projektzugänge und Zwei-Faktor-Schlüssel nicht lesbar. Bewahre ihn getrennt von den Backups auf, z. B. im
+  Passwortmanager.
+- **Zweite Kopie außer Haus:** `./backups` liegt auf demselben Rechner wie die Datenbank. Kopiere den Ordner deshalb
+  regelmäßig an einen anderen Ort, z. B. auf ein externes Laufwerk oder verschlüsselt in die Cloud.
+- **Probe:** `bash scripts/restore.sh --probe backups/<datei>.dump` spielt ein Backup in einen Wegwerf-Container
+  (Port 5439) ein und löscht ihn danach. Der Wartungs-Job `restore_probe` macht das wöchentlich mit dem neuesten
+  Backup.
+- **pg_restore auf dem Worker-Rechner:** `backup_check` prüft jedes neue Backup mit `pg_restore --list`. Dafür
+  brauchst du den Postgres-Client ab Version 17 (macOS: `brew install libpq`). Alternativ setzt du
+  `DEV_LOG_PG_RESTORE=/pfad/zu/pg_restore` in der `worker.env`. Fehlt das Programm, meldet der Job einen Fehler.
+
 ## Fehlerbehebung
 
 | Problem | Lösung |
@@ -231,6 +251,8 @@ löscht das Skript erst, wenn sie älter als `DEV_LOG_BACKUP_KEEP_DAYS` (Standar
 | Agents starten nicht | Worker-Status oben in AIdeation prüfen; `npm run worker` zeigt Fehler direkt |
 | Worker-Log: „Env-Datei … fehlt“ oder „für andere lesbar“ | Installationsskript erneut ausführen bzw. `chmod 600` auf die Env-Datei |
 | Backup-Container startet immer neu (Linux) | `./backups` ist für ihn nicht beschreibbar – `DEV_LOG_BACKUP_USER` setzen (siehe oben) |
+| `backup_check`: „pg_restore --list nicht gefunden“ | Postgres-Client ab 17 installieren oder `DEV_LOG_PG_RESTORE` in der `worker.env` setzen |
+| Restore: „Schlüssel-Test fehlgeschlagen“ | `DEV_LOG_SECRET_KEY` aus der Zeit des Backups in `.env` und `worker.env` eintragen |
 | Zwei-Faktor-Gerät verloren | siehe README, Abschnitt Sicherheit |
 | Start bricht ab: „Zwei-Faktor-Schlüssel brauchen DEV_LOG_SECRET_KEY“ | Den bisherigen `DEV_LOG_SECRET_KEY` in der `.env` wieder eintragen und neu starten |
 | Nach dem Update überall abgemeldet | Gewollt: Sitzungen von vor der Passwort-Bindung gelten nicht mehr, einmal neu anmelden |

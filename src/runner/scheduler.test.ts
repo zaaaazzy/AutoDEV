@@ -328,8 +328,14 @@ test('beim Herunterfahren werden keine neuen Jobs beansprucht', async () => {
   assert.equal(row.lastStatus, null);
 });
 
-test('Registry: genau die vier festen Job-Arten, keine Pfade', () => {
-  assert.deepEqual(Object.keys(JOB_KINDS).sort(), ['backup_check', 'close_old_sprints', 'push_alert', 'watchdog_logs']);
+test('Registry: genau die fünf festen Job-Arten, keine Pfade', () => {
+  assert.deepEqual(Object.keys(JOB_KINDS).sort(), [
+    'backup_check',
+    'close_old_sprints',
+    'push_alert',
+    'restore_probe',
+    'watchdog_logs',
+  ]);
   assert.ok(Object.isFrozen(JOB_KINDS));
   assert.equal(jobKind('backup_check'), JOB_KINDS.backup_check);
   assert.equal(jobKind('constructor'), null);
@@ -385,7 +391,7 @@ test('backup_check: frisch und gross genug ok; zu alt, zu klein, leer oder ausse
   await mkdir(join(root, 'backups'));
   const run = async (config: Record<string, unknown>) => {
     const row = job('backup_check', { config });
-    await runDueJobs(fakePool([row]).pool, deps({ installRoot: root }));
+    await runDueJobs(fakePool([row]).pool, deps({ installRoot: root, listDump: async () => TOC }));
     return row;
   };
   assert.match((await run({})).lastMessage!, /Kein Datenbank-Backup/);
@@ -406,6 +412,142 @@ test('backup_check: frisch und gross genug ok; zu alt, zu klein, leer oder ausse
   const outside = await run({ dir: '../etc' });
   assert.equal(outside.lastStatus, 'failed');
   assert.match(outside.lastMessage!, /ausserhalb/);
+});
+
+/** Auszug aus `pg_restore --list` eines echten Dumps. */
+const TOC = [
+  ';',
+  '; Archive created at 2026-10-27 03:00:01 UTC',
+  ';',
+  '215; 1259 16386 TABLE public projects devlog',
+  '3456; 0 16386 TABLE DATA public projects devlog',
+].join('\n');
+
+/** Ordner mit einem frischen, ausreichend grossen Dump. */
+async function freshBackup(): Promise<{ root: string; file: string }> {
+  const root = await backupRoot();
+  await mkdir(join(root, 'backups'));
+  const file = join(root, 'backups', 'aideation-20261027-030001.dump');
+  await writeFile(file, Buffer.alloc(2048));
+  return { root, file };
+}
+
+async function runBackupCheck(root: string, listDump: SchedulerDeps['listDump']): Promise<FakeJob> {
+  const row = job('backup_check');
+  await runDueJobs(fakePool([row]).pool, deps({ installRoot: root, listDump }));
+  return row;
+}
+
+test('backup_check: pg_restore --list liest den neuesten Dump; Einträge stehen in der Meldung', async (t) => {
+  const { root, file } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const listed: string[] = [];
+  const row = await runBackupCheck(root, async (path) => {
+    listed.push(path);
+    return TOC;
+  });
+  assert.equal(row.lastStatus, 'ok', row.lastMessage!);
+  assert.deepEqual(listed, [file]);
+  assert.match(row.lastMessage!, /2 Einträge für pg_restore lesbar/);
+});
+
+test('backup_check: fehlendes pg_restore ist ein benannter Fehler, kein stiller Erfolg', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const row = await runBackupCheck(root, async () => {
+    throw Object.assign(new Error('spawn pg_restore ENOENT'), { code: 'ENOENT' });
+  });
+  assert.equal(row.lastStatus, 'failed');
+  assert.match(row.lastMessage!, /pg_restore --list nicht gefunden/);
+  assert.match(row.lastMessage!, /DEV_LOG_PG_RESTORE/);
+});
+
+test('backup_check: kaputter Dump oder Dump ohne Tabellendaten = Fehler mit der Meldung von pg_restore', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const broken = await runBackupCheck(root, async () => {
+    throw Object.assign(new Error('Command failed'), {
+      code: 1,
+      stderr: 'pg_restore: error: input file does not appear to be a valid archive\n',
+    });
+  });
+  assert.equal(broken.lastStatus, 'failed');
+  assert.match(broken.lastMessage!, /aideation-20261027-030001\.dump nicht geprüft/);
+  assert.match(broken.lastMessage!, /does not appear to be a valid archive/);
+  const empty = await runBackupCheck(root, async () => ';\n215; 1259 16386 TABLE public projects devlog\n');
+  assert.equal(empty.lastStatus, 'failed');
+  assert.match(empty.lastMessage!, /keine Tabellendaten/);
+});
+
+test('backup_check: ein fehlendes pg_restore löst wie jeder Fehlschlag einen Push aus', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const row = job('backup_check');
+  const recorder = pushRecorder();
+  const missing = async () => {
+    throw Object.assign(new Error('spawn pg_restore ENOENT'), { code: 'ENOENT' });
+  };
+  await runDueJobs(fakePool([row]).pool, deps({ installRoot: root, push: recorder.push, listDump: missing }));
+  assert.equal(recorder.sent.length, 1);
+});
+
+test('restore_probe: ruft scripts/restore.sh --probe mit dem neuesten Dump auf, Erfolg = letzte Zeile', async (t) => {
+  const { root, file } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls: string[][] = [];
+  const row = job('restore_probe', { config: { dir: 'backups' } });
+  await runDueJobs(
+    fakePool([row]).pool,
+    deps({
+      installRoot: root,
+      restoreProbe: async (installRoot, path) => {
+        calls.push([installRoot, path]);
+        return 'Probe: Wegwerf-Container …\nRestore-Probe bestanden: 42 Tabellen, Schlüssel passt.\n';
+      },
+    }),
+  );
+  assert.deepEqual(calls, [[root, file]]);
+  assert.equal(row.lastStatus, 'ok');
+  assert.equal(row.lastMessage, 'Restore-Probe bestanden: 42 Tabellen, Schlüssel passt.');
+});
+
+test('restore_probe: Fehler des Skripts und fehlende Dumps landen in der Meldung des Jobs', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const row = job('restore_probe');
+  await runDueJobs(
+    fakePool([row]).pool,
+    deps({
+      installRoot: root,
+      restoreProbe: async () => {
+        throw Object.assign(new Error('Command failed'), {
+          code: 1,
+          stderr: 'Restore: Schlüssel-Test fehlgeschlagen – mit diesem DEV_LOG_SECRET_KEY …\n',
+        });
+      },
+    }),
+  );
+  assert.equal(row.lastStatus, 'failed');
+  assert.match(row.lastMessage!, /Restore-Probe mit aideation-20261027-030001\.dump: scripts\/restore\.sh gescheitert/);
+  assert.match(row.lastMessage!, /Schlüssel-Test fehlgeschlagen/);
+
+  const emptyRoot = await backupRoot();
+  t.after(() => rm(emptyRoot, { recursive: true, force: true }));
+  const none = job('restore_probe');
+  let called = false;
+  await runDueJobs(
+    fakePool([none]).pool,
+    deps({
+      installRoot: emptyRoot,
+      restoreProbe: async () => {
+        called = true;
+        return '';
+      },
+    }),
+  );
+  assert.equal(none.lastStatus, 'failed');
+  assert.match(none.lastMessage!, /nicht erreichbar/);
+  assert.equal(called, false, 'ohne Dump keine Probe');
 });
 
 test('watchdog_logs meldet dasselbe Problem nicht erneut vor Ablauf von REMIND_MS', async () => {
