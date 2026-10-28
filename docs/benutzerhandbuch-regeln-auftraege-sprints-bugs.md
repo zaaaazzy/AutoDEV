@@ -37,8 +37,9 @@ Die Meldungen stammen aus der Schnittstelle (`src/api/development.ts`, `src/api/
 
 ### 3.2 Übernehmen („Aufträge hinzufügen“)
 
-- **Erlaubt:** offene oder abgebrochene Aufträge ohne Sprint, Ziel ist ein geplanter oder aktiver Sprint desselben Projekts.
-- Ein abgebrochener Auftrag (aus einem Sprint genommen oder blockiert) wird dabei zurückgesetzt. Ein blockierter Auftrag zählt zusätzlich einen Versuch hoch.
+- **Erlaubt:** offene Aufträge ohne Sprint mit der Rolle „Planung“. Abgebrochene Aufträge (aus einem Sprint genommen oder blockiert) nur zusätzlich mit „Agents ausführen“. Ziel ist in beiden Fällen ein geplanter oder aktiver Sprint desselben Projekts.
+- **Ohne „Agents ausführen“:** Abgebrochene Aufträge sind nicht auswählbar. Der Server antwortet mit 403: „Abgebrochene Aufträge neu einplanen braucht die Rolle „Agents ausführen“.“ Der Auftrag bleibt unverändert. Details: `benutzerhandbuch-auftraege-hinzufuegen-abgebrochene-nur-mit-ausfuehren-2026-10-28.md`.
+- Ein abgebrochener Auftrag wird dabei zurückgesetzt. Ein blockierter Auftrag zählt zusätzlich einen Versuch hoch.
 - Läuft der Ziel-Sprint bereits, startet der Auftrag automatisch. Ist der Sprint nur geplant, wartet er auf den Start.
 - **Abgelehnt:** Express-Aufträge, Aufträge mit Sprint oder Ziel außerhalb des Projekts. Meldung: „Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen, und nur in geplante oder aktive Sprints desselben Projekts.“ (409)
 
