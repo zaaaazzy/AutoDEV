@@ -164,6 +164,19 @@ test('Wiederherstellung beim Start auf PostgreSQL: nur eigene oder verwaiste Lä
       assert.equal(after.run, 'failed');
       assert.equal(after.processes, 1, 'Eintrag bleibt für den nächsten Versuch');
     });
+
+    await t.test('langer Schritt ohne Verlaufseinträge: der gehaltene eigene Lauf wird nicht beendet', async () => {
+      await reset(db);
+      await beatWorker(db, 'A');
+      const long = await seedRun(db, 'A');
+      await db.query(`UPDATE agent_runs SET started_at = NOW() - INTERVAL '2 hours' WHERE id = $1`, [long.run]);
+      await db.query(`UPDATE agent_run_steps SET started_at = NOW() - INTERVAL '2 hours' WHERE run_id = $1`, [long.run]);
+      assert.equal(await closeOrphanedRuns(db as never, ['alpha'], [long.run], 5 * 60_000, 'A'), 0);
+      assert.equal((await state(db, long)).run, 'running');
+      // Gegenprobe: hält der Worker den Lauf nicht mehr (Rest eines Vorgängers), wird er beendet.
+      assert.equal(await closeOrphanedRuns(db as never, ['alpha'], [], 5 * 60_000, 'A'), 1);
+      assert.equal((await state(db, long)).run, 'failed');
+    });
   });
 });
 
