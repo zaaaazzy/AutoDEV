@@ -268,7 +268,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     // Ein UPDATE: Der Bug-Status folgt per Trigger in derselben Anweisung (abgelehnter Bug wird wieder offen).
     const result = await pool.query(
       `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = ${retryAutoRunSql('$3::uuid')},
-              failure = NULL, action_todo = NULL,
+              failure = NULL, action_todo = NULL, conflict_retries = 0,
               description = CASE WHEN $2::text IS NULL THEN d.description
                                  ELSE COALESCE(d.description, '') || E'\n\n## Hinweis zum erneuten Versuch (' || to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\n' || $2::text END,
               retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
@@ -332,6 +332,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               agent_id = CASE WHEN ${aborted} THEN NULL ELSE d.agent_id END,
               failure = CASE WHEN ${aborted} THEN NULL ELSE d.failure END,
               action_todo = CASE WHEN ${aborted} THEN NULL ELSE d.action_todo END,
+              conflict_retries = CASE WHEN ${aborted} THEN 0 ELSE d.conflict_retries END,
               retry_count = d.retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
               analysis_status = CASE WHEN NOT ${aborted} OR d.analysis_status IN ('requested', 'running')
                                      THEN d.analysis_status ELSE NULL END,

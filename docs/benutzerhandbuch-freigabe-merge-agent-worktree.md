@@ -53,7 +53,7 @@ Die Sperre des Agent-Ordners wird nur genommen, wenn wirklich freigegebene Auftr
 ## 4. Grenzen und Verhalten im Detail
 
 - **Ordnersperre wartet.** Während ein anderer Lauf den Agent-Ordner hält, wartet die Freigabe. Sie bricht nicht ab und meldet keinen Fehler.
-- **Konflikte werden höchstens zweimal neu versucht.** Danach bleibt der Auftrag blockiert („Freigabe nicht gemergt“). Dann musst du den Konflikt von Hand lösen und den Auftrag erneut ausführen.
+- **Konflikte werden höchstens zweimal neu versucht.** Danach bleibt der Auftrag blockiert („Freigabe nicht gemergt“). Dann musst du den Konflikt von Hand lösen und den Auftrag erneut ausführen. „Erneut versuchen“ und ein erfolgreicher Abschluss setzen den Zähler zurück: Danach gibt es wieder zwei automatische Neuversuche.
 - **Nachziehen der Vorschau darf scheitern.** Scheitert das Nachziehen, bleibt der Merge gültig. Die Meldung steht nur im Log des Workers, nicht als Fehler am Auftrag. Ist die Vorschau danach nicht auf dem neuen Stand, prüfe das Log.
 - **Verknüpfter Bug.** Gehört der Auftrag zu einem Bug, wird nach dem Merge `resumeBlockedByBug` aufgerufen, damit der blockierte Bug weiterläuft. Was genau dabei am Bug passiert, ist in diesem Kapitel nicht nachgelesen.
 - **Keine Zwischenstände im Projektordner.** Der Merge schreibt nur, wenn die Sperre frei ist. Dadurch überschreibt er keine Dateien eines parallelen Chats.
