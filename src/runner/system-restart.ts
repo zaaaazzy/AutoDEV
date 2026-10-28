@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { sendPush } from '../core/push.js';
+import { SANDBOX_IMAGE } from '../core/sandbox.js';
 import { gitEnvironment } from './project-command.js';
 
 /**
@@ -15,6 +16,9 @@ import { gitEnvironment } from './project-command.js';
  */
 export const RESTART_KEY = 'system:restart';
 export const RESTART_COMMAND = ['docker', 'compose', 'up', '-d', '--build'];
+/** Image der Agent-Sandbox (src/core/sandbox.ts); baut beim Neustart mit. */
+export const AGENT_IMAGE_COMMAND = ['docker', 'build', '-t', SANDBOX_IMAGE, '-f', 'deploy/agent/Dockerfile', '.'];
+const AGENT_IMAGE_LOG_CHARS = 1_000;
 const BUILD_TIMEOUT_MS = 20 * 60_000;
 /** Höchstens so lange auf laufende Aufträge warten; danach werden sie unterbrochen und nach dem Start fortgesetzt. */
 export const MAX_WAIT_MS = 15 * 60_000;
@@ -449,7 +453,7 @@ export async function processRestart(
     env: composeEnvironment(),
   });
   // Vorne steht, ob der neueste Stand geholt wurde; danach das Ende der Ausgabe von docker compose.
-  const log = `${pulled}\n\n${redactOutput(result.output, process.env)
+  let log = `${pulled}\n\n${redactOutput(result.output, process.env)
     .trim()
     .slice(-(MAX_LOG_CHARS - pulled.length - 2))}`;
   if (result.exitCode !== 0) {
@@ -465,6 +469,29 @@ export async function processRestart(
       options.notify,
     );
     return 'failed';
+  }
+  // Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker) mitbauen. Scheitert das, startet AIdeation trotzdem neu:
+  // Ein Lauf mit eingeschalteter Sandbox meldet das fehlende bzw. alte Image dann selbst (fail-closed).
+  await writeRestart(pool, {
+    ...building,
+    message: `Baut das Image der Agent-Sandbox: ${AGENT_IMAGE_COMMAND.join(' ')}`,
+    log,
+  });
+  const agentImage = await execute(AGENT_IMAGE_COMMAND, installRoot, {
+    timeoutMs: BUILD_TIMEOUT_MS,
+    env: composeEnvironment(),
+  }).catch((error: unknown) => ({
+    exitCode: 1,
+    durationMs: 0,
+    output: error instanceof Error ? error.message : String(error),
+  }));
+  if (agentImage.exitCode !== 0) {
+    log = `${log}\n\nImage der Agent-Sandbox nicht gebaut (Exit-Code ${agentImage.exitCode}):\n${redactOutput(
+      agentImage.output,
+      process.env,
+    )
+      .trim()
+      .slice(-AGENT_IMAGE_LOG_CHARS)}`.slice(-MAX_LOG_CHARS);
   }
   // Gesundheitsprüfung: Antwortet die Oberfläche nicht, zurück auf das vorherige Abbild; der Worker bleibt auf dem
   // bisherigen Stand und startet nicht neu.

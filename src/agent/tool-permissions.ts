@@ -149,14 +149,28 @@ export function roleDefaultCommands(role: string, permissions: ProjectPermission
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+/** Wo der Wächter läuft, wenn nicht auf dem Host: z. B. im Sandbox-Container (SANDBOX_GUARD in core/sandbox.ts). */
+export interface GuardLocation {
+  node: string;
+  script: string;
+}
+
 /** Hook-Befehl für den Wächter; null, wenn er nicht gestartet werden kann (dann gilt: nichts schreiben, keine Shell). */
-export function guardHookCommand(policy: {
-  create: boolean;
-  edit: boolean;
-  scopes: string[];
-  shell?: boolean;
-  root?: string;
-}): string | null {
+export function guardHookCommand(
+  policy: {
+    create: boolean;
+    edit: boolean;
+    scopes: string[];
+    shell?: boolean;
+    root?: string;
+  },
+  location?: GuardLocation,
+): string | null {
+  if (location) {
+    // Im Container liegt der gebündelte Wächter im Image; der Host-Pfad von Node und Skript gilt dort nicht.
+    const encoded = Buffer.from(JSON.stringify(policy)).toString('base64url');
+    return `${[location.node, location.script, encoded].map(shellQuote).join(' ')} || exit 2`;
+  }
   const typescript = import.meta.url.endsWith('.ts');
   const script = fileURLToPath(new URL(`./agent-guard.${typescript ? 'ts' : 'js'}`, import.meta.url));
   if (!existsSync(script)) return null;
@@ -266,7 +280,7 @@ function agentSettings(hook: string | null, matcher: string): object {
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
  * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern
  * sowie jeden Lesezugriff auf Geheimnisse. projectRoot legt den Projektordner des Wächters fest (sonst
- * CLAUDE_PROJECT_DIR bzw. das cwd des Aufrufs).
+ * CLAUDE_PROJECT_DIR bzw. das cwd des Aufrufs). guardLocation: Wächter ausserhalb des Hosts (Sandbox-Container).
  */
 export function withAgentPermissions(
   command: string[],
@@ -276,6 +290,7 @@ export function withAgentPermissions(
   fileScopes: readonly string[] = [],
   readDirectories: string[] = extraReadDirectories(),
   projectRoot?: string,
+  guardLocation?: GuardLocation,
 ): string[] {
   const root = projectRoot && isAbsolute(projectRoot) ? { root: projectRoot } : {};
   const [binary, ...rest] = command;
@@ -284,7 +299,7 @@ export function withAgentPermissions(
   // Voller Zugriff nur für den Dashboard-Assistenten und nur, wenn der Admin ihn im Befehl ausdrücklich verlangt:
   // dann weder Wächter für Schreiben und Shell noch Sperrlisten – nur Geheimnisse bleiben auch hier unlesbar.
   if (hasFullAccess(command, role)) {
-    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [], ...root });
+    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [], ...root }, guardLocation);
     return [binary, '--settings', JSON.stringify(agentSettings(secretHook, READ_MATCHER)), ...rest];
   }
   const readOnly = READ_ONLY_ROLES.has(role);
@@ -299,7 +314,7 @@ export function withAgentPermissions(
     : noFileWrite
       ? { create: false, edit: false, scopes: [] }
       : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
-  const hook = guardHookCommand({ ...policy, ...root });
+  const hook = guardHookCommand({ ...policy, ...root }, guardLocation);
   // Eigene und selbst gesetzte Sperren in einem einzigen --disallowedTools, damit keine Sperre verloren geht.
   const blocked = [
     ...new Set([
