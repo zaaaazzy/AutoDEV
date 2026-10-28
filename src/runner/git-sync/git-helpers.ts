@@ -148,8 +148,7 @@ function hasAscendingRun(text: string, length: number): boolean {
   const lower = text.toLowerCase();
   let run = 1;
   for (let index = 1; index < lower.length; index++) {
-    const ascending =
-      /[a-z0-9]/.test(lower[index]!) && lower.charCodeAt(index) === lower.charCodeAt(index - 1) + 1;
+    const ascending = /[a-z0-9]/.test(lower[index]!) && lower.charCodeAt(index) === lower.charCodeAt(index - 1) + 1;
     run = ascending ? run + 1 : 1;
     if (run >= length) return true;
   }

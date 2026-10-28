@@ -9,7 +9,15 @@ import type { DataColumn } from '../../shared/data-table/data-table.component.js
 import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { pickInOrder, poolOpenState } from './pool-selection.js';
-import { byRank, canEditSprintOrders, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from './sprint-phases.js';
+import {
+  byRank,
+  canEditSprintOrders,
+  moveId,
+  orderSprint,
+  phaseLabel,
+  phaseRank,
+  sprintPhase,
+} from './sprint-phases.js';
 
 /**
  * Aufträge eines Sprints als Liste wie auf der Auftragsseite, nach Phase eingeordnet. „Geplant“ ist die

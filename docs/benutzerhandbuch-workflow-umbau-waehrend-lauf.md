@@ -18,7 +18,7 @@ Der Runner lädt den Workflow einmal je Zyklus. Löschtest du während eines Lau
 | --- | --- |
 | Einen Einsatz „Entfernen“ oder „Pausieren“ | Der laufende Auftrag arbeitet den Lauf mit den Schritten zu Ende, die beim Start galten. Der gelöschte Schritt wird nicht mehr referenziert. |
 | Einen Agenten aus dem Workflow nehmen | Der bereits gestartete Schritt bleibt im Verlauf mit Name und Phase sichtbar. Der Verweis auf den Agenten fehlt dann (leer). |
-| Einen Schritt neu anordnen (↑↓) oder einen Agenten hinzufügen | Der laufende Auftrag nutzt bis zum Ende den alten Ablauf. Erst der nächste Lauf nutzt den neuen. |
+| Einen Schritt neu anordnen (↑↓ oder per Ziehen am Griff ⠿), in eine andere Phase verschieben (Ziehen oder Auswahl „In Phase verschieben“) oder einen Agenten hinzufügen | Der laufende Auftrag nutzt bis zum Ende den alten Ablauf. Erst der nächste Lauf nutzt den neuen. |
 
 Das Ergebnis des Auftrags hängt nicht davon ab, ob du einen Schritt gelöscht hast. Ein erfolgreicher Lauf bleibt erfolgreich.
 

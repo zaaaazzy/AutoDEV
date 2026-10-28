@@ -182,12 +182,11 @@ test('Tester-Plan: Playwright-Tests auch ausserhalb von e2e/ am Import von @play
   await writeFile(join(cwd, 'e2e/smoke.spec.ts'), "import { test } from '@playwright/test';");
   await writeFile(join(cwd, 'tests/ui.spec.ts'), "import { expect, test } from '@playwright/test';");
   await writeFile(join(cwd, 'tests/rules.test.ts'), "import { test } from 'vitest';");
-  const plan = await testerPlan(
-    poolWith([['npx', 'vitest', 'run', '{tests}']]).pool,
-    'p',
-    cwd,
-    ['e2e/smoke.spec.ts', 'tests/ui.spec.ts', 'tests/rules.test.ts'],
-  );
+  const plan = await testerPlan(poolWith([['npx', 'vitest', 'run', '{tests}']]).pool, 'p', cwd, [
+    'e2e/smoke.spec.ts',
+    'tests/ui.spec.ts',
+    'tests/rules.test.ts',
+  ]);
   assert.deepEqual(plan.commands, [{ command: ['npx', 'vitest', 'run', 'tests/rules.test.ts'], skipped: false }]);
 });
 

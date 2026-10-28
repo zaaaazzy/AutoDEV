@@ -13,8 +13,11 @@ test('Sprint-Branch: beim Start festgehalten, Umbenennen ändert ihn nicht, glei
   await withMigratedDatabase(t, 'devlog_sprint_branch', async (pool) => {
     await pool.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
     const insert = async (name: string) =>
-      (await pool.query<{ id: string }>(`INSERT INTO sprints (project_slug, name) VALUES ('shop', $1) RETURNING id`, [name]))
-        .rows[0]!.id;
+      (
+        await pool.query<{ id: string }>(`INSERT INTO sprints (project_slug, name) VALUES ('shop', $1) RETURNING id`, [
+          name,
+        ])
+      ).rows[0]!.id;
     const first = await insert('Sprint 5');
     assert.equal(await branchOf(pool, first), null, 'geplant: noch kein Branch');
     await pool.query(`UPDATE sprints SET name = 'Sprint 5' WHERE id = $1`, [first]);
@@ -60,7 +63,10 @@ test('Sprint-Branch-Migration: laufende Sprints behalten ihren Branch, doppelte 
   const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
   try {
     const version = MIGRATIONS.find((migration) => migration.name === 'sprint-branch-beim-start-festhalten')!.version;
-    await runMigrations(pool, MIGRATIONS.filter((migration) => migration.version < version));
+    await runMigrations(
+      pool,
+      MIGRATIONS.filter((migration) => migration.version < version),
+    );
     await pool.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
     const insert = async (sprint: string, status: string, created: string) =>
       (

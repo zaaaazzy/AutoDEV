@@ -9,7 +9,9 @@ const read = (file: string): string => readFileSync(join(ROOT, file), 'utf8');
 
 /** Dienste aus docker-compose.yml: Name → eingerückter Block (ohne YAML-Bibliothek). */
 function services(): Map<string, string> {
-  const section = read('docker-compose.yml').split(/^services:\n/m)[1].split(/^\S/m)[0];
+  const section = read('docker-compose.yml')
+    .split(/^services:\n/m)[1]
+    .split(/^\S/m)[0];
   const blocks = new Map<string, string>();
   for (const [, name, block] of section.matchAll(/^ {2}([\w-]+):\n((?:(?: {4}.*)?\n)*)/gm)) {
     blocks.set(name, block);

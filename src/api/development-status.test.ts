@@ -211,7 +211,9 @@ async function removeFromSprint(itemStatus = 'planned', sprintStatus = 'active')
       queries.push(sql);
       const fits =
         ['backlog', 'planned', 'blocked'].includes(itemStatus) && ['planned', 'active'].includes(sprintStatus);
-      return fits ? { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 } : { rows: [], rowCount: 0 };
+      return fits
+        ? { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
   const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');

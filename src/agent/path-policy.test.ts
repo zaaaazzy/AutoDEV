@@ -12,7 +12,16 @@ import { resolveInside, ToolError } from './tool-paths.js';
  */
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'path-policy-')));
 const outside = realpathSync(mkdtempSync(join(tmpdir(), 'path-policy-outside-')));
-for (const dir of ['src', 'docs', 'vendor', 'frontend', 'node_modules/paket', '.dev-log-backups', '.vscode', '.git/hooks']) {
+for (const dir of [
+  'src',
+  'docs',
+  'vendor',
+  'frontend',
+  'node_modules/paket',
+  '.dev-log-backups',
+  '.vscode',
+  '.git/hooks',
+]) {
   mkdirSync(join(root, dir), { recursive: true });
 }
 writeFileSync(join(root, 'node_modules/paket/index.js'), 'module.exports = 1;');
@@ -88,7 +97,8 @@ const ALLOWED = [
 ];
 
 const all: GuardPolicy = { create: true, edit: true, scopes: [] };
-const claude = (path: string) => fileProblem({ tool_name: 'Write', tool_input: { file_path: path }, cwd: root }, all, root);
+const claude = (path: string) =>
+  fileProblem({ tool_name: 'Write', tool_input: { file_path: path }, cwd: root }, all, root);
 const ollama = (path: string) =>
   resolveInside(root, path, true).then(
     () => null,

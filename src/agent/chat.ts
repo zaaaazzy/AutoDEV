@@ -159,6 +159,18 @@ const READ_ONLY_NOTE =
   'Hinweis: Gerade arbeitet ein Auftrag im Projektordner. Du kannst nur lesen und antworten, aber keine Dateien ' +
   'ändern und keine Befehle ausführen. Was geändert werden soll, beschreibe als Vorschlag.';
 
+/** Prompt für die fortgesetzte Sitzung: Antwort auf die Rückfrage samt Verweisen und, falls belegt, Nur-lesen-Hinweis. */
+export function resumePrompt(question: string, answer: string, references: string, readOnly: boolean): string {
+  return [
+    `Antwort des Nutzers auf deine Rückfrage „${question}“:\n${answer}`,
+    references,
+    `Arbeite damit weiter. ${QUESTION_RULE}`,
+    readOnly ? READ_ONLY_NOTE : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 export async function processChat(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
@@ -195,12 +207,6 @@ export async function processChat(
     ? { rows: [{ role: 'user', content: claimed.content }] }
     : await loadChatHistory(pool, options.project, claimed.id);
   const openQuestion = routine ? undefined : await findOpenQuestion(pool, options.project, claimed);
-  const resume = openQuestion?.sessionId
-    ? {
-        sessionId: openQuestion.sessionId,
-        prompt: `Antwort des Nutzers auf deine Rückfrage „${openQuestion.question}“:\n${claimed.content}\n\nArbeite damit weiter. ${QUESTION_RULE}`,
-      }
-    : undefined;
   // Anfragen aus dem Dashboard (nicht @Agent in Ideen-Kommentaren) erscheinen als Express-Auftrag im Sprint.
   const expressId =
     claimed.ideaCommentId || routine
@@ -220,6 +226,12 @@ export async function processChat(
   const folderAtStart = folderAvailable(options.cwd);
   // Ordner belegt (Auftrag, Testlauf, anderer Worker) → nur lesend; sonst hält der Chat ihn bis zum Ende der Antwort.
   const { readOnly, releaseTree } = await claimChatTree(options.cwd);
+  const resume = openQuestion?.sessionId
+    ? {
+        sessionId: openQuestion.sessionId,
+        prompt: resumePrompt(openQuestion.question, claimed.content, references, readOnly),
+      }
+    : undefined;
   const { exitCode, output, sessionId, tokens } = await runAuthorAgent(
     pool,
     options,

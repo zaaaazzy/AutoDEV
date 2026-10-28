@@ -277,8 +277,7 @@ export async function syncGitHub(
   if (state.pausedUntil > now.getTime()) return { ...result, skipped: 'Rate-Limit-Pause' };
   const adapter = adapterFor(repo);
   const issuesDue =
-    issuesActive &&
-    (!settings.syncedAt || now.getTime() - new Date(settings.syncedAt).getTime() >= ISSUE_INTERVAL_MS);
+    issuesActive && (!settings.syncedAt || now.getTime() - new Date(settings.syncedAt).getTime() >= ISSUE_INTERVAL_MS);
   const reviewsDue = now.getTime() - state.reviewsAt >= REVIEW_INTERVAL_MS;
   const checkedAt = settings.authCheckedAt ? new Date(settings.authCheckedAt).getTime() : 0;
   const authValid = settings.auth === 'ok' && now.getTime() - checkedAt < AUTH_RECHECK_MS;

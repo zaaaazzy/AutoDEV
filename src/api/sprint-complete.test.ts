@@ -343,7 +343,10 @@ function openSprintDb(initial: Omit<OpenSprint, 'report' | 'gitSync' | 'deleted'
     return sprint.orders.filter((status) => statuses.includes(status)).length;
   };
   const deletable = (sql: string) => {
-    const blocking = /NOT EXISTS \(SELECT 1 FROM development_items WHERE sprint_id = s\.id AND status (?:= '(\w+)'|IN \(([^)]*)\))/.exec(sql);
+    const blocking =
+      /NOT EXISTS \(SELECT 1 FROM development_items WHERE sprint_id = s\.id AND status (?:= '(\w+)'|IN \(([^)]*)\))/.exec(
+        sql,
+      );
     return (
       !sprint.deleted &&
       statusList(/status IN \(([^)]*)\)/.exec(sql)?.[1]).includes(sprint.status) &&
