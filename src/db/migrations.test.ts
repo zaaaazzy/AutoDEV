@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
 import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
@@ -66,6 +67,23 @@ test('Migrationen: fehlgeschlagener Schritt wird zurückgerollt, nicht vermerkt,
   assert.equal(queries.filter((query) => query.startsWith('INSERT INTO schema_migrations')).length, 1);
   assert.equal(queries.at(-2), 'ROLLBACK');
   assert.match(queries.at(-1)!, /pg_advisory_unlock/);
+});
+
+// Das Basis-Schema (Version 1) läuft nur auf neuen Datenbanken. Was dort nachträglich ergänzt wird, fehlt jeder
+// bestehenden Datenbank (so fehlte budget_role_limits, Migration 17). Neue Tabellen und Spalten gehören in eine neue
+// Migration; erst dann darf dieser Hash angepasst werden.
+test('Migrationen: Basis-Schema ist eingefroren, Änderungen brauchen eine neue Migration', () => {
+  assert.equal(
+    createHash('sha256').update(SCHEMA).digest('hex'),
+    '4ae610239349cb361a95dfd6182047e1c9999bcd18a0d5fb60e89c63cd4ada64',
+    'src/db/schema.ts wurde geändert: die Änderung als neue Migration in src/db/migrations.ts anlegen.',
+  );
+});
+
+test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenbanken', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 17);
+  assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
+  assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
 /** Struktur der Datenbank: Spalten, Prüfungen, Indizes, Trigger, Funktionen und vermerkte Migrationen. */

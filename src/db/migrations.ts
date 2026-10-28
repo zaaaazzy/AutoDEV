@@ -386,6 +386,24 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id TEXT;
     `,
   },
+  // Budget je Agent-Rolle: stand nur im Basis-Schema (Version 1) und fehlte deshalb in bestehenden Datenbanken.
+  // Die Budgetprüfung scheiterte dort mit „relation budget_role_limits does not exist“ (28.10.2026).
+  {
+    version: 17,
+    name: 'budget-limits-je-rolle',
+    sql: `
+      CREATE TABLE IF NOT EXISTS budget_role_limits (
+        project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+        role TEXT NOT NULL CHECK (role IN
+          ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer')),
+        period TEXT NOT NULL CHECK (period IN ('day', 'sprint', 'order')),
+        max_tokens BIGINT NOT NULL CHECK (max_tokens > 0),
+        PRIMARY KEY (project_slug, role, period)
+      );
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_blocked_role TEXT;
+      CREATE INDEX IF NOT EXISTS agent_usage_role_idx ON agent_usage (project_slug, role, created_at);
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
