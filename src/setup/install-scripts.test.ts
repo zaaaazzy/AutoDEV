@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync } from 'node:fs';
-import { chmod, cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { parseEnv } from '../core/env-file.js';
 import { RESTART_EXIT_CODE } from '../runner/system-restart.js';
 
 // Installationsskripte (scripts/install-*.sh, install-worker.ps1) im Probelauf: Dateien schreiben, Dienst nicht
@@ -33,7 +34,12 @@ function run(command: string, args: string[], env: Record<string, string>) {
     encoding: 'utf8',
     env: { PATH: process.env.PATH ?? '/usr/bin:/bin', AIDEATION_INSTALL_DRY_RUN: '1', ...env },
   });
-  return { status: result.status, output: `${result.stdout}${result.stderr}`, stderr: result.stderr };
+  return {
+    status: result.status,
+    output: `${result.stdout}${result.stderr}`,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 }
 
 const mode = (file: string) => statSync(file).mode & 0o777;
@@ -82,22 +88,176 @@ test('macOS-Worker: Plist wohlgeformt, Rechte 600, Zugänge nur in der Env-Datei
   assert.doesNotMatch(result.stderr, /WARNUNG/);
 });
 
-test('macOS-Worker: erneuter Lauf behält Zugänge, ohne Zugang gibt es eine Warnung', { skip: !isMac }, async () => {
-  const { root, home } = await sandbox();
-  const script = join(root, 'scripts', 'install-worker.sh');
-  const envFile = join(home, '.config', 'aideation', 'worker.env');
+/** Installationsskripte mit Env-Datei und Dienst-Datei (Plist/Unit); die macOS-Skripte nur auf macOS. */
+const SERVICE_SCRIPTS = [
+  {
+    script: 'install-worker-linux.sh',
+    envFile: 'worker.env',
+    service: join('.config', 'systemd', 'user', 'aideation-worker.service'),
+  },
+  ...(isMac
+    ? [
+        {
+          script: 'install-worker.sh',
+          envFile: 'worker.env',
+          service: join('Library', 'LaunchAgents', 'com.aideation.worker.plist'),
+        },
+        {
+          script: 'install-watchdog.sh',
+          envFile: 'watchdog.env',
+          service: join('Library', 'LaunchAgents', 'com.aideation.watchdog.plist'),
+        },
+      ]
+    : []),
+];
 
-  const first = run('bash', [script], { HOME: home });
-  assert.equal(first.status, 0, first.output);
-  assert.match(first.stderr, /WARNUNG: .*Standardpasswort/);
-  assert.match(await readFile(envFile, 'utf8'), /^DEV_LOG_DATABASE_URL=postgresql:\/\/devlog:devlog_local_dev@/m);
+test('Installationsskripte: ohne Datenbank-URL Abbruch mit klarer Meldung statt Standardpasswort', async () => {
+  for (const { script, envFile, service } of SERVICE_SCRIPTS) {
+    const { root, home } = await sandbox();
+    const missing = run('bash', [join(root, 'scripts', script)], { HOME: home });
+    assert.equal(missing.status, 1, `${script}: ${missing.output}`);
+    assert.match(missing.stderr, /FEHLER: DEV_LOG_DATABASE_URL fehlt.*start\.sh --setup/, script);
+    assert.ok(!existsSync(join(home, '.config', 'aideation', envFile)), `${script}: keine Env-Datei`);
+    assert.ok(!existsSync(join(home, service)), `${script}: kein Dienst`);
 
-  assert.equal(run('bash', [script], { HOME: home, DEV_LOG_DATABASE_URL: DATABASE_URL }).status, 0);
-  const again = run('bash', [script], { HOME: home });
-  assert.equal(again.status, 0, again.output);
-  assert.doesNotMatch(again.stderr, /WARNUNG/);
-  assert.ok((await readFile(envFile, 'utf8')).split('\n').includes(`DEV_LOG_DATABASE_URL=${DATABASE_URL}`));
+    // Das bekannte Standardpasswort gilt ebenfalls nicht, ausser ausdrücklich erlaubt.
+    const standard = 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation';
+    const refused = run('bash', [join(root, 'scripts', script)], { HOME: home, DEV_LOG_DATABASE_URL: standard });
+    assert.equal(refused.status, 1, `${script}: ${refused.output}`);
+    assert.match(refused.stderr, /FEHLER: .*Standardpasswort/, script);
+    const allowed = run('bash', [join(root, 'scripts', script)], {
+      HOME: home,
+      DEV_LOG_DATABASE_URL: standard,
+      DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD: '1',
+    });
+    assert.equal(allowed.status, 0, `${script}: ${allowed.output}`);
+    assert.match(allowed.stderr, /WARNUNG: .*Standardpasswort/, script);
+  }
 });
+
+test('Installationsskripte: Zugang aus der .env der Installation, auch in einer frischen Shell', async () => {
+  for (const { script, envFile } of SERVICE_SCRIPTS) {
+    const { root, home } = await sandbox();
+    const target = join(home, '.config', 'aideation', envFile);
+    // Alte Env-Datei des Dienstes mit dem früheren Passwort: Die .env des Einrichtungs-Assistenten geht vor.
+    await mkdir(join(home, '.config', 'aideation'), { recursive: true });
+    await writeFile(target, 'DEV_LOG_DATABASE_URL=postgresql://devlog:veraltet@localhost:5433/aideation\n');
+    const fromSetup = 'postgresql://devlog:3f9a%2Bneu@localhost:5433/aideation';
+    await writeFile(
+      join(root, '.env'),
+      `# vom Assistenten\nDEV_LOG_DB_PASSWORD=x\nDEV_LOG_DATABASE_URL='${fromSetup}'\nexport DEV_LOG_SECRET_KEY=geheim # Kommentar\n`,
+    );
+    const first = run('bash', [join(root, 'scripts', script)], { HOME: home });
+    assert.equal(first.status, 0, `${script}: ${first.output}`);
+    assert.doesNotMatch(first.stderr, /WARNUNG|FEHLER/, script);
+    const lines = (await readFile(target, 'utf8')).split('\n');
+    assert.ok(lines.includes(`DEV_LOG_DATABASE_URL=${fromSetup}`), `${script}: ${lines.join('\n')}`);
+    assert.ok(lines.includes('DEV_LOG_SECRET_KEY=geheim'), script);
+
+    // Ohne .env behält ein erneuter Lauf den Zugang aus der Env-Datei des Dienstes; die Umgebung geht allem vor.
+    await rm(join(root, '.env'));
+    assert.equal(run('bash', [join(root, 'scripts', script)], { HOME: home }).status, 0, script);
+    assert.ok((await readFile(target, 'utf8')).split('\n').includes(`DEV_LOG_DATABASE_URL=${fromSetup}`), script);
+    assert.equal(
+      run('bash', [join(root, 'scripts', script)], { HOME: home, DEV_LOG_DATABASE_URL: DATABASE_URL }).status,
+      0,
+    );
+    assert.ok((await readFile(target, 'utf8')).split('\n').includes(`DEV_LOG_DATABASE_URL=${DATABASE_URL}`), script);
+  }
+});
+
+test('dotenv_get liest die .env nach denselben Regeln wie parseEnv', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'aideation-dotenv-'));
+  const file = join(dir, 'werte.env');
+  const content = [
+    '# Kommentar=nein',
+    'A=eins',
+    "B='mit # Raute und Leerzeichen '",
+    'C="doppelt"',
+    'export D=wert # Kommentar',
+    '  E = mit   Abstand  ',
+    'F=a#b',
+    "G='",
+    'A=zwei',
+    'H=windows\r',
+    '   # I=kommentiert',
+  ].join('\n');
+  await writeFile(file, content);
+  const lib = join(SCRIPTS, 'lib', 'service-env.sh');
+  const expected = parseEnv(content);
+  for (const key of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'FEHLT']) {
+    const result = run('bash', ['-c', `. "${lib}" && dotenv_get "${file}" ${key}`], {});
+    assert.equal(result.status, 0, result.output);
+    assert.equal(result.stdout, expected.get(key) ?? '', `Schlüssel ${key}`);
+  }
+});
+
+test('Log-Rotation: newsyslog-Regel ohne Signal, Rechte 600 für das neue Log, mehrfach ausführbar', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'aideation-newsyslog-'));
+  const rules = join(dir, 'newsyslog.d');
+  const lib = join(SCRIPTS, 'lib', 'service-env.sh');
+  const install = (log: string) =>
+    run('bash', ['-c', `. "${lib}" && install_log_rotation aideation-worker "${log}" 5 10240`], {
+      AIDEATION_NEWSYSLOG_DIR: rules,
+    });
+  const log = join(dir, 'Logs', 'aideation-worker.log');
+  const first = install(log);
+  assert.equal(first.status, 0, first.output);
+  const file = join(rules, 'aideation-worker.conf');
+  assert.equal(mode(file), 0o644);
+  const user = spawnSync('id', ['-un'], { encoding: 'utf8' }).stdout.trim();
+  const group = spawnSync('id', ['-gn'], { encoding: 'utf8' }).stdout.trim();
+  const rule = (await readFile(file, 'utf8')).split('\n').filter((line) => line && !line.startsWith('#'));
+  assert.deepEqual(rule, [[log, `${user}:${group}`, '600', '5', '10240', '*', 'NJ'].join('\t')]);
+  const again = install(log);
+  assert.equal(again.status, 0, again.output);
+  assert.match(again.stdout, /unverändert/);
+  // newsyslog trennt Felder an Leerzeichen: solchen Pfad nicht halb eintragen.
+  const spaced = run(
+    'bash',
+    ['-c', `. "${lib}" && install_log_rotation mit-leerzeichen "${join(dir, 'mit leer', 'x.log')}" 3 1024`],
+    { AIDEATION_NEWSYSLOG_DIR: rules },
+  );
+  assert.equal(spaced.status, 0, spaced.output);
+  assert.match(spaced.stderr, /WARNUNG: Log-Pfad mit Leerzeichen/);
+  assert.ok(!existsSync(join(rules, 'mit-leerzeichen.conf')));
+  // Probelauf ohne Testordner: /etc/newsyslog.d bleibt unberührt, kein sudo.
+  const dry = run('bash', ['-c', `. "${lib}" && install_log_rotation aideation-worker "${log}" 5 10240`], {});
+  assert.equal(dry.status, 0, dry.output);
+  assert.match(dry.stdout, /Probelauf: Log-Rotation \/etc\/newsyslog\.d\/aideation-worker\.conf nicht angelegt/);
+});
+
+test(
+  'macOS-Dienste: Worker und Wächter legen ihre Log-Rotation an, der Worker schreibt sein Log selbst',
+  { skip: !isMac },
+  async () => {
+    for (const [script, name, plistName] of [
+      ['install-worker.sh', 'aideation-worker', 'com.aideation.worker.plist'],
+      ['install-watchdog.sh', 'aideation-watchdog', 'com.aideation.watchdog.plist'],
+    ]) {
+      const { base, root, home } = await sandbox();
+      const rules = join(base, 'newsyslog.d');
+      const result = run('bash', [join(root, 'scripts', script)], {
+        HOME: home,
+        DEV_LOG_DATABASE_URL: DATABASE_URL,
+        AIDEATION_NEWSYSLOG_DIR: rules,
+      });
+      assert.equal(result.status, 0, result.output);
+      const log = join(home, 'Library', 'Logs', `${name}.log`);
+      const rule = await readFile(join(rules, `${name}.conf`), 'utf8');
+      assert.ok(
+        rule.split('\n').some((line) => line.startsWith(`${log}\t`)),
+        rule,
+      );
+      const plist = join(home, 'Library', 'LaunchAgents', plistName);
+      const parsed = JSON.parse(
+        spawnSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }).stdout,
+      );
+      assert.equal(parsed.StandardOutPath, log);
+      if (name === 'aideation-worker') assert.equal(parsed.EnvironmentVariables.DEV_LOG_LOG_FILE, log);
+    }
+  },
+);
 
 test('macOS-Wächter: Plist wohlgeformt, Rechte 600, ohne Datenbank-URL', { skip: !isMac }, async () => {
   const { root, home } = await sandbox();

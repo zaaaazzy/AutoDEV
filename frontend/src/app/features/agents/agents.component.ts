@@ -44,6 +44,22 @@ interface SystemAgent {
   restricted?: boolean;
   allowTools?: boolean;
   envKey: string;
+  /** Was ein Lauf tatsächlich nimmt (vom Server, gleiche Auswahl wie der Lauf). */
+  usage?: SystemAgentUsage;
+}
+
+interface SystemAgentUsage {
+  kind: 'cli' | 'ollama';
+  source: 'settings' | 'environment' | 'model';
+  command: string[] | null;
+  model: string;
+}
+
+/** Anzeige „Verwendet: …“ eines System-Agents. */
+export function usageLabel(usage: SystemAgentUsage): string {
+  const label = modelLabel(usage.command, usage.model);
+  if (usage.kind === 'ollama') return `Lokales Modell: ${label}`;
+  return usage.source === 'environment' ? `CLI: ${label} (aus DEV_LOG_AGENT_COMMAND)` : `CLI: ${label}`;
 }
 
 interface AgentRow extends AgentTableRow {
@@ -117,6 +133,7 @@ export class AgentsComponent {
   protected readonly presets = MODEL_PRESETS;
   protected readonly presetLabel = presetLabel;
   protected readonly presetOf = presetOf;
+  protected readonly usageLabel = usageLabel;
 
   protected applyPreset(target: { command: string }, id: string): void {
     const preset = MODEL_PRESETS.find((item) => item.id === id);
@@ -161,7 +178,9 @@ export class AgentsComponent {
     const previous = this.systemAgents();
     this.systemAgents.set(previous.map((item) => (item.role === role ? change(item) : item)));
     try {
-      await this.api.put(`/api/system-agents/${role}`, body);
+      const { usage } = await this.api.put<{ usage?: SystemAgentUsage }>(`/api/system-agents/${role}`, body);
+      if (usage)
+        this.systemAgents.update((items) => items.map((item) => (item.role === role ? { ...item, usage } : item)));
     } catch (error) {
       this.systemAgents.set(previous);
       this.store.notice.set(errorMessage(error, 'Einstellung konnte nicht gespeichert werden.'));
@@ -257,7 +276,8 @@ export class AgentsComponent {
     this.systemAgents().map((system) => ({
       key: system.role,
       name: system.name,
-      command: system.command,
+      // Spalte „Modell“: was der Lauf tatsächlich nimmt, nicht nur die Einstellung.
+      command: system.usage ? system.usage.command : system.command,
       // Assistent und Visionär stehen in der Worker-Liste unter ihrer Rolle (id „assistant“ bzw. „visionary“).
       status: this.store.worker().agents.some((agent) => agent.id === system.role && agent.active)
         ? 'running'

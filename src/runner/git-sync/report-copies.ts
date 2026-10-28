@@ -2,8 +2,12 @@
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
-/** Ablage der Testberichte; der Tester schreibt sie unversioniert, committet werden sie später auf main. */
-export const REPORT_DIRECTORY = 'docs/tests/';
+/**
+ * Ablage der Agent-Berichte (Tester und Test-Gate in docs/tests/, Bug-Wächter in docs/risiken/). Die einzige Liste
+ * dieser Ordner: Sie liegen unversioniert, zählen nie als Änderung eines Auftrags (sonst pausierte der nächste Auftrag
+ * den Sprint als „fremde Änderung“) und kommen mit der Sprint-Sicherung – durch den Secret-Holdback – ins Repository.
+ */
+export const REPORT_DIRECTORIES = ['docs/tests/', 'docs/risiken/'];
 
 type GitRun = (...args: string[]) => Promise<{ exitCode: number; output: string }>;
 
@@ -24,13 +28,13 @@ export function checkoutTarget(args: readonly string[]): string | null {
 }
 
 /**
- * Entfernt unversionierte Dateien unter docs/tests/, die `target` mit exakt gleichem Inhalt enthält. Sonst bricht der
+ * Entfernt unversionierte Berichte (REPORT_DIRECTORIES), die `target` mit exakt gleichem Inhalt enthält. Sonst bricht der
  * Checkout ab („unversionierte Dateien … würden überschrieben“): Der Bericht liegt im Agent-Ordner noch lose, ist
  * aber inzwischen auf main committet. Abweichende oder im Ziel fehlende Dateien bleiben liegen. Gibt die entfernten
  * Pfade zurück.
  */
 export async function dropReportCopies(git: GitRun, cwd: string, target: string): Promise<string[]> {
-  const listed = await git('ls-files', '-z', '--others', '--exclude-standard', '--', REPORT_DIRECTORY);
+  const listed = await git('ls-files', '-z', '--others', '--exclude-standard', '--', ...REPORT_DIRECTORIES);
   if (listed.exitCode !== 0) return [];
   const removed: string[] = [];
   for (const file of listed.output.split('\0').filter(Boolean)) {
@@ -41,6 +45,6 @@ export async function dropReportCopies(git: GitRun, cwd: string, target: string)
     await rm(join(cwd, file), { force: true });
     removed.push(file);
   }
-  if (removed.length) console.warn(`Testberichte entfernt, die ${target} unverändert enthält: ${removed.join(', ')}`);
+  if (removed.length) console.warn(`Berichte entfernt, die ${target} unverändert enthält: ${removed.join(', ')}`);
   return removed;
 }

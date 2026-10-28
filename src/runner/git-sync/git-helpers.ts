@@ -1,6 +1,6 @@
 // Git-Grundlagen: Befehlsausführung, Remotes, Branch-Namen, Zugangsdaten-Schutz und Sprint-Branch.
 import { existsSync, realpathSync } from 'node:fs';
-import { appendFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
@@ -8,7 +8,9 @@ import { SECRET_PATTERNS } from '../../core/secret-mask.js';
 import { BACKUP_DIRECTORY } from '../../agent/tool-paths.js';
 import { gitEnvironment } from '../project-command.js';
 import { clearStaleLock, lockedFile } from './stale-lock.js';
-import { checkoutTarget, dropReportCopies } from './report-copies.js';
+import { checkoutTarget, dropReportCopies, REPORT_DIRECTORIES } from './report-copies.js';
+
+export { REPORT_DIRECTORIES };
 
 export const GIT_TIMEOUT_MS = 120_000;
 const REMOTE_PATTERN = /^(https:\/\/[^\s@/]+\/[^\s]+|git@[A-Za-z0-9.-]+:[^\s]+|ssh:\/\/git@[^\s]+)$/;
@@ -54,6 +56,20 @@ export function sprintBranch(name: string): string {
   return `sprint/${slugify(name)}`;
 }
 
+/** Sprint mit dem beim Start festgehaltenen Branch (sprints.branch); der Name dient nur noch der Anzeige. */
+export interface SprintRef {
+  name: string;
+  branch?: string | null;
+}
+
+/**
+ * Branch eines Sprints: der gespeicherte (beim Start vergeben, ändert sich beim Umbenennen nicht). Nur ohne
+ * gespeicherten Branch (geplanter Sprint, reiner Name in Tests) wird er aus dem Namen gebildet.
+ */
+export function sprintBranchOf(sprint: SprintRef | string): string {
+  return typeof sprint === 'string' ? sprintBranch(sprint) : sprint.branch || sprintBranch(sprint.name);
+}
+
 export const MAIN_BRANCH = 'main';
 
 const INTERNAL_EXCLUDES = [
@@ -78,7 +94,6 @@ const INTERNAL_EXCLUDES = [
 /** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens); gemeinsam mit der Maskierung. */
 export const SECRET_CONTENT = SECRET_PATTERNS;
 
-/** Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. */
 /**
  * Pfad aus einer Diff-Kopfzeile („+++ b/pfad“). Git hängt bei Namen mit Leerzeichen einen Tab an und setzt Namen mit
  * Sonderzeichen in Anführungszeichen mit C-Escapes („+++ "b/zug\303\244nge.txt"“) – beides muss gelesen werden, sonst
@@ -122,17 +137,104 @@ export function diffTargetPath(header: string): string | null {
   return rest.startsWith('b/') ? rest.slice(2) : null;
 }
 
+/** Testdateien, in denen eindeutige Testwerte (Platzhalter oder markiert) nicht als Zugangsdaten zählen. */
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+/** Markierung für einen erfundenen Wert in einer Testdatei: in derselben oder der Zeile direkt davor. */
+export const TEST_VALUE_MARKER = /dev-log:\s*testwert/i;
+const PLACEHOLDER_WORD = /example|beispiel|dummy|fake|placeholder|platzhalter|redacted|x{6,}/i;
+
+/** Mindestens `length` aufsteigende Zeichen am Stück („abcdef“, „AbCdEf“, „123456“) – in echten Schlüsseln praktisch nie. */
+function hasAscendingRun(text: string, length: number): boolean {
+  const lower = text.toLowerCase();
+  let run = 1;
+  for (let index = 1; index < lower.length; index++) {
+    const ascending = /[a-z0-9]/.test(lower[index]!) && lower.charCodeAt(index) === lower.charCodeAt(index - 1) + 1;
+    run = ascending ? run + 1 : 1;
+    if (run >= length) return true;
+  }
+  return false;
+}
+
+/** Bekannte Platzhaltermuster: Wörter wie EXAMPLE/FAKE, lange Wiederholungen („aaaaaaaa“) oder Folgen („abcdef“). */
+export function isPlaceholderToken(token: string): boolean {
+  return PLACEHOLDER_WORD.test(token) || /(.)\1{7,}/.test(token) || hasAscendingRun(token, 6);
+}
+
+/** PEM-Kopf in einer Testzeile: nur ein Platzhalter, wenn der Block in derselben Zeile kurz bzw. erfunden endet. */
+function isPlaceholderPem(line: string, index: number, header: string): boolean {
+  const rest = line.slice(index + header.length);
+  const end = rest.search(/-----END [A-Z ]*PRIVATE KEY-----/);
+  if (end < 0) return false;
+  const body = rest.slice(0, end).replace(/\\n|\s/g, '');
+  return body.length < 40 || isPlaceholderToken(body);
+}
+
+/** Jede Fundstelle der Zeile ist ein eindeutiger Testwert (nur für Testdateien gefragt). */
+function onlyTestValues(line: string): boolean {
+  for (const pattern of SECRET_CONTENT) {
+    for (const match of line.matchAll(new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`))) {
+      const placeholder = match[0].startsWith('-----BEGIN')
+        ? isPlaceholderPem(line, match.index, match[0])
+        : isPlaceholderToken(match[0]);
+      if (!placeholder) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Dateien, deren hinzugefügte Zeilen im Diff nach Zugangsdaten aussehen. In *.test.ts/*.spec.ts zählen eindeutige
+ * Testwerte nicht: markierte Zeilen (TEST_VALUE_MARKER) und Fundstellen nach bekannten Platzhaltermustern. Echte
+ * Schlüssel bleiben auch dort zurückgehalten – geprüft wird jede Fundstelle einzeln.
+ */
 export function filesWithSecrets(diff: string): string[] {
   const found = new Set<string>();
   let file: string | null = null;
+  let previous = '';
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
       file = diffTargetPath(line);
-    } else if (file && line.startsWith('+') && SECRET_CONTENT.some((pattern) => pattern.test(line))) {
-      found.add(file);
+      previous = '';
+      continue;
     }
+    const added = line.startsWith('+') ? line : '';
+    if (file && added && SECRET_CONTENT.some((pattern) => pattern.test(added))) {
+      const testValue =
+        TEST_FILE.test(file) &&
+        (TEST_VALUE_MARKER.test(added) || TEST_VALUE_MARKER.test(previous) || onlyTestValues(added));
+      if (!testValue) found.add(file);
+    }
+    previous = added;
   }
   return [...found];
+}
+
+/**
+ * Zurückgehaltene Dateien aus dem Arbeitsordner nehmen: Kopie unter BACKUP_DIRECTORY, versionierte Dateien auf HEAD
+ * zurück, neue gelöscht. Sonst wanderten sie beim Checkout mit und der nächste Auftrag scheiterte an „fremden
+ * Änderungen“. Liefert den Sicherungsordner (relativ zum Projekt).
+ */
+export async function setAsideFiles(
+  git: GitHelpers['git'],
+  cwd: string,
+  files: string[],
+  label: string,
+): Promise<string> {
+  const folder = join(BACKUP_DIRECTORY, `${label}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+  for (const file of files) {
+    const source = join(cwd, file);
+    if (existsSync(source)) {
+      const copy = join(cwd, folder, file);
+      await mkdir(dirname(copy), { recursive: true });
+      await copyFile(source, copy);
+    }
+    if ((await git('cat-file', '-e', `HEAD:${file}`)).exitCode === 0) {
+      await git('checkout', 'HEAD', '--', `:(literal)${file}`);
+    } else {
+      await unlink(source).catch(() => undefined);
+    }
+  }
+  return folder;
 }
 
 /**
@@ -215,7 +317,9 @@ export function gitHelpers(execute: CommandExecutor, cwd: string) {
   });
   const run = async (args: string[]) => {
     const result = await execute(['git', ...args], cwd, { timeoutMs: GIT_TIMEOUT_MS, env });
-    return { ...result, output: redactOutput(result.output, process.env).trim() };
+    // Diffs ohne Token-Maske: stageAll sucht darin nach Zugangsdaten (filesWithSecrets), sonst fände es keine mehr.
+    const tokens = !args.includes('diff');
+    return { ...result, output: redactOutput(result.output, process.env, { tokens }).trim() };
   };
   const git = async (...args: string[]) => {
     // Lose Testberichte, die das Ziel unverändert enthält, würden den Checkout abbrechen: vorher wegräumen.
@@ -258,7 +362,7 @@ export async function stageAll(
   log?: string[],
   options: { orderOnly?: boolean } = {},
 ): Promise<string[]> {
-  // Auftrags-Commits: Testberichte und Agent-Ablage gehören nicht zum Auftrag (sie kommen mit der Sprint-Sicherung).
+  // Auftrags-Commits: Berichte und Agent-Ablage gehören nicht zum Auftrag (sie kommen mit der Sprint-Sicherung).
   // Nur Pfade ausschliessen, die Git nicht ohnehin ignoriert: Ein ignorierter Pfad im Pathspec (z. B. .dev-log/ aus
   // info/exclude) lässt „git add“ mit Exit 1 abbrechen – der Stand bliebe dann gestagt liegen und blockierte jeden
   // weiteren Auftrag als „fremde Änderung“.
@@ -335,9 +439,18 @@ export async function branchExists(git: GitHelpers['git'], branch: string): Prom
 }
 
 /**
- * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
- * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
+ * Enthält `target` (Standard main) den Stand `revision`? Exit 1 von `git merge-base --is-ancestor` heisst „nein“
+ * (noch nicht übernommen); jeder andere Fehler (unbekannter Stand, kaputtes Repository) wirft – er ist weder „ja“
+ * noch „nein“.
  */
+export async function mainContains(git: GitHelpers['git'], revision: string, target = MAIN_BRANCH): Promise<boolean> {
+  const result = await git('merge-base', '--is-ancestor', revision, target);
+  if (result.exitCode === 0) return true;
+  if (result.exitCode === 1) return false;
+  const detail = result.output.trim().slice(-200) || `Exit-Code ${result.exitCode}`;
+  throw new Error(`Prüfung, ob ${target} den Stand ${revision} enthält, fehlgeschlagen: ${detail}`);
+}
+
 /**
  * Basis für einen neuen Sprint-Branch: der neueste Stand von main. Liegt GitHub vorn (z. B. ein gemergter Pull
  * Request des Vorgänger-Sprints) und hat das lokale main nichts Eigenes, zählt origin/main – sonst fehlte dem neuen
@@ -370,15 +483,19 @@ export async function refreshSprintFromMain(git: GitHelpers['git'], branch: stri
   return message;
 }
 
+/**
+ * Wechselt vor der Arbeit an einem Sprint-Auftrag auf den Sprint-Branch (legt ihn bei Bedarf von main an).
+ * Ungespeicherte Änderungen wandern mit; scheitert der Wechsel, bleibt der aktuelle Branch und es wird geloggt.
+ */
 export async function checkoutSprintBranch(
   cwd: string,
-  sprintName: string,
+  sprint: SprintRef | string,
   rawExecute: CommandExecutor = runCommand,
 ): Promise<string | null> {
   const execute: CommandExecutor = (command, directory, options) =>
     withProjectLock(cwd, () => rawExecute(command, directory, options));
   const { git, must } = gitHelpers(execute, cwd);
-  const branch = sprintBranch(sprintName);
+  const branch = sprintBranchOf(sprint);
   try {
     await ensureRepository(git, must, cwd);
     if ((await git('rev-parse', '--abbrev-ref', 'HEAD')).output === branch) return branch;
@@ -393,8 +510,11 @@ export async function checkoutSprintBranch(
   }
 }
 
-/** Interne Ordner, die nie als geänderte Datei eines Auftrags zählen (Agent-Ablage, Testberichte). */
-export const CHANGED_FILES_IGNORED = ['.dev-log/', 'docs/tests/'];
+/**
+ * Interne Ordner, die nie als geänderte Datei eines Auftrags zählen (Agent-Ablage, Berichte der Agents). Präfixe mit
+ * Schrägstrich am Ende: docs/risiken-x/ oder docs/tests-extra/ bleiben fremd.
+ */
+export const CHANGED_FILES_IGNORED = ['.dev-log/', ...REPORT_DIRECTORIES];
 
 /** Conventional-Commits-Betreff: Typ aus der Auftragsart, Sprint als Scope, Titel auf eine Zeile gekürzt. */
 export function taskCommitMessage(

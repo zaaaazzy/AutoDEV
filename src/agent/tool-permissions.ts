@@ -1,13 +1,16 @@
 import { existsSync } from 'node:fs';
-import { sep } from 'node:path';
+import { isAbsolute, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { customRuleProblem } from './command-checks.js';
 import {
+  CHECK_GROUP,
+  CHECK_ROLES,
   CREATE_TOOLS,
   EDIT_TOOLS,
   FILES_CREATE,
   FILES_EDIT,
+  fileGitRules,
   LOGS_COMMAND,
   NO_FILE_WRITE_ROLES,
   PERMISSION_GROUPS,
@@ -21,6 +24,8 @@ import {
 } from './permission-rules.js';
 
 export {
+  CHECK_GROUP,
+  CHECK_ROLES,
   CREATE_TOOLS,
   DATABASE_COMMAND,
   DEFAULT_PERMISSION_GROUPS,
@@ -47,8 +52,10 @@ export {
   customRuleProblem,
   forbiddenCommand,
   forbiddenSubcommand,
+  gitFileProblem,
   gitOptionProblem,
   gitPathProblem,
+  gitRemoteProblem,
   isAllowedCommand,
   isAssistantServiceCommand,
   npmOptionProblem,
@@ -150,6 +157,7 @@ export function guardHookCommand(policy: {
   edit: boolean;
   scopes: string[];
   shell?: boolean;
+  root?: string;
 }): string | null {
   const typescript = import.meta.url.endsWith('.ts');
   const script = fileURLToPath(new URL(`./agent-guard.${typescript ? 'ts' : 'js'}`, import.meta.url));
@@ -179,6 +187,12 @@ export const SECRET_READ_DENY = [
   'Read(**/id_rsa*)',
   'Read(**/id_ed25519*)',
   'Read(**/id_ecdsa*)',
+  'Read(**/.npmrc)',
+  'Read(**/.netrc)',
+  'Read(**/.git-credentials)',
+  'Read(~/.npmrc)',
+  'Read(~/.netrc)',
+  'Read(~/.git-credentials)',
   'Read(**/.ssh/**)',
   'Read(**/.aws/**)',
   'Read(**/.gnupg/**)',
@@ -209,17 +223,19 @@ export function hasFullAccess(command: readonly string[], role: string): boolean
 
 /**
  * Freigaben eines Agents: eigene Zuweisung, sonst der Projektstandard der Rolle – nur Befehle aus freigeschalteten
- * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln.
+ * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln. Routinen bekommen
+ * zusätzlich immer die Prüf-Gruppe (CHECK_GROUP), auch bei eigener Zuweisung.
  */
 function chosenRules(role: string, permissions: ProjectPermissions, agentCommands: string[] | null): string[] {
   if (READ_ONLY_ROLES.has(role)) return [];
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
   const available = availableCommands(permissions);
-  return normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
+  const chosen = normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
     (rule) =>
       (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
       !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
   );
+  return CHECK_ROLES.has(role) ? [...new Set([...chosen, ...CHECK_GROUP.rules])] : chosen;
 }
 
 /**
@@ -251,7 +267,8 @@ function agentSettings(hook: string | null, matcher: string): object {
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
  * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern
- * sowie jeden Lesezugriff auf Geheimnisse.
+ * sowie jeden Lesezugriff auf Geheimnisse. projectRoot legt den Projektordner des Wächters fest (sonst
+ * CLAUDE_PROJECT_DIR bzw. das cwd des Aufrufs).
  */
 export function withAgentPermissions(
   command: string[],
@@ -260,14 +277,16 @@ export function withAgentPermissions(
   agentCommands: string[] | null,
   fileScopes: readonly string[] = [],
   readDirectories: string[] = extraReadDirectories(),
+  projectRoot?: string,
 ): string[] {
+  const root = projectRoot && isAbsolute(projectRoot) ? { root: projectRoot } : {};
   const [binary, ...rest] = command;
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
   if (!isClaude) return command;
   // Voller Zugriff nur für den Dashboard-Assistenten und nur, wenn der Admin ihn im Befehl ausdrücklich verlangt:
   // dann weder Wächter für Schreiben und Shell noch Sperrlisten – nur Geheimnisse bleiben auch hier unlesbar.
   if (hasFullAccess(command, role)) {
-    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [] });
+    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [], ...root });
     return [binary, '--settings', JSON.stringify(agentSettings(secretHook, READ_MATCHER)), ...rest];
   }
   const readOnly = READ_ONLY_ROLES.has(role);
@@ -282,7 +301,7 @@ export function withAgentPermissions(
     : noFileWrite
       ? { create: false, edit: false, scopes: [] }
       : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
-  const hook = guardHookCommand(policy);
+  const hook = guardHookCommand({ ...policy, ...root });
   // Eigene und selbst gesetzte Sperren in einem einzigen --disallowedTools, damit keine Sperre verloren geht.
   const blocked = [
     ...new Set([
@@ -298,7 +317,12 @@ export function withAgentPermissions(
     JSON.stringify(agentSettings(hook, `Write|Edit|MultiEdit|NotebookEdit|Bash|${READ_MATCHER}`)),
   ];
   if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...others];
-  const rules = [...chosen.filter(isToolRule), ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : [])];
+  // Löschen und Umbenennen (git rm/mv) gehören zu den Datei-Rechten und gehen nur mit Wächter (gitFileProblem).
+  const rules = [
+    ...chosen.filter(isToolRule),
+    ...(hook ? fileGitRules(policy) : []),
+    ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : []),
+  ];
   const directories = chosen.includes(LOGS_COMMAND)
     ? readDirectories.flatMap((directory) => ['--add-dir', directory])
     : [];

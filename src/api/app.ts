@@ -60,13 +60,13 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.use(allowedHostsOnly);
   // Hinter dem HTTPS-Proxy: Protokoll und Client-IP aus X-Forwarded-* übernehmen,
   // damit die Herkunftsprüfung https erkennt und Fehlversuche je Client zählen.
-  // Nur konkrete Proxy-Netze, nie `true` (siehe trustProxySetting).
+  // Nur konkrete Proxy-Netze oder genau ein Hop, nie `true` (siehe trustProxySetting).
   const configured = process.env.DEV_LOG_TRUST_PROXY?.trim();
   const trustProxy = trustProxySetting(configured);
   if (trustProxy) app.set('trust proxy', trustProxy);
   else if (configured) {
     console.warn(
-      '[auth] DEV_LOG_TRUST_PROXY ungültig (erlaubt: loopback, linklocal, uniquelocal, IP oder CIDR) – X-Forwarded-For wird ignoriert.',
+      '[auth] DEV_LOG_TRUST_PROXY ungültig (erlaubt: 1, loopback, linklocal, uniquelocal, IP oder CIDR) – X-Forwarded-For wird ignoriert.',
     );
   }
   // Produktions-Rückkanal: einzige Route ohne Login (Token im Pfad), vor Herkunftsprüfung und JSON-Parser,

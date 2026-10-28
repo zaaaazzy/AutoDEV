@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type Page, test } from '@playwright/test';
 import pg from 'pg';
+import { e2eAdminUrl } from './admin-url.js';
 
 const username = process.env.E2E_USERNAME!;
 const password = process.env.E2E_PASSWORD!;
@@ -38,9 +39,7 @@ test('Git-Zustand: Hinweis, Lösung anfordern, Live schalten nur mit Begründung
   ).sprint;
   expect((await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'active' } })).ok()).toBeTruthy();
 
-  const url = new URL(
-    process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
-  );
+  const url = e2eAdminUrl();
   url.pathname = `/${process.env.E2E_DATABASE ?? 'dev_log_e2e'}`;
   const db = new pg.Client({ connectionString: url.toString() });
   await db.connect();

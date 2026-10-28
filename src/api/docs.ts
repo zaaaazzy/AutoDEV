@@ -8,15 +8,7 @@ import { publicBaseUrl } from './production-snippets.js';
 import type { Principal } from './roles.js';
 import { isAdmin } from './tenancy.js';
 import { readProjectText } from '../core/project-paths.js';
-import {
-  INVALID,
-  buildUpdate,
-  invalidInput,
-  isUuid,
-  parseFields,
-  parseProjectSlug,
-  parseTitle,
-} from '../core/validation.js';
+import { INVALID, invalidInput, isUuid, parseFields, parseProjectSlug, parseTitle } from '../core/validation.js';
 
 const MAX_API_CONTENT = 30_000;
 const MAX_STORED_CONTENT = 200_000;
@@ -151,24 +143,8 @@ export function registerDocRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ doc: result.rows[0] });
   });
 
-  app.patch('/docs/:id', access({ role: 'editor', tenant: 'docs' }), async (request, response) => {
-    if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Nicht gefunden.' });
-      return;
-    }
-    const fields = parseFields(request.body, DOC_FIELDS);
-    if (!fields) {
-      response.status(400).json(invalidInput(request.body, DOC_FIELDS));
-      return;
-    }
-    const update = buildUpdate('docs', request.params.id, fields, DOC_COLUMNS);
-    const result = await pool.query(update.sql, update.values);
-    if (!result.rows[0]) {
-      response.status(404).json({ message: 'Dokument nicht gefunden.' });
-      return;
-    }
-    response.json({ doc: result.rows[0] });
-  });
+  // Kein PATCH /docs/:id: Titel und Inhalt ändern sich nur über POST /docs/:id/revisions und die Freigabe einer
+  // anderen Person (doc-revisions.ts); dort gelten auch der Schreibschutz für `repo`/`request` und der Titel-409.
 
   app.delete('/docs/:id', access({ role: 'editor', tenant: 'docs' }), async (request, response) => {
     if (!isUuid(request.params.id)) {

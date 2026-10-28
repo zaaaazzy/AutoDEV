@@ -245,6 +245,8 @@ export async function runWatchdog(options: WatchdogOptions, file = stateFile()):
   const subscriptions = state.subscriptions ?? [];
   if (message && keys && subscriptions.length) {
     const { gone } = await deliverPush(keys, subscriptions, message);
+    // Abgemeldete und ungültige Endpunkte (Allowlist) auch aus dem Zwischenspeicher entfernen.
+    if (gone.length) state.subscriptions = subscriptions.filter((s) => !gone.includes(s.endpoint));
     if (gone.length && dbOk) {
       await options.pool
         .query('DELETE FROM push_subscriptions WHERE endpoint = ANY($1)', [gone])

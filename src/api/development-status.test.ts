@@ -2,16 +2,36 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import express from 'express';
 import type { Pool } from 'pg';
+import { routeGuard } from './access.js';
 import { createDevLogApp } from './app.js';
+import { registerDevelopmentRoutes } from './development.js';
+import type { Principal, Role } from './roles.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const SPRINT = '22222222-2222-4222-8222-222222222222';
 
-/** Pool-Attrappe: jede Abfrage sieht einen Auftrag im Status `current` und einen Sprint im Status `sprintStatus`. */
-async function patch(current: string, body: Record<string, unknown>, sprintStatus = 'active') {
+/**
+ * Pool-Attrappe: jede Abfrage sieht einen Auftrag im Status `current` (zugeordnet zu `currentSprintId`) und einen
+ * Sprint im Status `sprintStatus`.
+ */
+async function patch(
+  current: string,
+  body: Record<string, unknown>,
+  sprintStatus = 'active',
+  currentSprintId: string | null = null,
+) {
   const queries: string[] = [];
-  const row = { id: ID, status: current, projectSlug: 'dev-log', sprintStatus, sprint_status: sprintStatus, 1: 1 };
+  const row = {
+    id: ID,
+    status: current,
+    sprintId: currentSprintId,
+    projectSlug: 'dev-log',
+    sprintStatus,
+    sprint_status: sprintStatus,
+    1: 1,
+  };
   const pool = {
     query: async (sql: string) => {
       queries.push(sql);
@@ -70,6 +90,83 @@ test('PATCH /development: Zuordnung zu abgeschlossenem Sprint wird mit 409 abgel
   }
 });
 
+const OTHER_SPRINT = '33333333-3333-4333-8333-333333333333';
+const isUpdate = (sql: string) => /^\s*UPDATE development_items/i.test(sql);
+
+for (const status of ['in_progress', 'approval', 'done']) {
+  test(`PATCH /development: Auftrag ${status} lässt sich nicht in einen anderen Sprint hängen (409, nichts geschrieben)`, async () => {
+    const moved = await patch(status, { sprintId: OTHER_SPRINT }, 'planned', SPRINT);
+    assert.equal(moved.status, 409);
+    assert.ok(!moved.queries.some(isUpdate));
+  });
+
+  test(`PATCH /development: Auftrag ${status} lässt sich nicht aus dem Sprint lösen („Kein Sprint“, 409)`, async () => {
+    const cleared = await patch(status, { sprintId: null }, 'active', SPRINT);
+    assert.equal(cleared.status, 409);
+    assert.ok(!cleared.queries.some(isUpdate));
+  });
+
+  test(`PATCH /development: Auftrag ${status} ohne Sprint lässt sich keinem Sprint zuordnen (409)`, async () => {
+    const assigned = await patch(status, { sprintId: SPRINT }, 'planned', null);
+    assert.equal(assigned.status, 409);
+    assert.ok(!assigned.queries.some(isUpdate));
+  });
+
+  test(`PATCH /development: Auftrag ${status} mit unverändertem Sprint speichert andere Felder weiter`, async () => {
+    const same = await patch(status, { title: 'Neuer Titel', sprintId: SPRINT }, 'active', SPRINT);
+    assert.equal(same.status, 200);
+    assert.ok(same.queries.some(isUpdate));
+  });
+}
+
+test('PATCH /development: erledigter Auftrag im abgeschlossenen Sprint bleibt mit unverändertem Sprint speicherbar', async () => {
+  const result = await patch('done', { title: 'Neuer Titel', sprintId: SPRINT }, 'completed', SPRINT);
+  assert.equal(result.status, 200);
+});
+
+test('PATCH /development: Sperre greift vor der Prüfung des Ziel-Sprints', async () => {
+  // Ziel-Sprint wäre zulässig (aktiv); abgelehnt wird allein wegen des laufenden Auftrags.
+  const result = await patch('in_progress', { sprintId: OTHER_SPRINT }, 'active', SPRINT);
+  assert.equal(result.status, 409);
+  assert.ok(!result.queries.some((sql) => /FROM sprints/.test(sql)));
+});
+
+test('PATCH /development: geplanter Auftrag lässt sich weiter umhängen, atomar gegen Statuswechsel', async () => {
+  const result = await patch('planned', { sprintId: OTHER_SPRINT }, 'planned', SPRINT);
+  assert.equal(result.status, 200);
+  assert.match(result.queries.find(isUpdate) ?? '', /AND status = ANY\(/);
+});
+
+test('Aus dem Sprint nehmen: Auftrags- und Sprint-Status in derselben Abfrage (Positivliste)', async () => {
+  const result = await removeFromSprint();
+  assert.match(result.update, /status IN \('backlog', 'planned', 'blocked'\)/);
+  assert.match(
+    result.update,
+    /EXISTS \(SELECT 1 FROM sprints s WHERE s\.id = development_items\.sprint_id\s+AND s\.status IN \('planned', 'active'\)\)/,
+  );
+});
+
+for (const itemStatus of ['approval', 'rejected', 'in_progress', 'done']) {
+  test(`Aus dem Sprint nehmen: Auftrag im Status ${itemStatus} wird mit 409 abgelehnt`, async () => {
+    const result = await removeFromSprint(itemStatus, 'active');
+    assert.equal(result.status, 409);
+  });
+}
+
+for (const sprintStatus of ['review', 'completed', 'cancelled']) {
+  test(`Aus dem Sprint nehmen: Sprint im Status ${sprintStatus} wird mit 409 abgelehnt`, async () => {
+    const result = await removeFromSprint('planned', sprintStatus);
+    assert.equal(result.status, 409);
+  });
+}
+
+for (const itemStatus of ['planned', 'blocked', 'backlog']) {
+  test(`Aus dem Sprint nehmen: Auftrag im Status ${itemStatus} aus aktivem Sprint bleibt erlaubt`, async () => {
+    const result = await removeFromSprint(itemStatus, 'active');
+    assert.equal(result.status, 200);
+  });
+}
+
 /** Folgeauftrag zu einem erledigten Auftrag, Ziel-Sprint im Status `sprintStatus`. */
 async function followUp(sprintStatus: string) {
   const queries: string[] = [];
@@ -107,13 +204,20 @@ test('Folgeauftrag: aktiver Sprint bleibt erlaubt', async () => {
   assert.ok(result.queries.some((sql) => /INSERT INTO development_items/i.test(sql)));
 });
 
-/** Auftrag aus dem Sprint nehmen; liefert die UPDATE-Abfrage. */
-async function removeFromSprint() {
+/**
+ * Auftrag im Status `itemStatus` aus einem Sprint im Status `sprintStatus` nehmen; liefert Status und UPDATE-Abfrage.
+ * Das UPDATE liefert nur eine Zeile, wenn beide Status passen (wie die WHERE-Bedingung in Postgres).
+ */
+async function removeFromSprint(itemStatus = 'planned', sprintStatus = 'active') {
   const queries: string[] = [];
   const pool = {
     query: async (sql: string) => {
       queries.push(sql);
-      return { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 };
+      const fits =
+        ['backlog', 'planned', 'blocked'].includes(itemStatus) && ['planned', 'active'].includes(sprintStatus);
+      return fits
+        ? { rows: [{ id: ID, status: 'backlog', projectSlug: 'dev-log' }], rowCount: 1 }
+        : { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
   const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
@@ -226,6 +330,67 @@ test('In Sprint übernehmen: ungültige Sprint-ID ergibt 400 ohne Schreibzugriff
   const result = await takeIntoSprint('blocked', 'planned', 'kein-sprint');
   assert.equal(result.status, 400);
   assert.equal(result.updates.length, 0);
+});
+
+const ABORTED_NEEDS_RUN =
+  /AND \(\$3::boolean OR NOT \(d\.removed_from_sprint_at IS NOT NULL OR d\.status = 'blocked'\)\)/;
+
+/**
+ * „In Sprint übernehmen“ mit Wächter wie im Betrieb, als Benutzer mit `roles` (Mitglied von dev-log). Die Attrappe
+ * wertet nur die neue Bedingung aus: abgebrochene Aufträge gehen nur mit $3 (= darf ausführen) durch.
+ */
+async function takeAs(roles: Role[], aborted: boolean) {
+  const updates: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('project_members') || sql.startsWith('SELECT project_slug AS slug FROM development_items')) {
+        return { rows: [{ slug: 'dev-log' }], rowCount: 1 };
+      }
+      if (/^\s*UPDATE development_items/i.test(sql)) {
+        updates.push(values);
+        assert.match(sql, ABORTED_NEEDS_RUN);
+        if (values[2] !== true && aborted) return { rows: [], rowCount: 0 };
+        return { rows: [{ id: ID, status: 'planned', sprintId: SPRINT }], rowCount: 1 };
+      }
+      if (sql.startsWith('SELECT 1 FROM development_items d')) return { rows: [], rowCount: aborted ? 1 : 0 };
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const principal: Principal = { id: ID, username: 'pia', displayName: 'Pia', roles };
+  const app = express();
+  app.use(express.json());
+  const router = express.Router({ caseSensitive: true });
+  router.use((_request, response, next) => {
+    response.locals.principal = principal;
+    next();
+  });
+  router.use(routeGuard(pool, router));
+  registerDevelopmentRoutes(router, pool);
+  app.use('/api', router);
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/development/${ID}/take-into-sprint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprintId: SPRINT }),
+    });
+    const { message } = (await response.json()) as { message?: string };
+    return { status: response.status, message, updates };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('In Sprint übernehmen: abgebrochene Aufträge nur mit „Ausführen“ (wie /retry), offene schon mit „Planung“', async () => {
+  const planner = await takeAs(['plan'], true);
+  assert.equal(planner.status, 403);
+  assert.match(planner.message ?? '', /Agents ausführen/);
+  assert.equal(planner.updates[0]?.[2], false, 'ohne Ausführen schliesst das UPDATE Abgebrochene aus');
+  assert.equal((await takeAs(['plan'], false)).status, 200, 'offener Auftrag mit Planung');
+  assert.equal((await takeAs(['plan', 'run'], true)).status, 200, 'abgebrochener Auftrag mit Planung und Ausführen');
+  assert.equal((await takeAs(['run'], false)).status, 403, 'ohne Planung gar nicht');
 });
 
 test('PATCH /development: Zuordnung zu geplantem Sprint nimmt auto_run zurück', async () => {

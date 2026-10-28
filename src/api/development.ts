@@ -3,10 +3,19 @@ import { setActionTodo } from '../runner/action-todo.js';
 import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { DEVELOPMENT_STATUSES, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
-import { canSetDevelopmentStatus, isAssignableSprintStatus } from '../core/development-transitions.js';
+import {
+  ASSIGNABLE_SPRINT_STATUSES,
+  REPLANNABLE_DEVELOPMENT_STATUSES,
+  RETRYABLE_DEVELOPMENT_STATUSES,
+  SPRINT_POOL_DEVELOPMENT_STATUSES,
+  SPRINT_REMOVABLE_DEVELOPMENT_STATUSES,
+  canSetDevelopmentStatus,
+  isAssignableSprintStatus,
+  isSprintLockedDevelopmentStatus,
+} from '../core/development-transitions.js';
 import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
-import { developmentPatchRole } from './roles.js';
+import { developmentPatchRole, hasRole, ROLE_INFO, type Principal } from './roles.js';
 import {
   buildUpdate,
   manualEstimateSql,
@@ -53,9 +62,15 @@ const DEV_FIELDS = {
   agentId: { column: 'agent_id', parse: parseNullableUuid },
 };
 
+/** Feste Statusliste aus development-transitions für `IN (…)` (eigene Konstanten, keine Benutzereingabe). */
+const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
+
 const parseUuid: Parser = (value) => (isUuid(value) ? value : INVALID);
+/** Neue Aufträge nur in Backlog oder Geplant; alle weiteren Status entstehen über PATCH bzw. den Worker. */
+const NEW_ORDER_STATUSES = new Set<string>([DEVELOPMENT_STATUS.backlog, DEVELOPMENT_STATUS.planned]);
 const NEW_ORDER_FIELDS = {
   ...DEV_FIELDS,
+  status: { column: 'status', parse: parseOption(NEW_ORDER_STATUSES) },
   ideationId: { column: 'ideation_id', parse: parseUuid },
   testRunId: { column: 'test_run_id', parse: parseUuid },
 };
@@ -75,6 +90,25 @@ function invalidNewOrder(body: unknown): InvalidInput {
 export function retryComment(body: unknown): string | null {
   const raw = isRecord(body) && typeof body.comment === 'string' ? body.comment.trim() : '';
   return raw ? raw.slice(0, 2000) : null;
+}
+
+const ASSIGNABLE_SPRINTS_SQL = sqlList(ASSIGNABLE_SPRINT_STATUSES);
+
+/**
+ * Ziel-Sprint von /retry und review-reject (Alias d): der gewählte (`chosen`, SQL-Ausdruck oder NULL), sonst der
+ * bisherige, wenn er noch geplant oder aktiv ist, sonst der aktive Sprint des Projekts bzw. keiner (main). Im Review,
+ * abgeschlossen oder abgebrochen nimmt ein Sprint keine Arbeit mehr an – der Auftrag liefe auf dessen altem Branch.
+ */
+export function retrySprintSql(chosen = 'NULL::uuid'): string {
+  return `COALESCE(${chosen},
+                (SELECT s.id FROM sprints s WHERE s.id = d.sprint_id AND s.status IN (${ASSIGNABLE_SPRINTS_SQL})),
+                (SELECT s.id FROM sprints s WHERE s.project_slug = d.project_slug AND s.status = 'active'
+                  ORDER BY s.created_at LIMIT 1))`;
+}
+
+/** auto_run folgt dem Ziel-Sprint: ohne Sprint oder im aktiven sofort, ein geplanter wartet auf seinen Start. */
+export function retryAutoRunSql(chosen = 'NULL::uuid'): string {
+  return `COALESCE((SELECT t.status = 'active' FROM sprints t WHERE t.id = ${retrySprintSql(chosen)}), TRUE)`;
 }
 
 export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
@@ -114,7 +148,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       !isRecord(body) ||
       !validText(body.title, TITLE_MAX) ||
       (body.description !== undefined && (typeof body.description !== 'string' || body.description.length > 10_000)) ||
-      (body.status !== undefined && !validStatus(body.status, DEVELOPMENT_STATUSES)) ||
+      (body.status !== undefined && !validStatus(body.status, NEW_ORDER_STATUSES)) ||
       (body.priority !== undefined && !validStatus(body.priority, PRIORITIES)) ||
       (body.ideationId !== undefined && !isUuid(body.ideationId)) ||
       (body.testRunId !== undefined && !isUuid(body.testRunId)) ||
@@ -215,32 +249,53 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
     response.status(201).json({ item: result.rows[0] });
   });
 
-  // Retry a blocked or (after adjusting) rejected order, using the project's active sprint when none is assigned.
+  /**
+   * Retry a blocked or (after adjusting) rejected order. Optional `sprintId` (geplant oder aktiv, gleiches Projekt):
+   * Status und Sprint in einem UPDATE, ohne Zwischenstand im aktiven Sprint. Ohne Wahl siehe retrySprintSql.
+   */
   app.post('/development/:id/retry', access({ role: 'run', tenant: 'development' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
     }
+    const chosen = isRecord(request.body) ? request.body.sprintId : undefined;
+    if (chosen !== undefined && chosen !== null && !isUuid(chosen)) {
+      response.status(400).json({ message: 'Ungültiger Sprint.' });
+      return;
+    }
+    const sprintId = typeof chosen === 'string' ? chosen : null;
     const comment = retryComment(request.body);
+    // Ein UPDATE: Der Bug-Status folgt per Trigger in derselben Anweisung (abgelehnter Bug wird wieder offen).
     const result = await pool.query(
-      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = TRUE, failure = NULL, action_todo = NULL,
+      `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = ${retryAutoRunSql('$3::uuid')},
+              failure = NULL, action_todo = NULL, conflict_retries = 0,
               description = CASE WHEN $2::text IS NULL THEN d.description
                                  ELSE COALESCE(d.description, '') || E'\n\n## Hinweis zum erneuten Versuch (' || to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\n' || $2::text END,
               retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
               analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
-              -- Sprint schon abgeschlossen oder abgebrochen: nicht dorthin zurück (die Arbeit landete im alten Sprint-Branch
-              -- und nie in main), sondern in den aktiven Sprint bzw. ohne Sprint auf main.
-              sprint_id = CASE
-                WHEN d.sprint_id IS NOT NULL AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = d.sprint_id
-                                                           AND s.status NOT IN ('completed', 'cancelled')) THEN d.sprint_id
-                ELSE (SELECT id FROM sprints WHERE project_slug = d.project_slug AND status = 'active' ORDER BY created_at LIMIT 1)
-              END,
+              sprint_id = ${retrySprintSql('$3::uuid')},
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()
-        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN ('${DEVELOPMENT_STATUS.blocked}', '${DEVELOPMENT_STATUS.rejected}')
-              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}')))
+        WHERE d.id = $1 AND d.kind <> 'express' AND (d.status IN (${sqlList(RETRYABLE_DEVELOPMENT_STATUSES)})
+              OR (d.removed_from_sprint_at IS NOT NULL AND d.status IN (${sqlList(REPLANNABLE_DEVELOPMENT_STATUSES)})))
+          AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM sprints s WHERE s.id = $3::uuid
+                                             AND s.project_slug = d.project_slug AND s.status IN (${ASSIGNABLE_SPRINTS_SQL})))
         RETURNING ${DEV_COLUMNS}`,
-      [request.params.id, comment],
+      [request.params.id, comment, sprintId],
     );
+    if (!result.rows[0] && sprintId) {
+      // Nur für die Meldung: lag es am Sprint oder am Auftrag?
+      const fits = await pool.query(
+        `SELECT 1 FROM sprints s JOIN development_items d ON d.project_slug = s.project_slug
+          WHERE d.id = $1 AND s.id = $2 AND s.status IN (${ASSIGNABLE_SPRINTS_SQL})`,
+        [request.params.id, sprintId],
+      );
+      if (!fits.rowCount) {
+        response
+          .status(409)
+          .json({ message: 'Erneut versuchen nur in geplante oder aktive Sprints desselben Projekts.' });
+        return;
+      }
+    }
     if (!result.rows[0]) {
       response.status(409).json({
         message:
@@ -255,6 +310,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
    * In einen Sprint übernehmen (Sprintseite „Aufträge hinzufügen“): offene und abgebrochene Aufträge in einer Abfrage.
    * Abgebrochene (aus einem Sprint genommen oder blockiert) werden dabei wie bei /retry zurückgesetzt, landen aber direkt
    * im Ziel-Sprint statt erst im aktiven. auto_run nur, wenn der Ziel-Sprint läuft – ein geplanter wartet auf seinen Start.
+   * Abgebrochene neu einplanen ist ein erneuter Versuch: dafür braucht es wie bei /retry zusätzlich „Ausführen“ (403).
    */
   app.post(
     '/development/:id/take-into-sprint',
@@ -269,6 +325,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         response.status(400).json({ message: 'Sprint fehlt oder ist ungültig.' });
         return;
       }
+      const canRun = hasRole(response.locals.principal as Principal | undefined, 'run');
       const aborted = `(d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVELOPMENT_STATUS.blocked}')`;
       // Ohne Join auf sprints: DEV_COLUMNS (RETURNING) nennt id und status ohne Tabellen-Präfix.
       const result = await pool.query(
@@ -277,18 +334,32 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               agent_id = CASE WHEN ${aborted} THEN NULL ELSE d.agent_id END,
               failure = CASE WHEN ${aborted} THEN NULL ELSE d.failure END,
               action_todo = CASE WHEN ${aborted} THEN NULL ELSE d.action_todo END,
+              conflict_retries = CASE WHEN ${aborted} THEN 0 ELSE d.conflict_retries END,
               retry_count = d.retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
               analysis_status = CASE WHEN NOT ${aborted} OR d.analysis_status IN ('requested', 'running')
                                      THEN d.analysis_status ELSE NULL END,
               budget_since = CASE WHEN ${aborted} THEN NOW() ELSE d.budget_since END,
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
         WHERE d.id = $1 AND d.sprint_id IS NULL AND d.kind <> 'express'
-          AND d.status IN ('${DEVELOPMENT_STATUS.backlog}', '${DEVELOPMENT_STATUS.planned}', '${DEVELOPMENT_STATUS.blocked}')
+          AND d.status IN (${sqlList(SPRINT_POOL_DEVELOPMENT_STATUSES)})
+          AND ($3::boolean OR NOT ${aborted})
           AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
                          AND s.status IN ('planned', 'active'))
         RETURNING ${DEV_COLUMNS}`,
-        [request.params.id, sprintId],
+        [request.params.id, sprintId, canRun],
       );
+      if (!result.rows[0] && !canRun) {
+        // Nur für die Meldung: lag es am fehlenden Recht?
+        const blocked = await pool.query(`SELECT 1 FROM development_items d WHERE d.id = $1 AND ${aborted}`, [
+          request.params.id,
+        ]);
+        if (blocked.rowCount) {
+          response.status(403).json({
+            message: `Abgebrochene Aufträge neu einplanen braucht die Rolle „${ROLE_INFO.run.label}“.`,
+          });
+          return;
+        }
+      }
       if (!result.rows[0]) {
         response.status(409).json({
           message:
@@ -311,6 +382,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       }
       // Aus einem noch geplanten Sprint nehmen ist reine Planung: kein Vermerk, also auch keine Karte unter „Aktionen“.
       // Erst aus einem laufenden Sprint gilt ein Auftrag als abgebrochen und wartet auf eine Entscheidung.
+      // Auftrags- und Sprint-Status in derselben Anweisung: Im Review steckt der Sprint-Branch schon im PR.
       const result = await pool.query(
         `UPDATE development_items SET
               removed_from_sprint = (SELECT name FROM sprints WHERE id = development_items.sprint_id AND status <> 'planned'),
@@ -319,15 +391,17 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
               status = CASE WHEN status = '${DEVELOPMENT_STATUS.planned}' THEN '${DEVELOPMENT_STATUS.backlog}' ELSE status END,
               updated_at = NOW()
-        WHERE id = $1 AND sprint_id IS NOT NULL
-          AND status NOT IN ('${DEVELOPMENT_STATUS.inProgress}', '${DEVELOPMENT_STATUS.done}')
+        WHERE id = $1 AND status IN (${sqlList(SPRINT_REMOVABLE_DEVELOPMENT_STATUSES)})
+          AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = development_items.sprint_id
+                         AND s.status IN (${ASSIGNABLE_SPRINTS_SQL}))
         RETURNING ${DEV_COLUMNS}`,
         [request.params.id],
       );
       if (!result.rows[0]) {
-        response
-          .status(409)
-          .json({ message: 'Nur geplante oder blockierte Aufträge eines Sprints lassen sich herausnehmen.' });
+        response.status(409).json({
+          message:
+            'Nur geplante oder blockierte Aufträge lassen sich herausnehmen, und nur aus geplanten oder aktiven Sprints.',
+        });
         return;
       }
       response.json({ item: result.rows[0] });
@@ -414,26 +488,39 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         return;
       }
       const target = fields.find((field) => field.column === 'status')?.value as string | undefined;
+      const sprintChange = fields.find((field) => field.column === 'sprint_id');
       let from: string | undefined;
-      if (target) {
-        const current = await pool.query<{ status: string }>(`SELECT status FROM development_items WHERE id = $1`, [
-          request.params.id,
-        ]);
+      let sprintUnchanged = false;
+      if (target || sprintChange) {
+        const current = await pool.query<{ status: string; sprintId: string | null }>(
+          `SELECT status, sprint_id AS "sprintId" FROM development_items WHERE id = $1`,
+          [request.params.id],
+        );
         from = current.rows[0]?.status;
         if (!from) {
           response.status(404).json({ message: 'Auftrag nicht gefunden.' });
           return;
         }
-        if (!canSetDevelopmentStatus(from, target)) {
+        if (target && !canSetDevelopmentStatus(from, target)) {
           response.status(409).json({
             message: `Status change ${from} → ${target} is not allowed manually; it is set by the worker or a dedicated action.`,
           });
           return;
         }
+        // Erst der Auftragsstatus, dann der Ziel-Sprint. Derselbe Sprint wie bisher ist keine Änderung (Formular speichert
+        // ihn mit), sonst bräche das Speichern anderer Felder bei laufenden Aufträgen.
+        sprintUnchanged = sprintChange?.value === (current.rows[0].sprintId ?? null);
+        if (sprintChange && !sprintUnchanged && isSprintLockedDevelopmentStatus(from)) {
+          response.status(409).json({
+            message: 'Aufträge in Arbeit, in Freigabe oder erledigt lassen sich keinem anderen Sprint zuordnen.',
+          });
+          return;
+        }
       }
-      const sprintId = fields.find((field) => field.column === 'sprint_id')?.value;
+      const sprintId = sprintChange?.value;
       let targetSprintStatus: string | undefined;
-      if (typeof sprintId === 'string') {
+      // Der bisherige Sprint darf inzwischen im Review oder abgeschlossen sein (wie bei Bugs).
+      if (typeof sprintId === 'string' && !sprintUnchanged) {
         const sprint = await pool.query<{ sprintStatus: string }>(
           `SELECT s.status AS "sprintStatus" FROM sprints s JOIN development_items e ON e.project_slug = s.project_slug
           WHERE s.id = $1 AND e.id = $2`,
@@ -465,9 +552,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
           return;
         }
       }
-      const sprintField = fields.find((field) => field.column === 'sprint_id');
+      const sprintField = sprintChange;
       const agentField = fields.find((field) => field.column === 'agent_id');
-      // Status nur ändern, wenn er seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
+      // Status oder Sprint nur ändern, wenn der Status seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
       const update = buildUpdate(
         'development_items',
         request.params.id,

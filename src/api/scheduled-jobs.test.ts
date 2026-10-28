@@ -62,7 +62,13 @@ test('Wartungs-Jobs: Administratoren lesen Jobs samt erlaubten Job-Arten', async
     assert.equal(response.status, 200);
     const body = (await response.json()) as { jobs: unknown[]; kinds: string[] };
     assert.equal(body.jobs.length, 1);
-    assert.deepEqual(body.kinds.sort(), ['backup_check', 'close_old_sprints', 'push_alert', 'watchdog_logs']);
+    assert.deepEqual(body.kinds.sort(), [
+      'backup_check',
+      'close_old_sprints',
+      'push_alert',
+      'restore_probe',
+      'watchdog_logs',
+    ]);
   });
 });
 

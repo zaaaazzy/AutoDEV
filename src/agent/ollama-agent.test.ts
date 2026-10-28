@@ -13,6 +13,7 @@ import {
   runOllamaAgent,
   type ToolContext,
 } from './ollama-agent.js';
+import { agentRights } from './tool-permissions.js';
 
 async function project(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ollama-agent-'));
@@ -186,6 +187,84 @@ test('agent loop executes tool calls and returns the final answer with changed f
   assert.match(result.output, /Datei angelegt\.[\s\S]*- neu\.txt/);
   assert.equal(await readFile(join(cwd, 'neu.txt'), 'utf8'), 'hallo');
   assert.equal((bodies[1] as { messages: { role: string }[] }).messages.at(-1)?.role, 'tool');
+});
+
+test('Routine: run_command für Prüfbefehle (npm audit), aber keine Schreib-Werkzeuge', async () => {
+  const cwd = await project();
+  const rights = agentRights('routine', { enabled: null, custom: [] }, null);
+  assert.deepEqual(rights.files, { create: false, edit: false, scopes: [] });
+  const ran: string[] = [];
+  const { fetchImpl, bodies } = scriptedFetch([
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        call('run_command', { command: 'npm audit --json' }),
+        call('run_command', { command: 'npm outdated' }),
+        call('run_command', { command: 'git ls-files' }),
+        call('run_command', { command: 'git grep -n TODO' }),
+        call('run_command', { command: 'npm audit fix' }),
+        call('run_command', { command: 'npm audit --json fix' }),
+        call('run_command', { command: 'git grep -O less TODO' }),
+        call('run_command', { command: 'git grep -iOless TODO' }),
+        call('run_command', { command: 'git grep "-O" TODO' }),
+        call('run_command', { command: 'git grep TODO /etc' }),
+        call('run_command', { command: 'git grep --no-exclude-standard SECRET' }),
+        call('run_command', { command: 'git grep -f /etc/passwd' }),
+        call('write_file', { path: 'neu.txt', content: 'x' }),
+        call('replace_in_file', { path: 'a.txt', old_text: 'alt', new_text: 'neu' }),
+      ],
+    },
+    { role: 'assistant', content: 'Keine Sicherheitslücken.' },
+  ]);
+  const result = await runOllamaAgent({
+    prompt: 'Nächtlicher Sicherheits-Check',
+    role: 'routine',
+    cwd,
+    timeoutMs: 5000,
+    fetchImpl,
+    execute: async (command) => {
+      ran.push(command.join(' '));
+      return { exitCode: 0, durationMs: 1, output: 'found 0 vulnerabilities' };
+    },
+    ...rights,
+  });
+  assert.equal(result.exitCode, 0);
+  const tools = (bodies[0] as { tools: { function: { name: string } }[] }).tools.map((tool) => tool.function.name);
+  assert.ok(tools.includes('run_command'), 'Routine bekommt run_command');
+  for (const name of ['write_file', 'replace_in_file', 'run_sql']) assert.ok(!tools.includes(name), name);
+  // Nur die Prüfbefehle laufen; audit fix, Pager, fremde Pfade und ignorierte Dateien nicht.
+  assert.deepEqual(ran, ['npm audit --json', 'npm outdated', 'git ls-files', 'git grep -n TODO']);
+  assert.equal(await readFile(join(cwd, 'a.txt'), 'utf8'), 'alt\n');
+  await assert.rejects(readFile(join(cwd, 'neu.txt'), 'utf8'));
+  assert.doesNotMatch(result.output, /Geänderte Dateien/);
+});
+
+test('Prüfbefehle nur für Routinen, nicht für Entwickler; ohne Rechte-Kontext keine Shell', async () => {
+  const developer = agentRights('developer', { enabled: null, custom: [] }, null);
+  for (const rule of ['Bash(npm audit:*)', 'Bash(git grep:*)', 'Bash(git ls-files:*)']) {
+    assert.ok(!developer.commands.includes(rule), rule);
+  }
+  const cwd = await project();
+  const ran: string[] = [];
+  const { fetchImpl, bodies } = scriptedFetch([
+    { role: 'assistant', content: '', tool_calls: [call('run_command', { command: 'npm audit' })] },
+    { role: 'assistant', content: 'Fertig.' },
+  ]);
+  await runOllamaAgent({
+    prompt: 'x',
+    role: 'routine',
+    cwd,
+    timeoutMs: 5000,
+    fetchImpl,
+    execute: async (command) => {
+      ran.push(command.join(' '));
+      return { exitCode: 0, durationMs: 1, output: '' };
+    },
+  });
+  const tools = (bodies[0] as { tools: { function: { name: string } }[] }).tools.map((tool) => tool.function.name);
+  assert.ok(!tools.includes('run_command'));
+  assert.deepEqual(ran, []);
 });
 
 test('accepts a developer answer that proves the order is already implemented', async () => {

@@ -40,7 +40,7 @@ test('Chat-Assistent ohne Rechte-Kontext schreibt nicht (fail-closed)', async ()
   assert.doesNotMatch(result.output, /Geänderte Dateien/);
 });
 
-test('Chat-Assistent mit Rechte-Kontext respektiert PROTECTED_PATH', async () => {
+test('Chat-Assistent mit Rechte-Kontext respektiert geschützte Pfade (path-policy)', async () => {
   const cwd = await tempProject();
   for (const path of ['.mcp.json', '.claude/settings.json', '.husky/pre-commit', 'server.pem']) {
     await runOllamaAgent({

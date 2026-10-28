@@ -12,6 +12,8 @@ import {
   type JobKind,
   insideRoot,
   jobKind,
+  JobTimeoutError,
+  lateJobKeys,
   nextRunAfter,
   runDueJobs,
   runWithTimeout,
@@ -63,9 +65,9 @@ function fakePool(jobs: FakeJob[], extra?: (sql: string, values: unknown[]) => {
       statements.push(sql);
       const now = new Date();
       if (sql.startsWith('UPDATE scheduled_jobs j')) {
-        const [limit, lockSeconds] = values as [number, number];
+        const [limit, lockSeconds, running = []] = values as [number, number, string[]?];
         const due = jobs
-          .filter((row) => isDue(row, now))
+          .filter((row) => isDue(row, now) && !running.includes(row.key))
           .sort((a, b) => a.nextRunAt.getTime() - b.nextRunAt.getTime())
           .slice(0, limit);
         return {
@@ -82,6 +84,7 @@ function fakePool(jobs: FakeJob[], extra?: (sql: string, values: unknown[]) => {
               intervalSeconds: row.intervalSeconds,
               state: row.state,
               previousStatus,
+              lockedUntil: row.lockedUntil,
             };
           }),
         };
@@ -92,7 +95,13 @@ function fakePool(jobs: FakeJob[], extra?: (sql: string, values: unknown[]) => {
         row.lastStatus = status;
         row.lastMessage = message;
         if (state) row.state = JSON.parse(state) as Record<string, unknown>;
-        row.lockedUntil = null;
+        if (sql.includes('locked_until = NULL')) row.lockedUntil = null;
+        return { rows: [] };
+      }
+      if (sql.startsWith('UPDATE scheduled_jobs SET locked_until = NULL')) {
+        const [key, token] = values as [string, Date | null];
+        const row = jobs.find((entry) => entry.key === key)!;
+        if (row.lockedUntil && token && row.lockedUntil.getTime() === token.getTime()) row.lockedUntil = null;
         return { rows: [] };
       }
       if (sql.startsWith('UPDATE scheduled_jobs SET next_run_at = LEAST')) {
@@ -188,7 +197,8 @@ test('Beanspruchung in einer Anweisung mit SKIP LOCKED, Sperre und neuem Termin'
   assert.match(sql, /FOR UPDATE SKIP LOCKED/);
   assert.match(sql, /WHERE enabled AND next_run_at <= NOW\(\)/);
   assert.match(sql, /SET next_run_at = /);
-  assert.match(sql, /locked_until = NOW\(\)/);
+  assert.match(sql, /locked_until = date_trunc\('milliseconds', NOW\(\)/);
+  assert.match(sql, /key <> ALL\(\$3::text\[\]\)/, 'noch laufende Jobs dieses Workers nie erneut');
   assert.match(sql, /RETURNING/);
 });
 
@@ -312,12 +322,80 @@ test('Zeitlimit: ein hängender Job endet nach timeoutSeconds als Fehler, der Du
   assert.equal(fine.lastStatus, 'ok');
 });
 
-test('runWithTimeout liefert das Ergebnis oder bricht nach der Frist ab', async (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout'] });
+test('runWithTimeout liefert das Ergebnis oder bricht nach der Frist ab', async () => {
   assert.equal(await runWithTimeout(async () => 'ok', 1000), 'ok');
-  const pending = runWithTimeout(() => new Promise(() => undefined), 5000);
-  t.mock.timers.tick(5000);
-  await assert.rejects(pending, /Zeitlimit von 5 s/);
+  // Reagiert der Task auf den Abbruch, ist er beendet: kein `running` mehr.
+  const stops = runWithTimeout(
+    (signal) => new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('weg')))),
+    20,
+    500,
+  );
+  await assert.rejects(stops, (error: unknown) => error instanceof JobTimeoutError && error.running === null);
+  // Ignoriert er ihn, meldet der Fehler den noch laufenden Task.
+  let finish = (): void => undefined;
+  const ignores = runWithTimeout(() => new Promise<void>((done) => (finish = done)), 20, 20);
+  const error = await ignores.catch((caught: unknown) => caught);
+  assert.ok(error instanceof JobTimeoutError);
+  assert.match(error.message, /Zeitlimit von 0 s/);
+  assert.ok(error.running, 'Task läuft noch');
+  finish();
+  await error.running;
+});
+
+test('Zeitlimit: die Sperre bleibt, bis ein langsamer Job wirklich endet; der nächste Durchgang überspringt ihn', async () => {
+  const slow = job('slow', { kind: 'slow', config: { timeoutSeconds: 1 }, intervalSeconds: 1 });
+  const { pool } = fakePool([slow]);
+  let finish = (): void => undefined;
+  let abortedSeen = false;
+  let started = 0;
+  const kind = countingKind(({ signal }) => {
+    started += 1;
+    // Erst der zweite Lauf (nach dem Ende des ersten) endet sofort.
+    if (started > 1) return Promise.resolve({ status: 'ok', message: 'fertig' });
+    return new Promise((done) => {
+      signal.addEventListener('abort', () => (abortedSeen = true));
+      // Ignoriert den Abbruch (z. B. hängende Datenbankanweisung) und endet erst später.
+      finish = () => done({ status: 'ok', message: 'spät fertig' });
+    });
+  });
+  const registry = { slow: kind };
+  const options = deps({ timeoutGraceMs: 10 });
+  const runs = await runDueJobs(pool, options, undefined, registry);
+  assert.equal(runs[0]?.status, 'failed');
+  assert.match(runs[0]!.message, /läuft noch/);
+  assert.ok(abortedSeen, 'Abbruchsignal gesendet');
+  assert.ok(slow.lockedUntil, 'Sperre bleibt stehen, solange der Task läuft');
+  assert.deepEqual(lateJobKeys(), ['slow']);
+  // Nächster Termin erreicht, Sperre in der Datenbank sogar abgelaufen: dieser Worker startet ihn trotzdem nicht.
+  slow.nextRunAt = new Date(Date.now() - 1000);
+  slow.lockedUntil = new Date(Date.now() - 1000);
+  assert.deepEqual(await runDueJobs(pool, options, undefined, registry), []);
+  assert.equal(kind.calls, 1, 'keine Überschneidung mit dem nächsten Durchgang');
+  // Abgelaufene Sperre gehört nicht mehr dieser Beanspruchung: bleibt unverändert. Eigene Sperre wird freigegeben.
+  const token = new Date(Date.now() + 60_000);
+  slow.lockedUntil = token;
+  finish();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(lateJobKeys(), []);
+  assert.equal(slow.lockedUntil, token, 'fremde Sperre bleibt');
+  slow.lockedUntil = null;
+  assert.equal((await runDueJobs(pool, options, undefined, registry))[0]?.status, 'ok');
+  assert.equal(kind.calls, 2);
+});
+
+test('Zeitlimit: ein spät beendeter Job gibt seine eigene Sperre frei', async () => {
+  const slow = job('slow-own', { kind: 'slow', config: { timeoutSeconds: 1 } });
+  const { pool } = fakePool([slow]);
+  let finish = (): void => undefined;
+  const registry = {
+    slow: countingKind(() => new Promise((done) => (finish = () => done({ status: 'ok', message: 'fertig' })))),
+  };
+  await runDueJobs(pool, deps({ timeoutGraceMs: 10 }), undefined, registry);
+  assert.ok(slow.lockedUntil);
+  finish();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.equal(slow.lockedUntil, null, 'Sperre nach dem echten Ende frei');
+  assert.equal(slow.lastStatus, 'failed', 'das Zeitlimit bleibt als Fehler stehen');
 });
 
 test('beim Herunterfahren werden keine neuen Jobs beansprucht', async () => {
@@ -328,8 +406,14 @@ test('beim Herunterfahren werden keine neuen Jobs beansprucht', async () => {
   assert.equal(row.lastStatus, null);
 });
 
-test('Registry: genau die vier festen Job-Arten, keine Pfade', () => {
-  assert.deepEqual(Object.keys(JOB_KINDS).sort(), ['backup_check', 'close_old_sprints', 'push_alert', 'watchdog_logs']);
+test('Registry: genau die fünf festen Job-Arten, keine Pfade', () => {
+  assert.deepEqual(Object.keys(JOB_KINDS).sort(), [
+    'backup_check',
+    'close_old_sprints',
+    'push_alert',
+    'restore_probe',
+    'watchdog_logs',
+  ]);
   assert.ok(Object.isFrozen(JOB_KINDS));
   assert.equal(jobKind('backup_check'), JOB_KINDS.backup_check);
   assert.equal(jobKind('constructor'), null);
@@ -385,7 +469,7 @@ test('backup_check: frisch und gross genug ok; zu alt, zu klein, leer oder ausse
   await mkdir(join(root, 'backups'));
   const run = async (config: Record<string, unknown>) => {
     const row = job('backup_check', { config });
-    await runDueJobs(fakePool([row]).pool, deps({ installRoot: root }));
+    await runDueJobs(fakePool([row]).pool, deps({ installRoot: root, listDump: async () => TOC }));
     return row;
   };
   assert.match((await run({})).lastMessage!, /Kein Datenbank-Backup/);
@@ -406,6 +490,142 @@ test('backup_check: frisch und gross genug ok; zu alt, zu klein, leer oder ausse
   const outside = await run({ dir: '../etc' });
   assert.equal(outside.lastStatus, 'failed');
   assert.match(outside.lastMessage!, /ausserhalb/);
+});
+
+/** Auszug aus `pg_restore --list` eines echten Dumps. */
+const TOC = [
+  ';',
+  '; Archive created at 2026-10-27 03:00:01 UTC',
+  ';',
+  '215; 1259 16386 TABLE public projects devlog',
+  '3456; 0 16386 TABLE DATA public projects devlog',
+].join('\n');
+
+/** Ordner mit einem frischen, ausreichend grossen Dump. */
+async function freshBackup(): Promise<{ root: string; file: string }> {
+  const root = await backupRoot();
+  await mkdir(join(root, 'backups'));
+  const file = join(root, 'backups', 'aideation-20261027-030001.dump');
+  await writeFile(file, Buffer.alloc(2048));
+  return { root, file };
+}
+
+async function runBackupCheck(root: string, listDump: SchedulerDeps['listDump']): Promise<FakeJob> {
+  const row = job('backup_check');
+  await runDueJobs(fakePool([row]).pool, deps({ installRoot: root, listDump }));
+  return row;
+}
+
+test('backup_check: pg_restore --list liest den neuesten Dump; Einträge stehen in der Meldung', async (t) => {
+  const { root, file } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const listed: string[] = [];
+  const row = await runBackupCheck(root, async (path) => {
+    listed.push(path);
+    return TOC;
+  });
+  assert.equal(row.lastStatus, 'ok', row.lastMessage!);
+  assert.deepEqual(listed, [file]);
+  assert.match(row.lastMessage!, /2 Einträge für pg_restore lesbar/);
+});
+
+test('backup_check: fehlendes pg_restore ist ein benannter Fehler, kein stiller Erfolg', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const row = await runBackupCheck(root, async () => {
+    throw Object.assign(new Error('spawn pg_restore ENOENT'), { code: 'ENOENT' });
+  });
+  assert.equal(row.lastStatus, 'failed');
+  assert.match(row.lastMessage!, /pg_restore --list nicht gefunden/);
+  assert.match(row.lastMessage!, /DEV_LOG_PG_RESTORE/);
+});
+
+test('backup_check: kaputter Dump oder Dump ohne Tabellendaten = Fehler mit der Meldung von pg_restore', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const broken = await runBackupCheck(root, async () => {
+    throw Object.assign(new Error('Command failed'), {
+      code: 1,
+      stderr: 'pg_restore: error: input file does not appear to be a valid archive\n',
+    });
+  });
+  assert.equal(broken.lastStatus, 'failed');
+  assert.match(broken.lastMessage!, /aideation-20261027-030001\.dump nicht geprüft/);
+  assert.match(broken.lastMessage!, /does not appear to be a valid archive/);
+  const empty = await runBackupCheck(root, async () => ';\n215; 1259 16386 TABLE public projects devlog\n');
+  assert.equal(empty.lastStatus, 'failed');
+  assert.match(empty.lastMessage!, /keine Tabellendaten/);
+});
+
+test('backup_check: ein fehlendes pg_restore löst wie jeder Fehlschlag einen Push aus', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const row = job('backup_check');
+  const recorder = pushRecorder();
+  const missing = async () => {
+    throw Object.assign(new Error('spawn pg_restore ENOENT'), { code: 'ENOENT' });
+  };
+  await runDueJobs(fakePool([row]).pool, deps({ installRoot: root, push: recorder.push, listDump: missing }));
+  assert.equal(recorder.sent.length, 1);
+});
+
+test('restore_probe: ruft scripts/restore.sh --probe mit dem neuesten Dump auf, Erfolg = letzte Zeile', async (t) => {
+  const { root, file } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const calls: string[][] = [];
+  const row = job('restore_probe', { config: { dir: 'backups' } });
+  await runDueJobs(
+    fakePool([row]).pool,
+    deps({
+      installRoot: root,
+      restoreProbe: async (installRoot, path) => {
+        calls.push([installRoot, path]);
+        return 'Probe: Wegwerf-Container …\nRestore-Probe bestanden: 42 Tabellen, Schlüssel passt.\n';
+      },
+    }),
+  );
+  assert.deepEqual(calls, [[root, file]]);
+  assert.equal(row.lastStatus, 'ok');
+  assert.equal(row.lastMessage, 'Restore-Probe bestanden: 42 Tabellen, Schlüssel passt.');
+});
+
+test('restore_probe: Fehler des Skripts und fehlende Dumps landen in der Meldung des Jobs', async (t) => {
+  const { root } = await freshBackup();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const row = job('restore_probe');
+  await runDueJobs(
+    fakePool([row]).pool,
+    deps({
+      installRoot: root,
+      restoreProbe: async () => {
+        throw Object.assign(new Error('Command failed'), {
+          code: 1,
+          stderr: 'Restore: Schlüssel-Test fehlgeschlagen – mit diesem DEV_LOG_SECRET_KEY …\n',
+        });
+      },
+    }),
+  );
+  assert.equal(row.lastStatus, 'failed');
+  assert.match(row.lastMessage!, /Restore-Probe mit aideation-20261027-030001\.dump: scripts\/restore\.sh gescheitert/);
+  assert.match(row.lastMessage!, /Schlüssel-Test fehlgeschlagen/);
+
+  const emptyRoot = await backupRoot();
+  t.after(() => rm(emptyRoot, { recursive: true, force: true }));
+  const none = job('restore_probe');
+  let called = false;
+  await runDueJobs(
+    fakePool([none]).pool,
+    deps({
+      installRoot: emptyRoot,
+      restoreProbe: async () => {
+        called = true;
+        return '';
+      },
+    }),
+  );
+  assert.equal(none.lastStatus, 'failed');
+  assert.match(none.lastMessage!, /nicht erreichbar/);
+  assert.equal(called, false, 'ohne Dump keine Probe');
 });
 
 test('watchdog_logs meldet dasselbe Problem nicht erneut vor Ablauf von REMIND_MS', async () => {
@@ -518,6 +738,7 @@ test('close_old_sprints schliesst nur abgearbeitete Sprints, nie solche mit offe
       push: recorder.push,
       completeSprint: async (_pool, id) => {
         completed.push(id);
+        return true;
       },
     }),
   );
@@ -529,6 +750,55 @@ test('close_old_sprints schliesst nur abgearbeitete Sprints, nie solche mit offe
   assert.match(candidateSql, /NOT EXISTS .*r\.status = 'running'/s);
   assert.match(candidateSql, /make_interval\(days => \$1\)/);
   assert.deepEqual(recorder.sent[0]!.audience, { project: 'shop' });
+});
+
+test('close_old_sprints: schon abgeschlossener Sprint (zweiter Lauf) – keine zweite Push-Nachricht', async () => {
+  const row = job('close_old_sprints');
+  const { pool } = fakePool([row], (sql) => {
+    if (sql.includes('FROM sprints s')) return { rows: [{ id: 'twice', project: 'shop', name: 'Sprint 4' }] };
+    if (sql.includes('FROM development_items')) return { rows: [{ status: 'done', actionTodo: null }] };
+    return null;
+  });
+  const recorder = pushRecorder();
+  await runDueJobs(pool, deps({ push: recorder.push, completeSprint: async () => false }));
+  assert.equal(recorder.sent.length, 0);
+  assert.match(row.lastMessage!, /Kein abgearbeiteter Sprint/);
+});
+
+test('close_old_sprints: nach dem Abbruch wird kein weiterer Sprint abgeschlossen', async () => {
+  const row = job('close_old_sprints', { config: { timeoutSeconds: 1 } });
+  const completed: string[] = [];
+  let release = (): void => undefined;
+  const { pool } = fakePool([row], (sql) => {
+    if (sql.includes('FROM sprints s')) {
+      return { rows: ['a', 'b'].map((id) => ({ id, project: 'shop', name: id })) };
+    }
+    if (sql.includes('FROM development_items')) return { rows: [{ status: 'done', actionTodo: null }] };
+    return null;
+  });
+  // Die Abfrage für Sprint „a“ hängt über das Zeitlimit hinaus (z. B. Datenbank kurz blockiert).
+  const slowPool = {
+    query: async (sql: string, values?: unknown[]) => {
+      if (sql.includes('FROM development_items') && values?.[0] === 'a') {
+        await new Promise<void>((done) => (release = done));
+      }
+      return pool.query(sql, values);
+    },
+  } as unknown as Pool;
+  await runDueJobs(
+    slowPool,
+    deps({
+      timeoutGraceMs: 10,
+      completeSprint: async (_pool, id) => {
+        completed.push(id);
+        return true;
+      },
+    }),
+  );
+  release();
+  await new Promise((done) => setTimeout(done, 20));
+  assert.deepEqual(completed, [], 'nach dem Zeitlimit kein Abschluss mehr');
+  assert.equal(row.lockedUntil, null, 'Sperre nach dem echten Ende frei');
 });
 
 test('close_old_sprints begrenzt die Schwelle auf 1–365 Tage', async () => {

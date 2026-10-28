@@ -10,9 +10,16 @@ import { localDatabaseUrl, readEnvValues } from '../core/local-database.js';
  * DEV_LOG_TEST_REQUIRE_DATABASE ist gesetzt (CI): Dann schlagen sie fehl, statt still zu fehlen.
  */
 export const ADMIN_URL =
-  process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ??
-  process.env.E2E_ADMIN_DATABASE_URL ??
-  localDatabaseUrl(readEnvValues(join(import.meta.dirname, '..', '..')), 'postgres', 'localhost');
+  process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ?? process.env.E2E_ADMIN_DATABASE_URL ?? localAdminUrl();
+
+/** Lokale Datenbank mit dem Zugang aus der .env; ohne Passwort eine Adresse ohne Zugang (Tests werden übersprungen). */
+function localAdminUrl(): string {
+  try {
+    return localDatabaseUrl(readEnvValues(join(import.meta.dirname, '..', '..')), 'postgres', 'localhost');
+  } catch {
+    return 'postgresql://localhost:5433/postgres';
+  }
+}
 
 /** Test überspringen, weil keine Datenbank erreichbar ist; mit DEV_LOG_TEST_REQUIRE_DATABASE ein Fehler. */
 export function skipWithoutDatabase(t: TestContext): void {

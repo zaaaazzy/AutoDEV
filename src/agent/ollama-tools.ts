@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { withProjectLock } from '../core/project-lock.js';
@@ -15,7 +15,14 @@ import {
 import { bashProblem, fileProblem, type GuardPolicy } from './agent-guard.js';
 import { runProjectSql, type SqlClientFactory } from './tool-sql.js';
 import type { ToolCall } from './ollama-types.js';
-import { MAX_FILE_BYTES, SECRET_NAME, SKIPPED_DIRECTORIES, resolveInside, walkText } from './tool-paths.js';
+import {
+  MAX_FILE_BYTES,
+  SECRET_NAME,
+  SKIPPED_DIRECTORIES,
+  resolveInside,
+  walkText,
+  writeProjectFile,
+} from './tool-paths.js';
 
 export { BACKUP_DIRECTORY } from './tool-paths.js';
 
@@ -26,6 +33,8 @@ const clip = (text: string, max = MAX_TOOL_OUTPUT): string =>
 export interface ToolContext {
   cwd: string;
   canWrite: boolean;
+  /** Shell-Befehle unter dem Wächter (run_command); ohne Angabe wie canWrite. Routinen: ja, ohne Schreibrecht. */
+  canRunCommands?: boolean;
   canManageServices?: boolean;
   /** Dateirechte des Agents; geprüft wie bei der Claude-CLI (Anlegen/Ändern, Ordner, geschützte Pfade). */
   files?: GuardPolicy;
@@ -105,11 +114,11 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         const denied = filesProblem(context, 'Write', target);
         if (denied) return denied;
         await backup(context, target);
-        await mkdir(dirname(target), { recursive: true });
         // Zwischen Prüfung und Schreiben liegen awaits: ein Abbruch in dieser Zeit verhindert das Schreiben noch.
         if (context.signal?.aborted) return TOOL_ABORTED;
-        await writeFile(target, args.content, 'utf8');
-        context.changed.add(relative(await realpath(context.cwd), target));
+        // Prüft den wirklichen Pfad erneut, nachdem die Ordner angelegt sind (ein neuer Link lenkt nicht um).
+        const written = await writeProjectFile(context.cwd, target, args.content);
+        context.changed.add(relative(await realpath(context.cwd), written));
         return `${relative(context.cwd, target)} geschrieben (${args.content.length} Zeichen).`;
       }
       case 'replace_in_file': {
@@ -129,17 +138,17 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         }
         await backup(context, target);
         if (context.signal?.aborted) return TOOL_ABORTED;
-        await writeFile(
+        const written = await writeProjectFile(
+          context.cwd,
           target,
           content.replace(args.old_text, () => args.new_text as string),
-          'utf8',
         );
-        context.changed.add(relative(await realpath(context.cwd), target));
+        context.changed.add(relative(await realpath(context.cwd), written));
         return 'Ersetzt.';
       }
       case 'run_command': {
         const command = typeof args.command === 'string' ? args.command.trim() : '';
-        if (!context.canWrite) {
+        if (!(context.canRunCommands ?? context.canWrite)) {
           return 'Befehle sind für diese Rolle nicht erlaubt.';
         }
         const parts = command.split(/\s+/);

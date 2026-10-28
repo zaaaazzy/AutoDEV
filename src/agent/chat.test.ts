@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOllamaAgent } from './ollama-agent.js';
-import { splitQuestion, buildChatPrompt, findOpenQuestion, loadChatHistory } from './chat.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { acquireTree } from '../core/project-lock.js';
+import { splitQuestion, buildChatPrompt, findOpenQuestion, loadChatHistory, processChat } from './chat.js';
 
 test('reports concrete tool activity through the progress callback', async () => {
   const progress: string[] = [];
@@ -169,4 +173,78 @@ test('Rückfrage mit gleichem Zeitstempel wie die übernommene Nachricht zählt 
     { id: 'n2', role: 'user', at: 2 },
   ]);
   assert.equal(await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null }), undefined);
+});
+
+/**
+ * Antwort auf eine offene Rückfrage (Sitzung wird fortgesetzt), optional mit Verweis auf einen Auftrag und bei
+ * belegtem Ordner. Liefert den Befehl, den der Executor für den Agent-Lauf erhält.
+ */
+async function resumedRun(options: { withReference: boolean; busy: boolean }): Promise<string> {
+  const orderId = '11111111-1111-4111-8111-111111111111';
+  const pool = {
+    query: async (sql: string) => {
+      const text = sql.replace(/\s+/g, ' ');
+      if (text.startsWith("UPDATE chat_messages SET status = 'processing'")) {
+        return {
+          rows: [
+            {
+              id: 'n2',
+              content: 'Nimm Variante B.',
+              agentId: 'agent-1',
+              references: options.withReference ? [{ type: 'order', id: orderId, label: 'Login' }] : [],
+              ideaCommentId: null,
+              replyTo: null,
+              origin: 'chat',
+              taskRunId: null,
+            },
+          ],
+        };
+      }
+      if (text.includes('session_id AS "sessionId"')) {
+        return { rows: [{ id: 'a1', question: 'Welche Variante?', sessionId: 'session-a1' }] };
+      }
+      if (text.includes('FROM development_items d LEFT JOIN bugs b')) {
+        return { rows: [{ title: 'Login', status: 'in_progress', description: 'Login reparieren', untrusted: false }] };
+      }
+      if (text.includes('command, allowed_commands')) {
+        return { rows: [{ instructions: '', command: ['claude', '-p'], allowedCommands: null, fileScope: [] }] };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Parameters<typeof processChat>[0];
+  const cwd = mkdtempSync(join(tmpdir(), 'chat-resume-'));
+  const release = options.busy ? await acquireTree(cwd) : undefined;
+  const commands: string[][] = [];
+  try {
+    await processChat(pool, { project: 'demo', cwd, timeoutMs: 5000 }, async (command) => {
+      commands.push(command);
+      return { exitCode: 0, durationMs: 1, output: 'Erledigt.' };
+    });
+  } finally {
+    release?.();
+  }
+  const run = commands.find((command) => command.includes('--resume'));
+  assert.ok(run, 'Agent-Lauf setzt die Sitzung fort');
+  return run.join('\n');
+}
+
+test('Fortgesetzte Sitzung erhält die Verweise des Nutzers', async () => {
+  const prompt = await resumedRun({ withReference: true, busy: false });
+  assert.match(prompt, /Antwort des Nutzers auf deine Rückfrage „Welche Variante\?“/);
+  assert.match(prompt, /## Verweise des Nutzers/);
+  assert.match(prompt, /Auftrag „Login“/);
+  assert.doesNotMatch(prompt, /Du kannst nur lesen/);
+});
+
+test('Fortgesetzte Sitzung erhält bei belegtem Ordner den Nur-lesen-Hinweis', async () => {
+  const prompt = await resumedRun({ withReference: false, busy: true });
+  assert.match(prompt, /Du kannst nur lesen und antworten/);
+  assert.doesNotMatch(prompt, /Verweise des Nutzers/);
+});
+
+test('Fortgesetzte Sitzung ohne Verweis und bei freiem Ordner bleibt ohne beide Zusätze', async () => {
+  const prompt = await resumedRun({ withReference: false, busy: false });
+  assert.match(prompt, /Antwort des Nutzers auf deine Rückfrage/);
+  assert.doesNotMatch(prompt, /Verweise des Nutzers/);
+  assert.doesNotMatch(prompt, /Du kannst nur lesen/);
 });

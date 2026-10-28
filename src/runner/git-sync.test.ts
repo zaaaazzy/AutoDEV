@@ -10,6 +10,7 @@ import { type CommandExecutor, runCommand } from '../core/command.js';
 import { conflictSection, remainingConflicts } from './runner-steps.js';
 import type { HosterAdapter } from './hoster.js';
 import { goLive } from './go-live.js';
+import { syncGitHub } from './github-sync.js';
 import {
   ciLogExcerpt,
   maskSecrets,
@@ -41,6 +42,7 @@ function fakePool(
   action: 'push' | 'pull' = 'push',
   testCommands: string[][] = [['true']],
   status = 'active',
+  sprint: { name?: string; branch?: string | null; hasDone?: boolean } = {},
 ): { pool: Pool; updates: { sql: string; values: unknown[] }[] } {
   const updates: { sql: string; values: unknown[] }[] = [];
   let claimed = false;
@@ -50,7 +52,16 @@ function fakePool(
       if (sql.includes("SET git_sync = 'running'") && !claimed) {
         claimed = true;
         return {
-          rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', action, remote, status }],
+          rows: [
+            {
+              id: 'abcdef12-0000-0000-0000-000000000000',
+              name: 'Sprint 1: Äpfel',
+              action,
+              remote,
+              status,
+              ...sprint,
+            },
+          ],
         };
       }
       if (sql.includes('test_commands')) return { rows: [{ commands: testCommands }] };
@@ -214,6 +225,67 @@ test('each order works on its own branch and is merged into the sprint branch on
   assert.equal(git('branch', '--list', 'auftrag/*'), '');
 });
 
+test('Sprint umbenennen nach dem ersten gemergten Auftrag: Abschluss enthält alle Aufträge', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-rename-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+
+  // Branch beim Start festgehalten (sprints.branch); danach wird der Sprint umbenannt.
+  const before = { name: 'Sprint 5', branch: 'sprint/sprint-5' };
+  const first = { id: 'aaaaaaaa-0000-4000-8000-000000000001', title: 'Erster Auftrag' };
+  const one = await enterOrderBranch(cwd, first, before);
+  assert.equal(one?.base, 'sprint/sprint-5');
+  await writeFile(join(cwd, 'eins.txt'), '1');
+  assert.equal((await finishOrderBranch(cwd, first, one!, before.name, true)).merged, true);
+
+  const renamed = { name: 'Sprint 5 – Zahlungen', branch: 'sprint/sprint-5' };
+  const second = { id: 'bbbbbbbb-0000-4000-8000-000000000002', title: 'Zweiter Auftrag' };
+  const two = await enterOrderBranch(cwd, second, renamed);
+  assert.equal(two?.base, 'sprint/sprint-5', 'nach dem Umbenennen kein neuer Branch von main');
+  await writeFile(join(cwd, 'zwei.txt'), '2');
+  assert.equal((await finishOrderBranch(cwd, second, two!, renamed.name, true)).merged, true);
+  assert.equal(git('branch', '--list', 'sprint/*'), '* sprint/sprint-5');
+
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed', { ...renamed, hasDone: true });
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 1);
+  assert.match(updates.at(-1)?.sql ?? '', /git_sync = 'done'/);
+  assert.equal(git('show', 'main:eins.txt'), '1', 'Auftrag vor der Umbenennung ist in main');
+  assert.equal(git('show', 'main:zwei.txt'), '2');
+  assert.match(git('log', 'main', '-1', '--format=%s'), /^Merge sprint\/sprint-5: Sprint Sprint 5 – Zahlungen/);
+  const tag = sprintTag(renamed.name, 'abcdef12-0000-0000-0000-000000000000');
+  assert.equal(git('rev-parse', `${tag}^{commit}`), git('rev-parse', 'main'), 'Tag zeigt auf den vollständigen Stand');
+});
+
+test('Sprint-Abschluss ohne Sprint-Branch, aber mit erledigten Aufträgen: gescheitert statt „done“', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'git-missing-'));
+  const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
+  execFileSync('git', ['init', '-b', 'main'], { cwd });
+  git('config', 'user.email', 'a@b.c');
+  git('config', 'user.name', 'a');
+  await writeFile(join(cwd, 'base.txt'), 'base');
+  git('add', '-A');
+  git('commit', '-m', 'base');
+  await writeFile(join(cwd, 'lose.txt'), 'nicht vom Sprint');
+  const head = git('rev-parse', 'main');
+
+  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed', {
+    name: 'Sprint 7',
+    branch: 'sprint/sprint-7',
+    hasDone: true,
+  });
+  assert.equal(await syncSprintToGit(pool, 'p', cwd), 0);
+  const final = updates.at(-1);
+  assert.match(final?.sql ?? '', /git_sync = 'failed'/);
+  assert.match(String(final?.values[1]), /Sprint-Branch sprint\/sprint-7 fehlt/);
+  assert.equal(git('rev-parse', 'main'), head, 'main unverändert, kein Sicherungs-Commit');
+  assert.equal(git('tag'), '', 'kein Tag auf einem fremden Stand');
+});
+
 test('ein gescheiterter Deploy wird nicht als „Live geschaltet“ gemeldet', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'git-live-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd, stdio: 'pipe' }).toString().trim();
@@ -296,15 +368,22 @@ test('merges a finished sprint into main checked out elsewhere only when that fo
     return { calls, execute };
   };
   const clean = run('');
-  assert.equal(await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), true);
+  assert.equal(
+    await mergeIntoCheckedOutMain(clean.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []),
+    'merged',
+  );
   assert.ok(clean.calls.some((call) => call.startsWith('git merge --no-ff sprint/s1')));
 
+  // Offene Änderungen: Der Mensch übernimmt selbst (wartet auf Merge), nichts angefasst.
   const busy = run(' M src/app.ts\n');
-  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), false);
+  assert.equal(await mergeIntoCheckedOutMain(busy.execute, '/human', 'sprint/s1', 'S1', [], []), 'busy');
   assert.ok(!busy.calls.some((call) => call.startsWith('git merge')));
 
   const red = run('', true);
-  assert.equal(await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []), false);
+  assert.equal(
+    await mergeIntoCheckedOutMain(red.execute, '/human', 'sprint/s1', 'S1', [['npm', 'test']], []),
+    'failed',
+  );
   // Zurück auf den Stand vor dem Merge (nicht ORIG_HEAD, den das Test-Gate verschoben haben kann).
   assert.ok(red.calls.includes('git reset --keep abc1234'));
 });
@@ -532,6 +611,140 @@ test('PR-Modus: nach dem Merge des Pull Requests wird live geschaltet (Deploy un
   assert.match(String(updates.at(-1)?.values[1]), /Live geschaltet: .*deployt/);
 });
 
+/** Review-Pool mit Projektordner (projects.repository) und Deploy-Befehlen; zählt production_deploys-Einträge. */
+function livePool(repository: string, separate: boolean) {
+  const { pool: review, updates } = reviewPool({ ...REVIEW });
+  const deploys: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('SELECT repository')) return { rows: [{ repository, separate }] };
+      if (sql.includes('deploy_commands')) return { rows: [{ commands: [['true']] }] };
+      if (sql.includes('INSERT INTO production_deploys')) deploys.push(values);
+      return review.query(sql, values);
+    },
+  } as unknown as Pool;
+  return { pool, updates, deploys };
+}
+
+const finalMessage = (updates: { sql: string; values: unknown[] }[]) =>
+  String(updates.filter((entry) => /SET status = 'completed'/.test(entry.sql)).at(-1)?.values[1]);
+
+test('PR-Modus ohne eigenen Agent-Ordner: Projektordner wechselt vom Sprint-Branch auf main und geht live', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const { pool, updates, deploys } = livePool(cwd, false);
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(await pollSprintReviews(pool, 'p', cwd, adapter, false, undefined, () => goLive(pool, 'p', cwd)), 1);
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('rev-parse', 'HEAD'), execFileSync('git', ['rev-parse', 'main'], { cwd: remote }).toString().trim());
+  assert.equal(git('show', 'HEAD:feature.txt'), 'neu', 'deployt wird main mit dem Sprint, nicht der Sprint-Branch');
+  assert.equal(deploys.length, 1);
+  assert.match(finalMessage(updates), /Live geschaltet: .*deployt/);
+});
+
+test('PR-Modus ohne eigenen Agent-Ordner: offene Änderungen oder fremder Branch – kein Wechsel, kein Deploy', async () => {
+  // Offene Änderung auf dem Sprint-Branch: bleibt erhalten, nichts wird ausgecheckt oder deployt.
+  const dirty = await sprintRepository();
+  dirty.git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  await writeFile(join(dirty.cwd, 'feature.txt'), 'von Hand');
+  const first = livePool(dirty.cwd, false);
+  const one = reviewAdapter({ checks: 'success' });
+  one.adapter.mergePullRequest = () => mergeOnGithub(dirty.remote);
+  assert.equal(
+    await pollSprintReviews(first.pool, 'p', dirty.cwd, one.adapter, false, undefined, () =>
+      goLive(first.pool, 'p', dirty.cwd),
+    ),
+    1,
+  );
+  assert.equal(dirty.git('rev-parse', '--abbrev-ref', 'HEAD'), 'sprint/sprint-1-apfel');
+  assert.equal(await readFile(join(dirty.cwd, 'feature.txt'), 'utf8'), 'von Hand');
+  assert.deepEqual(first.deploys, []);
+  assert.match(finalMessage(first.updates), /offene Änderungen/);
+  assert.doesNotMatch(finalMessage(first.updates), /Live geschaltet/);
+
+  // Projektordner auf einem fremden Branch (nicht dem des Sprints): bleibt dort.
+  const foreign = await sprintRepository();
+  foreign.git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  foreign.git('checkout', '-q', '-b', 'feature/mensch', 'main');
+  const second = livePool(foreign.cwd, false);
+  const two = reviewAdapter({ checks: 'success' });
+  two.adapter.mergePullRequest = () => mergeOnGithub(foreign.remote);
+  assert.equal(
+    await pollSprintReviews(second.pool, 'p', foreign.cwd, two.adapter, false, undefined, () =>
+      goLive(second.pool, 'p', foreign.cwd),
+    ),
+    1,
+  );
+  assert.equal(foreign.git('rev-parse', '--abbrev-ref', 'HEAD'), 'feature/mensch');
+  assert.deepEqual(second.deploys, []);
+  assert.match(finalMessage(second.updates), /feature\/mensch/);
+});
+
+/** Eigener Agent-Ordner (Worktree auf dem Sprint-Branch); der Projektordner (Live-Ordner) steht auf main. */
+async function agentWorktreeLayout() {
+  const repo = await sprintRepository();
+  repo.git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  repo.git('checkout', '-q', 'main');
+  const agents = join(await mkdtemp(join(tmpdir(), 'git-agents-')), 'agents');
+  repo.git('worktree', 'add', '-q', agents, 'sprint/sprint-1-apfel');
+  return { ...repo, live: repo.cwd, agents };
+}
+
+test('PR-Modus mit eigenem Agent-Ordner: main im Live-Ordner nachgezogen, live geschaltet, production_deploys', async () => {
+  const { live, agents, remote, git } = await agentWorktreeLayout();
+  const { pool, updates, deploys } = livePool(live, true);
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(
+    await pollSprintReviews(pool, 'p', agents, adapter, false, undefined, () => goLive(pool, 'p', agents)),
+    1,
+  );
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), 'main');
+  assert.equal(git('show', 'HEAD:feature.txt'), 'neu');
+  assert.equal(deploys.length, 1);
+  assert.match(finalMessage(updates), /Live geschaltet: .*deployt/);
+});
+
+test('PR-Modus mit eigenem Agent-Ordner: Live-Ordner als losgelöste Vorschau wird auf main gesetzt und deployt', async () => {
+  const { live, agents, remote, git } = await agentWorktreeLayout();
+  git('checkout', '-q', '--detach', 'sprint/sprint-1-apfel');
+  const { pool, deploys } = livePool(live, true);
+  const { adapter } = reviewAdapter({ checks: 'success' });
+  adapter.mergePullRequest = () => mergeOnGithub(remote);
+  assert.equal(
+    await pollSprintReviews(pool, 'p', agents, adapter, false, undefined, () => goLive(pool, 'p', agents)),
+    1,
+  );
+  assert.equal(git('rev-parse', 'HEAD'), execFileSync('git', ['rev-parse', 'main'], { cwd: remote }).toString().trim());
+  assert.equal(deploys.length, 1);
+});
+
+test('PR-Modus mit eigenem Agent-Ordner: Live-Ordner unsauber oder auf fremdem Branch – kein Deploy', async () => {
+  const dirty = await agentWorktreeLayout();
+  await writeFile(join(dirty.live, 'base.txt'), 'von Hand');
+  const first = livePool(dirty.live, true);
+  const one = reviewAdapter({ checks: 'success' });
+  one.adapter.mergePullRequest = () => mergeOnGithub(dirty.remote);
+  await pollSprintReviews(first.pool, 'p', dirty.agents, one.adapter, false, undefined, () =>
+    goLive(first.pool, 'p', dirty.agents),
+  );
+  assert.equal(await readFile(join(dirty.live, 'base.txt'), 'utf8'), 'von Hand');
+  assert.deepEqual(first.deploys, []);
+  assert.match(finalMessage(first.updates), /offene Änderungen/);
+
+  const foreign = await agentWorktreeLayout();
+  foreign.git('checkout', '-q', '-b', 'feature/mensch');
+  const second = livePool(foreign.live, true);
+  const two = reviewAdapter({ checks: 'success' });
+  two.adapter.mergePullRequest = () => mergeOnGithub(foreign.remote);
+  await pollSprintReviews(second.pool, 'p', foreign.agents, two.adapter, false, undefined, () =>
+    goLive(second.pool, 'p', foreign.agents),
+  );
+  assert.equal(foreign.git('rev-parse', '--abbrev-ref', 'HEAD'), 'feature/mensch');
+  assert.deepEqual(second.deploys, []);
+});
+
 test('required approval: green CI waits until a human approves', async () => {
   const { cwd, remote, git } = await sprintRepository();
   git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
@@ -581,6 +794,73 @@ test('red CI never merges and files one bug per run with a masked, shortened log
   } finally {
     delete process.env.DEVLOG_CI_TEST_SECRET;
   }
+});
+
+/** Review-Pool mit Projekteinstellungen für syncGitHub; die GitHub-Brücke steht auf `aus`. */
+function bridgeOffPool(sprint: ReviewRow) {
+  const review = reviewPool(sprint);
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('FROM projects WHERE slug')) {
+        review.updates.push({ sql, values });
+        return {
+          rows: [
+            {
+              mode: 'aus',
+              remote: 'https://github.com/a/b.git',
+              requireApproval: false,
+              syncedAt: null,
+              auth: 'ok',
+              authCheckedAt: new Date(),
+            },
+          ],
+        };
+      }
+      return review.pool.query(sql, values);
+    },
+  } as unknown as Pool;
+  return { ...review, pool };
+}
+
+test('Brücke aus: Sprint im Review wird nach grüner CI trotzdem gemergt, getaggt und abgeschlossen', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  const sprint = { ...REVIEW };
+  const { pool, updates } = bridgeOffPool(sprint);
+  const { adapter, merged } = reviewAdapter({ checks: 'success' });
+  const listed: string[] = [];
+  adapter.listIssues = async (label) => (listed.push(label), []);
+  adapter.mergePullRequest = async (url) => {
+    merged.push(url);
+    await mergeOnGithub(remote);
+  };
+  const result = await syncGitHub(pool, 'bruecke-aus-ci', cwd, runCommand, new Date(), () => adapter);
+  assert.equal(result.skipped, undefined);
+  assert.equal(result.finished, 1);
+  assert.deepEqual(merged, ['https://github.com/a/b/pull/42']);
+  assert.equal(sprint.status, 'completed');
+  assert.ok(execFileSync('git', ['tag', '-l', 'sprint-sprint-1-apfel-abcdef'], { cwd: remote }).toString().trim());
+  // Der Issue-Import bleibt im Modus „aus“ abgeschaltet.
+  assert.deepEqual(listed, []);
+  assert.ok(!updates.some((update) => update.sql.includes('SET github_synced_at')));
+  // Zweiter Takt nach dem Intervall: nichts mehr im Review, also kein gh-Aufruf und kein zweiter Merge.
+  const later = new Date(Date.now() + 10 * 60_000);
+  assert.equal((await syncGitHub(pool, 'bruecke-aus-ci', cwd, runCommand, later, () => adapter)).skipped, 'Modus aus');
+  assert.equal(merged.length, 1);
+});
+
+test('Brücke aus: von Hand gemergter Pull Request schliesst den Sprint ab', async () => {
+  const { cwd, remote, git } = await sprintRepository();
+  git('push', '-u', 'origin', 'sprint/sprint-1-apfel');
+  await mergeOnGithub(remote);
+  const sprint = { ...REVIEW };
+  const { pool } = bridgeOffPool(sprint);
+  const { adapter, merged } = reviewAdapter({ checks: 'success', pr: 'merged' });
+  const result = await syncGitHub(pool, 'bruecke-aus-hand', cwd, runCommand, new Date(), () => adapter);
+  assert.equal(result.finished, 1);
+  assert.deepEqual(merged, []);
+  assert.equal(sprint.status, 'completed');
+  assert.ok(execFileSync('git', ['tag', '-l', 'sprint-sprint-1-apfel-abcdef'], { cwd: remote }).toString().trim());
 });
 
 test('a pull request closed without merge ends the review as failed sync', async () => {
@@ -887,8 +1167,88 @@ test('Live schalten deployt nicht aus einem Projektordner auf fremdem Branch ode
 });
 
 // Früher hiess die Sicherung „done“, obwohl der Sprint nie in main ankam (main im Ordner der Menschen ausgecheckt, dort
-// offene Änderungen) – der nächste Sprint zweigte dann vom alten main ab.
-test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gescheitert statt „done“, dort nichts angefasst', async () => {
+// offene Änderungen) – der Autopilot meldete „ready“, und der nächste Sprint zweigte vom alten main ab. Jetzt wartet
+// der Sprint auf den Merge (auch mit restart_after_sprint: kein Neustart) und wird „done“, sobald main ihn enthält.
+test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → wartet auf Merge, danach „done“', async () => {
+  const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
+  const agents = `${human}-agents`;
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 't',
+    GIT_AUTHOR_EMAIL: 't@t',
+    GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@t',
+  };
+  const run = (cwd: string, ...args: string[]) =>
+    execFileSync('git', args, { cwd, stdio: 'pipe', env }).toString().trim();
+  run(human, 'init', '-q', '-b', 'main');
+  await writeFile(join(human, 'a.txt'), 'a\n');
+  run(human, 'add', '-A');
+  run(human, 'commit', '-q', '-m', 'eins');
+  run(human, 'worktree', 'add', '-q', '-b', 'sprint/sprint-1-apfel', agents, 'main');
+  await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
+  run(agents, 'add', '-A');
+  run(agents, 'commit', '-q', '-m', 'sprint');
+  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
+  for (const restart of [false, true]) {
+    const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+    const query = pool.query.bind(pool) as (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }>;
+    (pool as unknown as { query: typeof query }).query = async (sql, values = []) => {
+      if (sql.includes('restart_after_sprint AS restart')) return { rows: [{ restart }] };
+      return query(sql, values);
+    };
+    assert.equal(await syncSprintToGit(pool, 'p', agents), 1);
+    const waiting = updates.find((entry) => /SET git_sync = 'awaiting_merge'/.test(entry.sql));
+    assert.ok(waiting, 'wartet auf Merge');
+    assert.match(String(waiting.values[1]), /git merge sprint\/sprint-1-apfel/);
+    assert.ok(!updates.some((entry) => /SET git_sync = '(done|failed)'/.test(entry.sql)), 'weder done noch failed');
+    assert.ok(!updates.some((entry) => /INSERT INTO app_settings/.test(entry.sql)), 'kein Neustart angefordert');
+    assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+    assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
+  }
+
+  // Noch nicht gemergt: Die Prüfung lässt den Sprint warten.
+  const commit = run(agents, 'rev-parse', '--short', 'sprint/sprint-1-apfel');
+  const settle = () => {
+    const updates: { sql: string; values: unknown[] }[] = [];
+    const pool = {
+      query: async (sql: string, values: unknown[] = []) => {
+        updates.push({ sql, values });
+        if (sql.includes("WHERE project_slug = $1 AND git_sync = 'awaiting_merge'"))
+          return { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', commit }] };
+        return { rows: [] };
+      },
+    } as unknown as Pool;
+    return { pool, updates };
+  };
+  const still = settle();
+  assert.equal(await syncSprintToGit(still.pool, 'p', agents), 0);
+  assert.ok(!still.updates.some((entry) => /SET git_sync = '(done|failed)'/.test(entry.sql)));
+
+  // Der Mensch räumt auf und übernimmt den Sprint von Hand: Beim nächsten Durchlauf wird er „done“.
+  run(human, 'checkout', '-q', '--', 'a.txt');
+  run(human, 'merge', '-q', '--no-ff', '-m', 'Sprint übernommen', 'sprint/sprint-1-apfel');
+  const merged = settle();
+  await syncSprintToGit(merged.pool, 'p', agents);
+  const done = merged.updates.find((entry) => /SET git_sync = 'done'/.test(entry.sql));
+  assert.ok(done, 'nach dem Merge „done“');
+  assert.match(done.sql, /WHERE id = \$1 AND git_sync = 'awaiting_merge'/, 'nur aus „wartet auf Merge“ heraus');
+
+  // Ein Stand, den git nicht kennt, ist ein echter Fehler (Exit-Code ≠ 0/1): weder „done“ noch weiter „wartet“.
+  const unknown = settle();
+  const pool = unknown.pool as unknown as { query: (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }> };
+  const inner = pool.query;
+  pool.query = async (sql, values = []) =>
+    sql.includes("WHERE project_slug = $1 AND git_sync = 'awaiting_merge'")
+      ? { rows: [{ id: 'abcdef12-0000-0000-0000-000000000000', name: 'Sprint 1: Äpfel', commit: 'deadbeef00' }] }
+      : inner(sql, values);
+  await syncSprintToGit(unknown.pool, 'p', agents);
+  assert.ok(unknown.updates.some((entry) => /SET git_sync = 'failed'/.test(entry.sql)));
+  assert.ok(!unknown.updates.some((entry) => /SET git_sync = 'done'/.test(entry.sql)));
+});
+
+// Konflikte oder rotes Test-Gate beim Merge in den Ordner der Menschen bleiben ein echter Fehler (Autopilot pausiert).
+test('Sprint-Sicherung: main in anderem Ordner, Test-Gate dort rot → gescheitert, Merge zurückgenommen', async () => {
   const human = await mkdtemp(join(tmpdir(), 'git-sync-human-'));
   const agents = `${human}-agents`;
   const run = (cwd: string, ...args: string[]) =>
@@ -913,8 +1273,10 @@ test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gesch
   await writeFile(join(agents, 'sprint.txt'), 'sprint\n');
   run(agents, 'add', '-A');
   run(agents, 'commit', '-q', '-m', 'sprint');
-  await writeFile(join(human, 'a.txt'), 'Mensch arbeitet\n');
-  const { pool, updates } = fakePool(null, 'push', [['true']], 'completed');
+  // Ungetrackte Datei zählt nicht als offene Änderung, lässt aber das Test-Gate nur im Ordner der Menschen scheitern.
+  await writeFile(join(human, 'rot.marker'), 'x');
+  const gate = ['node', '-e', "process.exit(require('fs').existsSync('rot.marker') ? 1 : 0)"];
+  const { pool, updates } = fakePool(null, 'push', [gate], 'completed');
   assert.equal(await syncSprintToGit(pool, 'p', agents), 0);
   const failed = updates.find((entry) => /git_sync = 'failed'/.test(entry.sql));
   assert.ok(failed, 'als gescheitert markiert');
@@ -922,8 +1284,8 @@ test('Sprint-Sicherung: main in anderem Ordner mit offenen Änderungen → gesch
     String(failed.values.find((value) => typeof value === 'string' && value.includes('main'))),
     /noch nicht in main/,
   );
-  assert.ok(!updates.some((entry) => /git_sync = 'done'/.test(entry.sql)));
-  assert.equal(run(human, 'status', '--porcelain'), 'M a.txt');
+  assert.ok(!updates.some((entry) => /SET git_sync = '(done|awaiting_merge)'/.test(entry.sql)));
+  assert.equal(run(human, 'status', '--porcelain'), '?? rot.marker');
   assert.equal(run(human, 'rev-list', '--count', 'main'), '1');
 });
 

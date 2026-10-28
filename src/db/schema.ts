@@ -1012,6 +1012,18 @@ export const SCHEMA = `
   -- Wegen Budget blockierter Auftrag: Zeitraum, der ihn blockiert (wird frei, sobald das Budget wieder reicht).
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_blocked TEXT
     CHECK (budget_blocked IN ('day', 'sprint', 'order'));
+  -- Token-Limit je Agent-Rolle und Zeitraum; keine Zeile = keine Grenze für die Rolle (zusätzlich zu budgets).
+  CREATE TABLE IF NOT EXISTS budget_role_limits (
+    project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+    role TEXT NOT NULL CHECK (role IN
+      ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer')),
+    period TEXT NOT NULL CHECK (period IN ('day', 'sprint', 'order')),
+    max_tokens BIGINT NOT NULL CHECK (max_tokens > 0),
+    PRIMARY KEY (project_slug, role, period)
+  );
+  -- Rolle, deren Limit den Auftrag blockiert (NULL = Projektlimit); die Freigabe prüft dasselbe Limit.
+  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_blocked_role TEXT;
+  CREATE INDEX IF NOT EXISTS agent_usage_role_idx ON agent_usage (project_slug, role, created_at);
   -- Beginn je Schritt, damit der Verbrauch dem richtigen Tag zufällt (ältere Schritte: Beginn des Laufs).
   ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
   ALTER TABLE agent_run_steps ALTER COLUMN started_at SET DEFAULT NOW();
@@ -1131,7 +1143,8 @@ export const SCHEMA = `
     ('backup_check', TRUE, 21600, 'backup_check', '{"dir": "backups", "maxAgeHours": 26, "minBytes": 1024}'),
     ('watchdog_logs', TRUE, 900, 'watchdog_logs', '{}'),
     ('close_old_sprints', FALSE, 86400, 'close_old_sprints', '{"inactiveDays": 14}'),
-    ('push_alert', TRUE, 3600, 'push_alert', '{}')
+    ('push_alert', TRUE, 3600, 'push_alert', '{}'),
+    ('restore_probe', TRUE, 604800, 'restore_probe', '{"dir": "backups"}')
   ON CONFLICT (key) DO NOTHING;
   -- Prozessregister des Workers: jeder gestartete Prozess (Agents, Chat, Autor, Visionär, Testläufe) mit Startzeit.
   -- Nach einem Absturz beendet der neue Worker diese Gruppen, bevor er Anfragen erneut einplant.

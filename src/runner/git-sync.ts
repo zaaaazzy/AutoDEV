@@ -10,6 +10,8 @@ export {
   previousSprintTag,
   pushRemote,
   sprintBranch,
+  sprintBranchOf,
+  type SprintRef,
   sprintTag,
   stageAll,
   taskCommitMessage,

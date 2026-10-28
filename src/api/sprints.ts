@@ -17,6 +17,13 @@ import {
   parseProjectSlug,
   parseTitle,
 } from '../core/validation.js';
+import {
+  canChangeSprintStatus,
+  completeSprintConflict,
+  DELETABLE_SPRINT_STATUSES,
+  IDLE_SPRINT_GIT_SYNC,
+  SPRINT_HOLDING_DEVELOPMENT_STATUSES,
+} from '../core/sprint-rules.js';
 
 const SPRINT_STATUSES = new Set(['planned', 'active', 'completed', 'cancelled']);
 const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
@@ -24,15 +31,9 @@ const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   created_at AS "createdAt", git_sync AS "gitSync", git_message AS "gitMessage",
   git_commit AS "gitCommit", git_branch AS "gitBranch", git_synced_at AS "gitSyncedAt", pr_url AS "prUrl", ci_status AS "ciStatus",
   review_ready_at AS "reviewReadyAt", paused_at AS "pausedAt", paused_by AS "pausedBy"`;
-// Erlaubte Statuswechsel per PATCH. Review → abgeschlossen übernimmt der Worker (Merge nach grüner CI).
-// Abgeschlossen → aktiv ist „Wieder öffnen“ in der Oberfläche. Abbrechen geht aus Planung und Lauf (cancelSprint);
-// ein abgebrochener Sprint lässt sich nur wieder planen.
-const SPRINT_TRANSITIONS: Record<string, readonly string[]> = {
-  planned: ['active', 'cancelled'],
-  active: ['planned', 'completed', 'cancelled'],
-  completed: ['active'],
-  cancelled: ['planned'],
-};
+/** Feste Statuslisten aus sprint-rules für `IN (…)` (eigene Konstanten, keine Benutzereingabe). */
+const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
+const ONE_ACTIVE_MESSAGE = 'Es kann nur ein Sprint pro Projekt aktiv sein.';
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },
@@ -46,6 +47,11 @@ const SPRINT_FIELDS = {
  * Schritt ab), offene Aufträge verlassen den Sprint wie „aus dem laufenden Sprint genommen“: geplante zurück ins
  * Backlog, laufende schließt der Worker ab (settleItem). Mit dem Vermerk stehen sie unter „Aktionen“ und zur Auswahl für
  * den nächsten Sprint. Erledigte und abgelehnte bleiben beim Sprint; Git-Sicherung und Merge gibt es nicht.
+ *
+ * Aufträge in Freigabe gehen ebenfalls zurück ins Backlog (statt wie erledigte beim Sprint zu bleiben): Ihre Freigabe
+ * mergte in den Sprint-Branch (review_base), der nach dem Abbruch nie in main kommt. Ohne Rücksetzen hingen sie ohne
+ * Sprint in Freigabe fest, und „Wieder einplanen“ (/retry nur aus backlog/planned) scheiterte mit 409. Die Arbeit
+ * bleibt auf dem Auftrags-Branch; der nächste Lauf setzt dort fort.
  */
 export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stopped: number; released: number }> {
   const stopped = await pool.query(
@@ -57,7 +63,8 @@ export async function cancelSprint(pool: Pool, sprintId: string): Promise<{ stop
   const released = await pool.query(
     `UPDATE development_items SET removed_from_sprint = (SELECT name FROM sprints WHERE id = $1),
             removed_from_sprint_at = NOW(), sprint_id = NULL, agent_id = NULL, auto_run = FALSE,
-            status = CASE WHEN status = 'planned' THEN 'backlog' ELSE status END, updated_at = NOW()
+            status = CASE WHEN status IN ('planned', 'approval') THEN 'backlog' ELSE status END,
+            review_branch = NULL, review_base = NULL, review_since = NULL, review_approved_at = NULL, updated_at = NOW()
       WHERE sprint_id = $1 AND status NOT IN ('done', 'rejected')`,
     [sprintId],
   );
@@ -71,7 +78,9 @@ const SAME_BRANCH_MESSAGE =
 
 /**
  * Zwei Sprints mit gleichem Branch-Namen (z. B. „Sprint 5“ und „sprint-5“, oder Namen, die nach 40 Zeichen gleich
- * werden) teilten sich einen Sprint-Branch: Der neue setzte dann die ungesicherte Arbeit des alten fort.
+ * werden) teilten sich einen Sprint-Branch: Der neue setzte dann die ungesicherte Arbeit des alten fort. Heute hält
+ * sprints.branch den Branch beim Start fest (bei Gleichstand mit ID-Zusatz); die Prüfung vermeidet weiter
+ * verwechselbare Namen. Umbenennen ändert den Branch nicht.
  */
 async function branchNameTaken(pool: Pool, project: string, name: string, exceptId?: string): Promise<boolean> {
   const branch = sprintBranch(name);
@@ -169,11 +178,19 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       let from: string | undefined;
       if (target) {
         // PR-Modus: Solange der Pull Request offen ist, schließt nur der Worker den Sprint ab (Merge und Tag).
-        const current = await pool.query<{ status: string; running: number; waiting: number; slug: string }>(
+        const current = await pool.query<{
+          status: string;
+          running: number;
+          waiting: number;
+          others: number;
+          slug: string;
+        }>(
           `SELECT status, project_slug AS slug, (SELECT COUNT(*)::int FROM development_items
                             WHERE sprint_id = s.id AND status = 'in_progress') AS running,
                   (SELECT COUNT(*)::int FROM development_items
-                    WHERE sprint_id = s.id AND status = 'approval') AS waiting
+                    WHERE sprint_id = s.id AND status = 'approval') AS waiting,
+                  (SELECT COUNT(*)::int FROM sprints o
+                    WHERE o.project_slug = s.project_slug AND o.id <> s.id AND o.status = 'active') AS others
              FROM sprints s WHERE id = $1`,
           [request.params.id],
         );
@@ -184,15 +201,15 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
           });
           return;
         }
+        // Dieselben Regeln wie die Knöpfe im Sprint-Detail (src/core/sprint-rules.ts).
         const conflict = !from
           ? null
-          : !SPRINT_TRANSITIONS[from]?.includes(target)
+          : !canChangeSprintStatus(from, target)
             ? `Statuswechsel ${from} → ${target} ist für Sprints nicht erlaubt.`
-            : target === 'completed' && Number(current.rows[0]?.running) > 0
-              ? 'Im Sprint laufen noch Aufträge – erst abwarten oder stoppen, dann abschließen.'
-              : target === 'completed' && Number(current.rows[0]?.waiting) > 0
-                ? // Freigaben werden später in den Sprint-Branch gemergt – nach dem Abschluss kämen sie nie mehr in main.
-                  `${current.rows[0]?.waiting} Auftrag/Aufträge warten auf die Review-Freigabe oder den Merge danach – erst freigeben bzw. zurückweisen und den Merge abwarten, dann abschliessen.`
+            : target === 'completed'
+              ? completeSprintConflict(Number(current.rows[0]?.running), Number(current.rows[0]?.waiting))
+              : target === 'active' && Number(current.rows[0]?.others) > 0
+                ? ONE_ACTIVE_MESSAGE
                 : null;
         if (conflict) {
           response.status(409).json({ message: conflict });
@@ -254,7 +271,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     } catch (error) {
       const code = databaseCode(error);
       if (code === '23505') {
-        response.status(409).json({ message: 'Es kann nur ein Sprint pro Projekt aktiv sein.' });
+        response.status(409).json({ message: ONE_ACTIVE_MESSAGE });
         return;
       }
       if (code === '23514') {
@@ -273,7 +290,8 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
     const action = isRecord(request.body) && request.body.action === 'pull' ? 'pull' : 'push';
     const result = await pool.query(
       `UPDATE sprints SET git_sync = 'pending', git_action = $2, git_message = NULL
-        WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed')) RETURNING ${SPRINT_COLUMNS}`,
+        WHERE id = $1 AND (git_sync IS NULL OR git_sync IN ('done', 'failed', 'awaiting_merge'))
+        RETURNING ${SPRINT_COLUMNS}`,
       [request.params.id, action],
     );
     if (!result.rows[0]) {
@@ -344,11 +362,12 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
-    // Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Aufträge und ohne laufende Git-Sicherung:
-    // sonst verlieren laufende Aufträge ihren Sprint bzw. ein offener PR bleibt ohne Sprint zurück.
-    const deletable = `status IN ('planned', 'completed', 'cancelled')
-          AND (git_sync IS NULL OR git_sync IN ('done', 'failed'))
-          AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status = 'in_progress')`;
+    // Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Git-Sicherung und ohne Aufträge, die laufen
+    // oder auf Freigabe warten: sonst verlieren diese ihren Sprint (die Freigabe mergte danach ohne Sprint) bzw. ein
+    // offener PR bleibt ohne Sprint zurück. Gleiche Regel wie canDeleteSprint (src/core/sprint-rules.ts).
+    const deletable = `status IN (${sqlList(DELETABLE_SPRINT_STATUSES)})
+          AND (git_sync IS NULL OR git_sync IN (${sqlList(IDLE_SPRINT_GIT_SYNC)}))
+          AND NOT EXISTS (SELECT 1 FROM development_items WHERE sprint_id = s.id AND status IN (${sqlList(SPRINT_HOLDING_DEVELOPMENT_STATUSES)}))`;
     // Geplante Aufträge eines gelöschten Sprints sind nicht mehr geplant: zurück ins Backlog, sonst stünden sie als
     // „Geplant“ ohne Sprint in der Liste (den Sprint-Verweis löscht der Fremdschlüssel). Einzeln gestartete behalten
     // ihren Status (agent_id), sie laufen ohne Sprint.
@@ -366,7 +385,7 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       if (exists) {
         response.status(409).json({
           message:
-            'Nur geplante, abgeschlossene oder abgebrochene Sprints ohne laufende Aufträge und Git-Sicherung lassen sich löschen.',
+            'Nur geplante, abgeschlossene oder abgebrochene Sprints ohne Git-Sicherung und ohne Aufträge, die laufen oder auf Freigabe warten, lassen sich löschen.',
         });
         return;
       }

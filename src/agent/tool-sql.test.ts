@@ -34,6 +34,29 @@ test('sqlViolation blocks bulk data loss and dynamic SQL', () => {
   }
 });
 
+test('runProjectSql maskiert Tokens in Ergebniszeilen und Fehlermeldungen, auch in gekürzten Zellen', async () => {
+  const token = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345';
+  const pem = `-----BEGIN PRIVATE KEY-----\n${'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC'.repeat(30)}\n-----END PRIVATE KEY-----`;
+  const client = (fail: boolean): SqlClient => ({
+    connect: async () => undefined,
+    end: async () => undefined,
+    query: async (text: string) => {
+      if (fail && text.startsWith('INSERT')) throw new Error(`Key (token)=(${token}) already exists.`);
+      const row = { id: 1, token, key: pem, meta: { github: `ghp_${'A1b2C3d4E5'.repeat(3)}abcdef` } };
+      return { command: 'SELECT', rowCount: 1, rows: text.startsWith('SELECT') ? [row] : [] };
+    },
+  });
+  const read = await runProjectSql('postgres://x@h/shop', 'SELECT * FROM api_keys', () => client(false), {});
+  assert.match(read, /^SELECT: 1 Zeile/);
+  assert.ok(!read.includes('AbCdEfGhIjKl'), read);
+  assert.ok(!read.includes('MIIEvQIBADAN'), read);
+  assert.ok(!read.includes('A1b2C3d4E5'), read);
+  assert.match(read, /"id":1/);
+  const insert = "INSERT INTO api_keys VALUES ('x')";
+  const failed = await runProjectSql('postgres://x@h/shop', insert, () => client(true), {});
+  assert.match(failed, /^SQL-Fehler: Key \(token\)=\(\[MASKIERT\]\) already exists\.$/);
+});
+
 test('targetsDevLogDatabase compares database names', () => {
   const env = { DEV_LOG_DATABASE_URL: 'postgres://a:b@db:5432/dev_log' };
   assert.equal(targetsDevLogDatabase('postgres://x@h/dev_log', env), true);

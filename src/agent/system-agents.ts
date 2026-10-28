@@ -1,6 +1,7 @@
 import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, patientFetch, resolveModel } from './ollama-client.js';
+import { defaultAgentCommand } from '../runner/runner-selection.js';
 
 export interface SystemAgent {
   command?: string[] | null;
@@ -78,6 +79,18 @@ export async function publishSystemAgents(pool: Pool): Promise<void> {
   const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
   await pool.query(upsert, ['system_agents', JSON.stringify(systemAgents())]);
   await pool.query(upsert, ['ollama_models', JSON.stringify(models)]);
+  // Nur der Programmname von DEV_LOG_AGENT_COMMAND (Argumente könnten Schlüssel enthalten) – für die Anzeige.
+  await pool.query(upsert, ['agent_fallback_command', JSON.stringify(fallbackProgram())]);
+}
+
+/** Programm aus DEV_LOG_AGENT_COMMAND (z. B. `claude`), null ohne bzw. bei ungültigem Wert. */
+export function fallbackProgram(environment: NodeJS.ProcessEnv = process.env): string[] | null {
+  try {
+    const program = defaultAgentCommand(environment)?.[0]?.split('/').at(-1);
+    return program ? [program] : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Anything but a non-empty string array counts as no command. */
@@ -108,9 +121,60 @@ export const RESTRICTED_ROLES = ['analyst', 'author'] as const;
 
 /** Dashboard CLI of a restricted role: read-only by default, with the preset's flags only if the user allowed it. */
 export async function restrictedSystemCommand(pool: Pool, role: string): Promise<string[] | null> {
-  const setting = await systemSetting(pool, role);
-  if (!setting?.command) return null;
-  return setting.allowTools ? setting.command : readOnlyCommand(setting.command);
+  return settingCommand(role, await systemSetting(pool, role));
+}
+
+/**
+ * Befehl, den die Einstellung einer System-Rolle ergibt (null: keine CLI gewählt). Assistent mit allen Optionen;
+ * Analyse und Schnellschätzung nur mit Freigabe; der Visionär bleibt immer lesend (kein Schalter).
+ */
+export function settingCommand(role: string, setting: SystemAgentSettings | undefined): string[] | null {
+  const command = setting?.command;
+  if (!command) return null;
+  if (role === 'assistant') return command;
+  if (role === 'visionary') return readOnlyCommand(command);
+  if (!(RESTRICTED_ROLES as readonly string[]).includes(role)) return null;
+  return setting.allowTools ? command : readOnlyCommand(command);
+}
+
+/**
+ * CLI aus den Einstellungen für einen Lauf von runAuthorAgent ohne eigenen Projekt-Agent. „author“ fehlt bewusst:
+ * seine Wahl gilt nur der Schnellschätzung, nicht dem Schreiben von Anforderungen. Routinen nehmen die CLI des
+ * Assistenten, aber ohne dessen Rechte-Optionen.
+ */
+export async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
+  if (role === 'routine') {
+    const command = await systemCommand(pool, 'assistant');
+    return command && readOnlyCommand(command);
+  }
+  if (role === 'author') return null;
+  return settingCommand(role, await systemSetting(pool, role));
+}
+
+export interface SystemAgentUsage {
+  /** `cli`: externe CLI; `ollama`: lokales Modell. */
+  kind: 'cli' | 'ollama';
+  /** Woher die Wahl stammt: Einstellung, DEV_LOG_AGENT_COMMAND des Workers oder lokales Modell. */
+  source: 'settings' | 'environment' | 'model';
+  command: string[] | null;
+  model: string;
+}
+
+/**
+ * Was ein Lauf der System-Rolle tatsächlich nimmt (ohne eigenen Projekt-Agent) – dieselbe Reihenfolge wie
+ * runAuthorAgent: Einstellung, dann DEV_LOG_AGENT_COMMAND, sonst Ollama. Die Schnellschätzung kennt keinen
+ * Umgebungs-Befehl.
+ */
+export function systemAgentUsage(
+  role: string,
+  setting: SystemAgentSettings | undefined,
+  fallback: string[] | null,
+  model: string,
+): SystemAgentUsage {
+  const chosen = settingCommand(role, setting);
+  if (chosen) return { kind: 'cli', source: 'settings', command: chosen, model };
+  if (fallback && role !== 'author') return { kind: 'cli', source: 'environment', command: fallback, model };
+  return { kind: 'ollama', source: 'model', command: null, model };
 }
 
 /** CLI flags that grant write or shell access without asking; flags in VALUE_FLAGS also consume the next part. */

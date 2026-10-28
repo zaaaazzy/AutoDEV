@@ -25,6 +25,13 @@ export const DATABASE_COMMAND = 'database';
 /** Live-Dienste der Projekte neu starten; wird erst beim Start mit der Benutzer-ID des Workers aufgelöst. */
 export const SERVICES_COMMAND = 'services';
 export const servicesRule = (): string => `Bash(launchctl kickstart -k gui/${process.getuid?.() ?? 501}/ch.*)`;
+/** Löschen bzw. Umbenennen: kommt mit „Dateien ändern“ (git mv zusätzlich mit „Dateien anlegen“), geprüft vom Wächter. */
+export const GIT_RM_RULE = 'Bash(git rm:*)';
+export const GIT_MV_RULE = 'Bash(git mv:*)';
+export const fileGitRules = ({ create, edit }: { create: boolean; edit: boolean }): string[] => [
+  ...(edit ? [GIT_RM_RULE] : []),
+  ...(edit && create ? [GIT_MV_RULE] : []),
+];
 const PSEUDO_COMMANDS = new Set([FILES_CREATE, FILES_EDIT, LOGS_COMMAND, DATABASE_COMMAND, SERVICES_COMMAND]);
 
 /** Ob eine Freigabe („Bash(befehl:*)“ bzw. „Bash(befehl)“) einen Shell-Befehl abdeckt (für das lokale Modell). */
@@ -69,8 +76,13 @@ export function commandLabel(rule: string): string {
 /** Erklärung je Befehl (Hover in der Oberfläche). */
 const COMMAND_HELP: Record<string, string> = {
   [FILES_CREATE]:
-    'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“.',
-  [FILES_EDIT]: 'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten oder überschreiben.',
+    'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“; mit beiden Rechten auch umbenennen (git mv).',
+  [FILES_EDIT]:
+    'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten, überschreiben oder löschen (git rm).',
+  [GIT_RM_RULE]:
+    'Löscht Dateien im Projekt (bzw. in den erlaubten Ordnern) – ohne -f, ohne geschützte Dateien wie .env oder .git. Kommt mit „Dateien ändern“.',
+  [GIT_MV_RULE]:
+    'Benennt Dateien im Projekt (bzw. in den erlaubten Ordnern) um – ohne -f, Quelle und Ziel nicht geschützt. Kommt mit „Dateien anlegen“ und „Dateien ändern“.',
   [SERVICES_COMMAND]:
     'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht AIdeation selbst (com.aideation.*).',
   [DATABASE_COMMAND]:
@@ -116,6 +128,10 @@ const COMMAND_HELP: Record<string, string> = {
   'Bash(docker compose pull:*)': 'Lädt neue Versionen der verwendeten Images.',
   'Bash(docker ps:*)': 'Listet alle laufenden Container (nur lesen).',
   'Bash(docker logs:*)': 'Zeigt die Logs eines Containers (nur lesen).',
+  'Bash(npm audit:*)': 'Prüft die Abhängigkeiten auf bekannte Sicherheitslücken (ohne „fix“, ändert nichts).',
+  'Bash(npm outdated:*)': 'Listet veraltete Abhängigkeiten (nur lesen).',
+  'Bash(git ls-files:*)': 'Listet die Dateien im Repository (nur lesen).',
+  'Bash(git grep:*)': 'Durchsucht die Dateien im Repository (ohne Pager, nur Pfade im Projekt).',
 };
 
 /** Erklärung eines Befehls; für eigene Befehle eine allgemeine Beschreibung. */
@@ -222,6 +238,20 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
 ];
 
 export const DEFAULT_PERMISSION_GROUPS = PERMISSION_GROUPS.map((group) => group.id);
+
+/**
+ * Eingebaute Prüf-Gruppe der Routinen (z. B. „Nächtlicher Sicherheits-Check“): nur lesende Befehle. Sie gehört zur
+ * Rolle, nicht zu den schaltbaren Projektgruppen – andere Rollen (auch Entwickler) bekommen sie nie. „npm audit fix“,
+ * „git grep -O“ und Pfade ausserhalb des Projekts sperrt der Wächter.
+ */
+export const CHECK_GROUP: PermissionGroup = {
+  id: 'checks',
+  label: 'Prüfbefehle',
+  description: 'npm audit, npm outdated, git ls-files und git grep – nur lesen, nur für Routinen.',
+  rules: prefixRules(['npm audit', 'npm outdated', 'git ls-files', 'git grep']),
+};
+/** Rollen, die die Prüf-Gruppe immer bekommen. */
+export const CHECK_ROLES = new Set(['routine']);
 
 /** Rollen mit erweiterten Rechten: Assistent, Entwickler, Tester (Tests, Coverage) und Reviewer (git diff). */
 export const TRUSTED_ROLES = new Set(['assistant', 'developer', 'tester', 'reviewer', 'routine']);

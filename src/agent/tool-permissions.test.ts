@@ -3,7 +3,7 @@ import test from 'node:test';
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { decodePolicy } from './agent-guard.js';
+import { bashProblem, decodePolicy } from './agent-guard.js';
 import {
   availableCommands,
   availableGroups,
@@ -18,6 +18,7 @@ import {
   forbiddenSubcommand,
   FULL_ACCESS_ROLES,
   gitPathProblem,
+  gitRemoteProblem,
   guardHookCommand,
   hasFullAccess,
   isAllowedCommand,
@@ -188,6 +189,54 @@ test('commandHelp: eingebaute Erklärung, allgemeine Erklärung für eigene Rege
   assert.equal(commandHelp('Bash(make test:*)'), 'Führt „make test“ aus, auch mit weiteren Argumenten.');
   assert.equal(commandHelp('Bash(make test)'), 'Führt genau „make test“ aus.');
   assert.equal(commandHelp('Read'), 'Read');
+});
+
+test('Claude-CLI: Routinen bekommen die Prüf-Gruppe, Entwickler nicht; der Wächter sperrt audit fix und Pager', () => {
+  const checks = ['Bash(npm audit:*)', 'Bash(npm outdated:*)', 'Bash(git ls-files:*)', 'Bash(git grep:*)'];
+  const restricted: ProjectPermissions = { enabled: ['git'], custom: [] };
+  // Auch mit eigener Zuweisung und eingeschränkten Projektgruppen.
+  for (const [permissions, assigned] of [
+    [all, null],
+    [restricted, ['Bash(git status:*)']],
+  ] as const) {
+    const routine = withAgentPermissions(CLAUDE, 'routine', permissions, assigned ? [...assigned] : null);
+    const allowed = (option(routine, '--allowedTools') ?? '').split(',');
+    for (const rule of checks) assert.ok(allowed.includes(rule), rule);
+    assert.deepEqual(policyOf(routine), { create: false, edit: false, scopes: [] });
+  }
+  for (const role of ['developer', 'assistant', 'tester']) {
+    const allowed = (option(withAgentPermissions(CLAUDE, role, all, null), '--allowedTools') ?? '').split(',');
+    for (const rule of checks) assert.ok(!allowed.includes(rule), `${role}: ${rule}`);
+  }
+  // Feste Liste des lokalen Modells.
+  assert.ok(isAllowedCommand('git grep -n TODO'));
+  assert.ok(isAllowedCommand('npm audit --audit-level=high'));
+  assert.ok(!isAllowedCommand('npm audit fix'));
+  const cwd = mkdtempSync(join(tmpdir(), 'checks-'));
+  for (const command of ['npm audit', 'npm audit --json', 'npm outdated', 'git ls-files', 'git grep -n TODO']) {
+    assert.equal(bashProblem(command, cwd, null), null, command);
+  }
+  for (const command of [
+    'npm audit fix',
+    'npm audit --json fix',
+    "npm audit 'fix'",
+    'npm audit \\"fix\\"',
+    'git grep -O less TODO',
+    'git grep -iOless TODO',
+    'git grep "-O" TODO',
+    'git grep --open-files-in-pager=less TODO',
+    'git grep --open TODO',
+    'git grep --no-index x /etc/passwd',
+    'git grep --no-exclude-standard SECRET',
+    'git grep TODO /etc',
+    'git grep TODO ../other',
+    'git grep -f /etc/passwd',
+    'git grep --file=/etc/passwd',
+    'git ls-files /etc',
+    'git grep KEY .env',
+  ]) {
+    assert.ok(bashProblem(command, cwd, null), command);
+  }
 });
 
 test('extraReadDirectories: Dienst-Logs nur mit HOME', () => {
@@ -493,7 +542,8 @@ test('withAgentPermissions: eigene Sperren im Befehl bleiben, der Wächter erlau
   assert.equal(option(command, '--disallowedTools'), 'WebFetch');
   assert.equal(command.includes('--disallowed-tools'), false, 'in einem einzigen --disallowedTools zusammengeführt');
   assert.deepEqual(command.slice(-1), ['-p']);
-  assert.equal(command.includes('--allowedTools'), false);
+  // Nur Löschen und Umbenennen (git rm/mv) kommen mit den Datei-Rechten dazu.
+  assert.equal(option(command, '--allowedTools'), 'Bash(git rm:*),Bash(git mv:*)');
   assert.deepEqual(policyOf(command), { create: true, edit: true, scopes: [] });
 });
 
@@ -552,7 +602,7 @@ test('withAgentPermissions: genau die zugewiesenen und im Projekt verfügbaren B
     ['Bash(git status:*)', 'Bash(docker compose up:*)', 'Bash(npm run prisma:*)', 'files:edit'],
     ['src'],
   );
-  assert.equal(option(command, '--allowedTools'), 'Bash(git status:*),Bash(npm run prisma:*)');
+  assert.equal(option(command, '--allowedTools'), 'Bash(git status:*),Bash(npm run prisma:*),Bash(git rm:*)');
   assert.equal(option(command, '--disallowedTools'), 'Write');
   assert.deepEqual(policyOf(command), { create: false, edit: true, scopes: ['src'] });
   assert.deepEqual(command.slice(-2), ['-p', '{prompt}'], 'der ursprüngliche Befehl bleibt am Ende');
@@ -572,7 +622,7 @@ test('withAgentPermissions: Rollenstandard ohne Zuweisung (null), übrige Rollen
   assert.ok((option(developer, '--allowedTools') ?? '').includes('Bash(npm test:*)'));
   assert.equal(developer.includes('--disallowedTools'), false);
   const documenter = withAgentPermissions(CLAUDE, 'documenter', all, null, ['docs']);
-  assert.equal(documenter.includes('--allowedTools'), false);
+  assert.equal(option(documenter, '--allowedTools'), 'Bash(git rm:*),Bash(git mv:*)');
   assert.deepEqual(policyOf(documenter), { create: true, edit: true, scopes: ['docs'] });
 });
 
@@ -800,6 +850,59 @@ test('npmOptionProblem: --ignore-scripts lässt sich nicht wieder abschalten', (
   }
 });
 
+test('npmOptionProblem: Registry, Proxy und Einstellungen je Scope/Host sind gesperrt, auch abgekürzt', () => {
+  for (const command of [
+    'npm ci --ignore-scripts --registry=https://x.example',
+    'npm ci --ignore-scripts --registry https://x.example',
+    'npm ci --ignore-scripts --reg=https://x.example',
+    'npm install --ignore-scripts --@scope:registry=https://x.example @scope/a',
+    'npm install --ignore-scripts --//x.example/:_authToken=abc left-pad',
+    'npm ci --ignore-scripts --proxy=http://x.example',
+    'npm ci --ignore-scripts --https-proxy http://x.example',
+    'npm ci --ignore-scripts --noproxy=*',
+    'npm ci --ignore-scripts --replace-registry-host=always',
+  ]) {
+    assert.ok(npmOptionProblem(command), command);
+    assert.ok(!isAllowedCommand(command), command);
+  }
+  for (const command of ['npm ci --ignore-scripts', 'npm ci --production --no-audit', 'npm test -- --registry=x']) {
+    assert.equal(npmOptionProblem(command), null, command);
+  }
+});
+
+test('gitRemoteProblem: fetch/pull nur von eingerichteten Remotes, Refs ohne URL, Host, Pfad oder „:“', () => {
+  for (const command of [
+    'git fetch https://x.example/a',
+    'git fetch git@host:r',
+    'git fetch file:///tmp/r',
+    'git fetch ext::sh',
+    'git fetch /tmp/r',
+    'git fetch ./r',
+    'git fetch host:r',
+    'git fetch upstream',
+    'git fetch --depth 1 origin',
+    'git fetch --multiple origin ../r',
+    'git fetch --mul origin r',
+    'git fetch origin main:main',
+    'git fetch origin ../x',
+    'git pull --ff-only https://x.example/a main',
+  ]) {
+    assert.ok(gitRemoteProblem(command), command);
+  }
+  for (const command of [
+    'git fetch',
+    'git fetch --all --prune',
+    'git fetch origin',
+    'git fetch --depth=1 origin main',
+    'git pull --ff-only',
+    'git pull --ff-only origin feature/x',
+    'git status https://x.example',
+  ]) {
+    assert.equal(gitRemoteProblem(command), null, command);
+  }
+  assert.equal(gitRemoteProblem('git fetch upstream', ['origin', 'upstream']), null);
+});
+
 test('loadProjectPermissions: zu breite eigene Regeln aus älteren Zeilen gelten beim Laden nicht mehr', async () => {
   const pool = {
     query: async <R>(sql: string): Promise<{ rows: R[] }> =>
@@ -818,4 +921,55 @@ test('loadProjectPermissions: zu breite eigene Regeln aus älteren Zeilen gelten
   };
   const loaded = await loadProjectPermissions(pool, 'p');
   assert.deepEqual(loaded.custom[0]?.rules, ['Bash(docker compose ps:*)', 'Bash(npm run prisma:*)']);
+});
+
+test('customRuleProblem: nur Programme aus der Allowlist, keine Wrapper, Builtins oder Schreib-Werkzeuge', () => {
+  for (const rule of [
+    'Bash(timeout:*)',
+    'Bash(timeout 60 git status)',
+    'Bash(nice:*)',
+    'Bash(stdbuf:*)',
+    'Bash(ionice:*)',
+    'Bash(find:*)',
+    'Bash(awk:*)',
+    'Bash(sed:*)',
+    'Bash(tee:*)',
+    'Bash(cp:*)',
+    'Bash(ln:*)',
+    'Bash(cd:*)',
+    'Bash(alias:*)',
+    'Bash(set:*)',
+    'Bash(trap:*)',
+    'Bash(.:*)',
+    'Bash(/usr/bin/timeout:*)',
+    'Bash(sort:*)',
+    'Bash(rg:*)',
+    'Bash(prisma:*)',
+  ]) {
+    assert.ok(customRuleProblem(rule), rule);
+  }
+  assert.match(customRuleProblem('Bash(timeout:*)') ?? '', /nicht freigegeben/);
+  for (const rule of ['Bash(git status:*)', 'Bash(npm run typecheck)', 'Bash(make test)', 'Bash(ls:*)', 'Bash(jq:*)']) {
+    assert.equal(customRuleProblem(rule), null, rule);
+  }
+});
+
+test('loadProjectPermissions: alte Regeln mit Wrappern und Schreib-Werkzeugen gelten nicht mehr, der Start läuft weiter', async () => {
+  const pool = {
+    query: async <R>(sql: string): Promise<{ rows: R[] }> =>
+      sql.startsWith('SELECT agent_permissions')
+        ? { rows: [{ groups: null }] as R[] }
+        : {
+            rows: [
+              {
+                id: 'alt',
+                label: 'Alt',
+                description: '',
+                rules: ['Bash(timeout:*)', 'Bash(find:*)', 'Bash(awk:*)', 'Bash(git log:*)', 'Bash(tee:*)'],
+              },
+            ] as R[],
+          },
+  };
+  const loaded = await loadProjectPermissions(pool, 'p');
+  assert.deepEqual(loaded.custom[0]?.rules, ['Bash(git log:*)']);
 });

@@ -22,8 +22,17 @@ function ignored(patterns: readonly string[], path: string): boolean {
     if (pattern.startsWith('!')) return false;
     const parts = pattern.split('/');
     if (parts.length > segments.length) return false;
-    return parts.every((part, i) => part === '*' || part === '**' || part === segments[i]);
+    return parts.every((part, i) => part === '**' || segmentMatches(part, segments[i]));
   });
+}
+
+/** `*` innerhalb eines Segments, etwa `.env.*`, steht für beliebige Zeichen ausser `/`. */
+function segmentMatches(part: string, segment: string): boolean {
+  const regex = part
+    .split('*')
+    .map((piece) => piece.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^/]*');
+  return new RegExp(`^${regex}$`).test(segment);
 }
 
 test('.dockerignore schliesst Medien von test:full, Sicherungen und Laufzeitdaten aus', async () => {
@@ -36,7 +45,10 @@ test('.dockerignore schliesst Medien von test:full, Sicherungen und Laufzeitdate
     'test-results',
     'playwright-report',
     '.dev-log',
+    '.dev-log-backups/merge-abbruch.patch',
     '.env',
+    '.env.bak-2026-10-21',
+    'e2e/test-results/video.webm',
   ]) {
     assert.ok(ignored(patterns, path), `${path} fehlt in .dockerignore`);
   }

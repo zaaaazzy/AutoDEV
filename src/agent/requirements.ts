@@ -1,10 +1,11 @@
 import { logged } from '../core/log.js';
-import { readOnlyCommand, restrictedSystemCommand, systemCommand } from './system-agents.js';
+import { dashboardCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../api/bugs.js';
+import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
@@ -118,21 +119,6 @@ export function buildRequirementPrompt(
   ].join('\n\n');
 }
 
-/**
- * CLI chosen in the dashboard for the chat assistant or the analysis. "author" is left out on purpose: its
- * dashboard choice belongs to the quick estimation only, not to writing requirements. The analysis stays read-only
- * unless full tool access was allowed for it in the dashboard.
- */
-async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
-  // Routinen laufen über die CLI des Assistenten, aber ohne dessen Vollzugriffs-Schalter (nur lesen, Wächter aktiv).
-  if (role === 'routine') {
-    const command = await systemCommand(pool, 'assistant');
-    return command && readOnlyCommand(command);
-  }
-  if (role !== 'assistant' && role !== 'analyst') return null;
-  return role === 'analyst' ? restrictedSystemCommand(pool, role) : systemCommand(pool, role);
-}
-
 /** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */
 export async function runAuthorAgent(
   pool: Pool,
@@ -175,7 +161,8 @@ export async function runAuthorAgent(
     buildPrompt(author?.instructions ?? ''),
   );
   // Budget-Prüfpunkt auch für Chat, Auftragsautor, Visionär & Co.: ist Tag oder Sprint erreicht, startet kein Lauf.
-  const budget = await checkBudget(pool, options.project).catch(logged('requirements', null));
+  // Agent-Rollen (Autor, Bug-Wächter) zählen über agent_usage.role zusätzlich gegen ihr Rollen-Limit.
+  const budget = await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
   if (budget?.exceeded) {
     return {
       exitCode: 1,
@@ -191,7 +178,15 @@ export async function runAuthorAgent(
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
   const command =
     configured &&
-    withAgentPermissions(configured, rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
+    withAgentPermissions(
+      configured,
+      rightsRole,
+      permissions,
+      author?.allowedCommands ?? null,
+      author?.fileScope ?? [],
+      undefined,
+      options.cwd,
+    );
   // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
   const rules = resume ? await loadProjectRules(pool, options.project) : '';
   const resuming =
@@ -250,7 +245,7 @@ export async function runAuthorAgent(
       )
       .catch(logged('requirements'));
     // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
-    if (budget?.states.length) await checkBudget(pool, options.project).catch(logged('requirements', null));
+    if (budget?.states.length) await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
     return {
       exitCode: result.exitCode,
       output: redactOutput(result.output, process.env).trim(),
@@ -275,10 +270,7 @@ async function assessRisks(
 ): Promise<string> {
   const bugs = await loadKnownBugs(pool, options.project, 60).catch(logged('requirements', []));
   if (!bugs.length) return 'Keine bekannten Bugs im Projekt.';
-  const list = bugs.map(
-    (bug) =>
-      `- [${bug.status === 'fixed' ? 'behoben' : 'offen'} / ${bug.severity}] ${bug.title}${bug.description ? ` – ${bug.description.slice(0, 200)}` : ''}${bug.fixNotes ? ` | Lösung: ${bug.fixNotes.slice(0, 300)}` : ''}`,
-  );
+  const list = bugs.map(knownBugLine);
   const { exitCode, output } = await runAuthorAgent(
     pool,
     options,
@@ -288,8 +280,11 @@ async function assessRisks(
         `## Anweisung\n${instructions}`,
         `## Auftrag\nTitel: ${title}\n${description}`,
         `## Alle bisherigen Bugs\n${list.join('\n')}`,
+        list.some(containsUntrusted) ? UNTRUSTED_HINT : '',
         'Antworte als Markdown-Liste nur mit den passenden Bugs: Bug, warum relevant, was nicht wiederholt werden darf. Passt keiner, schreibe "Keine relevanten Bugs." Ändere nichts.',
-      ].join('\n\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     execute,
     'bug_reviewer',
     onProgress,

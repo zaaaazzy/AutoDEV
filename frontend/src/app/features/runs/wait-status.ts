@@ -77,6 +77,9 @@ export function waitStatus(
   if (sprint?.gitSync === 'pending')
     return { label: 'Push steht an', hint: 'startet, sobald der Worker frei ist', percent: null };
   if (sprint?.gitSync === 'running') return { label: 'Merge und Push laufen', hint: 'gleich fertig', percent: null };
+  // main liegt in einem anderen Ordner mit offenen Änderungen: Dort übernimmt ein Mensch den Sprint.
+  if (sprint?.gitSync === 'awaiting_merge')
+    return { label: 'Wartet auf Merge nach main', hint: 'dort von Hand mit git merge übernehmen', percent: null };
   // Pull-Request-Modus: Der Sprint ist gepusht und wartet auf GitHub Actions, danach Merge nach main.
   if (sprint?.status === 'review' && sprint.prUrl) {
     if (sprint.ciStatus === 'pending' || !sprint.ciStatus)

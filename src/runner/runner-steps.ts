@@ -20,12 +20,26 @@ import {
 import { parseCoverage, saveCoverage, stripCoverage } from './coverage.js';
 import { measureCoverage, mergeCoverage } from './measured-coverage.js';
 import { parseReview } from './review.js';
-import { acceptanceProblems, manualChecks, parseAcceptance, saveAcceptance, stripAcceptance } from './acceptance.js';
+import {
+  acceptanceProblems,
+  manualChecks,
+  parseAcceptance,
+  saveAcceptance,
+  stripAcceptance,
+  waiveUnmeasuredCoverage,
+} from './acceptance.js';
 import type { BudgetState } from './budget.js';
 import { buildPrompt } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { testerPlan } from './order-tests.js';
-import { budgetGate, logEvent, orderChangedFiles, orderFilePaths, type RunContext } from './runner-context.js';
+import {
+  guardedBudgetGate,
+  logEvent,
+  orderChangedFiles,
+  orderFilePaths,
+  recordBudgetCheckFailure,
+  type RunContext,
+} from './runner-context.js';
 import {
   type AgentResult,
   findResumableSession,
@@ -37,7 +51,13 @@ import {
 import { TRANSIENT_RETRY_DELAY_MS } from './runner-runs.js';
 import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
 
-export { budgetGate, type RunContext } from './runner-context.js';
+export {
+  budgetGate,
+  guardedBudgetGate,
+  recordBudgetCheckFailure,
+  BUDGET_CHECK_RETRY_MS,
+  type RunContext,
+} from './runner-context.js';
 export {
   findResumableSession,
   type ResumableSession,
@@ -134,10 +154,14 @@ export async function runStep(
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const routed = await routeStep(ctx, agent);
   const model = stepModel(ctx, agent, routed);
+  // Der Workflow kann während des Laufs umgebaut werden: Gibt es den geladenen Schritt oder Agent nicht mehr, läuft der
+  // Schritt ohne Verweis (NULL) zu Ende, statt am Fremdschlüssel zu scheitern und den Lauf abzubrechen.
   const stepId = (
     await pool.query<{ id: string }>(
       `INSERT INTO agent_run_steps (run_id, position, agent_id, agent_name, phase, status, workflow_step_id, model, routing_rule)
-     VALUES ($1, $2, $3, $4, $5, '${AGENT_STEP_STATUS.running}', $6, $7, $8) RETURNING id`,
+     VALUES ($1, $2, (SELECT id FROM agents WHERE id = $3::uuid), $4, $5, '${AGENT_STEP_STATUS.running}',
+             (SELECT id FROM workflow_steps WHERE id = $6::uuid), $7, $8)
+     RETURNING id`,
       [
         runId,
         stepOptions.stepPosition ?? position,
@@ -272,11 +296,16 @@ export async function runStep(
   };
   let result: AgentResult = await raceAttempt();
   let budgetStop: BudgetState | null = null;
+  let budgetUnchecked: string | undefined;
   // Vorübergehender Fehler des Agents (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen –
-  // aber nur, wenn das Budget den zweiten Versuch noch erlaubt.
+  // aber nur, wenn das Budget den zweiten Versuch noch erlaubt. Ist es nicht prüfbar, gibt es keinen zweiten Versuch.
   if (!cancelled && !isShuttingDown() && shouldRetry(result)) {
-    budgetStop = await budgetGate(ctx).catch(logged('runner-steps', null));
-    if (budgetStop) {
+    const budget = await guardedBudgetGate(ctx, agent);
+    budgetStop = budget.stop;
+    budgetUnchecked = budget.failed;
+    if (budgetUnchecked) {
+      await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist nicht prüfbar');
+    } else if (budgetStop) {
       await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht');
     } else {
       const delay = options.transientRetryDelayMs ?? TRANSIENT_RETRY_DELAY_MS;
@@ -319,6 +348,15 @@ export async function runStep(
     console.info(`[${item.id}] ${reason}`);
     return { passed: false, interrupted: true };
   }
+  // Budget vor dem zweiten Versuch nicht prüfbar: unterbrochen wie vor einem Schritt – derselbe Agent setzt nach der
+  // Pause fort, ohne Bug-Bericht und ohne Nachbesserung. Tokens und Kosten des ersten Versuchs bleiben am Schritt.
+  if (budgetUnchecked) {
+    await markInterrupted(pool, stepId, result, `${output}\n${budgetUnchecked}`);
+    await recordBudgetCheckFailure(ctx, agent, budgetUnchecked, null).catch(logged('runner-steps'));
+    await logEvent(pool, stepId, budgetUnchecked);
+    ctx.stopReason = budgetUnchecked;
+    return { passed: false, interrupted: true };
+  }
   // Worker beendet oder Projektordner zwischendurch weg (externes Laufwerk getrennt): kein Fehler im Auftrag, der Lauf
   // wird erneut eingeplant – ohne Bug-Bericht und Problemanalyse.
   const folderLost = result.exitCode !== 0 && folderAtStart && hadOutage(ctx.options.cwd, stepStartedAt);
@@ -333,7 +371,17 @@ export async function runStep(
   let accepted = true;
   if (agent.role === 'tester' && ctx.definitionOfDone && !stepOptions.observer) {
     const criteria = ctx.criteria ?? [];
-    const acceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
+    const reportedAcceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
+    // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund: AIdeation misst danach selbst.
+    const waiver = reportedAcceptance ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length) : null;
+    const acceptance = waiver?.result ?? null;
+    if (waiver?.waived.length) {
+      await logEvent(
+        pool,
+        stepId,
+        `Abnahme: DoD ${waiver.waived.join(', ')} trotz fehlender Abdeckungsmessung des Testers erfüllt (AIdeation misst selbst)`,
+      );
+    }
     await saveAcceptance(pool, item.id, criteria, ctx.definitionOfDone, acceptance).catch((error) =>
       console.error('Abnahme konnte nicht gespeichert werden:', error),
     );

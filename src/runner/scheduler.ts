@@ -1,5 +1,7 @@
+import { execFile } from 'node:child_process';
 import { readdir, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import type { Pool } from 'pg';
 import { completeSprint } from '../api/sprint-planning.js';
 import { type PushAudience, type PushMessage, sendPush } from '../core/push.js';
@@ -21,6 +23,8 @@ export interface ScheduledJob {
   state: Record<string, unknown>;
   /** Status vor dieser Beanspruchung (für die Meldung beim Übergang in „fehlgeschlagen“). */
   previousStatus: JobStatus | null;
+  /** Sperre dieser Beanspruchung: gibt ein spät beendeter Job nur frei, wenn sie noch ihm gehört. */
+  lockedUntil?: Date | null;
 }
 
 export interface JobResult {
@@ -35,8 +39,15 @@ export interface SchedulerDeps {
   /** AIdeation-Ordner: relative Pfade der Job-Konfiguration gelten nur darin. */
   installRoot: string;
   push?: (pool: Pool, message: PushMessage, audience?: PushAudience) => Promise<number>;
-  completeSprint?: (pool: Pool, sprintId: string) => Promise<void>;
+  /** true = jetzt abgeschlossen; false = war schon abgeschlossen oder nicht mehr aktiv (nichts getan). */
+  completeSprint?: (pool: Pool, sprintId: string) => Promise<boolean>;
+  /** Wartezeit nach dem Zeitlimit, bis der abgebrochene Job wirklich endet (Standard TIMEOUT_GRACE_MS). */
+  timeoutGraceMs?: number;
   collectProblems?: typeof collectProblems;
+  /** Inhaltsverzeichnis eines Dumps (pg_restore --list); Fehler mit code (ENOENT) bzw. stderr. */
+  listDump?: (file: string, signal: AbortSignal) => Promise<string>;
+  /** Restore-Probe (scripts/restore.sh --probe); liefert stdout, Fehler mit stderr. */
+  restoreProbe?: (installRoot: string, file: string, signal: AbortSignal) => Promise<string>;
 }
 
 export interface JobContext {
@@ -59,7 +70,15 @@ const CLAIM_BATCH = 10;
 export const MAX_TIMEOUT_SECONDS = 300;
 /** Sperre eines beanspruchten Laufs: Zeitlimit plus Reserve; ein abgestürzter Worker gibt den Job danach frei. */
 const LOCK_SECONDS = MAX_TIMEOUT_SECONDS + 30;
+/** Nach dem Zeitlimit so lange auf das echte Ende warten (innerhalb der Reserve von LOCK_SECONDS). */
+export const TIMEOUT_GRACE_MS = 20_000;
 const MESSAGE_LIMIT = 2000;
+
+/**
+ * Jobs, deren Task in diesem Worker nach dem Zeitlimit noch läuft: Sie werden hier nicht erneut beansprucht, auch
+ * wenn ihre Sperre in der Datenbank inzwischen abgelaufen ist (Obergrenze für andere Worker bleibt LOCK_SECONDS).
+ */
+const stillRunning = new Set<string>();
 const HOUR_MS = 3600_000;
 
 const JOB_COLUMNS = `j.key, j.job_kind AS kind, j.config, j.interval_seconds AS "intervalSeconds", j.state`;
@@ -86,39 +105,82 @@ export async function claimDueJobs(pool: Pool, limit = CLAIM_BATCH): Promise<Sch
       `UPDATE scheduled_jobs j
           SET next_run_at = j.next_run_at + make_interval(secs => (j.interval_seconds *
                 (floor(EXTRACT(EPOCH FROM NOW() - j.next_run_at) / j.interval_seconds) + 1))::float8),
-              locked_until = NOW() + make_interval(secs => $2),
+              locked_until = date_trunc('milliseconds', NOW() + make_interval(secs => $2)),
               last_run_at = NOW(), last_status = 'running'
          FROM (SELECT key, last_status FROM scheduled_jobs
                 WHERE enabled AND next_run_at <= NOW() AND (locked_until IS NULL OR locked_until < NOW())
+                  AND key <> ALL($3::text[])
                 ORDER BY next_run_at LIMIT $1 FOR UPDATE SKIP LOCKED) due
         WHERE j.key = due.key
-        RETURNING ${JOB_COLUMNS}, due.last_status AS "previousStatus"`,
-      [limit, LOCK_SECONDS],
+        RETURNING ${JOB_COLUMNS}, due.last_status AS "previousStatus", j.locked_until AS "lockedUntil"`,
+      [limit, LOCK_SECONDS, [...stillRunning]],
     )
   ).rows;
 }
 
-/** Schreibt das Ergebnis eines Laufs zurück und gibt die Sperre frei. */
-async function finishJob(pool: Pool, key: string, result: JobResult): Promise<void> {
+/**
+ * Schreibt das Ergebnis eines Laufs zurück. Die Sperre wird nur freigegeben, wenn der Task wirklich beendet ist;
+ * läuft er nach dem Zeitlimit noch, bleibt sie stehen (releaseLateJob gibt sie bei seinem Ende frei).
+ */
+async function finishJob(pool: Pool, key: string, result: JobResult, release: boolean): Promise<void> {
   await pool.query(
-    `UPDATE scheduled_jobs SET last_status = $2, last_message = $3, state = COALESCE($4::jsonb, state),
-            locked_until = NULL WHERE key = $1`,
+    `UPDATE scheduled_jobs SET last_status = $2, last_message = $3, state = COALESCE($4::jsonb, state)${
+      release ? ', locked_until = NULL' : ''
+    } WHERE key = $1`,
     [key, result.status, result.message.slice(0, MESSAGE_LIMIT), result.state ? JSON.stringify(result.state) : null],
   );
 }
 
-/** Führt eine Aufgabe mit hartem Zeitlimit aus; danach wird sie abgebrochen (AbortSignal) und gilt als gescheitert. */
-export async function runWithTimeout<T>(task: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+/** Spät beendeter Job: Sperre freigeben, aber nur die eigene (ein anderer Worker kann ihn inzwischen beansprucht haben). */
+async function releaseLateJob(pool: Pool, job: ScheduledJob): Promise<void> {
+  await pool.query(`UPDATE scheduled_jobs SET locked_until = NULL WHERE key = $1 AND locked_until = $2`, [
+    job.key,
+    job.lockedUntil ?? null,
+  ]);
+}
+
+/** Zeitlimit erreicht; `running` ist gesetzt, solange der abgebrochene Task auch nach der Wartezeit nicht endete. */
+export class JobTimeoutError extends Error {
+  constructor(
+    message: string,
+    readonly running: Promise<unknown> | null,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Führt eine Aufgabe mit hartem Zeitlimit aus; danach wird sie abgebrochen (AbortSignal) und gilt als gescheitert.
+ * Nach dem Abbruch wartet sie bis zu graceMs auf das echte Ende des Tasks; läuft er dann noch, meldet der Fehler ihn
+ * als `running`, damit der Aufrufer die Sperre erst bei seinem Ende freigibt.
+ */
+export async function runWithTimeout<T>(
+  task: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  graceMs = TIMEOUT_GRACE_MS,
+): Promise<T> {
   const controller = new AbortController();
+  const running = task(controller.signal);
+  const ended = running.then(
+    () => true,
+    () => true,
+  );
+  const result = running.then((value) => ({ value }));
+  // Scheitert der Task erst nach dem Zeitlimit, ist das Rennen schon entschieden: keine unbehandelte Ablehnung.
+  result.catch(() => undefined);
   let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error(`Zeitlimit von ${Math.round(timeoutMs / 1000)} s erreicht.`));
-    }, timeoutMs);
-  });
+  const wait = (ms: number) => new Promise<false>((done) => (timer = setTimeout(() => done(false), ms)));
   try {
-    return await Promise.race([task(controller.signal), timeout]);
+    const first = await Promise.race([result, wait(timeoutMs)]);
+    if (first) return first.value;
+  } finally {
+    clearTimeout(timer);
+  }
+  controller.abort();
+  const message = `Zeitlimit von ${Math.round(timeoutMs / 1000)} s erreicht.`;
+  try {
+    const finished = await Promise.race([ended, wait(graceMs)]);
+    throw new JobTimeoutError(message, finished ? null : ended);
   } finally {
     clearTimeout(timer);
   }
@@ -143,13 +205,50 @@ export function insideRoot(root: string, path: string): string | null {
 
 const failed = (message: string): JobResult => ({ status: 'failed', message });
 
-/** Neuestes Backup in ./backups: vorhanden, jünger als maxAgeHours und nicht kleiner als minBytes. */
-async function backupCheck({ job, deps }: JobContext): Promise<JobResult> {
+const execFileAsync = promisify(execFile);
+const OUTPUT_LIMIT = 64 * 1024 * 1024;
+
+/** pg_restore aus DEV_LOG_PG_RESTORE (Umgebung des Workers, nie aus der Datenbank), sonst aus dem PATH. */
+async function pgRestoreList(file: string, signal: AbortSignal): Promise<string> {
+  const program = process.env.DEV_LOG_PG_RESTORE?.trim() || 'pg_restore';
+  return (await execFileAsync(program, ['--list', file], { signal, maxBuffer: OUTPUT_LIMIT })).stdout;
+}
+
+/** Fester Pfad im AIdeation-Ordner; mit bash aufgerufen, damit kein Ausführungsrecht nötig ist. */
+async function runRestoreProbe(installRoot: string, file: string, signal: AbortSignal): Promise<string> {
+  const script = join(installRoot, 'scripts', 'restore.sh');
+  return (await execFileAsync('bash', [script, '--probe', file], { cwd: installRoot, signal, maxBuffer: OUTPUT_LIMIT }))
+    .stdout;
+}
+
+/** Letzte nicht leere Zeile (Meldung eines Programms), gekürzt. */
+function lastLine(text: unknown): string {
+  const lines = String(text ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return (lines.at(-1) ?? '').slice(0, 400);
+}
+
+/** Fehler eines externen Programms als klare Meldung; ein fehlendes Programm ist nie ein stiller Erfolg. */
+function toolFailure(tool: string, error: unknown, hint: string): string {
+  const { code, stderr, message } = error as { code?: unknown; stderr?: unknown; message?: string };
+  if (code === 'ENOENT') return `${tool} nicht gefunden – ${hint}`;
+  return `${tool} gescheitert: ${lastLine(stderr) || message || String(error)}`;
+}
+
+interface BackupFile {
+  name: string;
+  path: string;
+  mtimeMs: number;
+  size: number;
+}
+
+/** Neuestes aideation-*.dump im konfigurierten Ordner oder ein Fehlerergebnis. */
+async function newestBackup(job: ScheduledJob, deps: SchedulerDeps): Promise<BackupFile | JobResult> {
   const configured = textSetting(job.config.dir) ?? 'backups';
   const dir = insideRoot(deps.installRoot, configured);
   if (!dir) return failed(`Backup-Ordner „${configured}“ liegt ausserhalb des AIdeation-Ordners.`);
-  const maxAgeHours = numberSetting(job.config.maxAgeHours, 26, 1, 24 * 30);
-  const minBytes = numberSetting(job.config.minBytes, 1024, 0, 1024 ** 4);
   let names: string[];
   try {
     names = await readdir(dir);
@@ -163,19 +262,63 @@ async function backupCheck({ job, deps }: JobContext): Promise<JobResult> {
   );
   const newest = dumps.sort((a, b) => b.info.mtimeMs - a.info.mtimeMs)[0];
   if (!newest) return failed(`Kein Datenbank-Backup in „${configured}“.`);
-  const ageHours = (Date.now() - newest.info.mtimeMs) / HOUR_MS;
+  return { name: newest.name, path: join(dir, newest.name), mtimeMs: newest.info.mtimeMs, size: newest.info.size };
+}
+
+const PG_RESTORE_HINT =
+  'ohne pg_restore lässt sich das Backup nicht prüfen. Postgres-Client ab Version 17 installieren ' +
+  '(macOS: brew install libpq) oder DEV_LOG_PG_RESTORE in der worker.env auf das Programm setzen.';
+
+/**
+ * Neuestes Backup in ./backups: vorhanden, jünger als maxAgeHours, nicht kleiner als minBytes und für pg_restore
+ * lesbar (pg_restore --list mit Tabellendaten). Ein fehlendes pg_restore ist ein Fehler, kein stiller Erfolg.
+ */
+async function backupCheck({ job, deps, signal }: JobContext): Promise<JobResult> {
+  const newest = await newestBackup(job, deps);
+  if ('status' in newest) return newest;
+  const maxAgeHours = numberSetting(job.config.maxAgeHours, 26, 1, 24 * 30);
+  const minBytes = numberSetting(job.config.minBytes, 1024, 0, 1024 ** 4);
+  const ageHours = (Date.now() - newest.mtimeMs) / HOUR_MS;
   if (ageHours > maxAgeHours) {
     return failed(`Neuestes Backup ${newest.name} ist ${Math.round(ageHours)} h alt (Grenze ${maxAgeHours} h).`);
   }
-  if (newest.info.size < minBytes) {
-    return failed(
-      `Neuestes Backup ${newest.name} ist mit ${newest.info.size} Bytes zu klein (mindestens ${minBytes}).`,
-    );
+  if (newest.size < minBytes) {
+    return failed(`Neuestes Backup ${newest.name} ist mit ${newest.size} Bytes zu klein (mindestens ${minBytes}).`);
+  }
+  let toc: string;
+  try {
+    toc = await (deps.listDump ?? pgRestoreList)(newest.path, signal);
+  } catch (error) {
+    return failed(`Backup ${newest.name} nicht geprüft: ${toolFailure('pg_restore --list', error, PG_RESTORE_HINT)}`);
+  }
+  // Einträge: „123; 0 16386 TABLE DATA public projects devlog“; Kommentarzeilen beginnen mit „;“.
+  const entries = toc.split('\n').filter((line) => /^\d+;/.test(line));
+  if (!entries.some((line) => / TABLE DATA /.test(line))) {
+    return failed(`Backup ${newest.name} enthält laut pg_restore --list keine Tabellendaten.`);
   }
   return {
     status: 'ok',
-    message: `Neuestes Backup ${newest.name}: ${ageHours.toFixed(1)} h alt, ${Math.round(newest.info.size / 1024)} KB.`,
+    message:
+      `Neuestes Backup ${newest.name}: ${ageHours.toFixed(1)} h alt, ${Math.round(newest.size / 1024)} KB, ` +
+      `${entries.length} Einträge für pg_restore lesbar.`,
   };
+}
+
+/**
+ * Wöchentliche Restore-Probe: spielt das neueste Backup mit scripts/restore.sh --probe in einen Wegwerf-Container
+ * (eigener Name und Port, nie die Live-Datenbank) und prüft DEV_LOG_SECRET_KEY per Entschlüsselungs-Test.
+ */
+async function restoreProbe({ job, deps, signal }: JobContext): Promise<JobResult> {
+  const newest = await newestBackup(job, deps);
+  if ('status' in newest) return newest;
+  try {
+    const output = await (deps.restoreProbe ?? runRestoreProbe)(deps.installRoot, newest.path, signal);
+    return { status: 'ok', message: lastLine(output) || `Restore-Probe mit ${newest.name} bestanden.` };
+  } catch (error) {
+    return failed(
+      `Restore-Probe mit ${newest.name}: ${toolFailure('scripts/restore.sh', error, 'bash fehlt im PATH des Workers.')}`,
+    );
+  }
 }
 
 /** Gemerkte Meldungen im Format des Wächters aus scheduled_jobs.state. */
@@ -250,8 +393,11 @@ async function closeOldSprints({ pool, job, deps, signal }: JobContext): Promise
         [sprint.id],
       )
     ).rows;
-    if (!sprintSettled(items)) continue;
-    await (deps.completeSprint ?? completeSprint)(pool, sprint.id);
+    // Abbruch (Zeitlimit) vor jedem Schreibschritt prüfen: nach dem Zeitlimit keinen Sprint mehr abschliessen.
+    if (signal.aborted || !sprintSettled(items)) continue;
+    // Nur ein echter Übergang aktiv → abgeschlossen zählt: Hat ihn ein anderer Lauf (oder die Oberfläche) schon
+    // abgeschlossen, gibt es weder einen zweiten Bericht noch eine zweite Push-Nachricht.
+    if (!(await (deps.completeSprint ?? completeSprint)(pool, sprint.id))) continue;
     closed.push(`${sprint.project}: ${sprint.name}`);
     await (deps.push ?? sendPush)(
       pool,
@@ -318,7 +464,8 @@ async function pushAlert({ pool, job, deps, now }: JobContext): Promise<JobResul
 
 /** Feste Registry: Nur diese Job-Arten werden ausgeführt (job_kind; „Skript-Pfad“ der Idee = Schlüssel hier). */
 export const JOB_KINDS: Readonly<Record<string, JobKind>> = Object.freeze({
-  backup_check: { run: backupCheck, defaultTimeoutSeconds: 20 },
+  backup_check: { run: backupCheck, defaultTimeoutSeconds: 60 },
+  restore_probe: { run: restoreProbe, defaultTimeoutSeconds: MAX_TIMEOUT_SECONDS },
   watchdog_logs: { run: watchdogLogs, defaultTimeoutSeconds: 60 },
   close_old_sprints: { run: closeOldSprints, defaultTimeoutSeconds: 120 },
   push_alert: { run: pushAlert, defaultTimeoutSeconds: 20 },
@@ -342,6 +489,7 @@ export async function runJob(
 ): Promise<JobResult> {
   const kind = jobKind(job.kind, registry);
   let result: JobResult;
+  let running: Promise<unknown> | null = null;
   if (!kind) {
     result = failed(`Übersprungen: unbekannte Job-Art „${job.kind}“.`);
   } else {
@@ -349,13 +497,33 @@ export async function runJob(
       result = await runWithTimeout(
         (signal) => kind.run({ pool, job, deps, signal, now: new Date() }),
         timeoutMs(job, kind),
+        deps.timeoutGraceMs,
       );
     } catch (error) {
-      result = failed(`Fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}`);
+      running = error instanceof JobTimeoutError ? error.running : null;
+      result = failed(
+        `Fehlgeschlagen: ${error instanceof Error ? error.message : String(error)}` +
+          (running ? ' Der Job reagiert nicht auf den Abbruch und läuft noch – gesperrt bis zu seinem Ende.' : ''),
+      );
     }
   }
-  await finishJob(pool, job.key, result);
+  if (running) {
+    // Sperre stehen lassen, bis der Task wirklich endet: sonst überschnitte er sich mit dem nächsten Durchgang.
+    stillRunning.add(job.key);
+    console.warn(`[scheduler] Job „${job.key}“ läuft nach dem Zeitlimit weiter – Sperre bleibt bis zu seinem Ende.`);
+    void running
+      .then(() => releaseLateJob(pool, job))
+      .then(() => console.info(`[scheduler] Job „${job.key}“ nach dem Zeitlimit beendet – Sperre freigegeben.`))
+      .catch((error: unknown) => console.error(`[scheduler] Sperre von „${job.key}“ nicht freigegeben:`, error))
+      .finally(() => stillRunning.delete(job.key));
+  }
+  await finishJob(pool, job.key, result, !running);
   return result;
+}
+
+/** Jobs, deren Task in diesem Worker noch über das Zeitlimit hinaus läuft (für Tests und Diagnose). */
+export function lateJobKeys(): string[] {
+  return [...stillRunning];
 }
 
 /**

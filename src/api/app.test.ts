@@ -567,7 +567,8 @@ test('deletes only planned or completed sprints without running work', async () 
     for (const query of blocked.slice(0, 2)) {
       assert.match(query.sql, /status IN \('planned', 'completed', 'cancelled'\)/);
       assert.match(query.sql, /in_progress/);
-      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+      // „Wartet auf Merge“ ist ein Ruhezustand wie „done“ oder „failed“ (es läuft nichts mehr).
+      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed', 'awaiting_merge'\)/);
     }
   });
 
@@ -606,7 +607,14 @@ test('new sprints can only be created as planned', async () => {
 });
 
 test('assigns development orders to sprints only within the same project', async () => {
-  const { pool, queries } = recordingPool([]);
+  const queries: { sql: string; values: unknown[] }[] = [];
+  // Erste Abfrage: der Auftrag (backlog, ohne Sprint) existiert; zweite: der Sprint gehört nicht zum Projekt.
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: queries.length === 1 ? [{ status: 'backlog', sprintId: null }] : [] };
+    },
+  } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/development/${ID}`, {
       method: 'PATCH',
@@ -614,8 +622,8 @@ test('assigns development orders to sprints only within the same project', async
       body: JSON.stringify({ sprintId: SPRINT_ID }),
     });
     assert.equal(response.status, 400);
-    assert.equal(queries.length, 1);
-    assert.match(queries[0]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
+    assert.equal(queries.length, 2);
+    assert.match(queries[1]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
   });
 });
 
@@ -677,6 +685,28 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(list.status, 200);
     // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
     assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
+  });
+});
+
+test('moves a workflow step to another phase with one order call per phase (drag & drop)', async () => {
+  const { pool, queries } = recordingPool();
+  await withServer(pool, async (baseUrl) => {
+    const order = (phase: string, ids: string[]) =>
+      fetch(`${baseUrl}/api/projects/mainty/workflow/order`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ phase, ids }),
+      });
+    // Zielphase mit dem Schritt, danach die Quellphase ohne ihn: beide lückenlos ab 1.
+    assert.equal((await order('after_task', [SPRINT_ID, ID])).status, 204);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'after_task', [SPRINT_ID, ID]]);
+    assert.equal((await order('while_task', [])).status, 204);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'while_task', []]);
+    const sql = queries.at(-1)?.sql ?? '';
+    assert.match(sql, /SET position = o\.ord, phase = \$2/);
+    // Pausiert bleibt pausiert: das Umordnen fasst `enabled` nicht an.
+    assert.doesNotMatch(sql, /enabled/);
+    assert.equal((await order('during', [ID])).status, 400);
   });
 });
 

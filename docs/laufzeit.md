@@ -35,14 +35,15 @@ flowchart TB
 | 0,5 s         | Einrichtung        | Host-Aufgaben des Projekt-Assistenten (Ordner, Git, GitHub, Vorlagen, Agent-Tests), bis zu 4 parallel.                                                                                                                                                                                                                                |
 | 1,5 s         | Chat-Takt          | Nacheinander angestoßen, jede Spur höchstens einmal gleichzeitig: Testanforderung → _falls kein Chat läuft:_ Schnellschätzung → Auftragsautor (Ideen) → KI-Kommentar zum Sprintvorschlag → Visionär → Chat-Nachricht → Problemanalyse, danach Abnahmeprüfung.                                                                         |
 | 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), prüft Branch `main` und sauberen Stand, bei geändertem Lockfile `npm ci --ignore-scripts` auf dem Host (scheitert es: „fehlgeschlagen“, kein Neubau), `docker compose up -d --build`, prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker (Exit-Code 75), launchd/systemd bzw. unter Windows `run-with-env.ps1` starten ihn neu. |
-| 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; jede Minute Git-Verlauf, alle 5 min Favicon.                                                                                                                                                                                                                                 |
+| 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; verwaiste Läufe aufräumen (`closeOrphanedRuns`, siehe `docs/workflows.md`); jede Minute Git-Verlauf, alle 5 min Favicon.                                                                                                                                                                                                                              |
 | 30 s · sofort | Arbeitszyklus      | Sofort, wenn die Datenbank neue Arbeit meldet (`NOTIFY devlog_work`: Auftrag eingeplant, Sprint gestartet) oder ein Platz frei wird; sonst alle 30 s. `runWorkflow` je Projekt, höchstens **2 Projekte gleichzeitig** (Einstellung, max. 8); wer am längsten wartet, kommt zuerst. Ablauf in Abschnitt 4.                             |
 | 30 s · Job    | Wartungs-Jobs      | Projektübergreifend, nach jedem Arbeitszyklus im Hintergrund (nie zwei Durchgänge gleichzeitig): fällige aktive Zeilen aus `scheduled_jobs` beanspruchen (`FOR UPDATE SKIP LOCKED`, `next_run_at` + Intervall, Sperre `locked_until`), dann mit Zeitlimit (Standard 20–120 s, max. 300 s) ausführen. Nur feste Job-Arten aus `src/runner/scheduler.ts`; Status und Meldung landen in der Zeile. Einstellbar über `GET`/`PATCH /api/scheduled-jobs` (nur Administration). |
-| 6 h           | `backup_check`     | Neuestes `aideation-*.dump` in `./backups` (relativ zum AIdeation-Ordner): jünger als `maxAgeHours` (26), mindestens `minBytes` (1024). Fehlender Ordner = „fehlgeschlagen“ + Push.                                                                                                                                               |
+| 6 h           | `backup_check`     | Neuestes `aideation-*.dump` in `./backups` (relativ zum AIdeation-Ordner): jünger als `maxAgeHours` (26), mindestens `minBytes` (1024), `pg_restore --list` mit Tabellendaten lesbar. Fehlender Ordner, fehlendes `pg_restore` oder kaputter Dump = „fehlgeschlagen“ + Push. |
+| 7 Tage        | `restore_probe`    | `scripts/restore.sh --probe` mit dem neuesten Backup: Wegwerf-Container `aideation_restore_probe_<zeit>` auf 127.0.0.1:5439, `pg_restore --exit-on-error --single-transaction`, Entschlüsselungs-Test mit `DEV_LOG_SECRET_KEY`, danach gelöscht (Zeitlimit 300 s). |
 | 15 min        | `watchdog_logs`    | Wächter-Prüfungen (`collectProblems`, ohne `git status`) im Worker; gleiche Probleme erst nach 6 h (`REMIND_MS`) erneut per Push, Merkzustand in der Datenbank.                                                                                                                                                                       |
 | 1 h · Fehler  | `push_alert`       | Push an Projektkreis (`config.project`) oder Administration, wenn ein beobachteter Job fehlgeschlagen ist; nach jedem Fehlschlag sofort fällig. Gleiche Fehlschläge erst nach 6 h wieder, Entwarnung einmal.                                                                                                                       |
 | 1 Tag · aus   | `close_old_sprints`| Standardmäßig aus. Schliesst aktive, nicht pausierte Sprints über `completeSprint`, wenn alle Aufträge erledigt sind (`sprintSettled`), kein Agent läuft und seit `inactiveDays` (14, 1–365) nichts passiert ist.                                                                                                                  |
-| Start         | Wiederherstellung  | Zuerst die Prozessgruppen des alten Workers beenden: jeder Befehl (Agent-Schritte, Chat, Auftragsautor, Visionär, Testanforderungen, `npm test` …) steht während des Laufs mit PID und Startzeit in `agent_processes`. Lebt die PID noch, muss die Startzeit passen (sonst neu vergeben, nicht angefasst); ist nur der Gruppenführer weg, wird die Restgruppe beendet. Danach: unterbrochene Läufe → Auftrag wieder „Geplant“, Chat → „pending“, Testanforderungen „fehlgeschlagen“, Abnahmeprüfungen und Visionär neu angefragt, Neustart als „erledigt“ markiert. Lässt sich ein Altprozess nicht sicher beenden, wird nichts doppelt gestartet: Chat → „failed“, Aufträge nicht neu eingeplant, Eintrag bleibt für den nächsten Start. |
+| Start         | Wiederherstellung  | Zuerst die Prozessgruppen des alten Workers beenden: jeder Befehl (Agent-Schritte, Chat, Auftragsautor, Visionär, Testanforderungen, `npm test` …) steht während des Laufs mit PID und Startzeit in `agent_processes`. Lebt die PID noch, muss die Startzeit passen (sonst neu vergeben, nicht angefasst); ist nur der Gruppenführer weg, wird die Restgruppe beendet. Danach: unterbrochene Läufe → Auftrag wieder „Geplant“, Chat → „pending“, Testanforderungen „fehlgeschlagen“, Abnahmeprüfungen und Visionär neu angefragt, Neustart als „erledigt“ markiert. Lässt sich ein Altprozess nicht sicher beenden, wird nichts doppelt gestartet: Chat → „failed“, Aufträge nicht neu eingeplant, Eintrag bleibt für den nächsten Start. **Nur eigene oder verwaiste:** Läufe (`agent_runs.worker_id`) und Prozesse (`agent_processes.worker_id`) tragen die ID ihres Workers (`Rechner:Installationsordner:Bereich`, von Hand `DEV_LOG_WORKER_ID`), jeder Worker schreibt alle 20 s `runner_workers.last_seen`. Aufgeräumt wird nur, was dieselbe ID hat (der eigene Vorgänger) oder deren Worker seit 90 s schweigt; Schritte folgen ihrem Lauf. Altzeilen ohne ID: Läufe, wenn `worker_heartbeats` ihres Projekts alt ist, Prozesse immer. Lebt ein anderer Worker, bleiben Chat, Autor, Visionär, Analysen, Testanforderungen, Abnahmen und Git-Lösungen unberührt. Auch `closeOrphanedRuns` lässt die Läufe eines lebenden anderen Workers stehen. |
 | Signal        | Herunterfahren     | Alle Agent-Prozesse werden beendet; laufende Aufträge → „Geplant“, Chat → „pending“, Ideen in Arbeit → „requested“.                                                                                                                                                                                                                   |
 | 1 h · API     | Sitzungen          | Im Backend, nicht im Worker (`startSessionCleanup` in `src/api/auth.ts`): beim Start sofort im Hintergrund, danach stündlich `DELETE FROM auth_sessions` für abgelaufene Sitzungen, Sitzungen ohne Bindung und Sitzungen des Systemadministrators mit altem `.env`-Passwort. Gültige Sitzungen bleiben. Der Timer endet beim Herunterfahren. |
 | Befehlsende   | Aufräumen          | Jeder Befehl läuft als eigene Prozessgruppe. Nach seinem Ende (Erfolg, Fehler, Zeitlimit, Abbruch) wird die ganze Gruppe beendet, damit gestartete Dev-Server keine Ports belegen. Wer einen Dienst dauerhaft starten will, braucht einen eigenen Dienst-Manager (launchd, Docker).                                                     |
@@ -88,6 +89,8 @@ Auf Knopfdruck (Ideation oder Aktionen). Liest das Projekt nur, legt Ideen mit B
 Arten: `feature`, `bug` (Behebungsauftrag) und `express` (Chat-Anfrage; läuft nie im Arbeitszyklus). Ausgewählt wird ein Auftrag nur, wenn er „planned“ ist _und_ sein Sprint aktiv ist, ein Agent fest zugewiesen ist (Play) oder `auto_run` gesetzt ist.
 
 Unter **Aufträge hinzufügen** auf der Sprintseite übernimmt `POST /api/development/:id/take-into-sprint` offene und abgebrochene Aufträge in einer Abfrage in den gewählten Sprint. Bei abgebrochenen werden Vermerk, Fehler und ein von Hand zugewiesener Agent zurückgesetzt, ohne Umweg über den aktiven Sprint. `auto_run` wird nur gesetzt, wenn der Ziel-Sprint aktiv ist. In einem geplanten Sprint wartet der Auftrag also, bis der Sprint startet. Auch ein PATCH mit `sprintId` auf einen nicht aktiven Sprint setzt `auto_run` zurück.
+
+Offene Aufträge übernimmt, wer die Rolle `plan` hat. Abgebrochene (blockiert oder aus einem Sprint genommen) neu einzuplanen ist ein erneuter Versuch wie `/retry`. Dafür braucht es zusätzlich die Rolle `run`. Ohne `run` schliesst das UPDATE sie aus, und die Route antwortet mit 403 („Abgebrochene Aufträge neu einplanen braucht die Rolle „Agents ausführen“.“). In der Oberfläche sind sie dann ohne Häkchen, „→“ ist deaktiviert, und über der Liste steht derselbe Hinweis. Wechselt die Rolle, fallen schon angehakte gesperrte Aufträge aus der Auswahl.
 
 ```mermaid
 stateDiagram-v2
@@ -201,9 +204,11 @@ flowchart TB
 - Ab dem ersten Agent, der Dateien ändert (Phase while_task, Entwickler, Tester), hält der Auftrag die Umsetzungssperre bis zum Merge.
 - Vorbereitung und Doku-Agents laufen parallel zur Umsetzung eines anderen Auftrags.
 - Erneuter Versuch: bereits bestandene Agents werden übersprungen, ihre Ausgabe geht weiter.
+- Einzellauf (nur ein Agent über `agentId`): Die Änderungen werden nur auf dem Auftrags-Branch committet, der Branch bleibt stehen. Ohne Tester, Reviewer und Freigabe wird nichts in Sprint-Branch oder `main` gemergt. Der Auftrag geht zurück auf seinen vorherigen Status. Der nächste normale Ablauf setzt den Branch fort und mergt erst am Ende.
 - Zeitlimit je Schritt 30 min (Standard).
-- Abbruch („Abbrechen“ in der Oberfläche, Zeitlimit, Worker-Ende): Ein Signal erreicht Modellanfragen, jedes Werkzeug des lokalen Modells und laufende Befehle samt Prozessgruppe. Nach dem Abbruch startet kein weiteres Werkzeug (`write_file`, `replace_in_file`, `run_command`, `run_sql`), auch ein schon abgebrochenes Signal wird geprüft. Der Schritt wartet auf das echte Ende des Agents, bevor Commit oder `checkout` laufen. Tokens und Kosten des abgebrochenen Laufs bleiben erhalten. Ein Abbruch von aussen meldet „Abgebrochen: Der Agent wurde gestoppt.“ und gilt weder als vorübergehender Fehler noch als Erfolg.
-- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
+- Abbruch („Abbrechen“ in der Oberfläche, Zeitlimit, Worker-Ende): Ein Signal erreicht Modellanfragen, jedes Werkzeug des lokalen Modells und laufende Befehle samt Prozessgruppe. Nach dem Abbruch startet kein weiteres Werkzeug (`write_file`, `replace_in_file`, `run_command`, `run_sql`), auch ein schon abgebrochenes Signal wird geprüft. Der Schritt wartet auf das echte Ende des Agents, bevor Commit oder `checkout` laufen. Tokens und Kosten des abgebrochenen Laufs bleiben erhalten. Fehlt bei der Claude-CLI das `result`-Ereignis, summiert `claude-stream.ts` die `message.usage` der `assistant`-Ereignisse, je `message.id` nur den letzten Stand. Ist `result` da, gilt nur dieses. Kosten werden dabei nicht geschätzt. Ein Abbruch von aussen meldet „Abgebrochen: Der Agent wurde gestoppt.“ und gilt weder als vorübergehender Fehler noch als Erfolg.
+- Budget: Vor jedem Agent werden Tages-, Sprint- und Auftragslimit des Projekts und der Agent-Rolle geprüft; ab 80 % eine Push-Warnung je Periode, ab 100 % → blocked mit „Aktion notwendig: Budget erreicht“, kein Bug. Der Zeitraum gibt den Auftrag wieder frei (Folgetag bzw. höheres Limit).
+- Budget nicht prüfbar (z. B. Datenbank kurz weg): Der Agent startet nicht, auch kein zweiter Versuch nach einem vorübergehenden Fehler. Der Auftrag gilt als unterbrochen und geht zurück auf „Geplant“, ohne Bug und ohne Budget-Blockade. Die Ursache steht in `failure` und in einem unterbrochenen Schritt des Agents (eine Anweisung, `guardedBudgetGate`/`recordBudgetCheckFailure` in `runner-context.ts`). `retry_after` hält den Auftrag 5 min zurück (`BUDGET_CHECK_RETRY_MS`), danach setzt derselbe Agent fort. „Bei abgeschlossen/abgelehnt“ starten in diesem Fall nicht.
 - Modell-Routing: Die Regeln des Projekts wählen je Schritt lokal (Ollama) oder stark (CLI); Modell und Regel stehen am Schritt.
 
 ## 6 · Fehler, Problemanalyse und Bugfix
@@ -246,6 +251,9 @@ Das Ingest-Token steht im Browser-Snippet und ist damit praktisch öffentlich; G
 - Die Runner-Auswahl (`selectItems`, auch `--item`) und der Start im Runner überspringen jeden Auftrag, dessen Bug aus `production` oder `github` stammt und kein `approved_at` hat. Das gilt für alle Wege: Sprint, `auto_run`, Wiederholungen, Retries. Altdaten ohne Freigabe bleiben gesperrt.
 - Die Freigabe setzt ein Mensch mit Recht „Ausführen“ im Bug („Für Agents freigeben“, `POST /api/bugs/:id/approve`). Per `PATCH /api/bugs/:id` lässt sie sich nicht setzen. Bei Betriebs-Bugs entsteht mit der Freigabe der Behebungsauftrag (bzw. der erledigte Auftrag wird erneut eingeplant).
 - Meldung, Stack und Herkunft stehen in der Bug-Beschreibung nur im Block `<<<FREMDER-TEXT aus dem Produktions-Rückkanal …>>>`, ohne Steuerzeichen, auf 2000 Zeichen gekürzt. Prompts mit solchen Aufträgen bekommen den Sicherheitshinweis „fremder Text“. Nicht freigegebene fremde Bugs erscheinen nicht unter „Bekannte Bugs“ im Prompt.
+- Freigegebene fremde Bugs stehen unter „Bekannte Bugs“ (Agent-Prompt und Bug-Wächter) mit Titel, Beschreibung und Lösung im Fremdtext-Block. Der Prompt bekommt dann den Sicherheitshinweis.
+- Bei Chat-Verweisen auf einen Auftrag, eine Idee oder einen Bug gilt dasselbe, wenn der Inhalt fremd ist: Bug aus `production`/`github`, Auftrag zu einem solchen Bug, GitHub-Idee oder bereits markierter Text. Der Kontext für den Assistenten steht dann eingefasst und mit Sicherheitshinweis.
+- Marker im Fremdtext (`<<<`, `>>>`) werden entschärft (`‹‹‹`, `›››`). So kann der Text keinen Block öffnen oder vorzeitig schließen.
 
 ```mermaid
 flowchart LR
@@ -271,9 +279,13 @@ stateDiagram-v2
     state "running" as gr
     state "done" as gd
     state "failed" as gf
+    state "awaiting_merge · Wartet auf Merge" as gw
     gp --> gr : Arbeitszyklus
     gr --> gd : Test-Gate grün, Merge, Push, Tag
     gr --> gf : Konflikt, rote Tests, Push-Fehler
+    gr --> gw : main in anderem Ordner mit offenen Änderungen
+    gw --> gd : main enthält den Sprint (merge-base --is-ancestor)
+    gw --> gf : Prüfung scheitert
   }
   [*] --> sp : Mensch oder Übernehmen
   sp --> sa : Starten oder Autopilot in Arbeitszeit
@@ -285,6 +297,7 @@ stateDiagram-v2
 
 - Sicherung gescheitert → pausiert, bis sie gelingt oder „Autopilot freigeben“.
 - Sicherung läuft → wartet.
+- Sicherung wartet auf Merge (letzter Sprint noch nicht in `main`) → wartet, startet keinen Sprint vom alten `main`.
 - Aktiver Sprint ohne backlog, planned, in_progress und nur noch Blockaden mit „Aktion notwendig“ → abschliessen (auch nachts).
 - Nächsten Vorschlag übernehmen und starten: nur in den Arbeitszeiten (Standard Mo–Fr 08–18 Uhr).
 
@@ -293,7 +306,7 @@ stateDiagram-v2
 - **Auftrag:** Branch `auftrag/…` vom Sprint-Branch; Erfolg → Merge, Misserfolg → WIP-Commit.
 - **Sprint:** Branch `sprint/…`; Sicherung committet Reste, Test-Gate, Push.
 - **Abschluss:** Merge nach `main` (--no-ff), erneutes Test-Gate, gegebenenfalls GitHub-Actions abwarten, Push, Tag `sprint-name-id`.
-- **AIdeation selbst:** `main` liegt im Arbeitsordner der Menschen. Mit „Nach dem Sprint-Abschluss neu starten“ merged der Worker dort nur, wenn nichts offen ist, prüft die Tests (rot → `reset --keep`) und fordert den Neustart an.
+- **AIdeation selbst:** `main` liegt im Arbeitsordner der Menschen. Mit „Nach dem Sprint-Abschluss neu starten“ merged der Worker dort nur, wenn nichts offen ist, prüft die Tests (rot → `reset --keep`) und fordert den Neustart an. Ist dort etwas offen, wartet der Sprint auf den Merge von Hand (kein Neustart) und wird „done“, sobald `main` ihn enthält.
 - Nie committet: `.env`, Backups, Schlüsseldateien, Zeilen mit Tokens.
 
 ## 8 · Chat, Aktionen und Anfragen auf Knopfdruck
@@ -338,6 +351,8 @@ Jeder dieser Knöpfe (und „Erneut versuchen“, „Sprintvorschlag übernehmen
 | Sprint → KI-Kommentar                              | `sprint_proposal_comments`               | Auftragsautor, nur Text                                                                 |
 | Sprint → Git hoch / runter                         | `git_sync` pending, push oder pull       | Arbeitszyklus, Schritt 1 und 11                                                         |
 
+Der Komplettlauf prüft im Agent-Worktree immer `main` (losgelöst ausgecheckt). Hat der Worktree offene Änderungen, etwa weil ein Auftrag nach dem Nutzungslimit mit halbfertigem Stand wartet, startet kein Test und es werden keine Bugs angelegt. Die Anforderung steht dann auf „fehlgeschlagen“ mit dem Grund „Offene Änderungen im Agent-Worktree … – Test auf main nicht möglich“.
+
 ## 9 · Rechte je Agent
 
 Zwei Ausführungswege mit unterschiedlichen Grenzen. **Claude-CLI**: Rechte aus den freigeschalteten Gruppen des Projekts, AIdeation setzt sie als `--allowedTools`, der Wächter prüft jeden Schreib- und Shell-Zugriff. **Lokales Modell (Ollama)**: eingebaute Werkzeuge, Schreiben nur für Entwickler und Assistent. Die Standardrechte werden je Agent gespeichert und lassen sich im Agent-Formular einzeln ändern.
@@ -380,7 +395,7 @@ Legende: ✅ erlaubt · ⚠️ eingeschränkt · ⛔ gesperrt
 ### Projektcode nur mit gefiltertem Environment
 
 - Tests, Test-Gate, Komplettlauf, Coverage-Messung und Befehle des Chat-Assistenten laufen über `runProjectCommand` bzw. `projectEnvironment` (`src/runner/project-command.ts`). Weitergegeben wird nur eine Allowlist: `PATH`, `HOME`, `TMPDIR`, Locale, Terminal, `CI`, `NODE_ENV`, `SSH_AUTH_SOCK` sowie `LC_*`, `NPM_CONFIG_*`, `PLAYWRIGHT_*`, `DOCKER_*`, `XDG_*`, `NVM_*`. `DEV_LOG_*` und alles mit SECRET, TOKEN, PASSWORD, API_KEY, DATABASE_URL oder CREDENTIAL im Namen fehlen immer; einen Rückfall auf `process.env` gibt es nicht.
-- Git und gh des Workers laufen mit `gitEnvironment`: dieselbe Allowlist plus GitHub-Token für den Push, Hooks aus (`core.hooksPath=/dev/null`) und kein fsmonitor. Alle Commits zusätzlich mit `--no-verify`.
+- Git und gh des Workers laufen mit `gitEnvironment`: dieselbe Allowlist plus GitHub-Token für den Push, Hooks aus (`core.hooksPath=/dev/null`) und kein fsmonitor. Das gilt für Commits, Merges, Checkouts und Pushes, auch für die Einrichtung eines Projekts (`setup-jobs.ts`) und für `gh repo create --push`. Alle Commits zusätzlich mit `--no-verify`. Hook-Ordner (`.git/hooks`, `.husky`, `.githooks`) können Agents nicht beschreiben.
 - Die eigene Coverage-Messung führt Vorbereitungsschritte aus dem `test`-Skript nur aus, wenn sie `npm run`, `npm ci`, `tsc`, `ng build` oder `vite build` sind. Sonst entfällt die Messung; die Ablehnung steht im Tester-Schritt (Ausgabe und Verlauf). Testbefehle je Auftrag (`npx tsx --test <Dateien>`, `node --test …`) misst AIdeation direkt mit `--experimental-test-coverage`, ohne Skript und ohne Vorbereitung.
 - Agent-CLIs (Claude, Codex) und Deploy-Befehle behalten `agentEnvironment` (nur `DEV_LOG_*` entfernt), weil sie API-Schlüssel bzw. Hoster-Zugänge brauchen.
 
@@ -399,6 +414,7 @@ Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitli
 ### Befehlsausgabe
 
 - Von jeder Befehlsausgabe (`runCommand`, `redactOutput`) bleiben höchstens 120 000 Zeichen: die ersten 20 000 und die letzten 100 000. Dazwischen steht `[… N Zeichen der Ausgabe ausgelassen …]`. Das Ende bleibt erhalten, weil dort Fehlerzusammenfassung und Coverage des Testlaufs stehen. Der Puffer ist fest begrenzt, das Mittelstück wird schon während des Laufs verworfen.
+- `redactOutput` schwärzt Werte geheimer Umgebungsvariablen und zusätzlich bekannte Token-Formate (`maskTokens` in `src/core/secret-mask.ts`): `sk-ant-…`, `sk-…`, `ghp_…`/`github_pat_…`, AWS-, Slack- und Google-Schlüssel, PEM-Schlüsselblöcke, JWT, `Bearer`/`Basic`/`Token` mit tokenartigem Wert (mindestens 16 Zeichen, mit Ziffer) und Passwörter in URLs (`postgres://[REDACTED]@host`). E-Mail, IP und `schlüssel=wert` maskiert nur `maskSecrets` (Betriebs-Rückkanal), damit Testausgaben wie `session.ts:12` und Zahlen wie `"input_tokens": 42` lesbar bleiben. `runCommand` selbst schwärzt nur die Umgebung; seine Ausgabe wird noch ausgewertet und erst über `redactOutput` gespeichert. Ausnahme ohne Token-Maske: `git diff` im Git-Sync, weil `stageAll` darin nach Zugangsdaten sucht. `run_sql` maskiert Tokens in Ergebniszellen (vor dem Kürzen) und Fehlermeldungen.
 - Geschwärzt wird vor dem Kürzen. Ein Secret, das über eine Schnittkante reicht, wird dort ganz entfernt. Geschnitten wird nie mitten in einem Emoji (Surrogate-Paar). stdout und stderr haben je einen eigenen UTF-8-Decoder, deshalb bleiben Umlaute auf Chunk-Grenzen ganz.
 - Claude-CLI (`stream-json`): stdout und stderr haben getrennte Zeilenpuffer, und nur stdout wird als Ereignis gelesen. stderr kann so keine JSON-Zeile zerreissen und kein gefälschtes `result` einschleusen. Die letzte Zeile ohne Zeilenumbruch wird beim Abschluss gelesen. Fehlt das `result`-Ereignis bei Exit-Code 0, gilt der Schritt als fehlgeschlagen, nicht als Erfolg mit Kosten 0. Die Live-Ausgabe wird höchstens alle 500 ms neu zusammengesetzt, der lesbare Text ist auf die letzten rund 120 000 Zeichen begrenzt.
 
@@ -409,6 +425,17 @@ Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. D
 ### Budget und Modell-Routing
 
 Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
+
+#### Token-Limits je Agent-Rolle
+
+Zusätzlich zu den Projektlimits kann je Agent-Rolle (`author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`; nicht `custom`) und Zeitraum (`day`, `sprint`, `order`) ein Token-Limit gelten (Tabelle `budget_role_limits`). Keine Zeile bedeutet keine Grenze. Eine Oberfläche gibt es noch nicht, nur die API:
+
+- `GET /api/projects/:slug/budget/roles`: alle Rollen mit `maxTokens`, Verbrauch (`spend`) und Anteil (`percent`) je Zeitraum. Der Verbrauch ist der von heute bzw. vom aktiven Sprint. Beim Auftragslimit ist `spend` `null`, weil der Verbrauch dort am einzelnen Auftrag hängt.
+- `PUT /api/projects/:slug/budget/roles/:role` (nur „admin“): Body `{ "day": { "maxTokens": 500000 }, "sprint": null }`. Eine Zahl setzt die Grenze, `null` bzw. `{ "maxTokens": null }` entfernt sie, ein fehlender Zeitraum bleibt unverändert. Unbekannte Rolle oder unbekannter Zeitraum und eine Grenze, die keine positive Zahl ist, ergeben 400. Danach werden wegen Budget blockierte Aufträge freigegeben, wenn ihr Limit wieder reicht.
+
+Verbrauch je Rolle: Workflow-Schritte über `agent_run_steps.agent_id → agents.role`, dazu `agent_usage.role` (Autor, Bug-Wächter). Schritte ohne `agent_id` (eingebaute Agents) und Schritte eines gelöschten Agents (`ON DELETE SET NULL`) zählen zu keiner Rolle, bleiben aber im Projektverbrauch. Ältere Schritte werden nicht nachträglich zugeordnet.
+
+Vor jedem Agent-Schritt (`budgetGate` mit der Rolle des Agents) und vor Autor bzw. Bug-Wächter gilt zuerst das Projektlimit, dann das Limit der Rolle. Ist ein Rollen-Limit erreicht, startet der Schritt nicht. Der Auftrag wird `blocked` mit dem Grund in `failure` bzw. „Aktion notwendig“, etwa „Tageslimit der Rolle „developer“: 600k Tokens von 500k Tokens“. Dazu kommt die Rolle in `budget_blocked_role`. Die Problemanalyse zeigt diesen Grund auch ohne fehlgeschlagenen Schritt. Bei „Bei abgeschlossen/abgelehnt“ fällt nur der Agent mit erreichtem Rollen-Limit aus. Die 80-%-Warnung kommt je Rolle und Periode genau einmal; in `budget_warnings` steht dafür `period_key = rolle:<role>:<key>`.
 
 ### Zeitleiste und Rückfragen im Auftrag
 
@@ -432,7 +459,7 @@ Neustart des Workers: Nach „restarting“ beendet sich der Worker mit `RESTART
 - **Backoff statt harter Sperre:** Die ersten 10 Fehlversuche je Schlüssel sind frei. Danach heißt es 1 min warten, jeder weitere Fehlversuch verdoppelt die Wartezeit bis höchstens 15 min. Nach 15 min ohne Fehlversuch beginnt der Zähler neu, eine erfolgreiche Anmeldung setzt ihn zurück. Die Antwort ist 429 mit `Retry-After`.
 - **Limit je Herkunft:** höchstens 300 Fehlversuche pro Minute über alle Benutzernamen. Massen-Logins mit Zufallsnamen kosten dadurch weder CPU noch Speicher, andere Adressen bleiben frei.
 - **Speicher:** Beide Tabellen haben höchstens 10 000 Einträge. Beim Einfügen werden zuerst abgelaufene, dann die ältesten Einträge gelöscht.
-- **Client-IP:** kommt aus `X-Forwarded-For`, aber nur von Proxys aus `DEV_LOG_TRUST_PROXY`. Erlaubt sind `loopback`, `linklocal`, `uniquelocal` sowie IP- oder CIDR-Angaben. `true`, `*` oder Hop-Zahlen werden mit Warnung verworfen; dann gilt die Socket-Adresse (`trustProxySetting`).
+- **Client-IP:** kommt aus `X-Forwarded-For`, aber nur von Proxys aus `DEV_LOG_TRUST_PROXY`. Erlaubt sind `1` (genau ein Hop, Compose), `loopback`, `linklocal`, `uniquelocal` sowie IP- oder CIDR-Angaben. `true`, `*` oder andere Hop-Zahlen werden mit Warnung verworfen; dann gilt die Socket-Adresse (`trustProxySetting`). `1` setzt voraus, dass nginx den Header durch genau eine Adresse ersetzt (`deploy/frontend/nginx.conf`, siehe `installation.md`, „Client-IP hinter nginx“).
 
 ### Log-Scan im Produktions-Rückkanal
 
@@ -458,4 +485,6 @@ Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code
 
 ## Parallele Testläufe
 
-E2E- und Oberflächentest suchen sich einen freien Port, wenn 3195 bzw. 3196 belegt ist (in 100er-Schritten: 3295, 3395 …), und nutzen dann eine eigene Testdatenbank mit dem Port als Endung (z. B. `dev_log_e2e_3295`). So stören sich Gate, Tester-Agent und Handläufe nicht mehr (`e2e/test-ports.ts`). Feste Werte gehen weiterhin über `E2E_PORT`/`E2E_DATABASE` bzw. `FULL_UI_PORT`/`FULL_UI_DATABASE`.
+E2E- und Oberflächentest suchen sich einen freien Port, wenn 3195 bzw. 3196 belegt ist (in 100er-Schritten: 3295, 3395 …), und nutzen dann eine eigene Testdatenbank mit dem Port als Endung (z. B. `dev_log_e2e_3295`). So stören sich Gate, Tester-Agent und Handläufe nicht mehr (`e2e/test-ports.ts`).
+
+Jeder Lauf reserviert seinen Port, sobald Playwright die Konfiguration lädt, und hält ihn bis zum Ende: Sperrdatei `dev-log-test-port-<port>.lock` im Temp-Verzeichnis mit PID und Zufallswert. Ein Lauf, der kurz danach startet, nimmt deshalb den nächsten Port, auch wenn der Testserver des ersten noch nicht lauscht. Damit bekommt er auch eine andere Datenbank, und `e2e/serve.ts` löscht nie die eines laufenden Laufs. Beim Beenden gibt der Lauf seine Sperre frei, auch bei Strg+C. Die Sperre eines abgestürzten Laufs (PID nicht mehr am Leben) wird übernommen. Liegengebliebene Testdatenbanken mit Port-Endung bleiben bis zum nächsten Lauf auf diesem Port, der sie neu anlegt. Sperrordner für Tests: `E2E_LOCK_DIR`. Feste Werte gehen weiterhin über `E2E_PORT`/`E2E_DATABASE` bzw. `FULL_UI_PORT`/`FULL_UI_DATABASE`.

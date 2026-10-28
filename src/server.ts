@@ -1,6 +1,7 @@
 import { createDevLogApp } from './api/app.js';
 import { loadTotpSecret, sealStoredTotpSecrets, startSessionCleanup } from './api/auth.js';
 import { encryptProjectSecrets } from './api/projects.js';
+import { sealStoredVapidKeys } from './core/push.js';
 import { createDatabasePool, readDatabaseConfig } from './db/database.js';
 
 async function start(): Promise<void> {
@@ -29,6 +30,8 @@ async function start(): Promise<void> {
   // Zwei-Faktor-Schlüssel aus der Zeit vor der Verschlüsselung neu schreiben; ohne Schlüssel startet der Dienst nicht.
   const sealed = await sealStoredTotpSecrets(pool);
   if (sealed) console.info(`${sealed} Zwei-Faktor-Schlüssel verschlüsselt.`);
+  // Ebenso den privaten VAPID-Schlüssel (Push), damit er nicht im Klartext in Backups steht.
+  if (await sealStoredVapidKeys(pool)) console.info('Push-Schlüssel verschlüsselt.');
   const port = Number(process.env.PORT ?? 3100);
   const auth =
     username && password && !authDisabled ? { username, password, totpSecret: await loadTotpSecret(pool) } : null;

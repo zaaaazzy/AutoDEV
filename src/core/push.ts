@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import webpush from 'web-push';
+import { readEnvValues } from './local-database.js';
+import { decryptSecret, encryptSecret, isEncrypted } from './secrets.js';
 
 /** Web-Push an alle registrierten Geräte. Server, Worker und Wächter teilen die VAPID-Schlüssel über die Datenbank. */
 export interface PushMessage {
@@ -26,19 +27,32 @@ export interface PushSubscriptionRow {
 }
 
 const VAPID_KEY = 'push_vapid_keys';
+
+/** Push-Dienste der Browser: exakte Hosts (Chrome/Edge über FCM, Firefox) und Domains mit Unterdomänen (Safari, Windows). */
+const PUSH_HOSTS = new Set(['fcm.googleapis.com', 'updates.push.services.mozilla.com']);
+const PUSH_DOMAINS = ['push.apple.com', 'notify.windows.com'];
+
+/**
+ * Nur Endpunkte bekannter Push-Dienste – sonst schickt der Server POST-Anfragen an beliebige Ziele (SSRF, z. B. ins
+ * LAN). Allowlist statt IP-Blocklist, weil DNS-Rebinding eine Blocklist umgeht. Gilt beim Anmelden und beim Senden.
+ */
+export function isAllowedPushEndpoint(endpoint: unknown): endpoint is string {
+  if (typeof endpoint !== 'string' || endpoint.length > 1000) return false;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    return false;
+  }
+  // `new URL` normalisiert Port 443 zu '' und Hosts zu Kleinbuchstaben.
+  if (url.protocol !== 'https:' || url.username || url.password || url.port !== '') return false;
+  const host = url.hostname;
+  return PUSH_HOSTS.has(host) || PUSH_DOMAINS.some((domain) => host.endsWith(`.${domain}`));
+}
 /** Wert aus der .env der Installation (Worker und Wächter laufen über launchd ohne diese Umgebung). */
 function installEnv(key: string): string | undefined {
-  try {
-    const file = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../.env'), 'utf8');
-    return (
-      new RegExp(`^${key}=(.*)$`, 'm')
-        .exec(file)?.[1]
-        ?.trim()
-        .replace(/^["']|["']$/g, '') || undefined
-    );
-  } catch {
-    return undefined;
-  }
+  const values = readEnvValues(resolve(dirname(fileURLToPath(import.meta.url)), '../..'));
+  return values.get(key)?.trim() || undefined;
 }
 
 /**
@@ -54,17 +68,64 @@ export function pushSubject(environment: NodeJS.ProcessEnv = process.env, fromFi
 
 const SUBJECT = pushSubject();
 
-export async function vapidKeys(pool: Pool): Promise<VapidKeys> {
+/** Ohne DEV_LOG_SECRET_KEY wird kein privater VAPID-Schlüssel gespeichert. */
+export class VapidKeyMissingError extends Error {
+  constructor() {
+    super('Push-Schlüssel brauchen DEV_LOG_SECRET_KEY. Den Schlüssel in der .env setzen und neu starten.');
+  }
+}
+
+/** VAPID-Schlüssel kommen nur verschlüsselt in die Datenbank; ohne Schlüssel wird nichts geschrieben (fail-closed). */
+export function sealVapid(keys: VapidKeys, environment: NodeJS.ProcessEnv = process.env): string {
+  const sealed = encryptSecret(JSON.stringify(keys), environment);
+  if (!isEncrypted(sealed)) throw new VapidKeyMissingError();
+  return sealed;
+}
+
+/** Liest gespeicherte VAPID-Schlüssel; Klartext aus der Zeit vor der Verschlüsselung bleibt bis zum Start lesbar. */
+export function openVapid(stored: string, environment: NodeJS.ProcessEnv = process.env): VapidKeys {
+  return JSON.parse(decryptSecret(stored, environment)) as VapidKeys;
+}
+
+export async function vapidKeys(pool: Pool, environment: NodeJS.ProcessEnv = process.env): Promise<VapidKeys> {
   const stored = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
-  if (stored.rows[0]) return JSON.parse(stored.rows[0].value) as VapidKeys;
+  if (stored.rows[0]) return openVapid(stored.rows[0].value, environment);
   const generated = webpush.generateVAPIDKeys();
   await pool.query('INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING', [
     VAPID_KEY,
-    JSON.stringify(generated),
+    sealVapid(generated, environment),
   ]);
   // Bei gleichzeitiger Erzeugung gewinnt der zuerst gespeicherte Schlüssel.
   const winner = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
-  return JSON.parse(winner.rows[0]!.value) as VapidKeys;
+  return openVapid(winner.rows[0]!.value, environment);
+}
+
+/**
+ * Beim Start: VAPID-Schlüssel aus der Zeit vor der Verschlüsselung einmal verschlüsselt neu schreiben; vorhandene
+ * müssen sich mit dem Schlüssel lesen lassen. Liegt ein Schlüssel vor, aber kein DEV_LOG_SECRET_KEY, startet der
+ * Dienst nicht – gelöscht wird nichts. Gibt die Zahl der neu verschlüsselten Werte zurück (0 oder 1).
+ */
+export async function sealStoredVapidKeys(pool: Pool, environment: NodeJS.ProcessEnv = process.env): Promise<number> {
+  const result = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
+  const stored = result.rows[0]?.value;
+  if (!stored) return 0;
+  if (!environment.DEV_LOG_SECRET_KEY?.trim()) throw new VapidKeyMissingError();
+  if (isEncrypted(stored)) {
+    try {
+      openVapid(stored, environment);
+    } catch {
+      throw new Error('Push-Schlüssel lassen sich mit dem gesetzten DEV_LOG_SECRET_KEY nicht lesen.');
+    }
+    return 0;
+  }
+  const value = sealVapid(openVapid(stored, environment), environment);
+  // Nur ersetzen, was noch der gelesene Klartext ist (ein gleichzeitiger Start hat es sonst schon erledigt).
+  const updated = await pool.query('UPDATE app_settings SET value = $2 WHERE key = $1 AND value = $3', [
+    VAPID_KEY,
+    value,
+    stored,
+  ]);
+  return updated.rowCount ?? 0;
 }
 
 /**
@@ -97,31 +158,35 @@ export async function loadSubscriptions(pool: Pool, audience: PushAudience = {})
 
 /**
  * Sendet an die übergebenen Geräte. Liefert die Zahl erfolgreicher Zustellungen und die Endpunkte, die der
- * Push-Dienst als abgemeldet meldet (404/410) – diese sollte der Aufrufer löschen.
+ * Push-Dienst als abgemeldet meldet (404/410) – diese sollte der Aufrufer löschen. Endpunkte außerhalb der
+ * Allowlist (Altdaten, Zwischenspeicher des Wächters) werden nie angefragt und ebenfalls als `gone` gemeldet.
  */
 export async function deliverPush(
   keys: VapidKeys,
   subscriptions: PushSubscriptionRow[],
   message: PushMessage,
+  send: typeof webpush.sendNotification = webpush.sendNotification.bind(webpush),
 ): Promise<{ sent: number; gone: string[] }> {
   const payload = JSON.stringify({ ...message, title: message.title.slice(0, 120), body: message.body.slice(0, 400) });
   let sent = 0;
-  const gone: string[] = [];
+  const gone = subscriptions.filter((s) => !isAllowedPushEndpoint(s.endpoint)).map((s) => s.endpoint);
   await Promise.all(
-    subscriptions.map(async (subscription) => {
-      try {
-        await webpush.sendNotification(
-          { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
-          payload,
-          { vapidDetails: { subject: SUBJECT, ...keys }, TTL: 6 * 3600, urgency: 'normal', timeout: 10_000 },
-        );
-        sent += 1;
-      } catch (error) {
-        const status = (error as { statusCode?: number }).statusCode;
-        if (status === 404 || status === 410) gone.push(subscription.endpoint);
-        else console.warn('Push fehlgeschlagen:', (error as Error).message);
-      }
-    }),
+    subscriptions
+      .filter((s) => isAllowedPushEndpoint(s.endpoint))
+      .map(async (subscription) => {
+        try {
+          await send(
+            { endpoint: subscription.endpoint, keys: { p256dh: subscription.p256dh, auth: subscription.auth } },
+            payload,
+            { vapidDetails: { subject: SUBJECT, ...keys }, TTL: 6 * 3600, urgency: 'normal', timeout: 10_000 },
+          );
+          sent += 1;
+        } catch (error) {
+          const status = (error as { statusCode?: number }).statusCode;
+          if (status === 404 || status === 410) gone.push(subscription.endpoint);
+          else console.warn('Push fehlgeschlagen:', (error as Error).message);
+        }
+      }),
   );
   return { sent, gone };
 }

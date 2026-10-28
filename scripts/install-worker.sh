@@ -20,8 +20,8 @@ for cli in claude copilot gemini; do
 done
 # Eigener Ablageort der Playwright-Browser (falls gesetzt) gilt auch im Dienst: Sonst finden optische Abnahme und
 # Smoke-Tests der Spielprojekte (Phaser-Vorlage) Chromium nicht.
-DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE" "$DEFAULT_DATABASE_URL")"
-warn_default_password "$DATABASE_URL"
+DATABASE_URL="$(resolve_value DEV_LOG_DATABASE_URL "$ENV_FILE")"
+require_database_url "$DATABASE_URL"
 write_env_file "$ENV_FILE" \
   "DEV_LOG_DATABASE_URL=$DATABASE_URL" \
   "DEV_LOG_REVIEW_DATABASE_URL=$(resolve_value DEV_LOG_REVIEW_DATABASE_URL "$ENV_FILE")" \
@@ -44,6 +44,7 @@ write_private_file "$PLIST" <<P
 <string>--all</string><string>--watch</string><string>--limit</string><string>3</string></array>
 <key>EnvironmentVariables</key><dict>
 <key>PATH</key><string>$(xml_escape "$WORKER_PATH")</string>
+<key>DEV_LOG_LOG_FILE</key><string>$(xml_escape "$LOG")</string>
 </dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>30</integer>
@@ -52,6 +53,9 @@ write_private_file "$PLIST" <<P
 </dict></plist>
 P
 plutil -lint -s "$PLIST"
+# Ab 10 MB rotieren, 5 Stände behalten. Der Worker schreibt das Log selbst (DEV_LOG_LOG_FILE) und öffnet es danach
+# neu; StandardOutPath bleibt für Ausgaben vor dem Start und Abstürze von Node.
+install_log_rotation aideation-worker "$LOG" 5 10240 || true
 if install_dry_run; then
   echo "Probelauf: $PLIST und $ENV_FILE geschrieben, Dienst nicht registriert."
   exit 0

@@ -13,11 +13,13 @@ import {
   checkedOutElsewhere,
   currentBranch,
   ensureRepository,
+  freshestMain,
   gitHelpers,
   type GitHelpers,
   MAIN_BRANCH,
+  mainContains,
   pushRemote,
-  sprintBranch,
+  sprintBranchOf,
   sprintTag,
   stageAll,
   taskCommitMessage,
@@ -79,6 +81,10 @@ export async function commitProjectSetup(
 interface PendingSprint {
   id: string;
   name: string;
+  /** Beim Start festgehaltener Sprint-Branch (sprints.branch); unabhängig vom aktuellen Namen. */
+  branch?: string | null;
+  /** Der Sprint hat erledigte Aufträge: Dann muss es seinen Branch geben. */
+  hasDone?: boolean;
   action: 'push' | 'pull' | null;
   remote: string | null;
   status: string;
@@ -106,6 +112,8 @@ interface SyncResult {
   log: string[];
   /** Der Sprint wurde in diesem Lauf nach main gemergt. */
   mergedMain?: boolean;
+  /** main liegt in einem anderen Ordner mit offenen Änderungen: Dort übernimmt ein Mensch den Sprint („wartet auf Merge“). */
+  awaitingMerge?: boolean;
   /** PR-Modus: Link des geöffneten Pull Requests; Merge und Tag folgen nach grüner CI. */
   pullRequest?: string;
 }
@@ -128,10 +136,17 @@ async function pushSprint(
   },
 ): Promise<SyncResult> {
   const { git, must } = helpers;
-  const branch = sprintBranch(sprint.name);
+  const branch = sprintBranchOf(sprint);
   let mergedMain = false;
+  let awaitingMerge = false;
   if (await branchExists(git, branch)) {
     if ((await must('rev-parse', '--abbrev-ref', 'HEAD')) !== branch) await must('checkout', branch);
+  } else if (sprint.status === 'completed' && sprint.hasDone) {
+    // Erledigte Aufträge, aber kein Sprint-Branch: Früher wurde dann der aktuelle Branch gesichert, getaggt und „done“
+    // gemeldet – main bekam die Aufträge nie, der Tag zeigte auf einen fremden Stand.
+    throw new Error(
+      `Sprint-Branch ${branch} fehlt, obwohl der Sprint erledigte Aufträge hat – nichts nach ${MAIN_BRANCH} übernommen. Branch wiederherstellen, dann „Git-Sicherung“ erneut starten.`,
+    );
   } else if ((await currentBranch(git)) === 'HEAD') {
     // Losgelöst (Agent-Worktree): Ohne Branch landete der Sicherungs-Commit nur am Tag und nie in main.
     await must('checkout', '-b', branch);
@@ -193,15 +208,18 @@ async function pushSprint(
     const elsewhere = await checkedOutElsewhere(git, MAIN_BRANCH, ci.cwd);
     if (elsewhere) {
       // main ist im Arbeitsordner der Menschen ausgecheckt: dort übernehmen, aber nur, wenn er sauber auf main steht
-      // (Test-Gate dort, bei Rot zurückgenommen). Geht das nicht, gilt die Sicherung als gescheitert – früher hiess
-      // sie „done“, obwohl nichts in main war, und der nächste Sprint zweigte vom alten main ab (Arbeit gestrandet).
-      mergedMain = await mergeIntoCheckedOutMain(ci.execute, elsewhere, branch, sprint.name, ci.commands, log);
-      if (!mergedMain) {
+      // (Test-Gate dort, bei Rot zurückgenommen). Offene Änderungen dort: Der Sprint wartet auf den Merge von Hand;
+      // Konflikte oder rotes Test-Gate: gescheitert. Früher hiess beides „done“, obwohl nichts in main war, und der
+      // nächste Sprint zweigte vom alten main ab (Arbeit gestrandet).
+      const outcome = await mergeIntoCheckedOutMain(ci.execute, elsewhere, branch, sprint.name, ci.commands, log);
+      if (outcome === 'failed') {
         throw new Error(
           `${log.at(-1) ?? `${branch} konnte nicht nach ${MAIN_BRANCH} übernommen werden.`} Der Sprint ist noch nicht in ${MAIN_BRANCH}; nach dem Aufräumen „Git-Sicherung“ erneut starten.`,
         );
       }
-      if (sprint.remote) {
+      mergedMain = outcome === 'merged';
+      awaitingMerge = outcome === 'busy';
+      if (mergedMain && sprint.remote) {
         const pushed = await ci.execute(['git', 'push', '-u', 'origin', MAIN_BRANCH], elsewhere, {
           timeoutMs: 120_000,
           env: gitEnvironment({
@@ -263,14 +281,21 @@ async function pushSprint(
     }
   }
   const tag = sprintTag(sprint.name, sprint.id);
-  await must('tag', '-f', tag);
+  await must('tag', '-f', tag, ...(awaitingMerge ? [branch] : []));
   if (sprint.remote) {
     await must('push', '--force', 'origin', `refs/tags/${tag}`);
     log.push(`Tag ${tag} gepusht.`);
   } else {
     log.push('Kein GitHub-Repository am Projekt hinterlegt – nur lokal gesichert.');
   }
-  return { commit: await must('rev-parse', '--short', 'HEAD'), branch: current, log, mergedMain };
+  // Nach dem Loslösen steht HEAD auf main: der Stand, auf den main warten muss, ist der Sprint-Branch.
+  return {
+    commit: await must('rev-parse', '--short', awaitingMerge ? branch : 'HEAD'),
+    branch: current,
+    log,
+    mergedMain,
+    awaitingMerge,
+  };
 }
 
 /**
@@ -285,23 +310,23 @@ export async function mergeIntoCheckedOutMain(
   sprintName: string,
   commands: string[][],
   log: string[],
-): Promise<boolean> {
+): Promise<'merged' | 'busy' | 'failed'> {
   const git = (...args: string[]) =>
     execute(['git', ...args], folder, { timeoutMs: 120_000, env: gitEnvironment(BOT_IDENTITY) });
   const head = await git('rev-parse', '--abbrev-ref', 'HEAD');
   const status = await git('status', '--porcelain', '--untracked-files=no');
   if (head.exitCode !== 0 || head.output.trim() !== MAIN_BRANCH || status.exitCode !== 0 || status.output.trim()) {
     log.push(
-      `Sprint abgeschlossen: ${branch} ist bereit. In ${folder} sind Änderungen offen oder nicht ${MAIN_BRANCH} ausgecheckt – dort mit „git merge ${branch}“ übernehmen; kein automatischer Neustart.`,
+      `Sprint abgeschlossen: ${branch} ist bereit, aber noch nicht in ${MAIN_BRANCH}. In ${folder} sind Änderungen offen oder nicht ${MAIN_BRANCH} ausgecheckt – dort mit „git merge ${branch}“ übernehmen; bis dahin startet der Autopilot keinen neuen Sprint, kein automatischer Neustart.`,
     );
-    return false;
+    return 'busy';
   }
   const before = (await git('rev-parse', 'HEAD')).output.trim();
   const merged = await git('merge', '--no-ff', branch, '-m', `Merge ${branch}: Sprint ${sprintName}`);
   if (merged.exitCode !== 0) {
     await git('merge', '--abort');
     log.push(`Merge von ${branch} nach ${MAIN_BRANCH} in ${folder} hat Konflikte – bitte manuell zusammenführen.`);
-    return false;
+    return 'failed';
   }
   try {
     await runTestGate(execute, folder, commands, log);
@@ -314,10 +339,10 @@ export async function mergeIntoCheckedOutMain(
         ? `Test-Gate nach dem Merge in ${folder} rot – Merge zurückgenommen. ${detail}`.trim()
         : `Test-Gate nach dem Merge in ${folder} rot – ACHTUNG: Merge konnte nicht zurückgenommen werden (${reset.output.trim().slice(-200)}); ${MAIN_BRANCH} dort von Hand auf ${before.slice(0, 7)} zurücksetzen. ${detail}`.trim(),
     );
-    return false;
+    return 'failed';
   }
   log.push(`Sprint abgeschlossen: ${branch} in ${folder} nach ${MAIN_BRANCH} gemergt.`);
-  return true;
+  return 'merged';
 }
 
 /** Holt den Stand von GitHub per Fast-Forward; lokale Änderungen oder abweichende Historie brechen mit Fehlermeldung ab. */
@@ -351,6 +376,40 @@ export async function goLiveLogged(onMergedMain: () => Promise<boolean | null | 
   }
 }
 
+/**
+ * Sprints, die auf den Merge nach main warten: „done“, sobald main (lokal oder der neuere Stand auf GitHub) den
+ * vermerkten Sprint-Stand enthält. Scheitert die Prüfung selbst, gilt die Sicherung als gescheitert – das ist weder
+ * „fertig“ noch „wartet“, und der Autopilot pausiert mit Begründung.
+ */
+async function settleAwaitingMerge(pool: Pool, project: string, git: GitHelpers['git']): Promise<void> {
+  const waiting = (
+    await pool.query<{ id: string; name: string; commit: string | null }>(
+      `SELECT id, name, git_commit AS commit FROM sprints WHERE project_slug = $1 AND git_sync = 'awaiting_merge'`,
+      [project],
+    )
+  ).rows;
+  if (!waiting.length) return;
+  const main = await freshestMain(git);
+  for (const sprint of waiting) {
+    try {
+      if (!sprint.commit) throw new Error('kein Sprint-Stand vermerkt.');
+      if (!(await mainContains(git, sprint.commit, main))) continue;
+      await pool.query(
+        `UPDATE sprints SET git_sync = 'done', git_message = concat_ws(' ', git_message, $2::text), git_synced_at = NOW()
+          WHERE id = $1 AND git_sync = 'awaiting_merge'`,
+        [sprint.id, `Inzwischen in ${MAIN_BRANCH} übernommen.`],
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await pool.query(
+        `UPDATE sprints SET git_sync = 'failed', git_message = $2, git_synced_at = NOW()
+          WHERE id = $1 AND git_sync = 'awaiting_merge'`,
+        [sprint.id, `Ob ${MAIN_BRANCH} „${sprint.name}“ enthält, liess sich nicht prüfen: ${message}`.slice(0, 1500)],
+      );
+    }
+  }
+}
+
 /** Works through the next queued Git request (push or pull) of the project's sprints. */
 export async function syncSprintToGit(
   pool: Pool,
@@ -369,6 +428,7 @@ export async function syncSprintToGit(
         AND updated_at < NOW() - INTERVAL '60 minutes'`,
     [project],
   );
+  await settleAwaitingMerge(pool, project, gitHelpers(execute, cwd).git);
   // Ein unterbrochener Auftrag (z. B. durch einen Neustart) steht noch mit offenen Änderungen auf seinem Branch und
   // läuft gleich weiter. Die Git-Sicherung wartet (bleibt „pending“), statt am Checkout zu scheitern; sie läuft am
   // Ende desselben Durchlaufs erneut.
@@ -377,7 +437,8 @@ export async function syncSprintToGit(
     `UPDATE sprints s SET git_sync = 'running', updated_at = NOW()
       WHERE s.id = (SELECT id FROM sprints WHERE project_slug = $1 AND git_sync = 'pending'
                      ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING s.id, s.name, s.status, s.git_action AS action, s.pr_url AS "prUrl",
+      RETURNING s.id, s.name, s.branch, s.status, s.git_action AS action, s.pr_url AS "prUrl",
+                EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'done') AS "hasDone",
                 (SELECT git_remote FROM projects WHERE slug = s.project_slug) AS remote`,
     [project],
   );
@@ -425,6 +486,24 @@ export async function syncSprintToGit(
         [sprint.id, result.log.join(' '), result.commit, result.branch, result.pullRequest],
       );
       return 1;
+    }
+    // Abgeschlossen heisst „in main“: Fehlt der Sprint dort noch (main in anderem Ordner mit offenen Änderungen), wartet
+    // er auf den Merge – kein „done“, kein Live schalten, kein Neustart, und der Autopilot startet keinen neuen Sprint.
+    if (sprint.status === 'completed' && sprint.action !== 'pull') {
+      const branch = sprintBranchOf(sprint);
+      const waiting =
+        result.awaitingMerge ||
+        ((await branchExists(helpers.git, branch)) &&
+          (await branchExists(helpers.git, MAIN_BRANCH)) &&
+          !(await mainContains(helpers.git, branch)));
+      if (waiting) {
+        await pool.query(
+          `UPDATE sprints SET git_sync = 'awaiting_merge', git_message = $2, git_commit = $3, git_branch = $4,
+                  git_synced_at = NOW() WHERE id = $1`,
+          [sprint.id, result.log.join(' '), await helpers.must('rev-parse', '--short', branch), branch],
+        );
+        return 1;
+      }
     }
     if (result.mergedMain && onMergedMain) await goLiveLogged(onMergedMain, result.log);
     if (result.mergedMain && restartAfterSprint) {

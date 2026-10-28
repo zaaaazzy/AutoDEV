@@ -154,6 +154,29 @@ export function folderFiles(folder: string, name: string, root = TEMPLATE_FOLDER
     }));
 }
 
+/**
+ * Feste Generator-Versionen, damit eine Vorlage heute und morgen dasselbe anlegt. Aktualisieren: `npm view <paket> version`,
+ * Vorlage einmal anlegen und prüfen.
+ */
+export const GENERATORS = {
+  createVite: 'create-vite@7.0.0',
+  angularCli: '@angular/cli@20.3.40',
+  createNextApp: 'create-next-app@15.5.0',
+  nuxi: 'nuxi@3.25.1',
+  nestCli: '@nestjs/cli@11.0.7',
+} as const;
+
+/**
+ * Installationen der Vorlagen laufen ohne Install-Skripte fremder Pakete (zusätzlich setzt der Worker
+ * npm_config_ignore_scripts). Generatoren, die selbst installieren, bekommen --skip-install bzw. --no-install.
+ */
+const NPM_INSTALL = ['npm', 'install', '--ignore-scripts'];
+
+const viteCommands = (template: string): string[][] => [
+  ['npm', 'create', '-y', GENERATORS.createVite, '.', '--', '--template', template],
+  NPM_INSTALL,
+];
+
 /** Vorschau-Port des Phaser-Dev-Servers (vite.config.ts der Vorlage, strictPort). */
 export const PHASER_DEV_URL = 'http://localhost:5180';
 
@@ -199,11 +222,11 @@ volumes:
       ...nodeApiFiles('backend/'),
     ],
     commands: [
-      ['npm', '--prefix', 'backend', 'install'],
+      ['npm', '--prefix', 'backend', 'install', '--ignore-scripts'],
       [
         'npx',
         '-y',
-        '@angular/cli@20',
+        GENERATORS.angularCli,
         'new',
         'frontend',
         '--defaults',
@@ -211,7 +234,9 @@ volumes:
         '--style=scss',
         '--skip-git',
         '--ssr=false',
+        '--skip-install',
       ],
+      ['npm', '--prefix', 'frontend', 'install', '--ignore-scripts'],
     ],
   },
   {
@@ -225,7 +250,7 @@ volumes:
       { path: '.gitignore', content: gitignore },
       ...nodeApiFiles(''),
     ],
-    commands: [['npm', 'install']],
+    commands: [NPM_INSTALL],
   },
   {
     id: 'phaser-game',
@@ -240,7 +265,7 @@ volumes:
     ],
     // Chromium für den Smoke-Test: gleiche Playwright-Version wie AIdeation, also meist schon vorhanden.
     commands: [
-      ['npm', 'install', '--no-audit', '--no-fund'],
+      ['npm', 'install', '--ignore-scripts', '--no-audit', '--no-fund'],
       ['npx', '--no-install', 'playwright', 'install', 'chromium'],
     ],
     project: {
@@ -270,10 +295,7 @@ volumes:
     description: 'React mit TypeScript und Vite.',
     group: 'frontend',
     stack: ['React', 'Vite', 'TypeScript'],
-    commands: [
-      ['npm', 'create', '-y', 'vite@latest', '.', '--', '--template', 'react-ts'],
-      ['npm', 'install'],
-    ],
+    commands: viteCommands('react-ts'),
   },
   {
     id: 'vue-vite',
@@ -281,10 +303,7 @@ volumes:
     description: 'Vue 3 mit TypeScript und Vite.',
     group: 'frontend',
     stack: ['Vue 3', 'Vite', 'TypeScript'],
-    commands: [
-      ['npm', 'create', '-y', 'vite@latest', '.', '--', '--template', 'vue-ts'],
-      ['npm', 'install'],
-    ],
+    commands: viteCommands('vue-ts'),
   },
   {
     id: 'svelte-vite',
@@ -292,10 +311,7 @@ volumes:
     description: 'Svelte mit TypeScript und Vite.',
     group: 'frontend',
     stack: ['Svelte', 'Vite', 'TypeScript'],
-    commands: [
-      ['npm', 'create', '-y', 'vite@latest', '.', '--', '--template', 'svelte-ts'],
-      ['npm', 'install'],
-    ],
+    commands: viteCommands('svelte-ts'),
   },
   {
     id: 'angular',
@@ -307,7 +323,7 @@ volumes:
       [
         'npx',
         '-y',
-        '@angular/cli@20',
+        GENERATORS.angularCli,
         'new',
         'app',
         '--directory',
@@ -317,7 +333,9 @@ volumes:
         '--style=scss',
         '--skip-git',
         '--ssr=false',
+        '--skip-install',
       ],
+      NPM_INSTALL,
     ],
   },
   {
@@ -330,7 +348,7 @@ volumes:
       [
         'npx',
         '-y',
-        'create-next-app@latest',
+        GENERATORS.createNextApp,
         '.',
         '--ts',
         '--eslint',
@@ -339,7 +357,9 @@ volumes:
         '--use-npm',
         '--yes',
         '--disable-git',
+        '--skip-install',
       ],
+      NPM_INSTALL,
     ],
   },
   {
@@ -349,11 +369,12 @@ volumes:
     group: 'fullstack',
     stack: ['Nuxt', 'Vue', 'TypeScript'],
     // Ohne Terminal verlangt nuxi eine Vorlage; npm 10 scheitert an Nuxts Peer-Abhängigkeiten ohne --legacy-peer-deps.
+    // Ohne Install-Skripte entfällt das postinstall `nuxt prepare` (.nuxt/-Typen); `npm run dev` bzw. `build` holt es nach.
     commands: [
       [
         'npx',
         '-y',
-        'nuxi@latest',
+        GENERATORS.nuxi,
         'init',
         '.',
         '--template',
@@ -365,7 +386,7 @@ volumes:
         '--no-install',
         '--force',
       ],
-      ['npm', 'install', '--legacy-peer-deps'],
+      ['npm', 'install', '--ignore-scripts', '--legacy-peer-deps'],
     ],
   },
   {
@@ -374,7 +395,10 @@ volumes:
     description: 'Strukturiertes Node.js-Backend mit Modulen und Dependency Injection.',
     group: 'backend',
     stack: ['NestJS', 'TypeScript'],
-    commands: [['npx', '-y', '@nestjs/cli@latest', 'new', '.', '--package-manager', 'npm', '--skip-git']],
+    commands: [
+      ['npx', '-y', GENERATORS.nestCli, 'new', '.', '--package-manager', 'npm', '--skip-git', '--skip-install'],
+      NPM_INSTALL,
+    ],
   },
   {
     id: 'fastapi',

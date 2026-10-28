@@ -3,8 +3,10 @@ name: aideation
 # Container, Volumes und Host-Ports hängen am Compose-Projekt: das Agent-Projekt (COMPOSE_PROJECT_NAME=aideation-agent)
 # bekommt eigene Namen und Volumes und veröffentlicht keine Host-Ports (deploy/compose/ports.<Projekt>.yml).
 # Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
-# Härtung: jeder Dienst hat Grenzen für Speicher, CPU und Prozesse (deploy.resources.limits) und einen Healthcheck;
-# frontend (nginx), https (Caddy) und backup laufen ohne root und ohne Linux-Capabilities.
+# Härtung: jeder Dienst hat Grenzen für Speicher, CPU und Prozesse (deploy.resources.limits), einen Healthcheck und
+# no-new-privileges; alle verwerfen die Linux-Capabilities (cap_drop: ALL) und holen nur begründete zurück (cap_add).
+# frontend (nginx), https (Caddy) und backup laufen ohne root mit schreibgeschütztem Dateisystem (read_only, /tmp als
+# tmpfs). dev-log schreibt Anhänge und Doku zur Laufzeit, db ihre Daten: dort kein read_only.
 # Ohne DEV_LOG_DB_PASSWORD in der .env gilt das bekannte Standardpasswort devlog_local_dev – der Server warnt dann beim Start.
 services:
   db:
@@ -21,6 +23,11 @@ services:
       file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
       service: db-ports
     restart: unless-stopped
+    # Der Entrypoint startet als root: übergibt das Datenverzeichnis an postgres (CHOWN, FOWNER, DAC_OVERRIDE) und
+    # wechselt dann per su-exec zu diesem Benutzer (SETUID, SETGID). Mehr braucht PostgreSQL nicht.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DEV_LOG_DB_USER:-devlog} -d aideation"]
       interval: 5s
@@ -37,7 +44,9 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3100
-      DEV_LOG_TRUST_PROXY: uniquelocal
+      # Genau ein Hop: nginx (deploy/frontend) setzt X-Forwarded-For auf eine einzige Adresse. Nicht uniquelocal –
+      # damit zählte eine vom Client vorangestellte Adresse, sobald die Kette nur private Proxys enthält.
+      DEV_LOG_TRUST_PROXY: "1"
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
       # Weitere eigene Domains für die Health-URL der betreuten Anwendungen (Komma-getrennt, inkl. Subdomains).
       DEV_LOG_OWN_DOMAINS: ${DEV_LOG_OWN_DOMAINS:-}
@@ -58,6 +67,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Läuft als Benutzer node (Dockerfile) auf Port 3100: keine Capability nötig.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
@@ -80,9 +92,12 @@ services:
     depends_on:
       dev-log:
         condition: service_healthy
-    # Läuft als Benutzer nginx (deploy/frontend/Dockerfile) auf Port 8080 im Container.
+    # nginx-unprivileged als Benutzer nginx (deploy/frontend/Dockerfile) auf 8080/8081: keine Capability nötig.
+    # PID-Datei und Zwischenablagen (client_temp usw.) liegen unter /tmp, sonst schreibt nginx nichts.
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
@@ -102,11 +117,15 @@ services:
     user: "${DEV_LOG_BACKUP_USER:-70:70}"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # Schreibt nur nach /backups (Volume).
+    read_only: true
+    tmpfs: [/tmp]
     environment:
       PGHOST: db
       PGUSER: ${DEV_LOG_DB_USER:-devlog}
       PGPASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
       BACKUP_KEEP_DAYS: ${DEV_LOG_BACKUP_KEEP_DAYS:-14}
+      BACKUP_MIN_KEEP: ${DEV_LOG_BACKUP_MIN_KEEP:-7}
     volumes:
       - ./backups:/backups
       - ./deploy/backup.sh:/backup.sh:ro
@@ -146,6 +165,9 @@ services:
     # /usr/bin/caddy trägt die Datei-Capability cap_net_bind_service; ohne sie im Bounding-Set scheitert der Start.
     cap_add: [NET_BIND_SERVICE]
     security_opt: ["no-new-privileges:true"]
+    # Zertifikate und Konfiguration liegen in den Volumes /data und /config.
+    read_only: true
+    tmpfs: [/tmp]
     environment:
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-localhost}
     volumes:
@@ -182,6 +204,7 @@ services:
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
     volumes:
       - aideation_caddy_data:/data
       - aideation_caddy_config:/config

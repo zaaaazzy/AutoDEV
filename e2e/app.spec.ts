@@ -962,6 +962,15 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
       data: { label: 'Gefährlich', rules: 'Bash(rm -rf:*)' },
     });
     expect(rule.status()).toBe(400);
+    // Eigene Regeln nur mit Programmen aus der Allowlist: Wrapper und Schreib-Werkzeuge lehnt der Server ab.
+    for (const rules of ['Bash(timeout:*)', 'Bash(find:*)', 'Bash(awk:*)', 'Bash(tee:*)', 'Bash(cd:*)']) {
+      const wrapper = await request.post('/api/projects/e2e/permission-groups', {
+        headers,
+        data: { label: 'Wrapper', rules },
+      });
+      expect(wrapper.status(), rules).toBe(400);
+      expect((await wrapper.json()).message, rules).toMatch(/nicht freigegeben|gesperrt/);
+    }
   } finally {
     await request.delete(`/api/agents/${agent.id}`, { headers });
   }

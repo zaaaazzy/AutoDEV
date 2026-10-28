@@ -6,6 +6,7 @@ import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { commitProjectSetup, isValidGitRemote, pushRemote } from '../runner/git-sync.js';
+import { gitEnvironment } from '../runner/project-command.js';
 import { normalizeFolder, projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
 import { listFolders } from './folders.js';
@@ -41,21 +42,36 @@ function folderOf(params: Params): string {
   return normalizeFolder(folder) ?? folder;
 }
 
-const ENV = {
-  ...process.env,
+const GIT_OPTIONS = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+};
+
+const ENV = {
+  ...process.env,
+  ...GIT_OPTIONS,
   CI: '1',
   npm_config_yes: 'true',
 };
+
+/** git und gh (startet git, z. B. bei „repo create --push“): gefiltert und ohne Hooks des Projekts. */
+const usesGit = (command: readonly string[]): boolean => command[0] === 'git' || command[0] === 'gh';
+
+/**
+ * Vorlagen-Befehle: Install-Skripte fremder Pakete laufen nicht (auch nicht in npm-Aufrufen der Generatoren selbst,
+ * die die Umgebung erben). Die Generatoren starten trotzdem, `npm exec` führt ihr Programm aus, kein Skript.
+ */
+export const TEMPLATE_ENV = { npm_config_ignore_scripts: 'true' };
 
 async function run(
   execute: CommandExecutor,
   command: string[],
   cwd: string,
   timeoutMs = QUICK_TIMEOUT_MS,
+  extraEnv: Record<string, string> = {},
 ): Promise<{ ok: boolean; output: string }> {
-  const result = await execute(command, cwd, { timeoutMs, env: ENV }).catch((error: unknown) => ({
+  const env = usesGit(command) ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' }) : { ...ENV, ...extraEnv };
+  const result = await execute(command, cwd, { timeoutMs, env }).catch((error: unknown) => ({
     exitCode: 1,
     durationMs: 0,
     output: error instanceof Error ? error.message : String(error),
@@ -195,7 +211,7 @@ async function applyTemplate(params: Params, execute: CommandExecutor, log: Log)
   if (template.files) await log('Dateien der Vorlage geschrieben.');
   for (const command of template.commands ?? []) {
     await log(`$ ${command.join(' ')}`);
-    const result = await run(execute, command, folder, STEP_TIMEOUT_MS);
+    const result = await run(execute, command, folder, STEP_TIMEOUT_MS, TEMPLATE_ENV);
     await log(result.output.split('\n').slice(-6).join('\n'));
     if (!result.ok) throw new Error(`\`${command.join(' ')}\` ist fehlgeschlagen.`);
   }

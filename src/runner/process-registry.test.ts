@@ -21,13 +21,14 @@ function fakePool(rows: { pid: number; startedAt: Date }[] = []) {
 
 test('Prozessregister: Anlegen und Löschen landen in Startreihenfolge in agent_processes', async () => {
   const pool = fakePool();
-  const store = databaseProcessStore(pool as never);
+  const store = databaseProcessStore(pool as never, 'host:/aideation:alle');
   const entry = { pid: 4242, startedAt: new Date(), command: 'claude', cwd: '/tmp/projekt' };
   store.add(entry);
   store.remove(entry);
   await store.flush();
   assert.match(pool.queries[0].sql, /^INSERT INTO agent_processes/);
-  assert.deepEqual(pool.queries[0].params, [4242, entry.startedAt, 'claude', '/tmp/projekt']);
+  // Mit Worker-ID: Ein zweiter Worker beendet den Prozess beim Start nicht, solange dieser Worker lebt.
+  assert.deepEqual(pool.queries[0].params, [4242, entry.startedAt, 'claude', '/tmp/projekt', 'host:/aideation:alle']);
   assert.match(pool.queries[1].sql, /^DELETE FROM agent_processes/);
   assert.deepEqual(pool.queries[1].params, [4242, entry.startedAt]);
 });
@@ -42,6 +43,8 @@ test('Start-Aufräumen liest auch Chat-, Autor- und Visionär-Prozesse, nicht nu
   });
   assert.match(pool.queries[0].sql, /FROM agent_processes/);
   assert.match(pool.queries[0].sql, /FROM agent_run_steps/);
+  // Besitzprüfung: nur eigene oder verwaiste Prozesse (Worker ohne frisches Lebenszeichen).
+  assert.match(pool.queries[0].sql, /FROM runner_workers/);
   assert.deepEqual(killed, [100]);
   assert.deepEqual(result, { killed: 1, failed: 0 });
   assert.ok(pool.queries.some((query) => /^DELETE FROM agent_processes/.test(query.sql)));

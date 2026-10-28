@@ -225,6 +225,15 @@ export async function checkGithubAuth(pool: Pool, project: string, adapter: Host
   return auth.ok;
 }
 
+/** Gibt es einen Sprint im Review mit geöffnetem Pull Request, den pollSprintReviews verfolgen muss? */
+async function hasSprintReviews(pool: Pool, project: string): Promise<boolean> {
+  const { rows } = await pool.query(
+    `SELECT 1 FROM sprints WHERE project_slug = $1 AND status = 'review' AND pr_url IS NOT NULL LIMIT 1`,
+    [project],
+  );
+  return rows.length > 0;
+}
+
 export interface GithubSyncResult {
   imported: number;
   reported: number;
@@ -235,7 +244,8 @@ export interface GithubSyncResult {
 
 /**
  * Worker-Takt der GitHub-Brücke je Projekt: Anmeldung prüfen, Issues importieren, Statuswechsel melden und Sprints im
- * Review verfolgen. Im Modus `aus` (oder ohne GitHub-Remote) wird kein gh-Befehl ausgeführt. Bei einem Rate-Limit
+ * Review verfolgen. Im Modus `aus` werden nur noch Sprints mit offenem Pull Request verfolgt; ohne solche (oder ohne
+ * GitHub-Remote) wird kein gh-Befehl ausgeführt. Bei einem Rate-Limit
  * pausiert das Projekt bis zum nächsten Intervall.
  */
 export async function syncGitHub(
@@ -248,7 +258,11 @@ export async function syncGitHub(
 ): Promise<GithubSyncResult> {
   const result: GithubSyncResult = { imported: 0, reported: 0, finished: 0 };
   const settings = await loadSettings(pool, project);
-  if (!settings || settings.mode === 'aus') return { ...result, skipped: 'Modus aus' };
+  if (!settings) return { ...result, skipped: 'Modus aus' };
+  // Im Modus `aus` ruht nur der Issue-Import. Ein schon geöffneter Pull Request (Sprint im Review) wird weiter
+  // verfolgt, sonst bliebe der Sprint nach dem Abschalten der Brücke für immer im Review.
+  const issuesActive = settings.mode !== 'aus';
+  if (!issuesActive && !(await hasSprintReviews(pool, project))) return { ...result, skipped: 'Modus aus' };
   const repo = githubRepo(settings.remote);
   if (!repo) {
     await pool.query(
@@ -262,7 +276,8 @@ export async function syncGitHub(
   runtime.set(project, state);
   if (state.pausedUntil > now.getTime()) return { ...result, skipped: 'Rate-Limit-Pause' };
   const adapter = adapterFor(repo);
-  const issuesDue = !settings.syncedAt || now.getTime() - new Date(settings.syncedAt).getTime() >= ISSUE_INTERVAL_MS;
+  const issuesDue =
+    issuesActive && (!settings.syncedAt || now.getTime() - new Date(settings.syncedAt).getTime() >= ISSUE_INTERVAL_MS);
   const reviewsDue = now.getTime() - state.reviewsAt >= REVIEW_INTERVAL_MS;
   const checkedAt = settings.authCheckedAt ? new Date(settings.authCheckedAt).getTime() : 0;
   const authValid = settings.auth === 'ok' && now.getTime() - checkedAt < AUTH_RECHECK_MS;

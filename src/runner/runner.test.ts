@@ -7,7 +7,13 @@ import {
   type BuiltinAgent,
   buildInvocation,
   buildPrompt,
+  closeOrphanedRuns,
+  heldRunIds,
+  isDatabaseUnavailable,
+  ORPHANED_REQUEUE_LIMIT,
+  ORPHANED_RUN_MS,
   parseRunnerOptions,
+  retryOnDatabase,
   recoverStuckItems,
   runSelectedItems,
   runWorkItem,
@@ -109,6 +115,72 @@ test('stops at the first failing agent and blocks the order', async () => {
   ]);
 });
 
+test('Workflow während des Laufs umgebaut: der Lauf endet mit den geladenen Schritten, ohne Fremdschlüssel-Fehler', async () => {
+  // Bildet den Fremdschlüssel nach: Eine gelöschte Schritt-ID direkt einzufügen, scheitert wie in Postgres.
+  const existing = new Set(['step-dev', 'step-test']);
+  const inserted: unknown[] = [];
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('INSERT INTO agent_run_steps') && sql.includes('workflow_step_id')) {
+        const id = values[5] as string | null;
+        const checked = sql.includes('SELECT id FROM workflow_steps WHERE id = $6');
+        if (!checked && id && !existing.has(id)) {
+          throw new Error(
+            'insert or update on table "agent_run_steps" violates foreign key constraint "agent_run_steps_workflow_step_id_fkey"',
+          );
+        }
+        inserted.push(checked && id && !existing.has(id) ? null : id);
+      }
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async (command) => {
+    // Während der Entwickler arbeitet, baut jemand im Agents-Menü den Workflow um: der Tester-Schritt verschwindet.
+    if (command[0] === 'dev') existing.delete('step-test');
+    return { exitCode: 0, durationMs: 1, output: `ok ${command[0]}` };
+  };
+  const agents = [
+    { ...agent('Entwickler', 'while_task', 1, ['dev']), stepId: 'step-dev' },
+    { ...agent('Prüfer', 'after_task', 1, ['test']), stepId: 'step-test' },
+  ];
+  const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
+  assert.equal(result, 'passed');
+  assert.deepEqual(inserted, ['step-dev', null]);
+  assert.deepEqual(queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1)?.values, [
+    'item-1',
+    'done',
+  ]);
+  assert.ok(!queries.some((query) => /SET failure = \$2/.test(query.sql)), 'keine Begründung für einen Abbruch');
+});
+
+test('unerwarteter Fehler im Lauf: der Auftrag wird nie ohne Begründung blockiert', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('INSERT INTO agent_run_steps')) throw new Error('Datenbank meldet etwas Unerwartetes');
+      return { rows: [{ id: 'step-row' }] };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => ({ exitCode: 0, durationMs: 1, output: 'ok' });
+  const result = await runWorkItem(pool, item, [agent('Entwickler', 'while_task', 1, ['dev'])], {
+    cwd: '/repo',
+    timeoutMs: 1000,
+    execute,
+  });
+  assert.equal(result, 'failed');
+  const failure = queries.find((query) => /SET failure = \$2/.test(query.sql));
+  assert.deepEqual(failure?.values, ['item-1', 'Lauf abgebrochen: Datenbank meldet etwas Unerwartetes']);
+  assert.deepEqual(queries.filter((query) => query.sql.includes('UPDATE development_items')).at(-1)?.values, [
+    'item-1',
+    'blocked',
+  ]);
+});
+
 test('Laufwerk fällt während eines Agents weg: Auftrag wird neu eingeplant statt blockiert, kein Bug', async () => {
   const { mkdtempSync, renameSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -185,8 +257,9 @@ test('puts known bugs into the prompt so mistakes are not repeated', () => {
         severity: 'high',
         status: 'fixed',
         fixNotes: 'Prüfung ergänzt',
+        source: 'agent',
       },
-      { title: 'Export leer', description: '', severity: 'low', status: 'open', fixNotes: '' },
+      { title: 'Export leer', description: '', severity: 'low', status: 'open', fixNotes: '', source: 'human' },
     ],
   });
   assert.match(prompt, /\[behoben \/ high\] Login bricht ab – Null-Zeiger \| Lösung: Prüfung ergänzt/);
@@ -934,6 +1007,7 @@ test('Datenbank-Aussetzer beim Abschluss: der Auftrag bleibt nicht „In Arbeit�
     cwd: '/r',
     timeoutMs: 1,
     execute,
+    settleRetryDelayMs: 0,
   });
   assert.equal(result, 'failed');
   const stuck = queries.findIndex(
@@ -943,6 +1017,125 @@ test('Datenbank-Aussetzer beim Abschluss: der Auftrag bleibt nicht „In Arbeit�
   const run = queries.findIndex((query) => query.sql.includes('UPDATE agent_runs SET status = $2'));
   assert.ok(run > stuck, 'der Lauf wird erst nach dem Abschluss beendet');
   assert.equal(queries[run]?.values[1], 'failed');
+});
+
+/** Wie pg bei ausgefallener Datenbank: AggregateError ohne Text, der Code steckt in den Einzelfehlern. */
+function refused(): Error {
+  return new AggregateError([
+    Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' }),
+  ]);
+}
+
+test('Datenbank kommt während des Abschlusses zurück: Auftrag und Lauf werden nach Pausen doch noch geschlossen', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  let outage = false;
+  let failures = 0;
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }], rowCount: 1 };
+      // settleItem scheitert endgültig; Blockieren und Lauf-Status scheitern je zweimal, dann ist die Datenbank zurück.
+      if (outage && sql.includes('status = CASE')) throw refused();
+      const closing =
+        sql.includes("SET status = 'blocked', failure = COALESCE") || sql.includes('UPDATE agent_runs SET status = $2');
+      if (outage && closing && failures < 4) {
+        failures += 1;
+        throw refused();
+      }
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => {
+    outage = true;
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  const result = await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+    settleRetryDelayMs: 0,
+  });
+  assert.equal(result, 'failed');
+  const blocks = queries.filter((query) => query.sql.includes("SET status = 'blocked', failure = COALESCE"));
+  const closes = queries.filter((query) => query.sql.includes('UPDATE agent_runs SET status = $2'));
+  assert.ok(blocks.length >= 2, 'Blockieren wird nach dem Datenbankfehler wiederholt');
+  assert.equal(failures, 4);
+  assert.equal(closes.at(-1)?.values[1], 'failed', 'der Lauf steht am Ende nicht mehr auf „läuft“');
+  assert.deepEqual(heldRunIds(), [], 'der Worker hält den Lauf danach nicht mehr');
+});
+
+test('SQL-Fehler beim Abschluss werden nicht wiederholt, nur Datenbankausfälle', async () => {
+  let calls = 0;
+  await assert.rejects(
+    retryOnDatabase(async () => {
+      calls += 1;
+      throw Object.assign(new Error('syntax error'), { code: '42601' });
+    }, 0),
+  );
+  assert.equal(calls, 1);
+  calls = 0;
+  await assert.rejects(
+    retryOnDatabase(async () => {
+      calls += 1;
+      throw refused();
+    }, 0),
+  );
+  assert.equal(calls, 5, 'begrenzt: nach fünf Versuchen gibt der Abschluss auf');
+  assert.ok(isDatabaseUnavailable(new Error('Connection terminated unexpectedly')));
+  assert.ok(isDatabaseUnavailable(Object.assign(new Error('terminating connection'), { code: '57P01' })));
+  assert.ok(!isDatabaseUnavailable(new Error('duplicate key')));
+});
+
+test('Abschluss scheitert endgültig: der verwaiste Lauf wird im Zyklus beendet, ohne Neustart; Abbrechen wirkt sofort', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  let outage = false;
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }], rowCount: 1 };
+      const closing = /status = CASE|SET status = 'blocked', failure = COALESCE|UPDATE agent_runs SET status = \$2/;
+      if (outage && closing.test(sql)) throw refused();
+      if (sql.includes('WITH candidates')) return { rows: [{ count: 1 }], rowCount: 1 };
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const execute: CommandExecutor = async () => {
+    outage = true;
+    return { exitCode: 0, durationMs: 1, output: 'ok' };
+  };
+  await runWorkItem(pool, item, [agent('dev', 'while_task', 1, ['dev'])], {
+    cwd: '/r',
+    timeoutMs: 1,
+    execute,
+    settleRetryDelayMs: 0,
+  });
+  // Der Lauf blieb in der Datenbank „läuft“, gehalten wird er aber nicht mehr – das Aufräumen darf ihn nehmen.
+  assert.deepEqual(heldRunIds(), []);
+  outage = false;
+  assert.equal(await closeOrphanedRuns(pool, ['mainty']), 1);
+  const sweep = queries.find((query) => query.sql.includes('WITH candidates'));
+  assert.ok(sweep);
+  const [projects, held, staleMs, cancelMs, note, cancelNote, limit] = sweep.values;
+  assert.deepEqual(projects, ['mainty']);
+  assert.deepEqual(held, [], 'nur Läufe, die kein Auftrag dieses Workers hält');
+  assert.equal(staleMs, ORPHANED_RUN_MS, 'nur ohne frisches Lebenszeichen');
+  assert.ok((cancelMs as number) < (staleMs as number), 'ein abgebrochener Schritt endet ohne langes Warten');
+  assert.match(note as string, /^Unterbrochen: /);
+  assert.match(cancelNote as string, /abgebrochen/);
+  assert.equal(limit, ORPHANED_REQUEUE_LIMIT);
+  const sql = sweep.sql;
+  assert.match(sql, /NOT \(r\.id::text = ANY\(\$2::text\[\]\)\)/);
+  assert.match(sql, /WHERE r\.id = o\.id AND r\.status = 'running'/, 'bedingt: nur Läufe, die noch laufen');
+  assert.match(sql, /s\.status = 'running'/);
+  assert.match(sql, /interrupted = NOT runs\.cancelled/, 'Unterbrechung setzt beim selben Agent fort');
+  assert.match(sql, /exit_code = CASE WHEN runs\.cancelled THEN 130/);
+  assert.match(sql, /WHEN st\.block THEN 'blocked' ELSE 'planned'/, 'wieder eingeplant, begrenzt');
+  assert.match(sql, /d\.status = 'in_progress'/);
+  assert.doesNotMatch(sql, /tokens|cost_usd/, 'Tokens und Kosten bleiben unberührt');
+  // Ein Lauf, den der Worker noch hält, wird nie angefasst.
+  await closeOrphanedRuns(pool, ['mainty'], ['run-2']);
+  assert.deepEqual(queries.filter((query) => query.sql.includes('WITH candidates')).at(-1)?.values[1], ['run-2']);
+  assert.equal(await closeOrphanedRuns(pool, []), 0, 'ohne eigene Projekte keine Abfrage');
 });
 
 test('Hängende Aufträge (In Arbeit ohne laufenden Lauf) werden je Projekt und beim Start blockiert', async () => {
@@ -1006,6 +1199,84 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   assert.ok(saved);
   assert.equal(saved.values[5], 800);
   assert.equal(saved.values[6], 0.4);
+});
+
+/** Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). */
+async function testerAcceptanceRun(acceptance: object) {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const query = async (sql: string, values: unknown[] = []) => {
+    queries.push({ sql, values });
+    if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+    if (sql.includes('SELECT test_commands'))
+      return { rows: [{ commands: [['npx', 'tsx', '--test', 'src/a.test.ts']] }] };
+    return { rows: [{ id: 'step-row' }] };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
+  // Wie im gemeldeten Fall: Tests grün, aber kein @@COVERAGE vom Tester, weil der Wächter die Messung sperrt.
+  const output = `75 von 75 Tests grün.\n@@ACCEPTANCE ${JSON.stringify(acceptance)}`;
+  const execute: CommandExecutor = async (command, _cwd, options) => {
+    if (command.includes('--experimental-test-coverage')) {
+      return { exitCode: 0, durationMs: 1, output: '# pass 75\n# fail 0\n# all files | 82.5 | 70.1 | 90.2 |' };
+    }
+    options?.onChunk?.(JSON.stringify({ type: 'result', result: output }));
+    return { exitCode: 0, durationMs: 1, output };
+  };
+  const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
+  const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
+  const order = { ...item, description: '## Akzeptanzkriterien\n- A ist belegt\n- B ist belegt' };
+  const result = await runWorkItem(pool, order, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin });
+  return { result, queries };
+}
+
+const NOT_MEASURED = 'Tests grün, aber die Abdeckung konnte nicht gemessen werden (Wächter blockiert den Befehl)';
+const DONE_WITH_UNMEASURED = [1, 2, 3, 4, 5].map((nr) =>
+  nr === 4 ? { nr, met: false, note: NOT_MEASURED } : { nr, met: true },
+);
+
+test('Abnahme: grüne Tests, alle Kriterien belegt, nur die Abdeckungsmessung des Testers fehlt → bestanden', async () => {
+  const { result, queries } = await testerAcceptanceRun({
+    criteria: [
+      { nr: 1, met: true, note: 'Test a' },
+      { nr: 2, met: true, note: 'Test b' },
+    ],
+    done: DONE_WITH_UNMEASURED,
+  });
+  assert.equal(result, 'passed');
+  const dod4 = queries.find(
+    (query) =>
+      query.sql.includes('INSERT INTO acceptance_checks') && query.values[1] === 'done' && query.values[2] === 4,
+  );
+  assert.equal(dod4?.values[4], 'met', 'DoD-Punkt gilt als erfüllt');
+  // Die von AIdeation gemessene Abdeckung wird weiterhin gespeichert – mit echten Werten, nicht null.
+  const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
+  assert.ok(area, 'Abdeckung gespeichert');
+  assert.equal(area.values[8], 82.5);
+  assert.notEqual(area.values[8], null);
+});
+
+test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs-Hinweis abgelehnt', async () => {
+  const unbelegt = await testerAcceptanceRun({
+    criteria: [
+      { nr: 1, met: true, note: 'Test a' },
+      { nr: 2, met: false, note: 'kein Test vorhanden' },
+    ],
+    done: DONE_WITH_UNMEASURED,
+  });
+  assert.equal(unbelegt.result, 'failed');
+  const rot = await testerAcceptanceRun({
+    criteria: [
+      { nr: 1, met: true, note: '' },
+      { nr: 2, met: true, note: '' },
+    ],
+    done: [1, 2, 3, 4, 5].map((nr) =>
+      nr === 2
+        ? { nr, met: false, note: '2 Tests rot; Abdeckung nicht gemessen (Wächter blockiert)' }
+        : { nr, met: true },
+    ),
+  });
+  assert.equal(rot.result, 'failed');
+  // Auch abgelehnt bleibt die gemessene Abdeckung gespeichert.
+  assert.ok(rot.queries.some((query) => query.sql.includes('INSERT INTO test_coverage_areas')));
 });
 
 test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach dem Reset, kein Bug', async () => {

@@ -13,7 +13,7 @@ import {
   type GitHelpers,
   MAIN_BRANCH,
   porcelainPath,
-  sprintBranch,
+  sprintBranchOf,
   stageAll,
 } from './git-helpers.js';
 import { clearStaleLocks } from './stale-lock.js';
@@ -52,14 +52,15 @@ async function baseOf(pool: Pool, project: string, branch: string, git: GitHelpe
   const prefix = /^auftrag\/([0-9a-f]{8})-/.exec(branch)?.[1];
   if (prefix) {
     const row = (
-      await pool.query<{ name: string | null }>(
-        `SELECT s.name FROM development_items d
+      await pool.query<{ name: string | null; branch: string | null }>(
+        `SELECT s.name, s.branch FROM development_items d
            LEFT JOIN sprints s ON s.id = d.sprint_id AND s.status NOT IN ('completed', 'cancelled')
           WHERE d.project_slug = $1 AND d.id::text LIKE $2 LIMIT 1`,
         [project, `${prefix}%`],
       )
     ).rows[0];
-    if (row?.name && (await branchExists(git, sprintBranch(row.name)))) return sprintBranch(row.name);
+    const sprint = row?.name ? sprintBranchOf({ name: row.name, branch: row.branch }) : null;
+    if (sprint && (await branchExists(git, sprint))) return sprint;
   }
   return MAIN_BRANCH;
 }

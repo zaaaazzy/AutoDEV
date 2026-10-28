@@ -1,9 +1,16 @@
 import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
-import { seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
+import { agentInProject, seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
-import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
+import {
+  RESTRICTED_ROLES,
+  SYSTEM_ROLES,
+  asCommand,
+  loadSystemSettings,
+  systemAgentUsage,
+  systemAgents,
+} from '../agent/system-agents.js';
 import type { Response, Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
@@ -191,17 +198,31 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     const published = (row ? JSON.parse(row.value) : []) as { role: string; model: string }[];
     const agents = systemAgents().map((agent) => published.find((item) => item.role === agent.role) ?? agent);
     const settings = await loadSystemSettings(pool);
+    const fallback = await publishedFallback();
     response.json({
-      agents: agents.map((agent) => ({
-        ...agent,
-        model: settings.get(agent.role)?.model ?? agent.model,
-        command: settings.get(agent.role)?.command ?? null,
-        restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
-        allowTools: settings.get(agent.role)?.allowTools ?? false,
-      })),
+      agents: agents.map((agent) => {
+        const model = settings.get(agent.role)?.model ?? agent.model;
+        return {
+          ...agent,
+          model,
+          command: settings.get(agent.role)?.command ?? null,
+          restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
+          allowTools: settings.get(agent.role)?.allowTools ?? false,
+          // Dieselbe Auswahl wie der Lauf (runAuthorAgent bzw. Schnellschätzung).
+          usage: systemAgentUsage(agent.role, settings.get(agent.role), fallback, model),
+        };
+      }),
       models: models ? JSON.parse(models.value) : [],
     });
   });
+
+  /** Vom Worker veröffentlichter Ersatzbefehl (DEV_LOG_AGENT_COMMAND, nur Programmname). */
+  const publishedFallback = async (): Promise<string[] | null> => {
+    const row = (
+      await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'agent_fallback_command'`)
+    ).rows[0];
+    return row ? asCommand(JSON.parse(row.value)) : null;
+  };
 
   app.put('/system-agents/:role', access({ role: 'admin', tenant: 'admin' }), async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
@@ -238,7 +259,11 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
         command !== undefined,
       ],
     );
-    response.json({ role, ...saved.rows[0] });
+    const row = saved.rows[0]!;
+    const setting = { model: row.model, command: asCommand(row.command), allowTools: row.allowTools };
+    const localModel = row.model ?? systemAgents().find((agent) => agent.role === role)?.model ?? '';
+    // Neue Anzeige „verwendet“ gleich nach dem Speichern, ohne auf den Worker zu warten.
+    response.json({ role, ...row, usage: systemAgentUsage(role, setting, await publishedFallback(), localModel) });
   });
 
   // Workflow order: phase (pre, while, after), then position.
@@ -373,7 +398,8 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       return;
     }
     let allowed = fields;
-    if (requested !== undefined || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
+    const handoffTo = fields.find((field) => field.column === 'handoff_to')?.value as string | null | undefined;
+    if (requested !== undefined || handoffTo || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
       const current = (
         await pool.query<{ slug: string; command: string[] | null; role: string }>(
           'SELECT project_slug AS slug, command, role FROM agents WHERE id = $1',
@@ -384,6 +410,10 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       const checked = adminFieldsCheck(principalOf(response), fields, current);
       if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
       allowed = checked;
+      // Nachrichten gehen nur an Agents desselben Projekts (Mandantentrennung); null = kein fester Empfänger.
+      if (handoffTo && !(await agentInProject(pool, handoffTo, current.slug))) {
+        return void response.status(400).json({ message: 'Der Empfänger gehört nicht zu diesem Projekt.' });
+      }
       if (requested !== undefined) {
         const commands = await validAgentCommands(pool, current.slug, requested);
         if (typeof commands === 'string') return void response.status(400).json({ message: commands });

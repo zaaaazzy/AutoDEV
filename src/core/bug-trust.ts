@@ -67,3 +67,8 @@ export function plainExternalText(text: string, max: number): string {
   const clean = text.replace(INVISIBLE, '').replace(/```/g, "'''").replace(/<<</g, '‹‹‹').replace(/>>>/g, '›››');
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
 }
+
+/** Fasst Fremdtext für einen Prompt ein; Marker im Text sind entschärft, er kann den Block weder öffnen noch schliessen. */
+export function fenceExternalText(text: string): string {
+  return `${EXTERNAL_TEXT_START}\n${plainExternalText(text, Infinity)}\n${EXTERNAL_TEXT_END}`;
+}

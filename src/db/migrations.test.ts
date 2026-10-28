@@ -128,10 +128,12 @@ test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nic
     await legacy.query(`INSERT INTO app_settings (key, value) VALUES ('model:tester', 'haiku')`);
     assert.deepEqual(await runMigrations(legacy), []);
     assert.equal((await legacy.query(`SELECT 1 FROM app_settings WHERE key = 'model:tester'`)).rowCount, 1);
-    const lock = await legacy.query('SELECT count(*)::int AS n FROM pg_locks WHERE locktype = $1 AND objid = $2', [
-      'advisory',
-      MIGRATION_LOCK,
-    ]);
+    // pg_locks zeigt den ganzen Cluster: nur diese Datenbank zählen, andere Testdateien migrieren parallel.
+    const lock = await legacy.query(
+      `SELECT count(*)::int AS n FROM pg_locks
+        WHERE locktype = $1 AND objid = $2 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+      ['advisory', MIGRATION_LOCK],
+    );
     assert.equal(lock.rows[0].n, 0, 'Sperre nach dem Lauf gelöst');
   } finally {
     for (const pool of pools) await pool.end();

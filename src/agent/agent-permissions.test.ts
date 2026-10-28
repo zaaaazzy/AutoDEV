@@ -64,8 +64,14 @@ test('Geheimnisse: jede Rolle bekommt Deny-Regeln und den Wächter für Read, Gr
       const label = `${role}: ${base.join(' ')}`;
       const settings = settingsOf(command);
       const deny = settings.permissions?.deny ?? [];
-      // .env, config/.env.production, certs/server.key, *.pem und SSH-Schlüssel
-      for (const rule of ['Read(**/.env*)', 'Read(**/*.key)', 'Read(**/*.pem)', 'Read(**/.ssh/**)']) {
+      // .env, config/.env.production, certs/server.key, *.pem, SSH-Schlüssel und npm-Tokens (.npmrc)
+      for (const rule of [
+        'Read(**/.env*)',
+        'Read(**/*.key)',
+        'Read(**/*.pem)',
+        'Read(**/.ssh/**)',
+        'Read(**/.npmrc)',
+      ]) {
         assert.ok(deny.includes(rule), `${label} ohne ${rule}`);
       }
       const matcher = settings.hooks?.PreToolUse[0]?.matcher ?? '';
@@ -111,7 +117,7 @@ test('Agent bekommt genau die einzeln gesetzten Befehle; Datei-Werkzeuge nur mit
   assert.deepEqual(policyOf(writer), { create: true, edit: false, scopes: ['docs'] });
 
   const developer = withAgentPermissions(CLAUDE, 'developer', project, ['files', 'logs', 'Bash(npm run prisma:*)']);
-  assert.equal(option(developer, '--allowedTools'), 'Bash(npm run prisma:*)');
+  assert.equal(option(developer, '--allowedTools'), 'Bash(npm run prisma:*),Bash(git rm:*),Bash(git mv:*)');
   assert.ok(developer.includes('--add-dir'));
   assert.equal(developer.includes('--disallowedTools'), false);
   assert.deepEqual(policyOf(developer), { create: true, edit: true, scopes: [] });
@@ -129,7 +135,7 @@ test('Befehle anderer Projekte oder ausgeschalteter Kategorien wirken nicht', ()
 
 test('Ohne Zuweisung gelten die Rollenstandards – auch dann mit Wächter', () => {
   const author = withAgentPermissions(CLAUDE, 'author', project, null);
-  assert.equal(author.includes('--allowedTools'), false);
+  assert.equal(option(author, '--allowedTools'), 'Bash(git rm:*),Bash(git mv:*)');
   assert.deepEqual(policyOf(author), { create: true, edit: true, scopes: [] });
   assert.ok(withAgentPermissions(CLAUDE, 'developer', project, null).includes('--allowedTools'));
   // Andere CLIs bleiben unverändert; eigene Werkzeug-Regeln im Befehl bleiben, der Wächter kommt dazu.
@@ -221,4 +227,21 @@ test('die Problemanalyse (analyst) arbeitet nur lesend: keine Datei-Werkzeuge, k
   const disallowed = command[command.indexOf('--disallowedTools') + 1] ?? '';
   for (const tool of ['Write', 'Edit', 'Bash']) assert.ok(disallowed.split(',').includes(tool), tool);
   assert.ok(!command.includes('--allowedTools'));
+});
+
+test('git rm und git mv kommen nur mit den Datei-Rechten und nur mit Wächter', () => {
+  const allowed = (commands: string[] | null, role = 'developer') =>
+    (option(withAgentPermissions(CLAUDE, role, project, commands), '--allowedTools') ?? '').split(',');
+  assert.ok(allowed(['files:create', 'files:edit']).includes('Bash(git rm:*)'));
+  assert.ok(allowed(['files:create', 'files:edit']).includes('Bash(git mv:*)'));
+  assert.ok(allowed(['files:edit']).includes('Bash(git rm:*)'));
+  assert.ok(!allowed(['files:edit']).includes('Bash(git mv:*)'));
+  assert.ok(!allowed(['files:create']).some((rule) => /git (?:rm|mv)/.test(rule)));
+  assert.ok(!allowed(['Bash(git status:*)']).some((rule) => /git (?:rm|mv)/.test(rule)));
+  // Rollen ohne Schreibrechte bekommen sie auch mit Zuweisung nicht.
+  for (const role of ['routine', 'analyst', 'visionary', 'pre_sprint']) {
+    assert.ok(!allowed(['files:create', 'files:edit'], role).some((rule) => /git (?:rm|mv)/.test(rule)), role);
+  }
+  assert.match(commandHelp('Bash(git rm:*)'), /Löscht/);
+  assert.match(commandHelp('Bash(git mv:*)'), /Benennt/);
 });

@@ -1,5 +1,6 @@
 import { logged } from '../core/log.js';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { followLogFile } from '../core/log-file.js';
+import { existsSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
@@ -7,13 +8,22 @@ import { processChat, rejectChat } from '../agent/chat.js';
 import { scheduleRoutines } from '../agent/routine.js';
 import { beginShutdown, isDraining, setDraining, setProcessStore } from '../core/shutdown.js';
 import { shareTreeLocks, treeLockName } from '../core/project-lock.js';
-import { databaseProcessStore, killPreviousProcesses } from './process-registry.js';
+import { databaseProcessStore, killPreviousProcesses, RECLAIMABLE_RUN_SQL } from './process-registry.js';
+import {
+  beatWorker,
+  currentWorkerId,
+  setWorkerId,
+  WORKER_BEAT_MS,
+  WORKER_STALE_SECONDS,
+  workerIdFor,
+} from './worker-identity.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
 import { publishSystemAgents } from '../agent/system-agents.js';
 import { processSetupJob } from '../setup/setup-jobs.js';
 import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
 import { projectFolderError } from '../core/validation.js';
+import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local-database.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
 import { ReviewSlots } from './review-slots.js';
@@ -31,7 +41,7 @@ import { reconcileWorkingTree } from './git-sync/reconcile.js';
 import { processRollback } from './rollback.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
-import { parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
+import { closeOrphanedRuns, parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';
@@ -47,19 +57,7 @@ import { runDueJobs } from './scheduler.js';
 export function resolveProjectScope(environment: NodeJS.ProcessEnv, installDir: string): string {
   const configured = environment.DEV_LOG_PROJECT_ROOTS?.trim();
   if (configured) return configured;
-  try {
-    const line = readFileSync(resolve(installDir, '.env'), 'utf8')
-      .split(/\r?\n/)
-      .find((entry) => entry.startsWith('DEV_LOG_PROJECT_ROOTS='));
-    const value = line
-      ?.slice('DEV_LOG_PROJECT_ROOTS='.length)
-      .trim()
-      .replace(/^["']|["']$/g, '');
-    if (value) return value;
-  } catch {
-    // keine .env – Vorgabe unten
-  }
-  return dirname(installDir);
+  return readEnvValues(installDir).get('DEV_LOG_PROJECT_ROOTS')?.trim() || dirname(installDir);
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
@@ -227,48 +225,89 @@ export async function holdWorkerLock(pool: Pool): Promise<(() => Promise<void>) 
   };
 }
 
-export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
-  // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
-  await recoverTestRequests(pool).catch(logged('runner-cli'));
-  // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
-  await pool
-    .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
-    .catch(logged('runner-cli'));
+/**
+ * Räumt beim Start nur eigene Läufe (Vorgänger mit derselben Worker-ID) und verwaiste (Worker ohne frisches
+ * Lebenszeichen) auf. Läuft daneben ein anderer Worker, bleiben seine Läufe, Schritte und Prozesse unberührt; Anfragen
+ * ohne Besitzer (Chat, Autor, Visionär, Analysen, Testanforderungen, Abnahmen, Git-Lösungen) bleiben dann ebenfalls
+ * stehen, weil sie dem lebenden Worker gehören könnten.
+ */
+export async function recoverInterruptedRuns(
+  pool: Pool,
+  workerId: string | null = currentWorkerId(),
+  kill?: Parameters<typeof killPreviousProcesses>[1],
+): Promise<void> {
+  const others = workerId
+    ? await pool.query<{ id: string }>(
+        `SELECT id FROM runner_workers w WHERE w.id <> $1 AND w.last_seen > NOW() - $2 * INTERVAL '1 second'`,
+        [workerId, WORKER_STALE_SECONDS],
+      )
+    : { rows: [] };
+  const alone = others.rows.length === 0;
+  if (!alone) {
+    console.info(
+      `Weitere Worker aktiv (${others.rows.map((row) => row.id).join(', ')}): nur eigene und verwaiste Läufe werden aufgeräumt.`,
+    );
+  }
+  if (alone) {
+    // Angefangene Komplettläufe (Testanforderungen) gelten nach dem Neustart als abgebrochen.
+    await recoverTestRequests(pool).catch(logged('runner-cli'));
+    // Unterbrochene Abnahme-Prüfungen werden erneut angefragt.
+    await pool
+      .query(`UPDATE acceptance_checks SET status = 'verifying' WHERE status = 'checking'`)
+      .catch(logged('runner-cli'));
+  }
   // Erst alle Altprozesse beenden (Agent-Schritte, Chat, Autor, Visionär, Testanforderungen), dann neu einplanen.
   // Lebt einer womöglich noch, liefe die Anfrage sonst doppelt: dann nichts automatisch neu starten.
-  const orphans = await killPreviousProcesses(pool);
+  const orphans = await killPreviousProcesses(pool, kill, workerId);
   const safe = orphans.failed === 0;
+  // Läufe, die dieser Worker aufräumen darf – einmal festgehalten, damit Neueinplanen, Schritte und Läufe dieselben treffen.
+  const runs = (
+    await pool.query<{ id: string }>(
+      `SELECT r.id FROM agent_runs r WHERE r.status = 'running' AND ${RECLAIMABLE_RUN_SQL}`,
+      [workerId, WORKER_STALE_SECONDS],
+    )
+  ).rows.map((row) => row.id);
   const requeued = safe
     ? await pool.query(
         `UPDATE development_items SET status = 'planned', updated_at = NOW()
-          WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE status = 'running')`,
+          WHERE status = 'in_progress' AND id IN (SELECT development_id FROM agent_runs WHERE id = ANY($1::uuid[]))`,
+        [runs],
       )
     : { rowCount: 0 };
-  // Aufträge „In Arbeit“ ohne laufenden Lauf hängen (auch nach einem erfolgreichen Lauf ohne Abschluss): blockieren,
-  // damit sie erneut gestartet werden können.
-  await recoverStuckItems(pool, null);
-  await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
-  await pool.query(`UPDATE chat_messages SET status = $1 WHERE status = 'processing'`, [safe ? 'pending' : 'failed']);
-  await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
-  await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
-  await pool
-    .query(
-      `UPDATE visionary_runs SET status = 'requested', started_at = NULL, progress = NULL WHERE status = 'running'`,
-    )
-    .catch(logged('runner-cli'));
+  if (alone) {
+    // Aufträge „In Arbeit“ ohne laufenden Lauf hängen (auch nach einem erfolgreichen Lauf ohne Abschluss): blockieren,
+    // damit sie erneut gestartet werden können.
+    await recoverStuckItems(pool, null);
+    await pool.query(`DELETE FROM chat_messages WHERE role = 'assistant' AND status = 'processing'`);
+    await pool.query(`UPDATE chat_messages SET status = $1 WHERE status = 'processing'`, [safe ? 'pending' : 'failed']);
+    await pool.query(`UPDATE development_items SET analysis_status = 'requested' WHERE analysis_status = 'running'`);
+    await pool.query(`UPDATE ideation_items SET status = 'requested', updated_at = NOW() WHERE status = 'drafting'`);
+    await pool
+      .query(
+        `UPDATE visionary_runs SET status = 'requested', started_at = NULL, progress = NULL WHERE status = 'running'`,
+      )
+      .catch(logged('runner-cli'));
+  }
   await pool.query(
     `UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE,
-            output = output || E'\nUnterbrochen: Der Worker wurde beendet.' WHERE status = 'running'`,
+            output = output || E'\nUnterbrochen: Der Worker wurde beendet.'
+      WHERE status = 'running' AND run_id = ANY($1::uuid[])`,
+    [runs],
   );
-  await pool.query(`UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running'`);
-  // Eine laufende Git-Lösung endet mit dem Worker; „läuft“ bliebe sonst stehen und sperrte jede weitere Anfrage (409).
-  await pool
-    .query(
-      `UPDATE git_fix_requests SET status = 'failed', finished_at = NOW(),
-              message = 'Durch einen Neustart des Workers unterbrochen – bitte den Git-Zustand prüfen und erneut anfordern.'
-        WHERE status = 'running'`,
-    )
-    .catch(logged('runner-cli'));
+  await pool.query(
+    `UPDATE agent_runs SET status = 'failed', completed_at = NOW() WHERE status = 'running' AND id = ANY($1::uuid[])`,
+    [runs],
+  );
+  if (alone) {
+    // Eine laufende Git-Lösung endet mit dem Worker; „läuft“ bliebe sonst stehen und sperrte jede weitere Anfrage (409).
+    await pool
+      .query(
+        `UPDATE git_fix_requests SET status = 'failed', finished_at = NOW(),
+                message = 'Durch einen Neustart des Workers unterbrochen – bitte den Git-Zustand prüfen und erneut anfordern.'
+          WHERE status = 'running'`,
+      )
+      .catch(logged('runner-cli'));
+  }
   if (requeued.rowCount) console.info(`${requeued.rowCount} unterbrochene Aufträge werden erneut aufgenommen.`);
 }
 
@@ -276,6 +315,12 @@ export async function recoverInterruptedRuns(pool: Pool): Promise<void> {
 const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function main(): Promise<void> {
+  // Dienst (scripts/install-worker.sh): Log selbst schreiben, damit es nach der Rotation durch newsyslog weitergeht.
+  const logFile = process.env.DEV_LOG_LOG_FILE?.trim();
+  if (logFile) followLogFile(logFile);
+  // Env-Datei des Dienstes (--env-file) vor der .env der Installation; ohne Datenbank-URL Abbruch statt Dauerschleife.
+  loadInstallEnv(INSTALL_ROOT);
+  requireDatabaseUrl();
   process.env.DEV_LOG_PROJECT_ROOTS = resolveProjectScope(process.env, INSTALL_ROOT);
   console.log(`Projektbereich: ${process.env.DEV_LOG_PROJECT_ROOTS}`);
   const options = parseRunnerOptions(process.argv.slice(2));
@@ -292,8 +337,20 @@ async function main(): Promise<void> {
   process.on('SIGINT', stop);
   let releaseWorkerLock: (() => Promise<void>) | null = null;
   let registry: ReturnType<typeof databaseProcessStore> | null = null;
+  // Worker-ID an Läufen und Prozessen, Lebenszeichen für die anderen Worker: Ein zweiter Worker räumt beim Start
+  // nur eigene oder verwaiste Läufe auf. Ein einmaliger Lauf hat eine eigene ID, damit ihn kein Dauer-Worker beerbt.
+  const scope = options.all ? 'alle' : options.project;
+  const workerId = workerIdFor(process.env, INSTALL_ROOT, options.watch ? scope : `einmal:${scope}`);
+  setWorkerId(workerId);
+  let workerBeat: NodeJS.Timeout | undefined;
+  const startWorkerBeat = async (): Promise<void> => {
+    await beatWorker(pool, workerId).catch(logged('runner-cli'));
+    workerBeat = setInterval(() => void beatWorker(pool, workerId).catch(logged('runner-cli')), WORKER_BEAT_MS);
+    workerBeat.unref();
+  };
   try {
     if (!options.watch) {
+      await startWorkerBeat();
       const targets = await resolveTargets(pool, options);
       let failed = false;
       for (const target of targets) {
@@ -316,7 +373,9 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    await recoverInterruptedRuns(pool);
+    // Erst nach der Sperre: Ein abgewiesener zweiter Worker soll nicht als lebender Worker gelten.
+    await startWorkerBeat();
+    await recoverInterruptedRuns(pool, workerId);
     // Erst nach dem Aufräumen: ab jetzt landet jeder gestartete Prozess im Register (nur der Dauer-Worker, damit ein
     // einmaliger Lauf nicht beim nächsten Start als Altprozess gilt).
     registry = databaseProcessStore(pool);
@@ -348,8 +407,20 @@ async function main(): Promise<void> {
     const githubActive = new Set<string>();
     const gitFixActive = new Set<string>();
     const rollbackActive = new Set<string>();
+    let orphanCheckActive = false;
     const heartbeat = setInterval(() => {
       beat();
+      // Läufe „läuft“ ohne Auftrag dieses Workers dahinter (Abschluss scheiterte an der Datenbank) aufräumen – auch
+      // abgebrochene, auf deren Abbruch kein Schritt mehr wartet. Sonst hingen sie bis zum nächsten Neustart.
+      if (!stopping && !orphanCheckActive && known.length) {
+        orphanCheckActive = true;
+        void closeOrphanedRuns(pool, known)
+          .then((count) => {
+            if (count) console.info(`${count} verwaiste Läufe beendet (kein laufender Auftrag dahinter).`);
+          })
+          .catch(logged('runner-cli'))
+          .finally(() => (orphanCheckActive = false));
+      }
       // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
       for (const target of chatTargets) {
         const slug = target.options.project;
@@ -709,6 +780,7 @@ async function main(): Promise<void> {
     // Register abmelden, bevor der Pool schliesst: Prozesse, die erst danach enden, räumt der nächste Start auf
     // (killPreviousProcesses) – statt „Cannot use a pool after calling end on the pool“ zu melden.
     setProcessStore(null);
+    clearInterval(workerBeat);
     await registry?.flush();
     await releaseWorkerLock?.();
     await pool.end();

@@ -19,7 +19,8 @@
     "src/**/*.ts",
     "../src/core/layout-measure.ts",
     "../src/core/cron.ts",
-    "../src/core/development-transitions.ts"
+    "../src/core/development-transitions.ts",
+    "../src/core/sprint-rules.ts"
   ],
   "exclude": ["src/**/*.spec.ts"]
 }
