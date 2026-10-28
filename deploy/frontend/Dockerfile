@@ -11,6 +11,8 @@ COPY src/core/layout-measure.ts ./src/core/layout-measure.ts
 COPY src/core/cron.ts ./src/core/cron.ts
 # Erlaubte Statuswechsel und Sprint-Zuordnung von Aufträgen – dieselbe Tabelle wie in PATCH /development/:id.
 COPY src/core/development-transitions.ts ./src/core/development-transitions.ts
+# Sprint-Regeln (Statuswechsel, Löschen, Abschluss) – dieselben wie in PATCH/DELETE /sprints/:id.
+COPY src/core/sprint-rules.ts ./src/core/sprint-rules.ts
 RUN npm run build:ui
 
 # Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit

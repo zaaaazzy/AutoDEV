@@ -265,50 +265,68 @@
       </section>
       <app-git-tree [nodes]="gitNodes(sprint)">
         <div class="git-actions">
-          <button class="button" type="button" (click)="editingId.set(sprint.id)">
-            <app-nav-icon name="edit" />Bearbeiten
-          </button>
-          @if (sprint.status === 'planned') {
-            <button class="button primary" type="button" (click)="startSprint(sprint)">
+          <!-- Sichtbar nur, was Server und Rolle erlauben (sprint-actions.ts); während einer Anfrage gesperrt. -->
+          @let can = buttons();
+          @if (can.edit) {
+            <button class="button" type="button" (click)="editingId.set(sprint.id)">
+              <app-nav-icon name="edit" />Bearbeiten
+            </button>
+          }
+          @if (can.start) {
+            <button class="button primary" type="button" [disabled]="busy()" (click)="startSprint(sprint)">
               <app-nav-icon name="play" />Sprint starten
             </button>
           }
-          @if (sprint.status === 'active') {
-            @if (sprint.pausedAt) {
-              <button class="button primary" type="button" (click)="resumeSprint(sprint.id)">
-                <app-nav-icon name="play" />Fortsetzen
-              </button>
-            } @else {
-              <button class="button secondary" type="button" (click)="pauseSprint(sprint.id)">
-                <app-nav-icon name="pause" />Pausieren
-              </button>
-            }
+          @if (can.resume) {
+            <button class="button primary" type="button" [disabled]="busy()" (click)="resumeSprint(sprint.id)">
+              <app-nav-icon name="play" />Fortsetzen
+            </button>
+          }
+          @if (can.pause) {
+            <button class="button secondary" type="button" [disabled]="busy()" (click)="pauseSprint(sprint.id)">
+              <app-nav-icon name="pause" />Pausieren
+            </button>
+          }
+          @if (can.live) {
             <button
               [class]="sprint.reviewReadyAt ? 'button primary' : 'button secondary'"
               [class.git-blocked]="gitBlocksLive()"
-              [attr.title]="gitBlocksLive() ? 'Git-Zustand des Projektordners prüfen – siehe Hinweis oben' : null"
+              [attr.title]="
+                can.liveBlocked ??
+                (gitBlocksLive() ? 'Git-Zustand des Projektordners prüfen – siehe Hinweis oben' : null)
+              "
               type="button"
+              [disabled]="busy() || !!can.liveBlocked"
               (click)="goLive(sprint)"
             >
               🚀 Live schalten
             </button>
           }
-          @if (sprint.status === 'completed') {
-            <button class="button secondary" type="button" (click)="startSprint(sprint)">
+          @if (can.reopen) {
+            <button class="button secondary" type="button" [disabled]="busy()" (click)="startSprint(sprint)">
               <app-nav-icon name="undo" />Wieder öffnen
             </button>
           }
-          @if (sprint.status === 'planned' || sprint.status === 'active') {
-            <button class="button secondary" type="button" (click)="cancelSprint(sprint)">⏹ Abbrechen</button>
+          @if (can.cancel) {
+            <button class="button secondary" type="button" [disabled]="busy()" (click)="cancelSprint(sprint)">
+              ⏹ Abbrechen
+            </button>
           }
-          @if (sprint.status === 'cancelled') {
-            <button class="button secondary" type="button" (click)="updateSprint(sprint.id, { status: 'planned' })">
+          @if (can.replan) {
+            <button
+              class="button secondary"
+              type="button"
+              [disabled]="busy()"
+              (click)="updateSprint(sprint.id, { status: 'planned' })"
+            >
               <app-nav-icon name="undo" />Wieder planen
             </button>
           }
-          <button class="button danger" type="button" (click)="deleteSprint(sprint.id)">
-            <app-nav-icon name="trash" />Löschen
-          </button>
+          @if (can.remove) {
+            <button class="button danger" type="button" [disabled]="busy()" (click)="deleteSprint(sprint.id)">
+              <app-nav-icon name="trash" />Löschen
+            </button>
+          }
         </div>
       </app-git-tree>
     </div>

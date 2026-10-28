@@ -92,6 +92,15 @@ Erlaubte Wechsel per Oberfläche oder Schnittstelle:
 
 **Abgelehnt** mit 409 „Statuswechsel … ist für Sprints nicht erlaubt.“ sind zum Beispiel: abgebrochen → aktiv, abgeschlossen → geplant.
 
+**Knöpfe im Sprint-Detail:** Die Oberfläche nutzt dieselben Regeln wie der Server (`src/core/sprint-rules.ts`). Sie zeigt nur die Knöpfe, die gerade erlaubt sind:
+
+- „Sprint starten“ und „Wieder öffnen“ fehlen, solange ein anderer Sprint des Projekts aktiv ist.
+- „Löschen“ erscheint nur, wenn der Sprint gelöscht werden darf (siehe 4.4).
+- „Live schalten“ ist ausgegraut, solange Aufträge laufen oder auf Freigabe warten. Den Grund zeigt der Tooltip.
+- Ohne die Rolle „Planung“ fehlen Bearbeiten, Starten, Live schalten, Wieder öffnen, Abbrechen, Wieder planen und Löschen.
+- Ohne die Rolle „Ausführen“ fehlen Pausieren und Fortsetzen.
+- Ab dem Klick bis zur Antwort des Servers sind alle Knöpfe gesperrt, auch während der Rückfrage. Ein Doppelklick schickt also keine zweite Anfrage.
+
 ### 4.1 Sprint abschließen
 
 - **Erlaubt:** nur, wenn kein Auftrag mehr läuft und keiner auf Freigabe wartet. Der Bericht wird erstellt, die Git-Sicherung steht danach auf „ausstehend“.
@@ -105,7 +114,7 @@ Erlaubte Wechsel per Oberfläche oder Schnittstelle:
 
 - **Erlaubt:** abgeschlossen → aktiv (ohne Git-Sicherung), abgebrochen → geplant.
 - **Abgelehnt:** abgebrochen → aktiv (409, nur über „Wieder planen“ und danach „Starten“). Abgeschlossen → geplant (409).
-- Pro Projekt kann nur ein Sprint aktiv sein. Ein zweiter aktiver Sprint: „Es kann nur ein Sprint pro Projekt aktiv sein.“ (409)
+- Pro Projekt kann nur ein Sprint aktiv sein. Ein zweiter aktiver Sprint: „Es kann nur ein Sprint pro Projekt aktiv sein.“ (409). Der Server prüft das vor dem Git-Check, die Oberfläche blendet die Knöpfe dann aus.
 
 ### 4.3 Sprint abbrechen
 
