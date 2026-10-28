@@ -13,7 +13,7 @@ Jetzt gilt:
 - **Wartungs-Jobs geben ihre Sperre erst frei, wenn sie wirklich beendet sind.** Ein Job, der das Zeitlimit reißt, läuft nicht still weiter, während schon der nächste Durchgang startet.
 - **Sprint-Abschluss ist einmalig.** Ein zweiter Abschluss desselben Sprints ändert nichts und sendet keine zweite Nachricht und keinen zweiten Git-Sync.
 
-Eine neue Oberfläche gibt es dafür nicht. Die Änderung zeigt sich im Auftrag (Hinweis in der Auftragsansicht) und in den Wartungs-Jobs (Status). Deshalb gibt es hier keine Printscreens (siehe unten).
+Eine neue Bedienung gibt es nicht. Die Änderung zeigt sich im Auftrag (Hinweis in der Auftragsansicht, Feld `failure`) und im Status der Wartungs-Jobs (nur über die API). Deshalb gibt es hier keine Printscreens (siehe unten).
 
 ## Bedingungen
 
@@ -58,7 +58,7 @@ Jeder Wartungs-Job hat ein Zeitlimit (`timeoutSeconds` in der Konfiguration, hö
 
 Solange der Job in diesem Worker noch läuft, startet der nächste Durchgang ihn nicht erneut, auch nach Ablauf der Sperre. Endet er später doch, gibt er die Sperre selbst frei.
 
-Für andere Worker ist die Obergrenze das Zeitlimit + 30 s. Danach kann ein anderer Worker den Job übernehmen.
+Für andere Worker ist die Sperre höchstens 330 s lang (höchstes Zeitlimit 300 s plus 30 s Reserve), unabhängig vom eingestellten Zeitlimit des Jobs. Danach kann ein anderer Worker den Job übernehmen, auch wenn der Task im ersten Worker noch läuft (siehe „Offen“).
 
 ### Sprint-Abschluss
 
@@ -92,16 +92,17 @@ Ein Auftrag läuft im aktiven Sprint. Der Agent „Entwickler“ soll starten.
 
 ## Printscreens
 
-Keine. Die Änderung ist ausschließlich serverseitig, und die Oberfläche hat keinen neuen Bedienschritt. In dieser Sitzung lief kein Browser und die Anwendung konnte nicht gestartet werden. Ein Bild würde deshalb dieselbe Auftragsansicht zeigen wie vorher, nur mit anderem Text.
+Keine. Die Änderung ist im Kern serverseitig, und die Oberfläche hat keinen neuen Bedienschritt. Die Anwendung wurde für dieses Handbuch nicht gestartet, daher gibt es keine Aufnahmen. Ein Bild würde nur die Auftragsansicht mit dem Feld `failure` zeigen, und das ließe sich ohne laufende Datenbank nicht sinnvoll erzeugen.
 
 Prüfbar ist die Änderung über das Verhalten:
 
 1. Einen Auftrag starten und den Budget-Check kurz scheitern lassen (z. B. Datenbank stoppen). Der Auftrag steht danach auf „Geplant“ mit dem Hinweis unter `failure`, und kein Agent läuft.
-2. Einen Wartungs-Job mit kurzem Zeitlimit und langsamer Aufgabe anstoßen. Der Status zeigt „läuft noch“, solange die Aufgabe nicht endet.
+2. Einen Wartungs-Job mit kurzem Zeitlimit und langsamer Aufgabe anstoßen. Der Status ist `failed` mit „läuft noch“, solange die Aufgabe nicht endet. Die Statusabfrage läuft über `GET /api/scheduled-jobs` als Administrator.
 3. Einen Sprint zweimal abschließen. Die zweite Aktion bleibt ohne Wirkung.
 
 ## Offen
 
 - Die Tests wurden in dieser Sitzung nicht ausgeführt. Die Angaben dazu stammen aus der Dokumentation des Entwicklers.
 - Der Countdown der 5-Minuten-Pause ist in der Oberfläche nicht sichtbar.
-- Ein Wartungs-Job, der nie endet, belegt seine Sperre, bis der Task endet. Dann ist ein Eingriff von Hand nötig.
+- Ein Wartungs-Job, der nie endet, belegt im eigenen Worker seine Sperre, bis der Task endet. Dann ist ein Eingriff von Hand nötig.
+- Offen: Nach Ablauf der Sperre (höchstens 330 s) kann ein anderer Worker den Job übernehmen, während der Task im ersten Worker noch läuft. Der Code verhindert das nicht. Bei nur einem Worker tritt es nicht auf.
