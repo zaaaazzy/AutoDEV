@@ -90,24 +90,27 @@ test('Wiederherstellung beim Start auf PostgreSQL: nur eigene oder verwaiste Lä
   await withMigratedDatabase(t, 'devlog_worker_recovery', async (db) => {
     await db.query(`INSERT INTO projects (slug, name, repository) VALUES ('alpha', 'Alpha', '/tmp/a')`);
 
-    await t.test('zwei Worker: B startet, die Läufe, Schritte und Prozesse des lebenden A bleiben unberührt', async () => {
-      await reset(db);
-      await beatWorker(db, 'A');
-      const a = await seedRun(db, 'A');
-      const spy = killSpy();
-      await recoverInterruptedRuns(db, 'B', spy.kill);
-      assert.deepEqual(spy.killed, [], 'kein Prozess von A beendet');
-      assert.deepEqual(await state(db, a), {
-        order: 'in_progress',
-        run: 'running',
-        step: 'running',
-        interrupted: false,
-        processes: 1,
-      });
-      // Auch das laufende Aufräumen von B lässt die Läufe des lebenden A stehen, selbst ohne Lebenszeichen im Verlauf.
-      assert.equal(await closeOrphanedRuns(db as never, ['alpha'], [], 0, 'B'), 0);
-      assert.equal((await state(db, a)).run, 'running');
-    });
+    await t.test(
+      'zwei Worker: B startet, die Läufe, Schritte und Prozesse des lebenden A bleiben unberührt',
+      async () => {
+        await reset(db);
+        await beatWorker(db, 'A');
+        const a = await seedRun(db, 'A');
+        const spy = killSpy();
+        await recoverInterruptedRuns(db, 'B', spy.kill);
+        assert.deepEqual(spy.killed, [], 'kein Prozess von A beendet');
+        assert.deepEqual(await state(db, a), {
+          order: 'in_progress',
+          run: 'running',
+          step: 'running',
+          interrupted: false,
+          processes: 1,
+        });
+        // Auch das laufende Aufräumen von B lässt die Läufe des lebenden A stehen, selbst ohne Lebenszeichen im Verlauf.
+        assert.equal(await closeOrphanedRuns(db as never, ['alpha'], [], 0, 'B'), 0);
+        assert.equal((await state(db, a)).run, 'running');
+      },
+    );
 
     await t.test('Worker mit altem Lebenszeichen: seine Läufe werden aufgeräumt und neu eingeplant', async () => {
       await reset(db);
@@ -144,33 +147,41 @@ test('Wiederherstellung beim Start auf PostgreSQL: nur eigene oder verwaiste Lä
       assert.deepEqual(spy.killed, [alive.pid + 1], 'Registereinträge ohne Worker-ID gelten als verwaist');
     });
 
-    await t.test('Neustart mit derselben Worker-ID: eigene Läufe werden aufgeräumt, auch bei frischem Lebenszeichen', async () => {
-      await reset(db);
-      await beatWorker(db, 'A');
-      const own = await seedRun(db, 'A');
-      const spy = killSpy();
-      await recoverInterruptedRuns(db, 'A', spy.kill);
-      assert.deepEqual(spy.killed.sort(), [own.pid, own.pid + 1]);
-      assert.equal((await state(db, own)).order, 'planned');
-      assert.equal((await state(db, own)).run, 'failed');
-    });
+    await t.test(
+      'Neustart mit derselben Worker-ID: eigene Läufe werden aufgeräumt, auch bei frischem Lebenszeichen',
+      async () => {
+        await reset(db);
+        await beatWorker(db, 'A');
+        const own = await seedRun(db, 'A');
+        const spy = killSpy();
+        await recoverInterruptedRuns(db, 'A', spy.kill);
+        assert.deepEqual(spy.killed.sort(), [own.pid, own.pid + 1]);
+        assert.equal((await state(db, own)).order, 'planned');
+        assert.equal((await state(db, own)).run, 'failed');
+      },
+    );
 
-    await t.test('Gegenprobe: lebt ein Altprozess womöglich noch (failed > 0), wird nichts neu eingeplant', async () => {
-      await reset(db);
-      const own = await seedRun(db, 'A');
-      await recoverInterruptedRuns(db, 'A', killSpy('failed').kill);
-      const after = await state(db, own);
-      assert.notEqual(after.order, 'planned');
-      assert.equal(after.run, 'failed');
-      assert.equal(after.processes, 1, 'Eintrag bleibt für den nächsten Versuch');
-    });
+    await t.test(
+      'Gegenprobe: lebt ein Altprozess womöglich noch (failed > 0), wird nichts neu eingeplant',
+      async () => {
+        await reset(db);
+        const own = await seedRun(db, 'A');
+        await recoverInterruptedRuns(db, 'A', killSpy('failed').kill);
+        const after = await state(db, own);
+        assert.notEqual(after.order, 'planned');
+        assert.equal(after.run, 'failed');
+        assert.equal(after.processes, 1, 'Eintrag bleibt für den nächsten Versuch');
+      },
+    );
 
     await t.test('langer Schritt ohne Verlaufseinträge: der gehaltene eigene Lauf wird nicht beendet', async () => {
       await reset(db);
       await beatWorker(db, 'A');
       const long = await seedRun(db, 'A');
       await db.query(`UPDATE agent_runs SET started_at = NOW() - INTERVAL '2 hours' WHERE id = $1`, [long.run]);
-      await db.query(`UPDATE agent_run_steps SET started_at = NOW() - INTERVAL '2 hours' WHERE run_id = $1`, [long.run]);
+      await db.query(`UPDATE agent_run_steps SET started_at = NOW() - INTERVAL '2 hours' WHERE run_id = $1`, [
+        long.run,
+      ]);
       assert.equal(await closeOrphanedRuns(db as never, ['alpha'], [long.run], 5 * 60_000, 'A'), 0);
       assert.equal((await state(db, long)).run, 'running');
       // Gegenprobe: hält der Worker den Lauf nicht mehr (Rest eines Vorgängers), wird er beendet.

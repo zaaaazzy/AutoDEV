@@ -95,7 +95,10 @@ test('Sprintbudget nicht prüfbar (Verbrauch der Sprint-Aufträge): Sprint-Auftr
   });
   assert.equal(result, 'failed');
   assert.deepEqual(calls, []);
-  assert.ok(queries.some((query) => query.sql.includes('d.sprint_id = $2::uuid')), 'Sprintverbrauch wurde abgefragt');
+  assert.ok(
+    queries.some((query) => query.sql.includes('d.sprint_id = $2::uuid')),
+    'Sprintverbrauch wurde abgefragt',
+  );
   assert.equal(recorded(queries).length, 1);
   assert.ok(!queries.some((query) => query.sql.includes('budget_blocked = $3')));
 });
