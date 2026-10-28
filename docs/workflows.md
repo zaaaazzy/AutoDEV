@@ -158,7 +158,8 @@ Unter „Agents“ legt die aufklappbare Karte „Workflow“ fest, wann welcher
 `workflow_steps` (Phase, Position, Agent, eigene Anweisung, aktiv). Derselbe Agent kann mehrfach vorkommen, z. B.
 der Tester einmal „Danach“ für die API und einmal für die Oberfläche; die Anweisung des Einsatzes kommt zusätzlich
 zur Anweisung des Agents in den Prompt und hat Vorrang. „+ Agent“ fügt einen bestehenden oder neuen Agent an das
-Ende einer Phase, ↑↓ ordnet, „Pausieren“ nimmt einen Einsatz aus dem Ablauf, „Entfernen“ löscht nur den Einsatz.
+Ende einer Phase, ↑↓ ordnet, der Griff ⠿ zieht einen Einsatz innerhalb der Phase oder in eine andere Phase (Auswahl
+„In Phase verschieben“ als Tastatur-Alternative; beides nur mit Recht `agents`), „Pausieren“ nimmt einen Einsatz aus dem Ablauf, „Entfernen“ löscht nur den Einsatz.
 Projekte ohne Schritte übernehmen beim ersten Öffnen ihren bisherigen Ablauf (Phase und Position am Agent); bis
 dahin gilt dieser auch im Worker. API: `GET /api/projects/:slug/workflow`, `POST …/workflow/steps`,
 `POST …/workflow/order`, `PATCH|DELETE /api/workflow-steps/:id` (Recht „Agents verwalten“).
