@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { computed, signal } from '@angular/core';
 import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
-import { pickInOrder, poolOpenState } from './pool-selection.js';
+import { NEEDS_RUN, pickInOrder, poolOpenState, poolSelectable } from './pool-selection.js';
 
 test('Auswahl: in Anzeige-Reihenfolge, nicht mehr verfügbare fallen weg', () => {
   const items = [{ id: 'c' }, { id: 'a' }, { id: 'b' }];
@@ -75,6 +75,35 @@ test('„Aufträge hinzufügen“: Wechsel leer ↔ nicht leer setzt auf die Vor
   // Sprint wieder leer: Vorgabe „offen“.
   view.data.update((data) => ({ ...data, development: [{ id: 'a' }, { id: 'b' }] }));
   assert.equal(view.poolOpen(), true);
+});
+
+test('„Aufträge hinzufügen“: abgebrochene nur mit „Ausführen“ wählbar, offene schon mit „Planung“', () => {
+  const open = { id: 'o', status: 'backlog', removedFromSprintAt: null };
+  const blocked = { id: 'b', status: 'blocked', removedFromSprintAt: null };
+  const removed = { id: 'r', status: 'backlog', removedFromSprintAt: '2026-10-21' };
+  const plannerOnly = poolSelectable(() => false);
+  assert.equal(plannerOnly(open), true, 'offen mit Planung');
+  assert.equal(plannerOnly(blocked), false, 'blockiert ohne Ausführen');
+  assert.equal(plannerOnly(removed), false, 'herausgenommen ohne Ausführen');
+  const runner = poolSelectable(() => true);
+  for (const item of [open, blocked, removed]) assert.equal(runner(item), true, item.id);
+  assert.match(NEEDS_RUN, /Agents ausführen/);
+});
+
+test('„Aufträge hinzufügen“: nach Rollenwechsel bleibt keine angehakte, nun gesperrte Auswahl übrig', () => {
+  const canRun = signal(true);
+  const selectable = poolSelectable(() => canRun());
+  const free = [
+    { id: 'o', status: 'backlog', removedFromSprintAt: null },
+    { id: 'b', status: 'blocked', removedFromSprintAt: null },
+  ];
+  // Wie SprintOrdersComponent.selection.
+  const selection = computed(() => pickInOrder(free.filter(selectable), new Set(['o', 'b'])).map((item) => item.id));
+  assert.deepEqual(selection(), ['o', 'b']);
+  canRun.set(false);
+  assert.deepEqual(selection(), ['o'], 'blockierter fällt ohne Ausführen aus der Auswahl');
+  canRun.set(true);
+  assert.deepEqual(selection(), ['o', 'b']);
 });
 
 test('Pool „Aufträge hinzufügen“: laufende und freizugebende Aufträge nach Sprint-Abbruch fehlen (Route lehnt sie ab)', () => {

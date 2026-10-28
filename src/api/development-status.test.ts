@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
+import express from 'express';
 import type { Pool } from 'pg';
+import { routeGuard } from './access.js';
 import { createDevLogApp } from './app.js';
+import { registerDevelopmentRoutes } from './development.js';
+import type { Principal, Role } from './roles.js';
 
 const ID = '11111111-1111-4111-8111-111111111111';
 const SPRINT = '22222222-2222-4222-8222-222222222222';
@@ -326,6 +330,67 @@ test('In Sprint übernehmen: ungültige Sprint-ID ergibt 400 ohne Schreibzugriff
   const result = await takeIntoSprint('blocked', 'planned', 'kein-sprint');
   assert.equal(result.status, 400);
   assert.equal(result.updates.length, 0);
+});
+
+const ABORTED_NEEDS_RUN =
+  /AND \(\$3::boolean OR NOT \(d\.removed_from_sprint_at IS NOT NULL OR d\.status = 'blocked'\)\)/;
+
+/**
+ * „In Sprint übernehmen“ mit Wächter wie im Betrieb, als Benutzer mit `roles` (Mitglied von dev-log). Die Attrappe
+ * wertet nur die neue Bedingung aus: abgebrochene Aufträge gehen nur mit $3 (= darf ausführen) durch.
+ */
+async function takeAs(roles: Role[], aborted: boolean) {
+  const updates: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('project_members') || sql.startsWith('SELECT project_slug AS slug FROM development_items')) {
+        return { rows: [{ slug: 'dev-log' }], rowCount: 1 };
+      }
+      if (/^\s*UPDATE development_items/i.test(sql)) {
+        updates.push(values);
+        assert.match(sql, ABORTED_NEEDS_RUN);
+        if (values[2] !== true && aborted) return { rows: [], rowCount: 0 };
+        return { rows: [{ id: ID, status: 'planned', sprintId: SPRINT }], rowCount: 1 };
+      }
+      if (sql.startsWith('SELECT 1 FROM development_items d')) return { rows: [], rowCount: aborted ? 1 : 0 };
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Pool;
+  const principal: Principal = { id: ID, username: 'pia', displayName: 'Pia', roles };
+  const app = express();
+  app.use(express.json());
+  const router = express.Router({ caseSensitive: true });
+  router.use((_request, response, next) => {
+    response.locals.principal = principal;
+    next();
+  });
+  router.use(routeGuard(pool, router));
+  registerDevelopmentRoutes(router, pool);
+  app.use('/api', router);
+  const server = app.listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const response = await fetch(`http://127.0.0.1:${port}/api/development/${ID}/take-into-sprint`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sprintId: SPRINT }),
+    });
+    const { message } = (await response.json()) as { message?: string };
+    return { status: response.status, message, updates };
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+test('In Sprint übernehmen: abgebrochene Aufträge nur mit „Ausführen“ (wie /retry), offene schon mit „Planung“', async () => {
+  const planner = await takeAs(['plan'], true);
+  assert.equal(planner.status, 403);
+  assert.match(planner.message ?? '', /Agents ausführen/);
+  assert.equal(planner.updates[0]?.[2], false, 'ohne Ausführen schliesst das UPDATE Abgebrochene aus');
+  assert.equal((await takeAs(['plan'], false)).status, 200, 'offener Auftrag mit Planung');
+  assert.equal((await takeAs(['plan', 'run'], true)).status, 200, 'abgebrochener Auftrag mit Planung und Ausführen');
+  assert.equal((await takeAs(['run'], false)).status, 403, 'ohne Planung gar nicht');
 });
 
 test('PATCH /development: Zuordnung zu geplantem Sprint nimmt auto_run zurück', async () => {

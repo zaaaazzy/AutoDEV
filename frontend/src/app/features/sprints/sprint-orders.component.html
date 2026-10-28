@@ -59,12 +59,15 @@
           </button>
         </app-bulk-bar>
       }
+      @if (lockedAborted()) {
+        <p class="muted sprint-pool-hint">{{ needsRun }}</p>
+      }
       <app-order-table
         [items]="free()"
         groupBy="sprint"
         [extraColumns]="poolColumns"
         [sortable]="false"
-        [selectable]="anyRow"
+        [selectable]="selectable"
         [(selection)]="selectedIds"
         emptyText="Keine offenen oder abgebrochenen Aufträge."
       >
@@ -72,10 +75,10 @@
           <button
             type="button"
             class="button secondary icon-button"
-            [disabled]="store.busy()"
+            [disabled]="store.busy() || !selectable(item)"
             (click)="take(item)"
             [attr.aria-label]="'In den Sprint nehmen: ' + title(item)"
-            title="In den Sprint nehmen"
+            [title]="selectable(item) ? 'In den Sprint nehmen' : needsRun"
           >
             →
           </button>
