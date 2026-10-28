@@ -216,7 +216,10 @@ function sprintRows(sprints: { id: string; status: string }[]) {
     assert.match(sql, /status = 'active' AND \(\$2::uuid IS NULL OR id = \$2::uuid\)/);
     return {
       rows: sprints
-        .filter((sprint) => sprint.status === 'active' && (values[1] === null || values[1] === undefined ||sprint.id === values[1]))
+        .filter(
+          (sprint) =>
+            sprint.status === 'active' && (values[1] === null || values[1] === undefined || sprint.id === values[1]),
+        )
         .map((sprint) => ({ id: sprint.id, since: '2026-10-19 00:00:00+02' })),
     };
   };
