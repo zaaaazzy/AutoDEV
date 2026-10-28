@@ -358,6 +358,16 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (git_sync IN ('pending', 'running', 'done', 'failed', 'awaiting_merge'));
     `,
   },
+  // „Vor dem Sprint“: Fehlversuche und nächster Versuch am Sprint statt im Speicher des Workers. So übersteht der
+  // Zähler einen Neustart, und Wiederholungen warten eine wachsende Pause ab (Code-Review vom 21.10.2026).
+  {
+    version: 15,
+    name: 'vor-dem-sprint-versuche-am-sprint',
+    sql: `
+      ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_attempts SMALLINT NOT NULL DEFAULT 0;
+      ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_next_at TIMESTAMPTZ;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

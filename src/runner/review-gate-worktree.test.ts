@@ -31,13 +31,13 @@ function repository(branch: string): { folder: string; agents: string } {
   return { folder, agents };
 }
 
-function fakePool(folder: string, item: Record<string, unknown>): { pool: Pool; done: () => boolean } {
-  let done = false;
+function fakePool(folder: string, item: Record<string, unknown>): { pool: Pool; done: () => string | null } {
+  let done: string | null = null;
   const pool = {
     query: async (sql: string) => {
       if (sql.includes('review_approved_at IS NOT NULL')) return { rows: [item], rowCount: 1 };
       if (sql.includes('agent_workspace AS separate')) return { rows: [{ repository: folder, separate: true }] };
-      if (sql.includes("status = 'done'")) done = true;
+      if (sql.includes("status = 'done'")) done = sql;
       return { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
@@ -65,6 +65,8 @@ test('Freigabe ohne Sprint: main im Ordner der Menschen ausgecheckt, Merge dort 
 
   assert.equal(await running, 1);
   assert.ok(done(), 'Auftrag erledigt statt „Freigabe nicht gemergt“');
+  // Erfolg setzt die Konflikt-Neuversuche zurück, im selben UPDATE (Code-Review vom 21.10.2026).
+  assert.match(done()!, /conflict_retries = 0/);
   assert.equal(git(folder, 'rev-parse', '--abbrev-ref', 'HEAD'), 'main');
   assert.equal(readFileSync(join(folder, 'fix.ts'), 'utf8'), 'export {};\n');
   git(folder, 'merge-base', '--is-ancestor', fixCommit, 'main');

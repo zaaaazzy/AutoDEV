@@ -197,8 +197,10 @@ export async function settleItem(ctx: RunContext, passed: boolean, interrupted: 
   }
   // „Abgelehnt“ (Projektregel, gesetzt in registerFailure) bleibt stehen statt „Blockiert“. „Backlog“ ebenso: der
   // Sprint wurde währenddessen abgebrochen (cancelSprint), der Auftrag bleibt draußen und wartet unter „Aktionen“.
+  // Erfolg setzt die Konflikt-Neuversuche zurück.
   await pool.query(
     `UPDATE development_items SET agent_id = NULL, return_status = NULL, updated_at = NOW(),
+            conflict_retries = CASE WHEN $2 = '${DEVELOPMENT_STATUS.done}' THEN 0 ELSE conflict_retries END,
             status = CASE WHEN status IN ('${DEVELOPMENT_STATUS.rejected}', '${DEVELOPMENT_STATUS.backlog}') THEN status ELSE $2 END WHERE id = $1`,
     [item.id, succeeded ? DEVELOPMENT_STATUS.done : DEVELOPMENT_STATUS.blocked],
   );

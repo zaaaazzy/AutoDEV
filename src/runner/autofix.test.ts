@@ -127,6 +127,11 @@ test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach 
   assert.equal(weekly?.getMonth(), 9);
   assert.equal(weekly?.getDate(), 24);
   assert.equal(weekly?.getHours(), 15);
+  // Ausgabenlimit (zwei Wörter vor „limit“): ebenfalls Agent-Fehler, Reset aus der Meldung.
+  const spend =
+    "You've hit your monthly spend limit · raise it at https://claude.ai/settings/usage · your session limit resets 8:50pm (Europe/Zurich)";
+  assert.equal(isAgentFailure(spend), true);
+  assert.equal(usageLimitReset(spend, now)?.getHours(), 20);
   // Ohne lesbare Zeit: eine Stunde später. Ohne Limit-Meldung: nichts.
   const vague = usageLimitReset("You've hit your usage limit.", now);
   assert.equal(vague?.getTime(), now.getTime() + 60 * 60_000);

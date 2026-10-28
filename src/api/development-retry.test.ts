@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import { withMigratedDatabase } from '../db/test-database.test.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerReviewRoutes } from './review-routes.js';
+import { retryAfterConflict } from '../runner/review-gate.js';
 import type { Principal } from './roles.js';
 import { serveRoutes } from './serve-routes.test.js';
 
@@ -125,5 +126,38 @@ test('Erneut versuchen auf PostgreSQL: nur in planbare Sprints, Ziel-Sprint atom
     } finally {
       await client.close();
     }
+  });
+});
+
+/** Code-Review vom 21.10.2026: Nach zwei Konflikten führte jeder spätere Konflikt sofort zu „blockiert“. */
+test('Erneut versuchen setzt die Konflikt-Neuversuche zurück', async (t) => {
+  await withMigratedDatabase(t, 'devlog_retry_conflicts', async (db) => {
+    const pool = db as unknown as Pool;
+    await pool.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+    const id = (
+      await pool.query<{ id: string }>(
+        `INSERT INTO development_items (project_slug, title, status) VALUES ('shop', 'Login', 'in_progress') RETURNING id`,
+      )
+    ).rows[0]!.id;
+    const item = { id, projectSlug: 'shop', title: 'Login' };
+    const message = 'Merge-Konflikt mit sprint/sprint-5';
+    assert.equal(await retryAfterConflict(pool, item, message), true);
+    assert.equal(await retryAfterConflict(pool, item, message), true);
+    assert.equal(await retryAfterConflict(pool, item, message), false, 'Neuversuche aufgebraucht');
+    await pool.query(`UPDATE development_items SET status = 'blocked' WHERE id = $1`, [id]);
+
+    const client = await serveRoutes(admin, (router) => registerDevelopmentRoutes(router, pool));
+    try {
+      assert.equal((await client.call('POST', `/development/${id}/retry`, {})).status, 200);
+    } finally {
+      await client.close();
+    }
+    const { retries } = (
+      await pool.query<{ retries: number }>(`SELECT conflict_retries AS retries FROM development_items WHERE id = $1`, [
+        id,
+      ])
+    ).rows[0]!;
+    assert.equal(retries, 0);
+    assert.equal(await retryAfterConflict(pool, item, message), true, 'nach dem Retry wieder neu eingeplant');
   });
 });

@@ -203,7 +203,7 @@ async function mergeApprovals(
     merged += 1;
     await pool.query(
       `UPDATE development_items SET status = '${DEVELOPMENT_STATUS.done}', review_branch = NULL, review_base = NULL,
-              review_since = NULL, updated_at = NOW()
+              review_since = NULL, conflict_retries = 0, updated_at = NOW()
         WHERE id = $1`,
       [item.id],
     );

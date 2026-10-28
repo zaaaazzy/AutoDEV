@@ -20,8 +20,11 @@ interface FailedItem {
   sprintId?: string | null;
 }
 
-/** Nutzungslimit des Agent-Kontos (Claude-CLI): „You've hit your session limit · resets 12:40am (Europe/Zurich)“. */
-const USAGE_LIMIT = /hit your (?:session|usage|weekly|daily|monthly|\w+) limit/i;
+/**
+ * Nutzungslimit des Agent-Kontos (Claude-CLI): „You've hit your session limit · resets 12:40am (Europe/Zurich)“,
+ * auch mit zwei Wörtern („monthly spend limit“).
+ */
+const USAGE_LIMIT = /hit your (?:[\w-]+ ){1,2}limit/i;
 const LIMIT_RESET =
   /resets?\s+(?:(?:on\s+)?([A-Z][a-z]{2})\s+(\d{1,2}),?\s+)?(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
