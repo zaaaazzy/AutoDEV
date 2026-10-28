@@ -253,6 +253,12 @@ function sprintDb(initial: SprintRow, options: { failReport?: boolean } = {}) {
       return { rows: [{ status: row.status, slug: 'demo', running: 0, waiting: 0 }] };
     }
     if (text.includes("UPDATE sprints SET status = 'completed'")) {
+      // Beanspruchung in completeSprint: nur ein aktiver Sprint wechselt (RETURNING id), sonst keine Zeile.
+      if (text.includes("status = 'active'")) {
+        if (row.status !== 'active') return { rows: [] };
+        row.status = 'completed';
+        return { rows: [{ id: SPRINT_ID }] };
+      }
       const fallback =
         text.includes('GREATEST(start_date, CURRENT_DATE)') && row.startDate && row.startDate > TODAY
           ? row.startDate
@@ -262,7 +268,7 @@ function sprintDb(initial: SprintRow, options: { failReport?: boolean } = {}) {
         throw Object.assign(new Error('new row violates check constraint'), { code: '23514' });
       row.status = 'completed';
       row.endDate = end;
-      return { rows: [] };
+      return { rows: [{ id: SPRINT_ID }] };
     }
     if (text.includes("git_sync = 'pending'")) {
       row.gitSync = 'pending';
@@ -438,7 +444,7 @@ test('Sprint ohne laufenden oder wartenden Auftrag: Abschluss und Löschen klapp
 
 test('completeSprint (Worker/Autopilot): Startdatum in der Zukunft, Abschluss atomar mit Bericht', async () => {
   const ok = sprintDb(futureSprint());
-  await completeSprint(ok.pool, SPRINT_ID);
+  assert.equal(await completeSprint(ok.pool, SPRINT_ID), true);
   assert.deepEqual(ok.state(), {
     status: 'completed',
     startDate: FUTURE_START,
@@ -450,4 +456,13 @@ test('completeSprint (Worker/Autopilot): Startdatum in der Zukunft, Abschluss at
   await assert.rejects(completeSprint(failing.pool, SPRINT_ID));
   assert.equal(failing.state().status, 'active');
   assert.equal(failing.state().gitSync, null);
+});
+
+test('completeSprint ist idempotent: ein schon abgeschlossener Sprint bekommt keinen zweiten Bericht und Git-Sync', async () => {
+  const done = sprintDb({ ...futureSprint(), status: 'completed', endDate: FUTURE_START, gitSync: 'done' });
+  assert.equal(await completeSprint(done.pool, SPRINT_ID), false);
+  assert.deepEqual(
+    { status: done.state().status, gitSync: done.state().gitSync, report: done.state().report },
+    { status: 'completed', gitSync: 'done', report: false },
+  );
 });

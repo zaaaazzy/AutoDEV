@@ -366,13 +366,24 @@ export async function applyProposal(
 /**
  * Sprint abschliessen: Bericht, danach testet, merged und pusht der Worker (Git-Sicherung). Alles in einer
  * Transaktion – scheitert ein Schritt, bleibt der Sprint im alten Status (kein „abgeschlossen ohne Bericht“).
+ * Idempotent: Der Statuswechsel ist an einen aktiven, nicht pausierten Sprint gebunden; war der Sprint schon
+ * abgeschlossen (zweiter Lauf, Oberfläche), passiert nichts und das Ergebnis ist false.
  */
-export async function completeSprint(pool: Pool, sprintId: string): Promise<void> {
+export async function completeSprint(pool: Pool, sprintId: string): Promise<boolean> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    const claimed = await client.query(
+      `UPDATE sprints SET status = 'completed' WHERE id = $1 AND status = 'active' AND paused_at IS NULL RETURNING id`,
+      [sprintId],
+    );
+    if (!claimed.rows[0]) {
+      await client.query('ROLLBACK');
+      return false;
+    }
     await completeSprintIn(client, sprintId);
     await client.query('COMMIT');
+    return true;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;

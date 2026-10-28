@@ -31,8 +31,9 @@ import { setActionTodo } from './action-todo.js';
 import { pauseForFolderProblem } from './folder-pause.js';
 import { leftItsSprint } from './runner-settle.js';
 import {
-  budgetGate,
   claimRun,
+  guardedBudgetGate,
+  recordBudgetCheckFailure,
   runStep,
   selectWorkflowAgents,
   settleItem,
@@ -49,7 +50,7 @@ export {
   defaultAgentCommand,
   parseTestCommands,
 } from './runner-selection.js';
-export { runBuiltinAgent } from './runner-steps.js';
+export { BUDGET_CHECK_RETRY_MS, runBuiltinAgent } from './runner-steps.js';
 import type { StepSummary as ResumedStep } from './runner-types.js';
 
 export type {
@@ -328,7 +329,17 @@ export async function runWorkItem(
         break;
       }
       // Budget: Ist ein Limit (Tag, Sprint, Auftrag) des Projekts oder der Rolle des Agents erreicht, startet er nicht.
-      budgetStop = await budgetGate(ctx, agent.role).catch(logged('runner', null));
+      // Lässt sich das Budget nicht prüfen (Datenbank kurz weg), startet er auch nicht: Der Auftrag gilt als
+      // unterbrochen und startet erst nach einer Pause wieder (retry_after) – kein sofortiger Neustart.
+      const budget = await guardedBudgetGate(ctx, agent);
+      if (budget.failed) {
+        passed = false;
+        interrupted = true;
+        ctx.stopReason = budget.failed;
+        await recordBudgetCheckFailure(ctx, agent, budget.failed, stepPosition).catch(logged('runner'));
+        break;
+      }
+      budgetStop = budget.stop;
       if (budgetStop) {
         passed = false;
         break;
@@ -383,7 +394,9 @@ export async function runWorkItem(
       for (const [index, agent] of observers.entries()) {
         // Auch „Bei abgeschlossen/abgelehnt“ starten nicht mehr, wenn das Budget erreicht ist (ohne Blockade).
         // Nur das Limit der eigenen Rolle erreicht: dieser Agent fällt aus, die übrigen laufen.
-        const stop = await budgetGate(ctx, agent.role).catch(logged('runner', null));
+        // Budget nicht prüfbar: kein weiterer Beobachter startet (das Ergebnis des Auftrags steht schon fest).
+        const { stop, failed } = await guardedBudgetGate(ctx, agent);
+        if (failed) break;
         if (stop?.role) continue;
         if (stop) break;
         if (!releaseTree && changesWorkingTree(agent)) {

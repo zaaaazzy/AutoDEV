@@ -32,7 +32,14 @@ import type { BudgetState } from './budget.js';
 import { buildPrompt } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { testerPlan } from './order-tests.js';
-import { budgetGate, logEvent, orderChangedFiles, orderFilePaths, type RunContext } from './runner-context.js';
+import {
+  guardedBudgetGate,
+  logEvent,
+  orderChangedFiles,
+  orderFilePaths,
+  recordBudgetCheckFailure,
+  type RunContext,
+} from './runner-context.js';
 import {
   type AgentResult,
   findResumableSession,
@@ -44,7 +51,13 @@ import {
 import { TRANSIENT_RETRY_DELAY_MS } from './runner-runs.js';
 import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
 
-export { budgetGate, type RunContext } from './runner-context.js';
+export {
+  budgetGate,
+  guardedBudgetGate,
+  recordBudgetCheckFailure,
+  BUDGET_CHECK_RETRY_MS,
+  type RunContext,
+} from './runner-context.js';
 export {
   findResumableSession,
   type ResumableSession,
@@ -283,11 +296,16 @@ export async function runStep(
   };
   let result: AgentResult = await raceAttempt();
   let budgetStop: BudgetState | null = null;
+  let budgetUnchecked: string | undefined;
   // Vorübergehender Fehler des Agents (Modell kurz weg, überlastet, Zeitlimit): einmal nach kurzer Pause wiederholen –
-  // aber nur, wenn das Budget den zweiten Versuch noch erlaubt.
+  // aber nur, wenn das Budget den zweiten Versuch noch erlaubt. Ist es nicht prüfbar, gibt es keinen zweiten Versuch.
   if (!cancelled && !isShuttingDown() && shouldRetry(result)) {
-    budgetStop = await budgetGate(ctx, agent.role).catch(logged('runner-steps', null));
-    if (budgetStop) {
+    const budget = await guardedBudgetGate(ctx, agent);
+    budgetStop = budget.stop;
+    budgetUnchecked = budget.failed;
+    if (budgetUnchecked) {
+      await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist nicht prüfbar');
+    } else if (budgetStop) {
       await logEvent(pool, stepId, 'Vorübergehender Fehler – kein neuer Versuch, das Budget ist erreicht');
     } else {
       const delay = options.transientRetryDelayMs ?? TRANSIENT_RETRY_DELAY_MS;
@@ -328,6 +346,15 @@ export async function runStep(
       .catch(logged('runner-steps'));
     await logEvent(pool, stepId, reason);
     console.info(`[${item.id}] ${reason}`);
+    return { passed: false, interrupted: true };
+  }
+  // Budget vor dem zweiten Versuch nicht prüfbar: unterbrochen wie vor einem Schritt – derselbe Agent setzt nach der
+  // Pause fort, ohne Bug-Bericht und ohne Nachbesserung. Tokens und Kosten des ersten Versuchs bleiben am Schritt.
+  if (budgetUnchecked) {
+    await markInterrupted(pool, stepId, result, `${output}\n${budgetUnchecked}`);
+    await recordBudgetCheckFailure(ctx, agent, budgetUnchecked, null).catch(logged('runner-steps'));
+    await logEvent(pool, stepId, budgetUnchecked);
+    ctx.stopReason = budgetUnchecked;
     return { passed: false, interrupted: true };
   }
   // Worker beendet oder Projektordner zwischendurch weg (externes Laufwerk getrennt): kein Fehler im Auftrag, der Lauf
