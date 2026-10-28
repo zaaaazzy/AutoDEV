@@ -214,6 +214,32 @@ test('runAuthorAgent: Dashboard-CLI für Assistent und (eingeschränkt) Problema
   assert.match(analyst.calls[0]!.command.join(' '), /--disallowedTools Write,Edit,NotebookEdit,MultiEdit,Bash/);
 });
 
+test('runAuthorAgent: Visionär nimmt die CLI aus den Einstellungen statt Ollama – nur lesend', async () => {
+  // Gemeldeter Fall: kein Visionär im Projekt, kein DEV_LOG_AGENT_COMMAND, in den Einstellungen `claude --model opus`.
+  const saved = process.env.DEV_LOG_AGENT_COMMAND;
+  delete process.env.DEV_LOG_AGENT_COMMAND;
+  try {
+    const { pool, find } = fakePool([
+      [
+        /system_agent_settings/,
+        [{ command: ['claude', '--model', 'opus', '--dangerously-skip-permissions', '-p'], allow_tools: true }],
+      ],
+    ]);
+    const { calls, execute } = fakeClaude(() => ({ text: 'Ideen' }));
+    const result = await runAuthorAgent(pool, options, () => 'x', execute, 'visionary');
+    assert.equal(result.output, 'Ideen');
+    assert.equal(calls.length, 1, 'die CLI läuft, nicht das lokale Modell');
+    const command = calls[0]!.command.join(' ');
+    assert.match(command, /^claude .*--model opus -p x$/);
+    assert.doesNotMatch(command, /--dangerously-skip-permissions/, 'Visionär bleibt lesend, auch mit allowTools');
+    assert.match(command, /--disallowedTools Write,Edit,NotebookEdit,MultiEdit,Bash/);
+    assert.deepEqual(find(/system_agent_settings/)[0]?.values, ['visionary']);
+  } finally {
+    if (saved === undefined) delete process.env.DEV_LOG_AGENT_COMMAND;
+    else process.env.DEV_LOG_AGENT_COMMAND = saved;
+  }
+});
+
 test('runAuthorAgent: ohne gehaltenen Arbeitsordner nur lesen – kein `git checkout main` neben dem Entwickler', async () => {
   const readOnly = /--disallowedTools Write,Edit,NotebookEdit,MultiEdit,Bash/;
   // Auftragsautor (draftRequirements), Bug-Wächter und Abnahme (Rolle „assistant“) laufen parallel zu runWorkflow.
