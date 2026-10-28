@@ -139,7 +139,7 @@ export function promptCommands(prompt: string): string[] {
   standalone: true,
   imports: [DatePipe],
   templateUrl: './agent-tasks.component.html',
-  host: { class: 'agent-tasks', '(document:click)': 'outside($event)', '(keydown.escape)': 'close()' },
+  host: { class: 'agent-tasks', '(document:click)': 'outside($event)', '(keydown.escape)': 'escape($event)' },
 })
 export class AgentTasksComponent {
   private readonly api = inject(ApiService);
@@ -291,6 +291,13 @@ export class AgentTasksComponent {
     this.open.set(false);
     this.editing.set(null);
     this.history.set(null);
+  }
+
+  /** Escape schliesst zuerst das offene Menü – der Chat dockt dabei nicht ab. */
+  protected escape(event: Event): void {
+    if (!this.open()) return;
+    event.preventDefault();
+    this.close();
   }
 
   protected outside(event: MouseEvent): void {

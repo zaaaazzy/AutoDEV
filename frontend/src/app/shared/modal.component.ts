@@ -10,7 +10,7 @@ const openModals: ModalComponent[] = [];
 @Component({
   selector: 'app-modal',
   standalone: true,
-  host: { style: 'display: contents', '(document:keydown.escape)': 'onEscape()' },
+  host: { style: 'display: contents', '(document:keydown.escape)': 'onEscape($event)' },
   template: `
     <div class="modal-backdrop" [class]="backdropClass()" (click)="dismissable() && closed.emit()">
       <section
@@ -42,8 +42,10 @@ export class ModalComponent {
     inject(DestroyRef).onDestroy(() => openModals.splice(openModals.indexOf(this), 1));
   }
 
-  protected onEscape(): void {
-    if (openModals.at(-1) !== this || !this.dismissable() || !this.closeOnEscape()) return;
+  protected onEscape(event: Event): void {
+    if (event.defaultPrevented || openModals.at(-1) !== this || !this.dismissable() || !this.closeOnEscape()) return;
+    // Behandelt: andere Escape-Empfänger (z. B. der angedockte Chat) lassen die Taste liegen.
+    event.preventDefault();
     this.closed.emit();
   }
 }
