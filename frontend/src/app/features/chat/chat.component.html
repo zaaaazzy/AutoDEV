@@ -1,7 +1,8 @@
 @if (zoom() === 'modal') {
-  <div class="modal-backdrop chat-zoom-backdrop" (click)="zoom.set(null)" aria-hidden="true"></div>
+  <div class="modal-backdrop chat-zoom-backdrop" (click)="unzoom()" aria-hidden="true"></div>
 }
 <section
+  #panel
   class="panel chat"
   aria-label="Assistent"
   [class.chat-bubble-panel]="bubble()"
@@ -32,33 +33,34 @@
       </button>
     }
     <!-- Sprechblase angedockt: kein zweites, kleines Fenster – nur Schließen. -->
-    <button
-      type="button"
-      class="chat-icon-button chat-zoom"
-      [hidden]="bubble() && zoom() === 'docked'"
-      (click)="toggleZoom()"
-      [attr.aria-pressed]="!!zoom()"
-      [title]="zoom() ? 'Verkleinern' : 'Chat vergrößern'"
-      [attr.aria-label]="zoom() ? 'Verkleinern' : 'Chat vergrößern'"
-    >
-      <svg
-        viewBox="0 0 24 24"
-        width="15"
-        height="15"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        aria-hidden="true"
+    @if (!(bubble() && zoom() === 'docked')) {
+      <button
+        type="button"
+        class="chat-icon-button chat-zoom"
+        (click)="toggleZoom()"
+        [attr.aria-pressed]="!!zoom()"
+        [title]="zoom() ? 'Verkleinern' : 'Chat vergrößern'"
+        [attr.aria-label]="zoom() ? 'Verkleinern' : 'Chat vergrößern'"
       >
-        @if (zoom()) {
-          <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
-        } @else {
-          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-        }
-      </svg>
-    </button>
+        <svg
+          viewBox="0 0 24 24"
+          width="15"
+          height="15"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          @if (zoom()) {
+            <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" />
+          } @else {
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          }
+        </svg>
+      </button>
+    }
     @if (bubble()) {
       <button
         type="button"

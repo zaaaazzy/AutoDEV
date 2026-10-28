@@ -1,4 +1,16 @@
-import { Component, ElementRef, afterNextRender, computed, effect, inject, input, output, signal } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  Injector,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import { ConfirmService } from '../../core/confirm.service.js';
@@ -10,6 +22,7 @@ import { NavIconComponent } from '../../shared/nav-icon.component.js';
 import { StepResultComponent } from '../../shared/step-result.component.js';
 import { AgentTasksComponent } from './agent-tasks.component.js';
 import { ChatComposerComponent, type ComposedMessage } from './chat-composer.component.js';
+import { FOCUSABLE, handlesEscape, trapFocusTarget } from './chat-focus.js';
 
 /** Nachladen per GET, solange die Live-Verbindung (noch) nichts geliefert hat. */
 const FALLBACK_POLL_MS = 3_000;
@@ -26,7 +39,7 @@ export type ChatZoom = 'docked' | 'modal' | null;
   templateUrl: './chat.component.html',
   host: {
     style: 'display: contents',
-    '(document:keydown.escape)': 'zoom.set(null)',
+    '(document:keydown)': 'onKeydown($event)',
     '(window:resize)': 'fitZoom()',
   },
 })
@@ -36,6 +49,10 @@ export class ChatComponent {
   private readonly confirm = inject(ConfirmService);
   protected readonly auth = inject(AuthService);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
+  private readonly injector = inject(Injector);
+  private readonly panel = viewChild.required<ElementRef<HTMLElement>>('panel');
+  /** Fokus vor dem Öffnen des Modals – bekommt ihn beim Schliessen zurück. */
+  private focusBeforeModal: HTMLElement | null = null;
 
   /**
    * Variante der Sprechblase: auf grossem Bildschirm rechts angedockt (wie im Dashboard), sonst als kleines Fenster
@@ -77,11 +94,14 @@ export class ChatComponent {
 
   constructor() {
     // Sprechblase auf grossem Bildschirm: gleich rechts angedockt öffnen – wie der vergrösserte Chat im Dashboard.
+    // Die Sprechblase wird angedockt ausgeblendet; der Fokus gehört dann ins Eingabefeld statt auf body.
     afterNextRender(() => {
       if (this.bubble() && globalThis.innerWidth >= DOCK_MIN_WIDTH) {
         this.zoom.set('docked');
         this.scrollToEnd();
       }
+      // Das Feld ist hier schon gerendert und bleibt beim Andocken dasselbe Element.
+      if (this.bubble()) this.focusInput();
     });
     // Angedockt: der Hauptbereich macht rechts Platz, damit nichts verdeckt wird.
     effect((onCleanup) => {
@@ -171,16 +191,66 @@ export class ChatComponent {
   /** Zoom-Knopf: vergrößern bzw. zurück zur normalen Ansicht. */
   protected toggleZoom(): void {
     if (this.zoom()) {
-      this.zoom.set(null);
+      this.unzoom();
     } else {
       this.zoom.set(this.bubble() || globalThis.innerWidth < DOCK_MIN_WIDTH ? 'modal' : 'docked');
+      if (this.zoom() === 'modal') this.openedModal();
     }
     this.scrollToEnd();
   }
 
   /** Wird das Fenster zu schmal zum Andocken, als Modal weiterzeigen. */
   protected fitZoom(): void {
-    if (this.zoom() === 'docked' && globalThis.innerWidth < DOCK_MIN_WIDTH) this.zoom.set('modal');
+    if (this.zoom() === 'docked' && globalThis.innerWidth < DOCK_MIN_WIDTH) {
+      this.zoom.set('modal');
+      this.openedModal();
+    }
+  }
+
+  /** Zurück zur normalen Ansicht; aus dem Modal kommt der Fokus dorthin zurück, wo er vorher war. */
+  protected unzoom(): void {
+    const wasModal = this.zoom() === 'modal';
+    this.zoom.set(null);
+    if (!wasModal) return;
+    const previous = this.focusBeforeModal;
+    this.focusBeforeModal = null;
+    afterNextRender(() => (previous?.isConnected ? previous.focus() : this.focusInput()), { injector: this.injector });
+  }
+
+  /** Escape (nur wenn zuständig) und Fokusfalle des Modals. */
+  protected onKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      const target = event.target instanceof Node ? event.target : null;
+      if (!handlesEscape({ defaultPrevented: event.defaultPrevented, target }, this.panel().nativeElement, this.zoom()))
+        return;
+      event.preventDefault();
+      this.unzoom();
+    } else if (event.key === 'Tab' && this.zoom() === 'modal') {
+      const focusables = Array.from(this.panel().nativeElement.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+        (element) => element.getClientRects().length > 0,
+      );
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const next = trapFocusTarget(focusables, active, event.shiftKey);
+      if (!next) return;
+      event.preventDefault();
+      next.focus();
+    }
+  }
+
+  /** Modal geöffnet: Fokus merken und ins Eingabefeld setzen. */
+  private openedModal(): void {
+    const active = document.activeElement;
+    this.focusBeforeModal = active instanceof HTMLElement && active !== document.body ? active : null;
+    this.focusInputAfterRender();
+  }
+
+  /** Erst nach dem Rendern fokussieren – sonst fällt der Fokus auf ein noch verstecktes Feld und landet auf body. */
+  private focusInputAfterRender(): void {
+    afterNextRender(() => this.focusInput(), { injector: this.injector });
+  }
+
+  private focusInput(): void {
+    this.host.nativeElement.querySelector<HTMLInputElement>('app-chat-composer input')?.focus();
   }
 
   private scrollToEnd(): void {
