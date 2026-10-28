@@ -24,10 +24,11 @@ AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich:
 - `npm run dev` startet die API auf Port 3101 und läuft damit neben dem Compose-Stack (3100, 5433, 80, 443 gehören dem Live-Stack). Sie braucht eine eigene Datenbank, z. B. `DEV_LOG_DATABASE_URL=postgresql://devlog:<passwort>@127.0.0.1:5433/aideation_dev DEV_LOG_AUTH=off npm run dev`; die Datenbank wird beim Start angelegt. Auf `PORT=3100` oder die Live-Datenbank `aideation` startet die Dev-API nicht (`src/core/dev-environment.ts`).
 - `npm run dev:ui` startet die Angular-Entwicklungsoberfläche auf Port 4200 und leitet `/api` und `/health` an die Dev-API auf Port 3101 weiter (`frontend/proxy.conf.json`), nie an den Live-Stack.
 - `npm run build` baut die Angular-Oberfläche und kompiliert anschließend das Backend.
-- `npm test` baut die Oberfläche und führt die Backend-Tests aus.
+- `npm run test:unit` führt die Unit- und Integrationstests aus (Backend, Skripte, Frontend-Specs), ohne die Oberfläche zu bauen. Kein Test liest `dist/ui`.
+- `npm test` ist der Komplettlauf: erst `build:ui`, dann `test:unit`.
 - `npm run lint`, `npm run format:check` und `npm run typecheck` prüfen Stil und Typen. `typecheck` prüft auch die Test-Dateien (`tsconfig.test.json`, `frontend/tsconfig.spec.json`), denn `tsx` allein prüft keine Typen.
 - `npm run test:e2e` startet die Oberflächentests (Playwright, eigene Datenbank `dev_log_e2e`; vorher `npm run build:ui`).
-- CI (`.github/workflows/ci.yml`, nur Leserechte): Job `check` (Lint, Format, Typen, Tests), Job `e2e` (Playwright gegen Postgres), Job `docker` (baut `dev-log`, `frontend`, `https` und das Review-Image, startet danach `db`, `dev-log` und `frontend` mit Health-Prüfung und zufälligen, maskierten Zugangsdaten). Keine Secrets, kein Token in `.git/config` (`persist-credentials: false`), keine Coverage-Schwelle. Fehler stehen im Log (Playwright-Ausgabe, Container-Logs), Traces zusätzlich als Artefakt. `.dockerignore` hält `.env*`, Schlüssel, Sicherungen und Testergebnisse aus den Images heraus.
+- CI (`.github/workflows/ci.yml`, nur Leserechte, bei Push auf `main` und bei Pull Requests): Job `check` (Lint, Format, Typen, `test:unit`), Job `e2e` (Playwright gegen Postgres), Job `docker` (baut `dev-log`, `frontend`, `https` und das Review-Image, startet danach `db`, `dev-log` und `frontend` mit Health-Prüfung und zufälligen, maskierten Zugangsdaten). Keine Secrets, kein Token in `.git/config` (`persist-credentials: false`), keine Coverage-Schwelle. Fehler stehen im Log (Playwright-Ausgabe, Container-Logs), Traces zusätzlich als Artefakt. `.dockerignore` hält `.env*`, Schlüssel, Sicherungen und Testergebnisse aus den Images heraus.
 
 ### Sicherheit
 

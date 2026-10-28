@@ -1,8 +1,16 @@
 name: CI
-on: [push, pull_request]
+# Push nur auf main; Branches laufen über ihren Pull Request, sonst liefe jeder Commit doppelt.
+on:
+  push:
+    branches: [main]
+  pull_request:
 # Nur Lesen: kein Job schreibt ins Repository, in Issues oder Pakete.
 permissions:
   contents: read
+# Ein neuer Push auf denselben Pull Request bricht den alten Lauf ab; Läufe auf main laufen immer zu Ende.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 # Kein Job nutzt Secrets. checkout legt das GITHUB_TOKEN nicht in .git/config ab (persist-credentials: false),
 # damit Projektcode (Tests, Testserver, Docker-Build) es nicht lesen kann.
 jobs:
@@ -38,7 +46,8 @@ jobs:
       - run: npm run format:check
       # Prüft auch die Test-Dateien (tsconfig.test.json, frontend/tsconfig.spec.json); tsx allein prüft keine Typen.
       - run: npm run typecheck
-      - run: npm test
+      # Ohne build:ui: kein Unit-Test liest dist/ui, die Oberfläche baut der Job e2e.
+      - run: npm run test:unit
 
   # Oberflächentests (Playwright) gegen eine eigene Postgres-Instanz nur für diesen Lauf.
   e2e:
