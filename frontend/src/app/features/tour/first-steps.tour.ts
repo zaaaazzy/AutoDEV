@@ -1,7 +1,7 @@
 import type { ApiService } from '../../core/api.service.js';
 import type { TourService, TourStep } from './tour.service.js';
 
-const CREATE_BUTTON = '.page-heading .actions .button.primary';
+const CREATE_BUTTON = '.page-heading .page-create';
 
 /** Erste Schritte: Ideation → Aufträge → Sprint → Board → Sprint starten → Agent live beobachten. */
 export function firstStepsTour(api: ApiService): TourStep[] {
