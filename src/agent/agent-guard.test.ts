@@ -760,3 +760,94 @@ test('Wächter als Hook: Projektordner aus der Richtlinie geht vor CLAUDE_PROJEC
   assert.equal(decodePolicy(pinned).root, root);
   assert.equal(decodePolicy(encodePolicy({ ...all, root: 'relativ' })).root, undefined);
 });
+
+test('Wächter: git rm und git mv löschen bzw. benennen Dateien im Projekt um – eng geprüft', () => {
+  mkdirSync(join(root, 'migrations'));
+  writeFileSync(join(root, 'migrations', '009_a.sql'), 'x');
+  mkdirSync(join(root, 'paket', '.husky'), { recursive: true });
+  writeFileSync(join(root, 'paket', '.husky', 'pre-commit'), 'x');
+  const bash = (command: string, policy: GuardPolicy = all) =>
+    guardProblem({ tool_name: 'Bash', tool_input: { command }, cwd: root }, policy, root);
+  for (const command of [
+    'git rm migrations/009_a.sql',
+    'git rm -q -- migrations/009_a.sql',
+    'git rm --cached migrations/009_a.sql',
+    'git rm -r migrations',
+    'git mv migrations/009_a.sql migrations/011_a.sql',
+    'git mv -v migrations/009_a.sql docs',
+    'git status && git mv migrations/009_a.sql migrations/011_a.sql',
+    'timeout 30 git rm docs/alt.md',
+  ]) {
+    assert.equal(bash(command), null, command);
+  }
+  for (const command of [
+    // Ausserhalb, geschützt, das ganze Projekt
+    'git rm ../x',
+    'git rm docs/../../x',
+    'git rm /etc/hosts',
+    'git rm docs/raus/x',
+    'git rm .env',
+    'git rm .git/config',
+    'git rm -r .git',
+    'git rm .claude/settings.json',
+    'git rm -r .',
+    'git rm -r ./',
+    'git rm -r paket',
+    'git mv migrations/009_a.sql .husky/pre-commit',
+    'git mv migrations/009_a.sql .npmrc',
+    'git mv migrations/009_a.sql ../x.sql',
+    'git mv .mcp.json x.json',
+    // Optionen: -f, Abkürzungen, Pfad-Listen, unbekannte
+    'git rm -f migrations/009_a.sql',
+    'git rm --force migrations/009_a.sql',
+    'git rm -rf migrations',
+    'git rm --for migrations/009_a.sql',
+    'git rm --pathspec-from-file=liste.txt',
+    'git rm --pathspec-f=liste.txt',
+    'git rm --sparse migrations/009_a.sql',
+    'git mv -f migrations/009_a.sql docs/alt.md',
+    'git mv -k migrations/009_a.sql x',
+    'git -C .. rm x',
+    'git --git-dir=.git rm x',
+    'git -c core.x=y rm x',
+    // Pathspec-Magie, Globs, Variablen, ~
+    "git rm ':(top)x'",
+    "git rm ':!docs'",
+    "git rm ':/x'",
+    "git rm 'migrations/*.sql'",
+    'git rm migrations/*.sql',
+    "git rm 'migrations/00?_a.sql'",
+    'git rm $X',
+    'git rm ~/x',
+    'git rm {a,b}',
+    // Verstecken: Ketten, Anführungszeichen, Backslash, Wrapper
+    'git rm migrations/009_a.sql; rm x',
+    'git rm migrations/009_a.sql && mv a b',
+    'git status | cp a b',
+    'git rm $(echo x)',
+    'git "rm" x',
+    'git r\\m x',
+    "'git' rm ../x",
+    'command git rm x',
+    'env git rm x',
+    'nohup git rm x',
+    'git rm',
+    'git mv migrations/009_a.sql',
+  ]) {
+    assert.ok(bash(command), command);
+  }
+  // Rechte und Ordner-Einschränkung: Löschen braucht „Dateien ändern“, Umbenennen zusätzlich „Dateien anlegen“.
+  const editOnly = { create: false, edit: true, scopes: [] };
+  assert.equal(bash('git rm docs/alt.md', editOnly), null);
+  assert.match(bash('git mv docs/alt.md docs/neu.md', editOnly) ?? '', /Dateien anlegen/);
+  assert.match(bash('git rm docs/alt.md', { create: true, edit: false, scopes: [] }) ?? '', /Dateien ändern/);
+  const migrations = { create: true, edit: true, scopes: ['migrations'] };
+  assert.equal(bash('git mv migrations/009_a.sql migrations/011_a.sql', migrations), null);
+  assert.match(bash('git rm docs/alt.md', migrations) ?? '', /erlaubten Ordner/);
+  assert.match(bash('git mv migrations/009_a.sql docs/x.sql', migrations) ?? '', /erlaubten Ordner/);
+  // Ohne Datei-Rechte (z. B. lokales Modell ohne Richtlinie) bleiben beide gesperrt; rm, mv und cp sowieso.
+  assert.ok(bashProblem('git rm docs/alt.md', root));
+  for (const command of ['rm docs/alt.md', 'mv docs/alt.md docs/neu.md', 'cp docs/alt.md docs/neu.md']) {
+    assert.match(bash(command) ?? '', /gesperrt/, command);
+  }
+});

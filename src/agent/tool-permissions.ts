@@ -10,6 +10,7 @@ import {
   EDIT_TOOLS,
   FILES_CREATE,
   FILES_EDIT,
+  fileGitRules,
   LOGS_COMMAND,
   NO_FILE_WRITE_ROLES,
   PERMISSION_GROUPS,
@@ -51,6 +52,7 @@ export {
   customRuleProblem,
   forbiddenCommand,
   forbiddenSubcommand,
+  gitFileProblem,
   gitOptionProblem,
   gitPathProblem,
   gitRemoteProblem,
@@ -315,7 +317,12 @@ export function withAgentPermissions(
     JSON.stringify(agentSettings(hook, `Write|Edit|MultiEdit|NotebookEdit|Bash|${READ_MATCHER}`)),
   ];
   if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...others];
-  const rules = [...chosen.filter(isToolRule), ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : [])];
+  // Löschen und Umbenennen (git rm/mv) gehören zu den Datei-Rechten und gehen nur mit Wächter (gitFileProblem).
+  const rules = [
+    ...chosen.filter(isToolRule),
+    ...(hook ? fileGitRules(policy) : []),
+    ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : []),
+  ];
   const directories = chosen.includes(LOGS_COMMAND)
     ? readDirectories.flatMap((directory) => ['--add-dir', directory])
     : [];

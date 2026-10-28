@@ -25,7 +25,14 @@ export const DATABASE_COMMAND = 'database';
 /** Live-Dienste der Projekte neu starten; wird erst beim Start mit der Benutzer-ID des Workers aufgelöst. */
 export const SERVICES_COMMAND = 'services';
 export const servicesRule = (): string => `Bash(launchctl kickstart -k gui/${process.getuid?.() ?? 501}/ch.*)`;
-const PSEUDO_COMMANDS = new Set([FILES_CREATE, FILES_EDIT, LOGS_COMMAND, DATABASE_COMMAND, SERVICES_COMMAND]);
+/** Löschen bzw. Umbenennen: kommt mit „Dateien ändern“ (git mv zusätzlich mit „Dateien anlegen“), geprüft vom Wächter. */
+export const GIT_RM_RULE = 'Bash(git rm:*)';
+export const GIT_MV_RULE = 'Bash(git mv:*)';
+export const fileGitRules = ({ create, edit }: { create: boolean; edit: boolean }): string[] => [
+  ...(edit ? [GIT_RM_RULE] : []),
+  ...(edit && create ? [GIT_MV_RULE] : []),
+];
+const PSEUDO_COMMANDS =new Set([FILES_CREATE, FILES_EDIT, LOGS_COMMAND, DATABASE_COMMAND, SERVICES_COMMAND]);
 
 /** Ob eine Freigabe („Bash(befehl:*)“ bzw. „Bash(befehl)“) einen Shell-Befehl abdeckt (für das lokale Modell). */
 export function rulesAllow(rules: readonly string[], command: string): boolean {
@@ -69,8 +76,13 @@ export function commandLabel(rule: string): string {
 /** Erklärung je Befehl (Hover in der Oberfläche). */
 const COMMAND_HELP: Record<string, string> = {
   [FILES_CREATE]:
-    'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“.',
-  [FILES_EDIT]: 'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten oder überschreiben.',
+    'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“; mit beiden Rechten auch umbenennen (git mv).',
+  [FILES_EDIT]:
+    'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten, überschreiben oder löschen (git rm).',
+  [GIT_RM_RULE]:
+    'Löscht Dateien im Projekt (bzw. in den erlaubten Ordnern) – ohne -f, ohne geschützte Dateien wie .env oder .git. Kommt mit „Dateien ändern“.',
+  [GIT_MV_RULE]:
+    'Benennt Dateien im Projekt (bzw. in den erlaubten Ordnern) um – ohne -f, Quelle und Ziel nicht geschützt. Kommt mit „Dateien anlegen“ und „Dateien ändern“.',
   [SERVICES_COMMAND]:
     'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht AIdeation selbst (com.aideation.*).',
   [DATABASE_COMMAND]:
