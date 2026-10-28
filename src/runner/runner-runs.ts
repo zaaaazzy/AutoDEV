@@ -6,6 +6,7 @@ import { PHASE_ORDER } from './runner-prompts.js';
 import { MAX_TIMEOUT_MINUTES } from './runner-selection.js';
 import type { WorkflowAgent, WorkItem } from './runner-types.js';
 import { VISUAL_CATEGORIES } from './visual-check.js';
+import { currentWorkerId } from './worker-identity.js';
 
 /** Pause vor dem Wiederholen nach einem vorübergehenden Fehler. */
 export const TRANSIENT_RETRY_DELAY_MS = 30_000;
@@ -42,11 +43,11 @@ export async function claimRun(pool: Pool, item: WorkItem): Promise<string | nul
     [item.id, ABANDONED_RUN_MS],
   );
   const claim = await pool.query<{ id: string }>(
-    `INSERT INTO agent_runs (project_slug, development_id, status)
-     VALUES ($1, $2, '${AGENT_RUN_STATUS.running}')
+    `INSERT INTO agent_runs (project_slug, development_id, status, worker_id)
+     VALUES ($1, $2, '${AGENT_RUN_STATUS.running}', $3)
      ON CONFLICT (development_id) WHERE status = 'running' DO NOTHING
      RETURNING id`,
-    [item.projectSlug, item.id],
+    [item.projectSlug, item.id, currentWorkerId()],
   );
   return claim.rows[0]?.id ?? null;
 }

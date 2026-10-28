@@ -368,6 +368,24 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_next_at TIMESTAMPTZ;
     `,
   },
+  // Wiederherstellung beim Start nur für eigene oder verwaiste Läufe: Läufe und Prozesse tragen die ID ihres Workers,
+  // jeder Worker schreibt ein Lebenszeichen. Schritte gehören über run_id zum Lauf. Altzeilen ohne ID gelten als
+  // verwaist, sobald das Lebenszeichen ihres Projekts (worker_heartbeats) alt ist (Code-Review vom 21.10.2026).
+  {
+    version: 16,
+    name: 'worker-id-und-lebenszeichen',
+    sql: `
+      CREATE TABLE IF NOT EXISTS runner_workers (
+        id TEXT PRIMARY KEY,
+        pid INTEGER,
+        host TEXT NOT NULL DEFAULT '',
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS worker_id TEXT;
+      ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id TEXT;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

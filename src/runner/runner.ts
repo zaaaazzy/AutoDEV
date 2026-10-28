@@ -52,6 +52,7 @@ export {
 } from './runner-selection.js';
 export { BUDGET_CHECK_RETRY_MS, runBuiltinAgent } from './runner-steps.js';
 import type { StepSummary as ResumedStep } from './runner-types.js';
+import { currentWorkerId, liveWorkerSql, WORKER_STALE_SECONDS } from './worker-identity.js';
 
 export type {
   BuiltinAgent,
@@ -560,13 +561,15 @@ export const ORPHANED_CANCEL_NOTE =
  * wie beim Start aufräumen, ohne Neustart. Schritte werden „Unterbrochen“, der Auftrag wieder eingeplant (höchstens
  * ORPHANED_REQUEUE_LIMIT-mal, danach blockiert). Ein abgebrochener Schritt („Abbrechen“) endet sofort, der Auftrag
  * wird blockiert wie bei cancelAgent. Nur Läufe der eigenen Projekte und ohne frisches Lebenszeichen (Start des Laufs
- * oder eines Schritts, Eintrag im Verlauf). Eine einzige Anweisung: alles oder nichts, mehrfach ausführbar.
+ * oder eines Schritts, Eintrag im Verlauf) und nicht von einem anderen, lebenden Worker. Eine einzige Anweisung: alles
+ * oder nichts, mehrfach ausführbar.
  */
 export async function closeOrphanedRuns(
   pool: Pool,
   projects: string[],
   held: string[] = heldRunIds(),
   staleMs = ORPHANED_RUN_MS,
+  workerId: string | null = currentWorkerId(),
 ): Promise<number> {
   if (!projects.length) return 0;
   const result = await pool.query<{ count: number }>(
@@ -583,9 +586,11 @@ export async function closeOrphanedRuns(
          FROM agent_runs r
         WHERE r.status = '${AGENT_RUN_STATUS.running}' AND r.project_slug = ANY($1::text[])
           AND NOT (r.id::text = ANY($2::text[]))
+          -- Läufe eines anderen, lebenden Workers räumt dieser selbst auf.
+          AND (r.worker_id IS NULL OR r.worker_id = $9 OR NOT ${liveWorkerSql('r.worker_id', '$10')})
      ), orphans AS (
        SELECT * FROM candidates
-        WHERE alive_at < NOW() - (CASE WHEN cancelled THEN $4 ELSE $3 END) * INTERVAL '1 millisecond'
+        WHERE alive_at < NOW() - (CASE WHEN cancelled THEN $4::bigint ELSE $3::bigint END) * INTERVAL '1 millisecond'
      ), runs AS (
        UPDATE agent_runs r SET status = '${AGENT_RUN_STATUS.failed}', completed_at = NOW()
          FROM orphans o WHERE r.id = o.id AND r.status = '${AGENT_RUN_STATUS.running}'
@@ -618,6 +623,8 @@ export async function closeOrphanedRuns(
       ORPHANED_CANCEL_NOTE,
       ORPHANED_REQUEUE_LIMIT,
       STUCK_FAILURE,
+      workerId,
+      WORKER_STALE_SECONDS,
     ],
   );
   return result.rows[0]?.count ?? 0;

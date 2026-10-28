@@ -129,7 +129,8 @@ test('claimRun: räumt zuerst verwaiste Läufe des Auftrags ab und meldet null, 
     /UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE[\s\S]*WHERE status = 'running' AND run_id IN \(SELECT id FROM abandoned\)/,
   );
   assert.match(free.queries[1]?.sql ?? '', /ON CONFLICT \(development_id\) WHERE status = 'running' DO NOTHING/);
-  assert.deepEqual(free.queries[1]?.values, [item.projectSlug, item.id]);
+  // Ohne Worker-ID (Tests, Werkzeuge) bleibt sie leer; der Worker setzt sie beim Start (setWorkerId).
+  assert.deepEqual(free.queries[1]?.values, [item.projectSlug, item.id, null]);
 
   // Nebenläufigkeit: Ein zweiter Worker bekommt den Auftrag nicht, solange der erste Lauf läuft.
   const busy = fakePool();
