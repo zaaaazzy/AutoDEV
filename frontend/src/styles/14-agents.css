@@ -346,7 +346,7 @@
 .workflow-phase.drop-active .workflow-steps {
   border-left-color: #2f6b4f;
   border-radius: 0 10px 10px 0;
-  background: #f7faf8;
+  background: rgb(238 243 239 / 50%);
 }
 .workflow-phase.drop-active .workflow-phase-number {
   background: #2f6b4f;
@@ -380,7 +380,7 @@
   bottom: -6px;
 }
 .workflow-empty.drop-here {
-  border: 2px dashed #a9c2b1;
+  border: 2px dashed #2f6b4f;
   border-radius: 10px;
   padding: 6px 10px;
 }
