@@ -15,7 +15,7 @@ import {
 } from '../core/development-transitions.js';
 import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
-import { developmentPatchRole } from './roles.js';
+import { developmentPatchRole, hasRole, ROLE_INFO, type Principal } from './roles.js';
 import {
   buildUpdate,
   manualEstimateSql,
@@ -310,6 +310,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
    * In einen Sprint übernehmen (Sprintseite „Aufträge hinzufügen“): offene und abgebrochene Aufträge in einer Abfrage.
    * Abgebrochene (aus einem Sprint genommen oder blockiert) werden dabei wie bei /retry zurückgesetzt, landen aber direkt
    * im Ziel-Sprint statt erst im aktiven. auto_run nur, wenn der Ziel-Sprint läuft – ein geplanter wartet auf seinen Start.
+   * Abgebrochene neu einplanen ist ein erneuter Versuch: dafür braucht es wie bei /retry zusätzlich „Ausführen“ (403).
    */
   app.post(
     '/development/:id/take-into-sprint',
@@ -324,6 +325,7 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         response.status(400).json({ message: 'Sprint fehlt oder ist ungültig.' });
         return;
       }
+      const canRun = hasRole(response.locals.principal as Principal | undefined, 'run');
       const aborted = `(d.removed_from_sprint_at IS NOT NULL OR d.status = '${DEVELOPMENT_STATUS.blocked}')`;
       // Ohne Join auf sprints: DEV_COLUMNS (RETURNING) nennt id und status ohne Tabellen-Präfix.
       const result = await pool.query(
@@ -340,11 +342,24 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
               removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()
         WHERE d.id = $1 AND d.sprint_id IS NULL AND d.kind <> 'express'
           AND d.status IN (${sqlList(SPRINT_POOL_DEVELOPMENT_STATUSES)})
+          AND ($3::boolean OR NOT ${aborted})
           AND EXISTS (SELECT 1 FROM sprints s WHERE s.id = $2 AND s.project_slug = d.project_slug
                          AND s.status IN ('planned', 'active'))
         RETURNING ${DEV_COLUMNS}`,
-        [request.params.id, sprintId],
+        [request.params.id, sprintId, canRun],
       );
+      if (!result.rows[0] && !canRun) {
+        // Nur für die Meldung: lag es am fehlenden Recht?
+        const blocked = await pool.query(`SELECT 1 FROM development_items d WHERE d.id = $1 AND ${aborted}`, [
+          request.params.id,
+        ]);
+        if (blocked.rowCount) {
+          response.status(403).json({
+            message: `Abgebrochene Aufträge neu einplanen braucht die Rolle „${ROLE_INFO.run.label}“.`,
+          });
+          return;
+        }
+      }
       if (!result.rows[0]) {
         response.status(409).json({
           message:

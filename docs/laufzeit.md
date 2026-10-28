@@ -90,6 +90,8 @@ Arten: `feature`, `bug` (Behebungsauftrag) und `express` (Chat-Anfrage; läuft n
 
 Unter **Aufträge hinzufügen** auf der Sprintseite übernimmt `POST /api/development/:id/take-into-sprint` offene und abgebrochene Aufträge in einer Abfrage in den gewählten Sprint. Bei abgebrochenen werden Vermerk, Fehler und ein von Hand zugewiesener Agent zurückgesetzt, ohne Umweg über den aktiven Sprint. `auto_run` wird nur gesetzt, wenn der Ziel-Sprint aktiv ist. In einem geplanten Sprint wartet der Auftrag also, bis der Sprint startet. Auch ein PATCH mit `sprintId` auf einen nicht aktiven Sprint setzt `auto_run` zurück.
 
+Offene Aufträge übernimmt, wer die Rolle `plan` hat. Abgebrochene (blockiert oder aus einem Sprint genommen) neu einzuplanen ist ein erneuter Versuch wie `/retry`. Dafür braucht es zusätzlich die Rolle `run`. Ohne `run` schliesst das UPDATE sie aus, und die Route antwortet mit 403 („Abgebrochene Aufträge neu einplanen braucht die Rolle „Agents ausführen“.“). In der Oberfläche sind sie dann ohne Häkchen, „→“ ist deaktiviert, und über der Liste steht derselbe Hinweis. Wechselt die Rolle, fallen schon angehakte gesperrte Aufträge aus der Auswahl.
+
 ```mermaid
 stateDiagram-v2
   state "backlog" as backlog

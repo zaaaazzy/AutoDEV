@@ -8,7 +8,7 @@ import { ProjectStore } from '../../core/project-store.js';
 import type { DataColumn } from '../../shared/data-table/data-table.component.js';
 import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
-import { pickInOrder, poolOpenState } from './pool-selection.js';
+import { isAborted, NEEDS_RUN, pickInOrder, poolOpenState, poolSelectable } from './pool-selection.js';
 import {
   byRank,
   canEditSprintOrders,
@@ -68,19 +68,22 @@ export class SprintOrdersComponent {
    */
   protected readonly free = computed(() => {
     const free = this.store.data().development.filter(canTakeIntoSprint);
-    const aborted = (item: DevelopmentItem): boolean => !!item.removedFromSprintAt || item.status === 'blocked';
-    return [...byRank(free.filter((item) => !aborted(item))), ...byRank(free.filter(aborted))];
+    return [...byRank(free.filter((item) => !isAborted(item))), ...byRank(free.filter(isAborted))];
   });
   protected readonly poolColumns: DataColumn<DevelopmentItem>[] = [
     {
       id: 'sprint',
       header: 'Herkunft',
-      value: (item) =>
-        item.removedFromSprintAt || item.status === 'blocked' ? 'Abgebrochen' : 'Offen – noch in keinem Sprint',
-      sortValue: (item) => (item.removedFromSprintAt || item.status === 'blocked' ? 1 : 0),
+      value: (item) => (isAborted(item) ? 'Abgebrochen' : 'Offen – noch in keinem Sprint'),
+      sortValue: (item) => (isAborted(item) ? 1 : 0),
     },
   ];
-  protected readonly anyRow = (): boolean => true;
+  /** Abgebrochene neu einplanen ist ein erneuter Versuch: nur mit „Ausführen“ (Server: 403, wie /retry). */
+  protected readonly canRun = computed(() => this.auth.can('run'));
+  protected readonly selectable = poolSelectable(() => this.canRun());
+  protected readonly needsRun = NEEDS_RUN;
+  /** Hinweis über der Liste, wenn abgebrochene Aufträge zu sehen, aber gesperrt sind. */
+  protected readonly lockedAborted = computed(() => (this.canRun() ? 0 : this.free().filter(isAborted).length));
   /**
    * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu; eine von Hand geöffnete Liste bleibt beim Nachladen
    * offen (siehe poolOpenState). Die Liste wird nur gerendert, wenn sie offen ist:
@@ -89,8 +92,11 @@ export class SprintOrdersComponent {
    */
   protected readonly poolOpen = poolOpenState(() => this.orders());
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
-  /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
-  protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));
+  /**
+   * Nur, was noch zur Auswahl steht, in Anzeige-Reihenfolge: inzwischen eingeplante fallen weg, ebenso abgebrochene,
+   * wenn „Ausführen“ fehlt (auch nach einem Rollenwechsel mit schon angehakten).
+   */
+  protected readonly selection = computed(() => pickInOrder(this.free().filter(this.selectable), this.selectedIds()));
 
   /** Umsortieren, Herausnehmen und Hineinnehmen (siehe canEditSprintOrders). */
   protected readonly editable = computed(() => canEditSprintOrders(this.sprint().status, this.auth.can('plan')));
