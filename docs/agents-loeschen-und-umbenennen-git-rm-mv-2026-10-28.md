@@ -30,13 +30,14 @@ Beobachtet bei Mainty: Migrationen wurden auf eine freie Nummer „umbenannt“,
 ## Tests
 
 - `agent-guard.test.ts` („git rm und git mv …“): erlaubte und gesperrte Fälle, Umgehungsversuche (Ketten, Anführungszeichen, Wrapper, Abkürzungen, Pfade ausserhalb, geschützte Dateien), Gegenprobe `rm`/`mv`/`cp`.
+- `command-checks.test.ts` (nachgereicht, +146 Zeilen): `gitFileProblem` direkt, wie vom Reviewer gefordert.
 - `agent-permissions.test.ts`, `tool-permissions.test.ts`: Regeln je Rechte-Kombination.
 - Von der Dokumentation nicht erneut ausgeführt.
 
 ## Geänderte Dateien
 
 - `src/agent/command-checks.ts`, `agent-guard.ts`, `permission-rules.ts`, `tool-permissions.ts`
-- `src/agent/agent-guard.test.ts`, `agent-permissions.test.ts`, `tool-permissions.test.ts`
+- `src/agent/agent-guard.test.ts`, `command-checks.test.ts`, `agent-permissions.test.ts`, `tool-permissions.test.ts`
 - `docs/agents-und-rechte.md` (Abschnitt „Löschen und Umbenennen“), `docs/benutzerhandbuch-dashboard-agents.md` (Abschnitt 3 und Fehlermeldungs-Zeile)
 
 ## Sprint 23 / Anfrage-TODO
