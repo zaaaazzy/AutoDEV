@@ -1,5 +1,5 @@
 import { logged } from '../core/log.js';
-import { readOnlyCommand, restrictedSystemCommand, systemCommand } from './system-agents.js';
+import { dashboardCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -117,21 +117,6 @@ export function buildRequirementPrompt(
     `## Definition of Ready (vor der Abgabe prüfen)\n${definitionOfReady.map((item) => `- ${item}`).join('\n')}\n` +
       'Schreibe die Akzeptanzkriterien als Liste mit genau einem prüfbaren Satz je Punkt – der Tester hakt sie einzeln ab.',
   ].join('\n\n');
-}
-
-/**
- * CLI chosen in the dashboard for the chat assistant or the analysis. "author" is left out on purpose: its
- * dashboard choice belongs to the quick estimation only, not to writing requirements. The analysis stays read-only
- * unless full tool access was allowed for it in the dashboard.
- */
-async function dashboardCommand(pool: Pool, role: string): Promise<string[] | null> {
-  // Routinen laufen über die CLI des Assistenten, aber ohne dessen Vollzugriffs-Schalter (nur lesen, Wächter aktiv).
-  if (role === 'routine') {
-    const command = await systemCommand(pool, 'assistant');
-    return command && readOnlyCommand(command);
-  }
-  if (role !== 'assistant' && role !== 'analyst') return null;
-  return role === 'analyst' ? restrictedSystemCommand(pool, role) : systemCommand(pool, role);
 }
 
 /** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */

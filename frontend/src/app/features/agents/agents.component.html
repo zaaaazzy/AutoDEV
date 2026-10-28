@@ -116,6 +116,17 @@
                 </optgroup>
               </select>
             </label>
+            @if (system.usage) {
+              <p class="muted system-usage">
+                Verwendet: <strong>{{ usageLabel(system.usage) }}</strong>
+                @if (system.role === 'visionary' && system.usage.kind === 'cli') {
+                  · nur lesend
+                }
+                @if (system.role !== 'author') {
+                  · ein eigener Agent dieser Rolle im Projekt geht vor.
+                }
+              </p>
+            }
             @if (system.restricted && system.command?.length) {
               <label class="system-tools">
                 <input
