@@ -1207,7 +1207,8 @@ async function testerAcceptanceRun(acceptance: object) {
   const query = async (sql: string, values: unknown[] = []) => {
     queries.push({ sql, values });
     if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
-    if (sql.includes('SELECT test_commands')) return { rows: [{ commands: [['npx', 'tsx', '--test', 'src/a.test.ts']] }] };
+    if (sql.includes('SELECT test_commands'))
+      return { rows: [{ commands: [['npx', 'tsx', '--test', 'src/a.test.ts']] }] };
     return { rows: [{ id: 'step-row' }] };
   };
   const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
@@ -1242,7 +1243,8 @@ test('Abnahme: grüne Tests, alle Kriterien belegt, nur die Abdeckungsmessung de
   });
   assert.equal(result, 'passed');
   const dod4 = queries.find(
-    (query) => query.sql.includes('INSERT INTO acceptance_checks') && query.values[1] === 'done' && query.values[2] === 4,
+    (query) =>
+      query.sql.includes('INSERT INTO acceptance_checks') && query.values[1] === 'done' && query.values[2] === 4,
   );
   assert.equal(dod4?.values[4], 'met', 'DoD-Punkt gilt als erfüllt');
   // Die von AIdeation gemessene Abdeckung wird weiterhin gespeichert – mit echten Werten, nicht null.
@@ -1267,7 +1269,9 @@ test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs
       { nr: 2, met: true, note: '' },
     ],
     done: [1, 2, 3, 4, 5].map((nr) =>
-      nr === 2 ? { nr, met: false, note: '2 Tests rot; Abdeckung nicht gemessen (Wächter blockiert)' } : { nr, met: true },
+      nr === 2
+        ? { nr, met: false, note: '2 Tests rot; Abdeckung nicht gemessen (Wächter blockiert)' }
+        : { nr, met: true },
     ),
   });
   assert.equal(rot.result, 'failed');

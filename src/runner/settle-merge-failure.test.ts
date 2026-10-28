@@ -71,7 +71,13 @@ test('Einzellauf eines Agents: main bleibt unverändert, Arbeit liegt committet 
   assert.ok(branch);
   await writeFile(join(cwd, 'export.ts'), 'export const csv = 1;\n');
   const { pool, queries } = recordingPool();
-  const ctx = { pool, item: single, options: { cwd, timeoutMs: 1 }, execute: runCommand, branch } as unknown as RunContext;
+  const ctx = {
+    pool,
+    item: single,
+    options: { cwd, timeoutMs: 1 },
+    execute: runCommand,
+    branch,
+  } as unknown as RunContext;
   await settleItem(ctx, true, false);
 
   assert.equal(git('rev-parse', 'main'), before, 'main unverändert');

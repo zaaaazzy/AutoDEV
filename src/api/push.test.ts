@@ -46,7 +46,10 @@ test('Push auf PostgreSQL: Schlüssel, Anmeldung je Benutzer, Abmeldung', async 
         assert.equal(first.body.publicKey, second.body.publicKey);
         assert.deepEqual(Object.keys(first.body), ['publicKey']);
         const { rows } = await pool.query("SELECT value FROM app_settings WHERE key = 'push_vapid_keys'");
-        assert.ok(String(rows[0]?.value).startsWith('enc:v1:'), 'privater Schlüssel liegt verschlüsselt in der Datenbank');
+        assert.ok(
+          String(rows[0]?.value).startsWith('enc:v1:'),
+          'privater Schlüssel liegt verschlüsselt in der Datenbank',
+        );
       });
 
       await t.test('Anmeldung wird geprüft', async () => {

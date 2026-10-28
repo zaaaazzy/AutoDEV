@@ -65,7 +65,13 @@ test('Geheimnisse: jede Rolle bekommt Deny-Regeln und den Wächter für Read, Gr
       const settings = settingsOf(command);
       const deny = settings.permissions?.deny ?? [];
       // .env, config/.env.production, certs/server.key, *.pem, SSH-Schlüssel und npm-Tokens (.npmrc)
-      for (const rule of ['Read(**/.env*)', 'Read(**/*.key)', 'Read(**/*.pem)', 'Read(**/.ssh/**)', 'Read(**/.npmrc)']) {
+      for (const rule of [
+        'Read(**/.env*)',
+        'Read(**/*.key)',
+        'Read(**/*.pem)',
+        'Read(**/.ssh/**)',
+        'Read(**/.npmrc)',
+      ]) {
         assert.ok(deny.includes(rule), `${label} ohne ${rule}`);
       }
       const matcher = settings.hooks?.PreToolUse[0]?.matcher ?? '';

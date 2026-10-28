@@ -7,10 +7,11 @@ import { isSprintLockedDevelopmentStatus } from '../../../../../src/core/develop
 const template = readFileSync(new URL('./order-detail.component.html', import.meta.url), 'utf8');
 
 test('Sprint-Auswahl: gesperrt in Arbeit, in Freigabe und erledigt, sonst frei', () => {
-  assert.deepEqual(
-    DEVELOPMENT_STATUSES.filter((status) => isSprintLockedDevelopmentStatus(status)).sort(),
-    ['approval', 'done', 'in_progress'],
-  );
+  assert.deepEqual(DEVELOPMENT_STATUSES.filter((status) => isSprintLockedDevelopmentStatus(status)).sort(), [
+    'approval',
+    'done',
+    'in_progress',
+  ]);
   for (const status of ['backlog', 'planned', 'blocked', 'rejected']) {
     assert.equal(isSprintLockedDevelopmentStatus(status), false, status);
   }

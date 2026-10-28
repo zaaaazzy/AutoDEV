@@ -33,13 +33,7 @@ import { reconcileWorkingTree } from './git-sync/reconcile.js';
 import { processRollback } from './rollback.js';
 import { syncGitHub } from './github-sync.js';
 import { estimateNewIdeas } from '../agent/estimation.js';
-import {
-  closeOrphanedRuns,
-  parseRunnerOptions,
-  recoverStuckItems,
-  runWorkflow,
-  type RunnerOptions,
-} from './runner.js';
+import { closeOrphanedRuns, parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
 import { analyzeBlocked } from '../agent/troubleshoot.js';
 import { verifyAcceptance } from './verify-acceptance.js';
 import { processTestRequest, recoverTestRequests } from './test-request.js';

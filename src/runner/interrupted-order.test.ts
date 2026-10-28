@@ -76,7 +76,14 @@ test('Unterbrochener Auftrag (Nutzungslimit, Neustart, Pause): WIP gesichert, Or
 });
 
 function contextFor(cwd: string, pool: Pool, branch: unknown, execute = runCommand): RunContext {
-  return { pool, item: first, runId: 'run-1', options: { cwd, timeoutMs: 1 }, execute, branch } as unknown as RunContext;
+  return {
+    pool,
+    item: first,
+    runId: 'run-1',
+    options: { cwd, timeoutMs: 1 },
+    execute,
+    branch,
+  } as unknown as RunContext;
 }
 
 test('Unterbrechung bei sauberem Ordner: kein leerer Commit, kein gescheiterter Schritt', async () => {
