@@ -32,7 +32,7 @@ export const fileGitRules = ({ create, edit }: { create: boolean; edit: boolean 
   ...(edit ? [GIT_RM_RULE] : []),
   ...(edit && create ? [GIT_MV_RULE] : []),
 ];
-const PSEUDO_COMMANDS =new Set([FILES_CREATE, FILES_EDIT, LOGS_COMMAND, DATABASE_COMMAND, SERVICES_COMMAND]);
+const PSEUDO_COMMANDS = new Set([FILES_CREATE, FILES_EDIT, LOGS_COMMAND, DATABASE_COMMAND, SERVICES_COMMAND]);
 
 /** Ob eine Freigabe („Bash(befehl:*)“ bzw. „Bash(befehl)“) einen Shell-Befehl abdeckt (für das lokale Modell). */
 export function rulesAllow(rules: readonly string[], command: string): boolean {
