@@ -50,13 +50,13 @@ Backend, API und Datenbank sind unverändert.
 
 | Auftrag | Titel | Art | Sprint | Zustand |
 |---|---|---|---|---|
-| 3a3acdb4 | Abnahme-Häkchen auf „Aktionen“ nach Fehler zurücksetzen | Bugfix | Sprint 28 | umgesetzt (Entwickler), dokumentiert; Tests noch durch den Tester auszuführen |
+| 3a3acdb4 | Abnahme-Häkchen auf „Aktionen“ nach Fehler zurücksetzen | Bugfix | Sprint 28 | umgesetzt (Entwickler), dokumentiert; Tests ausgeführt und grün |
 
 ## Anfrage / TODO
 
 - Anfrage: Code-Review vom 21.10.2026 (Stand `a4971e9`). Gemeldet war nur die Stelle unter „Aktionen“ (Zeile 206–212). Tatsächlich stand das Häkchen dort bei Zeile 49–55; dasselbe Muster steckte auch im Auftragsdetail und wurde mit behoben.
 - Benutzerhandbuch: Das Häkchen ist ohne Recht „Planung“ ausgegraut (Tooltip) und wird nach einem Fehler wieder leer. Übernimmt der Benutzerhandbuch-Autor.
-- Offen: `acceptance-ticks.spec.ts` und die Typprüfung durch den Tester ausführen lassen. Die Dokumentation hat sie nicht ausgeführt.
+- Tests ausgeführt (29.10.2026): `npm run test:unit` mit 1782 Tests, davon 1777 bestanden, 0 fehlgeschlagen. Alle sechs „Abnahme-Häkchen“-Tests aus `acceptance-ticks.spec.ts` sind grün (403, 409, Netzfehler, Erfolg, Doppelklick, Vorlagen). Im Testlauf cb63990a waren `npm run typecheck` und `acceptance-ticks.spec.ts` mit `sprint-actions.spec.ts` grün (13/13).
 
 ## Technische Dokumentation
 
