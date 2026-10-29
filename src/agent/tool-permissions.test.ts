@@ -542,7 +542,8 @@ test('withAgentPermissions: eigene Sperren im Befehl bleiben, der Wächter erlau
   assert.equal(option(command, '--disallowedTools'), 'WebFetch');
   assert.equal(command.includes('--disallowed-tools'), false, 'in einem einzigen --disallowedTools zusammengeführt');
   assert.deepEqual(command.slice(-1), ['-p']);
-  assert.equal(command.includes('--allowedTools'), false);
+  // Nur Löschen und Umbenennen (git rm/mv) kommen mit den Datei-Rechten dazu.
+  assert.equal(option(command, '--allowedTools'), 'Bash(git rm:*),Bash(git mv:*)');
   assert.deepEqual(policyOf(command), { create: true, edit: true, scopes: [] });
 });
 
@@ -601,7 +602,7 @@ test('withAgentPermissions: genau die zugewiesenen und im Projekt verfügbaren B
     ['Bash(git status:*)', 'Bash(docker compose up:*)', 'Bash(npm run prisma:*)', 'files:edit'],
     ['src'],
   );
-  assert.equal(option(command, '--allowedTools'), 'Bash(git status:*),Bash(npm run prisma:*)');
+  assert.equal(option(command, '--allowedTools'), 'Bash(git status:*),Bash(npm run prisma:*),Bash(git rm:*)');
   assert.equal(option(command, '--disallowedTools'), 'Write');
   assert.deepEqual(policyOf(command), { create: false, edit: true, scopes: ['src'] });
   assert.deepEqual(command.slice(-2), ['-p', '{prompt}'], 'der ursprüngliche Befehl bleibt am Ende');
@@ -621,7 +622,7 @@ test('withAgentPermissions: Rollenstandard ohne Zuweisung (null), übrige Rollen
   assert.ok((option(developer, '--allowedTools') ?? '').includes('Bash(npm test:*)'));
   assert.equal(developer.includes('--disallowedTools'), false);
   const documenter = withAgentPermissions(CLAUDE, 'documenter', all, null, ['docs']);
-  assert.equal(documenter.includes('--allowedTools'), false);
+  assert.equal(option(documenter, '--allowedTools'), 'Bash(git rm:*),Bash(git mv:*)');
   assert.deepEqual(policyOf(documenter), { create: true, edit: true, scopes: ['docs'] });
 });
 
