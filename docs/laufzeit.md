@@ -444,6 +444,8 @@ Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. D
 
 Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
 
+Kostenlimits werden auf Cent gerundet (Spalte `NUMERIC(10, 2)`). Werte unter 0,01 USD lehnt `PUT /api/projects/:slug/budget` mit 400 ab. Alle Änderungen eines Speicherns laufen in einer Transaktion: Scheitert ein Teil, bleibt nichts halb gespeichert.
+
 #### Token-Limits je Agent-Rolle
 
 Zusätzlich zu den Projektlimits kann je Agent-Rolle (`author`, `developer`, `tester`, `reviewer`, `documenter`, `bug_reviewer`, `manual_writer`, `user_manual_writer`; nicht `custom`) und Zeitraum (`day`, `sprint`, `order`) ein Token-Limit gelten (Tabelle `budget_role_limits`). Keine Zeile bedeutet keine Grenze. Eine Oberfläche gibt es noch nicht, nur die API:
