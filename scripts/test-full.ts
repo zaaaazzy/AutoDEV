@@ -7,15 +7,17 @@
  *   npm run test:full -- --projekt devlog      zusätzlich in AIdeation unter Testläufe ablegen
  *   npm run test:full -- --nur-oberflaeche     nur der Oberflächentest (UI muss gebaut sein: npm run build:ui)
  *   npm run test:full -- --projekt devlog --bugs   Befunde zusätzlich als Bugs anlegen (Quelle „Testlauf“)
+ *   npm run test:full -- --ergebnis <datei>    ohne erreichbare Datenbank das Ergebnis als JSON ablegen
  *
  * Datenbank für --projekt: DEV_LOG_DATABASE_URL, sonst die lokale aus docker-compose (127.0.0.1:5433) mit dem
- * Zugang aus der .env (DEV_LOG_DB_USER, DEV_LOG_DB_PASSWORD).
+ * Zugang aus der .env (DEV_LOG_DB_USER, DEV_LOG_DB_PASSWORD). Ist sie nicht erreichbar (Testcontainer des Workers),
+ * laufen die Tests trotzdem; mit --ergebnis legt danach der Worker den Testlauf aus der Datei an (test-import.ts).
  */
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, extname, join, relative } from 'node:path';
+import { basename, dirname, extname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import type { Pool } from 'pg';
 import { redactOutput } from '../src/core/command.js';
@@ -28,6 +30,7 @@ import {
   type TestCategory,
 } from '../src/core/test-results.js';
 import { caseBugs, fileBugs, stepBug } from '../src/core/test-bugs.js';
+import { documentReport, type FullTestResult, type FullTestStep } from '../src/core/full-test-result.js';
 import { adminDatabaseUrl, localDatabaseUrl, readEnvValues } from '../src/core/local-database.js';
 import { connectExistingDatabase, readDatabaseConfig } from '../src/db/database.js';
 import {
@@ -52,6 +55,8 @@ const project = argument('--projekt') ?? process.env.DEV_LOG_TEST_PROJECT;
 const requestId = argument('--anfrage');
 /** Befunde als Bugs anlegen (je fehlgeschlagenem Test einer, ohne Dubletten zu offenen Bugs). */
 const fileFindings = process.argv.includes('--bugs');
+/** Ergebnisdatei (relativ zum Projektordner), falls der Lauf nicht in die Datenbank schreiben kann. */
+const resultFile = argument('--ergebnis');
 const started = new Date();
 const two = (value: number) => String(value).padStart(2, '0');
 const stamp = `${started.getFullYear()}-${two(started.getMonth() + 1)}-${two(started.getDate())}_${two(started.getHours())}-${two(started.getMinutes())}`;
@@ -74,14 +79,7 @@ type Step = {
   /** Einzeltests aus der Ausgabe bzw. aus dem JSON-Bericht von Playwright. */
   cases?: (output: string) => Promise<TestCaseResult[]>;
 };
-type StepResult = {
-  name: string;
-  ok: boolean;
-  seconds: number;
-  summary: string;
-  tail: string;
-  cases: TestCaseResult[];
-};
+type StepResult = FullTestStep;
 
 const counted = (out: string, keys: string[]) =>
   keys
@@ -205,8 +203,12 @@ class Recorder {
   static async open(slug: string): Promise<Recorder> {
     const environment = { ...process.env, DEV_LOG_DATABASE_URL: process.env.DEV_LOG_DATABASE_URL ?? localDatabase() };
     // Nur mitschreiben: Der getestete Stand ist noch nicht freigegeben und darf das Schema nicht migrieren.
-    const pool = connectExistingDatabase(readDatabaseConfig(environment));
-    const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
+    // Kurzes Zeitlimit: Im Testcontainer ist die Datenbank nicht erreichbar, der Lauf soll dann ohne sie weitergehen.
+    const pool = connectExistingDatabase(readDatabaseConfig(environment), { connectionTimeoutMillis: 10_000 });
+    const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]).catch(async (error: unknown) => {
+      await pool.end().catch(() => undefined);
+      throw error;
+    });
     if (!exists.rowCount) {
       await pool.end();
       throw new Error(`Projekt „${slug}“ gibt es in AIdeation nicht – zuerst in der Oberfläche anlegen.`);
@@ -304,6 +306,8 @@ async function runStep(position: number, step: Step, recorder: Recorder | null, 
   const clean = output.replace(ANSI, '');
   const result: StepResult = {
     name: step.name,
+    command: [step.command, ...step.args].join(' '),
+    category: step.category,
     ok,
     seconds: Math.round((Date.now() - begin) / 1000),
     summary: step.summary(clean),
@@ -316,7 +320,11 @@ async function runStep(position: number, step: Step, recorder: Recorder | null, 
 }
 
 let mediaCount = 0;
+/** Schon kopierte Medien (Quelle → Pfad relativ zum Bericht), damit Bericht und Ergebnisdatei dieselbe Kopie nutzen. */
+const kept = new Map<string, string>();
 async function keep(path: string, label: string): Promise<string | null> {
+  const known = kept.get(path);
+  if (known) return known;
   if (!existsSync(path)) return null;
   mediaCount += 1;
   const safe = label
@@ -325,7 +333,9 @@ async function keep(path: string, label: string): Promise<string | null> {
     .slice(0, 60);
   const target = join(MEDIA, `${String(mediaCount).padStart(3, '0')}-${safe}${extname(path)}`);
   await copyFile(path, target);
-  return relative(OUT, target).split('\\').join('/');
+  const saved = relative(OUT, target).split('\\').join('/');
+  kept.set(path, saved);
+  return saved;
 }
 
 const icon = (ok: boolean) => (ok ? '✅' : '❌');
@@ -336,68 +346,51 @@ const STATUS_ICON: Record<TestCaseResult['status'], string> = {
   flaky: '⚠️',
 };
 
-/**
- * Bericht für die Dokumentation in AIdeation (Gruppe „Testberichte“): Übersicht je Kategorie und alle Befunde.
- * Screenshots und Videos zeigt die Ansicht „Testläufe“, auf die der Bericht verlinkt.
- */
-function documentReport(results: StepResult[], allOk: boolean, runId: string): string {
-  const cases = results.flatMap((result) => result.cases);
-  const count = (category: string, status: string) =>
-    cases.filter((testCase) => testCase.category === category && testCase.status === status).length;
-  const categories = (['unit', 'e2e', 'user'] as const)
-    .map((category) => ({
-      label: { unit: 'Unit', e2e: 'E2E', user: 'User' }[category],
-      passed: count(category, 'passed'),
-      failed: count(category, 'failed') + count(category, 'flaky'),
-      skipped: count(category, 'skipped'),
-    }))
-    .filter((category) => category.passed + category.failed + category.skipped);
-  const failed = cases.filter((testCase) => testCase.status === 'failed' || testCase.status === 'flaky');
-  const row = (text: string) => text.replace(/\|/g, '/').replace(/\s+/g, ' ');
-  return [
-    `# Testbericht ${started.toLocaleString('de-CH', { dateStyle: 'medium', timeStyle: 'short' })}`,
-    '',
-    `Gesamtergebnis: ${icon(allOk)} ${allOk ? 'alles grün' : 'mit Befunden'} · erstellt mit \`npm run test:full\``,
-    '',
-    `[Screenshots, Videos und alle Einzeltests in den Testläufen ansehen](#runs/${runId})`,
-    '',
-    '## Prüfungen',
-    '',
-    '| Prüfung | Ergebnis | Dauer | Zusammenfassung |',
-    '|---|---|---|---|',
-    ...results.map(
-      (result) => `| ${result.name} | ${icon(result.ok)} | ${result.seconds} s | ${row(result.summary || '–')} |`,
-    ),
-    '',
-    '## Einzeltests je Kategorie',
-    '',
-    '| Kategorie | Bestanden | Fehlgeschlagen | Übersprungen |',
-    '|---|---|---|---|',
-    ...categories.map(
-      (category) => `| ${category.label} | ${category.passed} | ${category.failed} | ${category.skipped} |`,
-    ),
-    '',
-    '## Befunde',
-    '',
-    ...(failed.length
-      ? failed.flatMap((testCase) => [
-          `### ${STATUS_ICON[testCase.status]} ${testCase.title}`,
-          '',
-          `${{ unit: 'Unit', e2e: 'E2E', user: 'User' }[testCase.category]}${testCase.device ? ` · ${testCase.device}` : ''}${testCase.file ? ` · \`${testCase.file}\`` : ''}`,
-          '',
-          ...(testCase.errors.length ? testCase.errors.map((error) => `- ${row(error)}`) : ['- ohne Meldung']),
-          '',
-        ])
-      : ['Keine Befunde.']),
-    ...results
-      .filter((result) => !result.ok && !result.cases.length)
-      .flatMap((result) => [`### ❌ ${result.name}`, '', `- ${row(result.summary || 'fehlgeschlagen')}`, '']),
-  ].join('\n');
+/** Recorder, wenn die AIdeation-Datenbank erreichbar ist; sonst läuft der Test ohne (z. B. im Testcontainer). */
+async function openRecorder(): Promise<Recorder | null> {
+  if (!project) return null;
+  try {
+    return await Recorder.open(project);
+  } catch (error) {
+    console.warn(
+      `AIdeation-Datenbank nicht erreichbar (${error instanceof Error ? error.message : String(error)}) – ` +
+        (resultFile ? `Ergebnis kommt nach ${resultFile}.` : 'der Lauf wird nicht unter Testläufe abgelegt.'),
+    );
+    return null;
+  }
+}
+
+/** Ergebnis als Datei für den Worker: Medien liegen dafür in docs/tests/<Datum>/media/, Pfade relativ zum Projekt. */
+async function writeResultFile(file: string, results: StepResult[], allOk: boolean): Promise<void> {
+  const steps: StepResult[] = [];
+  for (const result of results) {
+    const cases: TestCaseResult[] = [];
+    for (const testCase of result.cases) {
+      const media = [];
+      for (const item of testCase.media) {
+        const saved = await keep(item.path, `${testCase.device ?? testCase.category}-${item.name}`);
+        if (saved) media.push({ ...item, path: relative(ROOT, join(OUT, saved)).split('\\').join('/') });
+      }
+      cases.push({ ...testCase, media });
+    }
+    steps.push({ ...result, cases });
+  }
+  const content: FullTestResult = {
+    version: 1,
+    startedAt: started.toISOString(),
+    platform: process.platform,
+    passed: allOk,
+    steps,
+  };
+  const target = join(ROOT, file);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, JSON.stringify(content));
+  console.log(`Ergebnis für AIdeation: ${relative(ROOT, target)}`);
 }
 
 async function main(): Promise<void> {
   await mkdir(TEMP, { recursive: true });
-  const recorder = project ? await Recorder.open(project) : null;
+  const recorder = await openRecorder();
   // Nur Oberfläche: vorher die App bauen, sonst prüft der Test einen veralteten Stand (z. B. im Agenten-Worktree).
   const steps = onlyUi ? [UI_BUILD_STEP, USER_STEP] : [...STEPS, USER_STEP];
   const results: StepResult[] = [];
@@ -489,7 +482,8 @@ async function main(): Promise<void> {
     const bugs = await recorder.fileBugs(results, project);
     console.log(`→ ${bugs} neue Bugs aus den Befunden angelegt`);
   }
-  if (recorder) await recorder.close(allOk, documentReport(results, allOk, recorder.id));
+  if (recorder) await recorder.close(allOk, documentReport(results, allOk, recorder.id, started));
+  else if (resultFile) await writeResultFile(resultFile, results, allOk);
   await rm(TEMP, { recursive: true, force: true });
   console.log(
     `\nBericht: ${relative(ROOT, join(OUT, 'bericht.md'))} (${mediaCount} Screenshots/Videos in ${basename(MEDIA)}/)`,

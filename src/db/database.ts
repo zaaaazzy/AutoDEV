@@ -50,8 +50,11 @@ export async function ensureDatabase(config: DatabaseConfig): Promise<void> {
  * eines noch nicht freigegebenen Stands laufen (Test-Gate eines Sprints): Sie dürfen nur hineinschreiben, nie das Schema
  * der laufenden Installation auf ihren Stand heben.
  */
-export function connectExistingDatabase(config: DatabaseConfig): Pool {
-  const pool = new Pool({ connectionString: config.databaseUrl });
+export function connectExistingDatabase(
+  config: DatabaseConfig,
+  options: { connectionTimeoutMillis?: number } = {},
+): Pool {
+  const pool = new Pool({ connectionString: config.databaseUrl, ...options });
   pool.on('error', (error) => console.error('Datenbankverbindung getrennt:', error.message));
   return pool;
 }

@@ -1,8 +1,9 @@
 import { logged } from '../core/log.js';
-import { readFile } from 'node:fs/promises';
+import { readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { fullTestResultFile } from '../core/full-test-result.js';
 import { acquireTree, withProjectLock } from '../core/project-lock.js';
 import { adminDatabaseUrl } from '../core/local-database.js';
 import { sendPush } from '../core/push.js';
@@ -11,6 +12,7 @@ import { dropReportCopies } from './git-sync/report-copies.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
+import { importFullTestResult } from './test-import.js';
 import { gateExecutor } from './test-sandbox.js';
 
 /** Ein Komplettlauf mit Playwright dauert; danach gilt er als hängend. */
@@ -82,8 +84,40 @@ export function fullTestCommand(project: string, request: Claimed): string[] {
     '--anfrage',
     request.id,
     '--bugs',
+    '--ergebnis',
+    fullTestResultFile(request.id),
     ...(request.scope === 'ui' ? ['--nur-oberflaeche'] : []),
   ];
+}
+
+/**
+ * Lief test:full ohne Datenbank (Sandbox), liegt das Ergebnis als Datei im Projektordner: daraus den Testlauf
+ * samt Screenshots anlegen. Die Datei wird danach entfernt. Liefert die Lauf-ID oder null.
+ */
+async function importSandboxResult(
+  pool: Pool,
+  options: Pick<RunnerOptions, 'project' | 'cwd'>,
+  requestId: string,
+  execute: CommandExecutor,
+): Promise<string | null> {
+  const file = join(options.cwd, fullTestResultFile(requestId));
+  const git = async (...args: string[]) => {
+    const result = await execute(['git', ...args], options.cwd, { timeoutMs: 60_000, env: gitEnvironment() });
+    return result.exitCode === 0 ? result.output.trim() || null : null;
+  };
+  try {
+    return await importFullTestResult(pool, {
+      project: options.project,
+      cwd: options.cwd,
+      file,
+      requestId,
+      branch: await git('rev-parse', '--abbrev-ref', 'HEAD'),
+      commitSha: await git('rev-parse', 'HEAD'),
+      bugs: true,
+    });
+  } finally {
+    await rm(file, { force: true }).catch(logged('test-request'));
+  }
 }
 
 /**
@@ -144,7 +178,7 @@ export async function processTestRequest(
     const result = await withProjectLock(options.cwd, async () => {
       previous = await useLatestMain(options.cwd, execute);
       // Projektcode im Testcontainer (Sandbox, Standard); Git bleibt beim Worker. Im Container gibt es keinen Zugang
-      // zur AIdeation-Datenbank: test:full meldet dann nur Exit-Code und Ausgabe, keinen eigenen Testlauf.
+      // zur AIdeation-Datenbank: test:full schreibt dann eine Ergebnisdatei, und der Worker legt den Testlauf an.
       const testExecute = await gateExecutor(pool, options.project, options.cwd, execute, `test-${request.id}`);
       if (await hasFullTestScript(options.cwd)) {
         const outcome = await runProjectCommand(
@@ -153,11 +187,12 @@ export async function processTestRequest(
           { timeoutMs: TEST_TIMEOUT_MS, extraEnv: fullTestExtraEnv() },
           testExecute,
         );
-        const linked = (
-          await pool.query<{ runId: string | null }>('SELECT run_id AS "runId" FROM test_requests WHERE id = $1', [
-            request.id,
-          ])
-        ).rows[0]?.runId;
+        const linked =
+          (
+            await pool.query<{ runId: string | null }>('SELECT run_id AS "runId" FROM test_requests WHERE id = $1', [
+              request.id,
+            ])
+          ).rows[0]?.runId ?? (await importSandboxResult(pool, options, request.id, execute));
         // Ohne Testlauf ist der Befehl schon vor den Tests gescheitert (z. B. Port belegt): Ausgabe als Fehler zeigen.
         if (outcome.exitCode !== 0 && !linked) throw new Error(failureTail(outcome.output));
         return { passed: outcome.exitCode === 0, output: outcome.output };

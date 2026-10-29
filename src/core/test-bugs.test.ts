@@ -51,6 +51,8 @@ test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüf
     '--anfrage',
     'a1',
     '--bugs',
+    '--ergebnis',
+    'test-results/aideation-anfrage-a1.json',
   ]);
   assert.equal(fullTestCommand('dev-log', { id: 'a1', scope: 'ui' }).at(-1), '--nur-oberflaeche');
   assert.equal(parseScope({}), 'full');
