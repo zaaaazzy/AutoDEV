@@ -47,7 +47,9 @@ COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture
 RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
 # Ohne root: Der Container läuft mit der UID des Worker-Benutzers (--user), die hier keinen Eintrag hat. Home und
 # Arbeitsordner sind darum für alle beschreibbar; der Container ist kurzlebig (--rm), nichts bleibt liegen.
-RUN mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
+# Das npm-Cache von „npm install -g“ (als root, HOME=/home/agent) entfernen: sonst scheitert npx im Container an
+# EACCES auf /home/agent/.npm/_cacache.
+RUN rm -rf /home/agent/.npm && mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
 USER pwuser
 WORKDIR /workspace
 ENTRYPOINT ["/usr/bin/tini", "--"]

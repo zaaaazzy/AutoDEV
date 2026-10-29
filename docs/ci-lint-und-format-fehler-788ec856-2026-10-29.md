@@ -43,3 +43,21 @@ Die Docker-Umstellung war nicht beteiligt.
 - **Im nächsten echten CI-Lauf bestätigen**, dass `check` grün ist, erst dann den Bug schliessen.
 - **Offen, nicht Teil dieses Auftrags:** `@angular-devkit/build-angular` steht noch im Lockfile. `npm ci` scheitert deswegen nicht. Das Aufräumen braucht ein manuelles `npm install` (für Agents gesperrt) und gehört zum Bug „Angular-Builder umstellen“.
 - Meldungen mit „spend limit“ in anderen Bug-Einträgen sind keine Code-Fehler.
+
+## Nachtrag: Tester-Schritt scheitert in der Docker-Sandbox
+
+Der Tester konnte die Prüfungen nicht ausführen (`tsc: not found`, `npx` mit `EACCES`). Das ist kein Fehler im Code
+und keiner der GitHub-CI. Es ist ein Folgefehler der Umstellung der Agents auf Container (`src/core/sandbox.ts`):
+
+- **npm-Cache gehört root:** Im Image (`deploy/agent/Dockerfile`) läuft `npm install -g` als root mit
+  `HOME=/home/agent`. Dadurch gehört `/home/agent/.npm` root, und der Agent ohne root (`--user`) kann nicht hineinschreiben.
+  **Behoben:** Das Image löscht `/home/agent/.npm` nach der Installation. Wirksam erst nach einem Neubau des Images
+  (`docker build -t aideation-agent -f deploy/agent/Dockerfile .` oder „AIdeation neu starten“).
+- **`node_modules` fehlt im Container (offen):** `linkDependencies` (`src/runner/agent-workspace.ts`) legt im
+  Worktree `node_modules` als absoluten Symlink auf den Host-Pfad des Hauptordners an (`/Volumes/…/source/node_modules`).
+  Dieser Pfad existiert im Container nicht. Das Volume `aideation-node-modules-<projekt>` wird beim Einbinden auf dieses
+  Ziel umgelenkt, und kein Schritt füllt es (`npm ci`). Deshalb fehlen `tsx`, `tsc`, `eslint` und `prettier`.
+  `npm ci` im Container würde den Symlink im Host-Worktree ersetzen, darum hat der Agent es nicht ausgeführt.
+  Nötig ist eine Entscheidung: entweder bei aktiver Sandbox im Worktree keinen Symlink anlegen und das Volume vor
+  dem ersten Lauf einmal mit `npm ci --ignore-scripts` füllen, oder vorerst manuell den Symlink im Agent-Worktree
+  entfernen und im Container `npm ci --ignore-scripts` ausführen.
