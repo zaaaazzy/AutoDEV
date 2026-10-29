@@ -34,6 +34,10 @@ if (-not (Test-Path .env) -or $Setup -or $args -contains '--setup') {
 }
 
 Write-Host '-> Starte AIdeation ...'
+# Worker im Container (COMPOSE_PROFILES=worker): AIdeation-Ordner und Projektordner im Pfad von Docker Desktop
+# (C:\... -> /c/...) und Git-Zugaenge aus der .env in docker-compose.override.yml.
+npx --no-install tsx scripts/worker-compose.ts
+if ($LASTEXITCODE -ne 0) { Write-Host 'x docker-compose.override.yml konnte nicht geschrieben werden.'; exit 1 }
 docker compose up -d --build
 if ($LASTEXITCODE -ne 0) { Write-Host 'x docker compose up ist fehlgeschlagen.'; exit 1 }
 $healthy = $false

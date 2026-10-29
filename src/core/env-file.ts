@@ -13,6 +13,15 @@ export interface EnvInput {
   password: string;
   domain: string;
   projectRoots: string;
+  /**
+   * Worker als Compose-Dienst (Profil „worker“ in COMPOSE_PROFILES) statt auf dem Host. undefined lässt die
+   * bisherige Wahl stehen.
+   */
+  workerContainer?: boolean;
+  /** Anmeldung der Claude-CLI in den Agent-Containern (claude setup-token); leer lässt den bisherigen Wert stehen. */
+  claudeToken?: string;
+  /** Gruppe des Docker-Sockets (Linux), damit der Worker-Container ohne root auf Docker zugreifen darf. */
+  dockerGid?: number | null;
 }
 
 export interface InstallInput extends EnvInput {
@@ -94,7 +103,8 @@ export function mergeEnv(text: string, updates: Map<string, string>): string {
 /** Prüft die Formulareingaben auf Typ und Inhalt; liefert eine lesbare Meldung oder null. */
 export function validateInstall(body: unknown): string | null {
   if (!body || typeof body !== 'object') return 'Ungültige Anfrage.';
-  const { username, password, domain, projectRoots, installWorker, demoData } = body as Record<string, unknown>;
+  const { username, password, domain, projectRoots, installWorker, demoData, workerContainer, claudeToken } =
+    body as Record<string, unknown>;
   if (typeof username !== 'string' || !/^[a-zA-Z0-9._-]{3,40}$/.test(username))
     return 'Benutzername: 3–40 Zeichen (Buchstaben, Ziffern, . _ -).';
   if (typeof password !== 'string' || password.length < 16) return 'Das Passwort braucht mindestens 16 Zeichen.';
@@ -111,6 +121,11 @@ export function validateInstall(body: unknown): string | null {
   if (installWorker !== undefined && typeof installWorker !== 'boolean')
     return 'Die Worker-Auswahl muss ja oder nein sein.';
   if (demoData !== undefined && typeof demoData !== 'boolean') return 'Die Beispieldaten-Wahl muss ja oder nein sein.';
+  if (workerContainer !== undefined && typeof workerContainer !== 'boolean')
+    return 'Die Wahl „Worker im Container“ muss ja oder nein sein.';
+  if (claudeToken !== undefined && typeof claudeToken !== 'string') return 'Der Claude-Token muss ein Text sein.';
+  if (claudeToken && !/^[A-Za-z0-9._-]{20,500}$/.test(claudeToken.trim()))
+    return 'Der Claude-Token sieht ungültig aus (Ausgabe von „claude setup-token“ einfügen).';
   return null;
 }
 
@@ -143,11 +158,30 @@ export function planEnv(existing: string, input: EnvInput): EnvPlan {
   // Backup-Container läuft ohne root: unter Linux als eigener Benutzer, damit er in ./backups schreiben darf.
   if (platform() === 'linux' && process.getuid && process.getgid)
     updates.set('DEV_LOG_BACKUP_USER', `${process.getuid()}:${process.getgid()}`);
+  // Profile zusammenführen: https (Domain) und worker (Worker im Container) schliessen sich nicht aus.
+  const profiles = new Set(
+    (current.get('COMPOSE_PROFILES') ?? '')
+      .split(',')
+      .map((profile) => profile.trim())
+      .filter(Boolean),
+  );
   if (input.domain.trim()) {
     updates.set('DEV_LOG_DOMAIN', input.domain.trim());
     updates.set('DEV_LOG_PUBLIC_URL', `https://${input.domain.trim()}`);
-    updates.set('COMPOSE_PROFILES', 'https');
+    profiles.add('https');
   }
+  if (input.workerContainer === true) profiles.add('worker');
+  if (input.workerContainer === false) profiles.delete('worker');
+  const joined = [...profiles].join(',');
+  if (joined !== (current.get('COMPOSE_PROFILES') ?? '')) updates.set('COMPOSE_PROFILES', joined);
+  if (input.workerContainer) {
+    // Worker-Container als eigener Benutzer (Linux): Dateien in den Projektordnern gehören weiter dir.
+    if (platform() === 'linux' && process.getuid && process.getgid)
+      updates.set('DEV_LOG_WORKER_USER', `${process.getuid()}:${process.getgid()}`);
+    if (typeof input.dockerGid === 'number' && Number.isInteger(input.dockerGid) && input.dockerGid >= 0)
+      updates.set('DEV_LOG_DOCKER_GID', String(input.dockerGid));
+  }
+  if (input.claudeToken?.trim()) updates.set('CLAUDE_CODE_OAUTH_TOKEN', input.claudeToken.trim());
 
   const content = mergeEnv(existing, updates);
   return { content, values: parseEnv(content), secretKeyCreated, dbPasswordCreated };

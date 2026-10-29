@@ -50,6 +50,9 @@ if [ ! -f .env ] || [ "${1:-}" = "--setup" ]; then
 fi
 
 echo "→ Starte AIdeation …"
+# Worker im Container (COMPOSE_PROFILES=worker): AIdeation-Ordner, Projektordner und Git-Zugänge aus der .env in
+# docker-compose.override.yml – bei jedem Start neu, damit ein geänderter Projektbereich gilt.
+npx --no-install tsx scripts/worker-compose.ts
 docker compose up -d --build
 # Node statt curl: curl fehlt auf manchen Linux-Systemen, Node ist ohnehin Voraussetzung.
 healthy=0

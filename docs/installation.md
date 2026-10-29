@@ -6,12 +6,18 @@ AIdeation besteht aus drei Teilen:
 |---|---|---|
 | **AIdeation** (Oberfläche + API) | in Docker | Projekte, Ideen, Aufträge, Sprints, Dokumentation |
 | **Datenbank** (PostgreSQL) + Backups (etwa täglich) | in Docker | alle Daten, Backups unter `backups/` |
-| **Worker** | direkt auf deinem Rechner | startet die Agents in deinen Projektordnern |
+| **Worker** + Ausfall-Wächter | in Docker (Standard) oder direkt auf deinem Rechner | startet die Agents in deinen Projektordnern |
+
+Mit dem **Worker im Container** (Standard des Einrichtungs-Assistenten) braucht es auf macOS, Linux und Windows nur
+Docker: `docker compose up -d` startet alles, auch Worker und Wächter. launchd, systemd und `run-with-env.ps1` sind
+dann nicht nötig. Die Installationsskripte für den Worker auf dem Host bleiben für diesen Betrieb erhalten (siehe
+[Worker im Container](#worker-im-container)).
 
 ## Voraussetzungen
 
 - **Docker Desktop** (macOS, Windows) bzw. Docker Engine mit Compose (Linux) – läuft beim Start.
-- **Node.js 22.12** oder neuer (mit npm) – für Worker, Einrichtung und die Projektvorlagen (Vite 8, Angular 20).
+- **Node.js 22.12** oder neuer (mit npm) – für `start.sh`/`start.cmd`, den Einrichtungs-Assistenten, die
+  Projektvorlagen (Vite 8, Angular 20) und den Worker auf dem Host.
 - **Git**.
 - Mindestens ein KI-Werkzeug für die Agents:
   - **Claude Code** (`claude`) – beste Ergebnisse, Anmeldung über dein Claude-Konto, oder
@@ -35,9 +41,12 @@ Beim **ersten Start** installiert das Skript die Abhängigkeiten und öffnet den
 
 1. **System** – prüft Node, Docker, Git, Claude Code, Ollama und Chromium für Playwright.
 2. **Zugang** – Benutzername und Passwort des Systemadministrators (ein sicheres Passwort wird vorgeschlagen).
-3. **Optionen** – eigene Domain für HTTPS von unterwegs (optional), erlaubte Projektordner, Worker-Autostart.
-4. **Installation** – schreibt die `.env`, baut und startet die Container, richtet den Worker ein
-   (macOS: launchd, Linux: systemd-Benutzerdienst, Windows: Aufgabenplanung). Dazu lädt sie die
+3. **Optionen** – eigene Domain für HTTPS von unterwegs (optional), erlaubte Projektordner, Worker und der
+   Claude-Token für die Agents (optional, Ausgabe von `claude setup-token`). Beim Worker gibt es drei Wege:
+   **Worker im Container** (Standard, empfohlen), Worker auf diesem Rechner mit Autostart oder später von Hand.
+4. **Installation** – schreibt die `.env`, baut und startet die Container und richtet den Worker ein: im Container
+   über das Compose-Profil `worker`, auf dem Host über macOS launchd, einen Linux-systemd-Benutzerdienst bzw. die
+   Windows-Aufgabenplanung. Dazu lädt sie die
    **Spiele-Werkzeuge**: Chromium für Playwright (falls er fehlt) und die npm-Pakete der Phaser-Vorlage in den
    npm-Cache. Schlägt das fehl (z. B. offline), läuft AIdeation trotzdem; das Protokoll nennt den Befehl zum
    Nachholen. Das Protokoll läuft live mit.
@@ -63,8 +72,9 @@ wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**
   `devlog_local_dev`). Weil Postgres das Passwort nur beim ersten Anlegen übernimmt, setzt der Assistent es in einer
   schon vorhandenen Datenbank per `ALTER USER`, bevor die übrigen Container starten.
 - Die `.env` und ihre Sicherungen sind nur für dich lesbar (Modus `600`) und stehen in `.gitignore`.
-- Der Worker bekommt den Secret Key mit (macOS: LaunchAgent, Linux: systemd-Dienst, Windows: Startdatei
-  `%LOCALAPPDATA%\AIdeation\worker.cmd` der Aufgabe `AIdeationWorker`).
+- Der Worker bekommt den Secret Key mit: im Container über `docker-compose.yml` aus der `.env`, auf dem Host über den
+  macOS-LaunchAgent, den Linux-systemd-Dienst bzw. die Windows-Startdatei `%LOCALAPPDATA%\AIdeation\worker.cmd` der
+  Aufgabe `AIdeationWorker`.
 - Läuft die Einrichtung schon in einem anderen Fenster, lehnt der Assistent einen zweiten Start ab. Nach einem
   Fehler bleibt er offen, ein neuer Versuch ist mit „Zurück“ möglich.
 
@@ -142,7 +152,8 @@ Geräts entfernt.
 ```bash
 docker compose ps                 # Zustand der Dienste
 docker compose logs -f dev-log    # Protokoll der API (Oberfläche: frontend)
-npm run worker                    # Worker im Vordergrund starten (ohne Autostart)
+docker compose logs -f worker     # Protokoll des Workers im Container (Wächter: watchdog)
+npm run worker                    # Worker auf dem Host im Vordergrund starten (ohne Autostart)
 ./start.sh --setup                # Einrichtung wiederholen
 ```
 
@@ -151,8 +162,9 @@ Jedes Projekt liegt in einem eigenen Ordner mit `source` (Code, z. B. mit laufen
 
 Die Container heissen `aideation_frontend_angular` (Oberfläche, nginx, leitet `/api` weiter), `aideation_backend_nodejs`
 (API), `aideation_database_postgres` (Datenbank), `aideation_backup_postgres` (Sicherung, etwa täglich) und
-`aideation_proxy_caddy` (HTTPS, optional). In den Befehlen oben stehen die Dienstnamen (`frontend`, `dev-log`, `db`,
-`backup`, `https`); `docker exec` braucht den Containernamen, z. B.
+`aideation_proxy_caddy` (HTTPS, optional), mit dem Worker im Container zusätzlich `aideation_worker_nodejs` (Worker) und
+`aideation_watchdog_nodejs` (Ausfall-Wächter). In den Befehlen oben stehen die Dienstnamen (`frontend`, `dev-log`, `db`,
+`backup`, `https`, `worker`, `watchdog`); `docker exec` braucht den Containernamen, z. B.
 `docker exec -it aideation_database_postgres psql -U devlog aideation`.
 
 Im Agent-Ordner läuft Compose als eigenes Projekt `aideation-agent` (`COMPOSE_PROJECT_NAME`). Container und Volumes
@@ -168,9 +180,94 @@ Entwickeln ohne Container (`npm run dev`, `npm run dev:ui`) läuft neben dem Liv
 eigene Datenbank, z. B. `DEV_LOG_DATABASE_URL=postgresql://devlog:<passwort>@127.0.0.1:5433/aideation_dev`; sie wird beim
 Start angelegt. Mit `PORT=3100` oder der Live-Datenbank `aideation` bricht `npm run dev` mit einer Meldung ab.
 
+## Worker im Container
+
+Mit dem Profil `worker` in `COMPOSE_PROFILES` (der Einrichtungs-Assistent setzt es, zusammen mit `https`, falls eine
+Domain gewählt ist) startet `docker compose up -d` drei weitere Dienste aus dem Image `aideation-worker`
+(`deploy/worker/Dockerfile`: Node 22, Git, SSH, `gh`, Docker-CLI mit Compose und Buildx):
+
+| Dienst | Aufgabe |
+|---|---|
+| `worker` | Dauer-Worker für alle Projekte (wie `npm run worker`). **Einziger Dienst mit dem Docker-Socket** (`/var/run/docker.sock`): startet die Agent-Container und baut beim Neustart die Images. |
+| `worker-volumes` | Einmaliger Schritt vor dem Worker: übergibt das Volume für `node_modules` dem Worker-Benutzer, dann Ende. |
+| `watchdog` | Ausfall-Wächter: alle zwei Minuten ein Prüflauf mit denselben Push-Meldungen wie bisher. Ohne Docker-Socket und ohne Git-Zugang, AIdeation-Ordner nur lesend. |
+
+**Pfade:** Der Worker gibt Projektpfade an `docker run` weiter, und der Docker-Daemon löst sie auf dem Host auf. Deshalb
+sind der AIdeation-Ordner und jeder Ordner aus `DEV_LOG_PROJECT_ROOTS` im Worker **mit demselben Pfad wie auf dem Host**
+eingebunden (ohne Projektbereich: der Ordner, in dem AIdeation liegt). Unter Windows gilt der Pfad von Docker Desktop:
+`C:\Users\du\Projekte` liegt im Worker unter `/c/Users/du/Projekte`. In der Oberfläche eingetragene Windows-Pfade
+übersetzt der Worker selbst. Da sich Ordnerlisten in Compose nicht aufzählen lassen, schreibt `scripts/worker-compose.ts`
+sie in `docker-compose.override.yml`. Compose lädt diese Datei automatisch. `start.sh` bzw. `start.cmd` erzeugen sie bei
+jedem Start neu, so gilt ein geänderter Projektbereich nach dem nächsten Start. Die Datei steht in `.gitignore`. Eine
+selbst angelegte `docker-compose.override.yml` ohne die Kennzeichnung in der ersten Zeile wird nie überschrieben.
+Von Hand: `npx tsx scripts/worker-compose.ts`, danach `docker compose up -d`.
+
+Auf macOS muss der Ordner der Projekte in Docker Desktop unter **Settings → Resources → File sharing** freigegeben
+sein (z. B. `/Volumes/…`). Das gilt schon für die Agent-Sandbox.
+
+**Git-Zugang nur für den Worker, schreibgeschützt:** `docker-compose.override.yml` bindet nur in den Dienst `worker` ein,
+was es auf dem Host gibt, jeweils `read_only`:
+
+| Host | Im Worker | Anders per `.env` |
+|---|---|---|
+| `~/.ssh` | `/home/worker/.ssh` | `DEV_LOG_WORKER_SSH_DIR` |
+| `~/.config/gh` | `/home/worker/.config/gh` | `DEV_LOG_WORKER_GH_CONFIG_DIR` |
+| `~/.gitconfig` | `/home/worker/.gitconfig` | `DEV_LOG_WORKER_GITCONFIG` |
+| `~/.config/aideation/github-token` | `/run/secrets/github_token` → `GH_TOKEN` | `DEV_LOG_WORKER_GITHUB_TOKEN_FILE` |
+
+`gh` hält den Token unter macOS und Windows im Schlüsselbund, den der Container nicht sieht. Der Assistent legt ihn
+deshalb einmalig aus `gh auth token` in `~/.config/aideation/github-token` ab (Rechte 600). Von Hand geht das mit
+`gh auth token > ~/.config/aideation/github-token && chmod 600 ~/.config/aideation/github-token`. Agent-Container
+bekommen keinen dieser Zugänge, auch keinen Docker-Socket: Sie entstehen per `docker run` mit gefilterter Umgebung
+(siehe [Docker-Sandbox](#docker-sandbox-für-agents-optional)).
+
+**Benutzer:** Der Worker läuft ohne root als `DEV_LOG_WORKER_USER` (Standard `1000:1000`; unter Linux trägt der
+Assistent deine `uid:gid` ein, damit Dateien in den Projektordnern dir gehören). Zugriff auf Docker bekommt er über
+die Gruppe des Sockets `DEV_LOG_DOCKER_GID`. Unter Linux trägt der Assistent die Gruppe `docker` ein, sonst gilt `0`
+(Docker Desktop).
+
+**Anmeldung der Agents:** `CLAUDE_CODE_OAUTH_TOKEN` (aus `claude setup-token`, Feld im Assistenten) bzw.
+`ANTHROPIC_API_KEY` in der `.env`. Der Worker reicht ihn wie bisher nur als Name (`-e NAME`) an die Agent-Container
+weiter. Der Worker im Container nutzt immer die Docker-Sandbox (`DEV_LOG_AGENT_SANDBOX=docker`): Eine Claude-CLI gibt
+es im Worker-Image nicht. Ollama erreicht er unter `host.docker.internal:11434` (`DEV_LOG_WORKER_OLLAMA_URL`). Die
+Datenbank erreicht er im Compose-Netz unter `db:5432`. Für eine Review-Datenbank (`scripts/setup-review-db.sh`) gilt
+deshalb `DEV_LOG_WORKER_REVIEW_DATABASE_URL` mit Host `db:5432` statt `localhost:5433`.
+
+**Neustart:** „AIdeation neu starten“ läuft im Worker über den Socket. Er holt den Stand von `origin`, bringt bei
+Bedarf `node_modules` im Volume auf den Stand des Lockfiles und baut mit `docker compose up -d --build` alle Dienste
+ausser `worker`, `worker-volumes` und `watchdog` neu. Sonst ersetzte Compose den Container, in dem der Neubau gerade
+läuft. Zudem löst nur Compose auf dem Host die Ordner aus `docker-compose.override.yml` richtig auf (unter Windows
+`C:\…`). Der Wächter lädt den neuen Code ohnehin bei jedem Prüflauf. Danach baut der Worker das Agent-Image und das
+Worker-Image, prüft die Oberfläche (`http://frontend:8080/health`) und beendet sich mit Exit-Code 75.
+Die Restart-Richtlinie (`restart: unless-stopped`) startet ihn sofort wieder. Er lädt dann den neuen Code aus dem
+eingebundenen AIdeation-Ordner, das Worker-Badge wird wieder grün. Ein neues Worker-Image (nur Werkzeuge, kein Code)
+gilt ab dem nächsten `./start.sh` bzw. `docker compose up -d`.
+
+**Gesundheit:** `docker compose ps worker` zeigt `healthy`, solange der Worker sein Lebenszeichen in die Datenbank
+schreibt. Beim ersten Start installiert er `node_modules` (`npm ci --ignore-scripts`, einige Minuten), deshalb hat der
+Healthcheck 15 Minuten Anlaufzeit. Der Wächter ist `healthy`, solange seine Prüfläufe durchlaufen.
+
+**Umstieg vom Worker auf dem Host:** Zuerst den alten Dienst stoppen, sonst laufen zwei Worker. Der zweite beendet sich
+zwar wegen der Datenbank-Sperre, meldet das aber bei jedem Neustart:
+
+| System | Befehl |
+|---|---|
+| macOS | `launchctl bootout gui/$(id -u)/com.aideation.worker; launchctl bootout gui/$(id -u)/com.aideation.watchdog` |
+| Linux | `systemctl --user disable --now aideation-worker.service` |
+| Windows | `Unregister-ScheduledTask -TaskName AIdeationWorker -Confirm:$false` |
+
+Danach `./start.sh --setup` mit „Worker im Container“. Zurück zum Host: im Assistenten „Worker auf diesem Rechner“
+wählen. Er entfernt das Profil `worker` aus `COMPOSE_PROFILES` und stoppt die beiden Container.
+
+**Manuell zu prüfen (nicht im CI):** Starte auf einem frischen Linux-System und unter Windows mit Docker Desktop
+AIdeation mit `./start.sh` bzw. `start.cmd` und lass einen Testauftrag durchlaufen. Prüfe dabei unter Windows die
+Pfade `/c/…` für `docker run` aus dem Worker und unter macOS die Rechte von `~/.ssh` im Container. Danach
+„AIdeation neu starten“ auslösen: Der Container `worker` läuft wieder und das Worker-Badge ist grün. Halte das Ergebnis
+im Auftrag fest.
+
 ## Hintergrunddienste und Zugänge
 
-Die Installationsskripte (`scripts/install-worker.sh`, `install-watchdog.sh`, `install-worker-linux.sh`,
+Dieser Abschnitt gilt für den **Worker auf dem Host**. Die Installationsskripte (`scripts/install-worker.sh`, `install-watchdog.sh`, `install-worker-linux.sh`,
 `install-worker.ps1`) schreiben die Zugänge (`DEV_LOG_DATABASE_URL`, `DEV_LOG_SECRET_KEY`) in eine **Env-Datei, die nur
 du lesen kannst**. In Plist, systemd-Unit oder Befehlszeile der geplanten Aufgabe stehen sie nicht mehr. Beim Start liest
 `scripts/run-with-env.sh` bzw. `run-with-env.ps1` die Datei. Fehlt sie oder können andere sie lesen, bricht der Start
@@ -230,6 +327,12 @@ Jeder Dienst in `docker-compose.yml` hat Grenzen für Speicher, CPU und Prozesse
 | `db` | `CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETGID`, `SETUID` | Der Entrypoint übergibt das Datenverzeichnis an `postgres` und wechselt dann zu diesem Benutzer |
 | `https` | `NET_BIND_SERVICE` | Caddy bindet die Ports 80/443 |
 | `https-volumes` | `CHOWN`, `DAC_OVERRIDE` | Übergibt bestehende Zertifikats-Volumes einmalig an `caddy` |
+| `worker-volumes` | `CHOWN`, `DAC_OVERRIDE` | Übergibt das `node_modules`-Volume des Workers einmalig an dessen Benutzer |
+
+Der Dienst `worker` braucht keine Capability. Er ist aber der einzige mit dem Docker-Socket, und wer den Socket hat,
+steuert Docker auf dem Rechner. Ein Test (`src/runner/container-hardening.test.ts`) liest deshalb `docker-compose.yml`
+und schlägt fehl, sobald ein anderer Dienst den Socket einbindet. `watchdog` läuft wie `frontend` mit
+schreibgeschütztem Dateisystem.
 
 `frontend` nutzt `nginxinc/nginx-unprivileged`: Auch der Master-Prozess läuft als `nginx`, auf Port 8080 (direkt) und
 8081 (Caddy) im Container. `frontend`, `https` und `backup` laufen ohne root mit schreibgeschütztem Dateisystem
@@ -244,8 +347,8 @@ Das alte gemeinsame Volume `aideation_review_npm` wird nicht mehr benutzt und l�
 ### Docker-Sandbox für Agents (optional)
 
 Jeder Agent-Schritt und jeder Projekttest läuft in einem kurzlebigen Container statt direkt auf dem Rechner (Schalter
-`DEV_LOG_AGENT_SANDBOX`). Der Worker bleibt auf dem Host und steuert den Lauf. Das Verhalten ist auf macOS, Linux und
-Windows gleich.
+`DEV_LOG_AGENT_SANDBOX`). Der Worker steuert den Lauf, auf dem Host oder als Dienst `worker` im Container. Das
+Verhalten ist auf macOS, Linux und Windows gleich.
 
 | Wert | Wirkung |
 |---|---|
@@ -263,8 +366,8 @@ Testcontainer hängt nur in deren Netzwerk.
    bei jedem „AIdeation neu starten“ und im CI-Job `docker`. Das Image enthält Playwright mit Browsern, Node 22, die
    Claude-CLI in fester Version (Build-Argument `CLAUDE_CODE_VERSION`), Git, ripgrep und den gebündelten Wächter.
 2. Anmeldung für die Claude-CLI im Container: `claude setup-token` ausführen und den Wert als
-   `CLAUDE_CODE_OAUTH_TOKEN=…` in `worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Das `~/.claude` des Hosts wird
-   nicht eingebunden.
+   `CLAUDE_CODE_OAUTH_TOKEN=…` in `worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Mit dem Worker im Container
+   gehört er in die `.env` (Feld im Assistenten). Das `~/.claude` des Hosts wird nicht eingebunden.
 3. Schalter (optional): Ohne Angabe gilt `docker`. Abweichend global in `worker.env` oder je Projekt unter
    Einstellungen → Projekt & Ordner → „Docker-Sandbox für Agents und Projekttests“ (Wie global / Aus / Docker). Der
    Projektwert geht vor.

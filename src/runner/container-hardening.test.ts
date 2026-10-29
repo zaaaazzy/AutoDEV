@@ -27,8 +27,13 @@ const CAP_ADD: Record<string, string[]> = {
   backup: [],
   https: ['NET_BIND_SERVICE'],
   'https-volumes': ['CHOWN', 'DAC_OVERRIDE'],
+  worker: [],
+  'worker-volumes': ['CHOWN', 'DAC_OVERRIDE'],
+  watchdog: [],
 };
-const READ_ONLY = ['frontend', 'backup', 'https', 'https-volumes'];
+const READ_ONLY = ['frontend', 'backup', 'https', 'https-volumes', 'worker-volumes', 'watchdog'];
+/** Einmalige Schritte (chown eines Volumes, dann Ende): kein Healthcheck, kein /tmp. */
+const ONE_SHOT = ['https-volumes', 'worker-volumes'];
 
 test('Compose: jeder Dienst ohne Capabilities, mit no-new-privileges und nur begründeten cap_add', () => {
   const all = services();
@@ -41,13 +46,41 @@ test('Compose: jeder Dienst ohne Capabilities, mit no-new-privileges und nur beg
   }
 });
 
-test('Compose: Healthcheck für lang laufende Dienste, read_only für frontend, backup und https', () => {
+test('Compose: Healthcheck für lang laufende Dienste, read_only für frontend, backup, https und watchdog', () => {
   for (const [name, block] of services()) {
-    if (name !== 'https-volumes') assert.match(block, /^ {4}healthcheck:$/m, `${name}: healthcheck`);
+    if (!ONE_SHOT.includes(name)) assert.match(block, /^ {4}healthcheck:$/m, `${name}: healthcheck`);
     if (!READ_ONLY.includes(name)) continue;
     assert.match(block, /^ {4}read_only: true$/m, `${name}: read_only`);
-    if (name !== 'https-volumes') assert.match(block, /^ {4}tmpfs: \[\/tmp\]$/m, `${name}: /tmp als tmpfs`);
+    if (!ONE_SHOT.includes(name)) assert.match(block, /^ {4}tmpfs: \[\/tmp\]$/m, `${name}: /tmp als tmpfs`);
   }
+});
+
+/** Zeilen ohne Kommentar, die den Docker-Socket nennen. */
+const socketLines = (text: string): string[] =>
+  text.split('\n').filter((line) => !line.trim().startsWith('#') && /docker\.sock/.test(line));
+
+test('Compose: nur der Dienst worker hat den Docker-Socket gemountet', () => {
+  const withSocket = [...services()].filter(([, block]) => socketLines(block).length).map(([name]) => name);
+  assert.deepEqual(withSocket, ['worker']);
+  // Auch ausserhalb der Dienstblöcke (z. B. über Anker) steht der Socket nirgends sonst.
+  assert.deepEqual(socketLines(read('docker-compose.yml')), ['      - /var/run/docker.sock:/var/run/docker.sock']);
+});
+
+test('Compose: Worker als Dienst im Profil worker, Neustart über die Restart-Richtlinie (Exit-Code 75)', () => {
+  const all = services();
+  for (const name of ['worker', 'worker-volumes', 'watchdog'])
+    assert.match(all.get(name) ?? '', /^ {4}profiles: \["worker"\]$/m, `${name}: Profil worker`);
+  const worker = all.get('worker') ?? '';
+  assert.match(worker, /^ {4}restart: unless-stopped$/m);
+  assert.match(worker, /^ {4}build: deploy\/worker$/m);
+  assert.match(worker, /DEV_LOG_WORKER_CONTAINER: "1"/);
+  // Keine Git-Zugänge in docker-compose.yml: die bindet nur docker-compose.override.yml ein (nur worker, :ro).
+  for (const [name, block] of all) assert.doesNotMatch(block, /\.ssh|\.gitconfig|config\/gh|github_token/, name);
+  // Der Wächter braucht weder Docker noch Git-Zugang.
+  assert.doesNotMatch(all.get('watchdog') ?? '', /docker\.sock|GH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN/);
+  const entrypoint = read('deploy/worker/entrypoint.sh');
+  assert.match(entrypoint, /exec node "\$tsx" src\/runner\/runner-cli\.ts --all --watch --limit 3/);
+  assert.match(read('deploy/worker/Dockerfile'), /docker-ce-cli docker-compose-plugin docker-buildx-plugin gh/);
 });
 
 test('Frontend: nginx-unprivileged (Master ohne root) auf 8080, Healthcheck und Port-Mapping passen', () => {

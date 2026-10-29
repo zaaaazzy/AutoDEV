@@ -14,8 +14,17 @@ const LIVE_CONTAINERS = [
   'aideation_backup_postgres',
   'aideation_proxy_caddy',
   'aideation_proxy_caddy_volumes',
+  'aideation_worker_nodejs',
+  'aideation_worker_volumes',
+  'aideation_watchdog_nodejs',
 ];
-const LIVE_VOLUMES = ['aideation_pgdata', 'aideation_caddy_data', 'aideation_caddy_config'];
+const LIVE_VOLUMES = [
+  'aideation_pgdata',
+  'aideation_caddy_data',
+  'aideation_caddy_config',
+  'aideation_worker_modules',
+  'aideation_watchdog_state',
+];
 const LIVE_PORTS = ['5433', '3100', '80', '443'];
 
 /** Löst ${COMPOSE_PROJECT_NAME:-…} so auf wie Compose für das angegebene Projekt (ohne Docker). */
@@ -69,11 +78,17 @@ test('Agent-Compose: der Live-Stack behält Namen, Volumes und Ports (mit und oh
 
 /** `docker compose config` wie im Akzeptanzkriterium; null, wenn Docker fehlt (Test wird übersprungen). */
 function dockerConfig(project: string | undefined): string | null {
-  const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROFILES: 'https' };
+  // Alle Profile aktiv, damit jeder Dienst geprüft wird; nur docker-compose.yml (eine erzeugte
+  // docker-compose.override.yml mit Pfaden dieses Rechners gehört nicht in den Vergleich).
+  const env: NodeJS.ProcessEnv = { ...process.env, COMPOSE_PROFILES: 'https,worker' };
   delete env.COMPOSE_PROJECT_NAME;
   delete env.COMPOSE_FILE;
   if (project) env.COMPOSE_PROJECT_NAME = project;
-  const result = spawnSync('docker', ['compose', 'config', '--format', 'json'], { cwd: ROOT, env, encoding: 'utf8' });
+  const result = spawnSync('docker', ['compose', '-f', 'docker-compose.yml', 'config', '--format', 'json'], {
+    cwd: ROOT,
+    env,
+    encoding: 'utf8',
+  });
   if (result.error || result.status !== 0) {
     if (result.error || /unknown|not a docker command|Cannot connect/i.test(result.stderr)) return null;
     // Aufgelöste Konfiguration kann Passwörter aus der .env enthalten: nur bereinigt ausgeben.

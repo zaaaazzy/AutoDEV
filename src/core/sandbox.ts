@@ -9,7 +9,8 @@ import { type CommandExecutor, type CommandResult, redactOutput, runCommand } fr
  * direkt auf dem Host. Eingebunden ist nur der Worktree des Auftrags als /workspace (für lesende Rollen nur :ro) und
  * node_modules als Volume je Projekt – kein Docker-Socket, kein Home, kein ~/.ssh oder ~/.claude, keine .env des
  * Hosts. Netzwerk: das interne Netzwerk aideation-agents, hinaus nur über den Egress-Proxy (egress-proxy.ts) zu
- * Anthropic-API, npm-Registry und Ollama auf dem Host. Der Worker bleibt auf dem Host und steuert den Lauf.
+ * Anthropic-API, npm-Registry und Ollama auf dem Host. Der Worker steuert den Lauf – auf dem Host oder als
+ * Compose-Dienst worker (src/core/worker-container.ts), dort über den eingebundenen Docker-Socket.
  */
 
 export type SandboxMode = 'off' | 'docker';
