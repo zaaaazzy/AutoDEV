@@ -2,7 +2,7 @@ import { computed, effect, inject, Injectable, OnDestroy, signal } from '@angula
 import { ApiService } from '../../core/api.service.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { visibleInterval } from '../../core/visible-interval.js';
-import { EMPTY_GIT_GRAPH_STATE, type GitGraph, nextGitGraphState } from './git-graph.js';
+import { EMPTY_GIT_GRAPH_STATE, type GitGraph, layoutGraph, nextGitGraphState } from './git-graph.js';
 
 const REFRESH_MS = 60_000;
 
@@ -17,6 +17,8 @@ export class GitGraphStore implements OnDestroy {
   private readonly store = inject(ProjectStore);
   private readonly state = signal(EMPTY_GIT_GRAPH_STATE);
   readonly graph = computed(() => this.state().graph);
+  /** Spuren und Kanten, einmal berechnet für Panel und Rand-Dekoration. */
+  readonly layout = computed(() => layoutGraph(this.graph()?.commits ?? []));
   readonly loaded = computed(() => this.state().loaded);
   /** Letzter Abruf gescheitert (der angezeigte Stand kann veraltet sein). */
   readonly error = computed(() => this.state().error);

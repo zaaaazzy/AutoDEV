@@ -13,7 +13,7 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
-import { combinedCategory, statusLabel } from '../../shared/labels.js';
+import { ciLabel, combinedCategory, statusLabel } from '../../shared/labels.js';
 import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { SprintDetailComponent } from './sprint-detail.component.js';
@@ -123,13 +123,7 @@ export class SprintsComponent {
   }
 
   protected ciLabel(sprint: Sprint): string {
-    return sprint.ciStatus === 'success'
-      ? 'grün'
-      : sprint.ciStatus === 'failure'
-        ? 'rot'
-        : sprint.ciStatus === 'pending'
-          ? 'läuft'
-          : 'unbekannt';
+    return ciLabel(sprint.ciStatus);
   }
 
   protected toggleSprint(id: string): void {
