@@ -25,7 +25,7 @@ Der Hinweis trägt die Überschrift **„Token bzw. Nutzungslimit aufgebraucht�
 
 > Claude · Limit erreicht – Agents mit Claude pausieren bis 29.10., 20:53 Uhr.
 
-Die Uhrzeit ist der Reset laut Meldung, plus eine kleine Reserve von 3 Minuten. Ohne lesbare Uhrzeit in der Meldung gilt eine Pause von einer Stunde ab Erkennung. Dann erscheint die Zeile ohne Uhrzeit: „Limit erreicht – Agents mit Claude pausieren.“
+Die Uhrzeit ist der Reset laut Meldung, plus eine kleine Reserve von 3 Minuten. Enthält die Meldung keine lesbare Uhrzeit, gilt eine Pause von einer Stunde ab Erkennung, ohne Reserve. Die Zeile zeigt dann diese Uhrzeit ebenfalls an. Die Zeile ganz ohne Uhrzeit („Limit erreicht – Agents mit Claude pausieren.“) gibt es im Code, sie erscheint aber nicht, weil der Hinweis nur bei gesetzter Rücksetzzeit angezeigt wird.
 
 <!-- PRINTSCREEN 1: Dashboard mit dem Hinweis „Token bzw. Nutzungslimit aufgebraucht“ und der Zeile für Claude (Limit erreicht, Uhrzeit sichtbar) -->
 
@@ -74,6 +74,7 @@ Für Entwickler und Betrieb: Pro Anbieter steht ein Eintrag in `app_settings` mi
 
 ## Offen
 
-- **Printscreens fehlen.** Die App lief in dieser Umgebung nicht, und es ist kein Browser installiert. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Sie sind nicht erstellt.
-- **Oberfläche nicht im Browser geprüft.** Die Beschreibung stammt aus `provider-limit-alert.component.ts`, `provider-limits.ts` (Frontend), `src/api/provider-limits.ts` und `src/core/provider-limits.ts`.
+- **Printscreens fehlen.** Die App lief in dieser Umgebung nicht, es ist kein Browser installiert, und Shell-Befehle für Agents sind eingeschränkt. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Sie sind nicht erstellt. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
+- **Oberfläche nicht im Browser geprüft.** Die Beschreibung stammt aus `provider-limit-alert.component.ts`, `provider-limits.ts` (Frontend), `src/api/provider-limits.ts` und `src/core/provider-limits.ts`. Diese Dateien sind in diesem Lauf gelesen und mit den Angaben abgeglichen.
 - **Tests nicht in diesem Lauf ausgeführt.** Die Angaben zu `src/core/provider-limits.test.ts` und `frontend/src/app/features/dashboard/provider-limits.spec.ts` stammen aus dem Entwicklerbericht.
+- **Pre-Sprint-Aussage nicht im Code belegt.** Der Aufruf „Fortsetzen“ ändert nur Aufträge (`development_items`). Dass Pre-Sprint-Phasen bis zum Reset weiterwarten, folgt daraus, ist aber nicht im Code selbst geprüft.
