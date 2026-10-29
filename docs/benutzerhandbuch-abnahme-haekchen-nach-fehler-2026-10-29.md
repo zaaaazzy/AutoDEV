@@ -20,8 +20,8 @@ Beschreibung stammt aus dem Code der Oberfläche, nicht aus dem Bildschirm. Die 
 
 | Was | Wo in AIdeation | Sichtbar, wenn |
 |---|---|---|
-| Abnahme-Häkchen (Punkt abhaken) | Seite „Aktionen“, Karte eines Auftrags im Zustand „Prüfen“ (Liste „Noch zu erledigen“) | der Auftrag offene Abnahmepunkte hat |
-| Dasselbe Häkchen | Auftragsdetail, Abschnitt „Noch zu erledigen“ | der Auftrag offene Abnahmepunkte hat |
+| Abnahme-Häkchen (Punkt abhaken) | Seite „Aktionen“, Karte mit dem Hinweis „… lässt sich nur von Hand prüfen“ (Liste der Punkte) | der Auftrag hat Punkte, die nur ein Mensch prüfen kann |
+| Dasselbe Häkchen | Auftragsdetail, Abschnitt „Noch zu erledigen“ | der Auftrag hat offene Abnahmepunkte |
 
 ## Was passiert
 
@@ -54,6 +54,8 @@ In allen drei Fällen ist der Punkt nicht gespeichert. Du kannst den Klick danac
   mit 403 ab. Die Sperre in der Oberfläche ist nur Bedienkomfort.
 - **Während anderer Aktionen gesperrt.** Solange AIdeation gerade eine andere Aktion ausführt (zum Beispiel einen Sprint
   startet), sind alle Häkchen ebenfalls gesperrt. Warte, bis die Aktion fertig ist.
+- **Während der Tester prüft.** Im Auftragsdetail ist ein Punkt gesperrt, solange der Tester ihn gerade prüft (Anzeige
+  „🤖 Tester prüft …“). Warte, bis die Prüfung fertig ist.
 - **Ein Klick pro Punkt.** Während ein Punkt gespeichert wird, sendet ein weiterer Klick auf denselben Punkt nichts.
   Andere Punkte kannst du in der Zwischenzeit abhaken.
 - **Nur offene Punkte.** Abgehakte Punkte verschwinden aus der Liste der offenen Punkte, sobald die Daten neu geladen
@@ -67,13 +69,15 @@ In allen drei Fällen ist der Punkt nicht gespeichert. Du kannst den Klick danac
 | Häkchen springt nach dem Klick leer zurück, Fehler oben (403) | Server lehnt ab, Recht fehlt | wie oben: Recht prüfen lassen |
 | Häkchen springt leer zurück, Fehler oben (409) | Punkt ist auf dem Server anders | Seite neu laden |
 | Häkchen springt leer zurück, Fehler oben (Netz) | Verbindung unterbrochen | Netz prüfen, Klick wiederholen |
-| Häkchen ausgegraut, obwohl du das Recht hast | Die Aktion läuft gerade (anderer Speichervorgang) | kurz warten, dann erneut versuchen |
+| Häkchen ausgegraut, obwohl du das Recht hast | Eine andere Aktion läuft, oder der Tester prüft diesen Punkt gerade | kurz warten, dann erneut versuchen |
 
 ## Noch offen
 
 - **Printscreens fehlen.** Benötigt werden vier Aufnahmen: (1) Karte „Aktionen“ mit offenen Punkten, (2) ausgegrauetes
   Häkchen mit Tooltip ohne Recht „Planung“, (3) Häkchen leer nach fehlgeschlagenem Abhaken mit Fehlermeldung oben,
   (4) Auftragsdetail „Noch zu erledigen“.
-- **Tests nicht ausgeführt.** `frontend/src/app/shared/acceptance-ticks.spec.ts` und die Typprüfung wurden in diesem Lauf
-  nicht gestartet. Die Beschreibung stammt aus dem Code und dem Bericht des Entwicklers.
 - **Browser nicht geprüft.** Ob das Häkchen im echten Browser nach einem Netzfehler leer bleibt, ist offen.
+
+Die Tests sind gelaufen (Entwickler und Projekt-Testlauf cb63990a, nicht von diesem Agenten gestartet): `npm run test:unit`
+mit 1782 Tests, 0 fehlgeschlagen. Die Typprüfung und `acceptance-ticks.spec.ts` sowie `sprint-actions.spec.ts` sind
+grün (13/13). Die Beschreibung oben stützt sich auf die Oberflächen-Vorlagen und die Klasse `AcceptanceTicks`, die ich gelesen habe.
