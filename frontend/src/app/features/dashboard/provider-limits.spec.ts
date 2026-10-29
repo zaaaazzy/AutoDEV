@@ -16,8 +16,9 @@ const limit = (overrides: Partial<ProviderLimit> = {}): ProviderLimit => ({
 
 test('Hinweis nur für Anbieter mit Limit, solange der Reset in der Zukunft liegt', () => {
   const now = new Date('2026-10-29T12:00:00.000Z');
+  const providers = [limit(), limit({ provider: 'gemini', status: 'ok', resetAt: null })];
   assert.deepEqual(
-    activeLimits([limit(), limit({ provider: 'gemini', status: 'ok', resetAt: null })], now).map((entry) => entry.provider),
+    activeLimits(providers, now).map((entry) => entry.provider),
     ['claude'],
   );
   assert.deepEqual(activeLimits([limit()], new Date('2026-10-29T20:00:00.000Z')), []);

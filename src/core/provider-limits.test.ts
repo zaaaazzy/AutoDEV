@@ -102,7 +102,7 @@ test('Fortsetzen löscht das Limit und gibt nur Aufträge frei, die auf das Nutz
   await noteProviderOutcome(pool, ['claude'], { exitCode: 1, output: LIMIT });
   assert.equal(await resumeAfterProviderLimit(pool, 'claude', null), 3);
   assert.equal(pool.settings.size, 0);
-  assert.deepEqual(pool.updates,[[`${USAGE_LIMIT_REASON}%`, null]]);
+  assert.deepEqual(pool.updates, [[`${USAGE_LIMIT_REASON}%`, null]]);
 });
 
 test('Aktionen: Link nur bei Limit, Fortsetzen nur mit „Ausführen“ und Zugriff auf alle Projekte', () => {
