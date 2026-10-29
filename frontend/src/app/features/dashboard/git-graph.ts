@@ -45,6 +45,22 @@ export interface GraphEdge {
   color: number;
 }
 
+/** Farbe einer Spur; die Palette wiederholt sich. */
+export function laneColor(index: number): string {
+  return PALETTE[index % PALETTE.length]!;
+}
+
+/** SVG-Pfad einer Kante: gerade Linie oder weiche Kurve zwischen zwei Spuren innerhalb einer Zeile. */
+export function edgePath(edge: GraphEdge, x: (lane: number) => number, row: number): string {
+  const x1 = x(edge.from);
+  const x2 = x(edge.to);
+  const y1 = edge.fromY * row;
+  const y2 = edge.toY * row;
+  if (x1 === x2) return `M${x1} ${y1}V${y2}`;
+  const mid = (y1 + y2) / 2;
+  return `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
+}
+
 export interface GraphRow {
   commit: GitCommit;
   lane: number;
