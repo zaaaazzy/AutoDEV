@@ -15,7 +15,8 @@ Auftrag 9224d9a4 (Bugfix). Titel: „Bug: Bug-Wächter: Review-Box und doppelte 
 Geprüft wurde:
 
 - `npm run build:ui` lief ohne Fehler durch. Warnungen NG8113, NG8102, NG8107 und das Start-Paket von 1.06 MB (Grenze 950 kB) brechen den Build nicht ab. Sie betreffen andere Komponenten, nicht die Review-Box.
-- **Specs nicht ausgeführt:** `review-box.spec.ts`, `labels.spec.ts` und `git-graph.spec.ts` liefen in diesem Lauf nicht, weil die Umgebung `npx --no-install tsx --test …` nicht freigab. Ob sie grün sind, ist offen. Das darf nicht als „grün“ gelten.
+- **Specs gelaufen (zweiter Entwickler-Lauf):** `npm run test:unit` meldet 1833 bestanden, 0 fehlgeschlagen, 0 übersprungen. Die drei Specs liefen mit (`review-box.spec.ts` ok 86, `labels.spec.ts` ok 227/228, `git-graph.spec.ts` ok 70). Zuvor liefen sie weder beim Entwickler noch beim Tester, weil `npx --no-install tsx --test …` nicht freigegeben war. Der Tester-Schritt blieb deshalb «nicht bestanden» (DoD 1: keine Akzeptanzkriterien, Specs damals nicht gelaufen). Der Typecheck (`npm run typecheck`) war grün.
+- Ist `npx --no-install tsx --test <datei>` gesperrt, geht `npm run test:unit`.
 
 ## Geänderte Dateien
 
@@ -25,11 +26,12 @@ Keine. (Nur diese Dokumentation wurde ergänzt.)
 
 | Auftrag | Titel | Art | Zustand |
 |---|---|---|---|
-| 9224d9a4 | Bug-Wächter: Review-Box und doppelte Anzeige-Helfer zusammenführen | Bugfix | ohne Code-Änderung abgeschlossen, Ursache Spend-Limit; Build ok, Specs ungeprüft |
+| 9224d9a4 | Bug-Wächter: Review-Box und doppelte Anzeige-Helfer zusammenführen | Bugfix | ohne Code-Änderung abgeschlossen, Ursache Spend-Limit; Build ok, `test:unit` 1833 grün; Freigabe in der Vorschau (DoD 3) durch Mensch offen |
 
 ## Anfrage / TODO
 
-- Specs vom Tester ausführen lassen: `npx --no-install tsx --test frontend/src/app/features/development/review-box.spec.ts frontend/src/app/shared/labels.spec.ts frontend/src/app/features/dashboard/git-graph.spec.ts`.
+- Freigabe in der Vorschau (DoD 3) muss ein Mensch erteilen.
+- Offener CI-Bug («Run npm run test:unit schlägt fehl»): Lokal läuft `test:unit` grün, die Ursache liegt daher eher in der CI-/Docker-Umgebung als in den Tests.
 - Neustart von Wächter-Läufen erst nach dem Reset (8:50pm Europe/Zurich) oder mit höherem Limit unter claude.ai/settings/usage, sonst entsteht sofort wieder ein gleicher Bug.
 - Builder, `package.json` und Abhängigkeiten gehören zum offenen Builder-Bug und brauchen `npm install`, das Agents nicht dürfen. Das Zurücksetzen des Abnahme-Häkchens nach Fehler ist ein eigener, behobener Bug.
 
