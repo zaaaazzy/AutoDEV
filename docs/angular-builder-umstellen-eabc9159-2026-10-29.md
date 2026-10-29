@@ -33,3 +33,20 @@ Agents dürfen kein `npm install` ausführen. Deshalb stehen die Einträge von `
 - Vor der Änderung: `npm run test:unit` lokal grün (1831/1831).
 - Nach der Änderung: `npm run build` erfolgreich, mit den bisherigen Warnungen (NG8113, NG8107, Budget `initial` 1.06 MB über der Warnschwelle von 950 kB). `npm run test:unit` grün (1831/1831).
 - `grep` nach `build-angular` außerhalb von `node_modules`, `dist` und `package-lock.json`: kein Treffer, auch nicht in Dockerfile, CI und Skripten.
+
+## Geänderte Dateien
+
+- `angular.json`
+- `package.json`
+- `package-lock.json` (nur Wurzeleintrag, von Hand)
+- `docs/angular-builder-umstellen-eabc9159-2026-10-29.md`
+
+## Worauf zu achten ist
+
+- Die CI ist laut Bugliste rot (`npm run test:unit`). Lokal liess sich das nicht nachstellen (1831/1831 grün vor und nach der Änderung). Der Auftrag behebt die CI also nicht nachweislich. Die Ursache liegt möglicherweise in der Docker-Umstellung und ist weiter offen.
+- Ob die Build-Warnungen schon vor dem Wechsel bestanden, wurde nicht verglichen.
+
+## TODO (Mensch)
+
+- Einmal `npm install` ausführen und `package-lock.json` committen, damit die Einträge von `@angular-devkit/build-angular` verschwinden.
+- Offene Vorläufer-Bugs prüfen: Spend-Limit-Abbruch des Bug-Wächters, Agents dürfen kein `npm install` ausführen.
