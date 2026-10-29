@@ -4,6 +4,7 @@ import { decryptSecret } from '../core/secrets.js';
 import { logged } from '../core/log.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 import { type CommandResult, redactOutput } from '../core/command.js';
+import { SANDBOX_GUARD, SANDBOX_WORKDIR, sandboxExecutor, sandboxMode, usesSandbox } from '../core/sandbox.js';
 import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import {
   FILES_CREATE,
@@ -36,6 +37,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
   onProgress,
   model,
   changedFiles: changed,
+  execute,
 }) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
@@ -106,8 +108,24 @@ export const runBuiltinAgent: BuiltinAgent = async ({
     files,
     commands,
     model,
+    ...(execute ? { execute } : {}),
   });
 };
+
+/** Sandbox-Schalter des Projekts (projects.agent_sandbox); null = es gilt der globale Schalter. */
+export async function projectSandbox(pool: Pick<Pool, 'query'>, project: string): Promise<string | null> {
+  try {
+    const { rows } = await pool.query<{ mode: string | null }>(
+      'SELECT agent_sandbox AS mode FROM projects WHERE slug = $1',
+      [project],
+    );
+    return rows[0]?.mode ?? null;
+  } catch (error) {
+    // Ohne lesbaren Projektwert gilt der globale Schalter (DEV_LOG_AGENT_SANDBOX).
+    logged(`agent-sandbox:${project}`)(error);
+    return null;
+  }
+}
 
 /** Vom Routing gewähltes Modell eines Schritts: Ollama-Modell oder CLI-Befehl samt greifender Regel. */
 export interface RoutedModel {
@@ -239,9 +257,18 @@ export async function invokeAgent(
       onProgress: hooks.onAction,
       ...(routed.model ? { model: routed.model } : {}),
       ...(agent.role === 'tester' ? { changedFiles: await orderFilePaths(ctx) } : {}),
+      // Lokales Modell in der Sandbox: Shell-Befehle laufen im Container.
+      ...(sandboxed ? { execute: agentExecute } : {}),
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
+  // Docker-Sandbox (DEV_LOG_AGENT_SANDBOX): Der Agent läuft im Container, der Worktree heisst dort /workspace, und der
+  // Wächter ist der im Image. Fehlen Docker oder Image, scheitert der Schritt – kein Rückfall auf den Host.
+  const sandboxed = usesSandbox(agent.role, sandboxMode(await projectSandbox(pool, item.projectSlug)));
+  const agentExecute = sandboxed
+    ? sandboxExecutor(options.cwd, { runId: ctx.runId, project: item.projectSlug })
+    : execute;
+  const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;
   // Rechte des Agents; der Wächter prüft gegen den Projektordner des Laufs, nicht gegen das cwd der CLI.
   const withRights = (command: string[]): string[] =>
     withAgentPermissions(
@@ -250,8 +277,10 @@ export async function invokeAgent(
       permissions,
       agent.allowedCommands ?? null,
       agent.fileScope,
-      undefined,
-      options.cwd,
+      // Im Container gibt es die Log-Ordner des Hosts nicht.
+      sandboxed ? [] : undefined,
+      agentCwd,
+      sandboxed ? SANDBOX_GUARD : undefined,
     );
   // Visuelle Prüfung: Screenshots, Pixel-Vergleich und Browser-Prüfungen; der Befehl des Agents dient nur dem KI-Urteil.
   if (agent.role === 'visual_tester') {
@@ -309,9 +338,9 @@ export async function invokeAgent(
   if (!command) return agent.role === 'tester' ? { ...(await builtinRun()), fromTests: true } : builtinRun();
   const run = (resume: ResumableSession | null | undefined): Promise<CommandResult> =>
     executeAgentCommand(
-      execute,
+      agentExecute,
       buildInvocation(command, resume ? resumePrompt(prompt, resume) : prompt),
-      options.cwd,
+      agentCwd,
       {
         timeoutMs: options.timeoutMs,
         env: agentEnvironment(options.cwd),

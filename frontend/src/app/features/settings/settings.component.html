@@ -41,6 +41,14 @@
               >
             </label>
             <label class="wide"
+              >Docker-Sandbox für den Entwickler
+              <select name="agentSandbox" [(ngModel)]="settings.agentSandbox">
+                <option value="">Wie global (DEV_LOG_AGENT_SANDBOX, Standard aus)</option>
+                <option value="off">Aus – der Entwickler läuft direkt auf dem Rechner</option>
+                <option value="docker">Docker – der Entwickler läuft im Container „aideation-agent“</option>
+              </select>
+            </label>
+            <label class="wide"
               >Projektbeschreibung<textarea
                 name="description"
                 [(ngModel)]="settings.description"

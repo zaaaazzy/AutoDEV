@@ -241,6 +241,43 @@ Der Review-Container läuft als Benutzer `node`. Jedes Projekt hat ein eigenes n
 Das alte gemeinsame Volume `aideation_review_npm` wird nicht mehr benutzt und lässt sich mit
 `docker volume rm aideation_review_npm` löschen.
 
+### Docker-Sandbox für Agents (optional)
+
+Mit dem Schalter `DEV_LOG_AGENT_SANDBOX` läuft der Entwickler-Agent in einem kurzlebigen Container statt direkt auf dem
+Rechner. Der Worker bleibt auf dem Host und steuert den Lauf. Das Verhalten ist auf macOS, Linux und Windows gleich.
+
+| Wert | Wirkung |
+|---|---|
+| `off` (Standard) | Alle Agents laufen wie bisher auf dem Host. |
+| `docker` | Der Entwickler läuft im Image `aideation-agent`. Die anderen Rollen bleiben vorerst auf dem Host (Phase 1). |
+
+**Einschalten:**
+
+1. Image bauen, im AIdeation-Ordner: `docker build -t aideation-agent -f deploy/agent/Dockerfile .` Das geschieht auch
+   bei jedem „AIdeation neu starten“ und im CI-Job `docker`. Das Image enthält Playwright mit Browsern, Node 22, die
+   Claude-CLI in fester Version (Build-Argument `CLAUDE_CODE_VERSION`), Git, ripgrep und den gebündelten Wächter.
+2. Anmeldung für die Claude-CLI im Container: `claude setup-token` ausführen und den Wert als
+   `CLAUDE_CODE_OAUTH_TOKEN=…` in `worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Das `~/.claude` des Hosts wird
+   nicht eingebunden.
+3. Schalter setzen: global als `DEV_LOG_AGENT_SANDBOX=docker` in `worker.env`, oder je Projekt unter Einstellungen →
+   Projekt & Ordner → „Docker-Sandbox für den Entwickler“ (Wie global / Aus / Docker). Der Projektwert geht vor.
+4. Worker neu starten.
+
+Optional begrenzen `DEV_LOG_AGENT_SANDBOX_CPUS` (Standard `2`) und `DEV_LOG_AGENT_SANDBOX_MEMORY` (Standard `4g`) den
+Container.
+
+**Ist Docker nicht erreichbar oder fehlt das Image**, startet der Schritt nicht. Er scheitert mit einer Meldung im
+Auftrag und im Worker-Badge und läuft nie stattdessen auf dem Host. Fehlt nur die Anmeldung, lautet die Meldung anders
+(„Anmeldung der Claude-CLI fehlt“). Meldet die Claude-CLI ein Nutzungslimit, steht dabei, dass das kein Sandbox-Fehler
+ist.
+
+**Laufende Sandbox-Container anzeigen:** `docker ps --filter label=aideation.run`. Beim Start des Workers werden
+übrig gebliebene Container mit diesem Label entfernt.
+
+**node_modules:** Im Container liegen die Abhängigkeiten im Volume `aideation-node-modules-<projekt>` (Linux-Binärdateien,
+darum nicht die des Hosts). Beim ersten Lauf ist es leer; der Agent installiert sie mit `npm ci --ignore-scripts`.
+Zurücksetzen: `docker volume rm aideation-node-modules-<projekt>`.
+
 ### Log-Rotation (macOS)
 
 `install-worker.sh` und `install-watchdog.sh` legen je eine `newsyslog`-Regel an:

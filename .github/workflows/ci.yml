@@ -107,6 +107,16 @@ jobs:
       # Caddy (Profil https, beim ausdrücklichen Dienstnamen aktiv) wird nur gebaut, nicht gestartet: ohne Domain kein Zertifikat.
       - run: docker compose build dev-log frontend https
       - run: docker build deploy/review
+      # Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker); danach läuft der Sandbox-Integrationstest gegen echtes Docker.
+      - run: docker build -t aideation-agent -f deploy/agent/Dockerfile .
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx --no-install tsx --test src/core/sandbox-docker.test.ts
+        env:
+          DEV_LOG_TEST_REQUIRE_DOCKER: '1'
       - name: Container starten und Health prüfen
         run: |
           docker compose up -d --wait --wait-timeout 180 db dev-log frontend

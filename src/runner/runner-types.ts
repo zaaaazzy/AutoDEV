@@ -59,6 +59,8 @@ export type BuiltinAgent = (context: {
   model?: string;
   /** Nur Tester: vom Auftrag geänderte Dateien (undefined = unbekannt, dann laufen die Testbefehle des Projekts). */
   changedFiles?: string[];
+  /** Führt die Shell-Befehle des Agents aus, etwa im Sandbox-Container (sonst runCommand auf dem Host). */
+  execute?: CommandExecutor;
 }) => Promise<CommandResult>;
 
 export interface WorkflowAgent {

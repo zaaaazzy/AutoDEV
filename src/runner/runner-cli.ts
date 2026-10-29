@@ -26,6 +26,7 @@ import { projectFolderError } from '../core/validation.js';
 import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local-database.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
+import { removeLeftoverContainers, sandboxBadge } from '../core/sandbox.js';
 import { ReviewSlots } from './review-slots.js';
 import { syncSprintCommits } from './sprint-commits.js';
 
@@ -376,6 +377,9 @@ async function main(): Promise<void> {
     // Erst nach der Sperre: Ein abgewiesener zweiter Worker soll nicht als lebender Worker gelten.
     await startWorkerBeat();
     await recoverInterruptedRuns(pool, workerId);
+    // Sandbox-Container eines abgestürzten Vorgängers (Label aideation.run) entfernen; ohne Docker geschieht nichts.
+    const leftovers = await removeLeftoverContainers(runCommand, INSTALL_ROOT).catch(() => 0);
+    if (leftovers) console.info(`${leftovers} übrig gebliebene Sandbox-Container entfernt.`);
     // Erst nach dem Aufräumen: ab jetzt landet jeder gestartete Prozess im Register (nur der Dauer-Worker, damit ein
     // einmaliger Lauf nicht beim nächsten Start als Altprozess gilt).
     registry = databaseProcessStore(pool);
@@ -393,7 +397,10 @@ async function main(): Promise<void> {
     let startup = true;
     const beat = (): void => {
       for (const slug of known) {
-        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? null, startup).catch(logged('runner-cli'));
+        // Sandbox gesperrt (Docker oder Image fehlt): auch das zeigt das Worker-Badge.
+        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? sandboxBadge(slug), startup).catch(
+          logged('runner-cli'),
+        );
       }
       if (known.length) startup = false;
     };

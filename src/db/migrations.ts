@@ -404,6 +404,14 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS agent_usage_role_idx ON agent_usage (project_slug, role, created_at);
     `,
   },
+  // Docker-Sandbox je Projekt (Phase 1: nur der Entwickler). NULL = es gilt der globale Schalter DEV_LOG_AGENT_SANDBOX.
+  {
+    version: 18,
+    name: 'agent-sandbox-je-projekt',
+    sql: `
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
