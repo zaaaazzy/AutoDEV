@@ -273,7 +273,13 @@
             </button>
           }
           @if (can.start) {
-            <button class="button primary" type="button" [disabled]="busy()" (click)="startSprint(sprint)">
+            <button
+              class="button primary"
+              type="button"
+              [attr.title]="can.activateBlocked"
+              [disabled]="busy() || !!can.activateBlocked"
+              (click)="startSprint(sprint)"
+            >
               <app-nav-icon name="play" />Sprint starten
             </button>
           }
@@ -303,7 +309,13 @@
             </button>
           }
           @if (can.reopen) {
-            <button class="button secondary" type="button" [disabled]="busy()" (click)="startSprint(sprint)">
+            <button
+              class="button secondary"
+              type="button"
+              [attr.title]="can.activateBlocked"
+              [disabled]="busy() || !!can.activateBlocked"
+              (click)="startSprint(sprint)"
+            >
               <app-nav-icon name="undo" />Wieder öffnen
             </button>
           }

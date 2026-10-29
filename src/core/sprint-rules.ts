@@ -62,6 +62,9 @@ export function canCompleteSprint(sprint: SprintRef, items: readonly ItemRef[]):
   );
 }
 
+/** 409 von PATCH /sprints/:id, wenn schon ein anderer Sprint des Projekts aktiv ist. */
+export const ONE_ACTIVE_SPRINT_MESSAGE = 'Es kann nur ein Sprint pro Projekt aktiv sein.';
+
 /** Pro Projekt ist höchstens ein Sprint aktiv (Unique-Index); `sprints` sind die Sprints desselben Projekts. */
 export function hasOtherActiveSprint(sprint: SprintRef, sprints: readonly SprintRef[]): boolean {
   return sprints.some((other) => other.id !== sprint.id && other.status === 'active');
