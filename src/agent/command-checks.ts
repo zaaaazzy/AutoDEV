@@ -1,6 +1,7 @@
 // Prüfungen von Shell-Befehlen (npm, git, Einrichtung durch den Assistenten, eigene Regeln) für Wächter und lokales Modell.
-import { isAbsolute, resolve, sep } from 'node:path';
-import { realPath } from './path-policy.js';
+import { existsSync, lstatSync, readdirSync } from 'node:fs';
+import { isAbsolute, join, resolve, sep } from 'node:path';
+import { checkProjectPath, inside, protectedPath, realPath } from './path-policy.js';
 import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
 
 /** Ein Befehl als Text oder – im Wächter – schon zerlegt (Wörter eines einfachen Befehls). */
@@ -214,6 +215,89 @@ export function gitPathProblem(input: CommandInput, root?: string): string | nul
       ? ((real) => real !== root && !real.startsWith(root + sep))(realPath(resolve(root, word)))
       : isAbsolute(word) || word.split('/').includes('..');
     if (outside) return `„${command}“: nur Pfade im Projektordner (Git liest sonst fremde Dateien).`;
+  }
+  return null;
+}
+
+/** Datei-Rechte eines Agents, wie sie der Wächter bekommt (GuardPolicy ohne Shell und Projektordner). */
+export interface FileRights {
+  create: boolean;
+  edit: boolean;
+  /** Erlaubte Ordner relativ zum Projekt; leer = ganzes Projekt. */
+  scopes: readonly string[];
+}
+
+/** Erlaubte Optionen von git rm bzw. git mv – nur genau so, ohne Abkürzungen (kein -f, --pathspec-from-file …). */
+const GIT_FILE_OPTIONS: Record<string, ReadonlySet<string>> = {
+  rm: new Set(['-q', '--quiet', '-n', '--dry-run', '--cached', '-r']),
+  mv: new Set(['-v', '--verbose', '-n', '--dry-run']),
+};
+/** Pfad für git rm/mv: nur einfache Zeichen – keine Pathspec-Magie (:(top), :!), keine Git-Globs (*, ?, [), kein „\“. */
+const GIT_FILE_PATH = /^[\w@.+-]+(?:\/[\w@.+-]+)*\/?$/;
+/** Höchstens so viele Einträge durchsucht der Wächter in einem Ordner nach geschützten Pfaden; mehr = gesperrt. */
+const GIT_FILE_SCAN_LIMIT = 5_000;
+
+/** Liegt in einem Ordner (ohne Links zu folgen) ein geschützter Pfad? null = zu viele Einträge (fail-closed). */
+function protectedEntryInside(directory: string, root: string): string | null | false {
+  const pending = [directory];
+  let seen = 0;
+  while (pending.length) {
+    const current = pending.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (++seen > GIT_FILE_SCAN_LIMIT) return null;
+      const path = join(current, entry.name);
+      if (protectedPath(entry.name)) return path.slice(root.length + 1);
+      if (entry.isDirectory()) pending.push(path);
+    }
+  }
+  return false;
+}
+
+/**
+ * git rm und git mv: Löschen und Umbenennen für Agents (rm, mv und cp bleiben gesperrt). Löschen braucht „Dateien
+ * ändern“, Umbenennen zusätzlich „Dateien anlegen“ – ohne Rechte (files fehlt) ist beides gesperrt. Jeder Pfad, Quelle
+ * wie Ziel, ist ein einfacher relativer Pfad ohne „..“, liegt samt aufgelöster Links im Projekt und in den erlaubten
+ * Ordnern, ist nicht das Projekt selbst und nicht geschützt (.git, .env, .claude …) – auch nicht in einem Ordner darin.
+ */
+export function gitFileProblem(input: CommandInput, root: string, files?: FileRights): string | null {
+  const words = toWords(input);
+  const command = label(input);
+  const subcommand = words[1]?.text ?? '';
+  const options = GIT_FILE_OPTIONS[subcommand];
+  if (words[0]?.text !== 'git' || !options) return null;
+  if (!files?.edit || (subcommand === 'mv' && !files.create)) {
+    return `„${command}“: Löschen braucht das Recht „Dateien ändern“, Umbenennen zusätzlich „Dateien anlegen“.`;
+  }
+  const paths: ShellWord[] = [];
+  let onlyPaths = false;
+  for (const word of words.slice(2)) {
+    if (!onlyPaths && word.text === '--') onlyPaths = true;
+    else if (!onlyPaths && word.text.startsWith('-')) {
+      if (!options.has(word.text)) {
+        return `„${command}“: Option „${word.text}“ ist bei git ${subcommand} gesperrt (erlaubt: ${[...options].join(', ')}).`;
+      }
+    } else paths.push(word);
+  }
+  if (paths.length < (subcommand === 'mv' ? 2 : 1)) return `„${command}“: Pfad fehlt.`;
+  for (const word of paths) {
+    const path = word.text;
+    if (word.expanded || word.glob || !GIT_FILE_PATH.test(path) || path.split('/').includes('..')) {
+      return `„${command}“: „${path}“ – nur einfache relative Pfade (ohne „..“, Platzhalter, Variablen oder Pathspec-Magie).`;
+    }
+    const verdict = checkProjectPath(root, resolve(root, path));
+    if (!verdict.ok) {
+      if (verdict.reason === 'protected') return `„${command}“: ${verdict.relative} ist geschützt.`;
+      return `„${command}“: „${path}“ liegt ausserhalb des Projektordners.`;
+    }
+    if (verdict.real === root) return `„${command}“: nicht das ganze Projekt, nur einzelne Dateien oder Ordner.`;
+    if (files.scopes.length && !files.scopes.some((scope) => inside(verdict.real, resolve(root, scope)))) {
+      return `„${command}“: „${path}“ liegt ausserhalb der erlaubten Ordner (${files.scopes.join(', ')}).`;
+    }
+    if (existsSync(verdict.real) && lstatSync(verdict.real).isDirectory()) {
+      const hit = protectedEntryInside(verdict.real, root);
+      if (hit === null) return `„${command}“: „${path}“ enthält zu viele Einträge – bitte kleinere Ordner angeben.`;
+      if (hit) return `„${command}“: „${path}“ enthält ${hit} (geschützt).`;
+    }
   }
   return null;
 }
