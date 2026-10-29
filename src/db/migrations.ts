@@ -412,6 +412,21 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
     `,
   },
+  // Je Idee höchstens ein Auftrag: Ein Doppelklick auf „Übernehmen“ kam parallel am NOT EXISTS vorbei und legte zwei
+  // Aufträge an (Code-Review vom 20.10.2026). Vorhandene Doppel behalten ihre Arbeit; nur der älteste Auftrag bleibt
+  // mit der Idee verknüpft, die übrigen verlieren den Verweis (ideation_id = NULL).
+  {
+    version: 19,
+    name: 'ein-auftrag-je-idee',
+    sql: `
+      UPDATE development_items d SET ideation_id = NULL, updated_at = NOW()
+        FROM (SELECT id, row_number() OVER (PARTITION BY ideation_id ORDER BY created_at, id) AS rank
+                FROM development_items WHERE ideation_id IS NOT NULL) ranked
+       WHERE d.id = ranked.id AND ranked.rank > 1;
+      CREATE UNIQUE INDEX IF NOT EXISTS development_items_ideation_idx ON development_items (ideation_id)
+        WHERE ideation_id IS NOT NULL;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

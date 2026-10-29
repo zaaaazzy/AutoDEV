@@ -258,12 +258,12 @@ test('validates board input and stores valid project-scoped ideas', async () => 
 
 function recordingPool(rows: Record<string, unknown>[] = []) {
   const queries: { sql: string; values: unknown[] }[] = [];
-  const pool = {
-    query: async (sql: string, values: unknown[] = []) => {
-      queries.push({ sql, values });
-      return { rows };
-    },
-  } as unknown as Pool;
+  const query = async (sql: string, values: unknown[] = []) => {
+    // Transaktionsrahmen (withTransaction) nicht mitschreiben: Die Tests prüfen die eigentlichen Anweisungen.
+    if (!['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) queries.push({ sql, values });
+    return { rows };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return { pool, queries };
 }
 
