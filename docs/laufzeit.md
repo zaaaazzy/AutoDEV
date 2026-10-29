@@ -1,6 +1,6 @@
 # AIdeation zur Laufzeit
 
-Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Stand: 19.10.2026. Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
+Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Erstfassung vom 19.10.2026, seither mit jedem Auftrag nachgeführt, der Worker, Agents oder Rechte ändert (letzter Abgleich: Git-Verlauf dieser Datei). Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
 
 ## 1 · Prozesse und Takte
 
