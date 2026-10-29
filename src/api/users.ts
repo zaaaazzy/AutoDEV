@@ -1,5 +1,6 @@
 import type { Router, Response } from 'express';
 import type { Pool } from 'pg';
+import { isUniqueViolation, type Queryable, withTransaction } from '../db/transaction.js';
 import { access } from './access.js';
 import { isUuid } from '../core/validation.js';
 import { type DevLogAuth, hashPassword } from './auth.js';
@@ -21,9 +22,12 @@ async function projectsFrom(pool: Pool, value: unknown): Promise<string[] | null
   return known.length === slugs.length ? slugs : null;
 }
 
-async function saveProjects(pool: Pool, userId: string, slugs: string[]): Promise<void> {
-  await pool.query('DELETE FROM project_members WHERE user_id = $1 AND NOT (project_slug = ANY($2))', [userId, slugs]);
-  await pool.query(
+async function saveProjects(client: Queryable, userId: string, slugs: string[]): Promise<void> {
+  await client.query('DELETE FROM project_members WHERE user_id = $1 AND NOT (project_slug = ANY($2))', [
+    userId,
+    slugs,
+  ]);
+  await client.query(
     `INSERT INTO project_members (user_id, project_slug) SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING`,
     [userId, slugs],
   );
@@ -77,22 +81,25 @@ export function registerUserRoutes(app: Router, pool: Pool, auth: DevLogAuth | n
       const projects = await projectsFrom(pool, body.projects ?? []);
       if (projects === null) return void response.status(400).json({ message: 'Unbekanntes Projekt.' });
       const displayName = typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 120) : '';
-      const result = await pool
-        .query(
+      const passwordHash = await hashPassword(body.password as string);
+      // Benutzer und Projektzugriff zusammen: Scheitert der Zugriff, entsteht kein Konto ohne Projekte.
+      const user = await withTransaction(pool, async (client) => {
+        const result = await client.query(
           `INSERT INTO users (username, display_name, password_hash, roles) VALUES ($1, $2, $3, $4) RETURNING ${COLUMNS}`,
-          [username, displayName, await hashPassword(body.password as string), roles],
-        )
-        .catch((error: { code?: string }) => {
-          if (error.code === '23505') return null;
-          throw error;
-        });
-      if (!result) {
+          [username, displayName, passwordHash, roles],
+        );
+        // Neue Benutzer sehen nur die freigeschalteten Projekte (Mandantentrennung).
+        if (projects?.length) await saveProjects(client, result.rows[0].id, projects);
+        return result.rows[0] as Record<string, unknown>;
+      }).catch((error: unknown) => {
+        if (isUniqueViolation(error)) return null;
+        throw error;
+      });
+      if (!user) {
         response.status(409).json({ message: 'Diesen Benutzernamen gibt es schon.' });
         return;
       }
-      // Neue Benutzer sehen nur die freigeschalteten Projekte (Mandantentrennung).
-      if (projects?.length) await saveProjects(pool, result.rows[0].id, projects);
-      response.status(201).json({ user: { ...result.rows[0], projects: projects ?? [] } });
+      response.status(201).json({ user: { ...user, projects: projects ?? [] } });
     } catch (error) {
       next(error);
     }
@@ -111,25 +118,32 @@ export function registerUserRoutes(app: Router, pool: Pool, auth: DevLogAuth | n
         response.status(400).json({ message: 'Du kannst dir die Administration nicht selbst entziehen.' });
         return;
       }
-      const result = await pool.query(
-        `UPDATE users SET display_name = COALESCE($2, display_name), roles = COALESCE($3, roles),
-                active = COALESCE($4, active), updated_at = NOW()
-          WHERE id = $1 RETURNING ${COLUMNS}`,
-        [
-          request.params.id,
-          typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 120) : null,
-          roles ?? null,
-          typeof body.active === 'boolean' ? body.active : null,
-        ],
-      );
-      if (!result.rows[0]) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
-      if (projects) {
-        await saveProjects(pool, request.params.id, projects);
-        result.rows[0].projects = projects.sort();
-      }
-      // Deaktivierte Benutzer werden sofort abgemeldet.
-      if (body.active === false) await pool.query('DELETE FROM auth_sessions WHERE user_id = $1', [request.params.id]);
-      response.json({ user: result.rows[0] });
+      // Rollen, Projektzugriff und Abmelden zusammen: kein deaktivierter Benutzer mit noch gültigen Sitzungen.
+      const user = await withTransaction(pool, async (client) => {
+        const result = await client.query(
+          `UPDATE users SET display_name = COALESCE($2, display_name), roles = COALESCE($3, roles),
+                  active = COALESCE($4, active), updated_at = NOW()
+            WHERE id = $1 RETURNING ${COLUMNS}`,
+          [
+            request.params.id,
+            typeof body.displayName === 'string' ? body.displayName.trim().slice(0, 120) : null,
+            roles ?? null,
+            typeof body.active === 'boolean' ? body.active : null,
+          ],
+        );
+        const row = result.rows[0] as Record<string, unknown> | undefined;
+        if (!row) return null;
+        if (projects) {
+          await saveProjects(client, request.params.id, projects);
+          row.projects = projects.sort();
+        }
+        // Deaktivierte Benutzer werden sofort abgemeldet.
+        if (body.active === false)
+          await client.query('DELETE FROM auth_sessions WHERE user_id = $1', [request.params.id]);
+        return row;
+      });
+      if (!user) return void response.status(404).json({ message: 'Benutzer nicht gefunden.' });
+      response.json({ user });
     } catch (error) {
       next(error);
     }

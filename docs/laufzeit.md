@@ -432,6 +432,10 @@ Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitli
 
 `src/api/error-handler.ts` ist die letzte Middleware in `createDevLogApp`. Unbekannte Pfade (jede Methode) ergeben ein JSON-404, ein zu grosser Body 413, kaputtes JSON 400, alles andere 500. Die Antwort ist immer `{ "message": … }` und enthält nie Stacktrace oder Fehlertext; der Fehler steht nur im Server-Log. Das JSON-Limit ist 256 KB (Doku-Höchstlänge `MAX_DOC_CONTENT` = 30 000 Zeichen, bis 6 Byte je Zeichen). Ein Session-Cookie mit ungültiger Prozentkodierung gilt als nicht angemeldet (401).
 
+### Transaktionen
+
+Mehrstufige Änderungen der API laufen über `withTransaction(pool, async (client) => …)` aus `src/db/transaction.ts`: eine feste Verbindung, `BEGIN`/`COMMIT`, bei Fehler `ROLLBACK`, `release()` immer im `finally` (scheitert das `ROLLBACK`, wird die Verbindung verworfen). Alle Abfragen in der Funktion müssen über `client` laufen. Je Idee gibt es höchstens einen Auftrag (Teilindex `development_items_ideation_idx`, Migration 19); ein Verstoss (`23505`, `isUniqueViolation`) ergibt beim Übernehmen und beim Anlegen eines Auftrags 409. Transaktional sind Übernehmen und Löschen eines Auftrags, Projekt löschen (mit Ordner-Job), Kategorie löschen (mit Bereinigung der Agents) sowie Benutzer anlegen und ändern.
+
 ### Sofortstart
 
 Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. Das 30-s-Intervall bleibt als Absicherung.
