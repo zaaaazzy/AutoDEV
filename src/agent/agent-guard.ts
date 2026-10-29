@@ -5,9 +5,8 @@ import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkProjectPath, inside, realTarget, SECRET_DIRECTORIES } from './path-policy.js';
 import { secretGlob, secretSegment } from './tool-paths.js';
+import { SERVICE_ACTIONS } from './service-request.js';
 import {
-  COMPOSE_STARTING,
-  composeViolation,
   forbiddenCommand,
   forbiddenSubcommand,
   gitOptionProblem,
@@ -67,11 +66,8 @@ const READ_TOOLS = new Set(['Read', 'Grep', 'Glob', 'NotebookRead']);
 
 /** Paketangaben für npm install: nur Namen aus der Registry, keine Git-, Datei- oder URL-Quellen. */
 const REGISTRY_SPEC = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+(?:@[\w.^~<>=*-]+)?$/i;
-/** docker compose: Startbefehle nur in dieser Form – keine Compose-Datei, Umgebung oder Ordner von anderswo. */
-const COMPOSE_START_FORMS = [
-  /^docker compose up -d(?: --build| --wait| --force-recreate)*(?: [a-zA-Z0-9][\w.-]*)*$/,
-  /^docker compose (?:start|restart|build)(?: [a-zA-Z0-9][\w.-]*)*$/,
-];
+/** Dienst-Verwaltung per Shell (Docker-Socket, launchd, systemd): für jede Rolle gesperrt, dafür gibt es services.*. */
+const SERVICE_PROGRAMS = new Set(['docker', 'docker-compose', 'podman', 'nerdctl', 'launchctl', 'systemctl']);
 
 /** Wrapper und Präfixe, die einen weiteren Befehl starten – dessen Prüfung sähe sonst niemand. */
 const WRAPPERS = new Set(['env', 'command', 'exec', 'builtin', 'nohup', 'time', 'sudo']);
@@ -171,8 +167,8 @@ function nodeCheckOnly(words: readonly ShellWord[]): boolean {
 /**
  * Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). Gilt für Claude-Agents
  * und das lokale Modell gleichermassen. Der Befehl wird mit dem Tokenizer (parseShell) wie von Bash zerlegt; alle
- * Prüfungen sehen dieselben Wörter. Was sich nicht eindeutig zerlegen lässt, ist gesperrt. run = null: Compose-Starts
- * nicht selbst prüfen (das lokale Modell prüft sie asynchron unter der Projektsperre).
+ * Prüfungen sehen dieselben Wörter. Was sich nicht eindeutig zerlegen lässt, ist gesperrt. run = null: keine
+ * Git-Remotes abfragen (dann gilt nur origin).
  */
 export function bashProblem(
   command: string,
@@ -201,12 +197,16 @@ export function bashProblem(
     if (words.some((word) => word.text.split('/').some(secretGlob))) {
       return 'Befehle mit Platzhaltern, die Geheimnisse (.env, Schlüssel) treffen, sind gesperrt.';
     }
-    const [program = '', subcommand = '', third = ''] = words.map((word) => word.text);
+    const [program = '', subcommand = ''] = words.map((word) => word.text);
     if (/^[A-Za-z_]\w*=/.test(program) || (WRAPPERS.has(program) && words.length > 1)) {
       return `„${part}“: Umgebungsvariablen vor dem Befehl und Wrapper-Befehle sind gesperrt.`;
     }
     if (SHELL_BUILTINS.has(program)) {
       return `„${part}“: Shell-Builtins wie cd, export, alias, source und eval sind gesperrt – jeden Befehl einzeln aufrufen.`;
+    }
+    // Dienste verwaltet der Worker (services.*): wer docker aufrufen kann, hat über den Socket Root auf dem Host.
+    if (SERVICE_PROGRAMS.has(program.slice(program.lastIndexOf('/') + 1))) {
+      return `„${part}“: docker und launchctl sind für Agents gesperrt – Dienste über die Worker-Aktionen ${SERVICE_ACTIONS.join(', ')} verwalten.`;
     }
     // acceptEdits gibt mkdir, touch, rm, rmdir, mv, cp und sed ohne Regel frei – Rechte und Ordner prüft nur der Wächter.
     if (forbiddenCommand(words)) {
@@ -218,11 +218,11 @@ export function bashProblem(
     if (gitOptionProblem(words)) {
       return `„${part}“: diese Git-Option ist gesperrt (startet Programme oder schreibt Dateien).`;
     }
-    // Auch bei breiten eigenen Freigaben (Bash(git:*), Bash(docker:*)): diese Unterbefehle gibt keine Gruppe frei.
+    // Auch bei breiten eigenen Freigaben (Bash(git:*)): diese Unterbefehle gibt keine Gruppe frei.
     if (forbiddenSubcommand(words)) return `„${part}“: dieser Befehl ist für Agents grundsätzlich gesperrt.`;
     // Variablen in Argumenten geprüfter Programme: X=--output=… lässt sich vorher mit export setzen.
     if (CHECKED_PROGRAMS.has(program) && words.some((word) => word.expanded)) {
-      return `„${part}“: Variablen und Shell-Erweiterungen ($X, $'…', {a,b}, ~) sind in git-, npm- und docker-Befehlen gesperrt.`;
+      return `„${part}“: Variablen und Shell-Erweiterungen ($X, $'…', {a,b}, ~) sind in git- und npm-Befehlen gesperrt.`;
     }
     const gitProblem = gitPathProblem(words, root);
     if (gitProblem) return gitProblem;
@@ -245,28 +245,6 @@ export function bashProblem(
     // node lädt auch unter --check Module aus --import/-r und führt sie aus: nur genau diese zwei Formen.
     if (program === 'node' && !nodeCheckOnly(words)) {
       return `„${part}“: erlaubt sind nur „node --version“ und „node --check <relative Projektdatei>“ ohne weitere Optionen.`;
-    }
-    if (
-      (program === 'docker-compose' && subcommand.startsWith('-')) ||
-      (program === 'docker' && subcommand === 'compose' && third.startsWith('-'))
-    ) {
-      return `„${part}“: Optionen vor dem Compose-Befehl (-f, --project-directory, --env-file …) sind gesperrt.`;
-    }
-    if (program === 'docker-compose') return 'Bitte „docker compose“ (ohne Bindestrich) verwenden.';
-    if (COMPOSE_STARTING.test(part) && !COMPOSE_START_FORMS.some((form) => form.test(part))) {
-      return `„${part}“: erlaubt sind nur „docker compose up -d [--build] [--wait] [--force-recreate] [dienste]“ sowie start/restart/build [dienste].`;
-    }
-    if (COMPOSE_STARTING.test(part) && run) {
-      const check = run('docker', ['compose', 'config', '--format', 'json'], {
-        cwd: projectRoot,
-        encoding: 'utf8',
-        timeout: 60_000,
-      });
-      const reason =
-        check.status === 0
-          ? composeViolation(String(check.stdout), root)
-          : `docker compose config schlug fehl: ${String(check.stderr).slice(-300)}`;
-      if (reason) return `Start abgelehnt: ${reason} Nur Mounts und Builds im Projektordner, nicht privilegiert.`;
     }
   }
   return null;

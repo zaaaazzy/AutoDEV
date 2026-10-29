@@ -6,12 +6,12 @@
   },
   "developer": {
     "rolle": "Entwickler",
-    "beschreibung": "Setzt den Auftrag im Projektordner um, ändert Dateien mit Backup und führt freigegebene Befehle wie npm test oder git status aus. Bei Bug-Aufträgen hält er eine Fix-Notiz am Bug fest.",
+    "beschreibung": "Setzt den Auftrag im Projektordner um, ändert Dateien mit Backup und führt freigegebene Befehle wie npm test oder git status aus. Dienste startet er nicht selbst per docker, sondern fordert sie beim Worker an (z. B. services.restart). Bei Bug-Aufträgen hält er eine Fix-Notiz am Bug fest.",
     "nutzen": "Aus der Anforderung wird lauffähiger Code, nachvollziehbar dokumentiert und innerhalb der Projektregeln."
   },
   "tester": {
     "rolle": "Tester",
-    "beschreibung": "Schreibt Tests zu den Akzeptanzkriterien. Danach führt der Runner Build und Projekttests aus, und der Tester nimmt die Kriterien ab.",
+    "beschreibung": "Schreibt Tests zu den Akzeptanzkriterien. Danach führt der Runner Build und Projekttests aus, und der Tester nimmt die Kriterien ab. Status und Logs der Dienste liest er über den Worker (services.status, services.logs).",
     "nutzen": "Fehler fallen vor dem Abschluss auf, nicht erst im Betrieb. Jede Änderung ist durch Tests abgesichert."
   },
   "visual_tester": {

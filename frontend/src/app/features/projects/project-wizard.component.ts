@@ -14,6 +14,10 @@ interface FolderInfo {
   empty: boolean;
   entries?: string[];
   git: { isRepo: boolean; branch: string | null; remote: string | null; commits: number } | null;
+  /** launchd-Dienste (macOS), die den Ordner nutzen – Hinweis: Neustart läuft über Compose (services.restart). */
+  launchd?: string[];
+  /** Liegt eine Compose-Datei im Ordner? */
+  compose?: boolean;
 }
 interface GithubInfo {
   gh: { installed: boolean; authenticated: boolean; user: string | null };

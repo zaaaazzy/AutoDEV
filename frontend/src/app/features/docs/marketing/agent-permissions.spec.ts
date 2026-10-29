@@ -7,6 +7,7 @@ import {
   AGENT_ROLES,
   isAgentPermissionsHash,
   phaseDiagram,
+  SERVICE_ACTIONS_INFO,
 } from './agent-permissions.js';
 
 const root = new URL('../../../../../../', import.meta.url);
@@ -88,8 +89,19 @@ test('Seite nennt Sonderregel, Projektsperre, keine Sandbox und die Grenzen für
     '>rm<',
     '.env',
     '.git<',
+    'Dienste über den Worker',
   ])
     assert.ok(html.includes(text), text);
+});
+
+test('Dienst-Aktionen: dieselben fünf Aktionen wie in docs/agents-und-rechte.md, ohne docker/launchctl als Recht', () => {
+  const doc = read('docs/agents-und-rechte.md');
+  assert.deepEqual(
+    SERVICE_ACTIONS_INFO.map((item) => item.action),
+    ['services.status', 'services.logs', 'services.restart', 'services.up', 'services.stop'],
+  );
+  for (const { action } of SERVICE_ACTIONS_INFO) assert.ok(doc.includes(`\`${action}\``), action);
+  for (const role of AGENT_ROLES) assert.doesNotMatch(role.commands, /docker|launchctl/, role.role);
 });
 
 test('Marketing-Eintrag und Seite nur mit dem Recht „docs“', () => {

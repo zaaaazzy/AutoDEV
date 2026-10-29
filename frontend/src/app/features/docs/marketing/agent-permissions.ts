@@ -182,6 +182,18 @@ export const AGENT_ROLES: readonly AgentRoleInfo[] = [
   },
 ];
 
+/**
+ * Dienst-Aktionen (docs/agents-und-rechte.md, Abschnitt 3 „Dienst-Aktionen“): Agents verwalten Dienste nur über den
+ * Worker, nie per docker oder launchctl.
+ */
+export const SERVICE_ACTIONS_INFO: readonly { action: string; effect: string }[] = [
+  { action: 'services.status', effect: 'Zeigt, welche Dienste des Projekts laufen.' },
+  { action: 'services.logs', effect: 'Liest die Logs, mit Zeilenlimit (bis 1000) und Zeitraum (bis 24 Stunden).' },
+  { action: 'services.restart', effect: 'Startet Dienste neu, nach Prüfung der Compose-Konfiguration.' },
+  { action: 'services.up', effect: 'Startet Dienste, optional mit Build, nach Prüfung der Compose-Konfiguration.' },
+  { action: 'services.stop', effect: 'Hält Dienste an.' },
+];
+
 /** Mermaid-Ablauf: die drei Phasen mit ihren Rollen (custom ist frei und fehlt darum). */
 export function phaseDiagram(roles: readonly AgentRoleInfo[] = AGENT_ROLES): string {
   const lines = ['flowchart LR', '  start[Auftrag ausführbar] --> pre_task'];

@@ -120,18 +120,16 @@ test('the developer may write with backup, but only run allowed commands', async
   assert.match(await executeTool(assistant, call('run_command', { command: 'git log --oneline -20' })), /Exit-Code/);
   assert.match(await executeTool(assistant, call('run_command', { command: 'git status' })), /Exit-Code/);
   assert.match(await executeTool(assistant, call('run_command', { command: 'npm test' })), /Exit-Code/);
-  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose ps' })), /Exit-Code/);
-  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /Exit-Code/);
+  // Dienste nur über service_action, nie per Shell.
   for (const command of [
-    'docker compose down',
-    'docker compose stop backend',
+    'docker compose ps',
+    'docker compose up -d',
     'docker compose restart',
-    'docker compose up -d --build',
     'docker compose logs --tail=50 backend',
-    'docker compose logs --since 15m --no-color api web',
-    'git clone https://github.com/a/b.git',
-    'git clone git@github.com:a/b.git app/src',
   ]) {
+    assert.doesNotMatch(await executeTool(assistant, call('run_command', { command })), /Exit-Code/, command);
+  }
+  for (const command of ['git clone https://github.com/a/b.git', 'git clone git@github.com:a/b.git app/src']) {
     assert.match(await executeTool(assistant, call('run_command', { command })), /Exit-Code/);
   }
   assert.match(
@@ -424,20 +422,25 @@ test('compose configuration may not escape the project folder', () => {
   assert.ok(composeViolation('kein json', '/proj'));
 });
 
-test('docker compose start is refused when the configuration escapes the project', async () => {
+test('services.up is refused when the configuration escapes the project', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'devlog-compose-'));
+  await writeFile(join(cwd, 'compose.yaml'), 'services: {}\n');
   const ran: string[] = [];
   const bad = JSON.stringify({ services: { app: { privileged: true } } });
   const assistant = {
     ...context(cwd, true),
-    canManageServices: true,
+    serviceRole: 'assistant',
+    commands: ['services'],
     execute: async (command: string[]) => {
-      ran.push(command.join(' '));
-      return { exitCode: 0, durationMs: 1, output: command[2] === 'config' ? bad : 'ok' };
+      ran.push(command.slice(4).join(' '));
+      return { exitCode: 0, durationMs: 1, output: command.includes('--format') ? bad : 'app' };
     },
   };
-  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /abgelehnt/);
-  assert.deepEqual(ran, ['docker compose config --format json']);
+  assert.match(
+    await executeTool(assistant, call('service_action', { action: 'services.up' })),
+    /abgelehnt.*privilegiert/,
+  );
+  assert.deepEqual(ran, ['config --services', 'config --format json']);
 });
 
 test('model and context are resolved per role', () => {

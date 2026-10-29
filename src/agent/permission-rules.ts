@@ -1,4 +1,5 @@
 // Rechte-Regeln: Pseudo-Befehle, Datei-Werkzeuge, eingebaute Rechte-Gruppen und Rollen-Sets.
+import { LEGACY_DOCKER_GROUP, LEGACY_SERVICE_RULE } from './legacy-rules.js';
 
 /** Eine schaltbare Rechte-Gruppe für Dashboard-Assistent und Entwickler (Claude-CLI-Regeln). */
 export interface PermissionGroup {
@@ -22,9 +23,11 @@ export const LEGACY_FILES_COMMAND = 'files';
 export const LOGS_COMMAND = 'logs';
 /** SQL auf der Projekt-Datenbank – nur das lokale Modell hat dafür ein Werkzeug (run_sql). */
 export const DATABASE_COMMAND = 'database';
-/** Live-Dienste der Projekte neu starten; wird erst beim Start mit der Benutzer-ID des Workers aufgelöst. */
+/**
+ * Dienste des Projekts über feste Worker-Aktionen (services.status/logs/restart/up/stop). Keine Shell-Regel: Der
+ * Worker prüft und führt die Aktion selbst aus, kein Agent braucht docker oder den Docker-Socket.
+ */
 export const SERVICES_COMMAND = 'services';
-export const servicesRule = (): string => `Bash(launchctl kickstart -k gui/${process.getuid?.() ?? 501}/ch.*)`;
 const PSEUDO_COMMANDS = new Set([FILES_CREATE, FILES_EDIT, LOGS_COMMAND, DATABASE_COMMAND, SERVICES_COMMAND]);
 
 /** Ob eine Freigabe („Bash(befehl:*)“ bzw. „Bash(befehl)“) einen Shell-Befehl abdeckt (für das lokale Modell). */
@@ -38,19 +41,27 @@ export function rulesAllow(rules: readonly string[], command: string): boolean {
 }
 export const isToolRule = (rule: string): boolean => !PSEUDO_COMMANDS.has(rule) && rule !== LEGACY_FILES_COMMAND;
 
-/** Ersetzt frühere Regeln: „files“ durch Anlegen und Ändern, launchctl mit fester Benutzer-ID durch „services“. */
+/**
+ * Ersetzt frühere Regeln: „files“ durch Anlegen und Ändern, die früheren Dienst-Regeln (Betriebssystem-Dienste und
+ * docker, siehe legacy-rules.ts) durch „services“. Idempotent: ein zweiter Durchlauf ändert nichts.
+ */
 export function normalizeCommands(rules: readonly string[]): string[] {
   return [
     ...new Set(
       rules.flatMap((rule) =>
         rule === LEGACY_FILES_COMMAND
           ? [FILES_CREATE, FILES_EDIT]
-          : /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/.test(rule)
+          : LEGACY_SERVICE_RULE.test(rule)
             ? [SERVICES_COMMAND]
             : [rule],
       ),
     ),
   ];
+}
+
+/** Freigeschaltete Gruppen eines Projekts: die frühere Gruppe „docker“ zählt als „services“ (null bleibt null). */
+export function normalizeGroups(groups: readonly string[] | null): string[] | null {
+  return groups ? [...new Set(groups.map((id) => (id === LEGACY_DOCKER_GROUP ? 'services' : id)))] : null;
 }
 
 /** Lesbare Bezeichnung eines Befehls für die Oberfläche (ohne Platzhalter für weitere Argumente). */
@@ -59,9 +70,9 @@ export function commandLabel(rule: string): string {
   if (rule === FILES_EDIT) return 'Dateien ändern';
   if (rule === LOGS_COMMAND) return '~/Library/Logs lesen';
   if (rule === DATABASE_COMMAND) return 'SQL auf der Projekt-Datenbank';
-  if (rule === SERVICES_COMMAND) return 'launchctl kickstart -k ch.*';
+  if (rule === SERVICES_COMMAND) return 'Dienste: services.status/logs/restart/up/stop';
   const bash = rule.match(/^Bash\((.+?)(?::\*)?\)$/);
-  if (bash) return bash[1]!.replace(/ gui\/\d+\//, ' ');
+  if (bash) return bash[1]!;
   const web = rule.match(/^WebFetch\(domain:(.+)\)$/);
   return web ? `Webseiten auf ${web[1]} abrufen` : rule;
 }
@@ -72,7 +83,7 @@ const COMMAND_HELP: Record<string, string> = {
     'Neue Dateien im Projektordner (bzw. in den erlaubten Ordnern) anlegen. Bestehende Dateien überschreiben braucht zusätzlich „Dateien ändern“.',
   [FILES_EDIT]: 'Bestehende Dateien im Projektordner (bzw. in den erlaubten Ordnern) bearbeiten oder überschreiben.',
   [SERVICES_COMMAND]:
-    'Startet Live-Dienste der Projekte (launchd, ch.*) neu – nicht AIdeation selbst (com.aideation.*).',
+    'Dienste des Projekts (Docker Compose im Projektordner) über den Worker: Status, Logs, Neustart, Start (optional mit Build) und Stopp – nicht AIdeation selbst. Der Agent braucht dafür weder docker noch den Docker-Socket.',
   [DATABASE_COMMAND]:
     'Liest und ändert die Projekt-Datenbank per SQL (Werkzeug run_sql des lokalen Modells; braucht eine hinterlegte Datenbank-URL).',
   [LOGS_COMMAND]: 'Liest Dienst-Logs unter ~/Library/Logs, z. B. das Log des Live-Modus (nur lesen).',
@@ -80,7 +91,6 @@ const COMMAND_HELP: Record<string, string> = {
   'Bash(ps:*)': 'Listet laufende Prozesse (nur lesen).',
   'Bash(netstat:*)': 'Zeigt offene Netzwerkverbindungen und Ports (nur lesen).',
   'Bash(node --version:*)': 'Zeigt die installierte Node.js-Version.',
-  'Bash(launchctl list:*)': 'Listet die launchd-Dienste und ihren Status (nur lesen).',
   'WebFetch(domain:localhost)':
     'Ruft lokale Seiten und APIs auf localhost ab, z. B. um den laufenden Dienst zu prüfen.',
   'WebFetch(domain:127.0.0.1)': 'Ruft lokale Seiten und APIs auf 127.0.0.1 ab.',
@@ -103,19 +113,6 @@ const COMMAND_HELP: Record<string, string> = {
   'Bash(git pull --ff-only:*)': 'Holt und übernimmt neue Commits, nur wenn kein Merge nötig ist.',
   'Bash(git checkout:*)':
     'Wechselt den Branch oder stellt Dateien aus Git wieder her (verwirft dort lokale Änderungen).',
-  'Bash(docker compose ps:*)': 'Zeigt die Docker-Dienste des Projekts und ihren Status.',
-  'Bash(docker compose config --services:*)': 'Listet die Namen der Docker-Dienste des Projekts.',
-  'Bash(docker compose logs:*)': 'Zeigt die Logs der Docker-Dienste des Projekts.',
-  'Bash(docker compose up:*)':
-    'Startet die Docker-Dienste des Projekts. Vorher geprüft: nur Mounts und Builds im Projektordner, nicht privilegiert.',
-  'Bash(docker compose stop:*)': 'Hält Docker-Dienste des Projekts an.',
-  'Bash(docker compose start:*)': 'Startet angehaltene Docker-Dienste des Projekts (mit Compose-Prüfung).',
-  'Bash(docker compose restart:*)': 'Startet Docker-Dienste des Projekts neu (mit Compose-Prüfung).',
-  'Bash(docker compose down:*)': 'Stoppt und entfernt die Container des Projekts (Volumes bleiben erhalten).',
-  'Bash(docker compose build:*)': 'Baut die Images der Docker-Dienste neu (mit Compose-Prüfung).',
-  'Bash(docker compose pull:*)': 'Lädt neue Versionen der verwendeten Images.',
-  'Bash(docker ps:*)': 'Listet alle laufenden Container (nur lesen).',
-  'Bash(docker logs:*)': 'Zeigt die Logs eines Containers (nur lesen).',
   'Bash(npm audit:*)': 'Prüft die Abhängigkeiten auf bekannte Sicherheitslücken (ohne „fix“, ändert nichts).',
   'Bash(npm outdated:*)': 'Listet veraltete Abhängigkeiten (nur lesen).',
   'Bash(git ls-files:*)': 'Listet die Dateien im Repository (nur lesen).',
@@ -145,7 +142,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     description:
       'Prozesse und Ports prüfen (ps, lsof, netstat), lokale URLs abrufen (WebFetch auf localhost). Dateien liest der Agent mit seinem Lese-Werkzeug, nicht per Shell.',
     rules: [
-      ...prefixRules(['lsof -i', 'ps', 'netstat', 'node --version', 'launchctl list']),
+      ...prefixRules(['lsof -i', 'ps', 'netstat', 'node --version']),
       // Kein curl/cat/tail: Mit Shell-Lesebefehlen ließen sich Dateien außerhalb des Projekts lesen und per curl verschicken.
       'WebFetch(domain:localhost)',
       'WebFetch(domain:127.0.0.1)',
@@ -198,29 +195,12 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     rules: prefixRules(['git status', 'git diff', 'git log', 'git fetch', 'git pull --ff-only']),
   },
   {
-    id: 'docker',
-    label: 'Docker-Dienste',
-    description: 'docker compose ps/logs/up/stop/start/restart/down/build/pull, docker ps und docker logs.',
-    rules: prefixRules([
-      'docker compose ps',
-      'docker compose config --services',
-      'docker compose logs',
-      'docker compose up',
-      'docker compose stop',
-      'docker compose start',
-      'docker compose restart',
-      'docker compose down',
-      'docker compose build',
-      'docker compose pull',
-      'docker ps',
-      'docker logs',
-    ]),
-  },
-  {
     id: 'services',
-    label: 'Projekt-Dienste neu starten',
-    description: 'Live-Dienste der Projekte (ch.*) per launchctl neu starten – nicht AIdeation selbst.',
-    // Beim Start: Bash(launchctl kickstart -k gui/<uid>/ch.*) – Wildcard statt Präfix, weil „:*“ nur an Wortgrenzen greift.
+    label: 'Projekt-Dienste',
+    // Keine Shell-Regel (weder docker noch Dienst-Befehle des Betriebssystems): Agents fordern feste Aktionen an,
+    // der Worker prüft und führt sie aus.
+    description:
+      'Dienste des Projekts über den Worker: services.status, services.logs, services.restart, services.up (optional mit Build) und services.stop – nicht AIdeation selbst.',
     rules: [SERVICES_COMMAND],
   },
 ];

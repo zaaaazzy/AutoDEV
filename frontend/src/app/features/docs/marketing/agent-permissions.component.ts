@@ -1,6 +1,6 @@
 import { Component } from '@angular/core';
 import { MermaidDirective } from '../../../shared/mermaid.directive.js';
-import { AGENT_ROLES, PHASE_LABELS, phaseDiagram } from './agent-permissions.js';
+import { AGENT_ROLES, PHASE_LABELS, phaseDiagram, SERVICE_ACTIONS_INFO } from './agent-permissions.js';
 
 /** Statische Seite „Agents, Aufgaben und Rechte“ (Dokumentation → Marketing). Keine API-Daten. */
 @Component({
@@ -13,4 +13,5 @@ export class AgentPermissionsComponent {
   protected readonly roles = AGENT_ROLES;
   protected readonly phaseLabels = PHASE_LABELS;
   protected readonly diagram = phaseDiagram();
+  protected readonly serviceActions = SERVICE_ACTIONS_INFO;
 }

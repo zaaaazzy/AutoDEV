@@ -178,11 +178,13 @@ test('Lokales Modell: Shell-Befehle nur innerhalb der Freigaben des Agents', () 
   assert.ok(PERMISSION_GROUPS.some((group) => group.rules.includes('database')));
 });
 
-test('Dienste-Freigabe wird erst beim Start mit der Benutzer-ID aufgelöst', () => {
+test('Gespeicherte launchctl-Regel wird beim Laden zur Gruppe „services“, ohne Shell-Regel', () => {
   assert.deepEqual(normalizeCommands(['Bash(launchctl kickstart -k gui/1000/ch.*)']), ['services']);
-  const agent = withAgentPermissions(CLAUDE, 'developer', project, ['services']);
-  assert.match(option(agent, '--allowedTools') ?? '', /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/);
-  assert.equal(commandLabel('services'), 'launchctl kickstart -k ch.*');
+  // Die alte Regel als Zuweisung des Agents: beim Start gilt „services“ – keine launchctl-Freigabe mehr.
+  const agent = withAgentPermissions(CLAUDE, 'developer', project, ['Bash(launchctl kickstart -k gui/501/ch.*)']);
+  assert.equal(agent.includes('--allowedTools'), false);
+  assert.doesNotMatch(agent.join(' '), /launchctl/);
+  assert.equal(commandLabel('services'), 'Dienste: services.status/logs/restart/up/stop');
 });
 
 test('voller Zugriff ohne Wächter nur für den Dashboard-Assistenten und nur auf ausdrücklichen Wunsch', () => {

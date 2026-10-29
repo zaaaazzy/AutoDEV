@@ -142,7 +142,14 @@ export async function runAuthorAgent(
    * Arbeitsordner hält (`acquireTree`/`tryAcquireTree`) und deshalb ausdrücklich `false` übergibt – wie der Chat.
    */
   readOnly = true,
-): Promise<{ exitCode: number; output: string; sessionId?: string; tokens?: number }> {
+): Promise<{
+  exitCode: number;
+  output: string;
+  sessionId?: string;
+  tokens?: number;
+  /** Rechte für @@SERVICES-Marker der Claude-CLI (nur schreibende Läufe); das lokale Modell hat service_action. */
+  serviceRights?: { role: string; commands: string[] };
+}> {
   const author = (
     agentId
       ? await pool.query<AgentRights>(
@@ -205,6 +212,7 @@ export async function runAuthorAgent(
     }
   };
   signal?.addEventListener('abort', kill, { once: true });
+  const rights = agentRights(rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
   try {
     const result = command
       ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {
@@ -226,7 +234,7 @@ export async function runAuthorAgent(
           signal,
           readOnly,
           // Dieselben Datei- und Befehlsrechte wie bei der Claude-CLI (sonst liefe der Chat ohne Wächter).
-          ...agentRights(rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []),
+          ...rights,
         });
     await pool
       .query(
@@ -251,6 +259,7 @@ export async function runAuthorAgent(
       output: redactOutput(result.output, process.env).trim(),
       sessionId: 'sessionId' in result ? (result.sessionId as string | undefined) : undefined,
       tokens: result.tokens ?? 0,
+      ...(command && !readOnly ? { serviceRights: { role: rightsRole, commands: rights.commands } } : {}),
     };
   } catch (error) {
     return { exitCode: 1, output: error instanceof Error ? error.message : String(error) };

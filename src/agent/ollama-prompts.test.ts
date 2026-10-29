@@ -41,18 +41,23 @@ test('toolDefinitions: Schreibrecht ergänzt Schreiben, Ersetzen und Befehle; ru
   ]);
 });
 
-test('toolDefinitions: Dienste erweitern nur die Beschreibung von run_command', () => {
+test('toolDefinitions: Einrichtung erweitert run_command, Dienste gibt es nur als service_action', () => {
   const plain = find(toolDefinitions(true), 'run_command')?.function.description ?? '';
-  const services = find(toolDefinitions(true, true), 'run_command')?.function.description ?? '';
+  const setup = find(toolDefinitions(true, true), 'run_command')?.function.description ?? '';
   assert.doesNotMatch(plain, /docker compose/);
-  assert.match(services, /docker compose ps\/logs\/up -d/);
-  assert.match(services, /git clone\/pull, npm install/);
+  assert.doesNotMatch(setup, /docker compose/);
+  assert.match(setup, /git clone\/pull, npm install/);
+  assert.equal(find(toolDefinitions(true, true), 'service_action'), undefined);
+  const services = find(toolDefinitions(true, true, false, true, true), 'service_action');
+  assert.deepEqual(services?.function.parameters.required, ['action']);
+  assert.match(services?.function.description ?? '', /services\.restart/);
 });
 
 test('systemPrompt: Assistent darf Probleme selbst beheben, aber keine Aufträge anlegen', () => {
   const prompt = systemPrompt('assistant', true);
   assert.match(prompt, /^Du bist der Dashboard-Assistent/);
-  assert.match(prompt, /docker compose/);
+  assert.doesNotMatch(prompt, /docker compose|launchctl|Library\/Logs/);
+  assert.match(systemPrompt('assistant', true, false, true, true), /service_action/);
   assert.match(prompt, /Erstelle niemals Aufträge oder @@TASK-Zeilen/);
   assert.doesNotMatch(prompt, /run_sql/);
   assert.match(prompt, /Antworte auf Deutsch\.$/);
