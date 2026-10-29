@@ -39,6 +39,7 @@ Phase 3 von 4 des Konzepts „Agents plattformunabhängig in Docker-Sandbox ausf
 - Der visuelle Tester hängt am Bridge-Netz (nicht am internen), damit er die Vorschau erreicht; er hat keinen Worktree.
 - Projekte, die für Tests Dienste brauchen, müssen sie mit `aideation.test: "true"` markieren.
 - Nach Code-Änderungen den Worker neu starten.
+- **Bekannte Lücke (Merge von main, `docs/agents-loeschen-und-umbenennen-git-rm-mv-2026-10-28.md`):** Der Wächter erlaubt Löschen und Umbenennen nur noch über `git rm <pfad>` und `git mv <alt> <neu>`. Im Container sind diese Befehle wirkungslos, weil der Git-Ordner des Hauptprojekts nicht eingebunden ist. Mit Sandbox-Standard `docker` können Agents darum keine Dateien löschen oder umbenennen. Der Entwickler sieht das als Kandidat für Phase 4.
 - Der Entwickler sollte laut Nachricht einen Abbruch durch das Anthropic-Ausgabelimit als „pausiert/Limit“ erkennen. In der Änderungsliste ist dazu nur die Kennzeichnung von Limit-Fehlern belegt. Ob der Wiederholungszähler dabei wirklich nicht hochzählt, ist zu prüfen.
 - Die Bug-Wächter-Bugs („monthly spend limit“) sind Budget-Abbrüche, keine Code-Fehler.
 - `docs/tests/2026-10-28_23-36/` ist ein untracked Testbericht eines früheren Laufs, nicht Teil dieses Auftrags.
@@ -62,7 +63,7 @@ Sprint „Isolation“ (Sammelauftrag 36217529):
 - `@@SERVICES` in Workflow-Läufen (`runner-agent.ts`) und die Gruppe „Dienst-Logs“ (`~/Library/Logs`) plattformneutral machen (offen aus Phase 2, bisher nicht in der Änderungsliste).
 - Limit-Abbruch als „pausiert“ ohne Wiederholungszähler prüfen.
 - Bug-Wächter-Aufträge nach dem Limit-Reset erneut anstossen.
-- Phase 4 planen.
+- Phase 4 planen, darin `git rm`/`git mv` im Container ermöglichen (Löschen und Umbenennen durch Agents mit Sandbox `docker`).
 
 ## Technische Dokumentation
 
