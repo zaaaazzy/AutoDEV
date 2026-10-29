@@ -230,7 +230,7 @@ test('runStep: erfolgreicher Schritt wird gespeichert und an die Nachfolger weit
   };
   const ctx = context(pool, execute);
   const outcome = await runStep(ctx, agent('Dev', { command: ['dev'] }), 0, 1);
-  assert.deepEqual(outcome, { passed: true, interrupted: false, correctable: false });
+  assert.deepEqual(outcome, { passed: true, interrupted: false, correctable: false, cancelled: false });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.[0], 'dev');
   const saved = queries.find((query) => query.sql.includes('SET status = $2, exit_code = $3'));
@@ -247,7 +247,7 @@ test('runStep: ein Fehlschlag mit canCorrect geht zurück an den Entwickler, ohn
   const outcome = await runStep(context(pool, execute), agent('Test', { command: ['test'] }), 1, 2, {
     canCorrect: true,
   });
-  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: true });
+  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: true, cancelled: false });
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
 });
 
@@ -277,7 +277,8 @@ test('runStep: Abbruch aus der Oberfläche beendet den Schritt sofort, ohne Bug 
   assert.ok(Date.now() - startedAt < 10_000, 'Abbruch erreicht den Agent über das Signal');
   // Commit und checkout base dürfen erst laufen, wenn der Agent wirklich beendet ist.
   assert.equal(agentEnded, true, 'wartet auf das echte Ende des Agents');
-  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: false });
+  // Der Abbruch wird gemeldet: runWorkItem startet danach keinen Agent mehr (auch nicht „Bei abgelehnt“).
+  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: false, cancelled: true });
   assert.equal(calls, 1, 'ein Abbruch wird nicht als vorübergehender Fehler wiederholt');
   const saved = queries.find((query) => query.sql.includes('SET status = $2, exit_code = $3'));
   assert.deepEqual(saved?.values.slice(1, 3), ['failed', 130]);
