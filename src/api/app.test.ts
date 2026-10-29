@@ -650,6 +650,10 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(created.status, 201);
     const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
     assert.equal(insert?.values[3], 'while_task');
+    // Nutzt das Projekt Workflow-Schritte, bekommt der neue Agent dort seinen Schritt (sonst liefe er nie).
+    const step = queries.find((query) => query.sql.includes('INSERT INTO workflow_steps'));
+    assert.deepEqual(step?.values, ['mainty', 'while_task', ID]);
+    assert.match(step?.sql ?? '', /WHERE EXISTS \(SELECT 1 FROM workflow_steps WHERE project_slug = \$1\)/);
     // Jeder Befehl wird einzeln gesetzt: ohne Angabe bekommt ein neuer Agent keine Befehle.
     assert.deepEqual(insert?.values[7], []);
 
@@ -673,6 +677,10 @@ test('defines agents per workflow phase and persists their order', async () => {
     });
     assert.equal(ordered.status, 204);
     assert.deepEqual(queries.at(-1)?.values, ['mainty', 'pre_task', [ID, SPRINT_ID]]);
+    // Eine Quelle: Die Reihenfolge landet auch in den Workflow-Schritten, die der Worker ausführt.
+    assert.match(queries.at(-1)?.sql ?? '', /UPDATE workflow_steps s SET position = o\.ord, phase = \$2/);
+    assert.match(queries.at(-1)?.sql ?? '', /s\.agent_id = o\.id AND s\.project_slug = \$1/);
+    assert.match(queries.at(-2)?.sql ?? '', /UPDATE agents a SET position/);
 
     const badOrder = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
       method: 'POST',
@@ -685,6 +693,32 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(list.status, 200);
     // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
     assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
+  });
+});
+
+test('changing the phase of an agent moves its workflow steps, so the next run follows the setting', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const patch = (body: unknown) =>
+      fetch(`${baseUrl}/api/agents/${ID}`, { method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(body) });
+    assert.equal((await patch({ phase: 'after_task' })).status, 200);
+    const move = queries.at(-1);
+    assert.match(move?.sql ?? '', /UPDATE workflow_steps s\s+SET phase = \$2/);
+    assert.deepEqual(move?.values, [ID, 'after_task']);
+    // Ohne Phasenänderung bleiben die Schritte unberührt (Name, Anweisung …).
+    const before = queries.length;
+    assert.equal((await patch({ name: 'Neu' })).status, 200);
+    assert.ok(queries.slice(before).every((query) => !query.sql.includes('workflow_steps')));
+  });
+});
+
+test('lists agents with the phase and position of their first workflow step', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const list = await fetch(`${baseUrl}/api/projects/mainty/agents`, { headers: jsonHeaders() });
+    assert.deepEqual(((await list.json()) as { agents: unknown[] }).agents, [{ id: ID }]);
+    assert.match(queries.at(-1)?.sql ?? '', /COALESCE\(s\.phase, a\.phase\) AS phase/);
+    assert.match(queries.at(-1)?.sql ?? '', /FROM workflow_steps WHERE agent_id = a\.id/);
   });
 });
 
@@ -780,7 +814,8 @@ test('stores an agent command as an argument array and rejects strings', async (
       body: JSON.stringify({ name: 'Dev', phase: 'while_task', command: ['claude', '-p'] }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries.at(-1)?.values[6], ['claude', '-p']);
+    const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
+    assert.deepEqual(insert?.values[6], ['claude', '-p']);
     const invalid = await fetch(`${baseUrl}/api/agents/${ID}`, {
       method: 'PATCH',
       headers: jsonHeaders(),
