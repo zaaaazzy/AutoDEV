@@ -30,3 +30,15 @@ Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit
 
 - `src/core/provider-limits.test.ts`: Anbieter aus dem Befehl, fester https-Link, Zurücksetzen nach Reset und Erfolg, unlesbare Einträge, „Fortsetzen“, Aktionen je Rolle und Mandant.
 - `frontend/src/app/features/dashboard/provider-limits.spec.ts`: Anzeige nur bei aktivem Limit, nur `https://`, Meldungstext.
+
+## Geänderte Dateien
+
+- Backend: `src/core/provider-limits.ts` (neu), `src/api/provider-limits.ts` (neu), `src/api/app.ts`, `src/runner/autofix.ts`, `src/runner/runner-agent.ts`, `src/runner/runner-steps.ts`, `src/agent/requirements.ts`
+- Frontend: `core/models.ts`, `features/dashboard/provider-limits.ts` (neu), `provider-limit-alert.component.ts` (neu), `dashboard.component.ts/.html`
+- Doku: `README.md`, `docs/erm.md`, diese Datei, Benutzerhandbuch `benutzerhandbuch-tokenstand-im-dashboard-2026-10-29.md`
+
+## Hinweise / Teststand
+
+- Neue Daten liegen in `app_settings` (Schlüssel `provider_limit:<anbieter>`), keine neue Tabelle. Das ERM erwähnt dies.
+- **Teststand: nicht verifiziert.** Der Tester-Lauf scheiterte an der Umgebung, nicht am Code: `tsc: not found` (Exit 127 im Image „aideation-agent“) und `npx` mit `EACCES` auf `/home/agent/.npm`. Weder `npm run typecheck` noch die sechs zugehörigen Testdateien liefen. Vor dem Merge `npm run typecheck` und `npm run test:unit` in einer Umgebung mit installierten Abhängigkeiten ausführen (letzter grüner Stand: 1833 Tests).
+- Die Bug-Liste enthält weiterhin den Eintrag „CI CD nicht in Ordnung“ (offen, critical). Er hängt mit derselben Umgebung zusammen und ist durch diesen Auftrag nicht behoben.
