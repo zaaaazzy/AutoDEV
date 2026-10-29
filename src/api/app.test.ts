@@ -1214,6 +1214,81 @@ test('with a second factor, cached basic credentials neither count as failures n
   }
 });
 
+test('ein Handbuch mit 30 000 Umlauten passt durch den JSON-Parser, ein zu grosser Body gibt 413 als JSON', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const post = (content: string) =>
+      fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content }),
+      });
+    // 30 000 Zeichen „ä“ sind rund 60 KB – vorher schon am 32-KB-Limit als HTML-413 gescheitert.
+    const full = await post('ä'.repeat(30_000));
+    assert.equal(full.status, 201);
+    assert.equal(queries.at(-1)?.values[2], 'ä'.repeat(30_000));
+
+    const tooLarge = await post('ä'.repeat(150_000));
+    assert.equal(tooLarge.status, 413);
+    assert.match(tooLarge.headers.get('content-type') ?? '', /application\/json/);
+    assert.match(((await tooLarge.json()) as { message: string }).message, /zu gross/);
+  });
+});
+
+test('kaputtes JSON gibt 400 als JSON, ein Serverfehler 500 ohne Stacktrace und Fehlertext', async () => {
+  const pool = {
+    query: async () => {
+      throw new Error('geheimes Detail aus der Datenbank');
+    },
+  } as unknown as Pool;
+  const errors = console.error;
+  console.error = () => undefined;
+  try {
+    await withServer(pool, async (baseUrl) => {
+      const broken = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: '{"title": "x",',
+      });
+      assert.equal(broken.status, 400);
+      assert.deepEqual(await broken.json(), { message: 'Die Anfrage enthält kein gültiges JSON.' });
+
+      const failed = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content: 'x' }),
+      });
+      assert.equal(failed.status, 500);
+      assert.match(failed.headers.get('content-type') ?? '', /application\/json/);
+      const text = await failed.text();
+      assert.doesNotMatch(text, /stack|geheimes Detail|at /);
+      assert.deepEqual(JSON.parse(text), { message: 'Interner Fehler. Bitte später erneut versuchen.' });
+    });
+  } finally {
+    console.error = errors;
+  }
+});
+
+test('ein Sitzungs-Cookie mit kaputtem „%“ gibt 401 statt 500', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects`, { headers: { Cookie: 'devlog_session=%E0%A4%A' } });
+    assert.equal(response.status, 401);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
+  });
+});
+
+test('unbekannte Pfade antworten für jede Methode mit JSON-404', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      const response = await fetch(`${baseUrl}/gibt-es-nicht`, { method, headers: { Authorization: basicAuth() } });
+      assert.equal(response.status, 404, method);
+      assert.deepEqual(await response.json(), { message: 'Nicht gefunden.' }, method);
+    }
+  });
+});
+
 test('Sprint-Name mit gleichem Git-Branch wie ein anderer Sprint wird abgelehnt', async () => {
   const pool = {
     query: async (sql: string) =>
