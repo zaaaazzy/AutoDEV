@@ -22,7 +22,7 @@ Die Abnahme-Box auf „Aktionen“ war eine Kopie der Freigabe-Box (`shown`, `in
 - Neue Slot-Status oder Texte der Review-Boxen gehören nur noch in `review-box.ts` bzw. `review-slot-status.component.ts`.
 - Die `computed`-Werte stützen sich auf den Input-Signal und die Store-Daten, die ersetzt und nie verändert werden. Wer Sprint oder Aufträge künftig an Ort und Stelle verändert, aktualisiert die Anzeige nicht.
 - Das Verhalten ist gleich geblieben: gleiche Ausgabe, nur zwischengespeichert. Das Zurücksetzen des Abnahme-Häkchens nach Fehler (siehe `abnahme-haekchen-nach-fehler-zuruecksetzen-2026-10-29.md`) wurde nicht angefasst.
-- Der erste Lauf scheiterte am Ausgabenlimit des Kontos (Bug-Wächter), nicht am Code. Die offenen Bug-Einträge dazu sind Folgen des Limits.
+- Der erste Lauf scheiterte am Ausgabenlimit des Kontos (Bug-Wächter), nicht am Code. Die offenen Bug-Einträge dazu sind Folgen des Limits (Folge des Spend-Limits, keine Code-Änderung; siehe `bug-waechter-spend-limit-folgefehler-review-box-9224d9a4-2026-10-29.md`). Der Build lief, die Specs wurden auch beim Bugfix-Lauf nicht ausgeführt.
 
 ## Tests
 `review-box.spec.ts` (neu), `labels.spec.ts` und `git-graph.spec.ts` ergänzt. Für diese Dokumentation wurden die Tests nicht ausgeführt. Die CI ist laut Bug-Liste weiterhin offen (eigener Auftrag).
