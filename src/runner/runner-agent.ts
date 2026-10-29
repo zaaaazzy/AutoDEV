@@ -156,7 +156,7 @@ export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<
 }
 
 /** CLI-Befehl eines Schritts: vom Routing, eigener Befehl des Agents oder Standardbefehl; null = eingebautes Modell. */
-function configuredCommand(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string[] | null {
+export function configuredCommand(ctx: RunContext, agent: WorkflowAgent, routed: RoutedModel): string[] | null {
   if (routed.model) return null;
   if (routed.command) return routed.command;
   return agent.command?.length ? agent.command : agent.role === 'tester' ? null : ctx.fallbackCommand;

@@ -18,7 +18,8 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 ## Anmeldung, Benutzer und Mandanten
 
-- `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`.
+- `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`, `provider_limit:<anbieter>`.
+- `app_settings.provider_limit:<anbieter>` (Anbieter `claude` | `copilot` | `gemini`, JSON `{ "since", "resetAt" }`): Nutzungslimit des Agent-Kontos, erkannt an der CLI-Meldung („You've hit your … limit · resets …“, `src/core/provider-limits.ts`). Ein erfolgreicher Lauf desselben Anbieters oder „Fortsetzen“ löscht den Eintrag; nach `resetAt` gilt er als abgelaufen. Der Link zur Bezahlseite steht fest im Code, nie in der Datenbank.
 - `users` (`id` UUID, `username` – eindeutig ohne Gross-/Kleinschreibung, `display_name`, `password_hash`, `roles` TEXT[], `active`, `totp_secret`, `totp_pending` (beide verschlüsselt), `last_login_at`, `created_at`, `updated_at`): benannte Benutzer zusätzlich zum Systemadministrator.
 - `auth_sessions` (`token_hash` PK, `created_at`, `last_seen`, `expires_at`, `user_agent`, `user_id` → `users` (`ON DELETE CASCADE`, NULL = Systemadministrator), `credential_version` (an das Passwort gebunden, `src/db/migrations.ts`)) – n:1 zu `users`.
 - `push_subscriptions` (`endpoint` PK, `p256dh`, `auth`, `user_agent`, `created_at`, `user_id` → `users` (`ON DELETE CASCADE`), `system_admin`) – n:1 zu `users`; Push geht nur an Geräte mit Zugriff auf das Projekt.

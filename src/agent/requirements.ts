@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logged } from '../core/log.js';
+import { noteProviderOutcome } from '../core/provider-limits.js';
 import {
   readOnlyWorkspace,
   SANDBOX_GUARD,
@@ -281,6 +282,13 @@ export async function runAuthorAgent(
         ],
       )
       .catch(logged('requirements'));
+    // Anbieterstatus fürs Dashboard: Limit-Meldung festhalten, nach einem erfolgreichen Lauf zurücksetzen.
+    if (command && !signal?.aborted) {
+      await noteProviderOutcome(pool, configured, {
+        exitCode: result.exitCode,
+        output: redactOutput(result.output, process.env),
+      }).catch(logged('requirements'));
+    }
     // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
     if (budget?.states.length) await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
     return {

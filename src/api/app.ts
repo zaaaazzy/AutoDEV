@@ -43,6 +43,7 @@ import { registerTestRunRoutes } from './test-runs.js';
 import { registerTimelineRoutes } from './timeline.js';
 import { registerQualityRoutes } from './quality.js';
 import { registerWorkerRoutes } from './worker.js';
+import { registerProviderLimitRoutes } from './provider-limits.js';
 
 export type { DevLogAuth } from './auth.js';
 
@@ -150,6 +151,7 @@ export function createApiRouter(pool: Pool, auth: DevLogAuth | null): Router {
   registerSystemRestartRoutes(api, pool);
   registerScheduledJobRoutes(api, pool);
   registerWorkerRoutes(api, pool);
+  registerProviderLimitRoutes(api, pool);
   registerPushRoutes(api, pool);
   registerUserRoutes(api, pool, auth);
   registerDocRevisionRoutes(api, pool);

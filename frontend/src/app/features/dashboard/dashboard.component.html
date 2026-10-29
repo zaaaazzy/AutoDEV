@@ -1,6 +1,8 @@
 @if (store.ready()) {
   <app-git-graph-backdrop />
   <app-git-alert />
+  <!-- Nutzungslimit eines Agent-Anbieters (Claude …) erreicht: Hinweis mit Reset-Zeit und Link zum Erhöhen. -->
+  <app-provider-limit-alert />
   <!-- Test, Merge, Push oder CI-Prüfung laufen: Ladesymbol mit Restzeit und Fortschritt (sonst unsichtbar). -->
   <app-wait-status [card]="true" />
   <section class="summary-grid" aria-label="Projektkennzahlen">
