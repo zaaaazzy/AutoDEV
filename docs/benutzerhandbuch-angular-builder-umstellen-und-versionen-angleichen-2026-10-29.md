@@ -4,6 +4,10 @@ Dieses Kapitel beschreibt, was sich beim Entwickeln an AIdeation ändert: den Be
 Mindestversion von Node.js und die automatischen Abhängigkeits-Updates. Es gilt für das AIdeation-Repository. An der Oberfläche
 von Dev Log ändert sich nichts. Auftrag 95b15d69, Stand 29.10.2026.
 
+**Status: noch nicht abgeschlossen.** Die Code-Umstellung ist da. Der Schritt `npm install -D @angular/cdk@^20.3.0` mit
+anschließender Prüfung ist offen. Agents können `npm install` und `npx` in dieser Umgebung nicht ausführen. Die Angaben zu
+npm-Abhängigkeiten und Audit unten stammen aus den Vermerken des Entwicklers und der Tester, nicht aus einem eigenen Lauf.
+
 ## 1. Was sich ändert
 
 - **Der Entwicklungsserver heißt jetzt anders.** `npm run dev:ui` startet `ng serve` weiterhin mit dem Proxy aus
@@ -85,10 +89,14 @@ und `.github/dependabot.yml`.
 
 ## 7. Offene Punkte
 
+- **Manueller Schritt für Patrick (offen):** `npm install -D @angular/cdk@^20.3.0` ausführen. Danach `npm ci`,
+  `npm run build:ui`, `npm run typecheck`, `npm run lint`, `npm run test:unit`, `npm audit` und `npm audit --omit=dev`, und
+  das Ergebnis festhalten. Erst dann ist der Auftrag abgeschlossen.
 - **`@angular/cdk` steht noch auf 20.2.14.** Der Auftrag verlangt ^20.3.x. Der Entwickler hat cdk bewusst nicht von Hand
-  angehoben, weil `npm ci` sonst mit einer unstimmigen Lockfile bricht.
+  angehoben, weil `npm ci` sonst mit einer unstimmigen Lockfile bricht. Dieser Widerspruch ist mit dem manuellen Schritt
+  aufzulösen.
 - **Die Lockfile ist nicht von npm erzeugt.** Sie enthält noch den Paketeintrag `@angular-devkit/build-angular` mit der
-  Webpack-Kette. Erst `npm install -D @angular/cdk@^20.3.0` mit npm-Freigabe erneuert sie vollständig.
+  Webpack-Kette. Der manuelle Schritt erneuert sie vollständig.
 - **Die `npm audit`-Funde sind nicht nachgeprüft.** Die 17 Funde aus dem Review bleiben bis zu diesem Schritt bestehen. Die Funde
   über `@modelcontextprotocol/sdk` aus `@angular/cli` behebt die Umstellung nicht.
 - **Tests des Entwicklers:** `build:ui`, `typecheck` und `test:unit` (1822 Tests) laufen laut Entwickler grün, `lint` ohne
