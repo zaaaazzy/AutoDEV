@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import type { AcceptanceCheck } from '../core/models.js';
 import { AcceptanceTicks } from './acceptance-ticks.js';
 
-const check = { kind: 'manual', position: 2, text: 'Knopf prüfen' } as AcceptanceCheck;
+const check = { kind: 'manual', position: 2, text: 'Knopf prüfen' } as unknown as AcceptanceCheck;
 
 /** Wie `store.perform`: Fehler werden geschluckt, das Ergebnis sagt, ob es geklappt hat. */
 function perform(action: () => Promise<unknown>): Promise<boolean> {
