@@ -15,6 +15,24 @@ export interface GitGraph {
   commits: GitCommit[];
 }
 
+/** Zustand des Git-Verlaufs im Frontend: letzter Stand, erste Antwort da, letzter Abruf gescheitert. */
+export interface GitGraphState {
+  graph: GitGraph | null;
+  loaded: boolean;
+  error: boolean;
+}
+
+export const EMPTY_GIT_GRAPH_STATE: GitGraphState = { graph: null, loaded: false, error: false };
+
+/**
+ * Antwort eines Abrufs übernehmen. Scheitert er (`result` ist `null`, z. B. beim Neustart des Workers),
+ * bleibt der letzte Stand stehen und nur `error` wird gesetzt – Panel und Dekoration verschwinden nicht.
+ */
+export function nextGitGraphState(state: GitGraphState, result: { graph: GitGraph | null } | null): GitGraphState {
+  if (!result) return { ...state, error: true };
+  return { graph: result.graph, loaded: true, error: false };
+}
+
 /** Spurfarben für Panel und Rand-Dekoration. */
 export const PALETTE = ['#2f7de1', '#e8590c', '#2b9a66', '#ae3ec9', '#d6336c', '#0c8599', '#f08c00', '#5c7cfa'];
 

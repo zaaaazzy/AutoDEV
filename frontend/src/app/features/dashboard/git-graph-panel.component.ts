@@ -16,6 +16,7 @@ export class GitGraphPanelComponent {
   private readonly source = inject(GitGraphStore);
   protected readonly graph = this.source.graph;
   protected readonly loaded = this.source.loaded;
+  protected readonly error = this.source.error;
   protected readonly showAll = signal(false);
   protected readonly layout = computed(() => layoutGraph(this.graph()?.commits ?? []));
   protected readonly visibleRows = computed(() => this.layout().rows.slice(0, this.showAll() ? undefined : 25));
