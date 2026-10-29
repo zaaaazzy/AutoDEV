@@ -2,7 +2,7 @@
 
 Dieses Kapitel beschreibt die neue Docker-Sandbox aus Auftrag ef52246b. Auf Wunsch läuft der Entwickler-Agent in einem kurzlebigen Container statt direkt auf dem Rechner. Der Schalter ist standardmässig aus, daher ändert sich für bestehende Projekte nichts, solange du ihn nicht einschaltest.
 
-> **Printscreens:** keine. In dieser Sitzung wurde die App nicht gestartet und es gab keinen Browser-Lauf. Die Beschreibung stammt aus dem Quelltext des Auftrags-Branches (`src/core/sandbox.ts`, `src/runner/runner-agent.ts`, `src/runner/runner-cli.ts`, `frontend/src/app/features/settings/settings.component.html`) und aus `docs/agents-und-rechte.md` und `docs/installation.md` desselben Branches. Abschnitt 8 nennt die Aufnahmen, die noch fehlen.
+> **Printscreens:** keine. In dieser Sitzung wurde die App nicht gestartet und es gab keinen Browser-Lauf. Die Beschreibung stammt aus dem Quelltext des Auftrags-Branches (`src/core/sandbox.ts`, `src/runner/runner-agent.ts`, `src/runner/runner-cli.ts`, `frontend/src/app/features/settings/settings.component.html`) und aus `docs/agents-und-rechte.md` und `docs/installation.md` desselben Branches. Abschnitt 10 nennt die Aufnahmen, die noch fehlen.
 >
 > **Stand:** Der Code liegt auf dem Branch `auftrag/ef52246b-docker-sandbox-phase-1-entwickle`. Das Image `aideation-agent` wurde auf dem Entwicklungsrechner noch nicht gebaut, und der Docker-Integrationstest ist nicht gelaufen. Die Angaben zu Verhalten im Container sind daher aus dem Code abgeleitet und noch nicht im Lauf geprüft.
 
