@@ -645,8 +645,14 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   const sourceCountBefore = await source().locator('.workflow-step').count();
   await dragged.locator('.workflow-step-handle').hover();
   await page.mouse.down();
+  // Erst ein paar Pixel ziehen: Springt die Maus mit Scrollen direkt zur fernen Zielphase, startet Chromium kein Ziehen.
+  const handle = await dragged.locator('.workflow-step-handle').boundingBox();
+  if (handle) await page.mouse.move(handle.x + 6, handle.y + handle.height + 12, { steps: 5 });
   await target().locator('.workflow-phase-head').hover();
   await target().locator('.workflow-phase-head').hover({ position: { x: 20, y: 5 } });
+  // Unter Playwright kommt dragover erst mit der nächsten Bewegung an (echte Browser feuern es laufend).
+  const head = await target().locator('.workflow-phase-head').boundingBox();
+  if (head) await page.mouse.move(head.x + 24, head.y + 8, { steps: 3 });
   await expect.soft(dragged, 'Gezogener Schritt hat einen Schatten').toHaveClass(/dragging/);
   expect
     .soft(await dragged.evaluate((node) => getComputedStyle(node).boxShadow), 'Schatten beim Ziehen')
