@@ -428,6 +428,10 @@ Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitli
 - Geschwärzt wird vor dem Kürzen. Ein Secret, das über eine Schnittkante reicht, wird dort ganz entfernt. Geschnitten wird nie mitten in einem Emoji (Surrogate-Paar). stdout und stderr haben je einen eigenen UTF-8-Decoder, deshalb bleiben Umlaute auf Chunk-Grenzen ganz.
 - Claude-CLI (`stream-json`): stdout und stderr haben getrennte Zeilenpuffer, und nur stdout wird als Ereignis gelesen. stderr kann so keine JSON-Zeile zerreissen und kein gefälschtes `result` einschleusen. Die letzte Zeile ohne Zeilenumbruch wird beim Abschluss gelesen. Fehlt das `result`-Ereignis bei Exit-Code 0, gilt der Schritt als fehlgeschlagen, nicht als Erfolg mit Kosten 0. Die Live-Ausgabe wird höchstens alle 500 ms neu zusammengesetzt, der lesbare Text ist auf die letzten rund 120 000 Zeichen begrenzt.
 
+### Fehlerantworten der API
+
+`src/api/error-handler.ts` ist die letzte Middleware in `createDevLogApp`. Unbekannte Pfade (jede Methode) ergeben ein JSON-404, ein zu grosser Body 413, kaputtes JSON 400, alles andere 500. Die Antwort ist immer `{ "message": … }` und enthält nie Stacktrace oder Fehlertext; der Fehler steht nur im Server-Log. Das JSON-Limit ist 256 KB (Doku-Höchstlänge `MAX_DOC_CONTENT` = 30 000 Zeichen, bis 6 Byte je Zeichen). Ein Session-Cookie mit ungültiger Prozentkodierung gilt als nicht angemeldet (401).
+
 ### Sofortstart
 
 Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. Das 30-s-Intervall bleibt als Absicherung.
