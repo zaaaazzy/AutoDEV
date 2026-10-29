@@ -56,7 +56,7 @@ export function sprintButtons(
  * Führt `action` nur aus, wenn gerade keine andere läuft; `flag` ist ab dem ersten Klick gesetzt (auch während der
  * Rückfrage) und wird im finally zurückgesetzt, damit die Knöpfe nach einem Fehler wieder gehen.
  */
-export async function exclusive(flag: WritableSignal<boolean>, action: () => Promise<void>): Promise<void> {
+export async function exclusive(flag: WritableSignal<boolean>, action: () => Promise<unknown>): Promise<void> {
   if (flag()) return;
   flag.set(true);
   try {
