@@ -190,7 +190,10 @@ Workflow. Bricht ein Lauf aus einem anderen unerwarteten Grund ab, steht am bloc
 | Bei abgeschlossen | `on_done`     | am Ende eines erfolgreichen Auftrags                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 „Bei abgelehnt/abgeschlossen“ laufen noch vor dem Abschluss des Auftrags (ihre Änderungen landen im Commit), ändern
-aber sein Ergebnis nicht: kein Bug, keine Abnahme, kein Statuswechsel.
+aber sein Ergebnis nicht: kein Bug, keine Abnahme, kein Statuswechsel. Nach einem Abbruch durch den Benutzer
+(„Abbrechen“ am laufenden Agent oder Sprint-Abbruch, `cancel_requested`) startet kein weiterer Agent des Auftrags, auch
+kein „Bei abgelehnt“: `runStep` meldet `cancelled` im Ergebnis, `runWorkItem` hält an. Wird ein Beobachter selbst
+abgebrochen, starten die übrigen ebenfalls nicht.
 
 **Nachrichten zwischen Agents:** Ein Agent schreibt `@@NACHRICHT: …` (an den nächsten Agent) oder
 `@@NACHRICHT an <Name>: …`. Ist beim Absender „Nachricht geht an“ (`agents.handoff_to`) gesetzt, geht eine Nachricht
