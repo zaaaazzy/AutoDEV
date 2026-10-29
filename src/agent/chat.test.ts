@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOllamaAgent } from './ollama-agent.js';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireTree } from '../core/project-lock.js';
@@ -240,6 +240,64 @@ test('Fortgesetzte Sitzung erhält bei belegtem Ordner den Nur-lesen-Hinweis', a
   const prompt = await resumedRun({ withReference: false, busy: true });
   assert.match(prompt, /Du kannst nur lesen und antworten/);
   assert.doesNotMatch(prompt, /Verweise des Nutzers/);
+});
+
+test('Assistent startet einen Dienst über services.restart neu, das Ergebnis erscheint im Chat', async () => {
+  const answers: string[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      const text = sql.replace(/\s+/g, ' ');
+      if (text.startsWith("UPDATE chat_messages SET status = 'processing'")) {
+        return {
+          rows: [
+            {
+              id: 'n1',
+              content: 'Die API hängt, bitte neu starten.',
+              agentId: null,
+              references: [],
+              ideaCommentId: null,
+              replyTo: null,
+              origin: 'chat',
+              taskRunId: null,
+            },
+          ],
+        };
+      }
+      if (text.includes('command, allowed_commands')) {
+        return { rows: [{ instructions: '', command: ['claude', '-p'], allowedCommands: null, fileScope: [] }] };
+      }
+      if (text.startsWith('INSERT INTO chat_messages') && text.includes("'assistant'")) {
+        answers.push(String(values[1]));
+        return { rows: [{ id: 'a1' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Parameters<typeof processChat>[0];
+  const cwd = mkdtempSync(join(tmpdir(), 'chat-services-'));
+  writeFileSync(join(cwd, 'compose.yaml'), 'services:\n  api:\n    image: x\n');
+  const docker: string[] = [];
+  await processChat(pool, { project: 'demo', cwd, timeoutMs: 5000 }, async (command, _cwd, options) => {
+    if (command[0] === 'docker') {
+      docker.push(command.slice(4).join(' '));
+      if (command.includes('--services')) return { exitCode: 0, durationMs: 1, output: 'api\n' };
+      if (command.includes('--format')) return { exitCode: 0, durationMs: 1, output: '{"services":{"api":{}}}' };
+      return { exitCode: 0, durationMs: 1, output: 'Container api Started' };
+    }
+    // Der Claude-Lauf selbst ruft kein docker auf, er fordert die Aktion per Marker an (stream-json, result-Ereignis).
+    const result = {
+      type: 'result',
+      result: 'Ich starte die API neu.\n@@SERVICES: services.restart api',
+      is_error: false,
+    };
+    const raw = `${JSON.stringify(result)}\n`;
+    options?.onChunk?.(raw);
+    return { exitCode: 0, durationMs: 1, output: raw };
+  });
+  const answer = answers.at(-1) ?? '';
+  assert.deepEqual(docker, ['config --services', 'config --format json', 'restart api'], answer);
+  assert.match(answer, /^Ich starte die API neu\.\n\n## Dienst-Aktionen\n- services\.restart api: erledigt/);
+  assert.match(answer, /Container api Started/);
+  assert.doesNotMatch(answer, /@@SERVICES/);
 });
 
 test('Fortgesetzte Sitzung ohne Verweis und bei freiem Ordner bleibt ohne beide Zusätze', async () => {

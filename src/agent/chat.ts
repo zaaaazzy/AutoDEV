@@ -11,6 +11,8 @@ import { closeExpressOrder, openExpressOrder } from './express-order.js';
 import { saveRequestDoc } from './request-doc.js';
 import { type ChatReference, referenceContext } from './chat-references.js';
 import { replyToIdeaComment } from '../api/idea-comments.js';
+import { READ_ONLY_PERMISSION_ROLE } from './permission-rules.js';
+import { runServiceMarkers, serviceResultsSection } from './service-actions.js';
 import type { RunnerOptions } from '../runner/runner.js';
 import {
   finishTaskRun,
@@ -29,6 +31,13 @@ const OPTIONS_MARKER = /^@@OPTIONEN:\s*(.+)$/m;
 const MAX_OPTIONS = 4;
 const QUESTION_RULE =
   'Rückfragen: Fehlt dir eine Information, ohne die du nicht sinnvoll weiterarbeiten kannst (z. B. eine Entscheidung zwischen klaren Alternativen), arbeite so weit wie möglich und stelle dann genau eine kurze Rückfrage. Beende die Antwort in diesem Fall mit einer eigenen Zeile `@@FRAGE: <deine Frage>`. Gibt es naheliegende Antworten, nenne sie in einer weiteren Zeile `@@OPTIONEN: <Antwort 1> | <Antwort 2>` (höchstens 4, je ein kurzer Satz, den der Nutzer anklicken kann). Frage nicht, wenn du sinnvoll selbst entscheiden kannst.';
+
+/**
+ * Dienste verwaltet der Assistent nicht per Shell, sondern über feste Worker-Aktionen: Der Worker prüft jede Anfrage
+ * (Projektordner, Compose-Datei, Dienst, Rolle) und führt sie selbst aus.
+ */
+const SERVICE_RULE =
+  'Dienste des Projekts (Docker Compose im Projektordner) verwaltest du nur über die Worker-Aktionen services.status, services.logs (mit --lines=<1–1000> und --since=<z. B. 15m>), services.restart, services.up (optional --build) und services.stop – docker und Dienst-Befehle des Betriebssystems sind für dich gesperrt. Logs liest du mit services.logs, einen hängenden Dienst startest du mit services.restart neu, statt Prozesse mit kill zu beenden. Mit dem Werkzeug service_action rufst du sie direkt auf; hast du es nicht, schreibe je Aktion eine eigene Zeile `@@SERVICES: services.restart <dienst>` (bzw. `@@SERVICES: services.logs <dienst> --lines=200 --since=15m`). Der Worker führt diese Zeilen nach deiner Antwort aus und hängt das Ergebnis an; behaupte also nicht, die Aktion sei schon gelaufen.';
 
 /** Trennt die Rückfrage (@@FRAGE-Zeile) vom übrigen Antworttext. */
 export function splitQuestion(output: string): { text: string; question: string | null; options: string[] } {
@@ -79,7 +88,8 @@ export function buildChatPrompt(
     agentIdentity(agent),
     references,
     'Du bist der Einstiegspunkt für alle Anfragen. Sage NIE „das darf ich nicht“, „dafür habe ich kein Tool“ oder „mach das selbst“.',
-    'Du bist zugleich der Problemlöser und hast erweiterte Rechte innerhalb des Projektordners: untersuche und behebe gemeldete Fehler selbst, führe passende Tests aus und verwalte Dienste mit docker compose (ps, logs, up -d, stop, start, restart, down, build) und setze Umgebungen auf (git clone, npm install --ignore-scripts). Stoppen mit "docker compose stop" oder "docker compose down" ist erlaubt. Führe Befehle mit deinem Shell-Werkzeug aus (run_command bzw. Bash) und melde ihr tatsächliches Ergebnis. Wird ein Befehl abgelehnt, nenne ihn wörtlich, statt zu behaupten, er sei gelaufen. Diagnostiziere selbst, statt den Nutzer um Ausgaben zu bitten: Dienst-Logs liegen unter ~/Library/Logs (z. B. mainty-dev-live.log, lies sie mit deinem Lese-Werkzeug), lokale Webseiten und APIs prüfst du mit WebFetch (nur localhost), laufende Prozesse und Ports mit ps und lsof -i, Container mit docker ps und docker compose logs. Hängt der Live-Modus eines Projekts, starte ihn mit `launchctl kickstart -k gui/<uid>/ch.<projekt>.dev-live` neu (uid mit `id -u`), statt Prozesse mit kill zu beenden. Änderungen und Befehle müssen im Projektkontext bleiben.',
+    'Du bist zugleich der Problemlöser und hast erweiterte Rechte innerhalb des Projektordners: untersuche und behebe gemeldete Fehler selbst, führe passende Tests aus und setze Umgebungen auf (git clone, npm install --ignore-scripts). Führe Befehle mit deinem Shell-Werkzeug aus (run_command bzw. Bash) und melde ihr tatsächliches Ergebnis. Wird ein Befehl abgelehnt, nenne ihn wörtlich, statt zu behaupten, er sei gelaufen. Diagnostiziere selbst, statt den Nutzer um Ausgaben zu bitten: lokale Webseiten und APIs prüfst du mit WebFetch (nur localhost), laufende Prozesse und Ports mit ps. Änderungen und Befehle müssen im Projektkontext bleiben.',
+    SERVICE_RULE,
     'Führe die Anfrage direkt selbst aus. Erstelle niemals Aufträge, schreibe niemals @@TASK-Zeilen und delegiere nicht an andere Agents. Wenn du etwas machst, nutze deine Werkzeuge und berichte anschließend konkret über die ausgeführten Schritte und das Ergebnis.',
     routine || QUESTION_RULE,
     `## Gespräch\n${history.map((message) => `${message.role === 'user' ? 'Nutzer' : 'Assistent'}: ${message.content}`).join('\n\n')}`,
@@ -232,7 +242,7 @@ export async function processChat(
         prompt: resumePrompt(openQuestion.question, claimed.content, references, readOnly),
       }
     : undefined;
-  const { exitCode, output, sessionId, tokens } = await runAuthorAgent(
+  const { exitCode, output, sessionId, tokens, serviceRights } = await runAuthorAgent(
     pool,
     options,
     () =>
@@ -311,12 +321,24 @@ export async function processChat(
     ).catch(logged('chat'));
     return true;
   }
-  const split = splitQuestion(output);
+  // Dienst-Aktionen (@@SERVICES-Zeilen der Claude-CLI): Der Worker prüft und führt sie aus, das Ergebnis steht im Chat.
+  // Ohne Rechte (nur lesend, Gruppe nicht freigegeben) lehnt runServiceAction jede Aktion mit Grund ab.
+  const services = await runServiceMarkers(output, {
+    cwd: options.cwd,
+    role: serviceRights?.role ?? READ_ONLY_PERMISSION_ROLE,
+    commands: serviceRights?.commands ?? [],
+    execute,
+  });
+  const split = splitQuestion(services.text);
+  const serviceSection = serviceResultsSection(services.results);
   // Routine: Marker auswerten (Bug, Idee, Auftrag) und im Chat statt der Marker-Zeilen auflisten; keine Rückfrage.
   const finished = await finish(false);
-  const text = routine
-    ? [stripMarkers(split.text) || 'Erledigt.', finished.summary].filter(Boolean).join('\n\n')
-    : split.text;
+  const text = [
+    routine ? [stripMarkers(split.text) || 'Erledigt.', finished.summary].filter(Boolean).join('\n\n') : split.text,
+    serviceSection,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
   const question = routine ? null : split.question;
   const answers = routine ? [] : split.options;
   // Auslöser war ein Kommentar mit @Agent: die Antwort erscheint auch als Kommentar bei der Idee.

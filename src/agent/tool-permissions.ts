@@ -14,11 +14,10 @@ import {
   NO_FILE_WRITE_ROLES,
   PERMISSION_GROUPS,
   READ_ONLY_ROLES,
-  SERVICES_COMMAND,
   TRUSTED_ROLES,
   isToolRule,
   normalizeCommands,
-  servicesRule,
+  normalizeGroups,
   type PermissionGroup,
 } from './permission-rules.js';
 
@@ -42,6 +41,7 @@ export {
   commandHelp,
   commandLabel,
   normalizeCommands,
+  normalizeGroups,
   rulesAllow,
   type PermissionGroup,
 } from './permission-rules.js';
@@ -60,7 +60,7 @@ export {
   shellWords,
   withIgnoreScripts,
 } from './command-checks.js';
-export { COMPOSE_STARTING, composeViolation } from './compose-check.js';
+export { composeViolation } from './compose-check.js';
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -82,7 +82,8 @@ export async function loadProjectPermissions(
   const [enabled, custom] = await Promise.all([
     pool
       .query<{ groups: string[] | null }>('SELECT agent_permissions AS groups FROM projects WHERE slug = $1', [project])
-      .then((result) => result.rows[0]?.groups ?? null),
+      // Frühere Gruppe „docker“ gilt als „services“ (Dienste nur noch über die Worker-Aktionen).
+      .then((result) => normalizeGroups(result.rows[0]?.groups ?? null)),
     pool
       .query<PermissionGroup>(
         'SELECT id, label, description, rules FROM project_permission_groups WHERE project_slug = $1 ORDER BY label',
@@ -330,7 +331,8 @@ export function withAgentPermissions(
     JSON.stringify(agentSettings(hook, `Write|Edit|MultiEdit|NotebookEdit|Bash|${READ_MATCHER}`)),
   ];
   if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...others];
-  const rules = [...chosen.filter(isToolRule), ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : [])];
+  // „services“ ist keine Shell-Regel: Dienst-Aktionen fordert der Agent per @@SERVICES-Marker beim Worker an.
+  const rules = chosen.filter(isToolRule);
   const directories = chosen.includes(LOGS_COMMAND)
     ? readDirectories.flatMap((directory) => ['--add-dir', directory])
     : [];

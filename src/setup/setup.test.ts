@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { agentCommand, templateProjectColumns } from '../api/setup.js';
-import { processSetupJob, whichCommand } from './setup-jobs.js';
+import { launchdServicesFor, processSetupJob, whichCommand } from './setup-jobs.js';
 import type { CommandExecutor } from '../core/command.js';
 import { findTemplate, folderFiles, GENERATORS, PHASER_DEV_URL, TEMPLATES } from './templates.js';
 
@@ -234,4 +234,19 @@ test('Vorlage belegt Testbefehle, Review-Befehl, Vorschau-Adresse und Regeln vor
   assert.deepEqual(JSON.parse(String(columns.get('review_command')?.value)), ['npm', 'run', 'review']);
   assert.deepEqual(columns.get('preview_url'), { column: 'preview_url', value: PHASER_DEV_URL, cast: '' });
   assert.match(String(columns.get('guidelines')?.value), /src\/logic/);
+});
+
+test('Projekt-Assistent: launchd-Dienste, die den Projektordner nutzen, werden für den Hinweis erkannt', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'launchd-home-'));
+  const agents = join(home, 'Library', 'LaunchAgents');
+  await mkdir(agents, { recursive: true });
+  const folder = '/Users/x/Coding/app/source';
+  await writeFile(join(agents, 'ch.app.dev-live.plist'), `<string>${folder}</string>`);
+  await writeFile(join(agents, 'ch.app.worker.plist'), `<string>${folder}/scripts/run.sh</string>`);
+  await writeFile(join(agents, 'ch.app-alt.plist'), `<string>${folder}-alt</string>`);
+  await writeFile(join(agents, 'notiz.txt'), folder);
+  assert.deepEqual(await launchdServicesFor(folder, home), ['ch.app.dev-live', 'ch.app.worker']);
+  assert.deepEqual(await launchdServicesFor(`${folder}/`, home), ['ch.app.dev-live', 'ch.app.worker']);
+  // Ohne LaunchAgents-Ordner (Linux, Windows): kein Hinweis.
+  assert.deepEqual(await launchdServicesFor(folder, join(home, 'fehlt')), []);
 });

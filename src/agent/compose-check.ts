@@ -1,8 +1,7 @@
-// Prüfung der aufgelösten Docker-Compose-Konfiguration auf Pfade und Rechte ausserhalb des Projekts.
+// Prüfung der aufgelösten Docker-Compose-Konfiguration auf Pfade und Rechte ausserhalb des Projekts (vor jedem
+// services.up bzw. services.restart im Worker, siehe service-actions.ts).
 import { isAbsolute, resolve, sep } from 'node:path';
 import { realPath } from './path-policy.js';
-
-export const COMPOSE_STARTING = /^docker compose (?:up|start|restart|build)\b/;
 
 /** Check the resolved Compose configuration for paths that escape the project directory. */
 export function composeViolation(configJson: string, root: string): string | null {

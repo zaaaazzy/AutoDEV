@@ -187,8 +187,13 @@ test('run_command: Rolle, Geheimnisse, Agent-Freigaben und feste Liste werden ge
     await executeTool(limited, call('run_command', { command: '  npm test  ' })),
     'Exit-Code 0\nran npm test',
   );
-  // Dienstbefehle nur mit canManageServices.
-  assert.match(await executeTool(dev, call('run_command', { command: 'docker compose ps' })), /^Befehl nicht erlaubt/);
+  // docker nie per Shell, auch nicht mit canManageServices: Dienste nur über service_action.
+  for (const tools of [dev, context(cwd, { execute, canManageServices: true })]) {
+    assert.match(
+      await executeTool(tools, call('run_command', { command: 'docker compose ps' })),
+      /service_action|services\./,
+    );
+  }
   assert.deepEqual(
     calls.map((entry) => entry.command.join(' ')),
     ['npm test'],
@@ -217,36 +222,36 @@ test('run_command: npm install ohne Skripte, ohne DEV_LOG_-Variablen, mit Zeitli
   }
 });
 
-test('run_command: docker compose startet nur nach geprüfter Konfiguration', async () => {
+test('service_action: der Worker prüft die Konfiguration und startet den Dienst neu', async () => {
   const cwd = await project();
-  const services = (config: { exitCode: number; output: string }) => {
-    const ran: string[] = [];
-    const execute: CommandExecutor = async (command) => {
-      ran.push(command.join(' '));
-      return command[2] === 'config'
-        ? { ...config, durationMs: 1 }
-        : { exitCode: 0, durationMs: 1, output: 'gestartet' };
-    };
-    return { ran, tools: context(cwd, { canManageServices: true, execute }) };
+  await writeFile(join(cwd, 'compose.yaml'), 'services:\n  app:\n    image: x\n');
+  const ran: string[] = [];
+  const execute: CommandExecutor = async (command) => {
+    ran.push(command.slice(4).join(' '));
+    if (command.includes('--services')) return { exitCode: 0, durationMs: 1, output: 'app\n' };
+    if (command.includes('--format')) return { exitCode: 0, durationMs: 1, output: '{"services":{"app":{}}}' };
+    return { exitCode: 0, durationMs: 1, output: 'Container app Started' };
   };
-  const failing = services({ exitCode: 1, output: 'no configuration file provided' });
-  assert.match(
-    await executeTool(failing.tools, call('run_command', { command: 'docker compose up -d' })),
-    /^Start abgelehnt: docker compose config schlug fehl: no configuration file provided/,
-  );
-  assert.deepEqual(failing.ran, ['docker compose config --format json']);
-
-  const safe = services({ exitCode: 0, output: JSON.stringify({ services: { app: { image: 'x' } } }) });
+  const tools = context(cwd, { execute, serviceRole: 'assistant', commands: ['services'] });
   assert.equal(
-    await executeTool(safe.tools, call('run_command', { command: 'docker compose restart' })),
-    'Exit-Code 0\ngestartet',
+    await executeTool(tools, call('service_action', { action: 'services.restart', services: 'app' })),
+    'services.restart app: erledigt\nContainer app Started',
   );
-  assert.deepEqual(safe.ran, ['docker compose config --format json', 'docker compose restart']);
-
-  // Lesende Dienstbefehle brauchen keine Prüfung.
-  const read = services({ exitCode: 1, output: '' });
-  assert.match(await executeTool(read.tools, call('run_command', { command: 'docker compose ps' })), /^Exit-Code 0/);
-  assert.deepEqual(read.ran, ['docker compose ps']);
+  assert.deepEqual(ran, ['config --services', 'config --format json', 'restart app']);
+  // Ohne Dienst-Rolle gibt es das Werkzeug nicht; ungültige Anfragen erreichen den Worker nicht.
+  assert.match(
+    await executeTool(context(cwd, { execute }), call('service_action', { action: 'services.status' })),
+    /nicht freigegeben/,
+  );
+  assert.match(
+    await executeTool(tools, call('service_action', { action: 'services.exec' })),
+    /^Abgelehnt: Unbekannte Dienst-Aktion/,
+  );
+  assert.match(
+    await executeTool(tools, call('service_action', { action: 'services.logs', lines: 5000 })),
+    /^Abgelehnt: lines muss/,
+  );
+  assert.equal(ran.length, 3);
 });
 
 test('run_sql: nur mit Freigabe, Schreibrecht, Datenbank und gültigem SQL – über einen Fake-Client', async () => {

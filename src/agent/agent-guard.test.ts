@@ -78,11 +78,12 @@ test('Wächter: gefährliche Optionen erlaubter Befehle und Umleitungen sind ges
   }
 });
 
-test('Wächter: docker compose up nur mit sicherer Compose-Datei', () => {
-  const unsafe = () => ({ status: 0, stdout: '{"services":{"a":{"privileged":true}}}', stderr: '' });
-  assert.match(bashProblem('docker compose up -d', root, unsafe as never) ?? '', /privilegiert/);
+test('Wächter: docker compose up -d ist auch mit sicherer Compose-Datei gesperrt (Dienste über services.*)', () => {
+  // Der Wächter kennt keine Rolle: dieselbe Sperre gilt für jeden Agent unter ihm (auch Entwickler und Assistent).
   const safe = () => ({ status: 0, stdout: '{"services":{"a":{}}}', stderr: '' });
-  assert.equal(bashProblem('docker compose up -d', root, safe as never), null);
+  for (const command of ['docker compose up -d', 'docker compose up -d --build app', 'docker compose restart']) {
+    assert.match(bashProblem(command, root, safe as never) ?? '', /services\.restart/, command);
+  }
 });
 
 test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind gesperrt', () => {
@@ -137,9 +138,6 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'git commit -m "fix (ui): klammern"',
     'npm run --prefix docs build',
     'npm install --ignore-scripts left-pad@1.3.0 @types/node',
-    'docker compose up -d --build app',
-    'docker compose restart',
-    'docker compose logs --tail=50 app',
     'git diff HEAD~1 -- src 2>/dev/null',
     'git diff main...HEAD --stat',
   ]) {
@@ -315,22 +313,20 @@ test('Wächter: Umleitungen in Anführungszeichen und Befehlsketten', () => {
   assert.ok(bashProblem('git status || npx eslint', root));
   assert.ok(bashProblem('git status\ngit log --exec=x', root));
   assert.match(bashProblem('cat id_rsa', root) ?? '', /Geheimnisse/);
-  const noCheck = () => assert.fail('docker compose ps braucht keine Prüfung');
-  assert.equal(bashProblem('docker compose ps', root, noCheck as never), null);
 });
 
-test('Wächter: docker compose up wird abgelehnt, wenn die Konfiguration nicht lesbar ist', () => {
+test('Wächter: docker und launchctl ruft er nie selbst auf, sondern sperrt sie in jeder Kette', () => {
   const calls: unknown[][] = [];
-  const failing = (...args: unknown[]) => {
+  const recording = (...args: unknown[]) => {
     calls.push(args);
-    return { status: 1, stdout: '', stderr: 'no configuration file provided' };
+    return { status: 0, stdout: '', stderr: '' };
   };
   assert.match(
-    bashProblem('git status && docker compose up -d', root, failing as never) ?? '',
-    /^Start abgelehnt: docker compose config schlug fehl: no configuration file provided/,
+    bashProblem('git status && docker compose up -d', root, recording as never) ?? '',
+    /docker und launchctl sind für Agents gesperrt/,
   );
-  assert.deepEqual(calls[0]?.slice(0, 2), ['docker', ['compose', 'config', '--format', 'json']]);
-  assert.equal((calls[0]?.[2] as { cwd: string }).cwd, root);
+  assert.match(bashProblem('launchctl kickstart -k gui/501/ch.x.dev-live', root, null) ?? '', /gesperrt/);
+  assert.ok(!calls.some((call) => call[0] === 'docker'), 'kein docker-Aufruf durch den Wächter');
 });
 
 test('Richtlinie: kodieren, dekodieren und sicherer Standard', () => {

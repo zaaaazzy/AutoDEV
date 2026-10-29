@@ -9,10 +9,10 @@ import {
   isAssistantServiceCommand,
   rulesAllow,
   withIgnoreScripts,
-  composeViolation,
-  COMPOSE_STARTING,
 } from './tool-permissions.js';
 import { bashProblem, fileProblem, type GuardPolicy } from './agent-guard.js';
+import { runServiceAction } from './service-actions.js';
+import { parseServiceRequest, type ServiceRequestInput } from './service-request.js';
 import { runProjectSql, type SqlClientFactory } from './tool-sql.js';
 import type { ToolCall } from './ollama-types.js';
 import {
@@ -36,6 +36,8 @@ export interface ToolContext {
   /** Shell-Befehle unter dem Wächter (run_command); ohne Angabe wie canWrite. Routinen: ja, ohne Schreibrecht. */
   canRunCommands?: boolean;
   canManageServices?: boolean;
+  /** Rolle, unter der der Worker Dienst-Aktionen (service_action) prüft; ohne Angabe gibt es das Werkzeug nicht. */
+  serviceRole?: string;
   /** Dateirechte des Agents; geprüft wie bei der Claude-CLI (Anlegen/Ändern, Ordner, geschützte Pfade). */
   files?: GuardPolicy;
   /** Freigegebene Befehle des Agents; ohne Angabe gilt nur die feste Liste des lokalen Modells. */
@@ -155,7 +157,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         const executed = withIgnoreScripts(parts);
         // Derselbe Wächter wie bei der Claude-CLI (Geheimnisse, npm-/Git-Optionen, Wrapper, Shell-Konstrukte). Er
         // verlangt --ignore-scripts direkt nach dem Unterbefehl; ausgeführt wird es am Ende (bei npm gewinnt die letzte
-        // Angabe). Compose-Starts prüft der Pfad unten asynchron. Einzige Ausnahme: „git clone <https/ssh-URL> [ordner]“
+        // Angabe). docker sperrt der Wächter: Dienste nur über service_action. Einzige Ausnahme: „git clone <https/ssh-URL> [ordner]“
         // des Assistenten – ohne Optionen und Shell-Zeichen (isAssistantServiceCommand), also ohne -u/--upload-pack.
         const checked =
           executed.length > parts.length ? [...parts.slice(0, 2), '--ignore-scripts', ...parts.slice(2)] : parts;
@@ -170,26 +172,11 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         if (!isAllowedCommand(command, root) && !(context.canManageServices && isAssistantServiceCommand(command))) {
           return (
             'Befehl nicht erlaubt. Für den Assistenten sind git status/diff/log/show/branch, npm ls/outdated, ' +
-            'docker compose ps/logs/up -d/stop/start/restart/down/build, git clone ' +
-            '(https/ssh)/pull/fetch/checkout und npm install erlaubt.'
+            'git clone (https/ssh)/pull/fetch/checkout und npm install erlaubt. Dienste über service_action.'
           );
         }
         return withProjectLock(root, async () => {
           // Das Warten auf die Projektsperre kann dauern: danach erneut prüfen.
-          if (context.signal?.aborted) return TOOL_ABORTED;
-          if (COMPOSE_STARTING.test(command)) {
-            const check = await context.execute(['docker', 'compose', 'config', '--format', 'json'], context.cwd, {
-              timeoutMs: 60_000,
-              env: projectEnvironment(context.cwd),
-              signal: context.signal,
-            });
-            const reason =
-              check.exitCode === 0
-                ? composeViolation(check.output, await realpath(context.cwd))
-                : `docker compose config schlug fehl: ${check.output.slice(-300)}`;
-            if (reason)
-              return `Start abgelehnt: ${reason} Passe die Compose-Datei an (nur Mounts und Builds im Projektordner, nicht privilegiert).`;
-          }
           if (context.signal?.aborted) return TOOL_ABORTED;
           const result = await context.execute(executed, context.cwd, {
             timeoutMs: Math.min(context.timeoutMs, 10 * 60_000),
@@ -200,6 +187,19 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
           return clip(
             `Exit-Code ${result.exitCode}\n${redactOutput(result.output, process.env).slice(-MAX_TOOL_OUTPUT)}`,
           );
+        });
+      }
+      case 'service_action': {
+        if (!context.serviceRole) return 'Dienst-Aktionen sind für diesen Agent nicht freigegeben.';
+        const request = parseServiceRequest(args as ServiceRequestInput);
+        if (typeof request === 'string') return `Abgelehnt: ${request}`;
+        // Prüfen, sperren, ausführen und maskieren übernimmt der Worker (dieselbe Funktion wie für die Claude-CLI).
+        return runServiceAction(request, {
+          cwd: context.cwd,
+          role: context.serviceRole,
+          commands: context.commands ?? [],
+          execute: context.execute,
+          signal: context.signal,
         });
       }
       case 'run_sql': {

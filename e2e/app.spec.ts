@@ -732,7 +732,7 @@ test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details
   await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
   await expect(groups).toHaveText(['Tester']);
   await search.press('ArrowDown');
-  await expect(detail).toContainText('docker compose up -d');
+  await expect(detail).toContainText('services.up');
   await search.fill(title);
   await expect(menu.getByText('Keine Aktion gefunden.')).toBeVisible();
   await menu.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();

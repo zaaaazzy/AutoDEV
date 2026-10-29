@@ -148,6 +148,26 @@
                       </p>
                     }
                   </div>
+                  @if (info.launchd?.length) {
+                    <div class="wizard-hint warn" data-testid="launchd-hint">
+                      <p>
+                        Dieser Ordner wird noch von launchd-Diensten genutzt:
+                        @for (label of info.launchd; track label; let last = $last) {
+                          <code>{{ label }}</code
+                          >{{ last ? '' : ', ' }}
+                        }
+                      </p>
+                      <p class="muted">
+                        Agents starten Dienste nur noch über Docker Compose neu (Aktion <code>services.restart</code>),
+                        nicht mehr über launchd.
+                        {{
+                          info.compose
+                            ? 'Die Compose-Datei ist vorhanden – stelle die Dienste darauf um und entferne die launchd-Dienste.'
+                            : 'Lege eine compose.yaml im Projektordner an und stelle die Dienste darauf um.'
+                        }}
+                      </p>
+                    </div>
+                  }
                 }
               }
             }

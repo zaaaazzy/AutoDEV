@@ -1,4 +1,4 @@
-// Prüfungen von Shell-Befehlen (npm, git, Assistenten-Dienste, eigene Regeln) für Wächter und lokales Modell.
+// Prüfungen von Shell-Befehlen (npm, git, Einrichtung durch den Assistenten, eigene Regeln) für Wächter und lokales Modell.
 import { isAbsolute, resolve, sep } from 'node:path';
 import { realPath } from './path-policy.js';
 import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
@@ -8,21 +8,14 @@ type CommandInput = string | readonly ShellWord[];
 
 const COMMAND_PATTERN =
   /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
-const SERVICE_NAME = '[a-zA-Z0-9][\\w.-]*';
-const ASSISTANT_SERVICE_PATTERNS = [
-  new RegExp(`^docker compose (?:ps|config --services)$`),
-  // Auch der Log-Scan des Produktions-Rückkanals: docker compose logs --since 15m --no-color <dienste>.
-  new RegExp(`^docker compose logs(?: --since \\d+[smh])?(?: --no-color)?(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
-  new RegExp(`^docker compose up -d(?: --build| --wait| --force-recreate)*(?: ${SERVICE_NAME})*$`),
-  new RegExp(`^docker compose (?:stop|start|restart|down|build|pull)(?: ${SERVICE_NAME})*$`),
-  /^docker compose down --remove-orphans$/,
-];
 const GIT_URL = /^(?:https:\/\/[\w.-]+\/[\w./~-]+|git@[\w.-]+:[\w./~-]+)$/;
 const RELATIVE_DIRECTORY = /^(?!.*\.\.)(?:\.|[\w][\w.-]*(?:\/[\w][\w.-]*)*)$/;
 
-/** Allow the assistant to manage services and set up repositories within the project directory. */
+/**
+ * Allow the assistant to set up repositories within the project directory. Dienste verwaltet kein Agent per Shell:
+ * dafür gibt es die Worker-Aktionen services.* (service-actions.ts).
+ */
 export function isAssistantServiceCommand(command: string): boolean {
-  if (ASSISTANT_SERVICE_PATTERNS.some((pattern) => pattern.test(command))) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'git' && parts[1] === 'clone' && parts.length >= 3 && parts.length <= 4) {
     return GIT_URL.test(parts[2]) && (parts[3] === undefined || RELATIVE_DIRECTORY.test(parts[3]));
@@ -276,7 +269,7 @@ export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMAND_NAMES =
-  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|export|declare|typeset|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
+  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|export|declare|typeset|launchctl|systemctl|service|docker|docker-compose|podman|nerdctl|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
 const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
 /**
  * Befehle, die Dateien anlegen, ändern oder löschen. Die ersten sieben gibt die CLI mit --permission-mode acceptEdits
@@ -296,7 +289,7 @@ export const SHELL_BUILTINS = new Set([
 /** awk und Verwandte: system(), „| getline“ und „print > datei“ starten Programme bzw. schreiben Dateien. */
 const SCRIPT_COMMAND_NAMES = 'awk|gawk|nawk|mawk';
 /** Gesperrte Befehle, die eingebaute Gruppen nur mit festem Präfix freigeben (node --check, npx --no-install …). */
-const GUARD_PREFIXED = new Set(['node', 'npx', 'launchctl']);
+const GUARD_PREFIXED = new Set(['node', 'npx']);
 const GUARD_FORBIDDEN = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES}|${FILE_COMMAND_NAMES}|${SCRIPT_COMMAND_NAMES})$`);
 
 /**
@@ -400,38 +393,6 @@ const FORBIDDEN_SUBCOMMAND_LIST = [
     'submodule',
   ].map((sub) => `git ${sub}`),
   ...[
-    'run',
-    'exec',
-    'create',
-    'rm',
-    'rmi',
-    'system',
-    'volume',
-    'network',
-    'image',
-    'container',
-    'cp',
-    'login',
-    'build',
-    'buildx',
-    'builder',
-    'plugin',
-    'context',
-    'swarm',
-    'service',
-    'stack',
-    'secret',
-    'config',
-    'commit',
-    'export',
-    'import',
-    'load',
-    'save',
-    'update',
-    'attach',
-  ].map((sub) => `docker ${sub}`),
-  ...['exec', 'run', 'cp', 'rm', 'attach'].map((sub) => `docker compose ${sub}`),
-  ...[
     'publish',
     'unpublish',
     'deprecate',
@@ -473,18 +434,17 @@ export function forbiddenSubcommand(command: CommandInput): boolean {
   const tokens = toWords(command);
   const words = tokens.map((word) => word.text);
   const normalized = words.join(' ');
-  if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized)) return true;
+  if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|npm) -/.test(normalized)) return true;
   // „npm audit fix“ installiert und ändert package-lock.json – auch mit Optionen davor (npm audit --json fix).
   if (words[0] === 'npm' && words[1] === 'audit' && words.slice(2).includes('fix')) return true;
   // Befehlsname und Unterbefehl nur wörtlich: Variablen, Globs, Klammer-Erweiterung oder $'…' (git $X, git pus?,
   // git {push,}) setzt erst die Shell zusammen – und alle übrigen Prüfungen sähen den Befehl nicht.
   if (!CHECKED_PROGRAMS.has(words[0] ?? '')) return false;
-  const literal = tokens.slice(0, words[0] === 'docker' && words[1] === 'compose' ? 3 : 2);
-  return literal.some((word) => !/^[\w.:@/=+,-]+$/.test(word.raw));
+  return tokens.slice(0, 2).some((word) => !/^[\w.:@/=+,-]+$/.test(word.raw));
 }
 
-/** Programme, deren Unterbefehle der Wächter prüft. */
-export const CHECKED_PROGRAMS = new Set(['git', 'docker', 'docker-compose', 'npm', 'npx']);
+/** Programme, deren Unterbefehle der Wächter prüft (docker sperrt er ganz: Dienste nur über services.*). */
+export const CHECKED_PROGRAMS = new Set(['git', 'npm', 'npx']);
 
 /**
  * Zerlegt einen Befehl mit dem Tokenizer des Wächters (parseShell) in Wörter; Umleitungen gehören nicht dazu.
@@ -518,10 +478,11 @@ const SAFE_PREFIX = /^[\w@./=:,+-]+(?: [\w@./=:,+-]+)*$/;
 /**
  * Programme, die eine eigene Regel freigeben darf (Allowlist, gilt für Claude-CLI und lokales Modell). Nur Programme,
  * die weder andere Programme starten noch Dateien schreiben – nicht etwa timeout, find, awk, sed, tee, cp, ln, sort -o,
- * rg --pre. git, npm und docker prüft der Wächter Unterbefehl für Unterbefehl; make und npm run führen Projektskripte aus.
+ * rg --pre. git und npm prüft der Wächter Unterbefehl für Unterbefehl; make und npm run führen Projektskripte aus.
+ * docker fehlt bewusst: Wer den Docker-Socket hat, hat Root auf dem Host – Dienste nur über die Worker-Aktionen.
  */
 export const CUSTOM_RULE_PROGRAMS = new Set([
-  ...['git', 'npm', 'docker', 'make'],
+  ...['git', 'npm', 'make'],
   ...['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'diff', 'cut', 'tr', 'jq', 'stat', 'du', 'df'],
   ...['pwd', 'echo', 'printf', 'date', 'which', 'basename', 'dirname', 'realpath', 'uname', 'whoami', 'ps', 'lsof'],
 ]);

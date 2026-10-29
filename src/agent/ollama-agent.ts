@@ -1,6 +1,7 @@
 import type { GuardPolicy } from './agent-guard.js';
 import { join } from 'node:path';
-import { NO_FILE_WRITE_ROLES, READ_ONLY_ROLES } from './tool-permissions.js';
+import { NO_FILE_WRITE_ROLES, READ_ONLY_ROLES, SERVICES_COMMAND } from './tool-permissions.js';
+import { SERVICE_ROLES } from './service-actions.js';
 import { shutdownSignal } from '../core/shutdown.js';
 import { type CommandExecutor, type CommandResult, runCommand } from '../core/command.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat } from './ollama-client.js';
@@ -76,6 +77,11 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
     canWrite,
     canRunCommands,
     canManageServices: options.role === 'assistant' && !options.readOnly,
+    // Dienst-Aktionen nur mit Rechte-Kontext und dem Recht „services“; Rolle und Aktion prüft der Worker erneut.
+    serviceRole:
+      withRights && SERVICE_ROLES.has(options.role) && options.commands?.includes(SERVICES_COMMAND)
+        ? options.role
+        : undefined,
     databaseUrl: canWrite ? options.databaseUrl : null,
     files: options.files,
     commands: options.commands,
@@ -95,7 +101,16 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
   const loopGuard = new LoopGuard();
   let loopWarnings = 0;
   const messages: ChatMessage[] = [
-    { role: 'system', content: systemPrompt(options.role, canWrite, Boolean(context.databaseUrl), canRunCommands) },
+    {
+      role: 'system',
+      content: systemPrompt(
+        options.role,
+        canWrite,
+        Boolean(context.databaseUrl),
+        canRunCommands,
+        Boolean(context.serviceRole),
+      ),
+    },
     { role: 'user', content: options.prompt },
   ];
   let timedOut = false;
@@ -137,7 +152,13 @@ export async function runOllamaAgent(options: OllamaAgentOptions): Promise<Comma
             tools:
               lastTurn && !canWrite
                 ? undefined
-                : toolDefinitions(canWrite, context.canManageServices, Boolean(context.databaseUrl), canRunCommands),
+                : toolDefinitions(
+                    canWrite,
+                    context.canManageServices,
+                    Boolean(context.databaseUrl),
+                    canRunCommands,
+                    Boolean(context.serviceRole),
+                  ),
             stream: false,
             think: false,
             keep_alive: keepAlive,

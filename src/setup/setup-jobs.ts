@@ -1,7 +1,9 @@
 import { logged } from '../core/log.js';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { COMPOSE_FILES } from '../agent/service-actions.js';
 import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
@@ -120,7 +122,30 @@ async function checkFolder(params: Params, execute: CommandExecutor) {
     empty: entries.filter((entry) => entry !== '.git').length === 0,
     entries: entries.slice(0, 12),
     git,
+    launchd: await launchdServicesFor(folder),
+    compose: COMPOSE_FILES.some((name) => entries.includes(name)),
   };
+}
+
+/**
+ * launchd-Dienste (macOS, ~/Library/LaunchAgents), die diesen Projektordner nutzen. Agents starten Dienste nur noch
+ * über Docker Compose (services.restart); der Projekt-Assistent weist auf solche Dienste hin. Andere Systeme: leer.
+ */
+export async function launchdServicesFor(folder: string, home = homedir()): Promise<string[]> {
+  const directory = join(home, 'Library', 'LaunchAgents');
+  const plists = (await readdir(directory).catch(() => [] as string[])).filter((name) => name.endsWith('.plist'));
+  const paths = [...new Set([folder.replace(/\/+$/, ''), await realpath(folder).catch(() => folder)])];
+  const found: string[] = [];
+  for (const name of plists.slice(0, 500)) {
+    const content = await readFile(join(directory, name), 'utf8').catch(() => '');
+    // Nur der Ordner selbst oder ein Pfad darin, nicht ein Ordner mit gleichem Anfang (/a/app vs. /a/app-alt).
+    if (
+      paths.some((path) => new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[/<"\\s]|$)`).test(content))
+    ) {
+      found.push(name.slice(0, -'.plist'.length));
+    }
+  }
+  return found.sort();
 }
 
 async function createFolder(params: Params) {
