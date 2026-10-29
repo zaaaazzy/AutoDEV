@@ -9,13 +9,20 @@ import { SERVICE_ACTIONS } from './service-request.js';
 import {
   forbiddenCommand,
   forbiddenSubcommand,
+  gitFileProblem,
   gitOptionProblem,
   gitPathProblem,
   gitRemoteProblem,
   npmOptionProblem,
   SECRET_IN_COMMAND,
 } from './tool-permissions.js';
-import { CHECKED_PROGRAMS, SHELL_BUILTINS, unwrapCommand, WRAPPER_COMMANDS } from './command-checks.js';
+import {
+  CHECKED_PROGRAMS,
+  type FileRights,
+  SHELL_BUILTINS,
+  unwrapCommand,
+  WRAPPER_COMMANDS,
+} from './command-checks.js';
 import { parseShell, renderWords, type ShellRedirect, type ShellWord } from './shell-parse.js';
 
 /**
@@ -168,12 +175,14 @@ function nodeCheckOnly(words: readonly ShellWord[]): boolean {
  * Entscheidung für einen Shell-Befehl (der Befehlsanfang ist bereits von der CLI freigegeben). Gilt für Claude-Agents
  * und das lokale Modell gleichermassen. Der Befehl wird mit dem Tokenizer (parseShell) wie von Bash zerlegt; alle
  * Prüfungen sehen dieselben Wörter. Was sich nicht eindeutig zerlegen lässt, ist gesperrt. run = null: keine
- * Git-Remotes abfragen (dann gilt nur origin).
+ * Git-Remotes abfragen (dann gilt nur origin). files: Datei-Rechte für git rm/mv (Löschen, Umbenennen); ohne sie
+ * sind beide gesperrt.
  */
 export function bashProblem(
   command: string,
   projectRoot: string,
   run: typeof spawnSync | null = spawnSync,
+  files?: FileRights,
 ): string | null {
   if (SECRET_IN_COMMAND.test(command)) return 'Befehle mit Zugriff auf Geheimnisse (.env, Schlüssel) sind gesperrt.';
   const parsed = parseShell(command);
@@ -210,7 +219,7 @@ export function bashProblem(
     }
     // acceptEdits gibt mkdir, touch, rm, rmdir, mv, cp und sed ohne Regel frei – Rechte und Ordner prüft nur der Wächter.
     if (forbiddenCommand(words)) {
-      return `„${part}“: dieser Befehl ist für Agents gesperrt – Dateien nur mit den Datei-Werkzeugen anlegen, ändern oder löschen.`;
+      return `„${part}“: dieser Befehl ist für Agents gesperrt – Dateien mit den Datei-Werkzeugen anlegen und ändern, mit „git rm <pfad>“ löschen und mit „git mv <alt> <neu>“ umbenennen.`;
     }
     if (program === 'git' && subcommand.startsWith('-')) {
       return `„${part}“: Git-Optionen vor dem Unterbefehl (z. B. -C) sind gesperrt.`;
@@ -224,7 +233,7 @@ export function bashProblem(
     if (CHECKED_PROGRAMS.has(program) && words.some((word) => word.expanded)) {
       return `„${part}“: Variablen und Shell-Erweiterungen ($X, $'…', {a,b}, ~) sind in git- und npm-Befehlen gesperrt.`;
     }
-    const gitProblem = gitPathProblem(words, root);
+    const gitProblem = gitPathProblem(words, root) ?? gitFileProblem(words, root, files);
     if (gitProblem) return gitProblem;
     if (program === 'git' && (subcommand === 'fetch' || subcommand === 'pull')) {
       const remoteProblem = gitRemoteProblem(words, gitRemotes(projectRoot, run));
@@ -257,7 +266,7 @@ export function guardProblem(input: GuardInput, policy: GuardPolicy, projectRoot
   if (input.tool_name === 'Bash') {
     if (policy.shell === false) return 'Befehle sind für diesen Agent nicht freigegeben (nur lesen).';
     const command = input.tool_input?.command;
-    return typeof command === 'string' ? bashProblem(command, projectRoot) : null;
+    return typeof command === 'string' ? bashProblem(command, projectRoot, spawnSync, policy) : null;
   }
   return null;
 }
