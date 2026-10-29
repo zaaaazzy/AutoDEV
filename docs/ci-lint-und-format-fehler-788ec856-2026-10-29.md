@@ -25,9 +25,12 @@ Die Docker-Umstellung war nicht beteiligt.
 - `npm run test:unit`: 1833 von 1833 Tests bestanden (gleiche Zahl wie zuvor, kein Test entfernt oder übersprungen).
 - `npm run lint`, `npm run format:check`, `npm run typecheck`: grün.
 - Nicht belegt: ein echter Lauf in GitHub Actions. Die Dokumentation hat nichts davon erneut ausgeführt.
+- Der Tester-Schritt konnte in der Sandbox nichts ausführen (`tsc: not found`, `EACCES`), siehe Nachtrag. Die Zahlen oben stammen deshalb nur vom Entwickler und sind vom Tester nicht bestätigt.
 
 ## Geänderte Dateien
 
+- `deploy/agent/Dockerfile` (npm-Cache nach der Installation löschen, siehe Nachtrag)
+- `docs/ci.md`, diese Datei
 - `scripts/angular-builder.test.ts`
 - `frontend/src/app/features/dashboard/git-graph-state.spec.ts`
 - `frontend/src/app/features/dashboard/git-graph.spec.ts`
