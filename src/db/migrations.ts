@@ -161,6 +161,272 @@ export const MIGRATIONS: readonly Migration[] = [
       DELETE FROM auth_sessions WHERE credential_version IS NULL;
     `,
   },
+  // Bugs zu einem Auftrag (Fehlschlag eines Agents, Problemanalyse) kommen auf den Friedhof, sobald der Auftrag
+  // erledigt ist – alle, nicht nur der zuletzt in failure_bug_id vermerkte. Bestehende Meldungen werden über
+  // failure_bug_id bzw. den Auftragstitel im Text („Aufgetreten bei Auftrag „…““, „Tester: <Titel>“) verknüpft.
+  {
+    version: 8,
+    name: 'bugs-zum-auftrag-auf-den-friedhof',
+    sql: `
+      ALTER TABLE bugs ADD COLUMN IF NOT EXISTS development_id UUID REFERENCES development_items(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS bugs_development_idx ON bugs (development_id) WHERE development_id IS NOT NULL;
+
+      UPDATE bugs b SET development_id = d.id FROM development_items d
+       WHERE d.failure_bug_id = b.id AND b.development_id IS NULL;
+      UPDATE bugs b SET development_id = (
+          SELECT d.id FROM development_items d
+           WHERE d.project_slug = b.project_slug AND d.kind <> 'express' AND (
+                 b.description LIKE 'Aufgetreten bei Auftrag „' || d.title || '“%'
+              OR substring(b.title FROM position(': ' IN b.title) + 2) = d.title
+              OR (b.title LIKE '%…' AND position(': ' IN b.title) > 0
+                  AND left(d.title, char_length(rtrim(substring(b.title FROM position(': ' IN b.title) + 2), '…')))
+                      = rtrim(substring(b.title FROM position(': ' IN b.title) + 2), '…')))
+           ORDER BY d.created_at DESC LIMIT 1)
+       WHERE b.development_id IS NULL AND b.source = 'agent';
+
+      CREATE OR REPLACE FUNCTION development_items_sync_bug() RETURNS trigger AS $fn$
+      BEGIN
+        IF OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'done' THEN
+          -- Behebungsauftrag erledigt oder Auftrag mit Fehlschlag-Meldungen doch noch fertig: auf den Friedhof.
+          UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+           WHERE (id = NEW.bug_id OR id = NEW.failure_bug_id OR development_id = NEW.id)
+             AND status IN ('open', 'in_progress');
+        ELSIF NEW.bug_id IS NOT NULL AND OLD.status IS DISTINCT FROM NEW.status THEN
+          IF NEW.status = 'in_progress' THEN
+            UPDATE bugs SET status = 'in_progress', updated_at = NOW() WHERE id = NEW.bug_id AND status = 'open';
+          ELSIF NEW.status = 'rejected' THEN
+            UPDATE bugs SET status = 'rejected', updated_at = NOW() WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
+          ELSIF NEW.status IN ('planned', 'backlog', 'blocked') THEN
+            UPDATE bugs SET status = 'open', updated_at = NOW() WHERE id = NEW.bug_id AND status = 'in_progress';
+          END IF;
+        END IF;
+        RETURN NULL;
+      END;
+      $fn$ LANGUAGE plpgsql;
+
+      -- Aufräumen: Meldungen, deren Auftrag schon erledigt ist.
+      UPDATE bugs b SET status = 'fixed', fixed_at = NOW(), updated_at = NOW(),
+             fix_notes = concat_ws(E'\\n\\n', NULLIF(b.fix_notes, ''), 'Auftrag inzwischen erledigt – automatisch auf den Friedhof.')
+        FROM development_items d
+       WHERE b.status IN ('open', 'in_progress') AND d.status = 'done'
+         AND (d.id = b.development_id OR d.failure_bug_id = b.id);
+      -- Meldung „CI rot im Pull Request von „Sprint …““, deren Sprint inzwischen gemergt ist.
+      UPDATE bugs b SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+        FROM sprints s
+       WHERE b.status IN ('open', 'in_progress') AND b.source = 'github' AND s.project_slug = b.project_slug
+         AND s.status = 'completed' AND s.git_sync = 'done' AND b.title = 'CI rot im Pull Request von „' || s.name || '“';
+    `,
+  },
+  // Schätzungen in Agent-Stunden: woher ein Wert stammt (von Hand, Schnellschätzung, Auftragsautor; NULL = Altbestand
+  // in Menschenstunden), damit der Planer jede Herkunft getrennt kalibriert und der Autor nur Maschinenwerte ersetzt.
+  // Die Sprint-Kapazität zählt jetzt Agent-Stunden; der alte Standard 40 (Menschenstunden) wird zu 4.
+  {
+    version: 9,
+    name: 'schaetzung-in-agent-stunden',
+    sql: `
+      ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS estimate_source TEXT
+        CHECK (estimate_source IN ('manual', 'quick', 'author'));
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS estimate_source TEXT
+        CHECK (estimate_source IN ('manual', 'quick', 'author'));
+      -- Altbestand unter 1 h stammt schon vom Auftragsautor mit Ist-Werten (gemessen: Ist ÷ Schätzung im Median
+      -- 0,79 statt 0,02–0,08 bei grösseren Werten) und wird wie eine Autorschätzung kalibriert; der Rest bleibt NULL.
+      UPDATE ideation_items SET estimate_source = 'author' WHERE estimate_source IS NULL AND effort_hours < 1;
+      UPDATE development_items SET estimate_source = 'author' WHERE estimate_source IS NULL AND effort_hours < 1;
+      ALTER TABLE projects ALTER COLUMN sprint_capacity_hours SET DEFAULT 4;
+      UPDATE projects SET sprint_capacity_hours = 4 WHERE sprint_capacity_hours = 40;
+    `,
+  },
+  // Unterbrochene Schritte (Worker beendet, Ordner weg, Nutzungslimit) bleiben „failed“, tragen aber ein eigenes
+  // Kennzeichen: Der nächste Lauf setzt beim selben Agent fort statt wie nach einer Ablehnung beim Entwickler.
+  // Bestehende Schritte erkennt einmalig die bisher angehängte Zeile „Unterbrochen: …“.
+  {
+    version: 10,
+    name: 'agent-run-steps-unterbrochen',
+    sql: `
+      ALTER TABLE agent_run_steps ADD COLUMN IF NOT EXISTS interrupted BOOLEAN NOT NULL DEFAULT FALSE;
+      UPDATE agent_run_steps SET interrupted = TRUE
+       WHERE status = 'failed' AND NOT interrupted AND output LIKE E'%\\nUnterbrochen: %';
+    `,
+  },
+  // Abgelehnter Bug-Auftrag erneut versucht: Der Bug folgt dem Auftrag wieder (rejected → open/in_progress) und wird
+  // beim Erledigen auch aus rejected heraus behoben. Nur der eigene Bug (bug_id); Fehlschlag-Meldungen, die jemand
+  // abgelehnt hat, bleiben abgelehnt. Altfälle (Auftrag erledigt, Bug noch abgelehnt) einmalig nachziehen.
+  {
+    version: 11,
+    name: 'bug-folgt-erneut-versuchtem-auftrag',
+    sql: `
+      CREATE OR REPLACE FUNCTION development_items_sync_bug() RETURNS trigger AS $fn$
+      BEGIN
+        IF OLD.status IS DISTINCT FROM NEW.status AND NEW.status = 'done' THEN
+          -- Behebungsauftrag erledigt oder Auftrag mit Fehlschlag-Meldungen doch noch fertig: auf den Friedhof.
+          UPDATE bugs SET status = 'fixed', fixed_at = NOW(), updated_at = NOW()
+           WHERE (id = NEW.bug_id OR id = NEW.failure_bug_id OR development_id = NEW.id)
+             AND (status IN ('open', 'in_progress') OR (id = NEW.bug_id AND status = 'rejected'));
+        ELSIF NEW.bug_id IS NOT NULL AND OLD.status IS DISTINCT FROM NEW.status THEN
+          IF NEW.status = 'in_progress' THEN
+            UPDATE bugs SET status = 'in_progress', updated_at = NOW()
+             WHERE id = NEW.bug_id AND (status = 'open' OR (status = 'rejected' AND OLD.status = 'rejected'));
+          ELSIF NEW.status = 'rejected' THEN
+            UPDATE bugs SET status = 'rejected', updated_at = NOW() WHERE id = NEW.bug_id AND status IN ('open', 'in_progress');
+          ELSIF NEW.status IN ('planned', 'backlog', 'blocked') THEN
+            -- Abgelehnter Auftrag wieder eingeplant: Bug ist wieder offen.
+            UPDATE bugs SET status = 'open', updated_at = NOW()
+             WHERE id = NEW.bug_id AND (status = 'in_progress' OR (status = 'rejected' AND OLD.status = 'rejected'));
+          END IF;
+        END IF;
+        RETURN NULL;
+      END;
+      $fn$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS development_items_bug_trigger ON development_items;
+      CREATE TRIGGER development_items_bug_trigger AFTER UPDATE ON development_items
+        FOR EACH ROW EXECUTE FUNCTION development_items_sync_bug();
+
+      UPDATE bugs b SET status = 'fixed', fixed_at = COALESCE(d.completed_at, NOW()), updated_at = NOW(),
+             fix_notes = concat_ws(E'\\n\\n', NULLIF(b.fix_notes, ''), 'Auftrag nach erneutem Versuch erledigt – automatisch auf den Friedhof.')
+        FROM development_items d
+       WHERE d.bug_id = b.id AND d.status = 'done' AND b.status = 'rejected';
+    `,
+  },
+  // Sprint-Abbruch setzt Aufträge in Freigabe jetzt ins Backlog zurück (cancelSprint). Altfälle hängen ohne Sprint in
+  // Freigabe fest – ihre Freigabe mergte in den toten Sprint-Branch, „Wieder einplanen“ scheiterte mit 409.
+  {
+    version: 12,
+    name: 'freigabe-nach-sprint-abbruch-ins-backlog',
+    sql: `
+      UPDATE development_items SET status = 'backlog', review_branch = NULL, review_base = NULL, review_since = NULL,
+             review_approved_at = NULL, updated_at = NOW()
+       WHERE status = 'approval' AND sprint_id IS NULL AND removed_from_sprint_at IS NOT NULL;
+    `,
+  },
+  // Sprint-Branch beim Start festhalten statt bei jedem Zugriff aus dem (per PATCH änderbaren, nicht eindeutigen)
+  // Namen zu bilden: Nach einer Umbenennung zweigte sonst ein neuer Branch von main ab, und beim Abschluss kam nur der
+  // Teil danach nach main. sprint_branch_slug entspricht slugify() in git-helpers.ts (Marken vor lower() entfernt,
+  // damit es unabhängig von der Collation gleich bleibt). Altdaten: Laufende Sprints behalten ihren heutigen Branch;
+  // bei gleichem Namen („Sprint 5“ doppelt) bekommen die übrigen die ersten sechs Zeichen ihrer ID angehängt.
+  {
+    version: 13,
+    name: 'sprint-branch-beim-start-festhalten',
+    sql: `
+      ALTER TABLE sprints ADD COLUMN IF NOT EXISTS branch TEXT;
+      CREATE OR REPLACE FUNCTION sprint_branch_slug(p_name TEXT) RETURNS TEXT AS $fn$
+        SELECT COALESCE(NULLIF(left(btrim(regexp_replace(lower(regexp_replace(normalize(p_name, NFKD),
+                 '[\\u0300-\\u036f\\u1ab0-\\u1aff\\u1dc0-\\u1dff\\u20d0-\\u20ff\\ufe20-\\ufe2f]', '', 'g')),
+                 '[^a-z0-9]+', '-', 'g'), '-'), 40), ''), 'ohne-name')
+      $fn$ LANGUAGE sql IMMUTABLE;
+      CREATE OR REPLACE FUNCTION sprint_branch_for(p_project TEXT, p_id UUID, p_name TEXT) RETURNS TEXT AS $fn$
+        SELECT CASE WHEN EXISTS (SELECT 1 FROM sprints WHERE project_slug = p_project AND id <> p_id
+                                  AND branch = 'sprint/' || sprint_branch_slug(p_name))
+               THEN 'sprint/' || sprint_branch_slug(p_name) || '-' || left(p_id::text, 6)
+               ELSE 'sprint/' || sprint_branch_slug(p_name) END
+      $fn$ LANGUAGE sql STABLE;
+
+      WITH ranked AS (
+        SELECT id, 'sprint/' || sprint_branch_slug(name) AS plain,
+               row_number() OVER (PARTITION BY project_slug, sprint_branch_slug(name)
+                                  ORDER BY status IN ('active', 'review') DESC, created_at DESC, id) AS rank
+          FROM sprints WHERE branch IS NULL AND status <> 'planned'
+      )
+      UPDATE sprints s SET branch = CASE WHEN r.rank = 1 AND NOT EXISTS (
+                 SELECT 1 FROM sprints o WHERE o.project_slug = s.project_slug AND o.branch = r.plain)
+               THEN r.plain ELSE r.plain || '-' || left(s.id::text, 6) END
+        FROM ranked r WHERE s.id = r.id;
+      CREATE UNIQUE INDEX IF NOT EXISTS sprints_branch_idx ON sprints (project_slug, branch) WHERE branch IS NOT NULL;
+
+      -- Beim Start (jeder Status ausser „geplant“) einmal vergeben; spätere Umbenennungen ändern ihn nicht mehr.
+      CREATE OR REPLACE FUNCTION sprints_fix_branch() RETURNS trigger AS $fn$
+      BEGIN
+        IF NEW.status <> 'planned' AND NEW.branch IS NULL THEN
+          NEW.branch := sprint_branch_for(NEW.project_slug, NEW.id, NEW.name);
+        END IF;
+        RETURN NEW;
+      END;
+      $fn$ LANGUAGE plpgsql;
+      DROP TRIGGER IF EXISTS sprints_fix_branch ON sprints;
+      CREATE TRIGGER sprints_fix_branch BEFORE INSERT OR UPDATE OF status ON sprints
+        FOR EACH ROW EXECUTE FUNCTION sprints_fix_branch();
+    `,
+  },
+  // Sprint-Abschluss „wartet auf Merge“: main liegt in einem anderen Ordner mit offenen Änderungen, der Sprint ist noch
+  // nicht in main. Früher hiess das „done“, der Autopilot startete den nächsten Sprint vom alten main. Der Worker setzt
+  // „done“, sobald main den Sprint enthält (git merge-base --is-ancestor).
+  {
+    version: 14,
+    name: 'sprint-wartet-auf-merge',
+    sql: `
+      ALTER TABLE sprints DROP CONSTRAINT IF EXISTS sprints_git_sync_check;
+      ALTER TABLE sprints ADD CONSTRAINT sprints_git_sync_check
+        CHECK (git_sync IN ('pending', 'running', 'done', 'failed', 'awaiting_merge'));
+    `,
+  },
+  // „Vor dem Sprint“: Fehlversuche und nächster Versuch am Sprint statt im Speicher des Workers. So übersteht der
+  // Zähler einen Neustart, und Wiederholungen warten eine wachsende Pause ab (Code-Review vom 21.10.2026).
+  {
+    version: 15,
+    name: 'vor-dem-sprint-versuche-am-sprint',
+    sql: `
+      ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_attempts SMALLINT NOT NULL DEFAULT 0;
+      ALTER TABLE sprints ADD COLUMN IF NOT EXISTS pre_sprint_next_at TIMESTAMPTZ;
+    `,
+  },
+  // Wiederherstellung beim Start nur für eigene oder verwaiste Läufe: Läufe und Prozesse tragen die ID ihres Workers,
+  // jeder Worker schreibt ein Lebenszeichen. Schritte gehören über run_id zum Lauf. Altzeilen ohne ID gelten als
+  // verwaist, sobald das Lebenszeichen ihres Projekts (worker_heartbeats) alt ist (Code-Review vom 21.10.2026).
+  {
+    version: 16,
+    name: 'worker-id-und-lebenszeichen',
+    sql: `
+      CREATE TABLE IF NOT EXISTS runner_workers (
+        id TEXT PRIMARY KEY,
+        pid INTEGER,
+        host TEXT NOT NULL DEFAULT '',
+        started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS worker_id TEXT;
+      ALTER TABLE agent_processes ADD COLUMN IF NOT EXISTS worker_id TEXT;
+    `,
+  },
+  // Budget je Agent-Rolle: stand nur im Basis-Schema (Version 1) und fehlte deshalb in bestehenden Datenbanken.
+  // Die Budgetprüfung scheiterte dort mit „relation budget_role_limits does not exist“ (28.10.2026).
+  {
+    version: 17,
+    name: 'budget-limits-je-rolle',
+    sql: `
+      CREATE TABLE IF NOT EXISTS budget_role_limits (
+        project_slug TEXT NOT NULL REFERENCES projects(slug) ON DELETE CASCADE ON UPDATE CASCADE,
+        role TEXT NOT NULL CHECK (role IN
+          ('author', 'developer', 'tester', 'reviewer', 'documenter', 'bug_reviewer', 'manual_writer', 'user_manual_writer')),
+        period TEXT NOT NULL CHECK (period IN ('day', 'sprint', 'order')),
+        max_tokens BIGINT NOT NULL CHECK (max_tokens > 0),
+        PRIMARY KEY (project_slug, role, period)
+      );
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS budget_blocked_role TEXT;
+      CREATE INDEX IF NOT EXISTS agent_usage_role_idx ON agent_usage (project_slug, role, created_at);
+    `,
+  },
+  // Docker-Sandbox je Projekt (Phase 1: nur der Entwickler). NULL = es gilt der globale Schalter DEV_LOG_AGENT_SANDBOX.
+  {
+    version: 18,
+    name: 'agent-sandbox-je-projekt',
+    sql: `
+      ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
+    `,
+  },
+  // Je Idee höchstens ein Auftrag: Ein Doppelklick auf „Übernehmen“ kam parallel am NOT EXISTS vorbei und legte zwei
+  // Aufträge an (Code-Review vom 20.10.2026). Vorhandene Doppel behalten ihre Arbeit; nur der älteste Auftrag bleibt
+  // mit der Idee verknüpft, die übrigen verlieren den Verweis (ideation_id = NULL).
+  {
+    version: 19,
+    name: 'ein-auftrag-je-idee',
+    sql: `
+      UPDATE development_items d SET ideation_id = NULL, updated_at = NOW()
+        FROM (SELECT id, row_number() OVER (PARTITION BY ideation_id ORDER BY created_at, id) AS rank
+                FROM development_items WHERE ideation_id IS NOT NULL) ranked
+       WHERE d.id = ranked.id AND ranked.rank > 1;
+      CREATE UNIQUE INDEX IF NOT EXISTS development_items_ideation_idx ON development_items (ideation_id)
+        WHERE ideation_id IS NOT NULL;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

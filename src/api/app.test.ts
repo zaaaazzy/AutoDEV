@@ -258,12 +258,12 @@ test('validates board input and stores valid project-scoped ideas', async () => 
 
 function recordingPool(rows: Record<string, unknown>[] = []) {
   const queries: { sql: string; values: unknown[] }[] = [];
-  const pool = {
-    query: async (sql: string, values: unknown[] = []) => {
-      queries.push({ sql, values });
-      return { rows };
-    },
-  } as unknown as Pool;
+  const query = async (sql: string, values: unknown[] = []) => {
+    // Transaktionsrahmen (withTransaction) nicht mitschreiben: Die Tests prüfen die eigentlichen Anweisungen.
+    if (!['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) queries.push({ sql, values });
+    return { rows };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return { pool, queries };
 }
 
@@ -406,7 +406,13 @@ test('stores image attachments for bugs', async () => {
 });
 
 test('manages sprints with validation and a single active sprint', async () => {
-  const { pool, queries } = recordingPool([{ id: SPRINT_ID, name: 'Sprint 1' }]);
+  const recording = recordingPool([{ id: SPRINT_ID, name: 'Sprint 1' }]);
+  const { queries } = recording;
+  // Noch kein anderer Sprint im Projekt (Namensprüfung), sonst wie gehabt.
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) =>
+      sql.startsWith('SELECT name FROM sprints') ? { rows: [] } : recording.pool.query(sql, values),
+  } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const created = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
       method: 'POST',
@@ -414,7 +420,7 @@ test('manages sprints with validation and a single active sprint', async () => {
       body: JSON.stringify({ name: 'Sprint 1', startDate: '2026-10-19', endDate: '2026-11-01' }),
     });
     assert.equal(created.status, 201);
-    assert.equal(queries[0]?.values[4], '2026-10-19');
+    assert.equal(queries.find((query) => query.sql.includes('INSERT INTO sprints'))?.values[4], '2026-10-19');
 
     const badDate = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
       method: 'POST',
@@ -462,6 +468,11 @@ function sprintPool(sprint: { status: string; running?: number } | null) {
       if (sql.startsWith('UPDATE sprints SET')) return { rows: [{ id: SPRINT_ID, status: sprint.status }] };
       return { rows: [] };
     },
+    // Abschluss läuft in einer Transaktion auf eigener Verbindung: Statements gehen an pool.query (auch überschrieben).
+    connect: async () => ({
+      query: (sql: string, values?: unknown[]) => (pool as unknown as { query: typeof pool.query }).query(sql, values),
+      release: () => undefined,
+    }),
   } as unknown as Pool;
   return { pool, queries };
 }
@@ -556,7 +567,8 @@ test('deletes only planned or completed sprints without running work', async () 
     for (const query of blocked.slice(0, 2)) {
       assert.match(query.sql, /status IN \('planned', 'completed', 'cancelled'\)/);
       assert.match(query.sql, /in_progress/);
-      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed'\)/);
+      // „Wartet auf Merge“ ist ein Ruhezustand wie „done“ oder „failed“ (es läuft nichts mehr).
+      assert.match(query.sql, /git_sync IS NULL OR git_sync IN \('done', 'failed', 'awaiting_merge'\)/);
     }
   });
 
@@ -595,7 +607,14 @@ test('new sprints can only be created as planned', async () => {
 });
 
 test('assigns development orders to sprints only within the same project', async () => {
-  const { pool, queries } = recordingPool([]);
+  const queries: { sql: string; values: unknown[] }[] = [];
+  // Erste Abfrage: der Auftrag (backlog, ohne Sprint) existiert; zweite: der Sprint gehört nicht zum Projekt.
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: queries.length === 1 ? [{ status: 'backlog', sprintId: null }] : [] };
+    },
+  } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/development/${ID}`, {
       method: 'PATCH',
@@ -603,8 +622,8 @@ test('assigns development orders to sprints only within the same project', async
       body: JSON.stringify({ sprintId: SPRINT_ID }),
     });
     assert.equal(response.status, 400);
-    assert.equal(queries.length, 1);
-    assert.match(queries[0]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
+    assert.equal(queries.length, 2);
+    assert.match(queries[1]?.sql ?? '', /s\.project_slug|project_slug = s\.project_slug/);
   });
 });
 
@@ -666,6 +685,28 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(list.status, 200);
     // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
     assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
+  });
+});
+
+test('moves a workflow step to another phase with one order call per phase (drag & drop)', async () => {
+  const { pool, queries } = recordingPool();
+  await withServer(pool, async (baseUrl) => {
+    const order = (phase: string, ids: string[]) =>
+      fetch(`${baseUrl}/api/projects/mainty/workflow/order`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ phase, ids }),
+      });
+    // Zielphase mit dem Schritt, danach die Quellphase ohne ihn: beide lückenlos ab 1.
+    assert.equal((await order('after_task', [SPRINT_ID, ID])).status, 204);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'after_task', [SPRINT_ID, ID]]);
+    assert.equal((await order('while_task', [])).status, 204);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'while_task', []]);
+    const sql = queries.at(-1)?.sql ?? '';
+    assert.match(sql, /SET position = o\.ord, phase = \$2/);
+    // Pausiert bleibt pausiert: das Umordnen fasst `enabled` nicht an.
+    assert.doesNotMatch(sql, /enabled/);
+    assert.equal((await order('during', [ID])).status, 400);
   });
 });
 
@@ -1171,4 +1212,95 @@ test('with a second factor, cached basic credentials neither count as failures n
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('ein Handbuch mit 30 000 Umlauten passt durch den JSON-Parser, ein zu grosser Body gibt 413 als JSON', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const post = (content: string) =>
+      fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content }),
+      });
+    // 30 000 Zeichen „ä“ sind rund 60 KB – vorher schon am 32-KB-Limit als HTML-413 gescheitert.
+    const full = await post('ä'.repeat(30_000));
+    assert.equal(full.status, 201);
+    assert.equal(queries.at(-1)?.values[2], 'ä'.repeat(30_000));
+
+    const tooLarge = await post('ä'.repeat(150_000));
+    assert.equal(tooLarge.status, 413);
+    assert.match(tooLarge.headers.get('content-type') ?? '', /application\/json/);
+    assert.match(((await tooLarge.json()) as { message: string }).message, /zu gross/);
+  });
+});
+
+test('kaputtes JSON gibt 400 als JSON, ein Serverfehler 500 ohne Stacktrace und Fehlertext', async () => {
+  const pool = {
+    query: async () => {
+      throw new Error('geheimes Detail aus der Datenbank');
+    },
+  } as unknown as Pool;
+  const errors = console.error;
+  console.error = () => undefined;
+  try {
+    await withServer(pool, async (baseUrl) => {
+      const broken = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: '{"title": "x",',
+      });
+      assert.equal(broken.status, 400);
+      assert.deepEqual(await broken.json(), { message: 'Die Anfrage enthält kein gültiges JSON.' });
+
+      const failed = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content: 'x' }),
+      });
+      assert.equal(failed.status, 500);
+      assert.match(failed.headers.get('content-type') ?? '', /application\/json/);
+      const text = await failed.text();
+      assert.doesNotMatch(text, /stack|geheimes Detail|at /);
+      assert.deepEqual(JSON.parse(text), { message: 'Interner Fehler. Bitte später erneut versuchen.' });
+    });
+  } finally {
+    console.error = errors;
+  }
+});
+
+test('ein Sitzungs-Cookie mit kaputtem „%“ gibt 401 statt 500', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects`, { headers: { Cookie: 'devlog_session=%E0%A4%A' } });
+    assert.equal(response.status, 401);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
+  });
+});
+
+test('unbekannte Pfade antworten für jede Methode mit JSON-404', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      const response = await fetch(`${baseUrl}/gibt-es-nicht`, { method, headers: { Authorization: basicAuth() } });
+      assert.equal(response.status, 404, method);
+      assert.deepEqual(await response.json(), { message: 'Nicht gefunden.' }, method);
+    }
+  });
+});
+
+test('Sprint-Name mit gleichem Git-Branch wie ein anderer Sprint wird abgelehnt', async () => {
+  const pool = {
+    query: async (sql: string) =>
+      sql.startsWith('SELECT name FROM sprints') ? { rows: [{ name: 'Sprint 5' }] } : { rows: [{ id: SPRINT_ID }] },
+  } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/mainty/sprints`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ name: 'sprint-5' }),
+    });
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).message, /gleicher Git-Branch/);
+  });
 });

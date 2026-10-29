@@ -35,11 +35,43 @@ export function humanActionFor(text: string): string | null {
   return HUMAN_ACTIONS.find(([pattern]) => pattern.test(tail))?.[1] ?? null;
 }
 
+/** Beginn der Aktion aus den manuellen Abnahmepunkten: ein Hinweis zu einem bestandenen Test, kein Grund zu warten. */
+export const MANUAL_TODO_PREFIX = 'Selbst prüfen: ';
+
 /** Kurzform aus den manuellen Abnahmepunkten des Testers. */
 export function manualTodo(checks: string[]): string | null {
   if (!checks.length) return null;
   const short = checks.map((check) => check.replace(/\s+/g, ' ').trim().slice(0, 60)).join('; ');
-  return shorten(`Selbst prüfen: ${short}`);
+  return shorten(`${MANUAL_TODO_PREFIX}${short}`);
+}
+
+/**
+ * Der Auftrag ist fertig und getestet, nur der Merge in den Sprint scheiterte – nicht an Konflikten, sondern z. B. an
+ * einer Sperre, die nicht verwaist war, einem Hook oder voller Platte. Die Arbeit liegt auf dem Auftrags-Branch; der
+ * Sprint wartet auf sie (sprintSettled), statt ohne sie live zu gehen.
+ */
+export const MERGE_TODO = 'Merge in den Sprint fehlgeschlagen – Ursache im Auftrag beheben, dann „Erneut versuchen“';
+
+/**
+ * Der Commit-Schutz hat Dateien des Auftrags zurückgehalten (sehen nach Zugangsdaten aus). Ohne sie ist der Auftrag
+ * unvollständig; sie liegen gesichert unter .dev-log-backups, der Auftrags-Branch bleibt ungemergt.
+ */
+export const SECRETS_TODO =
+  'Dateien wegen Zugangsdaten zurückgehalten – Testwerte markieren bzw. Schlüssel entfernen, dann „Erneut versuchen“';
+
+/**
+ * Gescheiterter Auftrag: Ein Abnahmehinweis aus einem früheren, bestandenen Testschritt gilt nicht mehr. Sonst hielte
+ * der Autopilot den Auftrag für „wartet auf einen Menschen“ und den Sprint für fertig, obwohl die Behebung noch läuft.
+ */
+export async function clearManualTodo(pool: Pool, itemId: string): Promise<void> {
+  const changed = (
+    await pool.query<{ sprintId: string | null }>(
+      `UPDATE development_items SET action_todo = NULL WHERE id = $1 AND starts_with(action_todo, $2)
+       RETURNING sprint_id AS "sprintId"`,
+      [itemId, MANUAL_TODO_PREFIX],
+    )
+  ).rows[0];
+  if (changed?.sprintId) await generateSprintReport(pool, changed.sprintId).catch(logged('action-todo'));
 }
 
 /** „Budget erreicht“: Limit erhöhen oder warten (beim Tageslimit bis zum Folgetag); `detail` nennt Limit und Stand. */
@@ -47,12 +79,18 @@ export function budgetActionTodo(daily: boolean, detail: string): string {
   return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
 }
 
+/**
+ * „keine“, „nichts“, „-“ oder „n/a“ – allein oder mit Begründung hinter Satzzeichen, Gedankenstrich oder Klammer
+ * („keine – Agent behebt selbst“). „Keine Datenbank-URL hinterlegt“ ist dagegen eine Aktion.
+ */
+const NO_ACTION = /^(keine|nichts|-|n\/a)\s*($|[.,;:!]|[–—-](\s|$)|\()/i;
+
 /** Liest die AKTION-Zeile der Problemanalyse: Text, „keine“ (= null) oder undefined, wenn sie fehlt. */
 export function parseActionLine(output: string): string | null | undefined {
   const match = output.match(/^\s*AKTION:\s*(.+)$/im);
   if (!match) return undefined;
   const value = match[1]!.trim().replace(/^["„]|["“]$/g, '');
-  return /^(keine|nichts|-|n\/a)\.?$/i.test(value) ? null : shorten(value);
+  return NO_ACTION.test(value) ? null : shorten(value);
 }
 
 export function shorten(text: string): string {

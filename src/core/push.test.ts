@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { deliverPush, isAllowedPushEndpoint, pushSubject } from './push.js';
+import type { Pool } from 'pg';
+import webpush from 'web-push';
+import {
+  VapidKeyMissingError,
+  deliverPush,
+  isAllowedPushEndpoint,
+  pushSubject,
+  sealStoredVapidKeys,
+  vapidKeys,
+} from './push.js';
+import { isEncrypted } from './secrets.js';
 
 test('Push-Endpunkte: nur bekannte Push-Dienste per https ohne Port und Zugangsdaten', () => {
   for (const ok of [
@@ -68,4 +78,73 @@ test('Push-Absender: öffentliche Adresse aus Umgebung oder .env, nie localhost'
     'https://log.example.ch',
   );
   assert.doesNotMatch(pushSubject({}, none), /localhost/);
+});
+
+const KEY = { DEV_LOG_SECRET_KEY: 'ein-schluessel-nur-fuer-tests' };
+
+/** app_settings im Speicher, mit denselben Bedingungen wie in Postgres (ON CONFLICT DO NOTHING, UPDATE … AND value). */
+function settings(initial?: string) {
+  const values = new Map<string, string>(initial === undefined ? [] : [['push_vapid_keys', initial]]);
+  const pool = {
+    query: async (sql: string, params: string[]) => {
+      if (sql.startsWith('SELECT')) {
+        const value = values.get(params[0]!);
+        return { rows: value === undefined ? [] : [{ value }] };
+      }
+      if (sql.startsWith('INSERT')) {
+        if (!values.has(params[0]!)) values.set(params[0]!, params[1]!);
+        return { rows: [], rowCount: 1 };
+      }
+      if (values.get(params[0]!) !== params[2]) return { rows: [], rowCount: 0 };
+      values.set(params[0]!, params[1]!);
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  return { pool, stored: () => values.get('push_vapid_keys') };
+}
+
+test('VAPID: neue Schlüssel liegen nur verschlüsselt in der Datenbank', async () => {
+  const db = settings();
+  const keys = await vapidKeys(db.pool, KEY);
+  const stored = db.stored()!;
+  assert.ok(isEncrypted(stored), 'mit Präfix gespeichert');
+  assert.ok(!stored.includes(keys.privateKey), 'privater Schlüssel nicht im Klartext');
+  assert.ok(!stored.includes(keys.publicKey));
+  assert.deepEqual(await vapidKeys(db.pool, KEY), keys, 'derselbe Schlüssel beim nächsten Aufruf');
+});
+
+test('VAPID: ohne DEV_LOG_SECRET_KEY wird kein Schlüssel geschrieben', async () => {
+  const db = settings();
+  await assert.rejects(vapidKeys(db.pool, {}), VapidKeyMissingError);
+  assert.equal(db.stored(), undefined);
+});
+
+test('VAPID beim Start: Klartext wird einmal verschlüsselt, danach bleibt alles gleich', async () => {
+  const keys = webpush.generateVAPIDKeys();
+  const db = settings(JSON.stringify(keys));
+  assert.equal(await sealStoredVapidKeys(db.pool, KEY), 1);
+  const sealed = db.stored()!;
+  assert.ok(isEncrypted(sealed));
+  assert.ok(!sealed.includes(keys.privateKey));
+  assert.deepEqual(await vapidKeys(db.pool, KEY), keys, 'Geräte behalten ihr Abo (gleicher Schlüssel)');
+  assert.equal(await sealStoredVapidKeys(db.pool, KEY), 0, 'zweiter Start ändert nichts');
+  assert.equal(db.stored(), sealed);
+});
+
+test('VAPID beim Start: ohne oder mit falschem Schlüssel laut abbrechen, nichts löschen', async () => {
+  const plain = JSON.stringify(webpush.generateVAPIDKeys());
+  const db = settings(plain);
+  await assert.rejects(sealStoredVapidKeys(db.pool, {}), /DEV_LOG_SECRET_KEY/);
+  assert.equal(db.stored(), plain, 'Wert bleibt erhalten');
+
+  const sealed = settings();
+  await vapidKeys(sealed.pool, KEY);
+  const before = sealed.stored();
+  await assert.rejects(
+    sealStoredVapidKeys(sealed.pool, { DEV_LOG_SECRET_KEY: 'ein-ganz-anderer-schluessel' }),
+    /nicht lesen/,
+  );
+  assert.equal(sealed.stored(), before);
+
+  assert.equal(await sealStoredVapidKeys(settings().pool, {}), 0, 'ohne gespeicherten Schlüssel kein Abbruch');
 });

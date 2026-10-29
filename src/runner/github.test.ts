@@ -5,6 +5,7 @@ import type { CommandExecutor, CommandResult } from '../core/command.js';
 import {
   createGithubAdapter,
   evaluateChecks,
+  relevantChecks,
   GH_COMMANDS,
   ghRunner,
   githubRepo,
@@ -190,4 +191,38 @@ test('pending checks (exit code 8) and missing checks count as pending', async (
     status: 'failure',
     failedRun: '55',
   });
+});
+
+test('PR-Checks: Ein roter Push-Lauf zählt nicht, wenn derselbe Job für den Pull Request grün ist', () => {
+  const run = (event: string, name: string, bucket: string, id: number) => ({
+    workflow: 'CI',
+    event,
+    name,
+    bucket,
+    link: `https://github.com/a/b/actions/runs/${id}/job/1`,
+  });
+  // Wie bei Sprint 18: e2e im Push-Lauf durch ein Zeitlimit rot, im PR-Lauf grün.
+  const sprint18 = [
+    run('push', 'check', 'pass', 1),
+    run('push', 'e2e', 'fail', 1),
+    run('pull_request', 'check', 'pass', 2),
+    run('pull_request', 'e2e', 'pass', 2),
+  ];
+  assert.deepEqual(evaluateChecks(sprint18), { status: 'success', failedRun: null });
+  // Ist der PR-Lauf selbst rot, bleibt es rot – mit der Kennung des PR-Laufs.
+  assert.deepEqual(evaluateChecks([run('push', 'e2e', 'pass', 1), run('pull_request', 'e2e', 'fail', 2)]), {
+    status: 'failure',
+    failedRun: '2',
+  });
+  // Läuft der PR-Lauf noch, wartet die App, auch wenn der Push-Lauf schon fertig ist.
+  assert.deepEqual(evaluateChecks([run('push', 'e2e', 'pass', 1), run('pull_request', 'e2e', 'pending', 2)]), {
+    status: 'pending',
+    failedRun: null,
+  });
+  // Ein Job nur im Push-Lauf (kein PR-Gegenstück) zählt weiterhin.
+  assert.deepEqual(evaluateChecks([run('push', 'deploy-preview', 'fail', 1), run('pull_request', 'e2e', 'pass', 2)]), {
+    status: 'failure',
+    failedRun: '1',
+  });
+  assert.deepEqual(relevantChecks([run('push', 'e2e', 'fail', 1)]).length, 1, 'ohne PR-Lauf bleibt der Push-Lauf');
 });

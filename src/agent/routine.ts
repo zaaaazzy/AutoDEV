@@ -60,10 +60,11 @@ export function routineInstructions(target: OutputTarget): string {
     'Nur lesen: ändere keine Dateien, committe nichts, installiere nichts und starte oder stoppe keine Dienste. Das Ergebnis gibst du nur als Bericht und über die Marker-Zeilen weiter.',
     'Fehlt ein Messwert (z. B. weil ein Befehl blockiert ist), gilt das nicht als bestanden: nenne den fehlenden Wert als Hinweis.',
     `Ziel des Ergebnisses: ${TARGET_LABELS[target]}. ${wanted[target]}`,
-    'Marker-Zeilen stehen am Ende der Antwort, je eine Zeile mit einem JSON-Objekt:',
-    '`@@BUG {"title": "...", "severity": "low|medium|high|critical", "description": "..."}`',
-    '`@@IDEA {"title": "...", "category": "frontend|backend|fullstack|infrastructure|docs", "priority": "low|medium|high", "description": "..."}`',
-    '`@@ORDER {"title": "...", "priority": "low|medium|high", "description": "..."}`',
+    'Marker-Zeilen stehen am Ende der Antwort, je eine Zeile mit einem JSON-Objekt. Die Zeile beginnt direkt mit dem ' +
+      'Marker – ohne Backticks und nicht in einem Codeblock; Marker mitten in der Zeile oder in Codeblöcken zählen nicht:',
+    '@@BUG {"title": "...", "severity": "low|medium|high|critical", "description": "..."}',
+    '@@IDEA {"title": "...", "category": "frontend|backend|fullstack|infrastructure|docs", "priority": "low|medium|high", "description": "..."}',
+    '@@ORDER {"title": "...", "priority": "low|medium|high", "description": "..."}',
     'Ohne Befund keine Marker-Zeile.',
   ].join('\n');
 }

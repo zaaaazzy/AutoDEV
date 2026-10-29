@@ -8,7 +8,13 @@ import { ProjectStore } from '../../core/project-store.js';
 import type { FormValues } from '../../shared/forms.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
-import { CategoryLabelPipe, PriorityLabelPipe, StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
+import {
+  CategoryLabelPipe,
+  HoursPipe,
+  PriorityLabelPipe,
+  StatusClassPipe,
+  StatusLabelPipe,
+} from '../../shared/pipes.js';
 import { CATEGORIES } from '../../shared/labels.js';
 import { CommentThreadComponent } from './comment-thread.component.js';
 import {
@@ -18,12 +24,14 @@ import {
   MAX_IMAGE_BYTES,
   sourceLabel,
 } from './idea-options.js';
+import { ModalComponent } from '../../shared/modal.component.js';
 
 /** Dialog mit Details, Bearbeitung und Kommentaren einer Idee. */
 @Component({
   selector: 'app-idea-detail',
   standalone: true,
   imports: [
+    ModalComponent,
     GithubLinkComponent,
     CommentThreadComponent,
     DatePipe,
@@ -32,6 +40,7 @@ import {
     GalleryComponent,
     MarkdownPipe,
     CategoryLabelPipe,
+    HoursPipe,
     PriorityLabelPipe,
     StatusClassPipe,
     StatusLabelPipe,

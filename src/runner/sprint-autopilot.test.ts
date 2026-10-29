@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
+import { autopilotGuard } from '../api/sprint-planning.js';
+import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
 import { sprintAutopilot, sprintSettled } from './sprint-autopilot.js';
 
 // Montag, 19.10.2026 (Ortszeit): 10:00 liegt in den Arbeitszeiten Mo–Fr 08:00–18:00, 22:00 nicht.
@@ -65,6 +67,38 @@ test('Autopilot pausiert nach gescheitertem Merge und startet keinen Sprint', as
   assert.equal(started(), false);
 });
 
+// Früher meldete der Abschluss „done“, obwohl main (in einem anderen Ordner) den Sprint noch nicht enthielt – der
+// nächste Sprint zweigte vom alten main ab.
+test('Autopilot wartet, solange main den letzten Sprint nicht enthält, und nennt den Grund', async () => {
+  const { pool, started } = fakePool({ id: 'old', name: 'Sprint 1', sync: 'awaiting_merge', message: 'git merge' });
+  assert.equal(await sprintAutopilot(pool, 'demo', MONDAY_10), 'working');
+  assert.equal(started(), false);
+  const guard = await autopilotGuard(pool, 'demo', MONDAY_10);
+  assert.equal(guard?.state, 'finishing');
+  assert.match(guard?.message ?? '', /Sprint 1.*noch nicht in main/);
+});
+
+test('Sprint nicht fertig, wenn Aufträge nur am Arbeitsordner oder Laufwerk scheiterten (Sprint 20)', () => {
+  const git = { status: 'blocked', actionTodo: 'Arbeitsordner aufräumen (Git)' };
+  const drive = {
+    status: 'blocked',
+    actionTodo: 'Projektordner bzw. Laufwerk nicht erreichbar – anschliessen, der Auftrag startet dann neu',
+  };
+  const done = { status: 'done', actionTodo: null };
+  assert.equal(sprintSettled([done, done, git]), false);
+  assert.equal(sprintSettled([done, drive]), false);
+  // Eine echte „Aktion notwendig“ (z. B. Zugangsdaten eintragen) wartet weiterhin auf einen Menschen.
+  assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: 'API-Schlüssel eintragen' }]), true);
+});
+
+test('Budget je Auftrag gibt nie von selbst frei: dieser Auftrag hält den Sprint nicht ewig offen', () => {
+  const done = { status: 'done', actionTodo: null };
+  const order = { status: 'blocked', actionTodo: 'Budget je Auftrag erreicht', budgetBlocked: 'order' };
+  const day = { status: 'blocked', actionTodo: 'Tagesbudget erreicht', budgetBlocked: 'day' };
+  assert.equal(sprintSettled([done, order]), true);
+  assert.equal(sprintSettled([done, day]), false);
+});
+
 test('Sprint nicht fertig, solange ein Auftrag wegen Budget wartet (er läuft von selbst weiter)', () => {
   const budget = { status: 'blocked', actionTodo: 'Budget erreicht: Tageslimit …', budgetBlocked: 'day' };
   assert.equal(sprintSettled([{ status: 'done', actionTodo: null }, budget]), false);
@@ -89,7 +123,8 @@ function finishedSprintPool(autoLive: boolean, items = [{ status: 'done', action
     if (sql.includes("UPDATE sprints s SET status = 'completed'")) return completable ? [{ id: 'sprint-9' }] : [];
     return [];
   };
-  const pool = { query: async (sql: string) => ({ rows: answer(sql) }) } as unknown as Pool;
+  const query = async (sql: string) => ({ rows: answer(sql) });
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return {
     pool,
     completed: () => statements.some((sql) => sql.includes("UPDATE sprints s SET status = 'completed'")),
@@ -126,4 +161,17 @@ test('„Selbst live“ nur in den Arbeitszeiten, nie mit offener Arbeit, nie be
   const paused = finishedSprintPool(true, undefined, false);
   assert.equal(await sprintAutopilot(paused.pool, 'demo', MONDAY_10), 'review');
   assert.equal(paused.queuedSync(), false);
+});
+
+test('Sprint nicht fertig bei altem Abnahmehinweis oder gescheitertem Merge (beides wartet nicht auf einen Menschen)', () => {
+  const done = { status: 'done', actionTodo: null };
+  // Tester bestand mit manuellen Punkten, danach scheiterte der Reviewer: kein „Aktion notwendig“, sondern ein Fehler.
+  assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: `${MANUAL_TODO_PREFIX}Login am Handy` }]), false);
+  // Fertige Arbeit, die nur nicht in den Sprint-Branch kam: ohne sie ginge der Sprint unvollständig live.
+  assert.equal(sprintSettled([done, { status: 'blocked', actionTodo: MERGE_TODO }]), false);
+  // „Selbst prüfen (nicht automatisch prüfbar)“ aus einem Fehler ist dagegen eine echte Aktion für einen Menschen.
+  assert.equal(
+    sprintSettled([done, { status: 'blocked', actionTodo: 'Selbst prüfen (nicht automatisch prüfbar)' }]),
+    true,
+  );
 });

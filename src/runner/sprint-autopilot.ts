@@ -1,16 +1,27 @@
 import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
-import { applyProposal, autopilotGuard, completeSprint, loadProposal } from '../api/sprint-planning.js';
+import { applyProposal, autopilotGuard, completeSprintIn, loadProposal } from '../api/sprint-planning.js';
 import { sendPush } from '../core/push.js';
 import { loadGitState, problemsFor } from '../api/git-state.js';
+import { ENVIRONMENT_TODO, GIT_FOLDER_TODO } from './autofix.js';
+import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
 
 export type AutopilotStep =
   'off' | 'paused' | 'working' | 'review' | 'completed' | 'started' | 'outside_hours' | 'idle';
 
+export { GIT_FOLDER_TODO };
+
+/**
+ * „Aktion notwendig“, die nichts mit dem Auftrag zu tun hat, sondern mit der Umgebung (Arbeitsordner, Laufwerk): Der
+ * Auftrag ist nicht bearbeitet, nur aufgehalten. Ältere Läufe setzten den Git-Hinweis noch je Auftrag.
+ */
+const ENVIRONMENT_TODOS = [GIT_FOLDER_TODO, ENVIRONMENT_TODO];
+
 /**
  * Offen = noch zu bearbeiten. Blockierte Aufträge halten den Sprint nur dann nicht auf, wenn sie „Aktion notwendig“
  * haben (warten auf einen Menschen); andere Blockierte sind Fehler, die noch behoben werden. Wegen Budget blockierte
- * Aufträge (budget_blocked) laufen von selbst weiter, sobald das Budget wieder reicht: Sie sind noch offen.
+ * Aufträge (budget_blocked) laufen von selbst weiter, sobald das Budget wieder reicht: Sie sind noch offen. Ebenso
+ * Aufträge, die nur an der Umgebung scheiterten (Sprint 20 galt sonst mit 18 von 20 so blockierten als „fertig“).
  */
 export function sprintSettled(
   items: { status: string; actionTodo: string | null; budgetBlocked?: string | null }[],
@@ -21,7 +32,16 @@ export function sprintSettled(
       (item) =>
         // Wartet ein Auftrag auf die Review-Freigabe, ist er noch nicht im Sprint-Branch: der Sprint wartet mit.
         ['backlog', 'planned', 'in_progress', 'approval'].includes(item.status) ||
-        (item.status === 'blocked' && (!item.actionTodo || Boolean(item.budgetBlocked))),
+        (item.status === 'blocked' &&
+          (!item.actionTodo ||
+            // Abnahmehinweis eines früheren, bestandenen Tests: kein Warten auf einen Menschen, sondern ein Fehler.
+            item.actionTodo.startsWith(MANUAL_TODO_PREFIX) ||
+            // Fertige Arbeit, nur der Merge scheiterte: Ohne sie ginge der Sprint unvollständig live.
+            item.actionTodo === MERGE_TODO ||
+            // Tages- und Sprint-Budget geben von selbst wieder frei; das Budget je Auftrag nie (nur „Erneut versuchen“
+            // setzt es zurück) – dieser Auftrag wartet also auf einen Menschen und hält den Sprint nicht ewig offen.
+            (Boolean(item.budgetBlocked) && item.budgetBlocked !== 'order') ||
+            ENVIRONMENT_TODOS.includes(item.actionTodo))),
     )
   );
 }
@@ -106,15 +126,30 @@ async function goLiveAutomatically(
     );
     return false;
   }
-  const claimed = await pool.query(
-    `UPDATE sprints s SET status = 'completed'
-      WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'in_progress')
-      RETURNING s.id`,
-    [sprint.id],
-  );
-  if (!claimed.rows[0]) return false;
-  await completeSprint(pool, sprint.id);
+  // Status setzen und Abschluss (Bericht, Git-Sicherung) in einer Transaktion: scheitert der Abschluss, bleibt der
+  // Sprint aktiv statt „abgeschlossen ohne Bericht“.
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claimed = await client.query(
+      `UPDATE sprints s SET status = 'completed'
+        WHERE s.id = $1 AND s.status = 'active' AND s.paused_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.sprint_id = s.id AND d.status = 'in_progress')
+        RETURNING s.id`,
+      [sprint.id],
+    );
+    if (!claimed.rows[0]) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+    await completeSprintIn(client, sprint.id);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
   console.info(`[${project}] Autopilot: „${sprint.name}“ fertig – wird live geschaltet (Test-Gate, Merge, Push).`);
   await sendPush(
     pool,

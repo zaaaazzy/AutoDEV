@@ -2,6 +2,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import pg from 'pg';
+import { e2eAdminUrl } from './admin-url.js';
 
 const username = process.env.E2E_USERNAME!;
 const password = process.env.E2E_PASSWORD!;
@@ -33,9 +34,7 @@ test('Aufklappbereiche bleiben offen, während Agent-Läufe nachladen (Aktionen,
     ids.push(item.id);
   }
   await request.patch(`/api/development/${ids[0]}`, { headers, data: { sprintId: sprint.id } });
-  const url = new URL(
-    process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
-  );
+  const url = e2eAdminUrl();
   url.pathname = `/${process.env.E2E_DATABASE ?? 'dev_log_e2e'}`;
   const db = new pg.Client({ connectionString: url.toString() });
   await db.connect();
@@ -81,6 +80,12 @@ test('Aufklappbereiche bleiben offen, während Agent-Läufe nachladen (Aktionen,
     await page.waitForTimeout(8_000);
     await expect(panel.locator('.attention-body')).toBeVisible();
     await expect(panel.locator('app-order-detail')).toBeVisible();
+    // Unter „Aktionen“: keine Status-/Sprint-/Agent-Zeile in den Auftragsdetails, die Analyse steht nur einmal da.
+    await expect(panel.locator('app-order-detail .order-controls')).toHaveCount(0);
+    await panel.locator('details.attention-tech summary').click();
+    await expect(panel.locator('app-order-detail').getByText('Kaputt.')).toHaveCount(0);
+    await expect(panel.locator('details.attention-tech').getByText('Kaputt.')).toHaveCount(1);
+    if (process.env.E2E_SCREENSHOT) await panel.screenshot({ path: process.env.E2E_SCREENSHOT });
     // 2) Sprint: „Aufträge hinzufügen“ öffnen
     await page.goto('/#sprints?project=zz-aufklappen');
     const pool = page.locator('details.sprint-pool').first();

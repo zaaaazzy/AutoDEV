@@ -1,20 +1,57 @@
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { sendPush } from '../core/push.js';
+import { SANDBOX_IMAGE } from '../core/sandbox.js';
+import { inWorkerContainer } from '../core/worker-container.js';
 import { gitEnvironment } from './project-command.js';
 
 /**
  * „AIdeation neu starten“ (Aktionen im Assistenten): Die Oberfläche fordert den Neustart an, der Worker auf dem Host
- * baut die Container mit `docker compose up -d --build` neu und beendet sich danach selbst. launchd (KeepAlive)
- * startet ihn sofort wieder – mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
+ * holt den neuesten Stand per Fast-Forward von origin (pullBranch), baut die Container mit
+ * `docker compose up -d --build` neu und beendet sich danach selbst (RESTART_EXIT_CODE). launchd (KeepAlive),
+ * systemd (Restart=always) bzw. unter Windows die Schleife in scripts\run-with-env.ps1 starten ihn sofort wieder –
+ * mit dem neuen Code und den neuen Agents. Der Stand liegt in app_settings.
+ *
+ * Worker im Container (Dienst worker, DEV_LOG_WORKER_CONTAINER=1): Dieselben Schritte laufen über den eingebundenen
+ * Docker-Socket. Neu gebaut und gestartet werden alle Dienste ausser Worker und Wächter (Compose ersetzte sonst den
+ * Container, in dem der Neubau gerade läuft); ihr Image wird nur gebaut. Danach startet die Compose-Restart-Richtlinie
+ * den Worker neu, der den neuen Code aus dem eingebundenen AIdeation-Ordner lädt.
  */
 export const RESTART_KEY = 'system:restart';
 export const RESTART_COMMAND = ['docker', 'compose', 'up', '-d', '--build'];
+/** Compose-Dienst des Workers im Container (docker-compose.yml). */
+export const WORKER_SERVICE = 'worker';
+/**
+ * Dienste des Profils worker: Der Worker baut sie beim Neustart nicht selbst neu. Ihre Ordner stehen in
+ * docker-compose.override.yml mit Host-Pfaden (unter Windows C:\…), die Compose nur auf dem Host richtig auflöst.
+ * Der Wächter lädt den neuen Code ohnehin bei jedem Prüflauf aus dem eingebundenen Ordner.
+ */
+export const WORKER_SERVICES: readonly string[] = [WORKER_SERVICE, 'worker-volumes', 'watchdog'];
+/** Dienste der aktiven Profile (Container-Modus: alle ausser WORKER_SERVICES werden neu gebaut). */
+export const SERVICES_COMMAND = ['docker', 'compose', 'config', '--services'];
+/** Image des Worker-Dienstes; gilt ab dem nächsten Ersetzen des Containers (start.sh, docker compose up -d). */
+export const WORKER_IMAGE_COMMAND = ['docker', 'compose', 'build', WORKER_SERVICE];
+/** Image der Agent-Sandbox (src/core/sandbox.ts); baut beim Neustart mit. */
+export const AGENT_IMAGE_COMMAND = ['docker', 'build', '-t', SANDBOX_IMAGE, '-f', 'deploy/agent/Dockerfile', '.'];
+const AGENT_IMAGE_LOG_CHARS = 1_000;
 const BUILD_TIMEOUT_MS = 20 * 60_000;
 /** Höchstens so lange auf laufende Aufträge warten; danach werden sie unterbrochen und nach dem Start fortgesetzt. */
 export const MAX_WAIT_MS = 15 * 60_000;
 const MAX_LOG_CHARS = 4_000;
+/**
+ * Exit-Code des Workers nach einem erfolgreichen Neubau (75 = EX_TEMPFAIL). launchd und systemd starten ihn bei
+ * jedem Code neu; unter Windows startet scripts\run-with-env.ps1 den Worker genau bei diesem Code wieder – die
+ * geplante Aufgabe selbst läuft nur bei der Anmeldung an. Im Container greift „restart: unless-stopped“.
+ */
+export const RESTART_EXIT_CODE = 75;
+/**
+ * Steht „restarting“ länger, ist der Worker nicht wiedergekommen (z. B. Windows-Aufgabe ohne Neustart-Schleife):
+ * Dann darf ein neuer Neustart angefordert werden, statt dauerhaft 409 zu bekommen.
+ */
+export const RESTARTING_STALE_MS = 10 * 60_000;
 
 /**
  * Umgebung für Compose-Aufrufe (Neubau, Rollback, Abbilder): ohne `DEV_LOG_*` und `COMPOSE_*`. Bei Compose gehen
@@ -34,6 +71,8 @@ export interface RestartState {
   requestedBy: string | null;
   startedAt?: string | null;
   finishedAt?: string | null;
+  /** Seit wann der Worker sich zum Neustart beendet (Status „restarting“). */
+  restartingAt?: string | null;
   /** Kurze Meldung für die Oberfläche (z. B. „Wartet auf 1 laufenden Auftrag“). */
   message?: string | null;
   /** Ende der Ausgabe von docker compose. */
@@ -102,6 +141,13 @@ async function writeRestart(
   return state;
 }
 
+/** „restarting“ seit mehr als RESTARTING_STALE_MS: Der Worker hat sich beendet, ist aber nicht wieder gestartet. */
+function restartStale(state: RestartState, now: Date): boolean {
+  if (state.status !== 'restarting') return false;
+  const since = Date.parse(state.restartingAt ?? state.startedAt ?? state.requestedAt);
+  return Number.isFinite(since) && now.getTime() - since > RESTARTING_STALE_MS;
+}
+
 /** Neustart anfordern; läuft schon einer, wird dieser zurückgegeben (created = false). */
 export async function requestRestart(
   pool: Queryable,
@@ -110,7 +156,8 @@ export async function requestRestart(
   comment: string | null = null,
 ): Promise<{ state: RestartState; created: boolean }> {
   const current = await readRestart(pool);
-  if (current && OPEN_STATUSES.includes(current.status)) return { state: current, created: false };
+  if (current && OPEN_STATUSES.includes(current.status) && !restartStale(current, now))
+    return { state: current, created: false };
   const state = await writeRestart(pool, {
     status: 'requested',
     requestedAt: now.toISOString(),
@@ -160,6 +207,20 @@ export async function completeRestart(
 
 /** Wo die Oberfläche nach dem Neubau antworten muss (Port aus docker-compose.yml, nur lokal). */
 export const HEALTH_URL = 'http://127.0.0.1:3100/health';
+
+/** Health-URL für diesen Worker: im Container das Frontend im Compose-Netz (DEV_LOG_HEALTH_URL), sonst HEALTH_URL. */
+export function healthUrl(environment: NodeJS.ProcessEnv = process.env): string {
+  return environment.DEV_LOG_HEALTH_URL?.trim() || HEALTH_URL;
+}
+
+/** Dienstnamen aus `docker compose config --services`, ohne Worker und Wächter; null, wenn keiner lesbar ist. */
+export function servicesToRebuild(output: string): string[] | null {
+  const services = output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(line) && !WORKER_SERVICES.includes(line));
+  return services.length ? services : null;
+}
 const HEALTH_TIMEOUT_MS = 120_000;
 
 export interface RestartOptions {
@@ -176,11 +237,56 @@ export interface RestartOptions {
   healthIntervalMs?: number;
   /** Meldung bei Ende (fertig/fehlgeschlagen); Standard: Push an alle Geräte. */
   notify?: RestartNotifier;
+  /** Liest eine Datei im Installationsordner (null, wenn sie fehlt); Standard: Dateisystem. */
+  readText?: (path: string) => Promise<string | null>;
+  /** Läuft der Worker selbst als Compose-Dienst? Standard: DEV_LOG_WORKER_CONTAINER=1. */
+  container?: boolean;
+}
+
+/**
+ * Der Worker läuft per tsx direkt aus dem Installationsordner mit dessen node_modules – nicht im Container. Ohne
+ * `npm ci` auf dem Host startet er nach einer neuen Laufzeitabhängigkeit nicht (ERR_MODULE_NOT_FOUND, KeepAlive-Schleife).
+ */
+export const DEPENDENCY_COMMAND = ['npm', 'ci', '--ignore-scripts'];
+const DEPENDENCY_TIMEOUT_MS = 10 * 60_000;
+
+async function readTextFile(path: string): Promise<string | null> {
+  return readFile(path, 'utf8').catch(() => null);
+}
+
+/**
+ * Passt node_modules nicht mehr zu package-lock.json? Verglichen wird mit dem versteckten Lockfile, das npm beim
+ * Installieren in node_modules/.package-lock.json schreibt. Fehlt es oder ist es unlesbar, gilt der Stand als veraltet.
+ * Optionale Pakete fremder Plattformen (z. B. esbuild für Linux) stehen nur im Lockfile und zählen nicht.
+ */
+export function dependenciesOutdated(lockfile: string, installed: string | null): boolean {
+  type Packages = Record<string, { version?: string; optional?: boolean } | undefined>;
+  const packagesOf = (text: string): Packages | null => {
+    try {
+      const packages = (JSON.parse(text) as { packages?: unknown }).packages;
+      return typeof packages === 'object' && packages !== null ? (packages as Packages) : null;
+    } catch {
+      return null;
+    }
+  };
+  const wanted = packagesOf(lockfile);
+  const present = installed === null ? null : packagesOf(installed);
+  if (!wanted || !present) return true;
+  for (const [path, entry] of Object.entries(wanted)) {
+    if (!path) continue;
+    const have = present[path];
+    if (!have) {
+      if (entry?.optional) continue;
+      return true;
+    }
+    if (have.version !== entry?.version) return true;
+  }
+  return Object.keys(present).some((path) => path && !wanted[path]);
 }
 
 async function defaultHealth(): Promise<boolean> {
   try {
-    const response = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(5_000) });
+    const response = await fetch(healthUrl(), { signal: AbortSignal.timeout(5_000) });
     return response.ok;
   } catch {
     return false;
@@ -225,6 +331,35 @@ export async function deployProblem(
     return `Nicht committete Änderungen im AIdeation-Ordner (${files}${changed.length > 5 ? ' …' : ''}). Erst committen oder verwerfen.`;
   }
   return null;
+}
+
+/**
+ * Holt vor dem Bau den neuesten Stand des ausgecheckten Branches von „origin“, nur per Fast-Forward. Läuft erst nach
+ * deployProblem, also nur auf einem sauberen Stand des erlaubten Branches – so geht ein auf GitHub gemergter Pull
+ * Request mit dem nächsten Neustart live. Scheitert es (offline, kein Remote, lokale Commits, die origin nicht hat),
+ * wird der lokale Stand gebaut; die Rückgabe sagt, was passiert ist.
+ */
+export async function pullBranch(installRoot: string, execute: CommandExecutor): Promise<string> {
+  const git = (timeoutMs: number, ...args: string[]) =>
+    execute(['git', ...args], installRoot, { timeoutMs, env: gitEnvironment() });
+  const remotes = await git(30_000, 'remote');
+  if (remotes.exitCode !== 0 || !remotes.output.split('\n').some((line) => line.trim() === 'origin')) {
+    return 'Kein Remote „origin“ – gebaut wird der lokale Stand.';
+  }
+  const branch = (await git(30_000, 'rev-parse', '--abbrev-ref', 'HEAD')).output.trim();
+  const before = (await git(30_000, 'rev-parse', 'HEAD')).output.trim();
+  const fetched = await git(120_000, 'fetch', '--quiet', 'origin', branch);
+  if (fetched.exitCode !== 0) {
+    return `GitHub nicht erreichbar (${fetched.output.trim().slice(-160) || `Exit-Code ${fetched.exitCode}`}) – gebaut wird der lokale Stand.`;
+  }
+  const merged = await git(60_000, 'merge', '--ff-only', 'FETCH_HEAD');
+  if (merged.exitCode !== 0) {
+    return `Lokaler Stand weicht von origin/${branch} ab, kein Fast-Forward möglich – gebaut wird der lokale Stand.`;
+  }
+  const after = (await git(30_000, 'rev-parse', 'HEAD')).output.trim();
+  return before === after
+    ? `Stand von origin/${branch} war schon aktuell.`
+    : `Neuester Stand von origin/${branch} geholt (${before.slice(0, 7)} → ${after.slice(0, 7)}).`;
 }
 
 /** Abbild des laufenden Dienstes „dev-log“ vor dem Neubau – zum Zurücksetzen, falls der neue Stand nicht startet. */
@@ -294,12 +429,76 @@ export async function processRestart(
     );
     return 'failed';
   }
+  const pulled = await pullBranch(installRoot, execute).catch(
+    (error: unknown) =>
+      `Neuester Stand nicht geholt (${error instanceof Error ? error.message : String(error)}) – gebaut wird der lokale Stand.`,
+  );
+  // Worker im Container: alle Dienste ausser dem Worker selbst (laut dem eben geholten Stand der Compose-Datei).
+  const container = options.container ?? inWorkerContainer();
+  let restartCommand = RESTART_COMMAND;
+  if (container) {
+    const listed = await execute(SERVICES_COMMAND, installRoot, {
+      timeoutMs: 30_000,
+      env: composeEnvironment(),
+    }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
+    const services = listed.exitCode === 0 ? servicesToRebuild(listed.output) : null;
+    if (!services) {
+      await writeRestart(
+        pool,
+        {
+          ...current,
+          status: 'failed',
+          finishedAt: now().toISOString(),
+          message: `Nicht neu gebaut: ${SERVICES_COMMAND.join(' ')} lieferte keine Dienste (Exit-Code ${listed.exitCode}). AIdeation läuft unverändert weiter.`,
+          log: redactOutput(listed.output, process.env).trim().slice(-MAX_LOG_CHARS),
+        },
+        options.notify,
+      );
+      return 'failed';
+    }
+    restartCommand = [...RESTART_COMMAND, ...services];
+  }
   const building = await writeRestart(pool, {
     ...current,
     status: 'building',
     startedAt: now().toISOString(),
-    message: `Baut die Container neu: ${RESTART_COMMAND.join(' ')}`,
+    message: `${pulled} Baut die Container neu: ${restartCommand.join(' ')}`,
   });
+  // Vor dem Neubau: node_modules des Workers auf den Stand des Lockfiles bringen. Scheitert das, geht nichts live
+  // und der Worker beendet sich nicht – sonst stürzte er nach dem Neustart in einer Schleife ab.
+  const readText = options.readText ?? readTextFile;
+  const lockfile = await readText(join(installRoot, 'package-lock.json'));
+  if (
+    lockfile !== null &&
+    dependenciesOutdated(lockfile, await readText(join(installRoot, 'node_modules', '.package-lock.json')))
+  ) {
+    await writeRestart(pool, {
+      ...building,
+      message: `Aktualisiert die Abhängigkeiten des Workers: ${DEPENDENCY_COMMAND.join(' ')}`,
+    });
+    const install = await execute(DEPENDENCY_COMMAND, installRoot, {
+      timeoutMs: DEPENDENCY_TIMEOUT_MS,
+      env: composeEnvironment(),
+    }).catch((error: unknown) => ({
+      exitCode: 1,
+      durationMs: 0,
+      output: error instanceof Error ? error.message : String(error),
+    }));
+    if (install.exitCode !== 0) {
+      await writeRestart(
+        pool,
+        {
+          ...building,
+          status: 'failed',
+          finishedAt: now().toISOString(),
+          message: `${DEPENDENCY_COMMAND.join(' ')} ist fehlgeschlagen (Exit-Code ${install.exitCode}). Container nicht neu gebaut, der Worker läuft weiter. Bitte im AIdeation-Ordner „npm ci“ prüfen.`,
+          log: redactOutput(install.output, process.env).trim().slice(-MAX_LOG_CHARS),
+        },
+        options.notify,
+      );
+      return 'failed';
+    }
+  }
   const previous = parseComposeImages(
     (
       await execute(['docker', 'compose', 'images', ...BUILT_SERVICES, '--format', 'json'], installRoot, {
@@ -308,11 +507,14 @@ export async function processRestart(
       }).catch(() => ({ exitCode: 1, durationMs: 0, output: '' }))
     ).output,
   );
-  const result = await execute(RESTART_COMMAND, installRoot, {
+  const result = await execute(restartCommand, installRoot, {
     timeoutMs: BUILD_TIMEOUT_MS,
     env: composeEnvironment(),
   });
-  const log = redactOutput(result.output, process.env).trim().slice(-MAX_LOG_CHARS);
+  // Vorne steht, ob der neueste Stand geholt wurde; danach das Ende der Ausgabe von docker compose.
+  let log = `${pulled}\n\n${redactOutput(result.output, process.env)
+    .trim()
+    .slice(-(MAX_LOG_CHARS - pulled.length - 2))}`;
   if (result.exitCode !== 0) {
     await writeRestart(
       pool,
@@ -320,12 +522,60 @@ export async function processRestart(
         ...building,
         status: 'failed',
         finishedAt: now().toISOString(),
-        message: `${RESTART_COMMAND.join(' ')} ist fehlgeschlagen (Exit-Code ${result.exitCode}). Der Worker läuft mit dem bisherigen Code weiter.`,
+        message: `${restartCommand.join(' ')} ist fehlgeschlagen (Exit-Code ${result.exitCode}). Der Worker läuft mit dem bisherigen Code weiter.`,
         log,
       },
       options.notify,
     );
     return 'failed';
+  }
+  // Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker) mitbauen. Scheitert das, startet AIdeation trotzdem neu:
+  // Ein Lauf mit eingeschalteter Sandbox meldet das fehlende bzw. alte Image dann selbst (fail-closed).
+  await writeRestart(pool, {
+    ...building,
+    message: `Baut das Image der Agent-Sandbox: ${AGENT_IMAGE_COMMAND.join(' ')}`,
+    log,
+  });
+  const agentImage = await execute(AGENT_IMAGE_COMMAND, installRoot, {
+    timeoutMs: BUILD_TIMEOUT_MS,
+    env: composeEnvironment(),
+  }).catch((error: unknown) => ({
+    exitCode: 1,
+    durationMs: 0,
+    output: error instanceof Error ? error.message : String(error),
+  }));
+  if (agentImage.exitCode !== 0) {
+    log = `${log}\n\nImage der Agent-Sandbox nicht gebaut (Exit-Code ${agentImage.exitCode}):\n${redactOutput(
+      agentImage.output,
+      process.env,
+    )
+      .trim()
+      .slice(-AGENT_IMAGE_LOG_CHARS)}`.slice(-MAX_LOG_CHARS);
+  }
+  // Worker im Container: sein Image (Werkzeuge, kein Code) nur bauen. Scheitert das, läuft der Worker mit dem
+  // bisherigen Image weiter – der Code kommt ohnehin aus dem eingebundenen Ordner.
+  if (container) {
+    await writeRestart(pool, {
+      ...building,
+      message: `Baut das Image des Workers: ${WORKER_IMAGE_COMMAND.join(' ')}`,
+      log,
+    });
+    const workerImage = await execute(WORKER_IMAGE_COMMAND, installRoot, {
+      timeoutMs: BUILD_TIMEOUT_MS,
+      env: composeEnvironment(),
+    }).catch((error: unknown) => ({
+      exitCode: 1,
+      durationMs: 0,
+      output: error instanceof Error ? error.message : String(error),
+    }));
+    if (workerImage.exitCode !== 0) {
+      log = `${log}\n\nImage des Workers nicht gebaut (Exit-Code ${workerImage.exitCode}):\n${redactOutput(
+        workerImage.output,
+        process.env,
+      )
+        .trim()
+        .slice(-AGENT_IMAGE_LOG_CHARS)}`.slice(-MAX_LOG_CHARS);
+    }
   }
   // Gesundheitsprüfung: Antwortet die Oberfläche nicht, zurück auf das vorherige Abbild; der Worker bleibt auf dem
   // bisherigen Stand und startet nicht neu.
@@ -366,6 +616,7 @@ export async function processRestart(
   await writeRestart(pool, {
     ...building,
     status: 'restarting',
+    restartingAt: now().toISOString(),
     message: 'Container laufen mit dem neuen Code. Der Worker startet neu …',
     log,
   });

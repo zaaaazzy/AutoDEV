@@ -5,7 +5,9 @@ import { mkdtemp, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { treeLockName } from '../core/project-lock.js';
-import { describeError, folderInUseBy, recoverInterruptedRuns, resolveTargets } from './runner-cli.js';
+import { describeError, folderInUseBy, holdWorkerLock, recoverInterruptedRuns, resolveTargets } from './runner-cli.js';
+import pg from 'pg';
+import { adminPool, ADMIN_URL } from '../db/test-database.test.js';
 import type { RunnerOptions } from './runner.js';
 
 test('Ein Ordner, ein Auftrag: zweites Projekt im selben echten Ordner (auch per Symlink) startet nicht', async () => {
@@ -57,6 +59,8 @@ test('recoverInterruptedRuns: plant unterbrochene Aufträge neu, bevor die Läuf
   // Erst neu einplanen (braucht die noch laufenden Läufe), dann Schritte und Läufe beenden.
   assert.ok(requeue < runs && steps < runs);
   assert.match(queries[steps] ?? '', /Unterbrochen: Der Worker wurde beendet/);
+  // Kennzeichen „unterbrochen“: der nächste Lauf setzt beim selben Agent fort, nicht beim Entwickler.
+  assert.match(queries[steps] ?? '', /interrupted = TRUE/);
   assert.ok(index("UPDATE test_requests SET status = 'failed'") >= 0, 'Testanforderungen gelten als abgebrochen');
   assert.ok(index("UPDATE acceptance_checks SET status = 'verifying'") >= 0);
   // Ohne verwaiste Prozesse gehen unterbrochene Chat-Anfragen zurück auf „pending“ (Status als Parameter).
@@ -100,4 +104,59 @@ test('describeError: Text, sonst Code (pg ohne Meldung), sonst Name', () => {
   assert.equal(describeError(Object.assign(new Error(''), { code: 'ECONNREFUSED' })), 'ECONNREFUSED');
   assert.equal(describeError(new TypeError('')), 'TypeError');
   assert.equal(describeError('nur Text'), 'nur Text');
+});
+
+/** Verbindung mit Advisory-Lock: zählt Abfragen und Freigaben. */
+function lockClient(locked: boolean) {
+  const calls: string[] = [];
+  let released: unknown = 'nein';
+  const listeners = new Set<unknown>();
+  const client = {
+    query: async (sql: string) => {
+      calls.push(sql);
+      return { rows: [{ ok: locked }] };
+    },
+    release: (error?: unknown) => {
+      released = error ?? 'ok';
+    },
+    on: (_event: string, listener: unknown) => listeners.add(listener),
+    off: (_event: string, listener: unknown) => listeners.delete(listener),
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  return { pool, calls, released: () => released, listeners };
+}
+
+test('Worker-Sperre: gibt die Verbindung beim Beenden frei, sonst hängt pool.end()', async () => {
+  const held = lockClient(true);
+  const release = await holdWorkerLock(held.pool);
+  assert.ok(release);
+  assert.equal(held.released(), 'nein', 'solange der Worker läuft, bleibt die Verbindung ausgeliehen');
+  await release();
+  await release();
+  assert.equal(held.released(), 'ok');
+  assert.equal(held.calls.filter((sql) => sql.includes('pg_advisory_unlock')).length, 1, 'nur einmal freigeben');
+  assert.equal(held.listeners.size, 0);
+
+  const taken = lockClient(false);
+  assert.equal(await holdWorkerLock(taken.pool), null, 'ein anderer Worker hält die Sperre');
+  assert.equal(taken.released(), 'ok');
+});
+
+test('Worker-Sperre auf PostgreSQL: nach der Freigabe endet pool.end() sofort', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  await admin.end();
+  const pool = new pg.Pool({ connectionString: ADMIN_URL, max: 2 });
+  const release = await holdWorkerLock(pool);
+  if (!release) {
+    // Auf diesem Rechner läuft der echte Worker und hält die Sperre: dann nur prüfen, dass nichts ausgeliehen bleibt.
+    await pool.end();
+    return;
+  }
+  await release();
+  const ended = await Promise.race([
+    pool.end().then(() => 'beendet'),
+    new Promise((resolve) => setTimeout(() => resolve('hängt'), 3_000)),
+  ]);
+  assert.equal(ended, 'beendet');
 });

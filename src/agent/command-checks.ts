@@ -1,6 +1,7 @@
-// Prüfungen von Shell-Befehlen (npm, git, Assistenten-Dienste, eigene Regeln) für Wächter und lokales Modell.
-import { existsSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, resolve, sep } from 'node:path';
+// Prüfungen von Shell-Befehlen (npm, git, Einrichtung durch den Assistenten, eigene Regeln) für Wächter und lokales Modell.
+import { existsSync, lstatSync, readdirSync } from 'node:fs';
+import { isAbsolute, join, resolve, sep } from 'node:path';
+import { checkProjectPath, inside, protectedPath, realPath } from './path-policy.js';
 import { parseShell, renderWords, type ShellWord } from './shell-parse.js';
 
 /** Ein Befehl als Text oder – im Wächter – schon zerlegt (Wörter eines einfachen Befehls). */
@@ -8,21 +9,14 @@ type CommandInput = string | readonly ShellWord[];
 
 const COMMAND_PATTERN =
   /^(?:npm (?:test|run [a-z0-9:_-]+)(?: [\w@:./=-]+)*|git (?:status|diff|log)(?: [\w@:./~^][\w@:./=~^-]*)*)$/;
-const SERVICE_NAME = '[a-zA-Z0-9][\\w.-]*';
-const ASSISTANT_SERVICE_PATTERNS = [
-  new RegExp(`^docker compose (?:ps|config --services)$`),
-  // Auch der Log-Scan des Produktions-Rückkanals: docker compose logs --since 15m --no-color <dienste>.
-  new RegExp(`^docker compose logs(?: --since \\d+[smh])?(?: --no-color)?(?: --tail=\\d+)?(?: ${SERVICE_NAME})*$`),
-  new RegExp(`^docker compose up -d(?: --build| --wait| --force-recreate)*(?: ${SERVICE_NAME})*$`),
-  new RegExp(`^docker compose (?:stop|start|restart|down|build|pull)(?: ${SERVICE_NAME})*$`),
-  /^docker compose down --remove-orphans$/,
-];
 const GIT_URL = /^(?:https:\/\/[\w.-]+\/[\w./~-]+|git@[\w.-]+:[\w./~-]+)$/;
 const RELATIVE_DIRECTORY = /^(?!.*\.\.)(?:\.|[\w][\w.-]*(?:\/[\w][\w.-]*)*)$/;
 
-/** Allow the assistant to manage services and set up repositories within the project directory. */
+/**
+ * Allow the assistant to set up repositories within the project directory. Dienste verwaltet kein Agent per Shell:
+ * dafür gibt es die Worker-Aktionen services.* (service-actions.ts).
+ */
 export function isAssistantServiceCommand(command: string): boolean {
-  if (ASSISTANT_SERVICE_PATTERNS.some((pattern) => pattern.test(command))) return true;
   const parts = command.split(/\s+/);
   if (parts[0] === 'git' && parts[1] === 'clone' && parts.length >= 3 && parts.length <= 4) {
     return GIT_URL.test(parts[2]) && (parts[3] === undefined || RELATIVE_DIRECTORY.test(parts[3]));
@@ -45,7 +39,9 @@ const INSTALL_FLAGS = new Set([
   '--ignore-scripts',
 ]);
 const SAFE_COMMANDS = [
-  /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev))*$/,
+  /^npm (?:ls|list|outdated|audit|doctor)(?: --(?:depth=\d|json|production|omit=dev|audit-level=[a-z]+))*$/,
+  // Prüfbefehl der Routinen; Optionen und Pfade prüfen zusätzlich Wächter und gitPathProblem.
+  /^git grep(?: (?:-[inlwcvEFIh]+|-e|--(?:line-number|ignore-case|count|files-with-matches|word-regexp|fixed-strings|extended-regexp|cached)|[\w@:./~^][\w@:./=~^-]*))*$/,
   /^npm (?:ci|install|i)(?: (?:--(?:legacy-peer-deps|no-audit|no-fund|ignore-scripts|omit=dev|production)|-[DE]))*$/,
   /^node (?:--version|--check [\w./-]+)$/,
   /^npx --no-install (?:tsc --noEmit|eslint [\w./*-]+|prettier --check [\w./*-]+|jest|vitest run)$/,
@@ -82,6 +78,12 @@ const DANGEROUS_NPM_OPTIONS = [
   'init-module',
   'editor',
   'git',
+  // Fremde Hosts: Registry, Proxy und Umschreiben der Tarball-Adressen (Abfluss von Daten in der URL).
+  'registry',
+  'replace-registry-host',
+  'proxy',
+  'https-proxy',
+  'noproxy',
 ];
 /** Kurzoptionen: -g (global), -L (location); -C (prefix) wird wie --prefix geprüft. */
 const DANGEROUS_NPM_SHORT = /[gL]/;
@@ -134,7 +136,10 @@ export function npmOptionProblem(input: CommandInput, root?: string): string | n
         if (!prefixInside(prefixValue(), root)) return `„${command}“: --prefix nur für Ordner im Projekt.`;
       } else if (
         name &&
-        ('prefix'.startsWith(name) || DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)))
+        ('prefix'.startsWith(name) ||
+          DANGEROUS_NPM_OPTIONS.some((option) => option.startsWith(name)) ||
+          // Einstellungen je Scope oder Host: --@scope:registry=…, --//host/:_authToken=…
+          /[:@/]/.test(name))
       ) {
         return `„${command}“: diese npm-Option ist gesperrt.`;
       }
@@ -163,6 +168,8 @@ const DANGEROUS_GIT_OPTIONS = [
   'work-tree',
   'git-dir',
   'open-files-in-pager',
+  // git grep/ls-files würden sonst auch ignorierte Dateien (.env) durchsuchen.
+  'no-exclude-standard',
 ];
 /** Eigene Optionen, die zugleich Anfang einer gesperrten sind (git diff --text ≠ --textconv). */
 const SAFE_GIT_OPTIONS = new Set(['text']);
@@ -170,13 +177,14 @@ const SAFE_GIT_OPTIONS = new Set(['text']);
 /**
  * Gefährliche Option in einem git-Befehl? Git akzeptiert eindeutige Abkürzungen (--outp = --output, --upload-pa =
  * --upload-pack), darum ist jede lange Option gesperrt, deren Name der Anfang einer gesperrten ist. Dazu -c, -u und
- * -O (Pager bzw. Reihenfolge-Datei). Anführungszeichen und Backslashes werden wie in Bash entfernt.
+ * -O (Pager bzw. Reihenfolge-Datei), auch in zusammengefassten Kurzoptionen (git grep -iOless). Anführungszeichen
+ * und Backslashes werden wie in Bash entfernt.
  */
 export function gitOptionProblem(command: CommandInput): boolean {
   const words = toWords(command).map((word) => word.text);
   if (words[0] !== 'git') return false;
   return words.slice(1).some((word) => {
-    if (/^-[cu](?:=|$)/.test(word) || word.startsWith('-O')) return true;
+    if (/^-[cu](?:=|$)/.test(word) || /^-[a-zA-Z]*O/.test(word)) return true;
     if (!word.startsWith('--') || word === '--') return false;
     const name = word.slice(2).split('=')[0] ?? '';
     return !SAFE_GIT_OPTIONS.has(name) && DANGEROUS_GIT_OPTIONS.some((option) => option.startsWith(name));
@@ -187,15 +195,20 @@ export function gitOptionProblem(command: CommandInput): boolean {
  * Pfadangaben von „git diff“: Liegt ein Pfad ausserhalb des Arbeitsbaums, schaltet Git von selbst in den
  * No-Index-Modus und gibt beliebige Dateien aus (git diff /dev/null ~/.zshrc). Darum muss jedes Argument – samt
  * aufgelöster Links – im Projekt liegen; Shell-Ersetzungen ($, ~) und Ordner-Dateien (-O) sind gesperrt.
- * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt.
+ * Ohne Projektordner (root) sind absolute Pfade und „..“ gesperrt. Dasselbe gilt für „git grep“ und „git ls-files“
+ * (Prüfbefehle der Routinen); bei git grep zusätzlich ohne Musterdatei (-f/--file), die ausserhalb liegen könnte.
  */
 export function gitPathProblem(input: CommandInput, root?: string): string | null {
   // Umleitungen (2>/dev/null, 2>&1) trennt der Tokenizer ab; sie sind keine Argumente.
   const words = toWords(input);
   const command = label(input);
-  if (words[0]?.text !== 'git' || words[1]?.text !== 'diff') return null;
+  const subcommand = words[1]?.text ?? '';
+  if (words[0]?.text !== 'git' || !['diff', 'grep', 'ls-files'].includes(subcommand)) return null;
   for (const { text: word, expanded } of words.slice(2)) {
     if (/^(?:-O|--orderfile)/.test(word)) return `„${command}“: -O/--orderfile ist gesperrt.`;
+    if (subcommand === 'grep' && /^(?:-[a-zA-Z]*f|--file(?:=|$))/.test(word)) {
+      return `„${command}“: -f/--file ist gesperrt.`;
+    }
     if (!word || word.startsWith('-')) continue;
     if (expanded || word.startsWith('~') || word.includes('$')) return `„${command}“: nur Pfade im Projektordner.`;
     const outside = root
@@ -204,6 +217,117 @@ export function gitPathProblem(input: CommandInput, root?: string): string | nul
     if (outside) return `„${command}“: nur Pfade im Projektordner (Git liest sonst fremde Dateien).`;
   }
   return null;
+}
+
+/** Datei-Rechte eines Agents, wie sie der Wächter bekommt (GuardPolicy ohne Shell und Projektordner). */
+export interface FileRights {
+  create: boolean;
+  edit: boolean;
+  /** Erlaubte Ordner relativ zum Projekt; leer = ganzes Projekt. */
+  scopes: readonly string[];
+}
+
+/** Erlaubte Optionen von git rm bzw. git mv – nur genau so, ohne Abkürzungen (kein -f, --pathspec-from-file …). */
+const GIT_FILE_OPTIONS: Record<string, ReadonlySet<string>> = {
+  rm: new Set(['-q', '--quiet', '-n', '--dry-run', '--cached', '-r']),
+  mv: new Set(['-v', '--verbose', '-n', '--dry-run']),
+};
+/** Pfad für git rm/mv: nur einfache Zeichen – keine Pathspec-Magie (:(top), :!), keine Git-Globs (*, ?, [), kein „\“. */
+const GIT_FILE_PATH = /^[\w@.+-]+(?:\/[\w@.+-]+)*\/?$/;
+/** Höchstens so viele Einträge durchsucht der Wächter in einem Ordner nach geschützten Pfaden; mehr = gesperrt. */
+const GIT_FILE_SCAN_LIMIT = 5_000;
+
+/** Liegt in einem Ordner (ohne Links zu folgen) ein geschützter Pfad? null = zu viele Einträge (fail-closed). */
+function protectedEntryInside(directory: string, root: string): string | null | false {
+  const pending = [directory];
+  let seen = 0;
+  while (pending.length) {
+    const current = pending.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      if (++seen > GIT_FILE_SCAN_LIMIT) return null;
+      const path = join(current, entry.name);
+      if (protectedPath(entry.name)) return path.slice(root.length + 1);
+      if (entry.isDirectory()) pending.push(path);
+    }
+  }
+  return false;
+}
+
+/**
+ * git rm und git mv: Löschen und Umbenennen für Agents (rm, mv und cp bleiben gesperrt). Löschen braucht „Dateien
+ * ändern“, Umbenennen zusätzlich „Dateien anlegen“ – ohne Rechte (files fehlt) ist beides gesperrt. Jeder Pfad, Quelle
+ * wie Ziel, ist ein einfacher relativer Pfad ohne „..“, liegt samt aufgelöster Links im Projekt und in den erlaubten
+ * Ordnern, ist nicht das Projekt selbst und nicht geschützt (.git, .env, .claude …) – auch nicht in einem Ordner darin.
+ */
+export function gitFileProblem(input: CommandInput, root: string, files?: FileRights): string | null {
+  const words = toWords(input);
+  const command = label(input);
+  const subcommand = words[1]?.text ?? '';
+  const options = GIT_FILE_OPTIONS[subcommand];
+  if (words[0]?.text !== 'git' || !options) return null;
+  if (!files?.edit || (subcommand === 'mv' && !files.create)) {
+    return `„${command}“: Löschen braucht das Recht „Dateien ändern“, Umbenennen zusätzlich „Dateien anlegen“.`;
+  }
+  const paths: ShellWord[] = [];
+  let onlyPaths = false;
+  for (const word of words.slice(2)) {
+    if (!onlyPaths && word.text === '--') onlyPaths = true;
+    else if (!onlyPaths && word.text.startsWith('-')) {
+      if (!options.has(word.text)) {
+        return `„${command}“: Option „${word.text}“ ist bei git ${subcommand} gesperrt (erlaubt: ${[...options].join(', ')}).`;
+      }
+    } else paths.push(word);
+  }
+  if (paths.length < (subcommand === 'mv' ? 2 : 1)) return `„${command}“: Pfad fehlt.`;
+  for (const word of paths) {
+    const path = word.text;
+    if (word.expanded || word.glob || !GIT_FILE_PATH.test(path) || path.split('/').includes('..')) {
+      return `„${command}“: „${path}“ – nur einfache relative Pfade (ohne „..“, Platzhalter, Variablen oder Pathspec-Magie).`;
+    }
+    const verdict = checkProjectPath(root, resolve(root, path));
+    if (!verdict.ok) {
+      if (verdict.reason === 'protected') return `„${command}“: ${verdict.relative} ist geschützt.`;
+      return `„${command}“: „${path}“ liegt ausserhalb des Projektordners.`;
+    }
+    if (verdict.real === root) return `„${command}“: nicht das ganze Projekt, nur einzelne Dateien oder Ordner.`;
+    if (files.scopes.length && !files.scopes.some((scope) => inside(verdict.real, resolve(root, scope)))) {
+      return `„${command}“: „${path}“ liegt ausserhalb der erlaubten Ordner (${files.scopes.join(', ')}).`;
+    }
+    if (existsSync(verdict.real) && lstatSync(verdict.real).isDirectory()) {
+      const hit = protectedEntryInside(verdict.real, root);
+      if (hit === null) return `„${command}“: „${path}“ enthält zu viele Einträge – bitte kleinere Ordner angeben.`;
+      if (hit) return `„${command}“: „${path}“ enthält ${hit} (geschützt).`;
+    }
+  }
+  return null;
+}
+
+/** Remote-Name bzw. Ref (main, feature/x): keine URL (://, @, ::), kein Host (:), kein Pfad (/…, ./, ..). */
+const GIT_REF_ARGUMENT = /^(?![./])(?!.*\.\.)[\w][\w./-]*$/;
+
+/**
+ * git fetch/pull holen nur von einem eingerichteten Remote (remotes, sonst origin): Eine URL, ein Host oder ein Pfad
+ * schickte Daten im Pfad an einen fremden Host bzw. holte fremde Commits in den Branch. Weitere Argumente sind nur
+ * Refs ohne „:“ (keine Refspecs, die lokale Branches überschreiben). Optionen mit Wert nur als --option=wert.
+ */
+export function gitRemoteProblem(input: CommandInput, remotes: readonly string[] = ['origin']): string | null {
+  const words = toWords(input);
+  const command = label(input);
+  if (words[0]?.text !== 'git' || !['fetch', 'pull'].includes(words[1]?.text ?? '')) return null;
+  // --multiple (auch abgekürzt): dann wären alle Argumente Remotes bzw. Pfade.
+  if (words.some(({ text }) => /^--mu/.test(text) && 'multiple'.startsWith(text.slice(2).split('=')[0] ?? ''))) {
+    return `„${command}“: --multiple ist gesperrt – ein Remote je Befehl oder --all.`;
+  }
+  const positional = words
+    .slice(2)
+    .map((word) => word.text)
+    .filter((word) => word === '' || !word.startsWith('-'));
+  const [remote, ...refs] = positional;
+  if (remote !== undefined && !remotes.includes(remote)) {
+    return `„${command}“: nur eingerichtete Remotes (${remotes.join(', ')}), keine URLs, Hosts oder Pfade.`;
+  }
+  const foreign = refs.find((ref) => !GIT_REF_ARGUMENT.test(ref));
+  return foreign === undefined ? null : `„${command}“: „${foreign}“ ist kein einfacher Branch-Name.`;
 }
 
 /**
@@ -224,27 +348,12 @@ export function isAllowedCommand(command: string, root?: string): boolean {
   return SAFE_COMMANDS.some((pattern) => pattern.test(command));
 }
 
-/** Pfad samt symbolischer Links auflösen; für noch nicht vorhandene Pfade über den nächsten vorhandenen Ordner. */
-export function realPath(path: string): string {
-  let current = resolve(path);
-  const rest: string[] = [];
-  while (!existsSync(current) && dirname(current) !== current) {
-    rest.unshift(basename(current));
-    current = dirname(current);
-  }
-  try {
-    return resolve(realpathSync(current), ...rest);
-  } catch {
-    return resolve(path);
-  }
-}
-
 /** Gruppen-IDs eigener Gruppen: Kleinbuchstaben, Ziffern und Bindestriche. */
 export const CUSTOM_GROUP_ID = /^[a-z0-9][a-z0-9-]{1,39}$/;
 
 /** Befehle, die keine Gruppe freigeben darf – auch keine selbst angelegte (Schutz von System, AIdeation und Daten). */
 const FORBIDDEN_COMMAND_NAMES =
-  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|launchctl|systemctl|service|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
+  'sudo|su|doas|rm|rmdir|kill|killall|pkill|shutdown|reboot|halt|chmod|chown|chgrp|dd|mkfs\\S*|diskutil|security|crontab|osascript|open|curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet|sh|bash|zsh|fish|dash|eval|exec|source|env|xargs|python\\d*|perl|ruby|php|node|deno|bun|npx|pnpx|bunx|tsx|ts-node|export|declare|typeset|launchctl|systemctl|service|docker|docker-compose|podman|nerdctl|brew|apt|apt-get|yum|dnf|pip\\d*|gem|cargo|go';
 const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
 /**
  * Befehle, die Dateien anlegen, ändern oder löschen. Die ersten sieben gibt die CLI mit --permission-mode acceptEdits
@@ -253,9 +362,86 @@ const FORBIDDEN_COMMANDS = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES})\\b`);
  */
 const FILE_COMMAND_NAMES =
   'mkdir|touch|rm|rmdir|mv|cp|sed|gsed|ln|tee|truncate|install|unlink|shred|patch|chflags|ditto|command|builtin|nohup|time|nice|timeout';
+/**
+ * Shell-Builtins, die Variablen, Aliasse, Funktionen, den Suchpfad oder den Ordner ändern oder Code ausführen – sie
+ * verändern, was spätere Befehle derselben Kette bedeuten (cd .git/hooks, alias git=…, hash -p, trap …). Immer gesperrt.
+ */
+export const SHELL_BUILTINS = new Set([
+  ...['export', 'declare', 'typeset', 'readonly', 'local', 'unset', 'set', 'shopt', 'alias', 'unalias', 'hash'],
+  ...['cd', 'pushd', 'popd', 'source', '.', 'eval', 'exec', 'trap', 'enable', 'builtin', 'command', 'let'],
+]);
+/** awk und Verwandte: system(), „| getline“ und „print > datei“ starten Programme bzw. schreiben Dateien. */
+const SCRIPT_COMMAND_NAMES = 'awk|gawk|nawk|mawk';
 /** Gesperrte Befehle, die eingebaute Gruppen nur mit festem Präfix freigeben (node --check, npx --no-install …). */
-const GUARD_PREFIXED = new Set(['node', 'npx', 'launchctl']);
-const GUARD_FORBIDDEN = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES}|${FILE_COMMAND_NAMES})$`);
+const GUARD_PREFIXED = new Set(['node', 'npx']);
+const GUARD_FORBIDDEN = new RegExp(`^(?:${FORBIDDEN_COMMAND_NAMES}|${FILE_COMMAND_NAMES}|${SCRIPT_COMMAND_NAMES})$`);
+
+/**
+ * Wrapper, die nur Laufzeit, Priorität oder Pufferung ändern und danach einen weiteren Befehl starten. Der Wächter
+ * schält sie ab und prüft den Befehl dahinter wie einen direkt aufgerufenen. Je Wrapper: Optionen ohne Wert, Optionen
+ * mit Wert (einzeln „-k 5“, angehängt „-k5“ oder „--kill-after=5“) und die Zahl der festen Argumente (timeout: Dauer).
+ */
+const WRAPPER_SYNTAX: Record<string, { flags: string[]; valued: string[]; long: string[]; positional: RegExp[] }> = {
+  timeout: {
+    flags: ['--foreground', '--preserve-status', '-v', '--verbose'],
+    valued: ['-k', '-s'],
+    long: ['--kill-after', '--signal'],
+    positional: [/^\d+(?:\.\d+)?[smhd]?$/],
+  },
+  nice: { flags: [], valued: ['-n'], long: ['--adjustment'], positional: [] },
+  stdbuf: { flags: [], valued: ['-i', '-o', '-e'], long: ['--input', '--output', '--error'], positional: [] },
+  ionice: { flags: ['-t'], valued: ['-c', '-n'], long: ['--class', '--classdata'], positional: [] },
+};
+/** Werte der Wrapper-Optionen: Zahlen, Dauern, Signal- und Puffernamen – nichts, was die Shell erweitert. */
+const WRAPPER_VALUE = /^[\w.+-]+$/;
+/** Höchstens so viele Wrapper ineinander; danach gilt der Befehl als unklar und ist gesperrt. */
+const WRAPPER_DEPTH = 4;
+export const WRAPPER_COMMANDS = new Set(Object.keys(WRAPPER_SYNTAX));
+
+/**
+ * Schält Wrapper (timeout, nice, stdbuf, ionice) in einer Schleife ab und liefert die Wörter des eigentlichen Befehls.
+ * Fail-closed: unbekannte Optionen, Werte aus Variablen, fehlender Befehl oder zu tiefe Verschachtelung → null.
+ */
+export function unwrapCommand(words: readonly ShellWord[]): readonly ShellWord[] | null {
+  let rest = words;
+  for (let depth = 0; ; depth++) {
+    const first = rest[0];
+    const program = first ? first.text.slice(first.text.lastIndexOf('/') + 1) : '';
+    const syntax = WRAPPER_SYNTAX[program];
+    if (!syntax) return rest;
+    if (depth >= WRAPPER_DEPTH) return null;
+    let index = 1;
+    const valueAt = (at: number): boolean => {
+      const word = rest[at];
+      return !!word && !word.expanded && !word.glob && WRAPPER_VALUE.test(word.text);
+    };
+    for (;;) {
+      const word = rest[index];
+      if (!word || word.expanded || word.glob) return null;
+      const text = word.text;
+      if (text === '--') {
+        index++;
+        break;
+      }
+      if (!text.startsWith('-')) break;
+      const attached = (option: string, separator = ''): boolean =>
+        text.startsWith(option + separator) && WRAPPER_VALUE.test(text.slice(option.length + separator.length));
+      // nice -5 ist die alte Schreibweise von nice -n 5.
+      if (syntax.flags.includes(text) || (program === 'nice' && /^-\d+$/.test(text))) index++;
+      else if (syntax.valued.includes(text) && valueAt(index + 1)) index += 2;
+      else if (syntax.valued.some((option) => attached(option)) || syntax.long.some((option) => attached(option, '=')))
+        index++;
+      else return null;
+    }
+    for (const pattern of syntax.positional) {
+      const word = rest[index];
+      if (!word || word.expanded || !pattern.test(word.text)) return null;
+      index++;
+    }
+    if (index >= rest.length) return null;
+    rest = rest.slice(index);
+  }
+}
 /** find-Optionen, die löschen, Programme starten oder in Dateien schreiben. */
 const FIND_WRITING = /^-(?:delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/;
 
@@ -271,6 +457,7 @@ export function forbiddenCommand(command: CommandInput): boolean {
   const name = first.text;
   if (first.expanded || first.glob || /[$*?[\]{}~]/.test(name)) return true;
   const program = name.slice(name.lastIndexOf('/') + 1);
+  if (SHELL_BUILTINS.has(name)) return true;
   if (program === 'find') return words.some((word) => FIND_WRITING.test(word.text));
   return GUARD_FORBIDDEN.test(program) && !(GUARD_PREFIXED.has(program) && program === name);
 }
@@ -289,38 +476,6 @@ const FORBIDDEN_SUBCOMMAND_LIST = [
     'clone',
     'submodule',
   ].map((sub) => `git ${sub}`),
-  ...[
-    'run',
-    'exec',
-    'create',
-    'rm',
-    'rmi',
-    'system',
-    'volume',
-    'network',
-    'image',
-    'container',
-    'cp',
-    'login',
-    'build',
-    'buildx',
-    'builder',
-    'plugin',
-    'context',
-    'swarm',
-    'service',
-    'stack',
-    'secret',
-    'config',
-    'commit',
-    'export',
-    'import',
-    'load',
-    'save',
-    'update',
-    'attach',
-  ].map((sub) => `docker ${sub}`),
-  ...['exec', 'run', 'cp', 'rm', 'attach'].map((sub) => `docker compose ${sub}`),
   ...[
     'publish',
     'unpublish',
@@ -363,16 +518,17 @@ export function forbiddenSubcommand(command: CommandInput): boolean {
   const tokens = toWords(command);
   const words = tokens.map((word) => word.text);
   const normalized = words.join(' ');
-  if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|docker|npm) -/.test(normalized)) return true;
+  if (FORBIDDEN_SUBCOMMANDS.test(normalized) || /^(?:git|npm) -/.test(normalized)) return true;
+  // „npm audit fix“ installiert und ändert package-lock.json – auch mit Optionen davor (npm audit --json fix).
+  if (words[0] === 'npm' && words[1] === 'audit' && words.slice(2).includes('fix')) return true;
   // Befehlsname und Unterbefehl nur wörtlich: Variablen, Globs, Klammer-Erweiterung oder $'…' (git $X, git pus?,
   // git {push,}) setzt erst die Shell zusammen – und alle übrigen Prüfungen sähen den Befehl nicht.
   if (!CHECKED_PROGRAMS.has(words[0] ?? '')) return false;
-  const literal = tokens.slice(0, words[0] === 'docker' && words[1] === 'compose' ? 3 : 2);
-  return literal.some((word) => !/^[\w.:@/=+,-]+$/.test(word.raw));
+  return tokens.slice(0, 2).some((word) => !/^[\w.:@/=+,-]+$/.test(word.raw));
 }
 
-/** Programme, deren Unterbefehle der Wächter prüft. */
-export const CHECKED_PROGRAMS = new Set(['git', 'docker', 'docker-compose', 'npm', 'npx']);
+/** Programme, deren Unterbefehle der Wächter prüft (docker sperrt er ganz: Dienste nur über services.*). */
+export const CHECKED_PROGRAMS = new Set(['git', 'npm', 'npx']);
 
 /**
  * Zerlegt einen Befehl mit dem Tokenizer des Wächters (parseShell) in Wörter; Umleitungen gehören nicht dazu.
@@ -404,8 +560,21 @@ const coversForbidden = (prefix: string): boolean =>
 const SAFE_PREFIX = /^[\w@./=:,+-]+(?: [\w@./=:,+-]+)*$/;
 
 /**
+ * Programme, die eine eigene Regel freigeben darf (Allowlist, gilt für Claude-CLI und lokales Modell). Nur Programme,
+ * die weder andere Programme starten noch Dateien schreiben – nicht etwa timeout, find, awk, sed, tee, cp, ln, sort -o,
+ * rg --pre. git und npm prüft der Wächter Unterbefehl für Unterbefehl; make und npm run führen Projektskripte aus.
+ * docker fehlt bewusst: Wer den Docker-Socket hat, hat Root auf dem Host – Dienste nur über die Worker-Aktionen.
+ */
+export const CUSTOM_RULE_PROGRAMS = new Set([
+  ...['git', 'npm', 'make'],
+  ...['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'diff', 'cut', 'tr', 'jq', 'stat', 'du', 'df'],
+  ...['pwd', 'echo', 'printf', 'date', 'which', 'basename', 'dirname', 'realpath', 'uname', 'whoami', 'ps', 'lsof'],
+]);
+
+/**
  * Prüft eine Regel einer eigenen Gruppe. Erlaubt sind nur „Bash(<Befehl>:*)“ bzw. „Bash(<Befehl>)“ ohne
- * Shell-Sonderzeichen und ohne gesperrte Befehle sowie WebFetch auf localhost. Liefert die Fehlermeldung oder null.
+ * Shell-Sonderzeichen, mit einem Programm aus CUSTOM_RULE_PROGRAMS und ohne gesperrte Unterbefehle sowie WebFetch auf
+ * localhost. Liefert die Fehlermeldung oder null.
  */
 export function customRuleProblem(rule: string): string | null {
   const web = /^WebFetch\(domain:(?:localhost|127\.0\.0\.1)\)$/.test(rule);
@@ -423,5 +592,8 @@ export function customRuleProblem(rule: string): string | null {
     /\.\./.test(command)
   )
     return `„${rule}“: Zugriff auf Geheimnisse, AIdeation selbst oder übergeordnete Ordner ist gesperrt.`;
+  // Allowlist statt Sperrliste: timeout, nice, find, awk, sed, tee, cp, ln … starten Programme oder schreiben Dateien.
+  if (!CUSTOM_RULE_PROGRAMS.has(command.split(' ')[0]!))
+    return `„${rule}“: dieses Programm ist für eigene Regeln nicht freigegeben (erlaubt: ${[...CUSTOM_RULE_PROGRAMS].join(', ')}).`;
   return null;
 }

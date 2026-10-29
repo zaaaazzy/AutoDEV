@@ -1,12 +1,14 @@
 # CI (GitHub Actions)
 
-Workflow: `.github/workflows/ci.yml`. Läuft bei `push` und `pull_request`. Der Workflow hat `permissions: contents: read`, kein Job schreibt ins Repository.
+Workflow: `.github/workflows/ci.yml`. Läuft bei `push` auf `main` und bei `pull_request`. Ein Push auf einen anderen Branch startet keinen eigenen Lauf, das übernimmt sein Pull Request. So läuft ein Commit nicht doppelt. Der Workflow hat `permissions: contents: read`, kein Job schreibt ins Repository.
+
+`concurrency` gruppiert nach Workflow und Pull-Request-Nummer bzw. Ref. Ein neuer Push auf denselben Pull Request bricht den laufenden Lauf ab. Läufe auf `main` werden nicht abgebrochen (`cancel-in-progress` nur bei `pull_request`).
 
 ## Jobs
 
 Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHUB_TOKEN` landet nicht in `.git/config`, Projektcode (Tests, Testserver, Docker-Build) kann es nicht lesen. Kein Job nutzt Secrets.
 
-- **`check`**: `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm test`.
+- **`check`**: `npm ci`, `lint`, `format:check`, `typecheck` (inkl. Tests), `npm run test:unit`. `test:unit` baut die Oberfläche nicht, kein Unit-Test liest `dist/ui`. `npm test` (= `build:ui` + `test:unit`) bleibt der lokale Komplettlauf. Die Oberfläche baut in der CI nur der Job `e2e`.
 - **`e2e`**: Postgres 17 als Service (Wegwerf-Datenbank, kein Secret), Chromium installieren, `build:ui`, `npm run test:e2e`. Der Playwright-Reporter ist in der CI `list` plus `github`, Fehler stehen also im Log und als Annotation. Bei Fehlern werden die Traces als Artefakt `playwright-traces` (7 Tage) hochgeladen.
 - **`docker`**:
   1. Zufällige, maskierte Werte für `DEV_LOG_PASSWORD` und `DEV_LOG_DB_PASSWORD` (sonst griffe das bekannte Standardpasswort aus compose).
@@ -36,3 +38,5 @@ Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHU
 - **Noch nicht in GitHub Actions belegt:** Lokal grün sind Typprüfung, Lint, Format, `npm test` (870/870), E2E (58 bestanden, 2 nur auf dem Handy übersprungen) und der Compose-Build von `dev-log`, `frontend`, `https`. Nicht lokal geprüft sind `docker build deploy/review` (der Wächter erlaubt nur `docker compose`) und der Containerstart mit Health-Prüfung (der feste `container_name` würde die Produktiv-Container ersetzen). Den Auftrag erst nach dem ersten grünen CI-Lauf von `e2e` und `docker` als erledigt führen.
 - Die Testabdeckung wird nicht gemessen (der Wächter blockiert `--experimental-test-coverage`, Werte bleiben `null`). Es gibt bewusst keine Coverage-Schwelle in der CI.
 - Neue Test-Dateien müssen typsicher sein, sonst schlägt `typecheck` in der CI fehl.
+- **Actions noch per Tag statt SHA gepinnt** (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`). Die Commit-SHAs ließen sich in der Agent-Umgebung nicht ermitteln (kein Netzzugriff), geraten wird nicht. Nachtragen mit `git ls-remote --tags https://github.com/actions/<name>`, dann `uses: actions/<name>@<sha> # v4.x.y`.
+- Die Standard-Testbefehle des Runners (`npm run build` + `npm test`) gelten für alle Projekte und bleiben unverändert, denn andere Projekte haben kein Skript `test:unit`. Für AIdeation selbst in den Projekteinstellungen unter „Testbefehle“ `npm run build` und `npm run test:unit` eintragen, sonst baut der Lauf die Oberfläche zweimal.

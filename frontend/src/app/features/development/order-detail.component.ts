@@ -14,6 +14,7 @@ import {
   MANUAL_DEVELOPMENT_TRANSITIONS,
   canSetDevelopmentStatus,
   isAssignableSprintStatus,
+  isSprintLockedDevelopmentStatus,
 } from '../../../../../src/core/development-transitions.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
@@ -21,6 +22,8 @@ import { parseRisks } from '../../shared/risk-list.js';
 import { OrderService } from './order.service.js';
 import { OrderApprovalComponent } from './order-approval.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
+import { needsVisual } from './needs-visual.js';
+import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -75,6 +78,8 @@ export class OrderDetailComponent {
     const current = this.order().sprintId;
     return this.data().sprints.filter((sprint) => sprint.id === current || isAssignableSprintStatus(sprint.status));
   });
+  /** In Arbeit, Freigabe und Erledigt hängt der Auftrag fest am Sprint (dieselbe Liste wie der Server). */
+  protected readonly sprintLocked = computed(() => isSprintLockedDevelopmentStatus(this.order().status));
   readonly editing = input(false);
   /** Agent-Ansicht gleich aufgeklappt zeigen (z. B. auf der Agents-Seite). */
   readonly agentsOpen = input(false);
@@ -101,16 +106,8 @@ export class OrderDetailComponent {
     };
   });
 
-  /** Reiter „Ansicht“ bei Frontend- und Fullstack-Aufträgen (oder wenn es schon Befunde bzw. eine Freigabe gibt). */
-  protected readonly showVisual = computed(() => {
-    const item = this.order();
-    return (
-      item.category === 'frontend' ||
-      item.category === 'fullstack' ||
-      Boolean(item.visualApprovedAt) ||
-      this.acceptance().visual.length > 0
-    );
-  });
+  protected readonly showVisual = computed(() => needsVisual(this.order(), this.acceptance().visual.length));
+  protected readonly agentEnds = computed(() => agentEnds(buildWorkflow(this.data(), this.order())));
 
   /**
    * Eigener Wahrheitswert: `acceptance()` liefert bei jedem Live-Refresh ein neues Objekt; hinge der Poll daran,

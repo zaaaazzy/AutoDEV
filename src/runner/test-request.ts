@@ -7,9 +7,11 @@ import { acquireTree, withProjectLock } from '../core/project-lock.js';
 import { adminDatabaseUrl } from '../core/local-database.js';
 import { sendPush } from '../core/push.js';
 import { fileBugs, stepBug } from '../core/test-bugs.js';
+import { dropReportCopies } from './git-sync/report-copies.js';
 import { gitEnvironment, projectEnvironment, runProjectCommand } from './project-command.js';
 import type { RunnerOptions } from './runner-types.js';
 import { runTestAgent } from './test-agent.js';
+import { gateExecutor } from './test-sandbox.js';
 
 /** Ein Komplettlauf mit Playwright dauert; danach gilt er als hängend. */
 const TEST_TIMEOUT_MS = 60 * 60_000;
@@ -27,6 +29,7 @@ interface Claimed {
  * Im eigenen Agenten-Worktree (siehe agent-workspace.ts) steht oft noch der Stand des letzten Auftrags.
  * Getestet werden soll der aktuelle Stand: ist der Worktree sauber, wird main ausgecheckt (losgelöst, ohne Branch).
  * Liefert den Branch, auf dem der Worktree vorher stand (für restoreBranch), sonst null.
+ * Offene Änderungen (oder ein gescheitertes git status) werfen: sonst prüfte der Lauf einen halbfertigen Auftrag.
  */
 export async function useLatestMain(cwd: string, execute: CommandExecutor): Promise<string | null> {
   const git = (...args: string[]) => execute(['git', ...args], cwd, { timeoutMs: 60_000, env: gitEnvironment() });
@@ -36,8 +39,14 @@ export async function useLatestMain(cwd: string, execute: CommandExecutor): Prom
   if (dirs.exitCode !== 0 || !own || own === common) return null;
   // Nicht versionierte Dateien stören den Checkout nicht; nur echte Änderungen verhindern ihn.
   const status = await git('status', '--porcelain', '--untracked-files=no');
-  if (status.exitCode !== 0 || status.output.trim()) return null;
+  if (status.exitCode !== 0)
+    throw new Error(
+      `git status im Agent-Worktree fehlgeschlagen – Test auf main nicht möglich: ${failureTail(status.output)}`,
+    );
+  if (status.output.trim())
+    throw new Error('Offene Änderungen im Agent-Worktree (wartender Auftrag?) – Test auf main nicht möglich.');
   const branch = await git('symbolic-ref', '--short', '-q', 'HEAD');
+  await dropReportCopies(git, cwd, 'main');
   const moved = await git('checkout', '-q', '--detach', 'main');
   return moved.exitCode === 0 && branch.exitCode === 0 ? branch.output.trim() || null : null;
 }
@@ -134,12 +143,15 @@ export async function processTestRequest(
     let previous: string | null = null;
     const result = await withProjectLock(options.cwd, async () => {
       previous = await useLatestMain(options.cwd, execute);
+      // Projektcode im Testcontainer (Sandbox, Standard); Git bleibt beim Worker. Im Container gibt es keinen Zugang
+      // zur AIdeation-Datenbank: test:full meldet dann nur Exit-Code und Ausgabe, keinen eigenen Testlauf.
+      const testExecute = await gateExecutor(pool, options.project, options.cwd, execute, `test-${request.id}`);
       if (await hasFullTestScript(options.cwd)) {
         const outcome = await runProjectCommand(
           fullTestCommand(options.project, request),
           options.cwd,
           { timeoutMs: TEST_TIMEOUT_MS, extraEnv: fullTestExtraEnv() },
-          execute,
+          testExecute,
         );
         const linked = (
           await pool.query<{ runId: string | null }>('SELECT run_id AS "runId" FROM test_requests WHERE id = $1', [
@@ -165,6 +177,7 @@ export async function processTestRequest(
           existingProject: true,
           env: projectEnvironment(options.cwd),
           timeoutMs: TEST_TIMEOUT_MS,
+          ...(testExecute !== execute ? { execute: testExecute } : {}),
           // Sofort verknüpfen: bei Neustart oder Fehler während der Befehle findet recoverTestRequests den Lauf.
           onRunCreated: async (created) => {
             await pool.query('UPDATE test_requests SET run_id = $2 WHERE id = $1', [request.id, created]);

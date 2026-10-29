@@ -3,7 +3,18 @@ const parameter = (description: string, type = 'string'): { type: string; descri
   description,
 });
 
-export function toolDefinitions(canWrite: boolean, canManageServices = false, hasDatabase = false): unknown[] {
+/**
+ * Werkzeuge des lokalen Modells; run_command auch ohne Schreibrecht, wenn die Rolle Befehle ausführen darf.
+ * canManageServices: Einrichtung durch den Assistenten (git clone/pull, npm install). canUseServices: Werkzeug
+ * service_action für die Worker-Aktionen services.* (Recht „services“).
+ */
+export function toolDefinitions(
+  canWrite: boolean,
+  canManageServices = false,
+  hasDatabase = false,
+  canRunCommands = canWrite,
+  canUseServices = false,
+): unknown[] {
   const tools: { name: string; description: string; properties: Record<string, unknown>; required: string[] }[] = [
     {
       name: 'list_files',
@@ -45,23 +56,57 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false, ha
         },
         required: ['path', 'old_text', 'new_text'],
       },
-      {
-        name: 'run_command',
-        description: `Führt erlaubte Projektbefehle aus (npm test/run/ls, git status/diff/log${canManageServices ? ', docker compose ps/logs/up -d/stop/down/restart/build, git clone/pull, npm install' : ''}).`,
-        properties: { command: parameter('z. B. "npm run build", "npm test" oder "docker compose ps"') },
-        required: ['command'],
-      },
     );
+  }
+  if (canRunCommands) {
+    tools.push(
+      canWrite
+        ? {
+            name: 'run_command',
+            description: `Führt erlaubte Projektbefehle aus (npm test/run/ls, git status/diff/log${canManageServices ? ', git clone/pull, npm install' : ''}). Kein docker – Dienste über service_action.`,
+            properties: { command: parameter('z. B. "npm run build", "npm test" oder "git status"') },
+            required: ['command'],
+          }
+        : {
+            name: 'run_command',
+            description:
+              'Führt freigegebene Prüfbefehle aus (npm audit, npm outdated, git ls-files, git grep). Ändert nichts.',
+            properties: { command: parameter('z. B. "npm audit --json", "npm outdated" oder "git grep -n TODO"') },
+            required: ['command'],
+          },
+    );
+  }
+  if (canWrite) {
     if (hasDatabase) {
       tools.push({
         name: 'run_sql',
         description:
           'Führt SQL in der Datenbank dieses Projekts aus (lesen und schreiben, eine Transaktion, max. 50 ' +
           'Ergebniszeilen). Schema vorher mit information_schema prüfen. Keine Zugangsdaten raten oder erfinden.',
-        properties: { sql: parameter('SQL-Anweisung(en); UPDATE/DELETE nur mit WHERE') },
+        properties: {
+          sql: parameter('Eine SQL-Anweisung; UPDATE/DELETE nur mit WHERE und bis 500 Zeilen, ALTER TABLE nur ADD'),
+        },
         required: ['sql'],
       });
     }
+  }
+  if (canUseServices) {
+    tools.push({
+      name: 'service_action',
+      description:
+        'Dienste des Projekts (Docker Compose im Projektordner) über den Worker verwalten: services.status, ' +
+        'services.logs, services.restart, services.up und services.stop. Der Worker prüft die Anfrage und liefert ' +
+        'das Ergebnis samt Ausgabe.',
+      properties: {
+        action: parameter('services.status, services.logs, services.restart, services.up oder services.stop'),
+        services: parameter('Dienstnamen, durch Leerzeichen getrennt; leer = alle Dienste'),
+        lines: parameter('Nur services.logs: letzte Zeilen (1–1000, Standard 200)', 'integer'),
+        since: parameter('Nur services.logs: Zeitraum wie "15m" oder "2h" (höchstens 24h)'),
+        build: parameter('Nur services.up: Images vorher bauen', 'boolean'),
+        file: parameter('Compose-Datei relativ zum Projektordner; Standard: compose.yaml/docker-compose.yml'),
+      },
+      required: ['action'],
+    });
   }
   return tools.map((tool) => ({
     type: 'function',
@@ -73,7 +118,13 @@ export function toolDefinitions(canWrite: boolean, canManageServices = false, ha
   }));
 }
 
-export function systemPrompt(role: string, canWrite: boolean, hasDatabase = false): string {
+export function systemPrompt(
+  role: string,
+  canWrite: boolean,
+  hasDatabase = false,
+  canRunCommands = canWrite,
+  canUseServices = false,
+): string {
   return [
     role === 'assistant'
       ? 'Du bist der Dashboard-Assistent und Problemlöser. Du darfst Probleme im Projekt selbst untersuchen ' +
@@ -85,11 +136,10 @@ export function systemPrompt(role: string, canWrite: boolean, hasDatabase = fals
       ? 'Du darfst Dateien mit write_file/replace_in_file ändern und sichere Projektbefehle ausführen. Alle ' +
         'Dateioperationen bleiben auf das Projektverzeichnis begrenzt; .env, Schlüssel, node_modules und ' +
         '.git sind gesperrt. Führe bei Problemen zuerst Diagnose und dann eine gezielte, nachvollziehbare ' +
-        'Behebung samt passenden Tests aus. Du darfst Dienste per docker compose (ps, logs, up -d [--build], ' +
-        'stop, start, restart, down, build) verwalten und Umgebungen aufsetzen: Repository mit "git clone ' +
+        'Behebung samt passenden Tests aus. Du darfst Umgebungen aufsetzen: Repository mit "git clone ' +
         '<https-URL> <Unterordner oder .>" ins Projektverzeichnis holen, Abhängigkeiten mit npm install ' +
-        'installieren, Konfiguration (z. B. docker-compose.yml, README-Vorgaben) prüfen und anlegen, Dienste ' +
-        'starten und per docker compose ps/logs verifizieren. Befolge die Vorgaben des Nutzers Schritt für ' +
+        'installieren und Konfiguration (z. B. docker-compose.yml, README-Vorgaben) prüfen und anlegen. ' +
+        'Befolge die Vorgaben des Nutzers Schritt für ' +
         'Schritt und melde jeden Schritt. Beantworte alle Anfragen direkt und delegiere nicht. Erstelle ' +
         'niemals Aufträge oder @@TASK-Zeilen.'
       : canWrite
@@ -101,6 +151,15 @@ export function systemPrompt(role: string, canWrite: boolean, hasDatabase = fals
         : 'Du darfst nichts verändern. Gib dein Ergebnis als Text in Markdown aus (ohne Werkzeugaufruf als ' +
           'letzte Nachricht). Arbeite effizient: höchstens etwa 8 Werkzeugaufrufe, lies nur die wirklich ' +
           'relevanten Dateien (README, package.json, betroffene Module) und antworte dann.',
+    canRunCommands && !canWrite
+      ? 'Mit run_command führst du freigegebene Prüfbefehle aus (z. B. "npm audit --json", "npm outdated", ' +
+        '"git ls-files", "git grep -n TODO") und meldest ihr tatsächliches Ergebnis.'
+      : '',
+    canUseServices
+      ? 'Dienste verwaltest du nur mit service_action (services.status, services.logs mit lines/since, ' +
+        'services.restart, services.up mit build, services.stop) – nie per Shell, docker und Dienst-Befehle des ' +
+        'Betriebssystems sind gesperrt. Prüfe Logs mit services.logs und starte hängende Dienste mit services.restart neu.'
+      : '',
     hasDatabase
       ? 'Du hast mit run_sql Zugriff auf die Datenbank dieses Projekts. Prüfe zuerst per SELECT, ob Daten vorhanden ' +
         'sind, ändere nur gezielt und überschreibe keine Daten, die du nicht kennst. Erfinde keine Passwörter, ' +

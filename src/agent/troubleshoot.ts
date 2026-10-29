@@ -3,7 +3,7 @@ import { parseActionLine, setActionTodo } from '../runner/action-todo.js';
 import { delegateAfterAnalysis } from '../runner/autofix.js';
 import type { Pool } from 'pg';
 import { loadKnownBugs } from '../api/bugs.js';
-import type { CommandExecutor } from '../core/command.js';
+import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { runAuthorAgent } from './requirements.js';
 import type { RunnerOptions } from '../runner/runner.js';
 import { isShuttingDown } from '../core/shutdown.js';
@@ -20,7 +20,7 @@ export function buildTroubleshootPrompt(
     'Du bist der Problemanalyst im AIdeation (nur lesender Zugriff). Ein Entwicklungsauftrag ist blockiert. Analysiere die Fehler, finde die Ursache und schlage eine konkrete Lösung vor. Diese angeforderte Analyse dokumentiert den Befund, ohne den Auftrag ungefragt umzusetzen.',
     `## Anweisung\n${instructions || 'Analysiere gründlich und nenne konkrete Schritte.'}`,
     `## Auftrag\nTitel: ${item.title}\n${item.description.slice(0, 3000)}`,
-    `## Fehlgeschlagene Schritte (neueste zuerst)\n${failures.join('\n\n') || 'Keine Fehlerausgabe vorhanden.'}`,
+    `## Blockiergrund und fehlgeschlagene Schritte (neueste zuerst)\n${failures.join('\n\n') || 'Keine Fehlerausgabe vorhanden.'}`,
     bugs.length ? `## Bereits bekannte Bugs\n${bugs.join('\n')}` : '',
     [
       'Antworte genau in diesem Format:',
@@ -48,6 +48,42 @@ export function parseAnalysis(output: string, fallbackTitle: string): { title: s
   };
 }
 
+const MAX_FAILURE_CHARS = 2500;
+
+/**
+ * Sammelt die Fehlerausgaben eines blockierten Auftrags: die letzten fehlgeschlagenen Schritte und den
+ * Blockiergrund des Auftrags (`failure`, `action_todo`). Ohne Letzteres sähe die Analyse keine Ursache, wenn der
+ * Auftrag ohne fehlgeschlagenen Schritt blockiert (Git-Fehler, Budget, Merge-Konflikt, Abschluss gescheitert).
+ */
+export async function collectFailures(pool: Pool, developmentId: string): Promise<string[]> {
+  const steps = await pool
+    .query<{ agent: string; output: string }>(
+      `SELECT s.agent_name AS agent, s.output FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+      WHERE r.development_id = $1 AND s.status = 'failed' ORDER BY s.id DESC LIMIT 3`,
+      [developmentId],
+    )
+    .catch(() => ({ rows: [] as { agent: string; output: string }[] }));
+  const failures = steps.rows.map((step) => `### ${step.agent}\n${step.output.trim().slice(-MAX_FAILURE_CHARS)}`);
+  const blocked = (
+    await pool
+      .query<{ failure: string | null; actionTodo: string | null }>(
+        `SELECT failure, action_todo AS "actionTodo" FROM development_items WHERE id = $1`,
+        [developmentId],
+      )
+      .catch(logged('troubleshoot', { rows: [] as { failure: string | null; actionTodo: string | null }[] }))
+  ).rows[0];
+  // Der Grund steht vorne (z. B. „fremde, nicht committete Änderungen“), Dateilisten folgen: darum den Anfang behalten.
+  const section = (heading: string, text: string | null | undefined) => {
+    const trimmed = redactOutput(text ?? '', process.env).trim();
+    return trimmed ? `### ${heading}\n${trimmed.slice(0, MAX_FAILURE_CHARS)}` : '';
+  };
+  return [
+    section('Blockiergrund des Auftrags', blocked?.failure),
+    section('Offene Aktion', blocked?.actionTodo),
+    ...failures,
+  ].filter(Boolean);
+}
+
 /** Analysiert einen blockierten Auftrag mit dem Dashboard-Assistenten und speichert die Erkenntnisse als Bug (für den Bug-Wächter). */
 export async function analyzeBlocked(
   pool: Pool,
@@ -62,23 +98,21 @@ export async function analyzeBlocked(
     kind: string;
     sprintId: string | null;
     failureBugId: string | null;
+    budgetReason: string | null;
   }>(
     `UPDATE development_items SET analysis_status = 'running'
       WHERE id = (SELECT id FROM development_items WHERE project_slug = $1 AND analysis_status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, title, description, bug_id AS "bugId", kind, sprint_id AS "sprintId", failure_bug_id AS "failureBugId"`,
+      RETURNING id, title, description, bug_id AS "bugId", kind, sprint_id AS "sprintId", failure_bug_id AS "failureBugId",
+                CASE WHEN budget_blocked IS NOT NULL THEN failure END AS "budgetReason"`,
     [options.project],
   );
   const item = claimed.rows[0];
   if (!item) return 0;
-  const steps = await pool
-    .query<{ agent: string; output: string }>(
-      `SELECT s.agent_name AS agent, s.output FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
-      WHERE r.development_id = $1 AND s.status = 'failed' ORDER BY s.id DESC LIMIT 3`,
-      [item.id],
-    )
-    .catch(() => ({ rows: [] as { agent: string; output: string }[] }));
-  const failures = steps.rows.map((step) => `### ${step.agent}\n${step.output.trim().slice(-2500)}`);
+  const failures = await collectFailures(pool, item.id);
+  // Budget-Blockade (Projekt- oder Rollen-Limit) vor dem Schritt: Der Grund steht schon als Blockiergrund oben, hier
+  // nur die Einordnung, damit die Analyse ihn nicht für einen Code-Fehler hält.
+  if (item.budgetReason) failures.unshift('### Budget-Blockade\nDer Blockiergrund ist ein Projekt- oder Rollen-Limit.');
   const known = (await loadKnownBugs(pool, options.project, 30).catch(logged('troubleshoot', []))).map(
     (bug) => `- [${bug.status}] ${bug.title}`,
   );
@@ -112,14 +146,15 @@ export async function analyzeBlocked(
     ]);
   } else {
     await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes)
-       SELECT $1, $2, $3, 'high', 'agent', 'open', $4
+      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes, development_id)
+       SELECT $1, $2, $3, 'high', 'agent', 'open', $4, $5
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)`,
       [
         options.project,
         title,
         `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000),
         body.slice(0, 3000),
+        item.id,
       ],
     );
   }

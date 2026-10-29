@@ -3,6 +3,7 @@ import { Component, computed, inject, input, signal } from '@angular/core';
 import { GitGuardService } from '../../core/git-guard.service.js';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
+import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
@@ -17,6 +18,7 @@ import {
   TokensPipe,
   UsdPipe,
 } from '../../shared/pipes.js';
+import { exclusive, sprintButtons } from './sprint-actions.js';
 import { SprintOrdersComponent } from './sprint-orders.component.js';
 import { orderSprint } from './sprint-phases.js';
 import { SprintReviewComponent } from './sprint-review.component.js';
@@ -47,11 +49,20 @@ import { GitAlertComponent } from '../../shared/git-alert.component.js';
 export class SprintDetailComponent {
   private readonly api = inject(ApiService);
   private readonly gitGuard = inject(GitGuardService);
+  private readonly auth = inject(AuthService);
   protected readonly store = inject(ProjectStore);
-  protected readonly busy = this.store.busy;
+  /** Sprint-Aktion ab dem Klick bis zur Antwort (auch während der Rückfrage): sperrt die Knöpfe gegen Doppelklick. */
+  private readonly acting = signal(false);
+  protected readonly busy = computed(() => this.store.busy() || this.acting());
   protected readonly usdRate = USD_PER_MILLION_TOKENS;
   readonly sprintInput = input.required<Sprint>({ alias: 'sprint' });
   protected readonly editingId = signal<string | null>(null);
+
+  /** Sichtbare Knöpfe nach denselben Regeln wie der Server (src/core/sprint-rules.ts) und nach Rolle. */
+  protected readonly buttons = computed(() =>
+    sprintButtons(this.sprintInput(), this.store.data().sprints, this.store.data().development, this.can),
+  );
+  private readonly can = (role: 'plan' | 'run'): boolean => this.auth.can(role);
 
   protected reportFor(sprintId: string): SprintReport | undefined {
     return this.store.data().reports.find((report) => report.sprintId === sprintId);
@@ -123,9 +134,11 @@ export class SprintDetailComponent {
   }
 
   protected async updateSprint(id: string, values: Partial<Sprint>): Promise<void> {
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}`, values),
-      'Sprint aktualisiert.',
+    await exclusive(this.acting, () =>
+      this.store.perform(
+        () => this.api.patch(`/api/sprints/${encodeURIComponent(id)}`, values),
+        'Sprint aktualisiert.',
+      ),
     );
   }
 
@@ -134,44 +147,48 @@ export class SprintDetailComponent {
 
   /** Go zum Sprint: Tests, CI, Merge nach main, dann zieht der Projektordner nach und es wird deployt. */
   protected async goLive(sprint: Sprint): Promise<void> {
-    const answer = await this.gitGuard.confirmAction(
-      'go_live',
-      {
-        title: 'Sprint live schalten?',
-        message: `„${sprint.name}“: Tests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.`,
-        details: sprint.reviewReadyAt ? [] : ['Achtung: Es sind noch nicht alle Aufträge durch.'],
-        confirmLabel: 'Live schalten',
-        withoutComment: true,
-      },
-      'Trotzdem live schalten',
-    );
-    if (!answer) return;
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed', ...answer.body }),
-      'Wird live geschaltet – Tests, CI und Merge laufen im Hintergrund.',
-    );
+    await exclusive(this.acting, async () => {
+      const answer = await this.gitGuard.confirmAction(
+        'go_live',
+        {
+          title: 'Sprint live schalten?',
+          message: `„${sprint.name}“: Tests und CI laufen, danach wird der Sprint nach main gemergt, der Projektordner nachgezogen und deployt.`,
+          details: sprint.reviewReadyAt ? [] : ['Achtung: Es sind noch nicht alle Aufträge durch.'],
+          confirmLabel: 'Live schalten',
+          withoutComment: true,
+        },
+        'Trotzdem live schalten',
+      );
+      if (!answer) return;
+      await this.store.perform(
+        () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'completed', ...answer.body }),
+        'Wird live geschaltet – Tests, CI und Merge laufen im Hintergrund.',
+      );
+    });
   }
 
   /** Sprint starten bzw. wieder öffnen: Die Agents arbeiten danach in ihrem Ordner – der muss sauber sein. */
   protected async startSprint(sprint: Sprint): Promise<void> {
-    const reopen = sprint.status === 'completed';
-    const answer = await this.gitGuard.confirmAction(
-      'sprint_start',
-      {
-        title: reopen ? 'Sprint wieder öffnen?' : 'Sprint starten?',
-        message: reopen
-          ? `„${sprint.name}“ wird wieder aktiv; offene Aufträge laufen weiter.`
-          : `„${sprint.name}“ startet; die Agents arbeiten die Aufträge der Reihe nach ab.`,
-        confirmLabel: reopen ? 'Wieder öffnen' : 'Sprint starten',
-        withoutComment: true,
-      },
-      reopen ? 'Trotzdem wieder öffnen' : 'Trotzdem starten',
-    );
-    if (!answer) return;
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'active', ...answer.body }),
-      reopen ? 'Sprint ist wieder offen.' : 'Sprint gestartet.',
-    );
+    await exclusive(this.acting, async () => {
+      const reopen = sprint.status === 'completed';
+      const answer = await this.gitGuard.confirmAction(
+        'sprint_start',
+        {
+          title: reopen ? 'Sprint wieder öffnen?' : 'Sprint starten?',
+          message: reopen
+            ? `„${sprint.name}“ wird wieder aktiv; offene Aufträge laufen weiter.`
+            : `„${sprint.name}“ startet; die Agents arbeiten die Aufträge der Reihe nach ab.`,
+          confirmLabel: reopen ? 'Wieder öffnen' : 'Sprint starten',
+          withoutComment: true,
+        },
+        reopen ? 'Trotzdem wieder öffnen' : 'Trotzdem starten',
+      );
+      if (!answer) return;
+      await this.store.perform(
+        () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'active', ...answer.body }),
+        reopen ? 'Sprint ist wieder offen.' : 'Sprint gestartet.',
+      );
+    });
   }
 
   /** Abbrechen: laufende Agents enden, offene Aufträge gehen zurück ins Backlog (unter „Aktionen“ wieder einplanbar). */
@@ -182,15 +199,19 @@ export class SprintDetailComponent {
       )
     )
       return;
-    await this.store.perform(
-      () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'cancelled' }),
-      'Sprint abgebrochen.',
+    await exclusive(this.acting, () =>
+      this.store.perform(
+        () => this.api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'cancelled' }),
+        'Sprint abgebrochen.',
+      ),
     );
   }
 
   protected async deleteSprint(id: string): Promise<void> {
     if (!globalThis.confirm('Sprint löschen? Die Aufträge bleiben im Backlog erhalten.')) return;
-    await this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.');
+    await exclusive(this.acting, () =>
+      this.store.perform(() => this.api.delete(`/api/sprints/${encodeURIComponent(id)}`), 'Sprint gelöscht.'),
+    );
   }
 
   /** Pull Request des Sprints (PR-Modus); nur echte GitHub-PR-Links werden verlinkt. */
@@ -219,16 +240,17 @@ export class SprintDetailComponent {
   }
 
   protected async pauseSprint(id: string): Promise<void> {
-    await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/pause`),
-      'Sprint pausiert: Laufende Agents beenden ihren Schritt, danach startet nichts Neues.',
+    await exclusive(this.acting, () =>
+      this.store.perform(
+        () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/pause`),
+        'Sprint pausiert: Laufende Agents beenden ihren Schritt, danach startet nichts Neues.',
+      ),
     );
   }
 
   protected async resumeSprint(id: string): Promise<void> {
-    await this.store.perform(
-      () => this.api.post(`/api/sprints/${encodeURIComponent(id)}/resume`),
-      'Sprint läuft weiter.',
+    await exclusive(this.acting, () =>
+      this.store.perform(() => this.api.post(`/api/sprints/${encodeURIComponent(id)}/resume`), 'Sprint läuft weiter.'),
     );
   }
 

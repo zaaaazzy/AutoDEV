@@ -13,10 +13,12 @@ import {
   MODEL_PRESETS,
   modelLabel,
   parseCommand,
+  phaseLabel,
   presetLabel,
   roleLabel,
 } from './agent-options.js';
 import type { PermissionGroupInfo } from './permission-picker.component.js';
+import { applyOrders, moveStep, stepsInPhase, type PhaseOrder } from './workflow-order.js';
 
 /**
  * Workflow als aufklappbare Karte: für jeden Zeitpunkt (Sprintstart, vor/während/nach dem Auftrag, abgelehnt,
@@ -41,7 +43,14 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
         <span class="kanban-count">{{ steps().length }}</span>
       </summary>
       @for (phase of phases; track phase.id; let phaseIndex = $index) {
-        <section class="workflow-phase" [class]="'workflow-phase phase-' + phase.id">
+        <section
+          class="workflow-phase"
+          [class]="'workflow-phase phase-' + phase.id"
+          [class.drop-active]="dropTarget()?.phase === phase.id"
+          (dragover)="onDragOver($event, phase.id)"
+          (dragleave)="onDragLeave($event, phase.id)"
+          (drop)="onDrop($event)"
+        >
           <header class="workflow-phase-head">
             <span class="workflow-phase-number">{{ phaseIndex + 1 }}</span>
             <span class="workflow-phase-title">
@@ -62,8 +71,26 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
           <ol class="workflow-steps">
             @for (step of stepsOf(phase.id); track step.id; let index = $index; let last = $last) {
               @let agent = agentOf(step);
-              <li class="workflow-step" [class.disabled]="!step.enabled || !agent?.enabled">
-                <div class="workflow-step-head">
+              <li
+                class="workflow-step"
+                [class.disabled]="!step.enabled || !agent?.enabled"
+                [class.dragging]="dragged() === step.id"
+                [class.drop-before]="isDropSlot(phase.id, index)"
+                [class.drop-after]="last && isDropSlot(phase.id, index + 1)"
+              >
+                <div class="workflow-step-head row">
+                  @if (editable()) {
+                    <span
+                      class="workflow-step-handle"
+                      [class.locked]="!canDrag()"
+                      [attr.draggable]="canDrag() ? 'true' : 'false'"
+                      title="Ziehen, um den Schritt zu verschieben"
+                      aria-hidden="true"
+                      (dragstart)="onDragStart($event, step)"
+                      (dragend)="endDrag()"
+                      >⠿</span
+                    >
+                  }
                   <span class="kanban-rank">{{ index + 1 }}</span>
                   <strong class="workflow-step-name">{{ agent?.name ?? 'Agent gelöscht' }}</strong>
                   @if (agent && running().has(agent.id)) {
@@ -128,6 +155,17 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
                     >
                       ↓
                     </button>
+                    <select
+                      class="workflow-step-phase"
+                      aria-label="In Phase verschieben"
+                      title="In Phase verschieben"
+                      [disabled]="store.busy()"
+                      (change)="moveToPhase(step, $any($event.target).value)"
+                    >
+                      @for (option of phases; track option.id) {
+                        <option [value]="option.id" [selected]="option.id === phase.id">{{ option.label }}</option>
+                      }
+                    </select>
                     <button type="button" class="link-button" (click)="toggleEnabled(step)">
                       {{ step.enabled ? 'Pausieren' : 'Aktivieren' }}
                     </button>
@@ -146,7 +184,9 @@ import type { PermissionGroupInfo } from './permission-picker.component.js';
                 }
               </li>
             } @empty {
-              <li class="workflow-empty muted">Kein Agent – mit „+ Agent“ hinzufügen.</li>
+              <li class="workflow-empty muted" [class.drop-here]="isDropSlot(phase.id, 0)">
+                Kein Agent – mit „+ Agent“ hinzufügen.
+              </li>
             }
             @if (adding() === phase.id) {
               <li class="workflow-add-panel">
@@ -214,6 +254,17 @@ export class WorkflowStepsComponent {
   protected readonly editingStep = signal<string | null>(null);
   protected readonly settingsFor = signal<string | null>(null);
   protected draft = '';
+  /** Ziehen nur mit Recht `agents` und solange nichts gespeichert wird. */
+  protected readonly canDrag = computed(() => this.editable() && !this.store.busy());
+  /** Gezogener Schritt und Einfügestelle (Phase, Stelle in der angezeigten Liste). */
+  protected readonly dragged = signal<string | null>(null);
+  protected readonly dropTarget = signal<{ phase: AgentPhase; slot: number } | null>(null);
+  /** Was ein Ablegen an der aktuellen Stelle speichern würde; leer = keine Änderung, keine Einfügemarke. */
+  private readonly dropOrders = computed(() => {
+    const id = this.dragged();
+    const target = this.dropTarget();
+    return id && target ? moveStep(this.steps(), id, target.phase, target.slot) : [];
+  });
 
   /** Agents, die laut Worker gerade arbeiten. */
   protected readonly running = computed(
@@ -274,9 +325,7 @@ export class WorkflowStepsComponent {
   }
 
   protected stepsOf(phase: AgentPhase): WorkflowStep[] {
-    return this.steps()
-      .filter((step) => step.phase === phase)
-      .sort((a, b) => a.position - b.position);
+    return stepsInPhase(this.steps(), phase);
   }
 
   protected agentOf(step: WorkflowStep): Agent | undefined {
@@ -359,6 +408,80 @@ export class WorkflowStepsComponent {
       () => this.api.post(`${this.path()}/order`, { phase: step.phase, ids }),
       'Reihenfolge gespeichert.',
     );
+  }
+
+  /** Tastatur-Alternative zum Ziehen: Schritt ans Ende einer anderen Phase setzen. */
+  protected async moveToPhase(step: WorkflowStep, phase: AgentPhase): Promise<void> {
+    if (phase === step.phase) return;
+    await this.saveOrders(
+      moveStep(this.steps(), step.id, phase, Number.MAX_SAFE_INTEGER),
+      `Schritt nach „${phaseLabel(phase)}“ verschoben.`,
+    );
+  }
+
+  /**
+   * Neue Reihenfolgen sofort anzeigen und nacheinander speichern (Zielphase zuerst, dann Quellphase). Danach – auch
+   * bei einem Fehler – den Stand des Servers laden.
+   */
+  private async saveOrders(orders: PhaseOrder[], message = 'Reihenfolge gespeichert.'): Promise<void> {
+    if (!orders.length || !this.canDrag()) return;
+    this.steps.set(applyOrders(this.steps(), orders));
+    await this.change(async () => {
+      for (const order of orders) await this.api.post(`${this.path()}/order`, order);
+    }, message);
+  }
+
+  protected isDropSlot(phase: AgentPhase, slot: number): boolean {
+    const target = this.dropTarget();
+    return target?.phase === phase && target.slot === slot && this.dropOrders().length > 0;
+  }
+
+  protected onDragStart(event: DragEvent, step: WorkflowStep): void {
+    if (!this.canDrag()) {
+      event.preventDefault();
+      return;
+    }
+    this.dragged.set(step.id);
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      // Firefox startet das Ziehen nur mit Daten.
+      event.dataTransfer.setData('text/plain', step.id);
+      const card = (event.target as HTMLElement).closest('li');
+      if (card) event.dataTransfer.setDragImage(card, 16, 16);
+    }
+  }
+
+  /** Einfügestelle = Anzahl der Schritte der Phase, deren Mitte über dem Mauszeiger liegt. */
+  protected onDragOver(event: DragEvent, phase: AgentPhase): void {
+    if (!this.dragged() || !this.canDrag()) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    const items = Array.from((event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('.workflow-step'));
+    const slot = items.filter((item) => {
+      const box = item.getBoundingClientRect();
+      return box.top + box.height / 2 < event.clientY;
+    }).length;
+    const current = this.dropTarget();
+    if (current?.phase !== phase || current.slot !== slot) this.dropTarget.set({ phase, slot });
+  }
+
+  protected onDragLeave(event: DragEvent, phase: AgentPhase): void {
+    const section = event.currentTarget as HTMLElement;
+    if (section.contains(event.relatedTarget as Node | null)) return;
+    if (this.dropTarget()?.phase === phase) this.dropTarget.set(null);
+  }
+
+  protected async onDrop(event: DragEvent): Promise<void> {
+    if (!this.dragged()) return;
+    event.preventDefault();
+    const orders = this.canDrag() ? this.dropOrders() : [];
+    this.endDrag();
+    await this.saveOrders(orders);
+  }
+
+  protected endDrag(): void {
+    this.dragged.set(null);
+    this.dropTarget.set(null);
   }
 
   protected async remove(step: WorkflowStep, agent: Agent | undefined): Promise<void> {

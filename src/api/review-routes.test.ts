@@ -90,7 +90,7 @@ test('Review-Container: Nicht-Admins sehen nur Slots ihrer Projekte und stoppen 
 });
 
 /** „Im Review-Container prüfen“ für einen Auftrag im Status `status`; liefert Antwort und Slot-Anfrage. */
-async function showReview(status: string) {
+async function showReview(status: string, body?: unknown) {
   const queries: { sql: string; values: unknown[] }[] = [];
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
@@ -107,7 +107,9 @@ async function showReview(status: string) {
     const { port } = server.address() as AddressInfo;
     const response = await fetch(
       `http://127.0.0.1:${port}/api/development/11111111-1111-4111-8111-111111111111/show-review`,
-      { method: 'POST' },
+      body === undefined
+        ? { method: 'POST' }
+        : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
     );
     return { status: response.status, update: queries.find((query) => query.sql.startsWith('UPDATE review_slots')) };
   } finally {
@@ -125,6 +127,7 @@ test('Review-Container für die Abnahme: erledigter Auftrag startet ohne festen 
     'Abnahme: Login',
     '11111111-1111-4111-8111-111111111111',
     'manual',
+    null,
   ]);
 });
 
@@ -279,4 +282,53 @@ test('Kopfzeile: GET review-commits liest nur Sprints des Projekts und keine gep
   assert.deepEqual(sprints?.values, ['dev-log']);
   const orders = queries.find((query) => query.sql.includes('FROM development_items'));
   assert.match(orders?.sql ?? '', /project_slug = \$1/);
+});
+
+test('Optische Abnahme: gewählte Umgebung wird genau so angefordert, ungültige abgelehnt', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  let free = true;
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.startsWith('UPDATE review_slots')) return { rows: free ? [{ slot: values[5] }] : [], rowCount: 1 };
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const server = createDevLogApp(pool, null).listen(0, '127.0.0.1');
+  try {
+    await new Promise<void>((resolve) => server.once('listening', resolve));
+    const { port } = server.address() as AddressInfo;
+    const start = (slot: unknown) =>
+      fetch(`http://127.0.0.1:${port}/api/projects/dev-log/review-slots/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commit: 'd'.repeat(40), slot }),
+      });
+    const chosen = await start(3);
+    assert.equal(chosen.status, 200);
+    assert.deepEqual(await chosen.json(), { slot: 3 });
+    const update = queries.find((query) => query.sql.startsWith('UPDATE review_slots'))!;
+    assert.match(update.sql, /WHERE enabled AND \(\$6::int IS NULL OR slot = \$6\)/);
+    assert.equal(update.values[5], 3);
+
+    for (const slot of [0, 1.5, 'zwei', 100]) {
+      const response = await start(slot);
+      assert.equal(response.status, 400, String(slot));
+    }
+    free = false;
+    const locked = await start(2);
+    assert.equal(locked.status, 409);
+    assert.match(((await locked.json()) as { message: string }).message, /Umgebung 2 ist nicht freigegeben/);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test('Optische Abnahme: Auftrag startet in der gewählten Umgebung', async () => {
+  const chosen = await showReview('blocked', { slot: 2 });
+  assert.equal(chosen.status, 200);
+  assert.equal(chosen.update?.values[5], 2);
+  const invalid = await showReview('blocked', { slot: 'drei' });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.update, undefined, 'nichts angefordert');
 });

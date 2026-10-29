@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import pg from 'pg';
 import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
+import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
 function fakeClient(done: number[], fail?: string) {
@@ -67,28 +69,22 @@ test('Migrationen: fehlgeschlagener Schritt wird zurückgerollt, nicht vermerkt,
   assert.match(queries.at(-1)!, /pg_advisory_unlock/);
 });
 
-// Echte PostgreSQL-Datenbank (lokal aus docker-compose oder DEV_LOG_TEST_ADMIN_DATABASE_URL); ohne sie übersprungen.
-const ADMIN_URL =
-  process.env.DEV_LOG_TEST_ADMIN_DATABASE_URL ??
-  process.env.E2E_ADMIN_DATABASE_URL ??
-  'postgresql://devlog:devlog_local_dev@localhost:5433/postgres';
+// Das Basis-Schema (Version 1) läuft nur auf neuen Datenbanken. Was dort nachträglich ergänzt wird, fehlt jeder
+// bestehenden Datenbank (so fehlte budget_role_limits, Migration 17). Neue Tabellen und Spalten gehören in eine neue
+// Migration; erst dann darf dieser Hash angepasst werden.
+test('Migrationen: Basis-Schema ist eingefroren, Änderungen brauchen eine neue Migration', () => {
+  assert.equal(
+    createHash('sha256').update(SCHEMA).digest('hex'),
+    '4ae610239349cb361a95dfd6182047e1c9999bcd18a0d5fb60e89c63cd4ada64',
+    'src/db/schema.ts wurde geändert: die Änderung als neue Migration in src/db/migrations.ts anlegen.',
+  );
+});
 
-async function adminPool(): Promise<pg.Pool | undefined> {
-  const pool = new pg.Pool({ connectionString: ADMIN_URL, max: 1, connectionTimeoutMillis: 2000 });
-  try {
-    await pool.query('SELECT 1');
-    return pool;
-  } catch {
-    await pool.end();
-    return undefined;
-  }
-}
-
-function databaseUrl(name: string): string {
-  const url = new URL(ADMIN_URL);
-  url.pathname = `/${name}`;
-  return url.toString();
-}
+test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenbanken', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 17);
+  assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
+  assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
+});
 
 /** Struktur der Datenbank: Spalten, Prüfungen, Indizes, Trigger, Funktionen und vermerkte Migrationen. */
 async function structure(pool: pg.Pool): Promise<Record<string, unknown[]>> {
@@ -110,16 +106,13 @@ async function structure(pool: pg.Pool): Promise<Record<string, unknown[]>> {
 }
 
 test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nichts', async (t) => {
-  const admin = await adminPool();
-  if (!admin) {
-    t.skip(`keine PostgreSQL-Datenbank unter ${new URL(ADMIN_URL).host}`);
-    return;
-  }
+  const admin = await adminPool(t);
+  if (!admin) return;
   const names = [`devlog_migr_fresh_${process.pid}`, `devlog_migr_legacy_${process.pid}`];
   const pools: pg.Pool[] = [];
   try {
     for (const name of names) {
-      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      await dropDatabase(admin, name);
       await admin.query(`CREATE DATABASE ${name}`);
       pools.push(new pg.Pool({ connectionString: databaseUrl(name), max: 1 }));
     }
@@ -153,14 +146,16 @@ test('Migrationen: frische DB = migrierte Bestands-DB, zweiter Start ändert nic
     await legacy.query(`INSERT INTO app_settings (key, value) VALUES ('model:tester', 'haiku')`);
     assert.deepEqual(await runMigrations(legacy), []);
     assert.equal((await legacy.query(`SELECT 1 FROM app_settings WHERE key = 'model:tester'`)).rowCount, 1);
-    const lock = await legacy.query('SELECT count(*)::int AS n FROM pg_locks WHERE locktype = $1 AND objid = $2', [
-      'advisory',
-      MIGRATION_LOCK,
-    ]);
+    // pg_locks zeigt den ganzen Cluster: nur diese Datenbank zählen, andere Testdateien migrieren parallel.
+    const lock = await legacy.query(
+      `SELECT count(*)::int AS n FROM pg_locks
+        WHERE locktype = $1 AND objid = $2 AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
+      ['advisory', MIGRATION_LOCK],
+    );
     assert.equal(lock.rows[0].n, 0, 'Sperre nach dem Lauf gelöst');
   } finally {
     for (const pool of pools) await pool.end();
-    for (const name of names) await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    for (const name of names) await dropDatabase(admin, name);
     await admin.end();
   }
 });

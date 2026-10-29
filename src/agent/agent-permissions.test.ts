@@ -32,6 +32,54 @@ const policyOf = (command: string[]) => {
   return decodePolicy(/agent-guard\.ts' '([\w-]+)'/.exec(hook.hooks[0]!.command)![1]);
 };
 
+interface CliSettings {
+  permissions?: { deny?: string[] };
+  hooks?: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
+}
+const settingsOf = (command: string[]): CliSettings => JSON.parse(option(command, '--settings') ?? '{}') as CliSettings;
+
+test('Geheimnisse: jede Rolle bekommt Deny-Regeln und den Wächter für Read, Grep und Glob', () => {
+  const roles = [
+    'author',
+    'developer',
+    'tester',
+    'visual_tester',
+    'reviewer',
+    'documenter',
+    'bug_reviewer',
+    'manual_writer',
+    'user_manual_writer',
+    'custom',
+    'assistant',
+    'routine',
+    'visionary',
+    'analyst',
+    'pre_sprint',
+  ];
+  const full = ['claude', '--dangerously-skip-permissions', '-p', '{prompt}'];
+  const custom = ['claude', '--allowedTools', 'Read', '-p', '{prompt}'];
+  for (const role of roles) {
+    for (const base of [CLAUDE, full, custom]) {
+      const command = withAgentPermissions(base, role, project, null);
+      const label = `${role}: ${base.join(' ')}`;
+      const settings = settingsOf(command);
+      const deny = settings.permissions?.deny ?? [];
+      // .env, config/.env.production, certs/server.key, *.pem, SSH-Schlüssel und npm-Tokens (.npmrc)
+      for (const rule of [
+        'Read(**/.env*)',
+        'Read(**/*.key)',
+        'Read(**/*.pem)',
+        'Read(**/.ssh/**)',
+        'Read(**/.npmrc)',
+      ]) {
+        assert.ok(deny.includes(rule), `${label} ohne ${rule}`);
+      }
+      const matcher = settings.hooks?.PreToolUse[0]?.matcher ?? '';
+      for (const tool of ['Read', 'Grep', 'Glob']) assert.ok(matcher.split('|').includes(tool), `${label}: ${tool}`);
+    }
+  }
+});
+
 test('Eigene Befehle: sichere ja, gesperrte und Shell-Tricks nein', () => {
   assert.equal(customRuleProblem('Bash(npm run lint:*)'), null);
   assert.equal(customRuleProblem('Bash(make test)'), null);
@@ -61,15 +109,15 @@ test('Eigene Befehle: sichere ja, gesperrte und Shell-Tricks nein', () => {
 test('Agent bekommt genau die einzeln gesetzten Befehle; Datei-Werkzeuge nur mit Anlegen bzw. Ändern', () => {
   const reviewer = withAgentPermissions(CLAUDE, 'reviewer', project, ['Bash(git status:*)', 'Bash(git diff:*)']);
   assert.equal(option(reviewer, '--allowedTools'), 'Bash(git status:*),Bash(git diff:*)');
-  assert.equal(option(reviewer, '--disallowedTools'), 'Write,Edit,NotebookEdit');
+  assert.equal(option(reviewer, '--disallowedTools'), 'Write,Edit,NotebookEdit,MultiEdit');
   assert.deepEqual(policyOf(reviewer), { create: false, edit: false, scopes: [] });
 
   const writer = withAgentPermissions(CLAUDE, 'documenter', project, ['files:create'], ['docs']);
-  assert.equal(option(writer, '--disallowedTools'), 'Edit,NotebookEdit');
+  assert.equal(option(writer, '--disallowedTools'), 'Edit,NotebookEdit,MultiEdit');
   assert.deepEqual(policyOf(writer), { create: true, edit: false, scopes: ['docs'] });
 
   const developer = withAgentPermissions(CLAUDE, 'developer', project, ['files', 'logs', 'Bash(npm run prisma:*)']);
-  assert.equal(option(developer, '--allowedTools'), 'Bash(npm run prisma:*)');
+  assert.equal(option(developer, '--allowedTools'), 'Bash(npm run prisma:*),Bash(git rm:*),Bash(git mv:*)');
   assert.ok(developer.includes('--add-dir'));
   assert.equal(developer.includes('--disallowedTools'), false);
   assert.deepEqual(policyOf(developer), { create: true, edit: true, scopes: [] });
@@ -87,7 +135,7 @@ test('Befehle anderer Projekte oder ausgeschalteter Kategorien wirken nicht', ()
 
 test('Ohne Zuweisung gelten die Rollenstandards – auch dann mit Wächter', () => {
   const author = withAgentPermissions(CLAUDE, 'author', project, null);
-  assert.equal(author.includes('--allowedTools'), false);
+  assert.equal(option(author, '--allowedTools'), 'Bash(git rm:*),Bash(git mv:*)');
   assert.deepEqual(policyOf(author), { create: true, edit: true, scopes: [] });
   assert.ok(withAgentPermissions(CLAUDE, 'developer', project, null).includes('--allowedTools'));
   // Andere CLIs bleiben unverändert; eigene Werkzeug-Regeln im Befehl bleiben, der Wächter kommt dazu.
@@ -130,18 +178,25 @@ test('Lokales Modell: Shell-Befehle nur innerhalb der Freigaben des Agents', () 
   assert.ok(PERMISSION_GROUPS.some((group) => group.rules.includes('database')));
 });
 
-test('Dienste-Freigabe wird erst beim Start mit der Benutzer-ID aufgelöst', () => {
+test('Gespeicherte launchctl-Regel wird beim Laden zur Gruppe „services“, ohne Shell-Regel', () => {
   assert.deepEqual(normalizeCommands(['Bash(launchctl kickstart -k gui/1000/ch.*)']), ['services']);
-  const agent = withAgentPermissions(CLAUDE, 'developer', project, ['services']);
-  assert.match(option(agent, '--allowedTools') ?? '', /^Bash\(launchctl kickstart -k gui\/\d+\/ch\.\*\)$/);
-  assert.equal(commandLabel('services'), 'launchctl kickstart -k ch.*');
+  // Die alte Regel als Zuweisung des Agents: beim Start gilt „services“ – keine launchctl-Freigabe mehr.
+  const agent = withAgentPermissions(CLAUDE, 'developer', project, ['Bash(launchctl kickstart -k gui/501/ch.*)']);
+  assert.equal(agent.includes('--allowedTools'), false);
+  assert.doesNotMatch(agent.join(' '), /launchctl/);
+  assert.equal(commandLabel('services'), 'Dienste: services.status/logs/restart/up/stop');
 });
 
 test('voller Zugriff ohne Wächter nur für den Dashboard-Assistenten und nur auf ausdrücklichen Wunsch', () => {
   const full = ['claude', '--model', 'sonnet', '--dangerously-skip-permissions', '-p', '{prompt}'];
-  assert.deepEqual(withAgentPermissions(full, 'assistant', project, null), full);
+  // Nur die Sperre für Geheimnisse kommt dazu (siehe unten), sonst bleibt der Befehl, wie er ist.
+  const withoutSettings = (command: string[]) => command.filter((_, i) => i !== 1 && i !== 2);
+  const fullCommand = withAgentPermissions(full, 'assistant', project, null);
+  assert.deepEqual(withoutSettings(fullCommand), full);
+  assert.ok(!fullCommand.includes('--allowedTools') && !fullCommand.includes('--disallowedTools'));
+  assert.doesNotMatch(settingsOf(fullCommand).hooks!.PreToolUse[0]!.matcher, /Write|Bash/);
   const bypass = ['claude', '--permission-mode', 'bypassPermissions', '-p', '{prompt}'];
-  assert.deepEqual(withAgentPermissions(bypass, 'assistant', project, null), bypass);
+  assert.deepEqual(withoutSettings(withAgentPermissions(bypass, 'assistant', project, null)), bypass);
   assert.ok(hasFullAccess(['claude', '--permission-mode=bypassPermissions'], 'assistant'));
   // Andere Rollen behalten Wächter und Regeln, auch wenn der Befehl dasselbe verlangt.
   const developer = withAgentPermissions(full, 'developer', project, null);
@@ -174,4 +229,21 @@ test('die Problemanalyse (analyst) arbeitet nur lesend: keine Datei-Werkzeuge, k
   const disallowed = command[command.indexOf('--disallowedTools') + 1] ?? '';
   for (const tool of ['Write', 'Edit', 'Bash']) assert.ok(disallowed.split(',').includes(tool), tool);
   assert.ok(!command.includes('--allowedTools'));
+});
+
+test('git rm und git mv kommen nur mit den Datei-Rechten und nur mit Wächter', () => {
+  const allowed = (commands: string[] | null, role = 'developer') =>
+    (option(withAgentPermissions(CLAUDE, role, project, commands), '--allowedTools') ?? '').split(',');
+  assert.ok(allowed(['files:create', 'files:edit']).includes('Bash(git rm:*)'));
+  assert.ok(allowed(['files:create', 'files:edit']).includes('Bash(git mv:*)'));
+  assert.ok(allowed(['files:edit']).includes('Bash(git rm:*)'));
+  assert.ok(!allowed(['files:edit']).includes('Bash(git mv:*)'));
+  assert.ok(!allowed(['files:create']).some((rule) => /git (?:rm|mv)/.test(rule)));
+  assert.ok(!allowed(['Bash(git status:*)']).some((rule) => /git (?:rm|mv)/.test(rule)));
+  // Rollen ohne Schreibrechte bekommen sie auch mit Zuweisung nicht.
+  for (const role of ['routine', 'analyst', 'visionary', 'pre_sprint']) {
+    assert.ok(!allowed(['files:create', 'files:edit'], role).some((rule) => /git (?:rm|mv)/.test(rule)), role);
+  }
+  assert.match(commandHelp('Bash(git rm:*)'), /Löscht/);
+  assert.match(commandHelp('Bash(git mv:*)'), /Benennt/);
 });

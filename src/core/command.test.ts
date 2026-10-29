@@ -219,3 +219,35 @@ test('redactOutput maskiert API-Schlüssel, Tokens und Secrets aus der Umgebung'
   );
   assert.equal(output, 'key=[REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] /Users/test');
 });
+
+test('redactOutput maskiert Token-Formate, die nicht im Environment stehen (aus Projekt-DB, Dateien, Ausgaben)', () => {
+  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA1234\nabcd\n-----END RSA PRIVATE KEY-----';
+  const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U';
+  const secrets = [
+    'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz012345',
+    `ghp_${'A1b2C3d4E5'.repeat(3)}abcdef`,
+    pem,
+    jwt,
+    'Authorization: Bearer 9f8e7d6c5b4a39281706abcdef',
+    'postgres://shop:Sup3rGeheim@db.example.ch:5432/shop',
+  ];
+  const output = redactOutput(`| token |\n${secrets.join('\n')}\nfertig`, {});
+  const parts = ['AbCdEfGhIjKlMnOp', 'A1b2C3d4E5', 'MIIEowIBAAKCAQEA', 'dozjgNryP4J3', '9f8e7d6c5b4a', 'Sup3rGeheim'];
+  for (const secret of parts) {
+    assert.ok(!output.includes(secret), `sichtbar: ${secret}\n${output}`);
+  }
+  assert.match(output, /Authorization: Bearer \[REDACTED\]/);
+  assert.match(output, /postgres:\/\/\[REDACTED\]@db\.example\.ch:5432\/shop/);
+  assert.ok(output.endsWith('\nfertig'));
+});
+
+test('redactOutput: Gegenproben ohne echten Token, Token- und Kostenzahlen bleiben unverändert', () => {
+  const text = [
+    'Präfixe wie sk-, sk-ant-, ghp_ und github_pat_ erkennt der Wächter.',
+    'Bearer authentication und Basic configuration sind Begriffe, Token counting auch.',
+    '{"type":"result","total_cost_usd":0.4213,"usage":{"input_tokens":1234,"output_tokens":567},"session_id":"3f2a"}',
+    'at src/api/session.ts:12:5 · auth.test.ts:40 · password=*** · user@example.ch · 10.0.0.1',
+    'https://example.ch/pfad?x=1 und eyJ allein',
+  ].join('\n');
+  assert.equal(redactOutput(text, {}), text);
+});

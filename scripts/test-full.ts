@@ -60,8 +60,10 @@ const TEMP = join(tmpdir(), `dev-log-test-full-${stamp}`);
 const OUT = join(ROOT, 'docs', 'tests', stamp);
 const MEDIA = join(OUT, 'media');
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
-// Zugang aus der .env (DEV_LOG_DB_USER/DEV_LOG_DB_PASSWORD), sonst der Standard aus docker-compose.
-const LOCAL_DATABASE = localDatabaseUrl(readEnvValues(ROOT));
+// Zugang aus der .env (DEV_LOG_DB_USER/DEV_LOG_DB_PASSWORD); fehlt das Passwort, bricht der Lauf mit Hinweis ab.
+// Erst bei Bedarf gelesen: Ist die Adresse vorgegeben, braucht es die .env nicht.
+const localDatabase = (): string => localDatabaseUrl(readEnvValues(ROOT));
+const E2E_ADMIN = process.env.E2E_ADMIN_DATABASE_URL ?? adminDatabaseUrl(localDatabase());
 
 type Step = {
   name: string;
@@ -173,7 +175,7 @@ function run(
       shell: process.platform === 'win32',
       env: {
         ...environment,
-        E2E_ADMIN_DATABASE_URL: process.env.E2E_ADMIN_DATABASE_URL ?? adminDatabaseUrl(LOCAL_DATABASE),
+        E2E_ADMIN_DATABASE_URL: E2E_ADMIN,
         FORCE_COLOR: '0',
         // nur für den E2E-Schritt: die Umgebungsvariable hat bei Playwright Vorrang vor der Konfiguration
         ...(args.includes('e2e/playwright.config.ts') ? { PLAYWRIGHT_JSON_OUTPUT_FILE: E2E_JSON } : {}),
@@ -201,7 +203,7 @@ class Recorder {
   ) {}
 
   static async open(slug: string): Promise<Recorder> {
-    const environment = { ...process.env, DEV_LOG_DATABASE_URL: process.env.DEV_LOG_DATABASE_URL ?? LOCAL_DATABASE };
+    const environment = { ...process.env, DEV_LOG_DATABASE_URL: process.env.DEV_LOG_DATABASE_URL ?? localDatabase() };
     // Nur mitschreiben: Der getestete Stand ist noch nicht freigegeben und darf das Schema nicht migrieren.
     const pool = connectExistingDatabase(readDatabaseConfig(environment));
     const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);

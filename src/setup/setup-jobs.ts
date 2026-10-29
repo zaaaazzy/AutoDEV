@@ -1,12 +1,15 @@
 import { logged } from '../core/log.js';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { COMPOSE_FILES } from '../agent/service-actions.js';
 import type { Pool } from 'pg';
 import { DEFAULT_OLLAMA_URL, resolveModel } from '../agent/ollama-client.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { commitProjectSetup, isValidGitRemote, pushRemote } from '../runner/git-sync.js';
-import { projectFolderError } from '../core/validation.js';
+import { gitEnvironment } from '../runner/project-command.js';
+import { normalizeFolder, projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
 import { listFolders } from './folders.js';
 
@@ -38,24 +41,39 @@ function folderOf(params: Params): string {
   const folder = text(params.path);
   const error = projectFolderError(folder);
   if (error) throw new Error(error);
-  return folder.replace(/\/+$/, '');
+  return normalizeFolder(folder) ?? folder;
 }
+
+const GIT_OPTIONS = {
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+};
 
 const ENV = {
   ...process.env,
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+  ...GIT_OPTIONS,
   CI: '1',
   npm_config_yes: 'true',
 };
+
+/** git und gh (startet git, z. B. bei „repo create --push“): gefiltert und ohne Hooks des Projekts. */
+const usesGit = (command: readonly string[]): boolean => command[0] === 'git' || command[0] === 'gh';
+
+/**
+ * Vorlagen-Befehle: Install-Skripte fremder Pakete laufen nicht (auch nicht in npm-Aufrufen der Generatoren selbst,
+ * die die Umgebung erben). Die Generatoren starten trotzdem, `npm exec` führt ihr Programm aus, kein Skript.
+ */
+export const TEMPLATE_ENV = { npm_config_ignore_scripts: 'true' };
 
 async function run(
   execute: CommandExecutor,
   command: string[],
   cwd: string,
   timeoutMs = QUICK_TIMEOUT_MS,
+  extraEnv: Record<string, string> = {},
 ): Promise<{ ok: boolean; output: string }> {
-  const result = await execute(command, cwd, { timeoutMs, env: ENV }).catch((error: unknown) => ({
+  const env = usesGit(command) ? gitEnvironment({ ...GIT_OPTIONS, GH_PROMPT_DISABLED: '1' }) : { ...ENV, ...extraEnv };
+  const result = await execute(command, cwd, { timeoutMs, env }).catch((error: unknown) => ({
     exitCode: 1,
     durationMs: 0,
     output: error instanceof Error ? error.message : String(error),
@@ -63,9 +81,14 @@ async function run(
   return { ok: result.exitCode === 0, output: redactOutput(result.output, process.env).trim() };
 }
 
+/** Befehl, der den Pfad eines Programms ausgibt: `where` unter Windows (kein /bin/sh), sonst `command -v`. */
+export function whichCommand(binary: string, platform: NodeJS.Platform = process.platform): string[] {
+  return platform === 'win32' ? ['where', binary] : ['/bin/sh', '-c', `command -v ${binary}`];
+}
+
 async function which(execute: CommandExecutor, binary: string): Promise<string | null> {
-  const result = await run(execute, ['/bin/sh', '-c', `command -v ${binary}`], process.cwd());
-  return result.ok && result.output ? result.output.split('\n')[0]! : null;
+  const result = await run(execute, whichCommand(binary), process.cwd());
+  return result.ok && result.output ? result.output.split(/\r?\n/)[0]! : null;
 }
 
 /** Ordner, Leere und Git-Zustand (Branch, Remote, Commits). */
@@ -99,7 +122,30 @@ async function checkFolder(params: Params, execute: CommandExecutor) {
     empty: entries.filter((entry) => entry !== '.git').length === 0,
     entries: entries.slice(0, 12),
     git,
+    launchd: await launchdServicesFor(folder),
+    compose: COMPOSE_FILES.some((name) => entries.includes(name)),
   };
+}
+
+/**
+ * launchd-Dienste (macOS, ~/Library/LaunchAgents), die diesen Projektordner nutzen. Agents starten Dienste nur noch
+ * über Docker Compose (services.restart); der Projekt-Assistent weist auf solche Dienste hin. Andere Systeme: leer.
+ */
+export async function launchdServicesFor(folder: string, home = homedir()): Promise<string[]> {
+  const directory = join(home, 'Library', 'LaunchAgents');
+  const plists = (await readdir(directory).catch(() => [] as string[])).filter((name) => name.endsWith('.plist'));
+  const paths = [...new Set([folder.replace(/\/+$/, ''), await realpath(folder).catch(() => folder)])];
+  const found: string[] = [];
+  for (const name of plists.slice(0, 500)) {
+    const content = await readFile(join(directory, name), 'utf8').catch(() => '');
+    // Nur der Ordner selbst oder ein Pfad darin, nicht ein Ordner mit gleichem Anfang (/a/app vs. /a/app-alt).
+    if (
+      paths.some((path) => new RegExp(`${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[/<"\\s]|$)`).test(content))
+    ) {
+      found.push(name.slice(0, -'.plist'.length));
+    }
+  }
+  return found.sort();
 }
 
 async function createFolder(params: Params) {
@@ -176,12 +222,9 @@ async function applyTemplate(params: Params, execute: CommandExecutor, log: Log)
     const clone = await run(execute, ['git', 'clone', '--depth', '1', url, temp], folder, STEP_TIMEOUT_MS);
     if (!clone.ok) throw new Error(`Klonen fehlgeschlagen: ${clone.output.slice(-400)}`);
     await rm(join(temp, '.git'), { recursive: true, force: true });
-    const moved = await run(
-      execute,
-      ['/bin/sh', '-c', 'cp -R .devlog-template/. . && rm -rf .devlog-template'],
-      folder,
-    );
-    if (!moved.ok) throw new Error(moved.output);
+    // Ohne Shell (gibt es unter Windows nicht): Einträge verschieben, der Ordner ist bis auf .git leer.
+    for (const entry of await readdir(temp)) await rename(join(temp, entry), join(folder, entry));
+    await rm(temp, { recursive: true, force: true });
     await log('Vorlage übernommen (ohne fremde Git-Historie).');
     return { template: template.id };
   }
@@ -193,7 +236,7 @@ async function applyTemplate(params: Params, execute: CommandExecutor, log: Log)
   if (template.files) await log('Dateien der Vorlage geschrieben.');
   for (const command of template.commands ?? []) {
     await log(`$ ${command.join(' ')}`);
-    const result = await run(execute, command, folder, STEP_TIMEOUT_MS);
+    const result = await run(execute, command, folder, STEP_TIMEOUT_MS, TEMPLATE_ENV);
     await log(result.output.split('\n').slice(-6).join('\n'));
     if (!result.ok) throw new Error(`\`${command.join(' ')}\` ist fehlgeschlagen.`);
   }

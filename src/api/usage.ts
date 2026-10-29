@@ -2,6 +2,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { realFailureSql } from '../core/interrupted-steps.js';
 
 /** Bezeichnungen der Agents außerhalb des Auftrags-Workflows (Tabelle agent_usage). */
 const SYSTEM_ROLES: Record<string, string> = {
@@ -62,7 +63,7 @@ export async function collectUsage(pool: Pool, slug: string): Promise<Record<str
       [slug],
     ),
     pool.query<{ agent: string; count: string; failed: string; tokens: string; ms: string; cost: string }>(
-      `SELECT st.agent_name AS agent, COUNT(*) AS count, COUNT(*) FILTER (WHERE st.status = 'failed') AS failed,
+      `SELECT st.agent_name AS agent, COUNT(*) AS count, COUNT(*) FILTER (WHERE ${realFailureSql('st')}) AS failed,
               SUM(st.tokens) AS tokens, SUM(st.duration_ms) AS ms, SUM(st.cost_usd) AS cost
          FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
         WHERE r.project_slug = $1 AND st.status IN ('passed', 'failed')

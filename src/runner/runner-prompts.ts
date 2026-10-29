@@ -5,6 +5,7 @@ import { reviewInstructions } from './review.js';
 import { COVERAGE_INSTRUCTIONS } from './coverage.js';
 import { containsUntrusted, UNTRUSTED_HINT } from './hoster.js';
 import { isUntrustedBugSource } from '../core/bug-trust.js';
+import { knownBugLine } from '../core/known-bugs.js';
 import type { PromptExtras, StepSummary, WorkItem, WorkflowAgent } from './runner-types.js';
 
 export const PHASE_ORDER = ['pre_task', 'while_task', 'after_task'] as const;
@@ -27,12 +28,10 @@ export function buildPrompt(
     (step) =>
       `### ${step.agentName} (${step.phase}, ${step.status})\n${step.output.trim().slice(-PREVIOUS_OUTPUT_CHARS)}`,
   );
-  const bugs = (extras.bugs ?? []).map(
-    (bug) =>
-      `- [${bug.status === 'fixed' ? 'behoben' : 'offen'} / ${bug.severity}] ${bug.title}` +
-      `${bug.description ? ` – ${bug.description.slice(0, 200)}` : ''}` +
-      `${bug.fixNotes ? ` | Lösung: ${bug.fixNotes.slice(0, 300)}` : ''}`,
-  );
+  const bugs = (extras.bugs ?? []).map(knownBugLine);
+  // Fremdtext im Auftrag oder unter „Bekannte Bugs“ (dort eingefasst) braucht den Sicherheitshinweis.
+  const untrusted =
+    containsUntrusted(item.description) || isUntrustedBugSource(item.bugSource) || bugs.some(containsUntrusted);
   return [
     `Du bist der Agent "${agent.name}" (Rolle: ${agent.role}) in der Phase ${agent.phase}.`,
     `## Anweisung\n${agent.instructions || 'Keine zusätzliche Anweisung.'}`,
@@ -40,7 +39,7 @@ export function buildPrompt(
       ? `## Anweisung für diesen Schritt (hat Vorrang)\n${agent.stepInstructions.trim()}`
       : '',
     `## Entwicklungsauftrag ${item.id}${item.kind === 'bug' ? ' (Bugfix)' : ''}\nTitel: ${item.title}\n${item.description}`,
-    containsUntrusted(item.description) || isUntrustedBugSource(item.bugSource) ? UNTRUSTED_HINT : '',
+    untrusted ? UNTRUSTED_HINT : '',
     item.risks?.trim() ? `## Risiken (vom Bug-Wächter geprüft)\n${item.risks.trim()}` : '',
     extras.images?.length
       ? `## Angehängte Bilder (aus Idee bzw. Bug-Meldung, relativ zum Projektordner)\n${extras.images.map((path) => `- ${path}`).join('\n')}`

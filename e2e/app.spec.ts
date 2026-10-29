@@ -163,14 +163,14 @@ test('Navigation: Menü auf dem Handy, Seitenleiste auf dem Desktop', async ({ p
   if (isMobile) {
     const toggle = page.getByRole('button', { name: 'Menü öffnen' });
     await toggle.click();
-    await page.getByRole('link', { name: 'Auftrag' }).click();
-    await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+    await page.getByRole('link', { name: 'Aufträge', exact: true }).click();
+    await expect(page.locator('.page-heading h1')).toHaveText('Aufträge');
     await expect(page.getByRole('button', { name: 'Menü öffnen' })).toBeVisible();
   } else {
     await expect(page.locator('.menu-toggle')).toBeHidden();
     await page.locator('.sidebar').hover();
-    await page.getByRole('link', { name: 'Auftrag' }).click();
-    await expect(page.locator('.page-heading h1')).toHaveText('Auftrag');
+    await page.getByRole('link', { name: 'Aufträge', exact: true }).click();
+    await expect(page.locator('.page-heading h1')).toHaveText('Aufträge');
   }
 });
 
@@ -206,6 +206,14 @@ test('Projekt-Assistent öffnet, prüft Eingaben und schließt', async ({ page, 
 test('Einstellungen: DoR/DoD, Schalter für App und Push, Zwei-Faktor einrichten', async ({ page }) => {
   await login(page);
   await page.goto('/#settings');
+  // Die Gruppen sind zu Beginn zugeklappt; die Seitensuche klappt passende auf und blendet die übrigen aus.
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeHidden();
+  await page.getByPlaceholder('Seite durchsuchen …').fill('Definition of Done');
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeVisible();
+  await expect(page.locator('details.settings-group', { hasText: 'Sicherheit' })).toBeHidden();
+  await page.getByPlaceholder('Seite durchsuchen …').fill('');
+  await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeHidden();
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   await expect(page.getByLabel('Definition of Done (ein Punkt pro Zeile)')).toBeVisible();
   await expect(page.getByRole('switch', { name: 'Push-Nachrichten' })).toBeVisible();
   await page.getByRole('switch', { name: 'Push-Nachrichten' }).click();
@@ -555,7 +563,7 @@ test('Begrüßung beim ersten Besuch und interaktive Tour mit Spotlight', async 
   const card = page.locator('.tour-card');
   await expect(card.locator('h3')).toHaveText('Willkommen in AIdeation');
   await card.getByRole('button', { name: 'Weiter' }).click();
-  await expect(card.locator('h3')).toHaveText('1 · Ideen sammeln');
+  await expect(card.locator('h3')).toHaveText('Ideen sammeln');
   await expect(page).toHaveURL(/#ideation/);
   await expect(page.locator('.tour-spotlight')).toBeVisible();
   await card.getByRole('button', { name: 'Tour beenden' }).click();
@@ -599,10 +607,11 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   expect(invalid.status()).toBe(400);
   await login(page);
   await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   const budget = page.locator('#budget-settings');
   await expect(budget.getByRole('heading', { name: 'Budget' })).toBeVisible();
   // Standardregeln sind sichtbar, solange keine eigenen gespeichert sind.
-  await expect(budget.locator('.routing-rule').first()).toBeVisible();
+  await expect(budget.locator('.routing-rule:not(.routing-head)').first()).toBeVisible();
   await budget.getByLabel('Je Tag: Tokens').fill('5000000');
   await budget.getByLabel('Je Sprint: Kosten in USD').fill('25');
   await budget.getByLabel('Je Auftrag: Tokens').fill('800000');
@@ -631,7 +640,7 @@ test('Budget: Limits speichern, beim erneuten Öffnen unverändert, Balken auf D
   expect((await cleared.json()).status).toEqual([]);
 });
 
-test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', async ({ page, request }) => {
+test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden, dort nicht löschbar', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Sprint-Aufgabe ${Date.now()}`;
   // Nur aus einem laufenden Sprint genommen wartet ein Auftrag unter „Aktionen“: den aktiven Sprint nutzen bzw. starten.
@@ -664,15 +673,16 @@ test('Auftrag aus dem Sprint nehmen, unter „Aktionen“ finden und löschen', 
   await page.goto('/#development');
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
   await page.goto('/#actions');
-  // Zeile aufklappen: Grund und Aktionen stehen darin; Löschen fragt im Dialog nach.
+  // Zeile aufklappen: Grund und Aktionen stehen darin; löschen lässt sich ein Auftrag hier nicht.
   const card = await attentionPanel(page, title);
   await expect(card).toContainText(`Aus Sprint „${sprint.name}“ genommen`);
-  await expect(card.getByRole('button', { name: 'Wieder einplanen' })).toBeVisible();
-  await card.getByRole('button', { name: 'Löschen' }).click();
-  await page
-    .getByRole('dialog', { name: 'Auftrag löschen?' })
-    .getByRole('button', { name: 'Endgültig löschen' })
-    .click();
+  const replan = card.getByRole('button', { name: 'Wieder einplanen' });
+  await expect(replan).toBeVisible();
+  await expect(replan).toHaveAttribute('title', /nächsten Sprint/);
+  await expect(card.getByRole('button', { name: 'Löschen' })).toHaveCount(0);
+  // Aufräumen über die API.
+  expect((await request.delete(`/api/development/${item.id}`, { headers })).ok()).toBe(true);
+  await page.reload();
   await expect(attentionRow(page, title)).toHaveCount(0);
   if (started) {
     await request.patch(`/api/sprints/${sprint.id}`, { headers, data: { status: 'planned' } });
@@ -722,7 +732,7 @@ test('Agent-Aktionen: alle Aktionen nach Agent gruppiert im Assistenten, Details
   await expect(menu.locator('.agent-task')).toContainText('Docker-Dienste starten');
   await expect(groups).toHaveText(['Tester']);
   await search.press('ArrowDown');
-  await expect(detail).toContainText('docker compose up -d');
+  await expect(detail).toContainText('services.up');
   await search.fill(title);
   await expect(menu.getByText('Keine Aktion gefunden.')).toBeVisible();
   await menu.getByRole('button', { name: `+ Neue Aktion „${title}“` }).click();
@@ -756,6 +766,55 @@ test('Chat: „@“ wählt den Agent, „/“ verweist mit Bubbles, beim Tippen 
   await page.locator('.mention-bubble').first().click();
   await expect(page.locator('.composer-chip').nth(1)).toContainText('Login-Seite modernisieren');
   await expect(input).toHaveValue('');
+});
+
+test('Mehrfachauswahl: mehrere Aufträge markieren, Priorität setzen und gemeinsam erneut versuchen', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const stamp = Date.now();
+  const titles = [`Sammel A ${stamp}`, `Sammel B ${stamp}`];
+  const ids: string[] = [];
+  for (const title of titles) {
+    const created = await request.post('/api/projects/e2e/development', {
+      headers,
+      data: { title, status: 'backlog' },
+    });
+    ids.push(((await created.json()) as { item: { id: string } }).item.id);
+  }
+  const statusOf = async (id: string) =>
+    (
+      (await (await request.get('/api/projects/e2e/board', { headers })).json()) as {
+        development: { id: string; status: string; priority: string }[];
+      }
+    ).development.find((item) => item.id === id);
+
+  await login(page);
+  // Aufträge: beide markieren, die schmale Leiste zeigt die Anzahl; Priorität für beide auf „Hoch“.
+  await page.goto('/#development');
+  for (const title of titles) await page.getByRole('checkbox', { name: new RegExp(`Auswählen: ${title}`) }).check();
+  const bar = page.locator('app-bulk-bar');
+  await expect(bar).toContainText('2 Aufträge ausgewählt');
+  await expect(bar.getByRole('button', { name: /Erneut versuchen \(0\)/ })).toBeDisabled();
+  await bar.getByLabel('Priorität der gewählten setzen').selectOption('high');
+  // Die Leiste ändert nacheinander in Tabellenreihenfolge (neueste zuerst): auf beide warten.
+  for (const id of ids) await expect.poll(async () => (await statusOf(id))?.priority).toBe('high');
+  await bar.getByRole('button', { name: 'Auswahl aufheben' }).click();
+  await expect(bar).toHaveCount(0);
+
+  // Abgelehnte warten unter „Aktionen“: beide markieren und mit einem gemeinsamen Hinweis erneut versuchen.
+  for (const id of ids)
+    expect((await request.patch(`/api/development/${id}`, { headers, data: { status: 'rejected' } })).ok()).toBe(true);
+  await page.goto('/#actions');
+  for (const title of titles) await page.getByRole('checkbox', { name: new RegExp(`Auswählen: ${title}`) }).check();
+  await bar.getByRole('button', { name: /Erneut versuchen \(2\)/ }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toContainText('2 Aufträge erneut versuchen?');
+  await expect(dialog).toContainText(titles[0]!);
+  await dialog.getByRole('button', { name: 'Erneut versuchen' }).click();
+  for (const id of ids) await expect.poll(async () => (await statusOf(id))?.status).toBe('planned');
+  for (const id of ids) await request.delete(`/api/development/${id}`, { headers });
 });
 
 test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuwählen', async ({ page, request }) => {
@@ -903,6 +962,15 @@ test('Agent-Rechte: jeder Befehl einzeln, fremde Befehle und gefährliche Regeln
       data: { label: 'Gefährlich', rules: 'Bash(rm -rf:*)' },
     });
     expect(rule.status()).toBe(400);
+    // Eigene Regeln nur mit Programmen aus der Allowlist: Wrapper und Schreib-Werkzeuge lehnt der Server ab.
+    for (const rules of ['Bash(timeout:*)', 'Bash(find:*)', 'Bash(awk:*)', 'Bash(tee:*)', 'Bash(cd:*)']) {
+      const wrapper = await request.post('/api/projects/e2e/permission-groups', {
+        headers,
+        data: { label: 'Wrapper', rules },
+      });
+      expect(wrapper.status(), rules).toBe(400);
+      expect((await wrapper.json()).message, rules).toMatch(/nicht freigegeben|gesperrt/);
+    }
   } finally {
     await request.delete(`/api/agents/${agent.id}`, { headers });
   }
@@ -921,6 +989,7 @@ test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und 
   const title = `E2E-Fehler im Betrieb ${isMobile ? 'Handy' : 'Desktop'}`;
   await login(page);
   await page.goto('/#settings');
+  await page.getByRole('button', { name: 'Alle aufklappen' }).click();
   const settings = page.locator('#production-settings');
   // Ab dem zweiten Lauf ist ein Token hinterlegt: Rotieren fragt nach.
   page.once('dialog', (dialog) => void dialog.accept());
@@ -960,6 +1029,154 @@ test('Betrieb: Health-URL prüfen, Token erzeugen, Ingest ohne Login, Badge und 
     await request.delete(`/api/development/${item.id}`, { headers });
   }
   await request.delete(`/api/bugs/${bug.id}`, { headers });
+});
+
+test('Bugs: Deep-Link, Markdown escaped, nur Geändertes speichern, Friedhof und Löschen mit Rückfrage', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const title = `E2E-Bug Vorlage ${isMobile ? 'Handy' : 'Desktop'}`;
+  const created = await request.post('/api/projects/e2e/bugs', {
+    headers,
+    data: {
+      title,
+      severity: 'medium',
+      description: 'Fehler <img src=x onerror="window.hacked=1"> und [a](https://x.com/[b](https://y.com))',
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const id = (await created.json()).bug.id as string;
+
+  await login(page);
+  // Link auf den Bug: Zeile ist offen, Rohes HTML erscheint als Text, nicht als Element.
+  await page.goto(`/#bugs/${id}`);
+  const description = page.locator('.row-open + tr .markdown, .closed-detail .markdown').filter({ hasText: 'Fehler' });
+  await expect(description.first()).toContainText('<img src=x onerror="window.hacked=1">');
+  await expect(description.first().locator('img')).toHaveCount(0);
+  expect(await page.evaluate(() => (window as { hacked?: number }).hacked)).toBeUndefined();
+  const panel = page
+    .locator('.order-panel')
+    .filter({ has: page.getByText('Fehler <img', { exact: false }) })
+    .first();
+
+  // Bearbeiten: leerer Titel bleibt am Feld hängen, gespeichert wird nur das geänderte Feld.
+  await panel.getByText('Bug bearbeiten').click();
+  const form = panel.locator('form');
+  await form.getByLabel('Titel').fill('');
+  await form.getByRole('button', { name: 'Änderungen speichern' }).click();
+  await expect(form.getByRole('alert')).toHaveText('Bitte einen Titel angeben.');
+  await form.getByLabel('Titel').fill(title);
+  await form.getByLabel('Schweregrad').selectOption('high');
+  const patch = page.waitForRequest((sent) => sent.method() === 'PATCH' && sent.url().endsWith(`/api/bugs/${id}`));
+  await form.getByRole('button', { name: 'Änderungen speichern' }).click();
+  expect((await patch).postDataJSON()).toEqual({ severity: 'high' });
+  await expect(page.getByText('Bug wurde gespeichert.')).toBeVisible();
+
+  // Friedhof nur nach Rückfrage; Abbrechen lässt den Status stehen.
+  const status = panel.getByLabel('Status');
+  await status.selectOption('fixed');
+  const bury = page.getByRole('dialog', { name: 'Bug auf den Friedhof legen?' });
+  await expect(bury).toBeVisible();
+  await bury.getByRole('button', { name: 'Abbrechen' }).click();
+  await expect(status).toHaveValue('open');
+
+  // Löschen nur nach Rückfrage.
+  await panel.getByRole('button', { name: 'Löschen' }).click();
+  const remove = page.getByRole('dialog', { name: 'Bug löschen?' });
+  await expect(remove).toContainText(title);
+  await remove.getByRole('button', { name: 'Löschen' }).click();
+  await expect(page.getByText('Bug gelöscht.')).toBeVisible();
+  const bugs = (await (await request.get('/api/projects/e2e/bugs', { headers })).json()).bugs;
+  expect(bugs.some((bug: { id: string }) => bug.id === id)).toBe(false);
+});
+
+test('Bugs: Wer nur lesen darf, sieht keine Bearbeiten- und Löschknöpfe', async ({ browser, request, isMobile }) => {
+  const admin = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const reader = `leserin${Date.now() % 100000}${isMobile ? 'h' : 'd'}`;
+  const readerPassword = 'leserin-passwort-123';
+  const user = await request.post('/api/users', {
+    headers: admin,
+    data: {
+      username: reader,
+      displayName: 'Lea Leserin',
+      password: readerPassword,
+      roles: ['docs'],
+      projects: ['e2e'],
+    },
+  });
+  expect(user.ok(), await user.text()).toBeTruthy();
+  const bug = await request.post('/api/projects/e2e/bugs', { headers: admin, data: { title: `Nur lesen ${reader}` } });
+  const id = (await bug.json()).bug.id as string;
+
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  await page.addInitScript(() => localStorage.setItem('devlog.welcome.seen', '1'));
+  await page.goto('/');
+  await page.getByLabel('Benutzername').fill(reader);
+  await page.getByLabel('Passwort').fill(readerPassword);
+  await page.getByRole('button', { name: 'Anmelden' }).click();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  await page.goto(`/#bugs/${id}`);
+  const panel = page.locator('.order-panel').first();
+  await expect(panel).toContainText('Offen');
+  await expect(panel.getByRole('button', { name: 'Löschen' })).toHaveCount(0);
+  await expect(panel.getByText('Bug bearbeiten')).toHaveCount(0);
+  await expect(panel.getByLabel('Status')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Neuer Bug' })).toHaveCount(0);
+  expect((await page.request.delete(`/api/bugs/${id}`)).status()).toBe(403);
+  await context.close();
+  await request.delete(`/api/bugs/${id}`, { headers: admin });
+});
+
+test('Tabellen: ab 20 Einträgen blättern, Suche beginnt auf Seite 1, Deep-Link springt auf die richtige Seite', async ({
+  page,
+  request,
+  isMobile,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const prefix = `Blättern${isMobile ? 'H' : 'D'}${Date.now() % 100000}`;
+  const ids: string[] = [];
+  for (let index = 1; index <= 25; index++) {
+    const created = await request.post('/api/projects/e2e/bugs', {
+      headers,
+      data: { title: `${prefix} Nr. ${String(index).padStart(2, '0')}` },
+    });
+    expect(created.status(), await created.text()).toBe(201);
+    ids.push((await created.json()).bug.id as string);
+  }
+
+  await login(page);
+  // Der zuerst angelegte Bug liegt hinten (Seite 2): Der Link blättert dorthin und öffnet ihn sichtbar.
+  await page.goto(`/#bugs/${ids[0]}`);
+  await expect(page.locator('tr.row-open').filter({ hasText: `${prefix} Nr. 01` })).toBeVisible();
+
+  await page.getByRole('searchbox', { name: /durchsuchen/ }).fill(prefix);
+  const table = page.locator('.dt').filter({ has: page.getByRole('navigation', { name: 'Seiten' }) });
+  const pager = table.getByRole('navigation', { name: 'Seiten' });
+  await expect(table.locator('.dt-count')).toHaveText(/^1–20 von 25 Einträgen/);
+  await expect(table.locator('tbody tr').filter({ hasText: prefix })).toHaveCount(20);
+  await expect(pager.getByRole('button', { name: 'Vorherige Seite' })).toBeDisabled();
+
+  await pager.getByRole('button', { name: 'Nächste Seite' }).click();
+  await expect(table.locator('.dt-count')).toHaveText(/^21–25 von 25 Einträgen/);
+  await expect(table.locator('tbody tr').filter({ hasText: prefix })).toHaveCount(5);
+  await expect(pager.getByRole('button', { name: 'Nächste Seite' })).toBeDisabled();
+  if (isMobile) {
+    // Handy: statt Seitenzahlen nur „2 / 2“.
+    await expect(pager.getByText('2 / 2')).toBeVisible();
+    await expect(pager.getByRole('button', { name: 'Seite 1' })).toBeHidden();
+  } else {
+    await expect(pager.getByRole('button', { name: 'Seite 2' })).toHaveAttribute('aria-current', 'page');
+  }
+
+  // Schärfere Suche: zurück auf Seite 1, und unter 21 Treffern verschwindet das Blättern.
+  await page.getByRole('searchbox', { name: /durchsuchen/ }).fill(`${prefix} Nr. 1`);
+  await expect(page.locator('.dt-count').first()).toHaveText(/^10 von \d+ Einträgen$/);
+  await expect(page.getByRole('navigation', { name: 'Seiten' })).toHaveCount(0);
+
+  for (const id of ids) await request.delete(`/api/bugs/${id}`, { headers });
 });
 
 test('App-Grundlagen: Manifest, Symbole und Service Worker', async ({ page, request }) => {
@@ -1122,4 +1339,116 @@ test('Sprint abbrechen: Auftrag geht zurück ins Backlog und wartet unter „Akt
     await request.delete(`/api/development/${item.id}`, { headers });
     expect((await request.delete(`/api/sprints/${sprint.id}`, { headers })).status()).toBe(204);
   }
+});
+
+test('Dashboard: laufender Test zeigt Ladesymbol mit Schritt, Restzeit und Fortschritt', async ({ page }) => {
+  const started = new Date(Date.now() - 60_000).toISOString();
+  await page.route(/\/api\/projects\/[^/]+\/test-runs\/live(\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        run: {
+          id: '00000000-0000-4000-8000-0000000000aa',
+          trigger: 'full',
+          branch: 'sprint/sprint-19',
+          startedAt: started,
+          now: new Date().toISOString(),
+          steps: [
+            {
+              position: 0,
+              command: 'npm run lint',
+              status: 'passed',
+              category: null,
+              progress: null,
+              durationMs: 3000,
+              startedAt: started,
+              output: '',
+            },
+            {
+              position: 1,
+              command: 'npm test',
+              status: 'running',
+              category: null,
+              progress: '120 von 980 Tests',
+              durationMs: null,
+              startedAt: started,
+              output: '',
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await login(page);
+  const card = page.locator('.wait-status-card');
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('Test läuft');
+  await expect(card).toContainText('Schritt 2 von 2 · Unit-Tests (inkl. UI-Build) · 120 von 980 Tests');
+  await expect(card.getByRole('progressbar')).toBeVisible();
+  if (process.env.E2E_SCREENSHOT) await card.screenshot({ path: process.env.E2E_SCREENSHOT });
+});
+
+test('Aktionen: „Läuft gerade“ zeigt laufenden Test mit Fortschritt und den arbeitenden Agent', async ({ page }) => {
+  const started = new Date(Date.now() - 60_000).toISOString();
+  await page.route(/\/api\/projects\/[^/]+\/worker(\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        online: true,
+        worker: null,
+        running: [],
+        agents: [
+          { id: 'a1', name: 'Entwickler', active: true, sprintName: 'Sprint 20', orderTitle: 'Push-Abos absichern' },
+        ],
+      },
+    }),
+  );
+  await page.route(/\/api\/projects\/[^/]+\/test-runs\/live(\?|$)/, (route) =>
+    route.fulfill({
+      json: {
+        run: {
+          id: '00000000-0000-4000-8000-0000000000ab',
+          trigger: 'full',
+          branch: 'sprint/sprint-20',
+          startedAt: started,
+          now: new Date().toISOString(),
+          steps: [
+            {
+              position: 0,
+              command: 'npm run lint',
+              status: 'passed',
+              category: null,
+              progress: null,
+              durationMs: 3000,
+              startedAt: started,
+              output: '',
+            },
+            {
+              position: 1,
+              command: 'npx playwright test -c e2e/playwright.config.ts',
+              status: 'running',
+              category: null,
+              progress: '12 von 65 Tests',
+              durationMs: null,
+              startedAt: started,
+              output: '',
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await login(page);
+  await page.goto('/#actions');
+  const panel = page.locator('details.running-panel');
+  await expect(panel).toBeVisible();
+  await expect(panel.locator('summary')).toContainText('Läuft gerade (2)');
+  await expect(panel.locator('.wait-status-card')).toContainText('Test läuft');
+  await expect(panel.locator('.wait-status-card')).toContainText('Schritt 2 von 2 · E2E-Tests · 12 von 65 Tests');
+  await expect(panel.locator('.running-item.agent')).toContainText('Entwickler arbeitet');
+  await expect(panel.locator('.running-item.agent')).toContainText('Push-Abos absichern');
+  if (process.env.E2E_SCREENSHOT) await panel.screenshot({ path: process.env.E2E_SCREENSHOT });
+  // Zuklappbar wie „Aufträge“ im Sprint: die Kopfzeile bleibt, der Inhalt verschwindet.
+  await panel.locator('summary').click();
+  await expect(panel.locator('.running-item.agent')).toBeHidden();
+  await panel.locator('summary').click();
+  await expect(panel.locator('.running-item.agent')).toBeVisible();
 });

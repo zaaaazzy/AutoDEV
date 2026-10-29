@@ -90,6 +90,15 @@ test('Freigabe, Projektregel, aus dem Sprint genommen, Prüfpunkte und Express-R
   assert.equal(attentionCard({ status: 'blocked', kind: 'express', actionTodo: 'Frage' }).step, 'question');
 });
 
+test('Nach Sprint-Abbruch: laufender oder freizugebender Auftrag bietet kein „Wieder einplanen“ (sonst 409)', () => {
+  const removed = { removedFromSprint: 'Sprint 9', removedFromSprintAt: '2026-10-21' };
+  const running = attentionCard({ status: 'in_progress', ...removed });
+  assert.equal(running.step, 'wait');
+  assert.match(running.why, /Agent wird gerade beendet/);
+  assert.notEqual(attentionCard({ status: 'approval', ...removed }).step, 'replan');
+  assert.equal(attentionCard({ status: 'planned', ...removed }).step, 'replan');
+});
+
 test('Sätze enden sauber: kein „:.“, richtige Einzahl bei einem weiteren Punkt', () => {
   const analysis =
     '## Ursache\nDer Aufbau enthält mehrere Lücken im Widerspruch zum Kommentar in review.sh:\n1. .env lesbar\n2. Haupt-DB';

@@ -49,6 +49,29 @@ test('splitEstimate keeps the text when the estimate is missing or invalid', () 
   assert.equal(splitEstimate('## Ziel\nX\n## Schätzung\n{"effortHours": -5}').estimate, null);
 });
 
+test('splitEstimate: „### Schätzungsgrundlage“ und Mermaid-Klammern beenden die Anforderung nicht', () => {
+  const requirement = [
+    '## Ziel\nLogin',
+    '## Technische Hinweise\n### Schätzungsgrundlage\nÄhnlich wie der Export.',
+    '## Diagramme\n```mermaid\nflowchart LR\n  A{Login?} --> B[Start]\n```',
+    '## Abgrenzung\nKein SSO.',
+  ].join('\n\n');
+  const output = `${requirement}\n\n## Schätzung (zuletzt, nur ein JSON-Objekt)\n{"effortHours": 2, "cost": 3}`;
+  assert.deepEqual(splitEstimate(output), {
+    requirement,
+    estimate: { effortHours: 2, tokenEstimate: null, benefit: null, cost: 3 },
+  });
+  // Mehrere Schätzungsabschnitte: der letzte zählt.
+  assert.equal(splitEstimate('## Ziel\nX\n## Schätzung\n{"cost": 1}\n## Schätzung\n{"cost": 2}').estimate?.cost, 2);
+  // Nur eine „Schätzungsgrundlage“: kein Schätzungsabschnitt, der Text bleibt vollständig.
+  assert.deepEqual(splitEstimate('## Ziel\nX\n### Schätzungsgrundlage\n{"cost": 1}'), {
+    requirement: '## Ziel\nX\n### Schätzungsgrundlage\n{"cost": 1}',
+    estimate: null,
+  });
+  // Überschrift mit Doppelpunkt und JSON im Codeblock.
+  assert.equal(splitEstimate('## Ziel\nX\n## Schätzung:\n```json\n{"benefit": 5}\n```').estimate?.benefit, 5);
+});
+
 test('parseEstimate reads a bare JSON answer', () => {
   assert.equal(parseEstimate('{"effortHours": 2, "tokenEstimate": 5000}')?.effortHours, 2);
   assert.equal(parseEstimate('kein json'), null);
@@ -170,6 +193,8 @@ function ideasPool(ideas: { id: string; title: string; description: string }[], 
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes('FROM ideation_items')) return { rows: ideas };
+      // Ist-Werte ähnlicher Aufträge (loadActualReference): hier keine.
+      if (sql.includes('percentile_cont')) return { rows: [{ count: '0', hours: null, tokens: null }] };
       if (sql.includes('FROM projects')) return { rows: [{ name: 'Dev Log', description, guidelines: '' }] };
       updates.push({ sql, values });
       return { rows: [] };
@@ -213,6 +238,8 @@ test('estimateNewIdeas: Werte übernehmen, Fehlschläge einmal vermerken, fremde
   assert.equal(count, 3);
   assert.match(prompts[0]!, /Projekt: ## Projekt „Dev Log“\nEin Projekt\./);
   assert.match(prompts[0]!, /Titel: Export\nCSV-Export/);
+  assert.match(prompts[0]!, /effortHours: erwartete Agent-Laufzeit in Stunden/);
+  assert.match(updates[0]!.sql, /THEN 'quick'/);
   assert.ok(prompts[1]!.includes(`Titel: Import\n${'x'.repeat(1500)}`) && !prompts[1]!.includes('x'.repeat(1501)));
   assert.deepEqual(
     updates.map((update) => update.values),

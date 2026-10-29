@@ -1,0 +1,495 @@
+/* Agents: Workflow, Rechte, Aktionen, Rollen */
+/* Agent-Tabelle (Agents-Seite, Workflows) */
+.agent-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.agent-cell small {
+  flex-basis: 100%;
+  padding-left: 26px;
+}
+.agent-detail-body {
+  display: grid;
+  gap: 8px;
+}
+.agent-detail-body .actions {
+  flex-wrap: wrap;
+}
+
+/* Rechte eines Agents: Kategorien zum Aufklappen, darin jeder Befehl einzeln */
+.permission-picker {
+  display: grid;
+  gap: 4px;
+}
+.permission-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.permission-category {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.permission-category > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+.permission-count {
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #eef1ec;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+.permission-count.on {
+  background: #e2efe7;
+  color: var(--green);
+  font-weight: 600;
+}
+.permission-commands {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 2px 10px;
+  padding: 2px 10px 8px;
+}
+.permission-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 0.8rem;
+  cursor: pointer;
+  /* Erklärung des Befehls beim Überfahren bzw. Fokus (kompakt, über der Zeile). */
+  position: relative;
+}
+.permission-command input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--green);
+}
+.permission-command code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.permission-command.on code {
+  color: var(--green);
+}
+.permission-command[data-help]:is(:hover, :focus-within)::after {
+  content: attr(data-help);
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  max-width: min(320px, 80vw);
+  padding: 6px 9px;
+  border-radius: 6px;
+  background: #1f2a24;
+  color: var(--surface);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  white-space: normal;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+  pointer-events: none;
+}
+.permission-scope {
+  display: grid;
+  gap: 3px;
+  padding: 0 10px 9px;
+  font-size: 0.8rem;
+}
+.permission-scope input {
+  font-size: 16px;
+  padding: 5px 8px;
+}
+.permission-hint {
+  font-size: 0.74rem;
+}
+
+/* Aktionen eines Agents (Quick Actions) */
+.agent-actions-editor {
+  display: grid;
+  gap: 6px;
+}
+.agent-action-list {
+  display: grid;
+  gap: 4px;
+}
+.agent-action-list > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.agent-action-list .agent-task-icon {
+  opacity: 1;
+}
+.agent-action-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.agent-action-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-action-form {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+}
+
+/* „Was machen die Rollen?“ (Agents): aufklappbar, Texte brechen auch auf dem Handy um */
+.role-texts-panel > summary {
+  cursor: pointer;
+}
+.role-texts-panel > summary h2 {
+  display: inline;
+  margin: 0;
+}
+.role-texts-panel > summary .muted {
+  display: block;
+  margin-top: 2px;
+}
+.role-texts {
+  display: grid;
+  gap: 12px;
+  margin: 14px 0 0;
+}
+.role-text {
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.role-text dt {
+  font-weight: 700;
+}
+.role-text dd {
+  margin: 4px 0 0;
+}
+
+.workflow-add-existing {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.workflow-add-existing button {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafaf8;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.workflow-add-existing button:hover {
+  background: #eef6f1;
+}
+.workflow-live {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #2e9e5b;
+  box-shadow: 0 0 0 3px rgb(46 158 91 / 20%);
+}
+
+.agent-settings {
+  display: grid;
+  gap: 10px;
+}
+.agent-settings-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: 36px;
+}
+.agent-settings-head > div {
+  display: grid;
+  flex: 1;
+}
+.agent-settings-instructions {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f6f6f3;
+}
+.agent-settings-instructions h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.agent-settings-instructions p {
+  margin: 0;
+  white-space: pre-line;
+}
+.agent-settings-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0;
+}
+.agent-settings-list dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.agent-settings-list dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ── Workflow-Karte (Agents): aufklappbar, je Zeitpunkt die eingerückten Agents ── */
+.workflow-panel > .workflow-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+.workflow-panel > .workflow-summary::-webkit-details-marker {
+  display: none;
+}
+.workflow-summary-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+}
+.workflow-summary-text h2 {
+  margin: 0;
+}
+.workflow-panel .chev {
+  display: inline-block;
+  transition: transform 0.15s;
+}
+.workflow-panel .chev.open {
+  transform: rotate(90deg);
+}
+.workflow-phase {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.workflow-phase-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.workflow-phase-number {
+  display: inline-grid;
+  flex: none;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef3ef;
+  color: #2f6b4f;
+  font-weight: 700;
+}
+.workflow-phase-title {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Die Agents stehen eingerückt unter ihrem Zeitpunkt. */
+.workflow-steps {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0 13px;
+  padding: 0 0 0 26px;
+  border-left: 2px solid #dfe7e1;
+  list-style: none;
+}
+.workflow-step {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.workflow-step.disabled {
+  background: #f1f1ee;
+  color: #8a8a85;
+  filter: grayscale(1);
+  opacity: 0.65;
+}
+
+/* Drag & Drop: gezogener Schritt mit weichem Schatten, Einfügemarke in der Lücke, Zielphase hervorgehoben. */
+.workflow-phase .workflow-steps {
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
+}
+.workflow-phase.drop-active .workflow-steps {
+  border-left-color: #2f6b4f;
+  border-radius: 0 10px 10px 0;
+  background: rgb(238 243 239 / 50%);
+}
+.workflow-phase.drop-active .workflow-phase-number {
+  background: #2f6b4f;
+  color: #fff;
+}
+.workflow-step {
+  position: relative;
+  transition:
+    box-shadow 0.15s,
+    opacity 0.15s;
+}
+.workflow-step.dragging {
+  box-shadow: 0 6px 18px rgb(32 40 36 / 10%);
+  opacity: 0.55;
+}
+.workflow-step.drop-before::before,
+.workflow-step.drop-after::after {
+  position: absolute;
+  right: 0;
+  left: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: #2f6b4f;
+  content: '';
+  pointer-events: none;
+}
+.workflow-step.drop-before::before {
+  top: -6px;
+}
+.workflow-step.drop-after::after {
+  bottom: -6px;
+}
+.workflow-empty.drop-here {
+  border: 2px dashed #2f6b4f;
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+.workflow-step-handle {
+  flex: none;
+  color: #8a8a85;
+  cursor: grab;
+  user-select: none;
+}
+.workflow-step-handle:active {
+  cursor: grabbing;
+}
+.workflow-step-handle.locked {
+  cursor: default;
+  opacity: 0.4;
+}
+.workflow-step-phase {
+  width: auto;
+  padding: 2px 6px;
+  font-size: 13px;
+}
+.workflow-step-head {
+  min-width: 0;
+}
+.workflow-step-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+  hyphens: auto;
+}
+.workflow-step-instruction {
+  margin: 0;
+  padding-left: 30px;
+  white-space: pre-line;
+  font-size: 13px;
+}
+.workflow-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding-left: 30px;
+  font-size: 13px;
+}
+.workflow-step-actions .danger {
+  color: #a33d26;
+}
+.workflow-step-edit,
+.workflow-step-settings {
+  display: grid;
+  gap: 6px;
+  padding-left: 30px;
+}
+.workflow-step-edit textarea {
+  width: 100%;
+}
+.workflow-empty {
+  padding: 6px 0;
+  font-size: 13px;
+}
+.workflow-add-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px dashed #a9c2b1;
+  border-radius: 10px;
+  background: #f7faf8;
+}
+.workflow-add-panel .workflow-add-existing {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px;
+  max-height: none;
+}
+.workflow-add-panel .workflow-add-existing button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workflow-add-panel .workflow-add-existing span {
+  display: grid;
+  min-width: 0;
+}
+.workflow-add-new {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px;
+  align-items: end;
+}
+.workflow-add-new > strong,
+.workflow-add-new > .actions {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 600px) {
+  .agent-settings-list {
+    grid-template-columns: 1fr;
+  }
+  .agent-settings-list dd {
+    margin-bottom: 6px;
+  }
+  .workflow-steps {
+    margin-left: 6px;
+    padding-left: 12px;
+  }
+  .workflow-step-instruction,
+  .workflow-step-actions,
+  .workflow-step-edit,
+  .workflow-step-settings {
+    padding-left: 0;
+  }
+}

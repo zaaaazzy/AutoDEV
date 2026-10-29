@@ -4,13 +4,24 @@ import { access } from './access.js';
 import { isRecord, parseProjectSlug } from '../core/validation.js';
 import { asCommand } from '../agent/system-agents.js';
 import { DEFAULT_RULES, loadRouting, parseRules, ruleLabel, type RoutingRule } from '../agent/model-routing.js';
+import { localDay } from '../core/time-zone.js';
+import { withTransaction } from '../db/transaction.js';
 import {
   BUDGET_PERIODS,
+  BUDGET_ROLES,
   type BudgetLimit,
   type BudgetPeriod,
+  type BudgetRole,
   budgetStates,
+  isBudgetRole,
   loadBudgets,
+  loadRoleLimits,
   releaseBudgetBlocks,
+  type Spend,
+  spendByRole,
+  sprintSpendByRole,
+  sprintStart,
+  usagePercent,
   WARN_PERCENT,
 } from '../runner/budget.js';
 
@@ -50,6 +61,14 @@ const limitNumber = (value: unknown, max: number): number | null | 'invalid' => 
   return Number.isFinite(number) && number > 0 && number <= max ? number : 'invalid';
 };
 
+/** Kostenlimit in USD: auf Cent gerundet wie die Spalte (NUMERIC(10, 2)); unter 0,01 wäre gespeichert 0. */
+const costNumber = (value: unknown): number | null | 'invalid' | 'too-small' => {
+  const number = limitNumber(value, MAX_COST);
+  if (number === null || number === 'invalid') return number;
+  const rounded = Math.round(number * 100) / 100;
+  return rounded < 0.01 ? 'too-small' : rounded;
+};
+
 export interface BudgetInput {
   limits?: Partial<Record<BudgetPeriod, { maxTokens: number | null; maxCostUsd: number | null }>>;
   display?: Display;
@@ -71,9 +90,10 @@ export function parseBudgetInput(body: unknown): BudgetInput | string {
       if (raw === undefined) continue;
       const entry = isRecord(raw) ? raw : {};
       const maxTokens = limitNumber(entry.maxTokens, MAX_TOKENS);
-      const maxCostUsd = limitNumber(entry.maxCostUsd, MAX_COST);
+      const maxCostUsd = costNumber(entry.maxCostUsd);
       if (maxTokens === 'invalid' || maxCostUsd === 'invalid')
         return 'Limits: leer lassen (unbegrenzt) oder eine positive Zahl angeben.';
+      if (maxCostUsd === 'too-small') return 'Kostenlimit: mindestens 0,01 USD (oder leer lassen für unbegrenzt).';
       input.limits[period] = { maxTokens: maxTokens === null ? null : Math.round(maxTokens), maxCostUsd };
     }
   }
@@ -109,40 +129,48 @@ export function parseBudgetInput(body: unknown): BudgetInput | string {
   return input;
 }
 
-/** Speichert Limits, Währung und Routing; leere Limits entfernen den Zeitraum (= keine Prüfung). */
+/**
+ * Speichert Limits, Währung und Routing in einer Transaktion; leere Limits entfernen den Zeitraum (= keine Prüfung).
+ * Scheitert ein Schritt, bleibt nichts halb gespeichert.
+ */
 export async function saveBudget(pool: Pool, project: string, input: BudgetInput): Promise<void> {
-  for (const [period, limit] of Object.entries(input.limits ?? {}) as [BudgetPeriod, BudgetLimit][]) {
-    if (limit.maxTokens === null && limit.maxCostUsd === null)
-      await pool.query(`DELETE FROM budgets WHERE project_slug = $1 AND period = $2`, [project, period]);
-    else
-      await pool.query(
-        `INSERT INTO budgets (project_slug, period, max_tokens, max_cost_usd) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (project_slug, period) DO UPDATE SET max_tokens = EXCLUDED.max_tokens, max_cost_usd = EXCLUDED.max_cost_usd`,
-        [project, period, limit.maxTokens, limit.maxCostUsd],
-      );
-  }
-  if (input.display) {
-    const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
-    await pool.query(upsert, [CURRENCY_KEY, input.display.currency]);
-    await pool.query(upsert, [RATE_KEY, String(input.display.chfPerUsd)]);
-  }
-  if (input.rules !== undefined) {
-    await pool.query(`DELETE FROM routing_rules WHERE project_slug = $1`, [project]);
-    for (const [position, rule] of (input.rules ?? []).entries()) {
-      await pool.query(
-        `INSERT INTO routing_rules (project_slug, position, condition, tier) VALUES ($1, $2, $3::jsonb, $4)`,
-        [project, position, JSON.stringify(rule.condition), rule.tier],
-      );
+  await withTransaction(pool, async (client) => {
+    for (const [period, limit] of Object.entries(input.limits ?? {}) as [BudgetPeriod, BudgetLimit][]) {
+      if (limit.maxTokens === null && limit.maxCostUsd === null)
+        await client.query(`DELETE FROM budgets WHERE project_slug = $1 AND period = $2`, [project, period]);
+      else
+        await client.query(
+          `INSERT INTO budgets (project_slug, period, max_tokens, max_cost_usd) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (project_slug, period) DO UPDATE SET max_tokens = EXCLUDED.max_tokens, max_cost_usd = EXCLUDED.max_cost_usd`,
+          [project, period, limit.maxTokens, limit.maxCostUsd],
+        );
     }
-    await pool.query(`UPDATE projects SET routing_customized = $2 WHERE slug = $1`, [project, input.rules !== null]);
-  }
-  if (input.localModel !== undefined)
-    await pool.query(`UPDATE projects SET routing_local_model = $2 WHERE slug = $1`, [project, input.localModel]);
-  if (input.strongCommand !== undefined)
-    await pool.query(`UPDATE projects SET routing_strong_command = $2::jsonb WHERE slug = $1`, [
-      project,
-      input.strongCommand === null ? null : JSON.stringify(input.strongCommand),
-    ]);
+    if (input.display) {
+      const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+      await client.query(upsert, [CURRENCY_KEY, input.display.currency]);
+      await client.query(upsert, [RATE_KEY, String(input.display.chfPerUsd)]);
+    }
+    if (input.rules !== undefined) {
+      await client.query(`DELETE FROM routing_rules WHERE project_slug = $1`, [project]);
+      for (const [position, rule] of (input.rules ?? []).entries()) {
+        await client.query(
+          `INSERT INTO routing_rules (project_slug, position, condition, tier) VALUES ($1, $2, $3::jsonb, $4)`,
+          [project, position, JSON.stringify(rule.condition), rule.tier],
+        );
+      }
+      await client.query(`UPDATE projects SET routing_customized = $2 WHERE slug = $1`, [
+        project,
+        input.rules !== null,
+      ]);
+    }
+    if (input.localModel !== undefined)
+      await client.query(`UPDATE projects SET routing_local_model = $2 WHERE slug = $1`, [project, input.localModel]);
+    if (input.strongCommand !== undefined)
+      await client.query(`UPDATE projects SET routing_strong_command = $2::jsonb WHERE slug = $1`, [
+        project,
+        input.strongCommand === null ? null : JSON.stringify(input.strongCommand),
+      ]);
+  });
 }
 
 const withLabels = (rules: RoutingRule[]) => rules.map((rule) => ({ ...rule, label: ruleLabel(rule) }));
@@ -184,7 +212,118 @@ export async function collectBudget(pool: Pool, project: string): Promise<Record
   };
 }
 
+/** Neue Token-Limits einer Rolle je Zeitraum: Zahl = Grenze, null = Grenze entfernen; fehlender Zeitraum = unverändert. */
+export type RoleLimitsInput = Partial<Record<BudgetPeriod, number | null>>;
+
+/** Prüft den Body von PUT /budget/roles/:role ({ day, sprint, order } mit { maxTokens } oder null). */
+export function parseRoleLimitsInput(body: unknown): RoleLimitsInput | string {
+  if (!isRecord(body)) return 'Ungültige Anfrage.';
+  const unknown = Object.keys(body).find((key) => !(BUDGET_PERIODS as readonly string[]).includes(key));
+  if (unknown !== undefined) return `Unbekannter Zeitraum „${unknown}“: erlaubt sind day, sprint und order.`;
+  const input: RoleLimitsInput = {};
+  for (const period of BUDGET_PERIODS) {
+    const raw = body[period];
+    if (raw === undefined) continue;
+    if (raw !== null && !isRecord(raw)) return `${period}: { "maxTokens": <Zahl> } oder null angeben.`;
+    const maxTokens = raw === null ? null : limitNumber(raw.maxTokens, MAX_TOKENS);
+    if (maxTokens === 'invalid') return `${period}: maxTokens muss eine positive Zahl sein (oder null für unbegrenzt).`;
+    input[period] = maxTokens === null ? null : Math.max(1, Math.round(maxTokens));
+  }
+  if (!Object.keys(input).length) return 'Mindestens einen Zeitraum (day, sprint oder order) angeben.';
+  return input;
+}
+
+/** Speichert die Limits einer Rolle in einer Transaktion; null entfernt die Zeile (= keine Grenze, keine Prüfung). */
+export async function saveRoleLimits(pool: Pool, project: string, role: BudgetRole, input: RoleLimitsInput) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [period, maxTokens] of Object.entries(input) as [BudgetPeriod, number | null][]) {
+      if (maxTokens === null)
+        await client.query(`DELETE FROM budget_role_limits WHERE project_slug = $1 AND role = $2 AND period = $3`, [
+          project,
+          role,
+          period,
+        ]);
+      else
+        await client.query(
+          `INSERT INTO budget_role_limits (project_slug, role, period, max_tokens) VALUES ($1, $2, $3, $4)
+           ON CONFLICT (project_slug, role, period) DO UPDATE SET max_tokens = EXCLUDED.max_tokens`,
+          [project, role, period, maxTokens],
+        );
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+interface RolePeriodStatus {
+  maxTokens: number | null;
+  /** Verbrauch der Rolle im laufenden Zeitraum; null beim Auftragslimit (hängt am einzelnen Auftrag) bzw. ohne Sprint. */
+  spend: Spend | null;
+  percent: number | null;
+}
+
+/** Limits und aktueller Verbrauch (heute, aktiver Sprint) aller Agent-Rollen des Projekts. */
+export async function collectRoleBudget(pool: Pool, project: string): Promise<Record<string, unknown>> {
+  const [limits, sprint] = await Promise.all([loadRoleLimits(pool, project), sprintStart(pool, project, null)]);
+  const [today, sprintSpend] = await Promise.all([
+    spendByRole(pool, project, localDay().since),
+    sprint ? sprintSpendByRole(pool, project, sprint) : Promise.resolve(null),
+  ]);
+  const status = (role: BudgetRole, period: BudgetPeriod): RolePeriodStatus => {
+    const limit = limits.find((entry) => entry.role === role && entry.period === period);
+    const spent = period === 'day' ? today : period === 'sprint' ? sprintSpend : null;
+    const spend = spent ? (spent.get(role) ?? { tokens: 0, costUsd: 0 }) : null;
+    return {
+      maxTokens: limit?.maxTokens ?? null,
+      spend,
+      percent: limit && spend ? usagePercent(spend, limit) : null,
+    };
+  };
+  return {
+    warnPercent: WARN_PERCENT,
+    sprintId: sprint?.id ?? null,
+    roles: BUDGET_ROLES.map((role) => ({
+      role,
+      limits: Object.fromEntries(BUDGET_PERIODS.map((period) => [period, status(role, period)])),
+    })),
+  };
+}
+
 export function registerBudgetRoutes(app: Router, pool: Pool): void {
+  app.get('/projects/:slug/budget/roles', access({ tenant: 'project' }), async (request, response) => {
+    const slug = parseProjectSlug(request.params.slug ?? '');
+    if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+    response.json(await collectRoleBudget(pool, slug));
+  });
+
+  app.put(
+    '/projects/:slug/budget/roles/:role',
+    access({ role: 'admin', tenant: 'project' }),
+    async (request, response) => {
+      const slug = parseProjectSlug(request.params.slug ?? '');
+      if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });
+      const role = request.params.role;
+      if (!isBudgetRole(role))
+        return void response
+          .status(400)
+          .json({ message: `Unbekannte Agent-Rolle „${role ?? ''}“: erlaubt sind ${BUDGET_ROLES.join(', ')}.` });
+      const input = parseRoleLimitsInput(request.body);
+      if (typeof input === 'string') return void response.status(400).json({ message: input });
+      const exists = await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug]);
+      if (!exists.rows.length) return void response.status(404).json({ message: 'Projekt nicht gefunden.' });
+      await saveRoleLimits(pool, slug, role, input);
+      // Wie beim Projektbudget: wegen Budget wartende Aufträge sofort freigeben, wenn das Limit wieder reicht.
+      await releaseBudgetBlocks(pool, slug);
+      response.json(await collectRoleBudget(pool, slug));
+    },
+  );
+
   app.get('/projects/:slug/budget', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) return void response.status(400).json({ message: 'Ungültiges Projekt.' });

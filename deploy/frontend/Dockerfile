@@ -11,14 +11,18 @@ COPY src/core/layout-measure.ts ./src/core/layout-measure.ts
 COPY src/core/cron.ts ./src/core/cron.ts
 # Erlaubte Statuswechsel und Sprint-Zuordnung von Aufträgen – dieselbe Tabelle wie in PATCH /development/:id.
 COPY src/core/development-transitions.ts ./src/core/development-transitions.ts
+# Sprint-Regeln (Statuswechsel, Löschen, Abschluss) – dieselben wie in PATCH/DELETE /sprints/:id.
+COPY src/core/sprint-rules.ts ./src/core/sprint-rules.ts
 RUN npm run build:ui
 
-FROM nginx:1.27.3-alpine
-# Ohne root: PID-Datei nach /tmp, keine user-Anweisung, Cache-Ordner dem Benutzer nginx (Port 8080 braucht kein root).
-RUN sed -i -e '/^user /d' -e 's,^pid .*;,pid /tmp/nginx.pid;,' /etc/nginx/nginx.conf \
-    && chown -R nginx:nginx /var/cache/nginx
+# Ohne root schon im Master-Prozess: PID-Datei und Zwischenablagen unter /tmp, damit läuft der Container auch mit
+# read_only (docker-compose.yml, /tmp als tmpfs). Port 8080/8081 braucht kein root.
+FROM nginxinc/nginx-unprivileged:1.27.3-alpine
 COPY deploy/frontend/nginx.conf /etc/nginx/conf.d/default.conf
+# Ausserhalb von conf.d: wird nur in den server-Blöcken von nginx.conf eingebunden.
+COPY deploy/frontend/app-locations.conf /etc/nginx/app-locations.conf
 COPY deploy/frontend/security-headers.conf /etc/nginx/security-headers.conf
 COPY --from=build /app/dist/ui/browser /usr/share/nginx/html
 USER nginx
-EXPOSE 8080
+# 8080: direkter Zugriff (Host-Port), 8081: nur Caddy (siehe nginx.conf).
+EXPOSE 8080 8081

@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, ElementRef, Injector, afterNextRender, inject, signal, viewChild } from '@angular/core';
 import { ChatComponent } from './chat.component.js';
 
 /** Sprechblase unten rechts: öffnet den Assistenten-Chat in einem kleinen Fenster, per Zoom als Modal. */
@@ -9,10 +9,11 @@ import { ChatComponent } from './chat.component.js';
   template: `
     @if (open()) {
       <div class="chat-bubble-window">
-        <app-chat [bubble]="true" (closed)="open.set(false)" />
+        <app-chat [bubble]="true" (closed)="close()" />
       </div>
     }
     <button
+      #toggle
       type="button"
       class="chat-bubble"
       [class.open]="open()"
@@ -43,4 +44,12 @@ import { ChatComponent } from './chat.component.js';
 })
 export class ChatBubbleComponent {
   protected readonly open = signal(false);
+  private readonly injector = inject(Injector);
+  private readonly toggle = viewChild.required<ElementRef<HTMLButtonElement>>('toggle');
+
+  /** Schliessen im Chat: Fokus zurück auf die Sprechblase (war angedockt ausgeblendet, also erst nach dem Rendern). */
+  protected close(): void {
+    this.open.set(false);
+    afterNextRender(() => this.toggle().nativeElement.focus(), { injector: this.injector });
+  }
 }

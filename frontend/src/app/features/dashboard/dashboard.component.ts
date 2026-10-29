@@ -25,6 +25,7 @@ import { ChatComponent } from '../chat/chat.component.js';
 import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-options.js';
 import { agentWorkload, newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
+import { WaitStatusComponent } from '../runs/wait-status.component.js';
 
 const RECENT_RUNS = 20;
 /** Farbtöne der Agents in der Verteilung; Rot und Orange bleiben Fehlern und Warnungen vorbehalten. */
@@ -39,6 +40,7 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
   standalone: true,
   imports: [
     GitAlertComponent,
+    WaitStatusComponent,
     NgClass,
     AgentListComponent,
     ChatComponent,
@@ -60,6 +62,11 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
   host: { style: 'display: contents' },
 })
 export class DashboardComponent {
+  /** Nur der Ordnername; der volle (oft lange, technische) Pfad steht im Tooltip. */
+  protected folderName(path: string): string {
+    return path.replace(/\/+$/, '').split('/').pop() || path;
+  }
+
   protected readonly store = inject(ProjectStore);
   private readonly agentActivity = inject(AgentActivityService);
   protected readonly data = this.store.data;

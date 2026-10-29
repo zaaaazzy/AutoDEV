@@ -14,7 +14,7 @@ import {
 } from '../core/validation.js';
 import { isValidGitRemote } from '../runner/git-sync.js';
 import { SETUP_JOB_KINDS } from '../setup/setup-jobs.js';
-import { TEMPLATE_GROUP_LABELS, TEMPLATES } from '../setup/templates.js';
+import { findTemplate, TEMPLATE_GROUP_LABELS, TEMPLATES } from '../setup/templates.js';
 
 const MAX_PARAMS_BYTES = 20_000;
 const PROVIDERS = new Set(['ollama', 'claude', 'copilot', 'gemini']);
@@ -33,6 +33,23 @@ export function agentCommand(provider: string, model: string): string[] | null {
   }
 }
 
+/**
+ * Spalten und Werte, die eine Vorlage beim Anlegen des Projekts vorbelegt (Testbefehle, Review-Befehl,
+ * Vorschau-Adresse, Regeln). Leer ohne bekannte Vorlage oder ohne Vorbelegung.
+ */
+export function templateProjectColumns(templateId: unknown): { column: string; value: unknown; cast: string }[] {
+  const settings = typeof templateId === 'string' ? findTemplate(templateId)?.project : undefined;
+  if (!settings) return [];
+  const json = (column: string, value: unknown) => ({ column, value: JSON.stringify(value), cast: '::jsonb' });
+  return [
+    ...(settings.testCommands ? [json('test_commands', settings.testCommands)] : []),
+    ...(settings.orderTestCommands ? [json('order_test_commands', settings.orderTestCommands)] : []),
+    ...(settings.reviewCommand ? [json('review_command', settings.reviewCommand)] : []),
+    ...(settings.previewUrl ? [{ column: 'preview_url', value: settings.previewUrl, cast: '' }] : []),
+    ...(settings.guidelines ? [{ column: 'guidelines', value: settings.guidelines, cast: '' }] : []),
+  ];
+}
+
 function validGroups(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   const known = new Set(PERMISSION_GROUPS.map((group) => group.id));
@@ -44,12 +61,13 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
   app.get('/setup/templates', access({ tenant: 'global' }), (_request, response) => {
     response.json({
       groups: TEMPLATE_GROUP_LABELS,
-      templates: TEMPLATES.map(({ id, label, description, group, stack }) => ({
+      templates: TEMPLATES.map(({ id, label, description, group, stack, project }) => ({
         id,
         label,
         description,
         group,
         stack,
+        ...(project ? { project } : {}),
       })),
     });
   });
@@ -93,11 +111,11 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
 
   app.get('/setup/jobs/:id', access({ tenant: 'admin' }), async (request, response, next) => {
     try {
-      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Not found.' });
+      if (!isUuid(request.params.id)) return void response.status(404).json({ message: 'Nicht gefunden.' });
       const job = (
         await pool.query(`SELECT id, kind, status, result, log FROM setup_jobs WHERE id = $1`, [request.params.id])
       ).rows[0];
-      if (!job) return void response.status(404).json({ message: 'Not found.' });
+      if (!job) return void response.status(404).json({ message: 'Nicht gefunden.' });
       response.set('Cache-Control', 'no-store').json({ job });
     } catch (error) {
       next(error);
@@ -130,11 +148,15 @@ export function registerSetupRoutes(app: Router, pool: Pool): void {
       if (invalid) return void response.status(400).json({ message: invalid });
       const exists = (await pool.query('SELECT 1 FROM projects WHERE slug = $1', [slug])).rowCount;
       if (exists) return void response.status(409).json({ message: `Die Projekt-ID „${slug}“ ist schon vergeben.` });
+      // Mit Vorlage (z. B. Phaser-Spiel) kommen Testbefehle, Review-Befehl und Vorschau-Adresse gleich mit.
+      const preset = templateProjectColumns(body.template);
+      const values: unknown[] = [slug, name, repository, gitRemote, groups, ...preset.map((entry) => entry.value)];
       const project = (
         await pool.query(
-          `INSERT INTO projects (slug, name, repository, git_remote, agent_permissions)
-           VALUES ($1, $2, $3, $4, $5) RETURNING slug, name, repository, git_remote AS "gitRemote"`,
-          [slug, name, repository, gitRemote, groups],
+          `INSERT INTO projects (slug, name, repository, git_remote, agent_permissions${preset.map((entry) => `, ${entry.column}`).join('')})
+           VALUES ($1, $2, $3, $4, $5${preset.map((entry, index) => `, $${index + 6}${entry.cast}`).join('')})
+           RETURNING slug, name, repository, git_remote AS "gitRemote"`,
+          values,
         )
       ).rows[0];
       await ensureDefaultAgents(pool, slug);

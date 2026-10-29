@@ -26,19 +26,52 @@ function Get-EnvFileValue([string]$Key) {
   return $value
 }
 
+# Letzter Wert von $Key in der .env der Installation, nach denselben Regeln wie parseEnv (src/core/env-file.ts):
+# "export " erlaubt, Kommentarzeilen uebersprungen, Wert in '...' oder "..." ohne die Zeichen, sonst ohne " #Kommentar".
+function Get-DotEnvValue([string]$Key) {
+  $file = Join-Path $root '.env'
+  if (-not (Test-Path -LiteralPath $file)) { return '' }
+  $value = ''
+  foreach ($line in [IO.File]::ReadAllLines($file)) {
+    if ($line.TrimStart().StartsWith('#')) { continue }
+    $match = [regex]::Match($line, '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$')
+    if (-not $match.Success -or $match.Groups[1].Value -cne $Key) { continue }
+    $raw = $match.Groups[2].Value.Trim()
+    if ($raw.Length -ge 2 -and ($raw[0] -eq "'" -or $raw[0] -eq '"') -and $raw.EndsWith([string]$raw[0])) {
+      $value = $raw.Substring(1, $raw.Length - 2)
+    } else {
+      $value = $raw -replace '\s+#.*$', ''
+    }
+  }
+  return $value
+}
+
+# Umgebung vor .env der Installation vor bestehender Env-Datei des Workers vor $Default.
 function Resolve-Value([string]$Key, [string]$Default = '') {
   $value = [Environment]::GetEnvironmentVariable($Key)
+  if (-not $value) { $value = Get-DotEnvValue $Key }
   if (-not $value) { $value = Get-EnvFileValue $Key }
   if (-not $value) { $value = $Default }
   return $value
 }
 
 $values = [ordered]@{
-  DEV_LOG_DATABASE_URL = Resolve-Value 'DEV_LOG_DATABASE_URL' 'postgresql://devlog:devlog_local_dev@localhost:5433/aideation'
+  DEV_LOG_DATABASE_URL = Resolve-Value 'DEV_LOG_DATABASE_URL'
   DEV_LOG_SECRET_KEY = Resolve-Value 'DEV_LOG_SECRET_KEY'
+  # Eigener Ablageort der Playwright-Browser gilt auch fuer den Worker (Smoke-Tests der Spielprojekte, optische Abnahme).
+  PLAYWRIGHT_BROWSERS_PATH = Resolve-Value 'PLAYWRIGHT_BROWSERS_PATH'
+}
+# Ohne Datenbank-URL oder mit dem bekannten Standardpasswort abbrechen: Der Worker koennte sich nicht anmelden.
+if (-not $values.DEV_LOG_DATABASE_URL) {
+  [Console]::Error.WriteLine('FEHLER: DEV_LOG_DATABASE_URL fehlt - weder in der Umgebung noch in der .env der Installation noch in worker.env. Erst ./start.sh --setup ausfuehren, dann erneut installieren (siehe docs/installation.md).')
+  exit 1
 }
 if ($values.DEV_LOG_DATABASE_URL.Contains('devlog_local_dev')) {
-  Write-Warning 'Die Datenbank-URL nutzt das Standardpasswort devlog_local_dev. Setze DEV_LOG_DB_PASSWORD in der .env und installiere mit DEV_LOG_DATABASE_URL erneut (siehe docs/installation.md).'
+  if ($env:DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD -ne '1') {
+    [Console]::Error.WriteLine('FEHLER: Die Datenbank-URL nutzt das Standardpasswort devlog_local_dev. Erst ./start.sh --setup ausfuehren (setzt DEV_LOG_DB_PASSWORD), dann erneut installieren (siehe docs/installation.md).')
+    exit 1
+  }
+  Write-Warning 'Die Datenbank-URL nutzt das Standardpasswort devlog_local_dev (ausdruecklich erlaubt).'
 }
 $lines = @('# AIdeation - Zugaenge fuer den Worker (erzeugt von scripts\install-worker.ps1, nur fuer diesen Benutzer lesbar).')
 foreach ($key in $values.Keys) {
@@ -56,13 +89,22 @@ Protect-Path $envFile 'F'
 
 $wrapper = Join-Path (Join-Path $root 'scripts') 'run-with-env.ps1'
 $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$wrapper`" `"$envFile`" npm run worker"
+# Neustart nach "AIdeation neu starten" (Exit-Code 75) uebernimmt die Schleife in run-with-env.ps1.
+# Bewusst ohne RestartCount: Ein bewusster Stopp oder echter Fehler (Exit-Code ungleich 75) soll den Worker nicht neu
+# starten. Kein Zeitlimit (Standard waeren 72 Stunden, danach beendet die Aufgabenplanung den Worker).
+$settings = [ordered]@{
+  ExecutionTimeLimit = [TimeSpan]::Zero
+  MultipleInstances = 'IgnoreNew'
+}
 if ($env:AIDEATION_INSTALL_DRY_RUN -eq '1') {
   Write-Host "Probelauf: $envFile geschrieben, Aufgabe nicht registriert."
   Write-Host "Aufgabe: powershell.exe $arguments"
+  foreach ($key in $settings.Keys) { Write-Host "Einstellung: $key=$($settings[$key])" }
   exit 0
 }
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $root
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
-Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -RunLevel Limited -Force | Out-Null
+$taskSettings = New-ScheduledTaskSettingsSet @settings -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName 'AIdeationWorker' -Action $action -Trigger $trigger -Settings $taskSettings -RunLevel Limited -Force | Out-Null
 Start-ScheduledTask -TaskName 'AIdeationWorker'
 Write-Host "Worker installiert (Aufgabenplanung: AIdeationWorker, Zugaenge: $envFile)"

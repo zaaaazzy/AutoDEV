@@ -31,36 +31,26 @@ test('Bewertung: Priorität × Nutzen/Kosten, Bonus für Bugs, Malus für Blocki
   assert.equal(scoreOf(order({ troubled: true }), false), 0.5);
 });
 
-test('Kapazität aus den letzten 3 Sprints (Median), ohne Historie aus der Einstellung', () => {
+test('Kapazität: Einstellung in Agent-Stunden, Token-Grenze aus dem Sprint-Budget, Historie nur zur Anzeige', () => {
+  // Mehr oder weniger geschafft: die Einstellung gilt; der Median ohne Sprints ohne Laufzeit wird nur angezeigt.
   assert.deepEqual(
     capacityFrom(
       [
-        { hours: 10, tokens: 0 },
-        { hours: 30, tokens: 0 },
-        { hours: 20, tokens: 0 },
+        { hours: 0.5, tokens: 300_000 },
+        { hours: 0, tokens: 0 },
+        { hours: 0.7, tokens: 100_000 },
         { hours: 99, tokens: 0 },
       ],
-      40,
+      4,
     ),
-    {
-      hours: 20,
-      tokens: null,
-      source: 'history',
-    },
+    { hours: 4, tokens: null, historyHours: 0.7 },
   );
-  // Ist-Tokens ebenfalls als Median; Sprints ohne gemessene Laufzeit zählen nicht als Historie.
-  assert.deepEqual(
-    capacityFrom(
-      [
-        { hours: 5, tokens: 300_000 },
-        { hours: 0, tokens: 0 },
-        { hours: 7, tokens: 100_000 },
-      ],
-      40,
-    ),
-    { hours: 6, tokens: 200_000, source: 'history' },
-  );
-  assert.deepEqual(capacityFrom([], 40), { hours: 40, tokens: null, source: 'setting' });
+  assert.deepEqual(capacityFrom([{ hours: 9, tokens: 1 }], 4, 2_000_000), {
+    hours: 4,
+    tokens: 2_000_000,
+    historyHours: 9,
+  });
+  assert.deepEqual(capacityFrom([], 4, 0), { hours: 4, tokens: null, historyHours: null });
 });
 
 test('Füllt bis zur Kapazität, Folgeauftrag nie vor seinem Vorgänger, übernommene immer dabei', () => {
@@ -72,7 +62,7 @@ test('Füllt bis zur Kapazität, Folgeauftrag nie vor seinem Vorgänger, überno
       order({ id: 'carry', title: 'Übernommen', priority: 'low', effortHours: 50, carryOver: true }),
     ],
     new Set(),
-    { hours: 60, tokens: null, source: 'setting' },
+    { hours: 60, tokens: null, historyHours: null },
   );
   const selected = proposal.items.filter((item) => item.selected).map((item) => item.id);
   assert.deepEqual(selected, ['carry', 'base', 'follow']);
@@ -88,7 +78,7 @@ test('Aufträge mit denselben Dateien stehen direkt hintereinander', () => {
       order({ id: 'c', priority: 'medium', files: ['src/login.ts'] }),
     ],
     new Set(),
-    { hours: 100, tokens: null, source: 'setting' },
+    { hours: 100, tokens: null, historyHours: null },
   );
   assert.deepEqual(
     proposal.items.map((item) => item.id),
@@ -113,7 +103,7 @@ test('Folgeauftrag steht nie vor seinem Vorgänger, auch wenn er höher bewertet
       order({ id: 'base', priority: 'low' }),
     ],
     new Set(),
-    { hours: 100, tokens: null, source: 'setting' },
+    { hours: 100, tokens: null, historyHours: null },
   );
   const rank = (id: string) => proposal.items.find((item) => item.id === id)!.rank!;
   assert.ok(rank('base') < rank('follow'));
@@ -124,7 +114,7 @@ test('Folgeauftrag steht nie vor seinem Vorgänger, auch wenn er höher bewertet
       order({ id: 'base', priority: 'low', effortHours: 10 }),
     ],
     new Set(),
-    { hours: 2, tokens: null, source: 'setting' },
+    { hours: 2, tokens: null, historyHours: null },
   );
   assert.deepEqual(
     tight.items.filter((item) => item.selected).map((item) => item.id),
@@ -141,7 +131,7 @@ test('Gleiche Dateien auch zusammen mit Folgeaufträgen direkt hintereinander', 
       order({ id: 'y', priority: 'low', files: ['src/api.ts'], followUpOf: 'done-before' }),
     ],
     new Set(['done-before']),
-    { hours: 100, tokens: null, source: 'setting' },
+    { hours: 100, tokens: null, historyHours: null },
   );
   const ids = proposal.items.map((item) => item.id);
   assert.equal(ids.indexOf('y'), ids.indexOf('x') + 1);
@@ -158,7 +148,7 @@ test('Roadmap: 3 Sprints, kein Auftrag doppelt, Folgeauftrag nach dem Sprint sei
     order({ id: 'g', priority: 'low' }),
     order({ id: 'carry', priority: 'low', carryOver: true }),
   ];
-  const capacity = { hours: 8, tokens: null, source: 'setting' } as const;
+  const capacity = { hours: 8, tokens: null, historyHours: null } as const;
   const roadmap = planRoadmap(candidates, new Set(), capacity);
   assert.equal(roadmap.length, 3);
   const ids = roadmap.flatMap((sprint) => sprint.items.map((item) => item.id));
@@ -180,4 +170,36 @@ test('Autopilot: Sprint ist fertig, wenn nur noch Erledigtes oder „Aktion notw
   assert.equal(sprintSettled([item('in_progress')]), false);
   assert.equal(sprintSettled([item('backlog')]), false);
   assert.equal(sprintSettled([]), false);
+});
+
+test('Übernommene Aufträge allein füllen keinen Sprint: mindestens ein neuer kommt immer dazu', () => {
+  const proposal = proposeSprint(
+    [
+      order({ id: 'carry', title: 'Blockiert aus dem Vorsprint', carryOver: true }),
+      order({ id: 'new', title: 'Neu', effortHours: 2 }),
+      order({ id: 'second', title: 'Noch einer', effortHours: 2 }),
+    ],
+    new Set(),
+    { hours: 0.25, tokens: null, historyHours: 0.25 },
+  );
+  const selected = proposal.items.filter((item) => item.selected).map((item) => item.id);
+  assert.ok(selected.includes('carry'));
+  assert.equal(selected.filter((id) => id !== 'carry').length, 1, 'genau ein neuer trotz zu knapper Kapazität');
+});
+
+test('Rechnet mit kalibrierten Stunden und zeigt die gespeicherte Schätzung daneben', () => {
+  const proposal = proposeSprint(
+    [
+      order({ id: 'old', title: 'Altbestand', effortHours: 0.4, rawEffortHours: 10 }),
+      order({ id: 'new', title: 'Neu', effortHours: 0.3 }),
+      order({ id: 'none', title: 'Ohne Schätzung', effortHours: null }),
+    ],
+    new Set(),
+    { hours: 1.2, tokens: null, historyHours: null },
+  );
+  const byId = new Map(proposal.items.map((item) => [item.id, item]));
+  assert.deepEqual([byId.get('old')?.rawHours, byId.get('new')?.rawHours, byId.get('none')?.rawHours], [10, 0.3, null]);
+  // 0,4 + 0,3 + 0,5 (ohne Schätzung) = 1,2 Agent-Stunden passen genau.
+  assert.equal(proposal.items.filter((item) => item.selected).length, 3);
+  assert.equal(proposal.totals.hours, 1.2);
 });

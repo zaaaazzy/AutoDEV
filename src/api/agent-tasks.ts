@@ -45,11 +45,12 @@ export const DEFAULT_ACTIONS: { title: string; prompt: string }[] = [
   {
     title: 'Docker-Dienste starten',
     prompt:
-      'Starte die Docker-Dienste des Projekts (docker compose up -d) und prüfe, ob alle laufen. Melde Fehler mit einem kurzen Log-Auszug.',
+      'Starte die Docker-Dienste des Projekts (services.up) und prüfe mit services.status, ob alle laufen. Melde Fehler mit einem kurzen Log-Auszug (services.logs).',
   },
   {
     title: 'Logs auf Fehler prüfen',
-    prompt: 'Prüfe die Logs der laufenden Dienste auf Fehler und Warnungen der letzten Stunde und fasse sie zusammen.',
+    prompt:
+      'Prüfe die Logs der laufenden Dienste der letzten Stunde (services.logs --since=1h) auf Fehler und Warnungen und fasse sie zusammen.',
   },
   {
     title: 'Git-Status zusammenfassen',
@@ -170,7 +171,7 @@ export function computeNextRun(
 }
 
 /** Der gewählte Agent muss zum Projekt gehören. */
-async function agentInProject(pool: Pool, agentId: string | null, slug: string): Promise<boolean> {
+export async function agentInProject(pool: Pool, agentId: string | null, slug: string): Promise<boolean> {
   if (!agentId) return true;
   return !!(await pool.query('SELECT 1 FROM agents WHERE id = $1 AND project_slug = $2', [agentId, slug])).rows[0];
 }

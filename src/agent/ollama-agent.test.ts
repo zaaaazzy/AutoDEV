@@ -13,6 +13,7 @@ import {
   runOllamaAgent,
   type ToolContext,
 } from './ollama-agent.js';
+import { agentRights } from './tool-permissions.js';
 
 async function project(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'ollama-agent-'));
@@ -119,18 +120,16 @@ test('the developer may write with backup, but only run allowed commands', async
   assert.match(await executeTool(assistant, call('run_command', { command: 'git log --oneline -20' })), /Exit-Code/);
   assert.match(await executeTool(assistant, call('run_command', { command: 'git status' })), /Exit-Code/);
   assert.match(await executeTool(assistant, call('run_command', { command: 'npm test' })), /Exit-Code/);
-  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose ps' })), /Exit-Code/);
-  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /Exit-Code/);
+  // Dienste nur über service_action, nie per Shell.
   for (const command of [
-    'docker compose down',
-    'docker compose stop backend',
+    'docker compose ps',
+    'docker compose up -d',
     'docker compose restart',
-    'docker compose up -d --build',
     'docker compose logs --tail=50 backend',
-    'docker compose logs --since 15m --no-color api web',
-    'git clone https://github.com/a/b.git',
-    'git clone git@github.com:a/b.git app/src',
   ]) {
+    assert.doesNotMatch(await executeTool(assistant, call('run_command', { command })), /Exit-Code/, command);
+  }
+  for (const command of ['git clone https://github.com/a/b.git', 'git clone git@github.com:a/b.git app/src']) {
     assert.match(await executeTool(assistant, call('run_command', { command })), /Exit-Code/);
   }
   assert.match(
@@ -186,6 +185,84 @@ test('agent loop executes tool calls and returns the final answer with changed f
   assert.match(result.output, /Datei angelegt\.[\s\S]*- neu\.txt/);
   assert.equal(await readFile(join(cwd, 'neu.txt'), 'utf8'), 'hallo');
   assert.equal((bodies[1] as { messages: { role: string }[] }).messages.at(-1)?.role, 'tool');
+});
+
+test('Routine: run_command für Prüfbefehle (npm audit), aber keine Schreib-Werkzeuge', async () => {
+  const cwd = await project();
+  const rights = agentRights('routine', { enabled: null, custom: [] }, null);
+  assert.deepEqual(rights.files, { create: false, edit: false, scopes: [] });
+  const ran: string[] = [];
+  const { fetchImpl, bodies } = scriptedFetch([
+    {
+      role: 'assistant',
+      content: '',
+      tool_calls: [
+        call('run_command', { command: 'npm audit --json' }),
+        call('run_command', { command: 'npm outdated' }),
+        call('run_command', { command: 'git ls-files' }),
+        call('run_command', { command: 'git grep -n TODO' }),
+        call('run_command', { command: 'npm audit fix' }),
+        call('run_command', { command: 'npm audit --json fix' }),
+        call('run_command', { command: 'git grep -O less TODO' }),
+        call('run_command', { command: 'git grep -iOless TODO' }),
+        call('run_command', { command: 'git grep "-O" TODO' }),
+        call('run_command', { command: 'git grep TODO /etc' }),
+        call('run_command', { command: 'git grep --no-exclude-standard SECRET' }),
+        call('run_command', { command: 'git grep -f /etc/passwd' }),
+        call('write_file', { path: 'neu.txt', content: 'x' }),
+        call('replace_in_file', { path: 'a.txt', old_text: 'alt', new_text: 'neu' }),
+      ],
+    },
+    { role: 'assistant', content: 'Keine Sicherheitslücken.' },
+  ]);
+  const result = await runOllamaAgent({
+    prompt: 'Nächtlicher Sicherheits-Check',
+    role: 'routine',
+    cwd,
+    timeoutMs: 5000,
+    fetchImpl,
+    execute: async (command) => {
+      ran.push(command.join(' '));
+      return { exitCode: 0, durationMs: 1, output: 'found 0 vulnerabilities' };
+    },
+    ...rights,
+  });
+  assert.equal(result.exitCode, 0);
+  const tools = (bodies[0] as { tools: { function: { name: string } }[] }).tools.map((tool) => tool.function.name);
+  assert.ok(tools.includes('run_command'), 'Routine bekommt run_command');
+  for (const name of ['write_file', 'replace_in_file', 'run_sql']) assert.ok(!tools.includes(name), name);
+  // Nur die Prüfbefehle laufen; audit fix, Pager, fremde Pfade und ignorierte Dateien nicht.
+  assert.deepEqual(ran, ['npm audit --json', 'npm outdated', 'git ls-files', 'git grep -n TODO']);
+  assert.equal(await readFile(join(cwd, 'a.txt'), 'utf8'), 'alt\n');
+  await assert.rejects(readFile(join(cwd, 'neu.txt'), 'utf8'));
+  assert.doesNotMatch(result.output, /Geänderte Dateien/);
+});
+
+test('Prüfbefehle nur für Routinen, nicht für Entwickler; ohne Rechte-Kontext keine Shell', async () => {
+  const developer = agentRights('developer', { enabled: null, custom: [] }, null);
+  for (const rule of ['Bash(npm audit:*)', 'Bash(git grep:*)', 'Bash(git ls-files:*)']) {
+    assert.ok(!developer.commands.includes(rule), rule);
+  }
+  const cwd = await project();
+  const ran: string[] = [];
+  const { fetchImpl, bodies } = scriptedFetch([
+    { role: 'assistant', content: '', tool_calls: [call('run_command', { command: 'npm audit' })] },
+    { role: 'assistant', content: 'Fertig.' },
+  ]);
+  await runOllamaAgent({
+    prompt: 'x',
+    role: 'routine',
+    cwd,
+    timeoutMs: 5000,
+    fetchImpl,
+    execute: async (command) => {
+      ran.push(command.join(' '));
+      return { exitCode: 0, durationMs: 1, output: '' };
+    },
+  });
+  const tools = (bodies[0] as { tools: { function: { name: string } }[] }).tools.map((tool) => tool.function.name);
+  assert.ok(!tools.includes('run_command'));
+  assert.deepEqual(ran, []);
 });
 
 test('accepts a developer answer that proves the order is already implemented', async () => {
@@ -345,20 +422,25 @@ test('compose configuration may not escape the project folder', () => {
   assert.ok(composeViolation('kein json', '/proj'));
 });
 
-test('docker compose start is refused when the configuration escapes the project', async () => {
+test('services.up is refused when the configuration escapes the project', async () => {
   const cwd = await mkdtemp(join(tmpdir(), 'devlog-compose-'));
+  await writeFile(join(cwd, 'compose.yaml'), 'services: {}\n');
   const ran: string[] = [];
   const bad = JSON.stringify({ services: { app: { privileged: true } } });
   const assistant = {
     ...context(cwd, true),
-    canManageServices: true,
+    serviceRole: 'assistant',
+    commands: ['services'],
     execute: async (command: string[]) => {
-      ran.push(command.join(' '));
-      return { exitCode: 0, durationMs: 1, output: command[2] === 'config' ? bad : 'ok' };
+      ran.push(command.slice(4).join(' '));
+      return { exitCode: 0, durationMs: 1, output: command.includes('--format') ? bad : 'app' };
     },
   };
-  assert.match(await executeTool(assistant, call('run_command', { command: 'docker compose up -d' })), /abgelehnt/);
-  assert.deepEqual(ran, ['docker compose config --format json']);
+  assert.match(
+    await executeTool(assistant, call('service_action', { action: 'services.up' })),
+    /abgelehnt.*privilegiert/,
+  );
+  assert.deepEqual(ran, ['config --services', 'config --format json']);
 });
 
 test('model and context are resolved per role', () => {

@@ -97,6 +97,23 @@
     </p>
   </section>
 
+  <section aria-labelledby="ap-services">
+    <h3 id="ap-services">Dienste über den Worker</h3>
+    <p>
+      Kein Agent ruft <code>docker</code> oder <code>launchctl</code> selbst auf und keiner braucht den Docker-Socket.
+      Agents fordern feste Aktionen an (Gruppe „Projekt-Dienste“). Der Worker prüft Projektordner, Compose-Datei im
+      Projekt, Dienst und Rolle, führt die Aktion unter der Projektsperre aus und gibt das maskierte Ergebnis zurück –
+      im Chat als Abschnitt „Dienst-Aktionen“.
+    </p>
+    <ul>
+      @for (item of serviceActions; track item.action) {
+        <li>
+          <code>{{ item.action }}</code> – {{ item.effect }}
+        </li>
+      }
+    </ul>
+  </section>
+
   <section aria-labelledby="ap-limits">
     <h3 id="ap-limits">Sicherheitsgrenzen</h3>
     <p>Für alle Agents gilt: nicht erlaubt sind</p>
@@ -105,17 +122,24 @@
         Dateien außerhalb des Projektordners, <code>.env</code>, Schlüssel, <code>.git</code>,
         <code>node_modules</code>, Backup-Ordner und Symlink-Ausbrüche,
       </li>
-      <li><code>git push</code>, <code>rm</code>, <code>docker run</code> und <code>docker compose down -v</code>,</li>
+      <li>
+        <code>git push</code>, <code>rm</code>, jeder Aufruf von <code>docker</code> bzw.
+        <code>docker compose</code> und <code>launchctl</code> – Dienste nur über die Worker-Aktionen,
+      </li>
       <li>verkettete Befehle (<code>;</code>, <code>&amp;&amp;</code>, Pipes) – Befehle laufen ohne Shell,</li>
       <li><code>git clone</code> mit <code>file://</code>, Optionen oder Zielen außerhalb des Projekts.</li>
     </ul>
     <p>
-      <strong>Projektsperre:</strong> Befehle (git, npm, docker) des Assistenten, der Agents und des Git-Syncs laufen
-      pro Projektordner nacheinander, nie gleichzeitig. Dateischreibzugriffe sind davon nicht betroffen.
+      <strong>Projektsperre:</strong> Befehle (git, npm, Dienst-Aktionen) des Assistenten, der Agents und des Git-Syncs
+      laufen pro Projektordner nacheinander, nie gleichzeitig. Dateischreibzugriffe sind davon nicht betroffen.
     </p>
     <p>
-      <strong>Grenze – keine Sandbox:</strong> Diese Regeln verhindern Fehlgriffe, sind aber keine Sandbox. Tests und
-      npm-Skripte führen von Agents geschriebenen Code mit den Rechten des Workers auf dem Host aus.
+      <strong>Grenze – die Docker-Sandbox:</strong> Diese Regeln verhindern Fehlgriffe, sind aber selbst keine Sandbox.
+      Die Grenze zum Rechner ist die Docker-Sandbox (<code>DEV_LOG_AGENT_SANDBOX</code>, Standard <code>docker</code>):
+      Jeder Agent-Schritt und jeder Projekttest läuft in einem eigenen Container. Lesende Rollen sehen den Workspace nur
+      lesend. Nach aussen gibt es nur Anthropic-API, npm-Registry und Ollama, kein LAN und keine AIdeation-Datenbank.
+      Die Regeln hier sind die zweite Linie. Nur im Notfallmodus <code>off</code> (Warnung im Worker-Badge) laufen Tests
+      und npm-Skripte mit den Rechten des Workers auf dem Host.
     </p>
     <p>
       <strong>Eigene Befehle:</strong> Ist <code>DEV_LOG_AGENT_COMMAND</code> oder ein eigener Agent-Befehl gesetzt,

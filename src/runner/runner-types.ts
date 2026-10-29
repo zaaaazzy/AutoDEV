@@ -18,10 +18,12 @@ export interface WorkItem {
   risks?: string;
   /**
    * Kategorie (frontend, backend, fullstack …): Modell-Routing; die visuelle Prüfung läuft nur bei Frontend und
-   * Fullstack. Dazu Schätzung (Stunden) und Anzahl automatischer Wiederholungen fürs Modell-Routing.
+   * Fullstack. Dazu Schätzung (Stunden, samt Herkunft für die Kalibrierung) und Anzahl automatischer Wiederholungen
+   * fürs Modell-Routing.
    */
   category?: string | null;
   effortHours?: number | null;
+  estimateSource?: string | null;
   retryCount?: number;
 }
 
@@ -57,6 +59,11 @@ export type BuiltinAgent = (context: {
   model?: string;
   /** Nur Tester: vom Auftrag geänderte Dateien (undefined = unbekannt, dann laufen die Testbefehle des Projekts). */
   changedFiles?: string[];
+  /**
+   * Führt die Shell-Befehle des Agents aus, etwa im Sandbox-Container (sonst runCommand auf dem Host). Beim Tester
+   * führt er die Projekttests aus (Testcontainer, mit Diensten nur im Compose-Netzwerk des Projekts).
+   */
+  execute?: CommandExecutor;
 }) => Promise<CommandResult>;
 
 export interface WorkflowAgent {
@@ -104,6 +111,8 @@ export interface WorkItemOptions {
   builtin?: BuiltinAgent;
   /** Pause vor dem einmaligen Wiederholen eines Schritts nach einem vorübergehenden Fehler (Standard 30 s). */
   transientRetryDelayMs?: number;
+  /** Pause zwischen den Versuchen, den Abschluss nach einem Datenbankausfall zu speichern (Standard 15 s). */
+  settleRetryDelayMs?: number;
   /** Gezielt gestarteter Auftrag (--item): startet unabhängig von Status und Sprint. */
   itemId?: string;
 }

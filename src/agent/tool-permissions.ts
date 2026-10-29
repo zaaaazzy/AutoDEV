@@ -1,26 +1,30 @@
 import { existsSync } from 'node:fs';
-import { sep } from 'node:path';
+import { isAbsolute, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { customRuleProblem } from './command-checks.js';
 import {
+  CHECK_GROUP,
+  CHECK_ROLES,
   CREATE_TOOLS,
   EDIT_TOOLS,
   FILES_CREATE,
   FILES_EDIT,
+  fileGitRules,
   LOGS_COMMAND,
   NO_FILE_WRITE_ROLES,
   PERMISSION_GROUPS,
   READ_ONLY_ROLES,
-  SERVICES_COMMAND,
   TRUSTED_ROLES,
   isToolRule,
   normalizeCommands,
-  servicesRule,
+  normalizeGroups,
   type PermissionGroup,
 } from './permission-rules.js';
 
 export {
+  CHECK_GROUP,
+  CHECK_ROLES,
   CREATE_TOOLS,
   DATABASE_COMMAND,
   DEFAULT_PERMISSION_GROUPS,
@@ -38,6 +42,7 @@ export {
   commandHelp,
   commandLabel,
   normalizeCommands,
+  normalizeGroups,
   rulesAllow,
   type PermissionGroup,
 } from './permission-rules.js';
@@ -47,15 +52,17 @@ export {
   customRuleProblem,
   forbiddenCommand,
   forbiddenSubcommand,
+  gitFileProblem,
   gitOptionProblem,
   gitPathProblem,
+  gitRemoteProblem,
   isAllowedCommand,
   isAssistantServiceCommand,
   npmOptionProblem,
   shellWords,
   withIgnoreScripts,
 } from './command-checks.js';
-export { COMPOSE_STARTING, composeViolation } from './compose-check.js';
+export { composeViolation } from './compose-check.js';
 
 /** Ordner außerhalb des Projekts, die diese Rollen lesen dürfen (z. B. Dienst-Logs unter ~/Library/Logs). */
 export function extraReadDirectories(environment: NodeJS.ProcessEnv = process.env): string[] {
@@ -77,7 +84,8 @@ export async function loadProjectPermissions(
   const [enabled, custom] = await Promise.all([
     pool
       .query<{ groups: string[] | null }>('SELECT agent_permissions AS groups FROM projects WHERE slug = $1', [project])
-      .then((result) => result.rows[0]?.groups ?? null),
+      // Frühere Gruppe „docker“ gilt als „services“ (Dienste nur noch über die Worker-Aktionen).
+      .then((result) => normalizeGroups(result.rows[0]?.groups ?? null)),
     pool
       .query<PermissionGroup>(
         'SELECT id, label, description, rules FROM project_permission_groups WHERE project_slug = $1 ORDER BY label',
@@ -144,13 +152,28 @@ export function roleDefaultCommands(role: string, permissions: ProjectPermission
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
+/** Wo der Wächter läuft, wenn nicht auf dem Host: z. B. im Sandbox-Container (SANDBOX_GUARD in core/sandbox.ts). */
+export interface GuardLocation {
+  node: string;
+  script: string;
+}
+
 /** Hook-Befehl für den Wächter; null, wenn er nicht gestartet werden kann (dann gilt: nichts schreiben, keine Shell). */
-export function guardHookCommand(policy: {
-  create: boolean;
-  edit: boolean;
-  scopes: string[];
-  shell?: boolean;
-}): string | null {
+export function guardHookCommand(
+  policy: {
+    create: boolean;
+    edit: boolean;
+    scopes: string[];
+    shell?: boolean;
+    root?: string;
+  },
+  location?: GuardLocation,
+): string | null {
+  if (location) {
+    // Im Container liegt der gebündelte Wächter im Image; der Host-Pfad von Node und Skript gilt dort nicht.
+    const encoded = Buffer.from(JSON.stringify(policy)).toString('base64url');
+    return `${[location.node, location.script, encoded].map(shellQuote).join(' ')} || exit 2`;
+  }
   const typescript = import.meta.url.endsWith('.ts');
   const script = fileURLToPath(new URL(`./agent-guard.${typescript ? 'ts' : 'js'}`, import.meta.url));
   if (!existsSync(script)) return null;
@@ -167,6 +190,34 @@ export function guardHookCommand(policy: {
   // Scheitert der Wächter selbst (Exit ≠ 0/2), sperrt „|| exit 2“ den Zugriff, statt ihn durchzulassen.
   return `${[process.execPath, ...loader, script, encoded].map(shellQuote).join(' ')} || exit 2`;
 }
+
+/**
+ * Geheimnisse, die kein Claude-Agent lesen darf – jede Rolle, auch mit Vollzugriff. Deny-Regeln der CLI (gelten auch
+ * für Grep und Glob); dieselben Namen wie SECRET_NAME bzw. die geschützten Ordner des Wächters, der sie zusätzlich prüft.
+ */
+export const SECRET_READ_DENY = [
+  'Read(**/.env*)',
+  'Read(**/*.pem)',
+  'Read(**/*.key)',
+  'Read(**/id_rsa*)',
+  'Read(**/id_ed25519*)',
+  'Read(**/id_ecdsa*)',
+  'Read(**/.npmrc)',
+  'Read(**/.netrc)',
+  'Read(**/.git-credentials)',
+  'Read(~/.npmrc)',
+  'Read(~/.netrc)',
+  'Read(~/.git-credentials)',
+  'Read(**/.ssh/**)',
+  'Read(**/.aws/**)',
+  'Read(**/.gnupg/**)',
+  'Read(~/.ssh/**)',
+  'Read(~/.aws/**)',
+  'Read(~/.gnupg/**)',
+];
+
+/** Werkzeuge, die Dateien lesen – der Wächter prüft bei ihnen die Pfade auf Geheimnisse. */
+const READ_MATCHER = 'Read|Grep|Glob|NotebookRead';
 
 /** Rollen, denen der Admin per Befehl vollen Zugriff geben kann (ohne Wächter). */
 export const FULL_ACCESS_ROLES = new Set(['assistant']);
@@ -187,17 +238,19 @@ export function hasFullAccess(command: readonly string[], role: string): boolean
 
 /**
  * Freigaben eines Agents: eigene Zuweisung, sonst der Projektstandard der Rolle – nur Befehle aus freigeschalteten
- * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln.
+ * Projektgruppen; lesende Rollen bekommen nichts, Rollen ohne Dateirechte keine Datei-Regeln. Routinen bekommen
+ * zusätzlich immer die Prüf-Gruppe (CHECK_GROUP), auch bei eigener Zuweisung.
  */
 function chosenRules(role: string, permissions: ProjectPermissions, agentCommands: string[] | null): string[] {
   if (READ_ONLY_ROLES.has(role)) return [];
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
   const available = availableCommands(permissions);
-  return normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
+  const chosen = normalizeCommands(agentCommands ?? roleDefaultCommands(role, permissions)).filter(
     (rule) =>
       (available.has(rule) || rule === FILES_CREATE || rule === FILES_EDIT) &&
       !(noFileWrite && (rule === FILES_CREATE || rule === FILES_EDIT)),
   );
+  return CHECK_ROLES.has(role) ? [...new Set([...chosen, ...CHECK_GROUP.rules])] : chosen;
 }
 
 /**
@@ -217,10 +270,20 @@ export function agentRights(
   };
 }
 
+/** Einstellungen für --settings: Deny-Regeln für Geheimnisse und (falls startbar) der Wächter als PreToolUse-Hook. */
+function agentSettings(hook: string | null, matcher: string): object {
+  return {
+    permissions: { deny: SECRET_READ_DENY },
+    ...(hook ? { hooks: { PreToolUse: [{ matcher, hooks: [{ type: 'command', command: hook, timeout: 90 }] }] } } : {}),
+  };
+}
+
 /**
  * Befehlszeile eines Agents mit seinen Rechten (nur Claude-CLI). Ohne eigene Zuweisung (null) gelten die
  * Rollenstandards. Jeder Agent bekommt genau die freigegebenen Befehle; Datei-Werkzeuge nur mit „Dateien anlegen“
- * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern.
+ * bzw. „Dateien ändern“, und der Wächter (PreToolUse-Hook) prüft jeden Schreib- und Shell-Zugriff samt Ordnern
+ * sowie jeden Lesezugriff auf Geheimnisse. projectRoot legt den Projektordner des Wächters fest (sonst
+ * CLAUDE_PROJECT_DIR bzw. das cwd des Aufrufs). guardLocation: Wächter ausserhalb des Hosts (Sandbox-Container).
  */
 export function withAgentPermissions(
   command: string[],
@@ -229,49 +292,50 @@ export function withAgentPermissions(
   agentCommands: string[] | null,
   fileScopes: readonly string[] = [],
   readDirectories: string[] = extraReadDirectories(),
+  projectRoot?: string,
+  guardLocation?: GuardLocation,
 ): string[] {
+  const root = projectRoot && isAbsolute(projectRoot) ? { root: projectRoot } : {};
   const [binary, ...rest] = command;
   const isClaude = binary !== undefined && binary.split(sep).pop() === 'claude';
   if (!isClaude) return command;
   // Voller Zugriff nur für den Dashboard-Assistenten und nur, wenn der Admin ihn im Befehl ausdrücklich verlangt:
-  // dann weder Wächter noch Sperrlisten – der Assistent arbeitet mit allen Rechten des Workers.
-  if (hasFullAccess(command, role)) return command;
+  // dann weder Wächter für Schreiben und Shell noch Sperrlisten – nur Geheimnisse bleiben auch hier unlesbar.
+  if (hasFullAccess(command, role)) {
+    const secretHook = guardHookCommand({ create: false, edit: false, scopes: [], ...root }, guardLocation);
+    return [binary, '--settings', JSON.stringify(agentSettings(secretHook, READ_MATCHER)), ...rest];
+  }
   const readOnly = READ_ONLY_ROLES.has(role);
   const noFileWrite = NO_FILE_WRITE_ROLES.has(role);
-  const custom = !readOnly && !noFileWrite && rest.some((part) => /^--(?:allowed|disallowed)-?tools$/i.test(part));
+  // Eigene Freigaben (--allowedTools) im Befehl ersetzen nur die von AIdeation angehängten Freigaben; die
+  // Datei-Rechte kommen immer aus der Zuweisung, und --disallowedTools allein schränkt nur weiter ein.
+  const custom = !readOnly && !noFileWrite && rest.some((part) => /^--allowed-?tools(?:=|$)/i.test(part));
+  const { own, others } = splitDisallowed(rest);
   const chosen = chosenRules(role, permissions, agentCommands);
-  // Selbst gesetzte Werkzeug-Regeln im Befehl bleiben (Entscheid des Admins); der Wächter prüft trotzdem.
   const policy = readOnly
     ? { create: false, edit: false, scopes: [], shell: false }
     : noFileWrite
       ? { create: false, edit: false, scopes: [] }
-      : custom
-        ? { create: true, edit: true, scopes: [] }
-        : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
-  const hook = guardHookCommand(policy);
+      : { create: chosen.includes(FILES_CREATE), edit: chosen.includes(FILES_EDIT), scopes: [...fileScopes] };
+  const hook = guardHookCommand({ ...policy, ...root }, guardLocation);
+  // Eigene und selbst gesetzte Sperren in einem einzigen --disallowedTools, damit keine Sperre verloren geht.
   const blocked = [
-    ...(policy.create && hook ? [] : CREATE_TOOLS),
-    ...(policy.edit && hook ? [] : EDIT_TOOLS),
-    ...(readOnly ? ['MultiEdit'] : []),
-    ...(hook && !readOnly ? [] : ['Bash']),
+    ...new Set([
+      ...(policy.create && hook ? [] : CREATE_TOOLS),
+      ...(policy.edit && hook ? [] : [...EDIT_TOOLS, 'MultiEdit']),
+      ...(hook && !readOnly ? [] : ['Bash']),
+      ...own,
+    ]),
   ];
-  const guard = hook
-    ? [
-        '--settings',
-        JSON.stringify({
-          hooks: {
-            PreToolUse: [
-              {
-                matcher: 'Write|Edit|MultiEdit|NotebookEdit|Bash',
-                hooks: [{ type: 'command', command: hook, timeout: 90 }],
-              },
-            ],
-          },
-        }),
-      ]
-    : [];
-  if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...rest];
-  const rules = [...chosen.filter(isToolRule), ...(chosen.includes(SERVICES_COMMAND) ? [servicesRule()] : [])];
+  // Die Deny-Regeln für Geheimnisse kommen immer mit, auch wenn der Wächter nicht startet.
+  const guard = [
+    '--settings',
+    JSON.stringify(agentSettings(hook, `Write|Edit|MultiEdit|NotebookEdit|Bash|${READ_MATCHER}`)),
+  ];
+  if (custom) return [binary, ...guard, ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []), ...others];
+  // „services“ ist keine Shell-Regel: Dienst-Aktionen fordert der Agent per @@SERVICES-Marker beim Worker an.
+  // Löschen und Umbenennen (git rm/mv) gehören zu den Datei-Rechten und gehen nur mit Wächter (gitFileProblem).
+  const rules = [...chosen.filter(isToolRule), ...(hook ? fileGitRules(policy) : [])];
   const directories = chosen.includes(LOGS_COMMAND)
     ? readDirectories.flatMap((directory) => ['--add-dir', directory])
     : [];
@@ -281,6 +345,28 @@ export function withAgentPermissions(
     ...guard,
     ...(rules.length ? ['--allowedTools', rules.join(',')] : []),
     ...(blocked.length ? ['--disallowedTools', blocked.join(',')] : []),
-    ...rest,
+    ...others,
   ];
+}
+
+/** Trennt selbst gesetzte Sperren (`--disallowedTools X`, `--disallowed-tools=X`) vom übrigen Befehl. */
+function splitDisallowed(parts: readonly string[]): { own: string[]; others: string[] } {
+  const own: string[] = [];
+  const others: string[] = [];
+  for (let index = 0; index < parts.length; index++) {
+    const match = /^--disallowed-?tools(?:=(.*))?$/is.exec(parts[index]!);
+    if (!match) {
+      others.push(parts[index]!);
+      continue;
+    }
+    const value = match[1] ?? parts[++index] ?? '';
+    // Nur an Kommas ausserhalb von Klammern trennen: Regeln wie „Bash(git status:*)“ enthalten Leerzeichen.
+    own.push(
+      ...value
+        .split(/,(?![^(]*\))/)
+        .map((tool) => tool.trim())
+        .filter(Boolean),
+    );
+  }
+  return { own, others };
 }

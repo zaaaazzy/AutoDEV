@@ -2,7 +2,10 @@ import { logged } from '../core/log.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { runCommand } from '../core/command.js';
+import { runInSandbox, sandboxMode, usesSandbox } from '../core/sandbox.js';
+import { projectSandbox } from '../runner/test-sandbox.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
 import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
 import { restrictedSystemCommand } from './system-agents.js';
@@ -22,30 +25,33 @@ const number = (value: unknown, min: number, max: number): number | null =>
 
 const round = (value: number | null): number | null => (value === null ? null : Math.round(value));
 
-const ESTIMATE_SECTION = /\n#{1,4}\s*Schätzung[^\n]*\n([\s\S]*)$/i;
+// Nur „Schätzung“, „Schätzung (…)“ oder „Schätzung:“ – nicht etwa „### Schätzungsgrundlage“ in den Hinweisen.
+const ESTIMATE_HEADING = /\n#{1,4}[ \t]*Schätzung[ \t]*(?:\([^\n]*\)|:)?[ \t]*(?=\n|$)/gi;
 
-/** Splits the author's answer into the requirement text and the estimate from its "Schätzung" section. */
-export function splitEstimate(output: string): { requirement: string; estimate: Estimate | null } {
-  const section = ESTIMATE_SECTION.exec(output);
-  if (!section) return { requirement: output.trim(), estimate: null };
-  const requirement = output.slice(0, section.index).trim();
-  const json = /\{[\s\S]*\}/.exec(section[1] ?? '');
-  if (!json) return { requirement, estimate: null };
+function toEstimate(json: string): Estimate | null {
   try {
-    const raw = JSON.parse(json[0]) as Record<string, unknown>;
+    const raw = JSON.parse(json) as Record<string, unknown>;
     const estimate = {
       effortHours: number(raw.effortHours, 0, 10_000),
       tokenEstimate: round(number(raw.tokenEstimate, 0, 1_000_000_000)),
       benefit: round(number(raw.benefit, 0, 10)),
       cost: round(number(raw.cost, 0, 10)),
     };
-    return { requirement, estimate: Object.values(estimate).some((value) => value !== null) ? estimate : null };
+    return Object.values(estimate).some((value) => value !== null) ? estimate : null;
   } catch {
-    return { requirement, estimate: null };
+    return null;
   }
 }
 
-const toEstimate = (json: string): Estimate | null => splitEstimate(`\n## Schätzung\n${json}`).estimate;
+/** Splits the author's answer into the requirement text and the estimate from its last "Schätzung" section. */
+export function splitEstimate(output: string): { requirement: string; estimate: Estimate | null } {
+  const section = [...output.matchAll(ESTIMATE_HEADING)].at(-1);
+  if (!section) return { requirement: output.trim(), estimate: null };
+  return {
+    requirement: output.slice(0, section.index).trim(),
+    estimate: parseEstimate(output.slice(section.index + section[0].length)),
+  };
+}
 
 /**
  * Reads a bare JSON object (the quick estimation answer has no "Schätzung" heading). CLI output may carry
@@ -103,6 +109,14 @@ export async function loadActualReference(
   };
 }
 
+/**
+ * Einheit der Schätzung für beide Prompts (Schnellschätzung und Auftragsautor): gemessen und eingeplant wird die
+ * Laufzeit der Agents, nicht die Arbeitszeit eines Menschen.
+ */
+export const ESTIMATE_UNIT_HINT =
+  'effortHours: erwartete Agent-Laufzeit in Stunden (Summe aller Agent-Schritte des Auftrags, z. B. 0.3), ' +
+  'nicht die Arbeitszeit eines Menschen; tokenEstimate: Tokens aller Agent-Läufe des Auftrags.';
+
 /** Abschnitt für den Autor-Prompt: die Schätzung an echten Ist-Werten ausrichten. */
 export function referenceSection(reference: ActualReference): string {
   const scope = reference.category ? `der Kategorie „${reference.category}“` : 'ohne Kategorie';
@@ -143,18 +157,41 @@ export async function quickEstimate(prompt: string, fetchImpl: typeof fetch = pa
  * Uses the external CLI chosen for the author role. It only has to answer, so by default it gets no permission flags,
  * and it always runs in its own empty temp folder: idea texts come from users and must not be able to touch files.
  */
-async function estimateWithCommand(command: string[], prompt: string): Promise<Estimate | null> {
+async function estimateWithCommand(
+  command: string[],
+  prompt: string,
+  project: string,
+  sandboxed: boolean,
+): Promise<Estimate | null> {
   const cwd = await mkdtemp(join(tmpdir(), 'dev-log-estimate-'));
   try {
-    const result = await runCommand(buildInvocation(command, prompt), cwd, {
-      timeoutMs: ESTIMATE_TIMEOUT_MS * 2,
-      env: agentEnvironment(),
-    });
+    const invocation = buildInvocation(command, prompt);
+    const options = { timeoutMs: ESTIMATE_TIMEOUT_MS * 2, env: agentEnvironment() };
+    // Docker-Sandbox (Standard): auch die Schätzung läuft im Container, mit dem leeren Ordner nur lesend.
+    const result = sandboxed
+      ? await runInSandbox(invocation, cwd, {
+          ...options,
+          environment: options.env,
+          runId: `estimate-${randomUUID().slice(0, 8)}`,
+          project,
+          readOnly: true,
+        })
+      : await runCommand(invocation, cwd, options);
     return result.exitCode === 0 ? parseEstimate(result.output) : null;
   } finally {
     await rm(cwd, { recursive: true, force: true });
   }
 }
+
+/** Schnellschätzung speichern: füllt nur leere Felder; eine neue Stunden- oder Token-Schätzung gilt als `quick`. */
+export const QUICK_ESTIMATE_SQL = `
+  UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
+        benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5),
+        estimate_source = CASE WHEN estimate_source IS NULL AND effort_hours IS NULL AND token_estimate IS NULL
+                                 AND ($2::float8 IS NOT NULL OR $3::bigint IS NOT NULL) THEN 'quick'
+                               ELSE estimate_source END
+  WHERE id = $1
+`;
 
 /**
  * Estimates ideas that have no values yet; values entered by users are kept. Failures are noted once, not retried.
@@ -166,8 +203,8 @@ export async function estimateNewIdeas(
   estimate?: (prompt: string) => Promise<Estimate | null>,
 ): Promise<number> {
   const ideas = (
-    await pool.query<{ id: string; title: string; description: string }>(
-      `SELECT id, title, description FROM ideation_items
+    await pool.query<{ id: string; title: string; description: string; category: string | null }>(
+      `SELECT id, title, description, category FROM ideation_items
         WHERE project_slug = $1 AND status IN ('idea', 'considering', 'review', 'requested') AND agent_note IS NULL
           AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
         ORDER BY created_at LIMIT 5`,
@@ -177,11 +214,23 @@ export async function estimateNewIdeas(
   if (!ideas.length) return 0;
   const context = (await loadProjectContext(pool, project)).slice(0, 600);
   const external = estimate ? null : await restrictedSystemCommand(pool, 'author');
-  const run = estimate ?? (external ? (prompt: string) => estimateWithCommand(external, prompt) : quickEstimate);
+  const sandboxed = external ? usesSandbox(sandboxMode(await projectSandbox(pool, project))) : false;
+  const run =
+    estimate ??
+    (external ? (prompt: string) => estimateWithCommand(external, prompt, project, sandboxed) : quickEstimate);
+  const references = new Map<string | null, ActualReference | null>();
   for (const idea of ideas) {
+    if (!references.has(idea.category))
+      references.set(
+        idea.category,
+        await loadActualReference(pool, project, idea.category).catch(logged('estimation', null)),
+      );
+    const reference = references.get(idea.category);
     const prompt = [
       'Schätze Aufwand eines Entwicklungsauftrags. Antworte nur mit einem JSON-Objekt:',
-      '{"effortHours": Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',
+      '{"effortHours": Agent-Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',
+      ESTIMATE_UNIT_HINT,
+      reference ? referenceSection(reference) : '',
       context ? `Projekt: ${context}` : '',
       `Titel: ${idea.title}\n${idea.description.slice(0, 1500)}`,
       // Aus GitHub übernommene Ideen: fremder Text, nur Daten.
@@ -197,11 +246,13 @@ export async function estimateNewIdeas(
       );
       continue;
     }
-    await pool.query(
-      `UPDATE ideation_items SET effort_hours = COALESCE(effort_hours, $2), token_estimate = COALESCE(token_estimate, $3),
-              benefit = COALESCE(benefit, $4), cost = COALESCE(cost, $5) WHERE id = $1`,
-      [idea.id, result.effortHours, result.tokenEstimate, result.benefit, result.cost],
-    );
+    await pool.query(QUICK_ESTIMATE_SQL, [
+      idea.id,
+      result.effortHours,
+      result.tokenEstimate,
+      result.benefit,
+      result.cost,
+    ]);
   }
   return ideas.length;
 }

@@ -64,3 +64,34 @@ test('Abnahme-Anweisung: fehlende Abdeckungsmessung ist kein Ablehnungsgrund', a
   assert.match(acceptanceInstructions(['A'], ['Jedes Kriterium ist durch einen Test belegt']), /allein kein Grund/);
   assert.match(COVERAGE_INSTRUCTIONS, /kein Grund, die Abnahme abzulehnen/);
 });
+
+test('Abnahme: ein ausgelassener DoD-Punkt bleibt „nicht geprüft“; die Anweisung verlangt jeden Punkt', async () => {
+  const { acceptanceInstructions, acceptanceProblems } = await import('./acceptance.js');
+  const done = [
+    'Tests grün',
+    'Manuelle Kriterien nur in begründeten Ausnahmen',
+    'Abgenommen wird per Freigabe in der Vorschau',
+  ];
+  const instructions = acceptanceInstructions(['A'], done);
+  // Das Beispiel nennt jede DoD-Nummer, damit kein Punkt wegfällt.
+  const example = JSON.parse(/^@@ACCEPTANCE (.*)$/m.exec(instructions)?.[1] ?? '{}') as { done: { nr: number }[] };
+  assert.deepEqual(
+    example.done.map((entry) => entry.nr),
+    [1, 2, 3],
+  );
+  assert.match(instructions, /alle 3 DoD-Punkte/);
+  // Ausgelassen bleibt abgelehnt; als manuell gemeldet blockiert der Punkt nicht.
+  const criteria = [{ nr: 1, met: true, note: '' }];
+  assert.deepEqual(
+    acceptanceProblems({ criteria, done: [{ nr: 1, met: true, note: '' }] }, ['A'], done).map((line) =>
+      line.slice(0, 5),
+    ),
+    ['DoD 2', 'DoD 3'],
+  );
+  const reported = [
+    { nr: 1, met: true, note: '' },
+    { nr: 2, met: true, note: '' },
+    { nr: 3, met: false, manual: true, note: 'Freigabe in der Vorschau' },
+  ];
+  assert.deepEqual(acceptanceProblems({ criteria, done: reported }, ['A'], done), []);
+});

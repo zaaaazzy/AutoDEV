@@ -4,28 +4,56 @@ import { access } from './access.js';
 import { DEV_COLUMNS } from './development.js';
 import { COMMENT_COLUMNS } from './idea-comments.js';
 import { IDEA_COLUMNS, IDEA_SOURCES } from './ideation.js';
+import { CLOSED_DEVELOPMENT_STATUSES, CLOSED_IDEATION_STATUSES } from '../core/status.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { loadCalibration, withCalibratedHours } from '../core/estimate-calibration.js';
+
+/** Höchstzahl abgeschlossener Einträge je Liste im Board; offene werden immer vollständig geladen. */
+const CLOSED_LIMIT = 200;
+
+/**
+ * Lädt alle offenen Einträge (auch ohne Status) und nur die neuesten abgeschlossenen, neueste zuerst.
+ * Beide Mengen schliessen sich aus, darum entstehen keine doppelten Einträge.
+ */
+async function openAndRecentClosed(
+  pool: Pool,
+  table: 'ideation_items' | 'development_items',
+  columns: string,
+  filter: string,
+  params: unknown[],
+  closed: readonly string[],
+): Promise<{ effortHours?: number | null; estimateSource?: string | null }[]> {
+  const status = `status = ANY($${params.length + 1}::text[])`;
+  const result = await pool.query(
+    `(SELECT ${columns} FROM ${table} WHERE ${filter} AND (${status}) IS NOT TRUE)
+     UNION ALL
+     (SELECT ${columns} FROM ${table} WHERE ${filter} AND ${status} ORDER BY created_at DESC LIMIT ${CLOSED_LIMIT})
+     ORDER BY "createdAt" DESC`,
+    [...params, closed],
+  );
+  return result.rows;
+}
 
 export function registerBoardRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/board', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     // Optionaler Filter „Herkunft“ (?source=visionary); unbekannte Werte zeigen alle Ideen.
     const source =
       typeof request.query.source === 'string' && IDEA_SOURCES.has(request.query.source) ? request.query.source : null;
-    const [ideas, development, comments] = await Promise.all([
-      pool.query(
-        `SELECT ${IDEA_COLUMNS} FROM ideation_items WHERE project_slug = $1 AND ($2::text IS NULL OR source = $2)
-          ORDER BY created_at DESC LIMIT 200`,
-        [slug, source],
-      ),
-      pool.query(
-        `SELECT ${DEV_COLUMNS} FROM development_items WHERE project_slug = $1
-          ORDER BY created_at DESC LIMIT 200`,
+    const ideaFilter = 'project_slug = $1 AND ($2::text IS NULL OR source = $2)';
+    const [ideas, development, comments, calibration] = await Promise.all([
+      openAndRecentClosed(pool, 'ideation_items', IDEA_COLUMNS, ideaFilter, [slug, source], CLOSED_IDEATION_STATUSES),
+      openAndRecentClosed(
+        pool,
+        'development_items',
+        DEV_COLUMNS,
+        'project_slug = $1',
         [slug],
+        CLOSED_DEVELOPMENT_STATUSES,
       ),
       pool.query(
         `SELECT ${COMMENT_COLUMNS}
@@ -33,14 +61,20 @@ export function registerBoardRoutes(app: Router, pool: Pool): void {
           WHERE i.project_slug = $1 ORDER BY c.created_at`,
         [slug],
       ),
+      loadCalibration(pool, slug),
     ]);
-    response.json({ ideas: ideas.rows, development: development.rows, comments: comments.rows });
+    // Aufwand wird in kalibrierten Agent-Stunden angezeigt; effortHours bleibt die gespeicherte Schätzung.
+    response.json({
+      ideas: withCalibratedHours(ideas, calibration),
+      development: withCalibratedHours(development, calibration),
+      comments: comments.rows,
+    });
   });
 
   app.get('/projects/:slug/agent-runs', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const runs = await pool.query(

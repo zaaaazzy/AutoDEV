@@ -13,8 +13,10 @@ import {
   untracked,
 } from '@angular/core';
 import type { SortingState } from '@tanstack/angular-table';
+import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
   type DataColumn,
@@ -28,7 +30,8 @@ import type { FormValues } from '../../shared/forms.js';
 import { DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
-import { orderAgentName } from '../dashboard/order-shares.js';
+import { NO_AGENT, orderAgentName } from '../dashboard/order-shares.js';
+import { bulkSelectable, canRetry } from './order-bulk.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
 
@@ -57,6 +60,7 @@ export class OrderDetailSlotDirective {
     NgClass,
     NgTemplateOutlet,
     BugIconComponent,
+    BulkBarComponent,
     DataTableComponent,
     DataCellDirective,
     DataActionsDirective,
@@ -69,7 +73,8 @@ export class OrderDetailSlotDirective {
 })
 export class OrderTableComponent {
   private readonly orders = inject(OrderService);
-  private readonly store = inject(ProjectStore);
+  protected readonly store = inject(ProjectStore);
+  protected readonly auth = inject(AuthService);
   /** Filter aus einem Dashboard-Link (z. B. Status „Blockiert“). */
   protected readonly linkFilters = computed(() => (this.linkFiltered() ? this.store.filtersFor('development') : {}));
 
@@ -88,6 +93,11 @@ export class OrderTableComponent {
   /** Mehrfachauswahl wie in der Datentabelle; ohne Funktion keine Häkchen. */
   readonly selectable = input<((item: DevelopmentItem) => boolean) | null>(null);
   readonly selection = model<ReadonlySet<string>>(new Set());
+  /**
+   * Sammelaktionen: Häkchen an offenen Aufträgen und darüber eine schmale Leiste („Erneut versuchen“, „Priorität“).
+   * Ein eigenes `selectable` der einbettenden Ansicht hat Vorrang (dann ohne Leiste, z. B. „Aufträge hinzufügen“).
+   */
+  readonly bulk = input(false);
   /** false: kein Bearbeiten-Stift in der Zeile (z. B. unter „Aktionen“). */
   readonly editable = input(true);
   /** Filter aus Dashboard-Links (#development?status=…) anwenden; unter „Aktionen“ aus. */
@@ -96,6 +106,31 @@ export class OrderTableComponent {
   protected readonly customDetail = contentChild(OrderDetailSlotDirective);
 
   protected readonly openOrder = signal<string | null>(null);
+
+  protected readonly bulkActive = computed(() => this.bulk() && !this.selectable());
+  protected readonly rowSelectable = computed(() => this.selectable() ?? (this.bulk() ? bulkSelectable : null));
+  /** Gewählte Aufträge, die noch in der Liste stehen und wählbar sind (nach dem Nachladen fallen erledigte weg). */
+  protected readonly picked = computed(() => {
+    const ids = this.selection();
+    return this.items().filter((item) => ids.has(item.id) && bulkSelectable(item));
+  });
+  protected readonly retryable = computed(() => this.picked().filter(canRetry));
+
+  protected clearSelection(): void {
+    this.selection.set(new Set());
+  }
+
+  protected async retryPicked(): Promise<void> {
+    await this.orders.retryMany(this.retryable());
+    this.clearSelection();
+  }
+
+  protected async setPriority(select: HTMLSelectElement): Promise<void> {
+    const priority = select.value as DevelopmentItem['priority'];
+    select.value = '';
+    if (!priority) return;
+    await this.orders.setPriorityMany(this.picked(), priority);
+  }
 
   constructor() {
     // Link auf einen Auftrag (#development/<id>): Zeile aufklappen.
@@ -126,14 +161,19 @@ export class OrderTableComponent {
     { id: 'agent', header: 'Agent', value: (item) => orderAgentName(item, this.store.data().agents) },
     {
       id: 'effortHours',
-      header: 'Aufwand',
-      value: (item) => formatHours(item.effortHours),
-      sortValue: (item) => item.effortHours ?? -1,
+      header: 'Aufwand (Agent-Std.)',
+      value: (item) => formatHours(item.calibratedHours ?? item.effortHours),
+      sortValue: (item) => item.calibratedHours ?? item.effortHours ?? -1,
     },
   ];
   protected readonly columns = computed(() => {
     const extra = this.extraColumns();
     const hidden = new Set(this.hiddenColumns());
+    // „Agent“ nur zeigen, wenn mindestens ein Auftrag einen Agent hat (oder danach gefiltert wird);
+    // sonst steht in jeder Zeile nur „Ohne Agent“.
+    const agents = this.store.data().agents;
+    const agentFiltered = Boolean(this.linkFilters()['agent']?.length);
+    if (!agentFiltered && this.items().every((item) => orderAgentName(item, agents) === NO_AGENT)) hidden.add('agent');
     const replaced = new Set(extra.map((column) => column.id));
     const base = this.baseColumns
       .filter((column) => !hidden.has(column.id))

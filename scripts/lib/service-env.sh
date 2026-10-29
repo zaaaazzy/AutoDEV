@@ -5,13 +5,14 @@
 # Ordner für die Env-Dateien der Dienste (nur für den Benutzer lesbar).
 SERVICE_ENV_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aideation"
 
-# Standard-Zugang aus docker-compose.yml (ohne DEV_LOG_DB_PASSWORD in der .env).
-DEFAULT_DATABASE_URL="postgresql://devlog:devlog_local_dev@localhost:5433/aideation"
+# .env der Installation (vom Einrichtungs-Assistenten geschrieben); ROOT setzt das einbindende Skript.
+PROJECT_ENV_FILE="${ROOT:+$ROOT/.env}"
 
 # AIDEATION_INSTALL_DRY_RUN=1: nur Dateien schreiben, Dienst nicht registrieren (Tests).
 install_dry_run() { [ "${AIDEATION_INSTALL_DRY_RUN:-}" = "1" ]; }
 
-# Letzter Wert von <schluessel> in <datei> (leer, wenn Datei oder Schlüssel fehlt).
+# Letzter Wert von <schluessel> in der Env-Datei eines Dienstes <datei> (leer, wenn Datei oder Schlüssel fehlt).
+# Diese Dateien schreibt write_env_file unverändert, ohne Anführungszeichen – darum hier keine Auswertung.
 env_file_get() {
   local file="$1" key="$2" line value=""
   [ -f "$file" ] || return 0
@@ -21,20 +22,59 @@ env_file_get() {
   printf '%s' "$value"
 }
 
-# Wert für <schluessel>: Umgebung vor bestehender Env-Datei vor <standard>. So behält ein erneuter Lauf die Zugänge.
+# Letzter Wert von <schluessel> in der .env <datei>, nach denselben Regeln wie parseEnv (src/core/env-file.ts):
+# „export “ erlaubt, Kommentarzeilen übersprungen, Wert in '…' oder "…" ohne die Zeichen, sonst ohne „ #Kommentar“.
+dotenv_get() {
+  local file="$1" key="$2" line value="" found=""
+  local pattern='^[[:space:]]*(export[[:space:]]+)?([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*=(.*)$'
+  [ -n "$file" ] && [ -f "$file" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "${line#"${line%%[![:space:]]*}"}" in '#'*) continue ;; esac
+    [[ "$line" =~ $pattern ]] && [ "${BASH_REMATCH[2]}" = "$key" ] || continue
+    found="${BASH_REMATCH[3]}"
+    found="${found#"${found%%[![:space:]]*}"}"
+    found="${found%"${found##*[![:space:]]}"}"
+    if [ "${#found}" -ge 2 ] && { [[ "$found" == \'*\' ]] || [[ "$found" == \"*\" ]]; }; then
+      value="${found:1:${#found}-2}"
+    else
+      value="${found%%[[:space:]]#*}"
+      value="${value%"${value##*[![:space:]]}"}"
+    fi
+  done <"$file"
+  printf '%s' "$value"
+}
+
+# Wert für <schluessel>: Umgebung vor .env der Installation vor bestehender Env-Datei des Dienstes vor <standard>.
+# Die .env geht vor: Setzt der Einrichtungs-Assistent ein neues DB-Passwort, übernimmt ein erneuter Lauf es.
 resolve_value() {
   local key="$1" file="$2" fallback="${3:-}" value
   value="${!key:-}"
+  [ -n "$value" ] || value="$(dotenv_get "$PROJECT_ENV_FILE" "$key")"
   [ -n "$value" ] || value="$(env_file_get "$file" "$key")"
   printf '%s' "${value:-$fallback}"
 }
 
-# Warnt (ohne den Wert auszugeben), wenn die Datenbank-URL das öffentlich bekannte Standardpasswort nutzt.
-warn_default_password() {
+# Bricht ab (ohne den Wert auszugeben), wenn die Datenbank-URL fehlt oder das öffentlich bekannte Standardpasswort
+# nutzt – Worker und Server würden sich damit nicht anmelden bzw. den Start verweigern. Das Standardpasswort nur mit
+# DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD=1 (Wegwerf-Umgebung), dann mit Warnung.
+require_database_url() {
+  if [ -z "$1" ]; then
+    echo "FEHLER: DEV_LOG_DATABASE_URL fehlt – weder in der Umgebung noch in der .env der Installation noch in der" \
+      "Env-Datei des Dienstes. Erst ./start.sh --setup ausführen (schreibt die .env), dann erneut installieren" \
+      "(siehe docs/installation.md)." >&2
+    exit 1
+  fi
   case "$1" in
     *devlog_local_dev*)
-      echo "WARNUNG: Die Datenbank-URL nutzt das Standardpasswort „devlog_local_dev“. Setze DEV_LOG_DB_PASSWORD in" \
-        "der .env und installiere mit DEV_LOG_DATABASE_URL=… erneut (siehe docs/installation.md)." >&2
+      if [ "${DEV_LOG_ALLOW_DEFAULT_DB_PASSWORD:-}" = "1" ]; then
+        echo "WARNUNG: Die Datenbank-URL nutzt das Standardpasswort „devlog_local_dev“ (ausdrücklich erlaubt)." >&2
+        return 0
+      fi
+      echo "FEHLER: Die Datenbank-URL nutzt das öffentlich bekannte Standardpasswort „devlog_local_dev“. Erst" \
+        "./start.sh --setup ausführen (setzt DEV_LOG_DB_PASSWORD und ändert es in PostgreSQL), dann erneut installieren" \
+        "(siehe docs/installation.md)." >&2
+      exit 1
       ;;
   esac
 }
@@ -75,6 +115,52 @@ write_env_file() {
       if [ -n "${pair#*=}" ]; then printf '%s\n' "$pair"; fi
     done
   } | write_private_file "$file"
+}
+
+# Ordner der newsyslog-Regeln (macOS). AIDEATION_NEWSYSLOG_DIR nur für Tests: dann ohne sudo und ohne root:wheel.
+NEWSYSLOG_DIR="${AIDEATION_NEWSYSLOG_DIR:-/etc/newsyslog.d}"
+
+# Legt die newsyslog-Regel <name>.conf für <log> an: rotiert ab <groesse> KB, behält <anzahl> komprimierte Stände.
+# Flag N: kein Signal (Worker öffnet das Log selbst neu, siehe src/core/log-file.ts; der Wächter startet alle zwei
+# Minuten neu). Die neue Datei gehört dem aufrufenden Benutzer mit Rechten 600. Mehrfach ausführbar: Nur wenn die
+# Regel fehlt oder abweicht, wird sie (per sudo, root:wheel, 644) geschrieben.
+install_log_rotation() {
+  local name="$1" log="$2" count="$3" size="$4" target tmp
+  target="$NEWSYSLOG_DIR/$name.conf"
+  case "$log" in
+    *[[:space:]]*)
+      echo "WARNUNG: Log-Pfad mit Leerzeichen ($log) – newsyslog kann ihn nicht rotieren, Regel nicht angelegt." >&2
+      return 0
+      ;;
+  esac
+  tmp="$(mktemp)"
+  {
+    echo "# AIdeation: Rotation von $(basename "$log") (erzeugt von scripts/install-*.sh)."
+    echo "# logfilename	[owner:group]	mode	count	size(KB)	when	flags"
+    printf '%s\t%s:%s\t600\t%s\t%s\t*\tNJ\n' "$log" "$(id -un)" "$(id -gn)" "$count" "$size"
+  } >"$tmp"
+  if [ -f "$target" ] && cmp -s "$tmp" "$target"; then
+    rm -f "$tmp"
+    echo "Log-Rotation unverändert: $target"
+    return 0
+  fi
+  if [ -n "${AIDEATION_NEWSYSLOG_DIR:-}" ]; then
+    mkdir -p "$NEWSYSLOG_DIR"
+    install -m 644 "$tmp" "$target"
+  elif install_dry_run; then
+    rm -f "$tmp"
+    echo "Probelauf: Log-Rotation $target nicht angelegt."
+    return 0
+  else
+    echo "Log-Rotation: lege $target an (sudo, Besitzer root:wheel) …"
+    if ! sudo install -o root -g wheel -m 644 "$tmp" "$target"; then
+      rm -f "$tmp"
+      echo "WARNUNG: Log-Rotation nicht eingerichtet (sudo abgelehnt) – Skript später erneut ausführen." >&2
+      return 1
+    fi
+  fi
+  rm -f "$tmp"
+  echo "Log-Rotation eingerichtet: $target"
 }
 
 # XML-Escaping für Werte in einer Plist (& zuerst, sonst würde &lt; doppelt escapt).

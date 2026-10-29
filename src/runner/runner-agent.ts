@@ -4,6 +4,14 @@ import { decryptSecret } from '../core/secrets.js';
 import { logged } from '../core/log.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 import { type CommandResult, redactOutput } from '../core/command.js';
+import {
+  readOnlyWorkspace,
+  SANDBOX_GUARD,
+  SANDBOX_WORKDIR,
+  sandboxExecutor,
+  sandboxMode,
+  usesSandbox,
+} from '../core/sandbox.js';
 import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import {
   FILES_CREATE,
@@ -15,12 +23,15 @@ import {
 } from '../agent/tool-permissions.js';
 import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
 import { describeCommand, loadRouting, routable, routeModel } from '../agent/model-routing.js';
+import { calibratedHours, loadCalibration } from '../core/estimate-calibration.js';
 import { runTestAgent } from './test-agent.js';
 import { projectEnvironment } from './project-command.js';
 import { agentEnvironment, buildInvocation } from './runner-prompts.js';
 import type { BuiltinAgent, WorkflowAgent } from './runner-types.js';
 import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
 import { runVisualStep } from './visual-check.js';
+import { captureInSandbox } from './visual-sandbox.js';
+import { projectSandbox, projectTestExecutor } from './test-sandbox.js';
 import { orderFilePaths, type RunContext } from './runner-context.js';
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
@@ -35,6 +46,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
   onProgress,
   model,
   changedFiles: changed,
+  execute,
 }) => {
   if (agent.role === 'tester') {
     const startedAt = Date.now();
@@ -51,6 +63,8 @@ export const runBuiltinAgent: BuiltinAgent = async ({
         signal,
         // Testbefehle sind Projektcode: nur das gefilterte Environment, nicht das der Agent-CLIs.
         env: projectEnvironment(cwd),
+        // In der Sandbox: Testcontainer statt Host.
+        ...(execute ? { execute } : {}),
       },
       pool,
     );
@@ -105,8 +119,11 @@ export const runBuiltinAgent: BuiltinAgent = async ({
     files,
     commands,
     model,
+    ...(execute ? { execute } : {}),
   });
 };
+
+export { projectSandbox } from './test-sandbox.js';
 
 /** Vom Routing gewähltes Modell eines Schritts: Ollama-Modell oder CLI-Befehl samt greifender Regel. */
 export interface RoutedModel {
@@ -120,9 +137,15 @@ export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<
   if (!routable(agent.role)) return { rule: null };
   if (ctx.routing === undefined) ctx.routing = await loadRouting(ctx.pool, ctx.item.projectSlug).catch(() => null);
   if (!ctx.routing) return { rule: null };
+  // Die Regeln vergleichen Agent-Stunden: Schätzung mit dem gemessenen Faktor ihrer Herkunft umrechnen.
+  const estimate = ctx.item.effortHours ?? null;
+  if (ctx.routedHours === undefined)
+    ctx.routedHours = await loadCalibration(ctx.pool, ctx.item.projectSlug)
+      .then((calibration) => calibratedHours(estimate, ctx.item.estimateSource, calibration))
+      .catch(() => estimate);
   const decision = routeModel(ctx.routing.rules, {
     category: ctx.item.category ?? null,
-    effortHours: ctx.item.effortHours ?? null,
+    effortHours: ctx.routedHours,
     retryCount: ctx.item.retryCount ?? 0,
     budgetPercent: ctx.budgetPercent ?? 0,
   });
@@ -232,9 +255,49 @@ export async function invokeAgent(
       onProgress: hooks.onAction,
       ...(routed.model ? { model: routed.model } : {}),
       ...(agent.role === 'tester' ? { changedFiles: await orderFilePaths(ctx) } : {}),
+      // Lokales Modell in der Sandbox: Shell-Befehle laufen im Container; die Projekttests im Testcontainer.
+      ...(sandboxed
+        ? {
+            execute:
+              agent.role === 'tester'
+                ? await projectTestExecutor({
+                    project: item.projectSlug,
+                    cwd: options.cwd,
+                    runId: ctx.runId,
+                    docker: execute,
+                  })
+                : agentExecute,
+          }
+        : {}),
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
+  // Docker-Sandbox (DEV_LOG_AGENT_SANDBOX, Standard docker): Jeder Agent-Schritt läuft in einem eigenen Container
+  // (Label aideation.run), der Worktree heisst dort /workspace – für lesende Rollen nur :ro –, und der Wächter ist der
+  // im Image. Fehlen Docker oder Image, scheitert der Schritt – kein Rückfall auf den Host.
+  const sandboxed = usesSandbox(sandboxMode(await projectSandbox(pool, item.projectSlug)));
+  const agentExecute = sandboxed
+    ? sandboxExecutor(options.cwd, {
+        runId: ctx.runId,
+        project: item.projectSlug,
+        readOnly: readOnlyWorkspace(agent.role),
+        docker: execute,
+      })
+    : execute;
+  const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;
+  // Rechte des Agents; der Wächter prüft gegen den Projektordner des Laufs, nicht gegen das cwd der CLI.
+  const withRights = (command: string[]): string[] =>
+    withAgentPermissions(
+      command,
+      agent.role,
+      permissions,
+      agent.allowedCommands ?? null,
+      agent.fileScope,
+      // Im Container gibt es die Log-Ordner des Hosts nicht.
+      sandboxed ? [] : undefined,
+      agentCwd,
+      sandboxed ? SANDBOX_GUARD : undefined,
+    );
   // Visuelle Prüfung: Screenshots, Pixel-Vergleich und Browser-Prüfungen; der Befehl des Agents dient nur dem KI-Urteil.
   if (agent.role === 'visual_tester') {
     const visual = await runVisualStep({
@@ -244,26 +307,26 @@ export async function invokeAgent(
       criteria: ctx.criteria ?? [],
       signal: hooks.signal,
       onProgress: hooks.onAction,
-      judgeCommand:
-        configured &&
-        withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
-      execute,
+      judgeCommand: configured && withRights(configured),
+      // In der Sandbox: Aufnahme mit Playwright aus dem Image, das KI-Urteil im Container des Schritts.
+      execute: agentExecute,
+      ...(sandboxed
+        ? { capture: captureInSandbox({ runId: ctx.runId, project: item.projectSlug, docker: execute }) }
+        : {}),
     });
     return { ...visual, fromTests: true };
   }
-  const command =
-    configured &&
-    withAgentPermissions(configured, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope);
+  const command = configured && withRights(configured);
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
     const written = await executeAgentCommand(
-      execute,
+      agentExecute,
       buildInvocation(
-        // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers.
-        withAgentPermissions(fallbackCommand, agent.role, permissions, agent.allowedCommands ?? null, agent.fileScope),
+        // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers (in der Sandbox im Container).
+        withRights(fallbackCommand),
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
-      options.cwd,
+      agentCwd,
       {
         timeoutMs: options.timeoutMs,
         env: agentEnvironment(options.cwd),
@@ -295,9 +358,9 @@ export async function invokeAgent(
   if (!command) return agent.role === 'tester' ? { ...(await builtinRun()), fromTests: true } : builtinRun();
   const run = (resume: ResumableSession | null | undefined): Promise<CommandResult> =>
     executeAgentCommand(
-      execute,
+      agentExecute,
       buildInvocation(command, resume ? resumePrompt(prompt, resume) : prompt),
-      options.cwd,
+      agentCwd,
       {
         timeoutMs: options.timeoutMs,
         env: agentEnvironment(options.cwd),

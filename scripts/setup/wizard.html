@@ -358,7 +358,9 @@
         password: '',
         domain: '',
         projectRoots: '',
-        installWorker: true,
+        // Standard: Worker im Container (docker compose), sonst auf dem Host (launchd, systemd, Aufgabenplanung).
+        workerMode: 'container',
+        claudeToken: '',
         demoData: false,
         done: false,
       };
@@ -392,16 +394,17 @@
         const c = state.check;
         const install = {
           docker: 'Docker Desktop installieren und starten: https://docs.docker.com/get-docker/',
-          node: 'Node.js 22 oder neuer: https://nodejs.org/',
+          node: 'Node.js 22.12 oder neuer: https://nodejs.org/',
         };
         $('body').innerHTML = `
-          <p class="intro">AIdeation läuft in Docker; der Worker, der die Agents startet, läuft direkt auf deinem Rechner.</p>
+          <p class="intro">AIdeation läuft in Docker – auf Wunsch auch der Worker, der die Agents startet.</p>
           <ul class="checks">
-            ${item(c ? c.node.ok : null, 'Node.js 22+', c ? `gefunden: ${escape(c.node.version)}` : 'wird geprüft …')}
+            ${item(c ? c.node.ok : null, 'Node.js 22.12+', c ? (c.node.ok ? `gefunden: ${escape(c.node.version)}` : `gefunden: ${escape(c.node.version)} – ${install.node}`) : 'wird geprüft …')}
             ${item(c ? c.docker.ok : null, 'Docker läuft', c ? (c.docker.ok ? `Version ${escape(c.docker.version)}` : install.docker) : 'wird geprüft …')}
             ${item(c ? c.compose.ok : null, 'Docker Compose', c ? (c.compose.ok ? escape(c.compose.version) : 'Teil von Docker Desktop') : 'wird geprüft …')}
             ${item(c ? c.git.ok : null, 'Git', c ? (c.git.ok ? escape(c.git.version) : 'https://git-scm.com/downloads') : 'wird geprüft …')}
             ${item(c ? c.claude.ok : null, 'Claude Code (optional)', c ? (c.claude.ok ? escape(c.claude.version) : 'Für die besten Ergebnisse: https://claude.com/claude-code') : '…', true)}
+            ${item(c ? c.chromium.ok : null, 'Chromium für Playwright (optional)', c ? (c.chromium.ok ? 'installiert' : 'Wird bei der Installation geladen – für die optische Abnahme und Browser-Spiele (Phaser)') : '…', true)}
             ${item(c ? c.ollama.ok : null, 'Ollama (optional, kostenlos)', c ? (c.ollama.ok ? escape(c.ollama.version) : 'Lokales Modell: https://ollama.com') : '…', true)}
           </ul>
           ${c && c.envExists ? '<p class="hint">Es gibt bereits eine Konfiguration (.env). Sie wird gesichert (<code>.env.bak-…</code>) und ergänzt: Zugang und ausgefüllte Optionen werden gesetzt, alle anderen Werte – auch der Secret Key – bleiben erhalten.</p>' : ''}`;
@@ -440,12 +443,21 @@
           <label>Projektbereich – nur hier legt AIdeation Projekte an und arbeiten Agents
             <input type="text" id="roots" value="${escape(state.projectRoots)}" placeholder="z. B. /Users/du/Projekte" />
           </label>
-          <label class="check"><input type="checkbox" id="worker" ${state.installWorker ? 'checked' : ''} /> Worker automatisch beim Anmelden starten (empfohlen)</label>
+          <p class="hint"><strong>Worker</strong> – startet die Agents und führt Aufträge aus:</p>
+          <label class="check"><input type="radio" name="worker" id="worker-container" value="container" ${state.workerMode === 'container' ? 'checked' : ''} /> Worker im Container (empfohlen) – läuft mit <code>docker compose</code>, nichts weiter zu installieren</label>
+          <label class="check"><input type="radio" name="worker" id="worker-host" value="host" ${state.workerMode === 'host' ? 'checked' : ''} /> Worker auf diesem Rechner, automatisch beim Anmelden (launchd, systemd bzw. Aufgabenplanung)</label>
+          <label class="check"><input type="radio" name="worker" id="worker-none" value="none" ${state.workerMode === 'none' ? 'checked' : ''} /> Später von Hand starten (<code>npm run worker</code>)</label>
+          <label>Claude-Token für die Agents (optional, Ausgabe von <code>claude setup-token</code>)
+            <input type="password" id="claude-token" value="${escape(state.claudeToken)}" autocomplete="off" placeholder="sk-ant-oat01-…" />
+          </label>
+          <p class="hint">Die Agents laufen in Docker-Containern ohne dein <code>~/.claude</code>. Der Token steht danach in der <code>.env</code> (<code>CLAUDE_CODE_OAUTH_TOKEN</code>); leer lassen behält einen vorhandenen.</p>
           <label class="check"><input type="checkbox" id="demo" ${state.demoData ? 'checked' : ''} /> Mit Beispielprojekt „Velowerk“ starten</label>
           <p class="hint">Eine Velo-Werkstatt mit einem Jahr Geschichte: 25 Sprints, rund 240 Aufträge, Bugs, Ideen, Agent-Läufe, Kosten und Testberichte. Zum Ausprobieren – der laufende Sprint ist pausiert, Agents starten erst, wenn du ihn fortsetzt. Das Projekt lässt sich später unter Projekt löschen.</p>`;
         $('domain').oninput = () => (state.domain = $('domain').value.trim());
         $('roots').oninput = () => (state.projectRoots = $('roots').value.trim());
-        $('worker').onchange = () => (state.installWorker = $('worker').checked);
+        for (const mode of ['container', 'host', 'none'])
+          $(`worker-${mode}`).onchange = () => (state.workerMode = mode);
+        $('claude-token').oninput = () => (state.claudeToken = $('claude-token').value.trim());
         $('demo').onchange = () => (state.demoData = $('demo').checked);
         $('next').disabled = false;
         $('next').textContent = 'Installieren →';
@@ -457,6 +469,7 @@
           docker: 'Container bauen und starten',
           health: 'AIdeation antwortet',
           demo: 'Beispieldaten',
+          game: 'Spiele-Werkzeuge (Chromium, Phaser-Vorlage)',
           worker: 'Worker einrichten',
         };
         const status = {};
@@ -498,7 +511,9 @@
             password: state.password,
             domain: state.domain,
             projectRoots: state.projectRoots,
-            installWorker: state.installWorker,
+            installWorker: state.workerMode !== 'none',
+            workerContainer: state.workerMode === 'container',
+            claudeToken: state.claudeToken,
             demoData: state.demoData,
           }),
         });

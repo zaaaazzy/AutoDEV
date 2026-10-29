@@ -1,21 +1,33 @@
 name: aideation
-# Containernamen: aideation_<Aufgabe>_<Technik>. Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https).
-# Härtung: jeder Dienst hat Grenzen für Speicher, CPU und Prozesse (deploy.resources.limits) und einen Healthcheck;
-# frontend (nginx), https (Caddy) und backup laufen ohne root und ohne Linux-Capabilities.
+# Containernamen: <Projekt>_<Aufgabe>_<Technik>, im Live-Stack (Projekt aideation) also aideation_database_postgres usw.
+# Container, Volumes und Host-Ports hängen am Compose-Projekt: das Agent-Projekt (COMPOSE_PROJECT_NAME=aideation-agent)
+# bekommt eigene Namen und Volumes und veröffentlicht keine Host-Ports (deploy/compose/ports.<Projekt>.yml).
+# Befehle nutzen weiter die Dienstnamen (db, dev-log, frontend, backup, https, worker, watchdog).
+# Härtung: jeder Dienst hat Grenzen für Speicher, CPU und Prozesse (deploy.resources.limits), einen Healthcheck und
+# no-new-privileges; alle verwerfen die Linux-Capabilities (cap_drop: ALL) und holen nur begründete zurück (cap_add).
+# frontend (nginx), https (Caddy) und backup laufen ohne root mit schreibgeschütztem Dateisystem (read_only, /tmp als
+# tmpfs). dev-log schreibt Anhänge und Doku zur Laufzeit, db ihre Daten: dort kein read_only.
 # Ohne DEV_LOG_DB_PASSWORD in der .env gilt das bekannte Standardpasswort devlog_local_dev – der Server warnt dann beim Start.
 services:
   db:
     image: postgres:17-alpine
-    container_name: aideation_database_postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_database_postgres
     environment:
       POSTGRES_DB: aideation
       POSTGRES_USER: ${DEV_LOG_DB_USER:-devlog}
       POSTGRES_PASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
     volumes:
       - aideation_pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5433:5432"
+    # Host-Ports je Compose-Projekt: der Live-Stack veröffentlicht 127.0.0.1:5433, das Agent-Projekt nichts.
+    extends:
+      file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
+      service: db-ports
     restart: unless-stopped
+    # Der Entrypoint startet als root: übergibt das Datenverzeichnis an postgres (CHOWN, FOWNER, DAC_OVERRIDE) und
+    # wechselt dann per su-exec zu diesem Benutzer (SETUID, SETGID). Mehr braucht PostgreSQL nicht.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DEV_LOG_DB_USER:-devlog} -d aideation"]
       interval: 5s
@@ -27,15 +39,20 @@ services:
 
   dev-log:
     build: .
-    container_name: aideation_backend_nodejs
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_backend_nodejs
     # Kein Port nach aussen: erreichbar über das Frontend (aideation_frontend_angular), das /api weiterleitet.
     restart: unless-stopped
     environment:
       PORT: 3100
-      DEV_LOG_TRUST_PROXY: uniquelocal
+      # Genau ein Hop: nginx (deploy/frontend) setzt X-Forwarded-For auf eine einzige Adresse. Nicht uniquelocal –
+      # damit zählte eine vom Client vorangestellte Adresse, sobald die Kette nur private Proxys enthält.
+      DEV_LOG_TRUST_PROXY: "1"
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-}
       # Weitere eigene Domains für die Health-URL der betreuten Anwendungen (Komma-getrennt, inkl. Subdomains).
       DEV_LOG_OWN_DOMAINS: ${DEV_LOG_OWN_DOMAINS:-}
+      # Weitere Host-Namen, unter denen AIdeation selbst erreichbar ist (Komma-getrennt, z. B. Tailscale). IPs, localhost,
+      # *.local und DEV_LOG_DOMAIN gelten immer; andere Namen weist der Server ab (Schutz vor DNS-Rebinding).
+      DEV_LOG_ALLOWED_HOSTS: ${DEV_LOG_ALLOWED_HOSTS:-}
       DEV_LOG_PROJECT_ROOTS: ${DEV_LOG_PROJECT_ROOTS:-}
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
@@ -50,6 +67,9 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Läuft als Benutzer node (Dockerfile) auf Port 3100: keine Capability nötig.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
@@ -63,17 +83,21 @@ services:
     build:
       context: .
       dockerfile: deploy/frontend/Dockerfile
-    container_name: aideation_frontend_angular
-    ports:
-      # Direkt nur vom eigenen Rechner aus; von aussen geht es über HTTPS (Dienst https).
-      - "127.0.0.1:3100:8080"
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_frontend_angular
+    # Live: 127.0.0.1:3100, nur vom eigenen Rechner aus; von aussen über HTTPS (Dienst https). Agent-Projekt: kein Port.
+    extends:
+      file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
+      service: frontend-ports
     restart: unless-stopped
     depends_on:
       dev-log:
         condition: service_healthy
-    # Läuft als Benutzer nginx (deploy/frontend/Dockerfile) auf Port 8080 im Container.
+    # nginx-unprivileged als Benutzer nginx (deploy/frontend/Dockerfile) auf 8080/8081: keine Capability nötig.
+    # PID-Datei und Zwischenablagen (client_temp usw.) liegen unter /tmp, sonst schreibt nginx nichts.
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/health"]
       interval: 5s
@@ -85,7 +109,7 @@ services:
 
   backup:
     image: postgres:17-alpine
-    container_name: aideation_backup_postgres
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_backup_postgres
     restart: unless-stopped
     entrypoint: ["/bin/sh", "/backup.sh"]
     # Benutzer postgres (70:70) des Images. Unter Linux muss ./backups für ihn beschreibbar sein – oder
@@ -93,11 +117,15 @@ services:
     user: "${DEV_LOG_BACKUP_USER:-70:70}"
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    # Schreibt nur nach /backups (Volume).
+    read_only: true
+    tmpfs: [/tmp]
     environment:
       PGHOST: db
       PGUSER: ${DEV_LOG_DB_USER:-devlog}
       PGPASSWORD: ${DEV_LOG_DB_PASSWORD:-devlog_local_dev}
       BACKUP_KEEP_DAYS: ${DEV_LOG_BACKUP_KEEP_DAYS:-14}
+      BACKUP_MIN_KEEP: ${DEV_LOG_BACKUP_MIN_KEEP:-7}
     volumes:
       - ./backups:/backups
       - ./deploy/backup.sh:/backup.sh:ro
@@ -119,16 +147,144 @@ services:
       resources:
         limits: { cpus: "1", memory: 512m, pids: 64 }
 
+  # Worker im Container (optional, Standard des Einrichtungs-Assistenten): nur mit COMPOSE_PROFILES=worker in der .env.
+  # Einziger Dienst mit dem Docker-Socket: startet die Agent-Container (src/core/sandbox.ts) und baut beim Neustart die
+  # Images. Code und Projektordner bindet docker-compose.override.yml ein (scripts/worker-compose.ts, von start.sh bzw.
+  # start.cmd erzeugt) – mit demselben Pfad wie auf dem Host, damit die Pfade für docker run auf dem Host stimmen. Dort
+  # stehen auch die Git-Zugänge (~/.ssh, gh, ~/.gitconfig, GitHub-Token), schreibgeschützt und nur für diesen Dienst.
+  worker:
+    profiles: ["worker"]
+    build: deploy/worker
+    image: aideation-worker
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_worker_nodejs
+    command: ["worker"]
+    # Exit-Code 75 nach „AIdeation neu starten“ (src/runner/system-restart.ts): Docker startet den Worker neu, er lädt
+    # den neuen Code aus dem eingebundenen AIdeation-Ordner. Ersetzt launchd, systemd und scripts\run-with-env.ps1.
+    restart: unless-stopped
+    # Fester Name: die Worker-ID (Hostname, Ordner) bleibt über Neustarts und Neubauten des Containers gleich.
+    hostname: aideation-worker
+    # Benutzer des Hosts (Linux: uid:gid, schreibt der Einrichtungs-Assistent): Dateien in den Projektordnern gehören
+    # weiter dir, und die Agent-Container laufen mit derselben UID (--user). Die Gruppe des Docker-Sockets erlaubt
+    # docker-Befehle ohne root (Linux: Gruppe docker; Docker Desktop: 0).
+    user: "${DEV_LOG_WORKER_USER:-1000:1000}"
+    group_add: ["${DEV_LOG_DOCKER_GID:-0}"]
+    environment:
+      DEV_LOG_WORKER_CONTAINER: "1"
+      DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
+      # Review-Datenbank aus Sicht des Containers (Host db:5432 statt localhost:5433); leer = Wert aus der .env.
+      DEV_LOG_REVIEW_DATABASE_URL: ${DEV_LOG_WORKER_REVIEW_DATABASE_URL:-}
+      DEV_LOG_SECRET_KEY: ${DEV_LOG_SECRET_KEY:-}
+      DEV_LOG_AGENT_SANDBOX: docker
+      DEV_LOG_OLLAMA_URL: ${DEV_LOG_WORKER_OLLAMA_URL:-http://host.docker.internal:11434}
+      DEV_LOG_OLLAMA_MODEL: ${DEV_LOG_OLLAMA_MODEL:-}
+      # Nach dem Neubau prüft der Worker die Oberfläche im Compose-Netz (auf dem Host: 127.0.0.1:3100).
+      DEV_LOG_HEALTH_URL: http://frontend:8080/health
+      DEV_LOG_WORKER_HEALTH_FILE: /tmp/aideation-worker.alive
+      # Anmeldung der Claude-CLI in den Agent-Containern (claude setup-token); geht dort nur als -e NAME hinein.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      dev-log:
+        condition: service_healthy
+      worker-volumes:
+        condition: service_completed_successfully
+    # git, docker und npm brauchen keine Capability.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # Gesund, solange der Worker sein Lebenszeichen in die Datenbank schreibt (Datei je erfolgreichem Schreiben).
+    # Beim ersten Start installiert der Worker node_modules (einige Minuten).
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const f=require('fs');try{process.exit(Date.now()-f.statSync('/tmp/aideation-worker.alive').mtimeMs<120000?0:1)}catch{process.exit(1)}",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15m
+    deploy:
+      resources:
+        limits: { cpus: "2", memory: 4g, pids: 1024 }
+
+  # Einmaliger Schritt vor dem Worker: ein neues Volume gehört root – node_modules dem Worker-Benutzer übergeben (nur
+  # der oberste Ordner, ohne Netzwerk). Danach beendet er sich.
+  worker-volumes:
+    profiles: ["worker"]
+    build: deploy/worker
+    image: aideation-worker
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_worker_volumes
+    user: root
+    entrypoint: ["chown", "${DEV_LOG_WORKER_USER:-1000:1000}", "/modules"]
+    network_mode: none
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    volumes:
+      - aideation_worker_modules:/modules
+
+  # Ausfall-Wächter im Container (statt LaunchAgent): alle zwei Minuten ein Prüflauf, Push-Meldungen wie bisher. Ohne
+  # Docker-Socket und ohne Git-Zugang; AIdeation-Ordner und node_modules nur lesend (docker-compose.override.yml).
+  watchdog:
+    profiles: ["worker"]
+    build: deploy/worker
+    image: aideation-worker
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_watchdog_nodejs
+    command: ["watchdog"]
+    restart: unless-stopped
+    user: "${DEV_LOG_WORKER_USER:-1000:1000}"
+    environment:
+      DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
+      DEV_LOG_SECRET_KEY: ${DEV_LOG_SECRET_KEY:-}
+      DEV_LOG_PUBLIC_URL: ${DEV_LOG_PUBLIC_URL:-}
+      DEV_LOG_LOCAL_URL: http://frontend:8080
+      DEV_LOG_WATCHDOG_INTERVAL: "120"
+    # Zustand (gemeldete Probleme, zwischengespeicherte Push-Schlüssel) überlebt Neustarts im Volume.
+    volumes:
+      - aideation_watchdog_state:/home/worker
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: [/tmp]
+    # Gesund, solange die Prüfläufe durchlaufen (deploy/worker/entrypoint.sh erneuert die Datei nach jedem Lauf).
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const f=require('fs');try{process.exit(Date.now()-f.statSync('/tmp/aideation-watchdog.alive').mtimeMs<600000?0:1)}catch{process.exit(1)}",
+        ]
+      start_period: 15m
+      interval: 5m
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256m, pids: 64 }
+
   # HTTPS-Zugang von aussen (optional): nur mit COMPOSE_PROFILES=https und DEV_LOG_DOMAIN in der .env.
   https:
     profiles: ["https"]
     # Caddy als Benutzer caddy (deploy/caddy/Dockerfile); Ports 80/443 im Container ohne root erlaubt (sysctl).
     build: deploy/caddy
     image: aideation-caddy:2.8.4
-    container_name: aideation_proxy_caddy
-    ports:
-      - "80:80"
-      - "443:443"
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_proxy_caddy
+    # Live: 80/443; das Agent-Projekt veröffentlicht keine Ports.
+    extends:
+      file: deploy/compose/ports.${COMPOSE_PROJECT_NAME:-aideation}.yml
+      service: https-ports
     restart: unless-stopped
     sysctls:
       net.ipv4.ip_unprivileged_port_start: 0
@@ -136,6 +292,9 @@ services:
     # /usr/bin/caddy trägt die Datei-Capability cap_net_bind_service; ohne sie im Bounding-Set scheitert der Start.
     cap_add: [NET_BIND_SERVICE]
     security_opt: ["no-new-privileges:true"]
+    # Zertifikate und Konfiguration liegen in den Volumes /data und /config.
+    read_only: true
+    tmpfs: [/tmp]
     environment:
       DEV_LOG_DOMAIN: ${DEV_LOG_DOMAIN:-localhost}
     volumes:
@@ -164,7 +323,7 @@ services:
     profiles: ["https"]
     build: deploy/caddy
     image: aideation-caddy:2.8.4
-    container_name: aideation_proxy_caddy_volumes
+    container_name: ${COMPOSE_PROJECT_NAME:-aideation}_proxy_caddy_volumes
     user: root
     entrypoint: ["chown", "-R", "caddy:caddy", "/data", "/config"]
     network_mode: none
@@ -172,14 +331,22 @@ services:
     cap_drop: [ALL]
     cap_add: [CHOWN, DAC_OVERRIDE]
     security_opt: ["no-new-privileges:true"]
+    read_only: true
     volumes:
       - aideation_caddy_data:/data
       - aideation_caddy_config:/config
 
+# Die Schlüssel bleiben (Compose-Labels der bestehenden Live-Volumes); massgeblich ist der Docker-Name unter name:.
+# Der Live-Stack behält so aideation_pgdata usw., andere Projekte bekommen eigene, leere Volumes.
 volumes:
   aideation_pgdata:
-    name: aideation_pgdata
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_pgdata
   aideation_caddy_data:
-    name: aideation_caddy_data
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_caddy_data
   aideation_caddy_config:
-    name: aideation_caddy_config
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_caddy_config
+  # node_modules des Workers (Linux-Binärdateien; die des Hosts passen unter macOS/Windows nicht).
+  aideation_worker_modules:
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_worker_modules
+  aideation_watchdog_state:
+    name: ${COMPOSE_PROJECT_NAME:-aideation}_watchdog_state

@@ -9,7 +9,7 @@ import { registerProject } from '../db/project.js';
 import { categoryOfCommand, parseTapCases } from '../core/test-results.js';
 import { createTestRun, createTestRunStep, finishTestRun, finishTestRunStep, saveTestCases } from '../db/test-runs.js';
 import type { Pool } from 'pg';
-import { redactOutput, runCommand } from '../core/command.js';
+import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { killGroup } from '../core/shutdown.js';
 import { SKIPPED_NOTE } from './order-tests.js';
 import { gitEnvironment, projectEnvironment } from './project-command.js';
@@ -29,6 +29,8 @@ export interface TestAgentOptions {
   env?: NodeJS.ProcessEnv;
   /** Gleich nach dem Anlegen des Testlaufs (vor dem ersten Befehl), damit Aufrufer ihn sofort verknüpfen können. */
   onRunCreated?: (runId: string) => Promise<void>;
+  /** Führt die Testbefehle aus, etwa im Testcontainer (projectTestExecutor); Standard: runCommand auf dem Host. */
+  execute?: CommandExecutor;
 }
 
 export function parseTestAgentOptions(args: string[], cwd = process.env.INIT_CWD ?? process.cwd()): TestAgentOptions {
@@ -214,13 +216,15 @@ export async function runTestAgent(options: TestAgentOptions, pool: Pool): Promi
     options.signal?.addEventListener('abort', abort, { once: true });
     const result = options.signal?.aborted
       ? { exitCode: 130, durationMs: 0, output: 'Abgebrochen.' }
-      : await runCommand(command, options.cwd, {
+      : await (options.execute ?? runCommand)(command, options.cwd, {
           timeoutMs: options.timeoutMs,
           // Fail-closed: ohne Vorgabe nie das volle Environment des Workers (DEV_LOG_DATABASE_URL usw.).
           env: options.env ?? projectEnvironment(options.cwd),
           onSpawn: (value) => {
             pid = value;
           },
+          // Im Testcontainer beendet erst docker kill den Lauf, nicht das Signal an den Client allein.
+          ...(options.execute ? { signal: options.signal } : {}),
         });
     options.signal?.removeEventListener('abort', abort);
     const safeOutput = redactOutput(result.output, process.env);

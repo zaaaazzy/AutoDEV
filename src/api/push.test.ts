@@ -1,12 +1,105 @@
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { mock, test } from 'node:test';
+import test, { mock } from 'node:test';
 import type { Pool } from 'pg';
 import webpush from 'web-push';
 import { createDevLogApp } from './app.js';
-import { deleteOwnSubscription } from './push.js';
+import { deleteOwnSubscription, registerPushRoutes } from './push.js';
+import type { Principal } from './roles.js';
+import { requiredRole } from './route-table.test.js';
+import { serveRoutes } from './serve-routes.test.js';
+import { withMigratedDatabase } from '../db/test-database.test.js';
 
 delete process.env.DEV_LOG_PROJECT_ROOTS;
+// VAPID-Schlüssel werden nur verschlüsselt gespeichert; dafür braucht es einen Schlüssel.
+process.env.DEV_LOG_SECRET_KEY ??= 'ein-schluessel-nur-fuer-tests';
+
+// Endpunkt eines erlaubten Push-Dienstes (Allowlist in isAllowedPushEndpoint).
+const ENDPOINT = 'https://fcm.googleapis.com/fcm/send/geraet-1';
+const keys = { p256dh: 'BKey', auth: 'AuthKey' };
+
+test('Push an- und abmelden darf jeder angemeldete Benutzer', () => {
+  assert.equal(requiredRole('POST', '/api/push/subscribe', {}), null);
+  assert.equal(requiredRole('POST', '/api/push/unsubscribe', {}), null);
+  assert.equal(requiredRole('POST', '/api/push/test', {}), null);
+});
+
+test('Push auf PostgreSQL: Schlüssel, Anmeldung je Benutzer, Abmeldung', async (t) => {
+  await withMigratedDatabase(t, 'devlog_push', async (db) => {
+    const pool = db as unknown as Pool;
+    const userId = (
+      await pool.query<{ id: string }>(`INSERT INTO users (username, password_hash) VALUES ('ana', 'x') RETURNING id`)
+    ).rows[0]!.id;
+    const ana: Principal = { id: userId, username: 'ana', displayName: 'Ana', roles: ['plan'] };
+    const admin: Principal = { id: null, username: 'admin', displayName: 'Admin', roles: ['admin'] };
+    const asAna = await serveRoutes(ana, (router) => registerPushRoutes(router, pool));
+    const asAdmin = await serveRoutes(admin, (router) => registerPushRoutes(router, pool));
+    const owner = async () =>
+      (await pool.query('SELECT user_id, system_admin FROM push_subscriptions WHERE endpoint = $1', [ENDPOINT])).rows;
+    const storedAuth = async () =>
+      (await pool.query('SELECT auth FROM push_subscriptions WHERE endpoint = $1', [ENDPOINT])).rows[0]?.auth;
+    try {
+      await t.test('öffentlicher Schlüssel bleibt über Aufrufe gleich, der private nie ausgeliefert', async () => {
+        const first = await asAna.call('GET', '/push/key');
+        const second = await asAdmin.call('GET', '/push/key');
+        assert.equal(typeof first.body.publicKey, 'string');
+        assert.equal(first.body.publicKey, second.body.publicKey);
+        assert.deepEqual(Object.keys(first.body), ['publicKey']);
+        const { rows } = await pool.query("SELECT value FROM app_settings WHERE key = 'push_vapid_keys'");
+        assert.ok(
+          String(rows[0]?.value).startsWith('enc:v1:'),
+          'privater Schlüssel liegt verschlüsselt in der Datenbank',
+        );
+      });
+
+      await t.test('Anmeldung wird geprüft', async () => {
+        for (const body of [
+          { endpoint: 'http://fcm.googleapis.com/fcm/send/x', keys },
+          { endpoint: 'https://192.168.1.1/x', keys },
+          { endpoint: `https://fcm.googleapis.com/${'a'.repeat(1000)}`, keys },
+          { endpoint: ENDPOINT, keys: { p256dh: 'BKey' } },
+          { endpoint: ENDPOINT },
+          {},
+        ]) {
+          assert.equal((await asAna.call('POST', '/push/subscribe', body)).status, 400, JSON.stringify(body));
+        }
+        assert.equal((await pool.query('SELECT 1 FROM push_subscriptions')).rowCount, 0);
+      });
+
+      await t.test('Gerät gehört dem angemeldeten Benutzer; nur er selbst kann es erneut anmelden', async () => {
+        assert.deepEqual((await asAna.call('POST', '/push/subscribe', { endpoint: ENDPOINT, keys })).body, {
+          subscribed: true,
+        });
+        assert.deepEqual(await owner(), [{ user_id: userId, system_admin: false }]);
+        // Ein anderer Besitzer übernimmt das Gerät nicht still – gleiche Antwort, Zeile unverändert.
+        const takeover = { endpoint: ENDPOINT, keys: { ...keys, auth: 'Fremd' } };
+        assert.deepEqual((await asAdmin.call('POST', '/push/subscribe', takeover)).body, { subscribed: true });
+        assert.deepEqual(await owner(), [{ user_id: userId, system_admin: false }]);
+        assert.equal(await storedAuth(), 'AuthKey');
+        // Der Besitzer selbst aktualisiert seine Schlüssel ohne doppelten Eintrag.
+        await asAna.call('POST', '/push/subscribe', { endpoint: ENDPOINT, keys: { ...keys, auth: 'Neu' } });
+        assert.deepEqual(await owner(), [{ user_id: userId, system_admin: false }], 'kein doppelter Eintrag');
+        assert.equal(await storedAuth(), 'Neu');
+      });
+
+      await t.test('Testnachricht geht nur an eigene Geräte; Abmelden entfernt nur das eigene Gerät', async () => {
+        assert.deepEqual((await asAdmin.call('POST', '/push/test')).body, { sent: 0 }, 'Admin hat kein Gerät');
+        assert.deepEqual((await asAdmin.call('POST', '/push/unsubscribe', { endpoint: ENDPOINT })).body, {
+          subscribed: false,
+        });
+        assert.deepEqual(await owner(), [{ user_id: userId, system_admin: false }], 'fremdes Gerät bleibt');
+        assert.deepEqual((await asAna.call('POST', '/push/unsubscribe', { endpoint: ENDPOINT })).body, {
+          subscribed: false,
+        });
+        assert.deepEqual(await owner(), []);
+        assert.equal((await asAna.call('POST', '/push/unsubscribe', {})).status, 200, 'ohne Endpoint harmlos');
+      });
+    } finally {
+      await asAna.close();
+      await asAdmin.close();
+    }
+  });
+});
 
 const auth = { username: 'dev-log-user', password: 'a-long-enough-local-password' };
 const VAPID = webpush.generateVAPIDKeys();
@@ -23,8 +116,9 @@ interface Row {
 }
 
 /**
- * Sitzungen und push_subscriptions im Speicher. Die Besitzprüfung greift nur, wenn das SQL sie enthält – wie in
- * Postgres, wo `ON CONFLICT … DO UPDATE … WHERE` und `DELETE … AND <Besitz>` fremde Zeilen unberührt lassen.
+ * Sitzungen und push_subscriptions im Speicher, für Abläufe über die ganze App (Login, Logout). Die Besitzprüfung
+ * greift nur, wenn das SQL sie enthält – wie in Postgres, wo `ON CONFLICT … DO UPDATE … WHERE` und
+ * `DELETE … AND <Besitz>` fremde Zeilen unberührt lassen.
  */
 function store(rows: Row[]) {
   const sessions = new Map<string, string | null>();
@@ -40,7 +134,14 @@ function store(rows: Row[]) {
       } else if (sql.includes('FROM app_settings') && values[0] === 'push_vapid_keys') {
         return { rows: [{ value: JSON.stringify(VAPID) }] };
       } else if (sql.startsWith('INSERT INTO push_subscriptions')) {
-        const [endpoint, p256dh, key, , userId, systemAdmin] = values as [string, string, string, string, string | null, boolean];
+        const [endpoint, p256dh, key, , userId, systemAdmin] = values as [
+          string,
+          string,
+          string,
+          string,
+          string | null,
+          boolean,
+        ];
         const owner = { user_id: userId, system_admin: systemAdmin };
         const existing = rows.find((row) => row.endpoint === endpoint);
         const guarded = sql.includes('IS NOT DISTINCT FROM');
@@ -150,7 +251,10 @@ test('/push/test schickt keinen Server-POST an einen ungültigen Endpunkt und l�
     send.mock.calls.map((c) => (c.arguments[0] as { endpoint: string }).endpoint),
     [OWN],
   );
-  assert.deepEqual(rows.map((row) => row.endpoint), [OWN]);
+  assert.deepEqual(
+    rows.map((row) => row.endpoint),
+    [OWN],
+  );
 });
 
 test('Logout löscht das eigene Abo zum mitgeschickten Endpunkt, fremde bleiben', async () => {

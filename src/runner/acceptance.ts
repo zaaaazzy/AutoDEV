@@ -76,6 +76,8 @@ export function parseChecks(output: string): CheckResult[] {
 /** Anweisung an den Tester: Kriterien und Definition of Done einzeln prüfen und maschinenlesbar melden. */
 export function acceptanceInstructions(criteria: string[], definitionOfDone: string[]): string {
   const list = (items: string[]) => items.map((item, index) => `${index + 1}. ${item}`).join('\n');
+  // Beispiel mit jeder DoD-Nummer: ein ausgelassener Punkt gilt als „nicht geprüft“ und lehnt die Abnahme ab.
+  const done = JSON.stringify(definitionOfDone.map((_, index) => ({ nr: index + 1, met: true, note: '' })));
   return `## Abnahme (Pflicht für den Tester)
 Prüfe jedes Akzeptanzkriterium und jeden Punkt der Definition of Done einzeln – durch Tests, Ausführen oder Lesen des Codes.
 
@@ -88,13 +90,16 @@ ${list(definitionOfDone)}
 Lässt sich ein Punkt grundsätzlich nur durch einen Menschen prüfen (z. B. Login bei einem externen Anbieter, Verhalten
 auf einem echten Gerät, Einstellungen außerhalb des Projekts), setze "manual":true und beschreibe in "note", was der Mensch
 prüfen oder einstellen muss. Nutze das nie für Punkte, die du mit Tests oder durch Ausführen prüfen könntest.
+Melde jeden Punkt einzeln – alle ${criteria.length} Kriterien und alle ${definitionOfDone.length} DoD-Punkte, auch Punkte
+zum Ablauf (z. B. Freigabe durch einen Menschen in der Vorschau: "manual":true; Form des Auftragstexts: prüfe den
+Auftrag oben). Ein ausgelassener Punkt gilt als nicht geprüft und lehnt die Abnahme ab.
 Der DoD-Punkt „Alle Akzeptanzkriterien sind erfüllt“ gilt als erfüllt, wenn alle übrigen Kriterien erfüllt sind.
 Die Testabdeckung misst AIdeation nach deinem Schritt selbst. Konntest du sie nicht messen (Werkzeug fehlt, Befehl
 gesperrt), ist das allein kein Grund, einen Punkt als nicht erfüllt zu melden: Ein Punkt wie „durch einen automatischen
 Test belegt“ ist erfüllt, wenn es zu jedem Kriterium einen Test gibt und die Tests grün sind.
 
 Beende die Antwort (nach dem @@COVERAGE-Block) mit genau einer Zeile gültigem JSON:
-@@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"},{"nr":2,"met":false,"manual":true,"note":"Was der Mensch prüfen muss"}],"done":[{"nr":1,"met":true,"note":""}]}`;
+@@ACCEPTANCE {"criteria":[{"nr":1,"met":true,"note":"kurze Begründung"},{"nr":2,"met":false,"manual":true,"note":"Was der Mensch prüfen muss"}],"done":${done}}`;
 }
 
 function checks(value: unknown, count: number): Checked[] {
@@ -129,6 +134,34 @@ export function parseAcceptance(
 
 export function stripAcceptance(output: string): string {
   return output.replace(MARKER, '').trimEnd();
+}
+
+const COVERAGE = /abdeckung|coverage/i;
+const NOT_MEASURED = /nicht\s+(?:selbst\s+)?(?:ge)?mess|nicht\s+ermittel|blockiert|gesperrt|wächter|freigabe|\bnull\b/i;
+/** Hinweise auf echte Lücken: rote Tests oder ein Kriterium ohne Test. Solche Punkte bleiben nicht erfüllt. */
+const REAL_GAP = /\brot(?:e[nm]?)?\b|fehlgeschlagen|\bfail|ungetestet|ohne\s+(?:einen\s+)?test|kein(?:en)?\s+test/i;
+
+/**
+ * DoD-Punkte, die der Tester nur deshalb als nicht erfüllt meldet, weil er die Abdeckung nicht selbst messen konnte:
+ * Die Abdeckung misst AIdeation nach dem Tester selbst. Solche Punkte gelten als erfüllt, sofern jedes
+ * Akzeptanzkriterium erfüllt (also belegt) ist. Rote Tests oder unbelegte Kriterien bleiben ein Ablehnungsgrund.
+ */
+export function waiveUnmeasuredCoverage(
+  result: { criteria: Checked[]; done: Checked[] },
+  criteriaCount: number,
+): { result: { criteria: Checked[]; done: Checked[] }; waived: number[] } {
+  const allMet = Array.from({ length: criteriaCount }, (_, index) => index + 1).every(
+    (nr) => result.criteria.find((check) => check.nr === nr)?.met,
+  );
+  const waived: number[] = [];
+  if (!allMet) return { result, waived };
+  const done = result.done.map((check) => {
+    if (check.met || check.manual) return check;
+    if (!COVERAGE.test(check.note) || !NOT_MEASURED.test(check.note) || REAL_GAP.test(check.note)) return check;
+    waived.push(check.nr);
+    return { ...check, met: true, note: `${check.note} (Abdeckung misst AIdeation selbst)`.slice(0, 500) };
+  });
+  return { result: { ...result, done }, waived };
 }
 
 /** Nicht erfüllte oder fehlende Prüfungen, als lesbare Liste für den Entwickler. */

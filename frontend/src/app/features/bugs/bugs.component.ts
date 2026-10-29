@@ -1,12 +1,15 @@
 import { NgClass } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { ApiService } from '../../core/api.service.js';
+import { AuthService } from '../../core/auth.service.js';
+import { ConfirmService } from '../../core/confirm.service.js';
 import type { Bug, BugStatus, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { errorMessage } from '../../core/errors.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
+import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import type { FormValues } from '../../shared/forms.js';
 import {
   type DataColumn,
@@ -21,6 +24,7 @@ import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { type BugStatRow, type BugStats, bugStats, isBuried } from './bug-stats.js';
 import { ProductionDetailComponent } from './production-detail.component.js';
+import { BURYING_STATUSES, EDIT_TITLE_MAX, SEVERITIES, bugChanges, selectableSprints } from './bug-form.js';
 import {
   CategoryLabelPipe,
   SeverityLabelPipe,
@@ -67,7 +71,14 @@ const BUG_SOURCE_LABEL: Record<string, string> = {
 })
 export class BugsComponent {
   private readonly api = inject(ApiService);
+  private readonly confirm = inject(ConfirmService);
+  private readonly auth = inject(AuthService);
   protected readonly store = inject(ProjectStore);
+  /** Rechte wie in der API: Bearbeiten, Löschen und Sprint-Zuordnung „Planen“, Freigabe für Agents „Ausführen“. */
+  protected readonly mayPlan = computed(() => this.auth.can('plan'));
+  protected readonly mayRun = computed(() => this.auth.can('run'));
+  protected readonly severities = SEVERITIES;
+  protected readonly editTitleMax = EDIT_TITLE_MAX;
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly bugStatuses: BugStatus[] = ['open', 'in_progress', 'fixed', 'wontfix', 'rejected'];
@@ -92,7 +103,7 @@ export class BugsComponent {
     {
       id: 'sprint',
       header: 'Sprint',
-      value: (bug) => this.data().sprints.find((sprint) => sprint.id === bug.sprintId)?.name ?? 'Kein Sprint',
+      value: (bug) => this.sprintName(bug),
     },
     {
       id: 'createdAt',
@@ -143,29 +154,64 @@ export class BugsComponent {
     ];
   }
 
+  protected readonly bugErrors = new FieldErrors();
+  /** Fehler im Bearbeiten-Formular; es ist immer nur ein Bug aufgeklappt. */
+  protected readonly editErrors = new FieldErrors();
   protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
   protected readonly categories = CATEGORIES;
   protected pendingImages: File[] = [];
 
+  constructor() {
+    // Link auf einen Bug (#bugs/<id>, z. B. aus einem Bericht): Zeile aufklappen und hinscrollen.
+    effect(() => {
+      const id = this.store.focusId();
+      if (!id || !this.data().bugs.some((bug) => bug.id === id)) return;
+      untracked(() => {
+        this.openBug.set(id);
+        globalThis.setTimeout(
+          () => document.querySelector('.row-open')?.scrollIntoView({ block: 'start', behavior: 'smooth' }),
+          200,
+        );
+      });
+    });
+  }
+
   protected toggleBug(id: string): void {
-    this.openBug.update((current) => (current === id ? null : id));
+    this.showBug(this.openBug() === id ? null : id);
   }
 
-  protected availableSprints(): Sprint[] {
-    return this.data().sprints.filter((sprint) => sprint.status !== 'completed');
+  /** Aufklappen hält die Adresse aktuell (#bugs/<id>), damit sich der Bug als Link teilen lässt. */
+  protected showBug(id: string | null): void {
+    this.openBug.set(id);
+    this.editErrors.clear();
+    globalThis.history.replaceState(null, '', id ? `#bugs/${id}` : '#bugs');
   }
 
-  protected async createBug(): Promise<void> {
+  protected sprintName(bug: Bug): string {
+    return this.data().sprints.find((sprint) => sprint.id === bug.sprintId)?.name ?? 'Kein Sprint';
+  }
+
+  protected sprintsFor(currentId: string | null = null): Sprint[] {
+    return selectableSprints(this.data().sprints, currentId);
+  }
+
+  protected async createBug(form: HTMLFormElement): Promise<void> {
+    if (!this.bugErrors.require('title', this.bugForm.title, 'Bitte einen Titel angeben.')) {
+      focusField(form, 'title');
+      return;
+    }
     const body = { ...this.bugForm, sprintId: this.bugForm.sprintId || null };
     const files = this.pendingImages;
     let uploadError = '';
     await this.store.perform(async () => {
       // Größe vorher prüfen: Ein zu großes Bild darf keinen Bug ohne Bild anlegen.
       assertImageSizes(files);
-      const created = await this.api.post<{ bug: Bug }>(
-        `${this.api.projectPath(this.store.activeProject())}/bugs`,
-        body,
-      );
+      const created = await this.api
+        .post<{ bug: Bug }>(`${this.api.projectPath(this.store.activeProject())}/bugs`, body)
+        .catch((error: unknown) => {
+          this.bugErrors.take(error, form);
+          throw error;
+        });
       // Angelegt ist angelegt: Formular sofort leeren, damit ein zweiter Klick keinen doppelten Bug erzeugt.
       this.pendingImages = [];
       this.bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
@@ -204,16 +250,21 @@ export class BugsComponent {
     }
   }
 
-  protected async saveBug(bug: Bug, values: FormValues): Promise<void> {
+  protected async saveBug(bug: Bug, values: FormValues, form: HTMLFormElement): Promise<void> {
+    if (!this.editErrors.require('title', String(values['title'] ?? ''), 'Bitte einen Titel angeben.')) {
+      focusField(form, 'title');
+      return;
+    }
+    const changes = bugChanges(bug, values);
+    if (!Object.keys(changes).length) {
+      this.store.notice.set('Keine Änderungen zum Speichern.');
+      return;
+    }
     await this.store.perform(
       () =>
-        this.api.patch(`/api/bugs/${encodeURIComponent(bug.id)}`, {
-          title: String(values['title'] ?? ''),
-          description: String(values['description'] ?? ''),
-          severity: values['severity'],
-          sprintId: values['sprintId'] || null,
-          fixNotes: String(values['fixNotes'] ?? ''),
-          category: values['category'] || null,
+        this.api.patch(`/api/bugs/${encodeURIComponent(bug.id)}`, changes).catch((error: unknown) => {
+          this.editErrors.take(error, form);
+          throw error;
         }),
       'Bug wurde gespeichert.',
     );
@@ -223,21 +274,59 @@ export class BugsComponent {
     await this.store.perform(() => this.api.patch(`/api/bugs/${encodeURIComponent(id)}`, values), 'Bug aktualisiert.');
   }
 
+  /** Behoben, Wird nicht behoben, Abgelehnt: Der Bug geht auf den Friedhof – vorher nachfragen. */
+  protected async changeStatus(bug: Bug, select: HTMLSelectElement): Promise<void> {
+    const status = select.value as BugStatus;
+    if (status === bug.status) return;
+    if (BURYING_STATUSES.has(status)) {
+      const answer = await this.confirm.ask({
+        title: 'Bug auf den Friedhof legen?',
+        message: `„${bug.title}“ bekommt den Status „${statusLabel(status)}“ und verschwindet aus den offenen Bugs. Zurückholen lässt er sich nicht; taucht der Fehler wieder auf, als neuen Bug melden.`,
+        confirmLabel: statusLabel(status),
+        withoutComment: true,
+      });
+      if (!answer) {
+        select.value = bug.status;
+        return;
+      }
+    }
+    await this.updateBug(bug.id, { status });
+  }
+
   /** Bugs aus Betrieb oder GitHub enthalten fremden Text; Agents bearbeiten sie erst nach der Freigabe. */
   protected awaitsApproval(bug: Bug): boolean {
     return (bug.source === 'production' || bug.source === 'github') && !bug.approvedAt;
   }
 
-  protected async approveBug(id: string): Promise<void> {
-    if (!globalThis.confirm('Beschreibung geprüft? Erst nach der Freigabe arbeiten Agents an diesem Bug.')) return;
+  protected async approveBug(bug: Bug): Promise<void> {
+    const answer = await this.confirm.ask({
+      title: 'Bug für Agents freigeben?',
+      message:
+        'Die Beschreibung stammt aus einer fremden Quelle. Erst nach der Freigabe arbeiten Agents daran – vorher auf eingeschleuste Anweisungen prüfen.',
+      details: [bug.title],
+      confirmLabel: 'Geprüft, freigeben',
+      withoutComment: true,
+    });
+    if (!answer) return;
     await this.store.perform(
-      () => this.api.post(`/api/bugs/${encodeURIComponent(id)}/approve`, {}),
+      () => this.api.post(`/api/bugs/${encodeURIComponent(bug.id)}/approve`, {}),
       'Bug für Agents freigegeben.',
     );
   }
 
-  protected async deleteBug(id: string): Promise<void> {
-    if (!globalThis.confirm('Bug löschen?')) return;
-    await this.store.perform(() => this.api.delete(`/api/bugs/${encodeURIComponent(id)}`), 'Bug gelöscht.');
+  protected async deleteBug(bug: Bug): Promise<void> {
+    const answer = await this.confirm.ask({
+      title: 'Bug löschen?',
+      message: 'Der Bug wird endgültig gelöscht, samt Bildern und noch nicht begonnenem Auftrag.',
+      details: [bug.title],
+      confirmLabel: 'Löschen',
+      withoutComment: true,
+      danger: true,
+    });
+    if (!answer) return;
+    await this.store.perform(async () => {
+      await this.api.delete(`/api/bugs/${encodeURIComponent(bug.id)}`);
+      if (this.openBug() === bug.id) this.showBug(null);
+    }, 'Bug gelöscht.');
   }
 }

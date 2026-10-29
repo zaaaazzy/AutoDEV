@@ -1,15 +1,23 @@
 import { logged } from '../core/log.js';
 import { validAgentCommands } from './permission-groups.js';
-import { seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
+import { agentInProject, seedDefaultActions, seedRoutineTemplates } from './agent-tasks.js';
 import { SCOPE_PATTERN } from '../agent/agent-guard.js';
 import { materializeAgentCommands } from '../agent/tool-permissions.js';
-import { RESTRICTED_ROLES, SYSTEM_ROLES, loadSystemSettings, systemAgents } from '../agent/system-agents.js';
+import {
+  RESTRICTED_ROLES,
+  SYSTEM_ROLES,
+  asCommand,
+  loadSystemSettings,
+  systemAgentUsage,
+  systemAgents,
+} from '../agent/system-agents.js';
 import type { Response, Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
 import {
   buildUpdate,
   isRecord,
+  invalidInput,
   isUuid,
   parseBoolean,
   INVALID,
@@ -190,17 +198,31 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     const published = (row ? JSON.parse(row.value) : []) as { role: string; model: string }[];
     const agents = systemAgents().map((agent) => published.find((item) => item.role === agent.role) ?? agent);
     const settings = await loadSystemSettings(pool);
+    const fallback = await publishedFallback();
     response.json({
-      agents: agents.map((agent) => ({
-        ...agent,
-        model: settings.get(agent.role)?.model ?? agent.model,
-        command: settings.get(agent.role)?.command ?? null,
-        restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
-        allowTools: settings.get(agent.role)?.allowTools ?? false,
-      })),
+      agents: agents.map((agent) => {
+        const model = settings.get(agent.role)?.model ?? agent.model;
+        return {
+          ...agent,
+          model,
+          command: settings.get(agent.role)?.command ?? null,
+          restricted: (RESTRICTED_ROLES as readonly string[]).includes(agent.role),
+          allowTools: settings.get(agent.role)?.allowTools ?? false,
+          // Dieselbe Auswahl wie der Lauf (runAuthorAgent bzw. Schnellschätzung).
+          usage: systemAgentUsage(agent.role, settings.get(agent.role), fallback, model),
+        };
+      }),
       models: models ? JSON.parse(models.value) : [],
     });
   });
+
+  /** Vom Worker veröffentlichter Ersatzbefehl (DEV_LOG_AGENT_COMMAND, nur Programmname). */
+  const publishedFallback = async (): Promise<string[] | null> => {
+    const row = (
+      await pool.query<{ value: string }>(`SELECT value FROM app_settings WHERE key = 'agent_fallback_command'`)
+    ).rows[0];
+    return row ? asCommand(JSON.parse(row.value)) : null;
+  };
 
   app.put('/system-agents/:role', access({ role: 'admin', tenant: 'admin' }), async (request, response) => {
     const role = SYSTEM_ROLES.find(([, , value]) => value === request.params.role)?.[2];
@@ -237,14 +259,18 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
         command !== undefined,
       ],
     );
-    response.json({ role, ...saved.rows[0] });
+    const row = saved.rows[0]!;
+    const setting = { model: row.model, command: asCommand(row.command), allowTools: row.allowTools };
+    const localModel = row.model ?? systemAgents().find((agent) => agent.role === role)?.model ?? '';
+    // Neue Anzeige „verwendet“ gleich nach dem Speichern, ohne auf den Worker zu warten.
+    response.json({ role, ...row, usage: systemAgentUsage(role, setting, await publishedFallback(), localModel) });
   });
 
   // Workflow order: phase (pre, while, after), then position.
   app.get('/projects/:slug/agents', access({ tenant: 'project' }), async (request, response) => {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug) {
-      response.status(400).json({ message: 'Invalid project slug.' });
+      response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -260,7 +286,9 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     const fields = parseFields(request.body, AGENT_FIELDS);
     const values = new Map((fields ?? []).map((field) => [field.column, field.value]));
     if (!slug || !fields || !values.get('name') || !values.get('phase')) {
-      response.status(400).json({ message: 'Invalid agent.' });
+      response
+        .status(400)
+        .json(slug ? invalidInput(request.body, AGENT_FIELDS, ['name', 'phase']) : { message: 'Ungültiges Projekt.' });
       return;
     }
     if (!adminFieldsCheck(principalOf(response), fields, { command: null, role: 'custom' })) {
@@ -300,7 +328,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
     async (request, response) => {
       const slug = parseProjectSlug(request.params.slug ?? '');
       if (!slug) {
-        response.status(400).json({ message: 'Invalid project slug.' });
+        response.status(400).json({ message: 'Ungültiges Projekt.' });
         return;
       }
       const result = await pool.query(
@@ -345,7 +373,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       body.ids.length > 100 ||
       !body.ids.every(isUuid)
     ) {
-      response.status(400).json({ message: 'Invalid agent order.' });
+      response.status(400).json({ message: 'Ungültige Reihenfolge der Agents.' });
       return;
     }
     await pool.query(
@@ -360,27 +388,32 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
 
   app.patch('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const requested = isRecord(request.body) ? request.body.allowedCommands : undefined;
     const fields = parseFields(request.body, AGENT_FIELDS) ?? (requested !== undefined ? [] : null);
     if (!fields) {
-      response.status(400).json({ message: 'Invalid agent update.' });
+      response.status(400).json(invalidInput(request.body, AGENT_FIELDS));
       return;
     }
     let allowed = fields;
-    if (requested !== undefined || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
+    const handoffTo = fields.find((field) => field.column === 'handoff_to')?.value as string | null | undefined;
+    if (requested !== undefined || handoffTo || fields.some((field) => ADMIN_COLUMNS.has(field.column))) {
       const current = (
         await pool.query<{ slug: string; command: string[] | null; role: string }>(
           'SELECT project_slug AS slug, command, role FROM agents WHERE id = $1',
           [request.params.id],
         )
       ).rows[0];
-      if (!current) return void response.status(404).json({ message: 'Agent not found.' });
+      if (!current) return void response.status(404).json({ message: 'Agent nicht gefunden.' });
       const checked = adminFieldsCheck(principalOf(response), fields, current);
       if (!checked) return void response.status(403).json({ message: ADMIN_ONLY });
       allowed = checked;
+      // Nachrichten gehen nur an Agents desselben Projekts (Mandantentrennung); null = kein fester Empfänger.
+      if (handoffTo && !(await agentInProject(pool, handoffTo, current.slug))) {
+        return void response.status(400).json({ message: 'Der Empfänger gehört nicht zu diesem Projekt.' });
+      }
       if (requested !== undefined) {
         const commands = await validAgentCommands(pool, current.slug, requested);
         if (typeof commands === 'string') return void response.status(400).json({ message: commands });
@@ -393,7 +426,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       ? await pool.query(update.sql, update.values)
       : await pool.query(`SELECT ${AGENT_COLUMNS} FROM agents WHERE id = $1`, [request.params.id]);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Agent not found.' });
+      response.status(404).json({ message: 'Agent nicht gefunden.' });
       return;
     }
     response.json({ agent: result.rows[0] });
@@ -401,12 +434,12 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
 
   app.delete('/agents/:id', access({ role: 'agents', tenant: 'agents' }), async (request, response) => {
     if (!isUuid(request.params.id)) {
-      response.status(404).json({ message: 'Not found.' });
+      response.status(404).json({ message: 'Nicht gefunden.' });
       return;
     }
     const result = await pool.query('DELETE FROM agents WHERE id = $1 RETURNING id', [request.params.id]);
     if (!result.rows[0]) {
-      response.status(404).json({ message: 'Agent not found.' });
+      response.status(404).json({ message: 'Agent nicht gefunden.' });
       return;
     }
     response.status(204).end();

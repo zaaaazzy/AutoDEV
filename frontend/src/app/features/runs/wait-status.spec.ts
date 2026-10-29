@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { typicalRunMs, waitStatus } from './wait-status.js';
+import { runningStep, typicalRunMs, waitStatus } from './wait-status.js';
 
 const run = (trigger: string, minutes: number) => ({
   trigger,
@@ -40,6 +40,27 @@ test('ohne frühere Läufe: unbestimmter Fortschritt', () => {
 test('ausstehender Push ohne laufenden Test; sonst nichts anzuzeigen', () => {
   assert.equal(waitStatus(null, { gitSync: 'pending' }, [])?.label, 'Push steht an');
   assert.equal(waitStatus(null, { gitSync: 'running' }, [])?.label, 'Merge und Push laufen');
+  assert.equal(waitStatus(null, { gitSync: 'awaiting_merge' }, [])?.label, 'Wartet auf Merge nach main');
   assert.equal(waitStatus(null, { gitSync: 'done' }, []), null);
   assert.equal(waitStatus(null, null, []), null);
+});
+
+test('laufender Testschritt: Nummer, Name und Fortschritt', () => {
+  const steps = [
+    { position: 0, command: 'npm run lint', status: 'passed', progress: null },
+    { position: 1, command: 'npm test', status: 'running', progress: '120 von 980 Tests' },
+    { position: 2, command: 'npm run test:e2e', status: 'running', progress: null },
+  ] as Parameters<typeof runningStep>[0];
+  assert.equal(runningStep(steps), 'Schritt 2 von 3 · Unit-Tests (inkl. UI-Build) · 120 von 980 Tests');
+  assert.equal(runningStep([]), '');
+  const status = waitStatus({ ...live('manual', 3), steps }, null, [run('manual', 8)]);
+  assert.equal(status?.detail, 'Schritt 2 von 3 · Unit-Tests (inkl. UI-Build) · 120 von 980 Tests');
+});
+
+test('Pull-Request-Modus: CI-Prüfung läuft, danach Merge; rote CI zeigt keinen Ladebalken', () => {
+  const sprint = { gitSync: 'done', status: 'review', prUrl: 'https://github.com/x/y/pull/9' } as const;
+  assert.equal(waitStatus(null, { ...sprint, ciStatus: 'pending' }, [])?.label, 'CI-Prüfung auf GitHub läuft');
+  assert.equal(waitStatus(null, { ...sprint, ciStatus: 'success' }, [])?.label, 'Merge nach main');
+  assert.equal(waitStatus(null, { ...sprint, ciStatus: 'failure' }, []), null);
+  assert.equal(waitStatus(null, { ...sprint, status: 'active', ciStatus: 'pending' }, []), null);
 });

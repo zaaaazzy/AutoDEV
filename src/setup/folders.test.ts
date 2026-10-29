@@ -47,3 +47,13 @@ test('Ausserhalb des Projektbereichs und mit .. abgelehnt', async () => {
   await assert.rejects(listFolders('/etc', env), /ausserhalb/);
   await assert.rejects(listFolders(`${root}/alpha/../..`, env), /Ungültig/);
 });
+
+test('Windows-Pfade: Bereich ohne Gross-/Kleinschreibung, .. abgelehnt', async () => {
+  const env = { DEV_LOG_PROJECT_ROOTS: 'C:\\Users\\me\\Projekte;D:\\Dev' };
+  const listing = await listFolders('', env);
+  assert.deepEqual(listing.roots, ['C:\\Users\\me\\Projekte', 'D:\\Dev']);
+  await assert.rejects(listFolders('C:\\Users\\me\\Andere', env), /ausserhalb/);
+  await assert.rejects(listFolders('C:\\Users\\me\\Projekte\\..\\..', env), /Ungültig/);
+  // Im Bereich: Pfad wird angenommen und normalisiert (auf diesem Testrechner gibt es ihn nur nicht).
+  await assert.rejects(listFolders('c:/users/me/projekte/app/', env), /nicht gefunden: c:\\users\\me\\projekte\\app$/i);
+});

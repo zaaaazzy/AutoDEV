@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { backfillFailures, failureDetail, isAgentFailure, isEnvironmentFailure } from './autofix.js';
+import { backfillFailures, failureDetail, isAgentFailure, isEnvironmentFailure, queueBugFix } from './autofix.js';
 import { changesWorkingTree } from './runner.js';
 
 test('agent failures without code cause are recognised', () => {
@@ -76,10 +76,39 @@ test('Fehler-Nachtrag: ein vom Benutzer abgebrochener Lauf erzeugt keinen Bug-Be
   assert.ok(!failed.includes('abgebrochen'), 'Abbruch bekommt keinen Bericht');
 });
 
+test('Bugfix-Auftrag erbt keinen abgeschlossenen oder abgebrochenen Sprint (sonst hängt er am Sprintlimit)', async () => {
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      return { rows: [], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  await queueBugFix(pool, { title: 'Doku', sprintId: 'sprint-alt' }, 'bug-1');
+  const insert = queries.find((query) => query.sql.includes('INSERT INTO development_items'));
+  assert.equal(insert?.values[1], 'sprint-alt');
+  // Offener Sprint bleibt, geschlossener wird durch den aktiven ersetzt; ohne Sprint bleibt es ohne.
+  assert.match(
+    insert?.sql ?? '',
+    /CASE WHEN \$2::uuid IS NOT NULL THEN COALESCE\(\s*\(SELECT s\.id FROM sprints s WHERE s\.id = \$2::uuid AND s\.status NOT IN \('completed', 'cancelled'\)\),\s*\(SELECT s\.id FROM sprints s WHERE s\.project_slug = b\.project_slug AND s\.status = 'active'/,
+  );
+});
+
 test('ENOENT in einem Test ist kein Umgebungsfehler (Auftrag ea3a49b1)', () => {
   const out = "not ok 3 - liest Fixture\n  Error: ENOENT: no such file or directory, scandir '/tmp/fixtures/missing'";
   assert.equal(isEnvironmentFailure(out), false);
   assert.equal(isEnvironmentFailure('Path "/x/fixtures" does not exist'), false);
+});
+
+test('EROFS, EACCES und EPERM (z. B. read_only-Container) sind Code-Fehler, kein endloser Neustart als Umgebung', () => {
+  for (const out of [
+    "Error: EROFS: read-only file system, open '/app/uploads/a.png'",
+    "Error: EACCES: permission denied, mkdir '/home/node/.npm/_cacache'",
+    "Error: EPERM: operation not permitted, chown '/work/node_modules'",
+  ]) {
+    assert.equal(isEnvironmentFailure(out), false, out);
+    assert.equal(isAgentFailure(out), false, out);
+  }
 });
 
 test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach dem Reset', async () => {
@@ -98,6 +127,11 @@ test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach 
   assert.equal(weekly?.getMonth(), 9);
   assert.equal(weekly?.getDate(), 24);
   assert.equal(weekly?.getHours(), 15);
+  // Ausgabenlimit (zwei Wörter vor „limit“): ebenfalls Agent-Fehler, Reset aus der Meldung.
+  const spend =
+    "You've hit your monthly spend limit · raise it at https://claude.ai/settings/usage · your session limit resets 8:50pm (Europe/Zurich)";
+  assert.equal(isAgentFailure(spend), true);
+  assert.equal(usageLimitReset(spend, now)?.getHours(), 20);
   // Ohne lesbare Zeit: eine Stunde später. Ohne Limit-Meldung: nichts.
   const vague = usageLimitReset("You've hit your usage limit.", now);
   assert.equal(vague?.getTime(), now.getTime() + 60 * 60_000);

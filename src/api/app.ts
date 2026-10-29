@@ -16,6 +16,7 @@ import { registerTestRequestRoutes } from './test-requests.js';
 import { registerGitStateRoutes } from './git-state.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
+import { jsonErrors, notFound } from './error-handler.js';
 import { registerCoverageRoutes } from './coverage.js';
 import { registerSetupRoutes } from './setup.js';
 import { registerAcceptanceRoutes } from './acceptance.js';
@@ -34,7 +35,7 @@ import { registerUsageRoutes } from './usage.js';
 import { registerBudgetRoutes } from './budget.js';
 import { registerReportRoutes } from './reports.js';
 import { registerSprintRoutes } from './sprints.js';
-import { FailureLimiter, sameOriginWrites, securityHeaders, trustProxySetting } from './security.js';
+import { FailureLimiter, allowedHostsOnly, sameOriginWrites, securityHeaders, trustProxySetting } from './security.js';
 import { registerStatsRoutes } from './stats.js';
 import { registerScheduledJobRoutes } from './scheduled-jobs.js';
 import { registerSystemRestartRoutes } from './system-restart.js';
@@ -55,22 +56,27 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.disable('x-powered-by');
   app.get('/health', (_request, response) => response.json({ status: 'ok' }));
   app.use(securityHeaders);
+  // Vor allen übrigen Routen (auch Ingest): nur bekannte Host-Namen, sonst steuert eine fremde Seite per DNS-Rebinding
+  // die API – ohne Login (DEV_LOG_AUTH=off) mit Administratorrechten.
+  app.use(allowedHostsOnly);
   // Hinter dem HTTPS-Proxy: Protokoll und Client-IP aus X-Forwarded-* übernehmen,
   // damit die Herkunftsprüfung https erkennt und Fehlversuche je Client zählen.
-  // Nur konkrete Proxy-Netze, nie `true` (siehe trustProxySetting).
+  // Nur konkrete Proxy-Netze oder genau ein Hop, nie `true` (siehe trustProxySetting).
   const configured = process.env.DEV_LOG_TRUST_PROXY?.trim();
   const trustProxy = trustProxySetting(configured);
   if (trustProxy) app.set('trust proxy', trustProxy);
   else if (configured) {
     console.warn(
-      '[auth] DEV_LOG_TRUST_PROXY ungültig (erlaubt: loopback, linklocal, uniquelocal, IP oder CIDR) – X-Forwarded-For wird ignoriert.',
+      '[auth] DEV_LOG_TRUST_PROXY ungültig (erlaubt: 1, loopback, linklocal, uniquelocal, IP oder CIDR) – X-Forwarded-For wird ignoriert.',
     );
   }
   // Produktions-Rückkanal: einzige Route ohne Login (Token im Pfad), vor Herkunftsprüfung und JSON-Parser,
   // weil das Snippet von der Origin der betreuten Anwendung sendet und eigene Grenzen (16 KB) gelten.
   registerIngestRoutes(app, pool);
   app.use(sameOriginWrites);
-  app.use(express.json({ limit: '32kb' }));
+  // Ein Dokument darf MAX_DOC_CONTENT (30 000) Zeichen haben; in JSON kostet ein Zeichen bis zu 6 Byte
+  // (Umlaute 2, \uXXXX-Escapes 6). 256 KB lassen dafür samt Titel und Notiz Platz.
+  app.use(express.json({ limit: '256kb' }));
 
   app.use('/api', createApiRouter(pool, auth));
   app.use(express.static(UI_DIRECTORY, { index: false }));
@@ -78,7 +84,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     response.sendFile(join(UI_DIRECTORY, 'index.html'));
   });
 
-  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Not found.' }));
+  app.use(notFound);
+  app.use(jsonErrors);
   return app;
 }
 

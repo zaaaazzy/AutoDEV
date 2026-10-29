@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runOllamaAgent } from './ollama-agent.js';
-import { splitQuestion, buildChatPrompt, loadChatHistory } from './chat.js';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { acquireTree } from '../core/project-lock.js';
+import { splitQuestion, buildChatPrompt, findOpenQuestion, loadChatHistory, processChat } from './chat.js';
 
 test('reports concrete tool activity through the progress callback', async () => {
   const progress: string[] = [];
@@ -89,4 +93,216 @@ test('Verlauf endet bei der übernommenen Nachricht und lässt wartende Nutzerna
   const sql = call.sql.replace(/\s+/g, ' ');
   assert.match(sql, /created_at <= \(SELECT created_at FROM chat_messages WHERE id = \$3\)/);
   assert.match(sql, /\(role <> 'user' OR status NOT IN \('pending', 'processing'\) OR id = \$3\)/);
+});
+
+test('Verlauf: Antwort auf Nachricht 1 nach der schon wartenden Nachricht 2 steht davor (N1, A1, N2)', async () => {
+  // Nachricht 1 (t1), Nachricht 2 wartet (t2), Antwort A1 (t3) – die Datenbank liefert nach created_at sortiert.
+  const calls: string[] = [];
+  const pool = {
+    query: async (sql: string) => {
+      calls.push(sql.replace(/\s+/g, ' '));
+      return {
+        rows: [
+          { id: 'n1', role: 'user', content: 'Nachricht 1' },
+          { id: 'n2', role: 'user', content: 'Nachricht 2' },
+          { id: 'a1', role: 'assistant', content: 'A1' },
+        ],
+      };
+    },
+  } as unknown as Parameters<typeof loadChatHistory>[0];
+  const history = await loadChatHistory(pool, 'demo', 'n2');
+  assert.deepEqual(history.rows, [
+    { role: 'user', content: 'Nachricht 1' },
+    { role: 'assistant', content: 'A1' },
+    { role: 'user', content: 'Nachricht 2' },
+  ]);
+  const [sql] = calls;
+  assert.ok(sql);
+  // Zeitfilter nur für Nutzernachrichten; die übernommene Nachricht fällt nie aus dem Limit; Sitzung bleibt das Projekt.
+  assert.match(sql, /\(role <> 'user' OR created_at <= \(SELECT created_at FROM chat_messages WHERE id = \$3\)\)/);
+  assert.match(sql, /ORDER BY id = \$3 DESC, created_at DESC LIMIT \$2/);
+  assert.match(sql, /project_slug = \$1/);
+});
+
+/** Wertet die Zeitbedingungen der Rückfrage-Suche auf einem kleinen Datenbestand aus – nur die, die im SQL stehen. */
+function questionPool(messages: { id: string; role: string; question?: string; at: number }[]) {
+  return {
+    query: async (sql: string, params: unknown[]) => {
+      const text = sql.replace(/\s+/g, ' ');
+      const beforeClaimed = text.includes('created_at < (SELECT created_at FROM chat_messages WHERE id = $2)');
+      const afterLastUser = text.includes('created_at > COALESCE(');
+      const claimedAt = messages.find((message) => message.id === params[1])?.at ?? 0;
+      const otherUsers = messages.filter((m) => m.role === 'user' && m.id !== params[1]);
+      const lastUser = Math.max(-Infinity, ...otherUsers.map((m) => m.at));
+      const rows = messages
+        .filter((m) => m.role === 'assistant' && m.question)
+        .filter((m) => !beforeClaimed || m.at < claimedAt)
+        .filter((m) => !afterLastUser || m.at > lastUser)
+        .sort((a, b) => b.at - a.at)
+        .slice(0, 1)
+        .map((m) => ({ id: m.id, question: m.question, sessionId: `session-${m.id}` }));
+      return { rows };
+    },
+  } as unknown as Parameters<typeof findOpenQuestion>[0];
+}
+
+test('Rückfrage nach der übernommenen Nachricht setzt die Sitzung nicht fort', async () => {
+  // N1 (t1), N2 wartet (t2), A1 mit @@FRAGE (t3): N2 wurde vor der Rückfrage geschrieben.
+  const pool = questionPool([
+    { id: 'n1', role: 'user', at: 1 },
+    { id: 'n2', role: 'user', at: 2 },
+    { id: 'a1', role: 'assistant', question: 'Welche Variante?', at: 3 },
+  ]);
+  assert.equal(await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null }), undefined);
+});
+
+test('Rückfrage vor der übernommenen Nachricht setzt die Sitzung weiterhin fort', async () => {
+  const pool = questionPool([
+    { id: 'n1', role: 'user', at: 1 },
+    { id: 'a1', role: 'assistant', question: 'Welche Variante?', at: 2 },
+    { id: 'n2', role: 'user', at: 3 },
+  ]);
+  const open = await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null });
+  assert.deepEqual(open, { id: 'a1', question: 'Welche Variante?', sessionId: 'session-a1' });
+});
+
+test('Rückfrage mit gleichem Zeitstempel wie die übernommene Nachricht zählt nicht', async () => {
+  const pool = questionPool([
+    { id: 'n1', role: 'user', at: 1 },
+    { id: 'a1', role: 'assistant', question: 'Welche Variante?', at: 2 },
+    { id: 'n2', role: 'user', at: 2 },
+  ]);
+  assert.equal(await findOpenQuestion(pool, 'demo', { id: 'n2', agentId: null, replyTo: null }), undefined);
+});
+
+/**
+ * Antwort auf eine offene Rückfrage (Sitzung wird fortgesetzt), optional mit Verweis auf einen Auftrag und bei
+ * belegtem Ordner. Liefert den Befehl, den der Executor für den Agent-Lauf erhält.
+ */
+async function resumedRun(options: { withReference: boolean; busy: boolean }): Promise<string> {
+  const orderId = '11111111-1111-4111-8111-111111111111';
+  const pool = {
+    query: async (sql: string) => {
+      const text = sql.replace(/\s+/g, ' ');
+      if (text.startsWith("UPDATE chat_messages SET status = 'processing'")) {
+        return {
+          rows: [
+            {
+              id: 'n2',
+              content: 'Nimm Variante B.',
+              agentId: 'agent-1',
+              references: options.withReference ? [{ type: 'order', id: orderId, label: 'Login' }] : [],
+              ideaCommentId: null,
+              replyTo: null,
+              origin: 'chat',
+              taskRunId: null,
+            },
+          ],
+        };
+      }
+      if (text.includes('session_id AS "sessionId"')) {
+        return { rows: [{ id: 'a1', question: 'Welche Variante?', sessionId: 'session-a1' }] };
+      }
+      if (text.includes('FROM development_items d LEFT JOIN bugs b')) {
+        return { rows: [{ title: 'Login', status: 'in_progress', description: 'Login reparieren', untrusted: false }] };
+      }
+      if (text.includes('command, allowed_commands')) {
+        return { rows: [{ instructions: '', command: ['claude', '-p'], allowedCommands: null, fileScope: [] }] };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Parameters<typeof processChat>[0];
+  const cwd = mkdtempSync(join(tmpdir(), 'chat-resume-'));
+  const release = options.busy ? await acquireTree(cwd) : undefined;
+  const commands: string[][] = [];
+  try {
+    await processChat(pool, { project: 'demo', cwd, timeoutMs: 5000 }, async (command) => {
+      commands.push(command);
+      return { exitCode: 0, durationMs: 1, output: 'Erledigt.' };
+    });
+  } finally {
+    release?.();
+  }
+  const run = commands.find((command) => command.includes('--resume'));
+  assert.ok(run, 'Agent-Lauf setzt die Sitzung fort');
+  return run.join('\n');
+}
+
+test('Fortgesetzte Sitzung erhält die Verweise des Nutzers', async () => {
+  const prompt = await resumedRun({ withReference: true, busy: false });
+  assert.match(prompt, /Antwort des Nutzers auf deine Rückfrage „Welche Variante\?“/);
+  assert.match(prompt, /## Verweise des Nutzers/);
+  assert.match(prompt, /Auftrag „Login“/);
+  assert.doesNotMatch(prompt, /Du kannst nur lesen/);
+});
+
+test('Fortgesetzte Sitzung erhält bei belegtem Ordner den Nur-lesen-Hinweis', async () => {
+  const prompt = await resumedRun({ withReference: false, busy: true });
+  assert.match(prompt, /Du kannst nur lesen und antworten/);
+  assert.doesNotMatch(prompt, /Verweise des Nutzers/);
+});
+
+test('Assistent startet einen Dienst über services.restart neu, das Ergebnis erscheint im Chat', async () => {
+  const answers: string[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      const text = sql.replace(/\s+/g, ' ');
+      if (text.startsWith("UPDATE chat_messages SET status = 'processing'")) {
+        return {
+          rows: [
+            {
+              id: 'n1',
+              content: 'Die API hängt, bitte neu starten.',
+              agentId: null,
+              references: [],
+              ideaCommentId: null,
+              replyTo: null,
+              origin: 'chat',
+              taskRunId: null,
+            },
+          ],
+        };
+      }
+      if (text.includes('command, allowed_commands')) {
+        return { rows: [{ instructions: '', command: ['claude', '-p'], allowedCommands: null, fileScope: [] }] };
+      }
+      if (text.startsWith('INSERT INTO chat_messages') && text.includes("'assistant'")) {
+        answers.push(String(values[1]));
+        return { rows: [{ id: 'a1' }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  } as unknown as Parameters<typeof processChat>[0];
+  const cwd = mkdtempSync(join(tmpdir(), 'chat-services-'));
+  writeFileSync(join(cwd, 'compose.yaml'), 'services:\n  api:\n    image: x\n');
+  const docker: string[] = [];
+  await processChat(pool, { project: 'demo', cwd, timeoutMs: 5000 }, async (command, _cwd, options) => {
+    if (command[0] === 'docker') {
+      docker.push(command.slice(4).join(' '));
+      if (command.includes('--services')) return { exitCode: 0, durationMs: 1, output: 'api\n' };
+      if (command.includes('--format')) return { exitCode: 0, durationMs: 1, output: '{"services":{"api":{}}}' };
+      return { exitCode: 0, durationMs: 1, output: 'Container api Started' };
+    }
+    // Der Claude-Lauf selbst ruft kein docker auf, er fordert die Aktion per Marker an (stream-json, result-Ereignis).
+    const result = {
+      type: 'result',
+      result: 'Ich starte die API neu.\n@@SERVICES: services.restart api',
+      is_error: false,
+    };
+    const raw = `${JSON.stringify(result)}\n`;
+    options?.onChunk?.(raw);
+    return { exitCode: 0, durationMs: 1, output: raw };
+  });
+  const answer = answers.at(-1) ?? '';
+  assert.deepEqual(docker, ['config --services', 'config --format json', 'restart api'], answer);
+  assert.match(answer, /^Ich starte die API neu\.\n\n## Dienst-Aktionen\n- services\.restart api: erledigt/);
+  assert.match(answer, /Container api Started/);
+  assert.doesNotMatch(answer, /@@SERVICES/);
+});
+
+test('Fortgesetzte Sitzung ohne Verweis und bei freiem Ordner bleibt ohne beide Zusätze', async () => {
+  const prompt = await resumedRun({ withReference: false, busy: false });
+  assert.match(prompt, /Antwort des Nutzers auf deine Rückfrage/);
+  assert.doesNotMatch(prompt, /Verweise des Nutzers/);
+  assert.doesNotMatch(prompt, /Du kannst nur lesen/);
 });

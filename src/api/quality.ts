@@ -2,6 +2,7 @@ import type { Router } from 'express';
 import type { Pool } from 'pg';
 import { access } from './access.js';
 import { parseProjectSlug } from '../core/validation.js';
+import { realFailureSql } from '../core/interrupted-steps.js';
 
 /** Auswertung „Was klappt“: wo der Ablauf hilft und wo er hängen bleibt (letzte 30 Tage). */
 export interface QualityStats {
@@ -71,11 +72,11 @@ export async function collectQuality(pool: Pool, slug: string, days = 30): Promi
       `SELECT s.agent_name AS agent,
               CASE WHEN a.command IS NULL OR cardinality(a.command) = 0 THEN 'Standard'
                    ELSE regexp_replace(a.command[1], '^.*/', '') END AS engine,
-              COUNT(*) AS steps, COUNT(*) FILTER (WHERE s.status = 'failed') AS failed
+              COUNT(*) AS steps, COUNT(*) FILTER (WHERE ${realFailureSql('s')}) AS failed
          FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
          LEFT JOIN agents a ON a.id = s.agent_id
         WHERE r.project_slug = $1 AND r.started_at >= ${since} AND s.status IN ('passed', 'failed')
-        GROUP BY 1, 2 ORDER BY COUNT(*) FILTER (WHERE s.status = 'failed') DESC, COUNT(*) DESC LIMIT 20`,
+        GROUP BY 1, 2 ORDER BY COUNT(*) FILTER (WHERE ${realFailureSql('s')}) DESC, COUNT(*) DESC LIMIT 20`,
       [slug, days],
     ),
   ]);

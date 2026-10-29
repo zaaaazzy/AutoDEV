@@ -7,10 +7,40 @@
       </div>
     </div>
     @if (store.showCreate()) {
-      <form class="form-grid create-form" (ngSubmit)="createSprint()">
-        <label>Name<input name="name" [(ngModel)]="sprintForm.name" maxlength="120" required /> </label>
-        <label>Startdatum<input name="startDate" type="date" [(ngModel)]="sprintForm.startDate" /> </label>
-        <label>Enddatum<input name="endDate" type="date" [(ngModel)]="sprintForm.endDate" /> </label>
+      <form class="form-grid create-form" #sprintFormElement (ngSubmit)="createSprint(sprintFormElement)">
+        <label
+          >Name<input
+            name="name"
+            [(ngModel)]="sprintForm.name"
+            maxlength="120"
+            required
+            [attr.aria-invalid]="sprintErrors.message('name') ? true : null"
+            (input)="sprintErrors.clear('name')"
+          />
+          @if (sprintErrors.message('name')) {
+            <small class="field-error" role="alert">{{ sprintErrors.message('name') }}</small>
+          }
+        </label>
+        <label
+          >Startdatum<input
+            name="startDate"
+            type="date"
+            [(ngModel)]="sprintForm.startDate"
+            (input)="sprintErrors.clear('endDate')"
+          />
+        </label>
+        <label
+          >Enddatum<input
+            name="endDate"
+            type="date"
+            [(ngModel)]="sprintForm.endDate"
+            [attr.aria-invalid]="sprintErrors.message('endDate') ? true : null"
+            (input)="sprintErrors.clear('endDate')"
+          />
+          @if (sprintErrors.message('endDate')) {
+            <small class="field-error" role="alert">{{ sprintErrors.message('endDate') }}</small>
+          }
+        </label>
         <label class="wide">Sprint-Ziel<input name="goal" [(ngModel)]="sprintForm.goal" maxlength="1000" /> </label>
         <button class="button primary" type="submit" [disabled]="busy()">Sprint anlegen</button>
       </form>
@@ -84,6 +114,9 @@
       }
       @if (sprint.status === 'completed' && sprint.gitSync === 'failed') {
         <span class="status status-blocked" title="Live schalten ist gescheitert">Live gescheitert</span>
+      }
+      @if (sprint.status === 'completed' && sprint.gitSync === 'awaiting_merge') {
+        <span class="status status-review" title="Noch nicht in main – dort von Hand mergen">Wartet auf Merge</span>
       }
     </ng-template>
     <ng-template appDataCell="progress" let-sprint>

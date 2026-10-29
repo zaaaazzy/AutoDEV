@@ -11,6 +11,7 @@ import {
   type TestInfo,
 } from '@playwright/test';
 import pg from 'pg';
+import { e2eAdminUrl } from './admin-url.js';
 
 /**
  * Kompletter Oberflächentest: jede Seite, jede Tabelle (Sortieren, Filtern, Suchen, Zurücksetzen) und die
@@ -39,9 +40,7 @@ const IGNORED_CONSOLE = [/Service ?Worker/i, /status of 401/, /fetching the scri
 
 /** Testdatenbank des Oberflächentests (dieselbe wie im Webserver von full.config.ts). */
 function testDatabaseUrl(): string {
-  const url = new URL(
-    process.env.E2E_ADMIN_DATABASE_URL ?? 'postgresql://devlog:devlog_local_dev@localhost:5433/postgres',
-  );
+  const url = e2eAdminUrl();
   url.pathname = `/${process.env.FULL_UI_DATABASE ?? 'dev_log_full'}`;
   return url.toString();
 }
@@ -456,7 +455,14 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await button(firstPanel, 'Details').click();
   await expect(firstPanel.locator('app-order-detail')).toBeVisible();
   await snap(page, info, 'Auftrag Details', false);
-  await firstPanel.getByRole('combobox').first().selectOption({ label: 'Backlog' });
+  // Unter „Aktionen“ keine Status-/Sprint-/Agent-Zeile mehr: den Status ändert man auf der Seite „Aufträge“.
+  await expect(firstPanel.locator('app-order-detail .order-controls')).toHaveCount(0);
+  const firstId = (await firstPanel.locator('.attention-body').getAttribute('id'))?.replace(/^order-/, '');
+  expect(
+    (await page.request.patch(`/api/development/${firstId}`, { headers: auth, data: { status: 'backlog' } })).ok(),
+  ).toBe(true);
+  await page.reload();
+  await open(page, 'actions');
   await expect(rows.filter({ hasText: firstTitle })).toHaveCount(0);
 
   const retry = blocked.first();
@@ -480,11 +486,9 @@ test('Auftrag: anlegen, Status ändern, erneut versuchen, analysieren, löschen'
   await expect
     .soft(button(analysePanel, 'Neu analysieren'), '„Neu analysieren“ ist gesperrt, solange die Analyse läuft')
     .toBeDisabled();
-  await button(analysePanel, 'Löschen').click();
-  const remove = confirmIn('Auftrag löschen?');
-  await expect(remove).toBeVisible();
-  await button(remove, 'Abbrechen').click();
-  await expect(remove).toHaveCount(0);
+  // Löschen gibt es unter „Aktionen“ nicht; jeder Knopf erklärt sich per Hover-Text.
+  await expect(button(analysePanel, 'Löschen')).toHaveCount(0);
+  await expect(button(analysePanel, 'Neu analysieren')).toHaveAttribute('title', /kein Code/);
   await expect(analyse).toBeVisible();
 });
 
@@ -539,8 +543,9 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   await button(detail, 'Änderungen speichern').click();
   await expect(page.getByText('Bug wurde gespeichert.')).toBeVisible();
   await snap(page, info, 'Bug bearbeitet', false);
-  page.once('dialog', (dialog) => void dialog.accept());
   await button(detail, 'Löschen').click();
+  // Löschen fragt im eigenen Bestätigungsdialog nach.
+  await page.getByRole('dialog').getByRole('button', { name: 'Löschen' }).click();
   await expect(page.locator('.dt-table tbody tr').filter({ hasText: title })).toHaveCount(0);
 });
 
@@ -616,9 +621,11 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   if ((await card.getAttribute('open')) === null) await card.locator('summary').click();
   const phases = card.locator('.workflow-phase');
   let phase = phases.first();
+  let sourceIndex = 0;
   for (let index = 0; index < (await phases.count()); index += 1) {
     if ((await phases.nth(index).locator('.workflow-step').count()) >= 2) {
       phase = phases.nth(index);
+      sourceIndex = index;
       break;
     }
   }
@@ -626,6 +633,48 @@ test('Agents: anlegen, Reihenfolge, aktivieren, Detailansicht', async ({ page, i
   const before = await order();
   await phase.locator('.workflow-step').nth(1).getByRole('button', { name: 'Nach oben' }).click();
   await expect.poll(async () => (await order()).join()).not.toBe(before.join());
+  // Drag & Drop: Schritt in eine andere Phase ziehen – Einfügemarke und Schatten beim Ziehen, nach dem Neuladen dort.
+  const phaseCount = await phases.count();
+  const targetIndex = sourceIndex === phaseCount - 1 ? 0 : phaseCount - 1;
+  const source = () => card.locator('.workflow-phase').nth(sourceIndex);
+  const target = () => card.locator('.workflow-phase').nth(targetIndex);
+  const dragged = source().locator('.workflow-step').first();
+  const draggedName = (await dragged.locator('.workflow-step-name').textContent()) ?? '';
+  const named = (section: Locator) => section.locator('.workflow-step-name', { hasText: draggedName }).count();
+  const inTargetBefore = await named(target());
+  const sourceCountBefore = await source().locator('.workflow-step').count();
+  await dragged.locator('.workflow-step-handle').hover();
+  await page.mouse.down();
+  // Erst ein paar Pixel ziehen: Springt die Maus mit Scrollen direkt zur fernen Zielphase, startet Chromium kein Ziehen.
+  const handle = await dragged.locator('.workflow-step-handle').boundingBox();
+  if (handle) await page.mouse.move(handle.x + 6, handle.y + handle.height + 12, { steps: 5 });
+  await target().locator('.workflow-phase-head').hover();
+  await target().locator('.workflow-phase-head').hover({ position: { x: 20, y: 5 } });
+  // Unter Playwright kommt dragover erst mit der nächsten Bewegung an (echte Browser feuern es laufend).
+  const head = await target().locator('.workflow-phase-head').boundingBox();
+  if (head) await page.mouse.move(head.x + 24, head.y + 8, { steps: 3 });
+  await expect.soft(dragged, 'Gezogener Schritt hat einen Schatten').toHaveClass(/dragging/);
+  expect
+    .soft(await dragged.evaluate((node) => getComputedStyle(node).boxShadow), 'Schatten beim Ziehen')
+    .not.toBe('none');
+  await expect.soft(target(), 'Zielphase hervorgehoben').toHaveClass(/drop-active/);
+  await expect
+    .soft(target().locator('.drop-before, .drop-here'), 'Einfügemarke an der Zielstelle')
+    .toHaveCount(1);
+  await page.mouse.up();
+  await expect(page.getByText('Reihenfolge gespeichert.')).toBeVisible();
+  await page.reload();
+  if ((await card.getAttribute('open')) === null) await card.locator('summary').click();
+  await expect.poll(() => named(target()), 'Nach dem Neuladen in der Zielphase').toBe(inTargetBefore + 1);
+  await expect(source().locator('.workflow-step')).toHaveCount(sourceCountBefore - 1);
+  const ranks = await source().locator('.workflow-step .kanban-rank').allTextContents();
+  expect.soft(ranks, 'Quellphase lückenlos ab 1').toEqual(ranks.map((_, index) => String(index + 1)));
+  // Tastatur-Alternative: über die Phasen-Auswahl zurück in die Ausgangsphase.
+  const back = target().locator('.workflow-step', { hasText: draggedName }).first();
+  const sourceLabel = (await source().locator('.workflow-phase-title strong').textContent()) ?? '';
+  await back.getByLabel('In Phase verschieben').selectOption({ label: sourceLabel });
+  await expect(page.getByText(`Schritt nach „${sourceLabel}“ verschoben.`)).toBeVisible();
+  await expect(source().locator('.workflow-step')).toHaveCount(sourceCountBefore);
   const tester = page.locator('.dt tbody tr').filter({ hasText: 'Tester' }).first();
   if (!(await page.locator('.closed-detail').count())) await tester.locator('.dt-expand').click();
   await button(page.locator('.closed-detail'), 'Aktivität').click();
@@ -659,6 +708,7 @@ test('Agents: „Was machen die Rollen?“ auf- und zuklappen', async ({ page },
 test('Einstellungen: Validierungen, Benutzer anlegen, Projekt löschen gesperrt', async ({ page, isMobile }, info) => {
   await login(page);
   await open(page, 'settings');
+  await button(page, 'Alle aufklappen').click();
   if (isMobile) {
     const remove = button(page, 'Projekt endgültig löschen');
     await remove.scrollIntoViewIfNeeded();
@@ -737,6 +787,15 @@ test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: B
   await expect
     .soft(button(page, /Standard-Workflow anlegen/), 'Ohne Agent-Verwaltung kein „Standard-Workflow anlegen“')
     .toHaveCount(0);
+  const workflow = page.locator('details.workflow-panel');
+  if ((await workflow.getAttribute('open')) === null) await workflow.locator('summary').click();
+  await expect.soft(workflow.locator('.workflow-step').first(), 'Workflow-Schritte sichtbar').toBeVisible();
+  await expect.soft(workflow.locator('.workflow-step-handle'), 'Ohne Agent-Verwaltung keine Ziehgriffe').toHaveCount(0);
+  await expect
+    .soft(workflow.getByLabel('In Phase verschieben'), 'Ohne Agent-Verwaltung keine Phasen-Auswahl')
+    .toHaveCount(0);
+  const reorder = await page.request.post('/api/projects/alpha/workflow/order', { data: { phase: 'on_done', ids: [] } });
+  expect(reorder.status(), 'Ablegen ohne Agent-Verwaltung ist wirkungslos').toBe(403);
   expect((await page.request.post('/api/users', { data: {} })).status()).toBe(403);
   await snap(page, info, 'Ansicht der Autorin');
   await context.close();

@@ -1,10 +1,10 @@
-<section class="panel">
-  <div class="section-heading">
+<details appSettingsGroup="sicherheit">
+  <summary class="section-heading">
     <div>
       <h2>Sicherheit</h2>
       <p class="muted">Anmeldung und Geräte</p>
     </div>
-  </div>
+  </summary>
   @if (status(); as current) {
     <div class="security-grid">
       <div class="security-item">
@@ -106,4 +106,4 @@
   @if (error()) {
     <p class="notice error" role="alert">{{ error() }}</p>
   }
-</section>
+</details>

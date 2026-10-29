@@ -8,7 +8,8 @@ export function problemsForAction(
 ): GitProblem[] {
   if (action === 'all') return problems;
   return problems.filter((problem) => {
-    if (action === 'go_live') return problem.role === 'live';
+    // Live schalten: Die Git-Sicherung arbeitet im Agent-Ordner, der Deploy im Projektordner – beide zählen.
+    if (action === 'go_live') return true;
     if (problem.code.startsWith('main_')) return false;
     return separate ? problem.role === 'agents' : problem.role === 'live';
   });

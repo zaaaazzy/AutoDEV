@@ -98,7 +98,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
  * fremden Quellen (Betrieb, GitHub) ohne Freigabe durch einen Menschen werden nie gewählt, auch nicht gezielt (--item).
  */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.retry_count AS "retryCount"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d
@@ -113,9 +113,15 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
        LEFT JOIN sprints s ON s.id = d.sprint_id
       WHERE d.project_slug = $1 AND d.status = 'planned' AND d.kind <> 'express'
         AND NOT ${awaitsBugApprovalSql('d')}
-        AND (s.status = 'active' OR d.agent_id IS NOT NULL OR d.auto_run)
-        -- Nutzungslimit des Agent-Kontos: erst nach dem Reset wieder starten.
+        -- auto_run nur ohne Sprint: Ein geplanter Sprint wartet auf seinen Start, ein abgeschlossener bzw. abgebrochener
+        -- hält den Auftrag ohnehin an (sprintPaused) – er drehte sich sonst endlos (detachFromClosedSprints hängt ihn um).
+        AND (s.status = 'active' OR d.agent_id IS NOT NULL OR (d.auto_run AND d.sprint_id IS NULL))
+        -- Nutzungslimit des Agent-Kontos bzw. Arbeitsordner nicht sauber: erst nach dem Reset wieder starten. Beides gilt
+        -- für das ganze Projekt, nicht nur für den Auftrag, der es bemerkt hat – sonst liefe jeder weitere Auftrag in
+        -- dieselbe Wand (ein von Hand gestarteter Agent läuft trotzdem).
         AND (d.retry_after IS NULL OR d.retry_after <= NOW())
+        AND (d.agent_id IS NOT NULL OR NOT EXISTS (
+              SELECT 1 FROM development_items x WHERE x.project_slug = d.project_slug AND x.retry_after > NOW()))
         -- Pausierter Sprint: keine Aufträge starten (ausser ein einzelner Agent wurde von Hand gestartet).
         AND (s.paused_at IS NULL OR d.agent_id IS NOT NULL)
       ORDER BY d.sprint_rank NULLS LAST, CASE d.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, d.created_at

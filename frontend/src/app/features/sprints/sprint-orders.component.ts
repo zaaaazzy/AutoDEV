@@ -1,15 +1,23 @@
-import { Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
+import { Component, computed, inject, input, signal } from '@angular/core';
+import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import type { SortingState } from '@tanstack/angular-table';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { DataColumn } from '../../shared/data-table/data-table.component.js';
-import { isFinished } from '../../shared/labels.js';
-import { isAssignableSprintStatus } from '../../../../../src/core/development-transitions.js';
+import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
-import { pickInOrder } from './pool-selection.js';
-import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from './sprint-phases.js';
+import { isAborted, NEEDS_RUN, pickInOrder, poolOpenState, poolSelectable } from './pool-selection.js';
+import {
+  byRank,
+  canEditSprintOrders,
+  moveId,
+  orderSprint,
+  phaseLabel,
+  phaseRank,
+  sprintPhase,
+} from './sprint-phases.js';
 
 /**
  * Aufträge eines Sprints als Liste wie auf der Auftragsseite, nach Phase eingeordnet. „Geplant“ ist die
@@ -19,7 +27,7 @@ import { byRank, moveId, orderSprint, phaseLabel, phaseRank, sprintPhase } from 
 @Component({
   selector: 'app-sprint-orders',
   standalone: true,
-  imports: [OrderTableComponent, OrderActionsDirective],
+  imports: [OrderTableComponent, OrderActionsDirective, BulkBarComponent],
   templateUrl: './sprint-orders.component.html',
 })
 export class SprintOrdersComponent {
@@ -54,44 +62,44 @@ export class SprintOrdersComponent {
     },
   ];
 
-  /** Zur Auswahl: offene (noch in keinem Sprint) und abgebrochene (aus einem Sprint genommen oder gescheitert). */
+  /**
+   * Zur Auswahl: offene (noch in keinem Sprint) und abgebrochene (aus einem Sprint genommen oder gescheitert) – dieselbe
+   * Regel wie die Route take-into-sprint. Laufende oder in Freigabe stehen nicht zur Wahl (sonst 409).
+   */
   protected readonly free = computed(() => {
-    const free = this.store
-      .data()
-      .development.filter((item) => !item.sprintId && !isFinished(item.status) && item.status !== 'in_progress');
-    const aborted = (item: DevelopmentItem): boolean => !!item.removedFromSprintAt || item.status === 'blocked';
-    return [...byRank(free.filter((item) => !aborted(item))), ...byRank(free.filter(aborted))];
+    const free = this.store.data().development.filter(canTakeIntoSprint);
+    return [...byRank(free.filter((item) => !isAborted(item))), ...byRank(free.filter(isAborted))];
   });
   protected readonly poolColumns: DataColumn<DevelopmentItem>[] = [
     {
       id: 'sprint',
       header: 'Herkunft',
-      value: (item) =>
-        item.removedFromSprintAt || item.status === 'blocked' ? 'Abgebrochen' : 'Offen – noch in keinem Sprint',
-      sortValue: (item) => (item.removedFromSprintAt || item.status === 'blocked' ? 1 : 0),
+      value: (item) => (isAborted(item) ? 'Abgebrochen' : 'Offen – noch in keinem Sprint'),
+      sortValue: (item) => (isAborted(item) ? 1 : 0),
     },
   ];
-  protected readonly anyRow = (): boolean => true;
+  /** Abgebrochene neu einplanen ist ein erneuter Versuch: nur mit „Ausführen“ (Server: 403, wie /retry). */
+  protected readonly canRun = computed(() => this.auth.can('run'));
+  protected readonly selectable = poolSelectable(() => this.canRun());
+  protected readonly needsRun = NEEDS_RUN;
+  /** Hinweis über der Liste, wenn abgebrochene Aufträge zu sehen, aber gesperrt sind. */
+  protected readonly lockedAborted = computed(() => (this.canRun() ? 0 : this.free().filter(isAborted).length));
   /**
-   * Nur „leer ja/nein“ als Quelle: Die Auftragsliste wird bei jedem Nachladen (Agent-Läufe alle 3 s, Commits) neu
-   * berechnet. Hinge der Offen-Zustand direkt an ihr, klappte eine von Hand geöffnete Liste jedes Mal wieder zu.
-   */
-  private readonly sprintEmpty = computed(() => !this.orders().length);
-  /**
-   * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu. Die Liste wird nur gerendert, wenn sie offen ist:
+   * „Aufträge hinzufügen“ ist bei leerem Sprint offen, sonst zu; eine von Hand geöffnete Liste bleibt beim Nachladen
+   * offen (siehe poolOpenState). Die Liste wird nur gerendert, wenn sie offen ist:
    * In einem zugeklappten <details> hätte sie eine Höhe, wäre aber nicht fokussierbar (Chrome rendert den Inhalt
    * mit content-visibility) – Filter und Prüfungen hielten sie für sichtbar.
    */
-  protected readonly poolOpen = linkedSignal(() => this.sprintEmpty());
+  protected readonly poolOpen = poolOpenState(() => this.orders());
   protected readonly selectedIds = signal<ReadonlySet<string>>(new Set());
-  /** Nur, was noch zur Auswahl steht (inzwischen eingeplante fallen weg), in Anzeige-Reihenfolge. */
-  protected readonly selection = computed(() => pickInOrder(this.free(), this.selectedIds()));
+  /**
+   * Nur, was noch zur Auswahl steht, in Anzeige-Reihenfolge: inzwischen eingeplante fallen weg, ebenso abgebrochene,
+   * wenn „Ausführen“ fehlt (auch nach einem Rollenwechsel mit schon angehakten).
+   */
+  protected readonly selection = computed(() => pickInOrder(this.free().filter(this.selectable), this.selectedIds()));
 
-  protected readonly editable = computed(
-    () => !['completed', 'cancelled'].includes(this.sprint().status) && this.auth.can('plan'),
-  );
-  /** Hineinnehmen nur in geplante oder aktive Sprints (dieselbe Regel wie der Server); im Review und danach nicht. */
-  protected readonly canTakeIn = computed(() => this.editable() && isAssignableSprintStatus(this.sprint().status));
+  /** Umsortieren, Herausnehmen und Hineinnehmen (siehe canEditSprintOrders). */
+  protected readonly editable = computed(() => canEditSprintOrders(this.sprint().status, this.auth.can('plan')));
 
   protected clearSelection(): void {
     this.selectedIds.set(new Set());
@@ -164,7 +172,7 @@ export class SprintOrdersComponent {
    * sodass er auch in einem noch geplanten Sprint sofort startete.
    */
   private async takeIntoSprint(item: DevelopmentItem): Promise<void> {
-    if (!this.canTakeIn()) throw new Error('Aufträge lassen sich nur geplanten oder aktiven Sprints zuordnen.');
+    if (!this.editable()) throw new Error('Aufträge lassen sich nur geplanten oder aktiven Sprints zuordnen.');
     await this.api.post(`/api/development/${encodeURIComponent(item.id)}/take-into-sprint`, {
       sprintId: this.sprint().id,
     });

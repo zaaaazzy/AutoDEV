@@ -8,7 +8,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import { gitHelpers } from './git-helpers.js';
 import { reconcileWorkingTree } from './reconcile.js';
-import { clearStaleIndexLock } from './stale-lock.js';
+import { clearStaleLock } from './stale-lock.js';
 import { runCommand } from '../../core/command.js';
 
 const pool = { query: async () => ({ rows: [], rowCount: 0 }) } as unknown as Pool;
@@ -106,13 +106,12 @@ test('index.lock in Benutzung oder ganz frisch: bleibt liegen', async () => {
   const { agents, git } = await setup();
   const lock = join(git(agents, 'rev-parse', '--absolute-git-dir'), 'index.lock');
   await writeFile(lock, '');
-  assert.equal(await clearStaleIndexLock(agents), null, 'frisch angelegt');
+  assert.equal(await clearStaleLock(agents), null, 'frisch angelegt');
   const handle = await open(lock, 'r');
   try {
     const old = new Date(Date.now() - 5 * 60_000);
     await utimes(lock, old, old);
-    if (process.platform !== 'win32')
-      assert.equal(await clearStaleIndexLock(agents), null, 'von einem Prozess gehalten');
+    if (process.platform !== 'win32') assert.equal(await clearStaleLock(agents), null, 'von einem Prozess gehalten');
   } finally {
     await handle.close();
   }

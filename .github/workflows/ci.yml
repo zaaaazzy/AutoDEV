@@ -1,13 +1,38 @@
 name: CI
-on: [push, pull_request]
+# Push nur auf main; Branches laufen über ihren Pull Request, sonst liefe jeder Commit doppelt.
+on:
+  push:
+    branches: [main]
+  pull_request:
 # Nur Lesen: kein Job schreibt ins Repository, in Issues oder Pakete.
 permissions:
   contents: read
+# Ein neuer Push auf denselben Pull Request bricht den alten Lauf ab; Läufe auf main laufen immer zu Ende.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 # Kein Job nutzt Secrets. checkout legt das GITHUB_TOKEN nicht in .git/config ab (persist-credentials: false),
 # damit Projektcode (Tests, Testserver, Docker-Build) es nicht lesen kann.
 jobs:
   check:
     runs-on: ubuntu-latest
+    # Eigene Postgres-Instanz für die Datenbank-Tests (Migrationen, Sitzungen, Benutzer- und Rechte-Routen).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: devlog
+          POSTGRES_PASSWORD: devlog_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U devlog" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Wegwerf-Datenbank des Service-Containers, kein Secret.
+      DEV_LOG_TEST_ADMIN_DATABASE_URL: postgresql://devlog:devlog_ci_only@localhost:5432/postgres
+      # Ohne erreichbare Datenbank schlagen die Datenbank-Tests fehl, statt still übersprungen zu werden.
+      DEV_LOG_TEST_REQUIRE_DATABASE: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,7 +46,8 @@ jobs:
       - run: npm run format:check
       # Prüft auch die Test-Dateien (tsconfig.test.json, frontend/tsconfig.spec.json); tsx allein prüft keine Typen.
       - run: npm run typecheck
-      - run: npm test
+      # Ohne build:ui: kein Unit-Test liest dist/ui, die Oberfläche baut der Job e2e.
+      - run: npm run test:unit
 
   # Oberflächentests (Playwright) gegen eine eigene Postgres-Instanz nur für diesen Lauf.
   e2e:
@@ -81,11 +107,33 @@ jobs:
       # Caddy (Profil https, beim ausdrücklichen Dienstnamen aktiv) wird nur gebaut, nicht gestartet: ohne Domain kein Zertifikat.
       - run: docker compose build dev-log frontend https
       - run: docker build deploy/review
+      # Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker); danach läuft der Sandbox-Integrationstest gegen echtes Docker.
+      - run: docker build -t aideation-agent -f deploy/agent/Dockerfile .
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx --no-install tsx --test src/core/sandbox-docker.test.ts
+        env:
+          DEV_LOG_TEST_REQUIRE_DOCKER: '1'
       - name: Container starten und Health prüfen
         run: |
           docker compose up -d --wait --wait-timeout 180 db dev-log frontend
           curl -fsS http://127.0.0.1:3100/health
+      # Worker als Compose-Dienst (Profil worker): als Benutzer des Runners mit der Gruppe des Docker-Sockets, Pfade aus
+      # docker-compose.override.yml (scripts/worker-compose.ts). Gesund heisst: Lebenszeichen in der Datenbank.
+      - name: Worker im Container starten und Health prüfen
+        run: |
+          echo "DEV_LOG_WORKER_USER=$(id -u):$(id -g)" >> "$GITHUB_ENV"
+          echo "DEV_LOG_DOCKER_GID=$(stat -c %g /var/run/docker.sock)" >> "$GITHUB_ENV"
+          export DEV_LOG_WORKER_USER="$(id -u):$(id -g)" DEV_LOG_DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+          npx --no-install tsx scripts/worker-compose.ts
+          docker compose --profile worker up -d --build --wait --wait-timeout 900 worker watchdog
+          # Nur der Worker erreicht Docker über den Socket – als Benutzer ohne root.
+          docker compose exec -T worker docker version --format '{{.Server.Version}}'
+          test "$(docker compose ps --format '{{.Health}}' worker)" = healthy
       - if: failure()
-        run: docker compose logs --no-color --tail 200 db dev-log frontend
+        run: docker compose --profile worker logs --no-color --tail 200 db dev-log frontend worker watchdog
       - if: always()
-        run: docker compose down -v
+        run: docker compose --profile worker down -v

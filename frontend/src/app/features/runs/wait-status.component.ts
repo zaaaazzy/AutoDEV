@@ -1,11 +1,18 @@
-import { Component, DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, Injectable, computed, inject, input, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
+import type { Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import type { LiveRun } from './test-run-live.js';
 import { waitStatus } from './wait-status.js';
 
 const POLL_MS = 3_000;
+
+/** Sprint, bei dem Git noch arbeitet: Sicherung offen/läuft oder Pull Request wartet auf CI bzw. Merge. */
+function waitingOnGit(sprint: Sprint): boolean {
+  if (sprint.gitSync === 'pending' || sprint.gitSync === 'running') return true;
+  return sprint.status === 'review' && Boolean(sprint.prUrl) && sprint.ciStatus !== 'failure';
+}
 /** Steht nur ein Push an (noch kein Test), den Sprint-Stand seltener nachladen. */
 const SYNC_RELOAD_MS = 15_000;
 
@@ -48,9 +55,8 @@ export class TestLiveService {
       const was = this.live();
       this.live.set(run);
       // Test fertig oder Push noch offen: Sprint-Stand (Git-Sicherung) und Testläufe nachladen.
-      const syncing = this.store
-        .data()
-        .sprints.some((sprint) => sprint.gitSync === 'pending' || sprint.gitSync === 'running');
+      // Git-Sicherung offen oder Pull Request wartet auf die CI: Sprint-Stand regelmässig nachladen.
+      const syncing = this.store.data().sprints.some(waitingOnGit);
       const finished = was && (!run || run.id !== was.id);
       if (finished || (!run && syncing && Date.now() - this.lastSyncReload > SYNC_RELOAD_MS)) {
         this.lastSyncReload = Date.now();
@@ -73,11 +79,14 @@ export class TestLiveService {
   standalone: true,
   template: `
     @if (status(); as wait) {
-      <span class="wait-status" role="status">
+      <span class="wait-status" [class.wait-status-card]="card()" role="status">
         <span class="wait-status-text"
           ><span class="review-spinner" aria-hidden="true"></span> <strong>{{ wait.label }}</strong> ·
           {{ wait.hint }}</span
         >
+        @if (wait.detail) {
+          <span class="wait-status-detail">{{ wait.detail }}</span>
+        }
         <span
           class="wait-status-bar"
           [class.indeterminate]="wait.percent === null"
@@ -96,13 +105,12 @@ export class TestLiveService {
 export class WaitStatusComponent {
   private readonly store = inject(ProjectStore);
   private readonly testLive = inject(TestLiveService);
+  /** Eigene Karte (Dashboard) statt einer Zeile in einer Box. */
+  readonly card = input(false);
 
   readonly status = computed(() => {
     const data = this.store.data();
-    const sprint =
-      data.sprints.find((entry) => entry.gitSync === 'pending' || entry.gitSync === 'running') ??
-      data.sprints.find((entry) => entry.status === 'active') ??
-      null;
+    const sprint = data.sprints.find(waitingOnGit) ?? data.sprints.find((entry) => entry.status === 'active') ?? null;
     return waitStatus(this.testLive.live(), sprint, data.runs);
   });
 
