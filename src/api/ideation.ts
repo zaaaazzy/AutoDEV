@@ -97,8 +97,8 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
       fields,
       `${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
       { column: 'status', values: [...EDITABLE_IDEATION_STATUSES, IDEATION_STATUS.rejected] },
+      manualEstimateSql(fields),
     );
-    update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
       const exists = (await pool.query('SELECT 1 FROM ideation_items WHERE id = $1', [request.params.id])).rows[0];

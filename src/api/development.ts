@@ -112,6 +112,46 @@ export function retryAutoRunSql(chosen = 'NULL::uuid'): string {
   return `COALESCE((SELECT t.status = 'active' FROM sprints t WHERE t.id = ${retrySprintSql(chosen)}), TRUE)`;
 }
 
+/**
+ * Zusätzliche SET-Zuweisungen für PATCH /development/:id (als `extra` an `buildUpdate`). Jede Spalte erscheint
+ * höchstens einmal; `targetSprintStatus` ist der Status eines neu gewählten Sprints.
+ */
+export function developmentUpdateExtras(
+  fields: { column: string; value: unknown }[],
+  targetSprintStatus?: string,
+): string[] {
+  const extras = manualEstimateSql(fields);
+  const sprintField = fields.find((field) => field.column === 'sprint_id');
+  const agentField = fields.find((field) => field.column === 'agent_id');
+  const statusGiven = fields.some((field) => field.column === 'status');
+  const manualStart = typeof agentField?.value === 'string' && !statusGiven;
+  if ((sprintField || agentField) && !manualStart && !statusGiven) {
+    // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
+    const assigned = (sprintField ?? agentField)?.value !== null;
+    const target = assigned
+      ? "'planned'"
+      : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`;
+    extras.push(`status = CASE WHEN status IN ('backlog', 'planned') THEN ${target} ELSE status END`);
+  }
+  if (sprintField && sprintField.value !== null) {
+    // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
+    extras.push('removed_from_sprint = NULL', 'removed_from_sprint_at = NULL');
+  }
+  if (targetSprintStatus && targetSprintStatus !== 'active') {
+    // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
+    // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
+    extras.push('auto_run = FALSE');
+  }
+  if (manualStart) {
+    // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
+    extras.push(
+      "return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END",
+      "status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END",
+    );
+  }
+  return extras;
+}
+
 export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
   app.post('/ideation/:id/promote', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
@@ -577,8 +617,6 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
           return;
         }
       }
-      const sprintField = sprintChange;
-      const agentField = fields.find((field) => field.column === 'agent_id');
       // Status oder Sprint nur ändern, wenn der Status seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
       const update = buildUpdate(
         'development_items',
@@ -586,37 +624,8 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         fields,
         `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
         from ? { column: 'status', values: [from] } : undefined,
+        developmentUpdateExtras(fields, targetSprintStatus),
       );
-      update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
-      const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
-      if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
-        // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
-        const assigned = (sprintField ?? agentField)?.value !== null;
-        update.sql = update.sql.replace(
-          ', updated_at = NOW()',
-          `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`,
-        );
-      }
-      if (sprintField && sprintField.value !== null) {
-        // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
-        update.sql = update.sql.replace(
-          ', updated_at = NOW()',
-          ', removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()',
-        );
-      }
-      if (targetSprintStatus && targetSprintStatus !== 'active') {
-        // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
-        // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
-        update.sql = update.sql.replace(', updated_at = NOW()', ', auto_run = FALSE, updated_at = NOW()');
-      }
-      if (manualStart) {
-        // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
-        update.sql = update.sql.replace(
-          ', updated_at = NOW()',
-          `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,
-          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`,
-        );
-      }
       const result = await pool.query(update.sql, update.values);
       if (!result.rows[0]) {
         response.status(from ? 409 : 404).json({
