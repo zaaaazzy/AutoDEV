@@ -4,24 +4,34 @@ Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher A
 
 ## 1 · Prozesse und Takte
 
-Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker auf dem Mac; der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter; der schreibt nur Wünsche in die Datenbank.
+Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker auf dem Host (Mac, Linux oder Windows). Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker in kurzlebigen Containern der Docker-Sandbox (`DEV_LOG_AGENT_SANDBOX`, Standard `docker`). Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
 
 ```mermaid
 flowchart TB
   U(["Browser / Handy"]):::person -->|HTTPS| C["Caddy :443"]
   C --> FE["aideation_frontend_angular<br/>nginx · Oberfläche :3100"]
   FE -->|"/api"| API["aideation_backend_nodejs<br/>API (intern :3100)"]
-  subgraph MAC["Mac"]
+  subgraph HOST["Host"]
     direction TB
-    W["Worker<br/>launchd com.aideation.worker"]:::ok
+    W["Worker<br/>launchd · systemd · Windows"]:::ok
     WD["Watchdog<br/>alle 2 min"]:::wait
-    AG["Agents<br/>Claude · Copilot · Gemini · Ollama"]:::ok
     P[("Projektordner<br/>AIdeation: AIdeation/agent")]
+    subgraph SANDBOX["Docker-Sandbox · Netzwerk aideation-agents (intern)"]
+      direction TB
+      AG["Agent-Container je Schritt<br/>Label aideation.run · Claude · Ollama-Befehle"]:::ok
+      TC["Testcontainer<br/>Gate · test:full · Abdeckung"]:::ok
+      EG["Egress-Proxy aideation-egress"]:::wait
+    end
   end
   API -->|"Wünsche: Status, Chat, Aufträge"| DB[("PostgreSQL")]
   W <-->|"liest Anfragen, schreibt Ergebnisse"| DB
-  W -->|startet| AG
-  AG -->|arbeiten in| P
+  W -->|"docker run --rm"| AG
+  W -->|"docker run --rm"| TC
+  AG -->|"/workspace (lesende Rollen :ro)"| P
+  TC -->|/workspace| P
+  AG --> EG
+  EG -->|"nur Anthropic-API, npm, Ollama"| NET(["Internet / Ollama"])
+  AG -.-x|gesperrt| DB
   WD -.->|"prüft Dienst, HTTPS, DB, Worker"| DB
   WD -.->|Push| U
   classDef ok fill:#e3f1e8,stroke:#2f8a57,color:#1d4d33

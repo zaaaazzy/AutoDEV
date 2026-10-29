@@ -243,15 +243,21 @@ Das alte gemeinsame Volume `aideation_review_npm` wird nicht mehr benutzt und l�
 
 ### Docker-Sandbox für Agents (optional)
 
-Mit dem Schalter `DEV_LOG_AGENT_SANDBOX` läuft der Entwickler-Agent in einem kurzlebigen Container statt direkt auf dem
-Rechner. Der Worker bleibt auf dem Host und steuert den Lauf. Das Verhalten ist auf macOS, Linux und Windows gleich.
+Jeder Agent-Schritt und jeder Projekttest läuft in einem kurzlebigen Container statt direkt auf dem Rechner (Schalter
+`DEV_LOG_AGENT_SANDBOX`). Der Worker bleibt auf dem Host und steuert den Lauf. Das Verhalten ist auf macOS, Linux und
+Windows gleich.
 
 | Wert | Wirkung |
 |---|---|
-| `off` (Standard) | Alle Agents laufen wie bisher auf dem Host. |
-| `docker` | Der Entwickler läuft im Image `aideation-agent`. Die anderen Rollen bleiben vorerst auf dem Host (Phase 1). |
+| `docker` (Standard) | Alle Rollen, System-Agents, das Projekttests-Gate und `test:full` laufen im Image `aideation-agent`. Netzwerk nur über den Egress-Proxy (Anthropic-API, npm-Registry, Ollama). |
+| `off` | Notfallmodus: Alles läuft wieder auf dem Host. Das Worker-Badge zeigt eine Warnung. |
 
-**Einschalten:**
+Zusätzliche Ziele für den Egress-Proxy (z. B. eine weitere Registry) lassen sich ausdrücklich mit
+`DEV_LOG_AGENT_SANDBOX_EGRESS=host:port,host:port` freigeben. Testdienste eines Projekts (z. B. eine Datenbank)
+bekommen in dessen Compose-Datei das Label `aideation.test: "true"`. Der Worker startet sie vor den Tests, und der
+Testcontainer hängt nur in deren Netzwerk.
+
+**Einrichten:**
 
 1. Image bauen, im AIdeation-Ordner: `docker build -t aideation-agent -f deploy/agent/Dockerfile .` Das geschieht auch
    bei jedem „AIdeation neu starten“ und im CI-Job `docker`. Das Image enthält Playwright mit Browsern, Node 22, die
@@ -259,8 +265,9 @@ Rechner. Der Worker bleibt auf dem Host und steuert den Lauf. Das Verhalten ist 
 2. Anmeldung für die Claude-CLI im Container: `claude setup-token` ausführen und den Wert als
    `CLAUDE_CODE_OAUTH_TOKEN=…` in `worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Das `~/.claude` des Hosts wird
    nicht eingebunden.
-3. Schalter setzen: global als `DEV_LOG_AGENT_SANDBOX=docker` in `worker.env`, oder je Projekt unter Einstellungen →
-   Projekt & Ordner → „Docker-Sandbox für den Entwickler“ (Wie global / Aus / Docker). Der Projektwert geht vor.
+3. Schalter (optional): Ohne Angabe gilt `docker`. Abweichend global in `worker.env` oder je Projekt unter
+   Einstellungen → Projekt & Ordner → „Docker-Sandbox für Agents und Projekttests“ (Wie global / Aus / Docker). Der
+   Projektwert geht vor.
 4. Worker neu starten.
 
 Optional begrenzen `DEV_LOG_AGENT_SANDBOX_CPUS` (Standard `2`) und `DEV_LOG_AGENT_SANDBOX_MEMORY` (Standard `4g`) den

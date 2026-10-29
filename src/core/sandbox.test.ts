@@ -8,23 +8,41 @@ import {
   credentialProblem,
   dockerClientEnvironment,
   dockerHostPath,
+  EGRESS_CONTAINER,
+  EGRESS_URL,
+  egressAllowList,
+  egressRunArgs,
+  ensureAgentNetwork,
   modulesVolume,
+  readOnlyWorkspace,
   removeLeftoverContainers,
+  resetAgentNetwork,
   runInSandbox,
   SANDBOX_GUARD,
+  SANDBOX_NETWORK,
   sandboxBadge,
   sandboxExecutor,
   sandboxFailureNote,
   sandboxMode,
+  sandboxOffWarning,
   sandboxRunArgs,
   SANDBOX_WORKDIR,
   usesSandbox,
 } from './sandbox.js';
+import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
+import { usageLimitReset } from '../runner/autofix.js';
 
 const TOKEN = 'sk-ant-oat01-geheimer-test-token-1234567890';
 const WORKTREE = '/srv/projekte/demo/agent';
 
 const ok = (output = ''): CommandResult => ({ exitCode: 0, durationMs: 1, output });
+
+/** Agent-Netzwerk ist intern, der Egress-Proxy läuft: Standardantwort der Attrappe für diese Abfragen. */
+const networkReady = (command: string[]): CommandResult | null =>
+  (command[1] === 'network' && command[2] === 'inspect') ||
+  (command[1] === 'inspect' && command.includes(EGRESS_CONTAINER))
+    ? ok('true\n')
+    : null;
 
 /** Docker-Attrappe: zeichnet jeden Aufruf auf; `answer` bestimmt das Ergebnis je Unterbefehl. */
 function fakeDocker(answer: (command: string[]) => CommandResult | Promise<CommandResult> = () => ok()): {
@@ -34,7 +52,7 @@ function fakeDocker(answer: (command: string[]) => CommandResult | Promise<Comma
   const calls: { command: string[]; env?: NodeJS.ProcessEnv }[] = [];
   const docker: CommandExecutor = async (command, _cwd, options) => {
     calls.push({ command, env: options?.env });
-    return answer(command);
+    return networkReady(command) ?? answer(command);
   };
   return { calls, docker };
 }
@@ -102,11 +120,17 @@ test('Sandbox: Token nur als Name (-e NAME), nie als Wert in den Argumenten', ()
   assert.deepEqual(Object.keys(env).sort(), ['CLAUDE_CODE_OAUTH_TOKEN', 'PATH']);
 });
 
-test('Sandbox: Ollama über host.docker.internal; unter Linux mit host-gateway', () => {
-  const mac = args().join(' ');
-  assert.match(mac, /-e DEV_LOG_OLLAMA_URL=http:\/\/host\.docker\.internal:11434/);
-  assert.ok(!mac.includes('--add-host'));
-  const linux = sandboxRunArgs(['claude'], WORKTREE, {
+test('Sandbox: Agent-Netzwerk mit Egress-Proxy; Ollama über host.docker.internal', () => {
+  const mac = args();
+  const joined = mac.join(' ');
+  assert.equal(mac[mac.indexOf('--network') + 1], SANDBOX_NETWORK);
+  assert.match(joined, /-e DEV_LOG_OLLAMA_URL=http:\/\/host\.docker\.internal:11434/);
+  for (const name of ['HTTPS_PROXY', 'HTTP_PROXY', 'npm_config_https_proxy'])
+    assert.ok(mac.includes(`${name}=${EGRESS_URL}`), `${name} zeigt auf den Egress-Proxy`);
+  assert.ok(!joined.includes('--add-host'), 'im internen Netzwerk kein Weg zum Host');
+  assert.ok(!mac.includes('host'), 'nie --network host');
+  // Testcontainer im Compose-Netzwerk des Projekts: ohne Proxy, unter Linux mit host-gateway.
+  const linux = sandboxRunArgs(['npm', 'test'], WORKTREE, {
     runId: 'r',
     project: 'demo',
     name: 'n',
@@ -114,8 +138,84 @@ test('Sandbox: Ollama über host.docker.internal; unter Linux mit host-gateway',
     uid: 1000,
     gid: 1000,
     environment: {},
+    network: 'demo-agent_default',
   });
+  assert.equal(linux[linux.indexOf('--network') + 1], 'demo-agent_default');
+  assert.ok(!linux.join(' ').includes('PROXY'));
   assert.match(linux.join(' '), /--add-host host\.docker\.internal:host-gateway/);
+});
+
+test('Sandbox: lesende Rollen binden Workspace und node_modules nur mit :ro ein', () => {
+  for (const role of [...READ_ONLY_ROLES, 'visionary', 'analyst', 'pre_sprint']) {
+    assert.equal(readOnlyWorkspace(role), true, role);
+    const command = sandboxRunArgs(['claude', '-p', 'x'], WORKTREE, {
+      runId: 'r',
+      project: 'demo',
+      name: 'n',
+      platform: 'darwin',
+      uid: 501,
+      gid: 20,
+      environment: {},
+      readOnly: readOnlyWorkspace(role),
+    });
+    const mounts = command.flatMap((part, index) => (command[index - 1] === '-v' ? [part] : []));
+    assert.deepEqual(mounts, [
+      `${WORKTREE}:${SANDBOX_WORKDIR}:ro`,
+      `${modulesVolume('demo')}:${SANDBOX_WORKDIR}/node_modules:ro`,
+    ]);
+  }
+  for (const role of ['developer', 'tester', 'reviewer', 'documenter', 'assistant']) {
+    assert.equal(readOnlyWorkspace(role), false, role);
+    const mounts = args().flatMap((part, index, all) => (all[index - 1] === '-v' ? [part] : []));
+    assert.ok(
+      mounts.every((mount) => !mount.endsWith(':ro')),
+      `${role} schreibt im Worktree`,
+    );
+  }
+});
+
+test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm und Ollama', () => {
+  const command = egressRunArgs('darwin', { DEV_LOG_AGENT_SANDBOX_EGRESS: 'pypi.org:443, 10.0.0.1:5432x, ;rm' });
+  const joined = command.join(' ');
+  assert.match(joined, /--cap-drop ALL/);
+  assert.match(joined, /--read-only/);
+  assert.equal(command[command.indexOf('--network') + 1], 'bridge');
+  assert.ok(!command.includes('-v'), 'keine Mounts');
+  const allow = command
+    .find((part) => part.startsWith('AIDEATION_EGRESS_ALLOW='))!
+    .split('=')[1]!
+    .split(',');
+  assert.deepEqual(allow, [
+    'api.anthropic.com:443',
+    'registry.npmjs.org:443',
+    'host.docker.internal:11434',
+    'pypi.org:443',
+  ]);
+  assert.ok(!egressAllowList({}).includes('5432') && !egressAllowList({}).includes('5433'), 'keine Datenbank');
+});
+
+test('Sandbox: Agent-Netzwerk wird intern angelegt, ein nicht internes sperrt den Lauf', async () => {
+  resetAgentNetwork();
+  const created: string[][] = [];
+  const fresh: CommandExecutor = async (command) => {
+    created.push(command);
+    if (command[1] === 'network' && command[2] === 'inspect')
+      return { exitCode: 1, durationMs: 1, output: 'No such network' };
+    if (command[1] === 'inspect') return { exitCode: 1, durationMs: 1, output: 'No such object' };
+    return ok();
+  };
+  assert.equal(await ensureAgentNetwork(fresh, { platform: 'darwin' }), null);
+  const create = created.find((command) => command[2] === 'create');
+  assert.ok(create?.includes('--internal'), 'Netzwerk ist --internal');
+  assert.ok(created.some((command) => command[1] === 'run' && command.includes(EGRESS_CONTAINER)));
+  assert.ok(
+    created.some((command) => command.join(' ') === `docker network connect ${SANDBOX_NETWORK} ${EGRESS_CONTAINER}`),
+  );
+  resetAgentNetwork();
+  const open: CommandExecutor = async (command) =>
+    command[1] === 'network' && command[2] === 'inspect' ? ok('false\n') : ok();
+  assert.match((await ensureAgentNetwork(open)) ?? '', /nicht intern/);
+  resetAgentNetwork();
 });
 
 test('Sandbox: Windows-Pfade im Format von Docker Desktop, ohne --user', () => {
@@ -141,15 +241,18 @@ test('Sandbox: Arbeitsordner innerhalb des Worktrees wird auf /workspace abgebil
   assert.equal(modulesVolume('Mein Projekt/../x'), 'aideation-node-modules-mein-projekt-..-x');
 });
 
-test('Sandbox: Schalter global und je Projekt, Standard aus, nur der Entwickler', () => {
-  assert.equal(sandboxMode(null, {}), 'off');
-  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
+test('Sandbox: Schalter global und je Projekt, Standard docker, „off“ nur als Notfallmodus mit Warnung', () => {
+  assert.equal(sandboxMode(null, {}), 'docker', 'Standard: Sandbox an');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'off' }), 'off');
   assert.equal(sandboxMode('off', { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'off', 'Projekt geht vor');
-  assert.equal(sandboxMode('docker', {}), 'docker');
-  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'off', 'unbekannter Wert: aus');
-  assert.equal(usesSandbox('developer', 'docker'), true);
-  assert.equal(usesSandbox('tester', 'docker'), false);
-  assert.equal(usesSandbox('developer', 'off'), false);
+  assert.equal(sandboxMode('docker', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'docker');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'docker', 'unbekannter Wert: Standard');
+  assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child' }), 'off', 'Unit-Tests: Attrappen statt Docker');
+  assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child', DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
+  assert.equal(usesSandbox('docker'), true);
+  assert.equal(usesSandbox('off'), false);
+  assert.match(sandboxOffWarning('off') ?? '', /Notfallmodus.*auf dem Host/);
+  assert.equal(sandboxOffWarning('docker'), null);
 });
 
 test('Sandbox: Wächter-Hook zeigt im Container auf den gebündelten Wächter und /workspace', () => {
@@ -304,6 +407,29 @@ test('Sandbox: Limit- und Anmeldefehler der CLI sind keine Sandbox-Fehler', () =
   assert.match(sandboxFailureNote(125, 'docker: Error response from daemon') ?? '', /^Sandbox: Docker/);
   assert.equal(sandboxFailureNote(0, 'spend limit'), null);
   assert.equal(sandboxFailureNote(1, 'Tests fehlgeschlagen'), null);
+});
+
+test('Sandbox: Limit-Abbruch im Container wird als Pause bis zum Reset erkannt und der Container entfernt', async () => {
+  const limit =
+    "You've hit your monthly spend limit · raise it at https://claude.ai/settings/usage · your session limit resets 8:50pm (Europe/Zurich)";
+  const { calls, docker } = fakeDocker((command) =>
+    command.includes('--cap-drop') ? { exitCode: 1, durationMs: 1, output: limit } : ok('27'),
+  );
+  const result = await runInSandbox(['claude', '-p', 'x'], WORKTREE, {
+    runId: 'r-limit',
+    project: 'limit',
+    name: 'aideation-r-limit',
+    docker,
+    environment: { CLAUDE_CODE_OAUTH_TOKEN: TOKEN },
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /pausiert bis zum Reset/);
+  // Der Runner (runner-steps) pausiert damit statt einen Fehlversuch zu zählen.
+  const reset = usageLimitReset(result.output, new Date('2026-10-29T12:00:00'));
+  assert.ok(reset, 'Limit trotz angehängtem Hinweis erkannt');
+  assert.equal(reset.getHours(), 20);
+  assert.deepEqual(calls.at(-1)?.command, ['docker', 'rm', '-f', 'aideation-r-limit'], 'Container entfernt');
+  assert.equal(sandboxBadge('limit'), null, 'kein Sandbox-Problem im Badge');
 });
 
 test('Sandbox: Executor bildet den Arbeitsordner ab und reicht die Agent-Umgebung als Quelle weiter', async () => {

@@ -12,6 +12,12 @@ COPY src ./src
 RUN npx --no-install esbuild src/agent/agent-guard.ts --bundle --platform=node --format=esm --target=node22 \
       --banner:js="import { createRequire as aideationRequire } from 'node:module'; const require = aideationRequire(import.meta.url);" \
       --outfile=/out/agent-guard.mjs
+# Egress-Proxy des Agent-Netzwerks (nur Node-Bordmittel) und Vorschau-Aufnahme des visuellen Testers (Playwright aus
+# diesem Image statt vom Host).
+RUN npx --no-install esbuild src/core/egress-proxy.ts --bundle --platform=node --format=esm --target=node22 \
+      --outfile=/out/egress-proxy.mjs \
+    && npx --no-install esbuild src/runner/visual-capture-cli.ts --bundle --platform=node --format=esm --target=node22 \
+      --external:playwright --outfile=/out/visual-capture.mjs
 
 FROM node:22.22.3-bookworm-slim AS node
 
@@ -31,9 +37,14 @@ ENV DISABLE_AUTOUPDATER=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     HOME=/home/agent
+# Playwright in derselben Version wie die Browser des Basis-Images (für die Vorschau-Aufnahme des visuellen Testers).
+ARG PLAYWRIGHT_VERSION=1.64.1
 RUN npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+      "playwright@${PLAYWRIGHT_VERSION}" \
     && npm cache clean --force
-COPY --from=guard /out/agent-guard.mjs /opt/aideation/agent-guard.mjs
+COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture.mjs /opt/aideation/
+# ESM-Bündel lösen „playwright“ über node_modules neben sich auf: dort liegen die global installierten Pakete.
+RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
 # Ohne root: Der Container läuft mit der UID des Worker-Benutzers (--user), die hier keinen Eintrag hat. Home und
 # Arbeitsordner sind darum für alle beschreibbar; der Container ist kurzlebig (--rm), nichts bleibt liegen.
 RUN mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace

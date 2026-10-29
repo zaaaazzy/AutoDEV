@@ -2,7 +2,10 @@ import { logged } from '../core/log.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { runCommand } from '../core/command.js';
+import { runInSandbox, sandboxMode, usesSandbox } from '../core/sandbox.js';
+import { projectSandbox } from '../runner/test-sandbox.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
 import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
 import { restrictedSystemCommand } from './system-agents.js';
@@ -154,13 +157,26 @@ export async function quickEstimate(prompt: string, fetchImpl: typeof fetch = pa
  * Uses the external CLI chosen for the author role. It only has to answer, so by default it gets no permission flags,
  * and it always runs in its own empty temp folder: idea texts come from users and must not be able to touch files.
  */
-async function estimateWithCommand(command: string[], prompt: string): Promise<Estimate | null> {
+async function estimateWithCommand(
+  command: string[],
+  prompt: string,
+  project: string,
+  sandboxed: boolean,
+): Promise<Estimate | null> {
   const cwd = await mkdtemp(join(tmpdir(), 'dev-log-estimate-'));
   try {
-    const result = await runCommand(buildInvocation(command, prompt), cwd, {
-      timeoutMs: ESTIMATE_TIMEOUT_MS * 2,
-      env: agentEnvironment(),
-    });
+    const invocation = buildInvocation(command, prompt);
+    const options = { timeoutMs: ESTIMATE_TIMEOUT_MS * 2, env: agentEnvironment() };
+    // Docker-Sandbox (Standard): auch die Schätzung läuft im Container, mit dem leeren Ordner nur lesend.
+    const result = sandboxed
+      ? await runInSandbox(invocation, cwd, {
+          ...options,
+          environment: options.env,
+          runId: `estimate-${randomUUID().slice(0, 8)}`,
+          project,
+          readOnly: true,
+        })
+      : await runCommand(invocation, cwd, options);
     return result.exitCode === 0 ? parseEstimate(result.output) : null;
   } finally {
     await rm(cwd, { recursive: true, force: true });
@@ -198,7 +214,10 @@ export async function estimateNewIdeas(
   if (!ideas.length) return 0;
   const context = (await loadProjectContext(pool, project)).slice(0, 600);
   const external = estimate ? null : await restrictedSystemCommand(pool, 'author');
-  const run = estimate ?? (external ? (prompt: string) => estimateWithCommand(external, prompt) : quickEstimate);
+  const sandboxed = external ? usesSandbox(sandboxMode(await projectSandbox(pool, project))) : false;
+  const run =
+    estimate ??
+    (external ? (prompt: string) => estimateWithCommand(external, prompt, project, sandboxed) : quickEstimate);
   const references = new Map<string | null, ActualReference | null>();
   for (const idea of ideas) {
     if (!references.has(idea.category))

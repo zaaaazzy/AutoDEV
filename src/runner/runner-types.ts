@@ -59,7 +59,10 @@ export type BuiltinAgent = (context: {
   model?: string;
   /** Nur Tester: vom Auftrag geänderte Dateien (undefined = unbekannt, dann laufen die Testbefehle des Projekts). */
   changedFiles?: string[];
-  /** Führt die Shell-Befehle des Agents aus, etwa im Sandbox-Container (sonst runCommand auf dem Host). */
+  /**
+   * Führt die Shell-Befehle des Agents aus, etwa im Sandbox-Container (sonst runCommand auf dem Host). Beim Tester
+   * führt er die Projekttests aus (Testcontainer, mit Diensten nur im Compose-Netzwerk des Projekts).
+   */
   execute?: CommandExecutor;
 }) => Promise<CommandResult>;
 

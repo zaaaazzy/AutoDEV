@@ -27,6 +27,7 @@ import {
 import { ensureCiWorkflow, runTestGate, waitForCi } from './ci.js';
 import { orderWorkInProgress } from './order-branch.js';
 import { gitEnvironment } from '../project-command.js';
+import { gateExecutor } from '../test-sandbox.js';
 
 /** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */
 export async function commitTaskToGit(
@@ -131,7 +132,8 @@ async function pushSprint(
     cwd: string;
     commands: string[][];
     execute: CommandExecutor;
-
+    /** Führt die Testbefehle des Gates in einem Ordner aus (Testcontainer der Sandbox); Standard: execute. */
+    testExecutor?: (folder: string) => Promise<CommandExecutor>;
     pullRequest?: PullRequestPlan | null;
   },
 ): Promise<SyncResult> {
@@ -211,7 +213,15 @@ async function pushSprint(
       // (Test-Gate dort, bei Rot zurückgenommen). Offene Änderungen dort: Der Sprint wartet auf den Merge von Hand;
       // Konflikte oder rotes Test-Gate: gescheitert. Früher hiess beides „done“, obwohl nichts in main war, und der
       // nächste Sprint zweigte vom alten main ab (Arbeit gestrandet).
-      const outcome = await mergeIntoCheckedOutMain(ci.execute, elsewhere, branch, sprint.name, ci.commands, log);
+      const outcome = await mergeIntoCheckedOutMain(
+        ci.execute,
+        elsewhere,
+        branch,
+        sprint.name,
+        ci.commands,
+        log,
+        await ci.testExecutor?.(elsewhere),
+      );
       if (outcome === 'failed') {
         throw new Error(
           `${log.at(-1) ?? `${branch} konnte nicht nach ${MAIN_BRANCH} übernommen werden.`} Der Sprint ist noch nicht in ${MAIN_BRANCH}; nach dem Aufräumen „Git-Sicherung“ erneut starten.`,
@@ -310,6 +320,8 @@ export async function mergeIntoCheckedOutMain(
   sprintName: string,
   commands: string[][],
   log: string[],
+  /** Testbefehle des Gates (Testcontainer der Sandbox); Git läuft weiter über execute auf dem Host. */
+  testExecute: CommandExecutor = execute,
 ): Promise<'merged' | 'busy' | 'failed'> {
   const git = (...args: string[]) =>
     execute(['git', ...args], folder, { timeoutMs: 120_000, env: gitEnvironment(BOT_IDENTITY) });
@@ -329,7 +341,7 @@ export async function mergeIntoCheckedOutMain(
     return 'failed';
   }
   try {
-    await runTestGate(execute, folder, commands, log);
+    await runTestGate(testExecute, folder, commands, log);
   } catch (error) {
     // Auf den Stand vor dem Merge (nicht ORIG_HEAD: den können Befehle des Test-Gates verschoben haben).
     const reset = await git('reset', '--keep', before);
@@ -466,7 +478,10 @@ export async function syncSprintToGit(
           ])
           .catch(() => ({ rows: [] as { restart: boolean }[] }))
       ).rows[0]?.restart === true;
-    const gate = (entries: string[]) => runTestGate(rawExecute, cwd, commands, entries);
+    // Projekttests des Gates im Testcontainer (Sandbox, Standard); im Notfallmodus „off“ wie bisher auf dem Host.
+    const testExecutor = (folder: string): Promise<CommandExecutor> =>
+      gateExecutor(pool, project, folder, rawExecute, `gate-${sprint.id}`);
+    const gate = async (entries: string[]) => runTestGate(await testExecutor(cwd), cwd, commands, entries);
     const pullRequest =
       sprint.action === 'pull' ? null : await planPullRequest(pool, project, sprint, cwd, rawExecute, log);
     const result =
@@ -476,7 +491,7 @@ export async function syncSprintToGit(
             cwd,
             commands,
             execute: rawExecute,
-
+            testExecutor,
             pullRequest,
           });
     if (result.pullRequest) {
