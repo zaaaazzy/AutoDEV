@@ -1,6 +1,6 @@
 # Abnahme-Häkchen nach Fehler zurücksetzen
 
-Auftrag 3a3acdb4 (Bugfix, Sprint 23). Aus dem Code-Review vom 21.10.2026 (Stand `a4971e9`).
+Auftrag 3a3acdb4 (Bugfix, Sprint 28). Aus dem Code-Review vom 21.10.2026 (Stand `a4971e9`).
 
 ## Problem
 
@@ -32,3 +32,39 @@ Wer das Recht „Planung“ nicht hat, sieht die offenen Abnahmepunkte weiterhin
 - Bei Erfolg bleibt es gesetzt, und der Speicher-Zustand gilt nur für den jeweiligen Punkt.
 - Ein Doppelklick sendet nur einen Aufruf.
 - Beide Vorlagen binden Zustand und Recht. Gegen die alten Vorlagen mit `[checked]="false"` scheitert dieser Test.
+
+## Geänderte Dateien
+
+- `frontend/src/app/shared/acceptance-ticks.ts` (neu): Klasse `AcceptanceTicks`
+- `frontend/src/app/shared/acceptance-ticks.spec.ts` (neu)
+- `frontend/src/app/core/project-store.ts`: `perform` gibt `Promise<boolean>` zurück
+- `frontend/src/app/features/development/order.service.ts`: `checkPoint` gibt das Ergebnis weiter
+- `frontend/src/app/features/actions/actions.component.html` und `.ts`
+- `frontend/src/app/features/development/order-detail.component.html` und `.ts`
+- `frontend/src/app/features/development/order-visual.component.ts`
+- `frontend/src/app/features/sprints/sprint-actions.ts`: `exclusive` auf `Promise<unknown>` gelockert
+
+Backend, API und Datenbank sind unverändert.
+
+## Sprint
+
+| Auftrag | Titel | Art | Sprint | Zustand |
+|---|---|---|---|---|
+| 3a3acdb4 | Abnahme-Häkchen auf „Aktionen“ nach Fehler zurücksetzen | Bugfix | Sprint 28 | umgesetzt (Entwickler), dokumentiert; Tests noch durch den Tester auszuführen |
+
+## Anfrage / TODO
+
+- Anfrage: Code-Review vom 21.10.2026 (Stand `a4971e9`). Gemeldet war nur die Stelle unter „Aktionen“ (Zeile 206–212). Tatsächlich stand das Häkchen dort bei Zeile 49–55; dasselbe Muster steckte auch im Auftragsdetail und wurde mit behoben.
+- Benutzerhandbuch: Das Häkchen ist ohne Recht „Planung“ ausgegraut (Tooltip) und wird nach einem Fehler wieder leer. Übernimmt der Benutzerhandbuch-Autor.
+- Offen: `acceptance-ticks.spec.ts` und die Typprüfung durch den Tester ausführen lassen. Die Dokumentation hat sie nicht ausgeführt.
+
+## Technische Dokumentation
+
+- `ProjectStore.perform(action, success, refresh = true): Promise<boolean>` fängt Fehler weiterhin ab und zeigt die Meldung. Neu: `true` bei Erfolg, `false` bei Fehler. Wer nur bei Erfolg weitermachen will, nutzt diesen Wert.
+- `AcceptanceTicks` führt je Punkt (Auftrag, Art, Position) einen Zustand „wird gespeichert“. `saving(id, check)` wird an `[checked]` gebunden. `tick()` sperrt Doppelklicks und setzt im Fehlerfall `checked = false` direkt im DOM, weil sich der gebundene Wert sonst nicht ändert und Angular nichts zurücksetzt.
+- Die Sperre ohne `auth.can('plan')` ist nur Bedienkomfort. Maßgeblich bleibt `access({ role: 'plan' })` auf dem Server.
+
+## Worauf zu achten ist
+
+- Neue Checkboxen mit Speichern über die API nie mit festem `[checked]="false"` binden.
+- Die früheren „offenen“ Bug-Wächter-Einträge („monthly spend limit“) sind reine Abbrüche durch das Kostenlimit und haben mit diesem Code nichts zu tun.
