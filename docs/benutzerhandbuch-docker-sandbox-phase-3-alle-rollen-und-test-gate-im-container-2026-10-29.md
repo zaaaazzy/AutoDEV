@@ -112,6 +112,7 @@ Fehlt etwas, scheitert der Schritt mit einer Meldung. Es gibt keinen Rückfall a
 | „Image „aideation-agent“ fehlt“ | das Image wurde nicht gebaut | Image bauen (Abschnitt 10) |
 | „Egress-Proxy „aideation-egress“ startet nicht“ oder „hängt nicht im Agent-Netzwerk“ | Proxy-Container fehlt oder startet nicht | Meldung im Lauf lesen, dann Image neu bauen |
 | Netzwerk „aideation-agents“ ist nicht intern | ein gleichnamiges Netzwerk existiert ohne `--internal` | Netzwerk entfernen, der Worker legt es neu an |
+| Agent löscht oder benennt eine Datei um (`git rm`, `git mv`) | kein Fehler in der Sandbox, sondern eine Lücke: siehe Abschnitt 9 | bis Phase 4: Datei von Hand löschen oder umbenennen und committen |
 
 Limit- und Anmeldefehler der Claude-CLI werden getrennt von Docker-Fehlern gekennzeichnet. Ob ein Abbruch durch das Anthropic-Ausgabelimit als „pausiert“ gilt und den Wiederholungszähler **nicht** erhöht, ist im Quelltext nicht belegt und noch zu prüfen (siehe Abschnitt 11).
 
@@ -128,6 +129,7 @@ Limit- und Anmeldefehler der Claude-CLI werden getrennt von Docker-Fehlern geken
 | Projekt-Dienst mit Label `aideation.test: "true"` | wird im Compose-Projekt der Agent-Kopie gestartet und nur an dessen Netzwerk gehängt |
 | Ziel ausserhalb der Allowlist | vom Egress-Proxy abgelehnt |
 | Visueller Tester | kein Worktree, Bridge-Netz, Playwright aus dem Image |
+| Agent will eine Datei löschen oder umbenennen (`git rm <pfad>`, `git mv <alt> <neu>`) bei Sandbox `docker` | Der Wächter lässt den Befehl zu (er braucht die Rechte „Dateien ändern“ bzw. zusätzlich „Dateien anlegen“). Im Container schlägt er aber fehl, weil der Git-Ordner des Hauptprojekts nicht eingebunden ist (siehe Abschnitt 11). Das ist nicht im Container ausgeführt. |
 
 ## 10. Voraussetzungen: Image bauen
 
@@ -142,6 +144,8 @@ Ohne Image laufen keine Agent-Schritte. Das Image steht in `deploy/agent/Dockerf
 - **Akzeptanzkriterien mit echtem Docker:** Ein vollständiger Auftrag (Autor bis Benutzerhandbuch-Autor) mit Standardeinstellungen ist nicht durchlaufen. Auch nicht geprüft: jeder Schritt hat einen eigenen Container mit Label `aideation.run`.
 - **Integrationstests:** `sandbox-docker.test.ts` (`~/.ssh` nicht lesbar, Datenbank nicht erreichbar) ist mit `DEV_LOG_TEST_REQUIRE_DOCKER=1` noch nicht gelaufen.
 - **Visueller Tester:** Desktop- und Handy-Screenshots aus dem Container sind nicht erzeugt.
+- **Löschen und Umbenennen durch Agents (Lücke):** Der Wächter erlaubt `git rm <pfad>` und `git mv <alt> <neu>` (Regeln in `src/agent/command-checks.ts`, Funktion `gitFileProblem`). Im Container wirken sie aber nicht: Der Container bindet nur den Worktree ein (`src/core/sandbox.ts`), und der Git-Ordner des Hauptprojekts liegt ausserhalb davon. Mit dem Standard `docker` können Agents darum keine Dateien löschen oder umbenennen. Der Entwickler sieht das als Kandidat für Phase 4. Der Befehl ist im Container nicht ausgeführt, die Ursache ist aus dem Code und dem Dokumentierer-Hinweis abgeleitet.
+- **Tests zu `git rm` und `git mv`:** Nicht ausgeführt. Die Angabe „bestanden“ aus dem Entwickler-Bericht ist nicht nachgeprüft.
 - **Limit-Abbruch:** Die Erkennung als „pausiert/Limit“ und das Nicht-Hochzählen des Wiederholungszählers sind nicht geprüft.
 - **`@@SERVICES` in Workflow-Läufen** (`runner-agent.ts`) und die Gruppe „Dienst-Logs“ (`~/Library/Logs`) sind noch macOS-spezifisch. Das ist aus Phase 2 offen.
 - **Tests:** `npm test`, `npm run typecheck` und `npm run test:e2e` sind nicht in diesem Kapitel gelaufen.
