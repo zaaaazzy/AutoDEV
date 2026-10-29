@@ -1,4 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { logged } from '../core/log.js';
+import {
+  readOnlyWorkspace,
+  SANDBOX_GUARD,
+  SANDBOX_WORKDIR,
+  sandboxExecutor,
+  sandboxMode,
+  usesSandbox,
+} from '../core/sandbox.js';
+import { projectSandbox } from '../runner/test-sandbox.js';
 import { dashboardCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext, loadProjectRules, withProjectContext } from '../core/project-context.js';
@@ -183,6 +193,19 @@ export async function runAuthorAgent(
   const permissions = await loadProjectPermissions(pool, options.project);
   // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
+  // Docker-Sandbox (Standard): die CLI läuft in einem eigenen Container; lesende Läufe sehen den Ordner nur als :ro.
+  // Beim lokalen Modell laufen nur dessen Shell-Befehle im Container, die Datei-Werkzeuge im Worker (wie im Runner).
+  const inSandbox = usesSandbox(sandboxMode(await projectSandbox(pool, options.project)));
+  const sandboxed = Boolean(configured) && inSandbox;
+  const agentExecute = inSandbox
+    ? sandboxExecutor(options.cwd, {
+        runId: `${role}-${randomUUID().slice(0, 8)}`,
+        project: options.project,
+        readOnly: readOnly || readOnlyWorkspace(role),
+        docker: execute,
+      })
+    : execute;
+  const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;
   const command =
     configured &&
     withAgentPermissions(
@@ -191,13 +214,15 @@ export async function runAuthorAgent(
       permissions,
       author?.allowedCommands ?? null,
       author?.fileScope ?? [],
-      undefined,
-      options.cwd,
+      sandboxed ? [] : undefined,
+      agentCwd,
+      sandboxed ? SANDBOX_GUARD : undefined,
     );
-  // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten.
-  const rules = resume ? await loadProjectRules(pool, options.project) : '';
+  // Auch fortgesetzte Sitzungen bekommen die Projektregeln erneut mit, damit sie für jede Nachricht gelten. Im
+  // Container gibt es die frühere Sitzung nicht (kein ~/.claude): dort startet der Lauf mit dem vollen Prompt.
+  const rules = resume && !sandboxed ? await loadProjectRules(pool, options.project) : '';
   const resuming =
-    resume && command && isClaudeCommand(command)
+    resume && !sandboxed && command && isClaudeCommand(command)
       ? { ...resume, prompt: rules ? `${rules}\n\n${resume.prompt}` : resume.prompt }
       : undefined;
   let pid: number | undefined;
@@ -215,7 +240,7 @@ export async function runAuthorAgent(
   const rights = agentRights(rightsRole, permissions, author?.allowedCommands ?? null, author?.fileScope ?? []);
   try {
     const result = command
-      ? await executeAgentCommand(execute, buildInvocation(command, resuming?.prompt ?? prompt), options.cwd, {
+      ? await executeAgentCommand(agentExecute, buildInvocation(command, resuming?.prompt ?? prompt), agentCwd, {
           timeoutMs: options.timeoutMs,
           env: agentEnvironment(options.cwd),
           onAction: onProgress,
@@ -224,6 +249,8 @@ export async function runAuthorAgent(
             pid = spawned;
             if (signal?.aborted) kill();
           },
+          // Im Container beendet erst docker kill den Lauf (der Client allein liesse ihn weiterlaufen).
+          ...(sandboxed ? { signal } : {}),
         })
       : await runOllamaAgent({
           prompt,
@@ -235,6 +262,7 @@ export async function runAuthorAgent(
           readOnly,
           // Dieselben Datei- und Befehlsrechte wie bei der Claude-CLI (sonst liefe der Chat ohne Wächter).
           ...rights,
+          ...(inSandbox ? { execute: agentExecute } : {}),
         });
     await pool
       .query(

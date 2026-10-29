@@ -49,6 +49,7 @@ import {
   stepModel,
 } from './runner-agent.js';
 import { TRANSIENT_RETRY_DELAY_MS } from './runner-runs.js';
+import { gateExecutor } from './test-sandbox.js';
 import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
 
 export {
@@ -443,8 +444,12 @@ export async function runStep(
   const refusedSetup: string[] = [];
   const measured =
     agent.role === 'tester' && !cancelled
-      ? await measureCoverage(options.cwd, await coverageCommands(ctx), execute, (message) =>
-          refusedSetup.push(message),
+      ? await measureCoverage(
+          options.cwd,
+          await coverageCommands(ctx),
+          // Projektcode: in der Sandbox im Testcontainer, nicht auf dem Host.
+          await gateExecutor(pool, item.projectSlug, options.cwd, execute, ctx.runId),
+          (message) => refusedSetup.push(message),
         ).catch(logged('runner-steps', []))
       : [];
   // Abgelehnte Befehle stehen im Schritt selbst (Ausgabe und Verlauf), nicht nur im Worker-Log.

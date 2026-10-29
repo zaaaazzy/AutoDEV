@@ -41,11 +41,11 @@
               >
             </label>
             <label class="wide"
-              >Docker-Sandbox für den Entwickler
+              >Docker-Sandbox für Agents und Projekttests
               <select name="agentSandbox" [(ngModel)]="settings.agentSandbox">
-                <option value="">Wie global (DEV_LOG_AGENT_SANDBOX, Standard aus)</option>
-                <option value="off">Aus – der Entwickler läuft direkt auf dem Rechner</option>
-                <option value="docker">Docker – der Entwickler läuft im Container „aideation-agent“</option>
+                <option value="">Wie global (DEV_LOG_AGENT_SANDBOX, Standard Docker)</option>
+                <option value="off">Aus (Notfallmodus) – Agents und Tests laufen direkt auf dem Rechner</option>
+                <option value="docker">Docker – jeder Agent-Schritt läuft im Container „aideation-agent“</option>
               </select>
             </label>
             <label class="wide"

@@ -78,13 +78,14 @@ test('Adresse der Seite', () => {
   assert.ok(!isAgentPermissionsHash('#docs/marketing/other'));
 });
 
-test('Seite nennt Sonderregel, Projektsperre, keine Sandbox und die Grenzen für alle Agents', () => {
+test('Seite nennt Sonderregel, Projektsperre, die Docker-Sandbox als Grenze und die Grenzen für alle Agents', () => {
   const html = read('frontend/src/app/features/docs/marketing/agent-permissions.component.html');
   for (const text of [
     'TRUSTED_ROLES',
     'READ_ONLY_ROLES',
     'Projektsperre',
-    'keine Sandbox',
+    'Docker-Sandbox',
+    'Notfallmodus',
     'git push',
     '>rm<',
     '.env',

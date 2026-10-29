@@ -26,7 +26,8 @@ import { projectFolderError } from '../core/validation.js';
 import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local-database.js';
 import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
-import { removeLeftoverContainers, sandboxBadge } from '../core/sandbox.js';
+import { removeLeftoverContainers } from '../core/sandbox.js';
+import { sandboxStatus } from './test-sandbox.js';
 import { ReviewSlots } from './review-slots.js';
 import { syncSprintCommits } from './sprint-commits.js';
 
@@ -396,11 +397,12 @@ async function main(): Promise<void> {
     let known: string[] = options.all ? [] : [options.project];
     let startup = true;
     const beat = (): void => {
+      const first = startup;
       for (const slug of known) {
-        // Sandbox gesperrt (Docker oder Image fehlt): auch das zeigt das Worker-Badge.
-        void beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? sandboxBadge(slug), startup).catch(
-          logged('runner-cli'),
-        );
+        // Sandbox gesperrt (Docker oder Image fehlt) oder ausdrücklich aus (Notfallmodus): auch das zeigt das Badge.
+        void sandboxStatus(pool, slug)
+          .then((sandbox) => beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? sandbox, first))
+          .catch(logged('runner-cli'));
       }
       if (known.length) startup = false;
     };

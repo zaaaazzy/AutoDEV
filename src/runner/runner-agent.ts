@@ -4,7 +4,14 @@ import { decryptSecret } from '../core/secrets.js';
 import { logged } from '../core/log.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 import { type CommandResult, redactOutput } from '../core/command.js';
-import { SANDBOX_GUARD, SANDBOX_WORKDIR, sandboxExecutor, sandboxMode, usesSandbox } from '../core/sandbox.js';
+import {
+  readOnlyWorkspace,
+  SANDBOX_GUARD,
+  SANDBOX_WORKDIR,
+  sandboxExecutor,
+  sandboxMode,
+  usesSandbox,
+} from '../core/sandbox.js';
 import { executeAgentCommand, resumeFailed } from '../agent/claude-stream.js';
 import {
   FILES_CREATE,
@@ -23,6 +30,8 @@ import { agentEnvironment, buildInvocation } from './runner-prompts.js';
 import type { BuiltinAgent, WorkflowAgent } from './runner-types.js';
 import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
 import { runVisualStep } from './visual-check.js';
+import { captureInSandbox } from './visual-sandbox.js';
+import { projectSandbox, projectTestExecutor } from './test-sandbox.js';
 import { orderFilePaths, type RunContext } from './runner-context.js';
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
@@ -54,6 +63,8 @@ export const runBuiltinAgent: BuiltinAgent = async ({
         signal,
         // Testbefehle sind Projektcode: nur das gefilterte Environment, nicht das der Agent-CLIs.
         env: projectEnvironment(cwd),
+        // In der Sandbox: Testcontainer statt Host.
+        ...(execute ? { execute } : {}),
       },
       pool,
     );
@@ -112,20 +123,7 @@ export const runBuiltinAgent: BuiltinAgent = async ({
   });
 };
 
-/** Sandbox-Schalter des Projekts (projects.agent_sandbox); null = es gilt der globale Schalter. */
-export async function projectSandbox(pool: Pick<Pool, 'query'>, project: string): Promise<string | null> {
-  try {
-    const { rows } = await pool.query<{ mode: string | null }>(
-      'SELECT agent_sandbox AS mode FROM projects WHERE slug = $1',
-      [project],
-    );
-    return rows[0]?.mode ?? null;
-  } catch (error) {
-    // Ohne lesbaren Projektwert gilt der globale Schalter (DEV_LOG_AGENT_SANDBOX).
-    logged(`agent-sandbox:${project}`)(error);
-    return null;
-  }
-}
+export { projectSandbox } from './test-sandbox.js';
 
 /** Vom Routing gewähltes Modell eines Schritts: Ollama-Modell oder CLI-Befehl samt greifender Regel. */
 export interface RoutedModel {
@@ -257,16 +255,34 @@ export async function invokeAgent(
       onProgress: hooks.onAction,
       ...(routed.model ? { model: routed.model } : {}),
       ...(agent.role === 'tester' ? { changedFiles: await orderFilePaths(ctx) } : {}),
-      // Lokales Modell in der Sandbox: Shell-Befehle laufen im Container.
-      ...(sandboxed ? { execute: agentExecute } : {}),
+      // Lokales Modell in der Sandbox: Shell-Befehle laufen im Container; die Projekttests im Testcontainer.
+      ...(sandboxed
+        ? {
+            execute:
+              agent.role === 'tester'
+                ? await projectTestExecutor({
+                    project: item.projectSlug,
+                    cwd: options.cwd,
+                    runId: ctx.runId,
+                    docker: execute,
+                  })
+                : agentExecute,
+          }
+        : {}),
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
-  // Docker-Sandbox (DEV_LOG_AGENT_SANDBOX): Der Agent läuft im Container, der Worktree heisst dort /workspace, und der
-  // Wächter ist der im Image. Fehlen Docker oder Image, scheitert der Schritt – kein Rückfall auf den Host.
-  const sandboxed = usesSandbox(agent.role, sandboxMode(await projectSandbox(pool, item.projectSlug)));
+  // Docker-Sandbox (DEV_LOG_AGENT_SANDBOX, Standard docker): Jeder Agent-Schritt läuft in einem eigenen Container
+  // (Label aideation.run), der Worktree heisst dort /workspace – für lesende Rollen nur :ro –, und der Wächter ist der
+  // im Image. Fehlen Docker oder Image, scheitert der Schritt – kein Rückfall auf den Host.
+  const sandboxed = usesSandbox(sandboxMode(await projectSandbox(pool, item.projectSlug)));
   const agentExecute = sandboxed
-    ? sandboxExecutor(options.cwd, { runId: ctx.runId, project: item.projectSlug })
+    ? sandboxExecutor(options.cwd, {
+        runId: ctx.runId,
+        project: item.projectSlug,
+        readOnly: readOnlyWorkspace(agent.role),
+        docker: execute,
+      })
     : execute;
   const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;
   // Rechte des Agents; der Wächter prüft gegen den Projektordner des Laufs, nicht gegen das cwd der CLI.
@@ -292,7 +308,11 @@ export async function invokeAgent(
       signal: hooks.signal,
       onProgress: hooks.onAction,
       judgeCommand: configured && withRights(configured),
-      execute,
+      // In der Sandbox: Aufnahme mit Playwright aus dem Image, das KI-Urteil im Container des Schritts.
+      execute: agentExecute,
+      ...(sandboxed
+        ? { capture: captureInSandbox({ runId: ctx.runId, project: item.projectSlug, docker: execute }) }
+        : {}),
     });
     return { ...visual, fromTests: true };
   }
@@ -300,13 +320,13 @@ export async function invokeAgent(
   if (agent.role === 'tester' && !agent.command?.length && fallbackCommand) {
     // The tester first develops tests from the developer notes, then runs the build and test commands.
     const written = await executeAgentCommand(
-      execute,
+      agentExecute,
       buildInvocation(
-        // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers.
+        // Auch das Schreiben der Tests läuft mit den Rechten und dem Wächter des Testers (in der Sandbox im Container).
         withRights(fallbackCommand),
         `${prompt}\n\n## Aufgabe\nSchreibe oder ergänze die Tests für diesen Auftrag anhand der Angaben des Entwicklers. Führe sie nicht aus; das übernimmt anschließend der Testlauf.`,
       ),
-      options.cwd,
+      agentCwd,
       {
         timeoutMs: options.timeoutMs,
         env: agentEnvironment(options.cwd),
