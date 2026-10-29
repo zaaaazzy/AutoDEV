@@ -7,20 +7,33 @@ const CREATE_BUTTON = '.page-heading .page-create';
 export function firstStepsTour(api: ApiService): TourStep[] {
   const startSprint = async (tour: TourService): Promise<void> => {
     const data = tour.store.data();
-    const candidates = data.sprints.filter((sprint) => sprint.status !== 'completed');
-    const sprint =
-      candidates.find((entry) =>
-        data.development.some((item) => item.sprintId === entry.id && item.status === 'planned'),
-      ) ?? candidates[0];
-    if (!sprint) {
-      tour.store.notice.set('Lege zuerst einen Sprint an und ziehe Aufträge hinein.');
+    // Läuft schon ein Sprint, gibt es nichts zu starten – einfach weiter.
+    if (data.sprints.some((sprint) => sprint.status === 'active')) {
+      tour.next();
       return;
     }
-    await tour.store.perform(
-      () => api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'active' }),
-      `Sprint „${sprint.name}“ läuft – die Agents legen los.`,
+    // Starten lassen sich nur geplante Sprints, und nur mit geplanten Aufträgen.
+    const sprint = data.sprints.find(
+      (entry) =>
+        entry.status === 'planned' &&
+        data.development.some((item) => item.sprintId === entry.id && item.status === 'planned'),
     );
-    tour.next();
+    if (!sprint) {
+      tour.store.notice.set(
+        data.sprints.some((entry) => entry.status === 'planned')
+          ? 'Ziehe zuerst Aufträge in deinen geplanten Sprint.'
+          : 'Lege zuerst einen Sprint an und ziehe Aufträge hinein.',
+      );
+      return;
+    }
+    // perform meldet Fehler selbst und wirft nicht – darum merken, ob der Start geklappt hat.
+    let started = false;
+    await tour.store.perform(async () => {
+      const response = await api.patch(`/api/sprints/${encodeURIComponent(sprint.id)}`, { status: 'active' });
+      started = true;
+      return response;
+    }, `Sprint „${sprint.name}“ läuft – die Agents legen los.`);
+    if (started) tour.next();
   };
 
   return [
