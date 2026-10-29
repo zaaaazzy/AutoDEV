@@ -70,6 +70,28 @@ test('an empty secret key is replaced, a missing DB password gets the configured
   assert.equal(plan.content.match(/DEV_LOG_SECRET_KEY=/g)!.length, 1);
 });
 
+test('worker in a container adds the profile worker next to https, host mode removes it', () => {
+  const container = planEnv('COMPOSE_PROFILES=https\n', { ...input, workerContainer: true, dockerGid: 998 });
+  assert.equal(container.values.get('COMPOSE_PROFILES'), 'https,worker');
+  assert.equal(container.values.get('DEV_LOG_DOCKER_GID'), '998');
+  const host = planEnv(container.content, { ...input, workerContainer: false });
+  assert.equal(host.values.get('COMPOSE_PROFILES'), 'https');
+  const domain = planEnv('', { ...input, domain: 'devlog.example.com', workerContainer: true });
+  assert.equal(domain.values.get('COMPOSE_PROFILES'), 'https,worker');
+  assert.equal(planEnv('', input).values.has('COMPOSE_PROFILES'), false, 'without a choice nothing is added');
+  const token = planEnv('', { ...input, claudeToken: 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz' });
+  assert.equal(token.values.get('CLAUDE_CODE_OAUTH_TOKEN'), 'sk-ant-oat01-abcdefghijklmnopqrstuvwxyz');
+  assert.equal(
+    planEnv('CLAUDE_CODE_OAUTH_TOKEN=alt-token-bleibt-stehen-123\n', { ...input, claudeToken: '' }).values.get(
+      'CLAUDE_CODE_OAUTH_TOKEN',
+    ),
+    'alt-token-bleibt-stehen-123',
+  );
+  assert.equal(validateInstall({ ...valid, workerContainer: true, claudeToken: '' }), null);
+  assert.match(validateInstall({ ...valid, workerContainer: 'ja' })!, /Container/);
+  assert.match(validateInstall({ ...valid, claudeToken: 'a b' })!, /Claude-Token/);
+});
+
 test('values with spaces are quoted, line breaks are rejected', () => {
   assert.equal(formatEnvValue('/Users/du/Meine Projekte'), "'/Users/du/Meine Projekte'");
   assert.equal(formatEnvValue('/srv/a,/srv/b'), '/srv/a,/srv/b');

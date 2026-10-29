@@ -10,13 +10,16 @@ git clone <repository-url> AIdeation/source && cd AIdeation/source
 ```
 
 Beim ersten Start führt ein Einrichtungs-Assistent im Browser durch Docker, Zugang und Worker; danach begrüßt dich
-AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Ausführlich: [Installation](docs/installation.md).
+AIdeation mit dem Projekt-Assistenten und einer interaktiven Tour. Standard ist der **Worker im Container**: Auf
+macOS, Linux und Windows braucht es dann nur Docker, `./start.sh` bzw. `start.cmd` startet AIdeation samt Worker und
+Ausfall-Wächter. Ausführlich: [Installation](docs/installation.md).
 
 ## Starten (manuell)
 
 1. Dienst + Datenbank: `docker compose up -d --build` → Oberfläche lokal `http://localhost:3100`, von aussen optional `https://<DEV_LOG_DOMAIN>` (siehe Sicherheit). Datenbank `127.0.0.1:5433`, eigenes Volume.
-2. Worker (arbeitet alle Projekte automatisch ab, Autostart per launchd): `./scripts/install-worker.sh`. Log: `~/Library/Logs/aideation-worker.log`. Ohne Autostart: `npm run worker`. Die Zugänge stehen in `~/.config/aideation/worker.env` (Rechte 600), nicht in der Plist (siehe `docs/installation.md`, „Hintergrunddienste und Zugänge“).
-3. Lokales Modell: Ollama (`DEV_LOG_OLLAMA_MODEL`, Standard `qwen3.5:9b`). Optional pro Rolle: `DEV_LOG_OLLAMA_MODEL_<ROLLE>` (z. B. `_DEVELOPER`) und Kontext `DEV_LOG_OLLAMA_CTX[_<ROLLE>]` (Standard 16384, Entwickler 32768); `DEV_LOG_OLLAMA_KEEP_ALIVE` (Standard `30m`) hält das Modell geladen. Ollama-Einstellungen (Modell dauerhaft geladen, Flash Attention, KV-Cache q8_0, ein Modell gleichzeitig) setzt `./scripts/configure-ollama.sh` und startet die Ollama-App neu. Bei Verbindungsfehlern wird bis zu zweimal mit wachsender Wartezeit wiederholt.
+2. Worker im Container (Standard): `COMPOSE_PROFILES=worker` in der `.env` (mit Domain `https,worker`), einmal `npx tsx scripts/worker-compose.ts` (schreibt AIdeation-Ordner, Projektordner und Git-Zugänge in `docker-compose.override.yml`), dann `docker compose up -d --build`. Damit laufen die Dienste `worker` (einziger Dienst mit Docker-Socket) und `watchdog`. Log: `docker compose logs -f worker`. „AIdeation neu starten“ endet mit Exit-Code 75, Docker startet den Worker neu (siehe `docs/installation.md`, „Worker im Container“).
+3. Worker auf dem Host (Alternative, Autostart per launchd): `./scripts/install-worker.sh` (Linux: `install-worker-linux.sh`, Windows: `install-worker.ps1`). Log: `~/Library/Logs/aideation-worker.log`. Ohne Autostart: `npm run worker`. Die Zugänge stehen in `~/.config/aideation/worker.env` (Rechte 600), nicht in der Plist (siehe `docs/installation.md`, „Hintergrunddienste und Zugänge“). Nie beide Wege gleichzeitig.
+4. Lokales Modell: Ollama (`DEV_LOG_OLLAMA_MODEL`, Standard `qwen3.5:9b`). Optional pro Rolle: `DEV_LOG_OLLAMA_MODEL_<ROLLE>` (z. B. `_DEVELOPER`) und Kontext `DEV_LOG_OLLAMA_CTX[_<ROLLE>]` (Standard 16384, Entwickler 32768); `DEV_LOG_OLLAMA_KEEP_ALIVE` (Standard `30m`) hält das Modell geladen. Ollama-Einstellungen (Modell dauerhaft geladen, Flash Attention, KV-Cache q8_0, ein Modell gleichzeitig) setzt `./scripts/configure-ollama.sh` und startet die Ollama-App neu. Bei Verbindungsfehlern wird bis zu zweimal mit wachsender Wartezeit wiederholt.
 
 ## Entwicklung
 

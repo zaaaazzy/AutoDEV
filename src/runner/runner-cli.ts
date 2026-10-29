@@ -27,6 +27,7 @@ import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local
 import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
 import { removeLeftoverContainers } from '../core/sandbox.js';
+import { touchHealthFile, workerPath } from '../core/worker-container.js';
 import { sandboxStatus } from './test-sandbox.js';
 import { ReviewSlots } from './review-slots.js';
 import { syncSprintCommits } from './sprint-commits.js';
@@ -134,7 +135,9 @@ export async function resolveTargets(pool: Pool, options: RunnerOptions): Promis
     'SELECT slug, repository, agent_workspace AS separate FROM projects ORDER BY slug',
   );
   return Promise.all(
-    projects.rows.map(async ({ slug, repository, separate }) => {
+    projects.rows.map(async ({ slug, repository: stored, separate }) => {
+      // Worker im Container: unter Windows eingetragene Pfade liegen dort im Format von Docker Desktop (/c/…).
+      const repository = workerPath(stored);
       const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
       const folder =
         !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
@@ -345,9 +348,14 @@ async function main(): Promise<void> {
   const workerId = workerIdFor(process.env, INSTALL_ROOT, options.watch ? scope : `einmal:${scope}`);
   setWorkerId(workerId);
   let workerBeat: NodeJS.Timeout | undefined;
+  // Im Container (Dienst worker) erneuert jedes gelungene Lebenszeichen die Datei des Healthchecks.
+  const beatOnce = (): Promise<void> =>
+    beatWorker(pool, workerId)
+      .then(() => touchHealthFile())
+      .catch(logged('runner-cli'));
   const startWorkerBeat = async (): Promise<void> => {
-    await beatWorker(pool, workerId).catch(logged('runner-cli'));
-    workerBeat = setInterval(() => void beatWorker(pool, workerId).catch(logged('runner-cli')), WORKER_BEAT_MS);
+    await beatOnce();
+    workerBeat = setInterval(() => void beatOnce(), WORKER_BEAT_MS);
     workerBeat.unref();
   };
   try {
@@ -648,7 +656,7 @@ async function main(): Promise<void> {
       }
     };
     // „AIdeation neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
-    // launchd/systemd bzw. der Windows-Wrapper starten ihn mit dem neuen Code wieder.
+    // launchd/systemd, der Windows-Wrapper bzw. im Container die Compose-Restart-Richtlinie starten ihn neu.
     let restartActive = false;
     // Wartungs-Jobs (scheduled_jobs): im Arbeitszyklus angestossen, aber im Hintergrund – jeder Job hat sein
     // Zeitlimit, der Zyklus wartet nie darauf. Höchstens ein Durchgang gleichzeitig je Worker.

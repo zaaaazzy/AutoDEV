@@ -10,8 +10,12 @@ import {
   pullBranch,
   readRestart,
   requestRestart,
+  healthUrl,
   RESTART_COMMAND,
   RESTARTING_STALE_MS,
+  SERVICES_COMMAND,
+  servicesToRebuild,
+  WORKER_IMAGE_COMMAND,
 } from './system-restart.js';
 
 /** app_settings im Speicher: genug für SELECT value … WHERE key und INSERT … ON CONFLICT. */
@@ -474,4 +478,57 @@ test('Drain: solange ein Neustart angefordert ist oder gebaut wird, startet der 
   assert.equal(acceptsNewWork({ status: 'restarting' }), true);
   assert.equal(acceptsNewWork({ status: 'done' }), true);
   assert.equal(acceptsNewWork({ status: 'failed' }), true);
+});
+
+test('Neustart im Container: alle Dienste ausser Worker und Wächter neu bauen, Worker-Image nur bauen', async () => {
+  const pool = memoryPool();
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push(command);
+    if (command.join(' ') === SERVICES_COMMAND.join(' '))
+      return {
+        exitCode: 0,
+        durationMs: 1,
+        output: 'db\ndev-log\nfrontend\nbackup\nworker-volumes\nworker\nwatchdog\n',
+      };
+    return ok(command, cwd);
+  };
+  await requestRestart(pool, 'Patrick');
+  const result = await processRestart(pool, '/srv/aideation', () => 0, execute, undefined, {
+    health: async () => true,
+    container: true,
+    readText: async () => null,
+  });
+  assert.equal(result, 'restart', 'danach beendet sich der Worker mit Exit-Code 75, Docker startet ihn neu');
+  const up = calls.find((command) => command.includes('--build'));
+  assert.deepEqual(up, [...RESTART_COMMAND, 'db', 'dev-log', 'frontend', 'backup']);
+  assert.ok(calls.some((command) => command.join(' ') === WORKER_IMAGE_COMMAND.join(' ')));
+  assert.equal((await readRestart(pool))?.status, 'restarting');
+});
+
+test('Neustart im Container: ohne lesbare Dienstliste wird nichts gebaut', async () => {
+  const pool = memoryPool();
+  const calls: string[][] = [];
+  const execute: CommandExecutor = async (command, cwd) => {
+    calls.push(command);
+    if (command.join(' ') === SERVICES_COMMAND.join(' ')) return { exitCode: 1, durationMs: 1, output: 'kaputt' };
+    return ok(command, cwd);
+  };
+  await requestRestart(pool, 'Patrick');
+  const result = await processRestart(pool, '/srv/aideation', () => 0, execute, undefined, {
+    container: true,
+    notify: async () => undefined,
+    readText: async () => null,
+  });
+  assert.equal(result, 'failed');
+  assert.ok(!calls.some((command) => command.includes('--build')));
+  assert.match((await readRestart(pool))?.message ?? '', /lieferte keine Dienste/);
+});
+
+test('Neustart: Dienstliste ohne Worker, Health-URL im Container aus DEV_LOG_HEALTH_URL', () => {
+  assert.deepEqual(servicesToRebuild('db\nworker\n\nfrontend\r\nwatchdog\nhttps\n'), ['db', 'frontend', 'https']);
+  assert.equal(servicesToRebuild('worker\nworker-volumes\n'), null);
+  assert.equal(servicesToRebuild('WARN[0000] bla bla\n'), null);
+  assert.equal(healthUrl({}), 'http://127.0.0.1:3100/health');
+  assert.equal(healthUrl({ DEV_LOG_HEALTH_URL: 'http://frontend:8080/health' }), 'http://frontend:8080/health');
 });

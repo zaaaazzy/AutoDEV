@@ -5,11 +5,11 @@
  */
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import { mkdir, readFile } from 'node:fs/promises';
+import { existsSync, statSync } from 'node:fs';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { platform } from 'node:os';
-import { join, resolve } from 'node:path';
+import { homedir, platform } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import pg from 'pg';
 import {
   DEFAULT_DB_USER,
@@ -21,6 +21,7 @@ import {
 import { projectRoots } from '../../src/core/validation.js';
 import { MIN_NODE, nodeVersionOk, prepareGameTools } from '../../src/setup/game-tools.js';
 import { checkChromium } from '../../src/setup/setup-jobs.js';
+import { OVERRIDE_FILE, writeWorkerOverride } from '../../src/setup/worker-compose.js';
 import { installDemoProject } from './demo-data.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
@@ -130,6 +131,32 @@ async function applyDbPassword(env: Map<string, string>, log: (line: string) => 
   return alter.ok;
 }
 
+/** Gruppe des Docker-Sockets (nur Linux; Docker Desktop: null, dann gilt 0 aus docker-compose.yml). */
+function dockerSocketGroup(): number | null {
+  if (platform() !== 'linux') return null;
+  try {
+    return statSync('/var/run/docker.sock').gid;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * GitHub-Token für den Worker-Container: gh hält ihn unter macOS und Windows im Schlüsselbund, den der Container
+ * nicht sieht. Liegt noch keine Datei vor, wird der Token von „gh auth token“ privat (0600) abgelegt und dem Worker
+ * schreibgeschützt eingebunden. Ohne gh oder Anmeldung geschieht nichts.
+ */
+async function saveGitHubToken(log: (line: string) => void): Promise<void> {
+  const file = join(homedir(), '.config', 'aideation', 'github-token');
+  if (existsSync(file)) return;
+  const result = await run('gh', ['auth', 'token'], undefined, 15_000);
+  const token = result.ok ? result.output.trim() : '';
+  if (!/^[A-Za-z0-9_]{20,255}$/.test(token)) return;
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+  await writeFile(file, `${token}\n`, { mode: 0o600 });
+  log(`GitHub-Token für den Worker-Container abgelegt: ${file}`);
+}
+
 async function waitForHealth(log: (line: string) => void): Promise<boolean> {
   for (let attempt = 0; attempt < 90; attempt += 1) {
     try {
@@ -174,6 +201,16 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
   }
   // Fehlt ./backups, legt Docker den Ordner unter Linux als root an – der Backup-Container (ohne root) kann dann nicht schreiben.
   await mkdir(join(ROOT, 'backups'), { recursive: true });
+  // Worker im Container: AIdeation-Ordner, Projektordner und Git-Zugänge (docker-compose.override.yml).
+  if (body.workerContainer) {
+    await saveGitHubToken(log);
+    const override = await writeWorkerOverride(ROOT);
+    log(
+      override === 'kept'
+        ? `${OVERRIDE_FILE} ist eine eigene Datei und bleibt unverändert – darin müssen AIdeation-Ordner und Projektordner für den Worker stehen.`
+        : `${OVERRIDE_FILE} für den Worker im Container geschrieben.`,
+    );
+  }
   log('Baue und starte die Container (beim ersten Mal einige Minuten) …');
   const up = await run('docker', ['compose', 'up', '-d', '--build'], log);
   if (!up.ok) {
@@ -219,9 +256,19 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
   const tools = await prepareGameTools((command, args) => run(command, args, log), log);
   step('game', tools.notes.length ? 'error' : 'ok', tools.notes.join(' '));
 
-  if (!body.installWorker) {
+  if (body.workerContainer) {
+    // docker compose up hat ihn schon gestartet (Profil worker in der .env); beim ersten Mal installiert er node_modules.
+    step(
+      'worker',
+      'ok',
+      'Worker und Ausfall-Wächter laufen als Container (docker compose ps worker). Der erste Start dauert einige Minuten.',
+    );
+  } else if (!body.installWorker) {
+    await run('docker', ['compose', '--profile', 'worker', 'rm', '--stop', '--force', 'worker', 'watchdog'], log);
     step('worker', 'skipped', 'Den Worker startest du später mit „npm run worker“.');
   } else {
+    // Kein zweiter Worker: ein früher gewählter Worker-Container wird beendet.
+    await run('docker', ['compose', '--profile', 'worker', 'rm', '--stop', '--force', 'worker', 'watchdog'], log);
     step('worker', 'running');
     // Die Installationsskripte (launchd, systemd, Aufgabenplanung) lesen URL und Schlüssel aus der Umgebung.
     // PATH bleibt unverändert, sonst findet der Worker die Agent-CLIs nicht (spawn claude ENOENT).
@@ -298,6 +345,10 @@ const server = createServer(async (request, response) => {
             domain: payload.domain ?? '',
             projectRoots: payload.projectRoots ?? '',
             installWorker: payload.installWorker !== false,
+            // Standard: Worker im Container – dann braucht es weder launchd noch systemd noch run-with-env.ps1.
+            workerContainer: payload.workerContainer !== false,
+            claudeToken: payload.claudeToken ?? '',
+            dockerGid: dockerSocketGroup(),
             demoData: payload.demoData === true,
           },
           send,
