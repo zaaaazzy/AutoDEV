@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
@@ -1285,6 +1288,7 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
     exitCode: command[0] === 'b' ? 1 : 0,
     durationMs: 1,
     output: command[0] === 'b' ? "You've hit your session limit · resets 12:40am (Europe/Zurich)" : '',
+    ...(command[0] === 'b' ? { tokens: 1234, costUsd: 0.5 } : {}),
   });
   const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
   const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
@@ -1300,6 +1304,27 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   const step = queries.find((query) => marksStepInterrupted(query.sql));
   assert.ok(step, 'Schritt als unterbrochen markiert');
   assert.match(step.sql, /tokens = \$5, cost_usd = \$6/);
+  assert.equal(step.values[4], 1234, 'Tokens des Versuchs zählen fürs Budget');
+  assert.equal(step.values[5], 0.5, 'Kosten des Versuchs zählen fürs Budget');
+});
+
+test('Projektordner während des Schritts weg: Schritt unterbrochen, Tokens und Kosten bleiben am Schritt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'runner-outage-'));
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => {
+    if (command[0] !== 'b') return { exitCode: 0, durationMs: 1, output: '' };
+    // Das externe Laufwerk wird mitten im Schritt getrennt.
+    await rm(cwd, { recursive: true, force: true });
+    return { exitCode: 1, durationMs: 1, output: 'ENOENT', tokens: 777, costUsd: 0.25 };
+  };
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd, timeoutMs: 1000, execute }), 'failed');
+  const step = queries.find((query) => marksStepInterrupted(query.sql));
+  assert.ok(step, 'Schritt als unterbrochen markiert');
+  assert.match(String(step.values[3]), /Der Auftrag wird erneut eingeplant/);
+  assert.equal(step.values[4], 777);
+  assert.equal(step.values[5], 0.25);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
 });
 
 test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; danach geht es normal weiter', async () => {
