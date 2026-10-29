@@ -505,6 +505,14 @@ Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code
 - **Eigener DB-User:** `DEV_LOG_REVIEW_DATABASE_URL` im Worker zeigt auf einen User ohne Superuser-Rechte und auf dessen Basis-Datenbank (`scripts/setup-review-db.sh` legt beides an und entzieht `PUBLIC` das `CONNECT` auf `aideation` und `postgres`). Projekte ohne eigene Datenbank bekommen damit die leere Slot-Datenbank `aideation_review_<n>` (`REVIEW_DATABASE_URL`, `DATABASE_URL`). Angelegt wird sie vom Worker, und zwar über die Basis-Datenbank, nie über `postgres`. Projekte mit eigener Datenbank bekommen wie bisher eine Kopie `<db>_review_<n>`.
 - **Kein Rückfall:** Fehlt der Review-User, gleicht er dem Haupt-User (User, Passwort oder Datenbank) oder enthielte das Env das Haupt-DB-Passwort, den Haupt-User oder die DB `postgres`, dann wird der Container gar nicht erst gestartet. Der Slot steht dann auf „fehlgeschlagen“ mit Meldung, Docker-Ausgaben werden maskiert. Das betrifft nur den Review-Container, nicht den Auftrag und nicht den Autofix.
 
+### Frontend-Polling: Git-Verlauf und Review-Container
+
+- Alle Takte im Frontend laufen über `visibleInterval` und pausieren in verborgenen Tabs.
+- Der Git-Verlauf (`git-graph.store.ts`) behält bei einem Ladefehler den letzten Stand und setzt nur `error`. Leer wird er nur beim Projektwechsel.
+- `/api/review-slots` laden alle `app-sprint-review`-Instanzen über einen gemeinsamen Poll (`core/shared-poll.ts`, `ReviewLaunchService.watchSlots()`): ein Abruf je Takt, egal wie viele Sprints aufgeklappt sind.
+- `app-sprint-review` wird nur bei Sprints mit Status `planned`, `active` oder `review` eingebunden (`sprintReviewable`).
+- Details: `docs/git-verlauf-sprint-review-fehlerzustand-polling-2026-10-29.md`.
+
 ## Parallele Testläufe
 
 E2E- und Oberflächentest suchen sich einen freien Port, wenn 3195 bzw. 3196 belegt ist (in 100er-Schritten: 3295, 3395 …), und nutzen dann eine eigene Testdatenbank mit dem Port als Endung (z. B. `dev_log_e2e_3295`). So stören sich Gate, Tester-Agent und Handläufe nicht mehr (`e2e/test-ports.ts`).

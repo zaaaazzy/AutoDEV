@@ -58,7 +58,7 @@
       >
     </div>
   }
-  @if (store.currentProject()?.reviewCommand?.length) {
+  @if (store.currentProject()?.reviewCommand?.length && reviewable(sprint.status)) {
     <app-sprint-review [sprint]="sprint" />
   }
   <div class="sprint-layout">

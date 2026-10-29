@@ -20,6 +20,7 @@ import {
 } from '../../shared/pipes.js';
 import { exclusive, sprintButtons } from './sprint-actions.js';
 import { SprintOrdersComponent } from './sprint-orders.component.js';
+import { sprintReviewable } from './review-launch.js';
 import { orderSprint } from './sprint-phases.js';
 import { SprintReviewComponent } from './sprint-review.component.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
@@ -57,6 +58,7 @@ export class SprintDetailComponent {
   protected readonly usdRate = USD_PER_MILLION_TOKENS;
   readonly sprintInput = input.required<Sprint>({ alias: 'sprint' });
   protected readonly editingId = signal<string | null>(null);
+  protected readonly reviewable = sprintReviewable;
 
   /** Sichtbare Knöpfe nach denselben Regeln wie der Server (src/core/sprint-rules.ts) und nach Rolle. */
   protected readonly buttons = computed(() =>
