@@ -205,7 +205,7 @@ flowchart TB
 
 - Exit-Code 0 und nicht abgebrochen. Vorübergehender Fehler des Agents (Modell weg, überlastet, Rate-Limit, Zeitlimit): nach 30 s einmal wiederholt, wenn das Budget es noch erlaubt. Ergebnisse der Projekttests und der visuellen Prüfung werden nie wiederholt.
 - Tester mit eigener CLI: jedes Akzeptanzkriterium und jeder DoD-Punkt erfüllt (`@@ACCEPTANCE`); nur manuell prüfbare Punkte werden „Aktion notwendig“ + Push.
-- Reviewer: eindeutige Freigabe, sonst gescheitert.
+- Reviewer: eindeutige Freigabe, sonst gescheitert. Es zählen alle Urteilszeilen (`@@REVIEW: …` am Zeilenanfang); steht irgendwo „ÄNDERUNGEN NÖTIG“, gilt der Auftrag als abgelehnt, auch wenn später „FREIGEGEBEN“ folgt.
 - Kein `@@REGEL`-Einspruch (sonst Auftrag „rejected“).
 - Entwickler (lokales Modell) hat Dateien geändert oder „KEINE ÄNDERUNG NÖTIG“ gemeldet.
 
