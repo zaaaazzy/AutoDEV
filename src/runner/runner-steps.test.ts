@@ -14,7 +14,7 @@ import {
   stepModel,
 } from './runner-steps.js';
 import { ABANDONED_RUN_MS, MAX_STEP_MS } from './runner-runs.js';
-import { MAX_TIMEOUT_MINUTES } from './runner-selection.js';
+import { loadWorkflow, MAX_TIMEOUT_MINUTES, type WorkflowRow } from './runner-selection.js';
 import type { WorkflowAgent, WorkItem } from './runner-types.js';
 
 // Charakterisierung von runner-steps.ts: hält das Verhalten vor der Aufteilung fest.
@@ -91,6 +91,67 @@ test('selectWorkflowAgents: überspringt Autor bei Idee, Bug-Wächter bei Risike
   assert.deepEqual(names({ ...item, risks: '  ', category: 'backend' }), ['Autor', 'Wächter']);
   // Ein einzeln gestarteter Agent läuft allein, auch wenn er sonst übersprungen würde.
   assert.deepEqual(names({ ...item, agentId: 'Visuell-id' }), ['Visuell']);
+});
+
+// Ablauf nach den Einstellungen: loadWorkflow (Schritte bzw. Agent-Felder) → selectWorkflowAgents → Ausführung.
+const row = (name: string, overrides: Partial<WorkflowRow> = {}): WorkflowRow => ({
+  ...agent(name),
+  enabled: true,
+  ...overrides,
+});
+
+async function executedOrder(steps: WorkflowRow[], agents: WorkflowRow[]): Promise<string[]> {
+  const { pool } = fakePool((sql) => (sql.includes('FROM workflow_steps s') ? steps : agents));
+  return selectWorkflowAgents(await loadWorkflow(pool, 'mainty'), item).map((entry) => entry.name);
+}
+
+test('loadWorkflow: geänderte Reihenfolge der Schritte wird so ausgeführt, Agent-Position zählt nicht', async () => {
+  const steps = [
+    row('Dev', { phase: 'while_task', position: 2, stepId: 's1' }),
+    row('Test', { phase: 'while_task', position: 1, stepId: 's2' }),
+  ];
+  assert.deepEqual(await executedOrder(steps, [row('Dev', { position: 1 }), row('Test', { position: 2 })]), [
+    'Test',
+    'Dev',
+  ]);
+});
+
+test('loadWorkflow: pausierter Schritt läuft nicht, die übrigen Schritte desselben Agents schon', async () => {
+  const steps = [
+    row('Dev', { position: 1, stepId: 's1', enabled: false }),
+    row('Review', { phase: 'after_task', position: 1, stepId: 's2' }),
+    row('Dev', { phase: 'after_task', position: 2, stepId: 's3', stepInstructions: 'Nachbessern' }),
+  ];
+  assert.deepEqual(await executedOrder(steps, []), ['Review', 'Dev']);
+});
+
+test('loadWorkflow: deaktivierter Agent läuft in keinem seiner Schritte (auch ohne Schritte nicht)', async () => {
+  const steps = [row('Dev', { stepId: 's1', agentEnabled: false }), row('Test', { position: 2, stepId: 's2' })];
+  assert.deepEqual(await executedOrder(steps, []), ['Test']);
+  assert.deepEqual(await executedOrder([], [row('Dev', { enabled: false }), row('Test', { position: 2 })]), ['Test']);
+});
+
+test('loadWorkflow: Schritt nach Phasenwechsel läuft in der neuen Phase', async () => {
+  const steps = [
+    row('Autor', { phase: 'pre_task', position: 1, stepId: 's1' }),
+    row('Dev', { phase: 'while_task', position: 1, stepId: 's2' }),
+    // Am Agent steht noch while_task; der Schritt ist nach after_task gewechselt.
+    row('Doku', { phase: 'after_task', position: 1, stepId: 's3' }),
+  ];
+  assert.deepEqual(await executedOrder(steps, [row('Doku', { phase: 'while_task', position: 0 })]), [
+    'Autor',
+    'Dev',
+    'Doku',
+  ]);
+});
+
+test('loadWorkflow: ohne Workflow-Schritte gelten Phase und Position der Agents', async () => {
+  const agents = [
+    row('Review', { phase: 'after_task', position: 1 }),
+    row('Dev', { phase: 'while_task', position: 2 }),
+    row('Test', { phase: 'while_task', position: 1 }),
+  ];
+  assert.deepEqual(await executedOrder([], agents), ['Test', 'Dev', 'Review']);
 });
 
 test('resumePrompt: Fortsetzung nennt den Grund und hängt den aktuellen Auftrag an', () => {

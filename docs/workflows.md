@@ -161,7 +161,17 @@ zur Anweisung des Agents in den Prompt und hat Vorrang. „+ Agent“ fügt eine
 Ende einer Phase, ↑↓ ordnet, der Griff ⠿ zieht einen Einsatz innerhalb der Phase oder in eine andere Phase (Auswahl
 „In Phase verschieben“ als Tastatur-Alternative; beides nur mit Recht `agents`), „Pausieren“ nimmt einen Einsatz aus dem Ablauf, „Entfernen“ löscht nur den Einsatz.
 Projekte ohne Schritte übernehmen beim ersten Öffnen ihren bisherigen Ablauf (Phase und Position am Agent); bis
-dahin gilt dieser auch im Worker. API: `GET /api/projects/:slug/workflow`, `POST …/workflow/steps`,
+dahin gilt dieser auch im Worker.
+
+**Eine Quelle für den Ablauf:** Hat ein Projekt Workflow-Schritte, sind sie die einzige Quelle für Phase, Position
+und Anweisung (`loadWorkflow` / `workflowFromRows`, `src/runner/runner-selection.ts`). Phase und Position am Agent
+zählen dann im Worker nicht. Damit Anzeige und Worker nie auseinanderlaufen, schreiben die Agent-Wege in die
+Schritte mit: „Agent anlegen“ und der Standard-Reviewer (`ensureReviewer`) hängen einen Schritt ans Ende der Phase
+an, die Reihenfolge-Route (`POST …/agents/order`) setzt Phase und Position auch an den Schritten der Agents, und ein
+Phasenwechsel per `PATCH /agents/:id` verschiebt dessen Schritte in anderen Phasen ans Ende der neuen Phase.
+`GET …/agents` liefert bei vorhandenen Schritten Phase und Position des ersten Schritts. Aktiv-Status: Ein
+pausierter Schritt läuft nicht; ein deaktivierter Agent läuft in keinem seiner Schritte. Ohne Schritte gelten Phase,
+Position und Aktiv-Status am Agent wie bisher. API: `GET /api/projects/:slug/workflow`, `POST …/workflow/steps`,
 `POST …/workflow/order`, `PATCH|DELETE /api/workflow-steps/:id` (Recht „Agents verwalten“).
 
 **Umbau während eines Laufs:** Ein laufender Auftrag arbeitet mit dem Workflow, der zu seinem Start galt, bis zum
