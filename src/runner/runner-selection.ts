@@ -98,7 +98,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
  * fremden Quellen (Betrieb, GitHub) ohne Freigabe durch einen Menschen werden nie gewählt, auch nicht gezielt (--item).
  */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.token_estimate::float8 AS "tokenEstimate", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d

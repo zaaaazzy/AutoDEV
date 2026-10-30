@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -9,7 +9,7 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatMoney, formatNumber } from '../../shared/format.js';
-import type { BudgetOverview } from '../../core/models.js';
+import type { BudgetOverview, ProjectStats } from '../../core/models.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
@@ -92,6 +92,24 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
   return ratio < 1
     ? `${Math.max(1, Math.round(ratio * 100))} %`
     : `${ratio.toLocaleString('de-DE', { maximumFractionDigits: 1 })}×`;
+}
+
+type SprintVelocity = ProjectStats['velocity'][number];
+
+/** Trefferquote der Schätzung: „67 % (2 von 3)“; ohne gemessene Aufträge „–“ statt 0 %. */
+export function hitRateText(rate: SprintVelocity['hitRate']): string {
+  if (!rate || rate.percent === null || !rate.measured) return '–';
+  return `${rate.percent} % (${rate.hits} von ${rate.measured})`;
+}
+
+/** Korrekturfaktor einer Herkunft: „Faktor 0,8 h / 1,2 Tokens · 12 Messwerte“ bzw. Standard bei zu wenig Messwerten. */
+export function calibrationText(entry: NonNullable<ProjectStats['calibration']>[number]): string {
+  const factor = (value: number) => value.toLocaleString('de-DE', { maximumFractionDigits: 3 });
+  if (entry.scope === 'default') return 'Faktor 1 (unter 5 Messwerten)';
+  return (
+    `Faktor ${factor(entry.hours)} (Stunden) / ${factor(entry.tokens)} (Tokens) · ${entry.samples} Messwerte` +
+    (entry.scope === 'all' ? ', alle Projekte' : '')
+  );
 }
 
 /** Verbrauch nach Bereich, Art, Auftrag (Schätzung gegen tatsächlich) und Agent. */
@@ -207,6 +225,28 @@ export class StatsComponent {
       filter: false,
     },
   ];
+  protected readonly calibrationText = calibrationText;
+  protected readonly sprints = computed(() => this.store.data().stats?.velocity ?? []);
+  protected readonly calibration = computed(() => this.store.data().stats?.calibration ?? []);
+
+  protected readonly sprintColumns: DataColumn<SprintVelocity>[] = [
+    { id: 'name', header: 'Sprint', value: (row) => row.name, className: 'title-cell', filter: 'text' },
+    {
+      id: 'done',
+      header: 'Erledigt',
+      value: (row) => `${row.done} von ${row.total}`,
+      sortValue: (row) => row.done,
+      filter: false,
+    },
+    {
+      id: 'hitRate',
+      header: 'Trefferquote',
+      value: (row) => hitRateText(row.hitRate),
+      sortValue: (row) => row.hitRate?.percent ?? -1,
+      filter: false,
+    },
+  ];
+  protected readonly sprintId = (row: SprintVelocity): string => row.id ?? row.name;
   protected readonly orderId = (row: OrderUsage): string => row.id;
   protected readonly agentId = (row: AgentUsage): string => `${row.source}-${row.agent}`;
 

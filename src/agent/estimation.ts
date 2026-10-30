@@ -12,6 +12,7 @@ import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
+import { type AreaBucket, areaBucket, median } from '../core/sprint-planner.js';
 
 export interface Estimate {
   effortHours: number | null;
@@ -67,47 +68,78 @@ export function parseEstimate(output: string): Estimate | null {
   return json ? toEstimate(json[0]) : null;
 }
 
-/** Ist-Werte erledigter Aufträge einer Kategorie: Median der Agent-Laufzeit (Stunden) und der Tokens. */
+/** Art eines Auftrags bzw. einer Idee für den Vergleich; ohne Angabe gilt `feature`. */
+export type OrderKind = 'feature' | 'bug';
+
+export const orderKind = (value: string | null | undefined): OrderKind => (value === 'bug' ? 'bug' : 'feature');
+
+/**
+ * Ist-Werte erledigter Aufträge gleicher Kategorie und Art: Median der Agent-Laufzeit (Stunden) und der Tokens.
+ * `areas` nennt die Bereichsgruppe, wenn die engste Gruppe (gleiche Anzahl betroffener Bereiche) genügend Aufträge hat;
+ * sonst null (Median der ganzen Kategorie).
+ */
 export interface ActualReference {
   category: string | null;
+  kind: OrderKind;
+  areas: AreaBucket | null;
   count: number;
   medianHours: number;
   medianTokens: number;
 }
 
+/** So viele erledigte Aufträge braucht die engste Gruppe (Kategorie, Art, Bereichsanzahl); sonst gilt die Kategorie. */
+export const MIN_REFERENCE_ORDERS = 5;
+/** Höchstens so viele jüngste erledigte Aufträge fließen in die Referenz ein. */
+const REFERENCE_LIMIT = 200;
+
+type ReferenceRow = { hours: string | number | null; tokens: string | number | null; description: string | null };
+
 /**
  * Lernende Schätzung: Median-Ist-Werte erledigter Aufträge derselben Kategorie (ohne Kategorie: Aufträge ohne
- * Kategorie). null, solange es keine solchen Aufträge mit gemessenem Verbrauch gibt.
+ * Kategorie) und derselben Art. Gibt es mindestens `MIN_REFERENCE_ORDERS` mit derselben Bereichsanzahl
+ * (`areaBucket` der Beschreibung), zählt nur diese Gruppe; sonst alle Aufträge der Kategorie ohne Bereichsfilter.
+ * Die Art gilt immer: Eine Idee ohne Art wird nur mit `feature`-Aufträgen verglichen. null, solange es keine solchen
+ * Aufträge mit gemessenem Verbrauch gibt.
  */
 export async function loadActualReference(
   pool: Pool,
   project: string,
   category: string | null,
+  options: { kind?: string | null; areas?: AreaBucket | null } = {},
 ): Promise<ActualReference | null> {
-  const row = (
-    await pool.query<{ count: string; hours: string | null; tokens: string | null }>(
-      `SELECT COUNT(*) AS count,
-              percentile_cont(0.5) WITHIN GROUP (ORDER BY hours) AS hours,
-              percentile_cont(0.5) WITHIN GROUP (ORDER BY tokens) AS tokens
-         FROM (SELECT SUM(st.duration_ms) / 3600000.0 AS hours, SUM(st.tokens) AS tokens
-                 FROM development_items d
-                 JOIN agent_runs r ON r.development_id = d.id
-                 JOIN agent_run_steps st ON st.run_id = r.id
-                WHERE d.project_slug = $1 AND d.status = 'done' AND d.category IS NOT DISTINCT FROM $2
-                GROUP BY d.id
-               HAVING SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0) done`,
-      [project, category],
+  const kind = orderKind(options.kind);
+  const rows = (
+    await pool.query<ReferenceRow>(
+      `SELECT SUM(st.duration_ms) / 3600000.0 AS hours, SUM(st.tokens) AS tokens, d.description
+         FROM development_items d
+         JOIN agent_runs r ON r.development_id = d.id
+         JOIN agent_run_steps st ON st.run_id = r.id
+        WHERE d.project_slug = $1 AND d.status = 'done' AND d.category IS NOT DISTINCT FROM $2 AND d.kind = $3
+        GROUP BY d.id
+       HAVING SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0
+        ORDER BY d.completed_at DESC NULLS LAST
+        LIMIT ${REFERENCE_LIMIT}`,
+      [project, category, kind],
     )
-  ).rows[0];
-  const count = Number(row?.count ?? 0);
-  if (!count) return null;
+  ).rows;
+  if (!rows.length) return null;
+  const narrow = options.areas ? rows.filter((row) => areaBucket(row.description ?? '') === options.areas) : [];
+  const group = narrow.length >= MIN_REFERENCE_ORDERS ? narrow : rows;
   return {
     category,
-    count,
-    medianHours: Math.round(Number(row?.hours ?? 0) * 10) / 10,
-    medianTokens: Math.round(Number(row?.tokens ?? 0)),
+    kind,
+    areas: group === narrow ? (options.areas ?? null) : null,
+    count: group.length,
+    medianHours: Math.round((median(group.map((row) => Number(row.hours ?? 0))) ?? 0) * 10) / 10,
+    medianTokens: Math.round(median(group.map((row) => Number(row.tokens ?? 0))) ?? 0),
   };
 }
+
+const AREA_LABELS: Record<AreaBucket, string> = {
+  '1': '1 betroffener Bereich',
+  '2-3': '2–3 betroffene Bereiche',
+  '4+': '4 und mehr betroffene Bereiche',
+};
 
 /**
  * Einheit der Schätzung für beide Prompts (Schnellschätzung und Auftragsautor): gemessen und eingeplant wird die
@@ -119,7 +151,12 @@ export const ESTIMATE_UNIT_HINT =
 
 /** Abschnitt für den Autor-Prompt: die Schätzung an echten Ist-Werten ausrichten. */
 export function referenceSection(reference: ActualReference): string {
-  const scope = reference.category ? `der Kategorie „${reference.category}“` : 'ohne Kategorie';
+  const parts = [
+    reference.category ? `der Kategorie „${reference.category}“` : 'ohne Kategorie',
+    `Art „${reference.kind}“`,
+    reference.areas ? AREA_LABELS[reference.areas] : 'alle Bereichsgrößen',
+  ];
+  const scope = parts.join(', ');
   return [
     '## Ist-Werte ähnlicher erledigter Aufträge (für die Schätzung)',
     `${reference.count} erledigte Aufträge ${scope}: Median ${String(reference.medianHours).replace('.', ',')} h ` +
@@ -203,8 +240,8 @@ export async function estimateNewIdeas(
   estimate?: (prompt: string) => Promise<Estimate | null>,
 ): Promise<number> {
   const ideas = (
-    await pool.query<{ id: string; title: string; description: string; category: string | null }>(
-      `SELECT id, title, description, category FROM ideation_items
+    await pool.query<{ id: string; title: string; description: string; category: string | null; kind?: string }>(
+      `SELECT id, title, description, category, kind FROM ideation_items
         WHERE project_slug = $1 AND status IN ('idea', 'considering', 'review', 'requested') AND agent_note IS NULL
           AND effort_hours IS NULL AND token_estimate IS NULL AND benefit IS NULL AND cost IS NULL
         ORDER BY created_at LIMIT 5`,
@@ -218,14 +255,17 @@ export async function estimateNewIdeas(
   const run =
     estimate ??
     (external ? (prompt: string) => estimateWithCommand(external, prompt, project, sandboxed) : quickEstimate);
-  const references = new Map<string | null, ActualReference | null>();
+  // Vergleichsgruppe je Kategorie, Art und Bereichsanzahl; gleiche Gruppen nur einmal laden.
+  const references = new Map<string, ActualReference | null>();
   for (const idea of ideas) {
-    if (!references.has(idea.category))
+    const group = { kind: orderKind(idea.kind), areas: areaBucket(idea.description) };
+    const key = JSON.stringify([idea.category, group.kind, group.areas]);
+    if (!references.has(key))
       references.set(
-        idea.category,
-        await loadActualReference(pool, project, idea.category).catch(logged('estimation', null)),
+        key,
+        await loadActualReference(pool, project, idea.category, group).catch(logged('estimation', null)),
       );
-    const reference = references.get(idea.category);
+    const reference = references.get(key);
     const prompt = [
       'Schätze Aufwand eines Entwicklungsauftrags. Antworte nur mit einem JSON-Objekt:',
       '{"effortHours": Agent-Stunden, "tokenEstimate": Tokens aller KI-Agent-Läufe, "benefit": 0-10, "cost": 0-10}',

@@ -17,6 +17,7 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../api/bugs.js';
 import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
+import { areaBucket } from '../core/sprint-planner.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import {
@@ -44,6 +45,8 @@ interface Idea {
   description: string;
   priority: string;
   category?: string | null;
+  /** Art der Idee (`feature` oder `bug`); ohne Angabe `feature`. */
+  kind?: string | null;
   comments: string[];
   /** Herkunft; `github` heißt: Titel und Text stammen aus einem fremden Issue. */
   source?: string;
@@ -388,7 +391,7 @@ export async function draftRequirements(
              progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
       WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category`,
+      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category, kind`,
     [options.project],
   );
   const claimedIdea = claimed.rows[0];
@@ -411,9 +414,11 @@ export async function draftRequirements(
     )
   ).rows[0];
   const definitions = await loadDefinitions(pool, options.project);
-  const reference = await loadActualReference(pool, options.project, idea.category ?? null).catch(
-    logged('requirements', null),
-  );
+  // Vergleichsgruppe: Kategorie, Art der Idee und Anzahl betroffener Bereiche (bei Überarbeitung aus dem Auftrag).
+  const reference = await loadActualReference(pool, options.project, idea.category ?? null, {
+    kind: idea.kind,
+    areas: areaBucket(existing?.description ?? idea.description),
+  }).catch(logged('requirements', null));
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,

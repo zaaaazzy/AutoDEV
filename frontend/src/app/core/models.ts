@@ -129,6 +129,8 @@ export interface Idea extends Estimate {
   /** Herkunft: von Hand erfasst oder vom Visionär vorgeschlagen (weitere Quellen folgen). */
   source?: IdeaSource;
   rejectionReason?: string | null;
+  /** Art (Vergleichsgruppe der Schätzung); ohne Angabe `feature`. */
+  kind?: 'feature' | 'bug';
   /** Herkunft aus GitHub: owner/repo#123. */
   externalRef?: string | null;
 }
@@ -515,7 +517,25 @@ export interface ProjectStats {
     percent: number;
     burndown: { day: string; remaining: number }[];
   } | null;
-  velocity: { name: string; status: string; total: number; done: number; hours: number }[];
+  velocity: {
+    id?: string;
+    name: string;
+    status: string;
+    total: number;
+    done: number;
+    hours: number;
+    /** Trefferquote der Schätzung: Treffer von gemessenen erledigten Aufträgen (percent null = keine gemessen). */
+    hitRate?: { hits: number; measured: number; percent: number | null };
+  }[];
+  /** Korrekturfaktor je Herkunft der Schätzung (Median Ist ÷ Schätzung) und Anzahl der Messwerte. */
+  calibration?: {
+    source: string;
+    label: string;
+    hours: number;
+    tokens: number;
+    samples: number;
+    scope: 'project' | 'all' | 'default';
+  }[];
 }
 
 export interface DraftOrder {

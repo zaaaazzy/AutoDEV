@@ -6,6 +6,10 @@ import {
   calibratedSql,
   calibratedTokens,
   calibrationFrom,
+  calibrationSummary,
+  estimateHit,
+  estimateOverrun,
+  hitRate,
   loadCalibration,
   MIN_CALIBRATION_SAMPLES,
   UNCALIBRATED,
@@ -16,6 +20,64 @@ import { AUTHOR_ESTIMATE_SQL, REDRAFT_ORDER_SQL } from '../agent/requirements.js
 import { QUICK_ESTIMATE_SQL } from '../agent/estimation.js';
 import { MIGRATIONS, runMigrations } from '../db/migrations.js';
 import { adminPool, databaseUrl, dropDatabase, withMigratedDatabase } from '../db/test-database.test.js';
+
+test('Treffer: Stunden und Tokens zwischen 0,5- und 2,0-mal der Schätzung, Grenzen eingeschlossen', () => {
+  const estimate = { hours: 1, tokens: 1000 };
+  assert.equal(estimateHit({ hours: 1, tokens: 1000 }, estimate), true);
+  assert.equal(estimateHit({ hours: 0.5, tokens: 2000 }, estimate), true, 'Grenzen zählen als Treffer');
+  assert.equal(estimateHit({ hours: 0.4, tokens: 1000 }, estimate), false, '0,4-mal die Stunden: kein Treffer');
+  assert.equal(estimateHit({ hours: 1, tokens: 2001 }, estimate), false, 'Tokens über dem 2-Fachen');
+  // Nicht gemessen: Schätzung fehlt oder ist 0, oder es gibt keinen Verbrauch.
+  assert.equal(estimateHit({ hours: 1, tokens: 1000 }, { hours: null, tokens: 1000 }), null);
+  assert.equal(estimateHit({ hours: 1, tokens: 1000 }, { hours: 1, tokens: 0 }), null);
+  assert.equal(estimateHit({ hours: 0, tokens: 0 }, estimate), null);
+});
+
+test('Trefferquote: Treffer von gemessenen Aufträgen; ohne Messung null statt 0 %', () => {
+  assert.deepEqual(hitRate([true, false, null, true]), { hits: 2, measured: 3, percent: 67 });
+  assert.deepEqual(hitRate([null]), { hits: 0, measured: 0, percent: null });
+  assert.deepEqual(hitRate([]), { hits: 0, measured: 0, percent: null });
+  assert.deepEqual(hitRate([false]), { hits: 0, measured: 1, percent: 0 });
+});
+
+test('Überschreitung: erst über dem Dreifachen, je Wert; ohne Schätzung nie', () => {
+  const estimate = { hours: 0.5, tokens: 1_000_000 };
+  assert.equal(estimateOverrun({ hours: 1.5, tokens: 3_000_000 }, estimate), null, 'genau das Dreifache läuft weiter');
+  assert.deepEqual(estimateOverrun({ hours: 0.1, tokens: 3_000_001 }, estimate), { hours: false, tokens: true });
+  assert.deepEqual(estimateOverrun({ hours: 1.51, tokens: 10 }, estimate), { hours: true, tokens: false });
+  assert.equal(estimateOverrun({ hours: 100, tokens: 1e9 }, { hours: null, tokens: null }), null);
+  assert.equal(estimateOverrun({ hours: 100, tokens: 1e9 }, { hours: 0, tokens: 0 }), null);
+  // Nur Tokens geschätzt: die Laufzeit wird nicht geprüft.
+  assert.equal(estimateOverrun({ hours: 100, tokens: 10 }, { hours: null, tokens: 1000 }), null);
+});
+
+test('Faktor-Übersicht: je Herkunft Faktor und Anzahl der Messwerte; unter 5 Messwerten Faktor 1', () => {
+  const calibration = calibrationFrom([
+    { own: true, source: 'author', hourSamples: 7, hourRatio: 2.5, tokenSamples: 7, tokenRatio: 0.8 },
+    { own: true, source: 'quick', hourSamples: 4, hourRatio: 9, tokenSamples: 4, tokenRatio: 9 },
+  ]);
+  const summary = calibrationSummary(calibration);
+  assert.deepEqual(
+    summary.map((entry) => entry.source),
+    ['manual', 'quick', 'author', 'legacy'],
+  );
+  assert.deepEqual(summary.find((entry) => entry.source === 'author'), {
+    source: 'author',
+    label: 'Auftragsautor',
+    hours: 2.5,
+    tokens: 0.8,
+    samples: 7,
+    scope: 'project',
+  });
+  assert.deepEqual(summary.find((entry) => entry.source === 'quick'), {
+    source: 'quick',
+    label: 'Schnellschätzung',
+    hours: 1,
+    tokens: 1,
+    samples: 0,
+    scope: 'default',
+  });
+});
 
 test('Kalibrierung: erst das Projekt, dann alle Projekte, sonst 1; Stunden und Tokens getrennt, begrenzt', () => {
   const calibration = calibrationFrom([

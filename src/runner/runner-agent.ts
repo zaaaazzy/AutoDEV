@@ -23,7 +23,7 @@ import {
 } from '../agent/tool-permissions.js';
 import { resolveModel, runOllamaAgent } from '../agent/ollama-agent.js';
 import { describeCommand, loadRouting, routable, routeModel } from '../agent/model-routing.js';
-import { calibratedHours, loadCalibration } from '../core/estimate-calibration.js';
+import { calibratedHours } from '../core/estimate-calibration.js';
 import { runTestAgent } from './test-agent.js';
 import { projectEnvironment } from './project-command.js';
 import { agentEnvironment, buildInvocation } from './runner-prompts.js';
@@ -32,7 +32,7 @@ import { planSummary, SKIPPED_NOTE, testerPlan } from './order-tests.js';
 import { runVisualStep } from './visual-check.js';
 import { captureInSandbox } from './visual-sandbox.js';
 import { projectSandbox, projectTestExecutor } from './test-sandbox.js';
-import { orderFilePaths, type RunContext } from './runner-context.js';
+import { orderCalibration, orderFilePaths, type RunContext } from './runner-context.js';
 
 /** Built-in agents: the tester runs build and tests (and records a test run), all other roles use the local model. */
 export const runBuiltinAgent: BuiltinAgent = async ({
@@ -140,7 +140,7 @@ export async function routeStep(ctx: RunContext, agent: WorkflowAgent): Promise<
   // Die Regeln vergleichen Agent-Stunden: Schätzung mit dem gemessenen Faktor ihrer Herkunft umrechnen.
   const estimate = ctx.item.effortHours ?? null;
   if (ctx.routedHours === undefined)
-    ctx.routedHours = await loadCalibration(ctx.pool, ctx.item.projectSlug)
+    ctx.routedHours = await orderCalibration(ctx)
       .then((calibration) => calibratedHours(estimate, ctx.item.estimateSource, calibration))
       .catch(() => estimate);
   const decision = routeModel(ctx.routing.rules, {

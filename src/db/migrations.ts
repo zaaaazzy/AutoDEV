@@ -412,6 +412,16 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
     `,
   },
+  {
+    version: 19,
+    name: 'ideen-art',
+    // Art der Idee (wie development_items.kind, ohne 'express'): die Schätzung vergleicht nur Aufträge gleicher Art.
+    // Nullable, Standard 'feature'; NULL gilt im Code ebenfalls als 'feature'.
+    sql: `
+      ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'feature'
+        CHECK (kind IN ('feature', 'bug'));
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

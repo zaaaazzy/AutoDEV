@@ -13,26 +13,138 @@ import {
 } from './estimation.js';
 import { buildRequirementPrompt } from './requirements.js';
 
-test('lernende Schätzung: Median-Ist-Werte erledigter Aufträge derselben Kategorie im Autor-Prompt', async () => {
+/** Beschreibung eines erledigten Auftrags mit `files` betroffenen Dateien (für die Bereichsanzahl). */
+const withFiles = (files: number) =>
+  `## Ziel\nX\n\n## Technische Hinweise\n${Array.from({ length: files }, (_, index) => `- \`src/f${index}.ts\``).join('\n')}`;
+
+/** Fake-Pool: erledigte Aufträge (Ist-Werte und Beschreibung) für loadActualReference; merkt sich die Parameter. */
+function donePool(rows: { hours: number; tokens: number; description: string }[]) {
   const queries: unknown[][] = [];
   const pool = {
     query: async (_sql: string, values: unknown[]) => {
       queries.push(values);
-      return { rows: [{ count: '3', hours: '1.25', tokens: '42000.5' }] };
+      return { rows: rows.map((row) => ({ ...row, hours: String(row.hours), tokens: String(row.tokens) })) };
     },
   } as unknown as Pool;
+  return { pool, queries };
+}
+
+test('lernende Schätzung: Median-Ist-Werte erledigter Aufträge derselben Kategorie im Autor-Prompt', async () => {
+  const { pool, queries } = donePool([
+    { hours: 1, tokens: 40000, description: 'x' },
+    { hours: 1.25, tokens: 42001, description: 'x' },
+    { hours: 3, tokens: 90000, description: 'x' },
+  ]);
   const reference = await loadActualReference(pool, 'mainty', 'docs');
-  assert.deepEqual(reference, { category: 'docs', count: 3, medianHours: 1.3, medianTokens: 42001 });
-  assert.deepEqual(queries[0], ['mainty', 'docs']);
+  assert.deepEqual(reference, {
+    category: 'docs',
+    kind: 'feature',
+    areas: null,
+    count: 3,
+    medianHours: 1.3,
+    medianTokens: 42001,
+  });
+  assert.deepEqual(queries[0], ['mainty', 'docs', 'feature']);
   const idea = { id: 'i', projectSlug: 'mainty', title: 'Doku', description: 'x', priority: 'medium', comments: [] };
   const prompt = buildRequirementPrompt('', idea, undefined, undefined, reference);
   assert.match(prompt, /## Ist-Werte ähnlicher erledigter Aufträge/);
-  assert.match(prompt, /3 erledigte Aufträge der Kategorie „docs“: Median 1,3 h Agent-Laufzeit und 42001 Tokens/);
+  assert.match(
+    prompt,
+    /3 erledigte Aufträge der Kategorie „docs“, Art „feature“, alle Bereichsgrößen: Median 1,3 h Agent-Laufzeit und 42001 Tokens/,
+  );
   // Ohne erledigte Aufträge kein Abschnitt.
-  const none = { query: async () => ({ rows: [{ count: '0', hours: null, tokens: null }] }) } as unknown as Pool;
+  const none = { query: async () => ({ rows: [] }) } as unknown as Pool;
   assert.equal(await loadActualReference(none, 'mainty', null), null);
   assert.doesNotMatch(buildRequirementPrompt('', idea), /Ist-Werte/);
-  assert.match(referenceSection({ category: null, count: 1, medianHours: 2, medianTokens: 5 }), /ohne Kategorie/);
+  assert.match(
+    referenceSection({ category: null, kind: 'bug', areas: '4+', count: 1, medianHours: 2, medianTokens: 5 }),
+    /ohne Kategorie, Art „bug“, 4 und mehr betroffene Bereiche/,
+  );
+});
+
+test('Ist-Referenz: mindestens 5 Aufträge gleicher Bereichsanzahl ergeben den Median genau dieser Gruppe', async () => {
+  const { pool } = donePool([
+    // Engste Gruppe (2–3 Bereiche): 5 Aufträge, Median 0,2 h und 2 600 000 Tokens.
+    ...[0.1, 0.2, 0.2, 0.3, 0.4].map((hours, index) => ({
+      hours,
+      tokens: [2_000_000, 2_600_000, 2_600_000, 3_000_000, 3_500_000][index]!,
+      description: withFiles(index % 2 ? 2 : 3),
+    })),
+    // Andere Bereichsanzahl: viel größer, darf den Median nicht verschieben.
+    { hours: 5, tokens: 50_000_000, description: withFiles(1) },
+    { hours: 6, tokens: 60_000_000, description: withFiles(6) },
+  ]);
+  const reference = await loadActualReference(pool, 'p', 'backend', { kind: 'feature', areas: '2-3' });
+  assert.deepEqual(reference, {
+    category: 'backend',
+    kind: 'feature',
+    areas: '2-3',
+    count: 5,
+    medianHours: 0.2,
+    medianTokens: 2_600_000,
+  });
+  assert.match(
+    referenceSection(reference!),
+    /5 erledigte Aufträge der Kategorie „backend“, Art „feature“, 2–3 betroffene Bereiche: Median 0,2 h/,
+  );
+});
+
+test('Ist-Referenz: unter 5 Aufträgen der engsten Gruppe gilt der Median der Kategorie', async () => {
+  const { pool } = donePool([
+    { hours: 0.1, tokens: 1000, description: withFiles(1) },
+    { hours: 0.2, tokens: 2000, description: withFiles(1) },
+    { hours: 0.3, tokens: 3000, description: withFiles(1) },
+    { hours: 0.5, tokens: 4000, description: withFiles(1) },
+    { hours: 2, tokens: 20000, description: withFiles(5) },
+    { hours: 3, tokens: 30000, description: 'ohne Dateien' },
+  ]);
+  const reference = await loadActualReference(pool, 'p', 'backend', { areas: '1' });
+  assert.deepEqual(reference, {
+    category: 'backend',
+    kind: 'feature',
+    areas: null,
+    count: 6,
+    medianHours: 0.4,
+    medianTokens: 3500,
+  });
+});
+
+test('Ist-Referenz: Idee ohne Art nur mit feature-Aufträgen, Art bug nur mit bug-Aufträgen', async () => {
+  const { pool, queries } = donePool([{ hours: 1, tokens: 10, description: 'x' }]);
+  assert.equal((await loadActualReference(pool, 'p', null, {}))?.kind, 'feature');
+  assert.equal((await loadActualReference(pool, 'p', null, { kind: null }))?.kind, 'feature');
+  assert.equal((await loadActualReference(pool, 'p', null, { kind: 'bug' }))?.kind, 'bug');
+  // Die Art ist ein fester Filter der Abfrage (d.kind = $3), kein Rückfall auf andere Arten.
+  assert.deepEqual(
+    queries.map((values) => values[2]),
+    ['feature', 'feature', 'bug'],
+  );
+});
+
+test('estimateNewIdeas: Vergleichsgruppe aus Kategorie, Art und Bereichsanzahl der Idee', async () => {
+  const references: unknown[][] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      if (sql.includes('FROM ideation_items'))
+        return {
+          rows: [
+            { id: 'a', title: 'A', description: 'x', category: 'backend', kind: null },
+            { id: 'b', title: 'B', description: withFiles(2), category: 'backend', kind: 'bug' },
+          ],
+        };
+      if (sql.includes("d.status = 'done'")) {
+        references.push(values);
+        return { rows: [] };
+      }
+      if (sql.includes('FROM projects')) return { rows: [{ name: 'P', description: '', guidelines: '' }] };
+      return { rows: [] };
+    },
+  } as unknown as Pool;
+  await estimateNewIdeas(pool, 'p', async () => null);
+  assert.deepEqual(references, [
+    ['p', 'backend', 'feature'],
+    ['p', 'backend', 'bug'],
+  ]);
 });
 
 test('splitEstimate separates the requirement from the estimate section', () => {
@@ -129,9 +241,13 @@ test('parseEstimate: verschachteltes JSON als Rückfall, sonst null', () => {
 test('loadActualReference: ohne Zeile oder ohne Werte', async () => {
   const empty = { query: async () => ({ rows: [] }) } as unknown as Pool;
   assert.equal(await loadActualReference(empty, 'p', null), null);
-  const nulls = { query: async () => ({ rows: [{ count: '4', hours: null, tokens: null }] }) } as unknown as Pool;
+  const nulls = {
+    query: async () => ({ rows: Array.from({ length: 4 }, () => ({ hours: null, tokens: null, description: null })) }),
+  } as unknown as Pool;
   assert.deepEqual(await loadActualReference(nulls, 'p', 'frontend'), {
     category: 'frontend',
+    kind: 'feature',
+    areas: null,
     count: 4,
     medianHours: 0,
     medianTokens: 0,
@@ -194,7 +310,7 @@ function ideasPool(ideas: { id: string; title: string; description: string }[], 
     query: async (sql: string, values: unknown[] = []) => {
       if (sql.includes('FROM ideation_items')) return { rows: ideas };
       // Ist-Werte ähnlicher Aufträge (loadActualReference): hier keine.
-      if (sql.includes('percentile_cont')) return { rows: [{ count: '0', hours: null, tokens: null }] };
+      if (sql.includes("d.status = 'done'")) return { rows: [] };
       if (sql.includes('FROM projects')) return { rows: [{ name: 'Dev Log', description, guidelines: '' }] };
       updates.push({ sql, values });
       return { rows: [] };

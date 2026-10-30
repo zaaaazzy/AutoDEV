@@ -79,6 +79,17 @@ export function budgetActionTodo(daily: boolean, detail: string): string {
   return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
 }
 
+/** Beginn der Aktion „Schätzung überschritten“ (Überschreitungsprüfung nach jedem Agent-Schritt). */
+export const OVERRUN_TODO_PREFIX = 'Schätzung überschritten: ';
+
+/**
+ * „Schätzung überschritten“: Ist und kalibrierte Schätzung nennen; „Erneut versuchen“ gibt den Auftrag frei.
+ * `actual` und `estimate` sind schon lesbar formatiert („1,6 h / 9,2 Mio. Tokens“).
+ */
+export function overrunActionTodo(actual: string, estimate: string): string {
+  return shorten(`${OVERRUN_TODO_PREFIX}Ist ${actual}, Schätzung ${estimate} – prüfen, dann „Erneut versuchen“`);
+}
+
 /**
  * „keine“, „nichts“, „-“ oder „n/a“ – allein oder mit Begründung hinter Satzzeichen, Gedankenstrich oder Klammer
  * („keine – Agent behebt selbst“). „Keine Datenbank-URL hinterlegt“ ist dagegen eine Aktion.

@@ -143,6 +143,38 @@
     />
   </section>
 
+  <section class="panel stats-table" data-testid="stats-hit-rate">
+    <div class="section-heading">
+      <div>
+        <h2>Trefferquote der Schätzung je Sprint</h2>
+        <p class="muted">
+          Treffer: Stunden und Tokens eines erledigten Auftrags liegen zwischen dem 0,5- und 2,0-Fachen der kalibrierten
+          Schätzung
+        </p>
+      </div>
+    </div>
+    <app-data-table
+      [rows]="sprints()"
+      [columns]="sprintColumns"
+      [rowId]="sprintId"
+      emptyText="Noch keine Sprints."
+    />
+    @if (calibration().length) {
+      <h3>Korrekturfaktor je Herkunft</h3>
+      @for (entry of calibration(); track entry.source) {
+        <div class="usage-row">
+          <div class="usage-head">
+            <span>{{ entry.label }}</span>
+          </div>
+          <small class="muted">{{ calibrationText(entry) }}</small>
+        </div>
+      }
+      <p class="muted usage-note">
+        Median von Ist ÷ Schätzung der letzten 20 erledigten Aufträge je Projekt; unter 5 Messwerten gilt 1.
+      </p>
+    }
+  </section>
+
   <section class="panel prompt-log" data-testid="prompt-log">
     <div class="section-heading">
       <div>
