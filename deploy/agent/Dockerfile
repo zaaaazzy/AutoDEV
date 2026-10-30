@@ -35,7 +35,7 @@ COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
-    && apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates tini \
+    && apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates tini lsof \
     && rm -rf /var/lib/apt/lists/*
 # Claude-CLI in fester Version: ein Update kommt nur mit einem neuen Image, nicht still zur Laufzeit.
 ARG CLAUDE_CODE_VERSION=2.1.302

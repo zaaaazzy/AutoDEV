@@ -169,6 +169,8 @@ export interface WorkbenchOptions extends Pick<
   'project' | 'platform' | 'uid' | 'gid' | 'cpus' | 'memory' | 'image'
 > {
   extras?: WorkbenchExtras;
+  /** ID des Images: Nach einem neuen Build (gleicher Name) wird der Stapel so neu erstellt. */
+  imageId?: string;
 }
 
 /**
@@ -224,7 +226,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
         npm_config_proxy: EGRESS_URL,
         ...extras.environment,
       },
-      labels: { [WORKBENCH_LABEL]: options.project },
+      labels: { [WORKBENCH_LABEL]: options.project, 'aideation.workbench.image': options.imageId ?? '' },
     },
     docker: {
       image: WORKBENCH_DOCKER_IMAGE,
@@ -427,7 +429,13 @@ export async function runInWorkbench(
   } catch (error) {
     return blocked(`Arbeitscontainer: ${WORKBENCH_FILE} ist ungültig – ${String(error)}`, redactWith);
   }
-  const started = await ensureWorkbench(docker, worktree, { ...options, extras, environment: source });
+  const image = await docker(
+    ['docker', 'image', 'inspect', '--format', '{{.Id}}', options.image ?? SANDBOX_IMAGE],
+    worktree,
+    { timeoutMs: CHECK_TIMEOUT_MS, env },
+  ).catch(failed);
+  const imageId = image.exitCode === 0 ? image.output.trim() : '';
+  const started = await ensureWorkbench(docker, worktree, { ...options, extras, imageId, environment: source });
   if (started) {
     noteProblem(options.project, started);
     return blocked(started, redactWith);

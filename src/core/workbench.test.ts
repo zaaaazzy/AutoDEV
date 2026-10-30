@@ -123,6 +123,14 @@ test('Arbeitscontainer: Name je Projekt und Worktree, Hash ändert sich mit der 
   const base = workbenchCompose('/a/agent', { project: 'mainty', platform: 'darwin', uid: 1, gid: 1 });
   const other = workbenchCompose('/a/agent', { project: 'mainty', platform: 'darwin', uid: 1, gid: 1, memory: '8g' });
   assert.notEqual(workbenchHash(base), workbenchHash(other));
+  const rebuilt = workbenchCompose('/a/agent', {
+    project: 'mainty',
+    platform: 'darwin',
+    uid: 1,
+    gid: 1,
+    imageId: 'sha256:neu',
+  });
+  assert.notEqual(workbenchHash(base), workbenchHash(rebuilt), 'neues Image: Stapel neu erstellen');
 });
 
 test('Arbeitscontainer: workbench.json kommt aus dem Haupt-Checkout, nicht aus dem Worktree des Agents', () => {
