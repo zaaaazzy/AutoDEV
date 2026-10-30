@@ -1,10 +1,10 @@
 # AIdeation zur Laufzeit
 
-Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Stand: 19.10.2026. Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
+Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher Agent startet und was er darf – abgeleitet aus dem Quellcode (`src/runner`, `src/agent`, `src/db/schema.ts`). Erstfassung vom 19.10.2026, seither mit jedem Auftrag nachgeführt, der Worker, Agents oder Rechte ändert (letzter Abgleich: Git-Verlauf dieser Datei). Details zu Abläufen und Rechten stehen in „Workflows“ und „Agents und Rechte“.
 
 ## 1 · Prozesse und Takte
 
-Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker in kurzlebigen Containern der Docker-Sandbox (`DEV_LOG_AGENT_SANDBOX`, Standard `docker`). Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
+Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker im Arbeitscontainer des Projekts (`DEV_LOG_AGENT_SANDBOX`, Standard `workbench`, `src/core/workbench.ts`): ein dauerhafter Compose-Stapel `aideation-wb-<projekt>-<kennung>` mit eigenem Docker (`docker:dind`) und den Testdiensten aus `.aideation/workbench.json`; lesende Rollen laufen in kurzlebigen Containern. Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
 
 ```mermaid
 flowchart TB
@@ -205,7 +205,7 @@ flowchart TB
 
 - Exit-Code 0 und nicht abgebrochen. Vorübergehender Fehler des Agents (Modell weg, überlastet, Rate-Limit, Zeitlimit): nach 30 s einmal wiederholt, wenn das Budget es noch erlaubt. Ergebnisse der Projekttests und der visuellen Prüfung werden nie wiederholt.
 - Tester mit eigener CLI: jedes Akzeptanzkriterium und jeder DoD-Punkt erfüllt (`@@ACCEPTANCE`); nur manuell prüfbare Punkte werden „Aktion notwendig“ + Push.
-- Reviewer: eindeutige Freigabe, sonst gescheitert.
+- Reviewer: eindeutige Freigabe, sonst gescheitert. Es zählen alle Urteilszeilen (`@@REVIEW: …` am Zeilenanfang); steht irgendwo „ÄNDERUNGEN NÖTIG“, gilt der Auftrag als abgelehnt, auch wenn später „FREIGEGEBEN“ folgt.
 - Kein `@@REGEL`-Einspruch (sonst Auftrag „rejected“).
 - Entwickler (lokales Modell) hat Dateien geändert oder „KEINE ÄNDERUNG NÖTIG“ gemeldet.
 
@@ -428,6 +428,14 @@ Modell nicht erreichbar, überlastet, Rate-Limit, Verbindungsabbruch oder Zeitli
 - Geschwärzt wird vor dem Kürzen. Ein Secret, das über eine Schnittkante reicht, wird dort ganz entfernt. Geschnitten wird nie mitten in einem Emoji (Surrogate-Paar). stdout und stderr haben je einen eigenen UTF-8-Decoder, deshalb bleiben Umlaute auf Chunk-Grenzen ganz.
 - Claude-CLI (`stream-json`): stdout und stderr haben getrennte Zeilenpuffer, und nur stdout wird als Ereignis gelesen. stderr kann so keine JSON-Zeile zerreissen und kein gefälschtes `result` einschleusen. Die letzte Zeile ohne Zeilenumbruch wird beim Abschluss gelesen. Fehlt das `result`-Ereignis bei Exit-Code 0, gilt der Schritt als fehlgeschlagen, nicht als Erfolg mit Kosten 0. Die Live-Ausgabe wird höchstens alle 500 ms neu zusammengesetzt, der lesbare Text ist auf die letzten rund 120 000 Zeichen begrenzt.
 
+### Fehlerantworten der API
+
+`src/api/error-handler.ts` ist die letzte Middleware in `createDevLogApp`. Unbekannte Pfade (jede Methode) ergeben ein JSON-404, ein zu grosser Body 413, kaputtes JSON 400, alles andere 500. Die Antwort ist immer `{ "message": … }` und enthält nie Stacktrace oder Fehlertext; der Fehler steht nur im Server-Log. Das JSON-Limit ist 256 KB (Doku-Höchstlänge `MAX_DOC_CONTENT` = 30 000 Zeichen, bis 6 Byte je Zeichen). Ein Session-Cookie mit ungültiger Prozentkodierung gilt als nicht angemeldet (401).
+
+### Transaktionen
+
+Mehrstufige Änderungen der API laufen über `withTransaction(pool, async (client) => …)` aus `src/db/transaction.ts`: eine feste Verbindung, `BEGIN`/`COMMIT`, bei Fehler `ROLLBACK`, `release()` immer im `finally` (scheitert das `ROLLBACK`, wird die Verbindung verworfen). Alle Abfragen in der Funktion müssen über `client` laufen. Je Idee gibt es höchstens einen Auftrag (Teilindex `development_items_ideation_idx`, Migration 19); ein Verstoss (`23505`, `isUniqueViolation`) ergibt beim Übernehmen und beim Anlegen eines Auftrags 409. Transaktional sind Übernehmen und Löschen eines Auftrags, Projekt löschen (mit Ordner-Job), Kategorie löschen (mit Bereinigung der Agents) sowie Benutzer anlegen und ändern.
+
 ### Sofortstart
 
 Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. Das 30-s-Intervall bleibt als Absicherung.
@@ -435,6 +443,8 @@ Datenbank-Trigger melden neue Arbeit per `NOTIFY`; der Worker legt sofort los. D
 ### Budget und Modell-Routing
 
 Einstellungen → Budget: Limits je Tag, Sprint und Auftrag (Tokens/USD), Anzeige in USD oder CHF zum festen Kurs, Routing-Regeln und Modell je Stufe. Dashboard-Kachel „Budget heute / Sprint“, Statistik mit Verbrauch gegen Budget, Verbrauch je Modell und geschätzter Ersparnis durch das Routing. Der Auftragsautor bekommt die Median-Ist-Werte erledigter Aufträge derselben Kategorie in den Prompt (sichtbar im Prompt-Protokoll der Statistik). „Erneut versuchen“ startet ein neues Auftragsbudget.
+
+Kostenlimits werden auf Cent gerundet (Spalte `NUMERIC(10, 2)`). Werte unter 0,01 USD lehnt `PUT /api/projects/:slug/budget` mit 400 ab. Alle Änderungen eines Speicherns laufen in einer Transaktion: Scheitert ein Teil, bleibt nichts halb gespeichert.
 
 #### Token-Limits je Agent-Rolle
 
@@ -494,6 +504,14 @@ Der Review-Container (Worker-Takt 5 s, `src/runner/review-slots.ts`) führt Code
 - **npm-Cache je Projekt:** Volume `aideation_review_npm_<projekt>` statt eines gemeinsamen Caches.
 - **Eigener DB-User:** `DEV_LOG_REVIEW_DATABASE_URL` im Worker zeigt auf einen User ohne Superuser-Rechte und auf dessen Basis-Datenbank (`scripts/setup-review-db.sh` legt beides an und entzieht `PUBLIC` das `CONNECT` auf `aideation` und `postgres`). Projekte ohne eigene Datenbank bekommen damit die leere Slot-Datenbank `aideation_review_<n>` (`REVIEW_DATABASE_URL`, `DATABASE_URL`). Angelegt wird sie vom Worker, und zwar über die Basis-Datenbank, nie über `postgres`. Projekte mit eigener Datenbank bekommen wie bisher eine Kopie `<db>_review_<n>`.
 - **Kein Rückfall:** Fehlt der Review-User, gleicht er dem Haupt-User (User, Passwort oder Datenbank) oder enthielte das Env das Haupt-DB-Passwort, den Haupt-User oder die DB `postgres`, dann wird der Container gar nicht erst gestartet. Der Slot steht dann auf „fehlgeschlagen“ mit Meldung, Docker-Ausgaben werden maskiert. Das betrifft nur den Review-Container, nicht den Auftrag und nicht den Autofix.
+
+### Frontend-Polling: Git-Verlauf und Review-Container
+
+- Alle Takte im Frontend laufen über `visibleInterval` und pausieren in verborgenen Tabs.
+- Der Git-Verlauf (`git-graph.store.ts`) behält bei einem Ladefehler den letzten Stand und setzt nur `error`. Leer wird er nur beim Projektwechsel.
+- `/api/review-slots` laden alle `app-sprint-review`-Instanzen über einen gemeinsamen Poll (`core/shared-poll.ts`, `ReviewLaunchService.watchSlots()`): ein Abruf je Takt, egal wie viele Sprints aufgeklappt sind.
+- `app-sprint-review` wird nur bei Sprints mit Status `planned`, `active` oder `review` eingebunden (`sprintReviewable`).
+- Details: `docs/git-verlauf-sprint-review-fehlerzustand-polling-2026-10-29.md`.
 
 ## Parallele Testläufe
 

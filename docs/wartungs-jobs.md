@@ -50,6 +50,6 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 - Typecheck und 56 Tests (`app`, `roles`, `scheduled-jobs`, `scheduler`, `watchdog`) bestanden.
 - Die Abdeckung von `scheduler.ts` und `scheduled-jobs.ts` ist **nicht gemessen** (der Wächter blockiert `--experimental-test-coverage`).
-- `npm run lint` meldet zwei bereits vorher vorhandene Fehler (`no-regex-spaces`) in `src/core/test-results.test.ts`, nicht in den Dateien dieses Auftrags.
+- `npm run lint` läuft ohne Fehler durch (Stand 29.10.2026, nur Warnungen); die früher gemeldeten `no-regex-spaces`-Fehler in `src/core/test-results.test.ts` sind behoben.
 - Ein eigener Test für die idempotente Schema-Anlage fehlt; geprüft nur durch Lesen des Codes.
 - `purgeProductionData` (stündliche Aufbewahrung) wurde nicht in den Scheduler verlegt.

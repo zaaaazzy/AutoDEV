@@ -22,6 +22,7 @@ import {
   completeSprintConflict,
   DELETABLE_SPRINT_STATUSES,
   IDLE_SPRINT_GIT_SYNC,
+  ONE_ACTIVE_SPRINT_MESSAGE as ONE_ACTIVE_MESSAGE,
   SPRINT_HOLDING_DEVELOPMENT_STATUSES,
 } from '../core/sprint-rules.js';
 
@@ -33,7 +34,6 @@ const SPRINT_COLUMNS = `id, project_slug AS "projectSlug", name, goal, status,
   review_ready_at AS "reviewReadyAt", paused_at AS "pausedAt", paused_by AS "pausedBy"`;
 /** Feste Statuslisten aus sprint-rules für `IN (…)` (eigene Konstanten, keine Benutzereingabe). */
 const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
-const ONE_ACTIVE_MESSAGE = 'Es kann nur ein Sprint pro Projekt aktiv sein.';
 const SPRINT_FIELDS = {
   name: { column: 'name', parse: parseTitle(120) },
   goal: { column: 'goal', parse: parseLongText },

@@ -18,12 +18,6 @@ async function start(): Promise<void> {
       'WARNUNG: DEV_LOG_AUTH=off – die API ist ohne Login erreichbar und steuert Agents mit Datei- und Befehlsrechten. Nur in vertrauenswürdigen Netzen betreiben; Projektordner lassen sich mit DEV_LOG_PROJECT_ROOTS begrenzen.',
     );
   }
-  const bind = process.env.DEV_LOG_BIND?.trim();
-  if (bind && !['127.0.0.1', 'localhost', '::1'].includes(bind)) {
-    console.warn(
-      `WARNUNG: DEV_LOG_BIND=${bind} – AIdeation ist im Netz erreichbar, Benutzername und Passwort gehen per HTTP unverschlüsselt über die Leitung. Wer sie mitliest, kann über Agent-, Test- und Deploy-Befehle beliebige Befehle auf diesem Rechner ausführen. Besser: DEV_LOG_BIND=127.0.0.1 und Zugriff über HTTPS-Proxy, Tailscale oder SSH-Tunnel.`,
-    );
-  }
   const pool = await createDatabasePool(readDatabaseConfig());
   const encrypted = await encryptProjectSecrets(pool);
   if (encrypted) console.info(`${encrypted} Datenbank-Zugang/Zugänge verschlüsselt.`);

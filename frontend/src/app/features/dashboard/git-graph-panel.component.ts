@@ -1,5 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { type GitCommit, type GraphEdge, layoutGraph, PALETTE } from './git-graph.js';
+import { edgePath, type GitCommit, type GraphEdge, laneColor } from './git-graph.js';
 import { GitGraphStore } from './git-graph.store.js';
 
 const ROW = 30;
@@ -16,8 +16,9 @@ export class GitGraphPanelComponent {
   private readonly source = inject(GitGraphStore);
   protected readonly graph = this.source.graph;
   protected readonly loaded = this.source.loaded;
+  protected readonly error = this.source.error;
   protected readonly showAll = signal(false);
-  protected readonly layout = computed(() => layoutGraph(this.graph()?.commits ?? []));
+  protected readonly layout = this.source.layout;
   protected readonly visibleRows = computed(() => this.layout().rows.slice(0, this.showAll() ? undefined : 25));
   protected readonly graphWidth = computed(() => Math.min(this.layout().lanes, 10) * LANE + LANE / 2);
   protected readonly rowHeight = ROW;
@@ -26,19 +27,10 @@ export class GitGraphPanelComponent {
     return Math.min(lane, 9) * LANE + LANE / 2 + 1;
   }
 
-  protected color(index: number): string {
-    return PALETTE[index % PALETTE.length]!;
-  }
+  protected readonly color = laneColor;
 
-  /** Gerade Linie oder weiche Kurve zwischen zwei Spuren innerhalb einer Zeile. */
   protected path(edge: GraphEdge): string {
-    const x1 = this.x(edge.from);
-    const x2 = this.x(edge.to);
-    const y1 = edge.fromY * ROW;
-    const y2 = edge.toY * ROW;
-    if (x1 === x2) return `M${x1} ${y1}V${y2}`;
-    const mid = (y1 + y2) / 2;
-    return `M${x1} ${y1}C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`;
+    return edgePath(edge, (lane) => this.x(lane), ROW);
   }
 
   protected commitUrl(commit: GitCommit): string | null {

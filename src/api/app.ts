@@ -16,6 +16,7 @@ import { registerTestRequestRoutes } from './test-requests.js';
 import { registerGitStateRoutes } from './git-state.js';
 import { registerDevelopmentRoutes } from './development.js';
 import { registerDocRoutes } from './docs.js';
+import { jsonErrors, notFound } from './error-handler.js';
 import { registerCoverageRoutes } from './coverage.js';
 import { registerSetupRoutes } from './setup.js';
 import { registerAcceptanceRoutes } from './acceptance.js';
@@ -73,7 +74,9 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   // weil das Snippet von der Origin der betreuten Anwendung sendet und eigene Grenzen (16 KB) gelten.
   registerIngestRoutes(app, pool);
   app.use(sameOriginWrites);
-  app.use(express.json({ limit: '32kb' }));
+  // Ein Dokument darf MAX_DOC_CONTENT (30 000) Zeichen haben; in JSON kostet ein Zeichen bis zu 6 Byte
+  // (Umlaute 2, \uXXXX-Escapes 6). 256 KB lassen dafür samt Titel und Notiz Platz.
+  app.use(express.json({ limit: '256kb' }));
 
   app.use('/api', createApiRouter(pool, auth));
   app.use(express.static(UI_DIRECTORY, { index: false }));
@@ -81,7 +84,8 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
     response.sendFile(join(UI_DIRECTORY, 'index.html'));
   });
 
-  app.get('*splat', (_request, response) => response.status(404).json({ message: 'Nicht gefunden.' }));
+  app.use(notFound);
+  app.use(jsonErrors);
   return app;
 }
 

@@ -215,7 +215,8 @@ export class ProjectStore {
     }));
   }
 
-  async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<void> {
+  /** Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat. */
+  async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<boolean> {
     this.busy.set(true);
     this.notice.set('');
     try {
@@ -226,9 +227,11 @@ export class ProjectStore {
       setTimeout(() => {
         if (this.notice() === success) this.notice.set('');
       }, NOTICE_MS);
+      return true;
     } catch (error) {
       // Steht die Meldung schon am Formularfeld, nicht zusätzlich oben anzeigen.
       if (!(error instanceof FieldError && error.shown)) this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
+      return false;
     } finally {
       this.busy.set(false);
     }

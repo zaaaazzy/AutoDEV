@@ -330,10 +330,11 @@
               <li [class.verifying]="isVerifying(check)">
                 <input
                   type="checkbox"
-                  [checked]="false"
-                  [disabled]="busy() || isVerifying(check)"
+                  [checked]="ticks.saving(item.id, check)"
+                  [disabled]="busy() || isVerifying(check) || !auth.can('plan')"
                   [attr.aria-label]="'Abhaken: ' + check.text"
-                  (change)="checkPoint(item, check, true)"
+                  [title]="auth.can('plan') ? '' : 'Abhaken braucht das Recht „Planung“.'"
+                  (change)="tickPoint($event, item, check)"
                 />
                 <span class="todo-text"
                   >{{ check.text }}

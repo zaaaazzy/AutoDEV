@@ -4,6 +4,8 @@ import {
   canChangeSprintStatus,
   canDeleteSprint,
   completeSprintConflict,
+  hasOtherActiveSprint,
+  ONE_ACTIVE_SPRINT_MESSAGE,
 } from '../../../../../src/core/sprint-rules.js';
 
 type SprintRef = { id: string; status: string; gitSync?: string | null };
@@ -19,6 +21,8 @@ export interface SprintButtons {
   live: boolean;
   liveBlocked: string | null;
   reopen: boolean;
+  /** „Sprint starten“/„Wieder öffnen“ sichtbar, aber gesperrt, solange ein anderer Sprint aktiv ist (Server: 409). */
+  activateBlocked: string | null;
   cancel: boolean;
   replan: boolean;
   remove: boolean;
@@ -38,14 +42,22 @@ export function sprintButtons(
   const run = can('run');
   const mine = (status: string) => items.filter((item) => item.sprintId === sprint.id && item.status === status).length;
   const live = plan && canChangeSprintStatus(sprint.status, 'completed');
+  // Ohne den anderen aktiven Sprint erlaubt: Knopf zeigen, Sperre über activateBlocked.
+  const activatable =
+    plan &&
+    canActivateSprint(
+      sprint,
+      sprints.filter((other) => other.status !== 'active'),
+    );
   return {
     edit: plan,
-    start: plan && sprint.status === 'planned' && canActivateSprint(sprint, sprints),
+    start: activatable && sprint.status === 'planned',
     pause: run && sprint.status === 'active' && !sprint.pausedAt,
     resume: run && sprint.status === 'active' && !!sprint.pausedAt,
     live,
     liveBlocked: live ? completeSprintConflict(mine('in_progress'), mine('approval')) : null,
-    reopen: plan && sprint.status === 'completed' && canActivateSprint(sprint, sprints),
+    reopen: activatable && sprint.status === 'completed',
+    activateBlocked: activatable && hasOtherActiveSprint(sprint, sprints) ? ONE_ACTIVE_SPRINT_MESSAGE : null,
     cancel: plan && canChangeSprintStatus(sprint.status, 'cancelled'),
     replan: plan && sprint.status === 'cancelled' && canChangeSprintStatus(sprint.status, 'planned'),
     remove: plan && canDeleteSprint(sprint, items),
@@ -56,7 +68,7 @@ export function sprintButtons(
  * Führt `action` nur aus, wenn gerade keine andere läuft; `flag` ist ab dem ersten Klick gesetzt (auch während der
  * Rückfrage) und wird im finally zurückgesetzt, damit die Knöpfe nach einem Fehler wieder gehen.
  */
-export async function exclusive(flag: WritableSignal<boolean>, action: () => Promise<void>): Promise<void> {
+export async function exclusive(flag: WritableSignal<boolean>, action: () => Promise<unknown>): Promise<void> {
   if (flag()) return;
   flag.set(true);
   try {

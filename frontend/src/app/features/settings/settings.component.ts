@@ -56,7 +56,7 @@ export class SettingsComponent {
     autoBugfix: false,
     agentWorkspace: false,
     /** Leer = globaler Schalter. */
-    agentSandbox: '' as '' | 'off' | 'docker',
+    agentSandbox: '' as '' | 'off' | 'docker' | 'workbench',
     reviewMode: 'off' as 'off' | 'ui' | 'always',
     reviewCommand: '',
     restartAfterSprint: false,
