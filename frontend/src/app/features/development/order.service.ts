@@ -250,19 +250,6 @@ export class OrderService {
     return started;
   }
 
-  async removeFromSprint(item: DevelopmentItem): Promise<void> {
-    const ok = await this.sure({
-      title: 'Aus dem Sprint nehmen?',
-      message: `„${item.title}“ verlässt den Sprint und steht danach unter „Aktionen“.`,
-      confirmLabel: 'Aus dem Sprint nehmen',
-    });
-    if (!ok) return;
-    await this.store.perform(
-      () => this.api.post(`/api/development/${encodeURIComponent(item.id)}/remove-from-sprint`),
-      'Auftrag aus dem Sprint genommen – er steht jetzt unter „Aktionen“.',
-    );
-  }
-
   async remove(item: DevelopmentItem): Promise<void> {
     const ok = await this.sure({
       title: 'Auftrag löschen?',

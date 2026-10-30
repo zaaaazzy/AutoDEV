@@ -11,7 +11,6 @@ export interface WorkingHours {
   days: number[];
 }
 
-export const DEFAULT_WORKING_HOURS: WorkingHours = { start: '08:00', end: '18:00', days: [1, 2, 3, 4, 5] };
 export const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 const minutesOf = (time: string): number => Number(time.slice(0, 2)) * 60 + Number(time.slice(3, 5));

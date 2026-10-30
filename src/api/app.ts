@@ -44,8 +44,6 @@ import { registerTimelineRoutes } from './timeline.js';
 import { registerQualityRoutes } from './quality.js';
 import { registerWorkerRoutes } from './worker.js';
 
-export type { DevLogAuth } from './auth.js';
-
 const UI_DIRECTORY = join(import.meta.dirname, '..', '..', 'dist', 'ui', 'browser');
 
 /** `uiDirectory` nur für Tests: Unit-Tests laufen ohne gebaute Oberfläche (`dist/ui`). */

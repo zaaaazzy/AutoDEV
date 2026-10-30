@@ -5,11 +5,11 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 ## Ablauf
 
 1. `runner-cli.ts` ruft nach jedem Arbeitszyklus (30 s) `runScheduledJobs()` auf, ausserhalb von `runWorkflow`, weil dieses je Projekt läuft.
-2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf Zeitlimit + Reserve und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
+2. `runDueJobs` (`src/runner/scheduler.ts`) beansprucht fällige, aktive Zeilen mit `FOR UPDATE SKIP LOCKED`. Dabei setzt es `next_run_at` auf jetzt + Intervall, `locked_until` auf höchstes Zeitlimit + Reserve (330 s) und `last_status` auf `running`. Ein zweiter Worker sieht die Zeile nicht und führt sie nicht doppelt aus.
 3. Die Job-Art wird in der festen Registry `JOB_KINDS` nachgeschlagen. Unbekannte Art: Status `failed`, andere Jobs laufen weiter. Es wird nie ein Pfad oder Befehl aus der Datenbank ausgeführt.
 4. Der Job läuft mit hartem Zeitlimit (`config.timeoutSeconds`, sonst Art-Standard, höchstens 300 s). Status, Zeitpunkt und Meldung werden in die Zeile zurückgeschrieben. Ein Fehler wird gespeichert und bricht weder den Durchgang noch den Worker-Zyklus ab.
    - Beim Zeitlimit bekommt der Job das Abbruchsignal. `runWithTimeout` wartet danach noch bis zu 20 s (`TIMEOUT_GRACE_MS`) auf sein echtes Ende. Erst dann wird `locked_until` freigegeben.
-   - Läuft der Task danach noch, steht der Job als `failed` mit dem Hinweis „läuft noch“. Die Sperre bleibt stehen, und der Worker beansprucht den Job nicht erneut, auch nicht nach Ablauf der Sperre. Im Log steht eine Warnung. Endet der Task, gibt er die Sperre frei, aber nur, wenn sie noch seiner Beanspruchung gehört. Für andere Worker bleibt die Obergrenze die Sperrzeit (Zeitlimit + 30 s).
+   - Läuft der Task danach noch, steht der Job als `failed` mit dem Hinweis „läuft noch“. Die Sperre bleibt stehen, und der Worker beansprucht den Job nicht erneut, auch nicht nach Ablauf der Sperre. Im Log steht eine Warnung. Endet der Task, gibt er die Sperre frei, aber nur, wenn sie noch seiner Beanspruchung gehört. Für andere Worker bleibt die Obergrenze die Sperrzeit (330 s).
 5. Der Durchgang läuft im Hintergrund, höchstens einer gleichzeitig je Worker. Er zählt beim Neustart-Zähler (`busy`) mit und startet nicht mehr, sobald der Worker stoppt.
 
 ## Job-Arten
@@ -37,8 +37,8 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 - **Sprint-Abschluss** ändert den Status und ist darum standardmässig deaktiviert. Er schliesst nie einen Sprint mit offenen oder laufenden Aufträgen.
   - `completeSprint` ist idempotent: Der Statuswechsel gilt nur für einen aktiven, nicht pausierten Sprint. War der Sprint schon abgeschlossen, entstehen kein zweiter Bericht, kein zweiter Git-Sync und keine zweite Push-Nachricht.
   - `close_old_sprints` prüft das Abbruchsignal vor jedem Abschluss. Nach dem Zeitlimit wird kein weiterer Sprint geschlossen.
-- **Standardjobs** legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`). Änderungen der Administration bleiben bei einem Neustart erhalten.
-- **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach Zeitlimit + 30 s ab, danach ist der Job wieder beanspruchbar.
+- **Standardjobs** legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`), `restore_probe` kommt per Migration (`src/db/migrations.ts`) dazu. Änderungen der Administration bleiben bei einem Neustart erhalten.
+- **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach höchstem Zeitlimit + 30 s (330 s, `LOCK_SECONDS`) ab, danach ist der Job wieder beanspruchbar.
 - `watchdog-cli.ts` und `deploy/backup.sh` sind unverändert. `BACKUP_FILE` ist in `watchdog.ts` jetzt exportiert und wird von beiden Stellen genutzt.
 
 ## Geänderte Dateien

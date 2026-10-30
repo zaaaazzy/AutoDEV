@@ -1,16 +1,8 @@
-import type { Request, RequestHandler } from 'express';
+import type { RequestHandler } from 'express';
 import helmet from 'helmet';
 import { isIP, isIPv6 } from 'node:net';
 
 const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-
-/**
- * Voller Pfad der Anfrage. Im unter /api eingehängten Router fehlt das Präfix in request.path, die Regeln für
- * Rollen und Mandanten sind aber auf den vollen Pfad (/api/...) geschrieben.
- */
-export function fullPath(request: Pick<Request, 'baseUrl' | 'path'>): string {
-  return `${request.baseUrl ?? ''}${request.path}`;
-}
 
 export const securityHeaders: RequestHandler = helmet({
   contentSecurityPolicy: {

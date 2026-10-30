@@ -581,18 +581,3 @@ export async function stopLeftoverWorkbenchRuns(
   }
   return stopped;
 }
-
-/** Beendet den Stapel eines Projekts (Compose-Projekt aus der abgelegten Datei); Volumes bleiben. */
-export async function stopWorkbench(
-  project: string,
-  worktree: string,
-  docker: CommandExecutor = runCommand,
-): Promise<CommandResult> {
-  const name = workbenchName(project);
-  const file = join(workbenchDirectory(), `${name}.json`);
-  if (!existsSync(file)) return { exitCode: 0, durationMs: 0, output: 'Kein Arbeitscontainer.\n' };
-  return docker(['docker', 'compose', '-f', file, '-p', name, 'down'], worktree, {
-    timeoutMs: COMPOSE_TIMEOUT_MS,
-    env: dockerClientEnvironment(),
-  }).catch(failed);
-}
