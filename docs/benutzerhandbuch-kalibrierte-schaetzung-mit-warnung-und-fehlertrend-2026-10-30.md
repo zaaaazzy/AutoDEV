@@ -14,6 +14,8 @@ In der Umgebung, in der dieses Kapitel entstanden ist, lässt sich kein Browser 
 
 Zum Aufnehmen braucht es einen Host mit laufender App und Datenbank.
 
+Geprüft in diesem Lauf: In der Umgebung fehlen ein Chromium-Browser, Docker und die Abhängigkeiten des Frontends (`frontend/node_modules`). Der Browser-Cache unter `~/.cache/ms-playwright` liegt außerhalb des Arbeitsverzeichnisses und ist für den Agenten nicht lesbar. Deshalb wurde kein Printscreen erzeugt und keiner nachgebildet.
+
 ## 1. Kalibrierte Schätzung des Auftragsautors
 
 ### Was passiert
