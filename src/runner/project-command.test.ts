@@ -43,7 +43,7 @@ async function envCheckProject(script: string, scripts: Record<string, string> =
   const dir = await mkdtemp(join(tmpdir(), 'project-command-'));
   await writeFile(
     join(dir, 'package.json'),
-    JSON.stringify({ name: 'env-check', scripts: { ...scripts, test: script } }),
+    JSON.stringify({ name: 'env-check-backend', scripts: { ...scripts, test: script } }),
   );
   await writeFile(join(dir, 'env.test.cjs'), ENV_CHECK_TEST);
   return dir;
@@ -123,6 +123,7 @@ test('Coverage-Messung läuft unter dem gefilterten Environment', async () => {
   await withWorkerSecrets(async () => {
     const areas = await measureCoverage(dir, [['npm', 'test']], runCommand);
     assert.equal(areas.length, 1, 'Abdeckung nicht gemessen');
+    assert.equal(areas[0]?.area, 'backend', 'Bereichsschlüssel aus dem Paketnamen');
     assert.equal(areas[0]?.passed, 1);
     assert.equal(areas[0]?.failed, 0);
   });

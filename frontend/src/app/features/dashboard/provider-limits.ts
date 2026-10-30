@@ -14,13 +14,14 @@ export function activeLimits(providers: readonly ProviderLimit[], now = new Date
   );
 }
 
-/** „Limit erreicht – Agents pausieren bis 29.10., 20:53 Uhr.“ */
+/** „Limit erreicht – Agents pausieren bis 29.10., 20:53 Uhr.“ (beim Limit der Organisation mit Hinweis auf den Admin) */
 export function limitText(entry: ProviderLimit): string {
   const reset = entry.resetAt ? new Date(entry.resetAt) : null;
   const until = reset
     ? reset.toLocaleString('de-CH', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
     : null;
-  return until
+  const text = until
     ? `Limit erreicht – Agents mit ${entry.label} pausieren bis ${until} Uhr.`
     : `Limit erreicht – Agents mit ${entry.label} pausieren.`;
+  return entry.scope === 'org' ? `${text} Erhöhen kann es nur ein Admin der Organisation.` : text;
 }

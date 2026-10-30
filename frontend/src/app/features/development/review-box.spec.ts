@@ -101,7 +101,10 @@ test('Start lädt nichts nach, wenn inzwischen das Projekt gewechselt wurde', as
 });
 
 test('Abgelehnte Rückfrage oder Serverfehler: Stand trotzdem nachladen (Box zeigt den Fehler-Container)', async () => {
-  const { calls, deps: launch } = deps(() => true, async () => false);
+  const { calls, deps: launch } = deps(
+    () => true,
+    async () => false,
+  );
   await launchOrderReview(launch, order);
   assert.deepEqual(calls, ['show:o1', 'isActive:devlog', 'refresh']);
 });

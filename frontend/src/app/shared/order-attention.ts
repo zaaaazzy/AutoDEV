@@ -1,4 +1,4 @@
-import type { AcceptanceCheck, DevelopmentItem } from '../core/models.js';
+import type { AcceptanceCheck, DevelopmentItem, TestEvidence } from '../core/models.js';
 import { isFinished, statusLabel } from './labels.js';
 import { type AttentionCard, attentionCard } from './attention-card.js';
 import { failureParts, orderGuide, type FailureParts, type OrderGuide } from './order-problem.js';
@@ -16,6 +16,8 @@ export interface AttentionEntry {
   badges: AttentionReason[];
   /** Punkte, die nur ein Mensch prüfen kann. */
   checks: AcceptanceCheck[];
+  /** Offene Testnachweise (Datei, Befehl, Grund) – Start als Testlauf oder Verweis auf die Rechte. */
+  evidence: TestEvidence[];
   guide: OrderGuide | null;
   failure: FailureParts | null;
   /** Ein Grund und ein nächster Schritt für die Karte unter „Aktionen“. */
@@ -26,10 +28,20 @@ export interface AttentionEntry {
  * Aufträge, die eine Entscheidung brauchen: wartet auf Freigabe, abgelehnt, blockiert bzw. mit offener Aktion,
  * aus dem Sprint genommen oder mit Punkten, die nur ein Mensch prüfen kann.
  */
-export function orderAttention(development: DevelopmentItem[], acceptance: AcceptanceCheck[]): AttentionEntry[] {
+export function orderAttention(
+  development: DevelopmentItem[],
+  acceptance: AcceptanceCheck[],
+  evidence: TestEvidence[] = [],
+): AttentionEntry[] {
   const manual = new Map<string, AcceptanceCheck[]>();
   for (const check of acceptance) {
     if (check.status === 'manual') manual.set(check.developmentId, [...(manual.get(check.developmentId) ?? []), check]);
+  }
+  // Abgehakte Nachweise (grüner Lauf) verschwinden; rote und nicht freigegebene bleiben sichtbar.
+  const byOrder = new Map<string, TestEvidence[]>();
+  for (const proof of evidence) {
+    if (proof.status !== 'passed')
+      byOrder.set(proof.developmentId, [...(byOrder.get(proof.developmentId) ?? []), proof]);
   }
   return development
     .map((item) => {
@@ -50,6 +62,14 @@ export function orderAttention(development: DevelopmentItem[], acceptance: Accep
         const open = checks.length;
         reasons.push({ label: `${open} Punkt${open === 1 ? '' : 'e'} von dir zu prüfen`, tone: 'warn' });
       }
+      // Offene Testnachweise: eigener Grund, auch ohne action_todo und bei erledigten Aufträgen.
+      const proofs = byOrder.get(item.id) ?? [];
+      if (proofs.length) {
+        if (!reasons.some((reason) => reason.label === 'Aktion notwendig'))
+          reasons.push({ label: 'Aktion notwendig', tone: 'warn' });
+        const count = proofs.length;
+        reasons.push({ label: `${count} Testnachweis${count === 1 ? '' : 'e'} offen`, tone: 'warn' });
+      }
       // Das Etikett neben dem Titel nennt den Status schon; dieselbe Angabe nicht noch einmal darunter zeigen.
       const badges = reasons.filter((reason) => reason.label !== statusLabel(item.status));
       return {
@@ -57,9 +77,10 @@ export function orderAttention(development: DevelopmentItem[], acceptance: Accep
         reasons,
         badges,
         checks: item.actionTodo ? [] : checks,
+        evidence: proofs,
         guide: orderGuide(item),
         failure: item.failure ? failureParts(item.failure) : null,
-        card: attentionCard(item, item.actionTodo ? 0 : checks.length),
+        card: attentionCard(item, item.actionTodo ? 0 : checks.length, proofs.length),
       };
     })
     .filter((entry) => entry.reasons.length);

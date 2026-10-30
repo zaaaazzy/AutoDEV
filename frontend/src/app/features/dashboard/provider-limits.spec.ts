@@ -34,3 +34,11 @@ test('Meldung nennt Anbieter und Reset-Zeit', () => {
   assert.match(limitText(limit()), /^Limit erreicht – Agents mit Claude pausieren bis .*\d{2}:\d{2} Uhr\.$/);
   assert.equal(limitText(limit({ resetAt: null })), 'Limit erreicht – Agents mit Claude pausieren.');
 });
+
+test('Limit der Organisation: Meldung nennt den Admin', () => {
+  assert.equal(
+    limitText(limit({ resetAt: null, scope: 'org' })),
+    'Limit erreicht – Agents mit Claude pausieren. Erhöhen kann es nur ein Admin der Organisation.',
+  );
+  assert.doesNotMatch(limitText(limit({ scope: 'account' })), /Admin/);
+});

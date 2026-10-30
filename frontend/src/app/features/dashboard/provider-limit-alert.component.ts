@@ -1,6 +1,7 @@
 import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import type { ProviderLimit } from '../../core/models.js';
+import { visibleInterval } from '../../core/visible-interval.js';
 import { activeLimits, limitText } from './provider-limits.js';
 
 const POLL_MS = 60_000;
@@ -60,8 +61,7 @@ export class ProviderLimitAlertComponent {
 
   constructor() {
     void this.load();
-    const timer = setInterval(() => void this.load(), POLL_MS);
-    inject(DestroyRef).onDestroy(() => clearInterval(timer));
+    inject(DestroyRef).onDestroy(visibleInterval(() => void this.load(), POLL_MS));
   }
 
   protected text(limit: ProviderLimit): string {

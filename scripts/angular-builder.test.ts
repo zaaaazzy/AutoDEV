@@ -6,11 +6,15 @@ import { join } from 'node:path';
 const root = join(import.meta.dirname, '..');
 const readJson = (name: string) => JSON.parse(readFileSync(join(root, name), 'utf8'));
 
+interface AngularWorkspace {
+  projects: Record<string, { architect?: Record<string, { builder: string }> }>;
+}
+
 test('angular.json: alle Builder stammen aus @angular/build', () => {
-  const angular = readJson('angular.json');
+  const angular = readJson('angular.json') as AngularWorkspace;
   const builders: string[] = [];
-  for (const project of Object.values<any>(angular.projects)) {
-    for (const target of Object.values<any>(project.architect ?? {})) builders.push(target.builder);
+  for (const project of Object.values(angular.projects)) {
+    for (const target of Object.values(project.architect ?? {})) builders.push(target.builder);
   }
   assert.ok(builders.length > 0);
   for (const builder of builders) {

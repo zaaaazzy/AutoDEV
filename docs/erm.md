@@ -19,7 +19,7 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 ## Anmeldung, Benutzer und Mandanten
 
 - `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`, `provider_limit:<anbieter>`.
-- `app_settings.provider_limit:<anbieter>` (Anbieter `claude` | `copilot` | `gemini`, JSON `{ "since", "resetAt" }`): Nutzungslimit des Agent-Kontos, erkannt an der CLI-Meldung („You've hit your … limit · resets …“, `src/core/provider-limits.ts`). Ein erfolgreicher Lauf desselben Anbieters oder „Fortsetzen“ löscht den Eintrag; nach `resetAt` gilt er als abgelaufen. Der Link zur Bezahlseite steht fest im Code, nie in der Datenbank.
+- `app_settings.provider_limit:<anbieter>` (Anbieter `claude` | `copilot` | `gemini`, JSON `{ "since", "resetAt", "scope", "paymentUrl" }`): Nutzungslimit des Agent-Kontos, erkannt an der CLI-Meldung („You've hit your … limit · resets …“, `src/core/provider-limits.ts`). `scope` ist `account` oder `org` (Limit der Organisation). `paymentUrl` kommt aus der Meldung, wenn sie https auf dem Host des Anbieters ist, sonst ist es die feste Seite. Beim Lesen wird sie erneut gegen diese Hosts geprüft. Ein erfolgreicher Lauf desselben Anbieters oder „Fortsetzen“ löscht den Eintrag; nach `resetAt` gilt er als abgelaufen.
 - `users` (`id` UUID, `username` – eindeutig ohne Gross-/Kleinschreibung, `display_name`, `password_hash`, `roles` TEXT[], `active`, `totp_secret`, `totp_pending` (beide verschlüsselt), `last_login_at`, `created_at`, `updated_at`): benannte Benutzer zusätzlich zum Systemadministrator.
 - `auth_sessions` (`token_hash` PK, `created_at`, `last_seen`, `expires_at`, `user_agent`, `user_id` → `users` (`ON DELETE CASCADE`, NULL = Systemadministrator), `credential_version` (an das Passwort gebunden, `src/db/migrations.ts`)) – n:1 zu `users`.
 - `push_subscriptions` (`endpoint` PK, `p256dh`, `auth`, `user_agent`, `created_at`, `user_id` → `users` (`ON DELETE CASCADE`), `system_admin`) – n:1 zu `users`; Push geht nur an Geräte mit Zugriff auf das Projekt.
@@ -50,6 +50,11 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `production_rollbacks` (`project_slug`, `bug_id`, `from_tag`, `to_tag`, `status` requested|running|succeeded|failed, `result`, `requested_by`, `created_at`, `started_at`, `finished_at`): Rollback-Protokoll; höchstens ein offener Rollback je Projekt (eindeutiger Teilindex). `projects.deploy_started_at` markiert einen laufenden Deploy.
 - `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des letzten erfolgreichen Log-Scans (`logs_scanned_at`, untere Grenze des nächsten Scan-Fensters), letzter Scan-Fehler (`log_error`, höchstens 300 Zeichen, beim nächsten Erfolg leer), zuletzt vermerkte Lücke (`log_gap`) und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
 - Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.
+
+## Erweiterung: Offene Testnachweise (Migration 22)
+
+- `test_evidence` (`id` UUID, `development_id` → `development_items`, `position`, `datei`, `befehl`, `grund` `nicht_freigegeben`/`gegenprobe_fehlt`, `status` `open`/`passed`/`failed`/`nicht_freigegeben`, `run_id` → `test_runs`, `checked_at`). Eindeutig je `(development_id, befehl)`.
+- `test_requests.evidence_id` → `test_evidence`; `test_requests.scope` zusätzlich `befehl` (alle bisherigen Werte bleiben erlaubt).
 
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
 

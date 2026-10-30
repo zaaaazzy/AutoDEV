@@ -2,7 +2,18 @@ import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import { GithubLinkComponent } from '../../shared/github-link.component.js';
 import { NgClass, NgTemplateOutlet } from '@angular/common';
-import { Component, computed, DestroyRef, effect, inject, signal, untracked } from '@angular/core';
+import {
+  Component,
+  computed,
+  DestroyRef,
+  effect,
+  type ElementRef,
+  HostListener,
+  inject,
+  signal,
+  untracked,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -38,13 +49,19 @@ import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { assertImageSizes } from '../../shared/image-upload.js';
 import { FieldErrors, focusField } from '../../shared/field-errors.js';
 import { errorMessage } from '../../core/errors.js';
+import { RejectReasonFormComponent } from './reject-reason-form.component.js';
 import {
   IDEA_EDITABLE_STATUSES,
+  IDEA_REJECTABLE_STATUSES,
   IDEA_SELECTABLE_STATUSES,
   IDEA_STATUSES,
   ideaDisplayStatus,
   ideaPhase,
+  ideaValue,
+  ideaValueText,
   isOpenIdea,
+  openIdeasSort,
+  SCORE_FILTER_OPTIONS,
   VISIONARY_CONFIRM,
   SOURCE_FILTER_OPTIONS,
   sourceLabel,
@@ -55,6 +72,61 @@ const OPEN_RUN = new Set(['requested', 'running']);
 
 const DEFAULT_STATUS_FILTER = ['idea', 'considering', 'review', 'requested'].map(statusLabel);
 const PRIORITY_RANK = ['low', 'medium', 'high'];
+const POPOVER_WIDTH = 320;
+const POPOVER_GAP = 6;
+/** Platz, den das Popover unter dem Knopf braucht; sonst öffnet es nach oben. */
+const POPOVER_HEIGHT = 230;
+
+interface IdeaPopover {
+  kind: 'reject-many' | 'priority' | 'reject-one';
+  /** Nur bei „Schnell ablehnen“: die Idee der Zeile. */
+  idea?: Idea;
+}
+
+interface PopoverPosition {
+  left: number;
+  top: number | null;
+  bottom: number | null;
+}
+
+interface BulkIdea {
+  id: string;
+  title: string;
+}
+
+/** Antwort von POST /api/ideation/bulk/reject bzw. /priority. */
+interface BulkResult {
+  rejected?: BulkIdea[];
+  changed?: BulkIdea[];
+  skipped: { id: string; title: string | null; status: string | null; reason: string }[];
+}
+
+function popoverPosition(trigger: HTMLElement): PopoverPosition {
+  const rect = trigger.getBoundingClientRect();
+  const width = Math.min(POPOVER_WIDTH, window.innerWidth - 16);
+  const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
+  return rect.bottom + POPOVER_GAP + POPOVER_HEIGHT <= window.innerHeight
+    ? { left, top: rect.bottom + POPOVER_GAP, bottom: null }
+    : { left, top: null, bottom: window.innerHeight - rect.top + POPOVER_GAP };
+}
+
+/** Ergebnis einer Massenaktion als Meldung: geänderte Ideen, dann übersprungene mit Grund. */
+function bulkMessage(action: 'reject' | 'priority', total: number, result: BulkResult): string {
+  const done = (action === 'reject' ? result.rejected : result.changed)?.length ?? 0;
+  const verb = action === 'reject' ? 'abgelehnt' : 'neu priorisiert';
+  let summary = `${done} von ${total} Ideen ${verb}.`;
+  if (total === 1) summary = done ? `Idee ${verb}.` : `Idee nicht ${verb}.`;
+  const parts = [summary];
+  const impossible = result.skipped.filter((idea) => idea.reason === 'nicht möglich');
+  if (impossible.length) {
+    parts.push(
+      `Nicht möglich: ${impossible.map((idea) => `${idea.title} (${statusLabel(idea.status ?? '')})`).join(', ')}.`,
+    );
+  }
+  const missing = result.skipped.length - impossible.length;
+  if (missing) parts.push(`Nicht gefunden: ${missing} ${missing === 1 ? 'Idee' : 'Ideen'}.`);
+  return parts.join(' ');
+}
 
 @Component({
   selector: 'app-ideation',
@@ -72,6 +144,7 @@ const PRIORITY_RANK = ['low', 'medium', 'high'];
     GalleryComponent,
     GitTreeComponent,
     IdeaDetailComponent,
+    RejectReasonFormComponent,
     AgentWorkflowComponent,
     OrderBriefComponent,
     ChangedFilesComponent,
@@ -118,6 +191,22 @@ export class IdeationComponent {
       sortValue: (idea) => PRIORITY_RANK.indexOf(idea.priority),
     },
     {
+      id: 'benefit',
+      header: 'Nutzen',
+      value: (idea) => idea.benefit,
+      options: SCORE_FILTER_OPTIONS,
+      emptyLast: true,
+    },
+    { id: 'cost', header: 'Kosten', value: (idea) => idea.cost, options: SCORE_FILTER_OPTIONS, emptyLast: true },
+    {
+      id: 'value',
+      header: 'Wert',
+      value: (idea) => ideaValueText(idea),
+      sortValue: (idea) => ideaValue(idea),
+      filter: false,
+      emptyLast: true,
+    },
+    {
       id: 'effortHours',
       header: 'Aufwand (Agent-Std.)',
       value: (idea) => formatHours(idea.calibratedHours ?? idea.effortHours),
@@ -145,6 +234,7 @@ export class IdeationComponent {
   protected readonly categories = CATEGORIES;
   /** Badge-Text wie Spalte und Filter „Herkunft“. */
   protected readonly sourceLabel = sourceLabel;
+  protected readonly ideaValueText = ideaValueText;
 
   protected readonly ideaErrors = new FieldErrors();
   protected ideaForm: { title: string; description: string; priority: Priority; category: string } = {
@@ -161,6 +251,23 @@ export class IdeationComponent {
   protected readonly showInProgressIdeas = signal(true);
   /** Mehrfachauswahl offener Ideen: für alle gewählten auf einmal einen Auftrag ausformulieren lassen. */
   protected readonly picked = signal<ReadonlySet<string>>(new Set());
+  /** Offenes Popover (Massenablehnung, Massenpriorität oder Schnell ablehnen einer Zeile) samt Position. */
+  protected readonly popover = signal<(IdeaPopover & PopoverPosition) | null>(null);
+  private anchor: HTMLElement | null = null;
+  private readonly popoverElement = viewChild<ElementRef<HTMLElement>>('popoverElement');
+  protected readonly priorities = PRIORITY_RANK as Priority[];
+  /** Das offene Popover als Liste mit Schlüssel, damit @for es je Art und Zeile neu erzeugt. */
+  protected readonly openPopover = computed(() => {
+    const open = this.popover();
+    if (!open) return [];
+    const label =
+      open.kind === 'reject-one'
+        ? `Schnell ablehnen: ${open.idea?.title ?? ''}`
+        : open.kind === 'priority'
+          ? 'Priorität setzen'
+          : 'Ablehnen mit Grund';
+    return [{ ...open, label, key: `${open.kind}:${open.idea?.id ?? ''}` }];
+  });
   /** Letzter Visionär-Lauf des Projekts; solange er angefragt ist oder läuft, wird der Fortschritt abgefragt. */
   protected readonly visionaryRun = signal<VisionaryRun | null>(null);
   protected readonly visionaryOpen = computed(() => OPEN_RUN.has(this.visionaryRun()?.status ?? ''));
@@ -179,6 +286,14 @@ export class IdeationComponent {
         if (slug && this.visionaryOpen()) void this.loadVisionaryRun(slug);
       }, VISIONARY_POLL_MS),
     );
+    // Auswahl leer (aufgehoben oder Ideen nicht mehr wählbar): Massenaktionen-Popover schließen.
+    effect(() => {
+      const empty = !this.pickedIdeas().length;
+      untracked(() => {
+        const kind = this.popover()?.kind;
+        if (empty && (kind === 'reject-many' || kind === 'priority')) this.closePopover(false);
+      });
+    });
   }
 
   private visionaryPath(slug = this.store.activeProject()): string {
@@ -231,6 +346,8 @@ export class IdeationComponent {
   );
   /** Offene Ideen: weder angenommen noch abgelehnt – Abgeschlossene stehen nur unten in ihrer Gruppe. */
   protected readonly openIdeas = computed(() => this.data().ideas.filter((idea) => isOpenIdea(idea)));
+  /** Feste Konstanten statt neuer Arrays: Ein Daten-Refresh soll die Tabelle nicht auf Seite 1 zurücksetzen. */
+  protected readonly openIdeasSort = computed(() => openIdeasSort(this.openIdeas()));
 
   protected gitNodes(idea: Idea, order: DevelopmentItem | null, sprint: Sprint | null): GitNode[] {
     return [
@@ -285,6 +402,92 @@ export class IdeationComponent {
       }`,
     );
     this.clearPicks();
+  }
+
+  /** Schnell ablehnen wie auf dem Server erlaubt: nur aus Idee, In Überlegung und Prüfung. */
+  protected rejectable(idea: Idea): boolean {
+    return IDEA_REJECTABLE_STATUSES.includes(idea.status);
+  }
+
+  /**
+   * Öffnet ein Popover am Knopf (oder schließt es, wenn es schon offen ist). Feste Position am Bildschirm, damit
+   * die Tabelle (horizontal scrollbar) es nicht abschneidet; der Fokus geht erst beim Öffnen ins Popover.
+   */
+  protected togglePopover(kind: IdeaPopover['kind'], trigger: HTMLElement, idea?: Idea): void {
+    const open = this.popover();
+    if (open && open.kind === kind && open.idea?.id === idea?.id) {
+      this.closePopover();
+      return;
+    }
+    this.anchor = trigger;
+    this.popover.set({ kind, idea, ...popoverPosition(trigger) });
+    // Nach dem Zeichnen: erstes Eingabefeld bzw. ersten Knopf fokussieren (das Grundfeld fokussiert sich selbst).
+    setTimeout(() => {
+      const element = this.popoverElement()?.nativeElement;
+      if (element && !element.contains(document.activeElement)) element.querySelector<HTMLElement>('button')?.focus();
+    });
+  }
+
+  /** Schließt ohne zu speichern; der Fokus kehrt zum auslösenden Knopf zurück. */
+  protected closePopover(restoreFocus = true): void {
+    const anchor = this.anchor;
+    this.anchor = null;
+    this.popover.set(null);
+    if (restoreFocus && anchor?.isConnected) anchor.focus();
+  }
+
+  protected onPopoverEscape(event: Event): void {
+    event.stopPropagation();
+    this.closePopover();
+  }
+
+  /** Klick außerhalb schließt das Popover (Fokus bleibt, wo geklickt wurde). */
+  @HostListener('document:mousedown', ['$event'])
+  protected onDocumentMousedown(event: MouseEvent): void {
+    if (!this.popover()) return;
+    const target = event.target as Node | null;
+    if (this.popoverElement()?.nativeElement.contains(target) || this.anchor?.contains(target)) return;
+    this.closePopover(false);
+  }
+
+  @HostListener('window:resize')
+  @HostListener('window:scroll')
+  protected onViewportChange(): void {
+    if (!this.popover() || !this.anchor) return;
+    if (!this.anchor.isConnected) this.closePopover(false);
+    else this.popover.update((open) => open && { ...open, ...popoverPosition(this.anchor!) });
+  }
+
+  /** Massenablehnung der markierten Ideen mit einem gemeinsamen Grund. */
+  protected async rejectPicked(reason: string): Promise<void> {
+    if (await this.runBulk('reject', this.pickedIdeas(), { reason })) this.clearPicks();
+  }
+
+  protected async prioritizePicked(priority: Priority): Promise<void> {
+    if (await this.runBulk('priority', this.pickedIdeas(), { priority })) this.clearPicks();
+  }
+
+  /** Schnell ablehnen aus der Zeile: dieselbe Server-Route wie die Massenablehnung, mit einer Idee. */
+  protected async quickReject(idea: Idea, reason: string): Promise<void> {
+    await this.runBulk('reject', [idea], { reason });
+  }
+
+  /** Massenaktion ausführen, Liste neu laden und das Ergebnis melden; true = Server hat geantwortet. */
+  private async runBulk(action: 'reject' | 'priority', ideas: Idea[], body: object): Promise<boolean> {
+    if (!ideas.length) return false;
+    const outcome: { result?: BulkResult } = {};
+    await this.store.perform(
+      async () => {
+        outcome.result = await this.api.post<BulkResult>(`/api/ideation/bulk/${action}`, {
+          ids: ideas.map((idea) => idea.id),
+          ...body,
+        });
+      },
+      () => bulkMessage(action, ideas.length, outcome.result!),
+    );
+    if (!outcome.result) return false;
+    this.closePopover();
+    return true;
   }
 
   /** Bearbeiten wie auf dem Server erlaubt (nicht während der Auftragsautor schreibt, nicht nach der Annahme). */

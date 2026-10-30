@@ -17,8 +17,17 @@ Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit
   - `actions.pay` gibt es nur bei erreichtem Limit.
   - `actions.resume` gibt es nur zusätzlich mit der Rolle „Ausführen“ und Zugriff auf alle Projekte, denn das Konto gilt für alle Projekte.
   - `POST /api/agent-limits/:provider/resume` prüft dasselbe auf dem Server (404 unbekannter Anbieter, 403 ohne Zugriff auf alle Projekte, 409 ohne Limit). Danach vergisst es das Limit und setzt `retry_after` nur bei Aufträgen zurück, deren Vermerk mit „Unterbrochen: Nutzungslimit des Agent-Kontos erreicht“ beginnt.
-- **Bezahlseiten** fest im Code: Claude `https://claude.ai/settings/usage`, GitHub Copilot `https://github.com/settings/copilot`, Gemini `https://console.cloud.google.com/billing`. Links aus der CLI-Meldung werden nie übernommen. Das Frontend zeigt zusätzlich nur `https://`-Links.
+- **Bezahlseiten** je Anbieter und Fall (`paymentUrlFor`): Ein Link aus der Limit-Meldung gilt nur mit https auf einem `paymentHosts`-Eintrag des Anbieters, ohne Port und Anmeldedaten. Query und Fragment fallen weg. Sonst gilt die feste Seite: Claude `https://claude.ai/settings/usage`, beim Limit der Organisation `https://claude.ai/admin-settings/usage`; GitHub Copilot `https://github.com/settings/copilot`; Gemini `https://console.cloud.google.com/billing`. Der gespeicherte Link wird beim Lesen erneut geprüft. Das Frontend zeigt zusätzlich nur `https://`-Links.
 - **Dashboard.** `app-provider-limit-alert` steht unter dem Git-Hinweis. Es fragt alle 60 Sekunden ab und nutzt die vorhandenen Stile von `.git-alert` (kein neues CSS, keine neuen Pakete).
+
+## Nachtrag 30.10.2026 (Sprint 30, im Arbeitscontainer umgesetzt und getestet)
+
+- **Beide Meldungsvarianten.** `USAGE_LIMIT` erkennt jetzt bis zu drei Wörter mit Apostroph vor „limit“, also auch „You've hit your org's monthly spend limit“. Diese Variante fiel vorher durch: Läufe galten als normaler Fehler und erzeugten Bugs wie „Gegenprobe: neue Tests müssen ohne Fix scheitern“, die nur aus der Limit-Meldung bestehen. Jetzt pausieren sie ohne Bug und ohne Fehlversuch (`isAgentFailure`, `usageLimitReset`).
+- **Reset mit Zeitzone.** „resets 10:20pm (UTC)“ und „resets 8:50pm (Europe/Zurich)“ werden in der genannten Zone gerechnet, auch über eine Umstellung der Sommerzeit. Ohne Zone oder mit unbekannter Zone gilt wie bisher die des Workers.
+- **Fall „Organisation“.** `scope: 'org' | 'account'` wird mitgespeichert. Das Dashboard ergänzt bei `org` den Satz „Erhöhen kann es nur ein Admin der Organisation.“
+- **Behobene Testfehler des alten Stands.** Der Hinweis pollt über `visibleInterval` statt `setInterval` (`visible-interval.spec.ts`). `GET /agent-limits` und `POST /agent-limits/:provider/resume` stehen bewusst in `GLOBAL` (`access.test.ts`).
+- **Teststand:** `npm run typecheck` und `npm run test:unit` grün im Arbeitscontainer (1942 Tests, 1932 bestanden, 0 fehlgeschlagen, 10 übersprungen). Die Umgebung ist damit nicht mehr blockiert.
+- **Merge Sprint 30:** Die eigene `npm ci`-Befüllung des Volumes (`modulesInstallArgs`) ist entfallen. Sprint 30 installiert die Abhängigkeiten über `ensureDependencies` (Stempel, flock). Übernommen bleiben `npm_config_cache=/tmp/npm-cache` und das Löschen von `/root/.npm` im Dockerfile.
 
 ## Grenzen
 
