@@ -69,6 +69,11 @@ async function realDirectory(root: string, parts: readonly string[], create: boo
  * Hardlink, Nicht-Datei oder mehr als `maxBytes`.
  */
 export async function readProjectText(cwd: string, relative: string, maxBytes: number): Promise<string | null> {
+  return (await readProjectFile(cwd, relative, maxBytes))?.toString('utf8') ?? null;
+}
+
+/** Wie readProjectText, aber roh (auch Binärdateien). */
+export async function readProjectFile(cwd: string, relative: string, maxBytes: number): Promise<Buffer | null> {
   const parts = segments(relative);
   const root = await projectRoot(cwd);
   if (!parts || !root) return null;
@@ -89,7 +94,7 @@ export async function readProjectText(cwd: string, relative: string, maxBytes: n
     if (!again || again.ino !== info.ino || again.dev !== info.dev) return null;
     if ((await realDirectory(root, parts.slice(0, -1), false)) !== directory) return null;
     const content = await handle.readFile();
-    return content.length > maxBytes ? null : content.toString('utf8');
+    return content.length > maxBytes ? null : content;
   } catch {
     return null;
   } finally {
