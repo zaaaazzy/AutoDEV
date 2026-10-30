@@ -7,6 +7,7 @@ von Dev Log ändert sich nichts. Auftrag 95b15d69, Stand 29.10.2026.
 **Status: noch nicht abgeschlossen.** Die Code-Umstellung ist da. Der Schritt `npm install -D @angular/cdk@^20.3.0` mit
 anschließender Prüfung ist offen. Agents können `npm install` und `npx` in dieser Umgebung nicht ausführen. Die Angaben zu
 npm-Abhängigkeiten und Audit unten stammen aus den Vermerken des Entwicklers und der Tester, nicht aus einem eigenen Lauf.
+Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.ps1` und `.github/dependabot.yml` gegen diesen Text geprüft. Sie stimmen überein. `@angular/cdk` steht weiter auf 20.2.14.
 
 ## 1. Was sich ändert
 
@@ -85,7 +86,6 @@ und `.github/dependabot.yml`.
 | `npm ci` schlägt fehl, obwohl Node 22.12 oder neuer installiert ist | Nicht geprüft. Die Lockfile wurde von Hand angepasst und nicht von npm erzeugt, das ist der bekannte Schwachpunkt. | `npm ci` mit der Fehlermeldung melden. Siehe Abschnitt 7. |
 | `ng serve` startet, die Seite lädt nicht | Nicht geprüft. Die Konsole zeigt den Grund, meist Proxy oder Port. | Die Konsole ansehen und `frontend/proxy.conf.json` prüfen. |
 | `npm audit` zeigt noch Funde | Die Umstellung ist noch nicht vollständig (siehe Abschnitt 7). | Nicht als Fehler dieser Änderung werten, bis die offenen Punkte erledigt sind. |
-| Ein Bug-Wächter-Eintrag meldet „monthly spend limit“ | Die Claude-CLI hat wegen ihres Ausgabenlimits abgebrochen. | Kein Code-Fehler. Den Lauf nach Erhöhung des Limits wiederholen. |
 
 ## 7. Offene Punkte
 
