@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -13,6 +13,7 @@ import type { BudgetOverview } from '../../core/models.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
+import { CHART_HEIGHT, CHART_WIDTH, chartY, COVERAGE_TARGET, coverageSeries } from './coverage-history.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
 
 interface Usage {
@@ -117,6 +118,9 @@ export class StatsComponent {
   protected readonly budget = signal<BudgetOverview | null>(null);
   protected readonly prompts = signal<PromptEntry[]>([]);
   protected readonly error = signal('');
+  protected readonly coverage = computed(() => coverageSeries(this.store.data().coverage?.history ?? []));
+  protected readonly chart = { width: CHART_WIDTH, height: CHART_HEIGHT, target: chartY(COVERAGE_TARGET) };
+  protected readonly coverageTarget = COVERAGE_TARGET;
   protected readonly ratioText = ratioText;
   protected readonly shortRatio = shortRatio;
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;

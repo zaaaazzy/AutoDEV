@@ -1,3 +1,6 @@
+import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
+
+export type { CoverageAreaKey };
 export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
 export type SprintStatus = 'planned' | 'active' | 'review' | 'completed' | 'cancelled';
@@ -621,8 +624,9 @@ export interface AgentActivity {
   sprintEnd: string | null;
 }
 
+/** Je Bereichsschlüssel der neueste vollständige Lauf (ohne vollständigen Lauf: Prozentwerte null). */
 export interface CoverageArea {
-  area: string;
+  area: CoverageAreaKey;
   unit: number;
   component: number;
   integration: number;
@@ -633,9 +637,19 @@ export interface CoverageArea {
   statements: number | null;
   branches: number | null;
   functions: number | null;
+  /** Datum des Laufs, aus dem die Zeile stammt. */
+  createdAt: string;
+  complete: boolean;
 }
 
-/** Letzter Abdeckungsbericht des Testers. */
+/** Zeilenabdeckung eines vollständigen Laufs für den Verlauf je Bereich. */
+export interface CoverageHistoryPoint {
+  area: CoverageAreaKey;
+  lines: number;
+  createdAt: string;
+}
+
+/** Letzter Abdeckungsbericht des Testers mit der Übersicht je Bereich und dem Verlauf. */
 export interface CoverageReport {
   id: string;
   summary: string;
@@ -643,6 +657,7 @@ export interface CoverageReport {
   developmentId: string | null;
   orderTitle: string | null;
   areas: CoverageArea[];
+  history: CoverageHistoryPoint[];
 }
 
 export interface AcceptanceCheck {

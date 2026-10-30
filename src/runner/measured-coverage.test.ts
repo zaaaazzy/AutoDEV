@@ -9,6 +9,7 @@ import {
   splitArgs,
   testRunnerOf,
 } from './measured-coverage.js';
+import { selectCoverage } from './coverage.js';
 
 test('reads the node test runner coverage summary', () => {
   const output = `# tests 64\n# pass 63\n# fail 1\n# file | line % | branch % | funcs % | uncovered lines\n# all files                    |  84.02 |    82.64 |   91.78 |\n`;
@@ -24,19 +25,21 @@ test('reads the node test runner coverage summary', () => {
 
 test('splits script arguments and names areas', () => {
   assert.deepEqual(splitArgs(` "src/**/*.test.ts" --x 'a b'`), ['src/**/*.test.ts', '--x', 'a b']);
-  assert.equal(areaName('mainty-backend'), 'Backend');
-  assert.equal(areaName('@mainty/contracts'), 'Contracts');
+  assert.equal(areaName('mainty-backend'), 'backend');
+  assert.equal(areaName('@mainty/contracts'), 'contracts');
+  assert.equal(areaName('@shop/api'), 'backend');
+  assert.equal(areaName('shop-ui'), 'frontend');
+  // Ohne erkennbaren Bereich bleibt der Name stehen; gespeichert wird er nicht (saveCoverage verwirft mit Grund).
   assert.equal(areaName('tools'), 'tools');
   assert.equal(areaName('builder'), 'builder', '„ui“ nur als ganzer Namensteil');
   assert.equal(areaName('rapid'), 'rapid', '„api“ nur als ganzer Namensteil');
-  assert.equal(areaName('@shop/api'), 'Backend');
-  assert.equal(areaName('shop-ui'), 'Frontend');
+  assert.equal(areaName(''), 'Projekt');
 });
 
 test('measured percentages fill the tester report', () => {
   const measured = [
     {
-      area: 'Backend',
+      area: 'backend',
       unit: 64,
       component: 0,
       integration: 0,
@@ -69,11 +72,51 @@ test('measured percentages fill the tester report', () => {
   };
   const merged = mergeCoverage(reported, measured)!;
   assert.equal(merged.areas.length, 1);
+  assert.equal(merged.areas[0]!.area, 'backend');
   assert.equal(merged.areas[0]!.lines, 84);
   assert.equal(merged.areas[0]!.passed, 69);
   assert.equal(merged.areas[0]!.unit, 64);
   assert.match(merged.summary, /Gemessen von AIdeation/);
   assert.equal(mergeCoverage(null, []), null);
+});
+
+test('mergeCoverage vergleicht Schlüssel; eine Messung ohne Bereich fällt beim Speichern mit Grund weg', () => {
+  const entry = {
+    unit: 5,
+    component: 0,
+    integration: 0,
+    e2e: 0,
+    passed: 5,
+    failed: 0,
+    lines: 80,
+    statements: null,
+    branches: 70,
+    functions: 90,
+  };
+  const reported = {
+    summary: 'Tester',
+    areas: [{ ...entry, area: 'frontend', lines: null, branches: null, functions: null }],
+    discarded: ['„Projekt“ verworfen: keinem Bereich zuordenbar'],
+  };
+  const merged = mergeCoverage(reported, [
+    { ...entry, area: areaName('shop-web') },
+    { ...entry, area: areaName('dev-log') },
+  ])!;
+  assert.deepEqual(
+    merged.areas.map((area) => [area.area, area.lines]),
+    [
+      ['frontend', 80],
+      ['dev-log', 80],
+    ],
+  );
+  assert.deepEqual(merged.discarded, reported.discarded);
+  const { areas, discarded } = selectCoverage(merged);
+  assert.deepEqual(
+    areas.map((area) => area.area),
+    ['frontend'],
+  );
+  assert.equal(discarded.length, 2);
+  assert.match(discarded[1]!, /„dev-log“ verworfen: keinem Bereich zuordenbar/);
 });
 
 test('findet den Test-Runner auch hinter „&&“ und über „npm run“', () => {
