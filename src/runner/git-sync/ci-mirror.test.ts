@@ -91,8 +91,14 @@ test('CI-Spiegel: liest die Workflow-Datei bei jedem Lauf neu', async () => {
   await writeFile(join(cwd, '.github', 'workflows', 'ci.yml'), 'steps:\n  - run: npm run typecheck\n');
   const second = recorder();
   await runCiMirror(second.execute, cwd, []);
-  assert.deepEqual(first.calls.map((call) => call.command[2]), ['lint']);
-  assert.deepEqual(second.calls.map((call) => call.command[2]), ['typecheck']);
+  assert.deepEqual(
+    first.calls.map((call) => call.command[2]),
+    ['lint'],
+  );
+  assert.deepEqual(
+    second.calls.map((call) => call.command[2]),
+    ['typecheck'],
+  );
 });
 
 test('CI-Spiegel: ohne ci.yml übersprungen, nichts ausgeführt', async () => {
@@ -128,7 +134,10 @@ test('CI-Spiegel: hält beim ersten roten Schritt an, ohne Zugangsdaten, Auszug 
   assert.equal(failure.step, 'npm run format:check');
   assert.equal(failure.exitCode, 1);
   // Nach dem roten Schritt läuft nichts mehr.
-  assert.deepEqual(calls.map((call) => call.command[2]), ['lint', 'format:check']);
+  assert.deepEqual(
+    calls.map((call) => call.command[2]),
+    ['lint', 'format:check'],
+  );
   for (const call of calls) {
     assert.ok(call.env, 'Environment gesetzt (nicht process.env)');
     assert.equal(call.env.DEV_LOG_SECRET_KEY, undefined);
@@ -147,7 +156,8 @@ test('CI-Spiegel: ohne erreichbare Datenbank ist test:unit „nicht prüfbar“,
   const { execute } = recorder({
     'test:unit': {
       exitCode: 1,
-      output: 'not ok 3 - migrations\n  Error: keine PostgreSQL-Datenbank unter localhost:5432 (DEV_LOG_TEST_REQUIRE_DATABASE)\n',
+      output:
+        'not ok 3 - migrations\n  Error: keine PostgreSQL-Datenbank unter localhost:5432 (DEV_LOG_TEST_REQUIRE_DATABASE)\n',
     },
   });
   const log: string[] = [];
