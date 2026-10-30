@@ -231,7 +231,9 @@ export function stripEvidence(output: string): string {
 
 /**
  * Speichert offene Testnachweise eines Auftrags. Derselbe Befehl wird je Auftrag nur einmal gespeichert – auch über
- * mehrere Läufe; ein späterer Lauf ändert einen vorhandenen Nachweis nicht. Gibt die Zahl neuer Nachweise zurück.
+ * mehrere Läufe. Ein späterer Lauf ändert einen vorhandenen Nachweis nur in einem Fall: Ist der Befehl inzwischen
+ * freigegeben (vorher „nicht_freigegeben“, jetzt „gegenprobe_fehlt“), wird der offene Nachweis wieder startbar –
+ * sonst bliebe er nach der Freigabe für immer ohne Startknopf. Gibt die Zahl neuer Nachweise zurück.
  */
 export async function saveEvidence(
   pool: Pick<Pool, 'query'>,
@@ -241,13 +243,17 @@ export async function saveEvidence(
 ): Promise<number> {
   let created = 0;
   for (const entry of evidence) {
-    const result = await pool.query(
+    const result = await pool.query<{ inserted: boolean }>(
       `INSERT INTO test_evidence (development_id, position, datei, befehl, grund, agent_name)
        VALUES ($1, (SELECT COALESCE(MAX(position), 0) + 1 FROM test_evidence WHERE development_id = $1), $2, $3, $4, $5)
-       ON CONFLICT (development_id, befehl) DO NOTHING`,
+       ON CONFLICT (development_id, befehl) DO UPDATE
+         SET grund = EXCLUDED.grund, status = 'open', datei = EXCLUDED.datei, agent_name = EXCLUDED.agent_name
+         WHERE test_evidence.status <> 'passed' AND test_evidence.grund = 'nicht_freigegeben'
+           AND EXCLUDED.grund = 'gegenprobe_fehlt'
+       RETURNING (xmax = 0) AS inserted`,
       [developmentId, entry.datei, entry.befehl, entry.grund, agentName],
     );
-    created += result.rowCount ?? 0;
+    created += result.rows.filter((row) => row.inserted).length;
   }
   return created;
 }

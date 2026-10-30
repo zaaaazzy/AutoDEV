@@ -49,7 +49,9 @@ Seite bearbeiten nur Administratoren.
 - Lege den Befehl in einer eigenen Rechte-Kategorie an. Erlaubt sind dabei nur bestimmte Programme und Muster, z. B.
   `npm test …`, `npm run <skript> …` oder `git status|diff|log`. Andere (etwa `npx` ohne Ausnahme) bleiben gesperrt.
 - Weise die Kategorie dann dem Agent zu. Die Zuweisung erfolgt beim Agent, nicht in der Kategorie.
-- Danach meldet der Tester im nächsten Lauf den Nachweis mit einem erlaubten Befehl neu.
+- Danach meldet der Tester den Nachweis im nächsten Lauf neu. Ist es derselbe Befehl, jetzt mit Grund „Gegenprobe
+  fehlt“, wird der vorhandene Eintrag wieder startbar; es entsteht kein zweiter. Ist der Befehl anders, kommt ein
+  neuer Eintrag hinzu.
 - Agents erteilen sich selbst keine Freigaben.
 
 ## 4. Was sich nicht ändert

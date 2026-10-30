@@ -165,6 +165,20 @@ test('test_evidence: Migration wiederholbar, ein Nachweis je Befehl und Auftrag,
       'nur bekannte Status',
     );
 
+    // Nach der Freigabe meldet der Tester denselben Befehl mit „gegenprobe_fehlt“: dieselbe Zeile wird startbar.
+    await db.query(`UPDATE test_evidence SET status = 'nicht_freigegeben'`);
+    const released = parseEvidence(MARKER.replace('nicht_freigegeben', 'gegenprobe_fehlt'));
+    assert.equal(await saveEvidence(db, order, released, 'Tester'), 0, 'keine zweite Zeile');
+    const grund = async () => (await db.query('SELECT grund, status FROM test_evidence')).rows;
+    assert.deepEqual(await grund(), [{ grund: 'gegenprobe_fehlt', status: 'open' }]);
+    // Zurückstufen gibt es nicht, ein abgehakter Nachweis bleibt abgehakt.
+    assert.equal(await saveEvidence(db, order, reported, 'Tester'), 0);
+    assert.deepEqual(await grund(), [{ grund: 'gegenprobe_fehlt', status: 'open' }]);
+    await db.query(`UPDATE test_evidence SET status = 'passed', grund = 'nicht_freigegeben'`);
+    assert.equal(await saveEvidence(db, order, released, 'Tester'), 0);
+    assert.deepEqual(await grund(), [{ grund: 'nicht_freigegeben', status: 'passed' }]);
+    await db.query(`UPDATE test_evidence SET status = 'open'`);
+
     // Offener Nachweis setzt keine Aktion und hält den Sprint nicht auf.
     const todo = (await db.query('SELECT action_todo FROM development_items WHERE id = $1', [order])).rows[0];
     assert.equal(todo.action_todo, null);
