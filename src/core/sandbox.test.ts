@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -18,6 +18,7 @@ import {
   lockfileHash,
   modulesInstallArgs,
   modulesVolume,
+  prepareModulesMountpoint,
   readOnlyWorkspace,
   removeLeftoverContainers,
   resetAgentNetwork,
@@ -530,6 +531,45 @@ test('Sandbox: scheitert npm ci im Volume, startet der Lauf nicht', async () => 
     assert.match(sandboxBadge('ci-fail') ?? '', /npm ci/);
   } finally {
     await rm(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: node_modules-Symlink im Agent-Worktree wird vor dem Lauf zum Mountpunkt des Volumes', async () => {
+  const worktree = await npmWorktree();
+  const main = await mkdtemp(join(tmpdir(), 'sandbox-main-'));
+  try {
+    await mkdir(join(main, 'node_modules', 'typescript'), { recursive: true });
+    await writeFile(join(worktree, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'agent')}\n`);
+    await symlink(join(main, 'node_modules'), join(worktree, 'node_modules'));
+    const { docker } = fakeDocker((call) => (call[1] === 'version' ? ok('27') : ok()));
+    resetAgentNetwork();
+    const result = await runInSandbox(['npm', 'run', 'test:unit'], worktree, {
+      runId: 'r-link',
+      project: 'link-demo',
+      name: 'aideation-r-link',
+      docker,
+    });
+    assert.equal(result.exitCode, 0);
+    const mountpoint = await lstat(join(worktree, 'node_modules'));
+    assert.ok(mountpoint.isDirectory() && !mountpoint.isSymbolicLink(), 'Volume hängt an einem echten Ordner');
+    assert.deepEqual(await readdir(join(worktree, 'node_modules')), []);
+    assert.deepEqual(await readdir(join(main, 'node_modules')), ['typescript'], 'Ziel des Links bleibt unberührt');
+  } finally {
+    await rm(worktree, { recursive: true, force: true });
+    await rm(main, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: im Projektordner der Menschen (.git als Ordner) bleibt ein node_modules-Symlink', async () => {
+  const folder = await mkdtemp(join(tmpdir(), 'sandbox-human-'));
+  try {
+    await mkdir(join(folder, '.git'));
+    await mkdir(join(folder, 'vendor'));
+    await symlink(join(folder, 'vendor'), join(folder, 'node_modules'));
+    prepareModulesMountpoint(folder);
+    assert.ok((await lstat(join(folder, 'node_modules'))).isSymbolicLink());
+  } finally {
+    await rm(folder, { recursive: true, force: true });
   }
 });
 

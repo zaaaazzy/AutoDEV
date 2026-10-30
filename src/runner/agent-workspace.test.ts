@@ -71,6 +71,15 @@ test('npm-Workspaces: Workspace-Pakete zeigen auf den Code im Arbeitsordner, nic
   assert.equal(realpathSync(join(workspace, 'node_modules', 'lib')), realpathSync(join(folder, 'node_modules', 'lib')));
 });
 
+test('Leerer node_modules-Ordner (Mountpunkt der Docker-Sandbox) wird im Host-Modus wieder verlinkt', async () => {
+  const folder = repository();
+  const workspace = agentWorkspacePath(folder);
+  git(folder, 'worktree', 'add', '--detach', workspace, 'main');
+  mkdirSync(join(workspace, 'node_modules'));
+  await resolveAgentWorkspace(folder, '/somewhere/else', undefined, true);
+  assert.ok(lstatSync(join(workspace, 'node_modules')).isSymbolicLink());
+});
+
 test('AIdeation-Ordner: Aufträge laufen im eigenen Worktree, der Arbeitsordner bleibt unberührt', async () => {
   const folder = repository();
   // Offene Arbeit eines Menschen im AIdeation-Ordner.

@@ -136,6 +136,7 @@ Die Meldungen erscheinen im Auftrag und im Worker-Badge. Sie sind so formuliert,
 - **`docker ps --filter label=aideation.run` zeigt nichts, obwohl ein Lauf läuft.** Prüfe, ob der Schalter tatsächlich für dieses Projekt gilt. Läuft der Lauf auf dem Rechner, erscheint kein Container.
 - **Der Abbruch wirkt nicht sofort.** Der Abbruch soll den Container innerhalb von 10 Sekunden beenden. Bleibt er länger aktiv, prüfe `docker ps --filter label=aideation.run` und entferne den Container von Hand mit `docker rm -f <Name>`. Beim nächsten Start des Workers wird er ohnehin entfernt.
 - **Der erste Lauf dauert lange.** Das ist beim leeren `node_modules`-Volume normal (`npm ci`).
+- **`tsc: not found` / `tsx: not found` (Exit-Code 127) im Container.** Meist hängt das Volume nicht dort, wo `/workspace/node_modules` hinzeigt. Läuft der Worker mit altem Code, ist `node_modules` im Worktree noch ein Symlink auf den Hauptordner. Dann den Worker neu starten (ab 30.10.2026 ersetzt er den Link vor jedem Lauf). Gibt es den Stempel `.aideation-lock` im Volume nicht, wurde es nie gefüllt.
 - **Das Verhalten ist beim Git-Befehl im Agent anders.** Git im Container funktioniert nicht (Abschnitt 6). Das ist in Phase 1 so vorgesehen.
 
 ## 9. Noch offen (für Entwickler)
@@ -143,7 +144,7 @@ Die Meldungen erscheinen im Auftrag und im Worker-Badge. Sie sind so formuliert,
 - Das Image `aideation-agent` ist noch nicht gebaut. Vor dem produktiven Einsatz bitte ausführen:
   - `docker build -t aideation-agent -f deploy/agent/Dockerfile .`
   - `DEV_LOG_TEST_REQUIRE_DOCKER=1 npx --no-install tsx --test src/core/sandbox-docker.test.ts`
-- Besonders das Einbinden des `node_modules`-Volumes über den Symlink im Worktree ist noch ungeprüft.
+- Das Einbinden über den Symlink im Worktree funktionierte nicht. Im Container zeigte der Link auf einen leeren Ordner (`tsc: not found`, Exit-Code 127). Seit dem 30.10.2026 ersetzt der Worker vor dem Lauf den `node_modules`-Symlink des Agent-Worktrees durch einen leeren Ordner. Daran hängt das Volume (`prepareModulesMountpoint` in `src/core/sandbox.ts`). Das gilt nur für Git-Worktrees. Projektordner der Menschen bleiben unberührt. Im Host-Modus legt der Worker den Link beim Start wieder an. Mit echtem Docker ist das noch zu prüfen: Image neu bauen, Worker neu starten, `npm run test:unit` im Container.
 - Die Anmeldung steht als Wert in der Umgebung des Docker-Clients. Ob das für den Betrieb genügt, ist eine Entscheidung für den Betreiber.
 - Phase 2 bis 4 des Konzepts erweitern die Sandbox auf weitere Rollen. Dann sind Wächter, Mounts und Git-Zugriff je Rolle neu zu bewerten.
 

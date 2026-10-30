@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
@@ -376,6 +376,24 @@ async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
+/**
+ * Mountpunkt des node_modules-Volumes im Worktree als echten Ordner bereitstellen. linkDependencies legt im
+ * Agent-Worktree node_modules als Symlink auf den Hauptordner des Hosts an; ein Volume an diesem Pfad landet nicht
+ * hinter dem Link, im Container zeigt er auf einen leeren Ordner (tsc/tsx: not found, Exit-Code 127). Nur der Link
+ * wird entfernt, nie dessen Ziel; im Host-Modus legt linkDependencies ihn beim Start des Workers wieder an. Nur in
+ * einem Git-Worktree (.git ist eine Datei): Projektordner der Menschen bleiben unberührt.
+ */
+export function prepareModulesMountpoint(worktree: string): void {
+  const target = join(worktree, 'node_modules');
+  try {
+    if (!lstatSync(join(worktree, '.git')).isFile() || !lstatSync(target).isSymbolicLink()) return;
+  } catch {
+    return;
+  }
+  unlinkSync(target);
+  mkdirSync(target, { recursive: true });
+}
+
 /** Arbeitsordner des Installations-Containers: nur package.json, Lockfile und .npmrc des Worktrees, dazu das Volume. */
 const MODULES_INSTALL_DIR = '/deps';
 /** Stempel im Volume: Hash des Lockfiles, mit dem es zuletzt gefüllt wurde. */
@@ -619,6 +637,13 @@ export async function runInSandbox(
     return blocked(missing, redactWith);
   }
   if (options.workspace !== false) {
+    try {
+      prepareModulesMountpoint(worktree);
+    } catch (error) {
+      const message = `Sandbox: node_modules im Worktree ist ein Symlink und liess sich nicht durch einen Ordner ersetzen – der Agent wurde nicht gestartet. ${String(error)}`;
+      noteProblem(options.project, message);
+      return blocked(message, redactWith);
+    }
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;

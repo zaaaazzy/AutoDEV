@@ -7,6 +7,7 @@ import {
   readdirSync,
   readlinkSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
 } from 'node:fs';
@@ -36,6 +37,14 @@ const same = (left: string, right: string): boolean => {
 const isLink = (path: string): boolean => {
   try {
     return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+};
+
+const isEmptyDirectory = (path: string): boolean => {
+  try {
+    return lstatSync(path).isDirectory() && readdirSync(path).length === 0;
   } catch {
     return false;
   }
@@ -109,6 +118,8 @@ export function linkDependencies(folder: string, workspace: string): void {
     const source = join(folder, directory, 'node_modules');
     const target = join(workspace, directory, 'node_modules');
     if (!existsSync(source) || !existsSync(join(workspace, directory))) continue;
+    // Leerer Ordner = Mountpunkt der Docker-Sandbox (prepareModulesMountpoint): im Host-Modus wieder verlinken.
+    if (isEmptyDirectory(target)) rmdirSync(target);
     try {
       lstatSync(target);
     } catch {
