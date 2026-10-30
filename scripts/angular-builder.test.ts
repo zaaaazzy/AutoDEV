@@ -43,3 +43,12 @@ test('package.json: @angular/cdk steht auf 20.3.x wie die übrigen Angular-Paket
   const cdk: string = pkg.devDependencies['@angular/cdk'];
   assert.match(cdk, /^\^?20\.3\./, `cdk ist ${cdk}`);
 });
+
+test('package-lock.json: Webpack-Kette entfernt, cdk auf 20.3.x', () => {
+  const packages: Record<string, { version?: string }> = readJson('package-lock.json').packages;
+  const stale = Object.keys(packages).filter((path) =>
+    /node_modules\/(@angular-devkit\/build-(angular|webpack)|@ngtools\/webpack|webpack(-dev-server|-dev-middleware)?)$/.test(path),
+  );
+  assert.deepEqual(stale, [], 'Lockfile mit npm neu erzeugen');
+  assert.match(packages['node_modules/@angular/cdk']?.version ?? '', /^20\.3\./);
+});
