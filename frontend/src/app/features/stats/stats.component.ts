@@ -16,6 +16,7 @@ import { categoryLabel } from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
 import { CHART_HEIGHT, CHART_WIDTH, chartY, COVERAGE_TARGET, coverageSeries } from './coverage-history.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
+import { CoverageTrendComponent } from './coverage-trend.component.js';
 
 interface Usage {
   tokens: number;
@@ -106,6 +107,7 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
     HoursPipe,
     LocaleNumberPipe,
     QualityPanelComponent,
+    CoverageTrendComponent,
     BudgetMeterComponent,
     DateTimePipe,
   ],

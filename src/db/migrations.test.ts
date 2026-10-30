@@ -5,7 +5,7 @@ import pg from 'pg';
 import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
 import { coverageHistory, coverageOverview } from '../api/coverage.js';
-import { COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
+import { COVERAGE_AREA_ALIASES, COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
 import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
@@ -30,9 +30,10 @@ const steps: Migration[] = [
 ];
 
 test('Migrationen: Versionen lückenlos ab 1, Basisschritt ist das bisherige Schema, Index auf agent_run_steps(agent_id)', () => {
+  const versions = MIGRATIONS.map((migration) => migration.version);
   assert.deepEqual(
-    MIGRATIONS.map((migration) => migration.version),
-    MIGRATIONS.map((_, index) => index + 1),
+    versions,
+    versions.map((_, index) => index + 1),
   );
   assert.equal(MIGRATIONS[0].sql, SCHEMA);
   assert.ok(MIGRATIONS.some((migration) => /ON agent_run_steps \(agent_id\)/.test(migration.sql)));
@@ -88,6 +89,78 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
+test('Migration 24: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 24);
+  assert.equal(migration?.name, 'coverage-feste-bereiche');
+  const pairs = Object.fromEntries(
+    [...(migration?.sql ?? '').matchAll(/\('([^']+)', '([^']+)'\)/g)].map((match) => [match[1], match[2]]),
+  );
+  assert.deepEqual(pairs, COVERAGE_AREA_ALIASES);
+  for (const area of COVERAGE_AREA_KEYS) assert.match(migration?.sql ?? '', new RegExp(`'${area}'`));
+  // Nichts wird gelöscht außer den zusammengeführten Zeilen mit Zuordnung (sie kommen zusammengefasst wieder hinein).
+  assert.equal((migration?.sql ?? '').match(/DELETE FROM/g)?.length, 1);
+  assert.match(migration?.sql ?? '', /USING coverage_area_aliases/);
+});
+
+test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestand ohne Zuordnung behalten', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  const name = `devlog_migr_cov_${process.pid}`;
+  await dropDatabase(admin, name);
+  await admin.query(`CREATE DATABASE ${name}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
+  const client = await pool.connect();
+  try {
+    // Stand vor Version 24 mit Altbestand: zwei Schreibweisen für backend im selben Bericht, fehlender Zeilenwert,
+    // ein Bereich ohne Zuordnung. Der CHECK aus Migration 23 wird dafür entfernt (Altbestand vor 23 / Fremddaten).
+    await runMigrations(client, MIGRATIONS.filter((step) => step.version < 24));
+    assert.equal((await client.query(`SELECT to_regclass('coverage_area_aliases') AS t`)).rows[0].t, null);
+    await client.query('ALTER TABLE test_coverage_areas DROP CONSTRAINT test_coverage_areas_area_check');
+    await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+    const report = (
+      await client.query<{ id: string }>(
+        `INSERT INTO test_coverage_reports (project_slug, summary) VALUES ('shop', 'alt') RETURNING id`,
+      )
+    ).rows[0]!.id;
+    await client.query(
+      `INSERT INTO test_coverage_areas (report_id, area, unit_tests, passed, lines, branches) VALUES
+         ($1, 'Backend', 10, 10, 80, 60), ($1, ' backend (src) ', 4, 4, 70, NULL),
+         ($1, 'Frontend', 3, 3, NULL, 50), ($1, 'Sonstiges', 2, 2, 90, 90), ($1, 'Order', 1, 1, 50, 40)`,
+      [report],
+    );
+
+    assert.deepEqual(await runMigrations(client), [24]);
+    const rows = (
+      await client.query(
+        `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
+          WHERE report_id = $1 ORDER BY lower(area)`,
+        [report],
+      )
+    ).rows;
+    assert.deepEqual(rows, [
+      { area: 'auftrag', unit: 1, passed: 1, lines: 50, branches: 40 },
+      // Fehlt der Zweigwert in einem der beiden Einträge, bleibt eine Lücke (kein Mittel aus dem Rest).
+      { area: 'backend', unit: 14, passed: 14, lines: 75, branches: null },
+      { area: 'frontend', unit: 3, passed: 3, lines: null, branches: 50 },
+      { area: 'Sonstiges', unit: 2, passed: 2, lines: 90, branches: 90 },
+    ]);
+    const versions = (await client.query('SELECT version FROM schema_migrations WHERE version = 24')).rowCount;
+    assert.equal(versions, 1, 'Version 24 vermerkt');
+    // Neue Zeilen nur mit festen Namen; der Altbestand ohne Zuordnung bleibt trotzdem stehen.
+    await assert.rejects(
+      client.query(`INSERT INTO test_coverage_areas (report_id, area) VALUES ($1, 'Neu')`, [report]),
+      /test_coverage_areas_area_check/,
+    );
+    // Zweiter Start: läuft nicht erneut.
+    assert.deepEqual(await runMigrations(client), []);
+  } finally {
+    client.release();
+    await pool.end();
+    await dropDatabase(admin, name);
+    await admin.end();
+  }
+});
+
 test('Migrationen: Testabdeckung auf feste Bereichsschlüssel (Schritt 23)', () => {
   const migration = MIGRATIONS.find((step) => step.version === 23);
   assert.equal(migration?.name, 'testabdeckung-feste-bereiche');
@@ -119,7 +192,7 @@ const LEGACY_LABELS = [
   'Gesamtprojekt',
 ];
 
-test('Migration 23: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
+test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `devlog_migr_coverage_${process.pid}`;
@@ -158,7 +231,8 @@ test('Migration 23: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter 
       await area(newer, 'Frontend (Angular)', 66, 55, 77);
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
-      assert.deepEqual(await runMigrations(client), [23]);
+      // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
+      assert.deepEqual(await runMigrations(client), [23, 24]);
 
       const rows = async (id: string) =>
         (

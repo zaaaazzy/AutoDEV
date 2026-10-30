@@ -373,13 +373,63 @@ export async function runStep(
     await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
     return { passed: false, interrupted: true };
   }
+  // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests. Ein ungültiger
+  // Block (unbekannter Bereich, fehlender Zeilen- oder Zweigwert, 0 Tests) wird ganz verworfen, der Grund steht im Verlauf.
+  const parsed = agent.role === 'tester' ? parseCoverage(output) : { report: null, errors: [] };
+  const discarded = parsed.errors.length ? `Testabdeckung des Testers verworfen: ${parsed.errors.join(' ')}` : '';
+  if (discarded) await logEvent(pool, stepId, discarded.slice(0, 1000));
+  // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
+  const refusedSetup: string[] = [];
+  const measured =
+    agent.role === 'tester' && !cancelled
+      ? await measureCoverage(
+          options.cwd,
+          await coverageCommands(ctx),
+          // Projektcode: in der Sandbox im Testcontainer, nicht auf dem Host.
+          await gateExecutor(pool, item.projectSlug, options.cwd, execute, ctx.runId),
+          (message) => refusedSetup.push(message),
+        ).catch(logged('runner-steps', []))
+      : [];
+  // Abgelehnte Befehle stehen im Schritt selbst (Ausgabe und Verlauf), nicht nur im Worker-Log.
+  for (const message of refusedSetup) {
+    await logEvent(pool, stepId, message);
+    output += `\n\n${message}`;
+  }
+  const merged = mergeCoverage(parsed.report, measured);
+  for (const message of merged.errors) await logEvent(pool, stepId, message.slice(0, 1000));
+  const coverage = merged.report;
+  let coverageSaved = false;
+  if (coverage) {
+    const failure = await saveCoverage(pool, item.projectSlug, item.id, coverage).then(
+      () => null,
+      (error: unknown) => {
+        console.error('Coverage could not be saved:', error);
+        return error instanceof Error ? error.message : String(error);
+      },
+    );
+    coverageSaved = failure === null;
+    await logEvent(
+      pool,
+      stepId,
+      coverageSaved
+        ? `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`
+        : `Testabdeckung nicht gespeichert: ${failure}`.slice(0, 1000),
+    );
+  } else if (agent.role === 'tester' && !cancelled) {
+    await logEvent(pool, stepId, 'Testabdeckung nicht gespeichert: kein gültiger Bericht und keine Messung');
+  }
+  if (agent.role === 'tester') output = stripCoverage(output);
+  if (discarded) output += `\n\n${discarded}`;
   // Abnahme durch den Tester: jedes Akzeptanzkriterium und jeder DoD-Punkt muss erfüllt sein.
   let accepted = true;
   if (agent.role === 'tester' && ctx.definitionOfDone && !stepOptions.observer) {
     const criteria = ctx.criteria ?? [];
     const reportedAcceptance = parseAcceptance(output, criteria.length, ctx.definitionOfDone.length);
-    // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund: AIdeation misst danach selbst.
-    const waiver = reportedAcceptance ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length) : null;
+    // Fehlt nur die eigene Abdeckungsmessung des Testers, ist das kein Abnahmegrund – aber nur, wenn trotzdem ein
+    // gültiger Bericht gespeichert wurde (Messung durch AIdeation). Ohne Messung bleibt der DoD-Punkt offen.
+    const waiver = reportedAcceptance
+      ? waiveUnmeasuredCoverage(reportedAcceptance, criteria.length, coverageSaved)
+      : null;
     const acceptance = waiver?.result ?? null;
     if (waiver?.waived.length) {
       await logEvent(
@@ -453,37 +503,6 @@ export async function runStep(
   }
   const passed =
     result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule && !unresolved.length;
-  // Der Tester meldet die Testabdeckung als @@COVERAGE-Block; gespeichert wird sie auch bei roten Tests.
-  const reported = agent.role === 'tester' ? parseCoverage(output) : null;
-  // Zusätzlich misst AIdeation selbst, wo der Node-Test-Runner läuft – unabhängig von den Rechten des Testers.
-  const refusedSetup: string[] = [];
-  const measured =
-    agent.role === 'tester' && !cancelled
-      ? await measureCoverage(
-          options.cwd,
-          await coverageCommands(ctx),
-          // Projektcode: in der Sandbox im Testcontainer, nicht auf dem Host.
-          await gateExecutor(pool, item.projectSlug, options.cwd, execute, ctx.runId),
-          (message) => refusedSetup.push(message),
-        ).catch(logged('runner-steps', []))
-      : [];
-  // Abgelehnte Befehle stehen im Schritt selbst (Ausgabe und Verlauf), nicht nur im Worker-Log.
-  for (const message of refusedSetup) {
-    await logEvent(pool, stepId, message);
-    output += `\n\n${message}`;
-  }
-  const coverage = mergeCoverage(reported, measured);
-  if (coverage) {
-    // Nur feste Bereichsschlüssel mit vollständigen Prozentwerten; was wegfällt, steht mit Grund im Schritt-Log.
-    const stored = await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) => {
-      console.error('Coverage could not be saved:', error);
-      return null;
-    });
-    if (stored?.saved.length) await logEvent(pool, stepId, `Testabdeckung gespeichert (${stored.saved.join(', ')})`);
-    else if (stored) await logEvent(pool, stepId, 'Testabdeckung nicht gespeichert: kein vollständiger Bereich');
-    for (const reason of stored?.discarded ?? []) await logEvent(pool, stepId, `Testabdeckung: ${reason}`);
-    output = stripCoverage(output);
-  }
   await logEvent(
     pool,
     stepId,

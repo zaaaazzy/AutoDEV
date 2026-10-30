@@ -348,6 +348,14 @@ test('Alle Seiten laden ohne Fehler und ohne seitliches Überlaufen', async ({ p
     await open(page, section);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect.soft(overflow, `Seite ${section} ragt über den Rand`).toBeLessThanOrEqual(1);
+    if (section === 'stats') {
+      // Zeitreihe der Testabdeckung: geladen (Diagramme oder Leertext ohne Filterhinweis), kein Ladefehler
+      const trend = page.getByTestId('stats-coverage-trend');
+      await expect.soft(trend.getByRole('heading', { name: 'Testabdeckung im Verlauf' })).toBeVisible();
+      await expect.soft(trend.locator('.loading')).toHaveCount(0);
+      await expect.soft(trend).not.toContainText('konnte nicht geladen werden');
+      await expect.soft(trend).not.toContainText('Filter');
+    }
     // Elemente, die über den rechten Rand hinausragen (Tabellen dürfen waagrecht scrollen)
     const outside = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('main *')]

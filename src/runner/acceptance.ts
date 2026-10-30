@@ -137,24 +137,27 @@ export function stripAcceptance(output: string): string {
 }
 
 const COVERAGE = /abdeckung|coverage/i;
-const NOT_MEASURED = /nicht\s+(?:selbst\s+)?(?:ge)?mess|nicht\s+ermittel|blockiert|gesperrt|wächter|freigabe|\bnull\b/i;
+// „null“ gehört nicht mehr dazu: null-Werte sind keine gültige Meldung mehr, ein Hinweis darauf belegt keine Messung.
+const NOT_MEASURED = /nicht\s+(?:selbst\s+)?(?:ge)?mess|nicht\s+ermittel|blockiert|gesperrt|wächter|freigabe/i;
 /** Hinweise auf echte Lücken: rote Tests oder ein Kriterium ohne Test. Solche Punkte bleiben nicht erfüllt. */
 const REAL_GAP = /\brot(?:e[nm]?)?\b|fehlgeschlagen|\bfail|ungetestet|ohne\s+(?:einen\s+)?test|kein(?:en)?\s+test/i;
 
 /**
  * DoD-Punkte, die der Tester nur deshalb als nicht erfüllt meldet, weil er die Abdeckung nicht selbst messen konnte:
- * Die Abdeckung misst AIdeation nach dem Tester selbst. Solche Punkte gelten als erfüllt, sofern jedes
- * Akzeptanzkriterium erfüllt (also belegt) ist. Rote Tests oder unbelegte Kriterien bleiben ein Ablehnungsgrund.
+ * Solche Punkte gelten als erfüllt, sofern jedes Akzeptanzkriterium erfüllt (also belegt) ist und trotzdem ein
+ * gültiger Abdeckungsbericht gespeichert wurde (measured, in der Regel die Messung durch AIdeation). Fehlt jede
+ * gültige Messung, bleibt der Punkt offen. Rote Tests oder unbelegte Kriterien bleiben ein Ablehnungsgrund.
  */
 export function waiveUnmeasuredCoverage(
   result: { criteria: Checked[]; done: Checked[] },
   criteriaCount: number,
+  measured: boolean,
 ): { result: { criteria: Checked[]; done: Checked[] }; waived: number[] } {
   const allMet = Array.from({ length: criteriaCount }, (_, index) => index + 1).every(
     (nr) => result.criteria.find((check) => check.nr === nr)?.met,
   );
   const waived: number[] = [];
-  if (!allMet) return { result, waived };
+  if (!allMet || !measured) return { result, waived };
   const done = result.done.map((check) => {
     if (check.met || check.manual) return check;
     if (!COVERAGE.test(check.note) || !NOT_MEASURED.test(check.note) || REAL_GAP.test(check.note)) return check;

@@ -683,6 +683,20 @@ export interface CoverageReport {
   history: CoverageHistoryPoint[];
 }
 
+/** Ein Bericht in der Zeitreihe eines Bereichs; null = im Altbestand nicht gemeldet (Lücke, nicht 0 %). */
+export interface CoverageTrendPoint {
+  reportId: string;
+  date: string;
+  lines: number | null;
+  branches: number | null;
+  tests: number;
+}
+
+/** Zeitreihe je fester Bereich (COVERAGE_AREA_KEYS), nach Datum aufsteigend. */
+export interface CoverageTrend {
+  areas: { area: CoverageAreaKey; points: CoverageTrendPoint[] }[];
+}
+
 export interface AcceptanceCheck {
   developmentId: string;
   /** visual = Befund der visuellen Prüfung (Screenshots, Browser-Prüfungen, KI-Urteil). */

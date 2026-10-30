@@ -515,6 +515,60 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt'));
     `,
   },
+  // Auftrag „Feste Coverage-Bereiche mit Pflichtwerten“ (geplant als Version 20; 20–23 belegte inzwischen Sprint 30):
+  // Zuordnungstabelle der bekannten Schreibweisen (COVERAGE_AREA_ALIASES in src/core/coverage-areas.ts) und neuer
+  // Bereich „auftrag“. Bestehende Bereichsnamen werden über die Zuordnung umgeschrieben; mehrere Einträge eines
+  // Berichts, die auf denselben Bereich zeigen, werden vorher zusammengeführt (Testzahlen summiert, Prozentwerte
+  // gemittelt, NULL bleibt NULL), damit der Primärschlüssel (report_id, area) nicht kollidiert. Einträge ohne Zuordnung
+  // bleiben unverändert; nichts wird gelöscht. Der CHECK gilt deshalb nur für neue Zeilen (NOT VALID).
+  {
+    version: 24,
+    name: 'coverage-feste-bereiche',
+    sql: `
+      ALTER TABLE test_coverage_areas DROP CONSTRAINT IF EXISTS test_coverage_areas_area_check;
+      CREATE TABLE IF NOT EXISTS coverage_area_aliases (
+        alias TEXT PRIMARY KEY,
+        area TEXT NOT NULL CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt', 'auftrag'))
+      );
+      INSERT INTO coverage_area_aliases (alias, area) VALUES
+        ('backend', 'backend'), ('back-end', 'backend'), ('backend (src)', 'backend'), ('backend/api', 'backend'),
+        ('server', 'backend'), ('api', 'backend'),
+        ('frontend', 'frontend'), ('front-end', 'frontend'), ('frontend (angular)', 'frontend'),
+        ('angular', 'frontend'), ('web', 'frontend'), ('ui', 'frontend'), ('client', 'frontend'),
+        ('oberfläche', 'frontend'),
+        ('contracts', 'contracts'), ('contract', 'contracts'), ('contracts/shared', 'contracts'),
+        ('shared', 'contracts'), ('common', 'contracts'),
+        ('scripts', 'scripts'), ('script', 'scripts'), ('skripte', 'scripts'), ('skript', 'scripts'),
+        ('tools', 'scripts'),
+        ('e2e', 'e2e'), ('e2e-tests', 'e2e'), ('end-to-end', 'e2e'), ('playwright', 'e2e'),
+        ('gesamt', 'gesamt'), ('total', 'gesamt'), ('all files', 'gesamt'), ('alle', 'gesamt'),
+        ('projekt', 'gesamt'), ('project', 'gesamt'), ('dev-log', 'gesamt'), ('devlog', 'gesamt'),
+        ('aideation', 'gesamt'),
+        ('auftrag', 'auftrag'), ('order', 'auftrag'), ('geänderter code', 'auftrag'), ('changed code', 'auftrag')
+      ON CONFLICT (alias) DO NOTHING;
+
+      CREATE TEMP TABLE coverage_area_merge ON COMMIT DROP AS
+        SELECT t.report_id, a.area,
+               SUM(t.unit_tests)::int AS unit_tests, SUM(t.component_tests)::int AS component_tests,
+               SUM(t.integration_tests)::int AS integration_tests, SUM(t.e2e_tests)::int AS e2e_tests,
+               SUM(t.passed)::int AS passed, SUM(t.failed)::int AS failed,
+               CASE WHEN COUNT(t.lines) = COUNT(*) THEN AVG(t.lines)::real END AS lines,
+               CASE WHEN COUNT(t.statements) = COUNT(*) THEN AVG(t.statements)::real END AS statements,
+               CASE WHEN COUNT(t.branches) = COUNT(*) THEN AVG(t.branches)::real END AS branches,
+               CASE WHEN COUNT(t.functions) = COUNT(*) THEN AVG(t.functions)::real END AS functions
+          FROM test_coverage_areas t JOIN coverage_area_aliases a ON a.alias = lower(btrim(t.area))
+         GROUP BY t.report_id, a.area;
+      DELETE FROM test_coverage_areas t USING coverage_area_aliases a WHERE a.alias = lower(btrim(t.area));
+      INSERT INTO test_coverage_areas (report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+                                       passed, failed, lines, statements, branches, functions)
+        SELECT report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+               passed, failed, lines, statements, branches, functions
+          FROM coverage_area_merge;
+
+      ALTER TABLE test_coverage_areas ADD CONSTRAINT test_coverage_areas_area_check
+        CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt', 'auftrag')) NOT VALID;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
