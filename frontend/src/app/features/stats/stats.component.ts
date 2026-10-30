@@ -1,4 +1,4 @@
-import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ApiService } from '../../core/api.service.js';
 import { errorMessage } from '../../core/errors.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -10,6 +10,7 @@ import {
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatMoney, formatNumber } from '../../shared/format.js';
 import type { BudgetOverview } from '../../core/models.js';
+import { errorText, estimateTrend } from './estimate-trend.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js';
@@ -119,6 +120,8 @@ export class StatsComponent {
   protected readonly error = signal('');
   protected readonly ratioText = ratioText;
   protected readonly shortRatio = shortRatio;
+  protected readonly errorText = errorText;
+  protected readonly estimateTrend = computed(() => estimateTrend(this.store.data().stats?.velocity ?? []));
   protected readonly kindLabel = (key: string): string => KIND_LABELS[key] ?? key;
   protected readonly categoryLabel = (key: string): string => (key === 'none' ? 'Ohne Bereich' : categoryLabel(key));
 

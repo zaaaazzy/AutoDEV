@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -22,6 +22,7 @@ import {
   modulesVolume,
   readOnlyWorkspace,
   removeLeftoverContainers,
+  replaceLinkedModules,
   resetAgentNetwork,
   runInSandbox,
   SANDBOX_GUARD,
@@ -469,6 +470,48 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+/** Worktree mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */
+function linkedWorktree(): { worktree: string; target: string } {
+  const root = mkdtempSync(join(tmpdir(), 'sandbox-modules-'));
+  const worktree = join(root, 'agent');
+  const target = join(root, 'source-node_modules');
+  mkdirSync(worktree);
+  mkdirSync(target);
+  writeFileSync(join(target, 'bleibt.txt'), 'x');
+  writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+  writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+  symlinkSync(target, join(worktree, 'node_modules'), 'dir');
+  return { worktree, target };
+}
+
+test('Sandbox: verlinktes node_modules wird zum leeren Ordner, das Ziel bleibt unberührt', () => {
+  const { worktree, target } = linkedWorktree();
+  replaceLinkedModules(worktree);
+  const stat = lstatSync(join(worktree, 'node_modules'));
+  assert.ok(!stat.isSymbolicLink() && stat.isDirectory(), 'Einhängepunkt für das Volume');
+  assert.ok(existsSync(join(target, 'bleibt.txt')), 'Ziel des Links nicht gelöscht');
+  replaceLinkedModules(join(worktree, 'fehlt'));
+});
+
+test('Sandbox: verlinkter Worktree bekommt die Abhängigkeiten ins Volume, nicht in das Ziel des Links', async () => {
+  resetAgentNetwork();
+  const { worktree, target } = linkedWorktree();
+  const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+  const result = await runInSandbox(['npm', 'run', 'typecheck'], worktree, {
+    runId: 'r-install',
+    project: 'demo',
+    name: 'aideation-r-install',
+    docker,
+    environment: { PATH: '/usr/bin' },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.ok(!lstatSync(join(worktree, 'node_modules')).isSymbolicLink());
+  assert.ok(existsSync(join(target, 'bleibt.txt')));
+  const install = calls.findIndex((call) => call.command.at(-1)?.includes(DEPENDENCY_STAMP));
+  const run = calls.findIndex((call) => call.command.slice(-3).join(' ') === 'npm run typecheck');
+  assert.ok(install >= 0 && install < run, 'Installation vor dem eigentlichen Lauf');
 });
 
 test('Sandbox: Abhängigkeiten werden einmal je Lockfile ins Volume installiert, bevor der Befehl läuft', async () => {

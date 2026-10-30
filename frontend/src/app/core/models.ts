@@ -515,7 +515,30 @@ export interface ProjectStats {
     percent: number;
     burndown: { day: string; remaining: number }[];
   } | null;
-  velocity: { name: string; status: string; total: number; done: number; hours: number }[];
+  velocity: {
+    name: string;
+    status: string;
+    total: number;
+    done: number;
+    hours: number;
+    /** Schätzfehler: Median Ist ÷ Schätzung der erledigten Aufträge; null ohne erledigte, gemessene Aufträge. */
+    hourError?: number | null;
+    tokenError?: number | null;
+    errorSamples?: number;
+  }[];
+  /** Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung (Stunden oder Tokens). */
+  overruns?: EstimateOverrun[];
+}
+
+export interface EstimateOverrun {
+  id: string;
+  title: string;
+  status: string;
+  actual: { hours: number; tokens: number };
+  calibrated: { hours: number | null; tokens: number | null };
+  ratio: { hours: number | null; tokens: number | null };
+  exceeded: { hours: boolean; tokens: boolean };
+  scope: string;
 }
 
 export interface DraftOrder {
