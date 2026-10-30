@@ -39,12 +39,12 @@ Titel „Kalibrierte Schätzung mit Warnung und Fehlertrend“ (Agent „Entwick
 
 | Auftrag | Inhalt | Zustand |
 | --- | --- | --- |
-| ef5e57c7 | Kalibrierte Schätzung mit Warnung und Fehlertrend | Entwickler fertig (Bestanden), Dokumentation hier. Tester: nicht bestanden, aber nur wegen der Umgebung (siehe unten). Review/Merge offen |
+| ef5e57c7 | Kalibrierte Schätzung mit Warnung und Fehlertrend | Entwickler fertig (Bestanden), Dokumentation hier. Tester: nicht bestanden, aber nur wegen der Umgebung (siehe unten). Erneuter Versuch: Sandbox-Fix vom Entwickler, Image-Neubau und Testlauf offen. Review/Merge offen |
 
 ## Anfrage / TODO
 
 - **Tests sind noch nicht gelaufen.** Der Tester-Lauf scheiterte in der Sandbox: `npm run typecheck` fand `tsc` nicht (Exit 127, Image „aideation-agent“), und `npx tsx --test …` brach mit `EACCES` am root-eigenen npm-Cache ab. Das ist kein Testfehler im Code. Erneut ausführen: `npm_config_cache=/tmp/npm-cache npx tsx --test src/core/estimate-calibration.test.ts src/api/stats.test.ts src/agent/estimation.test.ts src/agent/requirements.test.ts frontend/src/app/features/dashboard/estimate-overruns.spec.ts frontend/src/app/features/stats/estimate-trend.spec.ts`, danach `npm run typecheck` mit installierten Abhängigkeiten.
-- **Erneuter Versuch (30.10.2026 12:22):** Vorschlag der Analyse: Agent-Image neu bauen und einmal `npm ci` ins `node_modules`-Volume ausführen. Das ist eine Umgebungsänderung, kein Code-Fix am Auftrag; erst danach sind Typecheck und Tests aussagekräftig.
+- **Erneuter Versuch (30.10.2026 12:22):** Vorschlag der Analyse: Agent-Image neu bauen und einmal `npm ci` ins `node_modules`-Volume ausführen. Der Entwickler hat dafür Code-Änderungen geliefert (siehe Nachtrag: `deploy/agent/Dockerfile`, `src/core/sandbox.ts`, `src/runner/agent-workspace.ts` samt Tests). Deren Tests (`sandbox.test.ts`, `agent-workspace.test.ts`) wurden bisher ebenfalls nicht ausgeführt. **Das Image muss neu gebaut werden**, erst danach sind Typecheck und Tests aussagekräftig; der vorherige Tester-Lauf lief noch im alten Image.
 - Zusätzlich geänderte Dateien, die nicht zur Fachlogik gehören: `frontend/tsconfig.app.json`, `frontend/tsconfig.spec.json`, `src/api/stats.test.ts`, `test-results/ts-loader/{hook,register}.mjs`. Vor dem Merge prüfen, ob die tsconfig- und `test-results`-Änderungen gewollt sind (Testartefakte gehören nicht ins Repository).
 - Tester: Akzeptanzkriterien prüfen (Bugfix-Faktor getrennt, 12 Schritte nicht in „bis 10“, Rückfall mit `scope`, genau 3× keine Warnung, Sprint ohne erledigte Aufträge ohne Wert). `estimate-calibration.test.ts` und `stats.test.ts` müssen grün bleiben.
 - Oberflächentest `full-ui.check.ts` auf das neue Panel „Schätzung überschritten“ und den Schätzfehler-Verlauf (Desktop und Handy) prüfen.
