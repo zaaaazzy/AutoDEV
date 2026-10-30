@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START, plainExternalText } from '../core/bug-trust.js';
+import { type BugCategory, priorityCategory } from '../core/bug-category.js';
 import { BUG_STATUS } from '../core/status.js';
 import { maskSecrets } from '../core/secret-mask.js';
 import { shortTitle } from '../core/validation.js';
@@ -152,6 +153,17 @@ export function categoryFor(error: ProductionError): 'frontend' | 'backend' | 'i
   const where = `${error.origin ?? ''} ${topFrame(error.stack)}`;
   if (INFRASTRUCTURE.test(error.origin ?? '')) return 'infrastructure';
   return FRONTEND.test(where) ? 'frontend' : 'backend';
+}
+
+/**
+ * Kategorie des Betriebs-Bugs: vorrangige Kategorien (Sicherheit, Git-Sync, CI, Runner, Doku) nach der allgemeinen
+ * Bug-Regel, sonst wie bisher categoryFor (Infrastruktur, Frontend, Backend). Health bleibt immer Infrastruktur.
+ */
+export function bugCategoryFor(error: ProductionError): BugCategory {
+  if (error.source === 'health') return 'infrastructure';
+  return (
+    priorityCategory({ title: error.message, description: error.stack, source: error.origin }) ?? categoryFor(error)
+  );
 }
 
 /** Ausschlussmuster: einfacher Textvergleich ohne Gross-/Kleinschreibung (keine regulären Ausdrücke, kein ReDoS). */
@@ -316,7 +328,7 @@ export async function recordEvent(
               `Betrieb: ${shortTitle(firstLine(plainExternalText(maskSecrets(error.message), 500)) || 'Unbekannter Fehler', 90)}`,
             bugDescription(error, print, sample),
             severity,
-            categoryFor(error),
+            bugCategoryFor(error),
           ],
         )
       ).rows[0]!.id;

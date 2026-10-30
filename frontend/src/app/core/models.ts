@@ -104,6 +104,8 @@ export interface VisualApproval {
 }
 
 export type Category = 'frontend' | 'backend' | 'fullstack' | 'infrastructure' | 'docs' | 'security';
+/** Kategorie eines Bugs (automatisch aus Pfaden und Stichworten oder gewählt) und damit auch seines Auftrags. */
+export type BugCategory = Category | 'git-sync' | 'ci' | 'runner';
 
 export interface Estimate {
   /** Bereich der Arbeit; Aufträge erben ihn von Idee bzw. Bug. */
@@ -251,7 +253,7 @@ export interface Sprint {
 
 export interface Bug {
   id: string;
-  category?: Category | null;
+  category?: BugCategory | null;
   title: string;
   description: string;
   severity: 'low' | 'medium' | 'high' | 'critical';

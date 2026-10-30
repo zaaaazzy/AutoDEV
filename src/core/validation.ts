@@ -1,5 +1,9 @@
+import { BUG_CATEGORY_VALUES } from './bug-category.js';
+
 export const PRIORITIES = new Set(['low', 'medium', 'high']);
 export const CATEGORIES = new Set(['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security']);
+/** Bugs haben zusätzlich Git-Sync, CI und Runner (Ideen und Visionär bleiben bei CATEGORIES). */
+export const BUG_CATEGORIES = new Set<string>(BUG_CATEGORY_VALUES);
 export const PROJECT_SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /** Macht aus einer Eingabe wie „KeyGuard 1“ eine gültige Projekt-ID („keyguard-1“). */
@@ -184,6 +188,8 @@ export const parseOption =
 /** Kategorie oder leer (null = keine Kategorie). */
 export const parseCategory: Parser = (value) =>
   value === null || value === '' ? null : validStatus(value, CATEGORIES) ? value : INVALID;
+export const parseBugCategory: Parser = (value) =>
+  value === null || value === '' ? null : validStatus(value, BUG_CATEGORIES) ? value : INVALID;
 export const parseNullableUuid: Parser = (value) => (value === null || isUuid(value) ? value : INVALID);
 export const parseNullableDate: Parser = (value) => {
   if (value === null || value === '') {

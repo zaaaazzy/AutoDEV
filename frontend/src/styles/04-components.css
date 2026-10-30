@@ -910,6 +910,18 @@ a.summary-card:hover {
   background: #f8e6e3;
   color: #9a3b2e;
 }
+.tag.category-git-sync {
+  background: #e3f1f1;
+  color: #2f6b6b;
+}
+.tag.category-ci {
+  background: #e9edf5;
+  color: #3f5378;
+}
+.tag.category-runner {
+  background: #f4ece2;
+  color: #7a5230;
+}
 .tag.category-mixed {
   background: #eef0ec;
   color: #4b554e;

@@ -1,4 +1,5 @@
 import { logged } from '../core/log.js';
+import { categorizeBug } from '../core/bug-category.js';
 import { parseActionLine, setActionTodo } from '../runner/action-todo.js';
 import { delegateAfterAnalysis } from '../runner/autofix.js';
 import type { Pool } from 'pg';
@@ -145,17 +146,12 @@ export async function analyzeBlocked(
       body.slice(0, 3000),
     ]);
   } else {
+    const description = `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000);
     await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes, development_id)
-       SELECT $1, $2, $3, 'high', 'agent', 'open', $4, $5
+      `INSERT INTO bugs (project_slug, title, description, severity, source, status, fix_notes, development_id, category)
+       SELECT $1, $2, $3, 'high', 'agent', 'open', $4, $5, $6
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2)`,
-      [
-        options.project,
-        title,
-        `Aufgetreten bei Auftrag „${item.title}“.\n\n${body}`.slice(0, 10_000),
-        body.slice(0, 3000),
-        item.id,
-      ],
+      [options.project, title, description, body.slice(0, 3000), item.id, categorizeBug({ title, description })],
     );
   }
   await pool.query(

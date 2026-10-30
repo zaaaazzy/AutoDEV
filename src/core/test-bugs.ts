@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { categorizeBug } from './bug-category.js';
 import type { TestCaseResult } from './test-results.js';
 
 /**
@@ -66,11 +67,11 @@ export async function fileBugs(pool: Pool, project: string, drafts: BugDraft[]):
   let created = 0;
   for (const draft of drafts) {
     const result = await pool.query(
-      `INSERT INTO bugs (project_slug, title, description, severity, source)
-       SELECT $1, $2, $3, $4, 'test'
+      `INSERT INTO bugs (project_slug, title, description, severity, source, category)
+       SELECT $1, $2, $3, $4, 'test', $5
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2
                             AND status IN ('open', 'in_progress'))`,
-      [project, draft.title, draft.description, draft.severity],
+      [project, draft.title, draft.description, draft.severity, categorizeBug(draft)],
     );
     created += result.rowCount ?? 0;
   }

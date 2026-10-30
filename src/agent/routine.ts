@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import { logged } from '../core/log.js';
+import { categorizeBug } from '../core/bug-category.js';
 import { inWindow, nextRoutineRun } from '../core/cron.js';
 import { sendPush } from '../core/push.js';
 import { markerCategory, markerPriority, markerScore, markerTitle, parseMarkerLines } from './visionary.js';
@@ -307,7 +308,15 @@ export async function storeMarkers(
             WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND lower(title) = lower($2)
                                 AND status IN ('open', 'in_progress'))
            RETURNING id`,
-          [project, title, body, severity, markerCategory(record.category), run.id],
+          [
+            project,
+            title,
+            body,
+            severity,
+            // Angegebene Kategorie gilt; sonst dieselbe Regel wie bei allen anderen automatisch angelegten Bugs.
+            markerCategory(record.category) ?? categorizeBug({ title, description: body }),
+            run.id,
+          ],
         )
       ).rows[0]?.id;
     } else if (marker === '@@IDEA') {

@@ -1,5 +1,8 @@
 import type { Pool } from 'pg';
 import { SCHEMA } from './schema.js';
+import { BUG_CATEGORY_VALUES, bugCategorySql } from '../core/bug-category.js';
+
+const BUG_CATEGORY_SQL = BUG_CATEGORY_VALUES.map((category) => `'${category}'`).join(', ');
 
 export interface Migration {
   version: number;
@@ -410,6 +413,26 @@ export const MIGRATIONS: readonly Migration[] = [
     name: 'agent-sandbox-je-projekt',
     sql: `
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
+    `,
+  },
+  // Automatische Bug-Kategorie: Bugs und (über den Trigger development_items_inherit_category) ihre Aufträge kennen
+  // zusätzlich Git-Sync, CI und Runner; Ideen bleiben bei der bisherigen Liste. Bisherige Bugs ohne Kategorie werden
+  // einmalig nach derselben Regel wie beim Anlegen (src/core/bug-category.ts) zugeordnet; gesetzte bleiben, Aufträge
+  // werden nicht nachkategorisiert. Das SQL entsteht aus der Regeltabelle – spätere Regeländerungen wirken nur auf neue
+  // Bugs, dieser Schritt läuft nicht erneut.
+  {
+    version: 19,
+    name: 'bug-kategorie-automatisch',
+    sql: `
+      ALTER TABLE bugs DROP CONSTRAINT IF EXISTS bugs_category_check;
+      ALTER TABLE bugs ADD CONSTRAINT bugs_category_check CHECK (category IN (${BUG_CATEGORY_SQL}));
+      ALTER TABLE development_items DROP CONSTRAINT IF EXISTS development_items_category_check;
+      ALTER TABLE development_items ADD CONSTRAINT development_items_category_check
+        CHECK (category IN (${BUG_CATEGORY_SQL}));
+      UPDATE bugs b SET category = r.category
+        FROM (SELECT id, ${bugCategorySql('t')} AS category
+                FROM (SELECT id, lower(title || E'\\n' || COALESCE(description, '')) AS t FROM bugs WHERE category IS NULL) x) r
+       WHERE b.id = r.id AND b.category IS NULL AND r.category IS NOT NULL;
     `,
   },
 ];

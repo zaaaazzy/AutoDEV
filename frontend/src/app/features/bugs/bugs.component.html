@@ -33,7 +33,7 @@
             </label>
             <label
               >Kategorie<select name="category" [(ngModel)]="bugForm.category">
-                <option value="">Ohne Kategorie</option>
+                <option value="">Automatisch (aus Pfaden und Stichworten)</option>
                 @for (category of categories; track category) {
                   <option [value]="category">{{ category | categoryLabel }}</option>
                 }

@@ -72,3 +72,21 @@ test('Statistik: wer, wo und in welchen Tests – offen und begraben getrennt ge
     'speichert Punkte',
   ]);
 });
+
+test('Statistik: Häufung je Bug-Kategorie (Git-Sync, CI, Runner) mit deutscher Bezeichnung, offen + begraben', () => {
+  const stats = bugStats([
+    bug({ category: 'git-sync' }),
+    bug({ category: 'git-sync', status: 'fixed' }),
+    bug({ category: 'git-sync', status: 'rejected' }),
+    bug({ category: 'ci' }),
+    bug({ category: 'runner', status: 'wontfix' }),
+  ]);
+  assert.deepEqual(
+    stats.places.map((row) => [row.label, row.open, row.buried, row.total]),
+    [
+      ['Git-Sync', 1, 2, 3],
+      ['CI', 1, 0, 1],
+      ['Runner', 0, 1, 1],
+    ],
+  );
+});

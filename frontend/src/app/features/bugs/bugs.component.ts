@@ -18,7 +18,7 @@ import {
   DataTableComponent,
 } from '../../shared/data-table/data-table.component.js';
 import { formatIsoDate } from '../../shared/format.js';
-import { CATEGORIES, severityLabel, statusLabel } from '../../shared/labels.js';
+import { BUG_CATEGORIES, severityLabel, statusLabel } from '../../shared/labels.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { GalleryComponent } from '../../shared/gallery.component.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
@@ -158,7 +158,7 @@ export class BugsComponent {
   /** Fehler im Bearbeiten-Formular; es ist immer nur ein Bug aufgeklappt. */
   protected readonly editErrors = new FieldErrors();
   protected bugForm = { title: '', description: '', severity: 'medium', sprintId: '', category: '' };
-  protected readonly categories = CATEGORIES;
+  protected readonly categories = BUG_CATEGORIES;
   protected pendingImages: File[] = [];
 
   constructor() {

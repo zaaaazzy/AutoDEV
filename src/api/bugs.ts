@@ -1,6 +1,7 @@
 import type { Router } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import { access } from './access.js';
+import { categorizeBug } from '../core/bug-category.js';
 import { BUG_STATUSES, BUG_STATUS, DEVELOPMENT_STATUS, type BugStatus } from '../core/status.js';
 import { isAssignableSprintStatus, SPRINT_POOL_DEVELOPMENT_STATUSES } from '../core/development-transitions.js';
 import { fencedBugDescriptionSql, isUntrustedBugSource, unapprovedBugSql } from '../core/bug-trust.js';
@@ -14,7 +15,7 @@ import {
   parseFields,
   parseLongText,
   parseNullableUuid,
-  parseCategory,
+  parseBugCategory,
   parseOption,
   parseProjectSlug,
   parseTitle,
@@ -41,7 +42,7 @@ const BUG_FIELDS = {
   status: { column: 'status', parse: parseOption(BUG_STATUSES) },
   sprintId: { column: 'sprint_id', parse: parseNullableUuid },
   fixNotes: { column: 'fix_notes', parse: parseLongText },
-  category: { column: 'category', parse: parseCategory },
+  category: { column: 'category', parse: parseBugCategory },
 };
 
 const sqlList = (statuses: readonly string[]): string => statuses.map((status) => `'${status}'`).join(', ');
@@ -140,12 +141,18 @@ export async function reportAgentBug(
   const title = bug.title.slice(0, 180);
   // development_id: Ist der Auftrag später doch erledigt, kommt die Meldung auf den Friedhof (Trigger).
   const created = await pool.query<{ id: string }>(
-    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id)
-     SELECT $1, $2, $3, 'high', 'agent', NULL, $4
+    `INSERT INTO bugs (project_slug, title, description, severity, source, sprint_id, development_id, category)
+     SELECT $1, $2, $3, 'high', 'agent', NULL, $4, $5
       WHERE NOT EXISTS (
         SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
       ) RETURNING id`,
-    [bug.projectSlug, title, bug.description.slice(0, 10_000), bug.developmentId ?? null],
+    [
+      bug.projectSlug,
+      title,
+      bug.description.slice(0, 10_000),
+      bug.developmentId ?? null,
+      categorizeBug({ title, description: bug.description }),
+    ],
   );
   if (created.rows[0]) return created.rows[0].id;
   const existing = (
@@ -287,7 +294,12 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
           values.get('description') ?? '',
           values.get('severity') ?? null,
           sprintId,
-          values.get('category') ?? null,
+          // Ausdrücklich gewählte Kategorie gilt; ohne Auswahl setzt sie die Regel (oder bleibt leer).
+          values.get('category') ||
+            categorizeBug({
+              title: String(values.get('title')),
+              description: values.get('description') as string | undefined,
+            }),
         ],
       );
       if (!result.rows[0]) return { status: 400, message: 'Sprint gehört zu einem anderen Projekt.' };

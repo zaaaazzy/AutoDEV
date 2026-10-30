@@ -499,7 +499,7 @@ interface ReviewRow {
 
 function reviewPool(sprint: ReviewRow) {
   const updates: { sql: string; values: unknown[] }[] = [];
-  const bugs: { title: string; description: string; source: string }[] = [];
+  const bugs: { title: string; description: string; source: string; category: unknown }[] = [];
   const pool = {
     query: async (sql: string, values: unknown[] = []) => {
       updates.push({ sql, values });
@@ -512,7 +512,7 @@ function reviewPool(sprint: ReviewRow) {
       }
       if (sql.includes('INSERT INTO bugs')) {
         assert.match(sql, /'github'/);
-        bugs.push({ title: String(values[1]), description: String(values[2]), source: 'github' });
+        bugs.push({ title: String(values[1]), description: String(values[2]), source: 'github', category: values[3] });
       }
       if (sql.includes('SET ci_status = $2 WHERE')) sprint.ciStatus = String(values[1]);
       if (sql.includes("SET status = 'completed'")) sprint.status = 'completed';
@@ -783,6 +783,7 @@ test('red CI never merges and files one bug per run with a masked, shortened log
     assert.equal(bugs.length, 1);
     const bug = bugs[0]!;
     assert.equal(bug.title, 'CI rot im Pull Request von „Sprint 1: Äpfel“');
+    assert.equal(bug.category, 'ci', 'Kategorie nach der Bug-Regel, unabhängig vom Log-Auszug');
     assert.match(bug.description, /Error: login failed with \[REDACTED\]/);
     assert.ok(!bug.description.includes('hunter2hunter2'));
     assert.ok(!bug.description.includes(`ghp_${'a'.repeat(36)}`));

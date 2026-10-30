@@ -1,6 +1,7 @@
 // Sprints im Review (PR-Modus): CI verfolgen, rote Läufe als Bug melden, mergen und taggen.
 import { existsSync, realpathSync } from 'node:fs';
 import type { Pool } from 'pg';
+import { categorizeBug } from '../../core/bug-category.js';
 import { logged } from '../../core/log.js';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, runCommand } from '../../core/command.js';
@@ -45,17 +46,23 @@ async function reportCiFailure(
     .failedRunLog(run)
     .catch((error: unknown) => `Log nicht abrufbar: ${error instanceof Error ? error.message : String(error)}`);
   const excerpt = ciLogExcerpt(log);
+  const intro =
+    `Der CI-Lauf ${run} für den Pull Request ${sprint.prUrl} ist fehlgeschlagen. Der Sprint bleibt im Review und ` +
+    `wird nicht gemergt; nach einem grünen Lauf übernimmt Dev Log Merge und Tag.`;
   await pool.query(
-    `INSERT INTO bugs (project_slug, title, description, severity, source) VALUES ($1, $2, $3, 'high', 'github')`,
+    `INSERT INTO bugs (project_slug, title, description, severity, source, category)
+     VALUES ($1, $2, $3, 'high', 'github', $4)`,
     [
       project,
       ciBugTitle(sprint.name),
       [
-        `Der CI-Lauf ${run} für den Pull Request ${sprint.prUrl} ist fehlgeschlagen. Der Sprint bleibt im Review und ` +
-          `wird nicht gemergt; nach einem grünen Lauf übernimmt Dev Log Merge und Tag.`,
+        intro,
         'Auszug aus `gh run view --log-failed` (gekürzt, Zugangsdaten maskiert):',
         `\`\`\`text\n${excerpt.replace(/```/g, "'''") || '(kein Log)'}\n\`\`\``,
       ].join('\n\n'),
+      // Ohne Sprintname, PR-Adresse und Log-Auszug: Wörter darin (z. B. ein Test „SSRF-Schutz“) sollen den CI-Bug
+      // nicht umkategorisieren.
+      categorizeBug({ title: `CI-Lauf ${run} fehlgeschlagen`, source: 'ci' }),
     ],
   );
 }

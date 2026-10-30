@@ -69,6 +69,18 @@ export function severityLabel(severity: string): string {
 }
 
 export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'] as const;
+/** Bugs (und ihre Aufträge) kennen zusätzlich Git-Sync, CI und Runner; Ideen bleiben bei CATEGORIES. */
+export const BUG_CATEGORIES = [
+  'security',
+  'git-sync',
+  'ci',
+  'runner',
+  'docs',
+  'frontend',
+  'backend',
+  'fullstack',
+  'infrastructure',
+] as const;
 const CATEGORY_LABELS: Record<string, string> = {
   frontend: 'Frontend',
   backend: 'Backend',
@@ -76,6 +88,9 @@ const CATEGORY_LABELS: Record<string, string> = {
   infrastructure: 'Infrastruktur',
   docs: 'Dokumentation',
   security: 'Sicherheit',
+  'git-sync': 'Git-Sync',
+  ci: 'CI',
+  runner: 'Runner',
   mixed: 'Gemischt',
 };
 
