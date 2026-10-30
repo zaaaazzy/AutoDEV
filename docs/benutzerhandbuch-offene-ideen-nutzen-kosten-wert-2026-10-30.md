@@ -4,7 +4,7 @@ Auftrag ef5e6c78 (Entwicklung, Frontend). Dieses Kapitel beschreibt, welche Spal
 
 > **Was sich geändert hat:** Die Tabelle „Offene Ideen“ hatte bisher keine Spalten für Nutzen und Kosten. Du musstest eine Idee aufklappen, um die Meter im Ideen-Dialog zu sehen. Jetzt stehen Nutzen, Kosten und ein Wert aus beiden direkt in der Tabelle. Bei Visionär-Ideen ist der Wert die Standard-Sortierung, damit du die besten Ideen ohne Aufklappen findest.
 >
-> **Printscreens:** keine. Im Agent-Image ist kein Chromium installiert (`which chromium` ohne Treffer), und der Dev-Server wurde nicht gestartet. Die Beschreibungen unten stammen aus dem Code (`frontend/src/app/features/ideation/ideation.component.ts`, `ideation.component.html`, `idea-options.ts`, `frontend/src/app/shared/data-table/data-table.component.ts`, `sort.ts`), nicht aus einem Lauf der App. Printscreens sollten auf einem Host mit `npm run dev:ui` und einem Browser entstehen. Zielbilder: Tabelle „Offene Ideen“ mit Spalten Nutzen, Kosten, Wert; Kopfzeile „Wert“ mit Sortierpfeil; Filtermenü „Nutzen“ mit Auswahl 0–10.
+> **Printscreens:** keine. Der Dev-Server (`npm run dev:ui`) wurde in diesem Lauf nicht gestartet, und ein Browser stand nicht zur Verfügung (die Sandbox sperrt die Prüfung nach Chromium; ein früherer Lauf meldete „kein Chromium installiert“, das ist hier nicht nachgeprüft). Die Beschreibungen unten stammen aus dem Code (`frontend/src/app/features/ideation/ideation.component.ts`, `ideation.component.html`, `idea-options.ts`, `frontend/src/app/shared/data-table/data-table.component.ts`, `sort.ts`), nicht aus einem Lauf der App. Printscreens sollten auf einem Host mit `npm run dev:ui` und einem Browser entstehen. Zielbilder: Tabelle „Offene Ideen“ mit Spalten Nutzen, Kosten, Wert; Kopfzeile „Wert“ mit Sortierpfeil; Filtermenü „Nutzen“ mit Auswahl 0–10.
 >
 > **Tests:** Für dieses Kapitel wurde nichts ausgeführt. Ob die Oberfläche so funktioniert, wie hier beschrieben, bestätigt erst der Tester (siehe Abschnitt 8).
 
@@ -41,7 +41,10 @@ Die Gruppen **In Bearbeitung** und **Abgeschlossen** auf derselben Seite zeigen 
 
 - Öffne das Filtermenü in der Kopfzeile „Nutzen“ oder „Kosten“.
 - Wähle einen Wert von **0 bis 10**. Es werden nur Ideen mit genau diesem Wert angezeigt.
+- Mehrere Werte kannst du gleichzeitig wählen. Dann erscheinen Ideen, die einem der gewählten Werte entsprechen.
+- Ideen ohne Nutzen (bzw. ohne Kosten) fallen bei der Auswahl heraus, sobald du einen Wert filterst.
 - Die Spalte „Wert“ hat **keinen** Filter. Du kannst sie nur sortieren.
+- Ohne Treffer zeigt die Tabelle „Keine Ideen.“. Den Zusatz „für diese Filter“ siehst du nur, wenn ein Filter oder die Suche aktiv ist.
 
 ---
 
