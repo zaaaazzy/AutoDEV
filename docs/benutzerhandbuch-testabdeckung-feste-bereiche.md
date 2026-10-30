@@ -133,7 +133,8 @@ Diese Punkte sind im Code noch nicht eindeutig entschieden:
 
 1. **Teilmeldungen:** Die Anforderung verlangt Werte für alle sechs Bereiche. Der Validator prüft aber nur die Bereiche, die gemeldet werden. Heute werden Berichte mit nur einem gemessenen Bereich gespeichert. Entscheidung nötig: Pflicht für alle sechs, oder nur gemessene Bereiche.
 2. **Migrationsnummer:** Die Migration heißt Version 20. Version 19 ist über `RESERVED_VERSIONS` als reserviert eingetragen. Gibt es keinen parallelen Schritt 19, sollte auf 19 umnummeriert und die Reservierung entfernt werden.
-3. **Oberflächentest:** `full-ui.check.ts` ist für die neue Statistik-Ansicht noch nicht angepasst und nicht geprüft.
+3. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
+4. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
 
 ## Nicht geprüft
 
