@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
@@ -21,8 +22,16 @@ const boundUser = {
   credential_version: await credentialVersion(auth, 'scrypt$salz$hash'),
 };
 
+// Attrappe der gebauten Oberfläche: Unit-Tests laufen ohne `build:ui` (CI-Job `check`), kein Test liest `dist/ui`.
+const uiDirectory = mkdtempSync(join(tmpdir(), 'aideation-ui-'));
+writeFileSync(
+  join(uiDirectory, 'index.html'),
+  '<!doctype html><html><head><base href="./" /></head><body><app-root></app-root><script src="main-TEST1234.js" type="module"></script></body></html>',
+);
+writeFileSync(join(uiDirectory, 'main-TEST1234.js'), 'export {};');
+
 async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>): Promise<void> {
-  const server = createDevLogApp(pool, auth).listen(0, '127.0.0.1');
+  const server = createDevLogApp(pool, auth, uiDirectory).listen(0, '127.0.0.1');
   try {
     await new Promise<void>((resolve) => server.once('listening', resolve));
     const address = server.address() as AddressInfo;
@@ -31,10 +40,6 @@ async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 }
-
-/** Die Shell-Tests brauchen die gebaute Oberfläche: `npm test` baut sie vorher, `test:unit` (und CI) nicht. */
-const UI_BUILT = existsSync(join(import.meta.dirname, '..', '..', 'dist', 'ui', 'browser', 'index.html'));
-const NEEDS_UI = UI_BUILT ? {} : { skip: 'dist/ui fehlt (npm run build:ui)' };
 
 function basicAuth(): string {
   return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`;
@@ -211,7 +216,7 @@ test('2FA einrichten verlangt das Passwort und bei aktivem zweitem Faktor einen 
   }
 });
 
-test('serves the Angular application shell', NEEDS_UI, async () => {
+test('serves the Angular application shell', async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/`, {
@@ -750,7 +755,7 @@ test('moves a workflow step to another phase with one order call per phase (drag
   });
 });
 
-test('serves the Angular bundle from the application shell', NEEDS_UI, async () => {
+test('serves the Angular bundle from the application shell', async () => {
   await withServer(recordingPool().pool, async (baseUrl) => {
     const html = await (await fetch(`${baseUrl}/`, { headers: { Authorization: basicAuth() } })).text();
     assert.match(html, /<app-root><\/app-root>/);
