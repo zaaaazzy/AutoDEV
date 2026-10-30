@@ -394,19 +394,24 @@ export function dependencyStamp(worktree: string): string | null {
     .slice(0, 16);
 }
 
+/** Sperrdatei im Volume: hält die Installation fest, solange sie läuft (flock, auch über Worker-Neustarts hinweg). */
+export const DEPENDENCY_LOCK = 'node_modules/.aideation-install.lock';
+
 /**
  * Installiert nur, wenn der Stempel im Volume nicht passt, und dann frisch (Reste eines abgebrochenen Laufs liessen
  * npm mit ENOTEMPTY scheitern; der Cache bleibt). npm install statt npm ci: node_modules ist ein Mountpunkt,
  * den npm ci löschen wollte. Ohne Installationsskripte, wie bei den Agents; der Cache liegt im Volume (HOME ist im
- * Container nicht beschreibbar).
+ * Container nicht beschreibbar). Die Sperre gilt für alle Container am selben Volume: Startet der Worker neu, während
+ * npm im Arbeitscontainer weiterläuft, wartet die nächste Installation und prüft danach den Stempel (sonst ENOENT).
  */
 export function dependencyCommand(stamp: string): string[] {
   return [
     'sh',
     '-c',
-    `[ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
-      '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} + && ' +
-      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }`,
+    `exec 9>${DEPENDENCY_LOCK} && flock 9 && ` +
+      `{ [ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
+      '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache ! -name .aideation-install.lock -exec rm -rf {} + && ' +
+      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }; }`,
   ];
 }
 
