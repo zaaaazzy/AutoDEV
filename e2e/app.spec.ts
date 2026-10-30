@@ -817,6 +817,108 @@ test('Mehrfachauswahl: mehrere Aufträge markieren, Priorität setzen und gemein
   for (const id of ids) await request.delete(`/api/development/${id}`, { headers });
 });
 
+test('Ideen: mehrere markieren, Priorität setzen und mit Grund ablehnen; Schnell ablehnen schließt mit Escape', async ({
+  page,
+  request,
+}) => {
+  const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
+  const stamp = `${test.info().project.name} ${Date.now()}`;
+  const titles = ['A', 'B', 'C'].map((letter) => `Massen-Idee ${letter} ${stamp}`);
+  const quickTitle = `Schnell-Idee ${stamp}`;
+  const ids: string[] = [];
+  for (const title of [...titles, quickTitle]) {
+    const created = await request.post('/api/projects/e2e/ideation', { headers, data: { title, priority: 'low' } });
+    expect(created.ok(), await created.text()).toBeTruthy();
+    ids.push(((await created.json()) as { item: { id: string } }).item.id);
+  }
+  const quickId = ids.pop()!;
+  const board = async () =>
+    (await (await request.get('/api/projects/e2e/board', { headers })).json()) as {
+      ideas: { id: string; status: string; priority: string; rejectionReason: string | null }[];
+      comments: { ideationId: string; body: string }[];
+    };
+  const ideaOf = async (id: string) => (await board()).ideas.find((idea) => idea.id === id);
+  const pick = async () => {
+    for (const title of titles) await page.getByRole('checkbox', { name: `Für Auftrag auswählen: ${title}` }).check();
+  };
+
+  await login(page);
+  await page.goto('/#ideation');
+  // Bulk-Leiste: neben „Aufträge erstellen“ stehen „Ablehnen mit Grund“ und „Priorität setzen“.
+  await pick();
+  const bar = page.locator('app-bulk-bar');
+  await expect(bar).toContainText('3 Ideen ausgewählt');
+  await expect(bar.getByRole('button', { name: '3 Aufträge erstellen' })).toBeVisible();
+  await expect(bar.getByRole('button', { name: 'Ablehnen mit Grund' })).toBeVisible();
+
+  // Priorität „Hoch“ für alle drei; danach ist die Auswahl leer und die Leiste weg.
+  await bar.getByRole('button', { name: 'Priorität setzen' }).click();
+  const priority = page.getByRole('dialog', { name: 'Priorität setzen' });
+  await expect(priority).toContainText('Priorität für 3 Ideen');
+  await priority.getByRole('button', { name: 'Hoch' }).click();
+  await expect(page.getByText('3 von 3 Ideen neu priorisiert.')).toBeVisible();
+  await expect(bar).toHaveCount(0);
+  for (const id of ids) expect((await ideaOf(id))?.priority).toBe('high');
+
+  // Ablehnen mit Grund: ohne Grund (leer oder nur Leerzeichen) ist der Knopf deaktiviert.
+  await pick();
+  await bar.getByRole('button', { name: 'Ablehnen mit Grund' }).click();
+  const rejectMany = page.getByRole('dialog', { name: 'Ablehnen mit Grund' });
+  const submitMany = rejectMany.getByRole('button', { name: '3 Ideen ablehnen' });
+  await expect(rejectMany.getByLabel(/Ablehnungsgrund/)).toBeFocused();
+  await expect(submitMany).toBeDisabled();
+  await rejectMany.getByLabel(/Ablehnungsgrund/).fill('   ');
+  await expect(submitMany).toBeDisabled();
+  const reason = `Passt nicht zur Vision ${stamp}`;
+  await rejectMany.getByLabel(/Ablehnungsgrund/).fill(reason);
+  await submitMany.click();
+  await expect(page.getByText('3 von 3 Ideen abgelehnt.')).toBeVisible();
+  await expect(rejectMany).toHaveCount(0);
+  const afterReject = await board();
+  for (const id of ids) {
+    const idea = afterReject.ideas.find((candidate) => candidate.id === id);
+    expect(idea?.status).toBe('rejected');
+    expect(idea?.rejectionReason).toBe(reason);
+    const comments = afterReject.comments.filter((comment) => comment.ideationId === id);
+    expect(comments.map((comment) => comment.body)).toEqual([`**Abgelehnt:** ${reason}`]);
+  }
+  // Abgelehnte Ideen sind gesperrt: Eine zweite Massenaktion überspringt sie als „nicht möglich“.
+  const again = await request.post('/api/ideation/bulk/priority', { headers, data: { ids, priority: 'low' } });
+  expect(((await again.json()) as { skipped: { reason: string }[] }).skipped.map((idea) => idea.reason)).toEqual([
+    'nicht möglich',
+    'nicht möglich',
+    'nicht möglich',
+  ]);
+
+  // Schnell ablehnen: Escape schließt nur das Popover, speichert nichts und gibt den Fokus an den Knopf zurück.
+  const openTable = page.locator('app-data-table').first();
+  const quickRow = openTable.locator('tbody tr').filter({ hasText: quickTitle });
+  const quickButton = quickRow.getByRole('button', { name: `Schnell ablehnen: ${quickTitle}` });
+  await expect(quickRow.getByRole('button', { name: `Idee bearbeiten: ${quickTitle}` })).toBeVisible();
+  await quickButton.click();
+  const quick = page.getByRole('dialog', { name: `Schnell ablehnen: ${quickTitle}` });
+  await quick.getByLabel(/Ablehnungsgrund/).fill('Doch nicht');
+  await page.keyboard.press('Escape');
+  await expect(quick).toHaveCount(0);
+  await expect(quickButton).toBeFocused();
+  const untouched = await board();
+  expect(untouched.ideas.find((idea) => idea.id === quickId)?.status).toBe('idea');
+  expect(untouched.comments.some((comment) => comment.ideationId === quickId)).toBe(false);
+
+  // Erneut öffnen (Feld ist wieder leer), Grund eingeben und ablehnen: Die Idee wandert zu „Abgeschlossene Ideen“.
+  await quickButton.click();
+  await expect(quick.getByLabel(/Ablehnungsgrund/)).toHaveValue('');
+  await quick.getByLabel(/Ablehnungsgrund/).fill('Kein Bedarf');
+  await quick.getByRole('button', { name: 'Ablehnen' }).click();
+  await expect(page.getByText('Idee abgelehnt.')).toBeVisible();
+  await expect(quickRow).toHaveCount(0);
+  const closedToggle = page.getByRole('button', { name: /Abgeschlossene Ideen/ });
+  if ((await closedToggle.getAttribute('aria-expanded')) !== 'true') await closedToggle.click();
+  const closedRow = page.locator('.panel', { has: closedToggle }).locator('tbody tr').filter({ hasText: quickTitle });
+  await expect(closedRow).toContainText('Abgelehnt');
+  expect((await ideaOf(quickId))?.rejectionReason).toBe('Kein Bedarf');
+});
+
 test('Sprintplanung: Vorschlag mit Begründung und Summen, Aufträge ab- und zuwählen', async ({ page, request }) => {
   const headers = { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` };
   const title = `Planungs-Auftrag ${test.info().project.name} ${Date.now()}`;

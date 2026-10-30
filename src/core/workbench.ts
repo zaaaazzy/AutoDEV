@@ -158,10 +158,17 @@ const slugOf = (project: string): string =>
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'projekt';
 
-/** Compose-Projekt und Containername je Projekt und Worktree (Agent-Ordner und Live-Ordner sind getrennt). */
-export function workbenchName(project: string, worktree: string): string {
-  const key = createHash('sha256').update(worktree).digest('hex').slice(0, 6);
-  return `aideation-wb-${slugOf(project)}-${key}`;
+/**
+ * Compose-Projekt je Projekt, z. B. „agents_mainty“ (in Docker Desktop eine Gruppe je Anwendung). Ein Projekt hat einen
+ * Arbeitsordner; käme ein anderer dazu, ändert sich der Fingerabdruck und der Stapel wird neu erstellt.
+ */
+export function workbenchName(project: string): string {
+  return `agents_${slugOf(project)}`;
+}
+
+/** Containername eines Dienstes im Stapel, z. B. „agents_mainty_workbench“, „agents_mainty_docker“. */
+export function workbenchContainer(project: string, service = 'workbench'): string {
+  return `${workbenchName(project)}_${service}`;
 }
 
 export interface WorkbenchOptions extends Pick<
@@ -196,19 +203,19 @@ const literalRecord = (record: Record<string, string> = {}): Record<string, stri
 /** Compose-Konfiguration des Stapels (JSON ist gültiges YAML). Enthält nie ein Geheimnis. */
 export function workbenchCompose(worktree: string, options: WorkbenchOptions): Record<string, unknown> {
   const platform = options.platform ?? process.platform;
-  const name = workbenchName(options.project, worktree);
+  const name = workbenchName(options.project);
   const extras = options.extras ?? { services: {}, environment: {} };
   const user = sandboxUser(options);
   const workspace = `${hostMount(worktree, platform)}:${SANDBOX_WORKDIR}`;
   const modules = modulesVolume(options.project);
-  const dockerData = `${name}-docker`;
+  const dockerData = `${name}_docker`;
   const proxy = { HTTPS_PROXY: EGRESS_URL, HTTP_PROXY: EGRESS_URL, https_proxy: EGRESS_URL, http_proxy: EGRESS_URL };
   const noProxy = { NO_PROXY: SANDBOX_NO_PROXY, no_proxy: SANDBOX_NO_PROXY };
   const shared = { network_mode: 'service:workbench', depends_on: ['workbench'], restart: 'unless-stopped' };
   const services: Record<string, unknown> = {
     workbench: {
       image: options.image ?? SANDBOX_IMAGE,
-      container_name: name,
+      container_name: workbenchContainer(options.project),
       command: WORKBENCH_START.map(literal),
       ...(user ? { user } : {}),
       cap_drop: ['ALL'],
@@ -235,6 +242,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
     },
     docker: {
       image: WORKBENCH_DOCKER_IMAGE,
+      container_name: workbenchContainer(options.project, 'docker'),
       privileged: true,
       ...shared,
       // Ausdrücklich „dockerd“: sonst hängt das Entrypoint-Skript tcp://0.0.0.0:2375 an – erreichbar aus dem ganzen
@@ -251,6 +259,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
   for (const [service, extra] of Object.entries(extras.services)) {
     services[service] = {
       image: extra.image,
+      container_name: workbenchContainer(options.project, service),
       ...shared,
       cap_drop: ['ALL'],
       cap_add: ['CHOWN', 'SETUID', 'SETGID', 'DAC_OVERRIDE', 'FOWNER'],
@@ -295,7 +304,7 @@ export function ensureWorkbench(
 ): Promise<string | null> {
   const compose = workbenchCompose(worktree, options);
   const hash = workbenchHash(compose);
-  const name = workbenchName(options.project, worktree);
+  const name = workbenchName(options.project);
   const key = `${name}:${hash}`;
   let pending = ready.get(key);
   if (!pending) {
@@ -321,7 +330,7 @@ async function startWorkbench(
   hash: string,
 ): Promise<string | null> {
   const env = dockerClientEnvironment(options.environment);
-  const name = workbenchName(options.project, worktree);
+  const name = workbenchName(options.project);
   const run = (command: string[], timeoutMs = CHECK_TIMEOUT_MS): Promise<CommandResult> =>
     docker(command, worktree, { timeoutMs, env }).catch(failed);
   const state = await run([
@@ -329,7 +338,7 @@ async function startWorkbench(
     'inspect',
     '--format',
     `{{.State.Running}} {{index .Config.Labels "${WORKBENCH_HASH_LABEL}"}}`,
-    name,
+    workbenchContainer(options.project),
   ]);
   if (state.exitCode === 0 && state.output.trim() === `true ${hash}`) return null;
   const volume = await prepareModulesVolume(docker, { ...options, runId: options.runId }, env, worktree);
@@ -377,7 +386,7 @@ export function workbenchExecArgs(
     '-e',
     `AIDEATION_RUN=${options.runId}`,
     ...credentials.flatMap((name) => ['-e', name]),
-    workbenchName(options.project, worktree),
+    workbenchContainer(options.project),
     // -w: warten und den Exit-Code weitergeben (ohne -w forkt setsid und kehrt sofort zurück).
     'setsid',
     '-w',
@@ -450,7 +459,7 @@ export async function runInWorkbench(
   if (options.dependencies !== false) {
     const stamp = dependencyStamp(worktree);
     if (stamp) {
-      const key = `${workbenchName(options.project, worktree)}:${stamp}`;
+      const key = `${workbenchName(options.project)}:${stamp}`;
       let install = installs.get(key);
       if (!install) {
         install = runInWorkbench(dependencyCommand(stamp), worktree, {
@@ -475,7 +484,7 @@ export async function runInWorkbench(
   }
   noteProblem(options.project, null);
   if (signal?.aborted) return { exitCode: 130, durationMs: 0, output: 'Abgebrochen, bevor der Lauf startete.\n' };
-  const name = workbenchName(options.project, worktree);
+  const name = workbenchContainer(options.project);
   const args = workbenchExecArgs(command, worktree, { ...options, environment: source });
   let killing: Promise<unknown> | null = null;
   const killGroup = (): Promise<unknown> => {
@@ -522,7 +531,7 @@ export async function stopWorkbench(
   worktree: string,
   docker: CommandExecutor = runCommand,
 ): Promise<CommandResult> {
-  const name = workbenchName(project, worktree);
+  const name = workbenchName(project);
   const file = join(workbenchDirectory(), `${name}.json`);
   if (!existsSync(file)) return { exitCode: 0, durationMs: 0, output: 'Kein Arbeitscontainer.\n' };
   return docker(['docker', 'compose', '-f', file, '-p', name, 'down'], worktree, {

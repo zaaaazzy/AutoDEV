@@ -20,6 +20,7 @@
     "../src/core/layout-measure.ts",
     "../src/core/cron.ts",
     "../src/core/development-transitions.ts",
+    "../src/core/estimate-overrun.ts",
     "../src/core/sprint-rules.ts"
   ],
   "exclude": ["src/**/*.spec.ts"]

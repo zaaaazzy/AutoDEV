@@ -15,6 +15,10 @@ export const IDEA_STATUSES = [
 export const IDEA_SELECTABLE_STATUSES = ['idea', 'considering', 'review'];
 /** Bearbeitbar wie auf dem Server: nicht während der Auftragsautor schreibt und nicht nach der Annahme. */
 export const IDEA_EDITABLE_STATUSES = [...IDEA_SELECTABLE_STATUSES, 'rejected'];
+/** Ablehnen (einzeln und als Massenaktion) wie auf dem Server: nur aus den manuell bearbeitbaren Status. */
+export const IDEA_REJECTABLE_STATUSES = IDEA_SELECTABLE_STATUSES;
+/** Höchstlänge des Ablehnungsgrunds wie `MAX_REJECTION_REASON` auf dem Server. */
+export const MAX_REJECTION_REASON = 1000;
 /** Noch nicht abgeschlossene Ideen: weder angenommen (bzw. umgesetzt) noch abgelehnt. */
 export const OPEN_IDEA_STATUSES = ['idea', 'considering', 'review', 'requested', 'drafting'];
 

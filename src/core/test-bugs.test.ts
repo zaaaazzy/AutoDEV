@@ -41,7 +41,7 @@ test('Testbefunde: fehlgeschlagener Schritt ohne Einzeltests wird ein Bug mit Au
 });
 
 test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüft; Rolle „Agents ausführen“', () => {
-  assert.deepEqual(fullTestCommand('dev-log', { id: 'a1', scope: 'full' }), [
+  assert.deepEqual(fullTestCommand('dev-log', { id: 'a1', scope: 'full', evidenceId: null }), [
     'npm',
     'run',
     'test:full',
@@ -52,7 +52,7 @@ test('Kompletter Test: Befehl mit Projekt, Anfrage und Bugs; Umfang wird geprüf
     'a1',
     '--bugs',
   ]);
-  assert.equal(fullTestCommand('dev-log', { id: 'a1', scope: 'ui' }).at(-1), '--nur-oberflaeche');
+  assert.equal(fullTestCommand('dev-log', { id: 'a1', scope: 'ui', evidenceId: null }).at(-1), '--nur-oberflaeche');
   assert.equal(parseScope({}), 'full');
   assert.equal(parseScope({ scope: 'ui' }), 'ui');
   assert.equal(parseScope({ scope: 'alles' }), null);

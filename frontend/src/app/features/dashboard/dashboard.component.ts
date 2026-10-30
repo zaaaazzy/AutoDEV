@@ -9,6 +9,8 @@ import { NgClass } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { AgentActivityService } from '../../core/agent-activity.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
+import { OVERRUN_FACTOR } from '../../../../../src/core/estimate-overrun.js';
+import { overrunText } from './estimate-overruns.js';
 import { ProjectStore } from '../../core/project-store.js';
 import {
   CATEGORIES,
@@ -72,6 +74,11 @@ export class DashboardComponent {
   protected readonly data = this.store.data;
   protected readonly worker = this.store.worker;
   protected readonly recentRuns = RECENT_RUNS;
+
+  /** Laufende Aufträge über der Dreifach-Schwelle (berechnet in der API, siehe src/core/estimate-overrun.ts). */
+  protected readonly overruns = computed(() => this.data().stats?.overruns ?? []);
+  protected readonly overrunFactor = OVERRUN_FACTOR;
+  protected readonly overrunText = overrunText;
 
   protected readonly activeSprint = computed(
     () => this.data().sprints.find((sprint) => sprint.status === 'active') ?? null,

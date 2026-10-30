@@ -28,6 +28,22 @@
   </section>
   <app-chat />
   <section class="view-grid">
+    @if (overruns().length) {
+      <!-- Reine Anzeige: laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung, unabhängig vom Budget. -->
+      <article class="panel attention-panel estimate-overruns" data-testid="estimate-overruns">
+        <div class="section-heading">
+          <h2>Schätzung überschritten</h2>
+          <span class="muted">mehr als {{ overrunFactor }}× der kalibrierten Schätzung</span>
+        </div>
+        @for (entry of overruns(); track entry.id) {
+          <button type="button" class="list-row list-link" (click)="store.navigate('development', { focus: entry.id })">
+            <strong>{{ entry.title }}</strong>
+            <span class="status" [ngClass]="entry.status | statusClass">{{ entry.status | statusLabel }}</span>
+            <span>{{ overrunText(entry) }}</span>
+          </button>
+        }
+      </article>
+    }
     <article class="panel">
       <div class="section-heading">
         <h2>Projektübersicht</h2>

@@ -12,6 +12,22 @@ import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';
 import { DEFAULT_OLLAMA_URL, patientFetch, requestOllamaChat, resolveModel } from './ollama-client.js';
+import {
+  AUTHOR_PROMPT_SOURCES,
+  loadSegmentFactor,
+  MIN_CALIBRATION_SAMPLES,
+  type Segment,
+  type SegmentFactor,
+  type SegmentScope,
+  segmentScopeLabel,
+} from '../core/estimate-calibration.js';
+import {
+  ORDER_KIND_LABELS,
+  type OrderKind,
+  STEP_CLASS_LABELS,
+  STEP_CLASS_LIMITS,
+  type StepClass,
+} from '../core/estimate-overrun.js';
 
 export interface Estimate {
   effortHours: number | null;
@@ -73,17 +89,40 @@ export interface ActualReference {
   count: number;
   medianHours: number;
   medianTokens: number;
+  /** Gesetzt, wenn der Median nur Aufträge derselben Art und Schrittklasse enthält. */
+  kind?: OrderKind;
+  stepClass?: StepClass | null;
+  /** Korrekturfaktor (Ist ÷ Schätzung) der Gruppe, ohne Schätzungen des Altbestands. */
+  factor?: { value: SegmentFactor; segment: Segment };
 }
 
 /**
  * Lernende Schätzung: Median-Ist-Werte erledigter Aufträge derselben Kategorie (ohne Kategorie: Aufträge ohne
- * Kategorie). null, solange es keine solchen Aufträge mit gemessenem Verbrauch gibt.
+ * Kategorie), mit `segment` zusätzlich derselben Art und Schrittklasse. null, solange es keine solchen Aufträge mit
+ * gemessenem Verbrauch gibt.
  */
 export async function loadActualReference(
   pool: Pool,
   project: string,
   category: string | null,
+  segment?: Pick<Segment, 'kind' | 'stepClass'>,
 ): Promise<ActualReference | null> {
+  const values: unknown[] = [project, category];
+  const filters: string[] = [];
+  const having: string[] = [];
+  if (segment) {
+    values.push(segment.kind);
+    filters.push(`AND d.kind = $${values.length}`);
+    if (segment.stepClass) {
+      const range = stepRange(segment.stepClass);
+      values.push(range.min);
+      having.push(`AND COUNT(st.id) >= $${values.length}`);
+      if (range.max !== null) {
+        values.push(range.max);
+        having.push(`AND COUNT(st.id) <= $${values.length}`);
+      }
+    }
+  }
   const row = (
     await pool.query<{ count: string; hours: string | null; tokens: string | null }>(
       `SELECT COUNT(*) AS count,
@@ -94,9 +133,10 @@ export async function loadActualReference(
                  JOIN agent_runs r ON r.development_id = d.id
                  JOIN agent_run_steps st ON st.run_id = r.id
                 WHERE d.project_slug = $1 AND d.status = 'done' AND d.category IS NOT DISTINCT FROM $2
+                      ${filters.join(' ')}
                 GROUP BY d.id
-               HAVING SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0) done`,
-      [project, category],
+               HAVING (SUM(st.tokens) > 0 OR SUM(st.duration_ms) > 0) ${having.join(' ')}) done`,
+      values,
     )
   ).rows[0];
   const count = Number(row?.count ?? 0);
@@ -106,8 +146,40 @@ export async function loadActualReference(
     count,
     medianHours: Math.round(Number(row?.hours ?? 0) * 10) / 10,
     medianTokens: Math.round(Number(row?.tokens ?? 0)),
+    ...(segment ? { kind: segment.kind, stepClass: segment.stepClass } : {}),
   };
 }
+
+/** Schrittzahlen einer Schrittklasse (für SQL). */
+function stepRange(stepClass: StepClass): { min: number; max: number | null } {
+  if (stepClass === 'small') return { min: 0, max: STEP_CLASS_LIMITS.small };
+  if (stepClass === 'medium') return { min: STEP_CLASS_LIMITS.small + 1, max: STEP_CLASS_LIMITS.medium };
+  return { min: STEP_CLASS_LIMITS.medium + 1, max: null };
+}
+
+/**
+ * Referenz für den Auftragsautor: Median der feinsten Gruppe mit genug Aufträgen (Art und Schrittklasse, sonst nur
+ * Kategorie) und der Korrekturfaktor der Gruppe. Schätzungen des Altbestands (Menschenstunden) zählen dabei nicht.
+ */
+export async function loadAuthorReference(
+  pool: Pool,
+  project: string,
+  segment: Segment,
+): Promise<ActualReference | null> {
+  const fine = await loadActualReference(pool, project, segment.category, segment);
+  const reference =
+    fine && fine.count >= MIN_CALIBRATION_SAMPLES
+      ? fine
+      : ((await loadActualReference(pool, project, segment.category)) ?? fine);
+  const value = await loadSegmentFactor(pool, project, segment, AUTHOR_PROMPT_SOURCES);
+  if (!reference && value.scope === 'default' && value.tokenScope === 'default') return null;
+  return {
+    ...(reference ?? { category: segment.category, count: 0, medianHours: 0, medianTokens: 0 }),
+    factor: { value, segment },
+  };
+}
+
+const decimal = (value: number): string => String(value).replace('.', ',');
 
 /**
  * Einheit der Schätzung für beide Prompts (Schnellschätzung und Auftragsautor): gemessen und eingeplant wird die
@@ -120,13 +192,37 @@ export const ESTIMATE_UNIT_HINT =
 /** Abschnitt für den Autor-Prompt: die Schätzung an echten Ist-Werten ausrichten. */
 export function referenceSection(reference: ActualReference): string {
   const scope = reference.category ? `der Kategorie „${reference.category}“` : 'ohne Kategorie';
+  const group = reference.kind
+    ? ` (${[ORDER_KIND_LABELS[reference.kind], reference.stepClass ? STEP_CLASS_LABELS[reference.stepClass] : '']
+        .filter(Boolean)
+        .join(', ')})`
+    : '';
   return [
     '## Ist-Werte ähnlicher erledigter Aufträge (für die Schätzung)',
-    `${reference.count} erledigte Aufträge ${scope}: Median ${String(reference.medianHours).replace('.', ',')} h ` +
-      `Agent-Laufzeit und ${reference.medianTokens} Tokens je Auftrag.`,
+    ...(reference.count
+      ? [
+          `${reference.count} erledigte Aufträge ${scope}${group}: Median ${decimal(reference.medianHours)} h ` +
+            `Agent-Laufzeit und ${reference.medianTokens} Tokens je Auftrag.`,
+        ]
+      : []),
+    ...(reference.factor ? [factorLine(reference.factor.value, reference.factor.segment)] : []),
     'Richte effortHours und tokenEstimate an diesen Werten aus; weiche nur ab, wenn der Auftrag deutlich größer ' +
       'oder kleiner ist, und begründe das kurz in den technischen Hinweisen.',
   ].join('\n');
+}
+
+/** Zeile mit dem Korrekturfaktor: so weit lagen bisherige Schätzungen (ohne Altbestand) im Median daneben. */
+export function factorLine(factor: SegmentFactor, segment: Segment): string {
+  const part = (label: string, value: number, samples: number, scope: SegmentScope): string =>
+    scope === 'default'
+      ? `${label} ×1 (zu wenige Messwerte)`
+      : `${label} ×${decimal(value)} (${samples} Messwerte, Gruppe: ${segmentScopeLabel(segment, scope)})`;
+  return (
+    `Korrekturfaktor bisheriger Schätzungen (Ist ÷ Schätzung): ` +
+    `${part('Stunden', factor.hours, factor.samples, factor.scope)}; ` +
+    `${part('Tokens', factor.tokens, factor.tokenSamples, factor.tokenScope)}. ` +
+    'Multipliziere deine erste Schätzung mit dem Faktor, bevor du sie angibst.'
+  );
 }
 
 const ESTIMATE_TIMEOUT_MS = 90_000;

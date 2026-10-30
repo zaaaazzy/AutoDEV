@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
@@ -379,6 +379,23 @@ export async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
+/**
+ * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
+ * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
+ * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
+ * ohne Sandbox wieder her.
+ */
+export function replaceLinkedModules(worktree: string): void {
+  const path = join(worktree, 'node_modules');
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return;
+    rmSync(path);
+    mkdirSync(path);
+  } catch {
+    // Kein node_modules oder nicht änderbar: Der Lauf geht trotzdem weiter.
+  }
+}
+
 /** Stempel im node_modules-Volume: Hash der package-lock.json, mit dem zuletzt installiert wurde. */
 export const DEPENDENCY_STAMP = 'node_modules/.aideation-lock';
 export const INSTALL_TIMEOUT_MS = 15 * 60_000;
@@ -394,19 +411,24 @@ export function dependencyStamp(worktree: string): string | null {
     .slice(0, 16);
 }
 
+/** Sperrdatei im Volume: hält die Installation fest, solange sie läuft (flock, auch über Worker-Neustarts hinweg). */
+export const DEPENDENCY_LOCK = 'node_modules/.aideation-install.lock';
+
 /**
  * Installiert nur, wenn der Stempel im Volume nicht passt, und dann frisch (Reste eines abgebrochenen Laufs liessen
  * npm mit ENOTEMPTY scheitern; der Cache bleibt). npm install statt npm ci: node_modules ist ein Mountpunkt,
  * den npm ci löschen wollte. Ohne Installationsskripte, wie bei den Agents; der Cache liegt im Volume (HOME ist im
- * Container nicht beschreibbar).
+ * Container nicht beschreibbar). Die Sperre gilt für alle Container am selben Volume: Startet der Worker neu, während
+ * npm im Arbeitscontainer weiterläuft, wartet die nächste Installation und prüft danach den Stempel (sonst ENOENT).
  */
 export function dependencyCommand(stamp: string): string[] {
   return [
     'sh',
     '-c',
-    `[ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
-      '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} + && ' +
-      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }`,
+    `exec 9>${DEPENDENCY_LOCK} && flock 9 && ` +
+      `{ [ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
+      '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache ! -name .aideation-install.lock -exec rm -rf {} + && ' +
+      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }; }`,
   ];
 }
 
@@ -615,6 +637,7 @@ export async function runInSandbox(
     return blocked(missing, redactWith);
   }
   if (options.workspace !== false) {
+    replaceLinkedModules(worktree);
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;

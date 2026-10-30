@@ -24,12 +24,15 @@ import {
   acceptanceProblems,
   manualChecks,
   parseAcceptance,
+  parseEvidence,
   saveAcceptance,
+  saveEvidence,
   stripAcceptance,
+  stripEvidence,
   waiveUnmeasuredCoverage,
 } from './acceptance.js';
 import type { BudgetState } from './budget.js';
-import { buildPrompt } from './runner-prompts.js';
+import { buildPrompt, EVIDENCE_ROLES } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { testerPlan } from './order-tests.js';
 import {
@@ -417,6 +420,16 @@ export async function runStep(
           { project: item.projectSlug },
         );
       }
+    }
+  }
+  // Offene Testnachweise (@@NACHWEIS) von Tester und Dokumentierer: als test_evidence speichern und aus Ausgabe und
+  // Auftragsdoku entfernen. Sie setzen keine Aktion (action_todo): Autopilot und Sprintabschluss bleiben unberührt.
+  if (EVIDENCE_ROLES.has(agent.role) && !cancelled) {
+    const evidence = parseEvidence(output);
+    output = stripEvidence(output);
+    if (evidence.length) {
+      const created = await saveEvidence(pool, item.id, evidence, agent.name).catch(logged('runner-steps', 0));
+      await logEvent(pool, stepId, `Testnachweise: ${evidence.length} gemeldet, ${created} neu`);
     }
   }
   // Der Reviewer muss ausdrücklich freigeben; ohne eindeutiges Ergebnis gilt der Schritt als nicht bestanden.
