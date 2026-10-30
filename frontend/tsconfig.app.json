@@ -20,7 +20,10 @@
     "../src/core/layout-measure.ts",
     "../src/core/cron.ts",
     "../src/core/development-transitions.ts",
-    "../src/core/sprint-rules.ts"
+    "../src/core/sprint-rules.ts",
+    "../src/core/shared-types.ts",
+    "../src/core/status.ts",
+    "../src/core/defined.ts"
   ],
   "exclude": ["src/**/*.spec.ts"]
 }

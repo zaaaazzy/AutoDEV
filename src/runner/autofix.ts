@@ -8,6 +8,7 @@ import { shortTitle } from '../core/validation.js';
 import type { Pool } from 'pg';
 import { reportAgentBug } from '../api/bugs.js';
 import { UNTRUSTED_START } from './hoster.js';
+import { defined } from '../core/defined.js';
 
 const MAX_AUTO_RETRIES = 2;
 
@@ -63,7 +64,7 @@ export function usageLimitReset(output: string, now = new Date()): Date | null {
   const match = tail.match(LIMIT_RESET);
   if (!match) return new Date(now.getTime() + 60 * 60_000);
   const [, month, day, hour, minute, meridiem] = match;
-  const hours = (Number(hour) % 12) + (meridiem!.toLowerCase() === 'pm' ? 12 : 0);
+  const hours = (Number(hour) % 12) + (defined(meridiem).toLowerCase() === 'pm' ? 12 : 0);
   const reset = new Date(now);
   reset.setHours(hours, Number(minute ?? 0), 0, 0);
   const monthIndex = month ? MONTHS.indexOf(month.toLowerCase()) : -1;

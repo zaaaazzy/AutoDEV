@@ -1,6 +1,7 @@
 import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { generateSprintReport } from '../api/reports.js';
+import { defined } from '../core/defined.js';
 
 /**
  * „Aktion notwendig“: Aufträge, die nicht an einem Code-Fehler scheitern, sondern auf einen Menschen warten
@@ -89,7 +90,9 @@ const NO_ACTION = /^(keine|nichts|-|n\/a)\s*($|[.,;:!]|[–—-](\s|$)|\()/i;
 export function parseActionLine(output: string): string | null | undefined {
   const match = output.match(/^\s*AKTION:\s*(.+)$/im);
   if (!match) return undefined;
-  const value = match[1]!.trim().replace(/^["„]|["“]$/g, '');
+  const value = defined(match[1])
+    .trim()
+    .replace(/^["„]|["“]$/g, '');
   return NO_ACTION.test(value) ? null : shorten(value);
 }
 

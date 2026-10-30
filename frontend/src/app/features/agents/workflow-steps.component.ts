@@ -19,6 +19,7 @@ import {
 } from './agent-options.js';
 import type { PermissionGroupInfo } from './permission-picker.component.js';
 import { applyOrders, moveStep, stepsInPhase, type PhaseOrder } from './workflow-order.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /**
  * Workflow als aufklappbare Karte: für jeden Zeitpunkt (Sprintstart, vor/während/nach dem Auftrag, abgelehnt,
@@ -414,7 +415,7 @@ export class WorkflowStepsComponent {
     const index = ids.indexOf(step.id);
     const target = index + direction;
     if (index < 0 || target < 0 || target >= ids.length) return;
-    [ids[index], ids[target]] = [ids[target]!, ids[index]!];
+    [ids[index], ids[target]] = [defined(ids[target]), defined(ids[index])];
     await this.change(
       () => this.api.post(`${this.path()}/order`, { phase: step.phase, ids }),
       'Reihenfolge gespeichert.',

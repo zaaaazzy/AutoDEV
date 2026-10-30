@@ -1,3 +1,5 @@
+import { defined } from './defined.js';
+
 /**
  * Arbeitszeiten eines Projekts für den Sprint-Autopilot: Zeitfenster „HH:MM“–„HH:MM“ an ausgewählten Wochentagen
  * (1 = Montag … 7 = Sonntag, ISO). Ein Fenster über Mitternacht (22:00–06:00) gehört zum Tag, an dem es beginnt;
@@ -42,12 +44,12 @@ const DAY_LABELS = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 /** Kurzform für Meldungen, z. B. „Mo–Fr 08:00–18:00“ bzw. „Mo, Mi 08:00–18:00“. */
 export function describeWorkingHours(hours: WorkingHours): string {
   const days = [...hours.days].sort((a, b) => a - b);
-  const consecutive = days.every((day, index) => index === 0 || day === days[index - 1]! + 1);
+  const consecutive = days.every((day, index) => index === 0 || day === defined(days[index - 1]) + 1);
   const label =
     days.length === 7
       ? 'täglich'
       : consecutive && days.length > 2
-        ? `${DAY_LABELS[days[0]! - 1]}–${DAY_LABELS[days[days.length - 1]! - 1]}`
+        ? `${DAY_LABELS[defined(days[0]) - 1]}–${DAY_LABELS[defined(days[days.length - 1]) - 1]}`
         : days.map((day) => DAY_LABELS[day - 1]).join(', ');
   return `${label} ${hours.start}–${hours.end}`;
 }

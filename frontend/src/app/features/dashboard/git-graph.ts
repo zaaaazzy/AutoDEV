@@ -1,3 +1,5 @@
+import { defined } from '../../../../../src/core/defined.js';
+
 /** Git-Verlauf vom Worker (siehe src/runner/git-graph.ts). */
 export interface GitCommit {
   hash: string;
@@ -47,7 +49,7 @@ export interface GraphEdge {
 
 /** Farbe einer Spur; die Palette wiederholt sich. */
 export function laneColor(index: number): string {
-  return PALETTE[index % PALETTE.length]!;
+  return defined(PALETTE[index % PALETTE.length]);
 }
 
 /** SVG-Pfad einer Kante: gerade Linie oder weiche Kurve zwischen zwei Spuren innerhalb einer Zeile. */
@@ -90,16 +92,16 @@ export function layoutGraph(commits: GitCommit[]): { rows: GraphRow[]; lanes: nu
       lanes[lane] = commit.hash;
       colors[lane] = nextColor++;
     }
-    const color = colors[lane]!;
+    const color = defined(colors[lane]);
     const edges: GraphEdge[] = [];
     // Durchlaufende Spuren und Spuren, die in diesen Commit münden.
     before.forEach((hash, index) => {
       if (!hash) return;
       if (hash === commit.hash) {
-        edges.push({ from: index, fromY: 0, to: lane, toY: 0.5, color: beforeColors[index]! });
+        edges.push({ from: index, fromY: 0, to: lane, toY: 0.5, color: defined(beforeColors[index]) });
         if (index !== lane) lanes[index] = null;
       } else {
-        edges.push({ from: index, fromY: 0, to: index, toY: 1, color: beforeColors[index]! });
+        edges.push({ from: index, fromY: 0, to: index, toY: 1, color: defined(beforeColors[index]) });
       }
     });
     // Eltern: der erste bleibt auf der Spur, weitere (Merge) öffnen oder treffen andere Spuren.
@@ -113,7 +115,7 @@ export function layoutGraph(commits: GitCommit[]): { rows: GraphRow[]; lanes: nu
         lanes[target] = parent;
         colors[target] = position === 0 ? color : nextColor++;
       }
-      edges.push({ from: lane, fromY: 0.5, to: target, toY: 1, color: colors[target]! });
+      edges.push({ from: lane, fromY: 0.5, to: target, toY: 1, color: defined(colors[target]) });
     });
     while (lanes.length && lanes[lanes.length - 1] === null) lanes.pop();
     colors = colors.slice(0, Math.max(lanes.length, 0));

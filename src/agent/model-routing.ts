@@ -1,32 +1,17 @@
 import type { Pool } from 'pg';
 import { asCommand } from './system-agents.js';
+import {
+  RULE_EFFECTS,
+  type ModelTier,
+  type RoutingCondition,
+  type RoutingRule,
+  type RuleEffect,
+} from '../core/shared-types.js';
 
-/** Modellstufen: lokal (Ollama) und stark (Claude-CLI bzw. ein anderer konfigurierter CLI-Befehl). */
-export const MODEL_TIERS = ['local', 'strong'] as const;
-export type ModelTier = (typeof MODEL_TIERS)[number];
-/** Ergebnis einer Regel: feste Stufe oder eine Stufe höher (Eskalation) bzw. tiefer (Sparmodus). */
-export const RULE_EFFECTS = ['local', 'strong', 'up', 'down'] as const;
-export type RuleEffect = (typeof RULE_EFFECTS)[number];
+export { MODEL_TIERS, RULE_EFFECTS } from '../core/shared-types.js';
+export type { ModelTier, RoutingCondition, RoutingRule, RuleEffect } from '../core/shared-types.js';
 
 export const CATEGORIES = ['frontend', 'backend', 'fullstack', 'infrastructure', 'docs', 'security'] as const;
-
-/** Alle angegebenen Teile müssen zutreffen; eine leere Bedingung trifft immer zu. */
-export interface RoutingCondition {
-  categories?: string[];
-  /** Schätzung (Stunden) größer als … */
-  minHours?: number;
-  /** Schätzung (Stunden) kleiner als … */
-  maxHours?: number;
-  /** retry_count mindestens … */
-  minRetries?: number;
-  /** Budget zu mehr als … % verbraucht */
-  minBudgetPercent?: number;
-}
-
-export interface RoutingRule {
-  condition: RoutingCondition;
-  tier: RuleEffect;
-}
 
 export interface RoutingInput {
   category: string | null;

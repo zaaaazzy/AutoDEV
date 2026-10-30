@@ -25,12 +25,12 @@ export const basicMatcher: Matcher = (before, after, output, width, height, opti
   // Gegen Weiss gemischt, damit Transparenz wie bei pixelmatch zählt.
   const blend = (channel: number, alpha: number): number => 255 + ((channel - 255) * alpha) / 255;
   for (let index = 0; index < width * height * 4; index += 4) {
-    const r1 = blend(before[index]!, before[index + 3]!);
-    const g1 = blend(before[index + 1]!, before[index + 3]!);
-    const b1 = blend(before[index + 2]!, before[index + 3]!);
-    const r2 = blend(after[index]!, after[index + 3]!);
-    const g2 = blend(after[index + 1]!, after[index + 3]!);
-    const b2 = blend(after[index + 2]!, after[index + 3]!);
+    const r1 = blend(before[index] ?? 0, before[index + 3] ?? 0);
+    const g1 = blend(before[index + 1] ?? 0, before[index + 3] ?? 0);
+    const b1 = blend(before[index + 2] ?? 0, before[index + 3] ?? 0);
+    const r2 = blend(after[index] ?? 0, after[index + 3] ?? 0);
+    const g2 = blend(after[index + 1] ?? 0, after[index + 3] ?? 0);
+    const b2 = blend(after[index + 2] ?? 0, after[index + 3] ?? 0);
     const y = (r1 - r2) * 0.29889531 + (g1 - g2) * 0.58662247 + (b1 - b2) * 0.11448223;
     const i = (r1 - r2) * 0.59597799 - (g1 - g2) * 0.2741761 - (b1 - b2) * 0.32180189;
     const q = (r1 - r2) * 0.21147017 - (g1 - g2) * 0.52261711 + (b1 - b2) * 0.31114694;
@@ -110,7 +110,7 @@ function halve(image: InstanceType<typeof PNG>): InstanceType<typeof PNG> {
         ] as const) {
           const sx = Math.min(image.width - 1, x * 2 + dx);
           const sy = Math.min(image.height - 1, y * 2 + dy);
-          sum += image.data[(sy * image.width + sx) * 4 + channel]!;
+          sum += image.data[(sy * image.width + sx) * 4 + channel] ?? 0;
           count += 1;
         }
         small.data[(y * width + x) * 4 + channel] = Math.round(sum / count);

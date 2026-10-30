@@ -7,6 +7,7 @@ import { completeSprint } from '../api/sprint-planning.js';
 import { type PushAudience, type PushMessage, sendPush } from '../core/push.js';
 import { sprintSettled } from './sprint-autopilot.js';
 import { type AlertLabels, BACKUP_FILE, collectProblems, evaluate, type WatchdogState } from './watchdog.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Zeitgesteuerte Wartungs-Jobs: Der Worker prüft in seinem Arbeitszyklus die Tabelle scheduled_jobs, beansprucht
@@ -473,7 +474,7 @@ export const JOB_KINDS: Readonly<Record<string, JobKind>> = Object.freeze({
 
 /** Job-Art aus der Registry; Object.hasOwn, damit „constructor“ & Co. nie als Art gelten. */
 export function jobKind(kind: string, registry: Readonly<Record<string, JobKind>> = JOB_KINDS): JobKind | null {
-  return Object.hasOwn(registry, kind) ? registry[kind]! : null;
+  return Object.hasOwn(registry, kind) ? defined(registry[kind]) : null;
 }
 
 export function timeoutMs(job: ScheduledJob, kind: JobKind): number {

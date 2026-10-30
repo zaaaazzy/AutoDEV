@@ -1,9 +1,14 @@
+// Status- und Routing-Typen kommen aus dem Backend (dort die einzige Definition), damit beide Seiten nicht
+// auseinanderlaufen.
+import type { BudgetPeriod, RoutingRule } from '../../../../src/core/shared-types.js';
+import type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+
+export type { BudgetPeriod, RoutingCondition, RoutingRule, RuleEffect } from '../../../../src/core/shared-types.js';
+export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
+
 export type Priority = 'low' | 'medium' | 'high';
 /** review = Pull Request offen (PR-Modus der GitHub-Brücke), Merge und Tag folgen nach grüner CI. */
-export type SprintStatus = 'planned' | 'active' | 'review' | 'completed' | 'cancelled';
 export type GithubMode = 'aus' | 'issues' | 'issues+pr';
-export type DevelopmentStatus = 'backlog' | 'planned' | 'in_progress' | 'blocked' | 'approval' | 'done' | 'rejected';
-export type BugStatus = 'open' | 'in_progress' | 'fixed' | 'wontfix' | 'rejected';
 /** Workflow-Phasen (Spalten im Workflow-Board); siehe src/core/workflow-phases.ts. */
 export type AgentPhase = 'pre_sprint' | 'pre_task' | 'while_task' | 'after_task' | 'on_rejected' | 'on_done';
 
@@ -764,26 +769,9 @@ export interface ReviewCommit extends SprintCommit {
   sprintStatus: string;
 }
 
-export type BudgetPeriod = 'day' | 'sprint' | 'order';
-export type RuleEffect = 'local' | 'strong' | 'up' | 'down';
-
 export interface BudgetLimit {
   maxTokens: number | null;
   maxCostUsd: number | null;
-}
-
-export interface RoutingCondition {
-  categories?: string[];
-  minHours?: number;
-  maxHours?: number;
-  minRetries?: number;
-  minBudgetPercent?: number;
-}
-
-export interface RoutingRule {
-  condition: RoutingCondition;
-  tier: RuleEffect;
-  label?: string;
 }
 
 export interface BudgetStatus {

@@ -25,6 +25,7 @@ import { sprintReviewable } from './review-launch.js';
 import { orderSprint } from './sprint-phases.js';
 import { SprintReviewComponent } from './sprint-review.component.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 /** Ein Sprint im Detail: Hinweise zum Go, Aufträge, Ziel, Bericht, Kennzahlen, Git-Stand und Aktionen. */
 @Component({
@@ -227,8 +228,9 @@ export class SprintDetailComponent {
 
   /** Pull Request des Sprints (PR-Modus); nur echte GitHub-PR-Links werden verlinkt. */
   protected pullRequest(sprint: Sprint): { url: string; number: string } | null {
-    const match = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)$/.exec(sprint.prUrl ?? '');
-    return match ? { url: sprint.prUrl!, number: match[1]! } : null;
+    const url = sprint.prUrl ?? '';
+    const match = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)$/.exec(url);
+    return match ? { url, number: defined(match[1]) } : null;
   }
 
   protected gitBusy(sprint: Sprint): boolean {

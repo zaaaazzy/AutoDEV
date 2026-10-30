@@ -1,5 +1,6 @@
 import { Pipe, type PipeTransform } from '@angular/core';
 import { escapeHtml } from './html.js';
+import { defined } from '../../../../src/core/defined.js';
 
 /** Platzhalter für schon erzeugtes HTML (Zeichen aus dem privaten Unicode-Bereich, aus der Eingabe entfernt). */
 const SLOT_START = '\uE000';
@@ -72,7 +73,7 @@ export class MarkdownPipe implements PipeTransform {
         const cells = (row: string[], tag: 'th' | 'td') =>
           row.map((cell) => `<${tag}>${this.inline(cell)}</${tag}>`).join('');
         blocks.push(
-          `<div class="md-table"><table><thead><tr>${cells(head!, 'th')}</tr></thead><tbody>${body
+          `<div class="md-table"><table><thead><tr>${cells(defined(head), 'th')}</tr></thead><tbody>${body
             .map((row) => `<tr>${cells(row, 'td')}</tr>`)
             .join('')}</tbody></table></div>`,
         );
@@ -138,15 +139,15 @@ export class MarkdownPipe implements PipeTransform {
       if (command) {
         flushParagraph();
         flushList();
-        blocks.push(`<p class="cmd-line"><code>$ ${escapeHtml(command[1]!)}</code></p>`);
+        blocks.push(`<p class="cmd-line"><code>$ ${escapeHtml(defined(command[1]))}</code></p>`);
         continue;
       }
       const heading = line.match(/^(#{1,6})\s+(.*)$/);
       if (heading) {
         flushParagraph();
         flushList();
-        const level = heading[1]!.length;
-        blocks.push(`<h${level}>${this.inline(heading[2]!)}</h${level}>`);
+        const level = defined(heading[1]).length;
+        blocks.push(`<h${level}>${this.inline(defined(heading[2]))}</h${level}>`);
         continue;
       }
       if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) {
@@ -159,7 +160,7 @@ export class MarkdownPipe implements PipeTransform {
       if (quote) {
         flushParagraph();
         flushList();
-        blocks.push(`<blockquote>${this.inline(quote[1]!)}</blockquote>`);
+        blocks.push(`<blockquote>${this.inline(defined(quote[1]))}</blockquote>`);
         continue;
       }
       const unordered = line.match(/^[-*]\s+(.*)$/);

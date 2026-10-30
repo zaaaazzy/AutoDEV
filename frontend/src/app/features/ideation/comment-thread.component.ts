@@ -16,6 +16,7 @@ import {
   insertMention,
   rankMentions,
 } from './comment-mentions.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 const POLL_MS = 4000;
 
@@ -128,7 +129,7 @@ export class CommentThreadComponent {
       }
       if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
-        this.choose(options[this.active()]!);
+        this.choose(defined(options[this.active()]));
         return;
       }
       if (event.key === 'Escape') {

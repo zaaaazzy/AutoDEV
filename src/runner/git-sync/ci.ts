@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { type CommandExecutor, redactOutput } from '../../core/command.js';
 import { GIT_TIMEOUT_MS, type GitHelpers, SECRET_CONTENT } from './git-helpers.js';
 import { gitEnvironment, runProjectCommand } from '../project-command.js';
+import { defined } from '../../core/defined.js';
 
 // Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
 const TEST_TIMEOUT_MS = 45 * 60_000;
@@ -182,7 +183,7 @@ const SUMMARY_CHARS = 1_000;
  * das bestand sonst oft aus bestandenen Tests vom Ende des Laufs und verschwieg die Ursache.
  */
 export function gateFailureSummary(output: string): string {
-  const red = [...new Set([...output.matchAll(/━━ (.+?): rot ━━/g)].map((match) => match[1]!.trim()))];
+  const red = [...new Set([...output.matchAll(/━━ (.+?): rot ━━/g)].map((match) => defined(match[1]).trim()))];
   const findings = [
     ...new Set(
       output

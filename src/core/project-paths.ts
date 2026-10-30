@@ -1,6 +1,7 @@
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises';
 import { isAbsolute, join, normalize, sep } from 'node:path';
+import { defined } from './defined.js';
 
 /**
  * Dateizugriffe des Workers im Projektordner, ohne Symlinks zu folgen. Agents schreiben in den Ordner; ein Link
@@ -79,7 +80,7 @@ export async function readProjectFile(cwd: string, relative: string, maxBytes: n
   if (!parts || !root) return null;
   const directory = await realDirectory(root, parts.slice(0, -1), false);
   if (!directory) return null;
-  const path = join(directory, parts.at(-1)!);
+  const path = join(directory, defined(parts.at(-1)));
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | NOFOLLOW);
@@ -120,7 +121,7 @@ export async function removeProjectDirectory(cwd: string, relative: string): Pro
   }
   const real = await realpath(current).catch(() => null);
   if (!real || !isInside(root, real)) return false;
-  await rm(join(current, parts.at(-1)!), { recursive: true, force: true });
+  await rm(join(current, defined(parts.at(-1))), { recursive: true, force: true });
   return true;
 }
 
