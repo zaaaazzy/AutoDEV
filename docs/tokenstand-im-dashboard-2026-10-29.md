@@ -53,5 +53,6 @@ Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit
   3. `node_modules`-Volume einmal per `npm ci` füllen (sonst übernimmt es der erste Lauf automatisch).
   4. Auftrag erneut testen lassen.
 - **Hinweis für den Tester:** Vor dem Test prüfen, ob `node_modules/.bin/tsc` existiert. Fehlt die Datei, wurden Image und Volume nicht erneuert. Das ist ein Sandbox-Problem, kein Fehler des Auftrags, und dafür wird kein Code-Bug angelegt.
+- **Stand Dokumentierer (30.10.2026, nach dem erneuten Versuch):** Es gab keine weiteren Code-Änderungen. Der letzte Tester-Lauf (after_task) scheiterte wieder vor dem Auftragscode an `npm error EACCES` auf `/home/agent/.npm/_cacache` (root-eigene Dateien im Image). Das ist derselbe Umgebungsfehler wie zuvor, kein Fehler des Auftrags, und er verschwindet erst mit dem neu gebauten Image. Der Auftrag bleibt „nicht verifiziert“, bis ein Mensch Image, Worker und Volume erneuert hat (Schritte oben, zusätzlich Rechte an `/home/agent/.npm` prüfen).
 - Limit-Meldungen („hit your … limit“) erzeugen keine Bugs und keine Folgeaufträge. Die ca. zehn Bug-Wächter-Einträge mit nur diesem Meldungstext sind kein Code-Fehler.
 - Die Bug-Liste enthält weiterhin den Eintrag „CI CD nicht in Ordnung“ (offen, critical). Er hängt mit derselben Umgebung zusammen und ist durch diesen Auftrag nicht behoben.
