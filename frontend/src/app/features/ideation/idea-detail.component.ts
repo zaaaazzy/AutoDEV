@@ -140,10 +140,12 @@ export class IdeaDetailComponent {
   protected async rejectIdea(idea: Idea): Promise<void> {
     const reason = this.rejectReason.trim();
     if (!reason) return;
-    await this.store.perform(
+    const rejected = await this.store.perform(
       () => this.api.post(`/api/ideation/${encodeURIComponent(idea.id)}/reject`, { reason }),
       'Idee abgelehnt.',
     );
+    // Gescheitert: Formular mit dem Grund stehen lassen.
+    if (!rejected) return;
     this.rejecting.set(false);
     this.rejectReason = '';
   }

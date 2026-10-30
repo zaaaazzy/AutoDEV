@@ -31,13 +31,26 @@ async function start(): Promise<void> {
     username && password && !authDisabled ? { username, password, totpSecret: await loadTotpSecret(pool) } : null;
   // Abgelaufene und an ein altes Passwort gebundene Sitzungen löschen (sofort im Hintergrund, danach stündlich).
   const stopCleanup = startSessionCleanup(pool, auth);
-  const server = createDevLogApp(pool, auth).listen(port, host, () => {
+  // Express 5 ruft den Callback auch bei einem Listen-Fehler (z. B. EADDRINUSE) auf – dann mit Fehlercode beenden,
+  // sonst endet der Prozess still mit 0 und ein Neustart per restart: on-failure greift nicht.
+  const server = createDevLogApp(pool, auth).listen(port, host, (error?: Error) => {
+    if (error) {
+      console.error(`AIdeation konnte ${host}:${port} nicht öffnen:`, error);
+      stopCleanup();
+      process.exitCode = 1;
+      void pool.end().catch(() => undefined);
+      return;
+    }
     console.info(`AIdeation listening on ${host}:${port}.`);
   });
   const shutdown = (): void => {
     stopCleanup();
-    server.close(() => void pool.end());
+    server.close(() => void pool.end().catch((error: unknown) => console.error('[db] Pool schliessen:', error)));
+    // close() wartet auf offene Verbindungen; Chat-Streams (SSE) enden nie von selbst.
+    server.closeAllConnections();
   };
+  // Letztes Netz: unerwartete Fehler ins Log statt stillem Absturz ohne Ursache.
+  process.on('unhandledRejection', (reason) => console.error('[server] Unbehandelte Ablehnung:', reason));
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }
