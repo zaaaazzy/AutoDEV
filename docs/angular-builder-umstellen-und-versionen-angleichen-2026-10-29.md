@@ -27,6 +27,17 @@ Der Entwickler-Agent hat nichts geändert, der Tester hat erneut nicht abgenomme
 ### Letzter Lauf (30.10.2026)
 Der Entwickler-Agent hat in diesem Lauf nichts geändert. Alles ohne npm Machbare ist erledigt: Builder, `engines`, Startskripte (prüfen Node ≥ 22.12), `.nvmrc` und Dockerfile (22.22.3), `dependabot.yml`. In `package-lock.json` stehen weiter `@angular-devkit/build-angular`, `webpack` und `@modelcontextprotocol/sdk`; `@angular/cdk` steht auf 20.2.14. Beides lässt sich nur mit `npm install -D @angular/cdk@^20.3.0` auf dem Host beheben. Danach Tests und Audit laufen lassen, `dist/prune-lock.mjs` löschen (von git ignoriert), `package.json` und `package-lock.json` committen und den Auftrag in der Vorschau freigeben. Die Builds-Warnungen NG8113, NG8107 und 1.06 MB Start-Grösse (Schwelle 950 kB) sind nicht auf ihre Herkunft geprüft; der Build bricht deswegen nicht ab. Die Einträge „monthly spend limit“ im Bug-Verzeichnis sind keine Codefehler. In diesem Dokumentationslauf wurden keine Tests ausgeführt.
 
+### Erneuter Lauf (30.10.2026, nach dem Hinweis zum erneuten Versuch)
+Am Code hat sich nichts geändert. Der Hinweis verlangt `npm install`, `npm ls`, `npm audit`, `npm start`, `rm dist/prune-lock.mjs` und einen Commit. Im Agent-Container ist all das gesperrt: npm, `rm`, `sed` und `node -e` blockiert der Wächter. `git` geht nicht, weil der Worktree auf einen Host-Pfad zeigt (`/Volumes/DroneShots/...`). Die Lockfile von Hand zu bereinigen, ist keine Lösung: Gut 100 Webpack-Einträge müssten raus, und für cdk 20.3.x fehlen `resolved`/`integrity`, weil es kein Netz gibt. Danach wäre `npm ci` unsicher.
+
+Für Patrick auf dem Host:
+1. `npm install -D @angular/cdk@^20.3.0`. Bricht der Befehl mit `ETARGET` ab, gibt es keine cdk-Version 20.3.x. In dem Fall `npm install -D @angular/cdk@^20.2.14` ausführen und den Regex in `scripts/angular-builder.test.ts:44` auf `^\^20\.` lockern. Wichtig ist dann nur, dass die Version nicht mehr fest gepinnt ist.
+2. `grep -c build-angular package-lock.json` muss 0 ergeben. Danach `npm ls @angular-devkit/build-angular webpack` (leer), `npm audit` und `npm audit --omit=dev` laufen lassen.
+3. `npm ci && npm run build:ui && npm run typecheck && npm run lint && npm run test:unit`.
+4. `rm dist/prune-lock.mjs`, dann `package.json` und `package-lock.json` committen und den Auftrag in der Vorschau freigeben.
+
+Bis Schritt 1 erledigt ist, schlägt der Test „@angular/cdk steht auf 20.3.x“ in `scripts/angular-builder.test.ts` absichtlich fehl. Die übrigen vier Tests dort prüfen Builder, `engines` und die Startskripte und müssen grün sein. Der Abbruch des Testers (`EACCES` in `/home/agent/.npm/_cacache`) kommt aus dem Container und ist kein Codefehler.
+
 ## Tests
 Laut Entwickler: `npm run build:ui` und `typecheck` fehlerfrei, `lint` 0 Fehler (812 Warnungen, schon vorher vorhanden), `test:unit` 1822 bestanden. `ng serve` mit Proxy startet („Local: http://localhost:4299/“); die Seite wurde nicht abgerufen (`curl` gesperrt). Für diese Dokumentation wurden die Tests nicht erneut ausgeführt.
 
