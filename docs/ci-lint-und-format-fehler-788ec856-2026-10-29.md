@@ -84,3 +84,14 @@ und keiner der GitHub-CI. Es ist ein Folgefehler der Umstellung der Agents auf C
   gegen echtes Docker. Nötig sind deshalb: Worker mit dem neuen Code neu starten („AIdeation neu starten“, baut auch das
   Image `aideation-agent` neu), dann einen Lauf starten. Das Volume füllt sich dabei. Den Bug erst nach einem grünen
   GitHub-Actions-Lauf (Jobs `check` und `docker`) schliessen.
+
+## Stand nach dem erneuten Versuch (30.10.2026)
+
+- **Geändert in diesem Versuch:** nur `src/core/sandbox.ts` und `src/core/sandbox.test.ts` (Befüllen des `node_modules`-Volumes, siehe Nachtrag oben). Die übrigen Dateien der Liste stammen aus früheren Versuchen dieses Auftrags.
+- **Tester: fehlgeschlagen, aber durch die Umgebung.** `npm run typecheck` meldete `tsc: not found` (Exit 127), `npx tsx --test …` meldete `EACCES` auf `/home/agent/.npm`. Beides sind die Fehler, die der Fix beheben soll. Der Tester lief noch im alten Image `aideation-agent` mit altem Worker (root-eigener `.npm`-Ordner da, Volume leer). Ein Code-Fehler ist daraus nicht abzuleiten.
+- **Nicht belegt:** `npx tsx --test src/core/sandbox.test.ts`, `npm run test:unit` im Container und ein grüner GitHub-Actions-Lauf. Die Dokumentation hat nichts davon ausgeführt.
+- **Nächste Schritte (manuell):**
+  1. Image `aideation-agent` neu bauen und den Worker neu starten („AIdeation neu starten“).
+  2. Einen Lauf starten, damit der Worker das Volume füllt. Dann `npm run test:unit` im Container ausführen und die Ausgabe festhalten.
+  3. Den Bug erst schliessen, wenn GitHub Actions grün ist (Jobs `check` und `e2e`).
+- Kein `npm install` im Agent ausführen (vom Wächter gesperrt). „Spend limit“-Meldungen in anderen Bugs sind keine Code-Fehler.
