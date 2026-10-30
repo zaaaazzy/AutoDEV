@@ -52,7 +52,11 @@ Zwei neue Routen, **vor** `POST /ideation/:id/reject` registriert (sonst fängt 
 - `src/api/access.test.ts`: Projektgrenzen bei Nicht-Admins.
 - `src/api/roles.test.ts`: Rolle „Planen“ für die neuen Routen.
 
-Die Tests wurden von der Dokumentation nicht erneut ausgeführt. Ein Browser-Lauf der neuen Oberfläche ist nicht erfolgt, und `e2e/app.spec.ts` wurde nicht erweitert (optional laut Auftrag).
+- `src/api/access.test.ts`: zusätzlich der Fall Nicht-Admin mit fremden Projekten.
+- `e2e/app.spec.ts`: Test „Ideen: mehrere markieren …“ (Bulk-Leiste, Schnell-Ablehnen-Popover, Escape schließt ohne Speichern, abgelehnte Idee wechselt zu „Abgeschlossene Ideen“).
+- `e2e/full-ui.check.ts`: Rollen-Check der Autorin. Ohne Planen-Recht gibt es keinen Knopf „Schnell ablehnen“, beide Bulk-Routen antworten mit 403.
+
+**Teststand:** Der Testlauf des Testers ist fehlgeschlagen, weil in der Sandbox `tsc` und `npx tsx` nicht ausführbar waren (Exit 127 bzw. `EACCES` im npm-Cache). Das ist ein Umgebungsproblem, kein Testergebnis. Weder `npm run typecheck` noch `src/api/app.test.ts` noch die neuen E2E-Tests wurden bisher ausgeführt. Sie müssen in einer Umgebung mit Werkzeugen laufen.
 
 ## Geänderte Dateien
 
@@ -60,6 +64,8 @@ Die Tests wurden von der Dokumentation nicht erneut ausgeführt. Ein Browser-Lau
 - `frontend/src/app/core/project-store.ts`
 - `frontend/src/app/features/ideation/idea-options.ts`, `reject-reason-form.component.ts`, `idea-detail.component.ts`, `idea-detail.component.html`, `ideation.component.ts`, `ideation.component.html`
 - `frontend/src/styles/10-ideas.css`
+- `e2e/app.spec.ts`, `e2e/full-ui.check.ts`
+- `docs/massen-ablehnen-und-prioritaet-in-der-ideenliste-2026-10-30.md`, `docs/benutzerhandbuch-massen-ablehnen-und-prioritaet-in-der-ideenliste-2026-10-30.md`
 
 ## Ablauf
 
@@ -82,5 +88,5 @@ sequenceDiagram
 ## Sprint und Anfrage/TODO
 
 - Auftrag e8de4bd4: umgesetzt (Entwickler, `while_task` bestanden). Dokumentation hiermit abgeschlossen.
-- Offen: Browser-Prüfung mit Nicht-Admin (fremde Projekte), optionaler E2E-Test, Printscreens.
+- Offen: Typecheck, `src/api/app.test.ts` und die neuen E2E-Tests in einer Umgebung mit `tsc`/`tsx` ausführen (Tester scheiterte an der Sandbox). Danach Browser-Prüfung mit Nicht-Admin und Printscreens.
 - Der letzte Bug-Wächter-Lauf scheiterte am Monatslimit der Claude-CLI. Er liefert kein Prüfergebnis und sollte nach dem Zurücksetzen des Limits wiederholt werden.
