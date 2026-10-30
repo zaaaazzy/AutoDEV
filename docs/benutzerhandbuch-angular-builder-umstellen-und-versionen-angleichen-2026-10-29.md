@@ -7,7 +7,7 @@ von Dev Log ändert sich nichts. Auftrag 95b15d69, Stand 29.10.2026.
 **Status: noch nicht abgeschlossen.** Die Code-Umstellung ist da. Der Schritt `npm install -D @angular/cdk@^20.3.0` mit
 anschließender Prüfung ist offen. Agents können `npm install` und `npx` in dieser Umgebung nicht ausführen. Die Angaben zu
 npm-Abhängigkeiten und Audit unten stammen aus den Vermerken des Entwicklers und der Tester, nicht aus einem eigenen Lauf.
-Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.ps1` und `.github/dependabot.yml` gegen diesen Text geprüft. Sie stimmen überein. `@angular/cdk` steht weiter auf 20.2.14.
+Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.ps1`, `.github/dependabot.yml` und die Dockerfiles gegen diesen Text geprüft. Sie stimmen überein. `@angular/cdk` steht weiter auf 20.2.14, und `package-lock.json` enthält `build-angular` noch 29-mal.
 
 ## 1. Was sich ändert
 
@@ -58,15 +58,19 @@ Die Prüfung gilt beim Start über die Skripte. Ein direkter Aufruf von `npm ci`
   Abschnitt 2 ab, bevor etwas installiert wird. Ein Start mit korrekter Version sieht aus wie bisher.
 - **Beim `npm run dev:ui`:** Die Konsole meldet `Local: http://localhost:<Port>/`. Der Entwickler hat den Start mit Port 4299
   geprüft. Ob die Seite dort lädt, ist nicht geprüft (siehe Abschnitt 7).
+- **Beim `npm run build:ui`:** Der Produktionsbuild kann Warnungen ausgeben. Die Start-Größe liegt laut Entwickler bei 1,06 MB
+  und damit über der Warnschwelle von 950 kB. Die Fehlergrenze von 1,1 MB wird nicht erreicht, der Build bricht also nicht ab.
+  Der Entwickler meldet außerdem die Hinweise NG8113 und NG8107. Ob die Warnungen schon vor der Umstellung kamen, ist nicht geprüft.
 - **Auf GitHub im Tab „Pull requests“:** Wöchentlich erscheinen Pull Requests von Dependabot. Die Angular-Pakete kommen als ein
   gemeinsamer Pull Request, damit ihre Versionen nicht wieder auseinanderlaufen.
 
 ## 4. Printscreens
 
 Für dieses Kapitel gibt es keine Printscreens. Die Änderung wirkt auf Build und Entwicklungsserver, nicht auf die Oberfläche
-von Dev Log, und es gibt keine neue Bildschirmansicht, die man zeigen könnte. Die Sitzung hatte keinen Browser, mit dem die
-Seite geöffnet und abfotografiert werden konnte. Die Beschreibung stammt aus `angular.json`, `package.json`, den Startskripten
-und `.github/dependabot.yml`.
+von Dev Log, und es gibt keine neue Bildschirmansicht, die man zeigen könnte. In dieser Umgebung ist kein Chromium installiert
+(`which chromium` ohne Ergebnis). Außerdem erlaubt der Workspace-Wächter `node` nur mit `--version` und `--check`. Ein Dev-Server
+oder Playwright lässt sich damit nicht starten, und es wurden keine Bilder erzeugt oder ersetzt. Die Beschreibung stammt aus
+`angular.json`, `package.json`, den Startskripten, `.github/dependabot.yml` und den Dockerfiles.
 
 ## 5. So prüfst du die Änderung
 
