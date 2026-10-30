@@ -31,6 +31,8 @@ Eine Meldung wird vollständig geprüft und nur dann gespeichert, wenn alle Bedi
 
 Eine ungültige Meldung wird als Ganzes abgelehnt. Es wird nichts ergänzt oder umgedeutet, und es wird nichts gespeichert.
 
+**Für den Tester (Agent):** Der Tester-Auftrag nennt die sechs Namen und verbietet `null`-Werte sowie Bereiche ohne Tests. Ein nicht messbarer Bereich wird weggelassen, nicht mit `null` gemeldet. Lässt sich die Abdeckung nicht messen (z. B. Werkzeug fehlt oder der Wächter sperrt den Befehl), misst AIdeation nach dem Schritt selbst. Ohne gültige Messung bleibt der Abnahmepunkt offen (siehe Abschnitt „Abnahme: fehlende Messung“).
+
 Was du davon siehst:
 
 - **Agent-Lauf (Tester):** Ist der `@@COVERAGE`-Block ungültig, wird er verworfen. Im Schrittverlauf steht der Grund, zum Beispiel „Bereich frontend: Zweigwert (branches) fehlt oder liegt nicht zwischen 0 und 100.“. Hat AIdeation den Bereich selbst gemessen, bleibt diese Messung erhalten.
@@ -119,6 +121,8 @@ Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung
 | „Bereich „xyz“ unbekannt (erlaubt: backend, …)“ | Der Name ist nicht in der festen Liste und nicht bekannt. | Tester-Prompt und Messung nutzen die festen Namen. Eine neue Schreibweise nur über Zuordnung ergänzen. |
 | „Zeilenwert (lines) fehlt oder liegt nicht zwischen 0 und 100“ | Der Zeilenwert fehlt oder ist außerhalb von 0 bis 100. | Den Wert messen und melden. Ein Bereich ohne Messung weglassen. |
 | „0 Testfälle“ | Der Bereich hat keine Tests. | Den Bereich nicht melden, oder Tests ergänzen. |
+| „Kein gültiges JSON.“ im Schrittverlauf | Der `@@COVERAGE`-Block ist syntaktisch kaputt (z. B. ein Komma zu viel). | Den Block in einer Zeile neu melden. Ein ungültiger Block wird ganz verworfen; eine eigene Messung von AIdeation bleibt erhalten. |
+| Zeilen- oder Zweigwert „fehlt“, obwohl ein Wert im Block steht | Der Wert ist `null` oder außerhalb von 0 bis 100 (`null` ist nicht erlaubt). | Den Bereich ohne Messung weglassen oder den Wert als Zahl von 0 bis 100 melden. |
 | Kachel leer, Verlauf zeigt nur alte Werte | Es gibt noch keinen neuen Bericht. | Einen Lauf mit Messung abwarten. |
 | Bereich fehlt im Verlauf, obwohl alte Daten existieren | Der Altbestand hat keine Zuordnung und wird ausgeblendet. | Nichts zu tun. Die Daten bleiben erhalten. |
 
