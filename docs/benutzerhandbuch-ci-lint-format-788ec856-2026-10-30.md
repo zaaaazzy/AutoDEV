@@ -4,7 +4,7 @@ Dieses Kapitel gehört zum Bugfix „CI CD nicht in Ordnung“. Es beschreibt, w
 
 > **Printscreens:** keine. Der Fix hat keine neue Bildschirmansicht. Die Änderungen liegen in Tests, Formatierung, Dockerfile und `src/core/sandbox.ts`. In dieser Umgebung läuft kein Browser und die App wurde nicht gestartet.
 
-> **Stand:** Nicht committet. Die Zahl „1833 von 1833 Tests bestanden“ stammt nur vom Entwickler. Der Tester konnte in der Sandbox nichts ausführen. Ein Lauf mit belegter Ausgabe und ein grüner GitHub-Actions-Lauf (Jobs `check` und `docker`) fehlen noch.
+> **Stand:** Nicht committet. Die Zahl „1833 von 1833 Tests bestanden“ stammt nur vom Entwickler. Der Tester konnte in der Sandbox nichts ausführen. Ein Lauf mit belegter Ausgabe und ein grüner GitHub-Actions-Lauf (Jobs `check`, `e2e` und `docker`) fehlen noch.
 
 ---
 
@@ -12,8 +12,8 @@ Dieses Kapitel gehört zum Bugfix „CI CD nicht in Ordnung“. Es beschreibt, w
 
 | Bereich | Änderung | Auswirkung für dich |
 |---|---|---|
-| `scripts/angular-builder.test.ts` | Zwei `any` durch konkrete Typen ersetzt | `npm run lint` ist grün. Keine Lint-Ausnahme. |
-| 6 Dateien unter `frontend/src` | Nur mit Prettier formatiert, kein Inhalt geändert | `npm run format:check` ist grün. |
+| `scripts/angular-builder.test.ts` | Zwei `any` durch konkrete Typen ersetzt (laut Entwicklerbericht) | `npm run lint` soll grün sein. Keine Lint-Ausnahme. Nicht in dieser Sitzung ausgeführt. |
+| 6 Dateien unter `frontend/src` (laut Entwicklerbericht) | Nur mit Prettier formatiert, kein Inhalt geändert | `npm run format:check` soll grün sein. Nicht in dieser Sitzung ausgeführt. |
 | `deploy/agent/Dockerfile` | `/home/agent/.npm` wird nach der Installation gelöscht | Der Agent im Container kann den npm-Cache wieder beschreiben. Wirksam erst nach Neubau des Images. |
 | `src/core/sandbox.ts` | Der Worker füllt das `node_modules`-Volume vor jedem Lauf selbst | Der erste Lauf im Container dauert länger. Du musst nichts von Hand tun. |
 
@@ -21,7 +21,7 @@ Die Oberfläche bleibt unverändert.
 
 ## 2. Welche Prüfungen vor einem Abschluss laufen
 
-Der CI-Job `check` besteht aus drei Schritten. Alle drei gehören zum Abschluss eines Bugs. `test:unit` allein reicht nicht.
+Der CI-Job `check` führt vier Befehle aus (`.github/workflows/ci.yml`). Alle vier gehören zum Abschluss eines Bugs. `test:unit` allein reicht nicht.
 
 Im Projektordner:
 
@@ -91,7 +91,7 @@ Der Bug 788ec856 gilt erst als behoben, wenn alle diese Punkte erfüllt sind:
 
 1. Die vier Befehle aus Abschnitt 2 sind lokal oder im Lauf grün, mit Ausgabe.
 2. Der Worker lief mit dem neuen Code, und ein Sandbox-Lauf hat das Volume gefüllt.
-3. Ein GitHub-Actions-Lauf ist grün, mit den Jobs `check` und `docker`.
+3. Ein GitHub-Actions-Lauf ist grün, mit den Jobs `check`, `e2e` und `docker`. Eine frühere Notiz behauptete, es gebe keinen `e2e`-Job. Das stimmt nicht: `ci.yml` definiert ihn.
 
 Meldungen wie „monthly spend limit“ der Claude-CLI sind **keine** Code-Fehler. Sie betreffen nur das Monatslimit und dürfen nicht als Begründung für einen Bug dienen.
 
