@@ -356,12 +356,12 @@ Pakete installieren, bauen, Tests mit Browsern ausführen und **mit Docker eigen
 Rechner, sein Docker und die anderen Projekte bleiben davon unberührt. Das Verhalten ist auf macOS, Linux und Windows
 gleich; der Worker steuert alles, auf dem Host oder als Dienst `worker` im Container.
 
-Ein Arbeitscontainer ist ein kleiner Compose-Stapel `aideation-wb-<projekt>-<kennung>` (je Projekt und Arbeitsordner):
+Ein Arbeitscontainer ist ein kleiner Compose-Stapel `agents_<projekt>` je Projekt (in Docker Desktop eine Gruppe je Anwendung). Seine Container heissen `agents_<projekt>_workbench`, `agents_<projekt>_docker` und `agents_<projekt>_<dienst>` für die Testdienste:
 
 | Dienst | Aufgabe |
 |---|---|
 | `workbench` | Image `aideation-agent` (Node 22, Playwright mit Browsern, Claude-CLI, Git, Docker-CLI mit Compose und Buildx). Der Arbeitsordner des Projekts liegt unter `/workspace`, `node_modules` im Volume `aideation-node-modules-<projekt>`. Ohne Rechte (`cap_drop: ALL`), Netzwerk nur über den Egress-Proxy. |
-| `docker` | Eigener Docker-Dienst des Stapels (`docker:29-dind`). Er läuft privilegiert, aber nur in seinem Container; Images, Container und Volumes der Agents liegen in seinem Volume `…-docker`, nie im Docker deines Rechners. Er lauscht nur innerhalb des Stapels. |
+| `docker` | Eigener Docker-Dienst des Stapels (`docker:29-dind`). Er läuft privilegiert, aber nur in seinem Container; Images, Container und Volumes der Agents liegen in seinem Volume `agents_<projekt>_docker`, nie im Docker deines Rechners. Er lauscht nur innerhalb des Stapels. |
 | Testdienste | Aus `.aideation/workbench.json` des Projekts, z. B. Postgres für die Tests (siehe unten). |
 
 Alle Dienste teilen sich das Netzwerk der `workbench`: Was die Agents mit Docker starten oder was als Testdienst
@@ -440,9 +440,9 @@ dass das kein Sandbox-Fehler ist.
 # Arbeitscontainer anzeigen
 docker ps --filter label=aideation.workbench
 # In einen Arbeitscontainer schauen
-docker exec -it aideation-wb-<projekt>-<kennung> bash
+docker exec -it agents_<projekt>_workbench bash
 # Arbeitscontainer stoppen (Volumes bleiben; der Worker startet ihn bei Bedarf neu)
-docker compose -p aideation-wb-<projekt>-<kennung> -f ~/.config/aideation/workbench/aideation-wb-<projekt>-<kennung>.json down
+docker compose -p agents_<projekt> -f ~/.config/aideation/workbench/agents_<projekt>.json down
 # Kurzlebige Container (Modus docker) anzeigen
 docker ps --filter label=aideation.run
 ```

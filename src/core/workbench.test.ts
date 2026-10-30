@@ -12,6 +12,7 @@ import {
   runInWorkbench,
   WORKBENCH_DOCKER_HOST,
   workbenchCompose,
+  workbenchContainer,
   workbenchExecArgs,
   workbenchHash,
   workbenchName,
@@ -79,6 +80,8 @@ test('Arbeitscontainer: nur der Docker-Dienst ist privilegiert, alle teilen den 
   ]);
   assert.equal(workbench.environment?.DOCKER_HOST, WORKBENCH_DOCKER_HOST);
   assert.equal(workbench.environment?.DEV_LOG_DATABASE_URL, 'postgresql://t:t@127.0.0.1:5433/t');
+  assert.equal((workbench as { container_name?: string }).container_name, 'agents_demo_workbench');
+  assert.equal((postgres as { container_name?: string }).container_name, 'agents_demo_postgres');
   assert.equal(docker.privileged, true);
   assert.equal(docker.network_mode, 'service:workbench');
   assert.ok(
@@ -119,9 +122,11 @@ test('Arbeitscontainer: workbench.json erlaubt nur Image, Umgebung, Befehl und t
     assert.throws(() => parseWorkbenchExtras(JSON.stringify(config)), JSON.stringify(config));
 });
 
-test('Arbeitscontainer: Name je Projekt und Worktree, Hash ändert sich mit der Konfiguration', () => {
-  assert.match(workbenchName('Mainty', '/a/agent'), /^aideation-wb-mainty-[a-f0-9]{6}$/);
-  assert.notEqual(workbenchName('mainty', '/a/agent'), workbenchName('mainty', '/a/source'));
+test('Arbeitscontainer: Namen je Projekt, Hash ändert sich mit der Konfiguration', () => {
+  assert.equal(workbenchName('Mainty'), 'agents_mainty');
+  assert.equal(workbenchContainer('Mainty'), 'agents_mainty_workbench');
+  assert.equal(workbenchContainer('dev-log', 'postgres'), 'agents_dev-log_postgres');
+  const moved = workbenchCompose('/a/source', { project: 'mainty', platform: 'darwin', uid: 1, gid: 1 });
   const base = workbenchCompose('/a/agent', { project: 'mainty', platform: 'darwin', uid: 1, gid: 1 });
   const other = workbenchCompose('/a/agent', { project: 'mainty', platform: 'darwin', uid: 1, gid: 1, memory: '8g' });
   assert.notEqual(workbenchHash(base), workbenchHash(other));
@@ -133,6 +138,7 @@ test('Arbeitscontainer: Name je Projekt und Worktree, Hash ändert sich mit der 
     imageId: 'sha256:neu',
   });
   assert.notEqual(workbenchHash(base), workbenchHash(rebuilt), 'neues Image: Stapel neu erstellen');
+  assert.notEqual(workbenchHash(base), workbenchHash(moved), 'anderer Arbeitsordner: Stapel neu erstellen');
 });
 
 test('Arbeitscontainer: workbench.json kommt aus dem Haupt-Checkout, nicht aus dem Worktree des Agents', () => {
