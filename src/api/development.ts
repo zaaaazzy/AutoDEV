@@ -53,7 +53,7 @@ export const DEV_COLUMNS = `id, ideation_id AS "ideationId", test_run_id AS "tes
   removed_from_sprint AS "removedFromSprint", removed_from_sprint_at AS "removedFromSprintAt",
   sprint_rank AS "sprintRank", review_branch AS "reviewBranch", review_since AS "reviewSince",
   review_approved_at AS "reviewApprovedAt", visual_approved_at AS "visualApprovedAt",
-  visual_approved_by AS "visualApprovedBy", changed_files AS "changedFiles"`;
+  visual_approved_by AS "visualApprovedBy", changed_files AS "changedFiles", counter_check AS "counterCheck"`;
 
 const DEV_FIELDS = {
   ...IDEA_FIELDS,

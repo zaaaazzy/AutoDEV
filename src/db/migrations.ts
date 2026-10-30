@@ -412,6 +412,16 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
     `,
   },
+  // Gegenprobe nach Bugfixes: neue Tests auf dem Stand vor dem Fix (Ergebnis je Testdatei). NULL = keine Gegenprobe;
+  // bestehende Aufträge bleiben unverändert (keine rückwirkende Prüfung).
+  {
+    version: 19,
+    name: 'gegenprobe-je-auftrag',
+    sql: `
+      ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB
+        CHECK (counter_check IS NULL OR jsonb_typeof(counter_check) = 'object');
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

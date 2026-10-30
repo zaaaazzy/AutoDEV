@@ -27,7 +27,9 @@ import {
 import { ensureCiWorkflow, runTestGate, waitForCi } from './ci.js';
 import { orderWorkInProgress } from './order-branch.js';
 import { gitEnvironment } from '../project-command.js';
-import { gateExecutor } from '../test-sandbox.js';
+import { gateExecutor, projectSandbox } from '../test-sandbox.js';
+import { sandboxMode, usesSandbox } from '../../core/sandbox.js';
+import { runSprintCounterChecks } from './counter-check.js';
 
 /** Erstellt nach einem erledigten Sprint-Auftrag einen lokalen Commit (kein Push; den übernimmt die Sprint-Sicherung). */
 export async function commitTaskToGit(
@@ -494,6 +496,23 @@ export async function syncSprintToGit(
             testExecutor,
             pullRequest,
           });
+    if (sprint.action !== 'pull') {
+      // Gegenprobe der Bugfixes erst nach grünem Test-Gate, Push und Merge: rein informativ, sie kann beides weder
+      // verhindern noch zurücknehmen. Vorher die Uhr der Stundengrenze neu stellen (das Gate hat sie schon genutzt).
+      await pool
+        .query(`UPDATE sprints SET updated_at = NOW() WHERE id = $1 AND git_sync = 'running'`, [sprint.id])
+        .catch(() => undefined);
+      const counterCheck = await runSprintCounterChecks({
+        pool,
+        project,
+        sprint: { id: sprint.id, name: sprint.name, branch: sprintBranchOf(sprint) },
+        cwd,
+        execute,
+        testExecutor,
+        linkModules: !usesSandbox(sandboxMode(await projectSandbox(pool, project))),
+      });
+      if (counterCheck) result.log.push(counterCheck);
+    }
     if (result.pullRequest) {
       await pool.query(
         `UPDATE sprints SET status = 'review', pr_url = $5, ci_status = 'pending', ci_bug_run = NULL, git_sync = 'done',

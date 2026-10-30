@@ -185,6 +185,22 @@ export interface Attachment {
   size: number;
 }
 
+/**
+ * Ergebnis je Testdatei: fails = scheitert ohne Fix, passes = läuft auch ohne Fix grün, import = bricht beim Import
+ * ab, skipped = nicht bewertet (Playwright), error = Gegenprobe gescheitert.
+ */
+export type CounterCheckResult = 'fails' | 'passes' | 'import' | 'skipped' | 'error';
+
+export interface CounterCheck {
+  checkedAt: string;
+  base: string | null;
+  commit: string | null;
+  files: { path: string; result: CounterCheckResult; detail?: string }[];
+  /** Fehler der Gegenprobe selbst; kein Blocker. */
+  error?: string;
+  runId?: string;
+}
+
 export interface DevelopmentItem extends Estimate {
   id: string;
   title: string;
@@ -214,6 +230,8 @@ export interface DevelopmentItem extends Estimate {
   visualApprovedBy?: string | null;
   /** Vom Auftrag geänderte Dateien (gegenüber der Basis, nach jedem Agent-Schritt aktualisiert). */
   changedFiles?: string[];
+  /** Gegenprobe eines Bugfixes (geänderte Tests auf dem Stand vor dem Fix); null = keine Gegenprobe. */
+  counterCheck?: CounterCheck | null;
   /** Folgeauftrag: bezieht sich auf diesen abgeschlossenen Auftrag. */
   followUpOf?: string | null;
   fixStatus?: string | null;

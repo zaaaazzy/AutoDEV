@@ -18,6 +18,13 @@ const MANUAL_PROMPT_CHARS = 12_000;
 export const CHANGED_FILES_INSTRUCTIONS = `## Geänderte Dateien melden
 Beende deine Antwort mit dem Abschnitt „## Geänderte Dateien“ und liste darin jede Datei, die du angelegt, geändert oder gelöscht hast – eine Zeile pro Datei im Format \`- pfad/zur/datei\` (relativ zum Projektordner, gelöschte mit „(gelöscht)“). Lass keine Datei weg: Der Tester-Schritt testet nur die geänderten Dateien.`;
 
+/**
+ * Dokumentierer bei Bugfixes: Die Gegenprobe (neue Tests auf dem Stand ohne Fix) führt das Test-Gate beim
+ * Sprint-Abschluss selbst aus; sie ist kein offener Punkt der Dokumentation.
+ */
+export const COUNTER_CHECK_NOTE = `## Gegenprobe
+Ob die neuen oder geänderten Tests ohne den Fix scheitern, prüft das Test-Gate beim Sprint-Abschluss automatisch (Gegenprobe auf dem Stand vor dem Fix). Das Ergebnis je Testdatei steht danach im Auftragsdetail und im Testbericht. Vermerke die Gegenprobe deshalb nicht als offen und beschreibe keine Schritte, sie von Hand nachzuholen.`;
+
 export function buildPrompt(
   agent: WorkflowAgent,
   item: WorkItem,
@@ -60,6 +67,7 @@ export function buildPrompt(
       : '',
     agent.role === 'reviewer' ? reviewInstructions(extras.baseBranch ?? null) : '',
     agent.role === 'developer' ? CHANGED_FILES_INSTRUCTIONS : '',
+    agent.role === 'documenter' && item.kind === 'bug' ? COUNTER_CHECK_NOTE : '',
     HANDOFF_RULE,
   ]
     .filter(Boolean)

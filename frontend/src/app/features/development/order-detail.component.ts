@@ -5,7 +5,7 @@ import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
+import type { AcceptanceCheck, CounterCheckResult, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import type { FormValues } from '../../shared/forms.js';
@@ -24,6 +24,15 @@ import { OrderApprovalComponent } from './order-approval.component.js';
 import { OrderVisualComponent } from './order-visual.component.js';
 import { needsVisual } from './needs-visual.js';
 import { agentEnds, buildWorkflow } from '../../shared/workflow.js';
+
+/** Texte der Gegenprobe je Testdatei (wie im Testbericht). */
+const COUNTER_CHECK_LABELS: Record<CounterCheckResult, string> = {
+  fails: 'scheitert ohne Fix',
+  passes: 'läuft auch ohne Fix grün',
+  import: 'bricht beim Import ab',
+  skipped: 'nicht bewertet',
+  error: 'Gegenprobe gescheitert',
+};
 
 /** Aufgeklappte Detailansicht eines offenen Auftrags. */
 @Component({
@@ -125,6 +134,10 @@ export class OrderDetailComponent {
 
   /** Risiken des Bug-Wächters als einzelne Einträge. */
   protected readonly risks = computed(() => parseRisks(this.order().risks));
+
+  /** Ergebnis der Gegenprobe (nur wenn gesetzt; ohne Ergebnis erscheint nichts, auch kein „offen“). */
+  protected readonly counterCheck = computed(() => this.order().counterCheck ?? null);
+  protected readonly counterCheckLabels = COUNTER_CHECK_LABELS;
 
   /** Formular für einen Folgeauftrag (nur bei erledigten Aufträgen). */
   protected readonly followUpOpen = signal(false);
