@@ -4,27 +4,30 @@ Dieses Kapitel beschreibt die Testabdeckung in AIdeation: welche Bereiche es gib
 
 ## Was sich geändert hat
 
-- Testabdeckung wird nur noch für sechs feste Bereiche gespeichert und angezeigt:
+- Testabdeckung wird nur noch für sieben feste Bereiche gespeichert und angezeigt (Schlüssel wie im Code, Anzeige in Klammern):
 
   | Bereich | Bedeutung |
   | --- | --- |
-  | `backend` | Server- und API-Code |
-  | `frontend` | Oberfläche (Angular) |
-  | `scripts` | Skripte und Werkzeuge |
-  | `e2e` | Ende-zu-Ende-Tests im Browser |
-  | `gesamt` | gesamtes Projekt |
-  | `auftrag` | nur der vom Auftrag geänderte Code |
+  | `backend` (Backend) | Server- und API-Code |
+  | `frontend` (Frontend) | Oberfläche (Angular) |
+  | `contracts` (Contracts) | gemeinsam genutzte Typen und Verträge |
+  | `scripts` (Skripte) | Skripte und Werkzeuge |
+  | `e2e` (E2E) | Ende-zu-Ende-Tests im Browser |
+  | `gesamt` (Gesamt) | gesamtes Projekt |
+  | `auftrag` (Auftrag) | nur der vom Auftrag geänderte Code |
+
+  Der Auftrag nennt sechs Bereiche; der Code führt `contracts` zusätzlich. Die Liste im Code gilt (siehe „Offene Entscheidungen“).
 
 - Jede Meldung braucht für jeden gemeldeten Bereich einen **Zeilenwert** und einen **Zweigwert** (Zahl von 0 bis 100) sowie **mindestens einen Testfall** in diesem Bereich.
 - Die Statistik zeigt je Bereich einen **Verlauf** über alle Messungen.
-- Die Dashboard-Kachel zeigt weiterhin den **neuesten Bericht** des Projekts.
+- Die Dashboard-Kachel zeigt je Bereich den **neuesten vollständigen Lauf** des Projekts.
 - Alte Einträge mit anderen Schreibweisen (z. B. „Backend (src)“ oder „Angular“) wurden einmalig auf die festen Namen umgestellt. Einträge, die sich keinem Bereich zuordnen lassen, bleiben unverändert gespeichert, erscheinen aber nicht im Verlauf.
 
 ## Wann eine Meldung angenommen wird
 
 Eine Meldung wird vollständig geprüft und nur dann gespeichert, wenn alle Bedingungen gelten:
 
-1. Jeder Bereich ist einer der sechs festen Namen. Groß- und Kleinschreibung und Leerzeichen am Rand spielen keine Rolle. Unbekannte Namen werden **nicht** stillschweigend angelegt.
+1. Jeder Bereich ist einer der sieben festen Namen. Groß- und Kleinschreibung und Leerzeichen am Rand spielen keine Rolle. Unbekannte Namen werden **nicht** stillschweigend angelegt.
 2. Zeilenwert und Zweigwert sind Zahlen von 0 bis 100. Fehlt einer der beiden, ist die Meldung ungültig.
 3. Jeder gemeldete Bereich hat mindestens einen Testfall (Summe aus Unit-, Komponenten-, Integrations- und E2E-Tests größer als 0).
 4. Ein Bereich darf in einer Meldung nur einmal vorkommen.
@@ -67,17 +70,20 @@ Was du davon siehst:
 
 **Ort:** Dashboard.
 
-**Anzeige:** Die Kachel zeigt den neuesten Bericht des aktuellen Projekts mit allen Bereichen, die dieser Bericht enthält. Je Bereich stehen die Spalten Unit-Tests, Komponententests, Integrationstests, E2E-Tests und Gesamt (Summe der vier Testarten). Darunter folgen die Abdeckungswerte Zeilen, Anweisungen, Zweige und Funktionen. Fehlgeschlagene Tests stehen als Hinweis „N fehlgeschlagen“ unter dem Bereichsnamen. Die vier Testart-Spalten haben einen Tooltip mit ihrer Erklärung.
+**Kopfzeile:** Zeigt den letzten Bericht des Projekts mit Datum, bei Auftragsberichten zusätzlich „nach „Auftragstitel““, sowie das Ziel von 75 % Zeilenabdeckung.
 
-**Summenzeile:** Hat der Bericht mindestens zwei Bereiche und keinen Bereich „gesamt“, zeigt die Kachel zusätzlich eine Zeile „Gesamt“. Die Testzahlen sind dort Summen über alle Bereiche. Die Prozentwerte sind der Mittelwert der gemeldeten Werte, kein gewichteter Wert. Enthält der Bericht selbst einen Bereich „gesamt“, entfällt die gerechnete Summenzeile, und die gemeldete Zeile steht in der Tabelle.
+**Anzeige:** Die Tabelle hat je Bereichsschlüssel eine Zeile mit dem **neuesten vollständigen Lauf** dieses Bereichs. Die Spalte „Stand“ zeigt das Datum dieses Laufs. Dann folgen die Testzahlen Unit-Tests, Komponententests, Integrationstests, E2E-Tests und Gesamt (Summe dieser vier Testarten derselben Zeile). Danach stehen die Abdeckungswerte Zeilen, Anweisungen, Zweige und Funktionen als Prozentwert mit Balken. Fehlgeschlagene Tests stehen als Hinweis „N fehlgeschlagen“ unter dem Bereichsnamen. Die Testart-Spalten haben einen Tooltip mit ihrer Erklärung.
 
-**Farben der Prozentwerte:** Ab 75 % grün, ab 50 % gelb, darunter rot. Fehlt ein Wert, steht er ohne Farbe.
+**Keine Summenzeile:** Die Kachel rechnet keine Zeile „Gesamt“ aus den anderen Bereichen. Eine Zeile „Gesamt“ erscheint nur, wenn ein Lauf den Bereich `gesamt` selbst meldet.
+
+**Farben der Prozentwerte:** Ab 75 % grün, ab 50 % gelb, darunter rot. Fehlt ein Wert, steht dort ein „–“ ohne Farbe.
 
 **Bedingungen:**
 
-- Gibt es noch keinen Bericht, zeigt die Kachel keine Werte.
+- Gibt es noch keinen Bericht, zeigt die Kachel „Noch keine Testabdeckung gemeldet.“ mit dem Hinweis, dass der Tester sie beim nächsten abgeschlossenen Auftrag misst.
+- Hat ein Bereich nie einen vollständigen Lauf gehabt, bleibt seine Zeile stehen, mit dem Hinweis „kein vollständiger Lauf“ unter dem Datum und „–“ bei den Prozentwerten.
+- Ein Altbestand ohne Zuordnung kann mit seinem alten Namen in der Tabelle stehen, weil die Übersicht nicht nach festen Namen filtert. In der Statistik fehlt er dagegen. Die Abfrage ist `GET /projects/:slug/coverage` (siehe unten).
 - Die Kachel ändert sich erst, wenn ein neuer Bericht gespeichert wurde. Der Verlauf steht nur in der Statistik.
-- Die Kachel filtert nicht nach festen Namen. Gehört ein Altbestand ohne Zuordnung zum neuesten Bericht, steht er mit seinem alten Namen in der Kachel, auch wenn er in der Statistik fehlt. Die Abfrage ist `GET /projects/:slug/coverage` (siehe unten).
 
 <!-- Printscreen 2: Dashboard, Kachel „Testabdeckung“ mit einem Bericht (Tabelle mit den festen Bereichsnamen). -->
 > **Printscreen fehlt:** Siehe oben, nicht aufgenommen.
@@ -106,13 +112,13 @@ Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung
 
 ### Lesen
 
-- `GET /projects/:slug/coverage`: neuester Bericht (Dashboard).
+- `GET /projects/:slug/coverage`: letzter Bericht und je Bereich der neueste vollständige Lauf (Dashboard).
 - `GET /projects/:slug/coverage/trend`: Verlauf je fester Bereich, nach Datum aufsteigend. Fehlende Werte kommen als `null` zurück; die Oberfläche zeichnet sie als Lücke.
 
 ### Bereichsnamen ändern oder ergänzen
 
-- Die Liste steht genau einmal in `COVERAGE_AREAS` (`src/runner/coverage.ts`). Ein neuer Bereich braucht eine Codeänderung. Das ist so gewollt.
-- Bekannte Schreibweisen stehen in `COVERAGE_AREA_ALIASES` (gleiche Datei). Eine neue Schreibweise kommt dort hinein und zusätzlich per neuer Migration in die Tabelle `coverage_area_aliases`. Die Migration 22 nicht ändern.
+- Die Liste steht genau einmal in `COVERAGE_AREA_KEYS` (`src/core/coverage-areas.ts`). Ein neuer Bereich braucht eine Codeänderung. Das ist so gewollt.
+- Bekannte Schreibweisen stehen in `COVERAGE_AREA_ALIASES` (gleiche Datei). Eine neue Schreibweise kommt dort hinein und zusätzlich per neuer Migration in die Tabelle `coverage_area_aliases`. Die Migration 24 nicht ändern.
 
 ## Fehlerbehebung
 
@@ -137,11 +143,12 @@ Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung
 
 Diese Punkte sind im Code noch nicht eindeutig entschieden:
 
-1. **Teilmeldungen:** Die Anforderung verlangt Werte für alle sechs Bereiche. Der Validator prüft aber nur die Bereiche, die gemeldet werden. Heute werden Berichte mit nur einem gemessenen Bereich gespeichert. Entscheidung nötig: Pflicht für alle sechs, oder nur gemessene Bereiche.
-2. **Migrationsnummer (entschieden):** Die Migration heißt Version 22, weil sprint-30 die Versionen 19 bis 21 belegt. Die Reservierung `RESERVED_VERSIONS` ist entfallen.
-3. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
-4. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
-5. **Ladezustand ohne Projekt (im Code geprüft, nicht im Browser gesehen):** Ohne aktives Projekt zeigt die Ansicht „Kein Projekt ausgewählt.“ und lädt nichts.
+1. **Teilmeldungen:** Die Anforderung verlangt Werte für alle Bereiche. Der Validator prüft aber nur die Bereiche, die gemeldet werden. Heute werden Berichte mit nur einem gemessenen Bereich gespeichert. Entscheidung nötig: Pflicht für alle Bereiche, oder nur gemessene Bereiche.
+2. **Anzahl der Bereiche:** Der Auftrag nennt sechs Bereiche, der Code führt sieben (mit `contracts`). Entscheidung nötig: `contracts` bleibt, oder der Auftrag und diese Anleitung werden auf sechs angepasst.
+3. **Migrationsnummer:** Der Auftrag nennt Version 20. Die Versionen 20 bis 23 sind im Code belegt; die Migration für Bereichsnamen und Zuordnung ist Version 24 (`coverage_area_aliases`). Der Auftragstext sollte angepasst werden.
+4. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
+5. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
+6. **Ladezustand ohne Projekt (im Code geprüft, nicht im Browser gesehen):** Ohne aktives Projekt zeigt die Ansicht „Kein Projekt ausgewählt.“ und lädt nichts.
 
 ## Nicht geprüft
 
