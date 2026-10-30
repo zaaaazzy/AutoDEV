@@ -45,6 +45,7 @@ Die alten Berichte bleiben als Verlaufsquelle. Die Zählungen werden nicht neu b
 - Tests: `src/agent/visionary.test.ts`, `src/db/migrations.test.ts`, `src/runner/{coverage,measured-coverage,project-command,runner}.test.ts`, `frontend/src/app/core/project-loader.spec.ts`.
 - Frontend: `frontend/src/app/core/{models,project-loader}.ts`, `features/dashboard/coverage-panel.component.{ts,html}`, `features/stats/stats.component.{ts,html}`, `frontend/src/styles/09-dashboard.css`.
 - Doku: `docs/benutzerhandbuch-dashboard-agents.md`.
+- Umgebung: `deploy/agent/Dockerfile` (npm-Cache), `frontend/tsconfig.app.json`, `frontend/tsconfig.spec.json`.
 
 **Tests**
 
@@ -55,6 +56,7 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 - `e2e/demo/seed.ts` wurde nicht geändert und braucht es nicht: Die Demo-Daten legen nur die Bereiche `backend` und `frontend` an (Zeilen 1197–1200), beide feste Schlüssel, der CHECK-Constraint lehnt sie nicht ab.
 - **Testschritt fehlgeschlagen, aber aus Umgebungsgründen:** Der Tester konnte nichts ausführen. `npm run typecheck` scheiterte mit `tsc: not found` (Sandbox-Image „aideation-agent“, Exit-Code 127), `npx tsx --test …` mit `EACCES` auf dem npm-Cache (`/home/agent/.npm`). Es gibt also weder einen grünen noch einen roten Testlauf des Codes; die Abnahme „`npm test` vollständig grün“ ist offen. Tests nur über `npm test` bzw. `npm run …` starten, nicht über `npx tsx`.
 - **Erneuter Versuch (30.10.2026 12:23):** Der Hinweis lautet, das Image „aideation-agent“ zu korrigieren, neu zu bauen und danach den `node_modules`-Volume des Projekts zu befüllen. Das ist eine Umgebungsaufgabe, keine Codeänderung; im Repository wurde dafür nichts geändert. Der Tester-Schritt davor scheiterte weiter an `tsc: not found` und `EACCES` auf `/home/agent/.npm`.
+- **Image-Korrektur im erneuten Versuch:** Geändert wurde `deploy/agent/Dockerfile`. Der npm-Install als root mit `HOME=/home/agent` hinterließ einen root-eigenen npm-Cache, daher `EACCES` bei jedem `npm`/`npx` des Agents. Das Image räumt den Cache jetzt auf (`npm cache clean --force`, `rm -rf /home/agent/.npm`), und `/home/agent` sowie `/workspace` sind für alle beschreibbar (`chmod 1777`). Das Image muss neu gebaut werden (`docker build -t aideation-agent -f deploy/agent/Dockerfile .`), erst dann wirkt die Korrektur. `tsc: not found` bleibt, bis der `node_modules`-Volume des Projekts befüllt ist (`npm ci`). Das habe ich nicht geprüft. Zusätzlich liegen Änderungen an `frontend/tsconfig.app.json` und `frontend/tsconfig.spec.json` vor, die der Entwickler aus dem vorherigen Versuch mitgeführt hat.
 - Die Migration wurde nach der Liste der Dateien nur im Test (`migrations.test.ts`) geprüft, nicht gegen eine echte Datenbank mit Altbestand.
 
 **Worauf zu achten ist**
@@ -74,6 +76,7 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 
 ## Anfrage / TODO
 
+- Image `aideation-agent` mit dem korrigierten Dockerfile neu bauen, dann den `node_modules`-Volume des Projekts befüllen.
 - Sandbox-Image reparieren (Abhängigkeiten installiert, `tsc` im Pfad, npm-Cache beschreibbar) und danach `npm run typecheck` und `npm test` ausführen; dabei die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
 - Nach der Migration Übersicht und Statistik im Browser ansehen: je Schlüssel eine Zeile, Datum je Zeile, Verlauf je Schlüssel.
 - Optional später: Sicherungstabelle `test_coverage_areas_backup_19` entfernen, wenn die Zuordnung der Altdaten abgenommen ist.
