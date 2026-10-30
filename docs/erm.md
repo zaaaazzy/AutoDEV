@@ -33,6 +33,11 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `production_status` (je Projekt): Health-Fehlschläge in Folge, `down`, letzter Fehler, Zeitpunkt der Prüfung bzw. des letzten erfolgreichen Log-Scans (`logs_scanned_at`, untere Grenze des nächsten Scan-Fensters), letzter Scan-Fehler (`log_error`, höchstens 300 Zeichen, beim nächsten Erfolg leer), zuletzt vermerkte Lücke (`log_gap`) und – wie beim Wächter – gemeldete Probleme (`problems`, `notified_at`).
 - Aufbewahrung: Der Worker löscht stündlich Ereignisse, Verlauf und Deploys, die älter als `production_retention_days` sind.
 
+## Erweiterung: Offene Testnachweise (Migration 19)
+
+- `test_evidence` (`id` UUID, `development_id` → `development_items`, `position`, `datei`, `befehl`, `grund` `nicht_freigegeben`/`gegenprobe_fehlt`, `status` `open`/`passed`/`failed`/`nicht_freigegeben`, `run_id` → `test_runs`, `checked_at`). Eindeutig je `(development_id, befehl)`.
+- `test_requests.evidence_id` → `test_evidence`; `test_requests.scope` zusätzlich `befehl` (alle bisherigen Werte bleiben erlaubt).
+
 ## Erweiterung: Visuelle Abnahme (Screenshots vor und nach dem Auftrag)
 
 - `projects`: `preview_url` (http(s), ohne Zugangsdaten; leer = Schritt übersprungen), `preview_pages` (JSONB-Liste von Pfaden wie `/#dashboard`), `visual_settings` (JSONB: `tolerance` in Prozent, `threshold` Farbabstand, `masks` CSS-Selektoren, `login` mit Seite, Selektoren und den **Namen** der Testwerte aus der `.env.example`, `aiJudge`, `visionModel`).
