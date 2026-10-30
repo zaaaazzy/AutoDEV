@@ -64,6 +64,8 @@ Die Umgebung ist unverändert: `node_modules` verweist auf einen Host-Pfad, `npm
 
 Der Tester konnte `npm run typecheck` und `npx tsx --test …` im Image „aideation-agent“ nicht ausführen (`tsc` fehlt, `/home/agent/.npm` nicht beschreibbar). Es gibt daher keinen grünen Lauf für diesen Auftrag. Die Testdateien sind geschrieben, aber ungeprüft: `src/runner/test-evidence.test.ts`, `src/api/test-evidence.test.ts`, `frontend/src/app/shared/order-attention.spec.ts`, `src/db/migrations.test.ts`, `src/runner/acceptance.test.ts`, `src/runner/runner-steps.test.ts`, `src/runner/test-request.test.ts`. Ein Mensch oder eine Umgebung mit `tsc` und beschreibbarem npm-Cache (`npm_config_cache` setzen) muss `npm run typecheck`, `npm test` und den Build ausführen.
 
+Auch der letzte Testerlauf (30.10.2026) endete ohne Ergebnis: `npm run typecheck` → `tsc: not found` (Exit 127), `npx tsx --test …` → `EACCES` auf `/home/agent/.npm/_cacache`. Beides ist ein Umgebungsfehler, kein Befund am Code. Die beiden Befehle stehen deshalb als Testnachweise (`gegenprobe_fehlt`) offen.
+
 ## Offen
 
 - Printscreens der Seite „Aktionen“ (mit Startknopf und mit Rechte-Link) fehlen im Benutzerhandbuch; in der Sitzung gab es keinen Browser. Nachreichen, sobald die App läuft.
