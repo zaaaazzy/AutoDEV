@@ -7,7 +7,8 @@ import {
   type DocRevision,
   type Agent,
   type Attachment,
-  CoverageReport,
+  type CoverageHistoryPoint,
+  type CoverageReport,
   type Bug,
   type DevelopmentItem,
   type DocumentEntry,
@@ -43,10 +44,11 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     api.get<{ docs?: DocumentEntry[] }>(`${base}/docs`),
     api.get<{ reports?: SprintReport[] }>(`${base}/sprint-reports`),
     api.get<{ attachments?: Attachment[] }>(`${base}/attachments`),
-    api.get<{ report?: CoverageReport | null }>(`${base}/coverage`),
+    api.get<{ report?: Omit<CoverageReport, 'history'> | null }>(`${base}/coverage`),
     api.get<{ checks?: AcceptanceCheck[]; defaults?: AcceptanceDefaults }>(`${base}/acceptance`),
     api.get<{ revisions?: DocRevision[] }>(`${base}/doc-revisions`),
     api.get<{ evidence?: TestEvidence[]; testRunning?: boolean }>(`${base}/test-evidence`),
+    api.get<{ history?: CoverageHistoryPoint[] }>(`${base}/coverage/history`),
   ]);
 
   const data = emptyProjectData();
@@ -67,6 +69,7 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     acceptance,
     revisions,
     evidence,
+    coverageHistory,
   ] = results;
   if (evidence.status === 'fulfilled') {
     data.evidence = evidence.value.evidence ?? [];
@@ -78,8 +81,12 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     data.acceptance = acceptance.value.checks ?? [];
     data.acceptanceDefaults = acceptance.value.defaults ?? null;
   } else failed.push('acceptance', 'acceptanceDefaults');
-  if (coverage.status === 'fulfilled') data.coverage = coverage.value.report ?? null;
-  else failed.push('coverage');
+  // Ohne Verlauf bleibt die Übersicht vollständig; der Verlauf ist dann leer.
+  if (coverage.status === 'fulfilled') {
+    const report = coverage.value.report ?? null;
+    const history = coverageHistory.status === 'fulfilled' ? (coverageHistory.value.history ?? []) : [];
+    data.coverage = report ? { ...report, history } : null;
+  } else failed.push('coverage');
   if (attachments.status === 'fulfilled') data.attachments = attachments.value.attachments ?? [];
   else errors.attachments = errorMessage(attachments.reason, 'Bilder konnten nicht geladen werden.');
   if (board.status === 'fulfilled') {

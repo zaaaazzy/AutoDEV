@@ -1204,8 +1204,16 @@ test('Tester mit eigenem CLI: Tokens und Kosten des CLI-Laufs bleiben beim Speic
   assert.equal(saved.values[6], 0.4);
 });
 
-/** Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). */
-async function testerAcceptanceRun(acceptance: object) {
+/**
+ * Tester mit eigenem CLI und eigener Abdeckungsmessung von AIdeation (direkter `npx tsx --test`-Befehl). Der
+ * Projektordner heisst „shop-backend“, damit die Messung dem Bereich „backend“ zugeordnet wird.
+ */
+async function testerAcceptanceRun(acceptance: object, packageName = 'shop-backend') {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const cwd = mkdtempSync(join(tmpdir(), 'coverage-run-'));
+  writeFileSync(join(cwd, 'package.json'), JSON.stringify({ name: packageName }));
   const queries: { sql: string; values: unknown[] }[] = [];
   const query = async (sql: string, values: unknown[] = []) => {
     queries.push({ sql, values });
@@ -1227,8 +1235,15 @@ async function testerAcceptanceRun(acceptance: object) {
   const builtin: BuiltinAgent = async () => ({ exitCode: 0, durationMs: 1, output: 'grün' });
   const tester = { ...agent('Tester', 'after_task', 1, ['claude', '-p']), role: 'tester' as const };
   const order = { ...item, description: '## Akzeptanzkriterien\n- A ist belegt\n- B ist belegt' };
-  const result = await runWorkItem(pool, order, [tester], { cwd: '/r', timeoutMs: 1, execute, builtin });
+  const result = await runWorkItem(pool, order, [tester], { cwd, timeoutMs: 1, execute, builtin });
   return { result, queries };
+}
+
+/** Texte der Schritt-Ereignisse (logEvent). */
+function stepEvents(queries: { sql: string; values: unknown[] }[]): string[] {
+  return queries
+    .filter((query) => query.sql.includes('SET events = events ||'))
+    .flatMap((query) => (JSON.parse(String(query.values[1])) as { text: string }[]).map((event) => event.text));
 }
 
 const NOT_MEASURED = 'Tests grün, aber die Abdeckung konnte nicht gemessen werden (Wächter blockiert den Befehl)';
@@ -1253,8 +1268,21 @@ test('Abnahme: grüne Tests, alle Kriterien belegt, nur die Abdeckungsmessung de
   // Die von AIdeation gemessene Abdeckung wird weiterhin gespeichert – mit echten Werten, nicht null.
   const area = queries.find((query) => query.sql.includes('INSERT INTO test_coverage_areas'));
   assert.ok(area, 'Abdeckung gespeichert');
+  assert.equal(area.values[1], 'backend');
   assert.equal(area.values[8], 82.5);
   assert.notEqual(area.values[8], null);
+  assert.ok(stepEvents(queries).includes('Testabdeckung gespeichert (backend)'));
+});
+
+test('Abdeckung: Messung ohne erkennbaren Bereich wird nicht gespeichert, der Grund steht im Schritt-Log', async () => {
+  const { queries } = await testerAcceptanceRun(
+    { criteria: [{ nr: 1, met: true, note: 'Test a' }], done: DONE_WITH_UNMEASURED },
+    'dev-log',
+  );
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO test_coverage')), 'kein Bericht angelegt');
+  const events = stepEvents(queries);
+  assert.ok(events.includes('Testabdeckung nicht gespeichert: kein vollständiger Bereich'), events.join('\n'));
+  assert.ok(events.some((text) => /Testabdeckung: „dev-log“ verworfen: keinem Bereich zuordenbar/.test(text)));
 });
 
 test('Abnahme: ein unbelegtes Kriterium oder rote Tests bleiben trotz Abdeckungs-Hinweis abgelehnt', async () => {

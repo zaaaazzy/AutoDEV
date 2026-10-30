@@ -7,9 +7,9 @@
 .coverage-table th {
   white-space: nowrap;
 }
-.coverage-table .coverage-total td {
-  border-top: 2px solid #dfe3da;
-  background: var(--surface-soft);
+.coverage-incomplete {
+  display: block;
+  font-size: 11px;
 }
 .coverage-failed {
   display: block;
@@ -48,6 +48,51 @@
 }
 
 /* ── Statistik ───────────────────────────────────────────────────────── */
+/* Testabdeckung-Verlauf: ein Kleindiagramm je Bereichsschlüssel */
+.coverage-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+.coverage-history-item {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.coverage-history-item figcaption {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+.coverage-history-item svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.coverage-history-target {
+  stroke: var(--line-strong);
+  stroke-dasharray: 4 4;
+  vector-effect: non-scaling-stroke;
+}
+.coverage-history-line {
+  fill: none;
+  stroke: var(--green);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.coverage-history-point {
+  fill: var(--green);
+  stroke: var(--surface);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+.coverage-history-table td,
+.coverage-history-table th {
+  padding: 2px 12px 2px 0;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
 .usage-row {
   display: grid;
   gap: 6px;

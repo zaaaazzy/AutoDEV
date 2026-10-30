@@ -4,6 +4,8 @@ import test from 'node:test';
 import pg from 'pg';
 import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
+import { coverageHistory, coverageOverview } from '../api/coverage.js';
+import { COVERAGE_AREA_KEYS, coverageAreaKey } from '../core/coverage-areas.js';
 import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
@@ -84,6 +86,147 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   const migration = MIGRATIONS.find((step) => step.version === 17);
   assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
+});
+
+test('Migrationen: Testabdeckung auf feste Bereichsschlüssel (Schritt 23)', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 23);
+  assert.equal(migration?.name, 'testabdeckung-feste-bereiche');
+  // Sicherung vor dem Löschen, CHECK erst nach dem Bereinigen.
+  const sql = migration?.sql ?? '';
+  assert.ok(sql.indexOf('test_coverage_areas_backup_23') < sql.indexOf('DELETE FROM test_coverage_areas'));
+  assert.ok(sql.lastIndexOf('DELETE FROM') < sql.indexOf('ADD CONSTRAINT test_coverage_areas_area_check'));
+});
+
+/** Bezeichnungen aus Altbeständen; die SQL-Zuordnung muss coverageAreaKey entsprechen. */
+const LEGACY_LABELS = [
+  'Backend',
+  'Backend (Express)',
+  'API-Server',
+  'Frontend',
+  'Frontend (Angular)',
+  'shop-ui',
+  'Contracts/Shared',
+  'Scripts',
+  'Skripte',
+  'E2E (Playwright)',
+  'Gesamt',
+  'Insgesamt',
+  'Backend und Frontend (zusammen)',
+  'Backend + Frontend',
+  'Projekt',
+  'dev-log',
+  'builder',
+  'Gesamtprojekt',
+];
+
+test('Migration 23: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  const name = `devlog_migr_coverage_${process.pid}`;
+  await dropDatabase(admin, name);
+  await admin.query(`CREATE DATABASE ${name}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
+  try {
+    const client = await pool.connect();
+    try {
+      await runMigrations(
+        client,
+        MIGRATIONS.filter((step) => step.version < 23),
+      );
+      await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+      const report = async (summary: string, createdAt: string) =>
+        (
+          await client.query<{ id: string }>(
+            `INSERT INTO test_coverage_reports (project_slug, summary, created_at) VALUES ('shop', $1, $2) RETURNING id`,
+            [summary, createdAt],
+          )
+        ).rows[0]!.id;
+      const area = (id: string, label: string, lines: number | null, branches: number | null, fns: number | null) =>
+        client.query(
+          `INSERT INTO test_coverage_areas (report_id, area, lines, branches, functions) VALUES ($1, $2, $3, $4, $5)`,
+          [id, label, lines, branches, fns],
+        );
+      const older = await report('älter', '2026-10-01T10:00:00Z');
+      await area(older, 'Backend', 70, 60, 80);
+      await area(older, 'Backend (Express)', 60, 50, 70); // gleicher Schlüssel: der höhere Zeilenwert bleibt
+      await area(older, 'Frontend', null, null, null); // ohne Prozentwerte
+      await area(older, 'Projekt', 50, 40, 60); // nicht zuordenbar
+      await area(older, 'Contracts/Shared', 90, 80, 95);
+      const newer = await report('neuer', '2026-10-20T10:00:00Z');
+      await area(newer, 'backend', 85, null, 90); // unvollständig: bleibt, zählt aber nicht als neuester Lauf
+      await area(newer, 'Backend und Frontend (zusammen)', 75, 65, 85);
+      await area(newer, 'Frontend (Angular)', 66, 55, 77);
+      for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
+
+      assert.deepEqual(await runMigrations(client), [23]);
+
+      const rows = async (id: string) =>
+        (
+          await client.query(
+            'SELECT area, lines FROM test_coverage_areas WHERE report_id = $1 ORDER BY area',
+            [id],
+          )
+        ).rows;
+      assert.deepEqual(await rows(older), [
+        { area: 'backend', lines: 70 },
+        { area: 'contracts', lines: 90 },
+      ]);
+      assert.deepEqual(await rows(newer), [
+        { area: 'backend', lines: 85 },
+        { area: 'frontend', lines: 66 },
+        { area: 'gesamt', lines: 75 },
+      ]);
+      // SQL-Zuordnung = coverageAreaKey.
+      const mapped = await client.query<{ summary: string; area: string | null }>(
+        `SELECT r.summary, a.area FROM test_coverage_reports r LEFT JOIN test_coverage_areas a ON a.report_id = r.id
+          WHERE r.created_at = '2026-09-01T10:00:00Z'`,
+      );
+      for (const row of mapped.rows) assert.equal(row.area, coverageAreaKey(row.summary), row.summary);
+      const backup = await client.query('SELECT count(*)::int AS n FROM test_coverage_areas_backup_23');
+      assert.equal(backup.rows[0].n, 8 + LEGACY_LABELS.length, 'Sicherung mit allen Altzeilen');
+
+      // Jede Zeile hat einen festen Schlüssel; jeder Schlüssel aus dem Code besteht den CHECK, andere nicht.
+      const keys = await client.query<{ area: string }>('SELECT DISTINCT area FROM test_coverage_areas');
+      for (const row of keys.rows) assert.ok((COVERAGE_AREA_KEYS as readonly string[]).includes(row.area), row.area);
+      const probe = await report('probe', '2026-08-01T10:00:00Z');
+      for (const key of COVERAGE_AREA_KEYS) await area(probe, key, 1, 1, 1);
+      await assert.rejects(area(probe, 'Frontend', 1, 1, 1), /test_coverage_areas_area_check/);
+      await client.query('DELETE FROM test_coverage_reports WHERE id = $1', [probe]);
+
+      // Übersicht und Verlauf: neuester vollständiger Lauf je Schlüssel, Verlauf mit Datum.
+      const overview = await coverageOverview(client, 'shop');
+      assert.deepEqual(
+        overview?.areas.map((row) => [row.area, row.lines, row.complete]),
+        [
+          ['backend', 70, true],
+          ['frontend', 66, true],
+          ['contracts', 90, true],
+          ['scripts', 50, true],
+          ['e2e', 50, true],
+          ['gesamt', 75, true],
+        ],
+      );
+      const history = await coverageHistory(client, 'shop');
+      const backend = history.filter((point) => point.area === 'backend');
+      assert.deepEqual(
+        backend.map((point) => point.lines),
+        [50, 50, 50, 70],
+        'nur vollständige Läufe, aufsteigend nach Datum',
+      );
+      assert.ok(backend.every((point) => !Number.isNaN(new Date(point.createdAt).getTime())), 'Datum je Punkt');
+
+      // Zweiter Start: keine Migration, Abdeckungsdaten unverändert.
+      const before = (await client.query('SELECT * FROM test_coverage_areas ORDER BY report_id, area')).rows;
+      assert.deepEqual(await runMigrations(client), []);
+      assert.deepEqual((await client.query('SELECT * FROM test_coverage_areas ORDER BY report_id, area')).rows, before);
+    } finally {
+      client.release();
+    }
+  } finally {
+    await pool.end();
+    await dropDatabase(admin, name);
+    await admin.end();
+  }
 });
 
 /** Struktur der Datenbank: Spalten, Prüfungen, Indizes, Trigger, Funktionen und vermerkte Migrationen. */

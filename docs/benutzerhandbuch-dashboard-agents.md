@@ -200,6 +200,13 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 - Läuft der Test über ein `test`-Skript mit Vorbereitungsschritten, werden diese nur ausgeführt, wenn sie zur erlaubten Liste gehören (`npm run`, `npm ci`, `tsc`, `ng build`, `vite build`), und ohne Verkettung mit `&&`, `;`, Pipes, Umleitungen oder `$`. Sonst entfällt die Messung, und der Schritt nennt den Grund. Die Tests selbst laufen weiter.
 - Der Tester muss die Abdeckung nicht selbst messen. Sperrt sein Wächter den Coverage-Befehl, ist das kein Grund für eine Ablehnung. Meldet er einen DoD-Punkt nur deshalb als nicht erfüllt („Abdeckung nicht gemessen, Wächter blockiert“), wertet AIdeation den Punkt als erfüllt. Voraussetzung: Jedes Akzeptanzkriterium ist erfüllt. Der Verlauf des Schritts vermerkt das. Nennt die Begründung rote Tests oder ein Kriterium ohne Test, bleibt die Abnahme abgelehnt. Die eigene Messung von AIdeation wird wie bisher gespeichert.
 
+**Testabdeckung, feste Bereiche:**
+- Gespeichert wird nur unter festen Schlüsseln: `backend`, `frontend`, `contracts`, `scripts`, `e2e`, `gesamt`. Gemeldete Bezeichnungen werden zugeordnet (Ganzwort): „Backend (Express)“ wird `backend`, „Contracts/Shared“ wird `contracts`. Bezeichnungen mit „gesamt“, „zusammen“ oder „insgesamt“ sowie solche, die Backend und Frontend gemeinsam nennen, werden `gesamt`.
+- `gesamt` berechnet AIdeation nicht selbst. Die Zeile erscheint nur, wenn ein Lauf sie meldet. Die frühere Summenzeile (Mittelwert) gibt es nicht mehr.
+- Verworfen werden: Bezeichnungen ohne erkennbaren Bereich (z. B. „Projekt“ oder ein Paketname wie „dev-log“) und Bereiche ohne Zeilen-, Verzweigungs- oder Funktionsabdeckung. Der Verlauf des Schritts nennt jeden verworfenen Eintrag mit Grund („Testabdeckung: „dev-log“ verworfen: keinem Bereich zuordenbar …“).
+- **Dashboard und Statistik:** Anzeige, Bedienung und Fehlerbehebung stehen in Abschnitt 5.6.
+- **Altbestand:** Die Datenbank-Migration 23 ordnet bestehende Einträge einmalig den Schlüsseln zu. Einträge ohne Prozentwerte oder ohne Zuordnung werden gelöscht. Gibt es in einem Bericht mehrere Einträge für denselben Schlüssel, bleibt der mit dem höchsten Zeilenwert. Vorher sichert sie die Tabelle in `test_coverage_areas_backup_23`.
+
 **Testläufe mit eigenem Datenbank-Passwort:** Ein Testlauf, den du unter **Testläufe** anforderst, und der Komplettlauf (`npm run test:full`) funktionieren auch dann, wenn du in der `.env` ein eigenes `DEV_LOG_DB_PASSWORD` hast, zum Beispiel vom Einrichtungs-Assistenten erzeugt.
 - Der Worker gibt diesen Befehlen nur `DEV_LOG_DATABASE_URL` mit, dazu das Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle anderen `DEV_LOG_*`-Werte fehlen dort.
 - Startest du `test:full` oder den E2E-Webserver von Hand, lesen sie den Zugang aus `DEV_LOG_DB_USER` und `DEV_LOG_DB_PASSWORD` der `.env` (Port 5433).
@@ -228,6 +235,60 @@ Dieser Abschnitt betrifft die Ausgabe, die ein Test- oder Befehlsschritt zurück
 **Abhilfe, wenn die Coverage fehlt:** Die Zahlen stehen im Ende der Ausgabe. Fehlen sie dort, prüfe den Testbefehl gegen die Bedingungen in Abschnitt 5, Coverage-Messung.
 
 **Printscreens:** Für diesen Abschnitt fehlen Bildschirmfotos. Sie erfordern eine laufende App mit Datenbank und Browser. Der Text oben beschreibt, was du siehst. Die Beschriftungen müssen gegen die laufende Oberfläche geprüft werden, bevor das Handbuch veröffentlicht wird.
+
+### 5.6 Testabdeckung: Dashboard und Statistik
+
+Die Testabdeckung zeigt, wie viel des Codes die Tests erreichen. Sie wird je **Bereich** gespeichert. Es gibt sechs feste Bereiche, und nur sie erscheinen in der Oberfläche:
+
+| Bereich | Anzeige | Bezeichnungen, die dem Bereich zugeordnet werden (Beispiele) |
+| --- | --- | --- |
+| `backend` | Backend | „Backend (Express)“, „API“, „Server“ |
+| `frontend` | Frontend | „Frontend“, „Web“, „UI“, „Client“ |
+| `contracts` | Contracts | „Contracts/Shared“, „Common“ |
+| `scripts` | Skripte | „Skripte“, „Scripts“ |
+| `e2e` | E2E | „E2E“, „End-to-End“, „Playwright“ |
+| `gesamt` | Gesamt | „Gesamt“, „zusammen“, „insgesamt“, sowie Backend und Frontend zusammen, z. B. „Backend und Frontend (zusammen)“ |
+
+**Dashboard → Testabdeckung** [Bild 5.6a: Tabelle mit je einer Zeile je Bereich, Spalte „Stand“ und Prozentbalken]
+
+- Der Kopf nennt den letzten Bericht mit Datum, dem Auftrag („nach „…““) und dem Ziel von 75 % Zeilenabdeckung.
+- Je Bereich steht genau eine Zeile. Sie zeigt den **neuesten vollständigen Lauf** dieses Bereichs. Das Datum dieses Laufs steht in der Spalte **„Stand“**. Das gilt je Bereich, nicht für den ganzen Bericht. Ein Bereich kann also mit einem älteren Datum erscheinen als ein anderer.
+- Die Prozentwerte stehen für Zeilen, Anweisungen, Zweige und Funktionen. Ab 75 % gilt der Wert als gut, ab 50 % als mittel, darunter als niedrig. Das Ziel ist also die Grenze für „gut“.
+- Hat ein Bereich keinen vollständigen Lauf, stehen alle Prozentwerte auf **„–“**. Neben dem Datum erscheint dann „kein vollständiger Lauf“. Ältere Läufe füllen die Zeile nicht auf.
+- Die Spalte **„Gesamt“** in den Testzahlen ist die Summe der Tests aus Unit-, Komponenten-, Integrations- und E2E-Tests. Sie hat nichts mit dem Bereich „Gesamt“ zu tun.
+- Ist ein Bereich fehlgeschlagen, steht unter seinem Namen „N fehlgeschlagen“.
+- Eine Summenzeile (Mittelwert) gibt es nicht. Die Zeile „Gesamt“ erscheint nur, wenn ein Lauf den Bereich `gesamt` meldet. AIdeation berechnet ihn nicht selbst.
+- Ohne jeden Lauf steht dort: „Noch keine Testabdeckung gemeldet.“
+
+**Statistik → Testabdeckung-Verlauf** [Bild 5.6b: ein kleines Liniendiagramm je Bereich mit gestrichelter Ziellinie bei 75 %]
+
+- Je Bereich mit vollständigen Läufen ein Diagramm (höchstens sechs) mit der **Zeilenabdeckung** über diese Läufe. Die x-Achse zeigt das Datum, die y-Achse 0 bis 100 %. Die gestrichelte Linie markiert das Ziel 75 %.
+- Rechts oben steht der Wert des letzten Laufs. Ein Punkt zeigt Datum und Wert im Tooltip.
+- Unter „N Läufe“ klappt eine Tabelle mit Datum und Zeilenwert auf.
+- Je Bereich bleiben höchstens die **neuesten 60 Läufe**. Ältere fallen aus dem Verlauf, bleiben aber in der Datenbank.
+- Ein Bereich ohne vollständigen Lauf erscheint nicht im Verlauf.
+
+**Bedingungen und Grenzen:**
+
+- **Vollständiger Lauf:** Zeilen-, Verzweigungs- und Funktionsabdeckung müssen alle gesetzt sein. Fehlt eine davon, wird der Bereich **nicht gespeichert**. Die Anweisungsabdeckung ist für die Vollständigkeit nicht nötig.
+- **Verworfene Bereiche:** Bezeichnungen ohne erkennbaren Bereich (z. B. „Projekt“ oder ein Paketname wie „dev-log“) und unvollständige Bereiche werden verworfen. Der Verlauf des Schritts nennt jeden verworfenen Eintrag mit dem Grund, etwa „Testabdeckung: „Projekt“ verworfen: keinem Bereich zuordenbar (erlaubt: backend, frontend, contracts, scripts, e2e, gesamt)“.
+- **Doppelte Bereiche:** Meldet ein Lauf denselben Bereich zweimal, bleibt der erste Eintrag. Der zweite wird mit dem Grund „doppelt gemeldet“ verworfen. Hat ein Lauf keinen gültigen Bereich mehr übrig, wird kein Bericht angelegt.
+- **Zuordnung ist ganzwortbasiert:** „builder“ ist kein „ui“. Gesamt hat Vorrang: Wer Backend und Frontend zusammen meldet, bekommt `gesamt`.
+- **Altbestand:** Die Migration 23 hat bestehende Einträge einmalig den Bereichen zugeordnet. Die Zuordnung ist eine Heuristik. Der Verlauf älterer Läufe ist nur so gut wie diese Zuordnung. Die Originaldaten bleiben in der Tabelle `test_coverage_areas_backup_23` erhalten.
+- **Keine Neuberechnung:** Die Zählungen alter Läufe werden nicht neu berechnet. Fehlende Werte werden nicht nachgeholt.
+- **Ziel bleibt bei 75 %:** Das Ziel ist unverändert. Es beeinflusst nur die Farben und die Ziellinie, nicht das Speichern.
+
+**Fehlerbehebung**
+
+| Beobachtung | Ursache und was zu tun ist |
+| --- | --- |
+| „–“ bei einem Bereich im Dashboard | Für diesen Bereich gibt es keinen vollständigen Lauf. Im Verlauf des Schritts nachsehen, ob ein Eintrag „verworfen“ wurde. Dann fehlte ein Wert. |
+| Bereich fehlt im Statistik-Verlauf | Noch kein vollständiger Lauf für diesen Bereich. |
+| Schritt-Log: „verworfen: keinem Bereich zuordenbar“ | Die Bezeichnung passt auf keinen festen Bereich. Im Tester-Block einen der Bereiche aus der Tabelle oben verwenden, etwa „Backend (Express)“. |
+| Schritt-Log: „verworfen“ mit fehlenden Werten | Eine der drei Abdeckungen (Zeilen, Verzweigungen, Funktionen) fehlt. Siehe Abschnitt 5, Coverage-Messung. |
+| Anzeige „Gesamt“ fehlt | Kein Lauf hat den Bereich `gesamt` gemeldet. Das ist gewollt; AIdeation berechnet ihn nicht. |
+
+**Printscreens:** Fehlen für diesen Abschnitt. In dieser Sitzung wurde die App nicht gestartet: Die Shell war für Browser- und Datenbankbefehle gesperrt, und eine laufende Datenbank war nicht erreichbar. Ohne laufende App mit Datenbank lässt sich die Oberfläche hier nicht aufnehmen. Die Platzhalter [Bild 5.6a] und [Bild 5.6b] ersetzen, sobald die Aufnahme auf einem Host mit Browser gemacht ist. Die Beschreibung beruht auf dem Code (`coverage-panel.component.*`, `stats.component.*`, `src/api/coverage.ts`), nicht auf einem Lauf der App.
 
 ---
 

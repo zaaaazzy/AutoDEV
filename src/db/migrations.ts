@@ -471,6 +471,50 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE test_requests ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES test_evidence(id) ON DELETE SET NULL;
     `,
   },
+  // Testabdeckung nur noch unter festen Bereichsschlüsseln (COVERAGE_AREA_KEYS in src/core/coverage-areas.ts). Bisher
+  // speicherte der Tester freie Bezeichnungen („Frontend“, „Contracts/Shared“, „Backend (Express)“), die Übersicht
+  // zeigte fast gleiche Namen mit widersprüchlichen Werten. Zuordnung wie coverageAreaKey (Ganzwort, „gesamt“ zuerst);
+  // Zeilen ohne Prozentwerte oder ohne Zuordnung fallen weg, je Bericht und Schlüssel bleibt der höchste Zeilenwert.
+  // Vorher eine Sicherung der Tabelle; die Berichte selbst bleiben als Verlauf erhalten. Im Auftrag als Version 20
+  // geplant; die Versionen 19–22 belegte inzwischen Sprint 30, darum Version 23.
+  {
+    version: 23,
+    name: 'testabdeckung-feste-bereiche',
+    sql: `
+      CREATE TABLE IF NOT EXISTS test_coverage_areas_backup_23 AS TABLE test_coverage_areas;
+      ALTER TABLE test_coverage_areas DROP CONSTRAINT IF EXISTS test_coverage_areas_area_check;
+
+      CREATE TEMP TABLE coverage_area_keys ON COMMIT DROP AS
+      SELECT report_id, area, CASE
+               WHEN label ~ '(^|[^a-z0-9äöüß])(gesamt|zusammen|insgesamt)s?($|[^a-z0-9äöüß])'
+                 OR (label ~ '(^|[^a-z0-9äöüß])(backend|server|api)s?($|[^a-z0-9äöüß])'
+                     AND label ~ '(^|[^a-z0-9äöüß])(frontend|web|ui|client)s?($|[^a-z0-9äöüß])') THEN 'gesamt'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(backend|server|api)s?($|[^a-z0-9äöüß])' THEN 'backend'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(frontend|web|ui|client)s?($|[^a-z0-9äöüß])' THEN 'frontend'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(contract|shared|common)s?($|[^a-z0-9äöüß])' THEN 'contracts'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(script|skripte?)s?($|[^a-z0-9äöüß])' THEN 'scripts'
+               WHEN label ~ '(^|[^a-z0-9äöüß])(e2e|end-to-end|playwright)s?($|[^a-z0-9äöüß])' THEN 'e2e'
+             END AS key
+        FROM (SELECT report_id, area, lower(btrim(area)) AS label FROM test_coverage_areas) a;
+
+      DELETE FROM test_coverage_areas a USING coverage_area_keys k
+       WHERE a.report_id = k.report_id AND a.area = k.area
+         AND (k.key IS NULL OR (a.lines IS NULL AND a.statements IS NULL AND a.branches IS NULL AND a.functions IS NULL));
+
+      DELETE FROM test_coverage_areas a USING (
+        SELECT k.report_id, k.area,
+               row_number() OVER (PARTITION BY k.report_id, k.key ORDER BY c.lines DESC NULLS LAST, k.area) AS rank
+          FROM coverage_area_keys k JOIN test_coverage_areas c ON c.report_id = k.report_id AND c.area = k.area
+      ) r
+       WHERE a.report_id = r.report_id AND a.area = r.area AND r.rank > 1;
+
+      UPDATE test_coverage_areas a SET area = k.key FROM coverage_area_keys k
+       WHERE a.report_id = k.report_id AND a.area = k.area AND a.area <> k.key;
+
+      ALTER TABLE test_coverage_areas ADD CONSTRAINT test_coverage_areas_area_check
+        CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt'));
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

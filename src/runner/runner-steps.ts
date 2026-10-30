@@ -474,10 +474,14 @@ export async function runStep(
   }
   const coverage = mergeCoverage(reported, measured);
   if (coverage) {
-    await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) =>
-      console.error('Coverage could not be saved:', error),
-    );
-    await logEvent(pool, stepId, `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`);
+    // Nur feste Bereichsschlüssel mit vollständigen Prozentwerten; was wegfällt, steht mit Grund im Schritt-Log.
+    const stored = await saveCoverage(pool, item.projectSlug, item.id, coverage).catch((error) => {
+      console.error('Coverage could not be saved:', error);
+      return null;
+    });
+    if (stored?.saved.length) await logEvent(pool, stepId, `Testabdeckung gespeichert (${stored.saved.join(', ')})`);
+    else if (stored) await logEvent(pool, stepId, 'Testabdeckung nicht gespeichert: kein vollständiger Bereich');
+    for (const reason of stored?.discarded ?? []) await logEvent(pool, stepId, `Testabdeckung: ${reason}`);
     output = stripCoverage(output);
   }
   await logEvent(

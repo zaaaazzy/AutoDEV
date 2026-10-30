@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandExecutor } from '../core/command.js';
+import { coverageAreaKey } from '../core/coverage-areas.js';
 import type { CoverageArea, CoverageReport } from './coverage.js';
 import { runProjectCommand } from './project-command.js';
 
@@ -33,19 +34,13 @@ export function parseNodeCoverage(
   };
 }
 
-/** Lesbarer Bereichsname aus dem Workspace-Namen („mainty-backend“ → „Backend“). */
+/**
+ * Bereichsschlüssel aus dem Workspace-Namen („mainty-backend“ → „backend“). Ohne erkennbaren Bereich bleibt der
+ * Paketname stehen; saveCoverage verwirft solche Messungen mit Grund im Schritt-Log.
+ */
 export function areaName(workspace: string): string {
   const name = workspace.replace(/^@[^/]+\//, '');
-  // Nur ganze Namensteile (getrennt durch -, _, / usw.): „builder“ ist kein „ui“, „rapid“ keine „api“.
-  const word = (words: string) => new RegExp(`(?:^|[^a-z0-9])(?:${words})s?(?=$|[^a-z0-9])`, 'i');
-  for (const [pattern, label] of [
-    [word('backend|server|api'), 'Backend'],
-    [word('frontend|web|ui|client'), 'Frontend'],
-    [word('contract|shared|common'), 'Contracts'],
-  ] as const) {
-    if (pattern.test(name)) return label;
-  }
-  return name || 'Projekt';
+  return coverageAreaKey(name) ?? (name || 'Projekt');
 }
 
 export interface TestRunner {
@@ -220,12 +215,16 @@ function coverageArea(area: string, measured: NonNullable<ReturnType<typeof pars
   };
 }
 
-/** Ergänzt den Bericht des Testers um die gemessenen Werte (gemessene Prozente haben Vorrang). */
+/**
+ * Ergänzt den Bericht des Testers um die gemessenen Werte (gemessene Prozente haben Vorrang). Verglichen wird über den
+ * Bereichsschlüssel; eine Messung ohne Schlüssel bleibt im Bericht und wird beim Speichern mit Grund verworfen.
+ */
 export function mergeCoverage(report: CoverageReport | null, measured: CoverageArea[]): CoverageReport | null {
   if (!measured.length) return report;
   const areas = [...(report?.areas ?? [])];
   for (const entry of measured) {
-    const existing = areas.find((area) => area.area.toLowerCase() === entry.area.toLowerCase());
+    const key = coverageAreaKey(entry.area);
+    const existing = key ? areas.find((area) => coverageAreaKey(area.area) === key) : undefined;
     if (existing) {
       Object.assign(existing, {
         lines: entry.lines,
@@ -242,5 +241,9 @@ export function mergeCoverage(report: CoverageReport | null, measured: CoverageA
       (area) => `${area.area} ${area.lines} % Zeilen, ${area.branches} % Verzweigungen, ${area.functions} % Funktionen`,
     )
     .join(' · ')}`;
-  return { summary: report?.summary ? `${report.summary}\n\n${note}` : note, areas };
+  return {
+    summary: report?.summary ? `${report.summary}\n\n${note}` : note,
+    areas,
+    discarded: report?.discarded ?? [],
+  };
 }
