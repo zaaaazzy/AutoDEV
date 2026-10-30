@@ -46,6 +46,10 @@ Der erste Testerlauf scheiterte an der Umgebung (`tsc` fehlt im Image, npm-Cache
 - `test-request.ts`: Bricht ein Lauf nach dem Anlegen ab, gilt der Nachweis als rot (`failed` mit diesem Lauf). Das gilt jetzt auch beim erneuten Start eines schon roten Nachweises; bisher blieb dort die alte `run_id` stehen.
 - `test-evidence.test.ts`: Migration 19 läuft zusätzlich auf einer Tabelle mit bestehenden Zeilen `full`, `ui` und `befehl`.
 
+## Teststand (Dokumentierer)
+
+Der Tester konnte `npm run typecheck` und `npx tsx --test …` im Image „aideation-agent“ nicht ausführen (`tsc` fehlt, `/home/agent/.npm` nicht beschreibbar). Es gibt daher keinen grünen Lauf für diesen Auftrag. Die Testdateien sind geschrieben, aber ungeprüft: `src/runner/test-evidence.test.ts`, `src/api/test-evidence.test.ts`, `frontend/src/app/shared/order-attention.spec.ts`, `src/db/migrations.test.ts`, `src/runner/acceptance.test.ts`, `src/runner/runner-steps.test.ts`, `src/runner/test-request.test.ts`. Ein Mensch oder eine Umgebung mit `tsc` und beschreibbarem npm-Cache (`npm_config_cache` setzen) muss `npm run typecheck`, `npm test` und den Build ausführen.
+
 ## Offen
 
 - Printscreens der Seite „Aktionen“ (mit Startknopf und mit Rechte-Link) fehlen im Benutzerhandbuch; in der Sitzung gab es keinen Browser. Nachreichen, sobald die App läuft.
