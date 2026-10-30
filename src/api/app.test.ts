@@ -1237,6 +1237,62 @@ test('Massenpriorität: setzt die Priorität nur auf bearbeitbaren Ideen des eig
   assert.equal(calls.filter((call) => call.sql.startsWith('UPDATE')).length, 1);
 });
 
+test('Massenaktionen ohne Admin: Ideen fremder Projekte bleiben unverändert und gelten als nicht gefunden', async () => {
+  // Kleine Ideen-Tabelle: eine Idee im eigenen Projekt p, zwei im fremden Projekt q.
+  const ideas = [
+    { id: BULK_IDS[0], title: 'Eigene Idee', status: 'idea', project: 'p' },
+    { id: BULK_IDS[1], title: 'Fremde Idee', status: 'idea', project: 'q' },
+    { id: BULK_IDS[2], title: 'Fremd in Prüfung', status: 'review', project: 'q' },
+  ];
+  // Wertet die Bedingung „id = ANY($1) [AND status = ANY($3)] AND project_slug = ANY(allowed)“ wie die Datenbank aus.
+  const matching = (ids: unknown, allowed: unknown, statuses?: unknown) =>
+    ideas.filter(
+      (idea) =>
+        (ids as string[]).includes(idea.id) &&
+        (allowed === null || (allowed as string[]).includes(idea.project)) &&
+        (!statuses || (statuses as string[]).includes(idea.status)),
+    );
+  const comments: unknown[][] = [];
+  const updates: unknown[][] = [];
+  const pool = transactionPool(['plan'], (sql, values) => {
+    if (sql.startsWith('UPDATE ideation_items')) {
+      updates.push(values);
+      return { rows: matching(values[0], values[3], values[2]).map(({ id, title }) => ({ id, title })) };
+    }
+    if (sql.includes('INSERT INTO ideation_comments')) comments.push(values[0] as unknown[]);
+    if (sql.startsWith('SELECT id, title, status FROM ideation_items')) {
+      return { rows: matching(values[0], values[1]).map(({ id, title, status }) => ({ id, title, status })) };
+    }
+    return undefined;
+  });
+  await withServer(pool, async (baseUrl) => {
+    const post = (path: string, body: unknown) =>
+      fetch(`${baseUrl}/api/ideation/bulk/${path}`, {
+        method: 'POST',
+        headers: sessionHeaders,
+        body: JSON.stringify(body),
+      }).then(async (response) => ({ status: response.status, body: await response.json() }));
+    const reasons = (skipped: { id: string; reason: string }[]) => skipped.map((idea) => [idea.id, idea.reason]);
+    const foreign = [
+      [BULK_IDS[1], 'nicht gefunden'],
+      [BULK_IDS[2], 'nicht gefunden'],
+    ];
+    const rejected = await post('reject', { ids: BULK_IDS, reason: 'Kein Bedarf' });
+    assert.equal(rejected.status, 200);
+    assert.deepEqual(rejected.body.rejected, [{ id: BULK_IDS[0], title: 'Eigene Idee' }]);
+    assert.deepEqual(reasons(rejected.body.skipped), foreign);
+    // Fremde Titel werden nicht verraten.
+    assert.ok(rejected.body.skipped.every((idea: { title: unknown }) => idea.title === null));
+
+    const prioritized = await post('priority', { ids: BULK_IDS.slice(1), priority: 'high' });
+    assert.equal(prioritized.status, 200);
+    assert.deepEqual(prioritized.body.changed, []);
+    assert.deepEqual(reasons(prioritized.body.skipped), foreign);
+  });
+  assert.deepEqual(comments, [[BULK_IDS[0]]], 'nur die eigene Idee bekommt den Ablehnungskommentar');
+  assert.ok(updates.every((values) => JSON.stringify(values[3]) === '["p"]'), 'jedes UPDATE filtert nach Projekt');
+});
+
 test('Massenaktionen brauchen die Rolle „Planen“', async () => {
   const writes: string[] = [];
   const pool = memberPool(['run'], (sql) => {
