@@ -546,7 +546,8 @@ test('Ideen: anlegen, öffnen, kommentieren, Auftrag erstellen lassen', async ({
 test('Ideen: Nutzen, Kosten und Wert in „Offene Ideen“', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop-Ablauf');
   const headers = async (table: Locator) =>
-    (await table.locator('thead .dt-head').allInnerTexts()).map((text) => text.replace(/[↑↓]/g, '').trim());
+    // textContent statt innerText: Die Köpfe stehen per CSS in Großbuchstaben, verglichen wird die Beschriftung.
+    (await table.locator('thead .dt-head').allTextContents()).map((text) => text.replace(/[↑↓]/g, '').trim());
   const sortedHeader = (table: Locator) => table.locator('thead th[aria-sort]');
   const titles = (table: Locator) => table.locator('tbody td[data-label="Titel"] .link-button').allInnerTexts();
   const groupTable = async (title: string) => {

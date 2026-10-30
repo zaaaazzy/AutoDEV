@@ -77,7 +77,7 @@ export const SCORE_FILTER_OPTIONS: readonly string[] = Array.from({ length: 11 }
 /** Wert einer Idee = Nutzen / Kosten; ohne Nutzen, ohne Kosten oder bei Kosten 0 nicht berechenbar (null). */
 export function ideaValue(idea: Pick<Idea, 'benefit' | 'cost'>): number | null {
   const { benefit, cost } = idea;
-  if (benefit == null || cost == null || cost <= 0) return null;
+  if (benefit === null || benefit === undefined || cost === null || cost === undefined || cost <= 0) return null;
   return benefit / cost;
 }
 
