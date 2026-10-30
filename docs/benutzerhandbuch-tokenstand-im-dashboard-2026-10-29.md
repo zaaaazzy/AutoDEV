@@ -66,7 +66,7 @@ Ist kein Limit vermerkt (z. B. weil es schon zurückgesetzt wurde), antwortet de
 - **Keine Zahlung im Dashboard.** Der Link führt nur zur Seite des Anbieters. Dort musst du dich anmelden und das Limit erhöhen.
 - **Zeitzone:** Die Uhrzeit wird in der Zeitzone des Browsers angezeigt (Format: Tag.Monat., Uhrzeit).
 - **Nur `https`-Links.** Links kommen ausschließlich aus der festen Anbieterliste des Servers, nie aus der Ausgabe einer CLI.
-- **Kein Kostenlimit.** Dieser Hinweis hat nichts mit dem Budget unter „Einstellungen → Budget“ (Kostenlimit in USD) zu tun. Das Budget begrenzt Kosten in eigenen Einstellungen. Das Nutzungslimit kommt vom Anbieter.
+- **Kein Kostenlimit.** Dieser Hinweis hat nichts mit dem Kostenlimit in USD (Budget) zu tun. Das Budget begrenzt Kosten in eigenen Einstellungen. Das Nutzungslimit kommt vom Anbieter.
 
 ## Wo der Zustand gespeichert wird
 
@@ -74,7 +74,7 @@ Für Entwickler und Betrieb: Pro Anbieter steht ein Eintrag in `app_settings` mi
 
 ## Offen
 
-- **Printscreens fehlen.** Die App lief in dieser Umgebung nicht, es ist kein Browser installiert, und Shell-Befehle für Agents sind eingeschränkt. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Sie sind nicht erstellt. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
-- **Oberfläche nicht im Browser geprüft.** Die Beschreibung stammt aus `provider-limit-alert.component.ts`, `provider-limits.ts` (Frontend), `src/api/provider-limits.ts` und `src/core/provider-limits.ts`. Am 30.10. nochmals gegen diesen Code abgeglichen: Texte, Schaltflächen, Rollen- und Projektbedingungen, Reserve von 3 Minuten, Stundenregel ohne Uhrzeit, Platzierung unter dem Git-Hinweis. Die Darstellung im Browser ist damit nicht bestätigt.
-- **Tests nicht in diesem Lauf ausgeführt.** Die Angaben zu `src/core/provider-limits.test.ts` und `frontend/src/app/features/dashboard/provider-limits.spec.ts` stammen aus dem Entwicklerbericht.
+- **Printscreens fehlen.** In diesem Lauf (30.10.) habe ich keine erstellt: Die App wurde nicht gestartet, und Agents dürfen keine Shell-Befehle wie `npm` ausführen. Ein Browser-Werkzeug war ebenfalls nicht verfügbar. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
+- **Oberfläche nicht im Browser geprüft.** Die Beschreibung stammt aus `provider-limit-alert.component.ts`, `provider-limits.ts` (Frontend), `src/api/provider-limits.ts` und `src/core/provider-limits.ts`. Am 30.10. gegen diesen Code abgeglichen (Lesen, keine Ausführung): Texte, Schaltflächen, Rollen- und Projektbedingungen, Reserve von 3 Minuten, Stundenregel ohne Uhrzeit, Platzierung unter dem Git-Hinweis, 409-Antwort ohne Limit, Unterbrechungsvermerk in `src/runner/runner-steps.ts` und Pre-Sprint-Reset in `src/runner/pre-sprint.ts`. Die Darstellung im Browser ist damit nicht bestätigt.
+- **Tests nicht in diesem Lauf ausgeführt.** Die Angaben zu `src/core/provider-limits.test.ts` und `frontend/src/app/features/dashboard/provider-limits.spec.ts` stammen aus dem Entwicklerbericht. Ich habe die Spec-Dateien gelesen, sie aber nicht laufen lassen.
 - **Pre-Sprint-Aussage im Code belegt (30.10.).** `src/runner/pre-sprint.ts` setzt bei einem Limit `sprints.pre_sprint_next_at` auf den Reset. „Fortsetzen“ ändert nur `development_items` und gibt Pre-Sprint-Phasen daher nicht vorzeitig frei.
