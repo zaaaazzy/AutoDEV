@@ -1,0 +1,86 @@
+# Testabdeckung: feste Bereichsschlüssel, neuester vollständiger Lauf, Verlauf
+
+## Aufträge
+
+### Auftrag 80ae16ac
+
+„Coverage-Bereiche auf feste Schlüssel umstellen“. Agent „Entwickler“ hat umgesetzt, diese Seite dokumentiert das Ergebnis.
+
+**Ergebnis:** Testabdeckung wird nur noch unter den sechs festen Schlüsseln `backend`, `frontend`, `contracts`, `scripts`, `e2e`, `gesamt` gespeichert. Eine gemeldete Bezeichnung wird über `coverageAreaKey` zugeordnet, nicht über den freien Text. Nicht zuordenbare und unvollständige Einträge werden verworfen, der Grund steht im Schritt-Log. Die Übersicht zeigt je Schlüssel höchstens eine Zeile mit dem neuesten vollständigen Lauf (Zeilen-, Verzweigungs- und Funktionsabdeckung gesetzt) und eigenem Datum. Die Statistik hat einen Abschnitt „Testabdeckung-Verlauf“. Eine Migration bereinigt den Bestand.
+
+**Anforderung → Umsetzung**
+
+- **Schlüssel und Zuordnung** (`src/core/coverage-areas.ts`, neu): `COVERAGE_AREA_KEYS`, `COVERAGE_AREA_LABELS` (Oberfläche), `isCoverageAreaKey`, `coverageAreaKey(label)`, `isCompleteCoverage`, `COMPLETE_COVERAGE_SQL`. Ganzwortprüfung (`builder` ist kein `ui`). Reihenfolge der Regeln:
+  1. `gesamt`: „gesamt“, „zusammen“, „insgesamt“ oder Backend- und Frontend-Wort zusammen.
+  2. `backend` (backend, server, api), 3. `frontend` (frontend, web, ui, client), 4. `contracts` (contract, shared, common), 5. `scripts` (script, skript, skripte), 6. `e2e` (e2e, end-to-end, playwright).
+  - Beispiele: „Backend (Express)“ → `backend`; „Backend und Frontend (zusammen)“ → `gesamt`; „Projekt“ → kein Schlüssel.
+- **Speichern und Verwerfen** (`src/runner/coverage.ts`): `parseCoverage` und `saveCoverage` wenden die Zuordnung an. `saveCoverage` liefert `discarded` (Gründe) zurück. Verworfen wird, was keinem Schlüssel entspricht oder keine Prozentwerte hat. Der Tester-Prompt (`COVERAGE_INSTRUCTIONS`) nennt als Beispiele nur die festen Schlüssel.
+- **Messung** (`src/runner/measured-coverage.ts`): `areaName` liefert Schlüssel statt Labels, `mergeCoverage` vergleicht Schlüssel. `measureCoverage` selbst ist unverändert.
+- **Schritt-Log** (`src/runner/runner-steps.ts`): Nach dem Speichern wird je verworfenem Bereich `Testabdeckung: <Grund>` protokolliert.
+- **API** (`src/api/coverage.ts`):
+  - `GET /projects/:slug/coverage`: letzter Bericht (Zusammenfassung, Auftrag) und je Schlüssel eine Zeile (`DISTINCT ON (a.area)`, vollständige Läufe zuerst, dann neuestes Datum). Hat ein Schlüssel keinen vollständigen Lauf, kommt sein neuester Eintrag mit `complete: false` und leeren Prozentwerten (Anzeige „–“). Sortiert in Reihenfolge der Schlüssel. Jede Zeile hat `createdAt`.
+  - `GET /projects/:slug/coverage/history` (neu): Zeilenabdeckung vollständiger Läufe je Schlüssel, höchstens `HISTORY_LIMIT` (60) neueste Punkte, aufsteigend nach Datum. Registrierung in `app.ts` bestand schon.
+- **Visionär** (`src/agent/visionary.ts`): dieselbe Regel „neuester vollständiger Lauf je Schlüssel“.
+- **Migration** (`src/db/migrations.ts`, `testabdeckung-feste-bereiche`): siehe unten.
+- **Frontend:** Typ `CoverageArea.area` als Schlüssel-Union und Verlauf in `models.ts`; `project-loader.ts` lädt den Verlauf; `coverage-panel.component.*` zeigt feste Zeilen mit Datum je Zeile, die Mittelwert-Summenzeile entfällt; `stats.component.*` zeigt den Abschnitt „Testabdeckung-Verlauf“, die Aufbereitung der Punkte liegt in `features/stats/coverage-history.ts`; Styles in `09-dashboard.css`.
+- **Doku:** `docs/benutzerhandbuch-dashboard-agents.md` angepasst.
+- `gesamt` berechnet der Worker nicht. Die Zeile erscheint nur, wenn ein Lauf sie unter diesem Schlüssel meldet.
+
+**Migration (Version 19)**
+
+Die Migrationsnummer ist **19, nicht 20** wie im Auftrag: Die letzte vorhandene Migration war 18, die Nummern sind fortlaufend. Der Auftrag ging von 19 als bereits belegt aus; im Code ist 19 die neue Migration. Der Kommentar in `coverage-areas.ts` nennt ebenfalls 19.
+
+1. Sicherung: `test_coverage_areas_backup_19` (`CREATE TABLE IF NOT EXISTS … AS TABLE`).
+2. Alten Constraint entfernen (`DROP CONSTRAINT IF EXISTS`), temporäre Zuordnungstabelle `coverage_area_keys` per `CASE` auf `lower(btrim(area))` mit denselben Regeln und Reihenfolge wie `coverageAreaKey`.
+3. Löschen: Zeilen ohne Zuordnung und Zeilen, bei denen Zeilen-, Statement-, Verzweigungs- und Funktionswert alle `NULL` sind.
+4. Duplikate je (`report_id`, Schlüssel): der höchste Zeilenwert bleibt.
+5. `UPDATE` auf den Schlüssel, dann `CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt'))` als `test_coverage_areas_area_check`.
+
+Die alten Berichte bleiben als Verlaufsquelle. Die Zählungen werden nicht neu berechnet. `src/db/schema.ts` ist unverändert.
+
+**Geänderte Dateien**
+
+- Neu: `src/core/coverage-areas.ts`, `src/core/coverage-areas.test.ts`, `frontend/src/app/features/stats/coverage-history.ts`, `coverage-history.spec.ts`.
+- Backend: `src/api/coverage.ts`, `src/agent/visionary.ts`, `src/db/migrations.ts`, `src/runner/{coverage,measured-coverage,runner-steps}.ts`.
+- Tests: `src/agent/visionary.test.ts`, `src/db/migrations.test.ts`, `src/runner/{coverage,measured-coverage,project-command,runner}.test.ts`, `frontend/src/app/core/project-loader.spec.ts`.
+- Frontend: `frontend/src/app/core/{models,project-loader}.ts`, `features/dashboard/coverage-panel.component.{ts,html}`, `features/stats/stats.component.{ts,html}`, `frontend/src/styles/09-dashboard.css`.
+- Doku: `docs/benutzerhandbuch-dashboard-agents.md`.
+
+**Tests**
+
+Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Vollständigkeitsprüfung, Migration und Verlauf (`coverage-areas.test.ts`, `coverage.test.ts`, `measured-coverage.test.ts`, `project-command.test.ts`, `migrations.test.ts`, `visionary.test.ts`, `runner.test.ts`, `project-loader.spec.ts`, `coverage-history.spec.ts`). Die Dokumentation hat `npm test` nicht selbst ausgeführt; das Ergebnis ist im Testschritt des Auftrags zu prüfen.
+
+**Nicht umgesetzt oder offen**
+
+- `e2e/demo/seed.ts` (Demo-Daten mit festen Schlüsseln) steht nicht in der Liste der geänderten Dateien. Prüfen, ob die Demo-Daten noch freie Bezeichnungen verwenden; sie würden vom CHECK-Constraint abgelehnt.
+- Die Migration wurde nach der Liste der Dateien nur im Test (`migrations.test.ts`) geprüft, nicht gegen eine echte Datenbank mit Altbestand.
+
+**Worauf zu achten ist**
+
+- Die Schlüsselliste steht dreifach: `coverage-areas.ts`, CHECK in der Migration, Frontend-Union. Ändert sich eine, müssen alle angepasst werden (neue Migration, die Version 19 nicht ändern). Ein Test in `migrations.test.ts` soll prüfen, dass jeder Schlüssel den Constraint besteht.
+- Die Zuordnung ist eine Heuristik. Bezeichnungen wie „Projekt“ fallen weg, Altdaten mit mehrdeutigen Namen können dem „falschen“ Schlüssel zugeordnet sein; Verlaufsdaten sind nur so gut wie diese Zuordnung.
+- Fehlt einem Lauf ein Prozentwert (z. B. keine Messung, `null`), wird er nicht still ignoriert: Er wird verworfen und der Grund steht im Schritt-Log. In der Übersicht erscheint ein Schlüssel ohne vollständigen Lauf mit „–“.
+- Die Migration löscht Altzeilen; Wiederherstellung über `test_coverage_areas_backup_19`. Ein zweiter Start führt Migration 19 nicht erneut aus.
+- Mehrere Einträge mit demselben Schlüssel im selben Bericht sind nach der Migration nicht mehr möglich; beim Speichern gilt dieselbe Regel (höchster Zeilenwert).
+- `COVERAGE_TARGET` (75 %) und die Zählung der Testarten sind unverändert.
+
+## Sprint
+
+| Auftrag | Inhalt | Zustand |
+| --- | --- | --- |
+| 80ae16ac | Coverage-Bereiche auf feste Schlüssel umstellen | Entwickler fertig, Dokumentation hier; Tester, Review und Merge laut Workflow offen |
+
+## Anfrage / TODO
+
+- `npm test` vollständig grün bestätigen (Testschritt), dabei die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
+- `e2e/demo/seed.ts` auf feste Schlüssel prüfen und gegebenenfalls anpassen.
+- Nach der Migration Übersicht und Statistik im Browser ansehen: je Schlüssel eine Zeile, Datum je Zeile, Verlauf je Schlüssel.
+- Optional später: Sicherungstabelle `test_coverage_areas_backup_19` entfernen, wenn die Zuordnung der Altdaten abgenommen ist.
+
+## Technische Dokumentation
+
+- Datenfluss: Tester-Block `@@COVERAGE` und Messung (AIdeation) → `coverageAreaKey` → unbekannt oder ohne Prozentwerte: verwerfen und im Schritt-Log nennen; sonst `test_coverage_areas` (CHECK auf sechs Schlüssel) → Übersicht (neuester vollständiger Lauf je Schlüssel) und Statistik (Verlauf je Schlüssel).
+- Tabellen: `test_coverage_reports` (`id`, `project_slug`, `development_id`, `created_at`) 1:n `test_coverage_areas` (`report_id`, `area`, `lines`, `statements`, `branches`, `functions`, Testzählungen).
+- API: `GET /projects/:slug/coverage`, `GET /projects/:slug/coverage/history` (beide `access({ tenant: 'project' })`, nur lesend).
+- Code: `src/core/coverage-areas.ts`, `src/runner/coverage.ts`, `src/runner/measured-coverage.ts`, `src/runner/runner-steps.ts`, `src/api/coverage.ts`, `src/agent/visionary.ts`, `src/db/migrations.ts` (Version 19), `frontend/src/app/features/dashboard/coverage-panel.component.*`, `frontend/src/app/features/stats/`.
+- Benutzerhandbuch: `docs/benutzerhandbuch-dashboard-agents.md`.
