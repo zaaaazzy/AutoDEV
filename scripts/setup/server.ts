@@ -19,6 +19,7 @@ import {
   validateInstall,
   writeEnvFile,
 } from '../../src/core/env-file.js';
+import { SANDBOX_IMAGE } from '../../src/core/sandbox.js';
 import { projectRoots } from '../../src/core/validation.js';
 import { MIN_NODE, nodeVersionOk, prepareGameTools } from '../../src/setup/game-tools.js';
 import { checkChromium } from '../../src/setup/setup-jobs.js';
@@ -256,6 +257,19 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
   step('game', 'running');
   const tools = await prepareGameTools((command, args) => run(command, args, log), log);
   step('game', tools.notes.length ? 'error' : 'ok', tools.notes.join(' '));
+
+  // Image der Agents (Sandbox, Standard an): sonst scheitert der erste Agent-Lauf mit „Image fehlt“, bis „AIdeation neu
+  // starten“ es baut. Kein Abbruch – das Protokoll nennt den Befehl zum Nachholen.
+  step('agent', 'running');
+  log(`Baue das Agent-Image ${SANDBOX_IMAGE} (beim ersten Mal einige Minuten) …`);
+  const agentImage = await run('docker', ['build', '-t', SANDBOX_IMAGE, '-f', 'deploy/agent/Dockerfile', '.'], log);
+  step(
+    'agent',
+    agentImage.ok ? 'ok' : 'error',
+    agentImage.ok
+      ? ''
+      : `Agent-Image nicht gebaut – im AIdeation-Ordner „docker build -t ${SANDBOX_IMAGE} -f deploy/agent/Dockerfile .“ ausführen.`,
+  );
 
   if (body.workerContainer) {
     // docker compose up hat ihn schon gestartet (Profil worker in der .env); beim ersten Mal installiert er node_modules.
