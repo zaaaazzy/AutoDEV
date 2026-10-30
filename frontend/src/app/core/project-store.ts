@@ -215,16 +215,18 @@ export class ProjectStore {
     }));
   }
 
-  async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<void> {
+  /** success als Funktion: Meldung aus dem Ergebnis der Aktion (wird erst danach gebildet). */
+  async perform(action: () => Promise<unknown>, success: string | (() => string), refresh = true): Promise<void> {
     this.busy.set(true);
     this.notice.set('');
     try {
       this.applyItem(await action());
       // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
-      this.notice.set(success);
+      const message = typeof success === 'function' ? success() : success;
+      this.notice.set(message);
       setTimeout(() => {
-        if (this.notice() === success) this.notice.set('');
+        if (this.notice() === message) this.notice.set('');
       }, NOTICE_MS);
     } catch (error) {
       // Steht die Meldung schon am Formularfeld, nicht zusätzlich oben anzeigen.
