@@ -46,4 +46,5 @@ Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit
   - `src/core/sandbox.ts` setzt im Container `npm_config_cache=/tmp/npm-cache`. Das wirkt auch mit dem alten Image.
   - Vor jedem Lauf füllt `src/core/sandbox.ts` ein leeres oder veraltetes `node_modules`-Volume per `npm ci --ignore-scripts` (`modulesInstallArgs`).
   - Tests: `src/core/sandbox.test.ts`. In der Umgebung des Entwicklers liessen sie sich nicht ausführen, dort ist `node_modules` ebenfalls leer.
+- **Vor dem erneuten Test (Reihenfolge):** (1) Image `aideation-agent` neu bauen, (2) Worker neu starten, (3) Auftrag testen lassen. Der erste Lauf füllt das `node_modules`-Volume per `npm ci` und dauert länger. Zusätzlich `src/core/sandbox.test.ts` ausführen. Steht am Anfang der Ausgabe „liess sich nicht mit npm ci füllen“, liegt das an Registry oder Egress-Proxy, nicht am Auftrag.
 - Die Bug-Liste enthält weiterhin den Eintrag „CI CD nicht in Ordnung“ (offen, critical). Er hängt mit derselben Umgebung zusammen und ist durch diesen Auftrag nicht behoben.
