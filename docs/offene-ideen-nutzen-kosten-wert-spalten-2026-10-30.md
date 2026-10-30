@@ -21,6 +21,7 @@ Die Tabelle „Offene Ideen“ (Ideen-Seite) hat drei neue Spalten:
 - `frontend/src/app/shared/data-table/sort.ts` (neu): `compareSortValues` mit Option `emptyLast`.
 - `frontend/src/app/shared/data-table/data-table.component.ts`: `DataColumn.emptyLast`, `sortingFn` über `compareSortValues`; `sortBy()` behandelt eine voreingestellte Sortierung.
 - `frontend/src/styles/04-components.css`: `.meter.table-meter` und Verwandte; die Meter-Styles liegen im gemeinsamen Stylesheet.
+- `e2e/full-ui.check.ts`: neuer Oberflächentest (Balken 80 %/30 %, Wert „2,7“, leerer Wert, Klick auf „Wert“ kehrt um, Filter „Nutzen“, Standard-Sortierung, unveränderte Gruppen). Die Hilfsfunktion `seedScoredIdeas` (Zeile 59) schreibt Ideen direkt in die Testdatenbank, weil die API die Herkunft (`source`) nicht setzen kann; jeder Titel (Präfix „Wert:“) wird nur einmal angelegt. Die Visionär-Idee liegt in Projekt Beta, damit die übrigen Tests auf Alpha ihre Standard-Sortierung „Erstellt“ behalten. Lauf mit `npm run test:full`.
 - Tests: `idea-value.spec.ts` (Formel, Formatierung, Filterwerte, Standard-Sortierung), `sort.spec.ts` (leere Werte in beiden Richtungen).
 
 ### Worauf zu achten ist
@@ -33,20 +34,21 @@ Die Tabelle „Offene Ideen“ (Ideen-Seite) hat drei neue Spalten:
 
 ### Tests
 
-- Die Entwickler-Stufe konnte nichts ausführen (`tsx`/`tsc` fehlen, `node_modules` zeigt auf einen Host-Pfad). Die Dokumentation hat nichts erneut ausgeführt.
-- Offen für den Tester: `npm run typecheck`, `lint`, `format:check`, `test:unit` sowie die Oberflächentests „Tabellen“, „Ideen“, „Dashboard“ und „Projektwechsel“.
+- Der Testlauf (676b004f) schlug fehl, aus Umgebungsgründen: `tsc` nicht gefunden (Exit 127 im Image „aideation-agent“) und `npx tsx` scheiterte an einem root-eigenen npm-Cache (EACCES). Es gibt also noch keine Aussage über Typprüfung und Unit-Tests (`idea-options.spec.ts`, `idea-value.spec.ts`, `sort.spec.ts`). Die Dokumentation hat nichts erneut ausgeführt.
+- Der Tester bemängelte zuvor den fehlenden E2E-Test; er wurde danach in `e2e/full-ui.check.ts` ergänzt, ist aber ungetestet (Playwright fehlt hier).
+- Offen: `npm run typecheck`, `lint`, `format:check`, `test:unit` sowie `npm run test:full` (Oberflächentests „Tabellen“, „Ideen“, „Dashboard“, „Projektwechsel“) in einer funktionierenden Umgebung.
 
 ## Sprint
 
 | Auftrag | Titel | Zustand | Details |
 | --- | --- | --- | --- |
-| ef5e6c78 | Nutzen-, Kosten- und Wertspalten in Offene Ideen | Umsetzung fertig, Prüfung durch Tester offen | Nur Frontend, kleiner Umfang |
+| ef5e6c78 | Nutzen-, Kosten- und Wertspalten in Offene Ideen | Umsetzung und E2E-Test fertig, Testlauf scheiterte an der Umgebung, Prüfung offen | Nur Frontend, kleiner Umfang |
 
 ## Anfrage / TODO
 
-- Tester: Befehle und Oberflächentests aus „Tests“ ausführen. Prüfen, dass „Wert“-Klick bei Voreinstellung umkehrt und Ideen ohne Wert in beiden Richtungen hinten stehen.
-- E2E-Locators (`e2e/full-ui.check.ts`) gegen die neuen Spaltenköpfe prüfen.
-- Benutzerhandbuch: Spalten Nutzen/Kosten/Wert, Filter 0–10, Standard-Sortierung nach Wert bei Visionär-Ideen.
+- Tester: Befehle und Oberflächentests aus „Tests“ in einer Umgebung mit `tsc`, `tsx` und Playwright ausführen. Prüfen, dass „Wert“-Klick bei Voreinstellung umkehrt und Ideen ohne Wert in beiden Richtungen hinten stehen.
+- Der neue E2E-Test legt in Projekt Beta drei Ideen mit dem Präfix „Wert:“ an; das bei der Bereinigung der Testdaten beachten.
+- Benutzerhandbuch ist angelegt (`benutzerhandbuch-offene-ideen-nutzen-kosten-wert-2026-10-30.md`).
 
 ## Technische Dokumentation
 
