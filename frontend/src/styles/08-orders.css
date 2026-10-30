@@ -915,9 +915,48 @@
   background: #eef0ec;
   color: var(--ink);
 }
-.visual-intro {
+/* Statuszeile der optischen Abnahme: Zustand und nächster Schritt. */
+.visual-status {
+  display: grid;
+  gap: 2px;
   margin: 6px 0 12px;
+  padding: 10px 12px;
+  border-left: 4px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  line-height: 1.45;
+}
+.visual-status.done {
+  border-color: var(--green);
+  background: var(--green-soft);
+}
+.visual-status.wait {
+  border-color: #c9cec7;
+  background: #f7f8f5;
+}
+.visual-status.error {
+  border-color: var(--danger);
+  background: #fbeceb;
+}
+.visual-more > summary {
+  cursor: pointer;
   color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.visual-env-hint {
+  color: #4b554e;
+  font-size: 12px;
+}
+.visual-env-log {
+  flex: 1 1 100%;
+  font-size: 12px;
+}
+.visual-env-log pre {
+  max-height: 160px;
+  margin: 4px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
 }
 .visual-steps {
   display: grid;

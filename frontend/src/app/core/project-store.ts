@@ -13,6 +13,7 @@ import { isSection, projectFromHash, sectionFromHash, targetFromHash, type Secti
 import { fetchProjectData, keepFailedSections, runningOrdersChanged, runStepFinished } from './project-loader.js';
 import { isFinished } from '../shared/labels.js';
 import { orderAttention } from '../shared/order-attention.js';
+import { sameIds } from './focus-once.js';
 import { visibleInterval } from './visible-interval.js';
 
 const WORKER_REFRESH_MS = 10_000;
@@ -80,7 +81,10 @@ export class ProjectStore {
   );
   /** Aufträge mit Handlungsbedarf (Seite „Aktionen“, Menü-Bubble). */
   readonly attention = computed(() => orderAttention(this.data().development, this.data().acceptance));
-  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
+  /** Bleibt dasselbe Objekt, solange sich die Menge nicht ändert: Effekte daran laufen nicht bei jedem Poll neu. */
+  readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)), {
+    equal: sameIds,
+  });
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
   );

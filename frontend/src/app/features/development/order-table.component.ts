@@ -15,6 +15,7 @@ import {
 import type { SortingState } from '@tanstack/angular-table';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
+import { FocusOnce } from '../../core/focus-once.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { BulkBarComponent } from '../../shared/bulk-bar.component.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
@@ -133,10 +134,12 @@ export class OrderTableComponent {
   }
 
   constructor() {
-    // Link auf einen Auftrag (#development/<id>): Zeile aufklappen.
+    // Link auf einen Auftrag (#development/<id>): Zeile aufklappen – einmal je Link, damit ein Nachladen im
+    // Hintergrund eine von Hand zugeklappte Zeile nicht wieder öffnet.
+    const focus = new FocusOnce();
     effect(() => {
       const id = this.store.focusId();
-      if (id && this.items().some((item) => item.id === id)) untracked(() => this.openOrder.set(id));
+      if (focus.take(id, !!id && this.items().some((item) => item.id === id))) untracked(() => this.openOrder.set(id));
     });
   }
   protected readonly orderEditing = signal<string | null>(null);
