@@ -52,7 +52,8 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 
 **Nicht umgesetzt oder offen**
 
-- `e2e/demo/seed.ts` (Demo-Daten mit festen Schlüsseln) steht nicht in der Liste der geänderten Dateien. Prüfen, ob die Demo-Daten noch freie Bezeichnungen verwenden; sie würden vom CHECK-Constraint abgelehnt.
+- `e2e/demo/seed.ts` wurde nicht geändert und braucht es nicht: Die Demo-Daten legen nur die Bereiche `backend` und `frontend` an (Zeilen 1197–1200), beide feste Schlüssel, der CHECK-Constraint lehnt sie nicht ab.
+- **Testschritt fehlgeschlagen, aber aus Umgebungsgründen:** Der Tester konnte nichts ausführen. `npm run typecheck` scheiterte mit `tsc: not found` (Sandbox-Image „aideation-agent“, Exit-Code 127), `npx tsx --test …` mit `EACCES` auf dem npm-Cache (`/home/agent/.npm`). Es gibt also weder einen grünen noch einen roten Testlauf des Codes; die Abnahme „`npm test` vollständig grün“ ist offen. Tests nur über `npm test` bzw. `npm run …` starten, nicht über `npx tsx`.
 - Die Migration wurde nach der Liste der Dateien nur im Test (`migrations.test.ts`) geprüft, nicht gegen eine echte Datenbank mit Altbestand.
 
 **Worauf zu achten ist**
@@ -68,12 +69,11 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 
 | Auftrag | Inhalt | Zustand |
 | --- | --- | --- |
-| 80ae16ac | Coverage-Bereiche auf feste Schlüssel umstellen | Entwickler fertig, Dokumentation hier; Tester, Review und Merge laut Workflow offen |
+| 80ae16ac | Coverage-Bereiche auf feste Schlüssel umstellen | Entwickler fertig, Dokumentation hier; Tester-Schritt scheiterte an der Umgebung (kein `tsc`, npm-Cache nicht beschreibbar), Testlauf wiederholen; Review und Merge offen |
 
 ## Anfrage / TODO
 
-- `npm test` vollständig grün bestätigen (Testschritt), dabei die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
-- `e2e/demo/seed.ts` auf feste Schlüssel prüfen und gegebenenfalls anpassen.
+- Sandbox-Image reparieren (Abhängigkeiten installiert, `tsc` im Pfad, npm-Cache beschreibbar) und danach `npm run typecheck` und `npm test` ausführen; dabei die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
 - Nach der Migration Übersicht und Statistik im Browser ansehen: je Schlüssel eine Zeile, Datum je Zeile, Verlauf je Schlüssel.
 - Optional später: Sicherungstabelle `test_coverage_areas_backup_19` entfernen, wenn die Zuordnung der Altdaten abgenommen ist.
 
