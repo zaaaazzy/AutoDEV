@@ -49,7 +49,7 @@ Ein Agent soll an einen Agenten aus einem anderen Projekt übergeben werden.
 2. Die Anfrage wird mit 400 abgelehnt. Die Antwort enthält eine Meldung zum falschen Projekt.
 3. Der Agent in „Alpha“ bleibt unverändert, auch sein Übergabe-Agent.
 
-Hinweis: Für `handoffTo` gibt es im Quelltext keine eigene Meldung mit dem Wortlaut „gehört nicht zum Projekt“. Der genaue Text ist deshalb offen (siehe unten).
+Die Meldung lautet in diesem Fall: „Der Empfänger gehört nicht zu diesem Projekt.“ (`src/api/agents.ts`, Zeilen 300 und 425).
 
 ## Für Entwickler: neues ID-Feld hinzufügen
 
@@ -68,12 +68,12 @@ Keine. Die Änderung liegt auf der Serverseite. In der Oberfläche ändert sich 
 Prüfen lässt sich das Verhalten so:
 
 1. Im Projekt „Alpha“ einen Agenten mit einer ID aus „Beta“ anlegen oder ändern. Die Antwort muss 400 sein, die Liste der Agenten darf sich nicht ändern.
-2. Einen Sprint-Vorschlag mit einer fremden Auftrags-ID bestätigen. Auch hier muss die Antwort 400 sein und kein Auftrag darf in den Sprint wechseln.
+2. Einen Sprint-Vorschlag mit einer fremden Auftrags-ID bestätigen (`POST /projects/:slug/sprints/proposal/apply`). Die Prüfung läuft dort über `applyProposal` und nicht über `assertInProject`. Dass die Antwort 400 ist und kein Auftrag in den Sprint wechselt, ist im Quelltext nicht bestätigt und muss beim Testlauf belegt werden.
 
 ## Offen
 
 - **Tests nicht ausgeführt.** `npm run typecheck` und der Testlauf (`npm run test:unit` mit `DEV_LOG_TEST_REQUIRE_DATABASE=1`) stehen noch aus. Die Angaben in diesem Kapitel stammen aus dem Quelltext und der Entwickler-Dokumentation `docs/mandanten-pruefung-id-felder-allowlist-2026-10-30.md`.
-- **Abdeckung im Code noch nicht vollständig belegt.** Der Vollständigkeitstest soll das zeigen. Bis dahin gilt die Liste in `TENANT_ID_FIELDS` als Absicht, nicht als geprüfter Stand. Die Prüfung in `bugs.ts` (`sprintId`) und die Sprint-Vorschläge (`proposal/apply`, `proposal/comment`) sollen beim Testlauf besonders geprüft werden.
+- **Abdeckung im Code noch nicht vollständig belegt.** Der Vollständigkeitstest soll das zeigen. Bis dahin gilt die Liste in `TENANT_ID_FIELDS` als Absicht, nicht als geprüfter Stand. `bugs.ts` prüft `sprintId` mit einer eigenen Abfrage (`project_slug`, Zeile 261), nicht mit `assertInProject`. Die Sprint-Vorschläge (`proposal/apply`, `proposal/comment`) sollen beim Testlauf besonders geprüft werden.
 - **Meldungstexte nicht vereinheitlicht.** Der Wortlaut bei der Ablehnung unterscheidet sich je Route. Die Oberfläche zeigt die Meldung nicht zwingend an.
 - **Gespeicherte fremde Verweise werden nicht bereinigt.** Eine Prüfung wirkt nur auf neue Anfragen.
 - **Query-Parameter sind nicht erfasst.**
