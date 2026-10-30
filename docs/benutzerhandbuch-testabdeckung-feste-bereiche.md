@@ -53,6 +53,7 @@ Was du davon siehst:
 - **Bereich ohne Messung:** Gibt es für einen Bereich keine Messung, steht dort „Noch keine Messung für diesen Bereich.“
 - **Noch keine Messung im Projekt:** Gibt es für kein Bereich Messungen, steht dort „Noch keine Testabdeckung gemessen.“
 - **Alte Einträge ohne Zuordnung:** Sie werden in der Statistik nicht angezeigt, bleiben aber in der Datenbank erhalten.
+- **Laden:** Während der Abfrage steht dort „Verlauf wird geladen …“.
 - **Fehler beim Laden:** Schlägt das Laden fehl, steht dort „Verlauf der Testabdeckung konnte nicht geladen werden.“
 - Der Verlauf zeigt höchstens die letzten 200 Berichte je Projekt.
 
