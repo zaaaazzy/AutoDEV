@@ -20,6 +20,8 @@ export const SANDBOX_IMAGE = 'aideation-agent';
 export const SANDBOX_LABEL = 'aideation.run';
 export const SANDBOX_WORKDIR = '/workspace';
 const SANDBOX_HOME = '/home/agent';
+/** npm-Cache im Container: beschreibbar für jede UID, unabhängig vom Inhalt von /home/agent im Image. */
+const SANDBOX_NPM_CACHE = '/tmp/npm-cache';
 /** Wächter im Image (deploy/agent/Dockerfile bündelt agent-guard.ts dorthin). */
 export const SANDBOX_GUARD = { node: 'node', script: '/opt/aideation/agent-guard.mjs' } as const;
 /** Internes Docker-Netzwerk der Agent-Container: keine Route nach aussen, nur zum Egress-Proxy. */
@@ -226,6 +228,10 @@ export function sandboxRunArgs(
     containerDirectory(worktree, options.cwd),
     '-e',
     `HOME=${SANDBOX_HOME}`,
+    // npm-Cache wie beim Füllen des Volumes in /tmp: npx scheitert sonst an EACCES, wenn ein älteres Image noch das
+    // root-eigene /home/agent/.npm von „npm install -g“ enthält.
+    '-e',
+    `npm_config_cache=${SANDBOX_NPM_CACHE}`,
     '-e',
     `CLAUDE_PROJECT_DIR=${SANDBOX_WORKDIR}`,
     '-e',
@@ -428,7 +434,7 @@ export function modulesInstallArgs(worktree: string, hash: string, options: Sand
     '-e',
     `HOME=${SANDBOX_HOME}`,
     '-e',
-    'npm_config_cache=/tmp/npm-cache',
+    `npm_config_cache=${SANDBOX_NPM_CACHE}`,
     '-e',
     `AIDEATION_LOCK_HASH=${hash}`,
     ...proxyEnvironment(),

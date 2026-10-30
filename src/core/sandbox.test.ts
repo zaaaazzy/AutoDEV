@@ -149,6 +149,12 @@ test('Sandbox: Agent-Netzwerk mit Egress-Proxy; Ollama über host.docker.interna
   assert.match(linux.join(' '), /--add-host host\.docker\.internal:host-gateway/);
 });
 
+test('Sandbox: npm-Cache in /tmp, nicht im Home des Images (npx ohne EACCES)', () => {
+  const command = args();
+  assert.equal(command[command.indexOf('npm_config_cache=/tmp/npm-cache') - 1], '-e');
+  assert.ok(!command.some((part) => /^npm_config_cache=\/home\//.test(part)));
+});
+
 test('Sandbox: lesende Rollen binden Workspace und node_modules nur mit :ro ein', () => {
   for (const role of [...READ_ONLY_ROLES, 'visionary', 'analyst', 'pre_sprint']) {
     assert.equal(readOnlyWorkspace(role), true, role);
