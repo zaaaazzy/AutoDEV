@@ -397,8 +397,8 @@ dabei weder gelöscht noch rotiert.
 - **Probe:** `bash scripts/restore.sh --probe backups/<datei>.dump` spielt ein Backup in einen Wegwerf-Container
   (Port 5439) ein und löscht ihn danach. Der Wartungs-Job `restore_probe` macht das wöchentlich mit dem neuesten
   Backup.
-- **pg_restore auf dem Worker-Rechner:** `backup_check` prüft jedes neue Backup mit `pg_restore --list`. Dafür
-  brauchst du den Postgres-Client ab Version 17 (macOS: `brew install libpq`). Alternativ setzt du
+- **pg_restore:** `backup_check` prüft jedes neue Backup mit `pg_restore --list`. Im Worker-Container ist der
+  Postgres-Client 17 schon im Image. Für den Worker auf dem Host brauchst du ihn ab Version 17 (macOS: `brew install libpq`). Alternativ setzt du
   `DEV_LOG_PG_RESTORE=/pfad/zu/pg_restore` in der `worker.env`. Fehlt das Programm, meldet der Job einen Fehler.
 
 ## Browser-Spiele mit Phaser
@@ -457,7 +457,7 @@ ausführen.
 | Agents starten nicht | Worker-Status oben in AIdeation prüfen; `npm run worker` zeigt Fehler direkt |
 | Worker-Log: „Env-Datei … fehlt“ oder „für andere lesbar“ | Installationsskript erneut ausführen bzw. `chmod 600` auf die Env-Datei |
 | Backup-Container startet immer neu (Linux) | `./backups` ist für ihn nicht beschreibbar – `DEV_LOG_BACKUP_USER` setzen (siehe oben) |
-| `backup_check`: „pg_restore --list nicht gefunden“ | Postgres-Client ab 17 installieren oder `DEV_LOG_PG_RESTORE` in der `worker.env` setzen |
+| `backup_check`: „pg_restore --list nicht gefunden“ | Worker im Container: Image neu bauen (`docker compose build worker`, dann `docker compose up -d`). Auf dem Host: Postgres-Client ab 17 installieren oder `DEV_LOG_PG_RESTORE` in der `worker.env` setzen |
 | Restore: „Schlüssel-Test fehlgeschlagen“ | `DEV_LOG_SECRET_KEY` aus der Zeit des Backups in `.env` und `worker.env` eintragen |
 | Zwei-Faktor-Gerät verloren | siehe README, Abschnitt Sicherheit |
 | Start bricht ab: „Zwei-Faktor-Schlüssel brauchen DEV_LOG_SECRET_KEY“ | Den bisherigen `DEV_LOG_SECRET_KEY` in der `.env` wieder eintragen und neu starten |
