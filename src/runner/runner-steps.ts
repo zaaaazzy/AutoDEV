@@ -153,7 +153,7 @@ export async function runStep(
   total: number,
   stepOptions: StepOptions = {},
 ): Promise<StepOutcome> {
-  const { pool, item, runId, done, options, execute } = ctx;
+  const { pool, item, runId } = ctx;
   console.info(`[${item.id}] ${agent.phase} › ${agent.name}`);
   const routed = await routeStep(ctx, agent);
   const model = stepModel(ctx, agent, routed);
@@ -177,6 +177,32 @@ export async function runStep(
       ],
     )
   ).rows[0]?.id;
+  // Ab hier steht der Schritt auf „läuft“: Wirft etwas vor dem Endstatus (Datenbank, Testbefehle), gilt er als
+  // gescheitert. Die Aufräumroutinen erfassen nur Schritte noch laufender Läufe, der Schritt hinge sonst für immer.
+  try {
+    return await executeStep(ctx, agent, position, total, stepOptions, stepId, routed, model);
+  } catch (error) {
+    await pool
+      .query(`UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}' WHERE id = $1 AND status = $2`, [
+        stepId,
+        AGENT_STEP_STATUS.running,
+      ])
+      .catch((cleanup: unknown) => console.error(`[${item.id}] Schritt-Status nicht zurückgesetzt:`, cleanup));
+    throw error;
+  }
+}
+
+async function executeStep(
+  ctx: RunContext,
+  agent: WorkflowAgent,
+  position: number,
+  total: number,
+  stepOptions: StepOptions,
+  stepId: string,
+  routed: Awaited<ReturnType<typeof routeStep>>,
+  model: ReturnType<typeof stepModel>,
+): Promise<StepOutcome> {
+  const { pool, item, done, options, execute } = ctx;
   await logEvent(pool, stepId, 'Schritt gestartet');
   // Stand vor dem ersten Schritt dieses Laufs, damit erkennbar ist, welcher Agent Dateien geändert hat.
   if (ctx.branch && ctx.changedFiles === undefined) ctx.changedFiles = await orderFilePaths(ctx);

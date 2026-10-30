@@ -444,6 +444,17 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (agent_sandbox IN ('off', 'docker', 'workbench'));
     `,
   },
+  // Wöchentliche Restore-Probe: der Job stand nur im Basis-Schema (Version 1) und fehlte deshalb in bestehenden
+  // Datenbanken; die Probe lief dort nie (Logikprüfung vom 30.10.2026).
+  {
+    version: 22,
+    name: 'job-restore-probe',
+    sql: `
+      INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config)
+        VALUES ('restore_probe', TRUE, 604800, 'restore_probe', '{"dir": "backups"}')
+      ON CONFLICT (key) DO NOTHING;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
