@@ -33,15 +33,18 @@ Der Auftragsautor sucht ähnliche erledigte Aufträge in dieser Reihenfolge:
 | 1 | Kategorie, Art und Anzahl betroffener Bereiche | Mindestens 5 Aufträge in dieser Gruppe |
 | 2 | Kategorie und Art, ohne Bereichsfilter | Die engste Gruppe hat weniger als 5 Aufträge |
 
-- **Anzahl betroffener Bereiche:** 1 Bereich, 2 bis 3 Bereiche, 4 und mehr. Gezählt werden die Dateien, die die Beschreibung im Abschnitt „Technische Hinweise“ bzw. „betroffene Dateien“ nennt (oder in Backticks als Pfad setzt).
-- **Keine erkennbaren Dateien:** Nennt die Beschreibung keine Datei, gibt es keine Bereichsgruppe. Dann gilt Stufe 2.
-- Der Prompt nennt, welche Gruppe verwendet wurde: „Median genau dieser Gruppe“ bei Stufe 1, „Median der Kategorie“ bei Stufe 2. Außerdem stehen Art und Bereichsgruppe darin.
+- **Anzahl betroffener Bereiche:** 1 Bereich, 2 bis 3 Bereiche, 4 und mehr. Gezählt werden nur Dateipfade im Abschnitt, dessen Überschrift „Technische Hinweise“ oder „betroffene Dateien“ enthält. Gezählt werden Pfade mit Dateiendung, entweder in Backticks oder mit Schrägstrich (z. B. `src/api/stats.ts`). Pfade außerhalb dieses Abschnitts zählen nicht.
+- **Keine erkennbaren Dateien:** Fehlt dieser Abschnitt oder nennt er keine Datei, gibt es keine Bereichsgruppe. Dann gilt Stufe 2.
+- Der Prompt nennt die Gruppe so: „N erledigte Aufträge der Kategorie „…“, Art „feature“ bzw. „bug“, 1 betroffener Bereich (bzw. 2–3 betroffene Bereiche, 4 und mehr betroffene Bereiche)“ mit dem Median. Fällt die Referenz auf Stufe 2 zurück, steht dort „alle Bereichsgrößen“. Der Prompt enthält also Kategorie, Art und Bereichsgruppe.
 
 ### 3. Korrekturfaktor je Herkunft
 
-- Der Faktor ist der Median von Ist ÷ Schätzung der letzten 20 erledigten Aufträge je Projekt. Er wird je Herkunft der Schätzung gebildet.
-- Unter 5 Messwerten gilt der Faktor **1**. Dann wird die Schätzung nicht korrigiert.
-- Die Statistik zeigt den Faktor und die Anzahl der Messwerte je Herkunft (Abschnitt „Korrekturfaktor je Herkunft“). Bei weniger als 5 Messwerten gilt der Faktor 1.
+- Der Faktor ist der Median von Ist ÷ Schätzung der letzten 20 erledigten Aufträge je Projekt. Er wird je Herkunft der Schätzung gebildet. Stunden und Tokens haben je einen eigenen Faktor.
+- Die Rückfallstufen je Herkunft:
+  1. Hat das Projekt mindestens **5** Messwerte, gilt dessen Faktor.
+  2. Sonst gilt der Faktor aller Projekte, wenn er mindestens 5 Messwerte hat. In der Statistik steht dann „alle Projekte“.
+  3. Sonst gilt der Faktor **1**. Dann wird die Schätzung nicht korrigiert.
+- Die Statistik zeigt im Abschnitt „Korrekturfaktor je Herkunft“ je Herkunft den Faktor (Stunden / Tokens) und die Anzahl der Messwerte, z. B. „Faktor 0,8 (Stunden) / 1,2 (Tokens) · 12 Messwerte“. Ohne genug Messwerte steht „Faktor 1 (unter 5 Messwerten)“.
 
 ### 4. Überschreitungs-Stopp
 
@@ -61,6 +64,8 @@ Wichtig:
 
 - **Gemessen wird nach abgeschlossenen Schritten.** Ein einzelner langer Schritt kann die Grenze deutlich überschreiten, bevor der Stopp greift.
 - **Aufträge ohne Schätzung** (weder Stunden noch Tokens) werden nicht geprüft.
+- **Ein von Hand gestarteter Einzel-Agent wird nicht geprüft.** Er gilt als Freigabe. Die Prüfung läuft nur im normalen Lauf des Auftrags.
+- **Die Beobachter-Schritte nach Abschluss werden nicht geprüft** (Agenten, die nach „Bei abgeschlossen“ bzw. „Bei abgelehnt“ laufen). Der Auftrag ist dann schon fertig oder abgelehnt.
 - **Ist eine Schätzung nur für einen der beiden Werte gesetzt,** wird nur dieser geprüft.
 - **Ist die Prüfung selbst nicht möglich** (zum Beispiel die Datenbank ist kurz nicht erreichbar), startet der Agent nicht. Der Auftrag gilt als unterbrochen und startet nach einer Pause von 5 Minuten wieder. Er läuft nicht unkontrolliert weiter.
 
@@ -83,7 +88,7 @@ Wichtig:
 
 ### 7. Budget bleibt unverändert
 
-Die Budget-Prüfung (Tages-, Sprint-, Auftrags- und Rollenbudget) bleibt wie bisher. Sie läuft zusätzlich zum Überschreitungs-Stopp und zuerst. Ein erreichtes Budget blockiert den Auftrag weiterhin mit „Budget erreicht“.
+Die Budget-Prüfung (Tages-, Sprint-, Auftrags- und Rollenbudget) bleibt wie bisher. Sie läuft vor dem Überschreitungs-Stopp, und beide laufen nacheinander. Ein erreichtes Budget blockiert den Auftrag weiterhin, unabhängig von der neuen Prüfung.
 
 ## Was du siehst
 
@@ -94,9 +99,9 @@ Die Budget-Prüfung (Tages-, Sprint-, Auftrags- und Rollenbudget) bleibt wie bis
 | Auftrag ohne Schätzung | Er wird nie durch diese Prüfung blockiert. |
 | Nach „Erneut versuchen“ | Der Auftrag geht auf „Geplant“. Der Verbrauch zählt neu. Er startet mit dem nächsten Sprintlauf. |
 | Die Prüfung selbst scheitert | Der Auftrag wird unterbrochen und nach 5 Minuten wieder eingeplant. Der Grund steht im Feld `failure`. |
-| Statistik, Sprint mit gemessenen Aufträgen | Spalte „Trefferquote“ mit Prozentwert und „x von y“. |
+| Statistik, Abschnitt „Trefferquote der Schätzung je Sprint“, Sprint mit gemessenen Aufträgen | Spalte „Trefferquote“ mit Prozentwert und „x von y“, z. B. „75 % (6 von 8)“. |
 | Statistik, Sprint ohne gemessene Aufträge | „–“ |
-| Statistik, Abschnitt „Korrekturfaktor je Herkunft“ | Faktor und Anzahl der Messwerte je Herkunft. Unter 5 Messwerten steht der Faktor 1. |
+| Statistik, Abschnitt „Korrekturfaktor je Herkunft“ | Faktor und Anzahl der Messwerte je Herkunft. Ohne genug Messwerte steht „Faktor 1 (unter 5 Messwerten)“. |
 | Idee-Detailansicht | Auswahl „Art“ mit `feature` (Standard) oder `bug`. |
 
 ## Beispiel
@@ -125,8 +130,11 @@ Dafür braucht es eine laufende App mit Datenbank, zum Beispiel `npm run seed:de
 
 - Die Tests (`npm run typecheck`, `npm run test:unit`, `npm run format:check`) sind nicht gelaufen. Die Angaben stammen aus der Dokumentation des Entwicklers und aus dem Code, den ich gelesen habe. Der Tester hat den Lauf mit `tsc` und dem npm-Cache nicht abgeschlossen.
 - Die Printscreens fehlen (siehe oben).
-- Nicht im Code bestätigt: ob ein von Hand gestarteter Einzel-Agent die Prüfung umgeht, und ob „Erneut versuchen“ den Wiederholungszähler auf 0 setzt oder nur nicht erhöht.
+- „Erneut versuchen“ setzt den Wiederholungszähler bei einer Freigabe nach „Schätzung überschritten“ nicht hoch (`src/api/development.ts`, Zeilen 268–279). Er wird aber auch nicht zurückgesetzt. Ein vorher angesammelter Stand bleibt.
+- Die Bereichszählung nutzt `affectedFiles` und `areaBucket` in `src/core/sprint-planner.ts`. Das Handbuch folgt diesem Code.
 - Die Oberfläche wurde nicht im Browser geprüft. Die Beschreibung der Schaltflächen und Texte stammt aus dem Code.
-- Ob „Erneut versuchen“ in der „Aktion notwendig“-Karte für jede Rolle sichtbar ist, habe ich nicht im Frontend nachgeprüft. Die API prüft die Berechtigung in jedem Fall.
-- Die Vorgänger-Dokumentation nennt die Bereichszählung über `affectedFiles`. Im Code wird sie aus der Beschreibung abgeleitet (`areaBucket` in `src/core/sprint-planner.ts`). Das Handbuch folgt dem Code.
+- Ob „Erneut versuchen“ in der „Aktion notwendig“-Karte für jede Rolle sichtbar ist, habe ich nicht im Frontend nachgeprüft. Die API verlangt die Berechtigung „Ausführen“ (`access({ role: 'run' })`) in jedem Fall.
+- Der Hinweis unter der Statistik-Tabelle (`stats.component.html`, Zeile 173) sagt „unter 5 Messwerten gilt 1“. Die Rückfallstufe auf alle Projekte ist dort nicht genannt. Das Handbuch folgt dem Code. Der Hinweistext im Frontend ist ungenau und müsste im Frontend korrigiert werden. Ich habe ihn nicht geändert.
+- Die Printscreens fehlen auch in diesem Lauf. Die Prüfung auf einen Browser war in diesem Lauf blockiert (Befehle außerhalb von `/workspace` nicht erlaubt). Der Stand „kein Browser, keine Datenbank“ stammt aus dem vorigen Lauf und ist nicht erneut bestätigt.
+- Tests (`npm run typecheck`, `npm run test:unit`, `npm run format:check`) sind in diesem Lauf nicht gelaufen. Ich habe nur gelesen und keine Tests ausgeführt.
 - `docs/laufzeit.md` und `docs/workflows.md` wurden von der Dokumentation des Entwicklers geändert. Ich habe sie nicht gegen die Änderungen gelesen.
