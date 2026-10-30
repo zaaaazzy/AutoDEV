@@ -24,12 +24,15 @@ import {
   acceptanceProblems,
   manualChecks,
   parseAcceptance,
+  parseEvidence,
   saveAcceptance,
+  saveEvidence,
   stripAcceptance,
+  stripEvidence,
   waiveUnmeasuredCoverage,
 } from './acceptance.js';
 import type { BudgetState } from './budget.js';
-import { buildPrompt } from './runner-prompts.js';
+import { buildPrompt, EVIDENCE_ROLES } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { testerPlan } from './order-tests.js';
 import {
@@ -83,6 +86,8 @@ interface StepOutcome {
   correctable?: boolean;
   /** Budget vor dem neuen Versuch erreicht: der Lauf hält an wie vor einem Schritt (kein Bug-Bericht). */
   budget?: BudgetState;
+  /** Vom Benutzer abgebrochen („Abbrechen“, Sprint-Abbruch): kein weiterer Agent des Auftrags, auch nicht „Bei abgelehnt“. */
+  cancelled?: boolean;
 }
 
 export interface StepOptions {
@@ -417,6 +422,16 @@ export async function runStep(
       }
     }
   }
+  // Offene Testnachweise (@@NACHWEIS) von Tester und Dokumentierer: als test_evidence speichern und aus Ausgabe und
+  // Auftragsdoku entfernen. Sie setzen keine Aktion (action_todo): Autopilot und Sprintabschluss bleiben unberührt.
+  if (EVIDENCE_ROLES.has(agent.role) && !cancelled) {
+    const evidence = parseEvidence(output);
+    output = stripEvidence(output);
+    if (evidence.length) {
+      const created = await saveEvidence(pool, item.id, evidence, agent.name).catch(logged('runner-steps', 0));
+      await logEvent(pool, stepId, `Testnachweise: ${evidence.length} gemeldet, ${created} neu`);
+    }
+  }
   // Der Reviewer muss ausdrücklich freigeben; ohne eindeutiges Ergebnis gilt der Schritt als nicht bestanden.
   const review = agent.role === 'reviewer' ? parseReview(output) : true;
   if (review !== true && result.exitCode === 0) {
@@ -533,7 +548,7 @@ export async function runStep(
   // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
   if (stepOptions.observer) {
     await commitStep();
-    return { passed, interrupted: false };
+    return { passed, interrupted: false, cancelled };
   }
   // Budget erreicht statt neuem Versuch: kein Fehler im Code, der Lauf hält an (Kostenbremse wie vor einem Schritt).
   if (budgetStop) {
@@ -555,5 +570,5 @@ export async function runStep(
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
   await commitStep();
-  return { passed, interrupted: false, correctable };
+  return { passed, interrupted: false, correctable, cancelled };
 }

@@ -361,8 +361,10 @@ export class WorkflowStepsComponent {
     if (!name.trim()) return;
     const preset = MODEL_PRESETS.find((item) => item.id === model);
     let agentId: string | null = null;
+    let step: WorkflowStep | null = null;
     await this.store.perform(async () => {
-      const result = await this.api.post<{ agent: Agent }>(
+      // Der Server setzt den neuen Agent bei vorhandenen Schritten selbst ans Ende der Phase.
+      const result = await this.api.post<{ agent: Agent; step?: WorkflowStep | null }>(
         `${this.api.projectPath(this.store.activeProject())}/agents`,
         {
           name: name.trim(),
@@ -374,8 +376,13 @@ export class WorkflowStepsComponent {
         },
       );
       agentId = result.agent.id;
+      step = result.step ?? null;
     }, `Agent „${name.trim()}“ angelegt.`);
-    if (agentId) await this.addStep(phase, agentId);
+    if (step) {
+      await this.load();
+      this.adding.set(null);
+      this.startInstructions(step);
+    } else if (agentId) await this.addStep(phase, agentId);
   }
 
   protected startInstructions(step: WorkflowStep): void {

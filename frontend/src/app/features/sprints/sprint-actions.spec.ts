@@ -6,21 +6,31 @@ import { exclusive, sprintButtons } from './sprint-actions.js';
 const all = () => true;
 const only = (role: 'plan' | 'run') => (wanted: 'plan' | 'run') => wanted === role;
 
-test('Sprint starten: nur geplant, mit „Planung“ und ohne anderen aktiven Sprint', () => {
+test('Sprint starten: nur geplant, mit „Planung“; anderer aktiver Sprint sperrt mit Grund', () => {
   const planned = { id: 's1', status: 'planned' };
   assert.equal(sprintButtons(planned, [planned], [], all).start, true);
+  assert.equal(sprintButtons(planned, [planned], [], all).activateBlocked, null);
   const other = { id: 's2', status: 'active' };
-  assert.equal(sprintButtons(planned, [planned, other], [], all).start, false, 'anderer aktiv');
+  const blocked = sprintButtons(planned, [planned, other], [], all);
+  assert.equal(blocked.start, true, 'anderer aktiv: sichtbar');
+  assert.match(blocked.activateBlocked ?? '', /nur ein Sprint/);
   assert.equal(sprintButtons(planned, [planned], [], only('run')).start, false, 'ohne Planung');
+  assert.equal(
+    sprintButtons(planned, [planned, other], [], only('run')).activateBlocked,
+    null,
+    'ohne Knopf kein Grund',
+  );
   for (const status of ['active', 'review', 'completed', 'cancelled']) {
     assert.equal(sprintButtons({ id: 's1', status }, [], [], all).start, false, status);
   }
 });
 
-test('Wieder öffnen: nur abgeschlossen und ohne anderen aktiven Sprint', () => {
+test('Wieder öffnen: nur abgeschlossen; anderer aktiver Sprint sperrt mit Grund', () => {
   const done = { id: 's1', status: 'completed' };
   assert.equal(sprintButtons(done, [done], [], all).reopen, true);
-  assert.equal(sprintButtons(done, [done, { id: 's2', status: 'active' }], [], all).reopen, false);
+  const blocked = sprintButtons(done, [done, { id: 's2', status: 'active' }], [], all);
+  assert.equal(blocked.reopen, true);
+  assert.match(blocked.activateBlocked ?? '', /nur ein Sprint/);
   assert.equal(sprintButtons({ id: 's1', status: 'review' }, [], [], all).reopen, false, 'Review: Worker');
 });
 

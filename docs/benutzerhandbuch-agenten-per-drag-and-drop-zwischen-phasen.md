@@ -29,6 +29,9 @@ Die Phasen heißen im Panel so (in dieser Reihenfolge):
 
 Im Panel heißt der erste Zeitpunkt „Vor dem Sprint“, nicht „Sprintstart“.
 
+Brichst du einen laufenden Agent mit „Abbrechen“ ab oder brichst du den Sprint ab, startet danach kein weiterer Agent
+des Auftrags. Auch die Agents „Bei abgelehnt“ laufen dann nicht.
+
 ## 2. Bedienung
 
 ### 2.1 Mit der Maus ziehen

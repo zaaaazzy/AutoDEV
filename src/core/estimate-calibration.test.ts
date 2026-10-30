@@ -59,11 +59,10 @@ test('Kalibrierte Werte je Herkunft; leere Herkunft ist Altbestand, null bleibt 
 });
 
 test('Von Hand geändert: nur geänderte Stunden oder Tokens zählen, Platzhalter wie in buildUpdate', () => {
-  assert.equal(manualEstimateSql([{ column: 'title' }, { column: 'benefit' }]), '');
-  assert.equal(
-    manualEstimateSql([{ column: 'title' }, { column: 'effort_hours' }, { column: 'token_estimate' }]),
-    ", estimate_source = CASE WHEN effort_hours IS DISTINCT FROM $3 OR token_estimate IS DISTINCT FROM $4 THEN 'manual' ELSE estimate_source END",
-  );
+  assert.deepEqual(manualEstimateSql([{ column: 'title' }, { column: 'benefit' }]), []);
+  assert.deepEqual(manualEstimateSql([{ column: 'title' }, { column: 'effort_hours' }, { column: 'token_estimate' }]), [
+    "estimate_source = CASE WHEN effort_hours IS DISTINCT FROM $3 OR token_estimate IS DISTINCT FROM $4 THEN 'manual' ELSE estimate_source END",
+  ]);
 });
 
 /** Erledigter Auftrag für die Gruppen-Kalibrierung (Ist ÷ Schätzung direkt angegeben). */
@@ -306,8 +305,14 @@ test('Datenbank: Migration, Kalibrierung aus Messwerten und Schutz von Hand eing
       );
       const id = order.rows[0]!.id;
       const save = async (fields: { column: string; value: unknown }[]) => {
-        const update = buildUpdate('development_items', id, fields, 'estimate_source AS source');
-        update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
+        const update = buildUpdate(
+          'development_items',
+          id,
+          fields,
+          'estimate_source AS source',
+          undefined,
+          manualEstimateSql(fields),
+        );
         return (await pool.query(update.sql, update.values)).rows[0]?.source;
       };
       assert.equal(

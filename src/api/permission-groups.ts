@@ -1,5 +1,6 @@
 import type { Router } from 'express';
 import type { Pool } from 'pg';
+import { withTransaction } from '../db/transaction.js';
 import { access } from './access.js';
 import {
   availableGroups,
@@ -144,24 +145,31 @@ export function registerPermissionGroupRoutes(app: Router, pool: Pool): void {
         if (!slug || !CUSTOM_GROUP_ID.test(request.params.id ?? '')) {
           return void response.status(404).json({ message: 'Kategorie nicht gefunden.' });
         }
-        const deleted = await pool.query<{ rules: string[] }>(
-          'DELETE FROM project_permission_groups WHERE project_slug = $1 AND id = $2 RETURNING rules',
-          [slug, request.params.id],
-        );
-        if (!deleted.rows[0]) return void response.status(404).json({ message: 'Kategorie nicht gefunden.' });
-        // Ihre Befehle verschwinden auch aus den Agents dieses Projekts (sofern keine andere Kategorie sie enthält).
-        const still = availableCommands(await loadProjectPermissions(pool, slug));
-        const removed = deleted.rows[0].rules.filter((rule) => !still.has(rule));
-        await pool.query(
-          `UPDATE agents SET allowed_commands = (
-             SELECT COALESCE(array_agg(rule), '{}') FROM unnest(allowed_commands) rule WHERE NOT (rule = ANY($2)))
-          WHERE project_slug = $1 AND allowed_commands IS NOT NULL`,
-          [slug, removed],
-        );
-        await pool.query(
-          `UPDATE projects SET agent_permissions = array_remove(agent_permissions, $2) WHERE slug = $1`,
-          [slug, request.params.id],
-        );
+        // Kategorie löschen und Agents/Projekt aufräumen in einer Transaktion: sonst behielten Agents bei einem Fehler
+        // Befehle einer Kategorie, die es nicht mehr gibt.
+        const found = await withTransaction(pool, async (client) => {
+          const deleted = await client.query<{ rules: string[] }>(
+            'DELETE FROM project_permission_groups WHERE project_slug = $1 AND id = $2 RETURNING rules',
+            [slug, request.params.id],
+          );
+          if (!deleted.rows[0]) return false;
+          // Ihre Befehle verschwinden auch aus den Agents dieses Projekts (sofern keine andere Kategorie sie enthält).
+          // Über dieselbe Verbindung, damit die Prüfung die Kategorie schon ohne die gelöschte sieht.
+          const still = availableCommands(await loadProjectPermissions(client, slug));
+          const removed = deleted.rows[0].rules.filter((rule) => !still.has(rule));
+          await client.query(
+            `UPDATE agents SET allowed_commands = (
+               SELECT COALESCE(array_agg(rule), '{}') FROM unnest(allowed_commands) rule WHERE NOT (rule = ANY($2)))
+            WHERE project_slug = $1 AND allowed_commands IS NOT NULL`,
+            [slug, removed],
+          );
+          await client.query(
+            `UPDATE projects SET agent_permissions = array_remove(agent_permissions, $2) WHERE slug = $1`,
+            [slug, request.params.id],
+          );
+          return true;
+        });
+        if (!found) return void response.status(404).json({ message: 'Kategorie nicht gefunden.' });
         response.status(204).end();
       } catch (error) {
         next(error);

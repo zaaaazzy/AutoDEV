@@ -631,6 +631,10 @@ body:has(.tour-layer) .agent-indicator .agent-popover {
   color: var(--surface);
   font-size: 8px;
 }
+.sprint-chip.state-paused .sprint-state {
+  color: var(--muted);
+  font-size: 9px;
+}
 .sprint-chip.state-running {
   border-color: rgb(95 191 138 / 55%);
 }
@@ -719,6 +723,10 @@ body:has(.tour-layer) .agent-indicator .agent-popover {
   background: #c9573f;
   color: var(--surface);
   font-size: 8px;
+}
+.sprint-pill.state-paused .sprint-state {
+  color: var(--muted);
+  font-size: 9px;
 }
 .sprint-pill.state-running .sprint-state,
 .sprint-pill.state-idle .sprint-state {

@@ -290,9 +290,9 @@ export class OrderService {
     );
   }
 
-  /** Einzelnen Abnahmepunkt abhaken oder wieder öffnen. */
-  async checkPoint(item: DevelopmentItem, check: AcceptanceCheck, checked: boolean): Promise<void> {
-    await this.store.perform(
+  /** Einzelnen Abnahmepunkt abhaken oder wieder öffnen; false bei Fehler (403, 409, Netz). */
+  checkPoint(item: DevelopmentItem, check: AcceptanceCheck, checked: boolean): Promise<boolean> {
+    return this.store.perform(
       () =>
         this.api.post(`/api/development/${encodeURIComponent(item.id)}/acceptance/check`, {
           kind: check.kind,

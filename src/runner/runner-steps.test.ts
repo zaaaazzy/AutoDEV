@@ -14,7 +14,7 @@ import {
   stepModel,
 } from './runner-steps.js';
 import { ABANDONED_RUN_MS, MAX_STEP_MS } from './runner-runs.js';
-import { MAX_TIMEOUT_MINUTES } from './runner-selection.js';
+import { loadWorkflow, MAX_TIMEOUT_MINUTES, type WorkflowRow } from './runner-selection.js';
 import type { WorkflowAgent, WorkItem } from './runner-types.js';
 
 // Charakterisierung von runner-steps.ts: hält das Verhalten vor der Aufteilung fest.
@@ -93,6 +93,67 @@ test('selectWorkflowAgents: überspringt Autor bei Idee, Bug-Wächter bei Risike
   assert.deepEqual(names({ ...item, agentId: 'Visuell-id' }), ['Visuell']);
 });
 
+// Ablauf nach den Einstellungen: loadWorkflow (Schritte bzw. Agent-Felder) → selectWorkflowAgents → Ausführung.
+const row = (name: string, overrides: Partial<WorkflowRow> = {}): WorkflowRow => ({
+  ...agent(name),
+  enabled: true,
+  ...overrides,
+});
+
+async function executedOrder(steps: WorkflowRow[], agents: WorkflowRow[]): Promise<string[]> {
+  const { pool } = fakePool((sql) => (sql.includes('FROM workflow_steps s') ? steps : agents));
+  return selectWorkflowAgents(await loadWorkflow(pool, 'mainty'), item).map((entry) => entry.name);
+}
+
+test('loadWorkflow: geänderte Reihenfolge der Schritte wird so ausgeführt, Agent-Position zählt nicht', async () => {
+  const steps = [
+    row('Dev', { phase: 'while_task', position: 2, stepId: 's1' }),
+    row('Test', { phase: 'while_task', position: 1, stepId: 's2' }),
+  ];
+  assert.deepEqual(await executedOrder(steps, [row('Dev', { position: 1 }), row('Test', { position: 2 })]), [
+    'Test',
+    'Dev',
+  ]);
+});
+
+test('loadWorkflow: pausierter Schritt läuft nicht, die übrigen Schritte desselben Agents schon', async () => {
+  const steps = [
+    row('Dev', { position: 1, stepId: 's1', enabled: false }),
+    row('Review', { phase: 'after_task', position: 1, stepId: 's2' }),
+    row('Dev', { phase: 'after_task', position: 2, stepId: 's3', stepInstructions: 'Nachbessern' }),
+  ];
+  assert.deepEqual(await executedOrder(steps, []), ['Review', 'Dev']);
+});
+
+test('loadWorkflow: deaktivierter Agent läuft in keinem seiner Schritte (auch ohne Schritte nicht)', async () => {
+  const steps = [row('Dev', { stepId: 's1', agentEnabled: false }), row('Test', { position: 2, stepId: 's2' })];
+  assert.deepEqual(await executedOrder(steps, []), ['Test']);
+  assert.deepEqual(await executedOrder([], [row('Dev', { enabled: false }), row('Test', { position: 2 })]), ['Test']);
+});
+
+test('loadWorkflow: Schritt nach Phasenwechsel läuft in der neuen Phase', async () => {
+  const steps = [
+    row('Autor', { phase: 'pre_task', position: 1, stepId: 's1' }),
+    row('Dev', { phase: 'while_task', position: 1, stepId: 's2' }),
+    // Am Agent steht noch while_task; der Schritt ist nach after_task gewechselt.
+    row('Doku', { phase: 'after_task', position: 1, stepId: 's3' }),
+  ];
+  assert.deepEqual(await executedOrder(steps, [row('Doku', { phase: 'while_task', position: 0 })]), [
+    'Autor',
+    'Dev',
+    'Doku',
+  ]);
+});
+
+test('loadWorkflow: ohne Workflow-Schritte gelten Phase und Position der Agents', async () => {
+  const agents = [
+    row('Review', { phase: 'after_task', position: 1 }),
+    row('Dev', { phase: 'while_task', position: 2 }),
+    row('Test', { phase: 'while_task', position: 1 }),
+  ];
+  assert.deepEqual(await executedOrder([], agents), ['Test', 'Dev', 'Review']);
+});
+
 test('resumePrompt: Fortsetzung nennt den Grund und hängt den aktuellen Auftrag an', () => {
   const fixed = resumePrompt('AUFTRAG', { sessionId: 's', passed: true });
   assert.match(fixed, /^## Fortsetzung deiner früheren Sitzung/);
@@ -169,7 +230,7 @@ test('runStep: erfolgreicher Schritt wird gespeichert und an die Nachfolger weit
   };
   const ctx = context(pool, execute);
   const outcome = await runStep(ctx, agent('Dev', { command: ['dev'] }), 0, 1);
-  assert.deepEqual(outcome, { passed: true, interrupted: false, correctable: false });
+  assert.deepEqual(outcome, { passed: true, interrupted: false, correctable: false, cancelled: false });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.[0], 'dev');
   const saved = queries.find((query) => query.sql.includes('SET status = $2, exit_code = $3'));
@@ -186,7 +247,7 @@ test('runStep: ein Fehlschlag mit canCorrect geht zurück an den Entwickler, ohn
   const outcome = await runStep(context(pool, execute), agent('Test', { command: ['test'] }), 1, 2, {
     canCorrect: true,
   });
-  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: true });
+  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: true, cancelled: false });
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')));
 });
 
@@ -216,7 +277,8 @@ test('runStep: Abbruch aus der Oberfläche beendet den Schritt sofort, ohne Bug 
   assert.ok(Date.now() - startedAt < 10_000, 'Abbruch erreicht den Agent über das Signal');
   // Commit und checkout base dürfen erst laufen, wenn der Agent wirklich beendet ist.
   assert.equal(agentEnded, true, 'wartet auf das echte Ende des Agents');
-  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: false });
+  // Der Abbruch wird gemeldet: runWorkItem startet danach keinen Agent mehr (auch nicht „Bei abgelehnt“).
+  assert.deepEqual(outcome, { passed: false, interrupted: false, correctable: false, cancelled: true });
   assert.equal(calls, 1, 'ein Abbruch wird nicht als vorübergehender Fehler wiederholt');
   const saved = queries.find((query) => query.sql.includes('SET status = $2, exit_code = $3'));
   assert.deepEqual(saved?.values.slice(1, 3), ['failed', 130]);
