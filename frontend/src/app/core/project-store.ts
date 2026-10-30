@@ -79,7 +79,9 @@ export class ProjectStore {
     () => this.data().development.filter((item) => !isFinished(item.status)).length,
   );
   /** Aufträge mit Handlungsbedarf (Seite „Aktionen“, Menü-Bubble). */
-  readonly attention = computed(() => orderAttention(this.data().development, this.data().acceptance));
+  readonly attention = computed(() =>
+    orderAttention(this.data().development, this.data().acceptance, this.data().evidence),
+  );
   readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,
@@ -215,8 +217,11 @@ export class ProjectStore {
     }));
   }
 
-  /** success als Funktion: Meldung aus dem Ergebnis der Aktion (wird erst danach gebildet). */
-  async perform(action: () => Promise<unknown>, success: string | (() => string), refresh = true): Promise<void> {
+  /**
+   * Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat.
+   * success als Funktion: Meldung aus dem Ergebnis der Aktion (wird erst danach gebildet).
+   */
+  async perform(action: () => Promise<unknown>, success: string | (() => string), refresh = true): Promise<boolean> {
     this.busy.set(true);
     this.notice.set('');
     try {
@@ -228,9 +233,11 @@ export class ProjectStore {
       setTimeout(() => {
         if (this.notice() === message) this.notice.set('');
       }, NOTICE_MS);
+      return true;
     } catch (error) {
       // Steht die Meldung schon am Formularfeld, nicht zusätzlich oben anzeigen.
       if (!(error instanceof FieldError && error.shown)) this.notice.set(errorMessage(error, 'Aktion fehlgeschlagen.'));
+      return false;
     } finally {
       this.busy.set(false);
     }

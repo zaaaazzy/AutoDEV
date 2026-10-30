@@ -13,6 +13,7 @@ import {
   isAssignableSprintStatus,
   isSprintLockedDevelopmentStatus,
 } from '../core/development-transitions.js';
+import { isUniqueViolation, withTransaction } from '../db/transaction.js';
 import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
 import { developmentPatchRole, hasRole, ROLE_INFO, type Principal } from './roles.js';
@@ -111,6 +112,46 @@ export function retryAutoRunSql(chosen = 'NULL::uuid'): string {
   return `COALESCE((SELECT t.status = 'active' FROM sprints t WHERE t.id = ${retrySprintSql(chosen)}), TRUE)`;
 }
 
+/**
+ * Zusätzliche SET-Zuweisungen für PATCH /development/:id (als `extra` an `buildUpdate`). Jede Spalte erscheint
+ * höchstens einmal; `targetSprintStatus` ist der Status eines neu gewählten Sprints.
+ */
+export function developmentUpdateExtras(
+  fields: { column: string; value: unknown }[],
+  targetSprintStatus?: string,
+): string[] {
+  const extras = manualEstimateSql(fields);
+  const sprintField = fields.find((field) => field.column === 'sprint_id');
+  const agentField = fields.find((field) => field.column === 'agent_id');
+  const statusGiven = fields.some((field) => field.column === 'status');
+  const manualStart = typeof agentField?.value === 'string' && !statusGiven;
+  if ((sprintField || agentField) && !manualStart && !statusGiven) {
+    // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
+    const assigned = (sprintField ?? agentField)?.value !== null;
+    const target = assigned
+      ? "'planned'"
+      : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`;
+    extras.push(`status = CASE WHEN status IN ('backlog', 'planned') THEN ${target} ELSE status END`);
+  }
+  if (sprintField && sprintField.value !== null) {
+    // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
+    extras.push('removed_from_sprint = NULL', 'removed_from_sprint_at = NULL');
+  }
+  if (targetSprintStatus && targetSprintStatus !== 'active') {
+    // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
+    // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
+    extras.push('auto_run = FALSE');
+  }
+  if (manualStart) {
+    // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
+    extras.push(
+      "return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END",
+      "status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END",
+    );
+  }
+  return extras;
+}
+
 export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
   app.post('/ideation/:id/promote', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
@@ -118,26 +159,35 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Ungültige Idee.' });
       return;
     }
-    const result = await pool.query(
-      `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
-                                      effort_hours, token_estimate, benefit, cost, estimate_source)
-       SELECT i.project_slug, i.id, i.title, i.description, '${DEVELOPMENT_STATUS.backlog}', i.priority,
-              i.effort_hours, i.token_estimate, i.benefit, i.cost, i.estimate_source
-         FROM ideation_items i
-        WHERE i.id = $1
-          AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)
-       RETURNING ${DEV_COLUMNS}`,
-      [request.params.id],
-    );
-    if (!result.rows[0]) {
+    // Auftrag und Status der Idee zusammen oder gar nicht. Ein zweiter Klick, der parallel am NOT EXISTS vorbeikommt,
+    // scheitert am Unique-Index auf development_items(ideation_id) (23505) und bekommt ebenfalls 409.
+    const item = await withTransaction(pool, async (client) => {
+      const result = await client.query(
+        `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
+                                        effort_hours, token_estimate, benefit, cost, estimate_source)
+         SELECT i.project_slug, i.id, i.title, i.description, '${DEVELOPMENT_STATUS.backlog}', i.priority,
+                i.effort_hours, i.token_estimate, i.benefit, i.cost, i.estimate_source
+           FROM ideation_items i
+          WHERE i.id = $1
+            AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)
+         RETURNING ${DEV_COLUMNS}`,
+        [request.params.id],
+      );
+      if (!result.rows[0]) return null;
+      await client.query(
+        `UPDATE ideation_items SET status = '${IDEATION_STATUS.accepted}', updated_at = NOW() WHERE id = $1`,
+        [request.params.id],
+      );
+      return result.rows[0] as unknown;
+    }).catch((error: unknown) => {
+      if (isUniqueViolation(error)) return null;
+      throw error;
+    });
+    if (!item) {
       response.status(409).json({ message: 'Idee nicht gefunden oder bereits als Auftrag übernommen.' });
       return;
     }
-    await pool.query(
-      `UPDATE ideation_items SET status = '${IDEATION_STATUS.accepted}', updated_at = NOW() WHERE id = $1`,
-      [request.params.id],
-    );
-    response.status(201).json({ item: result.rows[0] });
+    response.status(201).json({ item });
   });
 
   app.post('/projects/:slug/development', access({ role: 'plan', tenant: 'project' }), async (request, response) => {
@@ -160,8 +210,9 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       response.status(400).json(slug ? invalidNewOrder(body) : { message: 'Ungültiges Projekt.' });
       return;
     }
-    const result = await pool.query(
-      `INSERT INTO development_items (project_slug, ideation_id, test_run_id, title, description, status, priority,
+    const result = await pool
+      .query(
+        `INSERT INTO development_items (project_slug, ideation_id, test_run_id, title, description, status, priority,
                                       category)
        SELECT $1, i.id, tr.id, $4, $5, COALESCE($6, '${DEVELOPMENT_STATUS.backlog}'), COALESCE($7, 'medium'), $8
          FROM (SELECT 1) seed
@@ -170,17 +221,26 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         WHERE ($2::uuid IS NULL OR i.id IS NOT NULL)
           AND ($3::uuid IS NULL OR tr.id IS NOT NULL)
        RETURNING ${DEV_COLUMNS}`,
-      [
-        slug,
-        body.ideationId ?? null,
-        body.testRunId ?? null,
-        body.title.trim(),
-        typeof body.description === 'string' ? body.description.trim() : '',
-        body.status ?? null,
-        body.priority ?? null,
-        body.category || null,
-      ],
-    );
+        [
+          slug,
+          body.ideationId ?? null,
+          body.testRunId ?? null,
+          body.title.trim(),
+          typeof body.description === 'string' ? body.description.trim() : '',
+          body.status ?? null,
+          body.priority ?? null,
+          body.category || null,
+        ],
+      )
+      // Je Idee höchstens ein Auftrag (Unique-Index auf ideation_id).
+      .catch((error: unknown) => {
+        if (isUniqueViolation(error)) return null;
+        throw error;
+      });
+    if (!result) {
+      response.status(409).json({ field: 'ideationId', message: 'Zu dieser Idee gibt es schon einen Auftrag.' });
+      return;
+    }
     if (!result.rows[0]) {
       response.status(400).json({ message: 'Die verknüpfte Idee oder der Testlauf gehört nicht zu diesem Projekt.' });
       return;
@@ -414,23 +474,28 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Auftrag nicht gefunden.' });
       return;
     }
-    const result = await pool.query(
-      `DELETE FROM development_items WHERE id = $1 AND status <> '${DEVELOPMENT_STATUS.inProgress}'
-       RETURNING id, ideation_id AS "ideationId"`,
-      [request.params.id],
-    );
-    if (!result.rows[0]) {
+    // Löschen und Idee wieder öffnen in einer Transaktion: sonst bliebe die Idee bei einem Fehler auf „angenommen“.
+    const deleted = await withTransaction(pool, async (client) => {
+      const result = await client.query<{ id: string; ideationId: string | null }>(
+        `DELETE FROM development_items WHERE id = $1 AND status <> '${DEVELOPMENT_STATUS.inProgress}'
+         RETURNING id, ideation_id AS "ideationId"`,
+        [request.params.id],
+      );
+      const row = result.rows[0];
+      // Ohne Auftrag ist die Idee wieder offen (sonst hinge sie dauerhaft auf „Auftrag wird bearbeitet“).
+      if (row?.ideationId) {
+        await client.query(
+          `UPDATE ideation_items SET status = '${IDEATION_STATUS.idea}', updated_at = NOW()
+            WHERE id = $1 AND status = '${IDEATION_STATUS.accepted}'
+              AND NOT EXISTS (SELECT 1 FROM development_items WHERE ideation_id = $1)`,
+          [row.ideationId],
+        );
+      }
+      return Boolean(row);
+    });
+    if (!deleted) {
       response.status(409).json({ message: 'Der Auftrag läuft gerade und kann nicht gelöscht werden.' });
       return;
-    }
-    // Ohne Auftrag ist die Idee wieder offen (sonst hinge sie dauerhaft auf „Auftrag wird bearbeitet“).
-    if (result.rows[0].ideationId) {
-      await pool.query(
-        `UPDATE ideation_items SET status = '${IDEATION_STATUS.idea}', updated_at = NOW()
-          WHERE id = $1 AND status = '${IDEATION_STATUS.accepted}'
-            AND NOT EXISTS (SELECT 1 FROM development_items WHERE ideation_id = $1)`,
-        [result.rows[0].ideationId],
-      );
     }
     response.status(204).end();
   });
@@ -552,8 +617,6 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
           return;
         }
       }
-      const sprintField = sprintChange;
-      const agentField = fields.find((field) => field.column === 'agent_id');
       // Status oder Sprint nur ändern, wenn der Status seit der Prüfung gleich geblieben ist (kein Wettlauf mit dem Worker).
       const update = buildUpdate(
         'development_items',
@@ -561,37 +624,8 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         fields,
         `${DEV_COLUMNS}, project_slug AS "projectSlug"`,
         from ? { column: 'status', values: [from] } : undefined,
+        developmentUpdateExtras(fields, targetSprintStatus),
       );
-      update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
-      const manualStart = typeof agentId === 'string' && !fields.some((field) => field.column === 'status');
-      if ((sprintField || agentField) && !manualStart && !fields.some((field) => field.column === 'status')) {
-        // Assigning a backlog order to a sprint or an agent plans it; removing both returns it to the backlog.
-        const assigned = (sprintField ?? agentField)?.value !== null;
-        update.sql = update.sql.replace(
-          ', updated_at = NOW()',
-          `, status = CASE WHEN status IN ('backlog', 'planned') THEN ${assigned ? "'planned'" : `CASE WHEN ${sprintField ? 'agent_id' : 'sprint_id'} IS NULL THEN 'backlog' ELSE 'planned' END`} ELSE status END, updated_at = NOW()`,
-        );
-      }
-      if (sprintField && sprintField.value !== null) {
-        // Wieder einem Sprint zugeordnet: nicht mehr „aus dem Sprint entfernt“.
-        update.sql = update.sql.replace(
-          ', updated_at = NOW()',
-          ', removed_from_sprint = NULL, removed_from_sprint_at = NULL, updated_at = NOW()',
-        );
-      }
-      if (targetSprintStatus && targetSprintStatus !== 'active') {
-        // Ein geplanter Sprint startet seine Aufträge selbst; ein altes auto_run (z. B. von /retry) liesse den Worker
-        // den Auftrag sonst sofort starten (selectItems nimmt auto_run unabhängig vom Sprint-Status).
-        update.sql = update.sql.replace(', updated_at = NOW()', ', auto_run = FALSE, updated_at = NOW()');
-      }
-      if (manualStart) {
-        // A manual run of one agent restores the previous status after completion, even for done or blocked orders.
-        update.sql = update.sql.replace(
-          ', updated_at = NOW()',
-          `, return_status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN COALESCE(return_status, status) ELSE return_status END,
-          status = CASE WHEN status IN ('backlog', 'blocked', 'done') THEN 'planned' ELSE status END, updated_at = NOW()`,
-        );
-      }
       const result = await pool.query(update.sql, update.values);
       if (!result.rows[0]) {
         response.status(from ? 409 : 404).json({

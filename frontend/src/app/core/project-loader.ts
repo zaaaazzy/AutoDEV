@@ -17,6 +17,7 @@ import {
   type ProjectStats,
   type Sprint,
   type SprintReport,
+  type TestEvidence,
   type TestRun,
   type WorkerStatus,
 } from './models.js';
@@ -45,6 +46,7 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     api.get<{ report?: CoverageReport | null }>(`${base}/coverage`),
     api.get<{ checks?: AcceptanceCheck[]; defaults?: AcceptanceDefaults }>(`${base}/acceptance`),
     api.get<{ revisions?: DocRevision[] }>(`${base}/doc-revisions`),
+    api.get<{ evidence?: TestEvidence[]; testRunning?: boolean }>(`${base}/test-evidence`),
   ]);
 
   const data = emptyProjectData();
@@ -64,7 +66,12 @@ export async function fetchProjectData(api: ApiService, slug: string): Promise<L
     coverage,
     acceptance,
     revisions,
+    evidence,
   ] = results;
+  if (evidence.status === 'fulfilled') {
+    data.evidence = evidence.value.evidence ?? [];
+    data.testRunning = evidence.value.testRunning === true;
+  } else failed.push('evidence', 'testRunning');
   if (revisions.status === 'fulfilled') data.docRevisions = revisions.value.revisions ?? [];
   else failed.push('docRevisions');
   if (acceptance.status === 'fulfilled') {

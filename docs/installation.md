@@ -15,7 +15,10 @@ dann nicht nötig. Die Installationsskripte für den Worker auf dem Host bleiben
 
 ## Voraussetzungen
 
-- **Docker Desktop** (macOS, Windows) bzw. Docker Engine mit Compose (Linux) – läuft beim Start.
+- **Docker Desktop** (macOS, Windows) bzw. Docker Engine mit Compose (Linux) – läuft beim Start. Für die
+  Arbeitscontainer der Agents (je Projekt ein eigener Stapel, siehe
+  [Arbeitscontainer für Agents](#arbeitscontainer-für-agents)) braucht Docker Desktop **mindestens 12 GB, besser
+  16 GB Arbeitsspeicher** (Einstellungen → Resources → Memory) und rund 20 GB freien Speicher.
 - **Node.js 22.12** oder neuer (mit npm) – für `start.sh`/`start.cmd`, den Einrichtungs-Assistenten, die
   Projektvorlagen (Vite 8, Angular 20) und den Worker auf dem Host.
 - **Git**.
@@ -87,7 +90,8 @@ wird vorher als `.env.bak-<Zeit>` gesichert und dann **ergänzt, nicht ersetzt**
    - **Auftrag**: Aufträge direkt anlegen, „In Entstehung“ und „Besondere Aufmerksamkeit“
    - **Sprint**: Sprint anlegen, unter **Aufträge hinzufügen** offene Aufträge in den Sprint nehmen –
      die Reihenfolge unter „Geplant“ (↑/↓) bestimmt, was die Agents zuerst abarbeiten
-   - **Sprint starten** und dem ersten Agent live zuschauen
+   - **Sprint starten** und dem ersten Agent live zuschauen. Beim allerersten Auftrag eines Projekts richtet
+     AIdeation dessen [Arbeitscontainer](#arbeitscontainer-für-agents) ein; das dauert einige Minuten.
 
 Ausprobierte Projekte lassen sich unter **Einstellungen → Projekt löschen** wieder entfernen – auf Wunsch samt
 Ordner auf deinem Rechner.
@@ -188,7 +192,7 @@ Domain gewählt ist) startet `docker compose up -d` drei weitere Dienste aus dem
 
 | Dienst | Aufgabe |
 |---|---|
-| `worker` | Dauer-Worker für alle Projekte (wie `npm run worker`). **Einziger Dienst mit dem Docker-Socket** (`/var/run/docker.sock`): startet die Agent-Container und baut beim Neustart die Images. |
+| `worker` | Dauer-Worker für alle Projekte (wie `npm run worker`). **Einziger Dienst mit dem Docker-Socket** (`/var/run/docker.sock`): startet die Arbeitscontainer und Agent-Container und baut beim Neustart die Images. |
 | `worker-volumes` | Einmaliger Schritt vor dem Worker: übergibt das Volume für `node_modules` dem Worker-Benutzer, dann Ende. |
 | `watchdog` | Ausfall-Wächter: alle zwei Minuten ein Prüflauf mit denselben Push-Meldungen wie bisher. Ohne Docker-Socket und ohne Git-Zugang, AIdeation-Ordner nur lesend. |
 
@@ -218,8 +222,8 @@ was es auf dem Host gibt, jeweils `read_only`:
 `gh` hält den Token unter macOS und Windows im Schlüsselbund, den der Container nicht sieht. Der Assistent legt ihn
 deshalb einmalig aus `gh auth token` in `~/.config/aideation/github-token` ab (Rechte 600). Von Hand geht das mit
 `gh auth token > ~/.config/aideation/github-token && chmod 600 ~/.config/aideation/github-token`. Agent-Container
-bekommen keinen dieser Zugänge, auch keinen Docker-Socket: Sie entstehen per `docker run` mit gefilterter Umgebung
-(siehe [Docker-Sandbox](#docker-sandbox-für-agents-optional)).
+bekommen keinen dieser Zugänge, auch keinen Docker-Socket des Rechners: Sie haben ihr eigenes Docker im Stapel und
+bekommen nur eine gefilterte Umgebung (siehe [Arbeitscontainer für Agents](#arbeitscontainer-für-agents)).
 
 **Benutzer:** Der Worker läuft ohne root als `DEV_LOG_WORKER_USER` (Standard `1000:1000`; unter Linux trägt der
 Assistent deine `uid:gid` ein, damit Dateien in den Projektordnern dir gehören). Zugriff auf Docker bekommt er über
@@ -344,49 +348,107 @@ Der Review-Container läuft als Benutzer `node`. Jedes Projekt hat ein eigenes n
 Das alte gemeinsame Volume `aideation_review_npm` wird nicht mehr benutzt und lässt sich mit
 `docker volume rm aideation_review_npm` löschen.
 
-### Docker-Sandbox für Agents (optional)
+### Arbeitscontainer für Agents
 
-Jeder Agent-Schritt und jeder Projekttest läuft in einem kurzlebigen Container statt direkt auf dem Rechner (Schalter
-`DEV_LOG_AGENT_SANDBOX`). Der Worker steuert den Lauf, auf dem Host oder als Dienst `worker` im Container. Das
-Verhalten ist auf macOS, Linux und Windows gleich.
+Agents und Projekttests laufen nicht auf deinem Rechner, sondern **je Projekt in einem eigenen Arbeitscontainer**
+(Schalter `DEV_LOG_AGENT_SANDBOX`, Standard `workbench`). Darin dürfen sie alles, was ein Entwickler-Rechner kann:
+Pakete installieren, bauen, Tests mit Browsern ausführen und **mit Docker eigene Container bauen und starten**. Dein
+Rechner, sein Docker und die anderen Projekte bleiben davon unberührt. Das Verhalten ist auf macOS, Linux und Windows
+gleich; der Worker steuert alles, auf dem Host oder als Dienst `worker` im Container.
 
-| Wert | Wirkung |
+Ein Arbeitscontainer ist ein kleiner Compose-Stapel `agents_<projekt>` je Projekt (in Docker Desktop eine Gruppe je Anwendung). Seine Container heissen `agents_<projekt>_workbench`, `agents_<projekt>_docker` und `agents_<projekt>_<dienst>` für die Testdienste:
+
+| Dienst | Aufgabe |
 |---|---|
-| `docker` (Standard) | Alle Rollen, System-Agents, das Projekttests-Gate und `test:full` laufen im Image `aideation-agent`. Netzwerk nur über den Egress-Proxy (Anthropic-API, npm-Registry, Ollama). |
-| `off` | Notfallmodus: Alles läuft wieder auf dem Host. Das Worker-Badge zeigt eine Warnung. |
+| `workbench` | Image `aideation-agent` (Node 22, Playwright mit Browsern, Claude-CLI, Git, Docker-CLI mit Compose und Buildx). Der Arbeitsordner des Projekts liegt unter `/workspace`, `node_modules` im Volume `aideation-node-modules-<projekt>`. Ohne Rechte (`cap_drop: ALL`), Netzwerk nur über den Egress-Proxy. |
+| `docker` | Eigener Docker-Dienst des Stapels (`docker:29-dind`). Er läuft privilegiert, aber nur in seinem Container; Images, Container und Volumes der Agents liegen in seinem Volume `agents_<projekt>_docker`, nie im Docker deines Rechners. Er lauscht nur innerhalb des Stapels. |
+| Testdienste | Aus `.aideation/workbench.json` des Projekts, z. B. Postgres für die Tests (siehe unten). |
 
-Zusätzliche Ziele für den Egress-Proxy (z. B. eine weitere Registry) lassen sich ausdrücklich mit
-`DEV_LOG_AGENT_SANDBOX_EGRESS=host:port,host:port` freigeben. Testdienste eines Projekts (z. B. eine Datenbank)
-bekommen in dessen Compose-Datei das Label `aideation.test: "true"`. Der Worker startet sie vor den Tests, und der
-Testcontainer hängt nur in deren Netzwerk.
+Alle Dienste teilen sich das Netzwerk der `workbench`: Was die Agents mit Docker starten oder was als Testdienst
+läuft, erreichen sie wie gewohnt unter `localhost`.
+
+**Was beim Worker bleibt:** Git-Push, Merge nach `main`, Live schalten und das Bauen der echten Container macht
+weiterhin der Worker. Deine GitHub-Schlüssel, `~/.ssh`, `~/.claude` und der Docker-Socket deines Rechners kommen nie
+in einen Arbeitscontainer. Lesende Rollen (Visionär, Problemanalyse, Schätzung) laufen weiterhin in kurzlebigen
+Containern mit nur lesendem Arbeitsordner.
+
+**Netzwerk:** Hinaus geht es nur über den Egress-Proxy `aideation-egress`: Anthropic-API, npm-Registry, Ollama auf dem
+Host und Docker Hub (Images für das Docker im Stapel). Weitere Ziele gibst du ausdrücklich mit
+`DEV_LOG_AGENT_SANDBOX_EGRESS=host:port,host:port` in `worker.env` (bzw. `.env`) frei. Nach einer Änderung den Proxy
+einmal entfernen, AIdeation legt ihn neu an: `docker rm -f aideation-egress`.
+
+| Wert von `DEV_LOG_AGENT_SANDBOX` | Wirkung |
+|---|---|
+| `workbench` (Standard) | Arbeitscontainer je Projekt wie oben. |
+| `docker` | Früheres Verhalten: jeder Schritt in einem neuen, kurzlebigen Container `aideation-agent` ohne eigenes Docker. Testdienste mit dem Compose-Label `aideation.test: "true"` startet der Worker auf dem Host. |
+| `off` | Notfallmodus: Alles läuft wieder direkt auf dem Rechner. Das Worker-Badge zeigt eine Warnung. |
 
 **Einrichten:**
 
-1. Image bauen, im AIdeation-Ordner: `docker build -t aideation-agent -f deploy/agent/Dockerfile .` Das geschieht auch
-   bei jedem „AIdeation neu starten“ und im CI-Job `docker`. Das Image enthält Playwright mit Browsern, Node 22, die
-   Claude-CLI in fester Version (Build-Argument `CLAUDE_CODE_VERSION`), Git, ripgrep und den gebündelten Wächter.
-2. Anmeldung für die Claude-CLI im Container: `claude setup-token` ausführen und den Wert als
-   `CLAUDE_CODE_OAUTH_TOKEN=…` in `worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Mit dem Worker im Container
-   gehört er in die `.env` (Feld im Assistenten). Das `~/.claude` des Hosts wird nicht eingebunden.
-3. Schalter (optional): Ohne Angabe gilt `docker`. Abweichend global in `worker.env` oder je Projekt unter
-   Einstellungen → Projekt & Ordner → „Docker-Sandbox für Agents und Projekttests“ (Wie global / Aus / Docker). Der
-   Projektwert geht vor.
-4. Worker neu starten.
+1. **Docker Desktop:** Arbeitsspeicher auf mindestens 12 GB, besser 16 GB stellen (Einstellungen → Resources).
+2. **Image bauen**, im AIdeation-Ordner: `docker build -t aideation-agent -f deploy/agent/Dockerfile .` Das geschieht
+   auch bei jedem „AIdeation neu starten“ und im CI-Job `docker`. Die Claude-CLI hat eine feste Version
+   (Build-Argument `CLAUDE_CODE_VERSION`).
+3. **Anmeldung der Claude-CLI:** `claude setup-token` ausführen und den Wert als `CLAUDE_CODE_OAUTH_TOKEN=…` in
+   `~/.config/aideation/worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Mit dem Worker im Container gehört er in
+   die `.env` (Feld im Assistenten). Das `~/.claude` des Rechners wird nicht eingebunden.
+4. **Schalter (optional):** Ohne Angabe gilt `workbench`. Abweichend global in `worker.env` oder je Projekt unter
+   Einstellungen → Projekt & Ordner → „Docker-Sandbox für Agents und Projekttests“. Der Projektwert geht vor.
+5. **Worker neu starten.** Den Arbeitscontainer legt der Worker beim ersten Agent-Schritt bzw. Testlauf des Projekts
+   selbst an; der erste Start dauert wegen der Images und der Installation der Abhängigkeiten einige Minuten.
 
-Optional begrenzen `DEV_LOG_AGENT_SANDBOX_CPUS` (Standard `2`) und `DEV_LOG_AGENT_SANDBOX_MEMORY` (Standard `4g`) den
-Container.
+**Grenzen je Arbeitscontainer:** `DEV_LOG_AGENT_SANDBOX_CPUS` (Standard `4`) und `DEV_LOG_AGENT_SANDBOX_MEMORY`
+(Standard `6g`). Für die kurzlebigen Container (`docker`) gelten dieselben Variablen mit den Standards `2` und `4g`.
 
-**Ist Docker nicht erreichbar oder fehlt das Image**, startet der Schritt nicht. Er scheitert mit einer Meldung im
-Auftrag und im Worker-Badge und läuft nie stattdessen auf dem Host. Fehlt nur die Anmeldung, lautet die Meldung anders
-(„Anmeldung der Claude-CLI fehlt“). Meldet die Claude-CLI ein Nutzungslimit, steht dabei, dass das kein Sandbox-Fehler
-ist.
+**Testdienste eines Projekts:** Braucht ein Projekt für seine Tests z. B. eine Datenbank, legst du im Projekt die
+Datei `.aideation/workbench.json` an. Der Worker liest sie aus dem **Live-Ordner** des Projekts (dem geprüften Stand
+auf `main`), nicht aus dem Arbeitsordner der Agents – ein Agent kann sich so keine weiteren Rechte geben. Erlaubt sind
+je Dienst nur `image`, `environment`, `command` und `tmpfs`; Ports, Mounts, Rechte und Netzwerke setzt AIdeation
+selbst. `environment` auf oberster Ebene gilt für die `workbench`. Beispiel (so testet AIdeation sich selbst):
 
-**Laufende Sandbox-Container anzeigen:** `docker ps --filter label=aideation.run`. Beim Start des Workers werden
-übrig gebliebene Container mit diesem Label entfernt.
+```json
+{
+  "services": {
+    "postgres": {
+      "image": "postgres:17-alpine",
+      "environment": { "POSTGRES_USER": "devlog", "POSTGRES_PASSWORD": "workbench", "POSTGRES_DB": "aideation" },
+      "command": ["-p", "5433"],
+      "tmpfs": ["/var/lib/postgresql/data"]
+    }
+  },
+  "environment": {
+    "DEV_LOG_DATABASE_URL": "postgresql://devlog:workbench@127.0.0.1:5433/aideation"
+  }
+}
+```
 
-**node_modules:** Im Container liegen die Abhängigkeiten im Volume `aideation-node-modules-<projekt>` (Linux-Binärdateien,
-darum nicht die des Hosts). Beim ersten Lauf ist es leer; der Agent installiert sie mit `npm ci --ignore-scripts`.
-Zurücksetzen: `docker volume rm aideation-node-modules-<projekt>`.
+Ändert sich die Datei, das Image oder eine Grenze, erstellt der Worker den Stapel beim nächsten Lauf neu. Das Docker-
+und das `node_modules`-Volume bleiben dabei erhalten.
+
+**Abhängigkeiten:** Vor dem ersten Lauf und nach jeder Änderung an `package-lock.json` installiert der Worker sie im
+Arbeitscontainer (`npm install --ignore-scripts`, Linux-Binärdateien, darum nicht die des Rechners). Zurücksetzen:
+`docker volume rm aideation-node-modules-<projekt>` (bei gestopptem Arbeitscontainer).
+
+**Ist Docker nicht erreichbar, fehlt das Image oder startet der Stapel nicht**, beginnt der Schritt nicht. Er scheitert
+mit einer Meldung im Auftrag und im Worker-Badge und läuft nie stattdessen auf deinem Rechner. Fehlt nur die
+Anmeldung, lautet die Meldung „Anmeldung der Claude-CLI fehlt“. Meldet die Claude-CLI ein Nutzungslimit, steht dabei,
+dass das kein Sandbox-Fehler ist.
+
+**Nützliche Befehle:**
+
+```bash
+# Arbeitscontainer anzeigen
+docker ps --filter label=aideation.workbench
+# In einen Arbeitscontainer schauen
+docker exec -it agents_<projekt>_workbench bash
+# Arbeitscontainer stoppen (Volumes bleiben; der Worker startet ihn bei Bedarf neu)
+docker compose -p agents_<projekt> -f ~/.config/aideation/workbench/agents_<projekt>.json down
+# Kurzlebige Container (Modus docker) anzeigen
+docker ps --filter label=aideation.run
+```
+
+Die Compose-Dateien der Arbeitscontainer legt der Worker unter `~/.config/aideation/workbench/` ab (anders mit
+`DEV_LOG_WORKBENCH_DIR`). Sie enthalten keine Geheimnisse.
 
 ### Log-Rotation (macOS)
 

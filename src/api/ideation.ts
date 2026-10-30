@@ -97,8 +97,8 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
       fields,
       `${IDEA_COLUMNS}, project_slug AS "projectSlug"`,
       { column: 'status', values: [...EDITABLE_IDEATION_STATUSES, IDEATION_STATUS.rejected] },
+      manualEstimateSql(fields),
     );
-    update.sql = update.sql.replace(', updated_at = NOW()', `${manualEstimateSql(fields)}, updated_at = NOW()`);
     const result = await pool.query(update.sql, update.values);
     if (!result.rows[0]) {
       const exists = (await pool.query('SELECT 1 FROM ideation_items WHERE id = $1', [request.params.id])).rows[0];
@@ -147,7 +147,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
     const allowed = allowedSlugs(response.locals.allowedProjects);
     const author = authorName(response.locals.principal as Principal | undefined);
     const client = await pool.connect();
-    let changed: BulkIdea[] = [];
+    let changed: BulkIdea[];
     try {
       await client.query('BEGIN');
       // Gleiche Regel wie die Einzel-Ablehnung: Die Statusbedingung schützt Ideen, die der Auftragsautor schreibt.
@@ -218,11 +218,7 @@ export function registerIdeationRoutes(app: Router, pool: Pool): void {
     }
     await pool.query(
       `INSERT INTO ideation_comments (ideation_id, author, author_kind, body) VALUES ($1, $2, 'user', $3)`,
-      [
-        request.params.id,
-        authorName(response.locals.principal as Principal | undefined),
-        `**Abgelehnt:** ${reason}`,
-      ],
+      [request.params.id, authorName(response.locals.principal as Principal | undefined), `**Abgelehnt:** ${reason}`],
     );
     response.json({ item: result.rows[0] });
   });
