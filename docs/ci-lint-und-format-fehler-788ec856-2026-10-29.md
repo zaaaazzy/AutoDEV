@@ -95,3 +95,17 @@ und keiner der GitHub-CI. Es ist ein Folgefehler der Umstellung der Agents auf C
   2. Einen Lauf starten, damit der Worker das Volume füllt. Dann `npm run test:unit` im Container ausführen und die Ausgabe festhalten.
   3. Den Bug erst schliessen, wenn GitHub Actions grün ist (Jobs `check` und `e2e`).
 - Kein `npm install` im Agent ausführen (vom Wächter gesperrt). „Spend limit“-Meldungen in anderen Bugs sind keine Code-Fehler.
+
+## Stand nach dem dritten Versuch (30.10.2026, 12:22)
+
+- **Code im Repo (`src/core/sandbox.ts`, `src/core/sandbox.test.ts`, `src/runner/agent-workspace.ts`):**
+  - `prepareModulesMountpoint(worktree)`: ersetzt im Agent-Worktree den `node_modules`-Symlink auf den Host-Pfad durch einen leeren echten Ordner, damit das Volume dort eingebunden wird und nicht hinter dem Link im Leeren landet. Es wird nur der Link entfernt, nie sein Ziel. Das gilt nur in einem Git-Worktree (`.git` ist eine Datei); Projektordner von Menschen bleiben unberührt. `runInSandbox` ruft es vor dem Lauf auf.
+  - `installModules` / `modulesInstallArgs`: füllt das Volume per `npm ci --ignore-scripts`, nur wenn der Stempel `.aideation-lock` nicht zum Lockfile-Hash passt (siehe Nachtrag oben).
+  - `agent-workspace.ts`: Ein leerer `node_modules`-Ordner (Mountpunkt) wird im Host-Modus beim Start wieder auf den Hauptordner verlinkt.
+- **Nicht belegt:** Der aktive Worker läuft noch mit altem Code und altem Image. Der Entwickler konnte weder Tests noch Docker noch `gh` ausführen. Das Log des roten GitHub-Actions-Laufs liegt dem Auftrag nicht an, die Dokumentation hat es nicht eingesehen. Es ist damit weiterhin offen, ob `test:unit` in GitHub an einem Test scheitert.
+- **Manuell nötig (Host):**
+  1. „AIdeation neu starten“ (baut `aideation-agent` neu, startet den Worker mit dem neuen Code).
+  2. Einen Lauf starten, damit das Volume gefüllt wird. Dann `npm run test:unit` im Container ausführen.
+  3. Das Log des roten Actions-Laufs (Job `check`) an den Auftrag hängen und mit dem lokalen Ergebnis vergleichen.
+  4. Den Bug erst nach einem grünen Actions-Lauf desselben Jobs schliessen, ein lokaler grüner Lauf genügt nicht.
+- **Sektionen Sprint und Anfrage/TODO:** Der Auftrag bleibt im Sprint offen/blockiert (Wartet auf Host-Eingriff und Actions-Log). TODO: Neustart, Volume füllen, Actions-Log beschaffen, grünen Lauf abwarten. Technische Referenz: `docs/ci.md` (Abschnitt zum leeren Volume) und `docs/agents-und-rechte.md` (Sandbox, Volume je Projekt).
