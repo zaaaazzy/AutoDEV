@@ -268,7 +268,7 @@ export class AgentsComponent {
     }
     return this.data()
       .development.filter((item) => lastRun.has(item.id))
-      .sort((a, b) => lastRun.get(b.id)!.localeCompare(lastRun.get(a.id)!))
+      .sort((a, b) => (lastRun.get(b.id) ?? '').localeCompare(lastRun.get(a.id) ?? ''))
       .slice(0, 20);
   });
 

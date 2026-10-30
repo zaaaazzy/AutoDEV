@@ -3,6 +3,7 @@ import { logged } from '../core/log.js';
 import { inWindow, nextRoutineRun } from '../core/cron.js';
 import { sendPush } from '../core/push.js';
 import { markerCategory, markerPriority, markerScore, markerTitle, parseMarkerLines } from './visionary.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Zeitgesteuerte Routinen: Der Planer im Worker reiht fällige Agent-Aufgaben als Chat-Nachricht mit Herkunft
@@ -180,20 +181,24 @@ export async function queueRun(
   trigger: 'schedule' | 'manual',
   content: string,
 ): Promise<{ runId: string; message: Record<string, unknown> }> {
-  const runId = (
-    await client.query<{ id: string }>(
-      `INSERT INTO agent_task_runs (task_id, project_slug, trigger) VALUES ($1, $2, $3) RETURNING id`,
-      [task.id, task.projectSlug, trigger],
-    )
-  ).rows[0]!.id;
-  const message = (
-    await client.query<{ id: string }>(
-      `INSERT INTO chat_messages (project_slug, role, content, status, agent_id, agent_name, origin, task_run_id)
+  const runId = defined(
+    (
+      await client.query<{ id: string }>(
+        `INSERT INTO agent_task_runs (task_id, project_slug, trigger) VALUES ($1, $2, $3) RETURNING id`,
+        [task.id, task.projectSlug, trigger],
+      )
+    ).rows[0],
+  ).id;
+  const message = defined(
+    (
+      await client.query<{ id: string }>(
+        `INSERT INTO chat_messages (project_slug, role, content, status, agent_id, agent_name, origin, task_run_id)
        VALUES ($1, 'user', $2, 'pending', $3, (SELECT name FROM agents WHERE id = $3), $4, $5)
        RETURNING id, role, content, status, origin, created_at AS "createdAt"`,
-      [task.projectSlug, content, task.agentId, trigger === 'schedule' ? ROUTINE_ORIGIN : 'user', runId],
-    )
-  ).rows[0]!;
+        [task.projectSlug, content, task.agentId, trigger === 'schedule' ? ROUTINE_ORIGIN : 'user', runId],
+      )
+    ).rows[0],
+  );
   await client.query(`UPDATE agent_task_runs SET message_id = $2 WHERE id = $1`, [runId, message.id]);
   await client.query(
     `UPDATE agent_tasks SET run_count = run_count + 1, last_run_at = NOW(), last_status = 'queued' WHERE id = $1`,

@@ -2,6 +2,7 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { redactOutput } from '../core/command.js';
+import { defined } from '../core/defined.js';
 
 const MAX_PAGES = 20;
 
@@ -155,7 +156,7 @@ export function parseEnvFile(content: string): Map<string, string> {
     let value = match[2] ?? '';
     const quoted = /^(["'])(.*)\1$/.exec(value);
     value = quoted ? (quoted[2] ?? '') : value.replace(/\s+#.*$/, '');
-    values.set(match[1]!, value);
+    values.set(defined(match[1]), value);
   }
   return values;
 }
@@ -191,6 +192,6 @@ export function withoutQuery(url: string): string {
     const parsed = new URL(url);
     return `${parsed.origin}${parsed.pathname}`.slice(0, 200);
   } catch {
-    return url.split(/[?#]/)[0]!.slice(0, 200);
+    return defined(url.split(/[?#]/)[0]).slice(0, 200);
   }
 }

@@ -9,8 +9,13 @@ export default tseslint.config(
   {
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/no-non-null-assertion': 'error',
       eqeqeq: 'error',
     },
+  },
+  // Tests (und die Playwright-Prüfungen unter e2e/) dürfen Treffer und Indizes mit „!“ behaupten; ein Fehlgriff zeigt sich dort sofort als roter Test.
+  {
+    files: ['**/*.test.ts', '**/*.spec.ts', 'e2e/**'],
+    rules: { '@typescript-eslint/no-non-null-assertion': 'warn' },
   },
 );

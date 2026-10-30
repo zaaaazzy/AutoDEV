@@ -1,3 +1,5 @@
+import { defined } from './defined.js';
+
 /** Testkategorien und Einzelergebnisse für die Ansicht „Testläufe“. */
 export const TEST_CATEGORIES = ['quality', 'unit', 'e2e', 'user'] as const;
 export type TestCategory = (typeof TEST_CATEGORIES)[number];
@@ -45,18 +47,20 @@ export function parseTapCases(output: string): TestCaseResult[] {
   const lines = output.replace(ANSI, '').split('\n');
   const cases: TestCaseResult[] = [];
   for (let index = 0; index < lines.length; index++) {
-    const match = /^(not ok|ok) \d+ - (.+?)(?:\s+#\s*(SKIP|TODO)\b.*)?$/.exec(lines[index]!);
+    const match = /^(not ok|ok) \d+ - (.+?)(?:\s+#\s*(SKIP|TODO)\b.*)?$/.exec(defined(lines[index]));
     if (!match) continue;
     let durationMs: number | null = null;
     const errors: string[] = [];
     if (lines[index + 1]?.trim() === '---') {
-      for (let inner = index + 2; inner < lines.length && lines[inner]!.trim() !== '...'; inner++) {
-        const line = lines[inner]!;
+      for (let inner = index + 2; inner < lines.length && defined(lines[inner]).trim() !== '...'; inner++) {
+        const line = defined(lines[inner]);
         const duration = /^\s+duration_ms:\s*([\d.]+)/.exec(line);
         if (duration) durationMs = Math.round(Number(duration[1]));
         const error = /^\s+error:\s*(.*)$/.exec(line);
         if (error) {
-          const quoted = error[1]!.replace(/^['"|>-]+\s*/, '').replace(/['"]$/, '');
+          const quoted = defined(error[1])
+            .replace(/^['"|>-]+\s*/, '')
+            .replace(/['"]$/, '');
           const next = quoted || lines[inner + 1]?.trim() || '';
           if (next && errors.length < MAX_ERRORS) errors.push(cleanError(next));
         }
@@ -65,7 +69,7 @@ export function parseTapCases(output: string): TestCaseResult[] {
     const skipped = Boolean(match[3]);
     cases.push({
       category: 'unit',
-      title: match[2]!.trim(),
+      title: defined(match[2]).trim(),
       file: null,
       device: null,
       status: skipped ? 'skipped' : match[1] === 'ok' ? 'passed' : 'failed',
@@ -176,8 +180,8 @@ const ERROR_LINE = /^(?:\w*Error\b|Error:|AssertionError|TypeError|ReferenceErro
 function projectLocation(lines: string[]): string | null {
   for (const line of lines) {
     const match = /\(?((?:\/|[A-Za-z]:\\)[^():]+):(\d+)(?::\d+)?\)?\s*$/.exec(line);
-    if (!match || match[1]!.includes('node_modules') || match[1]!.startsWith('node:')) continue;
-    const parts = match[1]!.split(/[\\/]/);
+    if (!match || defined(match[1]).includes('node_modules') || defined(match[1]).startsWith('node:')) continue;
+    const parts = defined(match[1]).split(/[\\/]/);
     const anchor = parts.findIndex((part) =>
       ['src', 'e2e', 'frontend', 'tests', 'test', 'backend', 'scripts'].includes(part),
     );
@@ -210,7 +214,7 @@ export function summarizeTestFailure(output: string): string | null {
   const failed: string[] = [];
   let block: string[] = [];
   for (let index = 0; index < lines.length; index++) {
-    const line = lines[index]!;
+    const line = defined(lines[index]);
     const match = /^(not ok|ok) \d+ - (.+?)(?:\s+#\s*(?:SKIP|TODO)\b.*)?$/.exec(line);
     if (!match) {
       if (/^#\s/.test(line) && !/^# Subtest:/.test(line)) block.push(line.replace(/^#\s?/, ''));
@@ -218,8 +222,8 @@ export function summarizeTestFailure(output: string): string | null {
     }
     if (match[1] === 'not ok') {
       const yaml: string[] = [];
-      for (let inner = index + 1; inner < lines.length && lines[inner]!.trim() !== '...'; inner++)
-        yaml.push(lines[inner]!);
+      for (let inner = index + 1; inner < lines.length && defined(lines[inner]).trim() !== '...'; inner++)
+        yaml.push(defined(lines[inner]));
       const context = [...block, ...yaml];
       const error =
         context.map((entry) => entry.trim()).find((entry) => ERROR_LINE.test(entry)) ??
@@ -228,7 +232,7 @@ export function summarizeTestFailure(output: string): string | null {
           .find((entry) => entry && entry !== 'test failed');
       const where = projectLocation(context);
       failed.push(
-        `- **${match[2]!.trim()}**${where ? ` (\`${where}\`)` : ''}${error ? `\n  ${error.slice(0, 300)}` : ''}`,
+        `- **${defined(match[2]).trim()}**${where ? ` (\`${where}\`)` : ''}${error ? `\n  ${error.slice(0, 300)}` : ''}`,
       );
     }
     block = [];

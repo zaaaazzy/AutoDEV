@@ -11,6 +11,7 @@ import {
   type PullRequestChecks,
   type PullRequestState,
 } from './hoster.js';
+import { defined } from '../core/defined.js';
 
 /** GitHub-Brücke je Projekt: aus, nur Issues oder Issues plus Pull Request beim Sprint-Abschluss. */
 export const GITHUB_MODES = ['aus', 'issues', 'issues+pr'] as const;
@@ -49,14 +50,14 @@ export function githubRepo(remote: string | null | undefined): string | null {
     .match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/);
   const repo = match?.[1];
   if (!repo || !REPO_PATTERN.test(repo)) return null;
-  const name = repo.split('/')[1]!;
+  const name = defined(repo.split('/')[1]);
   return name === '.' || name === '..' ? null : repo;
 }
 
 /** Prüft, ob die URL ein Pull Request genau dieses Repositorys ist. */
 export function isPullRequestUrl(url: string, repo: string): boolean {
   const match = /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/\d{1,10}$/.exec(url);
-  return Boolean(match && match[1]!.toLowerCase() === repo.toLowerCase());
+  return Boolean(match && defined(match[1]).toLowerCase() === repo.toLowerCase());
 }
 
 /** Kennung des CI-Laufs aus einem Check-Link (…/actions/runs/<id>/job/<id>). */

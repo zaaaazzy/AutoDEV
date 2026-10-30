@@ -32,6 +32,7 @@ import {
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { hasRole, type Principal } from './roles.js';
 import { STEP_COLUMNS } from './workflow.js';
+import { defined } from '../core/defined.js';
 
 const ROLES = new Set([
   'author',
@@ -292,7 +293,7 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
         command !== undefined,
       ],
     );
-    const row = saved.rows[0]!;
+    const row = defined(saved.rows[0]);
     const setting = { model: row.model, command: asCommand(row.command), allowTools: row.allowTools };
     const localModel = row.model ?? systemAgents().find((agent) => agent.role === role)?.model ?? '';
     // Neue Anzeige „verwendet“ gleich nach dem Speichern, ohne auf den Worker zu warten.
@@ -576,7 +577,7 @@ export async function ensureReviewer(pool: Pool, slug: string): Promise<void> {
     `UPDATE agents SET position = position + 1 WHERE project_slug = $1 AND phase = 'after_task' AND position >= $2`,
     [slug, position],
   );
-  const reviewer = DEFAULT_AGENTS.find((agent) => agent.role === 'reviewer')!;
+  const reviewer = defined(DEFAULT_AGENTS.find((agent) => agent.role === 'reviewer'));
   const created = (
     await pool.query<{ id: string }>(
       `INSERT INTO agents (project_slug, name, role, phase, position, instructions, command)

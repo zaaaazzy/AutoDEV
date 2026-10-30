@@ -12,6 +12,7 @@ import { gitEnvironment } from '../runner/project-command.js';
 import { normalizeFolder, projectFolderError } from '../core/validation.js';
 import { findTemplate } from './templates.js';
 import { listFolders } from './folders.js';
+import { defined } from '../core/defined.js';
 
 /** Aufgaben, die der Worker auf dem Rechner ausführt (der Server im Container sieht keine Projektordner). */
 export const SETUP_JOB_KINDS = [
@@ -88,7 +89,7 @@ export function whichCommand(binary: string, platform: NodeJS.Platform = process
 
 async function which(execute: CommandExecutor, binary: string): Promise<string | null> {
   const result = await run(execute, whichCommand(binary), process.cwd());
-  return result.ok && result.output ? result.output.split(/\r?\n/)[0]! : null;
+  return result.ok && result.output ? defined(result.output.split(/\r?\n/)[0]) : null;
 }
 
 /** Ordner, Leere und Git-Zustand (Branch, Remote, Commits). */

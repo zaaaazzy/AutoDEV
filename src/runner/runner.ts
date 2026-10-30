@@ -125,14 +125,10 @@ async function resumePosition(
   const corrected = [...count(rows.map(keyOf))].some(([key, times]) => times > (planned.get(key) ?? times));
   const steps = corrected ? ordered.map((agent) => latest.get(keyOfAgent(agent))) : rows;
   let position = 0;
-  while (
-    position < ordered.length &&
-    steps[position] &&
-    ordered[position] &&
-    keyOf(steps[position]!) === keyOfAgent(ordered[position]!)
-  ) {
+  while (position < ordered.length) {
     const step = steps[position];
-    if (!step) break;
+    const agent = ordered[position];
+    if (!step || !agent || keyOf(step) !== keyOfAgent(agent)) break;
     if (step.status !== AGENT_STEP_STATUS.passed) break;
     done.push({ agentName: step.agent_name, phase: step.phase, status: 'passed', output: step.output });
     position += 1;

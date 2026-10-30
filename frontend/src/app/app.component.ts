@@ -38,6 +38,7 @@ import { HeaderReviewComponent } from './features/sprints/header-review.componen
 import { orderProblem, type OrderProblem } from './shared/order-problem.js';
 import { GitAlertComponent } from './shared/git-alert.component.js';
 import { RestartBannerComponent } from './shared/restart-banner.component.js';
+import { defined } from '../../../src/core/defined.js';
 
 const CREATE_LABELS: Partial<Record<Section, string>> = {
   development: 'Neuer Auftrag',
@@ -237,7 +238,7 @@ export class AppComponent {
   /** Handy: Mit Handlungsbedarf führt der Sprint-Chip direkt zu den betroffenen Aufträgen, sonst zu den Sprints. */
   protected openSprintChip(): void {
     const attention = this.sprintAttention();
-    if (attention.length === 1) this.openOrder(attention[0]!.item.id);
+    if (attention.length === 1) this.openOrder(defined(attention[0]).item.id);
     else if (attention.length) this.store.navigate('actions');
     else this.store.navigate('sprints');
   }
@@ -268,7 +269,7 @@ export class AppComponent {
     if (this.store.workerFailure()) return 'Worker-Status nicht abrufbar';
     const worker = this.worker();
     if (!worker.online) return worker.worker ? 'Worker offline' : 'Worker nicht gestartet';
-    if (worker.running.length) return `Worker arbeitet: ${worker.running[0]!.title}`;
+    if (worker.running.length) return `Worker arbeitet: ${defined(worker.running[0]).title}`;
     return 'Worker bereit';
   });
 

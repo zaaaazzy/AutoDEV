@@ -33,6 +33,7 @@ import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptan
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
 import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
+import { defined } from '../core/defined.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
 const PROMPT_LOG_CHARS = 30_000;
@@ -75,7 +76,7 @@ function permissionRole(role: string, agentId: string | null | undefined, author
 export function splitTitle(output: string): { title: string | null; text: string } {
   const match = TITLE_LINE.exec(output);
   if (!match) return { title: null, text: output };
-  const title = shortTitle(match[1]!.replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
+  const title = shortTitle(defined(match[1]).replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
   return {
     title: title || null,
     text: (output.slice(0, match.index) + output.slice(match.index + match[0].length)).trim(),

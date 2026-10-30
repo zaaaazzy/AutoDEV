@@ -49,6 +49,7 @@ import {
   SOURCE_FILTER_OPTIONS,
   sourceLabel,
 } from './idea-options.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 const VISIONARY_POLL_MS = 3000;
 const OPEN_RUN = new Set(['requested', 'running']);
@@ -132,15 +133,15 @@ export class IdeationComponent {
   ];
   /** In Bearbeitung und Abgeschlossen: Status aus Idee und Auftrag abgeleitet. */
   protected readonly groupColumns: DataColumn<Idea>[] = [
-    this.ideaColumns.find((column) => column.id === 'title')!,
+    defined(this.ideaColumns.find((column) => column.id === 'title')),
     {
       id: 'status',
       header: 'Status',
       value: (idea) => statusLabel(this.ideaStatus(idea)),
       sortValue: (idea) => IDEA_STATUSES.indexOf(this.ideaStatus(idea)),
     },
-    this.ideaColumns.find((column) => column.id === 'category')!,
-    this.ideaColumns.find((column) => column.id === 'createdAt')!,
+    defined(this.ideaColumns.find((column) => column.id === 'category')),
+    defined(this.ideaColumns.find((column) => column.id === 'createdAt')),
   ];
   protected readonly categories = CATEGORIES;
   /** Badge-Text wie Spalte und Filter „Herkunft“. */

@@ -35,6 +35,7 @@ import { NO_AGENT, orderAgentName } from '../dashboard/order-shares.js';
 import { bulkSelectable, canRetry } from './order-bulk.js';
 import { OrderDetailComponent } from './order-detail.component.js';
 import { OrderService } from './order.service.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 const PRIORITY_RANK = ['low', 'medium', 'high'];
 
@@ -180,7 +181,7 @@ export class OrderTableComponent {
     const replaced = new Set(extra.map((column) => column.id));
     const base = this.baseColumns
       .filter((column) => !hidden.has(column.id))
-      .map((column) => (replaced.has(column.id) ? extra.find((entry) => entry.id === column.id)! : column));
+      .map((column) => (replaced.has(column.id) ? defined(extra.find((entry) => entry.id === column.id)) : column));
     const known = new Set(this.baseColumns.map((column) => column.id));
     const columns = [...extra.filter((column) => !known.has(column.id)), ...base];
     return this.sortable() ? columns : columns.map((column) => ({ ...column, sortable: false }));
