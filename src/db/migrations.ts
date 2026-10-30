@@ -445,8 +445,10 @@ export const MIGRATIONS: readonly Migration[] = [
                SUM(t.unit_tests)::int AS unit_tests, SUM(t.component_tests)::int AS component_tests,
                SUM(t.integration_tests)::int AS integration_tests, SUM(t.e2e_tests)::int AS e2e_tests,
                SUM(t.passed)::int AS passed, SUM(t.failed)::int AS failed,
-               AVG(t.lines)::real AS lines, AVG(t.statements)::real AS statements,
-               AVG(t.branches)::real AS branches, AVG(t.functions)::real AS functions
+               CASE WHEN COUNT(t.lines) = COUNT(*) THEN AVG(t.lines)::real END AS lines,
+               CASE WHEN COUNT(t.statements) = COUNT(*) THEN AVG(t.statements)::real END AS statements,
+               CASE WHEN COUNT(t.branches) = COUNT(*) THEN AVG(t.branches)::real END AS branches,
+               CASE WHEN COUNT(t.functions) = COUNT(*) THEN AVG(t.functions)::real END AS functions
           FROM test_coverage_areas t JOIN coverage_area_aliases a ON a.alias = lower(btrim(t.area))
          GROUP BY t.report_id, a.area;
       DELETE FROM test_coverage_areas t USING coverage_area_aliases a WHERE a.alias = lower(btrim(t.area));

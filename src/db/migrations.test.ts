@@ -137,7 +137,8 @@ test('Migration 20: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       )
     ).rows;
     assert.deepEqual(rows, [
-      { area: 'backend', unit: 14, passed: 14, lines: 75, branches: 60 },
+      // Fehlt der Zweigwert in einem der beiden Einträge, bleibt eine Lücke (kein Mittel aus dem Rest).
+      { area: 'backend', unit: 14, passed: 14, lines: 75, branches: null },
       { area: 'Contracts', unit: 2, passed: 2, lines: 90, branches: 90 },
       { area: 'frontend', unit: 3, passed: 3, lines: null, branches: 50 },
     ]);
