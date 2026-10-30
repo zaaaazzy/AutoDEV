@@ -19,6 +19,18 @@ Auftrag 3ad55799 (30.10.2026).
   - `GET /projects/:slug/coverage` (Dashboard-Kachel) bleibt beim neuesten Bericht.
 - **Oberfläche:** Die Statistik zeigt neu „Testabdeckung im Verlauf“ (`frontend/src/app/features/stats/coverage-trend.component.ts`): je Bereich ein kleines Liniendiagramm (Zeilen durchgezogen mit Kreisen, Zweige gestrichelt mit Quadraten, Ziellinie 75 %), Tooltip je Punkt und Tabelle zum Aufklappen. Fehlende Werte bilden eine Lücke. Lesen braucht wie die API keine Rolle. Die Dashboard-Kachel rechnet keine zweite Summenzeile, wenn der Bericht `gesamt` selbst enthält.
 
+## Geänderte Dateien
+
+- Backend: `src/db/migrations.ts`, `src/runner/coverage.ts`, `src/runner/measured-coverage.ts`, `src/runner/runner-steps.ts`, `src/runner/acceptance.ts`, `src/api/coverage.ts`.
+- Frontend: `frontend/src/app/core/models.ts`, `features/dashboard/coverage-panel.component.ts`, `features/stats/` (`coverage-trend.ts`, `coverage-trend.component.ts`, `stats.component.*`), `frontend/src/styles/09-dashboard.css`.
+- Tests: `src/db/migrations.test.ts`, `src/api/coverage.test.ts`, `src/runner/{coverage,measured-coverage,acceptance,runner}.test.ts`, `coverage-trend.spec.ts`.
+- Doku: `docs/agent-tests.md` (Pflichtwerte statt „nicht als null melden“), `docs/benutzerhandbuch-dashboard-agents.md`.
+
+## Offen / TODO
+
+- **Migrationsnummer:** Die Migration trägt wie verlangt Version 20; Version 19 ist im Lückentest als reserviert eingetragen. Gibt es keinen parallelen Schritt 19, auf 19 umnummerieren und `RESERVED_VERSIONS` entfernen (Entscheidung beim Auftraggeber).
+- `full-ui.check.ts` (Oberflächentest) wurde in dieser Doku-Phase nicht geprüft; bei Änderungen an der Statistik-Ansicht mitführen.
+
 ## Worauf zu achten ist
 
 - **Reihenfolge beim Ausrollen:** Migration und Runner gehören in denselben Stand. Ein alter Worker, der noch Freitext-Namen schreibt, wird nicht blockiert (keine CHECK-Prüfung auf `test_coverage_areas.area`). Seine Einträge erscheinen nur nicht in der Zeitreihe.
