@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 import {
@@ -287,7 +287,11 @@ export function workbenchHash(compose: Record<string, unknown>): string {
 
 /** Ablage der Compose-Dateien (Konfiguration des Workers, nicht im Projekt und nicht für Agents erreichbar). */
 export function workbenchDirectory(environment: NodeJS.ProcessEnv = process.env): string {
-  return environment.DEV_LOG_WORKBENCH_DIR?.trim() || join(homedir(), '.config', 'aideation', 'workbench');
+  const configured = environment.DEV_LOG_WORKBENCH_DIR?.trim();
+  if (configured) return configured;
+  // Tests schreiben nie in die echte Konfiguration des Workers.
+  if (environment.NODE_TEST_CONTEXT) return join(tmpdir(), 'aideation-workbench-test');
+  return join(homedir(), '.config', 'aideation', 'workbench');
 }
 
 const failed = (error: unknown): CommandResult => ({ exitCode: 1, durationMs: 0, output: String(error) });
