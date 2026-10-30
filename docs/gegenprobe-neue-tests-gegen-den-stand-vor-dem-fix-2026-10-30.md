@@ -32,7 +32,7 @@ Gegenprobe für Bugfix-Aufträge (Agent „Entwickler“). Nach dem grünen Test
 
 - **Basis-Commit:** Abweichend vom Auftragstext ist es der erste Elternteil von `git_commit`, nicht `git merge-base` (der Auftragsbranch ist nach dem Merge gelöscht). Bei Aufträgen ohne `git_commit` (z. B. nach Review-Freigabe) gibt es nur den Fehlerhinweis „Gegenprobe nicht möglich“.
 - Die erwarteten Ergebnisse der tsx-Fixtures hängen an der Ausgabe von node:test/tsx. Weicht ein Test ab, die echte Ausgabe prüfen (Muster `LOAD_ERROR`/`TEST_CASE` in `ci.ts`).
-- Neue Migration 19 (`gegenprobe-je-auftrag`) und `schema.ts` gleichzeitig geändert; bestehende Daten bleiben `NULL`. Worker nach der Änderung neu starten.
+- Neue Migration 19 (`gegenprobe-je-auftrag`) legt `counter_check` an. Die Spalte steht bewusst **nicht** im eingefrorenen Basis-Schema `src/db/schema.ts` (sonst wird der Hash-Test in `migrations.test.ts` rot), genau wie bei Migration 18; `migrations.test.ts` wurde angepasst. Bestehende Daten bleiben `NULL`. Worker nach der Änderung neu starten.
 - Fehlen Testbefehle mit `{tests}`, steht „Gegenprobe nicht möglich“ im Auftrag. Playwright-Tests bekommen „nicht bewertet“.
 - Bei Worker-Neustart während des Laufs bleibt der Auftrag ohne Ergebnis und wird bei der nächsten Sicherung erneut geprüft. Keine rückwirkende Prüfung abgeschlossener Aufträge außer dieser Fälle (nur `counter_check IS NULL`, Status `done`, im Sprint).
 - Die Gegenprobe prüft nicht die Qualität des Tests, nur das Ergebnis gegen den Basis-Stand.
@@ -41,10 +41,11 @@ Gegenprobe für Bugfix-Aufträge (Agent „Entwickler“). Nach dem grünen Test
 
 | Auftrag | Inhalt | Zustand |
 | --- | --- | --- |
-| 37938d19 | Gegenprobe: neue Tests gegen den Stand vor dem Fix | Entwickler fertig, Dokumentation hier; Tester/Review/Merge offen, Tests nicht ausgeführt |
+| 37938d19 | Gegenprobe: neue Tests gegen den Stand vor dem Fix | Entwickler fertig, Dokumentation hier; Tester-Lauf fehlgeschlagen aus Umweltgründen (`tsc` fehlt im Image „aideation-agent“, npm-Cache `/home/agent/.npm` gehört root, EACCES), kein Codefehler belegt; Review/Merge offen, Tests nicht ausgeführt |
 
 ## Anfrage / TODO
 
+- Umgebung reparieren (gültiges `node_modules` mit `tsc`/`tsx` im Image, `/home/agent/.npm` beschreibbar), dann erneut ausführen. `counter-check.test.ts` braucht `git` und `node_modules/.bin/tsx`.
 - `npm run typecheck`, `npm run test:unit` und gezielt `src/runner/git-sync/counter-check.test.ts` ausführen; bei abweichenden Fixture-Ergebnissen die echte Ausgabe mitgeben.
 - Einen echten Sprint-Abschluss mit einem Bugfix-Auftrag mit Testdatei laufen lassen und prüfen: Zeile je Datei im Testbericht, Anzeige im Auftragsdetail, `git worktree list` ohne Gegenprobe-Worktree, HEAD/Status unverändert.
 - Mit Sandbox `docker` prüfen, dass die Gegenprobe über `gateExecutor` im Container läuft und `agentComposeProject` zum temporären Worktree-Pfad passt (Entwickler hat das nicht belegt).
