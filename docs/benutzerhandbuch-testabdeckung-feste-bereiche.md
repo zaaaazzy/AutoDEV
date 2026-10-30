@@ -53,7 +53,8 @@ Was du davon siehst:
 - **Bereich ohne Messung:** Gibt es für einen Bereich keine Messung, steht dort „Noch keine Messung für diesen Bereich.“
 - **Noch keine Messung im Projekt:** Gibt es für kein Bereich Messungen, steht dort „Noch keine Testabdeckung gemessen.“
 - **Alte Einträge ohne Zuordnung:** Sie werden in der Statistik nicht angezeigt, bleiben aber in der Datenbank erhalten.
-- **Laden:** Während der Abfrage steht dort „Verlauf wird geladen …“. Ist kein Projekt aktiv, wird die Abfrage nicht gestartet. Die Ansicht bleibt dann dauerhaft bei „Verlauf wird geladen …“ (siehe Offene Entscheidungen, Punkt 5).
+- **Kein Projekt:** Ist kein Projekt aktiv, steht dort „Kein Projekt ausgewählt.“ Es wird dann keine Abfrage gestartet.
+- **Laden:** Während der Abfrage steht dort „Verlauf wird geladen …“.
 - **Fehler beim Laden:** Schlägt das Laden fehl, steht dort „Verlauf der Testabdeckung konnte nicht geladen werden.“
 - Der Verlauf zeigt höchstens die letzten 200 Berichte je Projekt.
 
@@ -136,7 +137,7 @@ Diese Punkte sind im Code noch nicht eindeutig entschieden:
 2. **Migrationsnummer (entschieden):** Die Migration heißt Version 22, weil sprint-30 die Versionen 19 bis 21 belegt. Die Reservierung `RESERVED_VERSIONS` ist entfallen.
 3. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
 4. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
-5. **Ladezustand ohne Projekt (behoben, nicht im Browser geprüft):** Ohne aktives Projekt zeigt die Ansicht jetzt „Kein Projekt ausgewählt.“ statt dauerhaft „Verlauf wird geladen …“.
+5. **Ladezustand ohne Projekt (im Code geprüft, nicht im Browser gesehen):** Ohne aktives Projekt zeigt die Ansicht „Kein Projekt ausgewählt.“ und lädt nichts.
 
 ## Nicht geprüft
 
