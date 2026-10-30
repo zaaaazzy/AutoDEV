@@ -46,7 +46,8 @@ import { registerWorkerRoutes } from './worker.js';
 
 const UI_DIRECTORY = join(import.meta.dirname, '..', '..', 'dist', 'ui', 'browser');
 
-export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
+/** `uiDirectory` nur für Tests: Unit-Tests laufen ohne gebaute Oberfläche (`dist/ui`). */
+export function createDevLogApp(pool: Pool, auth: DevLogAuth | null, uiDirectory = UI_DIRECTORY): Express {
   const app = express();
   // Vor dem ersten app.use setzen: Express legt seinen Router beim ersten Zugriff mit diesen Einstellungen an.
   // Sonst träfe /API/... dieselben Routen wie /api/... (Express vergleicht standardmäßig ohne Groß-/Kleinschreibung).
@@ -77,9 +78,9 @@ export function createDevLogApp(pool: Pool, auth: DevLogAuth | null): Express {
   app.use(express.json({ limit: '256kb' }));
 
   app.use('/api', createApiRouter(pool, auth));
-  app.use(express.static(UI_DIRECTORY, { index: false }));
+  app.use(express.static(uiDirectory, { index: false }));
   app.get('/', async (_request, response) => {
-    response.sendFile(join(UI_DIRECTORY, 'index.html'));
+    response.sendFile(join(uiDirectory, 'index.html'));
   });
 
   app.use(notFound);
