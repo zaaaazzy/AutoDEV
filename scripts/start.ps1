@@ -40,6 +40,13 @@ npx --no-install tsx scripts/worker-compose.ts
 if ($LASTEXITCODE -ne 0) { Write-Host 'x docker-compose.override.yml konnte nicht geschrieben werden.'; exit 1 }
 docker compose up -d --build
 if ($LASTEXITCODE -ne 0) { Write-Host 'x docker compose up ist fehlgeschlagen.'; exit 1 }
+# Image der Agents (Sandbox): fehlt es, scheitert jeder Agent-Lauf mit "Image fehlt".
+docker image inspect aideation-agent *> $null
+if ($LASTEXITCODE -ne 0) {
+  Write-Host '-> Baue das Agent-Image (einmalig, einige Minuten) ...'
+  docker build -t aideation-agent -f deploy/agent/Dockerfile .
+  if ($LASTEXITCODE -ne 0) { Write-Host '! Agent-Image nicht gebaut - spaeter: docker build -t aideation-agent -f deploy/agent/Dockerfile .' }
+}
 $healthy = $false
 for ($i = 0; $i -lt 60; $i++) {
   try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3100/health -TimeoutSec 2 | Out-Null; $healthy = $true; break } catch { Start-Sleep 2 }

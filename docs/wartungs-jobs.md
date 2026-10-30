@@ -18,7 +18,7 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 | ------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
 | `backup_check`      | Neuestes `aideation-*.dump` in `./backups`: jung genug, plausible Grösse und für `pg_restore --list` lesbar (mit Tabellendaten). Fehlender Ordner, fehlendes `pg_restore` oder kaputter Dump = Fehler + Push. | `dir`, `maxAgeHours`, `minBytes`           |
 | `restore_probe`     | Wöchentlich: neuestes Backup mit `scripts/restore.sh --probe` in einen Wegwerf-Container (eigener Name, Port 5439) einspielen, Tabellen und `DEV_LOG_SECRET_KEY` prüfen, Container löschen. | `dir`, `timeoutSeconds` (Standard 300)     |
-| `watchdog_logs`     | Wächter-Probleme (`collectProblems`); gleiche Probleme erst nach `REMIND_MS` (6 h) erneut.               | `project`                                  |
+| `watchdog_logs`     | Wächter-Probleme (`collectProblems`); gleiche Probleme erst nach `REMIND_MS` (6 h) erneut.               | `backupDir`, `localUrl`, `publicUrl`       |
 | `close_old_sprints` | Schliesst über `completeSprint` Sprints, die `sprintSettled` sind und `inactiveDays` inaktiv waren. Standardmässig **aus**. | `inactiveDays` (1–365)                     |
 | `push_alert`        | Push an den Projektkreis über `sendPush`, wenn ein beobachteter Job fehlgeschlagen ist.                  | `project`, `jobs`                          |
 
@@ -31,13 +31,13 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 
 ## Worauf zu achten ist
 
-- **Backup-Ordner:** Er ist nur im Backup-Container eingebunden. Ist er im Worker nicht sichtbar, meldet `backup_check` einen Fehler mit Push, statt still auszusetzen. Pfad bei Bedarf in `config.dir` setzen (muss im AIdeation-Ordner liegen).
-- **pg_restore im Worker:** `backup_check` ruft `pg_restore --list` auf. Das Programm kommt aus `DEV_LOG_PG_RESTORE` in der `worker.env` oder aus dem PATH, nie aus der Datenbank. Es muss mindestens Version 17 haben, wie der Server. Fehlt es, meldet der Job „pg_restore --list nicht gefunden“ und schickt einen Push.
+- **Backup-Ordner:** `./backups` im AIdeation-Ordner; der Worker sieht ihn auf dem Host und im Container (eingebundener AIdeation-Ordner). Ist er nicht sichtbar, meldet `backup_check` einen Fehler mit Push, statt still auszusetzen. Pfad bei Bedarf in `config.dir` setzen (muss im AIdeation-Ordner liegen).
+- **pg_restore im Worker:** `backup_check` ruft `pg_restore --list` auf. Das Programm kommt aus `DEV_LOG_PG_RESTORE` in der `worker.env` oder aus dem PATH, nie aus der Datenbank. Es muss mindestens Version 17 haben, wie der Server. Fehlt es, meldet der Job „pg_restore --list nicht gefunden“ und schickt einen Push. **Worker im Container:** Das Image `aideation-worker` bringt den Postgres-Client 17 mit (`deploy/worker/Dockerfile`).
 - **Restore-Probe:** Sie braucht `docker` im PATH des Workers, `node_modules` im AIdeation-Ordner und `DEV_LOG_SECRET_KEY` in der `worker.env`. Sie läuft nie gegen die Live-Datenbank oder Port 5433. Die E2E-Tests nutzen die Datenbank `dev_log_e2e`; die Probe läuft getrennt davon. Ein Fehlschlag steht mit der letzten Skriptzeile in der Meldung des Jobs.
 - **Sprint-Abschluss** ändert den Status und ist darum standardmässig deaktiviert. Er schliesst nie einen Sprint mit offenen oder laufenden Aufträgen.
   - `completeSprint` ist idempotent: Der Statuswechsel gilt nur für einen aktiven, nicht pausierten Sprint. War der Sprint schon abgeschlossen, entstehen kein zweiter Bericht, kein zweiter Git-Sync und keine zweite Push-Nachricht.
   - `close_old_sprints` prüft das Abbruchsignal vor jedem Abschluss. Nach dem Zeitlimit wird kein weiterer Sprint geschlossen.
-- **Standardjobs** legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`), `restore_probe` kommt per Migration (`src/db/migrations.ts`) dazu. Änderungen der Administration bleiben bei einem Neustart erhalten.
+- **Standardjobs:** Alle fünf legt `src/db/schema.ts` idempotent an (`CREATE TABLE IF NOT EXISTS`, `ON CONFLICT (key) DO NOTHING`); Migration 22 (`job-restore-probe`) ergänzt `restore_probe` in bestehenden Datenbanken. Änderungen der Administration bleiben bei einem Neustart erhalten.
 - **Abgestürzter Worker:** Die Sperre `locked_until` läuft nach höchstem Zeitlimit + 30 s (330 s, `LOCK_SECONDS`) ab, danach ist der Job wieder beanspruchbar.
 - `watchdog-cli.ts` und `deploy/backup.sh` sind unverändert. `BACKUP_FILE` ist in `watchdog.ts` jetzt exportiert und wird von beiden Stellen genutzt.
 
@@ -49,7 +49,7 @@ Der Worker führt konfigurierbare Wartungsaufgaben zu festen Zeitpunkten aus. Di
 ## Tests und offene Punkte
 
 - Typecheck und 56 Tests (`app`, `roles`, `scheduled-jobs`, `scheduler`, `watchdog`) bestanden.
-- Die Abdeckung von `scheduler.ts` und `scheduled-jobs.ts` ist **nicht gemessen** (der Wächter blockiert `--experimental-test-coverage`).
+- Die Abdeckung misst der Worker selbst (`src/runner/measured-coverage.ts`); die CI misst keine.
 - `npm run lint` läuft ohne Fehler durch (Stand 29.10.2026, nur Warnungen); die früher gemeldeten `no-regex-spaces`-Fehler in `src/core/test-results.test.ts` sind behoben.
 - Ein eigener Test für die idempotente Schema-Anlage fehlt; geprüft nur durch Lesen des Codes.
 - `purgeProductionData` (stündliche Aufbewahrung) wurde nicht in den Scheduler verlegt.

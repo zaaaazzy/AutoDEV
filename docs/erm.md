@@ -1,6 +1,6 @@
 # AIdeation-Datenbank
 
-Eigene Datenbank, getrennt von `mainty`: `projects` (slug) 1:n `test_runs` 1:n `test_run_steps`; `projects` 1:n `ideation_items` 1:n `ideation_attachments` (Bilder bis 5 MB als BYTEA; Aufträge erreichen sie über `ideation_id`, der Runner legt sie unter `.dev-log/attachments/<auftrag>/` im Projektordner ab und nennt sie im Prompt); `projects` 1:n `development_items`, optional verknüpft mit einer Idee, einem Testlauf und einem Sprint desselben Projekts. `ideation_items` und `development_items` tragen `effort_hours`, `token_estimate`, `benefit` und `cost` (0–10). `projects` 1:n `sprints` (1:n `development_items`) und `projects` 1:n `agents` (`phase` pre_task/while_task/after_task, `position` = Reihenfolge). Das Schema wird beim Start von Dienst bzw. Agent automatisch angelegt.
+Eigene Datenbank, getrennt von `mainty`: `projects` (slug) 1:n `test_runs` 1:n `test_run_steps`; `projects` 1:n `ideation_items` 1:n `ideation_attachments` (Bilder bis 5 MB als BYTEA; Aufträge erreichen sie über `ideation_id`, der Runner legt sie unter `.dev-log/attachments/<auftrag>/` im Projektordner ab und nennt sie im Prompt); `projects` 1:n `development_items`, optional verknüpft mit einer Idee, einem Testlauf und einem Sprint desselben Projekts. `ideation_items` und `development_items` tragen `effort_hours`, `token_estimate`, `benefit` und `cost` (0–10). `projects` 1:n `sprints` (1:n `development_items`) und `projects` 1:n `agents` (`phase` pre_sprint/pre_task/while_task/after_task/on_rejected/on_done, `position` = Reihenfolge; `workflow_steps` überschreibt Phase und Position je Projekt). Das Schema wird beim Start von Dienst bzw. Agent automatisch angelegt.
 
 Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:n `agent_runs` (ein laufender Lauf pro Auftrag) 1:n `agent_run_steps` (Agent, Phase, Status, Exit-Code, Dauer, Ausgabe). `runner_workers` (ID, PID, Rechner, `last_seen`) ist das Lebenszeichen je Worker; `agent_runs.worker_id` und `agent_processes.worker_id` verweisen darauf (ohne Fremdschlüssel, Altzeilen ohne ID).
 
@@ -10,10 +10,10 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 - `development_items.status`: backlog/planned/in_progress/blocked/approval/done/rejected (`approval` = wartet auf Freigabe, `rejected` = abgelehnt).
 - `sprints.status`: planned/active/review/completed/cancelled (`cancelled` = abgebrochen über `PATCH /api/sprints/:id`, `cancelSprint` stoppt laufende Schritte und löst nicht erledigte Aufträge aus dem Sprint).
 - `sprint_reports` (Sprint, implemented, missing, problems, notes) – 1:1 je Sprint.
-- `docs` (Projekt, kind manual/sprint/order/repo, Titel, Inhalt).
-- `development_items`: zusätzlich `kind`, `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
+- `docs` (Projekt, kind manual/sprint/order/repo/request, Titel, Inhalt).
+- `development_items`: zusätzlich `kind` (feature/bug/express), `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
 - `agents.role`: author, developer, tester, reviewer, documenter, bug_reviewer, manual_writer, user_manual_writer, custom.
-- Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird (nicht beim Übergang `review` → `completed`).
+- Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed/awaiting_merge), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird (nicht beim Übergang `review` → `completed`).
 - GitHub-Brücke: `projects.github_mode` (aus/issues/issues+pr), `github_require_approval`, `github_synced_at`, `github_auth` (ok/missing) mit `github_auth_message` und `github_auth_checked_at`; `sprints.status` zusätzlich `review`, dazu `pr_url`, `ci_status` (pending/success/failure) und `ci_bug_run`; `ideation_items` und `bugs` mit `source='github'`, `external_ref` (`owner/repo#N`, eindeutig je Projekt) und `github_synced_status`; `development_items.git_commit`.
 
 ## Anmeldung, Benutzer und Mandanten
@@ -60,4 +60,15 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 ## Erweiterung: Wartungs-Jobs im Worker
 
 - `scheduled_jobs` (eigenständig, ohne Fremdschlüssel): `key` (PK, `[a-z0-9_-]`, max. 64), `enabled`, `start_at`, `interval_seconds` (60 s bis 30 Tage), `job_kind` (Schlüssel der festen Registry in `src/runner/scheduler.ts`: `backup_check`, `restore_probe`, `watchdog_logs`, `close_old_sprints`, `push_alert`; anderes wird nicht ausgeführt, sondern mit `failed` gespeichert), `config` (JSONB-Objekt, je Art z. B. `dir`, `maxAgeHours`, `minBytes`, `inactiveDays`, `project`, `jobs`, `timeoutSeconds`), `next_run_at`, `last_run_at`, `last_status` (running/ok/warning/failed), `last_message`, `state` (JSONB, bereits gemeldete Probleme und Zeitpunkt wie beim Wächter), `locked_until` (Sperre eines beanspruchten Laufs gegen andere Worker; nach höchstem Zeitlimit + 30 s, also 330 s, frei), `updated_at`.
-- Die fünf Standardjobs legen Schema (vier) und eine Migration (`restore_probe`) über `ON CONFLICT (key) DO NOTHING` an. `close_old_sprints` ist aus, weil er den Sprint-Status ändert. Ändert ein Administrator Intervall oder Startzeit (`PATCH /api/scheduled-jobs/<key>`), wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
+- Die fünf Standardjobs legt das Schema über `ON CONFLICT (key) DO NOTHING` an; Migration 22 ergänzt `restore_probe` in bestehenden Datenbanken. `close_old_sprints` ist aus, weil er den Sprint-Status ändert. Ändert ein Administrator Intervall oder Startzeit (`PATCH /api/scheduled-jobs/<key>`), wird `next_run_at` ab dem letzten Lauf neu berechnet, frühestens ab der Startzeit.
+
+## Weitere Tabellen (Kurzüberblick)
+
+- `workflow_steps`: Reihenfolge und Anweisung der Agents je Projekt und Phase (überschreibt `agents.phase`/`position`).
+- `test_cases`, `test_coverage_areas`, `test_coverage_reports`, `test_media`, `test_requests`: Testfälle, Abdeckung, Medien der Testläufe und angeforderte Testläufe.
+- `acceptance_checks`: Abnahmepunkte (Akzeptanzkriterien) je Auftrag.
+- `development_events`, `chat_messages`, `agent_usage`: Verlauf je Auftrag, Chat des Assistenten, Token- und Kostenverbrauch.
+- `sprint_commits`, `sprint_proposal_comments`, `project_git_graphs`, `git_fix_requests`: Commits je Sprint, Kommentare zum Sprintvorschlag, Git-Verlauf fürs Dashboard, Reparaturwünsche für Git.
+- `setup_jobs`, `system_agent_settings`, `project_permission_groups`: Einrichtungs-Aufträge, Modelle der System-Agents, eigene Rechte-Gruppen je Projekt.
+- `worker_heartbeats` (Lebenszeichen je Projekt) und `runner_workers` (je Worker-Prozess, Migration 16).
+- `schema_migrations`: ausgeführte Migrationen (`src/db/migrations.ts`).

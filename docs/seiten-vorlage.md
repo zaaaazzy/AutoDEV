@@ -15,7 +15,7 @@ man vor dem Pull Request durch.
    400, nie 500.
 4. **SQL nur mit Parametern.** Spalten- und Tabellennamen kommen aus Code-Konstanten (`buildUpdate`), nie aus Eingaben.
 5. **Bezüge im selben Projekt halten:** Ein Sprint, Auftrag o. Ä. aus dem Body muss zum Projekt des Eintrags gehören
-   (`relatedResourceBelongsToProject` oder `JOIN … ON project_slug`).
+   (per `JOIN … ON project_slug`, siehe `src/api/bugs.ts`).
 6. **Zustandswechsel atomar:** Bedingung ins `UPDATE … WHERE` schreiben (z. B. `approved_at IS NULL`) statt erst zu
    lesen und dann zu schreiben; 409, wenn sich der Zustand inzwischen geändert hat.
 7. **Löschen mit Folgen bedenken:** Was hängt am Eintrag (Aufträge, Bilder)? Läuft gerade etwas, 409 mit Hinweis.

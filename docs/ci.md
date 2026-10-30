@@ -36,7 +36,7 @@ Alle `actions/checkout`-Schritte nutzen `persist-credentials: false`: Das `GITHU
 
 ## Worauf zu achten ist
 
-- Die Testabdeckung wird nicht gemessen (der Wächter blockiert `--experimental-test-coverage`, Werte bleiben `null`). Es gibt bewusst keine Coverage-Schwelle in der CI.
+- Die CI misst keine Abdeckung und hat bewusst keine Coverage-Schwelle; der Worker misst sie selbst (`src/runner/measured-coverage.ts`).
 - Neue Test-Dateien müssen typsicher sein, sonst schlägt `typecheck` in der CI fehl.
 - **Actions noch per Tag statt SHA gepinnt** (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`). Die Commit-SHAs ließen sich in der Agent-Umgebung nicht ermitteln (kein Netzzugriff), geraten wird nicht. Nachtragen mit `git ls-remote --tags https://github.com/actions/<name>`, dann `uses: actions/<name>@<sha> # v4.x.y`.
 - Die Standard-Testbefehle des Runners (`npm run build` + `npm test`) gelten für alle Projekte und bleiben unverändert, denn andere Projekte haben kein Skript `test:unit`. Für AIdeation selbst in den Projekteinstellungen unter „Testbefehle“ `npm run build` und `npm run test:unit` eintragen, sonst baut der Lauf die Oberfläche zweimal.
