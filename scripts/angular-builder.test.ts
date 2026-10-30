@@ -26,3 +26,20 @@ test('package.json: @angular/build deklariert, alter Builder entfernt', () => {
   assert.ok(all['@angular/build']);
   assert.equal(all['@angular-devkit/build-angular'], undefined);
 });
+
+test('package.json: engines verlangt Node >= 22.12', () => {
+  assert.equal(readJson('package.json').engines?.node, '>=22.12');
+});
+
+test('Startskripte prüfen die Nebenversion 22.12', () => {
+  const sh = readFileSync(join(root, 'start.sh'), 'utf8');
+  const ps1 = readFileSync(join(root, 'scripts', 'start.ps1'), 'utf8');
+  assert.match(sh, /a===22&&b>=12/);
+  assert.match(ps1, /\[version\]'22\.12\.0'/);
+});
+
+test('package.json: @angular/cdk steht auf 20.3.x wie die übrigen Angular-Pakete', () => {
+  const pkg = readJson('package.json');
+  const cdk: string = pkg.devDependencies['@angular/cdk'];
+  assert.match(cdk, /^\^?20\.3\./, `cdk ist ${cdk}`);
+});
