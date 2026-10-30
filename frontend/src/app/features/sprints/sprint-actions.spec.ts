@@ -15,7 +15,11 @@ test('Sprint starten: nur geplant, mit „Planung“; anderer aktiver Sprint spe
   assert.equal(blocked.start, true, 'anderer aktiv: sichtbar');
   assert.match(blocked.activateBlocked ?? '', /nur ein Sprint/);
   assert.equal(sprintButtons(planned, [planned], [], only('run')).start, false, 'ohne Planung');
-  assert.equal(sprintButtons(planned, [planned, other], [], only('run')).activateBlocked, null, 'ohne Knopf kein Grund');
+  assert.equal(
+    sprintButtons(planned, [planned, other], [], only('run')).activateBlocked,
+    null,
+    'ohne Knopf kein Grund',
+  );
   for (const status of ['active', 'review', 'completed', 'cancelled']) {
     assert.equal(sprintButtons({ id: 's1', status }, [], [], all).start, false, status);
   }

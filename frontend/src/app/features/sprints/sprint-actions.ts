@@ -43,7 +43,12 @@ export function sprintButtons(
   const mine = (status: string) => items.filter((item) => item.sprintId === sprint.id && item.status === status).length;
   const live = plan && canChangeSprintStatus(sprint.status, 'completed');
   // Ohne den anderen aktiven Sprint erlaubt: Knopf zeigen, Sperre über activateBlocked.
-  const activatable = plan && canActivateSprint(sprint, sprints.filter((other) => other.status !== 'active'));
+  const activatable =
+    plan &&
+    canActivateSprint(
+      sprint,
+      sprints.filter((other) => other.status !== 'active'),
+    );
   return {
     edit: plan,
     start: activatable && sprint.status === 'planned',

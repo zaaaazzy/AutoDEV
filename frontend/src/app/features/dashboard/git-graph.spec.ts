@@ -67,7 +67,10 @@ test('Git-Graph: Kante als gerade Linie in derselben Spur, sonst als Kurve', () 
   assert.equal(edgePath({ from: 1, fromY: 0, to: 1, toY: 1, color: 0 }, x, 30), 'M15 0V30');
   assert.equal(edgePath({ from: 0, fromY: 0.5, to: 2, toY: 1, color: 0 }, x, 30), 'M5 15C5 22.5 25 22.5 25 30');
   // Begrenzte Spuren (gleiche x-Position) bleiben gerade.
-  assert.equal(edgePath({ from: 9, fromY: 0, to: 12, toY: 1, color: 0 }, () => 7, 20), 'M7 0V20');
+  assert.equal(
+    edgePath({ from: 9, fromY: 0, to: 12, toY: 1, color: 0 }, () => 7, 20),
+    'M7 0V20',
+  );
 });
 
 test('Git-Graph: Spurfarben wiederholen sich', () => {

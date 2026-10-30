@@ -5,7 +5,9 @@ import { EMPTY_GIT_GRAPH_STATE, type GitGraph, nextGitGraphState } from './git-g
 const graph: GitGraph = {
   webUrl: null,
   head: 'main',
-  commits: [{ hash: 'a', parents: [], author: 'Ana', date: '2026-10-29T10:00:00Z', subject: 'a', refs: [], pushed: true }],
+  commits: [
+    { hash: 'a', parents: [], author: 'Ana', date: '2026-10-29T10:00:00Z', subject: 'a', refs: [], pushed: true },
+  ],
 };
 
 test('Git-Verlauf: Ladefehler behält den letzten Stand und setzt nur den Fehler', () => {
