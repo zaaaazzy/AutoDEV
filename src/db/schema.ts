@@ -1051,9 +1051,6 @@ export const SCHEMA = `
     CHECK (order_test_commands IS NULL OR jsonb_typeof(order_test_commands) = 'array');
   -- Vom Auftrag geänderte Dateien (gegenüber der Basis), nach jedem Agent-Schritt aktualisiert.
   ALTER TABLE development_items ADD COLUMN IF NOT EXISTS changed_files TEXT[] NOT NULL DEFAULT '{}';
-  -- Gegenprobe nach Bugfixes (geänderte Testdateien auf dem Stand vor dem Fix); NULL = keine Gegenprobe.
-  ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB
-    CHECK (counter_check IS NULL OR jsonb_typeof(counter_check) = 'object');
 
   -- Zeitgesteuerte Routinen: Agent-Aufgaben nach Zeitplan (Cron mit 5 Feldern, Europe/Zurich), optional nur in einem
   -- Zeitfenster („22:00-06:00“), mit Ziel für das Ergebnis. next_run_at berechnet der Server (API und Planer).

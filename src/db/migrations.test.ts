@@ -86,6 +86,13 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
+test('Migrationen: Gegenprobe je Auftrag kommt per Migration, nicht über das eingefrorene Basis-Schema', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 19);
+  assert.match(migration?.sql ?? '', /ALTER TABLE development_items ADD COLUMN IF NOT EXISTS counter_check JSONB/);
+  assert.match(migration?.sql ?? '', /counter_check IS NULL OR/);
+  assert.doesNotMatch(SCHEMA, /counter_check/);
+});
+
 /** Struktur der Datenbank: Spalten, Prüfungen, Indizes, Trigger, Funktionen und vermerkte Migrationen. */
 async function structure(pool: pg.Pool): Promise<Record<string, unknown[]>> {
   const rows = async (sql: string) => (await pool.query(sql)).rows;
