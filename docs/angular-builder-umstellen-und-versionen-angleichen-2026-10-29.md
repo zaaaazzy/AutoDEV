@@ -21,6 +21,9 @@ Auftrag 95b15d69 aus dem Code-Review vom 21.10.2026 (Stand `a4971e9`). Stand: 29
 - Der Bug-Wächter-Eintrag „monthly spend limit“ ist ein Abbruch der CLI wegen Ausgabenlimit, kein Codefehler. Der offene critical-Bug „CI: `npm run test:unit` schlägt fehl“ ist ein eigener Auftrag und hier nicht gelöst.
 - Dependabot gruppiert `@angular/*` und `@angular-devkit/*` in einen Pull Request, damit Versionen nicht wieder auseinanderlaufen.
 
+## Stand beim erneuten Versuch (30.10.2026)
+Der Entwickler-Agent hat nichts geändert, der Tester hat erneut nicht abgenommen (DoD 1: cdk ^20.3.x und bereinigte Lockfile fehlen). Der Testlauf beschränkte sich auf `typecheck` (bestanden); passende Tests gab es nicht. In `package.json` steht `@angular/cdk` weiter auf `20.2.14`. Es bleibt bei den Befehlen von Patrick (siehe „Worauf zu achten ist“). Danach: `grep build-angular package-lock.json` darf nichts mehr ausgeben, `dist/prune-lock.mjs` löschen, `package.json` und `package-lock.json` committen, Auftrag in der Vorschau freigeben. Nicht noch einmal an den Entwickler-Agent zurückgeben.
+
 ## Tests
 Laut Entwickler: `npm run build:ui` und `typecheck` fehlerfrei, `lint` 0 Fehler (812 Warnungen, schon vorher vorhanden), `test:unit` 1822 bestanden. `ng serve` mit Proxy startet („Local: http://localhost:4299/“); die Seite wurde nicht abgerufen (`curl` gesperrt). Für diese Dokumentation wurden die Tests nicht erneut ausgeführt.
 
