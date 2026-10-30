@@ -111,7 +111,7 @@ Die Log-Ordner des Worker-Benutzers werden im Container nicht freigegeben. Die A
 
 **Fortgesetzte Sitzung:** Eine fortgesetzte Claude-Sitzung (`--resume`) gibt es im Container nicht. Der Schritt startet frisch.
 
-**Erster Lauf:** Das `node_modules`-Volume ist leer. Der Agent installiert die Abhängigkeiten mit `npm ci --ignore-scripts`. Das dauert beim ersten Lauf länger. Zurücksetzen mit `docker volume rm aideation-node-modules-<projekt>`.
+**Erster Lauf:** Das `node_modules`-Volume ist leer. Vor dem Lauf füllt der Worker es in einem eigenen Container mit `npm ci --ignore-scripts`. Dieser Container sieht nur `package.json`, das Lockfile und `.npmrc`. Der erste Lauf dauert deshalb länger. Danach wird nur neu installiert, wenn sich `package-lock.json` ändert (Stempel `.aideation-lock` im Volume). Zurücksetzen mit `docker volume rm aideation-node-modules-<projekt>`.
 
 ## 7. Meldungen
 
@@ -126,6 +126,7 @@ Die Meldungen erscheinen im Auftrag und im Worker-Badge. Sie sind so formuliert,
 | „Hinweis: Die Claude-CLI im Container ist nicht angemeldet – CLAUDE_CODE_OAUTH_TOKEN in worker.env prüfen.“ | Die Anmeldung wird abgelehnt. | Token in `worker.env` prüfen und ggf. erneuern. |
 | „Sandbox: Docker konnte den Container nicht starten (Exit-Code 125).“ | Docker-Fehler beim Start. | Docker-Zustand prüfen. Die Meldung zeigt den Docker-Fehlertext. |
 | „Sandbox: node_modules-Volume „…“ liess sich nicht vorbereiten … Der Agent wurde nicht gestartet.“ | Das Volume konnte nicht angelegt werden. | Die angezeigte Ausgabe prüfen. Ggf. `docker volume rm` und neu versuchen. |
+| „Sandbox: npm ci im node_modules-Volume „…“ ist fehlgeschlagen … Der Agent wurde nicht gestartet.“ | Die Abhängigkeiten liessen sich nicht installieren, etwa weil das Lockfile nicht passt oder die npm-Registry nicht erreichbar ist. | Die angezeigte npm-Ausgabe prüfen. Danach `docker volume rm aideation-node-modules-<projekt>` und neu versuchen. |
 
 **Limit-Meldungen sind kein Sandbox-Fehler.** Die Meldung „monthly spend limit“ der Claude-CLI wird als Hinweis gekennzeichnet. Du musst dann nicht an der Sandbox suchen.
 

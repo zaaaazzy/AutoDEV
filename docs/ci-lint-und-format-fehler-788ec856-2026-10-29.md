@@ -64,3 +64,23 @@ und keiner der GitHub-CI. Es ist ein Folgefehler der Umstellung der Agents auf C
   Nötig ist eine Entscheidung: entweder bei aktiver Sandbox im Worktree keinen Symlink anlegen und das Volume vor
   dem ersten Lauf einmal mit `npm ci --ignore-scripts` füllen, oder vorerst manuell den Symlink im Agent-Worktree
   entfernen und im Container `npm ci --ignore-scripts` ausführen.
+
+## Nachtrag 30.10.2026: Volume wird vom Worker gefüllt
+
+- **Umgesetzt (`src/core/sandbox.ts`):** `runInSandbox` füllt das Volume vor jedem Lauf, wenn der Worktree
+  `package.json` und `package-lock.json` hat. Das erledigt ein eigener Container (`modulesInstallArgs`), nicht der Agent:
+  - ohne root und ohne Capabilities, im Agent-Netzwerk, npm nur über den Egress-Proxy;
+  - eingebunden sind nur das Volume unter `/deps/node_modules` sowie `package.json`, Lockfile und `.npmrc` (`:ro`),
+    nicht der Worktree. Der Symlink im Worktree wird deshalb nicht angefasst;
+  - `npm ci --ignore-scripts`, danach `npm rebuild esbuild` wie im Image.
+- **Nur bei Bedarf:** Im Volume liegt `.aideation-lock` mit dem SHA-256 des Lockfiles. Stimmt er, entfällt `npm ci`. Ein
+  neues Lockfile installiert also neu. Parallele Läufe desselben Projekts warten auf dieselbe Installation.
+- **Fehlschlag:** Scheitert `npm ci`, startet der Lauf nicht. Die Meldung „Sandbox: npm ci im node_modules-Volume … ist
+  fehlgeschlagen“ erscheint mit Ausgabe im Lauf und im Worker-Badge.
+- **Lauf selbst:** Er bindet das Volume weiter unter `/workspace/node_modules` ein. Docker folgt dabei dem Symlink im
+  Worktree, und dieser zeigt dann auf das gefüllte Volume.
+- **Noch nicht belegt:** Agents dürfen in der Sandbox weder Tests noch Docker ausführen (`tsx: not found`, Wächter).
+  Bisher liefen also weder die neuen Unit-Tests in `src/core/sandbox.test.ts` noch `npm run test:unit` noch ein Lauf
+  gegen echtes Docker. Nötig sind deshalb: Worker mit dem neuen Code neu starten („AIdeation neu starten“, baut auch das
+  Image `aideation-agent` neu), dann einen Lauf starten. Das Volume füllt sich dabei. Den Bug erst nach einem grünen
+  GitHub-Actions-Lauf (Jobs `check` und `docker`) schliessen.

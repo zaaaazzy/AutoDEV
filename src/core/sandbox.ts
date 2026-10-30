@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { basename, isAbsolute, posix, relative, resolve, sep, win32 } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 
@@ -369,6 +370,98 @@ async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
+/** Arbeitsordner des Installations-Containers: nur package.json, Lockfile und .npmrc des Worktrees, dazu das Volume. */
+const MODULES_INSTALL_DIR = '/deps';
+/** Stempel im Volume: Hash des Lockfiles, mit dem es zuletzt gefüllt wurde. */
+const MODULES_STAMP = '.aideation-lock';
+const MODULES_INSTALL_TIMEOUT_MS = 15 * 60_000;
+
+/** Hash des Lockfiles im Worktree; null = kein npm-Projekt (dann wird nichts installiert). */
+export function lockfileHash(worktree: string): string | null {
+  const lockfile = join(worktree, 'package-lock.json');
+  if (!existsSync(join(worktree, 'package.json')) || !existsSync(lockfile)) return null;
+  return createHash('sha256').update(readFileSync(lockfile)).digest('hex');
+}
+
+/**
+ * docker run, der das node_modules-Volume mit `npm ci --ignore-scripts` füllt, wenn der Stempel nicht zum Lockfile
+ * passt. Läuft wie ein Agent (ohne root, ohne Capabilities, npm nur über den Egress-Proxy), sieht aber vom Worktree nur
+ * package.json, Lockfile und .npmrc (:ro). So hängt das Füllen nicht am node_modules-Symlink im Worktree.
+ */
+export function modulesInstallArgs(worktree: string, hash: string, options: SandboxOptions): string[] {
+  const platform = options.platform ?? process.platform;
+  const user = sandboxUser(options);
+  const files = ['package.json', 'package-lock.json', '.npmrc'].filter((file) => existsSync(join(worktree, file)));
+  const script = [
+    `stamp=node_modules/${MODULES_STAMP}`,
+    'if [ -d node_modules/.bin ] && [ "$(cat "$stamp" 2>/dev/null)" = "$AIDEATION_LOCK_HASH" ]; then exit 0; fi',
+    // esbuild (tsx) wie im Image einmal neu bauen; sonst laufen keine Install-Skripte.
+    'npm ci --ignore-scripts --no-audit --no-fund && { [ ! -d node_modules/esbuild ] || npm rebuild esbuild; } && printf \'%s\\n\' "$AIDEATION_LOCK_HASH" > "$stamp"',
+  ].join('\n');
+  return [
+    'docker',
+    'run',
+    '--rm',
+    '--label',
+    `${SANDBOX_LABEL}=${options.runId}`,
+    ...(user ? ['--user', user] : []),
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '--cpus',
+    options.cpus ?? (process.env.DEV_LOG_AGENT_SANDBOX_CPUS?.trim() || '2'),
+    '--memory',
+    options.memory ?? (process.env.DEV_LOG_AGENT_SANDBOX_MEMORY?.trim() || '4g'),
+    '--pids-limit',
+    '2048',
+    '--network',
+    SANDBOX_NETWORK,
+    '-v',
+    `${modulesVolume(options.project)}:${MODULES_INSTALL_DIR}/node_modules`,
+    ...files.flatMap((file) => [
+      '-v',
+      `${hostMount(join(worktree, file), platform)}:${MODULES_INSTALL_DIR}/${file}:ro`,
+    ]),
+    '-w',
+    MODULES_INSTALL_DIR,
+    '-e',
+    `HOME=${SANDBOX_HOME}`,
+    '-e',
+    'npm_config_cache=/tmp/npm-cache',
+    '-e',
+    `AIDEATION_LOCK_HASH=${hash}`,
+    ...proxyEnvironment(),
+    options.image ?? SANDBOX_IMAGE,
+    'sh',
+    '-c',
+    script,
+  ];
+}
+
+/** Laufende Installation je Volume: parallele Läufe desselben Projekts warten, statt gleichzeitig npm ci auszuführen. */
+const installing = new Map<string, Promise<CommandResult>>();
+
+function installModules(
+  docker: CommandExecutor,
+  worktree: string,
+  hash: string,
+  options: SandboxOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<CommandResult> {
+  const volume = modulesVolume(options.project);
+  const pending = installing.get(volume);
+  if (pending) return pending;
+  const run = docker(modulesInstallArgs(worktree, hash, options), worktree, {
+    timeoutMs: MODULES_INSTALL_TIMEOUT_MS,
+    env,
+  })
+    .catch(failed)
+    .finally(() => installing.delete(volume));
+  installing.set(volume, run);
+  return run;
+}
+
 /** Erlaubte Ziele des Egress-Proxys (siehe egress-proxy.ts); weitere über DEV_LOG_AGENT_SANDBOX_EGRESS (host:port, …). */
 export function egressAllowList(environment: NodeJS.ProcessEnv = process.env): string {
   const extra = (environment.DEV_LOG_AGENT_SANDBOX_EGRESS ?? '')
@@ -527,7 +620,9 @@ export async function runInSandbox(
       return blocked(message, redactWith);
     }
   }
-  if ((options.network ?? SANDBOX_NETWORK) === SANDBOX_NETWORK) {
+  const hash = options.workspace === false ? null : lockfileHash(worktree);
+  // Das Füllen des Volumes braucht npm über den Egress-Proxy, auch wenn der Lauf selbst im Compose-Netz hängt.
+  if (hash || (options.network ?? SANDBOX_NETWORK) === SANDBOX_NETWORK) {
     const network = await ensureAgentNetwork(docker, {
       environment: source,
       cwd: worktree,
@@ -537,6 +632,14 @@ export async function runInSandbox(
     if (network) {
       noteProblem(options.project, network);
       return blocked(network, redactWith);
+    }
+  }
+  if (hash) {
+    const install = await installModules(docker, worktree, hash, options, env);
+    if (install.exitCode !== 0) {
+      const message = `Sandbox: npm ci im node_modules-Volume „${modulesVolume(options.project)}“ ist fehlgeschlagen (Exit-Code ${install.exitCode}). Der Agent wurde nicht gestartet.\n${install.output.trim().slice(-800)}`;
+      noteProblem(options.project, message.split('\n')[0]);
+      return blocked(message, redactWith);
     }
   }
   noteProblem(options.project, null);

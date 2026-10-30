@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { CommandExecutor, CommandResult } from './command.js';
 import { guardHookCommand, withAgentPermissions } from '../agent/tool-permissions.js';
@@ -13,6 +15,8 @@ import {
   egressAllowList,
   egressRunArgs,
   ensureAgentNetwork,
+  lockfileHash,
+  modulesInstallArgs,
   modulesVolume,
   readOnlyWorkspace,
   removeLeftoverContainers,
@@ -452,4 +456,77 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+/** Worktree mit package.json und Lockfile (npm-Projekt). */
+async function npmWorktree(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'sandbox-modules-'));
+  await writeFile(join(folder, 'package.json'), '{"name":"demo"}\n');
+  await writeFile(join(folder, 'package-lock.json'), '{"lockfileVersion":3,"packages":{}}\n');
+  return folder;
+}
+
+test('Sandbox: node_modules-Volume wird vor dem Lauf mit npm ci gefüllt, ohne den Worktree einzubinden', async () => {
+  const worktree = await npmWorktree();
+  try {
+    const hash = lockfileHash(worktree);
+    assert.match(hash ?? '', /^[a-f0-9]{64}$/);
+    const command = modulesInstallArgs(worktree, hash ?? '', { runId: 'r-ci', project: 'Demo', uid: 501, gid: 20 });
+    const line = command.join(' ');
+    assert.ok(line.includes(`${modulesVolume('Demo')}:/deps/node_modules`), 'Volume unter /deps, nicht am Symlink');
+    assert.ok(line.includes(`${join(worktree, 'package-lock.json')}:/deps/package-lock.json:ro`));
+    assert.ok(!command.some((part) => part.endsWith(`:${SANDBOX_WORKDIR}`)), 'Worktree nicht eingebunden');
+    assert.deepEqual(command.slice(command.indexOf('--user'), command.indexOf('--user') + 2), ['--user', '501:20']);
+    assert.ok(command.includes('ALL') && command.includes('no-new-privileges'));
+    assert.equal(command[command.indexOf('--network') + 1], SANDBOX_NETWORK, 'npm nur über den Egress-Proxy');
+    assert.ok(command.includes(`HTTPS_PROXY=${EGRESS_URL}`));
+    assert.ok(command.includes(`AIDEATION_LOCK_HASH=${hash}`));
+    assert.match(command.at(-1) ?? '', /npm ci --ignore-scripts/);
+    assert.match(command.at(-1) ?? '', /\.aideation-lock/, 'Stempel: nur bei geändertem Lockfile neu installieren');
+
+    resetAgentNetwork();
+    const { calls, docker } = fakeDocker((call) => (call[1] === 'version' ? ok('27') : ok()));
+    const result = await runInSandbox(['npm', 'run', 'test:unit'], worktree, {
+      runId: 'r-ci',
+      project: 'ci-demo',
+      name: 'aideation-r-ci',
+      docker,
+      network: 'demo-test_default',
+    });
+    assert.equal(result.exitCode, 0);
+    const install = calls.findIndex((call) => call.command.at(-1)?.includes('npm ci'));
+    const run = calls.findIndex((call) => call.command.includes('aideation-r-ci') && call.command[1] === 'run');
+    assert.ok(install >= 0 && install < run, 'erst npm ci im Volume, dann der eigentliche Lauf');
+    assert.ok(
+      calls.some((call) => call.command[1] === 'network' && call.command[2] === 'inspect'),
+      'Agent-Netzwerk bereit, auch wenn der Lauf im Compose-Netz hängt',
+    );
+  } finally {
+    await rm(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: scheitert npm ci im Volume, startet der Lauf nicht', async () => {
+  const worktree = await npmWorktree();
+  try {
+    const { calls, docker } = fakeDocker((call) =>
+      call.at(-1)?.includes('npm ci') ? { exitCode: 1, durationMs: 1, output: 'npm error code E403' } : ok('27'),
+    );
+    const result = await runInSandbox(['npm', 'test'], worktree, {
+      runId: 'r-ci-fail',
+      project: 'ci-fail',
+      name: 'aideation-r-ci-fail',
+      docker,
+    });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.output, /npm ci im node_modules-Volume.*fehlgeschlagen.*\n.*E403/s);
+    assert.ok(!calls.some((call) => call.command.includes('aideation-r-ci-fail')), 'kein docker run des Laufs');
+    assert.match(sandboxBadge('ci-fail') ?? '', /npm ci/);
+  } finally {
+    await rm(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: ohne Lockfile kein npm ci', () => {
+  assert.equal(lockfileHash(WORKTREE), null);
 });
