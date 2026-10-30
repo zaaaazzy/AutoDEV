@@ -95,7 +95,7 @@ Der Worker braucht Zugang zu GitHub, um Stände zu holen und zu pushen. Dieser Z
 gh auth token > ~/.config/aideation/github-token && chmod 600 ~/.config/aideation/github-token
 ```
 
-**Agent-Container bekommen keinen dieser Zugänge.** Auch keinen Docker-Socket. Sie laufen mit gefilterter Umgebung (siehe [Docker-Sandbox](docs/installation.md)).
+**Agent-Container bekommen keinen dieser Zugänge.** Auch keinen Docker-Socket. Sie laufen mit gefilterter Umgebung (siehe [Docker-Sandbox](../installation.md)).
 
 ## 7. Neustart über „AIdeation neu starten“
 

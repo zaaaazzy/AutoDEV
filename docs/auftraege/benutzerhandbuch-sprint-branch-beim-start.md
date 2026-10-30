@@ -2,7 +2,7 @@
 
 Dieses Kapitel beschreibt, welchen Git-Branch ein Sprint bekommt und was passiert, wenn du den Sprint umbenennst. Auslöser ist der Bugfix 97fdce0c (Code-Review vom 21.10.2026): Der Branch wurde bei jedem Zugriff aus dem aktuellen Namen gebildet. Eine Umbenennung ließ den Sprint auf einem neuen Branch von `main` weiterarbeiten, und beim Abschluss kam nur der Teil nach der Umbenennung nach `main`.
 
-> **Printscreens:** keine. In dieser Sitzung gab es keinen Browser und keine laufende App, daher sind keine Aufnahmen entstanden. Die Beschreibung stammt aus dem Quelltext (`src/api/sprints.ts`, `src/db/migrations.ts` Migration 13, `src/runner/git-sync/sprint-sync.ts`) und aus [`workflows.md`](workflows.md), Abschnitt „Sprint-Branch beim Start festgehalten“. Für Aufnahmen müssten App, Datenbank und Browser laufen.
+> **Printscreens:** keine. In dieser Sitzung gab es keinen Browser und keine laufende App, daher sind keine Aufnahmen entstanden. Die Beschreibung stammt aus dem Quelltext (`src/api/sprints.ts`, `src/db/migrations.ts` Migration 13, `src/runner/git-sync/sprint-sync.ts`) und aus [`workflows.md`](../workflows.md), Abschnitt „Sprint-Branch beim Start festgehalten“. Für Aufnahmen müssten App, Datenbank und Browser laufen.
 
 ---
 
@@ -65,6 +65,6 @@ Nur Altdaten können trotzdem zwei Sprints mit gleichem Branch haben. Die Migrat
 
 ## 6. Verweise
 
-- [`workflows.md`](workflows.md), Abschnitt „Sprint-Branch beim Start festgehalten“ und Tabelle „Git-Sicherung“
+- [`workflows.md`](../workflows.md), Abschnitt „Sprint-Branch beim Start festgehalten“ und Tabelle „Git-Sicherung“
 - [`benutzerhandbuch-regeln-auftraege-sprints-bugs.md`](benutzerhandbuch-regeln-auftraege-sprints-bugs.md) (Regeln für Sprints)
 - [`sprint-branch-beim-start-festhalten-2026-10-25.md`](sprint-branch-beim-start-festhalten-2026-10-25.md) (Entwicklerdoku zum Fix)

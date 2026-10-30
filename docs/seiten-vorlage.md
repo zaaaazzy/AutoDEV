@@ -42,7 +42,7 @@ man vor dem Pull Request durch.
 7. **Texte aus Daten nie selbst als HTML bauen.** Interpolation `{{ }}` escaped. Für Markdown die `markdown`-Pipe,
    für eigenes HTML `escapeHtml` und zur Nachbearbeitung `replaceInText` aus `shared/html.ts`.
 8. **Dialoge mit `<app-modal>`,** Farben als Token in `01-base.css`, Styles in die Bereichsdatei (siehe
-   [styles-nach-bereich-2026-10-23.md](styles-nach-bereich-2026-10-23.md)).
+   [styles-nach-bereich-2026-10-23.md](auftraege/styles-nach-bereich-2026-10-23.md)).
 
 ## Tests
 

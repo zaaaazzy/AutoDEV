@@ -104,4 +104,4 @@ Diese Aufnahmen fehlen. Sie brauchen eine laufende App mit Testdaten und einem B
 
 - [`agenten-per-drag-and-drop-zwischen-phasen-2026-10-28.md`](agenten-per-drag-and-drop-zwischen-phasen-2026-10-28.md) (Entwicklerdoku zu diesem Auftrag)
 - [`benutzerhandbuch-workflow-umbau-waehrend-lauf.md`](benutzerhandbuch-workflow-umbau-waehrend-lauf.md) (Umbau während eines laufenden Auftrags)
-- [`workflows.md`](workflows.md), Abschnitt 4a (Workflow-Editor)
+- [`workflows.md`](../workflows.md), Abschnitt 4a (Workflow-Editor)

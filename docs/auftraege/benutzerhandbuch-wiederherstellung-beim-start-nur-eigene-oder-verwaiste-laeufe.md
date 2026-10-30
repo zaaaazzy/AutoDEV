@@ -68,4 +68,4 @@ Beendest du A hart (z. B. Rechner-Absturz) und startest ihn neu, gilt das so: Na
 
 - Die Beschreibung stammt aus dem Quelltext (`src/runner/worker-identity.ts`, `src/runner/runner.ts`, `src/db/migrations.ts`, Version 16) und aus der Entwicklerdoku [`wiederherstellung-beim-start-nur-eigene-oder-verwaiste-laeufe-2026-10-28.md`](wiederherstellung-beim-start-nur-eigene-oder-verwaiste-laeufe-2026-10-28.md). Im Betrieb habe ich das nicht beobachtet.
 - Die Einträge „Bug-Wächter“ zu diesem Auftrag sind Abbrüche der Claude-CLI wegen des Ausgabenlimits, keine Fehlerbeschreibung. Sie sind deshalb nicht als Inhalt übernommen.
-- Verweise: [`unterbrochene-auftraege`](benutzerhandbuch-unterbrochene-auftraege.md) für den Arbeitsordner nach einer Unterbrechung; Laufzeitdetails in [`laufzeit.md`](laufzeit.md) und Datenmodell in [`erm.md`](erm.md).
+- Verweise: [`unterbrochene-auftraege`](benutzerhandbuch-unterbrochene-auftraege.md) für den Arbeitsordner nach einer Unterbrechung; Laufzeitdetails in [`laufzeit.md`](../laufzeit.md) und Datenmodell in [`erm.md`](../erm.md).

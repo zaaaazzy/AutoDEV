@@ -66,6 +66,6 @@ Tests des Entwicklers. Die Tests selbst habe ich in dieser Sitzung nicht ausgef�
 ## 7. Grenzen dieses Kapitels
 
 - Es beschreibt nur die Filterung von `{tests}` und `{files}`. Die übrigen Befehle und Einstellungen stehen in den anderen
-  Kapiteln und in [Installation](installation.md).
+  Kapiteln und in [Installation](../installation.md).
 - Die Filterung kennt nur zwei Gruppen: Playwright und alle übrigen Testdateien. Mehrere Runner in einer Gruppe werden nicht
   weiter aufgeteilt.
