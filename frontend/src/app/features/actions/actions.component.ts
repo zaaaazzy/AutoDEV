@@ -2,6 +2,7 @@ import { Component, computed, effect, inject, signal, untracked } from '@angular
 import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
 import type { AttentionEntry } from '../../shared/order-attention.js';
 import { isFinished } from '../../shared/labels.js';
@@ -54,6 +55,8 @@ export class ActionsComponent {
   private readonly detailsShown = signal<ReadonlySet<string>>(new Set());
   /** Antwort bzw. Hinweis an die Agents je Auftrag, bis „Erneut versuchen“ ihn mitschickt. */
   private readonly notes = signal<Record<string, string>>({});
+  /** Häkchen der offenen Abnahmepunkte: gesetzt nur während des Speicherns, nach Fehler wieder leer. */
+  protected readonly ticks = new AcceptanceTicks();
 
   constructor() {
     // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Die Tabelle klappt die Zeile auf,
@@ -95,8 +98,10 @@ export class ActionsComponent {
     return this.orders.confirmChecks(item);
   }
 
-  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
-    return this.orders.checkPoint(item, check, true);
+  protected checkPoint(event: Event, item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
+    return this.ticks.tick(event.target as HTMLInputElement, item.id, check, () =>
+      this.orders.checkPoint(item, check, true),
+    );
   }
 
   /** „Ansicht“ samt „Optisch freigeben“ oben in der Karte (dieselbe Regel wie in der Auftragsansicht). */

@@ -13,6 +13,7 @@ import {
   sandboxExecutor,
   sandboxMode,
   sandboxOffWarning,
+  type SandboxMode,
   usesSandbox,
 } from '../core/sandbox.js';
 import { composeViolation } from '../agent/compose-check.js';
@@ -103,9 +104,12 @@ export async function projectTestExecutor(options: {
   cwd: string;
   runId: string;
   docker?: CommandExecutor;
+  mode?: SandboxMode;
 }): Promise<CommandExecutor> {
   const docker = options.docker ?? runCommand;
   const sandbox = { runId: options.runId, project: options.project, docker };
+  // Arbeitscontainer: Testdienste stehen in .aideation/workbench.json, Docker gibt es im Stapel selbst.
+  if (options.mode === 'workbench') return sandboxExecutor(options.cwd, { ...sandbox, mode: 'workbench' });
   const file = existsSync(options.cwd) ? composeFile(options.cwd) : null;
   if (!file) return sandboxExecutor(options.cwd, { ...sandbox, network: SANDBOX_NETWORK });
   // Wie bei services.up: das Compose-Projekt der Agent-Kopie (<projekt>-agent), nie das der Live-Container.
@@ -155,6 +159,7 @@ export async function gateExecutor(
   host: CommandExecutor,
   runId: string,
 ): Promise<CommandExecutor> {
-  if (!usesSandbox(sandboxMode(await projectSandbox(pool, project)))) return host;
-  return projectTestExecutor({ project, cwd, runId, docker: host });
+  const mode = sandboxMode(await projectSandbox(pool, project));
+  if (!usesSandbox(mode)) return host;
+  return projectTestExecutor({ project, cwd, runId, docker: host, mode });
 }

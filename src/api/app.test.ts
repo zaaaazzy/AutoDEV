@@ -258,12 +258,12 @@ test('validates board input and stores valid project-scoped ideas', async () => 
 
 function recordingPool(rows: Record<string, unknown>[] = []) {
   const queries: { sql: string; values: unknown[] }[] = [];
-  const pool = {
-    query: async (sql: string, values: unknown[] = []) => {
-      queries.push({ sql, values });
-      return { rows };
-    },
-  } as unknown as Pool;
+  const query = async (sql: string, values: unknown[] = []) => {
+    // Transaktionsrahmen (withTransaction) nicht mitschreiben: Die Tests prüfen die eigentlichen Anweisungen.
+    if (!['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql)) queries.push({ sql, values });
+    return { rows };
+  };
+  const pool = { query, connect: async () => ({ query, release: () => undefined }) } as unknown as Pool;
   return { pool, queries };
 }
 
@@ -650,6 +650,10 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(created.status, 201);
     const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
     assert.equal(insert?.values[3], 'while_task');
+    // Nutzt das Projekt Workflow-Schritte, bekommt der neue Agent dort seinen Schritt (sonst liefe er nie).
+    const step = queries.find((query) => query.sql.includes('INSERT INTO workflow_steps'));
+    assert.deepEqual(step?.values, ['mainty', 'while_task', ID]);
+    assert.match(step?.sql ?? '', /WHERE EXISTS \(SELECT 1 FROM workflow_steps WHERE project_slug = \$1\)/);
     // Jeder Befehl wird einzeln gesetzt: ohne Angabe bekommt ein neuer Agent keine Befehle.
     assert.deepEqual(insert?.values[7], []);
 
@@ -673,6 +677,10 @@ test('defines agents per workflow phase and persists their order', async () => {
     });
     assert.equal(ordered.status, 204);
     assert.deepEqual(queries.at(-1)?.values, ['mainty', 'pre_task', [ID, SPRINT_ID]]);
+    // Eine Quelle: Die Reihenfolge landet auch in den Workflow-Schritten, die der Worker ausführt.
+    assert.match(queries.at(-1)?.sql ?? '', /UPDATE workflow_steps s SET position = o\.ord, phase = \$2/);
+    assert.match(queries.at(-1)?.sql ?? '', /s\.agent_id = o\.id AND s\.project_slug = \$1/);
+    assert.match(queries.at(-2)?.sql ?? '', /UPDATE agents a SET position/);
 
     const badOrder = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
       method: 'POST',
@@ -685,6 +693,32 @@ test('defines agents per workflow phase and persists their order', async () => {
     assert.equal(list.status, 200);
     // Workflow-Reihenfolge: vor dem Sprint, vor dem Auftrag, während, danach, bei abgelehnt, bei abgeschlossen.
     assert.match(queries.at(-1)?.sql ?? '', /'pre_sprint' THEN 0 WHEN 'pre_task' THEN 1 WHEN 'while_task' THEN 2/);
+  });
+});
+
+test('changing the phase of an agent moves its workflow steps, so the next run follows the setting', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const patch = (body: unknown) =>
+      fetch(`${baseUrl}/api/agents/${ID}`, { method: 'PATCH', headers: jsonHeaders(), body: JSON.stringify(body) });
+    assert.equal((await patch({ phase: 'after_task' })).status, 200);
+    const move = queries.at(-1);
+    assert.match(move?.sql ?? '', /UPDATE workflow_steps s\s+SET phase = \$2/);
+    assert.deepEqual(move?.values, [ID, 'after_task']);
+    // Ohne Phasenänderung bleiben die Schritte unberührt (Name, Anweisung …).
+    const before = queries.length;
+    assert.equal((await patch({ name: 'Neu' })).status, 200);
+    assert.ok(queries.slice(before).every((query) => !query.sql.includes('workflow_steps')));
+  });
+});
+
+test('lists agents with the phase and position of their first workflow step', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const list = await fetch(`${baseUrl}/api/projects/mainty/agents`, { headers: jsonHeaders() });
+    assert.deepEqual(((await list.json()) as { agents: unknown[] }).agents, [{ id: ID }]);
+    assert.match(queries.at(-1)?.sql ?? '', /COALESCE\(s\.phase, a\.phase\) AS phase/);
+    assert.match(queries.at(-1)?.sql ?? '', /FROM workflow_steps WHERE agent_id = a\.id/);
   });
 });
 
@@ -780,7 +814,8 @@ test('stores an agent command as an argument array and rejects strings', async (
       body: JSON.stringify({ name: 'Dev', phase: 'while_task', command: ['claude', '-p'] }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries.at(-1)?.values[6], ['claude', '-p']);
+    const insert = queries.find((query) => query.sql.includes('INSERT INTO agents'));
+    assert.deepEqual(insert?.values[6], ['claude', '-p']);
     const invalid = await fetch(`${baseUrl}/api/agents/${ID}`, {
       method: 'PATCH',
       headers: jsonHeaders(),
@@ -1212,6 +1247,81 @@ test('with a second factor, cached basic credentials neither count as failures n
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test('ein Handbuch mit 30 000 Umlauten passt durch den JSON-Parser, ein zu grosser Body gibt 413 als JSON', async () => {
+  const { pool, queries } = recordingPool([{ id: ID }]);
+  await withServer(pool, async (baseUrl) => {
+    const post = (content: string) =>
+      fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content }),
+      });
+    // 30 000 Zeichen „ä“ sind rund 60 KB – vorher schon am 32-KB-Limit als HTML-413 gescheitert.
+    const full = await post('ä'.repeat(30_000));
+    assert.equal(full.status, 201);
+    assert.equal(queries.at(-1)?.values[2], 'ä'.repeat(30_000));
+
+    const tooLarge = await post('ä'.repeat(150_000));
+    assert.equal(tooLarge.status, 413);
+    assert.match(tooLarge.headers.get('content-type') ?? '', /application\/json/);
+    assert.match(((await tooLarge.json()) as { message: string }).message, /zu gross/);
+  });
+});
+
+test('kaputtes JSON gibt 400 als JSON, ein Serverfehler 500 ohne Stacktrace und Fehlertext', async () => {
+  const pool = {
+    query: async () => {
+      throw new Error('geheimes Detail aus der Datenbank');
+    },
+  } as unknown as Pool;
+  const errors = console.error;
+  console.error = () => undefined;
+  try {
+    await withServer(pool, async (baseUrl) => {
+      const broken = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: '{"title": "x",',
+      });
+      assert.equal(broken.status, 400);
+      assert.deepEqual(await broken.json(), { message: 'Die Anfrage enthält kein gültiges JSON.' });
+
+      const failed = await fetch(`${baseUrl}/api/projects/mainty/docs`, {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ title: 'Handbuch', content: 'x' }),
+      });
+      assert.equal(failed.status, 500);
+      assert.match(failed.headers.get('content-type') ?? '', /application\/json/);
+      const text = await failed.text();
+      assert.doesNotMatch(text, /stack|geheimes Detail|at /);
+      assert.deepEqual(JSON.parse(text), { message: 'Interner Fehler. Bitte später erneut versuchen.' });
+    });
+  } finally {
+    console.error = errors;
+  }
+});
+
+test('ein Sitzungs-Cookie mit kaputtem „%“ gibt 401 statt 500', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects`, { headers: { Cookie: 'devlog_session=%E0%A4%A' } });
+    assert.equal(response.status, 401);
+    assert.match(response.headers.get('content-type') ?? '', /application\/json/);
+  });
+});
+
+test('unbekannte Pfade antworten für jede Methode mit JSON-404', async () => {
+  const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
+  await withServer(pool, async (baseUrl) => {
+    for (const method of ['GET', 'POST', 'DELETE']) {
+      const response = await fetch(`${baseUrl}/gibt-es-nicht`, { method, headers: { Authorization: basicAuth() } });
+      assert.equal(response.status, 404, method);
+      assert.deepEqual(await response.json(), { message: 'Nicht gefunden.' }, method);
+    }
+  });
 });
 
 test('Sprint-Name mit gleichem Git-Branch wie ein anderer Sprint wird abgelehnt', async () => {

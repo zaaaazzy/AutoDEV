@@ -58,7 +58,7 @@
       >
     </div>
   }
-  @if (store.currentProject()?.reviewCommand?.length) {
+  @if (store.currentProject()?.reviewCommand?.length && reviewable(sprint.status)) {
     <app-sprint-review [sprint]="sprint" />
   }
   <div class="sprint-layout">
@@ -125,8 +125,8 @@
       @if (pullRequest(sprint); as pr) {
         <p class="sprint-pr">
           <a class="gh-link" [href]="pr.url" target="_blank" rel="noopener noreferrer">Pull Request #{{ pr.number }}</a>
-          <span class="ci-light" [ngClass]="sprint.ciStatus ?? ''" [title]="'CI: ' + ciLabel(sprint)">
-            CI {{ ciLabel(sprint) }}</span
+          <span class="ci-light" [ngClass]="sprint.ciStatus ?? ''" [title]="'CI: ' + ciLabel()">
+            CI {{ ciLabel() }}</span
           >
         </p>
       }
@@ -135,7 +135,7 @@
       }
       <details class="sprint-orders-section" [open]="sprint.status !== 'completed'">
         <summary>
-          Aufträge <span class="muted">({{ sprintProgress(sprint.id) }})</span>
+          Aufträge <span class="muted">({{ sprintProgress() }})</span>
         </summary>
         <app-sprint-orders [sprint]="sprint" />
       </details>
@@ -143,7 +143,7 @@
         <div class="actions">
           <button class="button secondary" (click)="refreshReport(sprint.id)">Sprintbericht aktualisieren</button>
         </div>
-        @if (reportFor(sprint.id); as report) {
+        @if (report(); as report) {
           <details class="report" open>
             <summary>{{ report.summary }}</summary>
             <div class="report-columns">
@@ -230,40 +230,40 @@
             </div>
             <div>
               <dt>Aufträge</dt>
-              <dd>{{ sprintProgress(sprint.id) }}</dd>
+              <dd>{{ sprintProgress() }}</dd>
             </div>
             <div>
               <dt>Geschätzt</dt>
-              <dd>{{ sprintEstimate(sprint.id) | hours }}</dd>
+              <dd>{{ sprintEstimate() | hours }}</dd>
             </div>
             <div class="sub">
               <dt>Tokens</dt>
-              <dd>{{ sprintTokensEstimate(sprint.id) | tokens }}</dd>
+              <dd>{{ sprintTokensEstimate() | tokens }}</dd>
             </div>
             <div class="sub">
               <dt>Kosten</dt>
               <dd [title]="'Referenzpreis ' + usdRate + ' $ je 1 Mio. Tokens'">
-                {{ sprintTokensEstimate(sprint.id) | usd }}
+                {{ sprintTokensEstimate() | usd }}
               </dd>
             </div>
             <div>
               <dt>Aufgewendet</dt>
-              <dd>{{ sprintSpent(sprint.id) === null ? '–' : (sprintSpent(sprint.id) | duration) }}</dd>
+              <dd>{{ sprintSpent() === null ? '–' : (sprintSpent() | duration) }}</dd>
             </div>
             <div class="sub">
               <dt>Tokens</dt>
-              <dd>{{ sprintTokensSpent(sprint.id) | tokens }}</dd>
+              <dd>{{ sprintTokensSpent() | tokens }}</dd>
             </div>
             <div class="sub">
               <dt>Kosten</dt>
               <dd [title]="'Referenzpreis ' + usdRate + ' $ je 1 Mio. Tokens'">
-                {{ sprintTokensSpent(sprint.id) | usd }}
+                {{ sprintTokensSpent() | usd }}
               </dd>
             </div>
           </dl>
         }
       </section>
-      <app-git-tree [nodes]="gitNodes(sprint)">
+      <app-git-tree [nodes]="gitNodes()">
         <div class="git-actions">
           <!-- Sichtbar nur, was Server und Rolle erlauben (sprint-actions.ts); während einer Anfrage gesperrt. -->
           @let can = buttons();
@@ -273,7 +273,13 @@
             </button>
           }
           @if (can.start) {
-            <button class="button primary" type="button" [disabled]="busy()" (click)="startSprint(sprint)">
+            <button
+              class="button primary"
+              type="button"
+              [attr.title]="can.activateBlocked"
+              [disabled]="busy() || !!can.activateBlocked"
+              (click)="startSprint(sprint)"
+            >
               <app-nav-icon name="play" />Sprint starten
             </button>
           }
@@ -303,7 +309,13 @@
             </button>
           }
           @if (can.reopen) {
-            <button class="button secondary" type="button" [disabled]="busy()" (click)="startSprint(sprint)">
+            <button
+              class="button secondary"
+              type="button"
+              [attr.title]="can.activateBlocked"
+              [disabled]="busy() || !!can.activateBlocked"
+              (click)="startSprint(sprint)"
+            >
               <app-nav-icon name="undo" />Wieder öffnen
             </button>
           }

@@ -39,13 +39,7 @@ test('Budget-Eingaben: leer = unbegrenzt, ungültige Werte werden abgelehnt', ()
 });
 
 test('Speichern: leere Limits entfernen den Zeitraum, Regeln in Reihenfolge, Standardregeln mit null', async () => {
-  const queries: { sql: string; values: unknown[] }[] = [];
-  const pool = {
-    query: async (sql: string, values: unknown[] = []) => {
-      queries.push({ sql, values });
-      return { rows: [] };
-    },
-  } as unknown as Pool;
+  const { pool, queries } = rolePool();
   await saveBudget(pool, 'mainty', {
     limits: { day: { maxTokens: 1000, maxCostUsd: null }, sprint: { maxTokens: null, maxCostUsd: null } },
     rules: [
@@ -68,6 +62,38 @@ test('Speichern: leere Limits entfernen den Zeitraum, Regeln in Reihenfolge, Sta
   await saveBudget(pool, 'mainty', { rules: null });
   assert.ok(queries.some((query) => query.sql.includes('routing_customized') && query.values[1] === false));
   assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO routing_rules')));
+});
+
+test('Kostenlimit: unter 0,01 USD abgelehnt, sonst auf Cent gerundet wie NUMERIC(10, 2)', () => {
+  assert.match(String(parseBudgetInput({ limits: { sprint: { maxCostUsd: 0.004 } } })), /mindestens 0,01/);
+  assert.match(
+    String(parseBudgetInput({ limits: { day: { maxCostUsd: 5 }, sprint: { maxCostUsd: '0.004' } } })),
+    /mindestens 0,01/,
+  );
+  const dayCost = (cost: unknown) => {
+    const input = parseBudgetInput({ limits: { day: { maxCostUsd: cost } } });
+    return typeof input === 'string' ? input : input.limits?.day?.maxCostUsd;
+  };
+  assert.equal(dayCost(0.005), 0.01);
+  assert.equal(dayCost(0.01), 0.01);
+  assert.equal(dayCost('2.499'), 2.5);
+});
+
+test('Speichern läuft in einer Transaktion: scheitert ein Zeitraum, wird alles zurückgerollt', async () => {
+  const { pool, queries } = rolePool((sql, values) => {
+    if (sql.includes('INSERT INTO budgets') && values[1] === 'sprint') throw new Error('check violation');
+    return undefined;
+  });
+  await assert.rejects(
+    saveBudget(pool, 'mainty', {
+      limits: { day: { maxTokens: null, maxCostUsd: 5 }, sprint: { maxTokens: null, maxCostUsd: 0.01 } },
+    }),
+    /check violation/,
+  );
+  const sqls = queries.map((query) => query.sql);
+  assert.equal(sqls[0], 'BEGIN');
+  assert.ok(sqls.includes('ROLLBACK'));
+  assert.ok(!sqls.includes('COMMIT'));
 });
 
 test('gespeicherte Limits erscheinen beim erneuten Öffnen unverändert; Währung mit festem Kurs', async () => {
@@ -147,6 +173,20 @@ async function callRoute(
   await handlers.get(`${method} ${path}`)?.({ params, body }, response);
   return result;
 }
+
+test('PUT /budget mit Tageslimit 5 und Sprintlimit 0.004: 400 mit Meldung, nichts gespeichert', async () => {
+  const { pool, queries } = rolePool((sql) => (sql.includes('FROM projects') ? { rows: [{}] } : undefined));
+  const result = await callRoute(
+    pool,
+    'put',
+    '/projects/:slug/budget',
+    { slug: 'mainty' },
+    { limits: { day: { maxCostUsd: 5 }, sprint: { maxCostUsd: 0.004 } } },
+  );
+  assert.equal(result.status, 400);
+  assert.match(String((result.body as { message: string }).message), /mindestens 0,01 USD/);
+  assert.ok(!queries.some((query) => /INSERT|UPDATE|DELETE|BEGIN/.test(query.sql)));
+});
 
 const writes = (queries: Captured[]) =>
   queries.filter((query) => /INSERT INTO budget_role_limits|DELETE FROM budget_role_limits/.test(query.sql));

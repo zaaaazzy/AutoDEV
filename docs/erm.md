@@ -6,13 +6,30 @@ Ergänzung: `agents.command` (TEXT[], Befehl ohne Shell). `development_items` 1:
 
 ## Erweiterungen: Bugs, Dokumentation, Sprintberichte
 
-- `bugs` (Projekt, Titel, Schwere, Status open/in_progress/fixed/wontfix, Quelle, Sprint, fix_notes) – 1:n zu `development_items.bug_id` (kind `bug`).
+- `bugs` (Projekt, Titel, Schwere, Status open/in_progress/fixed/wontfix/rejected, Quelle, Sprint, fix_notes) – 1:n zu `development_items.bug_id` (kind `bug`). `rejected` = verstösst gegen die Projektregeln; ein Trigger übernimmt ihn von einem abgelehnten Auftrag, solange der Bug offen oder in Arbeit ist.
+- `development_items.status`: backlog/planned/in_progress/blocked/approval/done/rejected (`approval` = wartet auf Freigabe, `rejected` = abgelehnt).
+- `sprints.status`: planned/active/review/completed/cancelled (`cancelled` = abgebrochen über `PATCH /api/sprints/:id`, `cancelSprint` stoppt laufende Schritte und löst nicht erledigte Aufträge aus dem Sprint).
 - `sprint_reports` (Sprint, implemented, missing, problems, notes) – 1:1 je Sprint.
 - `docs` (Projekt, kind manual/sprint/order/repo, Titel, Inhalt).
 - `development_items`: zusätzlich `kind`, `bug_id`, `completed_at`; Trigger synchronisieren den Bug-Status.
 - `agents.role`: author, developer, tester, reviewer, documenter, bug_reviewer, manual_writer, user_manual_writer, custom.
 - Git-Sicherung: `projects.git_remote` (HTTPS/SSH-URL ohne Zugangsdaten); `projects.database_url` (optional, Zugang zur Projekt-Datenbank für `run_sql`); `sprints.git_sync` (pending/running/done/failed), `git_action` (push/pull), `git_message`, `git_commit`, `git_synced_at`. Ein Trigger setzt `git_sync='pending'`, sobald ein Sprint `completed` wird (nicht beim Übergang `review` → `completed`).
 - GitHub-Brücke: `projects.github_mode` (aus/issues/issues+pr), `github_require_approval`, `github_synced_at`, `github_auth` (ok/missing) mit `github_auth_message` und `github_auth_checked_at`; `sprints.status` zusätzlich `review`, dazu `pr_url`, `ci_status` (pending/success/failure) und `ci_bug_run`; `ideation_items` und `bugs` mit `source='github'`, `external_ref` (`owner/repo#N`, eindeutig je Projekt) und `github_synced_status`; `development_items.git_commit`.
+
+## Anmeldung, Benutzer und Mandanten
+
+- `app_settings` (`key` PK, `value`): globale Einstellungen, u. a. `auth_totp_secret` / `auth_totp_pending` (TOTP-Schlüssel des Systemadministrators aus der `.env`, mit `DEV_LOG_SECRET_KEY` verschlüsselt), `push_vapid_keys`, `visionary_max_ideas`.
+- `users` (`id` UUID, `username` – eindeutig ohne Gross-/Kleinschreibung, `display_name`, `password_hash`, `roles` TEXT[], `active`, `totp_secret`, `totp_pending` (beide verschlüsselt), `last_login_at`, `created_at`, `updated_at`): benannte Benutzer zusätzlich zum Systemadministrator.
+- `auth_sessions` (`token_hash` PK, `created_at`, `last_seen`, `expires_at`, `user_agent`, `user_id` → `users` (`ON DELETE CASCADE`, NULL = Systemadministrator), `credential_version` (an das Passwort gebunden, `src/db/migrations.ts`)) – n:1 zu `users`.
+- `push_subscriptions` (`endpoint` PK, `p256dh`, `auth`, `user_agent`, `created_at`, `user_id` → `users` (`ON DELETE CASCADE`), `system_admin`) – n:1 zu `users`; Push geht nur an Geräte mit Zugriff auf das Projekt.
+- `project_members` (`user_id` → `users`, `project_slug` → `projects`, `created_at`; PK aus beiden) – n:m zwischen `users` und `projects` (Mandantentrennung; Administratoren sehen alle Projekte).
+- `doc_revisions` (`id`, `doc_id` → `docs` (`ON DELETE CASCADE`), `title`, `content`, `base_title`, `base_content`, `note`, `status` pending/approved/rejected, `author_id` → `users` (`ON DELETE SET NULL`), `author_name`, `reviewer_name`, `review_note`, `reviewed_at`, `created_at`) – n:1 zu `docs`: eingereichte Änderungen, die erst nach Prüfung übernommen werden.
+
+## Review-Container, Budgets und Modell-Routing
+
+- `review_slots` (`slot` 1–9 PK, `enabled`, `project_slug` → `projects` (`ON DELETE SET NULL`), `commit_sha`, `label`, `development_id` → `development_items`, `kind` manual/approval, `status` idle/requested/starting/running/failed/stopping, `message`, `requested_at`, `started_at`, `updated_at`): projektübergreifende Review-Container (Port 4200 + Nummer); Slot 1 ist beim Anlegen aktiv, 2 und 3 aus. Ersetzt die frühere Tabelle `review_instances`.
+- `budgets` (`project_slug` → `projects`, `period` day/sprint/order, `max_tokens`, `max_cost_usd`; PK aus Projekt und Zeitraum): leere Grenze = unbegrenzt, keine Zeile = keine Prüfung. Dazu `budget_warnings` (gemeldete 80-%-Schwelle je Zeitraum und Periode) und `budget_role_limits` (Token-Limit je Agent-Rolle und Zeitraum); `development_items.budget_blocked` / `budget_blocked_role` nennen das blockierende Limit.
+- `routing_rules` (`id`, `project_slug` → `projects`, `position`, `condition` JSONB-Objekt, `tier` local/strong/up/down) – n:1 zu `projects`; Regeln nach Priorität. Ohne gespeicherte Regeln (`projects.routing_customized = false`) gelten die Standardregeln; `agent_run_steps.model` und `routing_rule` halten die Wahl je Schritt fest.
 
 ## Erweiterung: Visionär (Ideen-Herkunft und Läufe)
 

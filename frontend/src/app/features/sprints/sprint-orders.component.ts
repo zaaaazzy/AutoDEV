@@ -6,6 +6,7 @@ import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import type { DataColumn } from '../../shared/data-table/data-table.component.js';
+import { orderTitle } from '../../shared/labels.js';
 import { canTakeIntoSprint } from '../../../../../src/core/development-transitions.js';
 import { OrderActionsDirective, OrderTableComponent } from '../development/order-table.component.js';
 import { isAborted, NEEDS_RUN, pickInOrder, poolOpenState, poolSelectable } from './pool-selection.js';
@@ -115,9 +116,7 @@ export class SprintOrdersComponent {
     return to >= 0 && to < ids.length;
   }
 
-  protected title(item: DevelopmentItem): string {
-    return item.kind === 'bug' ? item.title.replace(/^Bug:\s*/i, '') : item.title;
-  }
+  protected readonly title = orderTitle;
 
   /** Reihenfolge der geplanten Aufträge ändern; die Agents arbeiten sie von oben nach unten ab. */
   protected async move(item: DevelopmentItem, delta: number): Promise<void> {

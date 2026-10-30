@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
@@ -97,16 +97,16 @@ export class SprintReviewComponent {
   protected readonly starting = computed(() => reviewStarting(this.mine()));
 
   constructor() {
+    // Container-Status kommt aus einem gemeinsamen Poll aller Instanzen; je Instanz nur die eigenen Stände.
+    inject(DestroyRef).onDestroy(this.launch.watchSlots());
     effect((onCleanup) => {
       const id = this.sprint().id;
-      void this.load(id);
+      if (!document.hidden) void this.load(id);
       onCleanup(visibleInterval(() => void this.load(id), 5000));
     });
   }
 
   private async load(id: string): Promise<void> {
-    // Ohne Container-Status bleibt die Auswahl trotzdem sichtbar (nächster Versuch beim nächsten Intervall).
-    void this.launch.loadSlots().catch(() => undefined);
     try {
       const commits = await this.api.get<{ commits: SprintCommit[] }>(`/api/sprints/${encodeURIComponent(id)}/commits`);
       this.commits.set(commits.commits);
