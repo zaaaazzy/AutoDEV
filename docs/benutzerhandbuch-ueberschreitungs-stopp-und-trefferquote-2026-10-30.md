@@ -62,7 +62,6 @@ Wichtig:
 - **Gemessen wird nach abgeschlossenen Schritten.** Ein einzelner langer Schritt kann die Grenze deutlich überschreiten, bevor der Stopp greift.
 - **Aufträge ohne Schätzung** (weder Stunden noch Tokens) werden nicht geprüft.
 - **Ist eine Schätzung nur für einen der beiden Werte gesetzt,** wird nur dieser geprüft.
-- **Ein von Hand gestarteter Einzel-Agent** gilt selbst als Freigabe und wird nicht geprüft.
 - **Ist die Prüfung selbst nicht möglich** (zum Beispiel die Datenbank ist kurz nicht erreichbar), startet der Agent nicht. Der Auftrag gilt als unterbrochen und startet nach einer Pause von 5 Minuten wieder. Er läuft nicht unkontrolliert weiter.
 
 ### 5. Freigabe durch einen Menschen
@@ -126,6 +125,7 @@ Dafür braucht es eine laufende App mit Datenbank, zum Beispiel `npm run seed:de
 
 - Die Tests (`npm run typecheck`, `npm run test:unit`, `npm run format:check`) sind nicht gelaufen. Die Angaben stammen aus der Dokumentation des Entwicklers und aus dem Code, den ich gelesen habe. Der Tester hat den Lauf mit `tsc` und dem npm-Cache nicht abgeschlossen.
 - Die Printscreens fehlen (siehe oben).
+- Nicht im Code bestätigt: ob ein von Hand gestarteter Einzel-Agent die Prüfung umgeht, und ob „Erneut versuchen“ den Wiederholungszähler auf 0 setzt oder nur nicht erhöht.
 - Die Oberfläche wurde nicht im Browser geprüft. Die Beschreibung der Schaltflächen und Texte stammt aus dem Code.
 - Ob „Erneut versuchen“ in der „Aktion notwendig“-Karte für jede Rolle sichtbar ist, habe ich nicht im Frontend nachgeprüft. Die API prüft die Berechtigung in jedem Fall.
 - Die Vorgänger-Dokumentation nennt die Bereichszählung über `affectedFiles`. Im Code wird sie aus der Beschreibung abgeleitet (`areaBucket` in `src/core/sprint-planner.ts`). Das Handbuch folgt dem Code.
