@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { categoryOfCommand } from '../core/test-results.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { assertInProject } from './tenancy.js';
 
 export function registerTestRunRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/test-runs', access({ tenant: 'project' }), async (request, response) => {
@@ -95,6 +96,11 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
     const slug = parseProjectSlug(request.params.slug ?? '');
     if (!slug || !isUuid(request.params.id)) {
       response.status(400).json({ message: 'Ungültiger Testlauf.' });
+      return;
+    }
+    // Vor den Abfragen: Die Medienliste ist nicht nach Projekt gefiltert.
+    if (!(await assertInProject(pool, 'test_runs', request.params.id, slug))) {
+      response.status(404).json({ message: 'Testlauf nicht gefunden.' });
       return;
     }
     const cases = await pool.query(

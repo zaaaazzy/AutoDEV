@@ -16,6 +16,7 @@ import {
 import { access } from './access.js';
 import { IDEA_FIELDS } from './ideation.js';
 import { developmentPatchRole, hasRole, ROLE_INFO, type Principal } from './roles.js';
+import { assertInProject } from './tenancy.js';
 import {
   buildUpdate,
   manualEstimateSql,
@@ -111,6 +112,20 @@ export function retryAutoRunSql(chosen = 'NULL::uuid'): string {
   return `COALESCE((SELECT t.status = 'active' FROM sprints t WHERE t.id = ${retrySprintSql(chosen)}), TRUE)`;
 }
 
+/**
+ * Ziel-Sprint im Projekt des Auftrags; undefined = Sprint oder Auftrag fehlt, oder der Sprint gehört zu einem anderen
+ * Projekt.
+ */
+async function targetSprint(pool: Pool, orderId: string, sprintId: string): Promise<{ status: string } | undefined> {
+  return (
+    await pool.query<{ status: string }>(
+      `SELECT s.status FROM sprints s JOIN development_items d ON d.project_slug = s.project_slug
+        WHERE d.id = $1 AND s.id = $2`,
+      [orderId, sprintId],
+    )
+  ).rows[0];
+}
+
 export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
   // Turns an idea into a backlog order; sprint or agent are assigned to the order afterwards.
   app.post('/ideation/:id/promote', access({ role: 'plan', tenant: 'ideation' }), async (request, response) => {
@@ -158,6 +173,14 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         !validStatus(body.category, CATEGORIES))
     ) {
       response.status(400).json(slug ? invalidNewOrder(body) : { message: 'Ungültiges Projekt.' });
+      return;
+    }
+    // Sprint und Agent setzt erst PATCH; angenommen werden sie trotzdem nur aus demselben Projekt.
+    if (
+      !(await assertInProject(pool, 'sprints', isUuid(body.sprintId) ? body.sprintId : null, slug)) ||
+      !(await assertInProject(pool, 'agents', isUuid(body.agentId) ? body.agentId : null, slug))
+    ) {
+      response.status(400).json({ message: 'Sprint oder Agent gehört nicht zu diesem Projekt.' });
       return;
     }
     const result = await pool.query(
@@ -283,13 +306,14 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
       [request.params.id, comment, sprintId],
     );
     if (!result.rows[0] && sprintId) {
-      // Nur für die Meldung: lag es am Sprint oder am Auftrag?
-      const fits = await pool.query(
-        `SELECT 1 FROM sprints s JOIN development_items d ON d.project_slug = s.project_slug
-          WHERE d.id = $1 AND s.id = $2 AND s.status IN (${ASSIGNABLE_SPRINTS_SQL})`,
-        [request.params.id, sprintId],
-      );
-      if (!fits.rowCount) {
+      // Nur für die Meldung: lag es am Sprint (fremdes Projekt, nicht planbar) oder am Auftrag? Geschrieben hat das
+      // UPDATE in keinem Fall, es prüft Projekt und Status des Sprints selbst.
+      const target = await targetSprint(pool, request.params.id, sprintId);
+      if (!target) {
+        response.status(400).json({ message: 'Sprint gehört nicht zum Projekt.' });
+        return;
+      }
+      if (!isAssignableSprintStatus(target.status)) {
         response
           .status(409)
           .json({ message: 'Erneut versuchen nur in geplante oder aktive Sprints desselben Projekts.' });
@@ -361,6 +385,11 @@ export function registerDevelopmentRoutes(app: Router, pool: Pool): void {
         }
       }
       if (!result.rows[0]) {
+        // Nur für die Meldung (wie bei /retry): Ein Sprint aus einem anderen Projekt ist kein Konflikt, sondern falsch.
+        if (!(await targetSprint(pool, request.params.id, sprintId))) {
+          response.status(400).json({ message: 'Sprint gehört nicht zum Projekt.' });
+          return;
+        }
         response.status(409).json({
           message:
             'Nur offene oder abgebrochene Aufträge ohne Sprint lassen sich übernehmen, und nur in geplante oder aktive Sprints desselben Projekts.',

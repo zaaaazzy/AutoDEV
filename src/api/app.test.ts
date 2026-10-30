@@ -666,13 +666,14 @@ test('defines agents per workflow phase and persists their order', async () => {
     });
     assert.equal(badPhase.status, 400);
 
+    // Die Attrappe kennt nur den Agent ID im Projekt (assertInProject); fremde IDs prüft tenant-ids.test.ts.
     const ordered = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
       method: 'POST',
       headers: jsonHeaders(),
-      body: JSON.stringify({ phase: 'pre_task', ids: [ID, SPRINT_ID] }),
+      body: JSON.stringify({ phase: 'pre_task', ids: [ID] }),
     });
     assert.equal(ordered.status, 204);
-    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'pre_task', [ID, SPRINT_ID]]);
+    assert.deepEqual(queries.at(-1)?.values, ['mainty', 'pre_task', [ID]]);
 
     const badOrder = await fetch(`${baseUrl}/api/projects/mainty/agents/order`, {
       method: 'POST',
@@ -689,7 +690,8 @@ test('defines agents per workflow phase and persists their order', async () => {
 });
 
 test('moves a workflow step to another phase with one order call per phase (drag & drop)', async () => {
-  const { pool, queries } = recordingPool();
+  // Beide Schritte gehören zum Projekt (assertInProject findet zwei Zeilen).
+  const { pool, queries } = recordingPool([{ id: SPRINT_ID }, { id: ID }]);
   await withServer(pool, async (baseUrl) => {
     const order = (phase: string, ids: string[]) =>
       fetch(`${baseUrl}/api/projects/mainty/workflow/order`, {

@@ -4,6 +4,7 @@ import { access } from './access.js';
 import type { Principal } from './roles.js';
 import { completeSprintIn } from './sprint-planning.js';
 import { guardGit } from './git-state.js';
+import { assertInProject } from './tenancy.js';
 import { sprintBranch } from '../runner/git-sync/git-helpers.js';
 import {
   buildUpdate,
@@ -343,6 +344,19 @@ export function registerSprintRoutes(app: Router, pool: Pool): void {
       const ids = (request.body as { ids?: unknown } | undefined)?.ids;
       if (!isUuid(request.params.id) || !Array.isArray(ids) || ids.length > 500 || !ids.every(isUuid)) {
         response.status(400).json({ message: 'Ungültige Reihenfolge.' });
+        return;
+      }
+      const sprint = (
+        await pool.query<{ slug: string }>('SELECT project_slug AS slug FROM sprints WHERE id = $1', [
+          request.params.id,
+        ])
+      ).rows[0];
+      if (!sprint) {
+        response.status(404).json({ message: 'Sprint nicht gefunden.' });
+        return;
+      }
+      if (!(await assertInProject(pool, 'development_items', ids as string[], sprint.slug))) {
+        response.status(400).json({ message: 'Aufträge gehören nicht zu diesem Projekt.' });
         return;
       }
       await pool.query(

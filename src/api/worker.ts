@@ -7,6 +7,7 @@ import { access } from './access.js';
 import { cpus, loadavg } from 'node:os';
 import type { Pool } from 'pg';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { assertInProject } from './tenancy.js';
 
 export async function beatHeartbeat(
   pool: Pool,
@@ -151,6 +152,10 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         response.status(400).json({ message: 'Ungültige Anfrage.' });
         return;
       }
+      if (!(await assertInProject(pool, 'agents', id, slug))) {
+        response.status(404).json({ message: 'Agent nicht gefunden.' });
+        return;
+      }
       const rows = (
         await pool.query(
           `SELECT st.id, st.status AS "stepStatus", st.duration_ms AS "durationMs", st.output, st.progress, st.events, r.started_at AS "startedAt",
@@ -194,6 +199,10 @@ export function registerWorkerRoutes(app: Router, pool: Pool): void {
         const slug = parseProjectSlug(request.params.slug);
         if (!slug) {
           response.status(400).json({ message: 'Ungültiges Projekt.' });
+          return;
+        }
+        if (!isUuid(request.params.id) || !(await assertInProject(pool, 'agents', request.params.id, slug))) {
+          response.status(404).json({ message: 'Agent nicht gefunden.' });
           return;
         }
         const result = await cancelAgent(pool, slug, request.params.id);

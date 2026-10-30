@@ -188,6 +188,17 @@ ohne Namen dorthin. Als Empfänger ist nur ein Agent desselben Projekts erlaubt;
 IDs mit 400 ab, `null` hebt die feste Zuordnung auf. Der Empfänger sieht sie unter „Nachrichten an dich“; gespeichert sind sie in
 `agent_run_steps.handoffs`. Implementierung: `src/core/workflow-phases.ts`, `src/runner/pre-sprint.ts`.
 
+**Mandanten-Prüfung für ID-Felder (Pflicht für neue Routen):** Jede API-Route, die eine ID aus Pfad oder Body
+übernimmt (z. B. `agentId`, `handoffTo`, `sprintId`, `developmentId`, `ids`), prüft vor jedem Schreiben und jeder
+Folgeaktion mit `assertInProject(pool, tabelle, id, projektSlug)` (`src/api/tenancy.ts`), dass die ID zum Projekt der
+Route gehört. Der Fremdschlüssel prüft das Projekt nicht, und `routeGuard` prüft nur den Mandanten der Route selbst
+(`:slug` bzw. `:id`), für Administratoren gar nicht. Fremde IDs ergeben 400 (falsche Eingabe) oder 404 (nicht gefunden);
+ein schon vorhandener Statuscode einer Route bleibt. Jede neue ID-Eingabe gehört zusätzlich in die Allowlist
+`src/api/tenant-id-fields.ts`, mit Szenario in `src/api/tenant-ids.test.ts`. Der Test liest die registrierten
+Express-Routen und ihren Quelltext, scheitert bei einem ID-Feld ohne Eintrag und schickt für jeden Eintrag eine ID aus
+einem zweiten Projekt („fremd“): erwartet 400/404 und eine unveränderte Datenbank (Zeilenzahl und Inhalt aller
+Tabellen). Die gültige ID aus dem eigenen Projekt muss weiter den bisherigen Erfolgsstatus liefern.
+
 ## 5. Fehlerbehandlung und Auto-Bugfix
 
 0. **Nachbesserung im selben Lauf:** Sind die Tests rot oder lehnt der Reviewer ab, geht der Auftrag zuerst einmal direkt zurück an den Entwickler – mit der Ausgabe von Tester bzw. Reviewer als Rückmeldung. Danach laufen Entwickler, Tester und Reviewer erneut. Erst wenn auch dieser Versuch scheitert, greift der folgende Ablauf. Die erste Rückmeldung bleibt als fehlgeschlagener Schritt im Lauf sichtbar („Zurück an den Entwickler zur Nachbesserung“). Bei einem einzelnen Agent (Play-Knopf) gibt es keine Nachbesserung.

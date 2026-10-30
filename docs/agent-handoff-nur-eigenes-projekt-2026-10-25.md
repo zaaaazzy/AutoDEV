@@ -32,3 +32,12 @@ Auftrag d7054b90 (Bugfix, 25.10.2026). Gefunden im Code-Review vom 21.10.2026 (S
 - Die Prüfung gilt nur für `PATCH /agents/:id`. Wer künftig `handoff_to` an anderer Stelle schreibt, muss `agentInProject` ebenfalls nutzen.
 - Der Fremdschlüssel allein reicht nicht, er prüft das Projekt nicht; eine Schemaänderung ist deshalb nicht vorgesehen.
 - Für `developmentId` im Review-Container bleibt es bei 404 statt dem im Auftrag genannten 400.
+
+## Nachtrag 30.10.2026: Allowlist für alle ID-Felder
+
+Auftrag 852db391 hat die Prüfung verallgemeinert. `agentInProject` gibt es nicht mehr; an seine Stelle tritt
+`assertInProject(pool, tabelle, id, projektSlug)` in `src/api/tenancy.ts`. `PATCH /agents/:id` nutzt ihn mit
+unverändertem Verhalten (400, `null` erlaubt). Alle Routen mit ID-Feld in Pfad oder Body stehen in der Allowlist
+`src/api/tenant-id-fields.ts`. `src/api/tenant-ids.test.ts` scheitert, wenn eine registrierte Route mit ID-Feld dort
+fehlt, und prüft je Eintrag eine fremde ID (400/404, Datenbank unverändert) und eine eigene ID (bisheriger Status).
+Siehe `docs/workflows.md`, Abschnitt „Mandanten-Prüfung für ID-Felder“.

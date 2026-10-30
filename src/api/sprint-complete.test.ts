@@ -124,6 +124,8 @@ const statusList = (text: string | undefined): string[] =>
  */
 function orderDb(rows: OrderRow[]) {
   const query = async (sql: string, params: unknown[] = []) => {
+    // Meldung nach abgelehntem UPDATE: Der Ziel-Sprint ist geplant und gehört zum Projekt des Auftrags.
+    if (sql.includes('FROM sprints s JOIN development_items d')) return { rows: [{ status: 'planned' }], rowCount: 1 };
     if (sql.includes('UPDATE development_items SET removed_from_sprint =')) {
       const keep = statusList(/status NOT IN \(([^)]*)\)/.exec(sql)?.[1]);
       const reset = /CASE WHEN status (?:= '(\w+)'|IN \(([^)]*)\)) THEN 'backlog'/.exec(sql);

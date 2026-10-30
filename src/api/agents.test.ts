@@ -35,9 +35,14 @@ function setup() {
     query: async (sql: string, values: unknown[] = []) => {
       queries.push({ sql, values });
       if (sql.startsWith('SELECT project_slug AS slug, command, role')) return { rows: [STORED], rowCount: 1 };
+      // assertInProject (tenancy.ts): eine ID oder eine Liste von IDs im Projekt values[1].
       if (sql.startsWith('SELECT 1 FROM agents WHERE id = $1 AND project_slug = $2')) {
         const own = PROJECT_AGENTS[values[1] as string]?.includes(values[0] as string);
         return { rows: own ? [{ '?column?': 1 }] : [], rowCount: own ? 1 : 0 };
+      }
+      if (sql.startsWith('SELECT DISTINCT id FROM agents WHERE id = ANY($1) AND project_slug = $2')) {
+        const own = (values[0] as string[]).filter((id) => PROJECT_AGENTS[values[1] as string]?.includes(id));
+        return { rows: own.map((id) => ({ id })), rowCount: own.length };
       }
       return { rows: [{ id: AGENT_ID }], rowCount: 1 };
     },
@@ -142,6 +147,36 @@ test('PATCH /agents/:id: handoffTo auf einen Agent desselben Projekts und null b
     assert.ok(update && /handoff_to = \$2/.test(update.sql));
     assert.equal(update.values[1], handoffTo);
   }
+});
+
+test('POST /projects/:slug/agents: handoffTo auf einen Agent eines fremden Projekts wird mit 400 abgelehnt', async () => {
+  const create = (handoffTo: string) => ({ name: 'X', phase: 'while_task', handoffTo });
+  const foreign = setup();
+  const status = await call(
+    foreign.handlers.get('POST /projects/:slug/agents'),
+    agentsUser,
+    { slug: 'demo' },
+    create(FOREIGN_AGENT),
+  );
+  assert.equal(status, 400);
+  assert.deepEqual(writes(foreign.queries), []);
+  const own = setup();
+  assert.equal(
+    await call(own.handlers.get('POST /projects/:slug/agents'), agentsUser, { slug: 'demo' }, create(OWN_AGENT)),
+    201,
+  );
+});
+
+test('POST /projects/:slug/agents/order: Agents eines fremden Projekts werden mit 400 abgelehnt', async () => {
+  const order = (ids: string[]) => ({ phase: 'while_task', ids });
+  const foreign = setup();
+  const handler = foreign.handlers.get('POST /projects/:slug/agents/order');
+  assert.equal(await call(handler, agentsUser, { slug: 'demo' }, order([OWN_AGENT, FOREIGN_AGENT])), 400);
+  assert.deepEqual(writes(foreign.queries), []);
+  const own = setup();
+  const ownHandler = own.handlers.get('POST /projects/:slug/agents/order');
+  assert.equal(await call(ownHandler, agentsUser, { slug: 'demo' }, order([AGENT_ID, OWN_AGENT])), 204);
+  assert.equal(writes(own.queries).length, 1);
 });
 
 test('POST /projects/:slug/agents: Rolle agents darf weder command noch eine Rolle setzen', async () => {

@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { isRecord, isUuid, parseProjectSlug } from '../core/validation.js';
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
+import { assertInProject } from './tenancy.js';
 
 export const STEP_COLUMNS = `id, phase, position, agent_id AS "agentId", instructions, enabled`;
 const MAX_INSTRUCTIONS = 10_000;
@@ -60,6 +61,10 @@ export function registerWorkflowRoutes(app: Router, pool: Pool): void {
         ) {
           return void response.status(400).json({ message: 'Ungültiger Workflow-Schritt.' });
         }
+        // Vor ensureWorkflowSteps: Eine abgelehnte Anfrage darf auch die Standard-Schritte nicht anlegen.
+        if (!(await assertInProject(pool, 'agents', body.agentId as string, slug))) {
+          return void response.status(400).json({ message: 'Agent gehört nicht zum Projekt.' });
+        }
         await ensureWorkflowSteps(pool, slug);
         const result = await pool.query(
           `INSERT INTO workflow_steps (project_slug, phase, position, agent_id, instructions)
@@ -95,6 +100,9 @@ export function registerWorkflowRoutes(app: Router, pool: Pool): void {
           !body.ids.every(isUuid)
         ) {
           return void response.status(400).json({ message: 'Ungültige Reihenfolge.' });
+        }
+        if (!(await assertInProject(pool, 'workflow_steps', body.ids as string[], slug))) {
+          return void response.status(400).json({ message: 'Schritte gehören nicht zu diesem Projekt.' });
         }
         await pool.query(
           `UPDATE workflow_steps s SET position = o.ord, phase = $2
