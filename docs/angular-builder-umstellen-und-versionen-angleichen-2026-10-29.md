@@ -38,6 +38,9 @@ Für Patrick auf dem Host:
 
 Bis Schritt 1 erledigt ist, schlägt der Test „@angular/cdk steht auf 20.3.x“ in `scripts/angular-builder.test.ts` absichtlich fehl. Die übrigen vier Tests dort prüfen Builder, `engines` und die Startskripte und müssen grün sein. Der Abbruch des Testers (`EACCES` in `/home/agent/.npm/_cacache`) kommt aus dem Container und ist kein Codefehler.
 
+### Dokumentationslauf nach dem Tester (30.10.2026)
+Stand im Arbeitsordner geprüft: `package.json` hat `engines` (`>=22.12`) und `@angular/build` ^20.3.40, `@angular/cdk` steht weiter fest auf `20.2.14`. `package-lock.json` enthält `build-angular` noch 29-mal. Der Tester ist mit `EACCES` auf `/home/agent/.npm/_cacache` abgebrochen (Cache-Ordner gehört root, Umgebungsproblem des Containers, kein Codefehler); seine Dateiliste enthält auch `scripts/angular-builder.test.ts`, gelaufen ist davon nichts. Der Auftrag ist damit nicht abgenommen und bleibt offen, bis Patrick die Schritte im Abschnitt „Erneuter Lauf“ auf dem Host ausgeführt hat. Nicht erneut an Agents geben. Die Einträge „monthly spend limit“ sind keine Codefehler. Es wurden keine Tests ausgeführt.
+
 ## Tests
 Laut Entwickler: `npm run build:ui` und `typecheck` fehlerfrei, `lint` 0 Fehler (812 Warnungen, schon vorher vorhanden), `test:unit` 1822 bestanden. `ng serve` mit Proxy startet („Local: http://localhost:4299/“); die Seite wurde nicht abgerufen (`curl` gesperrt). Für diese Dokumentation wurden die Tests nicht erneut ausgeführt.
 
