@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import { createDevLogApp } from './app.js';
@@ -29,6 +31,10 @@ async function withServer(pool: Pool, action: (baseUrl: string) => Promise<void>
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 }
+
+/** Die Shell-Tests brauchen die gebaute Oberfläche: `npm test` baut sie vorher, `test:unit` (und CI) nicht. */
+const UI_BUILT = existsSync(join(import.meta.dirname, '..', '..', 'dist', 'ui', 'browser', 'index.html'));
+const NEEDS_UI = UI_BUILT ? {} : { skip: 'dist/ui fehlt (npm run build:ui)' };
 
 function basicAuth(): string {
   return `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`;
@@ -205,7 +211,7 @@ test('2FA einrichten verlangt das Passwort und bei aktivem zweitem Faktor einen 
   }
 });
 
-test('serves the Angular application shell', async () => {
+test('serves the Angular application shell', NEEDS_UI, async () => {
   const pool = { query: async () => ({ rows: [] }) } as unknown as Pool;
   await withServer(pool, async (baseUrl) => {
     const response = await fetch(`${baseUrl}/`, {
@@ -744,7 +750,7 @@ test('moves a workflow step to another phase with one order call per phase (drag
   });
 });
 
-test('serves the Angular bundle from the application shell', async () => {
+test('serves the Angular bundle from the application shell', NEEDS_UI, async () => {
   await withServer(recordingPool().pool, async (baseUrl) => {
     const html = await (await fetch(`${baseUrl}/`, { headers: { Authorization: basicAuth() } })).text();
     assert.match(html, /<app-root><\/app-root>/);
