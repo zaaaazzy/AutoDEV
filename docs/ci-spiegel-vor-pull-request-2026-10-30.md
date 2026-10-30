@@ -56,14 +56,15 @@ flowchart TD
 - **Bug-Quelle `github`:** vorhanden in `bugs_source_check`, keine Schema- oder Migrationsänderung. Der Titel unterscheidet sich von „CI rot im Pull Request von …“, die Bereinigung in `migrations.ts` erfasst ihn nicht.
 - **Offen:** Ein Bug „CI-Spiegel rot vor Pull Request von …“ wird nach erfolgreichem Merge nicht automatisch geschlossen. Falls gewünscht, in `pollSprintReviews` analog zu `ciBugTitle` ergänzen.
 - **Laufzeit:** Die vier Schritte (vor allem die Tests) verlängern die Sprint-Sicherung im PR-Modus.
-- **Datenbank-Erkennung ist musterbasiert** (`NO_DATABASE`) und gilt nur für `test:unit`. Ändern sich die Meldungen der Test-Datenbank, muss das Muster nachgezogen werden.
+- **Datenbank-Erkennung ist musterbasiert** (`NO_DATABASE`) und gilt nur für `test:unit`. Ändern sich die Meldungen der Test-Datenbank, muss das Muster nachgezogen werden. Enthält die Ausgabe den Datenbank-Hinweis, gilt der ganze Schritt als „nicht prüfbar“, auch wenn daneben andere Tests rot sind. Diese prüft dann die echte CI.
+- **Bestehender PR-Modus-Test** (`git-sync.test.ts`, ab Zeile 444): Dort legt `ensureCiWorkflow` eine `ci.yml` mit `run: true` an. Ohne `npm run`-Schritt überspringt der Spiegel, der Ablauf bleibt wie bisher.
 - Der Spiegel ist eine Vorprüfung. Die echte CI bleibt maßgeblich; `waitForCi` und der Merge sind unverändert.
 
 ## Sprint
 
 | Auftrag | Zustand | Details |
 | --- | --- | --- |
-| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Prüfung offen | Tester-Lauf wegen kaputter Umgebung nicht aussagekräftig |
+| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Prüfung offen | Tester-Lauf wegen kaputter Umgebung nicht aussagekräftig. Erneuter Versuch am 30.10.2026: Die Umgebung ist weiter kaputt. `node_modules` und `.git` im Worktree verweisen auf den Host-Pfad `/Volumes/DroneShots/Coding/AIdeation/source/…`, den es im Container nicht gibt (`tsc: not found`, `git` meldet „not a git repository“). Der Code wurde statisch geprüft und nicht geändert. |
 
 ## Anfrage / TODO
 
