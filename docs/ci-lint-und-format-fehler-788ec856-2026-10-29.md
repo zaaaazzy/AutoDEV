@@ -83,7 +83,7 @@ und keiner der GitHub-CI. Es ist ein Folgefehler der Umstellung der Agents auf C
   Bisher liefen also weder die neuen Unit-Tests in `src/core/sandbox.test.ts` noch `npm run test:unit` noch ein Lauf
   gegen echtes Docker. Nötig sind deshalb: Worker mit dem neuen Code neu starten („AIdeation neu starten“, baut auch das
   Image `aideation-agent` neu), dann einen Lauf starten. Das Volume füllt sich dabei. Den Bug erst nach einem grünen
-  GitHub-Actions-Lauf (Jobs `check` und `docker`) schliessen.
+  GitHub-Actions-Lauf (Jobs `check` und `e2e`) schliessen.
 
 ## Stand nach dem erneuten Versuch (30.10.2026)
 
