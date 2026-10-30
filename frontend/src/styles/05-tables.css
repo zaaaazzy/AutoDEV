@@ -74,7 +74,7 @@
   gap: 4px;
   padding: 3px 4px 3px 10px;
   border-radius: 999px;
-  background: #e7eff7;
+  background: var(--info-soft);
   color: var(--blue);
   font-size: 12px;
 }
@@ -124,7 +124,7 @@
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #4a554d;
+  color: var(--text-body);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
   transition:
@@ -160,7 +160,7 @@
 .dt-page-of {
   display: none;
   padding: 0 6px;
-  color: #4a554d;
+  color: var(--text-body);
   font-size: 12.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -169,14 +169,14 @@
 }
 .dt-reset {
   padding: 4px 10px;
-  border: 1px solid #dfe3da;
+  border: 1px solid var(--border-subtle);
   border-radius: 999px;
   background: var(--surface);
-  color: #4a554d;
+  color: var(--text-body);
   font-size: 12px;
 }
 .dt-reset:hover {
-  border-color: #9fb3a5;
+  border-color: var(--border-hover);
 }
 .dt-table thead th {
   position: sticky;
@@ -186,7 +186,7 @@
   font-size: 12px;
   font-weight: 650;
   letter-spacing: 0.02em;
-  color: #5b665e;
+  color: var(--text-secondary);
   text-transform: uppercase;
 }
 .dt-head {
@@ -208,7 +208,7 @@
   text-transform: inherit;
 }
 .dt-sort:hover {
-  background: #eef0ea;
+  background: var(--surface-tint);
 }
 .dt-sort-icon {
   color: #b3bcb3;
@@ -231,11 +231,11 @@
   color: #b3bcb3;
 }
 .dt-filter-button:hover {
-  background: #eef0ea;
-  color: #5b665e;
+  background: var(--surface-tint);
+  color: var(--text-secondary);
 }
 .dt-filter-button.active {
-  background: #e7eff7;
+  background: var(--info-soft);
   color: var(--blue);
 }
 .dt-filter-menu {
@@ -247,7 +247,7 @@
   max-height: 300px;
   overflow: auto;
   padding: 8px;
-  border: 1px solid #dfe3da;
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 10px 28px rgb(0 0 0 / 14%);
@@ -286,7 +286,7 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #4a554d;
+  color: var(--text-body);
   font-variant-numeric: tabular-nums;
 }
 .sprint-progress-cell .sprint-bar {
@@ -295,7 +295,7 @@
   height: 4px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e8ebe4;
+  background: var(--surface-track);
 }
 .sprint-progress-cell .sprint-bar span {
   display: block;
@@ -324,16 +324,16 @@
   height: 28px;
   place-items: center;
   padding: 0;
-  border: 1px solid #dfe3da;
+  border: 1px solid var(--border-subtle);
   border-radius: 7px;
   background: var(--surface);
-  color: #5b665e;
+  color: var(--text-secondary);
   transition:
     background 0.15s,
     border-color 0.15s;
 }
 .dt-expand:hover {
-  border-color: #9fb3a5;
+  border-color: var(--border-hover);
   background: var(--paper);
 }
 .dt-expand svg {
@@ -367,9 +367,9 @@
 /* Gruppenüberschrift in Tabellen (z. B. Agents nach Kategorie) */
 .dt-table tr.dt-group > td {
   padding: 14px 12px 6px;
-  border-bottom: 1px solid #dfe3da;
+  border-bottom: 1px solid var(--border-subtle);
   background: transparent;
-  color: #26312a;
+  color: var(--ink-deep);
   font-size: 13px;
   font-weight: 700;
 }

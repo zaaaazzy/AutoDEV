@@ -118,9 +118,9 @@
   display: grid;
   gap: 4px;
   padding: 12px 14px;
-  border: 1px solid #f1d8b5;
+  border: 1px solid var(--notice-border);
   border-radius: 14px;
-  background: #fdf6ec;
+  background: var(--notice-surface);
 }
 .guide-foot {
   display: flex;
@@ -189,7 +189,7 @@
 }
 .tour-card p {
   margin: 0;
-  color: #46524a;
+  color: var(--text-medium);
 }
 .tour-progress {
   color: var(--green) !important;
@@ -201,7 +201,7 @@
 .tour-wait {
   padding: 8px 10px;
   border-radius: 10px;
-  background: #fdf6ec;
+  background: var(--notice-surface);
   color: var(--warn) !important;
   font-size: 13px;
 }
