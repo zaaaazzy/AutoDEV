@@ -4,7 +4,7 @@ Stand: 30.10.2026 · Auftrag e8de4bd4
 
 Dieses Kapitel beschreibt die neuen Aktionen in der Ideenliste: **Ablehnen mit Grund** und **Priorität setzen** für markierte Ideen sowie **Schnell ablehnen** für eine einzelne Idee.
 
-> **Printscreens:** noch nicht erstellt. Die Umgebung hat keinen Browser und keine laufende App mit Datenbank. Die Abschnitte unten beruhen auf dem Quelltext. Die Platzhalter stehen in Abschnitt 9.
+> **Printscreens:** noch nicht erstellt. Im Workspace fehlen Chromium, Chrome und Firefox, und der Playwright-Cache liegt außerhalb des erlaubten Bereichs. Außerdem läuft keine App mit Datenbank. Die Abschnitte unten beruhen auf dem Quelltext. Die Platzhalter stehen in Abschnitt 9.
 >
 > **Tests:** Für diesen Stand sind Typecheck und Tests nicht gelaufen (`tsc` fehlt im Image, der npm-Cache gehört root).
 
@@ -50,7 +50,7 @@ Die Meldung lautet etwa „2 von 2 Ideen neu priorisiert.“. Danach werden List
 
 ## 5. Schnell ablehnen (eine Idee)
 
-Der Knopf **⊘ Schnell ablehnen** steht in der Aktionsspalte neben dem Bearbeiten-Knopf ✎. Er erscheint nur, wenn beide Bedingungen zutreffen:
+Der Knopf **⊘** (Tooltip „Schnell ablehnen“) steht in der Aktionsspalte neben dem Bearbeiten-Knopf ✎. Er erscheint nur, wenn beide Bedingungen zutreffen:
 
 - Die Idee hat den Status **Idee**, **In Überlegung** oder **Prüfung**.
 - Du hast die Rolle **Planung**.
@@ -58,8 +58,8 @@ Der Knopf **⊘ Schnell ablehnen** steht in der Aktionsspalte neben dem Bearbeit
 Abgelehnte Ideen zeigen den ✎-Knopf, aber keinen ⊘-Knopf. Ideen in Bearbeitung durch den Auftragsautor zeigen keinen von beiden.
 
 1. Klicke auf ⊘. Das Popover zeigt den Titel der Idee und das Grundfeld.
-2. Schreibe den Grund (Pflicht, höchstens 1000 Zeichen). **Idee ablehnen** ist erst aktiv, wenn Text drin steht.
-3. Klicke auf **Idee ablehnen**. Die Idee erhält dieselbe Speicherung und denselben Kommentar wie bei der Massenablehnung und erscheint danach unter **Abgeschlossene Ideen** mit dem Status **Abgelehnt**.
+2. Schreibe den Grund (Pflicht, höchstens 1000 Zeichen). **Ablehnen** ist erst aktiv, wenn Text drin steht.
+3. Klicke auf **Ablehnen**. Die Idee erhält dieselbe Speicherung und denselben Kommentar wie bei der Massenablehnung und erscheint danach unter **Abgeschlossene Ideen** mit dem Status **Abgelehnt**.
 
 **Abbrechen** oder **Escape** schließt das Popover ohne Speichern. Der Ideen-Dialog dahinter bleibt offen. Ein Klick außerhalb des Popovers schließt es ebenfalls ohne Speichern.
 
