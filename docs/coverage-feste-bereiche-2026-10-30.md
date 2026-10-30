@@ -29,6 +29,7 @@ Auftrag 3ad55799 (30.10.2026).
 ## Offen / TODO
 
 - **Migrationsnummer:** Die Migration trägt wie verlangt Version 20; Version 19 ist im Lückentest als reserviert eingetragen. Gibt es keinen parallelen Schritt 19, auf 19 umnummerieren und `RESERVED_VERSIONS` entfernen (Entscheidung beim Auftraggeber).
+- **Testlauf nicht verifiziert:** Der Tester-Schritt scheiterte an der Umgebung, nicht an einem Testergebnis: `npm run typecheck` fand `tsc` im Image „aideation-agent“ nicht (Exit 127), und `npx tsx --test …` scheiterte an `EACCES` im npm-Cache (`/home/agent/.npm`). Die Tests (`coverage-trend.spec.ts`, `src/api/coverage.test.ts`, `src/db/migrations.test.ts`, `src/runner/{acceptance,coverage,measured-coverage,runner-steps,runner}.test.ts`) und der Typecheck sind daher noch nicht grün bestätigt. Vor dem Mergen mit `npm test` bzw. `npm run typecheck` in einer Umgebung mit installierten Abhängigkeiten laufen lassen.
 - `full-ui.check.ts` (Oberflächentest) wurde in dieser Doku-Phase nicht geprüft; bei Änderungen an der Statistik-Ansicht mitführen.
 
 ## Worauf zu achten ist
