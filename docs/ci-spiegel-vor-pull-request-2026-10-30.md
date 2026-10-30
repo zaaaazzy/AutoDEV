@@ -35,7 +35,8 @@ flowchart TD
 ## Tests und Prüfung
 
 - Testdateien decken ab: vier Schritte in Dateireihenfolge, `npm ci`/Docker/E2E nicht gespiegelt, roter Schritt ohne `push`/`createPullRequest`, genau ein Bug mit Schrittnamen, kein zweiter Bug beim zweiten roten Lauf, Log-Auszug ohne Zugangsdaten und höchstens 3000 Zeichen, „nicht prüfbar“ ohne Datenbank (PR wird geöffnet), grüner Ablauf (Push, dann Pull Request).
-- **Nicht verifiziert:** Der Tester-Lauf scheiterte an der Umgebung (`node_modules` in `/workspace` ist ein toter macOS-Symlink, `tsc` nicht gefunden, npm-Cache nicht beschreibbar). Weder `npm run lint`, `format:check`, `typecheck` noch `test:unit` oder der bestehende PR-Modus-Test in `git-sync.test.ts` wurden in diesem Auftrag erfolgreich ausgeführt. Die Dokumentation hat nichts davon erneut ausgeführt; die Prüfung muss in einer Umgebung mit funktionierender Installation nachgeholt werden.
+- **Entwickler (Arbeitscontainer):** `npm run lint`, `format:check`, `typecheck` und `test:unit` liefen grün (1857 Tests, 0 fehlgeschlagen). Das ist die Angabe des Entwicklers; die Dokumentation hat nichts davon erneut ausgeführt. Die Dateiliste ist nicht per Diff gegen main geprüft, weil `.git` im Container auf einen Host-Pfad zeigt.
+- **Tester-Lauf nicht belegt:** Er scheiterte an der Umgebung des Images „aideation-agent“ (`tsc: not found`, Exit-Code 127; `npx` mit EACCES auf `/home/agent/.npm/_cacache`). Die Akzeptanzkriterien sind damit durch den Tester nicht bestätigt. Der Wächter sperrt `npx` und direkte `node_modules/.bin/tsx`-Aufrufe; `npm run …` funktioniert.
 
 ## Geänderte Dateien
 
@@ -44,6 +45,8 @@ flowchart TD
 - `src/runner/git-sync/ci.ts`
 - `src/runner/git-sync/sprint-sync.ts`
 - `src/runner/git-sync.test.ts`
+- `eslint.config.mjs` (gitignorierte Testausgaben `test-results/` ausgeschlossen)
+- `package-lock.json` (laut Dateiliste geändert; vom Entwickler nicht bewusst angefasst, vor dem Merge prüfen)
 - `docs/ci.md`
 - `docs/workflows.md`
 - `docs/benutzerhandbuch-live-schalten-pr-modus.md`
@@ -64,10 +67,12 @@ flowchart TD
 
 | Auftrag | Zustand | Details |
 | --- | --- | --- |
-| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Prüfung offen | Tester-Lauf wegen kaputter Umgebung nicht aussagekräftig. Erneuter Versuch am 30.10.2026: Die Umgebung ist weiter kaputt. `node_modules` und `.git` im Worktree verweisen auf den Host-Pfad `/Volumes/DroneShots/Coding/AIdeation/source/…`, den es im Container nicht gibt (`tsc: not found`, `git` meldet „not a git repository“). Der Code wurde statisch geprüft und nicht geändert. Zweiter erneuter Versuch (30.10.2026, nach dem Hinweis „Agent-Image und Worktree-Verlinkung reparieren“): Die Verlinkung ist weiter kaputt (`node_modules` → `/Volumes/…/source/node_modules`, `.git` → `/Volumes/…/.git/worktrees/DevLog-agents`, beides fehlt im Container). Node 22 ist da, `tsx`, `tsc` und `pg` fehlen. Der Code wurde nochmals statisch geprüft (Einbindung in `pushSprint`, Exporte aus `ci.ts`, Tests) und nicht geändert. Dritter Versuch (30.10.2026): Der Tester-Lauf auf die 10 geänderten Dateien scheiterte erneut an der Umgebung (`tsc: not found`, Exit-Code 127 im Image „aideation-agent“; `npx` scheitert mit EACCES auf `/home/agent/.npm/_cacache`). Die Akzeptanzkriterien gelten damit als nicht belegt, das manuelle Kriterium (Freigabe in der Vorschau) steht aus. Die Dokumentation wurde nicht geändert. |
+| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Entwickler-Prüfung grün, Tester-Abnahme offen | Neuer Versuch im Arbeitscontainer: Entwickler meldet lint, format:check, typecheck und test:unit grün (1857 Tests). Der Tester-Lauf scheiterte erneut an der Image-Umgebung. Frühere Versuche: Erneuter Versuch am 30.10.2026: Die Umgebung ist weiter kaputt. `node_modules` und `.git` im Worktree verweisen auf den Host-Pfad `/Volumes/DroneShots/Coding/AIdeation/source/…`, den es im Container nicht gibt (`tsc: not found`, `git` meldet „not a git repository“). Der Code wurde statisch geprüft und nicht geändert. Zweiter erneuter Versuch (30.10.2026, nach dem Hinweis „Agent-Image und Worktree-Verlinkung reparieren“): Die Verlinkung ist weiter kaputt (`node_modules` → `/Volumes/…/source/node_modules`, `.git` → `/Volumes/…/.git/worktrees/DevLog-agents`, beides fehlt im Container). Node 22 ist da, `tsx`, `tsc` und `pg` fehlen. Der Code wurde nochmals statisch geprüft (Einbindung in `pushSprint`, Exporte aus `ci.ts`, Tests) und nicht geändert. Dritter Versuch (30.10.2026): Der Tester-Lauf auf die 10 geänderten Dateien scheiterte erneut an der Umgebung (`tsc: not found`, Exit-Code 127 im Image „aideation-agent“; `npx` scheitert mit EACCES auf `/home/agent/.npm/_cacache`). Die Akzeptanzkriterien gelten damit als nicht belegt, das manuelle Kriterium (Freigabe in der Vorschau) steht aus. Die Dokumentation wurde nicht geändert. |
 
 ## Anfrage / TODO
 
-- Prüfung (`lint`, `format:check`, `typecheck`, `test:unit`, `npx tsx --test src/runner/git-sync/ci-mirror.test.ts src/runner/git-sync.test.ts`) in einer Umgebung mit funktionierendem `node_modules` nachholen.
+- Agent-Image „aideation-agent“ reparieren (`tsc` fehlt, npm-Cache `/home/agent/.npm` gehört root), damit der Tester `npm run typecheck` und die Tests des Auftrags ausführen kann.
+- `package-lock.json` auf unbeabsichtigte Änderung prüfen.
+- Freigabe in der Vorschau durch einen Menschen (manuelles Kriterium) steht aus.
 - Entscheidung: Spiegel auch ohne PR-Modus?
 - Entscheidung: Spiegel-Bug nach Merge automatisch schließen?
