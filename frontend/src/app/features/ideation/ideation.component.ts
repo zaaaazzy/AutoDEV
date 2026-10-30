@@ -57,7 +57,11 @@ import {
   IDEA_STATUSES,
   ideaDisplayStatus,
   ideaPhase,
+  ideaValue,
+  ideaValueText,
   isOpenIdea,
+  openIdeasSort,
+  SCORE_FILTER_OPTIONS,
   VISIONARY_CONFIRM,
   SOURCE_FILTER_OPTIONS,
   sourceLabel,
@@ -187,6 +191,22 @@ export class IdeationComponent {
       sortValue: (idea) => PRIORITY_RANK.indexOf(idea.priority),
     },
     {
+      id: 'benefit',
+      header: 'Nutzen',
+      value: (idea) => idea.benefit,
+      options: SCORE_FILTER_OPTIONS,
+      emptyLast: true,
+    },
+    { id: 'cost', header: 'Kosten', value: (idea) => idea.cost, options: SCORE_FILTER_OPTIONS, emptyLast: true },
+    {
+      id: 'value',
+      header: 'Wert',
+      value: (idea) => ideaValueText(idea),
+      sortValue: (idea) => ideaValue(idea),
+      filter: false,
+      emptyLast: true,
+    },
+    {
       id: 'effortHours',
       header: 'Aufwand (Agent-Std.)',
       value: (idea) => formatHours(idea.calibratedHours ?? idea.effortHours),
@@ -214,6 +234,7 @@ export class IdeationComponent {
   protected readonly categories = CATEGORIES;
   /** Badge-Text wie Spalte und Filter „Herkunft“. */
   protected readonly sourceLabel = sourceLabel;
+  protected readonly ideaValueText = ideaValueText;
 
   protected readonly ideaErrors = new FieldErrors();
   protected ideaForm: { title: string; description: string; priority: Priority; category: string } = {
@@ -325,6 +346,8 @@ export class IdeationComponent {
   );
   /** Offene Ideen: weder angenommen noch abgelehnt – Abgeschlossene stehen nur unten in ihrer Gruppe. */
   protected readonly openIdeas = computed(() => this.data().ideas.filter((idea) => isOpenIdea(idea)));
+  /** Feste Konstanten statt neuer Arrays: Ein Daten-Refresh soll die Tabelle nicht auf Seite 1 zurücksetzen. */
+  protected readonly openIdeasSort = computed(() => openIdeasSort(this.openIdeas()));
 
   protected gitNodes(idea: Idea, order: DevelopmentItem | null, sprint: Sprint | null): GitNode[] {
     return [

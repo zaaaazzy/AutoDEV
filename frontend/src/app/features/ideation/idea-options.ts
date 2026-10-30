@@ -71,6 +71,30 @@ export function sourceLabel(source: string | null | undefined): string {
 /** Feste Werte des Herkunft-Filters („Alle“ ergänzt die Tabelle) – gleich benannt wie Spalte und Badge. */
 export const SOURCE_FILTER_OPTIONS: readonly string[] = IDEA_SOURCES.map(sourceLabel);
 
+/** Feste Werte der Filter „Nutzen“ und „Kosten“ (Skala 0–10, wie angezeigt). */
+export const SCORE_FILTER_OPTIONS: readonly string[] = Array.from({ length: 11 }, (_, score) => String(score));
+
+/** Wert einer Idee = Nutzen / Kosten; ohne Nutzen, ohne Kosten oder bei Kosten 0 nicht berechenbar (null). */
+export function ideaValue(idea: Pick<Idea, 'benefit' | 'cost'>): number | null {
+  const { benefit, cost } = idea;
+  if (benefit === null || benefit === undefined || cost === null || cost === undefined || cost <= 0) return null;
+  return benefit / cost;
+}
+
+/** Wert mit einer Nachkommastelle und deutschem Komma („2,7“), leer wenn nicht berechenbar. */
+export function ideaValueText(idea: Pick<Idea, 'benefit' | 'cost'>): string {
+  const value = ideaValue(idea);
+  return value === null ? '' : value.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+/** Standard-Sortierung „Offene Ideen“: mit Visionär-Ideen nach Wert, sonst nach Erstellung (je absteigend). */
+export const VALUE_SORT = [{ id: 'value', desc: true }];
+export const CREATED_SORT = [{ id: 'createdAt', desc: true }];
+
+export function openIdeasSort(ideas: readonly Pick<Idea, 'source'>[]): typeof VALUE_SORT {
+  return ideas.some((idea) => idea.source === 'visionary') ? VALUE_SORT : CREATED_SORT;
+}
+
 /** Feld „Richtung“ für den Visionär: gleich in der Ideation und im Aktionsmenü des Assistenten. */
 export const VISIONARY_DIRECTION = {
   commentLabel: 'Richtung (optional)',
