@@ -41,7 +41,10 @@ ENV DISABLE_AUTOUPDATER=1 \
 ARG PLAYWRIGHT_VERSION=1.64.1
 RUN npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "playwright@${PLAYWRIGHT_VERSION}" \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && rm -rf /home/agent/.npm
+# Der Install oben läuft als root mit HOME=/home/agent: ohne das rm bliebe ein root-eigener npm-Cache im Image, und
+# jedes npm/npx des Agents (läuft ohne root) bräche mit EACCES ab.
 COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture.mjs /opt/aideation/
 # ESM-Bündel lösen „playwright“ über node_modules neben sich auf: dort liegen die global installierten Pakete.
 RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
