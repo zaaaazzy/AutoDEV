@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { basename, isAbsolute, posix, relative, resolve, sep, win32 } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 
@@ -19,6 +20,12 @@ export const SANDBOX_IMAGE = 'aideation-agent';
 export const SANDBOX_LABEL = 'aideation.run';
 export const SANDBOX_WORKDIR = '/workspace';
 const SANDBOX_HOME = '/home/agent';
+/** npm-Cache im Container: /tmp ist für jede UID beschreibbar (ein ~/.npm aus dem Image-Build gehört root). */
+const SANDBOX_NPM_CACHE = '/tmp/npm-cache';
+/** Höchstdauer von npm ci beim Befüllen des node_modules-Volumes. */
+const INSTALL_TIMEOUT_MS = 15 * 60_000;
+/** Kopie des Lockfiles der letzten Installation im Volume: bei Gleichheit entfällt npm ci. */
+const INSTALLED_LOCK = '.aideation-installed-lock.json';
 /** Wächter im Image (deploy/agent/Dockerfile bündelt agent-guard.ts dorthin). */
 export const SANDBOX_GUARD = { node: 'node', script: '/opt/aideation/agent-guard.mjs' } as const;
 /** Internes Docker-Netzwerk der Agent-Container: keine Route nach aussen, nur zum Egress-Proxy. */
@@ -226,6 +233,8 @@ export function sandboxRunArgs(
     '-e',
     `HOME=${SANDBOX_HOME}`,
     '-e',
+    `npm_config_cache=${SANDBOX_NPM_CACHE}`,
+    '-e',
     `CLAUDE_PROJECT_DIR=${SANDBOX_WORKDIR}`,
     '-e',
     `DEV_LOG_OLLAMA_URL=${SANDBOX_OLLAMA_URL}`,
@@ -367,6 +376,89 @@ async function prepareModulesVolume(
     cwd,
     { timeoutMs: CHECK_TIMEOUT_MS * 3, env },
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
+}
+
+/**
+ * docker run, der das node_modules-Volume mit npm ci füllt. Eingebunden sind nur package.json und package-lock.json
+ * des Worktrees (:ro) und das Volume; npm erreicht die Registry über den Egress-Proxy. Stimmt das Lockfile mit dem der
+ * letzten Installation überein, endet der Container sofort. --ignore-scripts wie beim Worker (entrypoint.sh).
+ */
+export function modulesInstallArgs(worktree: string, options: SandboxOptions): string[] {
+  const platform = options.platform ?? process.platform;
+  const user = sandboxUser(options);
+  const script =
+    `if cmp -s package-lock.json node_modules/${INSTALLED_LOCK}; then exit 0; fi; ` +
+    `echo "→ Installiere node_modules (npm ci) …" && ` +
+    `npm ci --ignore-scripts --no-audit --no-fund && cp package-lock.json node_modules/${INSTALLED_LOCK}`;
+  const file = (name: string): string => (platform === 'win32' ? win32 : posix).join(worktree, name);
+  return [
+    'docker',
+    'run',
+    '--rm',
+    '--label',
+    `${SANDBOX_LABEL}=${options.runId}`,
+    ...(user ? ['--user', user] : []),
+    '--cap-drop',
+    'ALL',
+    '--security-opt',
+    'no-new-privileges',
+    '--network',
+    SANDBOX_NETWORK,
+    '-v',
+    `${hostMount(file('package.json'), platform)}:/install/package.json:ro`,
+    '-v',
+    `${hostMount(file('package-lock.json'), platform)}:/install/package-lock.json:ro`,
+    '-v',
+    `${modulesVolume(options.project)}:/install/node_modules`,
+    '-w',
+    '/install',
+    '-e',
+    'HOME=/tmp',
+    '-e',
+    `npm_config_cache=${SANDBOX_NPM_CACHE}`,
+    ...proxyEnvironment(),
+    '--entrypoint',
+    'sh',
+    options.image ?? SANDBOX_IMAGE,
+    '-c',
+    script,
+  ];
+}
+
+/** Laufende Installation je Volume: parallele Läufe desselben Projekts warten, statt npm ci doppelt zu starten. */
+const installs = new Map<string, Promise<CommandResult>>();
+
+/**
+ * Füllt das node_modules-Volume, wenn es leer ist oder das Lockfile sich geändert hat. Ohne package-lock.json im
+ * Worktree (kein Node-Projekt) geschieht nichts.
+ */
+async function installModules(
+  docker: CommandExecutor,
+  worktree: string,
+  options: SandboxOptions & { signal?: AbortSignal },
+  env: NodeJS.ProcessEnv,
+): Promise<CommandResult | null> {
+  if (!existsSync(join(worktree, 'package-lock.json')) || !existsSync(join(worktree, 'package.json'))) return null;
+  const network = await ensureAgentNetwork(docker, {
+    environment: options.environment,
+    cwd: worktree,
+    platform: options.platform,
+    image: options.image,
+  });
+  if (network) return { exitCode: 1, durationMs: 0, output: network };
+  const volume = modulesVolume(options.project);
+  let running = installs.get(volume);
+  if (!running) {
+    running = docker(modulesInstallArgs(worktree, options), worktree, {
+      timeoutMs: INSTALL_TIMEOUT_MS,
+      env,
+      signal: options.signal,
+    })
+      .catch(failed)
+      .finally(() => installs.delete(volume));
+    installs.set(volume, running);
+  }
+  return running;
 }
 
 /** Erlaubte Ziele des Egress-Proxys (siehe egress-proxy.ts); weitere über DEV_LOG_AGENT_SANDBOX_EGRESS (host:port, …). */
@@ -527,6 +619,15 @@ export async function runInSandbox(
       return blocked(message, redactWith);
     }
   }
+  // Leeres oder veraltetes Volume füllen; scheitert npm ci, läuft der Agent trotzdem (nicht jeder Schritt braucht
+  // node_modules) – mit Hinweis in der Ausgabe statt eines rätselhaften „tsc: not found“.
+  let installNote = '';
+  if (options.workspace !== false) {
+    const installed = await installModules(docker, worktree, { ...options, environment: source }, env);
+    if (installed && installed.exitCode !== 0) {
+      installNote = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht mit npm ci füllen (Exit-Code ${installed.exitCode}).\n${installed.output.trim().slice(-500)}\n\n`;
+    }
+  }
   if ((options.network ?? SANDBOX_NETWORK) === SANDBOX_NETWORK) {
     const network = await ensureAgentNetwork(docker, {
       environment: source,
@@ -539,7 +640,7 @@ export async function runInSandbox(
       return blocked(network, redactWith);
     }
   }
-  noteProblem(options.project, null);
+  noteProblem(options.project, installNote ? installNote.split('\n')[0] : null);
   if (signal?.aborted) return { exitCode: 130, durationMs: 0, output: 'Abgebrochen, bevor der Container startete.\n' };
   const name = options.name ?? containerName(options.runId);
   const args = sandboxRunArgs(command, worktree, { ...options, name, environment: source });
@@ -569,7 +670,7 @@ export async function runInSandbox(
   return {
     ...result,
     durationMs: Date.now() - startedAt,
-    output: redactOutput(note ? `${result.output}\n\n${note}\n` : result.output, redactWith),
+    output: redactOutput(installNote + (note ? `${result.output}\n\n${note}\n` : result.output), redactWith),
   };
 }
 

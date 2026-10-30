@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { CommandExecutor, CommandResult } from './command.js';
 import { guardHookCommand, withAgentPermissions } from '../agent/tool-permissions.js';
@@ -13,6 +15,7 @@ import {
   egressAllowList,
   egressRunArgs,
   ensureAgentNetwork,
+  modulesInstallArgs,
   modulesVolume,
   readOnlyWorkspace,
   removeLeftoverContainers,
@@ -452,4 +455,76 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+test('Sandbox: npm im Container nutzt einen Cache unter /tmp, nicht ~/.npm aus dem Image', () => {
+  const command = args();
+  const index = command.indexOf('npm_config_cache=/tmp/npm-cache');
+  assert.ok(index > 0);
+  assert.equal(command[index - 1], '-e');
+});
+
+test('Sandbox: npm ci füllt das Volume nur mit package.json und Lockfile, über den Egress-Proxy', () => {
+  const command = modulesInstallArgs(WORKTREE, { runId: 'r-i', project: 'demo', platform: 'darwin', uid: 501, gid: 20 });
+  const mounts = command.flatMap((part, index) => (command[index - 1] === '-v' ? [part] : []));
+  assert.deepEqual(mounts, [
+    `${WORKTREE}/package.json:/install/package.json:ro`,
+    `${WORKTREE}/package-lock.json:/install/package-lock.json:ro`,
+    `${modulesVolume('demo')}:/install/node_modules`,
+  ]);
+  const joined = command.join(' ');
+  assert.match(joined, /--user 501:20/);
+  assert.match(joined, /--cap-drop ALL/);
+  assert.match(joined, new RegExp(`--network ${SANDBOX_NETWORK}`));
+  assert.ok(command.includes(`HTTPS_PROXY=${EGRESS_URL}`));
+  const script = command.at(-1) ?? '';
+  assert.match(script, /npm ci --ignore-scripts/);
+  assert.match(script, /^if cmp -s package-lock\.json node_modules\/\S+; then exit 0; fi/, 'gleiches Lockfile: nichts tun');
+});
+
+test('Sandbox: leeres Volume wird vor dem Lauf gefüllt; scheitert npm ci, läuft der Agent mit Hinweis', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-install-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{}');
+    writeFileSync(join(worktree, 'package-lock.json'), '{}');
+    const isInstall = (command: string[]): boolean => command.includes('/install');
+    resetAgentNetwork();
+    const good = fakeDocker();
+    const result = await runInSandbox(['npm', 'run', 'typecheck'], worktree, {
+      runId: 'r-i1',
+      project: 'install',
+      name: 'aideation-r-i1',
+      docker: good.docker,
+    });
+    assert.equal(result.exitCode, 0);
+    const install = good.calls.findIndex((call) => isInstall(call.command));
+    const run = good.calls.findIndex((call) => call.command.includes('--name'));
+    assert.ok(install > 0 && install < run, 'npm ci vor dem eigentlichen Lauf');
+    assert.equal(sandboxBadge('install'), null);
+
+    resetAgentNetwork();
+    const bad = fakeDocker((command) =>
+      isInstall(command) ? { exitCode: 1, durationMs: 1, output: 'npm error network' } : ok(),
+    );
+    const failedRun = await runInSandbox(['npm', 'test'], worktree, {
+      runId: 'r-i2',
+      project: 'install',
+      name: 'aideation-r-i2',
+      docker: bad.docker,
+    });
+    assert.ok(
+      bad.calls.some((call) => call.command.includes('--name') && !isInstall(call.command)),
+      'Agent läuft trotzdem',
+    );
+    assert.match(failedRun.output, /liess sich nicht mit npm ci füllen/);
+    assert.match(sandboxBadge('install') ?? '', /npm ci/);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: ohne Lockfile im Worktree kein npm ci', async () => {
+  const { calls, docker } = fakeDocker();
+  await runInSandbox(['npm', 'test'], WORKTREE, { runId: 'r-i3', project: 'demo', name: 'aideation-r-i3', docker });
+  assert.ok(!calls.some((call) => call.command.includes('/install')));
 });

@@ -41,4 +41,9 @@ Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit
 
 - Neue Daten liegen in `app_settings` (Schlüssel `provider_limit:<anbieter>`), keine neue Tabelle. Das ERM erwähnt dies.
 - **Teststand: nicht verifiziert.** Der Tester-Lauf scheiterte an der Umgebung, nicht am Code: `tsc: not found` (Exit 127 im Image „aideation-agent“) und `npx` mit `EACCES` auf `/home/agent/.npm`. Weder `npm run typecheck` noch die sechs zugehörigen Testdateien liefen. Vor dem Merge `npm run typecheck` und `npm run test:unit` in einer Umgebung mit installierten Abhängigkeiten ausführen (letzter grüner Stand: 1833 Tests).
+- **Sandbox-Fix (30.10.2026, erneuter Versuch):** Beide Ursachen sind im Code behoben, beide Fixes greifen aber erst nach einem Neubau des Images und einem Neustart des Workers.
+  - `deploy/agent/Dockerfile` löscht nach `npm install -g` das root-eigene `/home/agent/.npm`.
+  - `src/core/sandbox.ts` setzt im Container `npm_config_cache=/tmp/npm-cache`. Das wirkt auch mit dem alten Image.
+  - Vor jedem Lauf füllt `src/core/sandbox.ts` ein leeres oder veraltetes `node_modules`-Volume per `npm ci --ignore-scripts` (`modulesInstallArgs`).
+  - Tests: `src/core/sandbox.test.ts`. In der Umgebung des Entwicklers liessen sie sich nicht ausführen, dort ist `node_modules` ebenfalls leer.
 - Die Bug-Liste enthält weiterhin den Eintrag „CI CD nicht in Ordnung“ (offen, critical). Er hängt mit derselben Umgebung zusammen und ist durch diesen Auftrag nicht behoben.

@@ -385,8 +385,14 @@ ist.
 übrig gebliebene Container mit diesem Label entfernt.
 
 **node_modules:** Im Container liegen die Abhängigkeiten im Volume `aideation-node-modules-<projekt>` (Linux-Binärdateien,
-darum nicht die des Hosts). Beim ersten Lauf ist es leer; der Agent installiert sie mit `npm ci --ignore-scripts`.
-Zurücksetzen: `docker volume rm aideation-node-modules-<projekt>`.
+darum nicht die des Hosts). Vor jedem Lauf füllt AIdeation das Volume in einem Hilfscontainer mit
+`npm ci --ignore-scripts`, wenn es leer ist oder sich `package-lock.json` seit der letzten Installation geändert hat
+(`modulesInstallArgs` in `src/core/sandbox.ts`; eingebunden sind nur `package.json` und `package-lock.json`, npm geht
+über den Egress-Proxy). Der Agent selbst darf kein `npm install` ausführen. Scheitert `npm ci`, startet der Agent
+trotzdem; die Ausgabe beginnt dann mit „Sandbox: node_modules-Volume … liess sich nicht mit npm ci füllen“, und das
+Worker-Badge zeigt den Hinweis. Projekte ohne `package-lock.json` bleiben unberührt. Der npm-Cache liegt im Container
+unter `/tmp/npm-cache` (`npm_config_cache`), nicht unter `~/.npm`.
+Zurücksetzen: `docker volume rm aideation-node-modules-<projekt>`; der nächste Lauf installiert neu.
 
 ### Log-Rotation (macOS)
 
