@@ -8,7 +8,7 @@ gehen nicht mehr unter: Der Agent meldet sie als **Testnachweis**, und du starte
 
 **Aktionen → „Rückmeldungen der Agents“.** Ein Auftrag mit offenem Nachweis steht dort als „Aktion notwendig“ mit dem
 Hinweis „1 Testnachweis offen“ (bzw. „2 Testnachweise offen“). Das gilt auch, wenn der Auftrag schon erledigt ist und
-auch dann, wenn er sonst keine Aktion braucht. Die Zahl in der Menü-Bubble „Aktionen“ zählt ihn mit.
+auch dann, wenn er sonst keine Aktion braucht.
 
 Klappst du die Zeile auf, zeigt der Abschnitt **„Offene Testnachweise“** je Nachweis:
 
