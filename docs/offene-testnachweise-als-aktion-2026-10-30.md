@@ -39,6 +39,13 @@ Tester und Dokumentierer meldeten Tests, die sie nicht ausführen konnten (Befeh
 - Alt-Aufträge ohne strukturierte Nachweise erscheinen nur, wenn der Tester sie neu meldet.
 - Mehrere Befehle werden als mehrere Nachweise gemeldet.
 
+## Nacharbeit nach dem ersten Testerlauf
+
+Der erste Testerlauf scheiterte an der Umgebung (`tsc` fehlt im Image, npm-Cache ohne Schreibrecht), nicht am Code. Der Code wurde gegen die Akzeptanzkriterien gegengelesen. Dabei gab es zwei Korrekturen:
+
+- `test-request.ts`: Bricht ein Lauf nach dem Anlegen ab, gilt der Nachweis als rot (`failed` mit diesem Lauf). Das gilt jetzt auch beim erneuten Start eines schon roten Nachweises; bisher blieb dort die alte `run_id` stehen.
+- `test-evidence.test.ts`: Migration 19 läuft zusätzlich auf einer Tabelle mit bestehenden Zeilen `full`, `ui` und `befehl`.
+
 ## Offen
 
 - Printscreens der Seite „Aktionen“ (mit Startknopf und mit Rechte-Link) fehlen im Benutzerhandbuch; in der Sitzung gab es keinen Browser. Nachreichen, sobald die App läuft.

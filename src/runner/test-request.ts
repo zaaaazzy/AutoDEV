@@ -280,13 +280,14 @@ export async function processTestRequest(
         [request.id],
       )
       .catch(logged('test-request'));
-    // Testnachweis mit schon angelegtem Lauf: gilt als rot (sichtbar, mit Lauf), nie als abgehakt.
+    // Testnachweis mit schon angelegtem Lauf: gilt als rot (sichtbar, mit diesem Lauf), nie als abgehakt – auch bei
+    // erneutem Start eines schon roten Nachweises.
     if (evidence) {
       await pool
         .query(
           `UPDATE test_evidence e SET status = 'failed', run_id = r.run_id, checked_at = NOW()
              FROM test_requests r
-            WHERE r.id = $1 AND e.id = r.evidence_id AND r.run_id IS NOT NULL AND e.status = 'open'`,
+            WHERE r.id = $1 AND e.id = r.evidence_id AND r.run_id IS NOT NULL AND e.status IN ('open', 'failed')`,
           [request.id],
         )
         .catch(logged('test-request'));

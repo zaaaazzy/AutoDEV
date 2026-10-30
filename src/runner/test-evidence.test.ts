@@ -183,6 +183,13 @@ test('test_evidence: Migration wiederholbar, ein Nachweis je Befehl und Auftrag,
       db.query(`INSERT INTO test_requests (project_slug, scope) VALUES ('shop', 'datei')`),
       /check/,
     );
+    // Erneut auf einer Bestands-Datenbank mit allen geschriebenen Umfängen: die Prüfung lässt jeden Wert zu.
+    await db.query(MIGRATIONS.find((migration) => migration.version === 19)!.sql);
+    const scopes = (await db.query<{ scope: string }>('SELECT DISTINCT scope FROM test_requests ORDER BY scope')).rows;
+    assert.deepEqual(
+      scopes.map((row) => row.scope),
+      ['befehl', 'full', 'ui'],
+    );
     // Auftrag gelöscht: Nachweise gehen mit, die Anforderung bleibt ohne Verweis.
     await db.query('DELETE FROM development_items WHERE id = $1', [order]);
     assert.equal((await db.query('SELECT 1 FROM test_evidence')).rowCount, 0);
