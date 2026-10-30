@@ -20,7 +20,7 @@ export interface OutputSummary {
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 const MAX_ISSUES = 30;
 
-/** Absolute Pfade auf den Projektteil kürzen (…/DevLog/frontend/src/x.ts → frontend/src/x.ts). */
+/** Absolute Pfade auf den Projektteil kürzen (…/AIdeation/frontend/src/x.ts → frontend/src/x.ts). */
 function shortPath(path: string): string {
   return path.trim().replace(/^.*?\/((?:src|frontend|e2e|scripts|docs|test|tests|lib|app)\/)/, '$1');
 }

@@ -237,7 +237,7 @@ export async function generatedDocs(
   const production = settingsDoc(
     slug,
     'betrieb',
-    'Betrieb: Fehler an Dev Log melden',
+    'Betrieb: Fehler an AIdeation melden',
     productionGuide(baseUrl, slug),
     null,
   );

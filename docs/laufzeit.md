@@ -4,7 +4,7 @@ Was der Worker wann tut, welcher Status welchen Schritt auslöst, wann welcher A
 
 ## 1 · Prozesse und Takte
 
-Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker im Arbeitscontainer des Projekts (`DEV_LOG_AGENT_SANDBOX`, Standard `workbench`, `src/core/workbench.ts`): ein dauerhafter Compose-Stapel `agents_<projekt>` mit eigenem Docker (`docker:dind`) und den Testdiensten aus `.aideation/workbench.json`; lesende Rollen laufen in kurzlebigen Containern. Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
+Drei Prozesse laufen dauerhaft. Gearbeitet wird nur im Worker. Er läuft entweder als Compose-Dienst `worker` (Standard, Profil `worker`) oder auf dem Host (Mac, Linux oder Windows). Im Container ist er der einzige Dienst mit dem Docker-Socket. AIdeation-Ordner und Projektordner sind dort mit dem Pfad des Hosts eingebunden (unter Windows `/c/…`), damit die Pfade für `docker run` stimmen. Der Frontend-Container liefert die Oberfläche und leitet `/api` an den Backend-Container weiter. Der Backend-Container schreibt nur Wünsche in die Datenbank. Agents und Projekttests startet der Worker im Arbeitscontainer des Projekts (`DEV_LOG_AGENT_SANDBOX`, Standard `workbench` auf dem Host, `src/core/workbench.ts`; der Compose-Dienst `worker` setzt `docker` und startet kurzlebige Container je Schritt): ein dauerhafter Compose-Stapel `agents_<projekt>` mit eigenem Docker (`docker:dind`) und den Testdiensten aus `.aideation/workbench.json`; lesende Rollen laufen in kurzlebigen Containern. Der Host selbst führt keinen Code aus, den Agents geschrieben haben. Die Container hängen im internen Netzwerk `aideation-agents`. Hinaus kommen sie nur über den Egress-Proxy, und zwar nur zur Anthropic-API, zur npm-Registry, zu Docker Hub und zu Ollama auf dem Host. LAN und AIdeation-Datenbank sind gesperrt.
 
 ```mermaid
 flowchart TB
@@ -18,19 +18,20 @@ flowchart TB
     P[("Projektordner<br/>AIdeation: AIdeation/agent")]
     subgraph SANDBOX["Docker-Sandbox · Netzwerk aideation-agents (intern)"]
       direction TB
-      AG["Agent-Container je Schritt<br/>Label aideation.run · Claude · Ollama-Befehle"]:::ok
-      TC["Testcontainer<br/>Gate · test:full · Abdeckung"]:::ok
+      WB["Arbeitscontainer agents_projekt<br/>workbench · docker:dind · Testdienste<br/>schreibende Schritte · Gate · test:full"]:::ok
+      AG["Kurzlebiger Container je Schritt<br/>Label aideation.run · lesende Rollen · Modus docker"]:::ok
       EG["Egress-Proxy aideation-egress"]:::wait
     end
   end
   API -->|"Wünsche: Status, Chat, Aufträge"| DB[("PostgreSQL")]
   W <-->|"liest Anfragen, schreibt Ergebnisse"| DB
+  W -->|"docker compose · exec"| WB
   W -->|"docker run --rm"| AG
-  W -->|"docker run --rm"| TC
+  WB -->|/workspace| P
   AG -->|"/workspace (lesende Rollen :ro)"| P
-  TC -->|/workspace| P
+  WB --> EG
   AG --> EG
-  EG -->|"nur Anthropic-API, npm, Ollama"| NET(["Internet / Ollama"])
+  EG -->|"nur Anthropic-API, npm, Docker Hub, Ollama"| NET(["Internet / Ollama"])
   AG -.-x|gesperrt| DB
   WD -.->|"prüft Dienst, HTTPS, DB, Worker"| DB
   WD -.->|Push| U
@@ -47,7 +48,7 @@ flowchart TB
 | 5 s           | Neustart           | „AIdeation neu starten“ (von Hand oder nach dem Sprint-Abschluss): wartet, bis nichts läuft (max. 15 min), prüft Branch `main` und sauberen Stand, bei geändertem Lockfile `npm ci --ignore-scripts` für den Worker (scheitert es: „fehlgeschlagen“, kein Neubau), `docker compose up -d --build` (im Container alle Dienste ausser `worker`, `worker-volumes` und `watchdog`, danach `docker compose build worker`), prüft bis 2 min `/health`; antwortet AIdeation nicht, zurück aufs vorherige Abbild + Push. Sonst beendet sich der Worker (Exit-Code 75). Neu gestartet wird er von `restart: unless-stopped` (Container), launchd/systemd bzw. unter Windows `run-with-env.ps1`. |
 | 15 s          | Heartbeat          | Worker-Badge, Modelle der System-Agents veröffentlichen; verwaiste Läufe aufräumen (`closeOrphanedRuns`, siehe `docs/workflows.md`); jede Minute Git-Verlauf, alle 5 min Favicon.                                                                                                                                                                                                                              |
 | 30 s · sofort | Arbeitszyklus      | Sofort, wenn die Datenbank neue Arbeit meldet (`NOTIFY devlog_work`: Auftrag eingeplant, Sprint gestartet) oder ein Platz frei wird; sonst alle 30 s. `runWorkflow` je Projekt, höchstens **2 Projekte gleichzeitig** (Einstellung, max. 8); wer am längsten wartet, kommt zuerst. Ablauf in Abschnitt 4.                             |
-| 30 s · Job    | Wartungs-Jobs      | Projektübergreifend, nach jedem Arbeitszyklus im Hintergrund (nie zwei Durchgänge gleichzeitig): fällige aktive Zeilen aus `scheduled_jobs` beanspruchen (`FOR UPDATE SKIP LOCKED`, `next_run_at` + Intervall, Sperre `locked_until`), dann mit Zeitlimit (Standard 20–120 s, max. 300 s) ausführen. Nur feste Job-Arten aus `src/runner/scheduler.ts`; Status und Meldung landen in der Zeile. Einstellbar über `GET`/`PATCH /api/scheduled-jobs` (nur Administration). |
+| 30 s · Job    | Wartungs-Jobs      | Projektübergreifend, nach jedem Arbeitszyklus im Hintergrund (nie zwei Durchgänge gleichzeitig): fällige aktive Zeilen aus `scheduled_jobs` beanspruchen (`FOR UPDATE SKIP LOCKED`, `next_run_at` + Intervall, Sperre `locked_until`), dann mit Zeitlimit (Standard 20–300 s je Art, max. 300 s) ausführen. Nur feste Job-Arten aus `src/runner/scheduler.ts`; Status und Meldung landen in der Zeile. Einstellbar über `GET`/`PATCH /api/scheduled-jobs` (nur Administration). |
 | 6 h           | `backup_check`     | Neuestes `aideation-*.dump` in `./backups` (relativ zum AIdeation-Ordner): jünger als `maxAgeHours` (26), mindestens `minBytes` (1024), `pg_restore --list` mit Tabellendaten lesbar. Fehlender Ordner, fehlendes `pg_restore` oder kaputter Dump = „fehlgeschlagen“ + Push. |
 | 7 Tage        | `restore_probe`    | `scripts/restore.sh --probe` mit dem neuesten Backup: Wegwerf-Container `aideation_restore_probe_<zeit>` auf 127.0.0.1:5439, `pg_restore --exit-on-error --single-transaction`, Entschlüsselungs-Test mit `DEV_LOG_SECRET_KEY`, danach gelöscht (Zeitlimit 300 s). |
 | 15 min        | `watchdog_logs`    | Wächter-Prüfungen (`collectProblems`, ohne `git status`) im Worker; gleiche Probleme erst nach 6 h (`REMIND_MS`) erneut per Push, Merkzustand in der Datenbank.                                                                                                                                                                       |

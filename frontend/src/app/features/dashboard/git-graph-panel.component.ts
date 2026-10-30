@@ -38,14 +38,6 @@ export class GitGraphPanelComponent {
     return web && commit.pushed ? `${web}/commit/${commit.hash}` : null;
   }
 
-  protected refUrl(ref: string): string | null {
-    const web = this.graph()?.webUrl;
-    if (!web) return null;
-    if (ref.startsWith('tag: ')) return `${web}/releases/tag/${encodeURIComponent(ref.slice(5))}`;
-    const branch = ref.replace(/^origin\//, '');
-    return `${web}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`;
-  }
-
   /** Lokale Branches zuerst; origin/x nur, wenn es lokal keinen gleichnamigen Branch am selben Commit gibt. */
   protected refs(commit: GitCommit): { label: string; kind: 'head' | 'branch' | 'remote' | 'tag'; ref: string }[] {
     const local = new Set(commit.refs.filter((ref) => !ref.startsWith('origin/') && !ref.startsWith('tag: ')));

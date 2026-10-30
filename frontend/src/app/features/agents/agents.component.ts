@@ -128,7 +128,6 @@ export class AgentsComponent {
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
   protected readonly agentRoles = AGENT_ROLES;
-  protected readonly phases = AGENT_PHASES;
   protected readonly roleLabel = roleLabel;
   protected readonly presets = MODEL_PRESETS;
   protected readonly presetLabel = presetLabel;

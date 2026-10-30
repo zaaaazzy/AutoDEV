@@ -21,7 +21,7 @@ export interface Project {
   guidelines?: string;
   autoBugfix?: boolean;
   agentWorkspace?: boolean;
-  /** Docker-Sandbox für alle Agents und Projekttests; null = globaler Schalter DEV_LOG_AGENT_SANDBOX (Standard docker). */
+  /** Docker-Sandbox für alle Agents und Projekttests; null = globaler Schalter DEV_LOG_AGENT_SANDBOX (Standard workbench). */
   agentSandbox?: 'off' | 'docker' | 'workbench' | null;
   reviewMode?: 'off' | 'ui' | 'always';
   reviewCommand?: string[] | null;

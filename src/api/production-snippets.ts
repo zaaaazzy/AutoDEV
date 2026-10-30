@@ -1,12 +1,12 @@
 import type { Request } from 'express';
 
 /**
- * Kopierbare Snippets für die betreute Anwendung (nur Doku – Dev Log greift nicht in deren Code ein).
+ * Kopierbare Snippets für die betreute Anwendung (nur Doku – AIdeation greift nicht in deren Code ein).
  * `<TOKEN>` ersetzt die Oberfläche nach dem Erzeugen durch das neue Token.
  */
 export const TOKEN_PLACEHOLDER = '<TOKEN>';
 
-/** Adresse, unter der die betreute Anwendung Dev Log erreicht: öffentliche URL bzw. Domain, sonst die der Anfrage. */
+/** Adresse, unter der die betreute Anwendung AIdeation erreicht: öffentliche URL bzw. Domain, sonst die der Anfrage. */
 export function publicBaseUrl(request: Pick<Request, 'protocol' | 'get'>, environment = process.env): string {
   const configured = environment.DEV_LOG_PUBLIC_URL?.trim().replace(/\/+$/, '');
   if (configured) return configured;
@@ -21,7 +21,7 @@ export function ingestEndpoint(baseUrl: string, slug: string, token = TOKEN_PLAC
 
 export function browserSnippet(endpoint: string): string {
   return `<script>
-  // Dev Log – Fehler aus dem Browser melden (Produktions-Rückkanal)
+  // AIdeation – Fehler aus dem Browser melden (Produktions-Rückkanal)
   (function () {
     var endpoint = '${endpoint}';
     var sent = 0;
@@ -49,10 +49,10 @@ export function browserSnippet(endpoint: string): string {
 }
 
 export function nodeSnippet(endpoint: string): string {
-  return `// Dev Log – Fehler aus Node melden (Produktions-Rückkanal), Node 18 oder neuer
+  return `// AIdeation – Fehler aus Node melden (Produktions-Rückkanal), Node 18 oder neuer
 const DEV_LOG_INGEST_URL = process.env.DEV_LOG_INGEST_URL || '${endpoint}';
 
-function reportToDevLog(error) {
+function reportToAIdeation(error) {
   const body = JSON.stringify({
     message: String((error && error.message) || error).slice(0, 4000),
     stack: String((error && error.stack) || '').slice(0, 12000),
@@ -68,11 +68,11 @@ function reportToDevLog(error) {
 
 process.on('uncaughtException', (error) => {
   console.error(error);
-  reportToDevLog(error).finally(() => process.exit(1));
+  reportToAIdeation(error).finally(() => process.exit(1));
 });
 process.on('unhandledRejection', (reason) => {
   console.error(reason);
-  void reportToDevLog(reason);
+  void reportToAIdeation(reason);
 });`;
 }
 
@@ -80,9 +80,9 @@ process.on('unhandledRejection', (reason) => {
 export function productionGuide(baseUrl: string, slug: string): string {
   const endpoint = ingestEndpoint(baseUrl, slug);
   return [
-    '# Betrieb: Fehler an Dev Log melden',
+    '# Betrieb: Fehler an AIdeation melden',
     '',
-    'Dev Log erkennt Fehler der betreuten Anwendung im Betrieb selbst und legt sie als Bug mit Quelle „Betrieb“ an.',
+    'AIdeation erkennt Fehler der betreuten Anwendung im Betrieb selbst und legt sie als Bug mit Quelle „Betrieb“ an.',
     'Gleiche Fehler werden über einen Fingerabdruck (Meldung und oberster Stack-Frame, ohne Zahlen, IDs und',
     'Zeitstempel) gebündelt und nur gezählt. Einrichten unter [Einstellungen](#settings) → Betrieb.',
     '',

@@ -1,7 +1,7 @@
 // Egress-Proxy der Agent-Sandbox: einziger Weg aus dem internen Netzwerk aideation-agents (siehe sandbox.ts). Läuft
 // als eigener Container aus dem Image aideation-agent (deploy/agent/Dockerfile bündelt diese Datei ohne
-// Abhängigkeiten nach /opt/aideation/egress-proxy.mjs). Erlaubt sind nur feste Ziele (host:port): Anthropic-API,
-// npm-Registry und Ollama auf dem Host. LAN, Host-Dienste wie die AIdeation-Datenbank und alles andere sind gesperrt.
+// Abhängigkeiten nach /opt/aideation/egress-proxy.mjs). Erlaubt sind nur feste Ziele (host:port, egressAllowList in
+// sandbox.ts): Anthropic-API, npm-Registry, Docker Hub und Ollama auf dem Host. LAN, Host-Dienste wie die AIdeation-Datenbank und alles andere sind gesperrt.
 import { lookup } from 'node:dns/promises';
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http';
 import { isIP, connect, type Socket } from 'node:net';
