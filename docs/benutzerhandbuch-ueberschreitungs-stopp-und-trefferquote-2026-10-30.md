@@ -115,9 +115,9 @@ Ein Feature-Auftrag hat eine gespeicherte Schätzung von 2 Stunden und 1 Mio. To
 
 ## Printscreens
 
-**Keine.** Ich konnte in dieser Umgebung keine Aufnahmen machen. Es fehlen ein Browser (Chromium), eine laufende Datenbank (Postgres oder Docker) und die `DATABASE_URL`. Ohne sie lässt sich die App nicht starten und nichts anzeigen.
+**Noch keine.** Für dieses Handbuch wurden keine Aufnahmen erstellt. In der Entstehungsumgebung fehlten ein Browser (Chromium), eine laufende Datenbank (Postgres oder Docker) und die `DATABASE_URL`.
 
-Diese Bilder sollten beim nächsten Durchgang mit der App entstehen:
+Diese Bilder sollten mit der laufenden App entstehen:
 
 1. Die Statistik mit der Spalte „Trefferquote“ je Sprint, einmal mit einem gemessenen Sprint und einmal mit „–“.
 2. Der Abschnitt „Korrekturfaktor je Herkunft“ in der Statistik.
@@ -128,13 +128,8 @@ Dafür braucht es eine laufende App mit Datenbank, zum Beispiel `npm run seed:de
 
 ## Offen
 
-- Die Tests (`npm run typecheck`, `npm run test:unit`, `npm run format:check`) sind nicht gelaufen. Die Angaben stammen aus der Dokumentation des Entwicklers und aus dem Code, den ich gelesen habe. Der Tester hat den Lauf mit `tsc` und dem npm-Cache nicht abgeschlossen.
-- Die Printscreens fehlen (siehe oben).
-- „Erneut versuchen“ setzt den Wiederholungszähler bei einer Freigabe nach „Schätzung überschritten“ nicht hoch (`src/api/development.ts`, Zeilen 268–279). Er wird aber auch nicht zurückgesetzt. Ein vorher angesammelter Stand bleibt.
-- Die Bereichszählung nutzt `affectedFiles` und `areaBucket` in `src/core/sprint-planner.ts`. Das Handbuch folgt diesem Code.
-- Die Oberfläche wurde nicht im Browser geprüft. Die Beschreibung der Schaltflächen und Texte stammt aus dem Code.
-- Ob „Erneut versuchen“ in der „Aktion notwendig“-Karte für jede Rolle sichtbar ist, habe ich nicht im Frontend nachgeprüft. Die API verlangt die Berechtigung „Ausführen“ (`access({ role: 'run' })`) in jedem Fall.
-- Der Hinweis unter der Statistik-Tabelle (`stats.component.html`, Zeile 173) sagt „unter 5 Messwerten gilt 1“. Die Rückfallstufe auf alle Projekte ist dort nicht genannt. Das Handbuch folgt dem Code. Der Hinweistext im Frontend ist ungenau und müsste im Frontend korrigiert werden. Ich habe ihn nicht geändert.
-- Die Printscreens fehlen auch in diesem Lauf. Die Prüfung auf einen Browser war in diesem Lauf blockiert (Befehle außerhalb von `/workspace` nicht erlaubt). Der Stand „kein Browser, keine Datenbank“ stammt aus dem vorigen Lauf und ist nicht erneut bestätigt.
-- Tests (`npm run typecheck`, `npm run test:unit`, `npm run format:check`) sind in diesem Lauf nicht gelaufen. Ich habe nur gelesen und keine Tests ausgeführt.
-- `docs/laufzeit.md` und `docs/workflows.md` wurden von der Dokumentation des Entwicklers geändert. Ich habe sie nicht gegen die Änderungen gelesen.
+- **Tests nicht bestätigt:** `npm run typecheck`, `npm run test:unit` und `npm run format:check` sind bei der Dokumentation nicht gelaufen. Die Aussagen in diesem Handbuch stammen aus dem Code, nicht aus einem Testlauf.
+- **Printscreens fehlen** (siehe oben).
+- **Oberfläche nicht im Browser geprüft:** Die Beschreibung der Schaltflächen und Texte stammt aus dem Code.
+- **Sichtbarkeit von „Erneut versuchen“:** Ob die Schaltfläche in der Karte „Aktion notwendig“ für jede Rolle erscheint, ist im Frontend nicht geprüft. Die API verlangt in jedem Fall die Berechtigung „Ausführen“ (`access({ role: 'run' })`).
+- **Hinweistext in der Statistik:** Der Hinweis unter der Tabelle (`frontend/src/app/features/stats/stats.component.html`, Zeile 173) nennt nur „unter 5 Messwerten gilt 1“. Die Rückfallstufe auf alle Projekte fehlt dort. Dieses Handbuch folgt dem Code.
