@@ -64,7 +64,7 @@ flowchart TD
 
 | Auftrag | Zustand | Details |
 | --- | --- | --- |
-| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Prüfung offen | Tester-Lauf wegen kaputter Umgebung nicht aussagekräftig. Erneuter Versuch am 30.10.2026: Die Umgebung ist weiter kaputt. `node_modules` und `.git` im Worktree verweisen auf den Host-Pfad `/Volumes/DroneShots/Coding/AIdeation/source/…`, den es im Container nicht gibt (`tsc: not found`, `git` meldet „not a git repository“). Der Code wurde statisch geprüft und nicht geändert. |
+| dca86e51 CI-Spiegel vor dem Pull Request lokal ausführen | umgesetzt, Prüfung offen | Tester-Lauf wegen kaputter Umgebung nicht aussagekräftig. Erneuter Versuch am 30.10.2026: Die Umgebung ist weiter kaputt. `node_modules` und `.git` im Worktree verweisen auf den Host-Pfad `/Volumes/DroneShots/Coding/AIdeation/source/…`, den es im Container nicht gibt (`tsc: not found`, `git` meldet „not a git repository“). Der Code wurde statisch geprüft und nicht geändert. Zweiter erneuter Versuch (30.10.2026, nach dem Hinweis „Agent-Image und Worktree-Verlinkung reparieren“): Die Verlinkung ist weiter kaputt (`node_modules` → `/Volumes/…/source/node_modules`, `.git` → `/Volumes/…/.git/worktrees/DevLog-agents`, beides fehlt im Container). Node 22 ist da, `tsx`, `tsc` und `pg` fehlen. Der Code wurde nochmals statisch geprüft (Einbindung in `pushSprint`, Exporte aus `ci.ts`, Tests) und nicht geändert. |
 
 ## Anfrage / TODO
 
