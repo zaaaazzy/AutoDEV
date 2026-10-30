@@ -52,7 +52,7 @@ Bei Klick passiert Folgendes:
 
 **Wichtig:** Erst klicken, wenn du das Limit beim Anbieter tatsächlich erhöht hast. Sonst scheitert der nächste Lauf erneut am Limit, und der Hinweis erscheint wieder.
 
-Ist kein Limit vermerkt (z. B. weil es schon zurückgesetzt wurde), antwortet der Server mit „Für diesen Anbieter ist kein Limit vermerkt.“ Die Schaltfläche erscheint in diesem Fall gar nicht.
+Ist kein Limit vermerkt (z. B. weil es schon zurückgesetzt wurde), antwortet der Server mit dem Status 409 und „Für diesen Anbieter ist kein Limit vermerkt.“. Diesen Text siehst du im Dashboard nicht: Die Oberfläche zeigt bei jedem Fehler nur „Claude: Fortsetzen ist nicht möglich.“. Die Schaltfläche erscheint in diesem Fall normalerweise gar nicht, weil der Hinweis nach dem Reset verschwindet.
 
 <!-- PRINTSCREEN 2: Hinweis mit beiden Schaltflächen („Limit erhöhen bei Claude“ und „Limit erhöht – fortsetzen“), angemeldet als Benutzer mit Rolle „Ausführen“ und Zugriff auf alle Projekte -->
 <!-- PRINTSCREEN 3: Hinweis nach Klick auf „Limit erhöht – fortsetzen“ mit der Statusmeldung -->
@@ -74,7 +74,7 @@ Für Entwickler und Betrieb: Pro Anbieter steht ein Eintrag in `app_settings` mi
 
 ## Offen
 
-- **Printscreens fehlen.** In diesem Lauf (30.10.) habe ich keine erstellt: Die App wurde nicht gestartet, und Agents dürfen keine Shell-Befehle wie `npm` ausführen. Ein Browser-Werkzeug war ebenfalls nicht verfügbar. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
+- **Printscreens fehlen.** In diesem Lauf (30.10.) habe ich keine erstellt: Auf dem Host ist kein Chromium installiert (`which chromium` ohne Treffer), die App war nicht gestartet, und Agents dürfen keine Shell-Befehle wie `npm` ausführen. Ein Browser-Werkzeug war ebenfalls nicht verfügbar. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
 - **Oberfläche nicht im Browser geprüft.** Die Beschreibung stammt aus `provider-limit-alert.component.ts`, `provider-limits.ts` (Frontend), `src/api/provider-limits.ts` und `src/core/provider-limits.ts`. Am 30.10. gegen diesen Code abgeglichen (Lesen, keine Ausführung): Texte, Schaltflächen, Rollen- und Projektbedingungen, Reserve von 3 Minuten, Stundenregel ohne Uhrzeit, Platzierung unter dem Git-Hinweis, 409-Antwort ohne Limit, Unterbrechungsvermerk in `src/runner/runner-steps.ts` und Pre-Sprint-Reset in `src/runner/pre-sprint.ts`. Die Darstellung im Browser ist damit nicht bestätigt.
 - **Tests nicht in diesem Lauf ausgeführt.** Die Angaben zu `src/core/provider-limits.test.ts` und `frontend/src/app/features/dashboard/provider-limits.spec.ts` stammen aus dem Entwicklerbericht. Ich habe die Spec-Dateien gelesen, sie aber nicht laufen lassen.
 - **Pre-Sprint-Aussage im Code belegt (30.10.).** `src/runner/pre-sprint.ts` setzt bei einem Limit `sprints.pre_sprint_next_at` auf den Reset. „Fortsetzen“ ändert nur `development_items` und gibt Pre-Sprint-Phasen daher nicht vorzeitig frei.
