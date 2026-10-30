@@ -43,7 +43,8 @@ Auftrag 099e001e-45ef-4005-ad93-980165a79487 (Feature). Anlass: Abweichungen der
 
 ## Anfrage/TODO
 
-- **Tester-Lauf wiederholen:** Er scheiterte nur an der Umgebung: `tsc: not found` bei `npm run typecheck` (Exit 127, Sandbox-Image „aideation-agent“) und `npx tsx` scheiterte mit EACCES auf `/home/agent/.npm`. Es gibt also noch kein Ergebnis zu Typen oder Tests. Die Tests sollen über `npm test` bzw. `npm run …` laufen.- `npm run typecheck`, `npm run test:unit` und `npm run format:check` ausführen (Test-Gate). Einzelne Tests nur über `npm test`/`npm run …`, nicht mit `npx tsx` und ohne `--experimental-test-coverage`.
+- **Tester-Lauf wiederholen:** Er scheiterte nur an der Umgebung, nicht an Testfehlern. Zuerst: `tsc: not found` bei `npm run typecheck` (Exit 127, Sandbox-Image „aideation-agent“) und `npx tsx` mit EACCES auf `/home/agent/.npm`. Im letzten Versuch stoppte das monatliche Ausgabenlimit der Organisation den Lauf (Limit durch die Administration anheben). Es gibt also noch kein Ergebnis zu Typen oder Tests. Die Tests sollen über `npm test` bzw. `npm run …` laufen.
+- `npm run typecheck`, `npm run test:unit` und `npm run format:check` ausführen (Test-Gate). Einzelne Tests nur über `npm test`/`npm run …`, nicht mit `npx tsx` und ohne `--experimental-test-coverage`.
 - Oberfläche prüfen: Spalte „Trefferquote“ und Faktoranzeige in der Statistik, Art-Auswahl in der Idee, „Aktion notwendig“-Karte mit Freigabe nur mit passender Berechtigung (`auth.can()` wie API-Regel).
 - Oberflächentests (Tabellen, Dashboard) auf geänderte Texte prüfen.
 
