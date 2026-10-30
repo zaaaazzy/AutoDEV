@@ -53,7 +53,7 @@ Was du davon siehst:
 - **Bereich ohne Messung:** Gibt es für einen Bereich keine Messung, steht dort „Noch keine Messung für diesen Bereich.“
 - **Noch keine Messung im Projekt:** Gibt es für kein Bereich Messungen, steht dort „Noch keine Testabdeckung gemessen.“
 - **Alte Einträge ohne Zuordnung:** Sie werden in der Statistik nicht angezeigt, bleiben aber in der Datenbank erhalten.
-- **Laden:** Während der Abfrage steht dort „Verlauf wird geladen …“.
+- **Laden:** Während der Abfrage steht dort „Verlauf wird geladen …“. Ist kein Projekt aktiv, wird die Abfrage nicht gestartet. Die Ansicht bleibt dann dauerhaft bei „Verlauf wird geladen …“ (siehe Offene Entscheidungen, Punkt 5).
 - **Fehler beim Laden:** Schlägt das Laden fehl, steht dort „Verlauf der Testabdeckung konnte nicht geladen werden.“
 - Der Verlauf zeigt höchstens die letzten 200 Berichte je Projekt.
 
@@ -136,6 +136,7 @@ Diese Punkte sind im Code noch nicht eindeutig entschieden:
 2. **Migrationsnummer:** Die Migration heißt Version 20. Version 19 ist über `RESERVED_VERSIONS` als reserviert eingetragen. Gibt es keinen parallelen Schritt 19, sollte auf 19 umnummeriert und die Reservierung entfernt werden.
 3. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
 4. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
+5. **Ladezustand ohne Projekt (Fehler im Code, nicht im Browser geprüft):** In `frontend/src/app/features/stats/coverage-trend.component.ts` startet `load` nur, wenn `activeProject()` einen Wert hat. Ohne aktives Projekt bleibt `trend` auf `null`, und die Ansicht zeigt dauerhaft „Verlauf wird geladen …“. Vorschlag: In diesem Fall „Kein Projekt ausgewählt.“ anzeigen. Das braucht eine Codeänderung und eine Entscheidung des Auftraggebers über den Text.
 
 ## Nicht geprüft
 
