@@ -188,6 +188,11 @@ const WORKBENCH_START = [
   ].join('; '),
 ];
 
+/** Compose ersetzt $VAR selbst (mit Werten des Rechners); $$ lässt ein $ für die Shell im Container stehen. */
+const literal = (value: string): string => value.replaceAll('$', '$$$$');
+const literalRecord = (record: Record<string, string> = {}): Record<string, string> =>
+  Object.fromEntries(Object.entries(record).map(([key, value]) => [key, literal(value)]));
+
 /** Compose-Konfiguration des Stapels (JSON ist gültiges YAML). Enthält nie ein Geheimnis. */
 export function workbenchCompose(worktree: string, options: WorkbenchOptions): Record<string, unknown> {
   const platform = options.platform ?? process.platform;
@@ -204,7 +209,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
     workbench: {
       image: options.image ?? SANDBOX_IMAGE,
       container_name: name,
-      command: WORKBENCH_START,
+      command: WORKBENCH_START.map(literal),
       ...(user ? { user } : {}),
       cap_drop: ['ALL'],
       security_opt: ['no-new-privileges:true'],
@@ -224,7 +229,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
         ...noProxy,
         npm_config_https_proxy: EGRESS_URL,
         npm_config_proxy: EGRESS_URL,
-        ...extras.environment,
+        ...literalRecord(extras.environment),
       },
       labels: { [WORKBENCH_LABEL]: options.project, 'aideation.workbench.image': options.imageId ?? '' },
     },
@@ -250,8 +255,10 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
       cap_drop: ['ALL'],
       cap_add: ['CHOWN', 'SETUID', 'SETGID', 'DAC_OVERRIDE', 'FOWNER'],
       security_opt: ['no-new-privileges:true'],
-      ...(extra.environment && Object.keys(extra.environment).length ? { environment: extra.environment } : {}),
-      ...(extra.command ? { command: extra.command } : {}),
+      ...(extra.environment && Object.keys(extra.environment).length
+        ? { environment: literalRecord(extra.environment) }
+        : {}),
+      ...(extra.command ? { command: extra.command.map(literal) } : {}),
       ...(extra.tmpfs?.length ? { tmpfs: extra.tmpfs } : {}),
       labels: { [WORKBENCH_LABEL]: options.project },
     };

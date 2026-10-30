@@ -88,6 +88,8 @@ test('Arbeitscontainer: nur der Docker-Dienst ist privilegiert, alle teilen den 
   assert.ok(docker.volumes?.includes('/srv/demo/agent:/workspace'), 'gleicher Pfad für Bind-Mounts der Agents');
   assert.ok(!docker.volumes?.some((volume) => volume.includes('docker.sock')), 'nie der Socket des Hosts');
   assert.equal(postgres.network_mode, 'service:workbench');
+  const start = (workbench as { command?: string[] }).command?.join(' ') ?? '';
+  assert.ok(start.includes('$$HOME') && !/[^$]\$HOME/.test(start), 'Compose ersetzt kein $ des Startbefehls');
   assert.equal(postgres.privileged, undefined);
   assert.equal(compose.networks.agents?.name, SANDBOX_NETWORK);
   assert.equal(compose.networks.agents?.external, true);
