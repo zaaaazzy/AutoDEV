@@ -645,6 +645,20 @@ export interface CoverageReport {
   areas: CoverageArea[];
 }
 
+/** Ein Bericht in der Zeitreihe eines Bereichs; null = im Altbestand nicht gemeldet (Lücke, nicht 0 %). */
+export interface CoverageTrendPoint {
+  reportId: string;
+  date: string;
+  lines: number | null;
+  branches: number | null;
+  tests: number;
+}
+
+/** Zeitreihe je fester Bereich (backend, frontend, scripts, e2e, gesamt, auftrag), nach Datum aufsteigend. */
+export interface CoverageTrend {
+  areas: { area: string; points: CoverageTrendPoint[] }[];
+}
+
 export interface AcceptanceCheck {
   developmentId: string;
   /** visual = Befund der visuellen Prüfung (Screenshots, Browser-Prüfungen, KI-Urteil). */

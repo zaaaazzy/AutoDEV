@@ -412,6 +412,51 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
     `,
   },
+  // Version 19 ist für einen parallel entstandenen Schritt reserviert (Auftrag „Feste Coverage-Bereiche“ verlangt 20).
+  // Feste Coverage-Bereiche (COVERAGE_AREAS in src/runner/coverage.ts): Zuordnung der bekannten Schreibweisen,
+  // bestehende Bereichsnamen darüber umschreiben. Mehrere Einträge eines Berichts, die auf denselben Bereich zeigen,
+  // werden vorher zusammengeführt (Testzahlen summiert, Prozentwerte gemittelt, NULL bleibt NULL), damit der
+  // Primärschlüssel (report_id, area) nicht kollidiert. Einträge ohne Zuordnung bleiben unverändert; nichts wird gelöscht.
+  {
+    version: 20,
+    name: 'coverage-feste-bereiche',
+    sql: `
+      CREATE TABLE IF NOT EXISTS coverage_area_aliases (
+        alias TEXT PRIMARY KEY,
+        area TEXT NOT NULL CHECK (area IN ('backend', 'frontend', 'scripts', 'e2e', 'gesamt', 'auftrag'))
+      );
+      INSERT INTO coverage_area_aliases (alias, area) VALUES
+        ('backend', 'backend'), ('back-end', 'backend'), ('backend (src)', 'backend'), ('backend/api', 'backend'),
+        ('server', 'backend'), ('api', 'backend'),
+        ('frontend', 'frontend'), ('front-end', 'frontend'), ('frontend (angular)', 'frontend'),
+        ('angular', 'frontend'), ('web', 'frontend'), ('ui', 'frontend'), ('client', 'frontend'),
+        ('oberfläche', 'frontend'),
+        ('scripts', 'scripts'), ('script', 'scripts'), ('skripte', 'scripts'), ('skript', 'scripts'),
+        ('tools', 'scripts'),
+        ('e2e', 'e2e'), ('e2e-tests', 'e2e'), ('end-to-end', 'e2e'), ('playwright', 'e2e'),
+        ('gesamt', 'gesamt'), ('total', 'gesamt'), ('all files', 'gesamt'), ('alle', 'gesamt'),
+        ('projekt', 'gesamt'), ('project', 'gesamt'), ('dev-log', 'gesamt'), ('devlog', 'gesamt'),
+        ('aideation', 'gesamt'),
+        ('auftrag', 'auftrag'), ('order', 'auftrag'), ('geänderter code', 'auftrag'), ('changed code', 'auftrag')
+      ON CONFLICT (alias) DO NOTHING;
+
+      CREATE TEMP TABLE coverage_area_merge ON COMMIT DROP AS
+        SELECT t.report_id, a.area,
+               SUM(t.unit_tests)::int AS unit_tests, SUM(t.component_tests)::int AS component_tests,
+               SUM(t.integration_tests)::int AS integration_tests, SUM(t.e2e_tests)::int AS e2e_tests,
+               SUM(t.passed)::int AS passed, SUM(t.failed)::int AS failed,
+               AVG(t.lines)::real AS lines, AVG(t.statements)::real AS statements,
+               AVG(t.branches)::real AS branches, AVG(t.functions)::real AS functions
+          FROM test_coverage_areas t JOIN coverage_area_aliases a ON a.alias = lower(btrim(t.area))
+         GROUP BY t.report_id, a.area;
+      DELETE FROM test_coverage_areas t USING coverage_area_aliases a WHERE a.alias = lower(btrim(t.area));
+      INSERT INTO test_coverage_areas (report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+                                       passed, failed, lines, statements, branches, functions)
+        SELECT report_id, area, unit_tests, component_tests, integration_tests, e2e_tests,
+               passed, failed, lines, statements, branches, functions
+          FROM coverage_area_merge;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

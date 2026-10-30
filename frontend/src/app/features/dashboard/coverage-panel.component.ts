@@ -30,10 +30,13 @@ export class CoveragePanelComponent {
     { key: 'functions', label: 'Funktionen', hint: 'Funktionsabdeckung (Function Coverage)' },
   ];
 
-  /** Summenzeile über alle Bereiche; Prozentwerte als Mittel der gemeldeten Bereiche. */
+  /**
+   * Summenzeile über alle Bereiche; Prozentwerte als Mittel der gemeldeten Bereiche. Meldet der Bericht den festen
+   * Bereich „gesamt“ selbst, steht er schon in der Tabelle – dann keine zweite, gerechnete Summe.
+   */
   protected readonly total = computed<CoverageArea | null>(() => {
     const areas = this.report()?.areas ?? [];
-    if (areas.length < 2) return null;
+    if (areas.length < 2 || areas.some((area) => area.area === 'gesamt')) return null;
     const sum = (key: 'unit' | 'component' | 'integration' | 'e2e' | 'passed' | 'failed') =>
       areas.reduce((total, area) => total + area[key], 0);
     const mean = (key: 'lines' | 'statements' | 'branches' | 'functions') => {

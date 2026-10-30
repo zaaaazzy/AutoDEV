@@ -4,6 +4,7 @@ import test from 'node:test';
 import pg from 'pg';
 import { MIGRATIONS, MIGRATION_LOCK, runMigrations, type Migration } from './migrations.js';
 import { SCHEMA } from './schema.js';
+import { COVERAGE_AREA_ALIASES, COVERAGE_AREAS } from '../runner/coverage.js';
 import { adminPool, databaseUrl, dropDatabase } from './test-database.test.js';
 
 /** Verbindung, die jede Abfrage mitschreibt; done = bereits vermerkte Versionen, fail = SQL, das scheitert. */
@@ -27,10 +28,15 @@ const steps: Migration[] = [
   { version: 2, name: 'zwei', sql: 'ALTER TABLE a ADD COLUMN IF NOT EXISTS b TEXT' },
 ];
 
-test('Migrationen: Versionen lückenlos ab 1, Basisschritt ist das bisherige Schema, Index auf agent_run_steps(agent_id)', () => {
+/** Versionen, die bewusst frei bleiben: 19 ist für einen parallel entstandenen Schritt reserviert. */
+const RESERVED_VERSIONS = [19];
+
+test('Migrationen: Versionen lückenlos ab 1 (ausser reservierten), Basisschritt ist das bisherige Schema, Index auf agent_run_steps(agent_id)', () => {
+  const versions = MIGRATIONS.map((migration) => migration.version);
+  const last = versions.at(-1) ?? 0;
   assert.deepEqual(
-    MIGRATIONS.map((migration) => migration.version),
-    MIGRATIONS.map((_, index) => index + 1),
+    versions,
+    Array.from({ length: last }, (_, index) => index + 1).filter((version) => !RESERVED_VERSIONS.includes(version)),
   );
   assert.equal(MIGRATIONS[0].sql, SCHEMA);
   assert.ok(MIGRATIONS.some((migration) => /ON agent_run_steps \(agent_id\)/.test(migration.sql)));
@@ -84,6 +90,67 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   const migration = MIGRATIONS.find((step) => step.version === 17);
   assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
+});
+
+test('Migration 20: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 20);
+  assert.equal(migration?.name, 'coverage-feste-bereiche');
+  const pairs = Object.fromEntries(
+    [...(migration?.sql ?? '').matchAll(/\('([^']+)', '([^']+)'\)/g)].map((match) => [match[1], match[2]]),
+  );
+  assert.deepEqual(pairs, COVERAGE_AREA_ALIASES);
+  for (const area of COVERAGE_AREAS) assert.match(migration?.sql ?? '', new RegExp(`'${area}'`));
+});
+
+test('Migration 20: Bereiche umschreiben, Kollisionen zusammenführen, Altbestand ohne Zuordnung behalten', async (t) => {
+  const admin = await adminPool(t);
+  if (!admin) return;
+  const name = `devlog_migr_cov_${process.pid}`;
+  await dropDatabase(admin, name);
+  await admin.query(`CREATE DATABASE ${name}`);
+  const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
+  const client = await pool.connect();
+  try {
+    // Stand vor Version 20 mit Altbestand: zwei Schreibweisen für backend im selben Bericht, fehlender Zeilenwert,
+    // ein Bereich ohne Zuordnung.
+    await runMigrations(client, MIGRATIONS.filter((step) => step.version < 20));
+    assert.equal((await client.query(`SELECT to_regclass('coverage_area_aliases') AS t`)).rows[0].t, null);
+    await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
+    const report = (
+      await client.query<{ id: string }>(
+        `INSERT INTO test_coverage_reports (project_slug, summary) VALUES ('shop', 'alt') RETURNING id`,
+      )
+    ).rows[0]!.id;
+    await client.query(
+      `INSERT INTO test_coverage_areas (report_id, area, unit_tests, passed, lines, branches) VALUES
+         ($1, 'Backend', 10, 10, 80, 60), ($1, ' backend (src) ', 4, 4, 70, NULL),
+         ($1, 'Frontend', 3, 3, NULL, 50), ($1, 'Contracts', 2, 2, 90, 90)`,
+      [report],
+    );
+
+    assert.deepEqual(await runMigrations(client), [20]);
+    const rows = (
+      await client.query(
+        `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
+          WHERE report_id = $1 ORDER BY lower(area)`,
+        [report],
+      )
+    ).rows;
+    assert.deepEqual(rows, [
+      { area: 'backend', unit: 14, passed: 14, lines: 75, branches: 60 },
+      { area: 'Contracts', unit: 2, passed: 2, lines: 90, branches: 90 },
+      { area: 'frontend', unit: 3, passed: 3, lines: null, branches: 50 },
+    ]);
+    const versions = (await client.query('SELECT version FROM schema_migrations WHERE version = 20')).rowCount;
+    assert.equal(versions, 1, 'Version 20 vermerkt');
+    // Zweiter Start: läuft nicht erneut.
+    assert.deepEqual(await runMigrations(client), []);
+  } finally {
+    client.release();
+    await pool.end();
+    await dropDatabase(admin, name);
+    await admin.end();
+  }
 });
 
 /** Struktur der Datenbank: Spalten, Prüfungen, Indizes, Trigger, Funktionen und vermerkte Migrationen. */
