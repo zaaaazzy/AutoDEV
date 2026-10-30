@@ -7,7 +7,7 @@ import { GIT_TIMEOUT_MS, type GitHelpers, SECRET_CONTENT } from './git-helpers.j
 import { gitEnvironment, runProjectCommand } from '../project-command.js';
 
 // Projekttests können den kompletten Oberflächentest mit Playwright enthalten (Desktop und Handy).
-const TEST_TIMEOUT_MS = 45 * 60_000;
+export const TEST_TIMEOUT_MS = 45 * 60_000;
 
 const CI_WORKFLOW = join('.github', 'workflows', 'devlog-ci.yml');
 const CI_WAIT_MS = 30 * 60_000;
@@ -241,5 +241,6 @@ export function ciLogExcerpt(log: string, environment: NodeJS.ProcessEnv = proce
     .split('\n')
     .filter((line) => line.trim());
   const tail = lines.slice(-CI_LOG_LINES).join('\n');
-  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-CI_LOG_CHARS)}` : tail;
+  // Mit dem Auslassungszeichen höchstens CI_LOG_CHARS Zeichen.
+  return tail.length > CI_LOG_CHARS ? `…${tail.slice(-(CI_LOG_CHARS - 1))}` : tail;
 }

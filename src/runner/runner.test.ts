@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { Pool } from 'pg';
 import type { CommandExecutor } from '../core/command.js';
@@ -1313,6 +1316,7 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
     exitCode: command[0] === 'b' ? 1 : 0,
     durationMs: 1,
     output: command[0] === 'b' ? "You've hit your session limit · resets 12:40am (Europe/Zurich)" : '',
+    ...(command[0] === 'b' ? { tokens: 1234, costUsd: 0.5 } : {}),
   });
   const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
   const result = await runWorkItem(pool, item, agents, { cwd: '/repo', timeoutMs: 1000, execute });
@@ -1328,6 +1332,27 @@ test('Nutzungslimit des Agent-Kontos: Auftrag bleibt geplant mit Startzeit nach 
   const step = queries.find((query) => marksStepInterrupted(query.sql));
   assert.ok(step, 'Schritt als unterbrochen markiert');
   assert.match(step.sql, /tokens = \$5, cost_usd = \$6/);
+  assert.equal(step.values[4], 1234, 'Tokens des Versuchs zählen fürs Budget');
+  assert.equal(step.values[5], 0.5, 'Kosten des Versuchs zählen fürs Budget');
+});
+
+test('Projektordner während des Schritts weg: Schritt unterbrochen, Tokens und Kosten bleiben am Schritt', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'runner-outage-'));
+  const { pool, queries } = fakePool();
+  const execute: CommandExecutor = async (command) => {
+    if (command[0] !== 'b') return { exitCode: 0, durationMs: 1, output: '' };
+    // Das externe Laufwerk wird mitten im Schritt getrennt.
+    await rm(cwd, { recursive: true, force: true });
+    return { exitCode: 1, durationMs: 1, output: 'ENOENT', tokens: 777, costUsd: 0.25 };
+  };
+  const agents = [agent('a', 'pre_task', 1, ['a']), agent('b', 'while_task', 1, ['b'])];
+  assert.equal(await runWorkItem(pool, item, agents, { cwd, timeoutMs: 1000, execute }), 'failed');
+  const step = queries.find((query) => marksStepInterrupted(query.sql));
+  assert.ok(step, 'Schritt als unterbrochen markiert');
+  assert.match(String(step.values[3]), /Der Auftrag wird erneut eingeplant/);
+  assert.equal(step.values[4], 777);
+  assert.equal(step.values[5], 0.25);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht');
 });
 
 test('Drain beim Neustart: nach dem laufenden Auftrag startet kein weiterer; danach geht es normal weiter', async () => {
@@ -1385,4 +1410,63 @@ test('Sprint während des Laufs abgebrochen: nächster Agent startet nicht, Auft
     'zurück ins Backlog',
   );
   assert.ok(!queries.some((query) => query.values.includes('done')), 'nicht erledigt');
+});
+
+// Abbruch durch den Benutzer: Der Worker sieht cancel_requested am laufenden Schritt. Danach startet kein Agent des
+// Auftrags mehr – auch nicht „Bei abgelehnt“ (Tokens, Dateiänderungen). Ohne Abbruch laufen die Beobachter weiter.
+async function runCancelled(options: { cancel: boolean; sprint?: boolean }) {
+  let removed = false;
+  const queries: { sql: string; values: unknown[] }[] = [];
+  const pool = {
+    query: async (sql: string, values: unknown[] = []) => {
+      queries.push({ sql, values });
+      if (sql.includes('INSERT INTO agent_runs')) return { rows: [{ id: 'run-1' }] };
+      if (sql.includes('SELECT cancel_requested')) return { rows: [{ cancel_requested: options.cancel }] };
+      if (sql.includes('paused_at IS NOT NULL AS paused')) return { rows: [{ paused: false }] };
+      if (sql.includes('SELECT sprint_id AS "sprintId"')) return { rows: [{ sprintId: removed ? null : 'sprint-1' }] };
+      if (sql.includes('FROM agent_runs WHERE development_id')) return { rows: [] };
+      if (sql.includes('FROM agent_run_steps WHERE run_id')) return { rows: [] };
+      return { rows: [{ id: 'step-row' }], rowCount: 1 };
+    },
+  } as unknown as Pool;
+  const calls: string[] = [];
+  const execute: CommandExecutor = async (command, _cwd, execOptions) => {
+    calls.push(command[0] ?? '');
+    if (command[0] !== 'dev') return { exitCode: 0, durationMs: 1, output: 'ok' };
+    if (!options.cancel) return { exitCode: 1, durationMs: 1, output: 'TypeError: x is undefined' };
+    // Der Entwickler hängt, bis der Abbruch ihn beendet (Sprint-Abbruch: der Auftrag verlässt dabei den Sprint).
+    if (options.sprint) removed = true;
+    return new Promise((resolve) => {
+      const done = () => resolve({ exitCode: 130, durationMs: 1, output: 'beendet' });
+      if (execOptions?.signal?.aborted) done();
+      else execOptions?.signal?.addEventListener('abort', done, { once: true });
+    });
+  };
+  const agents = [
+    agent('dev', 'while_task', 1, ['dev']),
+    agent('tester', 'after_task', 1, ['tester']),
+    agent('rejected', 'on_rejected', 1, ['rejected']),
+  ];
+  const target = options.sprint ? { ...item, sprintId: 'sprint-1' } : item;
+  const result = await runWorkItem(pool, target, agents, { cwd: '/r', timeoutMs: 60_000, execute });
+  return { result, calls, queries };
+}
+
+test('Abbrechen (cancel_requested): kein weiterer Agent, auch kein Schritt der Phase on_rejected', async () => {
+  const { result, calls, queries } = await runCancelled({ cancel: true });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, ['dev']);
+  assert.ok(!queries.some((query) => query.sql.includes('INSERT INTO bugs')), 'kein Bug-Bericht für den Abbruch');
+});
+
+test('Sprint-Abbruch während des Laufs: kein Schritt der Phase on_rejected', async () => {
+  const { result, calls } = await runCancelled({ cancel: true, sprint: true });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, ['dev']);
+});
+
+test('Gegenprobe: normales Scheitern ohne Abbruch startet weiter „Bei abgelehnt“', async () => {
+  const { result, calls } = await runCancelled({ cancel: false });
+  assert.equal(result, 'failed');
+  assert.deepEqual(calls, ['dev', 'rejected']);
 });

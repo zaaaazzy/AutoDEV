@@ -1,5 +1,5 @@
 /**
- * Feste Bereiche der Testabdeckung. Gespeichert wird nur unter diesen Schlüsseln; die Migration 19 setzt dieselbe
+ * Feste Bereiche der Testabdeckung. Gespeichert wird nur unter diesen Schlüsseln; die Migration 23 setzt dieselbe
  * Liste als CHECK auf test_coverage_areas.area (ein Test prüft, dass beide übereinstimmen).
  */
 export const COVERAGE_AREA_KEYS = ['backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt'] as const;
@@ -28,7 +28,7 @@ const BACKEND = word('backend|server|api');
 const FRONTEND = word('frontend|web|ui|client');
 
 /**
- * Reihenfolge wie in der Migration 19: zuerst „gesamt“, dann die Einzelbereiche. Wer Backend und Frontend zusammen
+ * Reihenfolge wie in der Migration 23: zuerst „gesamt“, dann die Einzelbereiche. Wer Backend und Frontend zusammen
  * meldet, meldet ebenfalls „gesamt“.
  */
 const RULES: readonly [CoverageAreaKey, (label: string) => boolean][] = [

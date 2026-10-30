@@ -41,7 +41,7 @@ test('Vollständiger Lauf: Zeilen, Verzweigungen und Funktionen gesetzt', () => 
   assert.equal(isCompleteCoverage({ lines: 80, branches: 60, functions: null }), false);
 });
 
-test('Migration 19: CHECK auf test_coverage_areas.area enthält genau die Schlüssel aus dem Code', () => {
+test('Migration 23: CHECK auf test_coverage_areas.area enthält genau die Schlüssel aus dem Code', () => {
   const sql = MIGRATIONS.find((step) => step.name === 'testabdeckung-feste-bereiche')?.sql ?? '';
   const check = /CHECK \(area IN \(([^)]*)\)\)/.exec(sql)?.[1];
   assert.ok(check, 'CHECK-Constraint vorhanden');

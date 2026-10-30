@@ -660,6 +660,24 @@ app-wait-status {
 .attention-table .attention-section h3 {
   margin-bottom: 6px;
 }
+
+/* Offene Testnachweise: über die ganze Breite, Befehl als Code, Knopf bzw. Rechte-Link rechts (am Handy darunter). */
+.attention-table .attention-body > .attention-section.attention-evidence {
+  grid-column: 1 / -1;
+}
+.attention-evidence .evidence-item {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.attention-evidence .evidence-command {
+  overflow-wrap: anywhere;
+}
+.attention-evidence .evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
 .attention-table .attention-section p {
   line-height: 1.55;
 }

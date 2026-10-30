@@ -34,6 +34,9 @@ const GLOBAL = new Set([
   'GET /settings',
   'GET /review-slots',
   'POST /review-slots/:slot/stop',
+  // Ideen kommen im Body; die Abfragen filtern nach allowedProjects.
+  'POST /ideation/bulk/reject',
+  'POST /ideation/bulk/priority',
 ]);
 
 test('Jede registrierte API-Route deklariert Rolle und Mandanten', () => {

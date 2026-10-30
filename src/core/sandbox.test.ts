@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { CommandExecutor, CommandResult } from './command.js';
 import { guardHookCommand, withAgentPermissions } from '../agent/tool-permissions.js';
 import {
   containerDirectory,
   credentialProblem,
+  DOCKER_HUB_HOSTS,
+  DEPENDENCY_STAMP,
+  dependencyCommand,
+  dependencyStamp,
   dockerClientEnvironment,
   dockerHostPath,
   EGRESS_CONTAINER,
@@ -16,10 +22,12 @@ import {
   modulesVolume,
   readOnlyWorkspace,
   removeLeftoverContainers,
+  replaceLinkedModules,
   resetAgentNetwork,
   runInSandbox,
   SANDBOX_GUARD,
   SANDBOX_NETWORK,
+  SANDBOX_NO_PROXY,
   sandboxBadge,
   sandboxExecutor,
   sandboxFailureNote,
@@ -174,7 +182,7 @@ test('Sandbox: lesende Rollen binden Workspace und node_modules nur mit :ro ein'
   }
 });
 
-test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm und Ollama', () => {
+test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm, Ollama und Docker Hub', () => {
   const command = egressRunArgs('darwin', { DEV_LOG_AGENT_SANDBOX_EGRESS: 'pypi.org:443, 10.0.0.1:5432x, ;rm' });
   const joined = command.join(' ');
   assert.match(joined, /--cap-drop ALL/);
@@ -189,7 +197,14 @@ test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic,
     'api.anthropic.com:443',
     'registry.npmjs.org:443',
     'host.docker.internal:11434',
+    ...DOCKER_HUB_HOSTS,
     'pypi.org:443',
+  ]);
+  assert.deepEqual(DOCKER_HUB_HOSTS, [
+    'registry-1.docker.io:443',
+    'auth.docker.io:443',
+    'production.cloudflare.docker.com:443',
+    'production.cloudfront.docker.com:443',
   ]);
   assert.ok(!egressAllowList({}).includes('5432') && !egressAllowList({}).includes('5433'), 'keine Datenbank');
 });
@@ -241,12 +256,15 @@ test('Sandbox: Arbeitsordner innerhalb des Worktrees wird auf /workspace abgebil
   assert.equal(modulesVolume('Mein Projekt/../x'), 'aideation-node-modules-mein-projekt-..-x');
 });
 
-test('Sandbox: Schalter global und je Projekt, Standard docker, „off“ nur als Notfallmodus mit Warnung', () => {
-  assert.equal(sandboxMode(null, {}), 'docker', 'Standard: Sandbox an');
+test('Sandbox: Schalter global und je Projekt, Standard Arbeitscontainer, „off“ nur als Notfallmodus mit Warnung', () => {
+  assert.equal(sandboxMode(null, {}), 'workbench', 'Standard: Arbeitscontainer');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
+  assert.equal(sandboxMode('workbench', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'workbench');
+  assert.equal(usesSandbox('workbench'), true);
   assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'off' }), 'off');
   assert.equal(sandboxMode('off', { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'off', 'Projekt geht vor');
   assert.equal(sandboxMode('docker', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'docker');
-  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'docker', 'unbekannter Wert: Standard');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'workbench', 'unbekannter Wert: Standard');
   assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child' }), 'off', 'Unit-Tests: Attrappen statt Docker');
   assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child', DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
   assert.equal(usesSandbox('docker'), true);
@@ -452,4 +470,109 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+/** Worktree mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */
+function linkedWorktree(): { worktree: string; target: string } {
+  const root = mkdtempSync(join(tmpdir(), 'sandbox-modules-'));
+  const worktree = join(root, 'agent');
+  const target = join(root, 'source-node_modules');
+  mkdirSync(worktree);
+  mkdirSync(target);
+  writeFileSync(join(target, 'bleibt.txt'), 'x');
+  writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+  writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+  symlinkSync(target, join(worktree, 'node_modules'), 'dir');
+  return { worktree, target };
+}
+
+test('Sandbox: verlinktes node_modules wird zum leeren Ordner, das Ziel bleibt unberührt', () => {
+  const { worktree, target } = linkedWorktree();
+  replaceLinkedModules(worktree);
+  const stat = lstatSync(join(worktree, 'node_modules'));
+  assert.ok(!stat.isSymbolicLink() && stat.isDirectory(), 'Einhängepunkt für das Volume');
+  assert.ok(existsSync(join(target, 'bleibt.txt')), 'Ziel des Links nicht gelöscht');
+  replaceLinkedModules(join(worktree, 'fehlt'));
+});
+
+test('Sandbox: verlinkter Worktree bekommt die Abhängigkeiten ins Volume, nicht in das Ziel des Links', async () => {
+  resetAgentNetwork();
+  const { worktree, target } = linkedWorktree();
+  const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+  const result = await runInSandbox(['npm', 'run', 'typecheck'], worktree, {
+    runId: 'r-install',
+    project: 'demo',
+    name: 'aideation-r-install',
+    docker,
+    environment: { PATH: '/usr/bin' },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.ok(!lstatSync(join(worktree, 'node_modules')).isSymbolicLink());
+  assert.ok(existsSync(join(target, 'bleibt.txt')));
+  const install = calls.findIndex((call) => call.command.at(-1)?.includes(DEPENDENCY_STAMP));
+  const run = calls.findIndex((call) => call.command.slice(-3).join(' ') === 'npm run typecheck');
+  assert.ok(install >= 0 && install < run, 'Installation vor dem eigentlichen Lauf');
+});
+
+test('Sandbox: Abhängigkeiten werden einmal je Lockfile ins Volume installiert, bevor der Befehl läuft', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-deps-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+    const stamp = dependencyStamp(worktree);
+    assert.match(stamp ?? '', /^[a-f0-9]{16}$/);
+    const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    const execute = sandboxExecutor(worktree, { runId: 'r8', project: 'demo', docker, name: 'aideation-r8' });
+    await execute(['npm', 'test'], worktree);
+    const runs = calls.filter((call) => call.command.includes('--cap-drop'));
+    assert.equal(runs.length, 2);
+    assert.deepEqual(runs[0]?.command.slice(-3), dependencyCommand(stamp ?? ''));
+    assert.match(runs[0]?.command.at(-1) ?? '', /npm install --ignore-scripts/);
+    assert.ok(runs[0]?.command.at(-1)?.includes(DEPENDENCY_STAMP));
+    assert.match(
+      runs[0]?.command.at(-1) ?? '',
+      /^exec 9>node_modules\/\.aideation-install\.lock && flock 9 /,
+      'Sperre gegen parallele Installationen',
+    );
+    assert.equal(runs[0]?.command[runs[0].command.indexOf('--network') + 1], SANDBOX_NETWORK);
+    assert.deepEqual(runs[1]?.command.slice(-2), ['npm', 'test']);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: scheitert die Installation, startet der Befehl nicht; lesende Läufe installieren nichts', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-deps-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    const { calls, docker } = fakeDocker((command) =>
+      command[1] === 'version'
+        ? ok('27')
+        : command.at(-1)?.includes('npm install')
+          ? { ...ok('E404'), exitCode: 1 }
+          : ok(),
+    );
+    const result = await runInSandbox(['npm', 'test'], worktree, { runId: 'r9', project: 'demo', docker });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.output, /Abhängigkeiten liessen sich nicht/);
+    assert.ok(!calls.some((call) => call.command.slice(-2).join(' ') === 'npm test'));
+    const read = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    await runInSandbox(['npm', 'test'], worktree, {
+      runId: 'r10',
+      project: 'demo',
+      docker: read.docker,
+      readOnly: true,
+    });
+    assert.equal(read.calls.filter((call) => call.command.includes('--cap-drop')).length, 1);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: localhost geht nie über den Egress-Proxy', () => {
+  const run = args();
+  assert.ok(run.includes(`NO_PROXY=${SANDBOX_NO_PROXY}`));
+  assert.ok(run.includes(`no_proxy=${SANDBOX_NO_PROXY}`));
+  assert.match(SANDBOX_NO_PROXY, /localhost/);
+  assert.match(SANDBOX_NO_PROXY, /127\.0\.0\.1/);
 });

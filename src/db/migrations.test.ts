@@ -88,12 +88,12 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
-test('Migrationen: Testabdeckung auf feste Bereichsschlüssel (Schritt 19)', () => {
-  const migration = MIGRATIONS.find((step) => step.version === 19);
+test('Migrationen: Testabdeckung auf feste Bereichsschlüssel (Schritt 23)', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 23);
   assert.equal(migration?.name, 'testabdeckung-feste-bereiche');
   // Sicherung vor dem Löschen, CHECK erst nach dem Bereinigen.
   const sql = migration?.sql ?? '';
-  assert.ok(sql.indexOf('test_coverage_areas_backup_19') < sql.indexOf('DELETE FROM test_coverage_areas'));
+  assert.ok(sql.indexOf('test_coverage_areas_backup_23') < sql.indexOf('DELETE FROM test_coverage_areas'));
   assert.ok(sql.lastIndexOf('DELETE FROM') < sql.indexOf('ADD CONSTRAINT test_coverage_areas_area_check'));
 });
 
@@ -119,7 +119,7 @@ const LEGACY_LABELS = [
   'Gesamtprojekt',
 ];
 
-test('Migration 19: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
+test('Migration 23: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter Start ändert nichts', async (t) => {
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `devlog_migr_coverage_${process.pid}`;
@@ -131,7 +131,7 @@ test('Migration 19: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter 
     try {
       await runMigrations(
         client,
-        MIGRATIONS.filter((step) => step.version < 19),
+        MIGRATIONS.filter((step) => step.version < 23),
       );
       await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
       const report = async (summary: string, createdAt: string) =>
@@ -158,7 +158,7 @@ test('Migration 19: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter 
       await area(newer, 'Frontend (Angular)', 66, 55, 77);
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
-      assert.deepEqual(await runMigrations(client), [19]);
+      assert.deepEqual(await runMigrations(client), [23]);
 
       const rows = async (id: string) =>
         (
@@ -182,7 +182,7 @@ test('Migration 19: Altbestand wird zugeordnet, bereinigt, abgesichert; zweiter 
           WHERE r.created_at = '2026-09-01T10:00:00Z'`,
       );
       for (const row of mapped.rows) assert.equal(row.area, coverageAreaKey(row.summary), row.summary);
-      const backup = await client.query('SELECT count(*)::int AS n FROM test_coverage_areas_backup_19');
+      const backup = await client.query('SELECT count(*)::int AS n FROM test_coverage_areas_backup_23');
       assert.equal(backup.rows[0].n, 8 + LEGACY_LABELS.length, 'Sicherung mit allen Altzeilen');
 
       // Jede Zeile hat einen festen Schlüssel; jeder Schlüssel aus dem Code besteht den CHECK, andere nicht.

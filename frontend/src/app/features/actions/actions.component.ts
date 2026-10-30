@@ -1,7 +1,10 @@
 import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
-import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
+import type { AcceptanceCheck, DevelopmentItem, TestEvidence } from '../../core/models.js';
+import { SettingsGroups } from '../settings/settings-group.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import type { AttentionCard, CardStep } from '../../shared/attention-card.js';
 import type { AttentionEntry } from '../../shared/order-attention.js';
 import { isFinished } from '../../shared/labels.js';
@@ -17,9 +20,15 @@ import { OrderService } from '../development/order.service.js';
 import { AcceptanceReviewComponent } from './acceptance-review.component.js';
 import { RunningPanelComponent } from './running-panel.component.js';
 
+const EVIDENCE_REASON_LABELS: Record<TestEvidence['grund'], string> = {
+  nicht_freigegeben: 'Befehl für den Agent nicht freigegeben',
+  gegenprobe_fehlt: 'Gegenprobe fehlt',
+};
+
 /**
  * Seite „Aktionen“: Rückmeldungen der Agents und alles, was auf dich wartet – Rückfragen, blockierte oder
- * abgelehnte Aufträge, Freigaben, aus dem Sprint genommene Aufträge und Punkte, die nur ein Mensch prüfen kann.
+ * abgelehnte Aufträge, Freigaben, aus dem Sprint genommene Aufträge, Punkte, die nur ein Mensch prüfen kann, und
+ * offene Testnachweise.
  * Diese Aufträge stehen nicht mehr in der Liste unter „Aufträge“.
  */
 @Component({
@@ -41,6 +50,8 @@ import { RunningPanelComponent } from './running-panel.component.js';
 })
 export class ActionsComponent {
   private readonly orders = inject(OrderService);
+  private readonly api = inject(ApiService);
+  private readonly settingsGroups = inject(SettingsGroups);
   protected readonly store = inject(ProjectStore);
   protected readonly auth = inject(AuthService);
   protected readonly data = this.store.data;
@@ -54,6 +65,8 @@ export class ActionsComponent {
   private readonly detailsShown = signal<ReadonlySet<string>>(new Set());
   /** Antwort bzw. Hinweis an die Agents je Auftrag, bis „Erneut versuchen“ ihn mitschickt. */
   private readonly notes = signal<Record<string, string>>({});
+  /** Häkchen der offenen Abnahmepunkte: gesetzt nur während des Speicherns, nach Fehler wieder leer. */
+  protected readonly ticks = new AcceptanceTicks();
 
   constructor() {
     // Aus einem Link (#actions/<id> oder umgeleitet von #development/<id>): Die Tabelle klappt die Zeile auf,
@@ -82,6 +95,37 @@ export class ActionsComponent {
     this.store.navigate('bugs', { focus: id });
   }
 
+  /** Ein kompletter Test (oder ein anderer Nachweis-Lauf) läuft: Startknöpfe gesperrt, die API antwortet sonst 409. */
+  protected readonly testRunning = computed(() => this.data().testRunning);
+
+  protected evidenceReason(proof: TestEvidence): string {
+    return EVIDENCE_REASON_LABELS[proof.grund];
+  }
+
+  /** Startknopf nur für freigegebene Befehle; sonst führt der Eintrag zu den Rechten des Agents. */
+  protected canStartEvidence(proof: TestEvidence): boolean {
+    return proof.allowed && proof.grund !== 'nicht_freigegeben' && proof.status !== 'nicht_freigegeben';
+  }
+
+  /** Übergibt nur die Nachweis-ID: Den Befehl liest der Worker aus der gespeicherten Zeile. */
+  protected runEvidence(proof: TestEvidence): Promise<boolean> {
+    const path = `${this.api.projectPath(this.store.activeProject())}/test-evidence/${encodeURIComponent(proof.id)}/run`;
+    return this.store.perform(
+      () => this.api.post(path),
+      'Testlauf gestartet – grün hakt den Nachweis ab, das Ergebnis steht unter „Testläufe“.',
+    );
+  }
+
+  /** Rechte-Gruppen (Einstellungen › Rechte-Kategorien) aufgeklappt öffnen; zugewiesen werden sie beim Agent. */
+  protected openRights(): void {
+    this.settingsGroups.set('rechte', true);
+    this.store.navigate('settings', { anchor: 'permission-groups' });
+  }
+
+  protected openRun(id: string): void {
+    this.store.navigate('runs', { focus: id });
+  }
+
   protected analyzeOrder(item: DevelopmentItem): Promise<void> {
     return this.orders.analyze(item);
   }
@@ -95,8 +139,10 @@ export class ActionsComponent {
     return this.orders.confirmChecks(item);
   }
 
-  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
-    return this.orders.checkPoint(item, check, true);
+  protected checkPoint(event: Event, item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
+    return this.ticks.tick(event.target as HTMLInputElement, item.id, check, () =>
+      this.orders.checkPoint(item, check, true),
+    );
   }
 
   /** „Ansicht“ samt „Optisch freigeben“ oben in der Karte (dieselbe Regel wie in der Auftragsansicht). */

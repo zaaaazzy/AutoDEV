@@ -188,6 +188,24 @@ export function planEnv(existing: string, input: EnvInput): EnvPlan {
 }
 
 /**
+ * Werte, die die Installationsskripte der Dienste (Worker, Ausfall-Wächter) aus der Umgebung übernehmen – eine Liste,
+ * damit keiner fehlt (ohne DEV_LOG_PUBLIC_URL prüft der Wächter die HTTPS-Adresse nie).
+ */
+export const SERVICE_INSTALL_KEYS = ['DEV_LOG_DATABASE_URL', 'DEV_LOG_SECRET_KEY', 'DEV_LOG_PUBLIC_URL'] as const;
+
+/**
+ * Setzt die Werte aus SERVICE_INSTALL_KEYS in die Umgebung. Fehlende oder leere werden gelöscht statt als
+ * „undefined“ gesetzt, damit kein alter Wert (etwa eine frühere Domain) an die Skripte geht.
+ */
+export function applyServiceInstallEnv(values: Map<string, string>, target: NodeJS.ProcessEnv = process.env): void {
+  for (const key of SERVICE_INSTALL_KEYS) {
+    const value = values.get(key)?.trim();
+    if (value) target[key] = value;
+    else delete target[key];
+  }
+}
+
+/**
  * Schreibt die .env mit Modus 0600. Eine vorhandene Datei wird vorher als `.env.bak-<Zeit>` gesichert
  * (ebenfalls 0600); geschrieben wird über eine temporäre Datei, damit nie eine halbe .env entsteht.
  */

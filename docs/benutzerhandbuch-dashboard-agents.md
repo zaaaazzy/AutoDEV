@@ -205,7 +205,7 @@ Dieser Abschnitt betrifft keinen Bildschirm, sondern das Verhalten des Workers b
 - `gesamt` berechnet AIdeation nicht selbst. Die Zeile erscheint nur, wenn ein Lauf sie meldet. Die frühere Summenzeile (Mittelwert) gibt es nicht mehr.
 - Verworfen werden: Bezeichnungen ohne erkennbaren Bereich (z. B. „Projekt“ oder ein Paketname wie „dev-log“) und Bereiche ohne Zeilen-, Verzweigungs- oder Funktionsabdeckung. Der Verlauf des Schritts nennt jeden verworfenen Eintrag mit Grund („Testabdeckung: „dev-log“ verworfen: keinem Bereich zuordenbar …“).
 - **Dashboard und Statistik:** Anzeige, Bedienung und Fehlerbehebung stehen in Abschnitt 5.6.
-- **Altbestand:** Die Datenbank-Migration 19 ordnet bestehende Einträge einmalig den Schlüsseln zu. Einträge ohne Prozentwerte oder ohne Zuordnung werden gelöscht. Gibt es in einem Bericht mehrere Einträge für denselben Schlüssel, bleibt der mit dem höchsten Zeilenwert. Vorher sichert sie die Tabelle in `test_coverage_areas_backup_19`.
+- **Altbestand:** Die Datenbank-Migration 23 ordnet bestehende Einträge einmalig den Schlüsseln zu. Einträge ohne Prozentwerte oder ohne Zuordnung werden gelöscht. Gibt es in einem Bericht mehrere Einträge für denselben Schlüssel, bleibt der mit dem höchsten Zeilenwert. Vorher sichert sie die Tabelle in `test_coverage_areas_backup_23`.
 
 **Testläufe mit eigenem Datenbank-Passwort:** Ein Testlauf, den du unter **Testläufe** anforderst, und der Komplettlauf (`npm run test:full`) funktionieren auch dann, wenn du in der `.env` ein eigenes `DEV_LOG_DB_PASSWORD` hast, zum Beispiel vom Einrichtungs-Assistenten erzeugt.
 - Der Worker gibt diesen Befehlen nur `DEV_LOG_DATABASE_URL` mit, dazu das Admin-Ziel `E2E_ADMIN_DATABASE_URL` (Datenbank `postgres`, gleicher Zugang). Secret Key und alle anderen `DEV_LOG_*`-Werte fehlen dort.
@@ -274,7 +274,7 @@ Die Testabdeckung zeigt, wie viel des Codes die Tests erreichen. Sie wird je **B
 - **Verworfene Bereiche:** Bezeichnungen ohne erkennbaren Bereich (z. B. „Projekt“ oder ein Paketname wie „dev-log“) und unvollständige Bereiche werden verworfen. Der Verlauf des Schritts nennt jeden verworfenen Eintrag mit dem Grund, etwa „Testabdeckung: „Projekt“ verworfen: keinem Bereich zuordenbar (erlaubt: backend, frontend, contracts, scripts, e2e, gesamt)“.
 - **Doppelte Bereiche:** Meldet ein Lauf denselben Bereich zweimal, bleibt der erste Eintrag. Der zweite wird mit dem Grund „doppelt gemeldet“ verworfen. Hat ein Lauf keinen gültigen Bereich mehr übrig, wird kein Bericht angelegt.
 - **Zuordnung ist ganzwortbasiert:** „builder“ ist kein „ui“. Gesamt hat Vorrang: Wer Backend und Frontend zusammen meldet, bekommt `gesamt`.
-- **Altbestand:** Die Migration 19 hat bestehende Einträge einmalig den Bereichen zugeordnet. Die Zuordnung ist eine Heuristik. Der Verlauf älterer Läufe ist nur so gut wie diese Zuordnung. Die Originaldaten bleiben in der Tabelle `test_coverage_areas_backup_19` erhalten.
+- **Altbestand:** Die Migration 23 hat bestehende Einträge einmalig den Bereichen zugeordnet. Die Zuordnung ist eine Heuristik. Der Verlauf älterer Läufe ist nur so gut wie diese Zuordnung. Die Originaldaten bleiben in der Tabelle `test_coverage_areas_backup_23` erhalten.
 - **Keine Neuberechnung:** Die Zählungen alter Läufe werden nicht neu berechnet. Fehlende Werte werden nicht nachgeholt.
 - **Ziel bleibt bei 75 %:** Das Ziel ist unverändert. Es beeinflusst nur die Farben und die Ziellinie, nicht das Speichern.
 

@@ -18,7 +18,13 @@ const order = (area: string): number => COVERAGE_AREA_KEYS.indexOf(area as (type
  */
 export async function coverageOverview(pool: Queryable, slug: string) {
   const report = (
-    await pool.query(
+    await pool.query<{
+      id: string;
+      summary: string;
+      createdAt: string;
+      developmentId: string | null;
+      orderTitle: string | null;
+    }>(
       `SELECT r.id, r.summary, r.created_at AS "createdAt", r.development_id AS "developmentId",
               d.title AS "orderTitle"
          FROM test_coverage_reports r LEFT JOIN development_items d ON d.id = r.development_id

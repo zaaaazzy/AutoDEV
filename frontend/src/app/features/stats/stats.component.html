@@ -184,6 +184,34 @@
     </article>
   </section>
 
+  <section class="panel" data-testid="estimate-trend">
+    <div class="section-heading">
+      <div>
+        <h2>Schätzfehler je Sprint</h2>
+        <p class="muted">Median Ist ÷ Schätzung der erledigten Aufträge, ältester Sprint zuerst (1× = genau geschätzt)</p>
+      </div>
+    </div>
+    @for (row of estimateTrend(); track $index) {
+      <div class="usage-row">
+        <div class="usage-head">
+          <span>{{ row.name }}</span>
+          <strong>{{ errorText(row.hourError) }}</strong>
+        </div>
+        <div class="bar-track"><span [style.width.%]="row.width"></span></div>
+        <small class="muted">
+          @if (row.errorSamples) {
+            Laufzeit {{ errorText(row.hourError) }} · Tokens {{ errorText(row.tokenError) }} ·
+            {{ row.errorSamples }} {{ row.errorSamples === 1 ? 'Auftrag' : 'Aufträge' }} gemessen
+          } @else {
+            Kein Schätzfehler: noch keine erledigten Aufträge mit Messung
+          }
+        </small>
+      </div>
+    } @empty {
+      <p class="empty-state">Noch keine Sprints vorhanden.</p>
+    }
+  </section>
+
   <section class="panel stats-table">
     <div class="section-heading">
       <div>
