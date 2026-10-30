@@ -49,10 +49,8 @@ Zwei neue Routen, **vor** `POST /ideation/:id/reject` registriert (sonst fängt 
 ## Tests
 
 - `src/api/app.test.ts`: je ein neuer Test für Massenablehnung und Massenpriorität.
-- `src/api/access.test.ts`: Projektgrenzen bei Nicht-Admins.
+- `src/api/access.test.ts`: Projektgrenzen bei Nicht-Admins (Fall Nicht-Admin mit fremden Projekten).
 - `src/api/roles.test.ts`: Rolle „Planen“ für die neuen Routen.
-
-- `src/api/access.test.ts`: zusätzlich der Fall Nicht-Admin mit fremden Projekten.
 - `e2e/app.spec.ts`: Test „Ideen: mehrere markieren …“ (Bulk-Leiste, Schnell-Ablehnen-Popover, Escape schließt ohne Speichern, abgelehnte Idee wechselt zu „Abgeschlossene Ideen“).
 - `e2e/full-ui.check.ts`: Rollen-Check der Autorin. Ohne Planen-Recht gibt es keinen Knopf „Schnell ablehnen“, beide Bulk-Routen antworten mit 403.
 
@@ -90,4 +88,5 @@ sequenceDiagram
 - Auftrag e8de4bd4: umgesetzt (Entwickler, `while_task` bestanden). Dokumentation hiermit abgeschlossen.
 - Offen: Typecheck, `src/api/app.test.ts` und die neuen E2E-Tests in einer Umgebung mit `tsc`/`tsx` ausführen (Tester scheiterte an der Sandbox). Danach Browser-Prüfung mit Nicht-Admin und Printscreens.
 - Wiederholter Versuch (30.10.2026 12:23): Der Entwickler-Lauf hat keine Dateien geändert. Voraussetzung für den Test: Image `aideation-agent` neu bauen und das `node_modules`-Volume per `npm ci` füllen (für Agents gesperrt, ein Mensch muss es tun). Zusätzlich muss `/home/agent/.npm` beschreibbar sein (gehört root, `EACCES` bei `npx`). Testdateien: `e2e/app.spec.ts`, `frontend/src/app/features/ideation/idea-options.spec.ts`, `src/api/access.test.ts`, `src/api/app.test.ts`, `src/api/roles.test.ts`.
+- Testlauf 9866bd85 (Tester, `after_task`): `npm run typecheck` Exit 127 (`tsc` nicht gefunden), `npx tsx --test …` `EACCES` im npm-Cache. Kein Testergebnis, nur Umgebungsfehler.
 - Der letzte Bug-Wächter-Lauf scheiterte am Monatslimit der Claude-CLI. Er liefert kein Prüfergebnis und sollte nach dem Zurücksetzen des Limits wiederholt werden.
