@@ -53,6 +53,8 @@ Diese Bedingungen gelten nur, wenn die Docker-Sandbox eingeschaltet ist (`DEV_LO
 | Zwei Läufe desselben Projekts gleichzeitig | Der zweite wartet auf dieselbe Installation. |
 | `npm ci` schlägt fehl | Der Lauf startet nicht. Die Meldung unten erscheint. |
 
+Vor dem Lauf ersetzt der Worker im Agent-Worktree den `node_modules`-Symlink auf den Host-Pfad durch einen leeren Ordner (`prepareModulesMountpoint`), damit das Volume dort sichtbar ist. Projektordner von Menschen bleiben unberührt. Das Log des roten GitHub-Actions-Laufs (Job `check`) liegt dem Auftrag noch nicht an. Ein Mensch muss es anhängen, weil `gh` für Agents gesperrt ist.
+
 Der Installationscontainer sieht nur das Volume sowie `package.json`, das Lockfile und `.npmrc` (nur lesend). Den Worktree sieht er nicht.
 
 ### Meldung bei fehlgeschlagenem `npm ci`
