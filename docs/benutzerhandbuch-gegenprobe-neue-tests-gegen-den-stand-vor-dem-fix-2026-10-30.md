@@ -62,12 +62,12 @@ Jede Testdatei bekommt genau eines dieser Ergebnisse:
 
 **Testbericht** (`test_runs.report`, Trigger `counter-check`): Überschrift „Gegenprobe: neue Tests ohne den Fix (Sprintname)“, danach eine Zeile je geprüfter Testdatei mit dem Ergebnis. Der Lauf wird als erfolgreich beendet, auch wenn die Dateien rot sind. Er erscheint daher nicht als roter Testlauf im Dashboard.
 
-**Sprint-Log:** eine Zusammenfassung, zum Beispiel „Gegenprobe (3 Testdateien): 2 scheitern ohne Fix, 1 auch ohne Fix grün, 0 brechen beim Import ab“. Steht eine Zahl für nicht prüfbare Aufträge dabei, heisst es „nicht prüfbar“.
+**Sprint-Log:** eine Zusammenfassung, zum Beispiel „Gegenprobe (3 Testdateien): 2 scheitern ohne Fix, 1 auch ohne Fix grün, 0 brechen beim Import ab“. Gab es Fehler der Gegenprobe selbst, folgt „N nicht prüfbar“. Das Sprint-Log wird nur geschrieben, wenn es überhaupt Bugfixes mit geänderter Testdatei gibt.
 
 ## 5. Wann der Lauf stattfindet
 
-1. Das Test-Gate des Sprint-Abschlusses ist grün.
-2. Push und Merge laufen.
+1. Das Test-Gate des Sprint-Abschlusses läuft, danach Push beziehungsweise Pull Request und Merge.
+2. Die Gegenprobe wertet das Ergebnis des Gates **nicht** aus. Sie läuft nach dem Push-Schritt, auch wenn das Gate rot war. Sie kann Push und Merge weder verhindern noch zurücknehmen.
 3. Die Stundengrenze des Gates wird neu gestellt, damit die Gegenprobe sie nicht sprengt.
 4. Die Gegenprobe läuft für alle erledigten Bugfixes des Sprints ohne Ergebnis.
 
@@ -108,7 +108,7 @@ Hat der Worker während des Laufs einen Neustart (Shutdown), bleiben die Aufträ
 
 ```mermaid
 flowchart TD
-  A["Test-Gate grün, Push und Merge"] --> B{"Bugfix mit geänderter Testdatei?"}
+  A["Test-Gate, Push und Merge (Gate-Ergebnis fließt nicht ein)"] --> B{"Bugfix mit geänderter Testdatei?"}
   B -- nein --> Z["kein Ergebnis, Feld bleibt leer"]
   B -- ja --> C["Worktree auf dem Stand vor dem Fix"]
   C --> D["Testdateien aus dem Auftrags-Commit einspielen"]
