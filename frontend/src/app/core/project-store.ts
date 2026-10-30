@@ -79,7 +79,9 @@ export class ProjectStore {
     () => this.data().development.filter((item) => !isFinished(item.status)).length,
   );
   /** Aufträge mit Handlungsbedarf (Seite „Aktionen“, Menü-Bubble). */
-  readonly attention = computed(() => orderAttention(this.data().development, this.data().acceptance));
+  readonly attention = computed(() =>
+    orderAttention(this.data().development, this.data().acceptance, this.data().evidence),
+  );
   readonly attentionIds = computed(() => new Set(this.attention().map((entry) => entry.item.id)));
   readonly openBugCount = computed(
     () => this.data().bugs.filter((bug) => bug.status === 'open' || bug.status === 'in_progress').length,

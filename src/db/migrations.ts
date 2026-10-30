@@ -412,6 +412,33 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
     `,
   },
+  // Offene Testnachweise (@@NACHWEIS von Tester und Dokumentierer): je Auftrag und Befehl eine Zeile. Ein Mensch
+  // startet den Befehl unter „Aktion notwendig“ als Projekttestlauf (test_requests mit Umfang „befehl“). Die Prüfung
+  // des Umfangs behält jeden Wert, den der Code schreibt ('full', 'ui'), sonst scheitert sie an bestehenden Zeilen.
+  {
+    version: 19,
+    name: 'testnachweise',
+    sql: `
+      CREATE TABLE IF NOT EXISTS test_evidence (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        development_id UUID NOT NULL REFERENCES development_items(id) ON DELETE CASCADE,
+        position INTEGER NOT NULL DEFAULT 1,
+        datei TEXT NOT NULL DEFAULT '',
+        befehl TEXT NOT NULL CHECK (char_length(befehl) BETWEEN 1 AND 500),
+        grund TEXT NOT NULL CHECK (grund IN ('nicht_freigegeben', 'gegenprobe_fehlt')),
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'passed', 'failed', 'nicht_freigegeben')),
+        agent_name TEXT,
+        run_id UUID REFERENCES test_runs(id) ON DELETE SET NULL,
+        checked_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (development_id, befehl)
+      );
+      ALTER TABLE test_requests DROP CONSTRAINT IF EXISTS test_requests_scope_check;
+      ALTER TABLE test_requests ADD CONSTRAINT test_requests_scope_check
+        CHECK (scope IN ('full', 'ui', 'befehl'));
+      ALTER TABLE test_requests ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES test_evidence(id) ON DELETE SET NULL;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

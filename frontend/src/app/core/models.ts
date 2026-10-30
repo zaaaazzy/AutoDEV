@@ -657,6 +657,25 @@ export interface AcceptanceCheck {
   checkedAt: string | null;
 }
 
+/** Offener Testnachweis (@@NACHWEIS von Tester bzw. Dokumentierer): ein Befehl, den ein Mensch als Testlauf startet. */
+export interface TestEvidence {
+  id: string;
+  developmentId: string;
+  position: number;
+  datei: string;
+  befehl: string;
+  /** nicht_freigegeben = Befehl für den Agent gesperrt, gegenprobe_fehlt = Lauf steht noch aus. */
+  grund: 'nicht_freigegeben' | 'gegenprobe_fehlt';
+  status: 'open' | 'passed' | 'failed' | 'nicht_freigegeben';
+  agentName: string | null;
+  runId: string | null;
+  checkedAt: string | null;
+  /** Lässt die Befehlsprüfung (isAllowedCommand) den Befehl zu? Sonst nur der Verweis auf die Rechte. */
+  allowed: boolean;
+  /** Ein Testlauf für diesen Nachweis ist angefordert oder läuft. */
+  running: boolean;
+}
+
 export interface AcceptanceDefaults {
   definitionOfReady: string[];
   definitionOfDone: string[];
@@ -679,6 +698,10 @@ export interface ProjectData {
   acceptance: AcceptanceCheck[];
   acceptanceDefaults: AcceptanceDefaults | null;
   docRevisions: DocRevision[];
+  /** Offene (nicht abgehakte) Testnachweise. */
+  evidence: TestEvidence[];
+  /** Ein kompletter Test (bzw. Nachweis-Lauf) des Projekts ist angefordert oder läuft. */
+  testRunning: boolean;
 }
 
 export const emptyProjectData = (): ProjectData => ({
@@ -698,6 +721,8 @@ export const emptyProjectData = (): ProjectData => ({
   acceptance: [],
   acceptanceDefaults: null,
   docRevisions: [],
+  evidence: [],
+  testRunning: false,
 });
 
 export interface ChatMessage {
