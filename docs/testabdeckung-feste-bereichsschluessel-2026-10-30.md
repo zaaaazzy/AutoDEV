@@ -49,7 +49,7 @@ Die alten Berichte bleiben als Verlaufsquelle. Die Zählungen werden nicht neu b
 
 **Tests**
 
-Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Vollständigkeitsprüfung, Migration und Verlauf (`coverage-areas.test.ts`, `coverage.test.ts`, `measured-coverage.test.ts`, `project-command.test.ts`, `migrations.test.ts`, `visionary.test.ts`, `runner.test.ts`, `project-loader.spec.ts`, `coverage-history.spec.ts`). Die Dokumentation hat `npm test` nicht selbst ausgeführt; das Ergebnis ist im Testschritt des Auftrags zu prüfen.
+Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Vollständigkeitsprüfung, Migration und Verlauf (`coverage-areas.test.ts`, `coverage.test.ts`, `measured-coverage.test.ts`, `project-command.test.ts`, `migrations.test.ts`, `visionary.test.ts`, `runner.test.ts`, `project-loader.spec.ts`, `coverage-history.spec.ts`). Laut Entwicklerbericht (erneuter Versuch im Arbeitscontainer) ist `npm test` grün, und die Migrationstests sind gegen eine echte Datenbank gelaufen. Die Dokumentation hat die Läufe nicht selbst wiederholt.
 
 **Nicht umgesetzt oder offen**
 
@@ -57,7 +57,7 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 - **Testschritt fehlgeschlagen, aber aus Umgebungsgründen:** Der Tester konnte nichts ausführen. `npm run typecheck` scheiterte mit `tsc: not found` (Sandbox-Image „aideation-agent“, Exit-Code 127), `npx tsx --test …` mit `EACCES` auf dem npm-Cache (`/home/agent/.npm`). Es gibt also weder einen grünen noch einen roten Testlauf des Codes; die Abnahme „`npm test` vollständig grün“ ist offen. Tests nur über `npm test` bzw. `npm run …` starten, nicht über `npx tsx`.
 - **Erneuter Versuch (30.10.2026 12:23):** Der Hinweis lautet, das Image „aideation-agent“ zu korrigieren, neu zu bauen und danach den `node_modules`-Volume des Projekts zu befüllen. Das ist eine Umgebungsaufgabe, keine Codeänderung; im Repository wurde dafür nichts geändert. Der Tester-Schritt davor scheiterte weiter an `tsc: not found` und `EACCES` auf `/home/agent/.npm`.
 - **Image-Korrektur im erneuten Versuch:** Geändert wurde `deploy/agent/Dockerfile`. Der npm-Install als root mit `HOME=/home/agent` hinterließ einen root-eigenen npm-Cache, daher `EACCES` bei jedem `npm`/`npx` des Agents. Das Image räumt den Cache jetzt auf (`npm cache clean --force`, `rm -rf /home/agent/.npm`), und `/home/agent` sowie `/workspace` sind für alle beschreibbar (`chmod 1777`). Das Image muss neu gebaut werden (`docker build -t aideation-agent -f deploy/agent/Dockerfile .`), erst dann wirkt die Korrektur. `tsc: not found` bleibt, bis der `node_modules`-Volume des Projekts befüllt ist (`npm ci`). Das habe ich nicht geprüft. Zusätzlich liegen Änderungen an `frontend/tsconfig.app.json` und `frontend/tsconfig.spec.json` vor, die der Entwickler aus dem vorherigen Versuch mitgeführt hat.
-- Die Migration wurde nach der Liste der Dateien nur im Test (`migrations.test.ts`) geprüft, nicht gegen eine echte Datenbank mit Altbestand.
+- **Stand nach dem erneuten Versuch:** Der Entwickler hat im Arbeitscontainer umgesetzt und getestet: `npm test` grün, Migrationstests gegen eine echte Datenbank. Die oben genannten Umgebungsprobleme (Tester-Schritt) betreffen damit nur den früheren Versuch. Ein Browser-Check der Oberfläche steht noch aus.
 
 **Worauf zu achten ist**
 
@@ -72,12 +72,12 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 
 | Auftrag | Inhalt | Zustand |
 | --- | --- | --- |
-| 80ae16ac | Coverage-Bereiche auf feste Schlüssel umstellen | Entwickler fertig, Dokumentation hier; Tester-Schritt scheiterte an der Umgebung (kein `tsc`, npm-Cache nicht beschreibbar), Testlauf wiederholen; Review und Merge offen |
+| 80ae16ac | Coverage-Bereiche auf feste Schlüssel umstellen | Entwickler fertig (`npm test` grün, Migrationstests gegen echte Datenbank), Dokumentation hier; Abnahme durch den Tester, Review und Merge offen |
 
 ## Anfrage / TODO
 
-- Image `aideation-agent` mit dem korrigierten Dockerfile neu bauen, dann den `node_modules`-Volume des Projekts befüllen.
-- Sandbox-Image reparieren (Abhängigkeiten installiert, `tsc` im Pfad, npm-Cache beschreibbar) und danach `npm run typecheck` und `npm test` ausführen; dabei die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
+- Image `aideation-agent` mit dem korrigierten Dockerfile neu bauen, dann den `node_modules`-Volume des Projekts befüllen (nur nötig, wenn spätere Sandbox-Läufe weiter `tsc: not found` oder `EACCES` melden).
+- Abnahme: `npm run typecheck` und `npm test` im Testschritt bestätigen; die Migration auf einer Datenbank mit Altbestand und einen zweiten Start prüfen.
 - Nach der Migration Übersicht und Statistik im Browser ansehen: je Schlüssel eine Zeile, Datum je Zeile, Verlauf je Schlüssel.
 - Optional später: Sicherungstabelle `test_coverage_areas_backup_23` entfernen, wenn die Zuordnung der Altdaten abgenommen ist.
 
