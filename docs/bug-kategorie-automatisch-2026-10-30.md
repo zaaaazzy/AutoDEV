@@ -62,13 +62,17 @@ Worauf zu achten ist:
 
 | Auftrag | Zustand | Details |
 | --- | --- | --- |
-| f10a0971 Automatische Bug-Kategorisierung | Entwicklung bestanden, Dokumentation fertig; Abnahme durch Tester offen | Neu: Regel-Datei samt Test; Migration 19; 6 Einhängepunkte; Frontend-Auswahl und Labels |
+| f10a0971 Automatische Bug-Kategorisierung | Entwicklung bestanden, Dokumentation fertig; Tester-Lauf scheiterte an der Umgebung (siehe TODO), Abnahme offen | Neu: Regel-Datei samt Test; Migration 19; 6 Einhängepunkte; Frontend-Auswahl und Labels |
 
 ## Anfrage/TODO
 
 - Folgeauftrag: GitHub-Import (`src/runner/github-sync.ts:77`) kategorisieren.
 - Offen: Auftragsformular/-detail bietet geerbte Kategorien `git-sync`, `ci`, `runner` nicht zur Auswahl an.
 - Offen: Retrospektive-Auswertung existiert nur als Idee; Auswertung bis dahin über die Bug-Statistik.
+- Tester-Lauf vom 30.10.2026 scheiterte nicht an Testergebnissen, sondern an der Sandbox: `npm run typecheck` fand
+  `tsc` nicht (Exit 127), `npx tsx --test` scheiterte an `EACCES` im npm-Cache `/home/agent/.npm`. Es liegt also noch
+  kein Testergebnis für die geänderten Dateien vor; Lauf mit `npm test` in einer Umgebung mit installierten
+  Abhängigkeiten wiederholen.
 - Tester: Schema-Test über alle Constraint-Fassungen, Migrationstest (zweiter Lauf ändert 0 Zeilen) und
   `full-ui.check.ts`/E2E für die geänderte Auswahl prüfen.
 
