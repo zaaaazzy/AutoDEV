@@ -10,7 +10,8 @@
     "../src/core/layout-measure.ts",
     "../src/core/cron.ts",
     "../src/core/development-transitions.ts",
-    "../src/core/sprint-rules.ts"
+    "../src/core/sprint-rules.ts",
+    "../src/core/coverage-areas.ts"
   ],
   "exclude": []
 }
