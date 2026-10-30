@@ -1,4 +1,6 @@
 import type { Pool } from 'pg';
+import { afterBugCreated } from '../agent/bug-classifier.js';
+import { categoryFromBug } from '../core/bug-category.js';
 import { type CommandExecutor, runCommand } from '../core/command.js';
 import { pollSprintReviews, sprintTag } from './git-sync.js';
 import { goLive } from './go-live.js';
@@ -70,17 +72,20 @@ export async function importIssues(
       if (!issue.labels.includes(label) || (label === 'idea' && issue.labels.includes('bug'))) continue;
       if (!Number.isSafeInteger(issue.number) || issue.number <= 0) continue;
       const ref = `${repo}#${issue.number}`;
-      const values = [project, issueTitle(issue), issueDescription(issue, ref), ref];
+      const text = { title: issueTitle(issue), description: issueDescription(issue, ref) };
+      const values = [project, text.title, text.description, ref];
+      // Bugs: Kategorie aus den genannten Pfaden, sonst stuft das lokale Modell nach dem Import ein.
+      const category = label === 'bug' ? categoryFromBug(text) : null;
       const result =
         label === 'bug'
-          ? await pool.query(
-              `INSERT INTO bugs (project_slug, title, description, severity, source, external_ref)
-               SELECT $1, $2, $3, 'medium', 'github', $4
+          ? await pool.query<{ id: string }>(
+              `INSERT INTO bugs (project_slug, title, description, severity, source, external_ref, category)
+               SELECT $1, $2, $3, 'medium', 'github', $4, $5
                 WHERE NOT EXISTS (SELECT 1 FROM ideation_items WHERE project_slug = $1 AND external_ref = $4)
                ON CONFLICT (project_slug, external_ref) WHERE external_ref IS NOT NULL DO NOTHING RETURNING id`,
-              values,
+              [...values, category],
             )
-          : await pool.query(
+          : await pool.query<{ id: string }>(
               `INSERT INTO ideation_items (project_slug, title, description, source, external_ref)
                SELECT $1, $2, $3, 'github', $4
                 WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND external_ref = $4)
@@ -88,6 +93,7 @@ export async function importIssues(
               values,
             );
       created += result.rowCount ?? 0;
+      if (label === 'bug') afterBugCreated(pool, result.rows[0]?.id, category, text);
     }
   }
   return created;
