@@ -486,6 +486,11 @@ test('Sandbox: Abhängigkeiten werden einmal je Lockfile ins Volume installiert,
     assert.deepEqual(runs[0]?.command.slice(-3), dependencyCommand(stamp ?? ''));
     assert.match(runs[0]?.command.at(-1) ?? '', /npm install --ignore-scripts/);
     assert.ok(runs[0]?.command.at(-1)?.includes(DEPENDENCY_STAMP));
+    assert.match(
+      runs[0]?.command.at(-1) ?? '',
+      /^exec 9>node_modules\/\.aideation-install\.lock && flock 9 /,
+      'Sperre gegen parallele Installationen',
+    );
     assert.equal(runs[0]?.command[runs[0].command.indexOf('--network') + 1], SANDBOX_NETWORK);
     assert.deepEqual(runs[1]?.command.slice(-2), ['npm', 'test']);
   } finally {
