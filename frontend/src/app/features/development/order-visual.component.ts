@@ -225,7 +225,7 @@ export class OrderVisualComponent {
   }
 
   /** Speichert Person und Zeitpunkt der optischen Freigabe am Auftrag (oder nimmt sie zurück). */
-  protected approve(approved: boolean): Promise<void> {
+  protected approve(approved: boolean): Promise<boolean> {
     return this.store.perform(
       async () => {
         const result = await this.api.post<{ approval: VisualApproval }>(`${this.path()}/approve`, { approved });

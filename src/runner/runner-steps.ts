@@ -83,6 +83,8 @@ interface StepOutcome {
   correctable?: boolean;
   /** Budget vor dem neuen Versuch erreicht: der Lauf hält an wie vor einem Schritt (kein Bug-Bericht). */
   budget?: BudgetState;
+  /** Vom Benutzer abgebrochen („Abbrechen“, Sprint-Abbruch): kein weiterer Agent des Auftrags, auch nicht „Bei abgelehnt“. */
+  cancelled?: boolean;
 }
 
 export interface StepOptions {
@@ -549,7 +551,7 @@ export async function runStep(
   // „Bei abgelehnt“ / „Bei abgeschlossen“ ändern das Ergebnis des Auftrags nicht.
   if (stepOptions.observer) {
     await commitStep();
-    return { passed, interrupted: false };
+    return { passed, interrupted: false, cancelled };
   }
   // Budget erreicht statt neuem Versuch: kein Fehler im Code, der Lauf hält an (Kostenbremse wie vor einem Schritt).
   if (budgetStop) {
@@ -571,5 +573,5 @@ export async function runStep(
     await afterStep(pool, item, agent, output).catch((error) => console.error('Post-step handling failed:', error));
   }
   await commitStep();
-  return { passed, interrupted: false, correctable };
+  return { passed, interrupted: false, correctable, cancelled };
 }

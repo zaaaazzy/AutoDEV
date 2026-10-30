@@ -43,7 +43,13 @@ Auftrag 7ec815c1 (Bugfix, Schwere hoch, 25.10.2026). Sprint 23. Der Zweig enthä
 | --- | --- | --- |
 | 7ec815c1 Push-Abos: SSRF, Besitz, Logout | umgesetzt, ein Push-Test noch rot | Allowlist, Besitzprüfung, Logout löscht Abo, Wächter-Cache bereinigt |
 
+## Stand 29.10.2026 (nach Nachziehen von `sprint/sprint-28`)
+
+- Die Merge-Konflikte sind gelöst. In `src/api/push.test.ts` und `src/core/push.test.ts` gelten jetzt beide Stände: die Tests mit Speicher-Pool aus diesem Auftrag und der PostgreSQL-Test aus Sprint 28. Dieser verwendet als Testwert `https://fcm.googleapis.com/…` und prüft, dass ein fremdes Gerät nicht übernommen wird. Der rote Test aus Sprint 23 ist damit erledigt.
+- `src/core/push.ts`: Es gilt die Formatierung aus Sprint 28. Inhaltlich ist nichts anders: Die Allowlist wird auch beim Senden geprüft.
+- `npm run typecheck` ist grün. In `npm run test:unit` sind alle Push- und Logout-Tests grün (11 im Backend und 3 in `push-logout.spec.ts`), auch der Test gegen PostgreSQL.
+- Zwei Tests sind noch rot, beide in `styles-order.spec.ts`. Sie hängen nicht mit diesem Auftrag zusammen. Im Arbeitsordner liegt die verwaiste Datei `frontend/src/styles/27-settings.css`. `angular.json` lädt sie nicht, und ihr Inhalt steht bereits in `17-settings.css` und `04-components.css`. Der Dokumentierer hat die Datei mit `git rm` entfernt (keine Referenz im Code gefunden), weil der Entwickler keine git-Befehle ausführen durfte.
+
 ## Anfrage / TODO
 
-- Roten Push-Test klären (Testwert auf erlaubten Dienst, Übernahme-Test an Besitzprüfung anpassen), dann gezielt erneut starten.
-- Zweig `auftrag/f230ad31-push-abos-ssrf-verhindern-besitz` nicht mergen.
+- `styles-order.spec.ts` nach dem Entfernen von `27-settings.css` erneut ausführen (vom Dokumentierer nicht ausgeführt).

@@ -12,6 +12,7 @@ import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import pg from 'pg';
 import {
+  applyServiceInstallEnv,
   DEFAULT_DB_USER,
   type EnvPlan,
   type InstallInput,
@@ -270,10 +271,9 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
     // Kein zweiter Worker: ein früher gewählter Worker-Container wird beendet.
     await run('docker', ['compose', '--profile', 'worker', 'rm', '--stop', '--force', 'worker', 'watchdog'], log);
     step('worker', 'running');
-    // Die Installationsskripte (launchd, systemd, Aufgabenplanung) lesen URL und Schlüssel aus der Umgebung.
-    // PATH bleibt unverändert, sonst findet der Worker die Agent-CLIs nicht (spawn claude ENOENT).
-    process.env.DEV_LOG_DATABASE_URL = env.get('DEV_LOG_DATABASE_URL')!;
-    process.env.DEV_LOG_SECRET_KEY = env.get('DEV_LOG_SECRET_KEY')!;
+    // Die Installationsskripte (launchd, systemd, Aufgabenplanung) lesen DB-URL, Schlüssel und öffentliche Adresse
+    // aus der Umgebung. PATH bleibt unverändert, sonst findet der Worker die Agent-CLIs nicht (spawn claude ENOENT).
+    applyServiceInstallEnv(env);
     const os = platform();
     const result =
       os === 'darwin'

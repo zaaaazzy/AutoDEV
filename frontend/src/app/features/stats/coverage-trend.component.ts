@@ -21,7 +21,9 @@ const TARGET = 75;
           <p class="muted">Je Bereich: Zeilen- und Zweigabdeckung jeder Messung · Ziel {{ target }} % Zeilen</p>
         </div>
       </div>
-      @if (error()) {
+      @if (!project()) {
+        <p class="empty-state">Kein Projekt ausgewählt.</p>
+      } @else if (error()) {
         <p class="muted">Verlauf der Testabdeckung konnte nicht geladen werden.</p>
       } @else if (trend(); as data) {
         @if (hasData(data)) {
@@ -109,6 +111,7 @@ const TARGET = 75;
 export class CoverageTrendComponent {
   private readonly api = inject(ApiService);
   private readonly store = inject(ProjectStore);
+  protected readonly project = this.store.activeProject;
   protected readonly trend = signal<CoverageTrend | null>(null);
   protected readonly error = signal(false);
   protected readonly chart = CHART;

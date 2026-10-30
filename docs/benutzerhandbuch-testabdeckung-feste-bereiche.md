@@ -109,7 +109,7 @@ Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung
 ### Bereichsnamen ändern oder ergänzen
 
 - Die Liste steht genau einmal in `COVERAGE_AREAS` (`src/runner/coverage.ts`). Ein neuer Bereich braucht eine Codeänderung. Das ist so gewollt.
-- Bekannte Schreibweisen stehen in `COVERAGE_AREA_ALIASES` (gleiche Datei). Eine neue Schreibweise kommt dort hinein und zusätzlich per neuer Migration in die Tabelle `coverage_area_aliases`. Die Migration 20 nicht ändern.
+- Bekannte Schreibweisen stehen in `COVERAGE_AREA_ALIASES` (gleiche Datei). Eine neue Schreibweise kommt dort hinein und zusätzlich per neuer Migration in die Tabelle `coverage_area_aliases`. Die Migration 22 nicht ändern.
 
 ## Fehlerbehebung
 
@@ -133,10 +133,10 @@ Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung
 Diese Punkte sind im Code noch nicht eindeutig entschieden:
 
 1. **Teilmeldungen:** Die Anforderung verlangt Werte für alle sechs Bereiche. Der Validator prüft aber nur die Bereiche, die gemeldet werden. Heute werden Berichte mit nur einem gemessenen Bereich gespeichert. Entscheidung nötig: Pflicht für alle sechs, oder nur gemessene Bereiche.
-2. **Migrationsnummer:** Die Migration heißt Version 20. Version 19 ist über `RESERVED_VERSIONS` als reserviert eingetragen. Gibt es keinen parallelen Schritt 19, sollte auf 19 umnummeriert und die Reservierung entfernt werden.
+2. **Migrationsnummer (entschieden):** Die Migration heißt Version 22, weil sprint-30 die Versionen 19 bis 21 belegt. Die Reservierung `RESERVED_VERSIONS` ist entfallen.
 3. **Oberflächentest:** `full-ui.check.ts` prüft die neue Statistik-Ansicht (geladen, kein Ladefehler, kein Filterhinweis im Leertext). Der Lauf selbst ist noch nicht bestätigt, weil die Umgebung keinen Browser hat.
 4. **Testlauf:** Typecheck und Tests konnten in der Agent-Umgebung nicht laufen (`tsc`/`tsx` nicht gefunden, npm-Cache nicht beschreibbar). Vor dem Mergen `npm run typecheck` und `npm test` in einer Umgebung mit installierten Abhängigkeiten ausführen.
-5. **Ladezustand ohne Projekt (Fehler im Code, nicht im Browser geprüft):** In `frontend/src/app/features/stats/coverage-trend.component.ts` startet `load` nur, wenn `activeProject()` einen Wert hat. Ohne aktives Projekt bleibt `trend` auf `null`, und die Ansicht zeigt dauerhaft „Verlauf wird geladen …“. Vorschlag: In diesem Fall „Kein Projekt ausgewählt.“ anzeigen. Das braucht eine Codeänderung und eine Entscheidung des Auftraggebers über den Text.
+5. **Ladezustand ohne Projekt (behoben, nicht im Browser geprüft):** Ohne aktives Projekt zeigt die Ansicht jetzt „Kein Projekt ausgewählt.“ statt dauerhaft „Verlauf wird geladen …“.
 
 ## Nicht geprüft
 

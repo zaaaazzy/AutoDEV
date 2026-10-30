@@ -15,6 +15,7 @@ import { loadProjectContext, loadProjectRules, withProjectContext } from '../cor
 import { isShuttingDown } from '../core/shutdown.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../core/command.js';
 import { loadKnownBugs } from '../api/bugs.js';
+import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
 import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
@@ -195,7 +196,8 @@ export async function runAuthorAgent(
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
   // Docker-Sandbox (Standard): die CLI läuft in einem eigenen Container; lesende Läufe sehen den Ordner nur als :ro.
   // Beim lokalen Modell laufen nur dessen Shell-Befehle im Container, die Datei-Werkzeuge im Worker (wie im Runner).
-  const inSandbox = usesSandbox(sandboxMode(await projectSandbox(pool, options.project)));
+  const mode = sandboxMode(await projectSandbox(pool, options.project));
+  const inSandbox = usesSandbox(mode);
   const sandboxed = Boolean(configured) && inSandbox;
   const agentExecute = inSandbox
     ? sandboxExecutor(options.cwd, {
@@ -203,6 +205,7 @@ export async function runAuthorAgent(
         project: options.project,
         readOnly: readOnly || readOnlyWorkspace(role),
         docker: execute,
+        mode,
       })
     : execute;
   const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;
@@ -476,16 +479,21 @@ export async function draftRequirements(
     }
     await pool.query(REDRAFT_ORDER_SQL, [existing.id, output.slice(0, 10_000), risks, projectContext]);
   } else
-    await pool.query(
-      `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
+    await pool
+      .query(
+        `INSERT INTO development_items (project_slug, ideation_id, title, description, status, priority,
                                     effort_hours, token_estimate, benefit, cost, risks, project_context, estimate_source)
      SELECT i.project_slug, i.id, COALESCE($5, i.title), $2, 'backlog', i.priority, i.effort_hours, i.token_estimate, i.benefit, i.cost, $3, $4,
             i.estimate_source
        FROM ideation_items i
       WHERE i.id = $1 AND NOT EXISTS (SELECT 1 FROM development_items d WHERE d.ideation_id = i.id)`,
-      // Neuer Auftrag: kurzer Titel des Auftragsautors; ein bestehender behält seinen (evtl. von Hand gesetzten) Titel.
-      [idea.id, output.slice(0, 10_000), risks, projectContext, shortened ?? shortTitle(idea.title, TITLE_MAX)],
-    );
+        // Neuer Auftrag: kurzer Titel des Auftragsautors; ein bestehender behält seinen (evtl. von Hand gesetzten) Titel.
+        [idea.id, output.slice(0, 10_000), risks, projectContext, shortened ?? shortTitle(idea.title, TITLE_MAX)],
+      )
+      .catch((error: unknown) => {
+        // Inzwischen von Hand übernommen (Unique-Index auf ideation_id): Der Auftrag existiert, die Idee ist angenommen.
+        if (!isUniqueViolation(error)) throw error;
+      });
   await pool.query(
     `UPDATE ideation_items SET status = 'accepted', progress = NULL, progress_agent = NULL,
             agent_note = 'Anforderung vom Agenten erstellt – Auftrag liegt im Backlog.',

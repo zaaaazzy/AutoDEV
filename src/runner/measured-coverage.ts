@@ -41,7 +41,7 @@ export function parseNodeCoverage(
 }
 
 /**
- * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 20 („mainty-backend“ → backend). Ohne
+ * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 22 („mainty-backend“ → backend). Ohne
  * Workspace (Messung im Projektordner selbst) ist es „gesamt“. Ein Workspace ohne passenden Bereich (z. B.
  * „contracts“) ergibt null: Die Messung wird verworfen, statt einen neuen Bereich anzulegen.
  */

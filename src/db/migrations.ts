@@ -412,13 +412,45 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE projects ADD COLUMN IF NOT EXISTS agent_sandbox TEXT CHECK (agent_sandbox IN ('off', 'docker'));
     `,
   },
-  // Version 19 ist für einen parallel entstandenen Schritt reserviert (Auftrag „Feste Coverage-Bereiche“ verlangt 20).
+  // Je Idee höchstens ein Auftrag: Ein Doppelklick auf „Übernehmen“ kam parallel am NOT EXISTS vorbei und legte zwei
+  // Aufträge an (Code-Review vom 20.10.2026). Vorhandene Doppel behalten ihre Arbeit; nur der älteste Auftrag bleibt
+  // mit der Idee verknüpft, die übrigen verlieren den Verweis (ideation_id = NULL).
+  {
+    version: 19,
+    name: 'ein-auftrag-je-idee',
+    sql: `
+      UPDATE development_items d SET ideation_id = NULL, updated_at = NOW()
+        FROM (SELECT id, row_number() OVER (PARTITION BY ideation_id ORDER BY created_at, id) AS rank
+                FROM development_items WHERE ideation_id IS NOT NULL) ranked
+       WHERE d.id = ranked.id AND ranked.rank > 1;
+      CREATE UNIQUE INDEX IF NOT EXISTS development_items_ideation_idx ON development_items (ideation_id)
+        WHERE ideation_id IS NOT NULL;
+    `,
+  },
+  // Sprint-Listen filtern immer nach Projekt (oft mit Status, sortiert nach Anlage); ohne Index las jede Abfrage alle
+  // Sprints (Code-Review vom 21.10.2026). Der Teilindex sprints_one_active_idx deckt nur aktive Sprints ab.
+  {
+    version: 20,
+    name: 'sprints-projekt-index',
+    sql: 'CREATE INDEX IF NOT EXISTS sprints_project_idx ON sprints (project_slug, status, created_at);',
+  },
+  // Arbeitscontainer je Projekt (workbench.ts) als dritter Wert des Sandbox-Schalters.
+  {
+    version: 21,
+    name: 'agent-sandbox-arbeitscontainer',
+    sql: `
+      ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_agent_sandbox_check;
+      ALTER TABLE projects ADD CONSTRAINT projects_agent_sandbox_check
+        CHECK (agent_sandbox IN ('off', 'docker', 'workbench'));
+    `,
+  },
+  // Der Auftrag „Feste Coverage-Bereiche“ sah Version 20 vor; 19–21 kamen inzwischen aus sprint-30, daher Version 22.
   // Feste Coverage-Bereiche (COVERAGE_AREAS in src/runner/coverage.ts): Zuordnung der bekannten Schreibweisen,
   // bestehende Bereichsnamen darüber umschreiben. Mehrere Einträge eines Berichts, die auf denselben Bereich zeigen,
   // werden vorher zusammengeführt (Testzahlen summiert, Prozentwerte gemittelt, NULL bleibt NULL), damit der
   // Primärschlüssel (report_id, area) nicht kollidiert. Einträge ohne Zuordnung bleiben unverändert; nichts wird gelöscht.
   {
-    version: 20,
+    version: 22,
     name: 'coverage-feste-bereiche',
     sql: `
       CREATE TABLE IF NOT EXISTS coverage_area_aliases (

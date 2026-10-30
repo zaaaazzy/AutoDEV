@@ -48,10 +48,11 @@
                         <li>
                           <input
                             type="checkbox"
-                            [checked]="false"
-                            [disabled]="busy()"
+                            [checked]="ticks.saving(item.id, check)"
+                            [disabled]="busy() || !auth.can('plan')"
                             [attr.aria-label]="'Abhaken: ' + check.text"
-                            (change)="checkPoint(item, check)"
+                            [title]="auth.can('plan') ? '' : 'Abhaken braucht das Recht „Planung“.'"
+                            (change)="checkPoint($event, item, check)"
                           />
                           <span class="todo-text"
                             >{{ check.text }}

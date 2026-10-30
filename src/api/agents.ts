@@ -31,6 +31,7 @@ import {
 } from '../core/validation.js';
 import { PHASE_SET, PHASE_SQL_ORDER } from '../core/workflow-phases.js';
 import { hasRole, type Principal } from './roles.js';
+import { STEP_COLUMNS } from './workflow.js';
 
 const ROLES = new Set([
   'author',
@@ -79,6 +80,38 @@ export function adminFieldsCheck(
       ADMIN_COLUMNS.has(field.column) && JSON.stringify(field.value) !== JSON.stringify(stored[field.column] ?? null),
   );
   return changed ? null : fields.filter((field) => !ADMIN_COLUMNS.has(field.column));
+}
+
+/*
+ * Eine Quelle für den Ablauf: Hat ein Projekt Workflow-Schritte, führt der Worker nur diese aus (loadWorkflow).
+ * Phase und Position am Agent zählen dann nicht mehr; jede Änderung daran wird deshalb in seine Schritte übernommen.
+ */
+
+/** Agent ans Ende einer Phase des Workflows setzen, falls das Projekt schon Schritte nutzt (sonst läuft er nie). */
+async function appendAgentStep(pool: Pool, slug: string, agentId: string, phase: string): Promise<unknown> {
+  return (
+    await pool.query(
+      `INSERT INTO workflow_steps (project_slug, phase, position, agent_id)
+       SELECT $1, $2, COALESCE((SELECT MAX(position) FROM workflow_steps WHERE project_slug = $1 AND phase = $2), 0) + 1, $3
+        WHERE EXISTS (SELECT 1 FROM workflow_steps WHERE project_slug = $1)
+       RETURNING ${STEP_COLUMNS}`,
+      [slug, phase, agentId],
+    )
+  ).rows[0];
+}
+
+/** Phasenwechsel am Agent: seine Schritte in anderen Phasen wechseln mit, jeweils ans Ende der neuen Phase. */
+async function moveAgentSteps(pool: Pool, agentId: string, phase: string): Promise<void> {
+  await pool.query(
+    `UPDATE workflow_steps s
+        SET phase = $2,
+            position = COALESCE((SELECT MAX(x.position) FROM workflow_steps x
+                                  WHERE x.project_slug = s.project_slug AND x.phase = $2), 0) + m.ord
+       FROM (SELECT id, ROW_NUMBER() OVER (ORDER BY position, created_at) AS ord
+               FROM workflow_steps WHERE agent_id = $1 AND phase <> $2) m
+      WHERE s.id = m.id`,
+    [agentId, phase],
+  );
 }
 
 /** Erlaubte Ordner für Dateirechte: relativ zum Projekt, ohne „..“, höchstens 20; leer = ganzes Projekt. */
@@ -273,9 +306,19 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       response.status(400).json({ message: 'Ungültiges Projekt.' });
       return;
     }
+    // Mit Workflow-Schritten zeigt der Agent Phase und Position seines ersten Schritts – so, wie der Worker ihn ausführt.
     const result = await pool.query(
-      `SELECT ${AGENT_COLUMNS} FROM agents WHERE project_slug = $1
-        ORDER BY ${PHASE_SQL_ORDER}, position, created_at`,
+      `SELECT a.id, a.project_slug AS "projectSlug", a.name, a.role, COALESCE(s.phase, a.phase) AS phase,
+              COALESCE(s.position, a.position) AS position, a.instructions, a.enabled, a.command,
+              a.allowed_commands AS "allowedCommands", a.file_scope AS "fileScope", a.handoff_to AS "handoffTo"
+         FROM agents a
+         LEFT JOIN LATERAL (
+           SELECT phase, position FROM workflow_steps WHERE agent_id = a.id
+            ORDER BY ${PHASE_SQL_ORDER}, position, created_at LIMIT 1
+         ) s ON TRUE
+        WHERE a.project_slug = $1
+        ORDER BY ${PHASE_SQL_ORDER.replace('CASE phase', 'CASE COALESCE(s.phase, a.phase)')},
+                 COALESCE(s.position, a.position), a.created_at`,
       [slug],
     );
     response.json({ agents: result.rows });
@@ -319,7 +362,9 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
         values.get('file_scope') ?? null,
       ],
     );
-    response.status(201).json({ agent: result.rows[0] });
+    const agent = result.rows[0] as { id: string } | undefined;
+    const step = agent ? await appendAgentStep(pool, slug, agent.id, values.get('phase') as string) : undefined;
+    response.status(201).json({ agent, step: step ?? null });
   });
 
   app.post(
@@ -383,6 +428,13 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
         WHERE a.id = o.id AND a.project_slug = $1`,
       [slug, body.phase, body.ids],
     );
+    // Dieselbe Reihenfolge in den Workflow-Schritten der Agents – sonst führte der Worker die alte aus.
+    await pool.query(
+      `UPDATE workflow_steps s SET position = o.ord, phase = $2
+         FROM unnest($3::uuid[]) WITH ORDINALITY AS o(id, ord)
+        WHERE s.agent_id = o.id AND s.project_slug = $1`,
+      [slug, body.phase, body.ids],
+    );
     response.status(204).end();
   });
 
@@ -429,6 +481,9 @@ export function registerAgentRoutes(app: Router, pool: Pool): void {
       response.status(404).json({ message: 'Agent nicht gefunden.' });
       return;
     }
+    // Phasenwechsel gilt auch für die Workflow-Schritte des Agents (die führt der Worker aus).
+    const phase = allowed.find((field) => field.column === 'phase')?.value;
+    if (typeof phase === 'string') await moveAgentSteps(pool, request.params.id, phase);
     response.json({ agent: result.rows[0] });
   });
 
@@ -522,9 +577,13 @@ export async function ensureReviewer(pool: Pool, slug: string): Promise<void> {
     [slug, position],
   );
   const reviewer = DEFAULT_AGENTS.find((agent) => agent.role === 'reviewer')!;
-  await pool.query(
-    `INSERT INTO agents (project_slug, name, role, phase, position, instructions, command)
-     VALUES ($1, $2, 'reviewer', 'after_task', $3, $4, $5)`,
-    [slug, reviewer.name, position, reviewer.instructions, developer?.command ?? null],
-  );
+  const created = (
+    await pool.query<{ id: string }>(
+      `INSERT INTO agents (project_slug, name, role, phase, position, instructions, command)
+       VALUES ($1, $2, 'reviewer', 'after_task', $3, $4, $5) RETURNING id`,
+      [slug, reviewer.name, position, reviewer.instructions, developer?.command ?? null],
+    )
+  ).rows[0];
+  // Nutzt das Projekt Workflow-Schritte, läuft der Reviewer nur mit eigenem Schritt (am Ende von „Nach dem Auftrag“).
+  if (created) await appendAgentStep(pool, slug, created.id, 'after_task');
 }

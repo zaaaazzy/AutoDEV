@@ -28,15 +28,11 @@ const steps: Migration[] = [
   { version: 2, name: 'zwei', sql: 'ALTER TABLE a ADD COLUMN IF NOT EXISTS b TEXT' },
 ];
 
-/** Versionen, die bewusst frei bleiben: 19 ist für einen parallel entstandenen Schritt reserviert. */
-const RESERVED_VERSIONS = [19];
-
-test('Migrationen: Versionen lückenlos ab 1 (ausser reservierten), Basisschritt ist das bisherige Schema, Index auf agent_run_steps(agent_id)', () => {
+test('Migrationen: Versionen lückenlos ab 1, Basisschritt ist das bisherige Schema, Index auf agent_run_steps(agent_id)', () => {
   const versions = MIGRATIONS.map((migration) => migration.version);
-  const last = versions.at(-1) ?? 0;
   assert.deepEqual(
     versions,
-    Array.from({ length: last }, (_, index) => index + 1).filter((version) => !RESERVED_VERSIONS.includes(version)),
+    versions.map((_, index) => index + 1),
   );
   assert.equal(MIGRATIONS[0].sql, SCHEMA);
   assert.ok(MIGRATIONS.some((migration) => /ON agent_run_steps \(agent_id\)/.test(migration.sql)));
@@ -92,8 +88,8 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
-test('Migration 20: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
-  const migration = MIGRATIONS.find((step) => step.version === 20);
+test('Migration 22: Zuordnungstabelle enthält genau die Schreibweisen aus COVERAGE_AREA_ALIASES', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 22);
   assert.equal(migration?.name, 'coverage-feste-bereiche');
   const pairs = Object.fromEntries(
     [...(migration?.sql ?? '').matchAll(/\('([^']+)', '([^']+)'\)/g)].map((match) => [match[1], match[2]]),
@@ -102,7 +98,7 @@ test('Migration 20: Zuordnungstabelle enthält genau die Schreibweisen aus COVER
   for (const area of COVERAGE_AREAS) assert.match(migration?.sql ?? '', new RegExp(`'${area}'`));
 });
 
-test('Migration 20: Bereiche umschreiben, Kollisionen zusammenführen, Altbestand ohne Zuordnung behalten', async (t) => {
+test('Migration 22: Bereiche umschreiben, Kollisionen zusammenführen, Altbestand ohne Zuordnung behalten', async (t) => {
   const admin = await adminPool(t);
   if (!admin) return;
   const name = `devlog_migr_cov_${process.pid}`;
@@ -111,9 +107,9 @@ test('Migration 20: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
   const pool = new pg.Pool({ connectionString: databaseUrl(name), max: 1 });
   const client = await pool.connect();
   try {
-    // Stand vor Version 20 mit Altbestand: zwei Schreibweisen für backend im selben Bericht, fehlender Zeilenwert,
+    // Stand vor Version 22 mit Altbestand: zwei Schreibweisen für backend im selben Bericht, fehlender Zeilenwert,
     // ein Bereich ohne Zuordnung.
-    await runMigrations(client, MIGRATIONS.filter((step) => step.version < 20));
+    await runMigrations(client, MIGRATIONS.filter((step) => step.version < 22));
     assert.equal((await client.query(`SELECT to_regclass('coverage_area_aliases') AS t`)).rows[0].t, null);
     await client.query(`INSERT INTO projects (slug, name, repository) VALUES ('shop', 'Shop', '/tmp/shop')`);
     const report = (
@@ -128,7 +124,7 @@ test('Migration 20: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [20]);
+    assert.deepEqual(await runMigrations(client), [22]);
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -142,8 +138,8 @@ test('Migration 20: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       { area: 'Contracts', unit: 2, passed: 2, lines: 90, branches: 90 },
       { area: 'frontend', unit: 3, passed: 3, lines: null, branches: 50 },
     ]);
-    const versions = (await client.query('SELECT version FROM schema_migrations WHERE version = 20')).rowCount;
-    assert.equal(versions, 1, 'Version 20 vermerkt');
+    const versions = (await client.query('SELECT version FROM schema_migrations WHERE version = 22')).rowCount;
+    assert.equal(versions, 1, 'Version 22 vermerkt');
     // Zweiter Start: läuft nicht erneut.
     assert.deepEqual(await runMigrations(client), []);
   } finally {

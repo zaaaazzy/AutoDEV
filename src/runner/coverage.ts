@@ -12,8 +12,8 @@ export type CoverageAreaName = (typeof COVERAGE_AREAS)[number];
 
 /**
  * Bekannte Schreibweisen (klein geschrieben, ohne Leerraum am Rand) → fester Bereich. Dieselbe Zuordnung füllt
- * Migration 20 (coverage_area_aliases) und benennt die Messung durch AIdeation (areaName). Neue Schreibweisen nur
- * hier und per neuer Migration ergänzen, Migration 20 nicht ändern.
+ * Migration 22 (coverage_area_aliases) und benennt die Messung durch AIdeation (areaName). Neue Schreibweisen nur
+ * hier und per neuer Migration ergänzen, Migration 22 nicht ändern.
  */
 export const COVERAGE_AREA_ALIASES: Readonly<Record<string, CoverageAreaName>> = {
   backend: 'backend',
