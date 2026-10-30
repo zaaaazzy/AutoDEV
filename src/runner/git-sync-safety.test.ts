@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -55,6 +55,16 @@ test('Testberichte zählen nicht als fremde Änderung und landen nicht im Auftra
     git('log', '-1', '--format=%an <%ae>'),
     `${BOT_IDENTITY.GIT_AUTHOR_NAME} <${BOT_IDENTITY.GIT_AUTHOR_EMAIL}>`,
   );
+});
+
+test('Reste einer abgebrochenen npm-Installation (.node_modules-*) landen nicht im Auftrags-Commit', async () => {
+  const { cwd, git } = await project();
+  const branch = await enterOrderBranch(cwd, item, 'Sprint 1');
+  assert.ok(branch);
+  await symlink('/workspace/node_modules', join(cwd, '.node_modules-EFVt3rln'));
+  await writeFile(join(cwd, 'login.ts'), 'export {};\n');
+  assert.ok(await commitAgentStep(cwd, item, 'Entwickler', 'Sprint 1', true, undefined, branch.branch));
+  assert.deepEqual(git('show', '--name-only', '--format=', 'HEAD').split('\n'), ['login.ts']);
 });
 
 test('gescheiterter Auftrag mit vorhandenem .dev-log: Stand wird gesichert, nichts bleibt gestagt liegen', async () => {

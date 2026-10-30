@@ -89,6 +89,9 @@ const INTERNAL_EXCLUDES = [
   '.pgpass',
   'credentials.json',
   '*service-account*.json',
+  // Reste einer abgebrochenen npm-Installation („Removing non-directory node_modules“ benennt sie so um); ein
+  // node_modules-Eintrag in .gitignore trifft sie nicht.
+  '.node_modules-*',
 ];
 
 /** Inhalte, die nach Zugangsdaten aussehen (private Schlüssel, Cloud- und Git-Tokens); gemeinsam mit der Maskierung. */

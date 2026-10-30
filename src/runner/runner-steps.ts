@@ -4,7 +4,7 @@ import { manualTodo, setActionTodo } from './action-todo.js';
 import { withProjectContext } from '../core/project-context.js';
 import { sendPush } from '../core/push.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
-import { isTransientFailure, registerFailure, ruleRefusal, usageLimitReset } from './autofix.js';
+import { isSandboxFailure, isTransientFailure, registerFailure, ruleRefusal, usageLimitReset } from './autofix.js';
 import { startProgress } from '../agent/chat-progress.js';
 import { folderAvailable, hadOutage, missingFolderMessage } from '../core/folder-guard.js';
 import { isShuttingDown, killGroup } from '../core/shutdown.js';
@@ -122,6 +122,22 @@ async function markInterrupted(
             tokens = $5, cost_usd = $6, interrupted = TRUE WHERE id = $1`,
     [stepId, result.exitCode, result.durationMs, output, result.tokens ?? 0, result.costUsd ?? 0],
   );
+}
+
+/** Pausen wegen eines defekten Arbeitscontainers je Auftrag (innerhalb eines Tages), bevor er blockiert. */
+export const SANDBOX_PAUSES = 2;
+export const SANDBOX_PAUSE_MS = 60 * 60_000;
+const SANDBOX_PAUSE_MARK = 'Arbeitscontainer bzw. Sandbox defekt, kein Fehler im Auftrag';
+
+/** Wie oft der Auftrag in den letzten 24 Stunden schon wegen eines defekten Arbeitscontainers pausiert hat. */
+async function sandboxPauses(pool: RunContext['pool'], itemId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
+      WHERE r.development_id = $1 AND s.interrupted AND r.started_at > NOW() - INTERVAL '24 hours'
+        AND strpos(s.output, $2) > 0`,
+    [itemId, SANDBOX_PAUSE_MARK],
+  );
+  return Number(result.rows[0]?.count ?? 0);
 }
 
 /** Konfliktabschnitt am Anfang des Prompts, solange der Auftrags-Branch offene Merge-Konflikte hat; sonst leer. */
@@ -350,6 +366,24 @@ export async function runStep(
     await logEvent(pool, stepId, reason);
     console.info(`[${item.id}] ${reason}`);
     return { passed: false, interrupted: true };
+  }
+  // Arbeitscontainer bzw. Sandbox defekt: Das ganze Projekt pausiert (retry_after gilt projektweit), statt dass jeder
+  // Auftrag einzeln scheitert, Bugs anlegt und Problemanalysen startet. Nach SANDBOX_PAUSES Pausen bleibt der Auftrag
+  // blockiert (registerFailure: „Aktion notwendig“), bis ein Mensch den Container repariert hat.
+  if (result.exitCode !== 0 && !cancelled && isSandboxFailure(output)) {
+    const pauses = await sandboxPauses(pool, item.id).catch(() => SANDBOX_PAUSES);
+    if (pauses < SANDBOX_PAUSES) {
+      const until = new Date(Date.now() + SANDBOX_PAUSE_MS);
+      const time = until.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' });
+      const reason = `Unterbrochen: ${SANDBOX_PAUSE_MARK} – das Projekt pausiert bis ${time} Uhr, dann neuer Versuch.`;
+      await markInterrupted(pool, stepId, result, `${output}\n${reason}`);
+      await pool
+        .query(`UPDATE development_items SET retry_after = $2, failure = $3 WHERE id = $1`, [item.id, until, reason])
+        .catch(logged('runner-steps'));
+      await logEvent(pool, stepId, reason);
+      console.info(`[${item.id}] ${reason}`);
+      return { passed: false, interrupted: true };
+    }
   }
   // Budget vor dem zweiten Versuch nicht prüfbar: unterbrochen wie vor einem Schritt – derselbe Agent setzt nach der
   // Pause fort, ohne Bug-Bericht und ohne Nachbesserung. Tokens und Kosten des ersten Versuchs bleiben am Schritt.
