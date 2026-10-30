@@ -34,7 +34,8 @@ Die Tabelle „Offene Ideen“ (Ideen-Seite) hat drei neue Spalten:
 
 ### Tests
 
-- Der Testlauf (676b004f) schlug fehl, aus Umgebungsgründen: `tsc` nicht gefunden (Exit 127 im Image „aideation-agent“) und `npx tsx` scheiterte an einem root-eigenen npm-Cache (EACCES). Es gibt also noch keine Aussage über Typprüfung und Unit-Tests (`idea-options.spec.ts`, `idea-value.spec.ts`, `sort.spec.ts`). Die Dokumentation hat nichts erneut ausgeführt.
+- Auch der erneute Testlauf (298dc4eb, 30.10.2026) schlug mit demselben Umgebungsfehler fehl. Der Hinweis zum Wiederholen lautet: Image „aideation-agent“ mit korrigiertem Dockerfile neu bauen, das `node_modules`-Volume einmal befüllen, dann den Tester erneut starten. Im letzten Entwicklerlauf wurde keine Datei geändert.
+- Der frühere Testlauf (676b004f) schlug fehl, aus Umgebungsgründen: `tsc` nicht gefunden (Exit 127 im Image „aideation-agent“) und `npx tsx` scheiterte an einem root-eigenen npm-Cache (EACCES). Es gibt also noch keine Aussage über Typprüfung und Unit-Tests (`idea-options.spec.ts`, `idea-value.spec.ts`, `sort.spec.ts`). Die Dokumentation hat nichts erneut ausgeführt.
 - Der Tester bemängelte zuvor den fehlenden E2E-Test; er wurde danach in `e2e/full-ui.check.ts` ergänzt, ist aber ungetestet (Playwright fehlt hier).
 - Offen: `npm run typecheck`, `lint`, `format:check`, `test:unit` sowie `npm run test:full` (Oberflächentests „Tabellen“, „Ideen“, „Dashboard“, „Projektwechsel“) in einer funktionierenden Umgebung.
 
