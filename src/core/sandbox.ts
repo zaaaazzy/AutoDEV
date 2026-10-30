@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { basename, isAbsolute, posix, relative, resolve, sep, win32 } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 
@@ -125,6 +126,8 @@ export interface SandboxOptions {
   network?: string;
   /** Weitere Variablen, die nur als Name (-e NAME) weitergehen; den Wert liest der Docker-Client aus seiner Umgebung. */
   passEnv?: readonly string[];
+  /** Abhängigkeiten vor dem Lauf ins node_modules-Volume installieren (Standard: ja, ausser bei :ro). */
+  dependencies?: boolean;
 }
 
 /** Host-Pfad im Format von docker -v. */
@@ -369,6 +372,72 @@ async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
+/** Stempel im node_modules-Volume: Hash der package-lock.json, mit dem zuletzt installiert wurde. */
+export const DEPENDENCY_STAMP = 'node_modules/.aideation-lock';
+const INSTALL_TIMEOUT_MS = 15 * 60_000;
+
+/** Hash der package-lock.json (sonst package.json) im Worktree; null ohne package.json. */
+export function dependencyStamp(worktree: string): string | null {
+  const manifest = join(worktree, 'package.json');
+  if (!existsSync(manifest)) return null;
+  const lock = join(worktree, 'package-lock.json');
+  return createHash('sha256')
+    .update(readFileSync(existsSync(lock) ? lock : manifest))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+/**
+ * Installiert nur, wenn der Stempel im Volume nicht passt, und dann frisch (Reste eines abgebrochenen Laufs liessen
+ * npm mit ENOTEMPTY scheitern; der Cache bleibt). npm install statt npm ci: node_modules ist ein Mountpunkt,
+ * den npm ci löschen wollte. Ohne Installationsskripte, wie bei den Agents; der Cache liegt im Volume (HOME ist im
+ * Container nicht beschreibbar).
+ */
+export function dependencyCommand(stamp: string): string[] {
+  return [
+    'sh',
+    '-c',
+    `[ "$(cat ${DEPENDENCY_STAMP} 2>/dev/null)" = "${stamp}" ] || ` +
+      '{ find node_modules -mindepth 1 -maxdepth 1 ! -name .cache -exec rm -rf {} + && ' +
+      `npm install --ignore-scripts --no-audit --no-fund --cache node_modules/.cache/npm && echo ${stamp} > ${DEPENDENCY_STAMP}; }`,
+  ];
+}
+
+const installs = new Map<string, Promise<CommandResult>>();
+
+/**
+ * Das Volume ist anfangs leer: ohne diesen Schritt fehlen im Container tsx, tsc & Co. (Exit-Code 127). Läuft je
+ * Projekt und Lockfile einmal gleichzeitig, im Agent-Netzwerk (npm über den Egress-Proxy), auch wenn die Tests im
+ * Compose-Netzwerk des Projekts laufen.
+ */
+function ensureDependencies(
+  worktree: string,
+  options: SandboxOptions & { docker?: CommandExecutor; signal?: AbortSignal },
+): Promise<CommandResult> | null {
+  const stamp = dependencyStamp(worktree);
+  if (!stamp) return null;
+  const key = `${modulesVolume(options.project)}:${stamp}`;
+  let install = installs.get(key);
+  if (!install) {
+    install = runInSandbox(dependencyCommand(stamp), worktree, {
+      runId: options.runId,
+      project: options.project,
+      platform: options.platform,
+      uid: options.uid,
+      gid: options.gid,
+      image: options.image,
+      environment: options.environment,
+      docker: options.docker,
+      signal: options.signal,
+      name: `${options.name ?? containerName(options.runId)}-npm`,
+      dependencies: false,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+    }).finally(() => installs.delete(key));
+    installs.set(key, install);
+  }
+  return install;
+}
+
 /** Erlaubte Ziele des Egress-Proxys (siehe egress-proxy.ts); weitere über DEV_LOG_AGENT_SANDBOX_EGRESS (host:port, …). */
 export function egressAllowList(environment: NodeJS.ProcessEnv = process.env): string {
   const extra = (environment.DEV_LOG_AGENT_SANDBOX_EGRESS ?? '')
@@ -523,6 +592,14 @@ export async function runInSandbox(
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;
+      noteProblem(options.project, message.split('\n')[0]);
+      return blocked(message, redactWith);
+    }
+  }
+  if (options.workspace !== false && !options.readOnly && options.dependencies !== false) {
+    const installed = await ensureDependencies(worktree, { ...options, environment: source });
+    if (installed && installed.exitCode !== 0) {
+      const message = `Sandbox: Abhängigkeiten liessen sich nicht ins Volume „${modulesVolume(options.project)}“ installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
       noteProblem(options.project, message.split('\n')[0]);
       return blocked(message, redactWith);
     }

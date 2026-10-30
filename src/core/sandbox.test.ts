@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { CommandExecutor, CommandResult } from './command.js';
 import { guardHookCommand, withAgentPermissions } from '../agent/tool-permissions.js';
 import {
   containerDirectory,
   credentialProblem,
+  DEPENDENCY_STAMP,
+  dependencyCommand,
+  dependencyStamp,
   dockerClientEnvironment,
   dockerHostPath,
   EGRESS_CONTAINER,
@@ -452,4 +457,54 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+test('Sandbox: Abhängigkeiten werden einmal je Lockfile ins Volume installiert, bevor der Befehl läuft', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-deps-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+    const stamp = dependencyStamp(worktree);
+    assert.match(stamp ?? '', /^[a-f0-9]{16}$/);
+    const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    const execute = sandboxExecutor(worktree, { runId: 'r8', project: 'demo', docker, name: 'aideation-r8' });
+    await execute(['npm', 'test'], worktree);
+    const runs = calls.filter((call) => call.command.includes('--cap-drop'));
+    assert.equal(runs.length, 2);
+    assert.deepEqual(runs[0]?.command.slice(-3), dependencyCommand(stamp ?? ''));
+    assert.match(runs[0]?.command.at(-1) ?? '', /npm install --ignore-scripts/);
+    assert.ok(runs[0]?.command.at(-1)?.includes(DEPENDENCY_STAMP));
+    assert.equal(runs[0]?.command[runs[0].command.indexOf('--network') + 1], SANDBOX_NETWORK);
+    assert.deepEqual(runs[1]?.command.slice(-2), ['npm', 'test']);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: scheitert die Installation, startet der Befehl nicht; lesende Läufe installieren nichts', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-deps-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    const { calls, docker } = fakeDocker((command) =>
+      command[1] === 'version'
+        ? ok('27')
+        : command.at(-1)?.includes('npm install')
+          ? { ...ok('E404'), exitCode: 1 }
+          : ok(),
+    );
+    const result = await runInSandbox(['npm', 'test'], worktree, { runId: 'r9', project: 'demo', docker });
+    assert.equal(result.exitCode, 1);
+    assert.match(result.output, /Abhängigkeiten liessen sich nicht/);
+    assert.ok(!calls.some((call) => call.command.slice(-2).join(' ') === 'npm test'));
+    const read = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    await runInSandbox(['npm', 'test'], worktree, {
+      runId: 'r10',
+      project: 'demo',
+      docker: read.docker,
+      readOnly: true,
+    });
+    assert.equal(read.calls.filter((call) => call.command.includes('--cap-drop')).length, 1);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
 });
