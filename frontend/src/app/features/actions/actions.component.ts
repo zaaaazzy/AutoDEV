@@ -108,7 +108,7 @@ export class ActionsComponent {
   }
 
   /** Übergibt nur die Nachweis-ID: Den Befehl liest der Worker aus der gespeicherten Zeile. */
-  protected runEvidence(proof: TestEvidence): Promise<void> {
+  protected runEvidence(proof: TestEvidence): Promise<boolean> {
     const path = `${this.api.projectPath(this.store.activeProject())}/test-evidence/${encodeURIComponent(proof.id)}/run`;
     return this.store.perform(
       () => this.api.post(path),
