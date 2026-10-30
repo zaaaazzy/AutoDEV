@@ -63,12 +63,17 @@ Was du davon siehst:
 
 **Ort:** Dashboard.
 
-**Anzeige:** Die Kachel zeigt den neuesten Bericht des aktuellen Projekts mit allen Bereichen, die dieser Bericht enthält. Je Bereich stehen die Spalten Unit-Tests, Komponententests, Integrationstests, E2E-Tests und Gesamt. Darunter folgen die Abdeckungswerte Zeilen, Anweisungen, Zweige und Funktionen. Fehlgeschlagene Tests stehen als Hinweis unter dem Bereichsnamen. Jede Spalte hat einen Tooltip mit ihrer Erklärung.
+**Anzeige:** Die Kachel zeigt den neuesten Bericht des aktuellen Projekts mit allen Bereichen, die dieser Bericht enthält. Je Bereich stehen die Spalten Unit-Tests, Komponententests, Integrationstests, E2E-Tests und Gesamt (Summe der vier Testarten). Darunter folgen die Abdeckungswerte Zeilen, Anweisungen, Zweige und Funktionen. Fehlgeschlagene Tests stehen als Hinweis „N fehlgeschlagen“ unter dem Bereichsnamen. Die vier Testart-Spalten haben einen Tooltip mit ihrer Erklärung.
+
+**Summenzeile:** Hat der Bericht mindestens zwei Bereiche und keinen Bereich „gesamt“, zeigt die Kachel zusätzlich eine Zeile „Gesamt“. Die Testzahlen sind dort Summen über alle Bereiche. Die Prozentwerte sind der Mittelwert der gemeldeten Werte, kein gewichteter Wert. Enthält der Bericht selbst einen Bereich „gesamt“, entfällt die gerechnete Summenzeile, und die gemeldete Zeile steht in der Tabelle.
+
+**Farben der Prozentwerte:** Ab 75 % grün, ab 50 % gelb, darunter rot. Fehlt ein Wert, steht er ohne Farbe.
 
 **Bedingungen:**
 
 - Gibt es noch keinen Bericht, zeigt die Kachel keine Werte.
 - Die Kachel ändert sich erst, wenn ein neuer Bericht gespeichert wurde. Der Verlauf steht nur in der Statistik.
+- Die Kachel filtert nicht nach festen Namen. Gehört ein Altbestand ohne Zuordnung zum neuesten Bericht, steht er mit seinem alten Namen in der Kachel, auch wenn er in der Statistik fehlt. Die Abfrage ist `GET /projects/:slug/coverage` (siehe unten).
 
 <!-- Printscreen 2: Dashboard, Kachel „Testabdeckung“ mit einem Bericht (Tabelle mit den festen Bereichsnamen). -->
 > **Printscreen fehlt:** Siehe oben, nicht aufgenommen.
@@ -77,11 +82,14 @@ Was du davon siehst:
 
 Früher galt „Abdeckung nicht messbar“ im Abnahmeschritt immer als erfüllt. Das ist geändert:
 
-- Ein Punkt zur Abdeckung, den der Tester als „nicht messbar“ meldet, gilt nur dann als erfüllt, wenn **trotzdem ein gültiger Bericht gespeichert wurde**, in der Regel durch die Messung durch AIdeation.
-- Gibt es keinen gültigen Bericht, bleibt der Punkt offen.
-- Rote Tests oder Kriterien ohne Test bleiben immer ein Ablehnungsgrund.
+Ein offener Punkt zur Abdeckung im Definition-of-Done-Abschnitt gilt nur dann als erfüllt, wenn **alle** Bedingungen zutreffen:
 
-Das Wort „null“ zählt für die Abnahme nicht mehr als Messung.
+1. Alle Akzeptanzkriterien sind als erfüllt belegt.
+2. Der Hinweis des Testers zu diesem Punkt nennt die Abdeckung („abdeckung“ oder „coverage“) und zugleich, dass sie nicht gemessen werden konnte. Erkannt werden Formulierungen wie „nicht gemessen“, „nicht ermittelt“, „blockiert“, „gesperrt“, „Wächter“ oder „Freigabe“.
+3. Der Hinweis nennt keine echten Lücken. Rote oder fehlgeschlagene Tests, „ungetestet“ und „ohne Test“ bleiben immer ein Ablehnungsgrund.
+4. Es gibt trotzdem einen **gültigen, gespeicherten Bericht**, in der Regel durch die Messung durch AIdeation.
+
+Erfüllt der Punkt diese Bedingungen, steht im Hinweis zusätzlich „(Abdeckung misst AIdeation selbst)“. Fehlt ein gültiger Bericht, bleibt der Punkt offen. Eine Meldung „null“ oder ein Hinweis allein zählt nie als Messung.
 
 ## Für Entwickler und Schreibwege
 
