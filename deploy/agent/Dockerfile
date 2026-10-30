@@ -33,8 +33,14 @@ COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=dockercli /usr/local/bin/docker /usr/local/bin/docker
 COPY --from=dockercli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
+# Git aus dem PPA der Git-Maintainer: Ubuntus 2.43 sperrt und merged anders als das Git der Rechner (AUTO_MERGE).
+ARG GIT_PPA_KEY=E1DD270288B4E6030699E45FA1715D88E1DF1F24
 RUN ln -sf ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -sf ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${GIT_PPA_KEY}" \
+       | gpg --dearmor -o /usr/share/keyrings/git-core.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/git-core.gpg] https://ppa.launchpadcontent.net/git-core/ppa/ubuntu noble main" \
+       > /etc/apt/sources.list.d/git-core.list \
     && apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates tini lsof \
     && rm -rf /var/lib/apt/lists/*
 # Claude-CLI in fester Version: ein Update kommt nur mit einem neuen Image, nicht still zur Laufzeit.
