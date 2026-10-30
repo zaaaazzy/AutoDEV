@@ -1,77 +1,24 @@
 import type { Pool } from 'pg';
+import { COVERAGE_AREA_KEYS, type CoverageAreaKey, isCoverageAreaKey } from '../core/coverage-areas.js';
 
 /** Ab dieser Zeilenabdeckung gilt ein Bereich als ausreichend getestet. */
 export const COVERAGE_TARGET = 75;
 
-/**
- * Die feste Liste der Abdeckungsbereiche. Speicherung, Messung und Anzeige verwenden nur diese Namen; ein neuer
- * Bereich braucht eine Codeänderung (gewollt). „auftrag“ = Abdeckung des vom Auftrag geänderten Codes.
- */
-export const COVERAGE_AREAS = ['backend', 'frontend', 'scripts', 'e2e', 'gesamt', 'auftrag'] as const;
-export type CoverageAreaName = (typeof COVERAGE_AREAS)[number];
-
-/**
- * Bekannte Schreibweisen (klein geschrieben, ohne Leerraum am Rand) → fester Bereich. Dieselbe Zuordnung füllt
- * Migration 22 (coverage_area_aliases) und benennt die Messung durch AIdeation (areaName). Neue Schreibweisen nur
- * hier und per neuer Migration ergänzen, Migration 22 nicht ändern.
- */
-export const COVERAGE_AREA_ALIASES: Readonly<Record<string, CoverageAreaName>> = {
-  backend: 'backend',
-  'back-end': 'backend',
-  'backend (src)': 'backend',
-  'backend/api': 'backend',
-  server: 'backend',
-  api: 'backend',
-  frontend: 'frontend',
-  'front-end': 'frontend',
-  'frontend (angular)': 'frontend',
-  angular: 'frontend',
-  web: 'frontend',
-  ui: 'frontend',
-  client: 'frontend',
-  oberfläche: 'frontend',
-  scripts: 'scripts',
-  script: 'scripts',
-  skripte: 'scripts',
-  skript: 'scripts',
-  tools: 'scripts',
-  e2e: 'e2e',
-  'e2e-tests': 'e2e',
-  'end-to-end': 'e2e',
-  playwright: 'e2e',
-  gesamt: 'gesamt',
-  total: 'gesamt',
-  'all files': 'gesamt',
-  alle: 'gesamt',
-  projekt: 'gesamt',
-  project: 'gesamt',
-  'dev-log': 'gesamt',
-  devlog: 'gesamt',
-  aideation: 'gesamt',
-  auftrag: 'auftrag',
-  order: 'auftrag',
-  'geänderter code': 'auftrag',
-  'changed code': 'auftrag',
-};
-
-/** Fester Bereich zu einer bekannten Schreibweise, sonst null (kein stilles Anlegen neuer Bereiche). */
-export function canonicalArea(name: string): CoverageAreaName | null {
-  return COVERAGE_AREA_ALIASES[name.trim().toLowerCase()] ?? null;
-}
-
 const MARKER = /^@@COVERAGE\s+(\{.*\})\s*$/gm;
+
+const KEYS = COVERAGE_AREA_KEYS.join(', ');
 
 /** Anweisung an den Tester: Abdeckung messen, Lücken mit Tests schließen, Ergebnis maschinenlesbar melden. */
 export const COVERAGE_INSTRUCTIONS = `## Testabdeckung (AIdeation misst nach deinem Schritt zusätzlich selbst)
-1. Ermittle pro Bereich des Projekts die Testabdeckung. Gültige Bereichsnamen sind genau: ${COVERAGE_AREAS.map((area) => `\`${area}\``).join(', ')} („auftrag“ = der vom Auftrag geänderte Code, „gesamt“ = das ganze Projekt). Andere Namen werden abgelehnt. Gibt es ein npm-Skript \`test:coverage\`, nutze zuerst \`npm run test:coverage\`; sonst die Werkzeuge des Projekts (z. B. \`ng test --watch=false --coverage\`, \`vitest --coverage\`). Fehlt ein Coverage-Werkzeug, richte es als devDependency ein.
+1. Ermittle pro Bereich des Projekts die Testabdeckung. Gültige Bereichsnamen sind genau: ${COVERAGE_AREA_KEYS.map((area) => `\`${area}\``).join(', ')} („auftrag“ = der vom Auftrag geänderte Code, „gesamt“ = das ganze Projekt). Andere Namen werden abgelehnt. Gibt es ein npm-Skript \`test:coverage\`, nutze zuerst \`npm run test:coverage\`; sonst die Werkzeuge des Projekts (z. B. \`ng test --watch=false --coverage\`, \`tsx --test --experimental-test-coverage\`, \`vitest --coverage\`). Fehlt ein Coverage-Werkzeug, richte es als devDependency ein.
 2. Zähle die Testfälle je Bereich nach Testart: Unit-Tests (isolierte Funktionen/Services), Komponententests (UI-Komponenten mit TestBed o. Ä.), Integrationstests (mehrere Schichten, z. B. HTTP-Route mit Datenbank) und End-to-End-Tests (E2E, Browser über die ganze Anwendung).
 3. Liegt die Zeilenabdeckung eines Bereichs unter ${COVERAGE_TARGET} % oder ist der geänderte Code des Auftrags ungetestet, schreibe gezielt Tests für die ungetesteten, fachlich wichtigen Pfade und miss danach erneut.
-4. Melde nur Bereiche, die du gemessen hast. Für jeden gemeldeten Bereich sind \`lines\` und \`branches\` Pflicht (Zahl von 0 bis 100). \`null\` ist nicht erlaubt, auch nicht für unbekannte Werte. Bereiche ohne Tests (Summe aus unit, component, integration und e2e gleich 0) sind nicht erlaubt. Ein ungültiger Block wird vollständig verworfen. Lässt sich die Abdeckung nicht messen (Werkzeug fehlt, Befehl vom Wächter gesperrt), lass den Bereich weg oder den ganzen Block; AIdeation misst nach deinem Schritt selbst.
+4. Melde nur Bereiche, die du gemessen hast. Für jeden gemeldeten Bereich sind \`lines\` und \`branches\` Pflicht (Zahl von 0 bis 100). \`null\` ist nicht erlaubt, auch nicht für unbekannte Werte. Bereiche ohne Tests (Summe aus unit, component, integration und e2e gleich 0) sind nicht erlaubt. Ein ungültiger Block wird vollständig verworfen. Lässt sich die Abdeckung nicht messen (Werkzeug fehlt, Befehl vom Wächter gesperrt), lass den Bereich weg oder den ganzen Block; das ist kein Grund, die Abnahme abzulehnen – AIdeation misst nach deinem Schritt selbst.
 5. Beende deine Antwort mit genau einer Zeile in diesem Format (gültiges JSON in einer Zeile, Prozentwerte als Zahl):
 @@COVERAGE {"summary":"<kurze Zusammenfassung in Markdown, inkl. neu geschriebener Tests und verbleibender Lücken>","areas":[{"area":"frontend","unit":12,"component":4,"integration":0,"e2e":0,"passed":16,"failed":0,"lines":81.4,"statements":80.9,"branches":62,"functions":74.5}]}`;
 
 export interface CoverageArea {
-  area: CoverageAreaName;
+  area: CoverageAreaKey;
   unit: number;
   component: number;
   integration: number;
@@ -116,11 +63,11 @@ export function validateCoverage(data: unknown): CoverageValidation {
     const entry = raw as Record<string, unknown>;
     const name = typeof entry.area === 'string' ? entry.area.trim().toLowerCase() : '';
     const label = typeof entry.area === 'string' ? `„${entry.area.slice(0, 60)}“` : `Eintrag ${index + 1}`;
-    const area = (COVERAGE_AREAS as readonly string[]).includes(name) ? (name as CoverageAreaName) : null;
-    if (!area) {
-      errors.push(`Bereich ${label} unbekannt (erlaubt: ${COVERAGE_AREAS.join(', ')}).`);
+    if (!isCoverageAreaKey(name)) {
+      errors.push(`Bereich ${label} unbekannt (erlaubt: ${KEYS}).`);
       continue;
     }
+    const area = name;
     if (seen.has(area)) {
       errors.push(`Bereich ${area} doppelt gemeldet.`);
       continue;

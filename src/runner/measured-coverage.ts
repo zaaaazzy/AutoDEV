@@ -1,14 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { CommandExecutor } from '../core/command.js';
-import {
-  canonicalArea,
-  COVERAGE_AREAS,
-  type CoverageArea,
-  type CoverageAreaName,
-  type CoverageReport,
-  validateCoverage,
-} from './coverage.js';
+import { canonicalArea, COVERAGE_AREA_KEYS, type CoverageAreaKey } from '../core/coverage-areas.js';
+import { type CoverageArea, type CoverageReport, validateCoverage } from './coverage.js';
 import { runProjectCommand } from './project-command.js';
 
 /**
@@ -41,11 +35,11 @@ export function parseNodeCoverage(
 }
 
 /**
- * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 22 („mainty-backend“ → backend). Ohne
+ * Fester Bereich zum Workspace-Namen über dieselbe Zuordnung wie Migration 24 („mainty-backend“ → backend). Ohne
  * Workspace (Messung im Projektordner selbst) ist es „gesamt“. Ein Workspace ohne passenden Bereich (z. B.
- * „contracts“) ergibt null: Die Messung wird verworfen, statt einen neuen Bereich anzulegen.
+ * „builder“) ergibt null: Die Messung wird verworfen, statt einen neuen Bereich anzulegen.
  */
-export function areaName(workspace: string | null): CoverageAreaName | null {
+export function areaName(workspace: string | null): CoverageAreaKey | null {
   if (!workspace) return 'gesamt';
   const name = workspace.replace(/^@[^/]+\//, '');
   const exact = canonicalArea(name);
@@ -131,6 +125,15 @@ async function workspaceDir(cwd: string, name: string): Promise<string | null> {
   return null;
 }
 
+/**
+ * Bereich einer Messung im Projektordner selbst: über den Paketnamen („shop-backend“ → backend, „dev-log“ → gesamt);
+ * passt er zu keinem Bereich, deckt der Lauf das ganze Projekt ab („gesamt“).
+ */
+async function projectArea(dir: string): Promise<CoverageAreaKey> {
+  const name = (await packageJson(dir))?.name;
+  return (name && areaName(name)) || 'gesamt';
+}
+
 export async function measureCoverage(
   cwd: string,
   commands: string[][],
@@ -144,7 +147,7 @@ export async function measureCoverage(
     const direct = directRunner(command);
     if (direct) {
       const measured = await coverageRun(cwd, direct, execute);
-      if (measured) areas.push(coverageArea('gesamt', measured));
+      if (measured) areas.push(coverageArea(await projectArea(cwd), measured));
       continue;
     }
     if (command[0] !== 'npm' || command[1] !== 'test') continue;
@@ -153,9 +156,9 @@ export async function measureCoverage(
     if (!dir) continue;
     const area = workspace
       ? (areaName(workspace) ?? areaName((await packageJson(dir))?.name ?? workspace))
-      : areaName(null);
+      : await projectArea(dir);
     if (!area) {
-      const message = `Abdeckung nicht gemessen: Workspace „${workspace}“ passt zu keinem Bereich (${COVERAGE_AREAS.join(', ')}).`;
+      const message = `Abdeckung nicht gemessen: Workspace „${workspace}“ passt zu keinem Bereich (${COVERAGE_AREA_KEYS.join(', ')}).`;
       console.warn(`[coverage] ${message}`);
       onRefused?.(message);
       continue;
@@ -228,7 +231,7 @@ async function coverageRun(
 }
 
 function coverageArea(
-  area: CoverageAreaName,
+  area: CoverageAreaKey,
   measured: NonNullable<ReturnType<typeof parseNodeCoverage>>,
 ): CoverageArea {
   return {

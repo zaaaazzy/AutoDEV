@@ -3,6 +3,7 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { COMPLETE_COVERAGE_SQL } from '../core/coverage-areas.js';
 import { sendPush } from '../core/push.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { CATEGORIES, shortTitle, TITLE_MAX } from '../core/validation.js';
@@ -489,10 +490,11 @@ export async function loadVisionaryContext(pool: Pool, slug: string, cwd: string
     ),
     rows(
       pool.query<{ area: string; lines: number | null; branches: number | null; tests: string }>(
+        // Wie die Übersicht: je Bereichsschlüssel der neueste vollständige Lauf.
         `SELECT DISTINCT ON (a.area) a.area, a.lines, a.branches,
                 a.unit_tests + a.component_tests + a.integration_tests + a.e2e_tests AS tests
            FROM test_coverage_areas a JOIN test_coverage_reports r ON r.id = a.report_id
-          WHERE r.project_slug = $1 ORDER BY a.area, r.created_at DESC`,
+          WHERE r.project_slug = $1 AND ${COMPLETE_COVERAGE_SQL} ORDER BY a.area, r.created_at DESC`,
         [slug],
       ),
     ),

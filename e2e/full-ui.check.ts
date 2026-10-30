@@ -55,6 +55,26 @@ async function setStatus(id: string, status: string): Promise<void> {
   }
 }
 
+/** Ideen mit Nutzen, Kosten und Herkunft direkt anlegen (die API setzt keine Herkunft), einmalig je Titel. */
+async function seedScoredIdeas(
+  slug: string,
+  ideas: { title: string; benefit: number; cost: number; source: string }[],
+): Promise<void> {
+  const pool = new pg.Pool({ connectionString: testDatabaseUrl(), max: 1 });
+  try {
+    for (const idea of ideas) {
+      await pool.query(
+        `INSERT INTO ideation_items (project_slug, title, benefit, cost, source)
+         SELECT $1, $2, $3, $4, $5
+         WHERE NOT EXISTS (SELECT 1 FROM ideation_items WHERE project_slug = $1 AND title = $2)`,
+        [slug, idea.title, idea.benefit, idea.cost, idea.source],
+      );
+    }
+  } finally {
+    await pool.end();
+  }
+}
+
 /** Beispieldaten: zwei Projekte, Ideen, Aufträge in allen Status, Bugs aller Schweregrade, Sprints, Doku, Autorin. */
 async function seed(request: APIRequestContext): Promise<void> {
   const projects = await (await request.get('/api/projects', { headers: auth })).json();
@@ -531,6 +551,92 @@ test('Ideen: anlegen, öffnen, kommentieren, Auftrag erstellen lassen', async ({
   await expect.soft(comment, 'Escape schließt den Ideen-Dialog').toBeHidden();
 });
 
+test('Ideen: Nutzen, Kosten und Wert in „Offene Ideen“', async ({ page, isMobile }, info) => {
+  test.skip(isMobile, 'Desktop-Ablauf');
+  const headers = async (table: Locator) =>
+    // textContent statt innerText: Die Köpfe stehen per CSS in Großbuchstaben, verglichen wird die Beschriftung.
+    (await table.locator('thead .dt-head').allTextContents()).map((text) => text.replace(/[↑↓]/g, '').trim());
+  const sortedHeader = (table: Locator) => table.locator('thead th[aria-sort]');
+  const titles = (table: Locator) => table.locator('tbody td[data-label="Titel"] .link-button').allInnerTexts();
+  const groupTable = async (title: string) => {
+    const toggle = page.locator('.collapse-toggle', { hasText: title });
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    return page.locator('section.panel').filter({ has: toggle }).locator('.dt-table');
+  };
+  const groupHeaders = ['Titel', 'Status', 'Kategorie', 'Erstellt'];
+
+  // Alpha hat keine Visionär-Ideen: Standard bleibt „Erstellt“ absteigend.
+  await login(page);
+  await open(page, 'ideation');
+  let table = page.locator('.dt-table').first();
+  expect(await headers(table)).toEqual(expect.arrayContaining(['Nutzen', 'Kosten', 'Wert', 'Aufwand (Agent-Std.)']));
+  await expect(sortedHeader(table)).toHaveCount(1);
+  await expect(sortedHeader(table)).toContainText('Erstellt');
+  await expect(sortedHeader(table)).toHaveAttribute('aria-sort', 'descending');
+  expect.soft(await headers(await groupTable('In Bearbeitung')), 'In Bearbeitung unverändert').toEqual(groupHeaders);
+  expect.soft(await headers(await groupTable('Abgeschlossene Ideen')), 'Abgeschlossen unverändert').toEqual(groupHeaders);
+
+  // Beta mit Visionär-Idee: Standard ist „Wert“ absteigend, Ideen ohne Wert stehen am Ende.
+  const visionary = 'Wert: Vorschlag des Visionärs';
+  const small = 'Wert: Kleiner Nutzen';
+  const free = 'Wert: Ohne Kosten';
+  await seedScoredIdeas('beta', [
+    { title: visionary, benefit: 8, cost: 3, source: 'visionary' },
+    { title: small, benefit: 4, cost: 8, source: 'human' },
+    { title: free, benefit: 6, cost: 0, source: 'human' },
+  ]);
+  await page.getByRole('button', { name: 'Projekt wechseln' }).click();
+  await page.getByRole('option', { name: /Beta Portal/ }).click();
+  await open(page, 'ideation');
+  table = page.locator('.dt-table').first();
+  await expect(table).toContainText(visionary);
+  await expect(sortedHeader(table)).toContainText('Wert');
+  await expect(sortedHeader(table)).toHaveAttribute('aria-sort', 'descending');
+  let order = await titles(table);
+  expect(order.slice(0, 2)).toEqual([visionary, small]);
+  expect(order.slice(2)).toEqual(expect.arrayContaining([free, 'Beta-Idee']));
+
+  const row = table.locator('tbody tr').filter({ hasText: visionary });
+  const benefit = row.locator('td[data-label="Nutzen"]');
+  const cost = row.locator('td[data-label="Kosten"]');
+  await expect(benefit.locator('.meter-bar i')).toHaveAttribute('style', /width: 80%/);
+  await expect(benefit.locator('.meter-value')).toHaveText('8');
+  await expect(cost.locator('.meter-bar i')).toHaveAttribute('style', /width: 30%/);
+  await expect(cost.locator('.meter-value')).toHaveText('3');
+  await expect(row.locator('td[data-label="Wert"]')).toHaveText('2,7');
+  await expect(table.locator('tbody tr').filter({ hasText: small }).locator('td[data-label="Wert"]')).toHaveText('0,5');
+  await expect(table.locator('tbody tr').filter({ hasText: free }).locator('td[data-label="Wert"]')).toHaveText('');
+  await snap(page, info, 'Offene Ideen mit Nutzen, Kosten und Wert', false);
+
+  // Klick auf „Wert“ kehrt die voreingestellte Reihenfolge um; ohne Wert bleibt am Ende.
+  await button(table, 'Wert').click();
+  await expect(sortedHeader(table)).toHaveAttribute('aria-sort', 'ascending');
+  order = await titles(table);
+  expect(order.slice(0, 2)).toEqual([small, visionary]);
+  expect(order.slice(2)).toEqual(expect.arrayContaining([free, 'Beta-Idee']));
+  await button(table, 'Wert').click();
+  await expect(sortedHeader(table)).toHaveAttribute('aria-sort', 'descending');
+  expect((await titles(table)).slice(0, 2)).toEqual([visionary, small]);
+
+  // Filter „Nutzen“: nur Ideen mit dem gewählten Wert.
+  await button(table, 'Nutzen filtern').click();
+  const menu = page.locator('.dt-filter-menu');
+  await menu.locator('.dt-option').filter({ has: page.locator('span', { hasText: /^8$/ }) }).locator('input').check();
+  await expect.poll(() => titles(table)).toEqual([visionary]);
+  await page.keyboard.press('Escape');
+
+  // Ideen-Dialog zeigt die Meter weiterhin.
+  await button(row, visionary).click();
+  const dialogBenefit = page.locator('app-idea-detail .meter.benefit');
+  await expect(dialogBenefit.locator('dd')).toHaveText('8 / 10');
+  await expect(dialogBenefit.locator('.meter-bar i')).toHaveAttribute('style', /width: 80%/);
+  await expect(page.locator('app-idea-detail .meter.cost dd')).toHaveText('3 / 10');
+  await page.keyboard.press('Escape');
+  await expect.soft(dialogBenefit, 'Escape schließt den Ideen-Dialog').toBeHidden();
+  await page.getByRole('button', { name: 'Projekt wechseln' }).click();
+  await page.getByRole('option', { name: /Alpha Shop/ }).click();
+});
+
 test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMobile }, info) => {
   test.skip(isMobile, 'Desktop-Ablauf');
   await login(page);
@@ -791,6 +897,17 @@ test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: B
       'Ohne Agent-Rolle kein „Erneut versuchen“',
     )
     .toHaveCount(0);
+  await open(page, 'ideation');
+  await expect
+    .soft(page.getByRole('button', { name: /^Schnell ablehnen/ }), 'Ohne Planen-Rolle kein „Schnell ablehnen“')
+    .toHaveCount(0);
+  for (const [path, data] of [
+    ['reject', { ids: ['11111111-1111-4111-8111-111111111111'], reason: 'x' }],
+    ['priority', { ids: ['11111111-1111-4111-8111-111111111111'], priority: 'high' }],
+  ] as const) {
+    const bulk = await page.request.post(`/api/ideation/bulk/${path}`, { data });
+    expect.soft(bulk.status(), `Massenaktion „${path}“ ohne Planen-Rolle`).toBe(403);
+  }
   await open(page, 'agents');
   await expect
     .soft(button(page, /Standard-Workflow anlegen/), 'Ohne Agent-Verwaltung kein „Standard-Workflow anlegen“')

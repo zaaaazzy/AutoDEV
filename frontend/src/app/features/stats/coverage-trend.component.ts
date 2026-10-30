@@ -1,5 +1,6 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, effect, inject, signal, untracked } from '@angular/core';
+import { COVERAGE_AREA_LABELS } from '../../../../../src/core/coverage-areas.js';
 import { ApiService } from '../../core/api.service.js';
 import type { CoverageTrend, CoverageTrendPoint } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
@@ -35,12 +36,12 @@ const TARGET = 75;
           <div class="coverage-trend-grid">
             @for (entry of data.areas; track entry.area) {
               <article class="coverage-trend-area">
-                <h3>{{ entry.area }}</h3>
+                <h3>{{ labels[entry.area] }}</h3>
                 @if (entry.points.length) {
                   <svg
                     [attr.viewBox]="'0 0 ' + chart.width + ' ' + chart.height"
                     role="img"
-                    [attr.aria-label]="'Verlauf ' + entry.area + ', ' + entry.points.length + ' Messungen'"
+                    [attr.aria-label]="'Verlauf ' + labels[entry.area] + ', ' + entry.points.length + ' Messungen'"
                   >
                     @for (tick of [0, 50, 100]; track tick) {
                       <line class="grid" [attr.x1]="chart.left" [attr.x2]="chart.width - chart.right"
@@ -116,6 +117,7 @@ export class CoverageTrendComponent {
   protected readonly error = signal(false);
   protected readonly chart = CHART;
   protected readonly target = TARGET;
+  protected readonly labels = COVERAGE_AREA_LABELS;
   protected readonly y = yPosition;
   protected readonly plotted = plotted;
   protected readonly linePath = linePath;

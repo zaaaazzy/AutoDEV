@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'pg';
+import { COVERAGE_AREA_KEYS } from '../core/coverage-areas.js';
 import {
-  canonicalArea,
-  COVERAGE_AREA_ALIASES,
-  COVERAGE_AREAS,
   COVERAGE_INSTRUCTIONS,
   type CoverageArea,
   CoverageValidationError,
@@ -58,11 +56,13 @@ test('the last coverage block wins over an interim measurement', () => {
 const valid = { area: 'backend', unit: 3, lines: 80, branches: 60 };
 
 test('Validator: unbekannter Bereich wird abgelehnt, nicht angelegt', () => {
-  const result = validateCoverage({ areas: [valid, { ...valid, area: 'Contracts' }] });
+  const result = validateCoverage({ areas: [valid, { ...valid, area: 'Sonstiges' }] });
   assert.equal(result.ok, false);
-  assert.match(!result.ok ? result.errors[0]! : '', /Bereich „Contracts“ unbekannt \(erlaubt: backend, frontend/);
+  assert.match(!result.ok ? result.errors[0]! : '', /Bereich „Sonstiges“ unbekannt \(erlaubt: backend, frontend/);
   // Auch eine bekannte Schreibweise ist in einer Meldung kein gültiger Name: Gemeldet werden nur die festen Namen.
   assert.equal(validateCoverage({ areas: [{ ...valid, area: 'server' }] }).ok, false);
+  assert.equal(validateCoverage({ areas: [{ ...valid, area: 'Backend (Express)' }] }).ok, false);
+  for (const area of COVERAGE_AREA_KEYS) assert.equal(validateCoverage({ areas: [{ ...valid, area }] }).ok, true, area);
 });
 
 test('Validator: fehlender oder ungültiger Zeilen- oder Zweigwert wird abgelehnt (auch null)', () => {
@@ -97,20 +97,17 @@ test('Validator: doppelte Bereiche, negative Zahlen und Nicht-Objekte werden abg
   assert.equal(validateCoverage({ areas: ['backend'] }).ok, false);
 });
 
-test('Zuordnung: jede Schreibweise zeigt auf einen festen Bereich, jeder Bereich ist sich selbst zugeordnet', () => {
-  assert.deepEqual([...COVERAGE_AREAS], ['backend', 'frontend', 'scripts', 'e2e', 'gesamt', 'auftrag']);
-  for (const area of Object.values(COVERAGE_AREA_ALIASES)) assert.ok(COVERAGE_AREAS.includes(area));
-  for (const area of COVERAGE_AREAS) assert.equal(canonicalArea(area), area);
-  for (const alias of Object.keys(COVERAGE_AREA_ALIASES)) assert.equal(alias, alias.trim().toLowerCase());
-  assert.equal(canonicalArea('  Frontend (Angular) '), 'frontend');
-  assert.equal(canonicalArea('Contracts'), null);
-});
-
-test('Tester-Prompt nennt alle sechs Bereiche und verbietet null und Bereiche ohne Tests', () => {
-  for (const area of COVERAGE_AREAS) assert.ok(COVERAGE_INSTRUCTIONS.includes(`\`${area}\``), area);
+test('Tester-Prompt nennt alle festen Bereiche und verbietet null und Bereiche ohne Tests', () => {
+  for (const area of COVERAGE_AREA_KEYS) assert.ok(COVERAGE_INSTRUCTIONS.includes(`\`${area}\``), area);
+  for (const area of ['backend', 'frontend', 'scripts', 'e2e', 'gesamt', 'auftrag']) {
+    assert.ok(COVERAGE_INSTRUCTIONS.includes(`\`${area}\``), area);
+  }
   assert.match(COVERAGE_INSTRUCTIONS, /`null` ist nicht erlaubt/);
   assert.match(COVERAGE_INSTRUCTIONS, /Bereiche ohne Tests .* sind nicht erlaubt/);
   assert.doesNotMatch(COVERAGE_INSTRUCTIONS, /als null/);
+  // Als Beispiel nur feste Schlüssel, keine freien Bezeichnungen.
+  assert.doesNotMatch(COVERAGE_INSTRUCTIONS, /Contracts\/Shared|"area":"Frontend"|z\. B\. Frontend/);
+  assert.match(COVERAGE_INSTRUCTIONS, /"area":"frontend"/);
   // Das Beispiel im Prompt besteht selbst den Validator.
   const example = parseCoverage(COVERAGE_INSTRUCTIONS.split('\n').at(-1)!);
   assert.deepEqual(example.errors, []);
@@ -167,12 +164,13 @@ test('saveCoverage: in einer Transaktion mit den festen Namen', async () => {
 
 test('saveCoverage: ungültiger Bericht wird abgelehnt und nicht gespeichert', async () => {
   for (const broken of [
-    area({ area: 'Contracts' as unknown as CoverageArea['area'] }),
-    area({ lines: null as unknown as number }),
-    area({ unit: 0 }),
+    [area({ area: 'Sonstiges' as unknown as CoverageArea['area'] })],
+    [area({ lines: null as unknown as number })],
+    [area({ unit: 0 })],
+    [area(), area()],
   ]) {
     const fake = fakeClient();
-    await assert.rejects(saveCoverage(fake.pool, 'shop', null, { summary: 'x', areas: [broken] }), CoverageValidationError);
+    await assert.rejects(saveCoverage(fake.pool, 'shop', null, { summary: 'x', areas: broken }), CoverageValidationError);
     assert.equal(fake.connected(), false, 'keine Verbindung, nichts geschrieben');
   }
 });

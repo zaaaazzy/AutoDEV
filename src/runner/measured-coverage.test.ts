@@ -31,9 +31,10 @@ test('splits script arguments and names areas with the fixed list', () => {
   assert.equal(areaName('web-clients'), 'frontend');
   assert.equal(areaName('tools'), 'scripts');
   assert.equal(areaName('e2e'), 'e2e');
+  assert.equal(areaName('@mainty/contracts'), 'contracts');
+  assert.equal(areaName('dev-log'), 'gesamt');
   assert.equal(areaName(null), 'gesamt', 'Messung im Projektordner = gesamt');
   // Kein passender Bereich: null statt eines neuen Namens.
-  assert.equal(areaName('@mainty/contracts'), null);
   assert.equal(areaName('builder'), null, '„ui“ nur als ganzer Namensteil');
   assert.equal(areaName('rapid'), null, '„api“ nur als ganzer Namensteil');
   assert.equal(areaName('order-service'), null, '„auftrag“ ist kein Workspace-Bereich');
@@ -86,6 +87,22 @@ test('mergeCoverage: ungültige Messung (0 Tests, kein Zweigwert) wird verworfen
   assert.match(merged.errors[1]!, /scripts: Zweigwert/);
   // Nur ungültige Messungen: kein Bericht.
   assert.equal(mergeCoverage(null, [area({ unit: 0, passed: 0 })]).report, null);
+});
+
+test('mergeCoverage vergleicht feste Bereiche: Workspace-Messung ergänzt den gleichnamigen Bereich des Testers', () => {
+  const reported = { summary: 'Tester', areas: [area({ area: 'frontend', lines: 10, branches: 5 })] };
+  const merged = mergeCoverage(reported, [
+    area({ area: areaName('shop-web')!, lines: 80 }),
+    area({ area: areaName('dev-log')!, lines: 70 }),
+  ]);
+  assert.deepEqual(merged.errors, []);
+  assert.deepEqual(
+    merged.report?.areas.map((entry) => [entry.area, entry.lines]),
+    [
+      ['frontend', 80],
+      ['gesamt', 70],
+    ],
+  );
 });
 
 test('findet den Test-Runner auch hinter „&&“ und über „npm run“', () => {

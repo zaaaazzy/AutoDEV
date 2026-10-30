@@ -51,10 +51,13 @@ ENV DISABLE_AUTOUPDATER=1 \
     NPM_CONFIG_UPDATE_NOTIFIER=false \
     HOME=/home/agent
 # Playwright in derselben Version wie die Browser des Basis-Images (für die Vorschau-Aufnahme des visuellen Testers).
+# Die Installation läuft als root mit HOME=/home/agent: ihr npm-Cache wird danach entfernt, sonst gehörte
+# /home/agent/.npm root und npm im Container (ohne root) scheiterte mit EACCES.
 ARG PLAYWRIGHT_VERSION=1.64.1
 RUN npm install -g --no-audit --no-fund "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "playwright@${PLAYWRIGHT_VERSION}" \
-    && npm cache clean --force
+    && npm cache clean --force \
+    && rm -rf /home/agent/.npm
 COPY --from=guard /out/agent-guard.mjs /out/egress-proxy.mjs /out/visual-capture.mjs /opt/aideation/
 # ESM-Bündel lösen „playwright“ über node_modules neben sich auf: dort liegen die global installierten Pakete.
 RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules

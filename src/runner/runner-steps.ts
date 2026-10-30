@@ -24,12 +24,15 @@ import {
   acceptanceProblems,
   manualChecks,
   parseAcceptance,
+  parseEvidence,
   saveAcceptance,
+  saveEvidence,
   stripAcceptance,
+  stripEvidence,
   waiveUnmeasuredCoverage,
 } from './acceptance.js';
 import type { BudgetState } from './budget.js';
-import { buildPrompt } from './runner-prompts.js';
+import { buildPrompt, EVIDENCE_ROLES } from './runner-prompts.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { testerPlan } from './order-tests.js';
 import {
@@ -397,16 +400,23 @@ export async function runStep(
   const coverage = merged.report;
   let coverageSaved = false;
   if (coverage) {
-    coverageSaved = await saveCoverage(pool, item.projectSlug, item.id, coverage).then(
-      () => true,
-      (error) => {
+    const failure = await saveCoverage(pool, item.projectSlug, item.id, coverage).then(
+      () => null,
+      (error: unknown) => {
         console.error('Coverage could not be saved:', error);
-        return false;
+        return error instanceof Error ? error.message : String(error);
       },
     );
-    if (coverageSaved) {
-      await logEvent(pool, stepId, `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`);
-    }
+    coverageSaved = failure === null;
+    await logEvent(
+      pool,
+      stepId,
+      coverageSaved
+        ? `Testabdeckung gespeichert (${coverage.areas.map((area) => area.area).join(', ')})`
+        : `Testabdeckung nicht gespeichert: ${failure}`.slice(0, 1000),
+    );
+  } else if (agent.role === 'tester' && !cancelled) {
+    await logEvent(pool, stepId, 'Testabdeckung nicht gespeichert: kein gültiger Bericht und keine Messung');
   }
   if (agent.role === 'tester') output = stripCoverage(output);
   if (discarded) output += `\n\n${discarded}`;
@@ -460,6 +470,16 @@ export async function runStep(
           { project: item.projectSlug },
         );
       }
+    }
+  }
+  // Offene Testnachweise (@@NACHWEIS) von Tester und Dokumentierer: als test_evidence speichern und aus Ausgabe und
+  // Auftragsdoku entfernen. Sie setzen keine Aktion (action_todo): Autopilot und Sprintabschluss bleiben unberührt.
+  if (EVIDENCE_ROLES.has(agent.role) && !cancelled) {
+    const evidence = parseEvidence(output);
+    output = stripEvidence(output);
+    if (evidence.length) {
+      const created = await saveEvidence(pool, item.id, evidence, agent.name).catch(logged('runner-steps', 0));
+      await logEvent(pool, stepId, `Testnachweise: ${evidence.length} gemeldet, ${created} neu`);
     }
   }
   // Der Reviewer muss ausdrücklich freigeben; ohne eindeutiges Ergebnis gilt der Schritt als nicht bestanden.
