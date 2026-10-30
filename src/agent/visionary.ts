@@ -19,8 +19,6 @@ export const VISIONARY_AUTHOR = 'Visionär';
 export const VISIONARY_LIMIT_KEY = 'visionary_max_ideas';
 export const DEFAULT_VISIONARY_LIMIT = 5;
 export const MAX_VISIONARY_LIMIT = 8;
-/** Offene Läufe (angefragt oder laufend); je Projekt höchstens einer. */
-export const OPEN_RUN_STATUSES = ['requested', 'running'] as const;
 
 const IDEA_MARKER = '@@IDEA' as const;
 /** Datenbezug der Begründung: „stützt sich auf …“ mit einer konkreten Angabe danach. */

@@ -18,7 +18,6 @@ export type GithubMode = (typeof GITHUB_MODES)[number];
 
 /** Labels, deren Issues übernommen werden (Bug vor Idee, falls beide gesetzt sind). */
 export const ISSUE_LABELS = ['bug', 'idea'] as const;
-export type IssueLabel = (typeof ISSUE_LABELS)[number];
 
 /** Einzige erlaubte gh-Unterbefehle; alles andere wird vor dem Aufruf abgelehnt. */
 export const GH_COMMANDS = new Set([

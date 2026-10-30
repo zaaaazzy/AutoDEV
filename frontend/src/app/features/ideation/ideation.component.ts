@@ -30,7 +30,6 @@ import {
   StatusLabelPipe,
   CategoryLabelPipe,
 } from '../../shared/pipes.js';
-import { buildWorkflow } from '../../shared/workflow.js';
 import { IdeaDetailComponent } from './idea-detail.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { ChangedFilesComponent } from '../../shared/changed-files.component.js';
@@ -93,7 +92,6 @@ export class IdeationComponent {
   protected readonly busy = this.store.busy;
   protected readonly auth = inject(AuthService);
   private readonly confirm = inject(ConfirmService);
-  protected readonly defaultStatusFilter = DEFAULT_STATUS_FILTER;
   private readonly defaultFilters = { status: DEFAULT_STATUS_FILTER };
   /** Dashboard-Link mit Filter hat Vorrang vor dem Standardfilter. */
   protected readonly ideaFilters = computed(() => {
@@ -238,10 +236,6 @@ export class IdeationComponent {
       ...(order ? [{ kind: 'step', label: 'Auftrag', text: order.title } satisfies GitNode] : []),
       ...(sprint ? [branchNode(sprint), commitNode(sprint)] : []),
     ];
-  }
-
-  protected workflowOf(order: DevelopmentItem) {
-    return buildWorkflow(this.data(), order);
   }
 
   protected ideaStatus(idea: Idea): string {

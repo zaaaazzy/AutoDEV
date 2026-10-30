@@ -54,7 +54,7 @@ test('Testberichte, Agent-Einstellungen und Benutzerübersicht als schreibgesch�
     [
       ['test', 'Testbericht'],
       ['settings', 'Agent-Einstellungen'],
-      ['settings', 'Betrieb: Fehler an Dev Log melden'],
+      ['settings', 'Betrieb: Fehler an AIdeation melden'],
       ['settings', 'Benutzerübersicht'],
     ],
   );

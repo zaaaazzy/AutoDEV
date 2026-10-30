@@ -24,19 +24,6 @@
 .order-brief .markdown h2:first-child {
   margin-top: 0;
 }
-.order-section {
-  margin: 16px 0 6px;
-  font-size: 14px;
-  color: #8a5a00;
-}
-.order-context {
-  margin-top: 12px;
-}
-.order-context summary {
-  cursor: pointer;
-  font-weight: 600;
-  color: var(--green-light);
-}
 .approval-box {
   margin: 12px 0;
   padding: 12px 14px;
@@ -189,15 +176,6 @@
 .timeline span {
   overflow-wrap: anywhere;
 }
-.timeline .event-kind {
-  flex: none;
-  min-width: 78px;
-  padding: 1px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 650;
-  text-align: center;
-}
 .timeline .event-target {
   padding: 1px 6px;
   border-radius: 4px;
@@ -209,20 +187,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.timeline .event-read .event-kind {
-  background: #e7eff7;
-  color: var(--blue);
-}
-.timeline .event-write .event-kind {
-  background: #faf1da;
-  color: #8b6825;
-}
 .timeline .event-write .event-target {
   font-weight: 650;
-}
-.timeline .event-run .event-kind {
-  background: #ece8f5;
-  color: #5b4a8b;
 }
 .timeline .event-read::after {
   background: var(--blue);

@@ -1,5 +1,5 @@
 /* global self, URL */
-// Service Worker von Dev Log: zeigt Push-Nachrichten an und öffnet beim Antippen die passende Ansicht.
+// Service Worker von AIdeation: zeigt Push-Nachrichten an und öffnet beim Antippen die passende Ansicht.
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
@@ -11,7 +11,7 @@ self.addEventListener('push', (event) => {
     data = { body: event.data ? event.data.text() : '' };
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Dev Log', {
+    self.registration.showNotification(data.title || 'AIdeation', {
       body: data.body || '',
       tag: data.tag,
       renotify: Boolean(data.tag),

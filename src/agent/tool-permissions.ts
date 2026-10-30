@@ -23,17 +23,10 @@ import {
 } from './permission-rules.js';
 
 export {
-  CHECK_GROUP,
-  CHECK_ROLES,
-  CREATE_TOOLS,
   DATABASE_COMMAND,
   DEFAULT_PERMISSION_GROUPS,
-  EDIT_TOOLS,
-  FILE_TOOLS,
   FILES_CREATE,
   FILES_EDIT,
-  LEGACY_FILES_COMMAND,
-  LOGS_COMMAND,
   NO_FILE_WRITE_ROLES,
   PERMISSION_GROUPS,
   READ_ONLY_PERMISSION_ROLE,
@@ -42,7 +35,6 @@ export {
   commandHelp,
   commandLabel,
   normalizeCommands,
-  normalizeGroups,
   rulesAllow,
   type PermissionGroup,
 } from './permission-rules.js';

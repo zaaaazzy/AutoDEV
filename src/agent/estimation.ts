@@ -167,7 +167,7 @@ async function estimateWithCommand(
   try {
     const invocation = buildInvocation(command, prompt);
     const options = { timeoutMs: ESTIMATE_TIMEOUT_MS * 2, env: agentEnvironment() };
-    // Docker-Sandbox (Standard): auch die Schätzung läuft im Container, mit dem leeren Ordner nur lesend.
+    // Sandbox an (auch im Standard workbench): die Schätzung läuft lesend im kurzlebigen Container, leerer Ordner.
     const result = sandboxed
       ? await runInSandbox(invocation, cwd, {
           ...options,

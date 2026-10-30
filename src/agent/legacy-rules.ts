@@ -1,4 +1,5 @@
-// Frühere, gespeicherte Rechte-Regeln, die beim Laden ersetzt werden (normalizeCommands in permission-rules.ts).
+// Frühere, gespeicherte Rechte-Regeln, die beim Laden ersetzt werden (normalizeCommands bzw. normalizeGroups in
+// permission-rules.ts).
 
 /**
  * Frühere Dienst-Regeln: launchctl kickstart bzw. list (jede Benutzer-ID, jeder Dienstname) und die

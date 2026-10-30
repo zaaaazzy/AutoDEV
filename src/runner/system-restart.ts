@@ -529,7 +529,7 @@ export async function processRestart(
     );
     return 'failed';
   }
-  // Image der Agent-Sandbox (DEV_LOG_AGENT_SANDBOX=docker) mitbauen. Scheitert das, startet AIdeation trotzdem neu:
+  // Image der Agent-Sandbox (Modi docker und workbench) mitbauen. Scheitert das, startet AIdeation trotzdem neu:
   // Ein Lauf mit eingeschalteter Sandbox meldet das fehlende bzw. alte Image dann selbst (fail-closed).
   await writeRestart(pool, {
     ...building,

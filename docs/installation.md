@@ -354,7 +354,8 @@ Agents und Projekttests laufen nicht auf deinem Rechner, sondern **je Projekt in
 (Schalter `DEV_LOG_AGENT_SANDBOX`, Standard `workbench`). Darin dürfen sie alles, was ein Entwickler-Rechner kann:
 Pakete installieren, bauen, Tests mit Browsern ausführen und **mit Docker eigene Container bauen und starten**. Dein
 Rechner, sein Docker und die anderen Projekte bleiben davon unberührt. Das Verhalten ist auf macOS, Linux und Windows
-gleich; der Worker steuert alles, auf dem Host oder als Dienst `worker` im Container.
+gleich. Das gilt für den Worker auf dem Host; der Compose-Dienst `worker` setzt fest `DEV_LOG_AGENT_SANDBOX=docker`
+(kurzlebige Container je Schritt, siehe oben).
 
 Ein Arbeitscontainer ist ein kleiner Compose-Stapel `agents_<projekt>` je Projekt (in Docker Desktop eine Gruppe je Anwendung). Seine Container heissen `agents_<projekt>_workbench`, `agents_<projekt>_docker` und `agents_<projekt>_<dienst>` für die Testdienste:
 
@@ -392,7 +393,7 @@ einmal entfernen, AIdeation legt ihn neu an: `docker rm -f aideation-egress`.
 3. **Anmeldung der Claude-CLI:** `claude setup-token` ausführen und den Wert als `CLAUDE_CODE_OAUTH_TOKEN=…` in
    `~/.config/aideation/worker.env` eintragen (alternativ `ANTHROPIC_API_KEY`). Mit dem Worker im Container gehört er in
    die `.env` (Feld im Assistenten). Das `~/.claude` des Rechners wird nicht eingebunden.
-4. **Schalter (optional):** Ohne Angabe gilt `workbench`. Abweichend global in `worker.env` oder je Projekt unter
+4. **Schalter (optional):** Ohne Angabe gilt `workbench` (der Compose-Dienst `worker` setzt `docker`). Abweichend global in `worker.env` oder je Projekt unter
    Einstellungen → Projekt & Ordner → „Docker-Sandbox für Agents und Projekttests“. Der Projektwert geht vor.
 5. **Worker neu starten.** Den Arbeitscontainer legt der Worker beim ersten Agent-Schritt bzw. Testlauf des Projekts
    selbst an; der erste Start dauert wegen der Images und der Installation der Abhängigkeiten einige Minuten.

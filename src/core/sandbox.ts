@@ -5,13 +5,15 @@ import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 
 /**
- * Docker-Sandbox für Agents (Schalter DEV_LOG_AGENT_SANDBOX, global und je Projekt, Standard „docker“): Jeder Agent
- * und jeder Projekttest läuft in einem kurzlebigen Container (Image aideation-agent, deploy/agent/Dockerfile) statt
- * direkt auf dem Host. Eingebunden ist nur der Worktree des Auftrags als /workspace (für lesende Rollen nur :ro) und
- * node_modules als Volume je Projekt – kein Docker-Socket, kein Home, kein ~/.ssh oder ~/.claude, keine .env des
- * Hosts. Netzwerk: das interne Netzwerk aideation-agents, hinaus nur über den Egress-Proxy (egress-proxy.ts) zu
- * Anthropic-API, npm-Registry und Ollama auf dem Host. Der Worker steuert den Lauf – auf dem Host oder als
- * Compose-Dienst worker (src/core/worker-container.ts), dort über den eingebundenen Docker-Socket.
+ * Docker-Sandbox für Agents (Schalter DEV_LOG_AGENT_SANDBOX, global und je Projekt: off, docker oder workbench, Standard
+ * workbench). Im Modus „docker“ läuft jeder Agent und jeder Projekttest in einem kurzlebigen Container (Image
+ * aideation-agent, deploy/agent/Dockerfile) statt direkt auf dem Host; im Modus „workbench“ gehen schreibende Läufe in
+ * den Arbeitscontainer des Projekts (workbench.ts), lesende Läufe, Schätzung und Vorschau bleiben kurzlebig.
+ * Eingebunden ist nur der Worktree des Auftrags als /workspace (für lesende Rollen nur :ro) und node_modules als Volume
+ * je Projekt – kein Docker-Socket, kein Home, kein ~/.ssh oder ~/.claude, keine .env des Hosts. Netzwerk: das interne
+ * Netzwerk aideation-agents, hinaus nur über den Egress-Proxy (egress-proxy.ts) zu Anthropic-API, npm-Registry, Docker
+ * Hub und Ollama auf dem Host (egressAllowList). Der Worker steuert den Lauf – auf dem Host oder als Compose-Dienst
+ * worker (src/core/worker-container.ts), dort über den eingebundenen Docker-Socket.
  */
 
 export type SandboxMode = 'off' | 'docker' | 'workbench';
@@ -63,7 +65,7 @@ export function sandboxMode(projectValue: unknown, environment: NodeJS.ProcessEn
   );
 }
 
-/** Läuft ein Agent bzw. Projekttest im Container? Seit Phase 3 gilt das für alle Rollen. */
+/** Läuft ein Agent bzw. Projekttest im Container? Gilt für alle Rollen, sobald der Modus nicht „off“ ist. */
 export function usesSandbox(mode: SandboxMode): boolean {
   return mode !== 'off';
 }
@@ -276,7 +278,7 @@ export async function sandboxProblem(
   }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
   if (version.exitCode !== 0) {
     return (
-      'Sandbox (DEV_LOG_AGENT_SANDBOX=docker): Docker ist nicht erreichbar – der Agent wurde nicht gestartet, auch ' +
+      'Sandbox (DEV_LOG_AGENT_SANDBOX): Docker ist nicht erreichbar – der Agent wurde nicht gestartet, auch ' +
       'nicht auf dem Host. Docker starten oder die Sandbox ausschalten.'
     );
   }
@@ -286,7 +288,7 @@ export async function sandboxProblem(
   }).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
   if (inspect.exitCode !== 0) {
     return (
-      `Sandbox (DEV_LOG_AGENT_SANDBOX=docker): Image „${image}“ fehlt – der Agent wurde nicht gestartet, auch nicht ` +
+      `Sandbox (DEV_LOG_AGENT_SANDBOX): Image „${image}“ fehlt – der Agent wurde nicht gestartet, auch nicht ` +
       `auf dem Host. Bauen mit „docker build -t ${image} -f deploy/agent/Dockerfile .“ im AIdeation-Ordner ` +
       '(geschieht auch bei „AIdeation neu starten“).'
     );

@@ -82,7 +82,7 @@ const CREATE_LABELS: Partial<Record<Section, string>> = {
   templateUrl: './app.component.html',
 })
 export class AppComponent {
-  /** Browser-Tab zeigt das aktive Projekt (statt fest „Mainty“). */
+  /** Browser-Tab zeigt das aktive Projekt („AIdeation | Projekt“). */
   private readonly tabTitle = effect(() => {
     const name = this.store.currentProject()?.name;
     globalThis.document.title = name ? `AIdeation | ${name}` : 'AIdeation';
@@ -117,13 +117,13 @@ export class AppComponent {
     this.afterProject.set(false);
     this.welcomeDismissed.set(true);
   }
-  /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
   /** Favicon-Adresse, die nicht geladen werden konnte – dann erscheint wieder das AIdeation-Logo. */
   protected readonly failedFavicon = signal<string | null>(null);
   protected readonly visibleFavicon = computed(() => {
     const icon = this.favicon();
     return icon && icon !== this.failedFavicon() ? icon : null;
   });
+  /** Favicon der betreuten Anwendung neben der Projektauswahl, falls vorhanden. */
   protected readonly favicon = computed(() => {
     const project = this.store.currentProject();
     return project?.faviconVersion

@@ -8,7 +8,7 @@ import { access } from './access.js';
 import { deleteOwnSubscription } from './push.js';
 import QRCode from 'qrcode';
 import { isRole, type Principal, type Role } from './roles.js';
-import { FailureLimiter, clientSource, fullPath } from './security.js';
+import { FailureLimiter, clientSource } from './security.js';
 import { currentStep, generateSecret, otpauthUri, verifyTotp } from './totp.js';
 
 const scrypt = promisify(scryptCallback) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>;
@@ -325,10 +325,6 @@ export async function sessionStillAllowed(pool: Pool, token: string, project: st
  */
 export function requireCredentials(auth: DevLogAuth, pool: Pool, limiter = new FailureLimiter()): RequestHandler {
   return async (request, response, next) => {
-    if (!fullPath(request).startsWith('/api/')) {
-      next();
-      return;
-    }
     response.set('Cache-Control', 'no-store');
     try {
       // Gültige Sitzungen werden nie gesperrt – die Sperre betrifft nur Anmeldeversuche.
