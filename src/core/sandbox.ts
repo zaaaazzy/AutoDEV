@@ -1,5 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { basename, isAbsolute, posix, relative, resolve, sep, win32 } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstatSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { basename, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
 import { type CommandExecutor, type CommandResult, redactOutput, runCommand } from './command.js';
 
@@ -39,6 +40,10 @@ export const SANDBOX_OLLAMA_URL = 'http://host.docker.internal:11434';
 /** Nach dem Abbruch höchstens so lange auf docker kill/rm warten. */
 const KILL_TIMEOUT_MS = 8_000;
 const CHECK_TIMEOUT_MS = 20_000;
+/** npm ci ins node_modules-Volume (einmal je neuem package-lock.json). */
+const INSTALL_TIMEOUT_MS = 10 * 60_000;
+/** Marke im node_modules-Volume: Prüfsumme des package-lock.json, mit dem es zuletzt gefüllt wurde. */
+export const MODULES_STAMP = '.aideation-lock';
 
 /** Liest einen Schalterwert; unbekannte Werte gelten als nicht gesetzt. */
 export function parseSandboxMode(value: unknown): SandboxMode | null {
@@ -369,6 +374,107 @@ async function prepareModulesVolume(
   ).catch((error: unknown) => ({ exitCode: 1, durationMs: 0, output: String(error) }));
 }
 
+/**
+ * Eigene Agent-Worktrees verlinken node_modules des Hauptordners (agent-workspace.ts). Im Container zeigt der Link auf
+ * einen Host-Pfad: Docker hängt das Volume dann dort ein, und npm scheitert an „/workspace/node_modules“ (ENOTDIR).
+ * Der Link wird darum durch einen leeren Ordner ersetzt (nur der Link, nie sein Ziel); linkDependencies stellt ihn
+ * ohne Sandbox wieder her.
+ */
+export function replaceLinkedModules(worktree: string): void {
+  const path = join(worktree, 'node_modules');
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return;
+    rmSync(path);
+    mkdirSync(path);
+  } catch {
+    // Kein node_modules oder nicht änderbar: Der Lauf geht trotzdem weiter.
+  }
+}
+
+/** Prüfsumme des package-lock.json im Worktree; null ohne Lockfile (dann wird nichts installiert). */
+export function lockfileHash(worktree: string): string | null {
+  try {
+    return createHash('sha256')
+      .update(readFileSync(join(worktree, 'package-lock.json')))
+      .digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/** Je Volume nur eine Installation gleichzeitig (parallele Läufe desselben Projekts). */
+const installs = new Map<string, Promise<CommandResult | null>>();
+
+/**
+ * Abhängigkeiten ins node_modules-Volume installieren, sobald sich das package-lock.json geändert hat (Marke
+ * `MODULES_STAMP` im Volume): npm ci --ignore-scripts in einem Hilfscontainer mit dem Benutzer des Agents, über den
+ * Egress-Proxy, eingebunden nur package.json und package-lock.json (lesend) und das Volume. Ohne das bleibt das Volume
+ * leer, und npm run typecheck oder npx tsx scheitern im Container („tsc: not found“). null: nichts zu tun.
+ */
+export function installModules(
+  docker: CommandExecutor,
+  options: SandboxOptions,
+  env: NodeJS.ProcessEnv,
+  worktree: string,
+): Promise<CommandResult | null> {
+  const hash = lockfileHash(worktree);
+  if (!hash) return Promise.resolve(null);
+  const volume = modulesVolume(options.project);
+  const running = installs.get(volume);
+  if (running) return running;
+  const platform = options.platform ?? process.platform;
+  const user = sandboxUser(options);
+  const directory = '/tmp/aideation-install';
+  const script =
+    `if [ "$(cat node_modules/${MODULES_STAMP} 2>/dev/null)" = "${hash}" ]; then exit 0; fi; ` +
+    `npm ci --ignore-scripts --no-audit --no-fund && echo ${hash} > node_modules/${MODULES_STAMP}`;
+  const install = ensureAgentNetwork(docker, { environment: options.environment, cwd: worktree, platform })
+    .then((problem): Promise<CommandResult> | CommandResult =>
+      problem
+        ? { exitCode: 1, durationMs: 0, output: problem }
+        : docker(
+            [
+              'docker',
+              'run',
+              '--rm',
+              '--label',
+              `${SANDBOX_LABEL}=${options.runId}`,
+              ...(user ? ['--user', user] : []),
+              '--cap-drop',
+              'ALL',
+              '--security-opt',
+              'no-new-privileges',
+              '--network',
+              SANDBOX_NETWORK,
+              ...proxyEnvironment(),
+              '-e',
+              `HOME=${SANDBOX_HOME}`,
+              '-e',
+              'npm_config_cache=/tmp/npm-cache',
+              '-v',
+              `${hostMount(join(worktree, 'package.json'), platform)}:${directory}/package.json:ro`,
+              '-v',
+              `${hostMount(join(worktree, 'package-lock.json'), platform)}:${directory}/package-lock.json:ro`,
+              '-v',
+              `${volume}:${directory}/node_modules`,
+              '-w',
+              directory,
+              '--entrypoint',
+              'sh',
+              options.image ?? SANDBOX_IMAGE,
+              '-c',
+              script,
+            ],
+            worktree,
+            { timeoutMs: INSTALL_TIMEOUT_MS, env },
+          ),
+    )
+    .catch(failed)
+    .finally(() => installs.delete(volume));
+  installs.set(volume, install);
+  return install;
+}
+
 /** Erlaubte Ziele des Egress-Proxys (siehe egress-proxy.ts); weitere über DEV_LOG_AGENT_SANDBOX_EGRESS (host:port, …). */
 export function egressAllowList(environment: NodeJS.ProcessEnv = process.env): string {
   const extra = (environment.DEV_LOG_AGENT_SANDBOX_EGRESS ?? '')
@@ -519,12 +625,19 @@ export async function runInSandbox(
     noteProblem(options.project, missing);
     return blocked(missing, redactWith);
   }
+  let installNote: string | null = null;
   if (options.workspace !== false) {
+    replaceLinkedModules(worktree);
     const volume = await prepareModulesVolume(docker, options, env, worktree);
     if (volume.exitCode !== 0) {
       const message = `Sandbox: node_modules-Volume „${modulesVolume(options.project)}“ liess sich nicht vorbereiten (Exit-Code ${volume.exitCode}). Der Agent wurde nicht gestartet.\n${volume.output.trim().slice(-500)}`;
       noteProblem(options.project, message.split('\n')[0]);
       return blocked(message, redactWith);
+    }
+    // Scheitert die Installation (z. B. Registry nicht erreichbar), läuft der Agent trotzdem – mit Hinweis.
+    const installed = await installModules(docker, options, env, worktree);
+    if (installed && installed.exitCode !== 0) {
+      installNote = `Sandbox: npm ci ins node_modules-Volume „${modulesVolume(options.project)}“ ist fehlgeschlagen (Exit-Code ${installed.exitCode}); Befehle wie tsc fehlen im Container.\n${installed.output.trim().slice(-500)}`;
     }
   }
   if ((options.network ?? SANDBOX_NETWORK) === SANDBOX_NETWORK) {
@@ -566,10 +679,11 @@ export async function runInSandbox(
   }
   const note = signal?.aborted ? null : sandboxFailureNote(result.exitCode, result.output);
   if (note && /^Sandbox:/.test(note)) noteProblem(options.project, note);
+  const notes = [note, installNote].filter(Boolean).join('\n\n');
   return {
     ...result,
     durationMs: Date.now() - startedAt,
-    output: redactOutput(note ? `${result.output}\n\n${note}\n` : result.output, redactWith),
+    output: redactOutput(notes ? `${result.output}\n\n${notes}\n` : result.output, redactWith),
   };
 }
 

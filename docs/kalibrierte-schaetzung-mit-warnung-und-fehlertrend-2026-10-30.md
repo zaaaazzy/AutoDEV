@@ -56,3 +56,12 @@ Titel „Kalibrierte Schätzung mit Warnung und Fehlertrend“ (Agent „Entwick
 - `docs/workflows.md`: Abschnitte „Kalibrierung“, „Gruppen-Kalibrierung“, „Laufwarnung“, „Schätzfehler je Sprint“.
 - Ablauf: Auftrag erledigt → Gruppe aus Art, Kategorie, Schrittklasse → mindestens 5 Messwerte? ja: Gruppenfaktor, nein: gröbere Stufe → Prompt des Auftragsautors. Laufender Auftrag → Verbrauch > 3 × kalibrierte Schätzung → Eintrag in `overruns` → Dashboard.
 - API: `GET …/stats` liefert zusätzlich `overruns` und je Sprint `hourError` / `tokenError`.
+
+### Nachtrag: Testbefehle in der Docker-Sandbox (erneuter Versuch)
+
+Der Tester scheiterte nicht am Code des Auftrags, sondern an der Sandbox: `tsc: not found` und `EACCES` unter `/home/agent/.npm`.
+
+- `deploy/agent/Dockerfile`: Die globale Installation läuft als root mit `HOME=/home/agent`; ihr npm-Cache wird jetzt entfernt. Sonst gehört `/home/agent/.npm` root, und `npx`/`npm` im Container (ohne root) scheitern. **Image neu bauen** (`docker build -t aideation-agent -f deploy/agent/Dockerfile .` bzw. „AIdeation neu starten“).
+- `src/core/sandbox.ts`: Das node_modules-Volume je Projekt wurde nie gefüllt. Vor jedem Lauf prüft `installModules` die Marke `.aideation-lock` (SHA-256 des `package-lock.json`) und führt bei Abweichung `npm ci --ignore-scripts` in einem Hilfscontainer aus: Benutzer des Agents, über den Egress-Proxy, eingebunden sind nur `package.json`, `package-lock.json` (lesend) und das Volume. Ein Fehler sperrt den Lauf nicht; die Ausgabe erhält einen Hinweis.
+- `src/core/sandbox.ts` (`replaceLinkedModules`): Eigene Agent-Worktrees verlinken `node_modules` auf den Hauptordner. Im Container zeigt der Link auf einen Host-Pfad, und `npm ci` scheitert mit `ENOTDIR`. Der Link wird vor dem Lauf durch einen leeren Ordner ersetzt; das Ziel bleibt unberührt.
+- `src/runner/agent-workspace.ts`: Im Notfallmodus ohne Sandbox wird ein leerer `node_modules`-Ordner wieder verlinkt.

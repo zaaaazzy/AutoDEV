@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { homedir } from 'node:os';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import type { CommandExecutor, CommandResult } from './command.js';
 import { guardHookCommand, withAgentPermissions } from '../agent/tool-permissions.js';
@@ -13,9 +15,13 @@ import {
   egressAllowList,
   egressRunArgs,
   ensureAgentNetwork,
+  installModules,
+  lockfileHash,
+  MODULES_STAMP,
   modulesVolume,
   readOnlyWorkspace,
   removeLeftoverContainers,
+  replaceLinkedModules,
   resetAgentNetwork,
   runInSandbox,
   SANDBOX_GUARD,
@@ -452,4 +458,83 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+/** Worktree mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */
+function linkedWorktree(): { worktree: string; target: string } {
+  const root = mkdtempSync(join(tmpdir(), 'sandbox-modules-'));
+  const worktree = join(root, 'agent');
+  const target = join(root, 'source-node_modules');
+  mkdirSync(worktree);
+  mkdirSync(target);
+  writeFileSync(join(target, 'bleibt.txt'), 'x');
+  writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+  writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+  symlinkSync(target, join(worktree, 'node_modules'), 'dir');
+  return { worktree, target };
+}
+
+test('Sandbox: verlinktes node_modules wird zum leeren Ordner, das Ziel bleibt unberührt', () => {
+  const { worktree, target } = linkedWorktree();
+  replaceLinkedModules(worktree);
+  const stat = lstatSync(join(worktree, 'node_modules'));
+  assert.ok(!stat.isSymbolicLink() && stat.isDirectory(), 'Einhängepunkt für das Volume');
+  assert.ok(existsSync(join(target, 'bleibt.txt')), 'Ziel des Links nicht gelöscht');
+  replaceLinkedModules(join(worktree, 'fehlt'));
+});
+
+test('Sandbox: npm ci füllt das node_modules-Volume über den Egress-Proxy, mit Marke des Lockfiles', async () => {
+  resetAgentNetwork();
+  const { worktree } = linkedWorktree();
+  const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+  const result = await runInSandbox(['npm', 'run', 'typecheck'], worktree, {
+    runId: 'r-install',
+    project: 'demo',
+    name: 'aideation-r-install',
+    platform: 'linux',
+    uid: 501,
+    gid: 20,
+    docker,
+    environment: { PATH: '/usr/bin' },
+  });
+  assert.equal(result.exitCode, 0);
+  const install = calls.find((call) => call.command.includes('sh'));
+  assert.ok(install, 'Hilfscontainer für npm ci');
+  const joined = install.command.join(' ');
+  const hash = lockfileHash(worktree);
+  assert.ok(hash);
+  assert.match(joined, /--user 501:20/);
+  assert.match(joined, new RegExp(`--network ${SANDBOX_NETWORK}`));
+  assert.match(joined, new RegExp(`HTTPS_PROXY=${EGRESS_URL}`));
+  assert.match(joined, /package-lock\.json:\/tmp\/aideation-install\/package-lock\.json:ro/);
+  assert.match(joined, new RegExp(`${modulesVolume('demo')}:/tmp/aideation-install/node_modules`));
+  const script = install.command.at(-1) ?? '';
+  assert.match(script, /npm ci --ignore-scripts/);
+  assert.ok(script.includes(`${hash} > node_modules/${MODULES_STAMP}`), 'Marke nach Erfolg');
+  assert.ok(script.includes(`= "${hash}" ]; then exit 0`), 'gleiche Marke: keine Installation');
+  const run = calls.findIndex((call) => call.command.includes('aideation-r-install'));
+  assert.ok(calls.indexOf(install) < run, 'vor dem eigentlichen Lauf');
+});
+
+test('Sandbox: fehlgeschlagenes npm ci sperrt den Lauf nicht, meldet es aber', async () => {
+  resetAgentNetwork();
+  const { worktree } = linkedWorktree();
+  const { docker } = fakeDocker((command) =>
+    command.includes('sh') ? { exitCode: 1, durationMs: 1, output: 'E404' } : ok(),
+  );
+  const result = await runInSandbox(['npm', 'test'], worktree, {
+    runId: 'r-install-fail',
+    project: 'demo',
+    docker,
+    environment: { PATH: '/usr/bin' },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.match(result.output, /npm ci ins node_modules-Volume .* fehlgeschlagen \(Exit-Code 1\)/);
+});
+
+test('Sandbox: ohne package-lock.json wird nichts installiert', async () => {
+  const { docker, calls } = fakeDocker();
+  assert.equal(lockfileHash(WORKTREE), null);
+  assert.equal(await installModules(docker, { runId: 'r', project: 'demo' }, {}, WORKTREE), null);
+  assert.equal(calls.length, 0);
 });
