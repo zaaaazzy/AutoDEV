@@ -231,15 +231,15 @@ const CALIBRATED_COLUMNS = new Set(['effort_hours', 'token_estimate']);
 /**
  * Zusatz für ein UPDATE aus `buildUpdate`: Ändert jemand Aufwand oder Token-Schätzung von Hand, gilt die Schätzung als
  * `manual` und bleibt vor dem Auftragsautor geschützt. Unveränderte Werte zählen nicht, denn Formulare senden alle
- * Felder mit. Die Platzhalter sind die von `buildUpdate` ($2 = erstes Feld).
+ * Felder mit. Die Platzhalter sind die von `buildUpdate` ($2 = erstes Feld); das Ergebnis gehört in dessen `extra`.
  */
-export function manualEstimateSql(fields: { column: string }[]): string {
+export function manualEstimateSql(fields: { column: string }[]): string[] {
   const changed = fields.flatMap((field, index) =>
     CALIBRATED_COLUMNS.has(field.column) ? [`${field.column} IS DISTINCT FROM $${index + 2}`] : [],
   );
   return changed.length
-    ? `, estimate_source = CASE WHEN ${changed.join(' OR ')} THEN 'manual' ELSE estimate_source END`
-    : '';
+    ? [`estimate_source = CASE WHEN ${changed.join(' OR ')} THEN 'manual' ELSE estimate_source END`]
+    : [];
 }
 
 export type FieldSpec = Record<string, { column: string; parse: Parser }>;
@@ -321,6 +321,8 @@ export function invalidInput(body: unknown, spec: FieldSpec, required: readonly 
 /**
  * Builds a parameterised UPDATE. Table and columns come from code constants, never from input.
  * `onlyIf` limits the update to rows whose column still has one of the given values (atomic status check).
+ * `extra` adds further SET assignments from code (e.g. CASE expressions); they may use the field placeholders
+ * ($2 = first field) but must not add parameters of their own.
  */
 export function buildUpdate(
   table: string,
@@ -328,8 +330,9 @@ export function buildUpdate(
   fields: { column: string; value: unknown }[],
   returning: string,
   onlyIf?: { column: string; values: readonly unknown[] },
+  extra: readonly string[] = [],
 ): { sql: string; values: unknown[] } {
-  const assignments = fields.map((field, index) => `${field.column} = $${index + 2}`);
+  const assignments = [...fields.map((field, index) => `${field.column} = $${index + 2}`), ...extra];
   const values = [id, ...fields.map((field) => field.value)];
   const condition = onlyIf ? ` AND ${onlyIf.column} = ANY($${values.push([...onlyIf.values])})` : '';
   return {

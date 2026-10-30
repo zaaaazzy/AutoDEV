@@ -37,7 +37,7 @@ deshalb, siehe Abschnitt „Printscreens“.
 | Statuszeile mit Punkt | Es gibt einen Review-Container für **genau diesen** Auftrag, der nicht frei ist. Freie Container und Container anderer Aufträge zählen nicht. |
 | Link „Review N öffnen ↗“ | Nur, wenn der Container läuft (Status „läuft“). Der Link öffnet den Container in einem neuen Tab. |
 | Log in grauer Box | Nur bei gescheitertem Start, wenn eine Meldung vorliegt. |
-| Hinweis „Review-Befehl fehlt“ | Wenn unter Einstellungen → Review-Freigabe kein Review-Befehl eingetragen ist. Die Abnahme-Box zeigt dann nur diesen Hinweis. Die Freigabe-Box zeigt ihn zusätzlich. |
+| Hinweis „Kein Review-Befehl eingestellt – unter Einstellungen → Review-Freigabe ergänzen.“ (Freigabe-Box) bzw. „Zum Ausprobieren fehlt der Review-Befehl – unter Einstellungen → Review-Freigabe ergänzen.“ (Abnahme-Box) | Wenn unter Einstellungen → Review-Freigabe kein Review-Befehl eingetragen ist. Die Abnahme-Box zeigt dann nur diesen Hinweis. Die Freigabe-Box zeigt ihn zusätzlich. |
 | Start-Knopf | Freigabe-Box: nur, wenn der Review-Befehl eingestellt ist **und** kein Container für den Auftrag läuft oder gestartet ist. Ein gescheiterter Start zählt als „nicht gestartet“. Abnahme-Box: wie Freigabe-Box, zusätzlich nur mit dem Recht „Agents starten“. |
 | Hinweis „Alle Review-Container sind belegt“ | Freigabe-Box, wenn kein Container frei ist und der Auftrag keinen eigenen hat. Der Knopf „Im Review-Container anzeigen“ bleibt dann sichtbar und übernimmt einen Container. |
 | Hinweis „Wird gleich in einem freien Review-Container gestartet …“ | Freigabe-Box, wenn ein Container frei ist, aber noch keiner für den Auftrag angezeigt wird. |

@@ -427,6 +427,13 @@ export const MIGRATIONS: readonly Migration[] = [
         WHERE ideation_id IS NOT NULL;
     `,
   },
+  // Sprint-Listen filtern immer nach Projekt (oft mit Status, sortiert nach Anlage); ohne Index las jede Abfrage alle
+  // Sprints (Code-Review vom 21.10.2026). Der Teilindex sprints_one_active_idx deckt nur aktive Sprints ab.
+  {
+    version: 20,
+    name: 'sprints-projekt-index',
+    sql: 'CREATE INDEX IF NOT EXISTS sprints_project_idx ON sprints (project_slug, status, created_at);',
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
