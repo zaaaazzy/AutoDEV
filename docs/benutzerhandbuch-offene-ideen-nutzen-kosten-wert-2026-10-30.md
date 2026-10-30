@@ -4,9 +4,9 @@ Auftrag ef5e6c78 (Entwicklung, Frontend). Dieses Kapitel beschreibt, welche Spal
 
 > **Was sich geändert hat:** Die Tabelle „Offene Ideen“ hatte bisher keine Spalten für Nutzen und Kosten. Du musstest eine Idee aufklappen, um die Meter im Ideen-Dialog zu sehen. Jetzt stehen Nutzen, Kosten und ein Wert aus beiden direkt in der Tabelle. Bei Visionär-Ideen ist der Wert die Standard-Sortierung, damit du die besten Ideen ohne Aufklappen findest.
 >
-> **Printscreens:** keine. Der Dev-Server (`npm run dev:ui`) wurde in diesem Lauf nicht gestartet, und ein Browser stand nicht zur Verfügung (die Sandbox sperrt die Prüfung nach Chromium; ein früherer Lauf meldete „kein Chromium installiert“, das ist hier nicht nachgeprüft). Die Beschreibungen unten stammen aus dem Code (`frontend/src/app/features/ideation/ideation.component.ts`, `ideation.component.html`, `idea-options.ts`, `frontend/src/app/shared/data-table/data-table.component.ts`, `sort.ts`), nicht aus einem Lauf der App. Printscreens sollten auf einem Host mit `npm run dev:ui` und einem Browser entstehen. Zielbilder: Tabelle „Offene Ideen“ mit Spalten Nutzen, Kosten, Wert; Kopfzeile „Wert“ mit Sortierpfeil; Filtermenü „Nutzen“ mit Auswahl 0–10.
+> **Printscreens:** keine. In diesem Lauf wurde der Dev-Server (`npm run dev:ui`) nicht gestartet, und ein Browser ließ sich nicht prüfen (der Zugriff auf den Browser-Cache ist für den Agenten gesperrt). Die Beschreibungen stammen aus dem Code (`frontend/src/app/features/ideation/ideation.component.ts`, `ideation.component.html`, `idea-options.ts`, `frontend/src/app/shared/data-table/data-table.component.ts`, `sort.ts`, `filter.ts`), nicht aus einem Lauf der App. Die Printscreens fehlen deshalb; die Liste der Aufnahmen steht in Abschnitt 9.
 >
-> **Tests:** Für dieses Kapitel wurde nichts ausgeführt. Ob die Oberfläche so funktioniert, wie hier beschrieben, bestätigt erst der Tester (siehe Abschnitt 8).
+> **Tests:** Der Entwickler meldet einen bestandenen Lauf für Sortierung umkehren, Nutzen-Filter, Escape im Dialog und unveränderte Gruppen. In diesem Lauf wurden keine Tests wiederholt. Ob die Oberfläche so funktioniert, wie hier beschrieben, bestätigt der Tester (siehe Abschnitt 8).
 
 ---
 
@@ -35,12 +35,14 @@ Die Gruppen **In Bearbeitung** und **Abgeschlossen** auf derselben Seite zeigen 
 ### 2.1 Sortieren
 
 - Ein Klick auf die Kopfzeile sortiert aufsteigend, ein zweiter Klick absteigend, ein dritter hebt die Sortierung auf (so wie bei den anderen Tabellen).
+- Ist die Tabelle beim Öffnen schon voreingestellt sortiert (siehe Abschnitt 4), beginnt der erste Klick auf dieselbe Spalte mit der Umkehrung. Bei „Wert“ absteigend ist der erste Klick also aufsteigend.
 - Ideen **ohne** Wert (bzw. ohne Nutzen oder Kosten, wenn du nach Nutzen oder Kosten sortierst) stehen **immer am Ende**, egal ob du auf- oder absteigend sortierst.
 
 ### 2.2 Filtern
 
 - Öffne das Filtermenü in der Kopfzeile „Nutzen“ oder „Kosten“.
-- Wähle einen Wert von **0 bis 10**. Es werden nur Ideen mit genau diesem Wert angezeigt.
+- Das Menü listet die Werte **0 bis 10** mit der Anzahl der Ideen. Auch Werte ohne Treffer stehen da (mit 0).
+- Wähle einen Wert. Es werden nur Ideen mit genau diesem Wert angezeigt.
 - Mehrere Werte kannst du gleichzeitig wählen. Dann erscheinen Ideen, die einem der gewählten Werte entsprechen.
 - Ideen ohne Nutzen (bzw. ohne Kosten) fallen bei der Auswahl heraus, sobald du einen Wert filterst.
 - Die Spalte „Wert“ hat **keinen** Filter. Du kannst sie nur sortieren.
@@ -135,5 +137,16 @@ Die folgenden Prüfungen sind **nicht** erfolgt. Sie gehören zum Tester:
 4. Oberflächentest „Dashboard“ (Desktop) und „Projektwechsel“ (Desktop).
 5. E2E-Locators in `e2e/full-ui.check.ts` gegen die neuen Spaltenköpfe „Nutzen“, „Kosten“ und „Wert“ prüfen und bei Bedarf anpassen.
 6. Printscreens auf einem Host mit Browser erstellen und in dieses Kapitel einfügen.
+
+---
+
+## 9. Printscreens (ausstehend)
+
+Diese Aufnahmen fehlen noch. Sie entstehen auf einem Host mit `npm run dev:ui` und Browser, nicht durch den Agenten:
+
+1. **Tabelle „Offene Ideen“:** Spalten Nutzen (Balken mit Zahl), Kosten und Wert („2,7“ für Nutzen 8, Kosten 3). Eine Idee ohne Kosten zeigt eine leere Wert-Zelle.
+2. **Kopfzeile „Wert“:** mit Sortierpfeil, Liste mit einer Visionär-Idee (Standard „Wert absteigend“).
+3. **Filtermenü „Nutzen“:** Werte 0 bis 10 mit Anzahl.
+4. **Ideen-Dialog:** Meter für Nutzen und Kosten, zum Vergleich mit Abschnitt 2.
 
 Verwandte Dokumente: [`offene-ideen-nutzen-kosten-wert-spalten-2026-10-30.md`](offene-ideen-nutzen-kosten-wert-spalten-2026-10-30.md) (technische Begleitnotiz), [`benutzerhandbuch-regeln-auftraege-sprints-bugs.md`](benutzerhandbuch-regeln-auftraege-sprints-bugs.md).
