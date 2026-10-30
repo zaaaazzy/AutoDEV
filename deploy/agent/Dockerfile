@@ -50,6 +50,10 @@ RUN ln -s /usr/local/lib/node_modules /opt/aideation/node_modules
 # Das npm-Cache von „npm install -g“ (als root, HOME=/home/agent) entfernen: sonst scheitert npx im Container an
 # EACCES auf /home/agent/.npm/_cacache.
 RUN rm -rf /home/agent/.npm && mkdir -p /home/agent /workspace && chmod 1777 /home/agent /workspace
+# npm-Cache in /tmp wie in sandboxRunArgs (npm_config_cache): greift auch, wenn ein Worker mit älterem Code den
+# Container ohne -e npm_config_cache startet (Tester: EACCES auf /home/agent/.npm/_cacache). Erst nach „npm install -g“
+# gesetzt, damit root dort kein Cache anlegt.
+ENV npm_config_cache=/tmp/npm-cache
 USER pwuser
 WORKDIR /workspace
 ENTRYPOINT ["/usr/bin/tini", "--"]
