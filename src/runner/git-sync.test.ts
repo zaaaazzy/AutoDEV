@@ -488,6 +488,136 @@ test('mode "issues" keeps the direct merge path', async () => {
   assert.equal(git('show', 'main:feature.txt'), 'neu');
 });
 
+const MIRROR_WORKFLOW = `jobs:
+  check:
+    steps:
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run test:unit
+  docker:
+    steps:
+      - run: docker compose build dev-log
+      - run: npm run test:e2e
+`;
+
+/** Sprint-Repository mit ci.yml; npm-Schritte des CI-Spiegels antworten mit dem vorgegebenen Ergebnis. */
+async function mirrorSetup(
+  npm: Record<string, { exitCode: number; output: string }> = {},
+  gh: (command: string[]) => { exitCode?: number; output?: string } = (command) => {
+    if (command[2] === 'list') return { output: '[]' };
+    if (command[2] === 'create') return { output: 'https://github.com/a/b/pull/42\n' };
+    return {};
+  },
+) {
+  const repo = await sprintRepository();
+  await mkdir(join(repo.cwd, '.github', 'workflows'), { recursive: true });
+  await writeFile(join(repo.cwd, '.github', 'workflows', 'ci.yml'), MIRROR_WORKFLOW);
+  const { calls, execute: pr } = prExecutor(gh, repo.remote);
+  const execute: CommandExecutor = async (command, dir, options) => {
+    if (command[0] !== 'npm') return pr(command, dir, options);
+    calls.push(command);
+    return { durationMs: 1, ...(npm[command[2] ?? ''] ?? { exitCode: 0, output: 'ok' }) };
+  };
+  return { ...repo, calls, execute };
+}
+
+/** PR-Pool mit Bug-Tabelle: INSERT … WHERE NOT EXISTS wie in Postgres (offener Bug mit gleichem Titel und Schritt). */
+function mirrorPool(bugs: { title: string; description: string }[], status = 'completed') {
+  const { pool, updates } = prPool('issues+pr');
+  const query = pool.query.bind(pool) as (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }>;
+  (pool as unknown as { query: typeof query }).query = async (sql, values = []) => {
+    if (sql.includes("SET git_sync = 'running'")) {
+      const result = await query(sql, values);
+      for (const row of result.rows as { status: string }[]) row.status = status;
+      return result;
+    }
+    if (sql.includes('INSERT INTO bugs')) {
+      updates.push({ sql, values });
+      const [, title, description, marker] = values.map(String);
+      if (bugs.some((bug) => bug.title === title && bug.description.includes(marker!))) return { rows: [] };
+      bugs.push({ title: title!, description: description! });
+      return { rows: [{ id: 'b1' }] };
+    }
+    return query(sql, values);
+  };
+  return { pool, updates };
+}
+
+const pushes = (calls: string[][]) => calls.filter((call) => call[0] === 'git' && call.includes('push'));
+const creates = (calls: string[][]) => calls.filter((call) => call[0] === 'gh' && call[2] === 'create');
+
+test('CI-Spiegel grün: Ablauf wie bisher, erst Push, dann Pull Request', async () => {
+  const { cwd, calls, execute } = await mirrorSetup();
+  const { pool, updates } = mirrorPool([]);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 1);
+  const npm = calls.filter((call) => call[0] === 'npm').map((call) => call.join(' '));
+  assert.deepEqual(npm, ['npm run lint', 'npm run format:check', 'npm run typecheck', 'npm run test:unit']);
+  const push = calls.findIndex((call) => call[0] === 'git' && call.includes('push'));
+  const create = calls.findIndex((call) => call[0] === 'gh' && call[2] === 'create');
+  assert.ok(calls.findIndex((call) => call[0] === 'npm') < push, 'Spiegel vor dem Push');
+  assert.ok(push >= 0 && push < create, 'Push vor dem Pull Request');
+  const final = updates.at(-1)!;
+  assert.match(final.sql, /SET status = 'review', pr_url = \$5/);
+  assert.match(String(final.values[1]), /CI-Spiegel grün/);
+});
+
+test('CI-Spiegel rot: kein Push, kein Pull Request, genau ein Bug mit dem Schritt; zweiter Lauf ohne zweiten Bug', async () => {
+  const bugs: { title: string; description: string }[] = [];
+  const red = { typecheck: { exitCode: 2, output: 'src/a.ts(1,1): error TS2322: Typ falsch' } };
+  for (let run = 0; run < 2; run += 1) {
+    const { cwd, calls, execute, git } = await mirrorSetup(red);
+    const { pool, updates } = mirrorPool(bugs);
+    assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 0);
+    assert.deepEqual(pushes(calls), []);
+    assert.deepEqual(creates(calls), []);
+    assert.ok(!calls.some((call) => call[0] === 'gh' && call[2] === 'merge'));
+    assert.ok(!calls.some((call) => call.join(' ') === 'npm run test:unit'), 'nach Rot läuft kein Schritt mehr');
+    assert.throws(() => git('show', 'main:feature.txt'));
+    const final = updates.at(-1)!;
+    assert.match(final.sql, /git_sync = 'failed'/);
+    assert.match(String(final.values[1]), /CI-Spiegel rot bei `npm run typecheck`.*kein Pull Request/);
+  }
+  assert.equal(bugs.length, 1);
+  assert.equal(bugs[0]!.title, 'CI-Spiegel rot vor Pull Request von „Sprint 1: Äpfel“');
+  assert.match(bugs[0]!.description, /Fehlgeschlagener Schritt: `npm run typecheck`/);
+  assert.match(bugs[0]!.description, /error TS2322/);
+});
+
+test('CI-Spiegel rot bei der Nachbesserung im Review: kein Push auf den offenen Pull Request', async () => {
+  const bugs: { title: string; description: string }[] = [];
+  const { cwd, calls, execute } = await mirrorSetup({ lint: { exitCode: 1, output: '1:1 error  no-undef' } });
+  const { pool } = mirrorPool(bugs, 'review');
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 0);
+  assert.deepEqual(pushes(calls), []);
+  assert.equal(bugs.length, 1);
+  assert.match(bugs[0]!.description, /`npm run lint`/);
+});
+
+test('CI-Spiegel ohne Datenbank: test:unit „nicht prüfbar“, kein Bug, Pull Request wird geöffnet', async () => {
+  const bugs: { title: string; description: string }[] = [];
+  const { cwd, calls, execute } = await mirrorSetup({
+    'test:unit': { exitCode: 1, output: 'Error: keine PostgreSQL-Datenbank unter localhost:5432' },
+  });
+  const { pool, updates } = mirrorPool(bugs);
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 1);
+  assert.equal(bugs.length, 0);
+  assert.ok(pushes(calls).length > 0);
+  assert.equal(creates(calls).length, 1);
+  const final = updates.at(-1)!;
+  assert.match(final.sql, /SET status = 'review', pr_url = \$5/);
+  assert.match(String(final.values[1]), /`npm run test:unit` nicht prüfbar/);
+});
+
+test('CI-Spiegel läuft nicht ohne PR-Modus (direkter Merge)', async () => {
+  const { cwd, calls, execute, git } = await mirrorSetup({}, () => ({ exitCode: 1, output: 'not logged in' }));
+  const { pool } = prPool('issues');
+  assert.equal(await syncSprintToGit(pool, 'p', cwd, execute), 1);
+  assert.ok(!calls.some((call) => call[0] === 'npm'));
+  assert.equal(git('show', 'main:feature.txt'), 'neu');
+});
+
 interface ReviewRow {
   id: string;
   name: string;
