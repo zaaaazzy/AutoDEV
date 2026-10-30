@@ -8,6 +8,7 @@
       [class.mobile-open]="mobileMenu()"
       [class.has-favicon]="!!visibleFavicon()"
       (mouseleave)="menuClosed.set(false)"
+      (focusin)="menuClosed.set(false)"
     >
       <button
         class="menu-toggle"
