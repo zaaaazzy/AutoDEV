@@ -47,4 +47,11 @@ Hatte das Konto eines Agent-Anbieters sein Nutzungslimit erreicht („You've hit
   - Vor jedem Lauf füllt `src/core/sandbox.ts` ein leeres oder veraltetes `node_modules`-Volume per `npm ci --ignore-scripts` (`modulesInstallArgs`).
   - Tests: `src/core/sandbox.test.ts`. In der Umgebung des Entwicklers liessen sie sich nicht ausführen, dort ist `node_modules` ebenfalls leer.
 - **Vor dem erneuten Test (Reihenfolge):** (1) Image `aideation-agent` neu bauen, (2) Worker neu starten, (3) Auftrag testen lassen. Der erste Lauf füllt das `node_modules`-Volume per `npm ci` und dauert länger. Zusätzlich `src/core/sandbox.test.ts` ausführen. Steht am Anfang der Ausgabe „liess sich nicht mit npm ci füllen“, liegt das an Registry oder Egress-Proxy, nicht am Auftrag.
+- **Stand nach dem Entwicklerlauf vom 30.10.2026:** Der Lauf hat keine Dateien geändert. Der Code des Auftrags ist vollständig (23 Dateien, siehe oben). Offen ist allein ein Schritt auf dem Host, den Agents nicht ausführen dürfen (`npm install` ist gesperrt):
+  1. Image `aideation-agent` neu bauen (Dockerfile-Fix).
+  2. Worker neu starten.
+  3. `node_modules`-Volume einmal per `npm ci` füllen (sonst übernimmt es der erste Lauf automatisch).
+  4. Auftrag erneut testen lassen.
+- **Hinweis für den Tester:** Vor dem Test prüfen, ob `node_modules/.bin/tsc` existiert. Fehlt die Datei, wurden Image und Volume nicht erneuert. Das ist ein Sandbox-Problem, kein Fehler des Auftrags, und dafür wird kein Code-Bug angelegt.
+- Limit-Meldungen („hit your … limit“) erzeugen keine Bugs und keine Folgeaufträge. Die ca. zehn Bug-Wächter-Einträge mit nur diesem Meldungstext sind kein Code-Fehler.
 - Die Bug-Liste enthält weiterhin den Eintrag „CI CD nicht in Ordnung“ (offen, critical). Er hängt mit derselben Umgebung zusammen und ist durch diesen Auftrag nicht behoben.
