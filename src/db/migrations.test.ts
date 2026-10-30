@@ -86,6 +86,12 @@ test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenb
   assert.match(migration?.sql ?? '', /ADD COLUMN IF NOT EXISTS budget_blocked_role/);
 });
 
+test('Migrationen: Restore-Probe kommt per Migration auch in bestehende Datenbanken', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 22);
+  assert.match(migration?.sql ?? '', /'restore_probe', TRUE, 604800, 'restore_probe'/);
+  assert.match(migration?.sql ?? '', /ON CONFLICT \(key\) DO NOTHING/);
+});
+
 /** Struktur der Datenbank: Spalten, Prüfungen, Indizes, Trigger, Funktionen und vermerkte Migrationen. */
 async function structure(pool: pg.Pool): Promise<Record<string, unknown[]>> {
   const rows = async (sql: string) => (await pool.query(sql)).rows;

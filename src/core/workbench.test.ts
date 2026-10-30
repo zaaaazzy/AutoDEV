@@ -10,6 +10,7 @@ import {
   parseWorkbenchExtras,
   resetWorkbenches,
   runInWorkbench,
+  stopLeftoverWorkbenchRuns,
   WORKBENCH_DOCKER_HOST,
   workbenchCompose,
   workbenchContainer,
@@ -199,6 +200,58 @@ test('Arbeitscontainer: startet den Stapel, installiert einmal und führt dann d
     else process.env.DEV_LOG_WORKBENCH_DIR = previous;
     cleanup();
   }
+});
+
+test('Arbeitscontainer: nach dem Gate im Ordner der Menschen startet der nächste Agent-Lauf wieder seinen Worktree', async () => {
+  resetAgentNetwork();
+  resetWorkbenches();
+  const { root, worktree, cleanup } = fixture();
+  const source = join(root, 'source');
+  mkdirSync(source);
+  const previous = process.env.DEV_LOG_WORKBENCH_DIR;
+  process.env.DEV_LOG_WORKBENCH_DIR = join(root, 'compose');
+  try {
+    const { calls, docker } = fakeDocker();
+    const run = (directory: string, runId: string) =>
+      runInSandbox(['npm', 'test'], directory, { runId, project: 'demo', docker, mode: 'workbench', environment: {} });
+    await run(worktree, 'agent-1');
+    await run(source, 'gate');
+    await run(worktree, 'agent-2');
+    const ups = calls.filter((call) => call.includes('compose') && call.includes('up'));
+    assert.equal(ups.length, 3, 'der Stapel wird für den Agent-Worktree erneut erstellt, nicht aus dem Cache genommen');
+  } finally {
+    if (previous === undefined) delete process.env.DEV_LOG_WORKBENCH_DIR;
+    else process.env.DEV_LOG_WORKBENCH_DIR = previous;
+    cleanup();
+  }
+});
+
+test('Arbeitscontainer: beim Start werden Läufe des Vorgängers in den Containern beendet', async () => {
+  const { calls, docker } = fakeDocker((command) => {
+    if (command[1] === 'ps') return ok('agents_demo_workbench\nagents_demo_docker\nagents_demo_db\n');
+    if (command[1] === 'exec') return ok('2\n');
+    return null;
+  });
+  const stopped = await stopLeftoverWorkbenchRuns(docker, tmpdir());
+  assert.equal(stopped, 2);
+  const execs = calls.filter((call) => call[1] === 'exec');
+  assert.deepEqual(
+    execs.map((call) => call[2]),
+    ['agents_demo_workbench'],
+    'nur die workbench, nicht docker oder Zusatzdienste',
+  );
+  const script = execs[0]!.at(-1)!;
+  assert.match(script, /\/tmp\/aideation-run-\*\.pid/);
+  assert.match(script, /kill -TERM -"\$p"/);
+  assert.match(script, /kill -KILL -"\$p"/);
+  assert.match(script, /\[ "\$p" -gt 1 \] \|\| continue/, 'nie Gruppe 1 (hält den Container)');
+});
+
+test('Arbeitscontainer: Aufräumen beim Start ohne Docker tut nichts', async () => {
+  const { docker } = fakeDocker((command) =>
+    command[1] === 'ps' ? { exitCode: 1, durationMs: 1, output: 'Cannot connect' } : null,
+  );
+  assert.equal(await stopLeftoverWorkbenchRuns(docker, tmpdir()), 0);
 });
 
 test('Arbeitscontainer: lesende Läufe bleiben kurzlebige Container mit :ro', async () => {
