@@ -50,10 +50,12 @@ Ausgenommen (kein Datensatz): `role` in `PUT …/budget/roles/:role`, `slot` in 
 
 - Auftrag 852db391: umgesetzt, Entwickler-Schritt bestanden, Abnahme durch Tester/Reviewer steht aus.
 - Keine Schemaänderung, keine Migration.
+- Tester-Schritt (after_task) ist fehlgeschlagen, aber aus Umgebungsgründen, nicht wegen eines Testergebnisses: `npm run typecheck` fand `tsc` nicht (Exit 127), `npx tsx --test` scheiterte am npm-Cache (EACCES). Es gibt weiterhin keinen belegten Test- oder Typecheck-Lauf.
 
 ## Anfrage / TODO
 
 - **Nicht belegt:** Der Entwickler konnte in seiner Umgebung weder `npm run typecheck` noch Tests ausführen (kein `tsx`/`tsc`, `node_modules` zeigt auf einen Host-Pfad). Die Akzeptanzkriterien „typecheck fehlerfrei“ und „Testlauf zusammen mit `agents.test.ts` und `agent-tasks.test.ts` grün“ sind daher noch offen.
+- Der Sandbox-Lauf des Testers brauchte eine Umgebung mit installierten Abhängigkeiten; `npx` nicht verwenden (EACCES), sondern `npm run …`.
 - Der Tester soll `npm run typecheck` und `npm run test:unit` mit `DEV_LOG_TEST_REQUIRE_DATABASE=1` und PostgreSQL ausführen, damit `tenant-ids.test.ts` nicht übersprungen wird. Besonders prüfen: die beiden Vollständigkeits-Tests und die Szenarien für `sprints/proposal/apply` und `…/comment`.
 - Keine Abdeckungs-Flags (`--experimental-test-coverage`) verwenden; der Wächter blockiert sie.
 
