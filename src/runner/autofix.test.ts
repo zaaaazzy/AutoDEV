@@ -132,6 +132,12 @@ test('Nutzungslimit des Agent-Kontos: Agent-Fehler ohne Bug, Neustart erst nach 
     "You've hit your monthly spend limit · raise it at https://claude.ai/settings/usage · your session limit resets 8:50pm (Europe/Zurich)";
   assert.equal(isAgentFailure(spend), true);
   assert.equal(usageLimitReset(spend, now)?.getHours(), 20);
+  // Organisationslimit („org's“, drei Wörter) mit Reset in UTC: ebenfalls Agent-Fehler, Zeit als UTC gelesen.
+  const org =
+    "You've hit your org's monthly spend limit · ask your admin to raise it at https://claude.ai/admin-settings/usage · your session limit resets 12:20pm (UTC)";
+  assert.equal(isAgentFailure(org), true);
+  const orgReset = usageLimitReset(org, new Date('2026-10-30T12:15:58Z'));
+  assert.equal(orgReset?.toISOString(), '2026-10-30T12:23:00.000Z');
   // Ohne lesbare Zeit: eine Stunde später. Ohne Limit-Meldung: nichts.
   const vague = usageLimitReset("You've hit your usage limit.", now);
   assert.equal(vague?.getTime(), now.getTime() + 60 * 60_000);
@@ -148,4 +154,23 @@ test('failureDetail: abgelehnte Abnahme oder nur grüne Tests ergeben keine irre
   assert.equal(failureDetail(green), null);
   const rejected = `${green}\n## Abnahme nicht bestanden\n- DoD 1 „Kriterium“: Abdeckung nicht messbar`;
   assert.equal(failureDetail(rejected), null);
+});
+
+test('Defekter Arbeitscontainer wird erkannt, ein roter Test oder ein fehlendes Fixture nicht', async () => {
+  const { isSandboxFailure } = await import('./autofix.js');
+  for (const output of [
+    'Sandbox: Der Befehl ist im Image „aideation-agent“ nicht ausführbar (Exit-Code 127).',
+    'Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code 254). Befehl nicht gestartet.',
+    'npm error Log files were not written due to an error writing to the directory: /home/agent/.npm/_logs',
+    'Error response from daemon: No such exec instance: 7b6620d2a9e1',
+  ]) {
+    assert.equal(isSandboxFailure(output), true, output);
+  }
+  for (const output of [
+    'AssertionError: expected 2 to equal 3',
+    "ENOENT: no such file or directory, open 'fixtures/a.json'",
+    'Die Sandbox: ein Begriff im Fliesstext',
+  ]) {
+    assert.equal(isSandboxFailure(output), false, output);
+  }
 });
