@@ -1,7 +1,8 @@
 // Git-Grundlagen: Befehlsausführung, Remotes, Branch-Namen, Zugangsdaten-Schutz und Sprint-Branch.
 import { existsSync, realpathSync } from 'node:fs';
-import { appendFile, copyFile, mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { appendFile, mkdir, readFile, realpath, unlink } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join } from 'node:path';
+import { createProjectDirectory, isInside, readProjectFile, writeNewProjectFile } from '../../core/project-paths.js';
 import { withProjectLock } from '../../core/project-lock.js';
 import { type CommandExecutor, redactOutput, runCommand } from '../../core/command.js';
 import { SECRET_PATTERNS } from '../../core/secret-mask.js';
@@ -214,6 +215,14 @@ export function filesWithSecrets(diff: string): string[] {
  * zurück, neue gelöscht. Sonst wanderten sie beim Checkout mit und der nächste Auftrag scheiterte an „fremden
  * Änderungen“. Liefert den Sicherungsordner (relativ zum Projekt).
  */
+const SET_ASIDE_MAX_BYTES = 50 * 1024 * 1024;
+
+/** Liegt der Ordner `relative` wirklich im Projekt (auch nach Auflösen von Links)? Sonst nichts darin löschen. */
+async function insideProject(cwd: string, relative: string): Promise<boolean> {
+  const [root, real] = await Promise.all([realpath(cwd), realpath(join(cwd, relative))]).catch(() => [null, null]);
+  return Boolean(root && real && isInside(root, real));
+}
+
 export async function setAsideFiles(
   git: GitHelpers['git'],
   cwd: string,
@@ -222,16 +231,17 @@ export async function setAsideFiles(
 ): Promise<string> {
   const folder = join(BACKUP_DIRECTORY, `${label}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
   for (const file of files) {
-    const source = join(cwd, file);
-    if (existsSync(source)) {
-      const copy = join(cwd, folder, file);
-      await mkdir(dirname(copy), { recursive: true });
-      await copyFile(source, copy);
+    // Ohne Links zu folgen: ein Symlink `leak -> ~/.ssh/id_ed25519` mit Zugangsdaten-Muster im Ziel landete sonst mit
+    // dem Inhalt der Host-Datei in der Sicherung – im Projekt, also für den Agent lesbar. Links werden nicht gesichert.
+    const data = await readProjectFile(cwd, file, SET_ASIDE_MAX_BYTES);
+    if (data) {
+      const directory = await createProjectDirectory(cwd, join(folder, dirname(file)));
+      if (directory) await writeNewProjectFile(directory, basename(file), data);
     }
     if ((await git('cat-file', '-e', `HEAD:${file}`)).exitCode === 0) {
       await git('checkout', 'HEAD', '--', `:(literal)${file}`);
-    } else {
-      await unlink(source).catch(() => undefined);
+    } else if (await insideProject(cwd, dirname(file))) {
+      await unlink(join(cwd, file)).catch(() => undefined);
     }
   }
   return folder;
@@ -414,10 +424,11 @@ export async function currentBranch(git: GitHelpers['git']): Promise<string> {
 export async function backupWorkingTree(git: GitHelpers['git'], cwd: string, label: string): Promise<string | null> {
   const diff = await git('diff', '--no-color', '--no-ext-diff', '--binary', 'HEAD');
   if (diff.exitCode !== 0 || !diff.output) return null;
-  const file = join(cwd, BACKUP_DIRECTORY, `${label}-${new Date().toISOString().replace(/[:.]/g, '-')}.patch`);
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, `${diff.output}\n`);
-  return file;
+  // Ohne Links zu folgen: ein auf einen Host-Ordner umgebogenes .dev-log-backups bekäme sonst die Patch-Datei.
+  const directory = await createProjectDirectory(cwd, BACKUP_DIRECTORY);
+  const name = `${label}-${new Date().toISOString().replace(/[:.]/g, '-')}.patch`;
+  if (!directory || !(await writeNewProjectFile(directory, name, Buffer.from(`${diff.output}\n`)))) return null;
+  return join(directory, name);
 }
 
 /** Ordner eines anderen Worktrees, in dem der Branch ausgecheckt ist (sonst null). */
