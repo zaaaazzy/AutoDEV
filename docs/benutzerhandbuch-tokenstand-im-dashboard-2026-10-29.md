@@ -67,6 +67,7 @@ Ist kein Limit vermerkt (z. B. weil es schon zurückgesetzt wurde), antwortet de
 - **Zeitzone:** Die Uhrzeit wird in der Zeitzone des Browsers angezeigt (Format: Tag.Monat., Uhrzeit).
 - **Nur `https`-Links.** Links kommen ausschließlich aus der festen Anbieterliste des Servers, nie aus der Ausgabe einer CLI.
 - **Kein Kostenlimit.** Dieser Hinweis hat nichts mit dem Kostenlimit in USD (Budget) zu tun. Das Budget begrenzt Kosten in eigenen Einstellungen. Das Nutzungslimit kommt vom Anbieter.
+- **Nicht jede Limit-Meldung wird erkannt.** Erkannt wird „hit your“ gefolgt von höchstens zwei Wörtern aus Buchstaben, Ziffern, `_` oder `-` und dann „limit“. Die Meldung „You've hit your org's monthly spend limit“ enthält einen Apostroph und wird deshalb **derzeit nicht erkannt**: Es erscheint kein Hinweis. Das ist ein offener Code-Fehler in `USAGE_LIMIT` (`src/core/provider-limits.ts`), der noch nicht behoben ist. Bis dahin Limits beim Anbieter direkt prüfen.
 
 ## Wo der Zustand gespeichert wird
 
@@ -74,7 +75,7 @@ Für Entwickler und Betrieb: Pro Anbieter steht ein Eintrag in `app_settings` mi
 
 ## Offen
 
-- **Printscreens fehlen.** In diesem Lauf (30.10.) habe ich keine erstellt: Auf dem Host ist kein Chromium installiert (`which chromium` ohne Treffer), die App war nicht gestartet, und Agents dürfen keine Shell-Befehle wie `npm` ausführen. Ein Browser-Werkzeug war ebenfalls nicht verfügbar. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
+- **Printscreens fehlen.** In diesem Lauf (30.10.) habe ich keine erstellt: Die App läuft nicht, ein Browser-Werkzeug ist nicht verfügbar, und der Lesezugriff auf `/usr/bin/chromium` wurde nicht erteilt, also ließ sich das Vorhandensein eines Browsers nicht prüfen. Agents dürfen außerdem keine Shell-Befehle wie `npm` oder `curl` ausführen. Die Bildstellen sind oben mit `PRINTSCREEN 1–4` markiert. Bitte mit laufender App und angemeldeten Benutzern (Rolle „Ausführen“ und ohne Rolle) nachholen.
 - **Oberfläche nicht im Browser geprüft.** Die Beschreibung stammt aus `provider-limit-alert.component.ts`, `provider-limits.ts` (Frontend), `src/api/provider-limits.ts` und `src/core/provider-limits.ts`. Am 30.10. gegen diesen Code abgeglichen (Lesen, keine Ausführung): Texte, Schaltflächen, Rollen- und Projektbedingungen, Reserve von 3 Minuten, Stundenregel ohne Uhrzeit, Platzierung unter dem Git-Hinweis, 409-Antwort ohne Limit, Unterbrechungsvermerk in `src/runner/runner-steps.ts` und Pre-Sprint-Reset in `src/runner/pre-sprint.ts`. Die Darstellung im Browser ist damit nicht bestätigt.
 - **Tests nicht in diesem Lauf ausgeführt.** Die Angaben zu `src/core/provider-limits.test.ts` und `frontend/src/app/features/dashboard/provider-limits.spec.ts` stammen aus dem Entwicklerbericht. Ich habe die Spec-Dateien gelesen, sie aber nicht laufen lassen.
 - **Pre-Sprint-Aussage im Code belegt (30.10.).** `src/runner/pre-sprint.ts` setzt bei einem Limit `sprints.pre_sprint_next_at` auf den Reset. „Fortsetzen“ ändert nur `development_items` und gibt Pre-Sprint-Phasen daher nicht vorzeitig frei.
