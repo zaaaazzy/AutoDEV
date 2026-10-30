@@ -135,16 +135,17 @@ function hostMount(path: string, platform: NodeJS.Platform): string {
   return dockerHostPath((platform === 'win32' ? win32 : posix).resolve(path), platform);
 }
 
+/**
+ * Ziele im Container selbst: nie über den Proxy. Sonst antwortet er für localhost (Playwright meldet den Port als
+ * belegt, Tests gegen einen eigenen Server im Container scheitern).
+ */
+export const SANDBOX_NO_PROXY = 'localhost,127.0.0.1,::1,0.0.0.0';
+
 /** Proxy-Variablen für das Agent-Netzwerk: Claude-CLI, npm und Playwright gehen nur über den Egress-Proxy. */
 function proxyEnvironment(): string[] {
-  return [
-    'HTTPS_PROXY',
-    'HTTP_PROXY',
-    'https_proxy',
-    'http_proxy',
-    'npm_config_https_proxy',
-    'npm_config_proxy',
-  ].flatMap((name) => ['-e', `${name}=${EGRESS_URL}`]);
+  return ['HTTPS_PROXY', 'HTTP_PROXY', 'https_proxy', 'http_proxy', 'npm_config_https_proxy', 'npm_config_proxy']
+    .flatMap((name) => ['-e', `${name}=${EGRESS_URL}`])
+    .concat(['NO_PROXY', 'no_proxy'].flatMap((name) => ['-e', `${name}=${SANDBOX_NO_PROXY}`]));
 }
 
 /** Host-Pfade gehören nicht in den Container: die CLI heisst im Image einfach „claude“. */

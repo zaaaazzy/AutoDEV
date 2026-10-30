@@ -25,6 +25,7 @@ import {
   runInSandbox,
   SANDBOX_GUARD,
   SANDBOX_NETWORK,
+  SANDBOX_NO_PROXY,
   sandboxBadge,
   sandboxExecutor,
   sandboxFailureNote,
@@ -507,4 +508,12 @@ test('Sandbox: scheitert die Installation, startet der Befehl nicht; lesende Lä
   } finally {
     rmSync(worktree, { recursive: true, force: true });
   }
+});
+
+test('Sandbox: localhost geht nie über den Egress-Proxy', () => {
+  const run = args();
+  assert.ok(run.includes(`NO_PROXY=${SANDBOX_NO_PROXY}`));
+  assert.ok(run.includes(`no_proxy=${SANDBOX_NO_PROXY}`));
+  assert.match(SANDBOX_NO_PROXY, /localhost/);
+  assert.match(SANDBOX_NO_PROXY, /127\.0\.0\.1/);
 });
