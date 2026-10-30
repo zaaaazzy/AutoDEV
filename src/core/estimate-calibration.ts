@@ -263,7 +263,10 @@ function median(values: number[]): number {
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
 
-/** Je Projekt nur die jüngsten `CALIBRATION_WINDOW` Aufträge (wie `CALIBRATION_SQL`). */
+/**
+ * Je Projekt nur die jüngsten `CALIBRATION_WINDOW` Aufträge der bereits gefilterten Herkünfte. Bei einer einzelnen
+ * Herkunft entspricht das `CALIBRATION_SQL`; für den Auftragsautor gilt das Fenster über alle Herkünfte außer `legacy`.
+ */
 function recentPerProject(orders: MeasuredOrder[]): MeasuredOrder[] {
   const seen = new Map<string, number>();
   return orders.filter((order) => {
