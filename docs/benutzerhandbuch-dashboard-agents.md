@@ -260,9 +260,9 @@ Die Testabdeckung zeigt, wie viel des Codes die Tests erreichen. Sie wird je **B
 - Eine Summenzeile (Mittelwert) gibt es nicht. Die Zeile „Gesamt“ erscheint nur, wenn ein Lauf den Bereich `gesamt` meldet. AIdeation berechnet ihn nicht selbst.
 - Ohne jeden Lauf steht dort: „Noch keine Testabdeckung gemeldet.“
 
-**Statistik → Testabdeckung-Verlauf** [Bild 5.6b: vier kleine Liniendiagramme mit gestrichelter Ziellinie bei 75 %]
+**Statistik → Testabdeckung-Verlauf** [Bild 5.6b: ein kleines Liniendiagramm je Bereich mit gestrichelter Ziellinie bei 75 %]
 
-- Je Bereich ein Diagramm mit der **Zeilenabdeckung** über die vollständigen Läufe. Die x-Achse zeigt das Datum, die y-Achse 0 bis 100 %. Die gestrichelte Linie markiert das Ziel 75 %.
+- Je Bereich mit vollständigen Läufen ein Diagramm (höchstens sechs) mit der **Zeilenabdeckung** über diese Läufe. Die x-Achse zeigt das Datum, die y-Achse 0 bis 100 %. Die gestrichelte Linie markiert das Ziel 75 %.
 - Rechts oben steht der Wert des letzten Laufs. Ein Punkt zeigt Datum und Wert im Tooltip.
 - Unter „N Läufe“ klappt eine Tabelle mit Datum und Zeilenwert auf.
 - Je Bereich bleiben höchstens die **neuesten 60 Läufe**. Ältere fallen aus dem Verlauf, bleiben aber in der Datenbank.
@@ -271,7 +271,8 @@ Die Testabdeckung zeigt, wie viel des Codes die Tests erreichen. Sie wird je **B
 **Bedingungen und Grenzen:**
 
 - **Vollständiger Lauf:** Zeilen-, Verzweigungs- und Funktionsabdeckung müssen alle gesetzt sein. Fehlt eine davon, wird der Bereich **nicht gespeichert**. Die Anweisungsabdeckung ist für die Vollständigkeit nicht nötig.
-- **Verworfene Bereiche:** Bezeichnungen ohne erkennbaren Bereich (z. B. „Projekt“ oder ein Paketname wie „dev-log“) und unvollständige Bereiche werden verworfen. Der Verlauf des Schritts nennt jeden verworfenen Eintrag mit dem Grund, etwa „Testabdeckung: „Projekt“ verworfen: keinem Bereich zuordenbar“.
+- **Verworfene Bereiche:** Bezeichnungen ohne erkennbaren Bereich (z. B. „Projekt“ oder ein Paketname wie „dev-log“) und unvollständige Bereiche werden verworfen. Der Verlauf des Schritts nennt jeden verworfenen Eintrag mit dem Grund, etwa „Testabdeckung: „Projekt“ verworfen: keinem Bereich zuordenbar (erlaubt: backend, frontend, contracts, scripts, e2e, gesamt)“.
+- **Doppelte Bereiche:** Meldet ein Lauf denselben Bereich zweimal, bleibt der erste Eintrag. Der zweite wird mit dem Grund „doppelt gemeldet“ verworfen. Hat ein Lauf keinen gültigen Bereich mehr übrig, wird kein Bericht angelegt.
 - **Zuordnung ist ganzwortbasiert:** „builder“ ist kein „ui“. Gesamt hat Vorrang: Wer Backend und Frontend zusammen meldet, bekommt `gesamt`.
 - **Altbestand:** Die Migration 19 hat bestehende Einträge einmalig den Bereichen zugeordnet. Die Zuordnung ist eine Heuristik. Der Verlauf älterer Läufe ist nur so gut wie diese Zuordnung. Die Originaldaten bleiben in der Tabelle `test_coverage_areas_backup_19` erhalten.
 - **Keine Neuberechnung:** Die Zählungen alter Läufe werden nicht neu berechnet. Fehlende Werte werden nicht nachgeholt.
@@ -287,7 +288,7 @@ Die Testabdeckung zeigt, wie viel des Codes die Tests erreichen. Sie wird je **B
 | Schritt-Log: „verworfen“ mit fehlenden Werten | Eine der drei Abdeckungen (Zeilen, Verzweigungen, Funktionen) fehlt. Siehe Abschnitt 5, Coverage-Messung. |
 | Anzeige „Gesamt“ fehlt | Kein Lauf hat den Bereich `gesamt` gemeldet. Das ist gewollt; AIdeation berechnet ihn nicht. |
 
-**Printscreens:** Fehlen für diesen Abschnitt. Im Agent-Image ist kein Chromium installiert, und es gibt weder Postgres noch Docker. Ohne laufende App mit Datenbank lässt sich die Oberfläche hier nicht aufnehmen. Die Platzhalter [Bild 5.6a] und [Bild 5.6b] ersetzen, sobald die Aufnahme auf einem Host mit Browser gemacht ist. Die Beschreibung beruht auf dem Code (`coverage-panel.component.*`, `stats.component.*`, `src/api/coverage.ts`), nicht auf einem Lauf der App.
+**Printscreens:** Fehlen für diesen Abschnitt. In dieser Sitzung wurde die App nicht gestartet: Die Shell war für Browser- und Datenbankbefehle gesperrt, und eine laufende Datenbank war nicht erreichbar. Ohne laufende App mit Datenbank lässt sich die Oberfläche hier nicht aufnehmen. Die Platzhalter [Bild 5.6a] und [Bild 5.6b] ersetzen, sobald die Aufnahme auf einem Host mit Browser gemacht ist. Die Beschreibung beruht auf dem Code (`coverage-panel.component.*`, `stats.component.*`, `src/api/coverage.ts`), nicht auf einem Lauf der App.
 
 ---
 
