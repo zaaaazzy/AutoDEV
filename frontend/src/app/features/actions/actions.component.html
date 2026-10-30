@@ -97,7 +97,8 @@
                           <strong>{{ proof.datei || '(ohne Datei)' }}</strong>
                           <code class="evidence-command">{{ proof.befehl }}</code>
                           <small class="muted"
-                            >Grund: {{ evidenceReason(proof) }}{{ proof.agentName ? ' · gemeldet von ' + proof.agentName : '' }}
+                            >Grund: {{ evidenceReason(proof)
+                            }}{{ proof.agentName ? ' · gemeldet von ' + proof.agentName : '' }}
                             @if (proof.status === 'failed') {
                               · letzter Lauf rot
                             }
@@ -122,7 +123,9 @@
                             }
                           } @else {
                             <a href="#settings" class="evidence-rights" (click)="$event.preventDefault(); openRights()"
-                              >Rechte-Gruppen des Agents{{ proof.agentName ? ' „' + proof.agentName + '“' : '' }}
+                              >Rechte-Gruppen des Agents{{
+                                proof.agentName ? ' „' + proof.agentName + '“' : ''
+                              }}
                               anpassen</a
                             >
                           }

@@ -217,17 +217,21 @@ export class ProjectStore {
     }));
   }
 
-  /** Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat. */
-  async perform(action: () => Promise<unknown>, success: string, refresh = true): Promise<boolean> {
+  /**
+   * Fehler landen in der Meldung oben; das Ergebnis sagt, ob die Aktion geklappt hat.
+   * success als Funktion: Meldung aus dem Ergebnis der Aktion (wird erst danach gebildet).
+   */
+  async perform(action: () => Promise<unknown>, success: string | (() => string), refresh = true): Promise<boolean> {
     this.busy.set(true);
     this.notice.set('');
     try {
       this.applyItem(await action());
       // Im Hintergrund nachladen: Die Seite bleibt stehen, aufgeklappte Zeilen und Dialoge bleiben offen.
       if (refresh && this.activeProject()) await this.loadProject(this.activeProject(), true);
-      this.notice.set(success);
+      const message = typeof success === 'function' ? success() : success;
+      this.notice.set(message);
       setTimeout(() => {
-        if (this.notice() === success) this.notice.set('');
+        if (this.notice() === message) this.notice.set('');
       }, NOTICE_MS);
       return true;
     } catch (error) {

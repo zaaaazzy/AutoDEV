@@ -13,8 +13,7 @@ import { markSprintReady } from './sprint-autopilot.js';
 import { evidenceCommand, processTestRequest } from './test-request.js';
 import type { WorkflowAgent, WorkItem } from './runner-types.js';
 
-const MARKER =
-  '@@NACHWEIS {"datei":"src/a.test.ts","befehl":"npm test -- a","grund":"nicht_freigegeben"}';
+const MARKER = '@@NACHWEIS {"datei":"src/a.test.ts","befehl":"npm test -- a","grund":"nicht_freigegeben"}';
 
 test('Nachweis: gültige Markerzeile wird gelesen, unbekannter Grund und unlesbare Zeilen verworfen', () => {
   const output = [
@@ -159,11 +158,7 @@ test('test_evidence: Migration wiederholbar, ein Nachweis je Befehl und Auftrag,
     assert.deepEqual(rows, [
       { datei: 'src/a.test.ts', befehl: 'npm test -- a', grund: 'nicht_freigegeben', status: 'open', position: 1 },
     ]);
-    await assert.rejects(
-      db.query(`UPDATE test_evidence SET status = 'bogus'`),
-      /check/,
-      'nur bekannte Status',
-    );
+    await assert.rejects(db.query(`UPDATE test_evidence SET status = 'bogus'`), /check/, 'nur bekannte Status');
 
     // Nach der Freigabe meldet der Tester denselben Befehl mit „gegenprobe_fehlt“: dieselbe Zeile wird startbar.
     await db.query(`UPDATE test_evidence SET status = 'nicht_freigegeben'`);
@@ -193,10 +188,7 @@ test('test_evidence: Migration wiederholbar, ein Nachweis je Befehl und Auftrag,
       `INSERT INTO test_requests (project_slug, scope, status, evidence_id) VALUES ('shop', 'befehl', 'done', $1)`,
       [evidence],
     );
-    await assert.rejects(
-      db.query(`INSERT INTO test_requests (project_slug, scope) VALUES ('shop', 'datei')`),
-      /check/,
-    );
+    await assert.rejects(db.query(`INSERT INTO test_requests (project_slug, scope) VALUES ('shop', 'datei')`), /check/);
     // Erneut auf einer Bestands-Datenbank mit allen geschriebenen Umfängen: die Prüfung lässt jeden Wert zu.
     await db.query(MIGRATIONS.find((migration) => migration.version === 22)!.sql);
     const scopes = (await db.query<{ scope: string }>('SELECT DISTINCT scope FROM test_requests ORDER BY scope')).rows;

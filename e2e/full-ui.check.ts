@@ -783,6 +783,17 @@ test('Rollen: Autorin sieht nur, was sie darf', async ({ browser }: { browser: B
       'Ohne Agent-Rolle kein „Erneut versuchen“',
     )
     .toHaveCount(0);
+  await open(page, 'ideation');
+  await expect
+    .soft(page.getByRole('button', { name: /^Schnell ablehnen/ }), 'Ohne Planen-Rolle kein „Schnell ablehnen“')
+    .toHaveCount(0);
+  for (const [path, data] of [
+    ['reject', { ids: ['11111111-1111-4111-8111-111111111111'], reason: 'x' }],
+    ['priority', { ids: ['11111111-1111-4111-8111-111111111111'], priority: 'high' }],
+  ] as const) {
+    const bulk = await page.request.post(`/api/ideation/bulk/${path}`, { data });
+    expect.soft(bulk.status(), `Massenaktion „${path}“ ohne Planen-Rolle`).toBe(403);
+  }
   await open(page, 'agents');
   await expect
     .soft(button(page, /Standard-Workflow anlegen/), 'Ohne Agent-Verwaltung kein „Standard-Workflow anlegen“')
