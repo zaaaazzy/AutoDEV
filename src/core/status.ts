@@ -42,6 +42,15 @@ export const BUG_STATUS = {
 export type BugStatus = (typeof BUG_STATUS)[keyof typeof BUG_STATUS];
 export const BUG_STATUSES = new Set<string>(Object.values(BUG_STATUS));
 
+export const SPRINT_STATUS = {
+  planned: 'planned',
+  active: 'active',
+  review: 'review',
+  completed: 'completed',
+  cancelled: 'cancelled',
+} as const;
+export type SprintStatus = (typeof SPRINT_STATUS)[keyof typeof SPRINT_STATUS];
+
 export const RUN_STATUS = {
   running: 'running',
   passed: 'passed',

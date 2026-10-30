@@ -5,6 +5,7 @@ import { loadSystemSettings, systemAgents, systemCommand } from '../agent/system
 import { productionGuide } from './production-snippets.js';
 import { ROLE_INFO, type Role } from './roles.js';
 import { workflowDocs } from './workflow-docs.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Automatisch erzeugte, schreibgeschützte Dokumente für die Dokumentation: Testberichte (aus test:full),
@@ -51,7 +52,9 @@ const date = (value: Date | string | null): string =>
 function modelOf(command: string[] | null): string {
   if (!command?.length) return 'Lokal (Ollama)';
   const model = command[command.indexOf('--model') + 1];
-  return command[0] === 'claude' ? `Claude${command.includes('--model') && model ? ` · ${model}` : ''}` : command[0]!;
+  return command[0] === 'claude'
+    ? `Claude${command.includes('--model') && model ? ` · ${model}` : ''}`
+    : defined(command[0]);
 }
 
 async function testReports(pool: Pool, slug: string): Promise<GeneratedDoc[]> {

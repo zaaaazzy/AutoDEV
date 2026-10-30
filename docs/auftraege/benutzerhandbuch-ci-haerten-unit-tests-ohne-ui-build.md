@@ -86,7 +86,7 @@ Sitzung nicht ausgeführt.
   `@v4` (`ci.yml`). Die Commit-Nummern (SHA) ließen sich in der Agent-Umgebung nicht nachschlagen, sie wurden nicht geraten.
   Nachtragen mit `git ls-remote --tags https://github.com/actions/<name>`, dann `uses: actions/<name>@<sha> # v4.x.y`.
 - **Projekteinstellung „Testbefehle“ für AIdeation.** Auf `npm run build` und `npm run test:unit` setzen (siehe
-  [Installation](installation.md) und Abschnitt 2 oben). Sonst baut ein Agent-Lauf die Oberfläche zweimal. Ob das schon
+  [Installation](../installation.md) und Abschnitt 2 oben). Sonst baut ein Agent-Lauf die Oberfläche zweimal. Ob das schon
   geschehen ist, ist nicht geprüft.
 - **`docs/installation.md:105`** nennt bei „Testbefehle (Live schalten)“ noch `npm test`. Das betrifft das Standardbeispiel für
   Projekte, nicht AIdeation selbst. Es ist nicht angepasst.
@@ -99,5 +99,5 @@ Sitzung nicht ausgeführt.
 ## 8. Grenzen
 
 - Das Kapitel beschreibt nur Auslöser, Rechte und Testbefehle der CI. Den Aufbau der Jobs `e2e` und `docker` steht in
-  [CI (GitHub Actions)](ci.md).
+  [CI (GitHub Actions)](../ci.md).
 - Die Änderung hat kein Datenbankschema und keine Migration.

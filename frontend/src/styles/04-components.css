@@ -124,8 +124,8 @@ a.summary-card:hover {
   align-items: center;
   padding: 4px 8px;
   border-radius: 999px;
-  background: #faf1da;
-  color: #8b6825;
+  background: var(--notice-soft);
+  color: var(--notice-text);
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
@@ -141,7 +141,7 @@ a.summary-card:hover {
 .status-rejected,
 .status-wontfix {
   background: #f7e8e3;
-  color: #9d4938;
+  color: var(--error-text);
 }
 .status-in_progress,
 .status-planned,
@@ -151,22 +151,22 @@ a.summary-card:hover {
 .status-drafting,
 .status-accepted,
 .status-considering {
-  background: #e7eff7;
+  background: var(--info-soft);
   color: var(--blue);
 }
 .status-open,
 .status-idea,
 .status-review,
 .status-running {
-  background: #faf1da;
-  color: #8b6825;
+  background: var(--notice-soft);
+  color: var(--notice-text);
 }
 .tag {
   display: inline-flex;
   padding: 3px 8px;
   border-radius: 999px;
-  background: #eef0ec;
-  color: #4b554e;
+  background: var(--surface-hover);
+  color: var(--text-strong);
   font-size: 10px;
   font-weight: 650;
 }
@@ -196,7 +196,7 @@ a.summary-card:hover {
   margin-top: 14px;
   padding: 12px;
   border-radius: 9px;
-  background: #f7f8f5;
+  background: var(--surface-muted);
 }
 .report-columns {
   display: grid;
@@ -299,9 +299,9 @@ a.summary-card:hover {
 .notice {
   margin: 14px 0;
   padding: 12px 14px;
-  border: 1px solid #e5c8b9;
+  border: 1px solid var(--error-border-warm);
   border-radius: 8px;
-  background: #fff8f4;
+  background: var(--error-surface);
   color: #854938;
   font-size: 12px;
 }
@@ -546,7 +546,7 @@ a.summary-card:hover {
 }
 .info-block {
   padding: 10px 14px;
-  border: 1px solid #dfe3da;
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: var(--surface-soft);
 }
@@ -572,9 +572,9 @@ a.summary-card:hover {
   color: #5c4a12;
 }
 .git-alert.block {
-  border-color: #ecc9c0;
-  border-left-color: #c9573f;
-  background: #fbeeea;
+  border-color: var(--error-border);
+  border-left-color: var(--error);
+  background: var(--error-soft);
   color: #6b2a1d;
 }
 .git-alert header {
@@ -612,7 +612,7 @@ a.summary-card:hover {
   font-size: 0.9em;
 }
 .git-alert-status.failed {
-  color: #9d4938;
+  color: var(--error-text);
   font-weight: 600;
 }
 .git-alert-compact {
@@ -626,14 +626,14 @@ a.summary-card:hover {
   text-decoration: none;
 }
 .git-alert-compact.block {
-  background: #fbeeea;
+  background: var(--error-soft);
   color: #6b2a1d;
 }
 
 /* Git-Verlauf: gemeinsame Zeitleiste für Sprints und Ideen */
 .git-tree {
   padding: 12px 14px;
-  border: 1px solid #dfe3da;
+  border: 1px solid var(--border-subtle);
   border-radius: 10px;
   background: var(--surface-soft);
   font-size: 13px;
@@ -812,7 +812,7 @@ a.summary-card:hover {
   max-width: min(360px, 80vw);
   padding: 8px 10px;
   border-radius: 8px;
-  background: #26312a;
+  background: var(--ink-deep);
   color: var(--surface);
   font-size: 12px;
   font-style: normal;
@@ -863,8 +863,8 @@ a.summary-card:hover {
   text-decoration: underline;
 }
 .file-link > .file-plain {
-  background: #f1f3ef;
-  color: #26312a;
+  background: var(--surface-neutral);
+  color: var(--ink-deep);
 }
 .file-link .file-icon {
   flex: none;
@@ -887,20 +887,20 @@ a.summary-card:hover {
 
 /* Kategorien: gleiche Farbe in allen Tabellen und Formularen */
 .tag.category-frontend {
-  background: #e7eff7;
+  background: var(--info-soft);
   color: var(--blue);
 }
 .tag.category-backend {
-  background: #ece8f5;
-  color: #5b4a8b;
+  background: var(--accent-purple-soft);
+  color: var(--accent-purple);
 }
 .tag.category-fullstack {
   background: var(--green-soft);
   color: #39704e;
 }
 .tag.category-infrastructure {
-  background: #faf1da;
-  color: #8b6825;
+  background: var(--notice-soft);
+  color: var(--notice-text);
 }
 .tag.category-docs {
   background: #f3e9ef;
@@ -911,8 +911,8 @@ a.summary-card:hover {
   color: #9a3b2e;
 }
 .tag.category-mixed {
-  background: #eef0ec;
-  color: #4b554e;
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 .tag.category-none {
   background: transparent;
@@ -949,20 +949,20 @@ a.summary-card:hover {
   stroke-linejoin: round;
 }
 .event-icon.icon-read {
-  background: #e7eff7;
+  background: var(--info-soft);
   color: var(--blue);
 }
 .event-icon.icon-search {
-  background: #eef0ea;
-  color: #5b665e;
+  background: var(--surface-tint);
+  color: var(--text-secondary);
 }
 .event-icon.icon-write {
   background: var(--warn-soft);
   color: var(--warn);
 }
 .event-icon.icon-run {
-  background: #ece8f5;
-  color: #5b4a8b;
+  background: var(--accent-purple-soft);
+  color: var(--accent-purple);
 }
 
 /* Anteilsbalken: überall gleiche Darstellung, 100 % = alle Einträge, Abschnitte klickbar */
@@ -1006,7 +1006,7 @@ a.summary-card:hover {
   height: 14px;
   overflow: hidden;
   border-radius: 999px;
-  background: #eef1ec;
+  background: var(--surface-hover-alt);
 }
 .share-stack.compact .share-bar {
   height: 10px;
@@ -1063,10 +1063,10 @@ button.share-key:hover {
   border-radius: 50%;
 }
 .tone-ok {
-  background: #2b9a66;
+  background: var(--success-bright);
 }
 .tone-active {
-  background: #2f7de1;
+  background: var(--info-bright);
 }
 .tone-info {
   background: #8bb6ee;
@@ -1075,10 +1075,10 @@ button.share-key:hover {
   background: #f0b44c;
 }
 .tone-warn {
-  background: #e8590c;
+  background: var(--accent-orange-strong);
 }
 .tone-bad {
-  background: #d6453d;
+  background: var(--error-bright);
 }
 .tone-neutral {
   background: #b9c1b5;
@@ -1129,7 +1129,7 @@ a.app-link {
 .markdown .cmd-line code {
   padding: 1px 5px;
   border-radius: 4px;
-  background: #eef1ec;
+  background: var(--surface-hover-alt);
   color: #2c4a3a;
 }
 .markdown .cmd-line {
@@ -1142,19 +1142,19 @@ a.app-link {
   overflow-wrap: anywhere;
 }
 .status-skipped {
-  background: #eef0ec;
+  background: var(--surface-hover);
   color: #5d665f;
 }
 .status-flaky {
-  background: #faf1da;
-  color: #8b6825;
+  background: var(--notice-soft);
+  color: var(--notice-text);
 }
 .meter-bar {
   display: block;
   height: 6px;
   overflow: hidden;
   border-radius: 999px;
-  background: #edf0ea;
+  background: var(--surface-tint-alt);
 }
 .meter-bar i {
   display: block;
@@ -1212,7 +1212,7 @@ a.app-link {
   gap: 12px;
   margin: 12px 0;
   padding: 10px 14px;
-  border: 1px solid #b9d3c4;
+  border: 1px solid var(--success-border-soft-alt);
   border-radius: 14px;
   background: #f0f7f2;
   box-shadow: var(--shadow);
@@ -1319,7 +1319,7 @@ a.app-link {
 }
 .mermaid-error {
   margin: 0 0 0.5rem;
-  color: #b4472f;
+  color: var(--error-text-strong);
   font-size: 0.85rem;
 }
 .status.paused {
@@ -1332,11 +1332,11 @@ a.app-link {
   margin-top: 2px;
 }
 .tag.visual-env-own {
-  background: #e3f1ea;
+  background: var(--success-soft-alt);
   color: var(--green);
 }
 .tag.visual-approved {
-  background: #e3f1ea;
+  background: var(--success-soft-alt);
   color: var(--green);
 }
 .tag.visual-open {
@@ -1347,7 +1347,7 @@ a.app-link {
 /* ── Gemeinsame Bausteine für Detailansichten ── */
 .detail-heading {
   margin: 0 0 8px;
-  color: #5b665e;
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -1387,7 +1387,7 @@ a.app-link {
   background: #fffaf5;
 }
 .detail-alert.rejected {
-  border-color: #e6b8b3;
+  border-color: var(--error-border-soft);
   border-left-color: var(--danger);
   background: #fdf3f1;
 }

@@ -67,7 +67,7 @@ erledigt dann der Server beim nächsten Start.
 | Wächter schickt nach dem Update keine Push-Nachricht | `DEV_LOG_SECRET_KEY` fehlt in `watchdog.env` | `DEV_LOG_SECRET_KEY=… ./scripts/install-watchdog.sh` einmal erneut ausführen |
 
 Wer den Schlüssel verloren hat, muss die Projektzugänge neu eintragen, den zweiten Faktor neu einrichten und Push auf
-den Geräten neu aktivieren (siehe [README](../README.md), Abschnitt Konfiguration).
+den Geräten neu aktivieren (siehe [README](../../README.md), Abschnitt Konfiguration).
 
 ## Einmalige Schritte bei bestehender Installation
 
@@ -92,5 +92,5 @@ den Geräten neu aktivieren (siehe [README](../README.md), Abschnitt Konfigurati
 ## Verwandte Dokumente
 
 - [Entwicklerdoku zur Änderung](totp-und-vapid-verschluesselt-2026-10-27.md)
-- [Installation, Abschnitt Wiederherstellen](installation.md)
+- [Installation, Abschnitt Wiederherstellen](../installation.md)
 - [Benutzerhandbuch Restore-Skript und Probe](benutzerhandbuch-restore-skript-und-probe.md)

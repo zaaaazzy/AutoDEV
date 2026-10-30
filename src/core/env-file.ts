@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { chmod, readFile, rename, writeFile } from 'node:fs/promises';
 import { platform } from 'node:os';
+import { defined } from './defined.js';
 
 export interface EnvInput {
   username: string;
@@ -65,7 +66,7 @@ export function parseEnv(text: string): Map<string, string> {
   for (const line of text.split(/\r?\n/)) {
     if (line.trimStart().startsWith('#')) continue;
     const match = KEY_LINE.exec(line);
-    if (match) values.set(match[1]!, unquote(match[2]!));
+    if (match) values.set(defined(match[1]), unquote(defined(match[2])));
   }
   return values;
 }
@@ -92,7 +93,7 @@ export function mergeEnv(text: string, updates: Map<string, string>): string {
     }
     if (seen.has(key)) continue;
     seen.add(key);
-    merged.push(`${key}=${formatEnvValue(updates.get(key)!)}`);
+    merged.push(`${key}=${formatEnvValue(defined(updates.get(key)))}`);
     pending.delete(key);
   }
   if (!lines.length) merged.push('# AIdeation – erzeugt vom Einrichtungs-Assistenten');
@@ -143,7 +144,7 @@ export function planEnv(existing: string, input: EnvInput): EnvPlan {
   if (secretKeyCreated) updates.set('DEV_LOG_SECRET_KEY', newSecretKey());
 
   const dbPasswordCreated = !current.get('DEV_LOG_DB_PASSWORD');
-  const dbPassword = dbPasswordCreated ? newDbPassword() : current.get('DEV_LOG_DB_PASSWORD')!;
+  const dbPassword = dbPasswordCreated ? newDbPassword() : defined(current.get('DEV_LOG_DB_PASSWORD'));
   if (dbPasswordCreated) updates.set('DEV_LOG_DB_PASSWORD', dbPassword);
   if (dbPasswordCreated || !current.get('DEV_LOG_DATABASE_URL')) {
     const user = current.get('DEV_LOG_DB_USER') || DEFAULT_DB_USER;

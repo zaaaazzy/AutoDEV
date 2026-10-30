@@ -8,6 +8,7 @@ import type { CommandExecutor } from '../core/command.js';
 import { runInSandbox } from '../core/sandbox.js';
 import type { CaptureFn, CapturedPage, CaptureOptions, PageCapture } from './visual-capture.js';
 import type { Credentials, Device, VisualSettings } from './visual-settings.js';
+import { defined } from '../core/defined.js';
 
 export const CAPTURE_SCRIPT = '/opt/aideation/visual-capture.mjs';
 const CAPTURE_JOB = 'AIDEATION_CAPTURE_JOB';
@@ -76,7 +77,7 @@ export function captureInSandbox(sandbox: {
         onChunk: (chunk) => {
           for (const line of chunk.split('\n')) {
             const progress = /^Fortschritt: (.+)$/.exec(line.trim());
-            if (progress) options.onProgress?.(progress[1]!);
+            if (progress) options.onProgress?.(defined(progress[1]));
           }
         },
       });

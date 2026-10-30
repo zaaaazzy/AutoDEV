@@ -2,7 +2,7 @@
 
 Dieses Kapitel beschreibt, was passiert, wenn du den Workflow unter „Agents“ umbaust, während ein Auftrag gerade läuft. Auslöser des Fixes ist der Bugfix c6952ea1 (25.10.2026): Ein Umbau löschte einen Schritt, den der laufende Auftrag noch brauchte, und der Auftrag stand danach ohne Begründung auf „blockiert“.
 
-> **Printscreens:** keine. In dieser Sitzung gab es keinen Browser und keine laufende App, daher sind keine Aufnahmen entstanden. Die Beschreibung stammt aus dem Quelltext (`src/runner/runner-steps.ts`, `src/runner/runner.ts`) und aus [`workflows.md`](workflows.md), Abschnitt 4a. Für Aufnahmen müssten App, Datenbank und Browser laufen.
+> **Printscreens:** keine. In dieser Sitzung gab es keinen Browser und keine laufende App, daher sind keine Aufnahmen entstanden. Die Beschreibung stammt aus dem Quelltext (`src/runner/runner-steps.ts`, `src/runner/runner.ts`) und aus [`workflows.md`](../workflows.md), Abschnitt 4a. Für Aufnahmen müssten App, Datenbank und Browser laufen.
 
 ---
 
@@ -50,11 +50,11 @@ Tritt aus einem anderen Grund ein unerwarteter Fehler im Lauf auf, passiert Folg
 ## 5. Grenzen dieses Kapitels
 
 - Die Tests für diese Änderung stehen in `src/runner/runner.test.ts` („Workflow während des Laufs umgebaut…“ und „unerwarteter Fehler im Lauf…“). Ich habe sie in dieser Sitzung nicht selbst ausgeführt. Der Entwickler meldet alle Tests grün über `npm test`.
-- Das Kapitel beschreibt nicht, wie der Workflow-Editor bedient wird. Das steht in [`workflows.md`](workflows.md), Abschnitt 4a.
+- Das Kapitel beschreibt nicht, wie der Workflow-Editor bedient wird. Das steht in [`workflows.md`](../workflows.md), Abschnitt 4a.
 - Ob der Verlauf den Schrittnamen auch nach einem Umbau zeigt, ist im Code nicht ausdrücklich geprüft. Die Spalten `agent_name` und `phase` werden beim Schreiben gesetzt und nicht nachträglich gelesen.
 
 ## 6. Verweise
 
-- [`workflows.md`](workflows.md), Abschnitt 4a „Workflow“ (Editor und Umbau während eines Laufs)
+- [`workflows.md`](../workflows.md), Abschnitt 4a „Workflow“ (Editor und Umbau während eines Laufs)
 - [`benutzerhandbuch-unterbrochene-auftraege.md`](benutzerhandbuch-unterbrochene-auftraege.md) (Unterbrechungen und Arbeitsordner)
 - [`workflow-umbau-waehrend-lauf-fk-2026-10-25.md`](workflow-umbau-waehrend-lauf-fk-2026-10-25.md) (Entwicklerdoku zum Fix)

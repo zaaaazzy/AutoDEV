@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { CommandExecutor } from '../core/command.js';
 import type { CoverageArea, CoverageReport } from './coverage.js';
 import { runProjectCommand } from './project-command.js';
+import { defined } from '../core/defined.js';
 
 /**
  * Eigene Abdeckungsmessung von AIdeation: Für Testbefehle, deren npm-Skript den Node-Test-Runner nutzt
@@ -178,7 +179,7 @@ export function directRunner(command: string[]): Pick<TestRunner, 'binary' | 'ar
   const index = command.findIndex((part, position) => /^(tsx|node)$/.test(part) && command[position + 1] === '--test');
   if (index < 0 || !RUNNER_PREFIXES.has(command.slice(0, index).join(' '))) return null;
   const args = command.slice(index + 2).filter((part) => !part.startsWith('--test-coverage') && part !== COVERAGE_FLAG);
-  return { binary: command[index]!, args };
+  return { binary: defined(command[index]), args };
 }
 
 /** Startet den Testläufer mit Abdeckung (gefiltertes Environment) und liest das Ergebnis. */

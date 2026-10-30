@@ -288,3 +288,43 @@ test('Freigabe-Merge: geänderter Testbericht in docs/tests sperrt nicht, echte 
   assert.equal(blocked.merged, false);
   assert.match(blocked.message, /Offene Änderungen im Arbeitsordner \(base\.txt\)/);
 });
+
+test('Auftrags-Branch aus einem abgebrochenen Sprint: geparkt, der Auftrag startet neu von main ohne dessen Commits', async () => {
+  const { cwd, git } = await project();
+  const own = 'auftrag/1a2b3c4d-login-seite';
+  git('checkout', '-b', 'sprint/sprint-alt');
+  await writeFile(join(cwd, 'ungeprueft.ts'), 'export {};\n');
+  git('add', '-A');
+  git('commit', '-m', 'Auftrag eines abgebrochenen Sprints', '-m', 'Auftrag: 99999999-0000');
+  git('checkout', '-b', own);
+  await writeFile(join(cwd, 'login.ts'), 'export {};\n');
+  git('add', '-A');
+  git('commit', '-m', 'wip(Sprint alt): Login-Seite', '-m', `Auftrag: ${item.id}`);
+  git('checkout', 'main');
+  const branch = await enterOrderBranch(cwd, item, null);
+  assert.deepEqual(branch, { branch: own, base: 'main' });
+  assert.equal(git('rev-parse', 'HEAD'), git('rev-parse', 'main'));
+  // Die bisherige Arbeit bleibt auf dem geparkten Branch erhalten.
+  const parked = git('branch', '--list', 'wip/1a2b3c4d-login-seite-fremde-basis-*', '--format=%(refname:short)');
+  assert.ok(parked);
+  assert.equal(git('show', `${parked}:login.ts`), 'export {};');
+});
+
+test('Auftrags-Branch mit nur eigenen Commits wird fortgesetzt und bekommt den neuen main', async () => {
+  const { cwd, git } = await project();
+  const own = 'auftrag/1a2b3c4d-login-seite';
+  git('checkout', '-b', own);
+  await writeFile(join(cwd, 'login.ts'), 'export {};\n');
+  git('add', '-A');
+  git('commit', '-m', 'wip(auftrag): Login-Seite', '-m', `Auftrag: ${item.id}`);
+  git('checkout', 'main');
+  await writeFile(join(cwd, 'neu.txt'), 'neu\n');
+  git('add', '-A');
+  git('commit', '-m', 'main geht weiter');
+  const branch = await enterOrderBranch(cwd, item, null);
+  assert.deepEqual(branch, { branch: own, base: 'main' });
+  assert.equal(git('rev-parse', '--abbrev-ref', 'HEAD'), own);
+  assert.equal(await readFile(join(cwd, 'login.ts'), 'utf8'), 'export {};\n');
+  assert.equal(await readFile(join(cwd, 'neu.txt'), 'utf8'), 'neu\n');
+  assert.equal(git('branch', '--list', 'wip/*'), '');
+});

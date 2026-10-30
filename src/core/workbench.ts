@@ -32,6 +32,7 @@ import {
   sandboxProblem,
   sandboxUser,
 } from './sandbox.js';
+import { defined } from './defined.js';
 
 /**
  * Arbeitscontainer je Projekt (Schalter DEV_LOG_AGENT_SANDBOX bzw. projects.agent_sandbox = „workbench“, Standard):
@@ -146,7 +147,7 @@ export function mainCheckout(worktree: string): string {
   try {
     const text = readFileSync(marker, 'utf8');
     const match = /^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/]+\s*$/m.exec(text);
-    return match ? match[1]! : worktree;
+    return match ? defined(match[1]) : worktree;
   } catch {
     return worktree;
   }
@@ -359,7 +360,8 @@ async function startWorkbench(
   try {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const labelled = structuredClone(compose) as { services: Record<string, { labels?: Record<string, string> }> };
-    labelled.services.workbench!.labels = { ...labelled.services.workbench!.labels, [WORKBENCH_HASH_LABEL]: hash };
+    const service = defined(labelled.services.workbench, 'Dienst workbench');
+    service.labels = { ...service.labels, [WORKBENCH_HASH_LABEL]: hash };
     writeFileSync(file, `${JSON.stringify(labelled, null, 2)}\n`, { mode: 0o600 });
   } catch (error) {
     return `Arbeitscontainer: Compose-Datei liess sich nicht schreiben (${file}). ${String(error)}`;
@@ -487,7 +489,7 @@ export async function runInWorkbench(
       const installed = await install;
       if (installed.exitCode !== 0) {
         const message = `Arbeitscontainer: Abhängigkeiten liessen sich nicht installieren (Exit-Code ${installed.exitCode}). Befehl nicht gestartet.\n${installed.output.trim().slice(-800)}`;
-        noteProblem(options.project, message.split('\n')[0]!);
+        noteProblem(options.project, defined(message.split('\n')[0]));
         return blocked(message, redactWith);
       }
     }

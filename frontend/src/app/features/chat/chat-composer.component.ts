@@ -27,6 +27,7 @@ import {
   suggestions,
   type Trigger,
 } from './chat-mentions.js';
+import { defined } from '../../../../../src/core/defined.js';
 
 export interface ComposedMessage {
   content: string;
@@ -157,7 +158,7 @@ export class ChatComposerComponent {
       this.active.set((this.active() + step) % count);
     } else if (event.key === 'Enter' || event.key === 'Tab') {
       event.preventDefault();
-      this.choose(this.options()[this.active()]!);
+      this.choose(defined(this.options()[this.active()]));
     } else if (event.key === 'Escape') {
       event.preventDefault();
       this.dismissed.set(true);

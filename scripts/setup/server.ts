@@ -25,6 +25,7 @@ import { MIN_NODE, nodeVersionOk, prepareGameTools } from '../../src/setup/game-
 import { checkChromium } from '../../src/setup/setup-jobs.js';
 import { OVERRIDE_FILE, writeWorkerOverride } from '../../src/setup/worker-compose.js';
 import { installDemoProject } from './demo-data.js';
+import { defined } from '../../src/core/defined.js';
 
 const ROOT = join(import.meta.dirname, '..', '..');
 const ENV_FILE = join(ROOT, '.env');
@@ -68,7 +69,7 @@ function run(
 
 async function version(command: string, args: string[]): Promise<string | null> {
   const result = await run(command, args, undefined, 15_000);
-  return result.ok ? result.output.split('\n')[0]!.trim().slice(0, 120) : null;
+  return result.ok ? defined(result.output.split('\n')[0]).trim().slice(0, 120) : null;
 }
 
 async function checks() {
@@ -118,7 +119,7 @@ async function writeEnv(body: InstallInput, log: (line: string) => void): Promis
  */
 async function applyDbPassword(env: Map<string, string>, log: (line: string) => void): Promise<boolean> {
   const user = env.get('DEV_LOG_DB_USER') || DEFAULT_DB_USER;
-  const password = env.get('DEV_LOG_DB_PASSWORD')!;
+  const password = defined(env.get('DEV_LOG_DB_PASSWORD'));
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(user) || !/^[0-9a-f]+$/.test(password)) {
     log('Datenbank-Passwort nicht gesetzt: DEV_LOG_DB_USER oder DEV_LOG_DB_PASSWORD hat ein unerwartetes Format.');
     return false;
@@ -237,7 +238,7 @@ async function install(body: InstallInput, send: (event: Record<string, unknown>
   if (body.demoData) {
     step('demo', 'running');
     // Läuft auf diesem Rechner gegen die eben gestartete Datenbank (Port 5433), das Schema hat der Server angelegt.
-    const pool = new pg.Pool({ connectionString: env.get('DEV_LOG_DATABASE_URL')!, max: 2 });
+    const pool = new pg.Pool({ connectionString: defined(env.get('DEV_LOG_DATABASE_URL')), max: 2 });
     const root = projectRoots({ DEV_LOG_PROJECT_ROOTS: env.get('DEV_LOG_PROJECT_ROOTS') })[0] ?? resolve(ROOT, '..');
     try {
       const result = await installDemoProject(pool, root, log);
@@ -354,8 +355,8 @@ const server = createServer(async (request, response) => {
         const send = (event: Record<string, unknown>) => response.write(`${JSON.stringify(event)}\n`);
         const ok = await install(
           {
-            username: payload.username!,
-            password: payload.password!,
+            username: defined(payload.username),
+            password: defined(payload.password),
             domain: payload.domain ?? '',
             projectRoots: payload.projectRoots ?? '',
             installWorker: payload.installWorker !== false,

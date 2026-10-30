@@ -26,6 +26,7 @@ import { describeWorkingHours, type WorkingHours, withinWorkingHours } from '../
 import { generateSprintReport } from './reports.js';
 import { guardGit } from './git-state.js';
 import { completedSprintUsage, costOfTokens, tokenPriceUsd } from './usage.js';
+import { defined } from '../core/defined.js';
 
 /** Modus der Sprintplanung je Projekt: manuell (Standard), vorschlagen, Autopilot. */
 export const SPRINT_MODES = ['manual', 'suggest', 'autopilot'] as const;
@@ -317,20 +318,22 @@ export async function applyProposal(
       await client.query('SELECT 1 FROM sprints WHERE project_slug = $1 AND status = $2', [project, 'active'])
     ).rows[0];
     const shouldStart = start && !active;
-    const sprintId = (
-      await client.query<{ id: string }>(
-        `INSERT INTO sprints (project_slug, name, goal, status, start_date)
+    const sprintId = defined(
+      (
+        await client.query<{ id: string }>(
+          `INSERT INTO sprints (project_slug, name, goal, status, start_date)
          VALUES ($1, $2, $3, $4, CASE WHEN $4 = 'active' THEN CURRENT_DATE END) RETURNING id`,
-        [
-          project,
-          proposal.name,
-          comment.trim()
-            ? `${comment.trim().slice(0, 2000)}\n\n(Vorschlag der Sprintplanung: ${ids.length} Aufträge)`
-            : `Vorschlag der Sprintplanung: ${ids.length} Aufträge`,
-          shouldStart ? 'active' : 'planned',
-        ],
-      )
-    ).rows[0]!.id;
+          [
+            project,
+            proposal.name,
+            comment.trim()
+              ? `${comment.trim().slice(0, 2000)}\n\n(Vorschlag der Sprintplanung: ${ids.length} Aufträge)`
+              : `Vorschlag der Sprintplanung: ${ids.length} Aufträge`,
+            shouldStart ? 'active' : 'planned',
+          ],
+        )
+      ).rows[0],
+    ).id;
     // Blockierte Aufträge (z. B. aus einem gescheiterten Sprint) werden wie bei „In Sprint übernehmen“ zurückgesetzt:
     // Sonst landeten sie blockiert samt altem Vermerk im neuen Sprint, liefen nie und hielten ihn offen (Sprint 21).
     // auto_run folgt dem Sprint: ein geplanter wartet auf seinen Start.
