@@ -11,7 +11,7 @@ Am 30.10.2026 wurden `angular.json`, `package.json`, `start.sh`, `scripts/start.
 
 ## 1. Was sich ändert
 
-- **Der Entwicklungsserver heißt jetzt anders.** `npm run dev:ui` startet `ng serve` weiterhin mit dem Proxy aus
+- **Der Builder heißt jetzt anders.** `npm run dev:ui` startet `ng serve` weiterhin mit dem Proxy aus
   `frontend/proxy.conf.json`. Dahinter steht jetzt der Builder `@angular/build:dev-server` statt `@angular-devkit/build-angular`.
   Der Aufruf bleibt gleich.
 - **Der Build der Oberfläche läuft mit einem neuen Builder.** `npm run build:ui` nutzt `@angular/build:application`. Das
@@ -83,7 +83,7 @@ und `.github/dependabot.yml`.
 | Zustand | Ursache | Was du tust |
 |---|---|---|
 | „Node.js … ist zu alt“ beim Start | Installierte Node-Version liegt unter 22.12. | Node.js auf 22.12 oder neuer aktualisieren und das Skript erneut starten. |
-| `npm ci` schlägt fehl, obwohl Node 22.12 oder neuer installiert ist | Nicht geprüft. Die Lockfile wurde von Hand angepasst und nicht von npm erzeugt, das ist der bekannte Schwachpunkt. | `npm ci` mit der Fehlermeldung melden. Siehe Abschnitt 7. |
+| `npm ci` schlägt fehl, obwohl Node 22.12 oder neuer installiert ist | Nicht geprüft. Die Lockfile ist nicht von npm erzeugt und enthält noch den alten Eintrag `@angular-devkit/build-angular`. | `npm ci` mit der Fehlermeldung melden. Siehe Abschnitt 7. |
 | `ng serve` startet, die Seite lädt nicht | Nicht geprüft. Die Konsole zeigt den Grund, meist Proxy oder Port. | Die Konsole ansehen und `frontend/proxy.conf.json` prüfen. |
 | `npm audit` zeigt noch Funde | Die Umstellung ist noch nicht vollständig (siehe Abschnitt 7). | Nicht als Fehler dieser Änderung werten, bis die offenen Punkte erledigt sind. |
 
@@ -99,8 +99,8 @@ und `.github/dependabot.yml`.
   Webpack-Kette. Der manuelle Schritt erneuert sie vollständig.
 - **Die `npm audit`-Funde sind nicht nachgeprüft.** Die 17 Funde aus dem Review bleiben bis zu diesem Schritt bestehen. Die Funde
   über `@modelcontextprotocol/sdk` aus `@angular/cli` behebt die Umstellung nicht.
-- **Tests des Entwicklers:** `build:ui`, `typecheck` und `test:unit` (1822 Tests) laufen laut Entwickler grün, `lint` ohne
-  Fehler (812 Warnungen, schon vorher vorhanden). `ng serve` startete. Die Seite wurde nicht abgerufen, weil `curl` in der
+- **Tests des Entwicklers:** `build:ui`, `typecheck` und `test:unit` laufen laut Entwickler grün (1822 Tests; ein Bug-Eintrag
+  nennt 1833, das ist nicht geklärt), `lint` ohne Fehler (812 Warnungen, schon vorher vorhanden). `ng serve` startete. Die Seite wurde nicht abgerufen, weil `curl` in der
   Sitzung gesperrt war. Für dieses Kapitel wurden die Tests nicht erneut ausgeführt.
 - **Nicht gelöst:** Der critical-Bug „CI: `npm run test:unit` schlägt fehl“ ist ein eigener Auftrag. Ob die Docker-Umstellung
   die Ursache ist, ist nicht geprüft. Die Node-Version in den Dockerfiles (`node:22.22.3`) entspricht dem Mindestwert.
