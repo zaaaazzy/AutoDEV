@@ -68,12 +68,12 @@ Das Panel listet laufende Aufträge, deren gemessener Verbrauch mehr als das **D
 
 > Laufzeit 6,2 h statt 2 h (3,1×) · Tokens 400.000 statt 100.000 (4×)
 
-Die Überschrift lautet „Schätzung überschritten“, der Untertitel „mehr als 3× der kalibrierten Schätzung“. Ein Klick auf eine Zeile öffnet den Bereich Aufträge mit diesem Auftrag. Die Liste ist absteigend nach dem größten Verhältnis sortiert.
+Die Überschrift lautet „Schätzung überschritten“, der Untertitel „mehr als 3× der kalibrierten Schätzung“. Ein Klick auf eine Zeile öffnet die Entwicklungsansicht mit diesem Auftrag (Sprunglink, keine Änderung am Auftrag). Die Liste ist absteigend nach dem größten Verhältnis sortiert.
 
 ### Bedingungen
 
 - **Nur bei Warnungen sichtbar.** Ohne überschrittene Aufträge fehlt das Panel vollständig.
-- **Position:** im Startbereich des Projekts, nach den Kennzahlen und dem Chat, vor der Projektübersicht. Das Panel ist eigenständig und gehört nicht zu einer Gruppe „Besondere Aufmerksamkeit“.
+- **Position:** im Startbereich des Projekts, nach den Kennzahlen und dem Chat, vor der Projektübersicht. Das Panel steht als eigene Karte im Dashboard. Es gibt im Frontend keine Gruppe „Besondere Aufmerksamkeit“, zu der es gehören könnte.
 - **Genau das Dreifache löst nicht aus.** Erst strikt mehr als das Dreifache zeigt die Warnung.
 - **Unabhängig vom Budget:** Die Warnung erscheint auch dann, wenn noch kein Budget erreicht ist. Die Budget-Warnung bei 80 % bleibt davon getrennt.
 - **Nur laufende Aufträge:** die Status „in Arbeit“ und „blockiert“. Erledigte, geplante oder Express-Aufträge erscheinen nicht.
@@ -81,7 +81,7 @@ Die Überschrift lautet „Schätzung überschritten“, der Untertitel „mehr 
 - **Vergleich mit der kalibrierten Schätzung**, nicht mit der rohen. Der Faktor stammt aus den erledigten Aufträgen derselben Herkunft wie der Auftrag selbst.
 - **Ohne brauchbare Schätzung keine Warnung:** Fehlt die Schätzung oder ist sie 0, erscheint für diese Größe keine Warnung.
 - **Fehler in der Prüfung blockieren nichts.** Das Panel bleibt dann leer, und der Fehler wird im Protokoll festgehalten.
-- **Reine Anzeige:** Das Panel bietet keine Aktion. Es gibt keine Push-Nachricht und keine Blockade des Sprints.
+- **Reine Anzeige:** Das Panel ändert nichts am Auftrag. Die Zeilen sind nur Sprunglinks. Es gibt keine Push-Nachricht und keine Blockade des Sprints.
 
 ## 3. Statistik: „Schätzfehler je Sprint“
 
