@@ -2,8 +2,8 @@ import { Component, DestroyRef, computed, inject, input } from '@angular/core';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
-import { WaitStatusComponent } from '../runs/wait-status.component.js';
-import { OrderService } from '../development/order.service.js';
+import { orderReviewSlot, reviewLaunchable } from '../development/review-box.js';
+import { ReviewSlotStatusComponent } from '../development/review-slot-status.component.js';
 import { ReviewStateService } from '../development/review-state.service.js';
 
 /**
@@ -13,7 +13,7 @@ import { ReviewStateService } from '../development/review-state.service.js';
 @Component({
   selector: 'app-acceptance-review',
   standalone: true,
-  imports: [WaitStatusComponent],
+  imports: [ReviewSlotStatusComponent],
   template: `
     @if (state(); as review) {
       @if (!review.configured) {
@@ -22,19 +22,9 @@ import { ReviewStateService } from '../development/review-state.service.js';
         </p>
       } @else {
         @if (shown(); as slot) {
-          <p class="approval-instance">
-            <span class="approval-dot" [class]="slot.status"></span>
-            {{ slot.status === 'running' && wait.status() ? 'Review ' + slot.slot : instanceLabel() }}
-            @if (slot.status === 'running') {
-              · <a [href]="slot.url" target="_blank" rel="noopener">Review {{ slot.slot }} öffnen ↗</a>
-            }
-          </p>
-          <app-wait-status #wait />
-          @if (slot.status === 'failed' && slot.message) {
-            <pre class="approval-log">{{ slot.message }}</pre>
-          }
+          <app-review-slot-status [slot]="slot" />
         }
-        @if (auth.can('run') && (!shown() || shown()?.status === 'failed')) {
+        @if (auth.can('run') && launchable()) {
           <button class="button secondary" type="button" [disabled]="busy()" (click)="start(order())">
             {{ shown() ? '↻ Review-Container neu starten' : '🖥 Im Review-Container prüfen' }}
           </button>
@@ -45,7 +35,6 @@ import { ReviewStateService } from '../development/review-state.service.js';
 })
 export class AcceptanceReviewComponent {
   private readonly store = inject(ProjectStore);
-  private readonly orders = inject(OrderService);
   private readonly review = inject(ReviewStateService);
   protected readonly auth = inject(AuthService);
   protected readonly busy = this.store.busy;
@@ -53,31 +42,15 @@ export class AcceptanceReviewComponent {
   readonly order = input.required<DevelopmentItem>();
   protected readonly state = this.review.state;
   /** Review-Container, der diesen Auftrag zeigt (bzw. für ihn angefordert ist). */
-  protected readonly shown = computed(
-    () => this.state()?.slots.find((slot) => slot.developmentId === this.order().id && slot.status !== 'idle') ?? null,
-  );
-  protected readonly instanceLabel = computed(() => {
-    const slot = this.shown();
-    switch (slot?.status) {
-      case 'running':
-        return `Review ${slot.slot} läuft`;
-      case 'starting':
-        return `Review ${slot.slot} startet (Abhängigkeiten, Datenbank-Kopie) …`;
-      case 'failed':
-        return `Review ${slot.slot} konnte nicht starten`;
-      default:
-        return 'Wird gestartet …';
-    }
-  });
+  protected readonly shown = computed(() => orderReviewSlot(this.state()?.slots, this.order().id));
+  protected readonly launchable = computed(() => reviewLaunchable(this.shown()));
 
   constructor() {
     // Ein gemeinsamer Poll für alle Boxen (Freigabe und Abnahme), nur solange eine angezeigt wird.
     inject(DestroyRef).onDestroy(this.review.subscribe());
   }
 
-  protected async start(item: DevelopmentItem): Promise<void> {
-    const slug = this.store.activeProject();
-    await this.orders.showReview(item);
-    if (this.store.isActive(slug)) await this.review.refresh();
+  protected start(item: DevelopmentItem): Promise<void> {
+    return this.review.launch(item);
   }
 }

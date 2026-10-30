@@ -69,6 +69,17 @@ test('sprints.git_sync: erlaubt awaiting_merge, Migration läuft mehrfach, Unsin
   });
 });
 
+test('sprints_project_idx: Migration legt den Index idempotent auf Projekt, Status und Anlage an', async (t) => {
+  assert.ok(MIGRATIONS.some((migration) => migration.sql.includes('CREATE INDEX IF NOT EXISTS sprints_project_idx')));
+  await withMigratedDatabase(t, 'devlog_sprints_index', async (db) => {
+    await runMigrations(db); // zweiter Start ohne Fehler
+    const index = await db.query<{ def: string }>(
+      `SELECT indexdef AS def FROM pg_indexes WHERE tablename = 'sprints' AND indexname = 'sprints_project_idx'`,
+    );
+    assert.match(index.rows[0]?.def ?? '', /\(project_slug, status, created_at\)/);
+  });
+});
+
 type Bug = { status: string; fixed_at: Date | null };
 
 async function bugOf(db: Pick<pg.Pool, 'query'>, id: string): Promise<Bug> {

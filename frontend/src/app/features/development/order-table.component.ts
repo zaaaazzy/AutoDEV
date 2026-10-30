@@ -27,7 +27,7 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { formatHours } from '../../shared/format.js';
 import type { FormValues } from '../../shared/forms.js';
-import { DEVELOPMENT_STATUSES, priorityLabel, statusLabel } from '../../shared/labels.js';
+import { DEVELOPMENT_STATUSES, orderTitle, priorityLabel, statusLabel } from '../../shared/labels.js';
 import { StatusClassPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { BugIconComponent } from '../../shared/bug-icon.component.js';
 import { NO_AGENT, orderAgentName } from '../dashboard/order-shares.js';
@@ -185,9 +185,7 @@ export class OrderTableComponent {
   protected readonly selectLabel = (item: DevelopmentItem): string => `Auswählen: ${this.displayTitle(item)}`;
 
   /** Bei Bugs ersetzt der Käfer das Präfix „Bug:“. */
-  protected displayTitle(item: DevelopmentItem): string {
-    return item.kind === 'bug' ? item.title.replace(/^Bug:\s*/i, '') : item.title;
-  }
+  protected readonly displayTitle = orderTitle;
 
   protected toggleOrder(id: string): void {
     this.openOrder.set(this.openOrder() === id ? null : id);

@@ -25,6 +25,7 @@ import {
   taskCommitMessage,
 } from './git-helpers.js';
 import { ensureCiWorkflow, runTestGate, waitForCi } from './ci.js';
+import { reportCiMirrorFailure, runCiMirror } from './ci-mirror.js';
 import { orderWorkInProgress } from './order-branch.js';
 import { gitEnvironment } from '../project-command.js';
 import { gateExecutor } from '../test-sandbox.js';
@@ -135,6 +136,8 @@ async function pushSprint(
     /** Führt die Testbefehle des Gates in einem Ordner aus (Testcontainer der Sandbox); Standard: execute. */
     testExecutor?: (folder: string) => Promise<CommandExecutor>;
     pullRequest?: PullRequestPlan | null;
+    /** CI-Spiegel vor dem Push im PR-Modus; wirft bei einem roten Schritt (dann kein Push, kein Pull Request). */
+    mirror?: (log: string[]) => Promise<void>;
   },
 ): Promise<SyncResult> {
   const { git, must } = helpers;
@@ -186,6 +189,12 @@ async function pushSprint(
   if (sprint.remote && /github\.com/.test(sprint.remote)) await ensureCiWorkflow(ci.cwd, ci.commands, helpers, log);
   await gate(log);
   let current = await must('rev-parse', '--abbrev-ref', 'HEAD');
+  // PR-Modus: Der Push öffnet oder aktualisiert einen Pull Request (Abschluss wie Nachbesserung im Review). Vorher die
+  // Prüfschritte aus ci.yml lokal – zusätzlich zum Test-Gate, nicht statt seiner.
+  const opensPullRequest =
+    Boolean(sprint.remote) &&
+    (sprint.status === 'review' || (sprint.status === 'completed' && current === branch && Boolean(ci.pullRequest)));
+  if (opensPullRequest && ci.mirror) await ci.mirror(log);
   if (sprint.remote) {
     await must('push', '-u', 'origin', current);
     log.push(`${current} nach GitHub gepusht.`);
@@ -482,6 +491,16 @@ export async function syncSprintToGit(
     const testExecutor = (folder: string): Promise<CommandExecutor> =>
       gateExecutor(pool, project, folder, rawExecute, `gate-${sprint.id}`);
     const gate = async (entries: string[]) => runTestGate(await testExecutor(cwd), cwd, commands, entries);
+    const mirror = async (entries: string[]) => {
+      const failure = await runCiMirror(await testExecutor(cwd), cwd, entries);
+      if (!failure) return;
+      const created = await reportCiMirrorFailure(pool, project, sprint.name, failure);
+      throw new Error(
+        `Push abgelehnt: CI-Spiegel rot bei \`${failure.step}\` (Exit-Code ${failure.exitCode}) – kein Pull Request. ${
+          created ? 'Bug angelegt.' : 'Bug dazu ist schon offen.'
+        } ${failure.summary}`.trim(),
+      );
+    };
     const pullRequest =
       sprint.action === 'pull' ? null : await planPullRequest(pool, project, sprint, cwd, rawExecute, log);
     const result =
@@ -493,6 +512,7 @@ export async function syncSprintToGit(
             execute: rawExecute,
             testExecutor,
             pullRequest,
+            mirror,
           });
     if (result.pullRequest) {
       await pool.query(

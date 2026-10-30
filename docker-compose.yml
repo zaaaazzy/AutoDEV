@@ -57,8 +57,8 @@ services:
       DEV_LOG_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/aideation
       DEV_LOG_ADMIN_DATABASE_URL: postgresql://${DEV_LOG_DB_USER:-devlog}:${DEV_LOG_DB_PASSWORD:-devlog_local_dev}@db:5432/postgres
       DEV_LOG_AUTH: ${DEV_LOG_AUTH:-on}
+      # Lauscht nur im Compose-Netz (kein veröffentlichter Port); von aussen geht es über frontend bzw. https.
       DEV_LOG_HOST: 0.0.0.0
-      DEV_LOG_BIND: 127.0.0.1
       DEV_LOG_USERNAME: ${DEV_LOG_USERNAME:-devlog}
       DEV_LOG_PASSWORD: ${DEV_LOG_PASSWORD:-}
       # Erzeugt der Einrichtungs-Assistent einmalig. Nie ändern oder löschen: sonst sind verschlüsselte Werte

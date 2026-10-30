@@ -26,11 +26,11 @@ Hast du nur „Ausführen“, siehst du im Sprint-Detail nur Pausieren und Forts
 | Knopf | Erscheint, wenn | Wird ausgeblendet, wenn |
 | --- | --- | --- |
 | **Bearbeiten** | Rolle „Planung“ | – |
-| **Sprint starten** | Rolle „Planung“, Sprint ist geplant, und kein anderer Sprint des Projekts ist aktiv | anderer Sprint aktiv |
+| **Sprint starten** | Rolle „Planung“ und Sprint ist geplant | – (ist ein anderer Sprint aktiv, ist der Knopf ausgegraut, siehe 2.2) |
 | **Pausieren** | Rolle „Ausführen“, Sprint ist aktiv und nicht pausiert | Sprint nicht aktiv oder schon pausiert |
 | **Fortsetzen** | Rolle „Ausführen“, Sprint ist aktiv und pausiert | Sprint nicht aktiv oder nicht pausiert |
 | **Live schalten** | Rolle „Planung“ und Sprint ist aktiv | Sprint nicht aktiv (Knopf ist dann ganz weg) |
-| **Wieder öffnen** | Rolle „Planung“, Sprint ist abgeschlossen, und kein anderer Sprint des Projekts ist aktiv | anderer Sprint aktiv oder Sprint nicht abgeschlossen |
+| **Wieder öffnen** | Rolle „Planung“ und Sprint ist abgeschlossen | Sprint nicht abgeschlossen (ist ein anderer Sprint aktiv, ist der Knopf ausgegraut, siehe 2.2) |
 | **Abbrechen** | Rolle „Planung“ und Sprint ist geplant oder aktiv | Sprint ist in einem anderen Status |
 | **Wieder planen** | Rolle „Planung“ und Sprint ist abgebrochen | Sprint nicht abgebrochen |
 | **Löschen** | Rolle „Planung“ und der Sprint darf gelöscht werden (siehe unten) | Sprint darf nicht gelöscht werden |
@@ -41,7 +41,7 @@ Der Knopf erscheint nur, wenn der Sprint **geplant, abgeschlossen oder abgebroch
 
 ### 2.2 Sprint starten und Wieder öffnen
 
-Beide fehlen, solange im Projekt schon ein anderer Sprint aktiv ist. Pro Projekt kann nur ein Sprint aktiv sein. Pausiere oder schließe den aktiven Sprint zuerst ab.
+Beide bleiben sichtbar, sind aber ausgegraut, solange im Projekt schon ein anderer Sprint aktiv ist. Der Tooltip nennt den Grund. Pro Projekt kann nur ein Sprint aktiv sein. Pausiere oder schließe den aktiven Sprint zuerst ab. Siehe [`benutzerhandbuch-sprint-seite-keine-409-aktionen-2026-10-29.md`](benutzerhandbuch-sprint-seite-keine-409-aktionen-2026-10-29.md).
 
 ### 2.3 Live schalten
 
@@ -75,7 +75,8 @@ Ein 409 oder 403 bekommst du also nur noch, wenn sich der Zustand zwischen Anzei
 
 ## 5. Fehlerbehebung
 
-- **Ein Knopf fehlt, obwohl ich ihn erwarte.** Prüfe in dieser Reihenfolge: Hast du die Rolle „Planung“ bzw. „Ausführen“? Ist der Sprint im richtigen Status (siehe Abschnitt 2)? Läuft in diesem Projekt ein anderer Sprint? Hängt noch ein Auftrag an Freigabe oder läuft noch ein Auftrag?
+- **Ein Knopf fehlt, obwohl ich ihn erwarte.** Prüfe in dieser Reihenfolge: Hast du die Rolle „Planung“ bzw. „Ausführen“? Ist der Sprint im richtigen Status (siehe Abschnitt 2)? Hängt noch ein Auftrag an Freigabe oder läuft noch ein Auftrag?
+- **„Sprint starten“ oder „Wieder öffnen“ ist ausgegraut.** Ein anderer Sprint des Projekts ist aktiv. Siehe [`benutzerhandbuch-sprint-seite-keine-409-aktionen-2026-10-29.md`](benutzerhandbuch-sprint-seite-keine-409-aktionen-2026-10-29.md).
 - **„Live schalten“ ist ausgegraut.** Den Grund zeigt der Tooltip. Meist laufen noch Aufträge oder einer wartet auf Freigabe.
 - **Nach dem Abbrechen fehlt „Wieder planen“.** Der Knopf erscheint nur für abgebrochene Sprints. Hat der Sprint noch einen anderen Status, ist er nicht abgebrochen.
 - **Ein Knopf bleibt gesperrt.** Warte die Antwort des Servers ab. Nach einem Fehler gehen die Knöpfe von selbst wieder. Hilft das nicht, lade die Seite neu.

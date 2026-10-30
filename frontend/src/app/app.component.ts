@@ -29,7 +29,7 @@ import { TourService } from './features/tour/tour.service.js';
 import { WelcomeDialogComponent } from './features/tour/welcome-dialog.component.js';
 import type { DevelopmentItem } from './core/models.js';
 import { isFinished, sprintLabel } from './shared/labels.js';
-import { navCount } from './core/nav-counts.js';
+import { navCount, sprintHealthOf, sprintStateOf, type SprintState } from './core/nav-counts.js';
 import { PageSearchService } from './core/page-search.service.js';
 import { isOpenIdea } from './features/ideation/idea-options.js';
 import { nextOpenOrders } from './features/sprints/review-launch.js';
@@ -204,16 +204,13 @@ export class AppComponent {
     const indicator = event.currentTarget as HTMLElement;
     if (!indicator.contains(event.relatedTarget as Node | null)) this.sprintFocus.set(false);
   }
-  /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, rot gestoppt. */
+  /** Zustand des laufenden Sprints für die Menü-Bubble: grün läuft, orange Fehler, grau pausiert, rot gestoppt. */
   protected readonly sprintHealth = computed(() => {
     const data = this.store.data();
     const sprint = data.sprints.find((candidate) => candidate.status === 'active');
     if (!sprint) return null;
     const items = data.development.filter((item) => item.sprintId === sprint.id);
     const open = items.filter((item) => !isFinished(item.status)).length;
-    const worker = this.worker();
-    if (this.store.workerFailure() || !worker.online)
-      return { open, tone: 'stopped', text: 'Sprint gestoppt: Worker offline' };
     const failed = items.some(
       (item) =>
         item.status === 'blocked' ||
@@ -222,9 +219,8 @@ export class AppComponent {
             .filter((run) => run.developmentId === item.id)
             .sort((left, right) => right.startedAt.localeCompare(left.startedAt))[0]?.status === 'failed'),
     );
-    return failed
-      ? { open, tone: 'warn', text: 'Sprint läuft mit Fehlern' }
-      : { open, tone: 'ok', text: 'Sprint läuft' };
+    const workerDown = this.store.workerFailure() || !this.worker().online;
+    return { open, ...sprintHealthOf({ workerDown, paused: !!sprint.pausedAt, failed }) };
   });
 
   /** Aufträge des laufenden Sprints mit Handlungsbedarf: Problem und Lösung in wenigen Worten (Sprint-Hover). */
@@ -250,16 +246,16 @@ export class AppComponent {
     this.store.navigate('development', { focus: id });
   }
 
-  /** Zustand des Sprint-Chips im Handy-Header: fertig, gestoppt, Risiko, läuft oder wartet. */
-  protected readonly sprintState = computed<'done' | 'stopped' | 'warn' | 'running' | 'idle' | null>(() => {
+  /** Zustand des Sprint-Chips im Handy-Header: fertig, gestoppt, pausiert, Risiko, läuft oder wartet. */
+  protected readonly sprintState = computed<SprintState | null>(() => {
     const sprint = this.activeSprint();
     if (!sprint) return null;
-    if (sprint.finished) return 'done';
-    const tone = this.sprintHealth()?.tone;
-    if (tone === 'stopped') return 'stopped';
-    if (tone === 'warn') return 'warn';
-    const busy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
-    return sprint.running || busy ? 'running' : 'idle';
+    const agentBusy = this.worker().agents.some((agent) => agent.active && agent.sprintName === sprint.name);
+    return sprintStateOf({
+      finished: sprint.finished,
+      tone: this.sprintHealth()?.tone,
+      busy: sprint.running > 0 || agentBusy,
+    });
   });
 
   /** Farbe der Menü-Bubble: Aktionen warten auf dich, laufende Agents sind grün. */

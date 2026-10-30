@@ -5,8 +5,10 @@ import { OrderBriefComponent } from '../../shared/order-brief.component.js';
 import { AgentWorkflowComponent } from '../../shared/agent-workflow.component.js';
 import { Component, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { AuthService } from '../../core/auth.service.js';
 import type { AcceptanceCheck, DevelopmentItem } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
+import { AcceptanceTicks } from '../../shared/acceptance-ticks.js';
 import { visibleInterval } from '../../core/visible-interval.js';
 import type { FormValues } from '../../shared/forms.js';
 import { CATEGORIES, DEVELOPMENT_STATUSES } from '../../shared/labels.js';
@@ -52,6 +54,9 @@ export class OrderDetailComponent {
   protected readonly store = inject(ProjectStore);
   protected readonly data = this.store.data;
   protected readonly busy = this.store.busy;
+  protected readonly auth = inject(AuthService);
+  /** Häkchen der offenen Abnahmepunkte: gesetzt nur während des Speicherns, nach Fehler wieder leer. */
+  protected readonly ticks = new AcceptanceTicks();
   protected readonly categories = CATEGORIES;
   protected readonly isAssignableSprintStatus = isAssignableSprintStatus;
   protected readonly manualAgent: Record<string, string> = {};
@@ -172,8 +177,10 @@ export class OrderDetailComponent {
     return check.status === 'met' ? '✓' : check.status === 'unmet' ? '✕' : check.status === 'manual' ? '👤' : '○';
   }
 
-  protected checkPoint(item: DevelopmentItem, check: AcceptanceCheck, checked: boolean): Promise<void> {
-    return this.orders.checkPoint(item, check, checked);
+  protected tickPoint(event: Event, item: DevelopmentItem, check: AcceptanceCheck): Promise<void> {
+    return this.ticks.tick(event.target as HTMLInputElement, item.id, check, () =>
+      this.orders.checkPoint(item, check, true),
+    );
   }
 
   protected verifyPoints(item: DevelopmentItem, check?: AcceptanceCheck): Promise<void> {

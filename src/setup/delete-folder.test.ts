@@ -21,7 +21,8 @@ test('deletes a project folder but refuses shallow paths, symlinks and AIdeation
   await assert.rejects(deleteProjectFolder({ path: '/Users' }), /Projektordner|zu weit oben/);
   await assert.rejects(
     deleteProjectFolder({ path: join(import.meta.dirname, '..', '..') }),
-    /AIdeation-Ordner|Projektordner/,
+    // Im Arbeitscontainer liegt AIdeation unter /workspace – dort greift schon die Sperre für flache Pfade.
+    /AIdeation-Ordner|Projektordner|zu weit oben/,
   );
   assert.deepEqual(await deleteProjectFolder({ path: project }), { deleted: true, path: project });
   assert.equal(existsSync(project), false);
