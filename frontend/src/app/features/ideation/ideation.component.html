@@ -116,7 +116,7 @@
       [columns]="ideaColumns"
       [rowId]="ideaId"
       [initialFilters]="ideaFilters()"
-      [initialSort]="[{ id: 'createdAt', desc: true }]"
+      [initialSort]="openIdeasSort()"
       [(expanded)]="expandedIdea"
       [showFilterChips]="false"
       [selectable]="promotableRow"
@@ -130,6 +130,13 @@
       <ng-template appDataCell="status" let-idea>
         <span class="status" [ngClass]="idea.status | statusClass">{{ idea.status | statusLabel }}</span>
       </ng-template>
+      <ng-template appDataCell="benefit" let-idea>
+        <ng-container *ngTemplateOutlet="scoreMeter; context: { $implicit: idea.benefit, kind: 'benefit' }" />
+      </ng-template>
+      <ng-template appDataCell="cost" let-idea>
+        <ng-container *ngTemplateOutlet="scoreMeter; context: { $implicit: idea.cost, kind: 'cost' }" />
+      </ng-template>
+      <ng-template appDataCell="value" let-idea>{{ ideaValueText(idea) }}</ng-template>
       <ng-template appDataActions let-idea>
         @if (editable(idea)) {
           <button
@@ -165,6 +172,17 @@
       }
       <app-github-link [ref]="idea.externalRef" />
     </div>
+  </ng-template>
+  <!-- Nutzen/Kosten 0–10 als Balken mit Zahl, aufgebaut wie die Meter im Ideen-Dialog. -->
+  <ng-template #scoreMeter let-score let-kind="kind">
+    @if (score != null) {
+      <span class="meter table-meter" [ngClass]="kind">
+        <span class="meter-bar"><i [style.width.%]="score * 10"></i></span>
+        <span class="meter-value">{{ score }}</span>
+      </span>
+    } @else {
+      –
+    }
   </ng-template>
   <ng-template #ideaGroup let-group>
     <section class="panel">
