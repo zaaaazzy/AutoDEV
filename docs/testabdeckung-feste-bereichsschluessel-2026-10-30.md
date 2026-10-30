@@ -54,6 +54,7 @@ Der Entwickler hat Tests ergänzt oder angepasst für Zuordnung, Verwerfen, Voll
 
 - `e2e/demo/seed.ts` wurde nicht geändert und braucht es nicht: Die Demo-Daten legen nur die Bereiche `backend` und `frontend` an (Zeilen 1197–1200), beide feste Schlüssel, der CHECK-Constraint lehnt sie nicht ab.
 - **Testschritt fehlgeschlagen, aber aus Umgebungsgründen:** Der Tester konnte nichts ausführen. `npm run typecheck` scheiterte mit `tsc: not found` (Sandbox-Image „aideation-agent“, Exit-Code 127), `npx tsx --test …` mit `EACCES` auf dem npm-Cache (`/home/agent/.npm`). Es gibt also weder einen grünen noch einen roten Testlauf des Codes; die Abnahme „`npm test` vollständig grün“ ist offen. Tests nur über `npm test` bzw. `npm run …` starten, nicht über `npx tsx`.
+- **Erneuter Versuch (30.10.2026 12:23):** Der Hinweis lautet, das Image „aideation-agent“ zu korrigieren, neu zu bauen und danach den `node_modules`-Volume des Projekts zu befüllen. Das ist eine Umgebungsaufgabe, keine Codeänderung; im Repository wurde dafür nichts geändert. Der Tester-Schritt davor scheiterte weiter an `tsc: not found` und `EACCES` auf `/home/agent/.npm`.
 - Die Migration wurde nach der Liste der Dateien nur im Test (`migrations.test.ts`) geprüft, nicht gegen eine echte Datenbank mit Altbestand.
 
 **Worauf zu achten ist**
