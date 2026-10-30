@@ -265,6 +265,7 @@ export async function invokeAgent(
                     cwd: options.cwd,
                     runId: ctx.runId,
                     docker: execute,
+                    mode,
                   })
                 : agentExecute,
           }
@@ -272,16 +273,19 @@ export async function invokeAgent(
     });
   const configured = configuredCommand(ctx, agent, routed);
   const permissions = await loadProjectPermissions(pool, item.projectSlug);
-  // Docker-Sandbox (DEV_LOG_AGENT_SANDBOX, Standard docker): Jeder Agent-Schritt läuft in einem eigenen Container
+  // Sandbox (DEV_LOG_AGENT_SANDBOX, Standard workbench): Jeder Agent-Schritt läuft im Arbeitscontainer des Projekts
+  // bzw. (docker) in einem eigenen Container
   // (Label aideation.run), der Worktree heisst dort /workspace – für lesende Rollen nur :ro –, und der Wächter ist der
   // im Image. Fehlen Docker oder Image, scheitert der Schritt – kein Rückfall auf den Host.
-  const sandboxed = usesSandbox(sandboxMode(await projectSandbox(pool, item.projectSlug)));
+  const mode = sandboxMode(await projectSandbox(pool, item.projectSlug));
+  const sandboxed = usesSandbox(mode);
   const agentExecute = sandboxed
     ? sandboxExecutor(options.cwd, {
         runId: ctx.runId,
         project: item.projectSlug,
         readOnly: readOnlyWorkspace(agent.role),
         docker: execute,
+        mode,
       })
     : execute;
   const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;

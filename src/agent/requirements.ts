@@ -196,7 +196,8 @@ export async function runAuthorAgent(
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
   // Docker-Sandbox (Standard): die CLI läuft in einem eigenen Container; lesende Läufe sehen den Ordner nur als :ro.
   // Beim lokalen Modell laufen nur dessen Shell-Befehle im Container, die Datei-Werkzeuge im Worker (wie im Runner).
-  const inSandbox = usesSandbox(sandboxMode(await projectSandbox(pool, options.project)));
+  const mode = sandboxMode(await projectSandbox(pool, options.project));
+  const inSandbox = usesSandbox(mode);
   const sandboxed = Boolean(configured) && inSandbox;
   const agentExecute = inSandbox
     ? sandboxExecutor(options.cwd, {
@@ -204,6 +205,7 @@ export async function runAuthorAgent(
         project: options.project,
         readOnly: readOnly || readOnlyWorkspace(role),
         docker: execute,
+        mode,
       })
     : execute;
   const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;

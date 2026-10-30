@@ -8,6 +8,7 @@ import { guardHookCommand, withAgentPermissions } from '../agent/tool-permission
 import {
   containerDirectory,
   credentialProblem,
+  DOCKER_HUB_HOSTS,
   DEPENDENCY_STAMP,
   dependencyCommand,
   dependencyStamp,
@@ -180,7 +181,7 @@ test('Sandbox: lesende Rollen binden Workspace und node_modules nur mit :ro ein'
   }
 });
 
-test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm und Ollama', () => {
+test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm, Ollama und Docker Hub', () => {
   const command = egressRunArgs('darwin', { DEV_LOG_AGENT_SANDBOX_EGRESS: 'pypi.org:443, 10.0.0.1:5432x, ;rm' });
   const joined = command.join(' ');
   assert.match(joined, /--cap-drop ALL/);
@@ -195,7 +196,14 @@ test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic,
     'api.anthropic.com:443',
     'registry.npmjs.org:443',
     'host.docker.internal:11434',
+    ...DOCKER_HUB_HOSTS,
     'pypi.org:443',
+  ]);
+  assert.deepEqual(DOCKER_HUB_HOSTS, [
+    'registry-1.docker.io:443',
+    'auth.docker.io:443',
+    'production.cloudflare.docker.com:443',
+    'production.cloudfront.docker.com:443',
   ]);
   assert.ok(!egressAllowList({}).includes('5432') && !egressAllowList({}).includes('5433'), 'keine Datenbank');
 });
@@ -247,12 +255,15 @@ test('Sandbox: Arbeitsordner innerhalb des Worktrees wird auf /workspace abgebil
   assert.equal(modulesVolume('Mein Projekt/../x'), 'aideation-node-modules-mein-projekt-..-x');
 });
 
-test('Sandbox: Schalter global und je Projekt, Standard docker, „off“ nur als Notfallmodus mit Warnung', () => {
-  assert.equal(sandboxMode(null, {}), 'docker', 'Standard: Sandbox an');
+test('Sandbox: Schalter global und je Projekt, Standard Arbeitscontainer, „off“ nur als Notfallmodus mit Warnung', () => {
+  assert.equal(sandboxMode(null, {}), 'workbench', 'Standard: Arbeitscontainer');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
+  assert.equal(sandboxMode('workbench', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'workbench');
+  assert.equal(usesSandbox('workbench'), true);
   assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'off' }), 'off');
   assert.equal(sandboxMode('off', { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'off', 'Projekt geht vor');
   assert.equal(sandboxMode('docker', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'docker');
-  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'docker', 'unbekannter Wert: Standard');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'workbench', 'unbekannter Wert: Standard');
   assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child' }), 'off', 'Unit-Tests: Attrappen statt Docker');
   assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child', DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
   assert.equal(usesSandbox('docker'), true);

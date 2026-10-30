@@ -434,6 +434,16 @@ export const MIGRATIONS: readonly Migration[] = [
     name: 'sprints-projekt-index',
     sql: 'CREATE INDEX IF NOT EXISTS sprints_project_idx ON sprints (project_slug, status, created_at);',
   },
+  // Arbeitscontainer je Projekt (workbench.ts) als dritter Wert des Sandbox-Schalters.
+  {
+    version: 21,
+    name: 'agent-sandbox-arbeitscontainer',
+    sql: `
+      ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_agent_sandbox_check;
+      ALTER TABLE projects ADD CONSTRAINT projects_agent_sandbox_check
+        CHECK (agent_sandbox IN ('off', 'docker', 'workbench'));
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;
