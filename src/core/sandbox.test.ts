@@ -443,9 +443,9 @@ test('Sandbox: Limit-Abbruch im Container wird als Pause bis zum Reset erkannt u
   assert.equal(result.exitCode, 1);
   assert.match(result.output, /pausiert bis zum Reset/);
   // Der Runner (runner-steps) pausiert damit statt einen Fehlversuch zu zählen.
-  const reset = usageLimitReset(result.output, new Date('2026-10-29T12:00:00'));
+  const reset = usageLimitReset(result.output, new Date('2026-10-29T12:00:00Z'));
   assert.ok(reset, 'Limit trotz angehängtem Hinweis erkannt');
-  assert.equal(reset.getHours(), 20);
+  assert.equal(reset.toISOString(), '2026-10-29T19:53:00.000Z', '20:50 Uhr Zürich plus Reserve');
   assert.deepEqual(calls.at(-1)?.command, ['docker', 'rm', '-f', 'aideation-r-limit'], 'Container entfernt');
   assert.equal(sandboxBadge('limit'), null, 'kein Sandbox-Problem im Badge');
 });
@@ -470,6 +470,13 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   );
   assert.equal(await removeLeftoverContainers(none.docker, '/'), 0, 'ohne Docker: nichts zu tun');
   assert.equal(none.calls.length, 1);
+});
+
+test('Sandbox: npm im Container nutzt einen Cache unter /tmp, nicht ~/.npm aus dem Image', () => {
+  const command = args();
+  const index = command.indexOf('npm_config_cache=/tmp/npm-cache');
+  assert.ok(index > 0);
+  assert.equal(command[index - 1], '-e');
 });
 
 /** Worktree mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */

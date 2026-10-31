@@ -28,6 +28,7 @@ import { ideaPhase, OPEN_IDEA_STATUSES, type IdeaPhase } from '../ideation/idea-
 import { agentWorkload, newestSprints, opensActions, ORDER_STATUSES, ORDER_TONES } from './order-shares.js';
 import { GitAlertComponent } from '../../shared/git-alert.component.js';
 import { WaitStatusComponent } from '../runs/wait-status.component.js';
+import { ProviderLimitAlertComponent } from './provider-limit-alert.component.js';
 
 const RECENT_RUNS = 20;
 /** Farbtöne der Agents in der Verteilung; Rot und Orange bleiben Fehlern und Warnungen vorbehalten. */
@@ -42,6 +43,7 @@ const WORKLOAD_TONES = ['active', 'plain', 'ok', 'info', 'wait'];
   standalone: true,
   imports: [
     GitAlertComponent,
+    ProviderLimitAlertComponent,
     WaitStatusComponent,
     NgClass,
     AgentListComponent,

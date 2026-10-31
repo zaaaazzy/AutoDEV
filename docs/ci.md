@@ -51,3 +51,7 @@ Im PR-Modus (`issues+pr`) führt der Worker die Prüfschritte aus `.github/workf
 - Neue Test-Dateien müssen typsicher sein, sonst schlägt `typecheck` in der CI fehl.
 - **Actions noch per Tag statt SHA gepinnt** (`actions/checkout@v4`, `actions/setup-node@v4`, `actions/upload-artifact@v4`). Die Commit-SHAs ließen sich in der Agent-Umgebung nicht ermitteln (kein Netzzugriff), geraten wird nicht. Nachtragen mit `git ls-remote --tags https://github.com/actions/<name>`, dann `uses: actions/<name>@<sha> # v4.x.y`.
 - Die Standard-Testbefehle des Runners (`npm run build` + `npm test`) gelten für alle Projekte und bleiben unverändert, denn andere Projekte haben kein Skript `test:unit`. Für AIdeation selbst in den Projekteinstellungen unter „Testbefehle“ `npm run build` und `npm run test:unit` eintragen, sonst baut der Lauf die Oberfläche zweimal.
+
+## Angular-Builder und Node-Version
+
+Die Oberfläche baut mit `@angular/build:application` und läuft beim Entwickeln mit `@angular/build:dev-server` (vorher `@angular-devkit/build-angular`). `package.json` verlangt Node ≥ 22.12 (`engines`), die Dockerfiles nutzen `node:22.22.3`. `.github/dependabot.yml` hält `npm`, `docker` und `github-actions` wöchentlich aktuell. Offen: `@angular/cdk` auf ^20.3 anheben und die Lockfile mit `npm install` neu erzeugen, siehe `angular-builder-umstellen-und-versionen-angleichen-2026-10-29.md`.
