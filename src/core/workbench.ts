@@ -41,9 +41,10 @@ import { defined } from './defined.js';
  *
  * - workbench: Image aideation-agent, der Worktree als /workspace, node_modules als Volume des Projekts, ohne
  *   Capabilities, im internen Agent-Netzwerk (hinaus nur über den Egress-Proxy).
- * - docker: eigener Docker-Dienst (docker:dind, privilegiert, aber nur in seinem eigenen Container) im
- *   Netzwerk-Namensraum der workbench, also unter 127.0.0.1:2375. Images, Container und Volumes der Agents liegen in
- *   seinem Volume, nie im Docker des Hosts. Veröffentlichte Ports sind in der workbench unter localhost erreichbar.
+ * - docker: eigener Docker-Dienst (docker:dind-rootless: dockerd als Benutzer ohne Rechte in einem eigenen
+ *   Benutzer-Namensraum, nicht privilegiert) im Netzwerk-Namensraum der workbench, also unter 127.0.0.1:2375. Images,
+ *   Container und Volumes der Agents liegen in seinem Volume, nie im Docker des Hosts. Veröffentlichte Ports sind in
+ *   der workbench unter localhost erreichbar. Innere Container können nicht privilegiert laufen (kein sysfs-Mount).
  * - Dienste aus .aideation/workbench.json des Projekts (z. B. Postgres für die Tests), ebenfalls unter localhost.
  *
  * Der Worker steuert alles von aussen (docker compose, docker exec). Git-Push, Merge und Live schalten bleiben beim
@@ -52,10 +53,14 @@ import { defined } from './defined.js';
 
 export const WORKBENCH_LABEL = 'aideation.workbench';
 const WORKBENCH_HASH_LABEL = 'aideation.workbench.hash';
-/** Docker-Dienst im Stapel; Version wie das übrige Docker-Setup. */
-export const WORKBENCH_DOCKER_IMAGE = 'docker:29-dind';
+/** Docker-Dienst im Stapel (rootless, Benutzer „rootless“ = uid 1000); Version wie das übrige Docker-Setup. */
+export const WORKBENCH_DOCKER_IMAGE = 'docker:29-dind-rootless';
+const WORKBENCH_DOCKER_PORT = 2375;
 /** Docker im Stapel, aus Sicht der workbench (gemeinsamer Netzwerk-Namensraum). */
-export const WORKBENCH_DOCKER_HOST = 'tcp://127.0.0.1:2375';
+export const WORKBENCH_DOCKER_HOST = `tcp://127.0.0.1:${WORKBENCH_DOCKER_PORT}`;
+/** Socket und Datenordner des rootless dockerd (XDG_RUNTIME_DIR bzw. HOME des Benutzers rootless im Image). */
+const WORKBENCH_DOCKER_SOCKET = 'unix:///run/user/1000/docker.sock';
+const WORKBENCH_DOCKER_DATA = '/home/rootless/.local/share/docker';
 /** Datei im Projekt (Stand des Live-Ordners, nicht des Agent-Worktrees) mit zusätzlichen Diensten. */
 export const WORKBENCH_FILE = '.aideation/workbench.json';
 const COMPOSE_TIMEOUT_MS = 10 * 60_000;
@@ -209,10 +214,17 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
   const user = sandboxUser(options);
   const workspace = `${hostMount(worktree, platform)}:${SANDBOX_WORKDIR}`;
   const modules = modulesVolume(options.project);
-  const dockerData = `${name}_docker`;
+  // Eigener Name: das Volume des früheren privilegierten dind (agents_<projekt>_docker) gehört root und wäre für den
+  // Benutzer rootless nicht beschreibbar. Ein leeres Volume übernimmt beim ersten Start Eigentümer und Inhalt des Images.
+  const dockerData = `${name}_docker_rootless`;
   const proxy = { HTTPS_PROXY: EGRESS_URL, HTTP_PROXY: EGRESS_URL, https_proxy: EGRESS_URL, http_proxy: EGRESS_URL };
   const noProxy = { NO_PROXY: SANDBOX_NO_PROXY, no_proxy: SANDBOX_NO_PROXY };
   const shared = { network_mode: 'service:workbench', depends_on: ['workbench'], restart: 'unless-stopped' };
+  const limits = {
+    cpus: Number(options.cpus ?? (process.env.DEV_LOG_AGENT_SANDBOX_CPUS?.trim() || '4')),
+    mem_limit: options.memory ?? (process.env.DEV_LOG_AGENT_SANDBOX_MEMORY?.trim() || '6g'),
+    pids_limit: 4096,
+  };
   const services: Record<string, unknown> = {
     workbench: {
       image: options.image ?? SANDBOX_IMAGE,
@@ -221,9 +233,7 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
       ...(user ? { user } : {}),
       cap_drop: ['ALL'],
       security_opt: ['no-new-privileges:true'],
-      cpus: Number(options.cpus ?? (process.env.DEV_LOG_AGENT_SANDBOX_CPUS?.trim() || '4')),
-      mem_limit: options.memory ?? (process.env.DEV_LOG_AGENT_SANDBOX_MEMORY?.trim() || '6g'),
-      pids_limit: 4096,
+      ...limits,
       restart: 'unless-stopped',
       networks: ['agents'],
       volumes: [workspace, `${modules}:${SANDBOX_WORKDIR}/node_modules`],
@@ -244,16 +254,44 @@ export function workbenchCompose(worktree: string, options: WorkbenchOptions): R
     docker: {
       image: WORKBENCH_DOCKER_IMAGE,
       container_name: workbenchContainer(options.project, 'docker'),
-      privileged: true,
       ...shared,
-      // Ausdrücklich „dockerd“: sonst hängt das Entrypoint-Skript tcp://0.0.0.0:2375 an – erreichbar aus dem ganzen
-      // Agent-Netzwerk, also aus den Stapeln anderer Projekte. Ohne TLS nur auf 127.0.0.1 (gemeinsamer Namensraum).
-      command: ['dockerd', '--host=unix:///var/run/docker.sock', '--host=tcp://127.0.0.1:2375', '--tls=false'],
+      // Rootless statt privilegiert: dockerd läuft als Benutzer rootless in einem eigenen Benutzer-Namensraum. Dafür
+      // reichen SETUID/SETGID (newuidmap/newgidmap sind setuid, darum kein no-new-privileges), /dev/net/tun für das
+      // Netz von rootlesskit (slirp4netns) und das Aufheben von seccomp, AppArmor und den maskierten /proc- und
+      // /sys-Pfaden (sonst lässt sich im neuen Namensraum kein proc einhängen). Ohne privileged sieht der Dienst keine
+      // Geräte des Rechners: Block-Geräte einhängen oder den Docker des Hosts erreichen ist nicht mehr möglich.
+      cap_drop: ['ALL'],
+      cap_add: ['SETUID', 'SETGID'],
+      devices: ['/dev/net/tun:/dev/net/tun'],
+      security_opt: ['seccomp=unconfined', 'apparmor=unconfined', 'systempaths=unconfined'],
+      // Ohne cgroups im rootless Docker gelten innere Grenzen nicht; die Grenzen dieses Containers fangen das auf.
+      ...limits,
+      // Ausdrücklich „dockerd“: sonst hängt das Entrypoint-Skript tcp://0.0.0.0:2375 an und veröffentlicht den Port im
+      // ganzen Agent-Netzwerk, also für die Stapel anderer Projekte. dockerd lauscht im Netz-Namensraum von rootlesskit
+      // nur auf 127.0.0.1 (innere Container erreichen die API so nicht); rootlesskit reicht genau 127.0.0.1:2375 der
+      // workbench dorthin weiter. Ohne TLS (gemeinsamer Namensraum).
+      command: [
+        'dockerd',
+        `--host=${WORKBENCH_DOCKER_SOCKET}`,
+        `--host=tcp://127.0.0.1:${WORKBENCH_DOCKER_PORT}`,
+        '--tls=false',
+      ],
       // up --wait wartet so, bis Docker antwortet – der erste Befehl darf es schon brauchen.
-      healthcheck: { test: ['CMD', 'docker', 'info'], interval: '2s', timeout: '5s', retries: 60, start_period: '5s' },
-      environment: { DOCKER_TLS_CERTDIR: '', ...proxy, ...noProxy },
+      healthcheck: {
+        test: ['CMD', 'docker', '-H', WORKBENCH_DOCKER_HOST, 'info'],
+        interval: '2s',
+        timeout: '5s',
+        retries: 60,
+        start_period: '5s',
+      },
+      environment: {
+        DOCKER_TLS_CERTDIR: '',
+        DOCKERD_ROOTLESS_ROOTLESSKIT_FLAGS: `-p 127.0.0.1:${WORKBENCH_DOCKER_PORT}:${WORKBENCH_DOCKER_PORT}/tcp`,
+        ...proxy,
+        ...noProxy,
+      },
       // Gleicher Pfad wie in der workbench: Bind-Mounts aus Compose-Dateien der Agents (./src:/app) gelten hier.
-      volumes: [workspace, `${dockerData}:/var/lib/docker`],
+      volumes: [workspace, `${dockerData}:${WORKBENCH_DOCKER_DATA}`],
       labels: { [WORKBENCH_LABEL]: options.project },
     },
   };

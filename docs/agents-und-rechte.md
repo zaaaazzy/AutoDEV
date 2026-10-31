@@ -242,7 +242,7 @@ flowchart TB
   subgraph WB["Arbeitscontainer je Projekt: agents_slug"]
     direction TB
     WB1["workbench: schreibende Rollen, Tester,<br/>Gate, test:full (docker exec, setsid)"]:::ok
-    WB2["docker:29-dind · 127.0.0.1:2375"]
+    WB2["docker:29-dind-rootless · 127.0.0.1:2375"]
     WB3["Testdienste aus .aideation/workbench.json"]
   end
   subgraph DK["kurzlebiger Container je Schritt"]
@@ -259,7 +259,7 @@ flowchart TB
   classDef wait fill:#fdf1e0,stroke:#e08a1e,color:#5c3a0a
 ```
 
-**Arbeitscontainer (`DEV_LOG_AGENT_SANDBOX=workbench`, Standard):** Schreibende Rollen, Tester und alle Projekttests laufen per `docker exec` im dauerhaften Arbeitscontainer des Projekts (`src/core/workbench.ts`, Einrichtung in [Betrieb](betrieb.md#arbeitscontainer-für-agents)). Er hat ein eigenes Docker (`docker:29-dind`, `DOCKER_HOST=tcp://127.0.0.1:2375`) und die Testdienste aus `.aideation/workbench.json` des Live-Ordners, alles unter `localhost`. Ein Abbruch beendet die Prozessgruppe des Laufs im Container (`setsid -w`). Lesende Rollen und die Schätzung bleiben kurzlebige Container mit `:ro` (unten). Die Regeln des Wächters gelten im Arbeitscontainer unverändert; Dienste starten Agents weiterhin über `services.*`.
+**Arbeitscontainer (`DEV_LOG_AGENT_SANDBOX=workbench`, Standard):** Schreibende Rollen, Tester und alle Projekttests laufen per `docker exec` im dauerhaften Arbeitscontainer des Projekts (`src/core/workbench.ts`, Einrichtung in [Betrieb](betrieb.md#arbeitscontainer-für-agents)). Er hat ein eigenes Docker (`docker:29-dind-rootless`, nicht privilegiert, `DOCKER_HOST=tcp://127.0.0.1:2375`) und die Testdienste aus `.aideation/workbench.json` des Live-Ordners, alles unter `localhost`. Ein Abbruch beendet die Prozessgruppe des Laufs im Container (`setsid -w`). Lesende Rollen und die Schätzung bleiben kurzlebige Container mit `:ro` (unten). Die Regeln des Wächters gelten im Arbeitscontainer unverändert; Dienste starten Agents weiterhin über `services.*`.
 
 **Docker-Sandbox (`DEV_LOG_AGENT_SANDBOX=docker`, kurzlebige Container, seit Phase 3 für alle Rollen):** Der Schalter steht global in `worker.env` oder je Projekt in den Einstellungen. Jeder Agent-Schritt läuft in einem eigenen kurzlebigen Container aus dem Image `aideation-agent` (`deploy/agent/Dockerfile`). Das gilt für Autor, Entwickler, Tester, Reviewer, Dokumentierer, (Benutzer-)Handbuch-Autor, Bug-Wächter, den Assistenten (Chat), Routinen, Visionär, Problemanalyse und `pre_sprint`. Auch die System-Agents laufen dort: die Schätzung im leeren Ordner `:ro`, die Analyse und die Läufe mit `readOnlyCommand`. Der Host führt damit keinen Code aus, den Agents geschrieben haben. `off` ist der ausdrückliche Notfallmodus. Dann laufen Agents und Projekttests wieder auf dem Host, und das Worker-Badge zeigt eine Warnung (`sandboxOffWarning`). Unter dem Node-Test-Runner (`NODE_TEST_CONTEXT`) gilt ohne ausdrückliche Angabe `off`, weil Unit-Tests mit Attrappen arbeiten. `runInSandbox` in `src/core/sandbox.ts` baut den Aufruf:
 
