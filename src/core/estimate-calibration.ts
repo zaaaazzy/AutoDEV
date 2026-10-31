@@ -122,6 +122,61 @@ export function calibratedTokens(
   return tokens === null ? null : Math.round(tokens * calibration[sourceOf(source)].tokens);
 }
 
+/** Gemessener Verbrauch bzw. kalibrierte Schätzung eines Auftrags (Agent-Stunden und Tokens). */
+export interface Effort {
+  hours: number | null;
+  tokens: number | null;
+}
+
+/** Treffer: Ist liegt bei Stunden und Tokens zwischen dem 0,5- und dem 2,0-Fachen der kalibrierten Schätzung. */
+export const HIT_RANGE = { min: 0.5, max: 2 } as const;
+
+/**
+ * Trefferprüfung eines erledigten Auftrags; null = nicht gemessen (Stunden- oder Tokenschätzung fehlt bzw. ist 0,
+ * oder es gibt keinen Verbrauch). Grenzen zählen als Treffer.
+ */
+export function estimateHit(actual: Effort, estimate: Effort): boolean | null {
+  const { hours: estHours, tokens: estTokens } = estimate;
+  if (!estHours || !estTokens || estHours <= 0 || estTokens <= 0) return null;
+  const hours = actual.hours ?? 0;
+  const tokens = actual.tokens ?? 0;
+  if (hours <= 0 && tokens <= 0) return null;
+  const inRange = (ratio: number) => ratio >= HIT_RANGE.min && ratio <= HIT_RANGE.max;
+  return inRange(hours / estHours) && inRange(tokens / estTokens);
+}
+
+export interface HitRate {
+  hits: number;
+  measured: number;
+  /** Treffer in Prozent; null ohne gemessene Aufträge (Anzeige „–“ statt 0 %). */
+  percent: number | null;
+}
+
+export function hitRate(results: (boolean | null)[]): HitRate {
+  const measured = results.filter((result) => result !== null);
+  const hits = measured.filter(Boolean).length;
+  const percent = measured.length ? Math.round((hits / measured.length) * 100) : null;
+  return { hits, measured: measured.length, percent };
+}
+
+/**
+ * Überschreitet der Ist-Wert eines laufenden Auftrags das Dreifache der kalibrierten Schätzung (Stunden oder Tokens)?
+ * Gleiche Schwelle wie die Laufwarnung (`exceedsEstimate`), damit Warnung und Stopp nie auseinanderlaufen. Genau das
+ * Dreifache läuft weiter. Ohne Schätzung (null bzw. 0) wird der jeweilige Wert nicht geprüft.
+ */
+export function estimateOverrun(actual: Effort, estimate: Effort): { hours: boolean; tokens: boolean } | null {
+  const hours = exceedsEstimate(actual.hours ?? 0, estimate.hours);
+  const tokens = exceedsEstimate(actual.tokens ?? 0, estimate.tokens);
+  return hours || tokens ? { hours, tokens } : null;
+}
+
+/** Faktoren je Herkunft für die Statistik (Anzeige von Faktor und Anzahl der Messwerte). */
+export function calibrationSummary(
+  calibration: Calibration,
+): ({ source: EstimateSource; label: string } & CalibrationFactor)[] {
+  return ESTIMATE_SOURCES.map((source) => ({ source, label: ESTIMATE_SOURCE_LABELS[source], ...calibration[source] }));
+}
+
 /**
  * Gemessene Ist-Werte erledigter Aufträge: je Auftrag Summe von Laufzeit und Tokens aller Agent-Schritte, davon die
  * jüngsten `CALIBRATION_WINDOW` je Projekt und Herkunft. Ergebnis: Median von Ist ÷ Schätzung für das Projekt

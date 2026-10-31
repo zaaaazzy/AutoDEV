@@ -7,6 +7,7 @@ import {
   SPRINT_POOL_DEVELOPMENT_STATUSES,
   SPRINT_REMOVABLE_DEVELOPMENT_STATUSES,
 } from '../core/development-transitions.js';
+import { OVERRUN_TODO_PREFIX } from '../core/estimate-overrun.js';
 import { DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
 import { buildUpdate } from '../core/validation.js';
 import { isUniqueViolation, withTransaction } from './transaction.js';
@@ -239,12 +240,17 @@ export async function retryOrder(
   comment: string | null,
   sprintId: string | null,
 ): Promise<DevelopmentRow | undefined> {
+  // Freigabe nach „Schätzung überschritten“ ist kein Fehlversuch: kein Wiederholungszähler (Modell-Routing, Planung).
+  // budget_since = NOW(): Ab hier zählt der Verbrauch neu gegen die (ggf. angepasste) Schätzung.
+  const countsAsRetry =
+    `d.status = '${DEVELOPMENT_STATUS.blocked}'` +
+    ` AND NOT starts_with(COALESCE(d.action_todo, ''), '${OVERRUN_TODO_PREFIX}')`;
   const result = await pool.query<DevelopmentRow>(
     `UPDATE development_items d SET status = '${DEVELOPMENT_STATUS.planned}', auto_run = ${retryAutoRunSql('$3::uuid')},
             failure = NULL, action_todo = NULL, conflict_retries = 0,
             description = CASE WHEN $2::text IS NULL THEN d.description
                                ELSE COALESCE(d.description, '') || E'\n\n## Hinweis zum erneuten Versuch (' || to_char(NOW(), 'DD.MM.YYYY HH24:MI') || E')\n' || $2::text END,
-            retry_count = retry_count + CASE WHEN d.status = '${DEVELOPMENT_STATUS.blocked}' THEN 1 ELSE 0 END,
+            retry_count = retry_count + CASE WHEN ${countsAsRetry} THEN 1 ELSE 0 END,
             analysis_status = CASE WHEN analysis_status IN ('requested', 'running') THEN analysis_status ELSE NULL END,
             sprint_id = ${retrySprintSql('$3::uuid')},
             removed_from_sprint = NULL, removed_from_sprint_at = NULL, budget_since = NOW(), updated_at = NOW()

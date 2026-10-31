@@ -31,6 +31,12 @@ export function stepClassOf(steps: number): StepClass {
 /** Ein laufender Auftrag gilt als überschritten, wenn er mehr als das Dreifache der kalibrierten Schätzung verbraucht. */
 export const OVERRUN_FACTOR = 3;
 
+/**
+ * Beginn der Aktion „Schätzung überschritten“ (Stopp vor dem nächsten Agent-Schritt). Hier statt im Runner, weil auch
+ * die Freigabe (`retryOrder`) daran erkennt, dass „Erneut versuchen“ kein Fehlversuch ist.
+ */
+export const OVERRUN_TODO_PREFIX = 'Schätzung überschritten: ';
+
 /** Ist ÷ kalibrierte Schätzung; null ohne brauchbare Werte (Schätzung fehlt, ist 0 oder ungültig). */
 function rawRatio(actual: number | null | undefined, calibrated: number | null | undefined): number | null {
   if (actual === null || actual === undefined || !Number.isFinite(actual) || actual < 0) return null;

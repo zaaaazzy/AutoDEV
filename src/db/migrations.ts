@@ -591,6 +591,16 @@ export const MIGRATIONS: readonly Migration[] = [
       ON CONFLICT (key) DO NOTHING;
     `,
   },
+  {
+    version: 27,
+    name: 'ideen-art',
+    // Art der Idee (wie development_items.kind, ohne 'express'): die Schätzung vergleicht nur Aufträge gleicher Art.
+    // Nullable, Standard 'feature'; NULL gilt im Code ebenfalls als 'feature'.
+    sql: `
+      ALTER TABLE ideation_items ADD COLUMN IF NOT EXISTS kind TEXT DEFAULT 'feature'
+        CHECK (kind IN ('feature', 'bug'));
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

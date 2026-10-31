@@ -137,6 +137,8 @@ export interface Idea extends Estimate {
   /** Herkunft: von Hand erfasst oder vom Visionär vorgeschlagen (weitere Quellen folgen). */
   source?: IdeaSource;
   rejectionReason?: string | null;
+  /** Art (Vergleichsgruppe der Schätzung); ohne Angabe `feature`. */
+  kind?: 'feature' | 'bug';
   /** Herkunft aus GitHub: owner/repo#123. */
   externalRef?: string | null;
 }
@@ -524,15 +526,27 @@ export interface ProjectStats {
     burndown: { day: string; remaining: number }[];
   } | null;
   velocity: {
+    id?: string;
     name: string;
     status: string;
     total: number;
     done: number;
     hours: number;
+    /** Trefferquote der Schätzung: Treffer von gemessenen erledigten Aufträgen (percent null = keine gemessen). */
+    hitRate?: { hits: number; measured: number; percent: number | null };
     /** Schätzfehler: Median Ist ÷ Schätzung der erledigten Aufträge; null ohne erledigte, gemessene Aufträge. */
     hourError?: number | null;
     tokenError?: number | null;
     errorSamples?: number;
+  }[];
+  /** Korrekturfaktor je Herkunft der Schätzung (Median Ist ÷ Schätzung) und Anzahl der Messwerte. */
+  calibration?: {
+    source: string;
+    label: string;
+    hours: number;
+    tokens: number;
+    samples: number;
+    scope: 'project' | 'all' | 'default';
   }[];
   /** Laufende Aufträge über dem Dreifachen ihrer kalibrierten Schätzung (Stunden oder Tokens). */
   overruns?: EstimateOverrun[];

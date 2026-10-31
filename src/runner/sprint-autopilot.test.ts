@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
 import { autopilotGuard } from '../api/sprint-planning.js';
-import { MANUAL_TODO_PREFIX, MERGE_TODO } from './action-todo.js';
+import { MANUAL_TODO_PREFIX, MERGE_TODO, OVERRUN_TODO_PREFIX, overrunActionTodo } from './action-todo.js';
 import { sprintAutopilot, sprintSettled } from './sprint-autopilot.js';
 
 // Montag, 19.10.2026 (Ortszeit): 10:00 liegt in den Arbeitszeiten Mo–Fr 08:00–18:00, 22:00 nicht.
@@ -174,4 +174,13 @@ test('Sprint nicht fertig bei altem Abnahmehinweis oder gescheitertem Merge (bei
     sprintSettled([done, { status: 'blocked', actionTodo: 'Selbst prüfen (nicht automatisch prüfbar)' }]),
     true,
   );
+});
+
+test('Schätzung überschritten: wartet auf die Freigabe durch einen Menschen wie jede „Aktion notwendig“', () => {
+  const done = { status: 'done', actionTodo: null };
+  const overrun = { status: 'blocked', actionTodo: overrunActionTodo('2 h', '0,5 h'), budgetBlocked: null };
+  assert.ok(overrun.actionTodo.startsWith(OVERRUN_TODO_PREFIX));
+  assert.equal(sprintSettled([done, overrun]), true);
+  // Nach der Freigabe („Erneut versuchen“) ist er wieder eingeplant und hält den Sprint offen.
+  assert.equal(sprintSettled([done, { status: 'planned', actionTodo: null }]), false);
 });

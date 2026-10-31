@@ -65,6 +65,12 @@
         </select>
       </label>
       <label
+        >Art<select name="kind" [ngModel]="idea.kind ?? 'feature'">
+          <option value="feature">Feature</option>
+          <option value="bug">Bug</option>
+        </select>
+      </label>
+      <label
         >Priorität<select name="priority" [ngModel]="idea.priority">
           <option value="low">Niedrig</option>
           <option value="medium">Mittel</option>

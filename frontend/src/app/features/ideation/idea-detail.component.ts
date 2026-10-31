@@ -114,6 +114,7 @@ export class IdeaDetailComponent {
           ...(IDEA_SELECTABLE_STATUSES.includes(idea.status) ? { status: values['status'] } : {}),
           priority: values['priority'],
           category: values['category'] || null,
+          kind: values['kind'] === 'bug' ? 'bug' : 'feature',
         }),
       'Idee gespeichert.',
     );

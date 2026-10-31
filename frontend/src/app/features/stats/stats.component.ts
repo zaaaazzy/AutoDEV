@@ -9,7 +9,7 @@ import {
 } from '../../shared/data-table/data-table.component.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import { formatHours, formatMoney, formatNumber } from '../../shared/format.js';
-import type { BudgetOverview } from '../../core/models.js';
+import type { BudgetOverview, ProjectStats } from '../../core/models.js';
 import { errorText, estimateTrend } from './estimate-trend.js';
 import { BudgetMeterComponent } from '../../shared/budget-meter.component.js';
 import { categoryLabel } from '../../shared/labels.js';
@@ -17,6 +17,7 @@ import { DateTimePipe, HoursPipe, LocaleNumberPipe } from '../../shared/pipes.js
 import { CHART_HEIGHT, CHART_WIDTH, chartY, COVERAGE_TARGET, coverageSeries } from './coverage-history.js';
 import { QualityPanelComponent } from './quality-panel.component.js';
 import { CoverageTrendComponent } from './coverage-trend.component.js';
+import { calibrationText, hitRateText } from './stats-text.js';
 
 interface Usage {
   tokens: number;
@@ -96,6 +97,8 @@ function shortRatio(actual: number, estimate: number | null | undefined): string
     ? `${Math.max(1, Math.round(ratio * 100))} %`
     : `${ratio.toLocaleString('de-DE', { maximumFractionDigits: 1 })}×`;
 }
+
+type SprintVelocity = ProjectStats['velocity'][number];
 
 /** Verbrauch nach Bereich, Art, Auftrag (Schätzung gegen tatsächlich) und Agent. */
 @Component({
@@ -216,6 +219,28 @@ export class StatsComponent {
       filter: false,
     },
   ];
+  protected readonly calibrationText = calibrationText;
+  protected readonly sprints = computed(() => this.store.data().stats?.velocity ?? []);
+  protected readonly calibration = computed(() => this.store.data().stats?.calibration ?? []);
+
+  protected readonly sprintColumns: DataColumn<SprintVelocity>[] = [
+    { id: 'name', header: 'Sprint', value: (row) => row.name, className: 'title-cell', filter: 'text' },
+    {
+      id: 'done',
+      header: 'Erledigt',
+      value: (row) => `${row.done} von ${row.total}`,
+      sortValue: (row) => row.done,
+      filter: false,
+    },
+    {
+      id: 'hitRate',
+      header: 'Trefferquote',
+      value: (row) => hitRateText(row.hitRate),
+      sortValue: (row) => row.hitRate?.percent ?? -1,
+      filter: false,
+    },
+  ];
+  protected readonly sprintId = (row: SprintVelocity): string => row.id ?? row.name;
   protected readonly orderId = (row: OrderUsage): string => row.id;
   protected readonly agentId = (row: AgentUsage): string => `${row.source}-${row.agent}`;
 

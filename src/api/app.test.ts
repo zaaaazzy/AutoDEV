@@ -298,7 +298,8 @@ test('stores effort, token, benefit and cost estimates on ideas and rejects out-
       }),
     });
     assert.equal(created.status, 201);
-    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend']);
+    // Ohne Art: null, die Abfrage setzt dann `feature`.
+    assert.deepEqual(queries[0]?.values.slice(5), [12.5, 40000, 8, 3, 'frontend', null]);
 
     for (const invalid of [
       { benefit: 11 },
