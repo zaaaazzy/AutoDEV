@@ -569,6 +569,17 @@ export const MIGRATIONS: readonly Migration[] = [
         CHECK (area IN ('backend', 'frontend', 'contracts', 'scripts', 'e2e', 'gesamt', 'auftrag')) NOT VALID;
     `,
   },
+  // Wartungsjob bug_categories (src/runner/bug-category-job.ts): trägt einmalig die Kategorie bei Bugs ohne Kategorie
+  // nach (nur category IS NULL) und merkt sich in state.done, dass er fertig ist. Ändert keine Bugs selbst.
+  {
+    version: 25,
+    name: 'bug-kategorien-nachtragen',
+    sql: `
+      INSERT INTO scheduled_jobs (key, enabled, interval_seconds, job_kind, config)
+      VALUES ('bug_categories', TRUE, 86400, 'bug_categories', '{}')
+      ON CONFLICT (key) DO NOTHING;
+    `,
+  },
 ];
 
 type Queryable = Pick<Pool, 'query'>;

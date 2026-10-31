@@ -82,7 +82,11 @@ export function pathsInText(text: string): string[] {
 }
 
 /** Kategorie aus ausdrücklichen Pfaden und den im Text genannten. */
-export function categoryFromBug(bug: { title: string; description: string; paths?: readonly string[] }): BugCategory | null {
+export function categoryFromBug(bug: {
+  title: string;
+  description: string;
+  paths?: readonly string[];
+}): BugCategory | null {
   return categoryFromPaths([...(bug.paths ?? []), ...pathsInText(`${bug.title}\n${bug.description}`)]);
 }
 

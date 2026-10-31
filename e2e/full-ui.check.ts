@@ -645,9 +645,36 @@ test('Bugs: anlegen, Status ändern, bearbeiten, löschen', async ({ page, isMob
   const title = `Knopf reagiert nicht ${Date.now() % 10000}`;
   const form = page.locator('form.create-form');
   await form.locator('[name=title]').fill(title);
+  await form.locator('select[name=category]').selectOption({ label: 'Backend' });
   await button(form, 'Bug melden').click();
   const row = page.locator('.dt-table tbody tr').filter({ hasText: title });
   await expect(row).toBeVisible();
+  // Mitgeschickte Kategorie bleibt; der Kategoriefilter „Backend“ lässt nur Bugs dieser Kategorie stehen.
+  await expect(row.locator('td[data-label="Kategorie"]')).toHaveText('Backend');
+  const openTable = page.locator('.dt-table').first();
+  await button(openTable, 'Kategorie filtern').click();
+  const menu = page.locator('.dt-filter-menu');
+  await expect.soft(menu.locator('.dt-option span'), 'Filter bietet alle Kategorien an').toContainText([
+    'Alle',
+    'Frontend',
+    'Backend',
+    'Fullstack',
+    'Infrastruktur',
+    'Dokumentation',
+    'Sicherheit',
+    'Ohne Kategorie',
+  ]);
+  await menu.locator('.dt-option').filter({ has: page.locator('span', { hasText: /^Backend$/ }) }).locator('input').check();
+  await page.keyboard.press('Escape');
+  await expect(row).toBeVisible();
+  await expect
+    .poll(async () => [...new Set(await openTable.locator('tbody td[data-label="Kategorie"]').allInnerTexts())])
+    .toEqual(['Backend']);
+  await expect(
+    page.locator('.bug-stats-card').filter({ has: page.locator('h3', { hasText: 'Nach Kategorie' }) }),
+  ).toContainText('Backend');
+  await button(page, 'Zurücksetzen').click();
+  await expect(page.locator('.dt-chip')).toHaveCount(0);
   await row.locator('.dt-expand').click();
   const detail = page.locator('.closed-detail');
   await detail.getByRole('combobox').first().selectOption({ label: 'In Arbeit' });

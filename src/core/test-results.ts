@@ -37,23 +37,40 @@ function cleanError(message: string): string {
   return message.replace(ANSI, '').trim().slice(0, MAX_ERROR_LENGTH);
 }
 
+/** Testdatei aus `location` (TAP, Node ≥ 20): ohne `file://`, Zeile und Spalte; relativ zum Arbeitsordner. */
+function tapLocation(value: string, root: string): string | null {
+  const path = value
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/^file:\/\//, '')
+    .replace(/(?::\d+)+$/, '')
+    .replace(/\\/g, '/');
+  if (!path) return null;
+  const base = `${root.replace(/\\/g, '/').replace(/\/$/, '')}/`;
+  return path.startsWith(base) ? path.slice(base.length) : path;
+}
+
 /**
  * Einzeltests aus TAP (node --test, tsx --test): nur Tests der obersten Ebene, mit Dauer und Fehlermeldung
  * aus dem YAML-Block. Unterschiedlich eingerückte Untertests werden ihrem Elterntest zugerechnet.
  */
-export function parseTapCases(output: string): TestCaseResult[] {
+export function parseTapCases(output: string, root = process.cwd()): TestCaseResult[] {
   const lines = output.replace(ANSI, '').split('\n');
   const cases: TestCaseResult[] = [];
   for (let index = 0; index < lines.length; index++) {
     const match = /^(not ok|ok) \d+ - (.+?)(?:\s+#\s*(SKIP|TODO)\b.*)?$/.exec(lines[index]!);
     if (!match) continue;
     let durationMs: number | null = null;
+    let file: string | null = null;
     const errors: string[] = [];
     if (lines[index + 1]?.trim() === '---') {
       for (let inner = index + 2; inner < lines.length && lines[inner]!.trim() !== '...'; inner++) {
         const line = lines[inner]!;
         const duration = /^\s+duration_ms:\s*([\d.]+)/.exec(line);
         if (duration) durationMs = Math.round(Number(duration[1]));
+        // Nur die eigene Ebene (zwei Leerzeichen); Untertests stehen tiefer eingerückt.
+        const location = /^ {2}location:\s*(.+)$/.exec(line);
+        if (location && !file) file = tapLocation(location[1]!, root);
         const error = /^\s+error:\s*(.*)$/.exec(line);
         if (error) {
           const quoted = error[1]!.replace(/^['"|>-]+\s*/, '').replace(/['"]$/, '');
@@ -66,7 +83,7 @@ export function parseTapCases(output: string): TestCaseResult[] {
     cases.push({
       category: 'unit',
       title: match[2]!.trim(),
-      file: null,
+      file,
       device: null,
       status: skipped ? 'skipped' : match[1] === 'ok' ? 'passed' : 'failed',
       durationMs,

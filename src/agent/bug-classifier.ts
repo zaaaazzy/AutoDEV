@@ -78,8 +78,15 @@ export async function classifyBug(bug: BugText, options: ClassifyOptions = {}): 
 }
 
 /** Setzt die Kategorie nur, wenn der Bug noch keine hat; true, wenn geändert. */
-export async function fillBugCategory(pool: Pick<Pool, 'query'>, bugId: string, category: BugCategory): Promise<boolean> {
-  const result = await pool.query('UPDATE bugs SET category = $2 WHERE id = $1 AND category IS NULL', [bugId, category]);
+export async function fillBugCategory(
+  pool: Pick<Pool, 'query'>,
+  bugId: string,
+  category: BugCategory,
+): Promise<boolean> {
+  const result = await pool.query('UPDATE bugs SET category = $2 WHERE id = $1 AND category IS NULL', [
+    bugId,
+    category,
+  ]);
   return (result.rowCount ?? 0) > 0;
 }
 
@@ -116,6 +123,13 @@ export function categorizeLater(
 /** Wartet, bis alle angestoßenen Einstufungen fertig sind (z. B. bevor ein Skript die Datenbank schließt). */
 export function settledBugCategories(): Promise<void> {
   return queue;
+}
+
+/** Wie settledBugCategories, aber höchstens maxMs lang (kurzlebige Skripte sollen nicht minutenlang hängen). */
+export async function waitForBugCategories(maxMs: number): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([queue, new Promise<void>((done) => (timer = setTimeout(done, maxMs)))]);
+  clearTimeout(timer);
 }
 
 /**
