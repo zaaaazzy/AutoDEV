@@ -7,6 +7,7 @@ import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { runAuthorAgent } from './requirements.js';
 import type { RunnerOptions } from '../runner/runner-types.js';
 import { isShuttingDown } from '../core/shutdown.js';
+import { AGENT_STEP_STATUS } from '../core/status.js';
 
 const MIN_ANALYSIS_CHARS = 60;
 
@@ -59,7 +60,7 @@ export async function collectFailures(pool: Pool, developmentId: string): Promis
   const steps = await pool
     .query<{ agent: string; output: string }>(
       `SELECT s.agent_name AS agent, s.output FROM agent_run_steps s JOIN agent_runs r ON r.id = s.run_id
-      WHERE r.development_id = $1 AND s.status = 'failed' ORDER BY s.id DESC LIMIT 3`,
+      WHERE r.development_id = $1 AND s.status = '${AGENT_STEP_STATUS.failed}' ORDER BY s.id DESC LIMIT 3`,
       [developmentId],
     )
     .catch(() => ({ rows: [] as { agent: string; output: string }[] }));

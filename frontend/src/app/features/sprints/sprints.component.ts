@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import type { SortingState } from '@tanstack/angular-table';
 import type { Sprint } from '../../core/models.js';
+import { DEVELOPMENT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { categoryColumn } from '../../shared/data-table/columns.js';
 import {
@@ -119,7 +120,7 @@ export class SprintsComponent {
 
   protected sprintCounts(sprintId: string): { done: number; total: number } {
     const orders = this.data().development.filter((item) => item.sprintId === sprintId);
-    return { done: orders.filter((item) => item.status === 'done').length, total: orders.length };
+    return { done: orders.filter((item) => item.status === DEVELOPMENT_STATUS.done).length, total: orders.length };
   }
 
   protected ciLabel(sprint: Sprint): string {

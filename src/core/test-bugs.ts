@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import type { TestCaseResult } from './test-results.js';
+import { BUG_STATUS } from './status.js';
 
 /**
  * Bugs aus Testbefunden: je fehlgeschlagenem Test (bzw. Prüfschritt ohne Einzeltests) ein Bug mit Quelle „test“.
@@ -69,7 +70,7 @@ export async function fileBugs(pool: Pool, project: string, drafts: BugDraft[]):
       `INSERT INTO bugs (project_slug, title, description, severity, source)
        SELECT $1, $2, $3, $4, 'test'
         WHERE NOT EXISTS (SELECT 1 FROM bugs WHERE project_slug = $1 AND title = $2
-                            AND status IN ('open', 'in_progress'))`,
+                            AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}'))`,
       [project, draft.title, draft.description, draft.severity],
     );
     created += result.rowCount ?? 0;

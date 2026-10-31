@@ -1,7 +1,7 @@
 // Lauf eines Auftrags belegen (ein Lauf je Auftrag, verwaiste Läufe abräumen) und die Agents des Laufs wählen.
 import type { Pool } from 'pg';
 import { ORDER_PHASES } from '../core/workflow-phases.js';
-import { AGENT_RUN_STATUS } from '../core/status.js';
+import { AGENT_RUN_STATUS, AGENT_STEP_STATUS } from '../core/status.js';
 import { PHASE_ORDER } from './runner-prompts.js';
 import { MAX_TIMEOUT_MINUTES } from './runner-selection.js';
 import type { WorkflowAgent, WorkItem } from './runner-types.js';
@@ -37,15 +37,15 @@ export async function claimRun(pool: Pool, item: WorkItem): Promise<string | nul
                   WHERE s.run_id = r.id)
               ) < NOW() - $2 * INTERVAL '1 millisecond'
        RETURNING r.id)
-     UPDATE agent_run_steps SET status = 'failed', interrupted = TRUE,
+     UPDATE agent_run_steps SET status = '${AGENT_STEP_STATUS.failed}', interrupted = TRUE,
             output = COALESCE(output, '') || E'\\nUnterbrochen: Der Lauf hatte kein Lebenszeichen mehr (Absturz).'
-      WHERE status = 'running' AND run_id IN (SELECT id FROM abandoned)`,
+      WHERE status = '${AGENT_STEP_STATUS.running}' AND run_id IN (SELECT id FROM abandoned)`,
     [item.id, ABANDONED_RUN_MS],
   );
   const claim = await pool.query<{ id: string }>(
     `INSERT INTO agent_runs (project_slug, development_id, status, worker_id)
      VALUES ($1, $2, '${AGENT_RUN_STATUS.running}', $3)
-     ON CONFLICT (development_id) WHERE status = 'running' DO NOTHING
+     ON CONFLICT (development_id) WHERE status = '${AGENT_RUN_STATUS.running}' DO NOTHING
      RETURNING id`,
     [item.projectSlug, item.id, currentWorkerId()],
   );

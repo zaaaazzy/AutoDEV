@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { access } from './access.js';
 import { categoryOfCommand } from '../core/test-results.js';
 import { isUuid, parseProjectSlug } from '../core/validation.js';
+import { TEST_RUN_STATUS } from '../core/status.js';
 
 export function registerTestRunRoutes(app: Router, pool: Pool): void {
   app.get('/projects/:slug/test-runs', access({ tenant: 'project' }), async (request, response) => {
@@ -73,7 +74,7 @@ export function registerTestRunRoutes(app: Router, pool: Pool): void {
     const run = (
       await pool.query(
         `SELECT id, status, trigger, branch, started_at AS "startedAt", NOW() AS "now"
-           FROM test_runs WHERE project_slug = $1 AND status = 'running'
+           FROM test_runs WHERE project_slug = $1 AND status = '${TEST_RUN_STATUS.running}'
           ORDER BY started_at DESC LIMIT 1`,
         [slug],
       )

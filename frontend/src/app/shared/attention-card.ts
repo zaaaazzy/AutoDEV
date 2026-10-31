@@ -1,4 +1,5 @@
 import type { DevelopmentItem } from '../core/models.js';
+import { DEVELOPMENT_STATUS } from '../core/models.js';
 import { canRetryDevelopment } from '../../../../src/core/development-transitions.js';
 import { failureParts, orderGuide } from './order-problem.js';
 import { defined } from '../../../../src/core/defined.js';
@@ -134,15 +135,16 @@ function ruleOf(failure: string | null | undefined): string {
 /** Eine Karte unter „Aktionen“: ein Grund, ein nächster Schritt, und welcher Agent die Meldung ausgelöst hat. */
 export function attentionCard(item: CardSource, manualChecks = 0): AttentionCard {
   const card = buildCard(item, manualChecks);
-  const agent = item.status === 'blocked' && item.failure ? failureParts(item.failure).agent || null : null;
+  const agent =
+    item.status === DEVELOPMENT_STATUS.blocked && item.failure ? failureParts(item.failure).agent || null : null;
   return { ...card, agent };
 }
 
 function buildCard(item: CardSource, manualChecks: number): AttentionCard {
-  if (item.status === 'approval') {
+  if (item.status === DEVELOPMENT_STATUS.approval) {
     return { why: 'Fertig – wartet auf deine Freigabe.', step: 'approve', next: '', detail: null };
   }
-  if (item.status === 'rejected') {
+  if (item.status === DEVELOPMENT_STATUS.rejected) {
     const rule = ruleOf(item.failure);
     return {
       why: rule ? `Verstösst gegen die Projektregel: ${sentence(rule)}` : 'Verstösst gegen eine Projektregel.',
@@ -151,10 +153,10 @@ function buildCard(item: CardSource, manualChecks: number): AttentionCard {
       detail: null,
     };
   }
-  if (item.status !== 'blocked') {
+  if (item.status !== DEVELOPMENT_STATUS.blocked) {
     // Nach einem Sprint-Abbruch läuft der Agent noch: erst nach seinem Ende ist der Auftrag im Backlog und lässt sich
     // wieder einplanen (vorher lehnt /retry mit 409 ab).
-    if (item.removedFromSprintAt && item.status === 'in_progress') {
+    if (item.removedFromSprintAt && item.status === DEVELOPMENT_STATUS.inProgress) {
       return {
         why: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen – der Agent wird gerade beendet.`,
         step: 'wait',
@@ -205,7 +207,7 @@ function buildCard(item: CardSource, manualChecks: number): AttentionCard {
       detail: null,
     };
   }
-  if (item.fixStatus === 'planned' || item.fixStatus === 'in_progress') {
+  if (item.fixStatus === DEVELOPMENT_STATUS.planned || item.fixStatus === DEVELOPMENT_STATUS.inProgress) {
     return {
       why,
       step: 'wait',

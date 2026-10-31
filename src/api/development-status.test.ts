@@ -304,7 +304,7 @@ test('In Sprint übernehmen: selectItems startet geplante Aufträge nur im aktiv
   // runner/sprint-requeue.test.ts).
   assert.match(
     source,
-    /AND \(s\.status = 'active' OR d\.agent_id IS NOT NULL OR \(d\.auto_run AND d\.sprint_id IS NULL\)\)/,
+    /AND \(s\.status = '\$\{SPRINT_STATUS\.active\}' OR d\.agent_id IS NOT NULL OR \(d\.auto_run AND d\.sprint_id IS NULL\)\)/,
   );
 });
 

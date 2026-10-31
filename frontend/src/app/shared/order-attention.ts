@@ -1,4 +1,5 @@
 import type { AcceptanceCheck, DevelopmentItem } from '../core/models.js';
+import { DEVELOPMENT_STATUS } from '../core/models.js';
 import { isFinished, statusLabel } from './labels.js';
 import { type AttentionCard, attentionCard } from './attention-card.js';
 import { failureParts, orderGuide, type FailureParts, type OrderGuide } from './order-problem.js';
@@ -36,17 +37,19 @@ export function orderAttention(development: DevelopmentItem[], acceptance: Accep
       const reasons: AttentionReason[] = [];
       // Wartet der Auftrag auf einen Menschen, ist er nicht gescheitert, sondern braucht eine Aktion.
       // Schon freigegeben: wartet nur noch auf den Merge – steht unter „Läuft gerade“, nicht mehr bei dir.
-      if (item.status === 'approval' && !item.reviewApprovedAt)
+      if (item.status === DEVELOPMENT_STATUS.approval && !item.reviewApprovedAt)
         reasons.push({ label: 'Wartet auf Freigabe', tone: 'info' });
-      else if (item.status === 'rejected')
+      else if (item.status === DEVELOPMENT_STATUS.rejected)
         reasons.push({ label: 'Abgelehnt – verstösst gegen Projektregel', tone: 'error' });
-      else if (item.status === 'blocked' || (item.actionTodo && !isFinished(item.status)))
+      else if (item.status === DEVELOPMENT_STATUS.blocked || (item.actionTodo && !isFinished(item.status)))
         reasons.push({ label: 'Aktion notwendig', tone: 'warn' });
       if (item.removedFromSprintAt && !isFinished(item.status)) {
         reasons.push({ label: `Aus Sprint „${item.removedFromSprint ?? '?'}“ genommen`, tone: 'info' });
       }
       // Von Hand prüfen lässt sich erst, was umgesetzt ist: geplante oder laufende Aufträge warten noch nicht auf dich.
-      const testable = item.status === 'done' || (item.status === 'approval' && !item.reviewApprovedAt);
+      const testable =
+        item.status === DEVELOPMENT_STATUS.done ||
+        (item.status === DEVELOPMENT_STATUS.approval && !item.reviewApprovedAt);
       const checks = testable ? (manual.get(item.id) ?? []) : [];
       if (checks.length && !item.actionTodo) {
         const open = checks.length;

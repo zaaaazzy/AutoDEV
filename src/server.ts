@@ -1,6 +1,6 @@
 import { createDevLogApp } from './api/app.js';
 import { loadTotpSecret, sealStoredTotpSecrets, startSessionCleanup } from './api/auth.js';
-import { encryptProjectSecrets } from './api/projects.js';
+import { encryptProjectSecrets } from './db/project-repository.js';
 import { sealStoredVapidKeys } from './core/push.js';
 import { seedProjectDefaults } from './agent/default-agents.js';
 import { createDatabasePool, readDatabaseConfig } from './db/database.js';

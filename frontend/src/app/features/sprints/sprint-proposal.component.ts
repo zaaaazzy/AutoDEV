@@ -7,6 +7,7 @@ import { GitGuardService } from '../../core/git-guard.service.js';
 import { formatHours, formatUsd, USD_PER_MILLION_TOKENS } from '../../shared/format.js';
 import { LocaleNumberPipe } from '../../shared/pipes.js';
 import { proposalSelection } from './proposal-selection.js';
+import { SPRINT_STATUS } from '../../core/models.js';
 
 interface ProposalItem {
   id: string;
@@ -113,7 +114,9 @@ export class SprintProposalComponent {
   protected readonly opened = signal(false);
   protected readonly mode = computed(() => this.store.currentProject()?.sprintMode ?? 'manual');
   protected readonly visible = computed(() => this.mode() !== 'manual' || this.opened());
-  protected readonly hasActive = computed(() => this.store.data().sprints.some((sprint) => sprint.status === 'active'));
+  protected readonly hasActive = computed(() =>
+    this.store.data().sprints.some((sprint) => sprint.status === SPRINT_STATUS.active),
+  );
 
   protected readonly comment = signal<ProposalComment | null>(null);
   protected readonly roadmap = signal<Roadmap | null>(null);

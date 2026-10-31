@@ -1,4 +1,5 @@
 import type { Sprint, TestRun } from '../../core/models.js';
+import { SPRINT_STATUS } from '../../core/models.js';
 import { type LiveRun, liveStepName } from './test-run-live.js';
 import { defined } from '../../../../../src/core/defined.js';
 
@@ -82,7 +83,7 @@ export function waitStatus(
   if (sprint?.gitSync === 'awaiting_merge')
     return { label: 'Wartet auf Merge nach main', hint: 'dort von Hand mit git merge übernehmen', percent: null };
   // Pull-Request-Modus: Der Sprint ist gepusht und wartet auf GitHub Actions, danach Merge nach main.
-  if (sprint?.status === 'review' && sprint.prUrl) {
+  if (sprint?.status === SPRINT_STATUS.review && sprint.prUrl) {
     if (sprint.ciStatus === 'pending' || !sprint.ciStatus)
       return { label: 'CI-Prüfung auf GitHub läuft', hint: 'danach Merge nach main', percent: null };
     if (sprint.ciStatus === 'success') return { label: 'Merge nach main', hint: 'gleich fertig', percent: null };

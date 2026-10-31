@@ -8,6 +8,7 @@ import { errorFingerprint, isExcluded, type ProductionError, recordEvent } from 
 import { agentEnvironment } from './runner-prompts.js';
 import { type AlertLabels, evaluate, problemKey, type WatchdogState } from './watchdog.js';
 import { defined } from '../core/defined.js';
+import { BUG_STATUS } from '../core/status.js';
 
 /**
  * Sammler des Produktions-Rückkanals im Worker: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten (lückenlos ab
@@ -426,7 +427,7 @@ export async function currentProblems(pool: Pool, project: string): Promise<stri
   const critical = await pool.query<{ title: string }>(
     `SELECT b.title FROM bugs b
       WHERE b.project_slug = $1 AND b.source = 'production' AND b.severity = 'critical'
-        AND b.status IN ('open', 'in_progress')
+        AND b.status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}')
         AND EXISTS (SELECT 1 FROM production_events e WHERE e.bug_id = b.id AND e.source <> 'health'
                      AND e.last_seen > NOW() - INTERVAL '1 hour')
       ORDER BY b.created_at`,

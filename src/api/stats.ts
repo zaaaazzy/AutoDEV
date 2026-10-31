@@ -5,6 +5,7 @@ import { localTimeZone } from '../core/time-zone.js';
 import { parseProjectSlug } from '../core/validation.js';
 import { calibratedSql, loadCalibration } from '../core/estimate-calibration.js';
 import { realFailureSql } from '../core/interrupted-steps.js';
+import { AGENT_STEP_STATUS, BUG_STATUS, DEVELOPMENT_STATUS, SPRINT_STATUS, TEST_RUN_STATUS } from '../core/status.js';
 
 type CountRow = { key: string; count: string };
 const counts = (rows: CountRow[]): Record<string, number> =>
@@ -16,7 +17,7 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
     await pool.query<{ id: string; name: string; startDate: string; endDate: string | null }>(
       `SELECT id, name, to_char(COALESCE(start_date, (created_at AT TIME ZONE $2::text)::date), 'YYYY-MM-DD') AS "startDate",
             to_char(end_date, 'YYYY-MM-DD') AS "endDate"
-       FROM sprints WHERE project_slug = $1 AND status = 'active'`,
+       FROM sprints WHERE project_slug = $1 AND status = '${SPRINT_STATUS.active}'`,
       [slug, timeZone],
     )
   ).rows[0];
@@ -39,7 +40,7 @@ async function sprintStats(pool: Pool, slug: string): Promise<Record<string, unk
   );
   const progress = (
     await pool.query<{ total: string; done: string }>(
-      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = 'done') AS done FROM development_items WHERE sprint_id = $1`,
+      `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status = '${DEVELOPMENT_STATUS.done}') AS done FROM development_items WHERE sprint_id = $1`,
       [active.id],
     )
   ).rows[0];
@@ -77,12 +78,12 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       ),
       pool.query<CountRow>(
         `SELECT severity AS key, COUNT(*) AS count FROM bugs
-        WHERE project_slug = $1 AND status IN ('open', 'in_progress') GROUP BY severity`,
+        WHERE project_slug = $1 AND status IN ('${BUG_STATUS.open}', '${BUG_STATUS.inProgress}') GROUP BY severity`,
         [slug],
       ),
       pool.query<{ planned: string; done: string; tokens: string }>(
         `SELECT COALESCE(SUM(${calibratedSql('effort_hours', calibration)}), 0) AS planned,
-              COALESCE(SUM(${calibratedSql('effort_hours', calibration)}) FILTER (WHERE status = 'done'), 0) AS done,
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration)}) FILTER (WHERE status = '${DEVELOPMENT_STATUS.done}'), 0) AS done,
               COALESCE(SUM(${calibratedSql('token_estimate', calibration)}), 0) AS tokens
          FROM development_items WHERE project_slug = $1`,
         [slug],
@@ -94,17 +95,17 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       ),
       pool.query<{ agent: string; passed: string; failed: string; skipped: string }>(
         `SELECT st.agent_name AS agent,
-              COUNT(*) FILTER (WHERE st.status = 'passed') AS passed,
+              COUNT(*) FILTER (WHERE st.status = '${AGENT_STEP_STATUS.passed}') AS passed,
               COUNT(*) FILTER (WHERE ${realFailureSql('st')}) AS failed,
-              COUNT(*) FILTER (WHERE st.status = 'skipped') AS skipped
+              COUNT(*) FILTER (WHERE st.status = '${AGENT_STEP_STATUS.skipped}') AS skipped
          FROM agent_run_steps st JOIN agent_runs r ON r.id = st.run_id
         WHERE r.project_slug = $1 GROUP BY st.agent_name ORDER BY st.agent_name`,
         [slug],
       ),
       sprintStats(pool, slug),
       pool.query<{ name: string; status: string; total: string; done: string; hours: string }>(
-        `SELECT s.name, s.status, COUNT(d.id) AS total, COUNT(d.id) FILTER (WHERE d.status = 'done') AS done,
-              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = 'done'), 0) AS hours
+        `SELECT s.name, s.status, COUNT(d.id) AS total, COUNT(d.id) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}') AS done,
+              COALESCE(SUM(${calibratedSql('effort_hours', calibration, 'd')}) FILTER (WHERE d.status = '${DEVELOPMENT_STATUS.done}'), 0) AS hours
          FROM sprints s LEFT JOIN development_items d ON d.sprint_id = s.id
         WHERE s.project_slug = $1 GROUP BY s.id ORDER BY s.created_at DESC LIMIT 8`,
         [slug],
@@ -118,7 +119,7 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       pool.query<{ count: string }>('SELECT COUNT(*) AS count FROM test_runs WHERE project_slug = $1', [slug]),
     ]);
 
-  const finishedTests = tests.rows.filter((run) => run.status !== 'running');
+  const finishedTests = tests.rows.filter((run) => run.status !== TEST_RUN_STATUS.running);
   return {
     orders: counts(orders.rows),
     kinds: counts(kinds.rows),
@@ -139,7 +140,9 @@ export async function collectStats(pool: Pool, slug: string): Promise<Record<str
       total: Number(testTotal.rows[0]?.count ?? 0),
       recent: [...tests.rows].reverse(),
       passRate: finishedTests.length
-        ? Math.round((finishedTests.filter((run) => run.status === 'passed').length / finishedTests.length) * 100)
+        ? Math.round(
+            (finishedTests.filter((run) => run.status === TEST_RUN_STATUS.passed).length / finishedTests.length) * 100,
+          )
         : null,
     },
     agents: agentSteps.rows.map((row) => ({

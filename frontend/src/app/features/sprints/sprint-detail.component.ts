@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { ApiService } from '../../core/api.service.js';
 import { AuthService } from '../../core/auth.service.js';
 import type { DevelopmentItem, Sprint, SprintReport } from '../../core/models.js';
+import { DEVELOPMENT_STATUS, SPRINT_STATUS } from '../../core/models.js';
 import { ProjectStore } from '../../core/project-store.js';
 import { USD_PER_MILLION_TOKENS } from '../../shared/format.js';
 import { ciLabel } from '../../shared/labels.js';
@@ -81,7 +82,7 @@ export class SprintDetailComponent {
 
   protected readonly sprintProgress = computed(() => {
     const orders = this.sprintItems();
-    const done = orders.filter((item) => item.status === 'done').length;
+    const done = orders.filter((item) => item.status === DEVELOPMENT_STATUS.done).length;
     return `${done} / ${orders.length} Aufträge erledigt`;
   });
 
@@ -182,7 +183,7 @@ export class SprintDetailComponent {
   /** Sprint starten bzw. wieder öffnen: Die Agents arbeiten danach in ihrem Ordner – der muss sauber sein. */
   protected async startSprint(sprint: Sprint): Promise<void> {
     await exclusive(this.acting, async () => {
-      const reopen = sprint.status === 'completed';
+      const reopen = sprint.status === SPRINT_STATUS.completed;
       const answer = await this.gitGuard.confirmAction(
         'sprint_start',
         {

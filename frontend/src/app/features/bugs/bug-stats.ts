@@ -1,11 +1,12 @@
 import type { Bug } from '../../core/models.js';
+import { BUG_STATUS } from '../../core/models.js';
 import { NAVIGATION } from '../../core/navigation.js';
 import { categoryLabel } from '../../shared/labels.js';
 import { defined } from '../../../../../src/core/defined.js';
 
 /** Begraben: behoben, nicht behoben (kein Fix) oder abgelehnt – liegt auf dem Bug-Friedhof. */
 export function isBuried(bug: Pick<Bug, 'status'>): boolean {
-  return bug.status === 'fixed' || bug.status === 'wontfix' || bug.status === 'rejected';
+  return bug.status === BUG_STATUS.fixed || bug.status === BUG_STATUS.wontfix || bug.status === BUG_STATUS.rejected;
 }
 
 export interface BugStatRow {
