@@ -1,9 +1,22 @@
 // Status- und Routing-Typen kommen aus dem Backend (dort die einzige Definition), damit beide Seiten nicht
 // auseinanderlaufen.
-import type { BudgetPeriod, RoutingRule } from '../../../../src/core/shared-types.js';
+import type {
+  BudgetPeriod,
+  CounterProbeCase,
+  CounterProbeVerdict,
+  RoutingRule,
+} from '../../../../src/core/shared-types.js';
 import type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
 
-export type { BudgetPeriod, RoutingCondition, RoutingRule, RuleEffect } from '../../../../src/core/shared-types.js';
+export type {
+  BudgetPeriod,
+  CounterProbeCase,
+  CounterProbeResult,
+  CounterProbeVerdict,
+  RoutingCondition,
+  RoutingRule,
+  RuleEffect,
+} from '../../../../src/core/shared-types.js';
 export type { BugStatus, DevelopmentStatus, SprintStatus } from '../../../../src/core/status.js';
 
 import type { CoverageAreaKey } from '../../../../src/core/coverage-areas.js';
@@ -209,6 +222,11 @@ export interface CounterCheck {
   /** Fehler der Gegenprobe selbst; kein Blocker. */
   error?: string;
   runId?: string;
+  /** Gegenprobe je neuem Testfall im Tester-Schritt (nur Bugfixes); fehlt bei der älteren Prüfung je Datei. */
+  cases?: CounterProbeCase[];
+  verdict?: CounterProbeVerdict;
+  /** Warum keine Gegenprobe lief bzw. warum sie nicht auswertbar ist. */
+  reason?: string;
 }
 
 export interface DevelopmentItem extends Estimate {

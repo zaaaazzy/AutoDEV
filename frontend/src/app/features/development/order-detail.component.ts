@@ -18,6 +18,7 @@ import {
   isAssignableSprintStatus,
   isSprintLockedDevelopmentStatus,
 } from '../../../../../src/core/development-transitions.js';
+import { COUNTER_PROBE_LABELS, UNPROVEN_FIX_MARK } from '../../../../../src/core/shared-types.js';
 import { MarkdownPipe } from '../../shared/markdown.pipe.js';
 import { CategoryLabelPipe, HoursPipe, PriorityLabelPipe, StatusLabelPipe } from '../../shared/pipes.js';
 import { parseRisks } from '../../shared/risk-list.js';
@@ -143,6 +144,8 @@ export class OrderDetailComponent {
   /** Ergebnis der Gegenprobe (nur wenn gesetzt; ohne Ergebnis erscheint nichts, auch kein „offen“). */
   protected readonly counterCheck = computed(() => this.order().counterCheck ?? null);
   protected readonly counterCheckLabels = COUNTER_CHECK_LABELS;
+  protected readonly probeLabels = COUNTER_PROBE_LABELS;
+  protected readonly unprovenMark = UNPROVEN_FIX_MARK;
 
   /** Formular für einen Folgeauftrag (nur bei erledigten Aufträgen). */
   protected readonly followUpOpen = signal(false);
