@@ -481,7 +481,9 @@ export function registerBugRoutes(app: Router, pool: Pool): void {
       return;
     }
     const body = (request.body ?? {}) as Record<string, unknown>;
-    const fields = parseFields(body, CONFIRM_FIELDS);
+    // Ohne category (leerer Body) gilt der Vorschlag; parseFields meldet dann null, das ist hier kein Fehler.
+    const withChoice = body.category !== undefined && body.category !== null && body.category !== '';
+    const fields = withChoice ? parseFields(body, CONFIRM_FIELDS) : [];
     if (!fields) {
       response.status(400).json(invalidInput(body, CONFIRM_FIELDS));
       return;
