@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import type { Pool } from 'pg';
 import { completeSprint } from '../api/sprint-planning.js';
 import { type PushAudience, type PushMessage, sendPush } from '../core/push.js';
+import { backfillBugCategories } from './bug-category-job.js';
 import { sprintSettled } from './sprint-autopilot.js';
 import { type AlertLabels, BACKUP_FILE, collectProblems, evaluate, type WatchdogState } from './watchdog.js';
 
@@ -469,6 +470,7 @@ export const JOB_KINDS: Readonly<Record<string, JobKind>> = Object.freeze({
   watchdog_logs: { run: watchdogLogs, defaultTimeoutSeconds: 60 },
   close_old_sprints: { run: closeOldSprints, defaultTimeoutSeconds: 120 },
   push_alert: { run: pushAlert, defaultTimeoutSeconds: 20 },
+  bug_categories: { run: (context) => backfillBugCategories(context), defaultTimeoutSeconds: MAX_TIMEOUT_SECONDS },
 });
 
 /** Job-Art aus der Registry; Object.hasOwn, damit „constructor“ & Co. nie als Art gelten. */

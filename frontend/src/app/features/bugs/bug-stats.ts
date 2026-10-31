@@ -23,6 +23,8 @@ export interface BugStats {
   places: BugStatRow[];
   /** In welchen Tests: Testname (mit Gerät) und genannte Testdateien. */
   tests: BugStatRow[];
+  /** Verteilung nach dem Feld `category` (ohne Pfad-Fallback); leere Kategorie als „Ohne Kategorie“. */
+  categories: BugStatRow[];
 }
 
 const PAGE_LABELS = new Map(NAVIGATION.map((item) => [item.id as string, item.label]));
@@ -95,5 +97,6 @@ export function bugStats(bugs: Bug[]): BugStats {
     finders: tally(bugs, (bug) => [finder(bug)]),
     places: tally(bugs, places),
     tests: tally(bugs, tests),
+    categories: tally(bugs, (bug) => [categoryLabel(bug.category)]),
   };
 }

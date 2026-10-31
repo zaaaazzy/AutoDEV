@@ -83,6 +83,16 @@ test('Migrationen: Basis-Schema ist eingefroren, Änderungen brauchen eine neue 
   );
 });
 
+test('Migration 25: legt nur den Wartungsjob bug_categories an und ändert keine Bugs', () => {
+  const migration = MIGRATIONS.find((step) => step.version === 25);
+  assert.equal(migration?.name, 'bug-kategorien-nachtragen');
+  assert.match(
+    migration?.sql ?? '',
+    /INSERT INTO scheduled_jobs[\s\S]*'bug_categories'[\s\S]*ON CONFLICT \(key\) DO NOTHING/,
+  );
+  assert.doesNotMatch(migration?.sql ?? '', /\bbugs\b/);
+});
+
 test('Migrationen: Budget je Rolle kommt per Migration auch in bestehende Datenbanken', () => {
   const migration = MIGRATIONS.find((step) => step.version === 17);
   assert.match(migration?.sql ?? '', /CREATE TABLE IF NOT EXISTS budget_role_limits/);
@@ -129,7 +139,7 @@ test('Migration 24: Bereiche umschreiben, Kollisionen zusammenführen, Altbestan
       [report],
     );
 
-    assert.deepEqual(await runMigrations(client), [24]);
+    assert.deepEqual(await runMigrations(client), [24, 25]);
     const rows = (
       await client.query(
         `SELECT area, unit_tests AS unit, passed, lines, branches FROM test_coverage_areas
@@ -232,7 +242,7 @@ test('Migrationen 23 und 24: Altbestand wird zugeordnet, bereinigt, abgesichert;
       for (const label of LEGACY_LABELS) await area(await report(label, '2026-09-01T10:00:00Z'), label, 50, 50, 50);
 
       // 24 schreibt über die Zuordnungstabelle um; nach 23 ist alles schon zugeordnet, es ändert sich nichts.
-      assert.deepEqual(await runMigrations(client), [23, 24]);
+      assert.deepEqual(await runMigrations(client), [23, 24, 25]);
 
       const rows = async (id: string) =>
         (

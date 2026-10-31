@@ -3,7 +3,7 @@ import test from 'node:test';
 import type { Pool } from 'pg';
 import { EXTERNAL_TEXT_END, EXTERNAL_TEXT_START } from '../core/bug-trust.js';
 import { withMigratedDatabase } from '../db/test-database.test.js';
-import { registerBugRoutes, syncBugOrder } from './bugs.js';
+import { registerBugRoutes, reportAgentBug, syncBugOrder } from './bugs.js';
 import type { Principal } from './roles.js';
 import { requiredRole } from './route-table.test.js';
 import { serveRoutes } from './serve-routes.test.js';
@@ -97,6 +97,47 @@ test('Bugs auf PostgreSQL: Eingaben, Freigabe fremder Bugs und Löschen', async 
         assert.equal(created.body.bug.title, 'Knopf <b>kaputt</b>');
         assert.equal(created.body.bug.source, 'manual');
         assert.equal((await orders(created.body.bug.id)).length, 1, 'eigener Bug im Sprint bekommt einen Auftrag');
+      });
+
+      await t.test('Kategorie: mitgeschickt bleibt sie, sonst aus Pfaden, sonst leer ohne Fehler', async () => {
+        const sent = await api.call('POST', '/projects/shop/bugs', {
+          title: 'Mit Kategorie',
+          description: 'Fehler in frontend/src/app/app.ts',
+          category: 'docs',
+        });
+        assert.equal(sent.status, 201);
+        assert.equal(sent.body.bug.category, 'docs');
+        const fromPath = await api.call('POST', '/projects/shop/bugs', {
+          title: 'Aus Pfad',
+          description: 'Fehler in deploy/backup.sh und deploy/caddy/Caddyfile',
+        });
+        assert.equal(fromPath.body.bug.category, 'infrastructure');
+        // Ohne Pfad und ohne erreichbares Modell (Test-Runner): angelegt, Kategorie leer.
+        const plain = await api.call('POST', '/projects/shop/bugs', { title: 'Ohne Pfad', description: 'Geht nicht.' });
+        assert.equal(plain.status, 201);
+        assert.equal(plain.body.bug.category, null);
+
+        const agentBug = await reportAgentBug(pool, {
+          projectSlug: 'shop',
+          title: 'Entwickler: Wächter',
+          description: 'Fehler in src/agent/agent-guard.ts',
+        });
+        const stored = await pool.query('SELECT category FROM bugs WHERE id = $1', [agentBug]);
+        assert.equal(stored.rows[0]?.category, 'security');
+      });
+
+      await t.test('PATCH category ändert nur die Kategorie', async () => {
+        const id = await bug('manual', 'Beschreibung');
+        await api.call('PATCH', `/bugs/${id}`, { sprintId: sprint, severity: 'low', fixNotes: 'Notiz' });
+        const columns = `title, description, severity, status, source, sprint_id, fix_notes, fixed_at, approved_at`;
+        const before = (await pool.query(`SELECT ${columns} FROM bugs WHERE id = $1`, [id])).rows[0];
+        const ordersBefore = await orders(id);
+        const response = await api.call('PATCH', `/bugs/${id}`, { category: 'docs' });
+        assert.equal(response.status, 200);
+        assert.equal(response.body.bug.category, 'docs');
+        assert.deepEqual((await pool.query(`SELECT ${columns} FROM bugs WHERE id = $1`, [id])).rows[0], before);
+        assert.deepEqual(await orders(id), ordersBefore);
+        assert.equal((await api.call('PATCH', `/bugs/${id}`, { category: 'git' })).body.field, 'category');
       });
 
       await t.test('Bearbeiten: unbekannte ID, leere Angaben, Sprint eines anderen Projekts', async () => {
