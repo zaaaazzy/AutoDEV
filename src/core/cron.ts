@@ -1,3 +1,5 @@
+import { defined } from './defined.js';
+
 /**
  * Kleiner Cron-Parser für Routinen (5 Felder: Minute Stunde Tag Monat Wochentag) ohne Abhängigkeiten. Die Zeiten
  * gelten in einer Zeitzone (Standard Europe/Zurich) samt Sommer-/Winterzeit. Reiner Code ohne Node-APIs, damit die
@@ -69,7 +71,7 @@ export function parseCron(expression: string): CronSchedule | string {
     return 'Cron-Ausdruck braucht genau 5 Felder (Minute Stunde Tag Monat Wochentag).';
   const sets: Set<number>[] = [];
   for (const [index, field] of FIELDS.entries()) {
-    const parsed = parseField(parts[index]!, field);
+    const parsed = parseField(defined(parts[index]), field);
     if (typeof parsed === 'string') return parsed;
     sets.push(parsed);
   }
@@ -115,15 +117,15 @@ export function zonedParts(
   }
   const parts: Record<string, number> = {};
   for (const part of format.formatToParts(at)) if (part.type !== 'literal') parts[part.type] = Number(part.value);
-  const year = parts.year!;
-  const month = parts.month!;
-  const day = parts.day!;
+  const year = defined(parts.year);
+  const month = defined(parts.month);
+  const day = defined(parts.day);
   return {
     year,
     month,
     day,
-    hour: parts.hour! % 24,
-    minute: parts.minute!,
+    hour: defined(parts.hour) % 24,
+    minute: defined(parts.minute),
     weekday: new Date(Date.UTC(year, month - 1, day)).getUTCDay(),
   };
 }

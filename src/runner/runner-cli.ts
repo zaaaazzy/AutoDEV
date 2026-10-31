@@ -27,6 +27,7 @@ import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local
 import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
 import { removeLeftoverContainers } from '../core/sandbox.js';
+import { stopLeftoverWorkbenchRuns } from '../core/workbench.js';
 import { touchHealthFile, workerPath } from '../core/worker-container.js';
 import { sandboxStatus } from './test-sandbox.js';
 import { ReviewSlots } from './review-slots.js';
@@ -385,6 +386,10 @@ async function main(): Promise<void> {
     }
     // Erst nach der Sperre: Ein abgewiesener zweiter Worker soll nicht als lebender Worker gelten.
     await startWorkerBeat();
+    // Vor dem Neueinplanen: Läufe des Vorgängers in den Arbeitscontainern beenden. Sonst arbeitete der alte Agent (oder
+    // npm) neben dem neu eingeplanten im selben Worktree weiter; ohne Docker geschieht nichts.
+    const stoppedRuns = await stopLeftoverWorkbenchRuns(runCommand, INSTALL_ROOT).catch(() => 0);
+    if (stoppedRuns) console.info(`${stoppedRuns} übrig gebliebene Läufe in Arbeitscontainern beendet.`);
     await recoverInterruptedRuns(pool, workerId);
     // Sandbox-Container eines abgestürzten Vorgängers (Label aideation.run) entfernen; ohne Docker geschieht nichts.
     const leftovers = await removeLeftoverContainers(runCommand, INSTALL_ROOT).catch(() => 0);

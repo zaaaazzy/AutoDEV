@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { type CommandExecutor, runCommand } from '../core/command.js';
+import { sandboxMode, usesSandbox } from '../core/sandbox.js';
 import { gitEnvironment } from './project-command.js';
 
 /**
@@ -37,14 +38,6 @@ const same = (left: string, right: string): boolean => {
 const isLink = (path: string): boolean => {
   try {
     return lstatSync(path).isSymbolicLink();
-  } catch {
-    return false;
-  }
-};
-
-const isEmptyDirectory = (path: string): boolean => {
-  try {
-    return lstatSync(path).isDirectory() && readdirSync(path).length === 0;
   } catch {
     return false;
   }
@@ -118,13 +111,16 @@ export function linkDependencies(folder: string, workspace: string): void {
     const source = join(folder, directory, 'node_modules');
     const target = join(workspace, directory, 'node_modules');
     if (!existsSync(source) || !existsSync(join(workspace, directory))) continue;
-    // Leerer Ordner = Mountpunkt der Docker-Sandbox (prepareModulesMountpoint): im Host-Modus wieder verlinken.
-    if (isEmptyDirectory(target)) rmdirSync(target);
     try {
-      lstatSync(target);
+      const stat = lstatSync(target);
+      // Leerer Ordner: Die Docker-Sandbox hat den Link ersetzt (replaceLinkedModules). Nur im Notfallmodus ohne
+      // Sandbox wieder verlinken – sonst ist der Ordner Einhängepunkt des node_modules-Volumes laufender Container.
+      if (usesSandbox(sandboxMode(null)) || !stat.isDirectory() || readdirSync(target).length) continue;
+      rmdirSync(target);
     } catch {
-      symlinkSync(source, target, DIRECTORY_LINK);
+      // Fehlt noch: verlinken.
     }
+    symlinkSync(source, target, DIRECTORY_LINK);
   }
 }
 

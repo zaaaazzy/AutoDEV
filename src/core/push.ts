@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import webpush from 'web-push';
 import { readEnvValues } from './local-database.js';
 import { decryptSecret, encryptSecret, isEncrypted } from './secrets.js';
+import { defined } from './defined.js';
 
 /** Web-Push an alle registrierten Geräte. Server, Worker und Wächter teilen die VAPID-Schlüssel über die Datenbank. */
 export interface PushMessage {
@@ -97,7 +98,7 @@ export async function vapidKeys(pool: Pool, environment: NodeJS.ProcessEnv = pro
   ]);
   // Bei gleichzeitiger Erzeugung gewinnt der zuerst gespeicherte Schlüssel.
   const winner = await pool.query<{ value: string }>('SELECT value FROM app_settings WHERE key = $1', [VAPID_KEY]);
-  return openVapid(winner.rows[0]!.value, environment);
+  return openVapid(defined(winner.rows[0]).value, environment);
 }
 
 /**

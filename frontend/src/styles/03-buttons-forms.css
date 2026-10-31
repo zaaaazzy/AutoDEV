@@ -25,18 +25,18 @@
   color: var(--surface);
 }
 .button.danger {
-  border-color: #ecc9c0;
-  color: #9d4938;
+  border-color: var(--error-border);
+  color: var(--error-text);
 }
 .button.danger:hover:not(:disabled) {
-  border-color: #c9573f;
-  background: #fbeeea;
+  border-color: var(--error);
+  background: var(--error-soft);
 }
 
 /* Hauptaktion, die etwas zerstört (Bestätigungsdialog): rot gefüllt statt grün. */
 .button.primary.danger {
-  border-color: #9d4938;
-  background: #9d4938;
+  border-color: var(--error-text);
+  background: var(--error-text);
   color: var(--surface);
 }
 .button.primary.danger:hover:not(:disabled) {
@@ -61,7 +61,7 @@
 .field-error {
   display: block;
   margin-top: 4px;
-  color: #9d4938;
+  color: var(--error-text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -73,7 +73,7 @@
   margin: 16px 0 20px;
   padding: 15px;
   border-radius: 9px;
-  background: #f7f8f5;
+  background: var(--surface-muted);
 }
 .inline-form {
   display: grid;
@@ -83,7 +83,7 @@
   margin: 15px 0 18px;
   padding: 14px;
   border-radius: 9px;
-  background: #f7f8f5;
+  background: var(--surface-muted);
 }
 .filter {
   display: flex;
@@ -134,7 +134,7 @@ h3 .link-button {
   transform: rotate(90deg);
 }
 .button.git-blocked {
-  outline: 2px solid #c9573f;
+  outline: 2px solid var(--error);
   outline-offset: 1px;
 }
 
@@ -185,13 +185,13 @@ label.check > input[type='checkbox'] {
   font-weight: 800;
 }
 .check-state.ok {
-  background: #2f8a57;
+  background: var(--success);
 }
 .check-state.error {
   background: var(--danger);
 }
 .check-state.warn {
-  background: #e08a1e;
+  background: var(--accent-orange);
 }
 .check-state.loading {
   color: var(--blue);

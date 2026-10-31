@@ -1,3 +1,5 @@
+import { defined } from '../../../../../src/core/defined.js';
+
 /** Zeilenweiser Vergleich (LCS) für die Anzeige eingereichter Dokumentänderungen. */
 export interface DiffLine {
   kind: 'same' | 'added' | 'removed';
@@ -17,7 +19,10 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   const table: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
   for (let i = a.length - 1; i >= 0; i -= 1) {
     for (let j = b.length - 1; j >= 0; j -= 1) {
-      table[i]![j] = a[i] === b[j] ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
+      defined(table[i])[j] =
+        a[i] === b[j]
+          ? defined(defined(table[i + 1])[j + 1]) + 1
+          : Math.max(defined(defined(table[i + 1])[j]), defined(defined(table[i])[j + 1]));
     }
   }
   const lines: DiffLine[] = [];
@@ -25,19 +30,19 @@ export function lineDiff(before: string, after: string): DiffLine[] {
   let j = 0;
   while (i < a.length && j < b.length) {
     if (a[i] === b[j]) {
-      lines.push({ kind: 'same', text: a[i]! });
+      lines.push({ kind: 'same', text: defined(a[i]) });
       i += 1;
       j += 1;
-    } else if (table[i + 1]![j]! >= table[i]![j + 1]!) {
-      lines.push({ kind: 'removed', text: a[i]! });
+    } else if (defined(defined(table[i + 1])[j]) >= defined(defined(table[i])[j + 1])) {
+      lines.push({ kind: 'removed', text: defined(a[i]) });
       i += 1;
     } else {
-      lines.push({ kind: 'added', text: b[j]! });
+      lines.push({ kind: 'added', text: defined(b[j]) });
       j += 1;
     }
   }
-  while (i < a.length) lines.push({ kind: 'removed', text: a[i++]! });
-  while (j < b.length) lines.push({ kind: 'added', text: b[j++]! });
+  while (i < a.length) lines.push({ kind: 'removed', text: defined(a[i++]) });
+  while (j < b.length) lines.push({ kind: 'added', text: defined(b[j++]) });
   return lines;
 }
 

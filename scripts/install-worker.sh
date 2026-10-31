@@ -2,7 +2,7 @@
 # Installiert den AIdeation-Worker als macOS LaunchAgent (Autostart, Neustart bei Absturz).
 # Der Worker bedient alle im AIdeation registrierten Projekte, jeweils im eigenen Projektordner.
 # Zugänge (DEV_LOG_DATABASE_URL, DEV_LOG_SECRET_KEY) kommen in ~/.config/aideation/worker.env (Rechte 600),
-# nicht in die Plist; scripts/run-with-env.sh liest sie beim Start.
+# nicht in die Plist; Node liest sie beim Start selbst (--env-file, siehe unten).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # shellcheck source=lib/service-env.sh

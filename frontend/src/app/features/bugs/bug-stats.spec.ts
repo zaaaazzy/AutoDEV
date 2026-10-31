@@ -71,4 +71,29 @@ test('Statistik: wer, wo und in welchen Tests – offen und begraben getrennt ge
     'list.spec.ts',
     'speichert Punkte',
   ]);
+  // Kategorie nur aus dem Feld: Pfade in der Beschreibung (frontend/…) zählen hier nicht.
+  assert.deepEqual(
+    stats.categories.map((row) => [row.label, row.open, row.buried]),
+    [
+      ['Ohne Kategorie', 2, 2],
+      ['Backend', 1, 0],
+    ],
+  );
+});
+
+test('Statistik nach Kategorie: je Kategorie offen und begraben, leere Kategorie als „Ohne Kategorie“', () => {
+  const stats = bugStats([
+    bug({ category: 'frontend' }),
+    bug({ category: 'frontend', status: 'fixed' }),
+    bug({ category: 'security', status: 'rejected' }),
+    bug({ category: null, description: 'in src/api/bugs.ts' }),
+  ]);
+  assert.deepEqual(
+    stats.categories.map((row) => [row.label, row.open, row.buried, row.total]),
+    [
+      ['Frontend', 1, 1, 2],
+      ['Ohne Kategorie', 1, 0, 1],
+      ['Sicherheit', 0, 1, 1],
+    ],
+  );
 });

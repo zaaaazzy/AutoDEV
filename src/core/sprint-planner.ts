@@ -1,3 +1,5 @@
+import { defined } from './defined.js';
+
 /**
  * Autopilot-Sprintplanung (deterministisch, ohne Modell): bewertet offene Aufträge, füllt den Sprint bis zur
  * Kapazität in Agent-Stunden (Schätzungen kalibriert, siehe `estimate-calibration.ts`) und legt die Reihenfolge fest – Folgeaufträge nach ihrem Vorgänger, Aufträge mit
@@ -67,11 +69,11 @@ export function scoreOf(candidate: PlanCandidate, predecessorDone: boolean): num
   return Math.round(score * 100) / 100;
 }
 
-function median(values: number[]): number | null {
+export function median(values: number[]): number | null {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
+  return sorted.length % 2 ? defined(sorted[middle]) : (defined(sorted[middle - 1]) + defined(sorted[middle])) / 2;
 }
 
 /**
@@ -102,9 +104,18 @@ export function affectedFiles(description: string): string[] {
   const source = section ?? '';
   const files = new Set<string>();
   for (const match of source.matchAll(/`([^`\s]+\.[a-z0-9]{1,6})`|(?:^|\s)((?:[\w.-]+\/)+[\w.-]+\.[a-z0-9]{1,6})/gim)) {
-    files.add((match[1] ?? match[2])!.replace(/^\.\//, ''));
+    files.add(defined(match[1] ?? match[2]).replace(/^\.\//, ''));
   }
   return [...files];
+}
+
+/** Größe eines Auftrags nach betroffenen Bereichen (Dateien aus `affectedFiles`): 1, 2–3 oder 4 und mehr. */
+export type AreaBucket = '1' | '2-3' | '4+';
+
+/** Bereichsgruppe einer Beschreibung; null, wenn sie keine betroffenen Dateien nennt. */
+export function areaBucket(description: string): AreaBucket | null {
+  const count = affectedFiles(description).length;
+  return count === 0 ? null : count === 1 ? '1' : count <= 3 ? '2-3' : '4+';
 }
 
 function reasonOf(candidate: PlanCandidate, predecessorTitle: string | null): string {

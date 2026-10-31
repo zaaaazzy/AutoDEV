@@ -1,6 +1,7 @@
 import type { DevelopmentItem } from '../core/models.js';
 import { canRetryDevelopment } from '../../../../src/core/development-transitions.js';
 import { failureParts, orderGuide } from './order-problem.js';
+import { defined } from '../../../../src/core/defined.js';
 
 /**
  * Was eine Karte unter „Aktionen“ als nächsten Schritt anbietet – genau einer je Auftrag:
@@ -14,9 +15,20 @@ import { failureParts, orderGuide } from './order-problem.js';
  * - rule: Verstösst gegen eine Projektregel – anpassen oder löschen.
  * - replan: Aus dem Sprint genommen – wieder einplanen oder löschen.
  * - check: Punkte, die nur ein Mensch prüfen kann.
+ * - evidence: Offene Testnachweise – Befehl als Testlauf starten bzw. Freigabe in den Rechten erteilen.
  */
 export type CardStep =
-  'wait' | 'analyzing' | 'retry' | 'suggestion' | 'task' | 'question' | 'approve' | 'rule' | 'replan' | 'check';
+  | 'wait'
+  | 'analyzing'
+  | 'retry'
+  | 'suggestion'
+  | 'task'
+  | 'question'
+  | 'approve'
+  | 'rule'
+  | 'replan'
+  | 'check'
+  | 'evidence';
 
 export interface AttentionCard {
   /** Warum der Auftrag wartet: ein Satz mit dem echten Grund. */
@@ -101,7 +113,7 @@ export function blockedReason(item: Pick<CardSource, 'failure' | 'analysis' | 'a
     const parts = failureParts(failure);
     const agent = parts.agent || 'Ein Agent';
     if (parts.unmet.length) {
-      const first = parts.unmet[0]!;
+      const first = defined(parts.unmet[0]);
       const others = parts.unmet.length - 1;
       const more = others ? ` (und ${others} ${others === 1 ? 'weiterer Punkt' : 'weitere Punkte'})` : '';
       return short(`${agent}: Abnahme nicht bestanden – ${first.reason || first.criterion}${more}`);
@@ -131,13 +143,13 @@ function ruleOf(failure: string | null | undefined): string {
 }
 
 /** Eine Karte unter „Aktionen“: ein Grund, ein nächster Schritt, und welcher Agent die Meldung ausgelöst hat. */
-export function attentionCard(item: CardSource, manualChecks = 0): AttentionCard {
-  const card = buildCard(item, manualChecks);
+export function attentionCard(item: CardSource, manualChecks = 0, openEvidence = 0): AttentionCard {
+  const card = buildCard(item, manualChecks, openEvidence);
   const agent = item.status === 'blocked' && item.failure ? failureParts(item.failure).agent || null : null;
   return { ...card, agent };
 }
 
-function buildCard(item: CardSource, manualChecks: number): AttentionCard {
+function buildCard(item: CardSource, manualChecks: number, openEvidence: number): AttentionCard {
   if (item.status === 'approval') {
     return { why: 'Fertig – wartet auf deine Freigabe.', step: 'approve', next: '', detail: null };
   }
@@ -181,6 +193,17 @@ function buildCard(item: CardSource, manualChecks: number): AttentionCard {
       };
     }
     const todo = clean(item.actionTodo ?? '');
+    if (openEvidence && !todo) {
+      return {
+        why:
+          openEvidence === 1
+            ? 'Ein Testnachweis ist offen: Der Befehl wurde noch nicht ausgeführt.'
+            : `${openEvidence} Testnachweise sind offen: Die Befehle wurden noch nicht ausgeführt.`,
+        step: 'evidence',
+        next: 'Starte den Befehl als Testlauf – grün hakt den Nachweis ab. Gesperrte Befehle gibst du in den Rechten frei.',
+        detail: null,
+      };
+    }
     return { why: todo ? sentence(todo) : 'Wartet auf dich.', step: 'task', next: '', detail: null };
   }
 

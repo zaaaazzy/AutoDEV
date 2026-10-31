@@ -65,15 +65,30 @@ export async function applyModelSettings(pool: Pool): Promise<void> {
   }
 }
 
+/** Die Modellliste ist klein; antwortet Ollama nicht, bricht die Abfrage ab statt Sockets zu sammeln. */
+const MODELS_TIMEOUT_MS = 10_000;
+
 async function installedModels(): Promise<string[]> {
   const baseUrl = (process.env.DEV_LOG_OLLAMA_URL ?? DEFAULT_OLLAMA_URL).replace(/\/$/, '');
-  const response = await patientFetch(`${baseUrl}/api/tags`);
+  const response = await patientFetch(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(MODELS_TIMEOUT_MS) });
   const body = (await response.json()) as { models?: { name: string }[] };
   return (body.models ?? []).map((model) => model.name).sort();
 }
 
-/** The worker owns the environment and reaches Ollama, so it publishes models and choices for the dashboard. */
-export async function publishSystemAgents(pool: Pool): Promise<void> {
+let publishing: Promise<void> | null = null;
+
+/**
+ * The worker owns the environment and reaches Ollama, so it publishes models and choices for the dashboard.
+ * Der Worker ruft das alle 15 s auf; ein noch laufender Abgleich wird geteilt statt parallel ein zweiter gestartet.
+ */
+export function publishSystemAgents(pool: Pool): Promise<void> {
+  publishing ??= publishNow(pool).finally(() => {
+    publishing = null;
+  });
+  return publishing;
+}
+
+async function publishNow(pool: Pool): Promise<void> {
   await applyModelSettings(pool);
   const models = await installedModels().catch(logged('system-agents', []));
   const upsert = `INSERT INTO app_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;

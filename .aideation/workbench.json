@@ -1,0 +1,20 @@
+{
+  "services": {
+    "postgres": {
+      "image": "postgres:17-alpine",
+      "environment": {
+        "POSTGRES_USER": "devlog",
+        "POSTGRES_PASSWORD": "workbench",
+        "POSTGRES_DB": "aideation"
+      },
+      "command": ["-p", "5433"],
+      "tmpfs": ["/var/lib/postgresql/data"]
+    }
+  },
+  "environment": {
+    "DEV_LOG_DATABASE_URL": "postgresql://devlog:workbench@127.0.0.1:5433/aideation",
+    "DEV_LOG_ADMIN_DATABASE_URL": "postgresql://devlog:workbench@127.0.0.1:5433/postgres",
+    "E2E_ADMIN_DATABASE_URL": "postgresql://devlog:workbench@127.0.0.1:5433/postgres",
+    "DEV_LOG_TEST_REQUIRE_DATABASE": "1"
+  }
+}

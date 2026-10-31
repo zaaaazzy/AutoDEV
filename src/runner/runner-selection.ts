@@ -112,7 +112,7 @@ export async function loadWorkflow(pool: Pool, projectSlug: string): Promise<Wor
  * fremden Quellen (Betrieb, GitHub) ohne Freigabe durch einen Menschen werden nie gewählt, auch nicht gezielt (--item).
  */
 export async function selectItems(pool: Pool, options: RunnerOptions): Promise<WorkItem[]> {
-  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
+  const columns = `d.id, d.project_slug AS "projectSlug", d.title, d.description, d.kind, d.bug_id AS "bugId", (SELECT source FROM bugs WHERE id = d.bug_id) AS "bugSource", d.sprint_id AS "sprintId", d.ideation_id AS "ideationId", d.agent_id AS "agentId", d.risks, d.category, d.effort_hours AS "effortHours", d.token_estimate::float8 AS "tokenEstimate", d.estimate_source AS "estimateSource", d.retry_count AS "retryCount"`;
   if (options.itemId) {
     const result = await pool.query<WorkItem>(
       `SELECT ${columns} FROM development_items d
@@ -145,13 +145,26 @@ export async function selectItems(pool: Pool, options: RunnerOptions): Promise<W
   return result.rows;
 }
 
+/**
+ * JSON aus einer Umgebungsvariable; ungültig → Warnung und null. Ein Tippfehler darf keinen Auftrag mitten im Start
+ * werfen lassen (der Auftrag stünde sonst bis zum Neustart auf „In Arbeit“).
+ */
+function envJson(name: string, raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    console.warn(`[runner] ${name} ist kein gültiges JSON – Wert wird ignoriert.`);
+    return null;
+  }
+}
+
 export function defaultAgentCommand(environment: NodeJS.ProcessEnv = process.env): string[] | null {
   const raw = environment.DEV_LOG_AGENT_COMMAND?.trim();
   if (!raw) {
     return null;
   }
   if (raw.startsWith('[')) {
-    const parsed: unknown = JSON.parse(raw);
+    const parsed = envJson('DEV_LOG_AGENT_COMMAND', raw);
     return Array.isArray(parsed) && parsed.every((part) => typeof part === 'string') && parsed.length
       ? (parsed as string[])
       : null;
@@ -181,7 +194,7 @@ export async function loadTestCommands(
   const raw = environment.DEV_LOG_TEST_COMMANDS?.trim();
   return (
     parseTestCommands(stored) ??
-    (raw ? parseTestCommands(JSON.parse(raw)) : null) ?? [
+    (raw ? parseTestCommands(envJson('DEV_LOG_TEST_COMMANDS', raw)) : null) ?? [
       ['npm', 'run', 'build'],
       ['npm', 'test'],
     ]

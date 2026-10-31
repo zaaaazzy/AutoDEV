@@ -18,7 +18,6 @@ export class StepResultComponent {
   readonly output = input('');
   readonly progress = input<string | null | undefined>(null);
   readonly running = input(false);
-  readonly eventsOpen = input(false);
   /** Kompakte Ansicht (Chat): Ausgabe direkt, Verlauf und Dateien nur nach dem Aufklappen unter der Nachricht. */
   readonly compact = input(false);
   protected readonly describe = describeStepEvent;

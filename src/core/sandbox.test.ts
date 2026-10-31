@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,10 @@ import { guardHookCommand, withAgentPermissions } from '../agent/tool-permission
 import {
   containerDirectory,
   credentialProblem,
+  DOCKER_HUB_HOSTS,
+  DEPENDENCY_STAMP,
+  dependencyCommand,
+  dependencyStamp,
   dockerClientEnvironment,
   dockerHostPath,
   EGRESS_CONTAINER,
@@ -15,16 +19,15 @@ import {
   egressAllowList,
   egressRunArgs,
   ensureAgentNetwork,
-  lockfileHash,
-  modulesInstallArgs,
   modulesVolume,
-  prepareModulesMountpoint,
   readOnlyWorkspace,
   removeLeftoverContainers,
+  replaceLinkedModules,
   resetAgentNetwork,
   runInSandbox,
   SANDBOX_GUARD,
   SANDBOX_NETWORK,
+  SANDBOX_NO_PROXY,
   sandboxBadge,
   sandboxExecutor,
   sandboxFailureNote,
@@ -185,7 +188,7 @@ test('Sandbox: lesende Rollen binden Workspace und node_modules nur mit :ro ein'
   }
 });
 
-test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm und Ollama', () => {
+test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic, npm, Ollama und Docker Hub', () => {
   const command = egressRunArgs('darwin', { DEV_LOG_AGENT_SANDBOX_EGRESS: 'pypi.org:443, 10.0.0.1:5432x, ;rm' });
   const joined = command.join(' ');
   assert.match(joined, /--cap-drop ALL/);
@@ -200,7 +203,14 @@ test('Sandbox: Egress-Proxy ohne Rechte am Bridge-Netz, Allowlist nur Anthropic,
     'api.anthropic.com:443',
     'registry.npmjs.org:443',
     'host.docker.internal:11434',
+    ...DOCKER_HUB_HOSTS,
     'pypi.org:443',
+  ]);
+  assert.deepEqual(DOCKER_HUB_HOSTS, [
+    'registry-1.docker.io:443',
+    'auth.docker.io:443',
+    'production.cloudflare.docker.com:443',
+    'production.cloudfront.docker.com:443',
   ]);
   assert.ok(!egressAllowList({}).includes('5432') && !egressAllowList({}).includes('5433'), 'keine Datenbank');
 });
@@ -252,12 +262,15 @@ test('Sandbox: Arbeitsordner innerhalb des Worktrees wird auf /workspace abgebil
   assert.equal(modulesVolume('Mein Projekt/../x'), 'aideation-node-modules-mein-projekt-..-x');
 });
 
-test('Sandbox: Schalter global und je Projekt, Standard docker, „off“ nur als Notfallmodus mit Warnung', () => {
-  assert.equal(sandboxMode(null, {}), 'docker', 'Standard: Sandbox an');
+test('Sandbox: Schalter global und je Projekt, Standard Arbeitscontainer, „off“ nur als Notfallmodus mit Warnung', () => {
+  assert.equal(sandboxMode(null, {}), 'workbench', 'Standard: Arbeitscontainer');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
+  assert.equal(sandboxMode('workbench', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'workbench');
+  assert.equal(usesSandbox('workbench'), true);
   assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'off' }), 'off');
   assert.equal(sandboxMode('off', { DEV_LOG_AGENT_SANDBOX: 'docker' }), 'off', 'Projekt geht vor');
   assert.equal(sandboxMode('docker', { DEV_LOG_AGENT_SANDBOX: 'off' }), 'docker');
-  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'docker', 'unbekannter Wert: Standard');
+  assert.equal(sandboxMode(null, { DEV_LOG_AGENT_SANDBOX: 'podman' }), 'workbench', 'unbekannter Wert: Standard');
   assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child' }), 'off', 'Unit-Tests: Attrappen statt Docker');
   assert.equal(sandboxMode(null, { NODE_TEST_CONTEXT: 'child', DEV_LOG_AGENT_SANDBOX: 'docker' }), 'docker');
   assert.equal(usesSandbox('docker'), true);
@@ -436,9 +449,9 @@ test('Sandbox: Limit-Abbruch im Container wird als Pause bis zum Reset erkannt u
   assert.equal(result.exitCode, 1);
   assert.match(result.output, /pausiert bis zum Reset/);
   // Der Runner (runner-steps) pausiert damit statt einen Fehlversuch zu zählen.
-  const reset = usageLimitReset(result.output, new Date('2026-10-29T12:00:00'));
+  const reset = usageLimitReset(result.output, new Date('2026-10-29T12:00:00Z'));
   assert.ok(reset, 'Limit trotz angehängtem Hinweis erkannt');
-  assert.equal(reset.getHours(), 20);
+  assert.equal(reset.toISOString(), '2026-10-29T19:53:00.000Z', '20:50 Uhr Zürich plus Reserve');
   assert.deepEqual(calls.at(-1)?.command, ['docker', 'rm', '-f', 'aideation-r-limit'], 'Container entfernt');
   assert.equal(sandboxBadge('limit'), null, 'kein Sandbox-Problem im Badge');
 });
@@ -465,114 +478,128 @@ test('Sandbox: Aufräumen beim Start entfernt Container mit dem Label aideation.
   assert.equal(none.calls.length, 1);
 });
 
-/** Worktree mit package.json und Lockfile (npm-Projekt). */
-async function npmWorktree(): Promise<string> {
-  const folder = await mkdtemp(join(tmpdir(), 'sandbox-modules-'));
-  await writeFile(join(folder, 'package.json'), '{"name":"demo"}\n');
-  await writeFile(join(folder, 'package-lock.json'), '{"lockfileVersion":3,"packages":{}}\n');
-  return folder;
+test('Sandbox: npm im Container nutzt einen Cache unter /tmp, nicht ~/.npm aus dem Image', () => {
+  const command = args();
+  const index = command.indexOf('npm_config_cache=/tmp/npm-cache');
+  assert.ok(index > 0);
+  assert.equal(command[index - 1], '-e');
+});
+
+/** Git-Worktree (.git als Datei) mit package.json, package-lock.json und node_modules als Link auf einen Host-Ordner. */
+function linkedWorktree(): { worktree: string; target: string } {
+  const root = mkdtempSync(join(tmpdir(), 'sandbox-modules-'));
+  const worktree = join(root, 'agent');
+  const target = join(root, 'source-node_modules');
+  mkdirSync(worktree);
+  mkdirSync(target);
+  writeFileSync(join(target, 'bleibt.txt'), 'x');
+  writeFileSync(join(worktree, '.git'), `gitdir: ${join(root, '.git', 'worktrees', 'agent')}\n`);
+  writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+  writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+  symlinkSync(target, join(worktree, 'node_modules'), 'dir');
+  return { worktree, target };
 }
 
-test('Sandbox: node_modules-Volume wird vor dem Lauf mit npm ci gefüllt, ohne den Worktree einzubinden', async () => {
-  const worktree = await npmWorktree();
-  try {
-    const hash = lockfileHash(worktree);
-    assert.match(hash ?? '', /^[a-f0-9]{64}$/);
-    const command = modulesInstallArgs(worktree, hash ?? '', { runId: 'r-ci', project: 'Demo', uid: 501, gid: 20 });
-    const line = command.join(' ');
-    assert.ok(line.includes(`${modulesVolume('Demo')}:/deps/node_modules`), 'Volume unter /deps, nicht am Symlink');
-    assert.ok(line.includes(`${join(worktree, 'package-lock.json')}:/deps/package-lock.json:ro`));
-    assert.ok(!command.some((part) => part.endsWith(`:${SANDBOX_WORKDIR}`)), 'Worktree nicht eingebunden');
-    assert.deepEqual(command.slice(command.indexOf('--user'), command.indexOf('--user') + 2), ['--user', '501:20']);
-    assert.ok(command.includes('ALL') && command.includes('no-new-privileges'));
-    assert.equal(command[command.indexOf('--network') + 1], SANDBOX_NETWORK, 'npm nur über den Egress-Proxy');
-    assert.ok(command.includes(`HTTPS_PROXY=${EGRESS_URL}`));
-    assert.ok(command.includes(`AIDEATION_LOCK_HASH=${hash}`));
-    assert.match(command.at(-1) ?? '', /npm ci --ignore-scripts/);
-    assert.match(command.at(-1) ?? '', /\.aideation-lock/, 'Stempel: nur bei geändertem Lockfile neu installieren');
+test('Sandbox: verlinktes node_modules wird zum leeren Ordner, das Ziel bleibt unberührt', () => {
+  const { worktree, target } = linkedWorktree();
+  replaceLinkedModules(worktree);
+  const stat = lstatSync(join(worktree, 'node_modules'));
+  assert.ok(!stat.isSymbolicLink() && stat.isDirectory(), 'Einhängepunkt für das Volume');
+  assert.ok(existsSync(join(target, 'bleibt.txt')), 'Ziel des Links nicht gelöscht');
+  replaceLinkedModules(join(worktree, 'fehlt'));
+});
 
-    resetAgentNetwork();
-    const { calls, docker } = fakeDocker((call) => (call[1] === 'version' ? ok('27') : ok()));
-    const result = await runInSandbox(['npm', 'run', 'test:unit'], worktree, {
-      runId: 'r-ci',
-      project: 'ci-demo',
-      name: 'aideation-r-ci',
-      docker,
-      network: 'demo-test_default',
-    });
-    assert.equal(result.exitCode, 0);
-    const install = calls.findIndex((call) => call.command.at(-1)?.includes('npm ci'));
-    const run = calls.findIndex((call) => call.command.includes('aideation-r-ci') && call.command[1] === 'run');
-    assert.ok(install >= 0 && install < run, 'erst npm ci im Volume, dann der eigentliche Lauf');
-    assert.ok(
-      calls.some((call) => call.command[1] === 'network' && call.command[2] === 'inspect'),
-      'Agent-Netzwerk bereit, auch wenn der Lauf im Compose-Netz hängt',
-    );
+test('Sandbox: im Projektordner der Menschen (.git als Ordner) bleibt ein node_modules-Symlink', () => {
+  const folder = mkdtempSync(join(tmpdir(), 'sandbox-human-'));
+  try {
+    mkdirSync(join(folder, '.git'));
+    mkdirSync(join(folder, 'vendor'));
+    symlinkSync(join(folder, 'vendor'), join(folder, 'node_modules'), 'dir');
+    replaceLinkedModules(folder);
+    assert.ok(lstatSync(join(folder, 'node_modules')).isSymbolicLink());
   } finally {
-    await rm(worktree, { recursive: true, force: true });
+    rmSync(folder, { recursive: true, force: true });
   }
 });
 
-test('Sandbox: scheitert npm ci im Volume, startet der Lauf nicht', async () => {
-  const worktree = await npmWorktree();
+test('Sandbox: verlinkter Worktree bekommt die Abhängigkeiten ins Volume, nicht in das Ziel des Links', async () => {
+  resetAgentNetwork();
+  const { worktree, target } = linkedWorktree();
+  const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+  const result = await runInSandbox(['npm', 'run', 'typecheck'], worktree, {
+    runId: 'r-install',
+    project: 'demo',
+    name: 'aideation-r-install',
+    docker,
+    environment: { PATH: '/usr/bin' },
+  });
+  assert.equal(result.exitCode, 0);
+  assert.ok(!lstatSync(join(worktree, 'node_modules')).isSymbolicLink());
+  assert.ok(existsSync(join(target, 'bleibt.txt')));
+  const install = calls.findIndex((call) => call.command.at(-1)?.includes(DEPENDENCY_STAMP));
+  const run = calls.findIndex((call) => call.command.slice(-3).join(' ') === 'npm run typecheck');
+  assert.ok(install >= 0 && install < run, 'Installation vor dem eigentlichen Lauf');
+});
+
+test('Sandbox: Abhängigkeiten werden einmal je Lockfile ins Volume installiert, bevor der Befehl läuft', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-deps-'));
   try {
-    const { calls, docker } = fakeDocker((call) =>
-      call.at(-1)?.includes('npm ci') ? { exitCode: 1, durationMs: 1, output: 'npm error code E403' } : ok('27'),
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    writeFileSync(join(worktree, 'package-lock.json'), '{"lockfileVersion":3}');
+    const stamp = dependencyStamp(worktree);
+    assert.match(stamp ?? '', /^[a-f0-9]{16}$/);
+    const { calls, docker } = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    const execute = sandboxExecutor(worktree, { runId: 'r8', project: 'demo', docker, name: 'aideation-r8' });
+    await execute(['npm', 'test'], worktree);
+    const runs = calls.filter((call) => call.command.includes('--cap-drop'));
+    assert.equal(runs.length, 2);
+    assert.deepEqual(runs[0]?.command.slice(-3), dependencyCommand(stamp ?? ''));
+    assert.match(runs[0]?.command.at(-1) ?? '', /npm install --ignore-scripts/);
+    assert.ok(runs[0]?.command.at(-1)?.includes(DEPENDENCY_STAMP));
+    assert.match(
+      runs[0]?.command.at(-1) ?? '',
+      /^exec 9>node_modules\/\.aideation-install\.lock && flock 9 /,
+      'Sperre gegen parallele Installationen',
     );
-    const result = await runInSandbox(['npm', 'test'], worktree, {
-      runId: 'r-ci-fail',
-      project: 'ci-fail',
-      name: 'aideation-r-ci-fail',
-      docker,
-    });
+    assert.equal(runs[0]?.command[runs[0].command.indexOf('--network') + 1], SANDBOX_NETWORK);
+    assert.deepEqual(runs[1]?.command.slice(-2), ['npm', 'test']);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+test('Sandbox: scheitert die Installation, startet der Befehl nicht; lesende Läufe installieren nichts', async () => {
+  const worktree = mkdtempSync(join(tmpdir(), 'sandbox-deps-'));
+  try {
+    writeFileSync(join(worktree, 'package.json'), '{"name":"demo"}');
+    const { calls, docker } = fakeDocker((command) =>
+      command[1] === 'version'
+        ? ok('27')
+        : command.at(-1)?.includes('npm install')
+          ? { ...ok('E404'), exitCode: 1 }
+          : ok(),
+    );
+    const result = await runInSandbox(['npm', 'test'], worktree, { runId: 'r9', project: 'demo', docker });
     assert.equal(result.exitCode, 1);
-    assert.match(result.output, /npm ci im node_modules-Volume.*fehlgeschlagen.*\n.*E403/s);
-    assert.ok(!calls.some((call) => call.command.includes('aideation-r-ci-fail')), 'kein docker run des Laufs');
-    assert.match(sandboxBadge('ci-fail') ?? '', /npm ci/);
-  } finally {
-    await rm(worktree, { recursive: true, force: true });
-  }
-});
-
-test('Sandbox: node_modules-Symlink im Agent-Worktree wird vor dem Lauf zum Mountpunkt des Volumes', async () => {
-  const worktree = await npmWorktree();
-  const main = await mkdtemp(join(tmpdir(), 'sandbox-main-'));
-  try {
-    await mkdir(join(main, 'node_modules', 'typescript'), { recursive: true });
-    await writeFile(join(worktree, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'agent')}\n`);
-    await symlink(join(main, 'node_modules'), join(worktree, 'node_modules'));
-    const { docker } = fakeDocker((call) => (call[1] === 'version' ? ok('27') : ok()));
-    resetAgentNetwork();
-    const result = await runInSandbox(['npm', 'run', 'test:unit'], worktree, {
-      runId: 'r-link',
-      project: 'link-demo',
-      name: 'aideation-r-link',
-      docker,
+    assert.match(result.output, /Abhängigkeiten liessen sich nicht/);
+    assert.ok(!calls.some((call) => call.command.slice(-2).join(' ') === 'npm test'));
+    const read = fakeDocker((command) => (command[1] === 'version' ? ok('27') : ok()));
+    await runInSandbox(['npm', 'test'], worktree, {
+      runId: 'r10',
+      project: 'demo',
+      docker: read.docker,
+      readOnly: true,
     });
-    assert.equal(result.exitCode, 0);
-    const mountpoint = await lstat(join(worktree, 'node_modules'));
-    assert.ok(mountpoint.isDirectory() && !mountpoint.isSymbolicLink(), 'Volume hängt an einem echten Ordner');
-    assert.deepEqual(await readdir(join(worktree, 'node_modules')), []);
-    assert.deepEqual(await readdir(join(main, 'node_modules')), ['typescript'], 'Ziel des Links bleibt unberührt');
+    assert.equal(read.calls.filter((call) => call.command.includes('--cap-drop')).length, 1);
   } finally {
-    await rm(worktree, { recursive: true, force: true });
-    await rm(main, { recursive: true, force: true });
+    rmSync(worktree, { recursive: true, force: true });
   }
 });
 
-test('Sandbox: im Projektordner der Menschen (.git als Ordner) bleibt ein node_modules-Symlink', async () => {
-  const folder = await mkdtemp(join(tmpdir(), 'sandbox-human-'));
-  try {
-    await mkdir(join(folder, '.git'));
-    await mkdir(join(folder, 'vendor'));
-    await symlink(join(folder, 'vendor'), join(folder, 'node_modules'));
-    prepareModulesMountpoint(folder);
-    assert.ok((await lstat(join(folder, 'node_modules'))).isSymbolicLink());
-  } finally {
-    await rm(folder, { recursive: true, force: true });
-  }
-});
-
-test('Sandbox: ohne Lockfile kein npm ci', () => {
-  assert.equal(lockfileHash(WORKTREE), null);
+test('Sandbox: localhost geht nie über den Egress-Proxy', () => {
+  const run = args();
+  assert.ok(run.includes(`NO_PROXY=${SANDBOX_NO_PROXY}`));
+  assert.ok(run.includes(`no_proxy=${SANDBOX_NO_PROXY}`));
+  assert.match(SANDBOX_NO_PROXY, /localhost/);
+  assert.match(SANDBOX_NO_PROXY, /127\.0\.0\.1/);
 });

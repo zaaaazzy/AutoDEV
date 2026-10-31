@@ -2,7 +2,9 @@
 
 Stand: 18.10.2026 · Rolle: Visionär · Grundlage: Code (`src/`, `frontend/src/`), `docs/*.md`, Datenmodell (`src/db/schema.ts`), inkl. der noch nicht committeten Arbeit (Agent-Aufgaben, Folgeaufträge, „Aktion notwendig“, automatische Abnahmeprüfung, Git-Graph).
 
-Es wurde **nichts umgesetzt**. Jede Datei ist so aufgebaut, dass sie direkt als Idee in **Ideation** erfasst und vom Auftragsautor zu einem Auftrag ausgearbeitet werden kann:
+> **Stand 30.10.2026:** Umgesetzt sind 01–07 (Visionär, Routinen, Autopilot, Budget und Modell-Routing, Produktions-Rückkanal, visuelle Abnahme, GitHub-Brücke). Offen ist nur 08 (Retrospektive). Der Text unten ist der Stand vom 18.10.2026.
+
+Zum Zeitpunkt des Vorschlags war **nichts umgesetzt**. Jede Datei ist so aufgebaut, dass sie direkt als Idee in **Ideation** erfasst und vom Auftragsautor zu einem Auftrag ausgearbeitet werden kann:
 
 - **Titel** → Ideen-Titel (max. 180 Zeichen)
 - **Steckbrief** → Kategorie, Priorität, Nutzen, Kosten, Aufwand

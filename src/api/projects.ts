@@ -399,10 +399,10 @@ export function registerProjectRoutes(app: Router, pool: Pool): void {
       sets.push(`agent_workspace = $${values.length}`);
     }
     if (body.agentSandbox !== undefined) {
-      // Leer bzw. null = globaler Schalter (DEV_LOG_AGENT_SANDBOX), sonst „off“ oder „docker“ nur für dieses Projekt.
+      // Leer bzw. null = globaler Schalter (DEV_LOG_AGENT_SANDBOX), sonst „off“, „docker“ oder „workbench“ nur für dieses Projekt.
       const mode = body.agentSandbox === null || body.agentSandbox === '' ? null : parseSandboxMode(body.agentSandbox);
       if (mode === null && body.agentSandbox !== null && body.agentSandbox !== '')
-        return fail('Docker-Sandbox: global, aus oder docker.');
+        return fail('Docker-Sandbox: global, aus, docker oder workbench.');
       values.push(mode);
       sets.push(`agent_sandbox = $${values.length}`);
     }

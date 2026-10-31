@@ -1,11 +1,12 @@
 import type { Pool } from 'pg';
 import { logged } from '../core/log.js';
+import type { BudgetPeriod } from '../core/shared-types.js';
 import { sendPush } from '../core/push.js';
 import { localDay, localTimeZone } from '../core/time-zone.js';
 import { budgetActionTodo, setActionTodo } from './action-todo.js';
 
-export const BUDGET_PERIODS = ['day', 'sprint', 'order'] as const;
-export type BudgetPeriod = (typeof BUDGET_PERIODS)[number];
+export { BUDGET_PERIODS } from '../core/shared-types.js';
+export type { BudgetPeriod } from '../core/shared-types.js';
 
 export const PERIOD_LABELS: Record<BudgetPeriod, string> = {
   day: 'Tageslimit',

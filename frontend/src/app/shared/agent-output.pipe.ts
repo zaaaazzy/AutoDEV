@@ -2,6 +2,7 @@ import { Pipe, type PipeTransform } from '@angular/core';
 import { escapeHtml } from './html.js';
 import { MarkdownPipe } from './markdown.pipe.js';
 import { splitTestSteps, type TestStep } from './test-output.js';
+import { defined } from '../../../../src/core/defined.js';
 
 interface ToolCall {
   failed: boolean;
@@ -48,7 +49,7 @@ export class AgentOutputPipe implements PipeTransform {
       text = [];
     };
     for (let index = 0; index < lines.length; index += 1) {
-      const line = lines[index]!;
+      const line = defined(lines[index]);
       if (!/^[●✗✓] /.test(line)) {
         text.push(line);
         continue;
@@ -57,7 +58,7 @@ export class AgentOutputPipe implements PipeTransform {
       const call: ToolCall = { failed: line.startsWith('✗'), command: stripDuration(line.slice(2)), result: '' };
       let phase: 'command' | 'echo' | 'result' = 'command';
       for (index += 1; index < lines.length; index += 1) {
-        const next = lines[index]!;
+        const next = defined(lines[index]);
         if (/^[●✗✓] /.test(next) || (!next.startsWith(' ') && next.trim())) {
           index -= 1;
           break;

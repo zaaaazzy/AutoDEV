@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises';
 import type { Pool } from 'pg';
 import { TEST_RUN_STATUS } from '../core/status.js';
 import type { TestCaseResult, TestCategory } from '../core/test-results.js';
+import { defined } from '../core/defined.js';
 
 /** Größte gespeicherte Datei (Video) und wie viele Läufe je Projekt ihre Screenshots und Videos behalten. */
 const MAX_MEDIA_BYTES = 50 * 1024 * 1024;
@@ -118,7 +119,7 @@ export async function saveTestCases(pool: Pool, runId: string, cases: TestCaseRe
       if (!size || size > MAX_MEDIA_BYTES) continue;
       await pool.query(
         `INSERT INTO test_media (run_id, case_id, name, mime, size, data) VALUES ($1, $2, $3, $4, $5, $6)`,
-        [runId, inserted.rows[0]!.id, file.name.slice(0, 200), file.mime, size, await readFile(file.path)],
+        [runId, defined(inserted.rows[0]).id, file.name.slice(0, 200), file.mime, size, await readFile(file.path)],
       );
       media += 1;
     }

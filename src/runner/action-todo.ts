@@ -1,6 +1,8 @@
 import { logged } from '../core/log.js';
 import type { Pool } from 'pg';
 import { generateSprintReport } from '../api/reports.js';
+import { defined } from '../core/defined.js';
+import { OVERRUN_TODO_PREFIX } from '../core/estimate-overrun.js';
 
 /**
  * „Aktion notwendig“: Aufträge, die nicht an einem Code-Fehler scheitern, sondern auf einen Menschen warten
@@ -79,6 +81,16 @@ export function budgetActionTodo(daily: boolean, detail: string): string {
   return shorten(`Budget erreicht: erhöhen oder ${daily ? 'bis morgen ' : ''}warten (${detail})`);
 }
 
+export { OVERRUN_TODO_PREFIX };
+
+/**
+ * „Schätzung überschritten“: Ist und kalibrierte Schätzung nennen; „Erneut versuchen“ gibt den Auftrag frei.
+ * `actual` und `estimate` sind schon lesbar formatiert („1,6 h / 9,2 Mio. Tokens“).
+ */
+export function overrunActionTodo(actual: string, estimate: string): string {
+  return shorten(`${OVERRUN_TODO_PREFIX}Ist ${actual}, Schätzung ${estimate} – prüfen, dann „Erneut versuchen“`);
+}
+
 /**
  * „keine“, „nichts“, „-“ oder „n/a“ – allein oder mit Begründung hinter Satzzeichen, Gedankenstrich oder Klammer
  * („keine – Agent behebt selbst“). „Keine Datenbank-URL hinterlegt“ ist dagegen eine Aktion.
@@ -89,7 +101,9 @@ const NO_ACTION = /^(keine|nichts|-|n\/a)\s*($|[.,;:!]|[–—-](\s|$)|\()/i;
 export function parseActionLine(output: string): string | null | undefined {
   const match = output.match(/^\s*AKTION:\s*(.+)$/im);
   if (!match) return undefined;
-  const value = match[1]!.trim().replace(/^["„]|["“]$/g, '');
+  const value = defined(match[1])
+    .trim()
+    .replace(/^["„]|["“]$/g, '');
   return NO_ACTION.test(value) ? null : shorten(value);
 }
 

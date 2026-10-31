@@ -1,5 +1,6 @@
 import { basename, dirname } from 'node:path';
 import { type CommandExecutor, type CommandResult, runCommand } from '../core/command.js';
+import { GIT_GUARD_ENV } from '../core/git-guard.js';
 
 /**
  * Docker-Compose-Projekt im Arbeitsordner der Agents (<Projekt>/agent bzw. <Ordner>-agents): eigener Name
@@ -83,6 +84,7 @@ export function projectEnvironment(
 /**
  * Git des Workers: gefiltertes Environment, keine Hooks (`core.hooksPath=/dev/null`) und kein fsmonitor-Befehl aus
  * der Repo-Konfiguration. Beides kann ein Agent im Projekt setzen; über GIT_CONFIG_* hat es Vorrang vor `.git/config`.
+ * Alle übrigen ausführbaren Einträge (filter, credential.helper, include.path …) weist runCommand ab (core/git-guard.ts).
  * GitHub-Tokens bleiben erlaubt, damit Push über HTTPS funktioniert (die gh-Anmeldung ist ohnehin im Keyring lesbar).
  */
 export function gitEnvironment(
@@ -97,6 +99,8 @@ export function gitEnvironment(
   return {
     ...projectEnvironment(undefined, source),
     ...tokens,
+    // runCommand prüft damit vor dem Aufruf die Repo-Konfiguration (filter, credential.helper, gitdir-Umlenkung).
+    [GIT_GUARD_ENV]: '1',
     GIT_CONFIG_COUNT: '2',
     GIT_CONFIG_KEY_0: 'core.hooksPath',
     GIT_CONFIG_VALUE_0: '/dev/null',

@@ -21,19 +21,13 @@ import {
   normalizeGroups,
   type PermissionGroup,
 } from './permission-rules.js';
+import { defined } from '../core/defined.js';
 
 export {
-  CHECK_GROUP,
-  CHECK_ROLES,
-  CREATE_TOOLS,
   DATABASE_COMMAND,
   DEFAULT_PERMISSION_GROUPS,
-  EDIT_TOOLS,
-  FILE_TOOLS,
   FILES_CREATE,
   FILES_EDIT,
-  LEGACY_FILES_COMMAND,
-  LOGS_COMMAND,
   NO_FILE_WRITE_ROLES,
   PERMISSION_GROUPS,
   READ_ONLY_PERMISSION_ROLE,
@@ -42,7 +36,6 @@ export {
   commandHelp,
   commandLabel,
   normalizeCommands,
-  normalizeGroups,
   rulesAllow,
   type PermissionGroup,
 } from './permission-rules.js';
@@ -105,11 +98,9 @@ export async function loadProjectPermissions(
 /** Gruppen, die in einem Projekt zur Verfügung stehen: eingebaute (freigeschaltet) und eigene; „files“ immer. */
 export function availableGroups(permissions: ProjectPermissions): PermissionGroup[] {
   const all = [...PERMISSION_GROUPS, ...permissions.custom];
-  return permissions.enabled
-    ? all.filter(
-        (group) =>
-          group.id === 'files' || permissions.enabled!.includes(group.id) || permissions.custom.includes(group),
-      )
+  const { enabled } = permissions;
+  return enabled
+    ? all.filter((group) => group.id === 'files' || enabled.includes(group.id) || permissions.custom.includes(group))
     : all;
 }
 
@@ -354,9 +345,9 @@ function splitDisallowed(parts: readonly string[]): { own: string[]; others: str
   const own: string[] = [];
   const others: string[] = [];
   for (let index = 0; index < parts.length; index++) {
-    const match = /^--disallowed-?tools(?:=(.*))?$/is.exec(parts[index]!);
+    const match = /^--disallowed-?tools(?:=(.*))?$/is.exec(defined(parts[index]));
     if (!match) {
-      others.push(parts[index]!);
+      others.push(defined(parts[index]));
       continue;
     }
     const value = match[1] ?? parts[++index] ?? '';

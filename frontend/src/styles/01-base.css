@@ -23,6 +23,78 @@
   --warn-soft: #fdf1e0;
   --danger: #c0392b;
   --blue: #36608f;
+  /* Text: abgestufte Grautöne */
+  --text-strong: #4b554e;
+  --text-body: #4a554d;
+  --text-secondary: #5b665e;
+  --text-medium: #46524a;
+  --text-faint: #aab3ab;
+  --ink-deep: #26312a;
+  /* Flächen: neutrale Hintergründe */
+  --surface-muted: #f7f8f5;
+  --surface-hover: #eef0ec;
+  --surface-hover-alt: #eef1ec;
+  --surface-tint: #eef0ea;
+  --surface-tint-alt: #edf0ea;
+  --surface-subtle: #f3f5f3;
+  --surface-subtle-alt: #f3f6f2;
+  --surface-neutral: #f1f3ef;
+  --surface-track: #e8ebe4;
+  --surface-cool: #eef3ef;
+  /* Rahmen: neutral */
+  --border-subtle: #dfe3da;
+  --border-default: #d5dbd0;
+  --border-light: #e1e6de;
+  --border-light-alt: #e3e7de;
+  --border-dark: #3a433d;
+  --border-neutral: #c9cec7;
+  --border-hover: #9fb3a5;
+  /* Erfolg / Grün */
+  --success: #2f8a57;
+  --success-strong: #328455;
+  --success-bright: #2b9a66;
+  --success-light: #5fbf8a;
+  --success-deep: #2f6b4f;
+  --success-text: #1f6e49;
+  --success-surface: #eef6f1;
+  --success-surface-faint: #f6fbf8;
+  --success-surface-alt: #eef5f0;
+  --success-soft: #e2efe7;
+  --success-soft-alt: #e3f1ea;
+  --success-border: #a9c2b1;
+  --success-border-soft: #b9d3c3;
+  --success-border-soft-alt: #b9d3c4;
+  /* Hinweis / Orange */
+  --accent-orange: #e08a1e;
+  --accent-amber: #e0a03a;
+  --accent-orange-strong: #e8590c;
+  --notice-soft: #faf1da;
+  --notice-surface: #fdf6ec;
+  --notice-surface-faint: #fffaf2;
+  --notice-peach: #fde8d7;
+  --notice-border: #f1d8b5;
+  --notice-text: #8b6825;
+  --notice-text-warm: #9a4b17;
+  --notice-text-dark: #8a5a00;
+  /* Fehler / Rot */
+  --error: #c9573f;
+  --error-bright: #d6453d;
+  --error-muted: #c2604b;
+  --error-text: #9d4938;
+  --error-text-strong: #b4472f;
+  --error-text-deep: #a33d26;
+  --error-text-dark: #a8322b;
+  --error-soft: #fbeeea;
+  --error-surface: #fff8f4;
+  --error-soft-alt: #fbe9e6;
+  --error-border-warm: #e5c8b9;
+  --error-border: #ecc9c0;
+  --error-border-soft: #e6b8b3;
+  /* Info / Akzente: Blau, Violett */
+  --info-soft: #e7eff7;
+  --info-bright: #2f7de1;
+  --accent-purple: #5b4a8b;
+  --accent-purple-soft: #ece8f5;
   --shadow: 0 10px 28px rgb(32 40 36 / 8%);
   --chat-dock-width: min(560px, 38vw);
 }
@@ -95,7 +167,7 @@ select {
     box-shadow 0.15s;
 }
 select:hover {
-  border-color: #9fb3a5;
+  border-color: var(--border-hover);
 }
 select:focus {
   border-color: var(--green-light);
@@ -108,7 +180,7 @@ textarea {
 label {
   display: grid;
   gap: 5px;
-  color: #4b554e;
+  color: var(--text-strong);
   font-size: 12px;
   font-weight: 600;
 }
@@ -168,7 +240,7 @@ input[type='file']::file-selector-button:hover {
 input[aria-invalid='true'],
 select[aria-invalid='true'],
 textarea[aria-invalid='true'] {
-  border-color: #c9573f;
+  border-color: var(--error);
   box-shadow: 0 0 0 2px rgb(201 87 63 / 18%);
 }
 details > summary {

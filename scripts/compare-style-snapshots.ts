@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { PNG } from 'pngjs';
+import { defined } from '../src/core/defined.js';
 
 /**
  * Vergleicht zwei Läufe von e2e/styles-snapshot.check.ts (npm run check:styles):
@@ -78,7 +79,7 @@ function noisy(a: Snapshot, b: Snapshot | null): Set<string> {
     const other = right.get(element[0]);
     if (!other) continue;
     for (const slot of [1, 2, 3] as const)
-      for (const name of changedProperties(a.styles[element[slot]]!, b.styles[other[slot]]!))
+      for (const name of changedProperties(defined(a.styles[element[slot]]), defined(b.styles[other[slot]])))
         result.add(`${element[0]}|${slot}|${name}`);
   }
   return result;
@@ -113,8 +114,8 @@ for (const device of readdirSync(before)) {
       failures++;
       continue;
     }
-    const a = load(before, device, file)!;
-    const b = load(after, device, file)!;
+    const a = defined(load(before, device, file));
+    const b = defined(load(after, device, file));
     const ignored = noisy(a, noise ? load(noise, device, file) : null);
     const right = new Map(b.elements.map((element) => [withoutIgnored(element[0]), element]));
     const lines: { text: string; cause: boolean }[] = [];
@@ -130,9 +131,9 @@ for (const device of readdirSync(before)) {
         [2, '::before'],
         [3, '::after'],
       ] as const) {
-        const old = parse(a.styles[element[slot]]!);
-        const now = parse(b.styles[other[slot]]!);
-        const names = changedProperties(a.styles[element[slot]]!, b.styles[other[slot]]!).filter(
+        const old = parse(defined(a.styles[element[slot]]));
+        const now = parse(defined(b.styles[other[slot]]));
+        const names = changedProperties(defined(a.styles[element[slot]]), defined(b.styles[other[slot]])).filter(
           (name) => !ignored.has(`${element[0]}|${slot}|${name}`),
         );
         if (!names.length) continue;

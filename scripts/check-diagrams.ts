@@ -49,7 +49,8 @@ for (const [index, diagram] of diagrams.entries()) {
       api.initialize(config);
       try {
         const { svg } = await api.render(id, source);
-        const box = document.getElementById('out')!;
+        const box = document.getElementById('out');
+        if (!box) throw new Error('Element #out fehlt.');
         box.innerHTML = svg;
         return null;
       } catch (error) {

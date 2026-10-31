@@ -109,14 +109,91 @@
         >
           {{ pickedIdeas().length === 1 ? 'Auftrag erstellen' : pickedIdeas().length + ' Aufträge erstellen' }}
         </button>
+        @if (auth.can('plan')) {
+          <button
+            #rejectManyTrigger
+            type="button"
+            class="button secondary small"
+            aria-haspopup="dialog"
+            [attr.aria-expanded]="popover()?.kind === 'reject-many'"
+            title="Alle markierten Ideen mit demselben Grund ablehnen – der Visionär beachtet ihn beim nächsten Lauf."
+            (click)="togglePopover('reject-many', rejectManyTrigger)"
+            [disabled]="busy()"
+          >
+            Ablehnen mit Grund
+          </button>
+          <button
+            #priorityTrigger
+            type="button"
+            class="button secondary small"
+            aria-haspopup="dialog"
+            [attr.aria-expanded]="popover()?.kind === 'priority'"
+            (click)="togglePopover('priority', priorityTrigger)"
+            [disabled]="busy()"
+          >
+            Priorität setzen
+          </button>
+        }
       </app-bulk-bar>
+    }
+    <!-- Neu erzeugen, sobald ein anderes Popover (oder eine andere Zeile) öffnet: kein Grund wandert mit. -->
+    @for (open of openPopover(); track open.key) {
+      <div
+        #popoverElement
+        class="idea-popover"
+        role="dialog"
+        [attr.aria-label]="open.label"
+        [style.left.px]="open.left"
+        [style.top.px]="open.top"
+        [style.bottom.px]="open.bottom"
+        (keydown.escape)="onPopoverEscape($event)"
+      >
+        @switch (open.kind) {
+          @case ('priority') {
+            <p class="idea-popover-title">
+              Priorität für {{ pickedIdeas().length }} {{ pickedIdeas().length === 1 ? 'Idee' : 'Ideen' }}
+            </p>
+            <div class="actions">
+              @for (priority of priorities; track priority) {
+                <button
+                  type="button"
+                  class="button secondary small"
+                  (click)="prioritizePicked(priority)"
+                  [disabled]="busy()"
+                >
+                  {{ priority | priorityLabel }}
+                </button>
+              }
+              <button type="button" class="button secondary small" (click)="closePopover()">Abbrechen</button>
+            </div>
+          }
+          @case ('reject-many') {
+            <app-reject-reason-form
+              [busy]="busy()"
+              [autofocus]="true"
+              [submitLabel]="pickedIdeas().length === 1 ? 'Idee ablehnen' : pickedIdeas().length + ' Ideen ablehnen'"
+              (submitted)="rejectPicked($event)"
+              (cancelled)="closePopover()"
+            />
+          }
+          @case ('reject-one') {
+            <p class="idea-popover-title clamp">{{ open.idea?.title }}</p>
+            <app-reject-reason-form
+              [busy]="busy()"
+              [autofocus]="true"
+              (submitted)="quickReject(open.idea!, $event)"
+              (cancelled)="closePopover()"
+            />
+          }
+        }
+      </div>
     }
     <app-data-table
       [rows]="openIdeas()"
       [columns]="ideaColumns"
       [rowId]="ideaId"
       [initialFilters]="ideaFilters()"
-      [initialSort]="[{ id: 'createdAt', desc: true }]"
+      [initialSort]="openIdeasSort()"
       [(expanded)]="expandedIdea"
       [showFilterChips]="false"
       [selectable]="promotableRow"
@@ -130,6 +207,13 @@
       <ng-template appDataCell="status" let-idea>
         <span class="status" [ngClass]="idea.status | statusClass">{{ idea.status | statusLabel }}</span>
       </ng-template>
+      <ng-template appDataCell="benefit" let-idea>
+        <ng-container *ngTemplateOutlet="scoreMeter; context: { $implicit: idea.benefit, kind: 'benefit' }" />
+      </ng-template>
+      <ng-template appDataCell="cost" let-idea>
+        <ng-container *ngTemplateOutlet="scoreMeter; context: { $implicit: idea.cost, kind: 'cost' }" />
+      </ng-template>
+      <ng-template appDataCell="value" let-idea>{{ ideaValueText(idea) }}</ng-template>
       <ng-template appDataActions let-idea>
         @if (editable(idea)) {
           <button
@@ -140,6 +224,20 @@
             title="Bearbeiten"
           >
             ✎
+          </button>
+        }
+        @if (rejectable(idea) && auth.can('plan')) {
+          <button
+            #quickRejectTrigger
+            type="button"
+            class="button secondary icon-button"
+            aria-haspopup="dialog"
+            [attr.aria-expanded]="popover()?.idea?.id === idea.id"
+            (click)="togglePopover('reject-one', quickRejectTrigger, idea)"
+            [attr.aria-label]="'Schnell ablehnen: ' + idea.title"
+            title="Schnell ablehnen"
+          >
+            ⊘
           </button>
         }
       </ng-template>
@@ -165,6 +263,17 @@
       }
       <app-github-link [ref]="idea.externalRef" />
     </div>
+  </ng-template>
+  <!-- Nutzen/Kosten 0–10 als Balken mit Zahl, aufgebaut wie die Meter im Ideen-Dialog. -->
+  <ng-template #scoreMeter let-score let-kind="kind">
+    @if (score != null) {
+      <span class="meter table-meter" [ngClass]="kind">
+        <span class="meter-bar"><i [style.width.%]="score * 10"></i></span>
+        <span class="meter-value">{{ score }}</span>
+      </span>
+    } @else {
+      –
+    }
   </ng-template>
   <ng-template #ideaGroup let-group>
     <section class="panel">

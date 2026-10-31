@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { logged } from '../core/log.js';
+import { noteProviderOutcome } from '../core/provider-limits.js';
 import {
   readOnlyWorkspace,
   SANDBOX_GUARD,
@@ -17,7 +18,9 @@ import { type CommandExecutor, redactOutput, runCommand } from '../core/command.
 import { loadKnownBugs } from '../api/bugs.js';
 import { isUniqueViolation } from '../db/transaction.js';
 import { knownBugLine } from '../core/known-bugs.js';
-import { type ActualReference, loadActualReference, referenceSection, splitEstimate } from './estimation.js';
+import { type ActualReference, loadAuthorReference, referenceSection, splitEstimate } from './estimation.js';
+import { kindOf, stepClassOf } from '../core/estimate-overrun.js';
+import { areaBucket } from '../core/sprint-planner.js';
 import { budgetTodo, checkBudget } from '../runner/budget.js';
 import { runOllamaAgent } from './ollama-agent.js';
 import {
@@ -32,7 +35,14 @@ import { executeAgentCommand, isClaudeCommand } from './claude-stream.js';
 import { DEFAULT_DEFINITION_OF_READY, loadDefinitions } from '../runner/acceptance.js';
 import { shortTitle, TITLE_MAX } from '../core/validation.js';
 import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
-import { agentEnvironment, buildInvocation, defaultAgentCommand, type RunnerOptions } from '../runner/runner.js';
+import {
+  agentEnvironment,
+  buildInvocation,
+  defaultAgentCommand,
+  loadWorkflow,
+  type RunnerOptions,
+} from '../runner/runner.js';
+import { defined } from '../core/defined.js';
 
 const MIN_REQUIREMENT_CHARS = 80;
 const PROMPT_LOG_CHARS = 30_000;
@@ -45,6 +55,8 @@ interface Idea {
   description: string;
   priority: string;
   category?: string | null;
+  /** Art der Idee (`feature` oder `bug`); ohne Angabe `feature`. */
+  kind?: string | null;
   comments: string[];
   /** Herkunft; `github` heißt: Titel und Text stammen aus einem fremden Issue. */
   source?: string;
@@ -75,7 +87,7 @@ function permissionRole(role: string, agentId: string | null | undefined, author
 export function splitTitle(output: string): { title: string | null; text: string } {
   const match = TITLE_LINE.exec(output);
   if (!match) return { title: null, text: output };
-  const title = shortTitle(match[1]!.replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
+  const title = shortTitle(defined(match[1]).replace(/^["„“]+|["„“]+$/g, ''), TITLE_MAX);
   return {
     title: title || null,
     text: (output.slice(0, match.index) + output.slice(match.index + match[0].length)).trim(),
@@ -130,7 +142,10 @@ export function buildRequirementPrompt(
   ].join('\n\n');
 }
 
-/** Runs the project's agent of the given role (default: author) (own command, default command or local model) and returns its redacted output. */
+/**
+ * Runs the project's agent of the given role (default: author) (own command, the agent chosen on the dashboard,
+ * default command or local model) and returns its redacted output.
+ */
 export async function runAuthorAgent(
   pool: Pool,
   options: Pick<RunnerOptions, 'project' | 'cwd' | 'timeoutMs'>,
@@ -194,9 +209,11 @@ export async function runAuthorAgent(
   const permissions = await loadProjectPermissions(pool, options.project);
   // Rechte einer lesenden Rolle: keine Datei-Werkzeuge, keine Shell, auch kein voller Zugriff.
   const rightsRole = readOnly ? READ_ONLY_PERMISSION_ROLE : permissionRole(role, agentId, author);
-  // Docker-Sandbox (Standard): die CLI läuft in einem eigenen Container; lesende Läufe sehen den Ordner nur als :ro.
+  // Sandbox (Standard workbench): schreibende Läufe gehen in den Arbeitscontainer des Projekts, lesende in einen
+  // kurzlebigen Container, der den Ordner nur als :ro sieht.
   // Beim lokalen Modell laufen nur dessen Shell-Befehle im Container, die Datei-Werkzeuge im Worker (wie im Runner).
-  const inSandbox = usesSandbox(sandboxMode(await projectSandbox(pool, options.project)));
+  const mode = sandboxMode(await projectSandbox(pool, options.project));
+  const inSandbox = usesSandbox(mode);
   const sandboxed = Boolean(configured) && inSandbox;
   const agentExecute = inSandbox
     ? sandboxExecutor(options.cwd, {
@@ -204,6 +221,7 @@ export async function runAuthorAgent(
         project: options.project,
         readOnly: readOnly || readOnlyWorkspace(role),
         docker: execute,
+        mode,
       })
     : execute;
   const agentCwd = sandboxed ? SANDBOX_WORKDIR : options.cwd;
@@ -281,6 +299,13 @@ export async function runAuthorAgent(
         ],
       )
       .catch(logged('requirements'));
+    // Anbieterstatus fürs Dashboard: Limit-Meldung festhalten, nach einem erfolgreichen Lauf zurücksetzen.
+    if (command && !signal?.aborted) {
+      await noteProviderOutcome(pool, configured, {
+        exitCode: result.exitCode,
+        output: redactOutput(result.output, process.env),
+      }).catch(logged('requirements'));
+    }
     // Nach dem Buchen: 80-%-Warnung, falls dieser Lauf die Schwelle überschritten hat.
     if (budget?.states.length) await checkBudget(pool, options.project, { role }).catch(logged('requirements', null));
     return {
@@ -389,7 +414,7 @@ export async function draftRequirements(
              progress = 'Liest die Idee und den Projektkontext …', progress_agent = 'author'
       WHERE id = (SELECT id FROM ideation_items WHERE project_slug = $1 AND status = 'requested'
                    ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category`,
+      RETURNING id, project_slug AS "projectSlug", title, description, priority, source, category, kind`,
     [options.project],
   );
   const claimedIdea = claimed.rows[0];
@@ -412,9 +437,21 @@ export async function draftRequirements(
     )
   ).rows[0];
   const definitions = await loadDefinitions(pool, options.project);
-  const reference = await loadActualReference(pool, options.project, idea.category ?? null).catch(
-    logged('requirements', null),
-  );
+  // Vergleichsgruppe: Kategorie, Art der Idee (ohne Angabe `feature`), Anzahl betroffener Bereiche (bei Überarbeitung
+  // aus dem Auftrag) und Schrittklasse; diese schätzt die Länge des Workflows (ein Lauf ohne Wiederholung).
+  const workflowSteps = await loadWorkflow(pool, options.project)
+    .then((steps) => steps.length)
+    .catch(logged('requirements', 0));
+  const reference = await loadAuthorReference(
+    pool,
+    options.project,
+    {
+      kind: kindOf(idea.kind),
+      category: idea.category ?? null,
+      stepClass: workflowSteps > 0 ? stepClassOf(workflowSteps) : null,
+    },
+    areaBucket(existing?.description ?? idea.description),
+  ).catch(logged('requirements', null));
   console.info(`[idea ${idea.id}] Anforderung erstellen`);
   const { exitCode, output: rawOutput } = await runAuthorAgent(
     pool,
