@@ -54,7 +54,10 @@ import {
   stepModel,
 } from './runner-agent.js';
 import { TRANSIENT_RETRY_DELAY_MS } from './runner-runs.js';
-import { gateExecutor } from './test-sandbox.js';
+import { gateExecutor, projectSandbox } from './test-sandbox.js';
+import { probeBugfixOrder } from './counter-probe.js';
+import { sandboxMode, usesSandbox } from '../core/sandbox.js';
+import { UNPROVEN_FIX_MARK } from '../core/shared-types.js';
 import { afterStep, MANUAL_TITLE, USER_MANUAL_TITLE } from './runner-settle.js';
 
 export {
@@ -164,6 +167,45 @@ export async function remainingConflicts(cwd: string, execute: CommandExecutor):
 async function coverageCommands(ctx: RunContext): Promise<string[][]> {
   const plan = await testerPlan(ctx.pool, ctx.item.projectSlug, ctx.options.cwd, await orderFilePaths(ctx));
   return plan.commands.filter((entry) => !entry.skipped).map((entry) => entry.command);
+}
+
+/** Gegenprobe des Tester-Schritts eines Bugfixes: im Testcontainer wie das Gate, Ergebnis für Ausgabe und Verlauf. */
+async function bugfixProbe(
+  ctx: RunContext,
+  baseBranch: string,
+  stepStartedAt: number,
+): Promise<{ unproven: boolean; section: string; event: string }> {
+  const { pool, item, options, execute, runId } = ctx;
+  let outcome: Awaited<ReturnType<typeof probeBugfixOrder>>;
+  try {
+    outcome = await probeBugfixOrder({
+      pool,
+      item,
+      cwd: options.cwd,
+      baseBranch,
+      changedFiles: (await orderFilePaths(ctx)) ?? [],
+      execute,
+      testExecutor: (folder) => gateExecutor(pool, item.projectSlug, folder, execute, `${runId}-gegenprobe`),
+      linkModules: !usesSandbox(sandboxMode(await projectSandbox(pool, item.projectSlug))),
+      stepStartedAt,
+    });
+  } catch (error) {
+    // Eine gescheiterte Gegenprobe ist kein Beleg und kein Rückgabegrund.
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      unproven: false,
+      section: `## Gegenprobe\n\nNicht gelaufen: ${message}\n`,
+      event: `Gegenprobe nicht gelaufen: ${message}`.slice(0, 1000),
+    };
+  }
+  const cases = outcome.check.cases ?? [];
+  const count = (result: string) => cases.filter((entry) => entry.result === result).length;
+  const summary =
+    outcome.check.verdict === 'none'
+      ? 'keine neuen Testfälle'
+      : `${count('fails')} scheitern wie erwartet, ${count('passes')} bestehen, ${count('inconclusive')} nicht auswertbar`;
+  const event = `Gegenprobe: ${summary}${outcome.unproven ? ` – ${UNPROVEN_FIX_MARK}` : ''}${outcome.report ? ` (${outcome.report})` : ''}`;
+  return { unproven: outcome.unproven, section: outcome.section, event };
 }
 
 /** Execute a workflow step and persist its progress, cancellation state, and result. */
@@ -552,6 +594,22 @@ async function executeStep(
       await logEvent(pool, stepId, `Testnachweise: ${evidence.length} gemeldet, ${created} neu`);
     }
   }
+  // Gegenprobe bei Bugfixes: Besteht ein neuer Testfall auch ohne den Fix, ist der Schritt rot wie bei roten Tests.
+  let probeUnproven = false;
+  if (
+    agent.role === 'tester' &&
+    item.kind === 'bug' &&
+    ctx.branch &&
+    !stepOptions.observer &&
+    !cancelled &&
+    result.exitCode === 0 &&
+    accepted
+  ) {
+    const probe = await bugfixProbe(ctx, ctx.branch.base, stepStartedAt);
+    probeUnproven = probe.unproven;
+    output += `\n\n${probe.section}`;
+    await logEvent(pool, stepId, probe.event);
+  }
   // Der Reviewer muss ausdrücklich freigeben; ohne eindeutiges Ergebnis gilt der Schritt als nicht bestanden.
   const review = agent.role === 'reviewer' ? parseReview(output) : true;
   if (review !== true && result.exitCode === 0) {
@@ -572,7 +630,13 @@ async function executeStep(
     await logEvent(pool, stepId, 'Merge-Konflikte gelöst');
   }
   const passed =
-    result.exitCode === 0 && !cancelled && review === true && accepted && !refusedByRule && !unresolved.length;
+    result.exitCode === 0 &&
+    !cancelled &&
+    review === true &&
+    accepted &&
+    !probeUnproven &&
+    !refusedByRule &&
+    !unresolved.length;
   await logEvent(
     pool,
     stepId,

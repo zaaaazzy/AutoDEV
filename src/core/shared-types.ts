@@ -29,3 +29,27 @@ export interface RoutingRule {
   condition: RoutingCondition;
   tier: RuleEffect;
 }
+
+/** Gegenprobe je neuem Testfall eines Bugfixes auf dem Stand vor dem Auftrag. */
+export type CounterProbeResult = 'fails' | 'passes' | 'inconclusive';
+/**
+ * Urteil über alle neuen Testfälle: proven = alle scheitern ohne Fix, unproven = mindestens einer besteht,
+ * inconclusive = keiner besteht, aber nicht alle sind auswertbar, none = keine neuen Testfälle (keine Gegenprobe).
+ */
+export type CounterProbeVerdict = 'proven' | 'unproven' | 'inconclusive' | 'none';
+
+export interface CounterProbeCase {
+  file: string;
+  name: string;
+  result: CounterProbeResult;
+  detail?: string;
+}
+
+export const COUNTER_PROBE_LABELS: Record<CounterProbeResult, string> = {
+  fails: 'scheitert wie erwartet',
+  passes: 'besteht (Fix nicht belegt)',
+  inconclusive: 'nicht auswertbar',
+};
+
+/** Markierung am Auftrag, wenn ein neuer Testfall auch ohne den Fix besteht. */
+export const UNPROVEN_FIX_MARK = 'Test belegt den Fix nicht';

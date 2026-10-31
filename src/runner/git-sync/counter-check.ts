@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import type { Pool } from 'pg';
 import { type CommandExecutor, redactOutput } from '../../core/command.js';
 import { isShuttingDown } from '../../core/shutdown.js';
+import type { CounterProbeCase, CounterProbeVerdict } from '../../core/shared-types.js';
 import { createTestRun, finishTestRun, saveTestReport } from '../../db/test-runs.js';
 import { linkDependencies } from '../agent-workspace.js';
 import { expandOrderCommands, isPlaywrightTest, isTestFile, TESTS_PLACEHOLDER } from '../order-tests.js';
@@ -43,6 +44,10 @@ export interface CounterCheck {
   error?: string;
   /** Testlauf, dessen Bericht die Gegenprobe enthält. */
   runId?: string;
+  /** Gegenprobe je neuem Testfall im Tester-Schritt (counter-probe.ts); fehlt bei der Prüfung je Datei. */
+  cases?: CounterProbeCase[];
+  verdict?: CounterProbeVerdict;
+  reason?: string;
 }
 
 export const COUNTER_CHECK_LABELS: Record<CounterCheckResult, string> = {
@@ -76,10 +81,10 @@ export async function pruneCounterCheckWorktrees(cwd: string, execute: CommandEx
   await git('worktree', 'prune');
 }
 
-const shortDetail = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, DETAIL_CHARS);
+export const shortDetail = (text: string): string => text.replace(/\s+/g, ' ').trim().slice(0, DETAIL_CHARS);
 
 /** Der Befehl lief gar nicht (fehlt im PATH, Sandbox lehnt ab, Zeitüberschreitung): kein Testergebnis. */
-function commandProblem(result: { exitCode: number; output: string }, timedOut: boolean): string | null {
+export function commandProblem(result: { exitCode: number; output: string }, timedOut: boolean): string | null {
   if (timedOut) return 'Zeitüberschreitung des Testbefehls.';
   if (result.output.startsWith('Sandbox:')) return result.output.split('\n', 1)[0] ?? 'Sandbox:';
   if (result.exitCode < 0 || result.exitCode === 127 || /im PATH des Workers nicht gefunden/.test(result.output)) {

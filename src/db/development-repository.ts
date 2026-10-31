@@ -164,6 +164,11 @@ export async function orderExists(pool: Pool, id: string): Promise<boolean> {
   return Boolean((await pool.query(`SELECT 1 FROM development_items WHERE id = $1`, [id])).rows[0]);
 }
 
+/** Ergebnis der Gegenprobe am Auftrag; jeder neue Lauf überschreibt das vorige (auch die Markierung). */
+export async function saveCounterCheck(pool: Pick<Pool, 'query'>, id: string, check: object): Promise<void> {
+  await pool.query('UPDATE development_items SET counter_check = $2::jsonb WHERE id = $1', [id, JSON.stringify(check)]);
+}
+
 /** Status des Sprints, wenn er zum Projekt gehört. */
 export async function findProjectSprintStatus(
   pool: Pool,
