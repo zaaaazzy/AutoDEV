@@ -1,59 +1,24 @@
 import { logged } from '../core/log.js';
 import { followLogFile } from '../core/log-file.js';
-import { existsSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
-import { processChat, rejectChat } from '../agent/chat.js';
-import { scheduleRoutines } from '../agent/routine.js';
-import { beginShutdown, isDraining, setDraining, setProcessStore } from '../core/shutdown.js';
-import { shareTreeLocks, treeLockName } from '../core/project-lock.js';
+import { beginShutdown, setProcessStore } from '../core/shutdown.js';
+import { shareTreeLocks } from '../core/project-lock.js';
 import { databaseProcessStore, killPreviousProcesses, RECLAIMABLE_RUN_SQL } from './process-registry.js';
-import {
-  beatWorker,
-  currentWorkerId,
-  setWorkerId,
-  WORKER_BEAT_MS,
-  WORKER_STALE_SECONDS,
-  workerIdFor,
-} from './worker-identity.js';
+import { currentWorkerId, setWorkerId, WORKER_STALE_SECONDS, workerIdFor } from './worker-identity.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
-import { beatHeartbeat, readMaxAgents } from '../api/worker.js';
-import { publishSystemAgents } from '../agent/system-agents.js';
-import { processSetupJob } from '../setup/setup-jobs.js';
-import { missingFolderMessage, volumeOf, watchFolders } from '../core/folder-guard.js';
-import { projectFolderError } from '../core/validation.js';
 import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local-database.js';
-import { resolveAgentWorkspace } from './agent-workspace.js';
 import { runCommand } from '../core/command.js';
 import { removeLeftoverContainers } from '../core/sandbox.js';
 import { stopLeftoverWorkbenchRuns } from '../core/workbench.js';
-import { touchHealthFile, workerPath } from '../core/worker-container.js';
-import { sandboxStatus } from './test-sandbox.js';
-import { ReviewSlots } from './review-slots.js';
-import { syncSprintCommits } from './sprint-commits.js';
-
-const SETUP_PARALLEL = 4;
-import { draftRequirements } from '../agent/requirements.js';
-import { commentSprintProposal } from '../agent/sprint-comment.js';
-import { processVisionaryRun } from '../agent/visionary.js';
-import { syncFavicon } from './favicon.js';
-import { ProductionMonitor } from './production-monitor.js';
-import { syncGitGraph } from './git-graph.js';
-import { processGitFix, syncGitState } from './git-state-sync.js';
-import { reconcileWorkingTree } from './git-sync/reconcile.js';
-import { processRollback } from './rollback.js';
-import { syncGitHub } from './github-sync.js';
-import { estimateNewIdeas } from '../agent/estimation.js';
-import { closeOrphanedRuns, parseRunnerOptions, recoverStuckItems, runWorkflow, type RunnerOptions } from './runner.js';
-import { analyzeBlocked } from '../agent/troubleshoot.js';
-import { verifyAcceptance } from './verify-acceptance.js';
-import { processTestRequest, recoverTestRequests } from './test-request.js';
-import { acceptsNewWork, completeRestart, processRestart, readRestart, RESTART_EXIT_CODE } from './system-restart.js';
-import { sendPush } from '../core/push.js';
-import { listenForWork, WorkSignal } from './work-signal.js';
-import { runDueJobs } from './scheduler.js';
 import { AGENT_RUN_STATUS, AGENT_STEP_STATUS, DEVELOPMENT_STATUS, IDEATION_STATUS } from '../core/status.js';
+import { parseRunnerOptions, recoverStuckItems, type RunnerOptions } from './runner.js';
+import { recoverTestRequests } from './test-request.js';
+import { completeRestart } from './system-restart.js';
+import { runWorker } from './worker-loop.js';
+import { describeError } from './worker-log.js';
+import { INSTALL_ROOT, resolveTargets, runProjectOnce, workerBeat } from './worker-targets.js';
 
 /**
  * Projektbereich des Workers: aus der Umgebung, sonst aus der .env der Installation, sonst der Ordner, in dem
@@ -84,117 +49,6 @@ async function connect(watch: boolean): Promise<Pool> {
   }
 }
 
-const loggedErrors = new Map<string, string>();
-
-/** pg liefert bei ausgefallener Datenbank AggregateErrors ohne Text; der Code (z. B. ECONNREFUSED) ist dann die einzige Information. */
-export function describeError(error: unknown): string {
-  if (!(error instanceof Error)) return String(error);
-  const code = (error as { code?: string }).code;
-  return error.message || code || error.name;
-}
-
-/**
- * Läuft schon ein Auftrag eines anderen Projekts im selben echten Ordner (gleiches Repository, gemeinsamer
- * Agent-Worktree, Symlink)? Dann startet dieses Projekt nicht, statt unbemerkt auf die Ordner-Sperre zu warten.
- * Liefert das Projekt, das den Ordner gerade benutzt. Schlüssel immer über den realpath (`treeLockName`).
- */
-export function folderInUseBy(cwd: string, running: ReadonlyMap<string, string>): string | null {
-  const key = treeLockName(cwd);
-  for (const [slug, other] of running) if (other === key) return slug;
-  return null;
-}
-
-/** Gleiche Fehlermeldungen pro Schlüssel nur einmal ausgeben, bis sie sich ändern oder der Fehler verschwindet. */
-function logOnce(key: string, message: string): void {
-  if (loggedErrors.get(key) === message) return;
-  loggedErrors.set(key, message);
-  console.error(message);
-}
-
-async function runOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
-  const results = await runWorkflow(pool, options);
-  for (const { itemId, result } of results) {
-    console.info(`${itemId}: ${result}`);
-  }
-  return results.some(({ result }) => result === 'failed');
-}
-
-export interface Target {
-  options: RunnerOptions;
-  problem: string | null;
-  /** Projektordner laut Projekt (für die Ausfall-Überwachung). */
-  repository: string;
-  /** Ordner fehlt nur vorübergehend (externes Laufwerk getrennt): Anfragen warten statt abgelehnt zu werden. */
-  transient: boolean;
-}
-
-/** With --all every registered project is served from its own project folder (projects.repository). */
-export async function resolveTargets(pool: Pool, options: RunnerOptions): Promise<Target[]> {
-  if (!options.all) {
-    return [{ options, problem: null, repository: options.cwd, transient: false }];
-  }
-  const projects = await pool.query<{ slug: string; repository: string; separate: boolean }>(
-    'SELECT slug, repository, agent_workspace AS separate FROM projects ORDER BY slug',
-  );
-  return Promise.all(
-    projects.rows.map(async ({ slug, repository: stored, separate }) => {
-      // Worker im Container: unter Windows eingetragene Pfade liegen dort im Format von Docker Desktop (/c/…).
-      const repository = workerPath(stored);
-      const outside = isAbsolute(repository) ? projectFolderError(repository) : null;
-      const folder =
-        !outside && isAbsolute(repository) && existsSync(repository) && statSync(repository).isDirectory()
-          ? repository
-          : null;
-      // Der AIdeation-Ordner selbst (oder ein Projekt mit eigenem Arbeitsordner): Agents arbeiten in einem eigenen
-      // Worktree, nie im Arbeitsordner der Menschen bzw. des laufenden Entwicklungsservers.
-      const workspace = folder ? await resolveAgentWorkspace(folder, INSTALL_ROOT, undefined, separate) : null;
-      const transient = !outside && !folder && isAbsolute(repository) && volumeOf(repository) !== null;
-      return {
-        options: { ...options, project: slug, cwd: workspace?.cwd ?? folder ?? options.cwd },
-        problem: outside
-          ? `Projekt ausserhalb des Projektbereichs – Agents bleiben gestoppt: ${outside}`
-          : transient
-            ? missingFolderMessage(repository)
-            : !folder
-              ? `Projektordner nicht gefunden: ${repository} (im AIdeation unter „Projekt“ den absoluten Pfad angeben)`
-              : (workspace?.problem ?? null),
-        repository,
-        transient,
-      };
-    }),
-  );
-}
-
-const FOLDER_NOTICE_KEY = 'folder_outage_notified';
-const FOLDER_NOTICE_PAUSE_MS = 10 * 60_000;
-/** Zuletzt gemeldeter Ausfall je Laufwerk: ein wackelndes Kabel soll nicht jede Minute einen Push auslösen. */
-const folderNotices = new Map<string, number>();
-
-/** Push an die betroffenen Projekte, wenn ein Laufwerk wegfällt oder wiederkommt (je Laufwerk und Zustand einmal). */
-async function notifyFolders(pool: Pool, targets: Target[], volume: string, back: boolean): Promise<void> {
-  const last = folderNotices.get(volume);
-  if (!back && last && Date.now() - last < FOLDER_NOTICE_PAUSE_MS) return;
-  if (back && !last) return;
-  if (back) folderNotices.delete(volume);
-  else folderNotices.set(volume, Date.now());
-  const name = volume.startsWith('/Volumes/') ? `Laufwerk „${volume.slice('/Volumes/'.length)}“` : volume;
-  for (const target of targets.filter((entry) => entry.repository.startsWith(volume))) {
-    await sendPush(
-      pool,
-      {
-        title: back ? `✅ ${name} wieder verbunden` : `⚠️ ${name} getrennt`,
-        body: back
-          ? 'Die Agents arbeiten weiter; unterbrochene Aufträge und wartende Anfragen laufen erneut.'
-          : 'Die Agents pausieren, bis der Projektordner wieder erreichbar ist. Kabel und Stromversorgung prüfen.',
-        url: `#dashboard?project=${encodeURIComponent(target.options.project)}`,
-        tag: `${FOLDER_NOTICE_KEY}-${volume}`,
-      },
-      { project: target.options.project },
-    ).catch(logged('runner-cli'));
-  }
-}
-
-// Läufe, die beim Beenden oder Absturz des Workers noch liefen, werden beendet und wieder eingeplant.
 /** Schlüssel der Datenbank-Sperre „ein Dauer-Worker für alle Projekte“ (beliebig, aber fest). */
 const WORKER_LOCK_KEY = 727_402;
 
@@ -321,8 +175,33 @@ export async function recoverInterruptedRuns(
 }
 
 /** Ordner, aus dem dieser Worker läuft (die AIdeation-Installation). */
-const INSTALL_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
+/** Bereinigt, was ein Vorgänger hinterliess, und plant unterbrochene Aufträge neu – bevor dieser Worker Arbeit annimmt. */
+async function cleanUpPredecessor(pool: Pool, workerId: string): Promise<void> {
+  // Vor dem Neueinplanen: Läufe des Vorgängers in den Arbeitscontainern beenden. Sonst arbeitete der alte Agent (oder
+  // npm) neben dem neu eingeplanten im selben Worktree weiter; ohne Docker geschieht nichts.
+  const stoppedRuns = await stopLeftoverWorkbenchRuns(runCommand, INSTALL_ROOT).catch(() => 0);
+  if (stoppedRuns) console.info(`${stoppedRuns} übrig gebliebene Läufe in Arbeitscontainern beendet.`);
+  await recoverInterruptedRuns(pool, workerId);
+  // Sandbox-Container eines abgestürzten Vorgängers (Label aideation.run) entfernen; ohne Docker geschieht nichts.
+  const leftovers = await removeLeftoverContainers(runCommand, INSTALL_ROOT).catch(() => 0);
+  if (leftovers) console.info(`${leftovers} übrig gebliebene Sandbox-Container entfernt.`);
+}
+
+/** Ohne --watch: ein Arbeitszyklus je Projekt; liefert true, wenn ein Auftrag gescheitert ist. */
+async function runAllOnce(pool: Pool, options: RunnerOptions): Promise<boolean> {
+  let failed = false;
+  for (const target of await resolveTargets(pool, options)) {
+    if (target.problem) {
+      console.error(`[${target.options.project}] ${target.problem}`);
+      continue;
+    }
+    failed = (await runProjectOnce(pool, target.options)) || failed;
+  }
+  return failed;
+}
+
+/** Start des Workers: Umgebung, Datenbank, Worker-ID und Sperre; dann ein Zyklus oder der Dauerbetrieb (worker-loop). */
 async function main(): Promise<void> {
   // Dienst (scripts/install-worker.sh): Log selbst schreiben, damit es nach der Rotation durch newsyslog weitergeht.
   const logFile = process.env.DEV_LOG_LOG_FILE?.trim();
@@ -344,37 +223,18 @@ async function main(): Promise<void> {
   };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
-  let releaseWorkerLock: (() => Promise<void>) | null = null;
-  let registry: ReturnType<typeof databaseProcessStore> | null = null;
   // Worker-ID an Läufen und Prozessen, Lebenszeichen für die anderen Worker: Ein zweiter Worker räumt beim Start
   // nur eigene oder verwaiste Läufe auf. Ein einmaliger Lauf hat eine eigene ID, damit ihn kein Dauer-Worker beerbt.
   const scope = options.all ? 'alle' : options.project;
   const workerId = workerIdFor(process.env, INSTALL_ROOT, options.watch ? scope : `einmal:${scope}`);
   setWorkerId(workerId);
-  let workerBeat: NodeJS.Timeout | undefined;
-  // Im Container (Dienst worker) erneuert jedes gelungene Lebenszeichen die Datei des Healthchecks.
-  const beatOnce = (): Promise<void> =>
-    beatWorker(pool, workerId)
-      .then(() => touchHealthFile())
-      .catch(logged('runner-cli'));
-  const startWorkerBeat = async (): Promise<void> => {
-    await beatOnce();
-    workerBeat = setInterval(() => void beatOnce(), WORKER_BEAT_MS);
-    workerBeat.unref();
-  };
+  const beat = workerBeat(pool, workerId);
+  let releaseWorkerLock: (() => Promise<void>) | null = null;
+  let registry: ReturnType<typeof databaseProcessStore> | null = null;
   try {
     if (!options.watch) {
-      await startWorkerBeat();
-      const targets = await resolveTargets(pool, options);
-      let failed = false;
-      for (const target of targets) {
-        if (target.problem) {
-          console.error(`[${target.options.project}] ${target.problem}`);
-          continue;
-        }
-        failed = (await runOnce(pool, target.options)) || failed;
-      }
-      process.exitCode = failed ? 1 : 0;
+      await beat.start();
+      process.exitCode = (await runAllOnce(pool, options)) ? 1 : 0;
       return;
     }
     // Nur ein Dauer-Worker für alle Projekte: Ein zweiter (z. B. „npm run worker“ neben dem Dienst) setzte beim Start
@@ -388,15 +248,8 @@ async function main(): Promise<void> {
       return;
     }
     // Erst nach der Sperre: Ein abgewiesener zweiter Worker soll nicht als lebender Worker gelten.
-    await startWorkerBeat();
-    // Vor dem Neueinplanen: Läufe des Vorgängers in den Arbeitscontainern beenden. Sonst arbeitete der alte Agent (oder
-    // npm) neben dem neu eingeplanten im selben Worktree weiter; ohne Docker geschieht nichts.
-    const stoppedRuns = await stopLeftoverWorkbenchRuns(runCommand, INSTALL_ROOT).catch(() => 0);
-    if (stoppedRuns) console.info(`${stoppedRuns} übrig gebliebene Läufe in Arbeitscontainern beendet.`);
-    await recoverInterruptedRuns(pool, workerId);
-    // Sandbox-Container eines abgestürzten Vorgängers (Label aideation.run) entfernen; ohne Docker geschieht nichts.
-    const leftovers = await removeLeftoverContainers(runCommand, INSTALL_ROOT).catch(() => 0);
-    if (leftovers) console.info(`${leftovers} übrig gebliebene Sandbox-Container entfernt.`);
+    await beat.start();
+    await cleanUpPredecessor(pool, workerId);
     // Erst nach dem Aufräumen: ab jetzt landet jeder gestartete Prozess im Register (nur der Dauer-Worker, damit ein
     // einmaliger Lauf nicht beim nächsten Start als Altprozess gilt).
     registry = databaseProcessStore(pool);
@@ -405,407 +258,12 @@ async function main(): Promise<void> {
     await completeRestart(pool).catch((error: unknown) =>
       console.error('Neustart-Status konnte nicht gesetzt werden:', describeError(error)),
     );
-    const intervalSeconds = Math.round(options.intervalMs / 1000);
-    console.info(
-      `Worker gestartet (${options.all ? 'alle Projekte' : options.project}, Intervall ${intervalSeconds} s).`,
-    );
-    const errors = new Map<string, string | null>();
-    let known: string[] = options.all ? [] : [options.project];
-    let startup = true;
-    const beat = (): void => {
-      const first = startup;
-      for (const slug of known) {
-        // Sandbox gesperrt (Docker oder Image fehlt) oder ausdrücklich aus (Notfallmodus): auch das zeigt das Badge.
-        void sandboxStatus(pool, slug)
-          .then((sandbox) => beatHeartbeat(pool, slug, intervalSeconds, errors.get(slug) ?? sandbox, first))
-          .catch(logged('runner-cli'));
-      }
-      if (known.length) startup = false;
-    };
-    void publishSystemAgents(pool).catch(logged('runner-cli'));
-    // Produktions-Rückkanal: Health-URL alle 2 Minuten, Compose-Logs alle 15 Minuten, Aufbewahrung stündlich.
-    const production = new ProductionMonitor(pool);
-    // Favicons der Projekte alle 5 Minuten abgleichen (nur bei Änderung wird gespeichert).
-    let faviconCheck = 0;
-    // Git-Verlauf fürs Dashboard jede Minute.
-    let gitCheck = 0;
-    const githubActive = new Set<string>();
-    const gitFixActive = new Set<string>();
-    const rollbackActive = new Set<string>();
-    let orphanCheckActive = false;
-    const heartbeat = setInterval(() => {
-      beat();
-      // Läufe „läuft“ ohne Auftrag dieses Workers dahinter (Abschluss scheiterte an der Datenbank) aufräumen – auch
-      // abgebrochene, auf deren Abbruch kein Schritt mehr wartet. Sonst hingen sie bis zum nächsten Neustart.
-      if (!stopping && !orphanCheckActive && known.length) {
-        orphanCheckActive = true;
-        void closeOrphanedRuns(pool, known)
-          .then((count) => {
-            if (count) console.info(`${count} verwaiste Läufe beendet (kein laufender Auftrag dahinter).`);
-          })
-          .catch(logged('runner-cli'))
-          .finally(() => (orphanCheckActive = false));
-      }
-      // Angeforderte Git-Lösungen (Zwischenstand sichern, zurück auf main, main abgleichen) zeitnah ausführen.
-      for (const target of chatTargets) {
-        const slug = target.options.project;
-        // Kein Start während eines angeforderten Neustarts (Drain): ein abgebrochener Commit hinterliesse index.lock.
-        if (target.problem || stopping || isDraining() || gitFixActive.has(slug)) continue;
-        gitFixActive.add(slug);
-        void processGitFix(pool, slug, target.repository, target.options.cwd)
-          .catch(logged('runner-cli'))
-          .finally(() => gitFixActive.delete(slug));
-      }
-      // Bestätigte Rollbacks (Bug-Detail „Betrieb“) über den normalen Deploy-Pfad ausrollen.
-      for (const target of chatTargets) {
-        const slug = target.options.project;
-        if (target.problem || stopping || rollbackActive.has(slug)) continue;
-        rollbackActive.add(slug);
-        void processRollback(pool, slug, target.repository, target.options.cwd)
-          .catch(logged('runner-cli'))
-          .finally(() => rollbackActive.delete(slug));
-      }
-      void publishSystemAgents(pool).catch(logged('runner-cli'));
-      if (!stopping) {
-        production.tick(
-          chatTargets
-            .filter((target) => !target.problem)
-            .map((target) => ({ slug: target.options.project, cwd: target.options.cwd })),
-        );
-      }
-      if (Date.now() - gitCheck > 60_000) {
-        gitCheck = Date.now();
-        for (const target of chatTargets) {
-          if (target.problem) continue;
-          void syncGitGraph(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
-          void syncGitState(pool, target.options.project, target.repository, target.options.cwd).catch(
-            logged('runner-cli'),
-          );
-          void syncSprintCommits(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
-          // GitHub-Brücke: Issue-Import, Rückmeldung und Sprints im Review (Intervalle begrenzt das Modul selbst).
-          const slug = target.options.project;
-          if (githubActive.has(slug) || stopping) continue;
-          githubActive.add(slug);
-          void syncGitHub(pool, slug, target.options.cwd)
-            .then(() => loggedErrors.delete(`github:${slug}`))
-            .catch((error: unknown) =>
-              logOnce(`github:${slug}`, `[${slug}] GitHub-Brücke fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => githubActive.delete(slug));
-        }
-      }
-      if (Date.now() - faviconCheck > 5 * 60_000) {
-        faviconCheck = Date.now();
-        for (const target of chatTargets) {
-          if (target.problem) continue;
-          void syncFavicon(pool, target.options.project, target.options.cwd).catch(logged('runner-cli'));
-        }
-      }
-    }, 15_000);
-    // Projektordner und AIdeation-Ordner überwachen: Ausfälle (z. B. externes Laufwerk) melden und für Agent-Läufe merken,
-    // damit ein Abbruch in dieser Zeit als Unterbrechung gilt statt als Fehler im Auftrag.
-    const stopFolderWatch = watchFolders(
-      () => [
-        INSTALL_ROOT,
-        ...chatTargets.flatMap((target) => [target.repository, target.options.cwd]).filter((path) => isAbsolute(path)),
-      ],
-      ({ lost, back }) => {
-        const volumes = (paths: string[]) => [...new Set(paths.map((path) => volumeOf(path) ?? path))];
-        for (const volume of volumes(lost)) {
-          console.error(`[Ordner] nicht erreichbar: ${volume} – Agents pausieren.`);
-          void notifyFolders(pool, chatTargets, volume, false);
-        }
-        for (const volume of volumes(back)) {
-          console.info(`[Ordner] wieder erreichbar: ${volume}`);
-          void notifyFolders(pool, chatTargets, volume, true);
-        }
-      },
-    );
-    // Einrichtungsassistent: Host-Aufgaben (Ordner, Git, GitHub, Vorlagen, Agent-Tests) schnell und parallel abarbeiten.
-    let setupActive = 0;
-    const setupTimer = setInterval(() => {
-      if (setupActive >= SETUP_PARALLEL || stopping || isDraining()) return;
-      setupActive += 1;
-      void processSetupJob(pool)
-        .catch((error: unknown) => logOnce('setup', `Einrichtungsaufgabe fehlgeschlagen: ${describeError(error)}`))
-        .finally(() => (setupActive -= 1));
-    }, 500);
-    // Chat-Antworten laufen unabhängig von Aufträgen, damit der Assistent sofort reagiert.
-    let chatTargets: Target[] = [];
-    const chatActive = new Set<string>();
-    const analysisActive = new Set<string>();
-    const estimateActive = new Set<string>();
-    const authorActive = new Set<string>();
-    const commentActive = new Set<string>();
-    const visionaryActive = new Set<string>();
-    const testActive = new Set<string>();
-    // Review-Container (projektübergreifend): angeforderte Stände starten, Freigaben zuweisen, Zustand prüfen.
-    const reviewSlots = new ReviewSlots(pool, INSTALL_ROOT, runCommand, undefined, {
-      reviewUrl: process.env.DEV_LOG_REVIEW_DATABASE_URL?.trim() || null,
-      mainUrl: process.env.DEV_LOG_DATABASE_URL?.trim() || null,
-    });
-    let reviewActive = false;
-    const reviewTimer = setInterval(() => {
-      if (reviewActive || stopping || isDraining()) return;
-      reviewActive = true;
-      void reviewSlots
-        .sync()
-        .then(() => loggedErrors.delete('review'))
-        .catch((error: unknown) => logOnce('review', `Review-Container fehlgeschlagen: ${describeError(error)}`))
-        .finally(() => (reviewActive = false));
-    }, 5_000);
-    // Planer für zeitgesteuerte Routinen: jede Minute fällige Agent-Aufgaben als Chat-Nachricht einreihen (der Chat
-    // führt sie dann aus). Gesperrte Projekte (laufender Auftrag) bleiben fällig, bis die Sperre frei ist.
-    let routineActive = false;
-    const routineTimer = setInterval(() => {
-      if (routineActive || stopping || isDraining()) return;
-      const projects = chatTargets.filter((target) => !target.problem).map((target) => target.options.project);
-      if (!projects.length) return;
-      routineActive = true;
-      void scheduleRoutines(pool, projects)
-        .then((result) => {
-          loggedErrors.delete('routines');
-          if (result.queued.length) console.info(`Routinen eingereiht: ${result.queued.length}`);
-        })
-        .catch((error: unknown) => logOnce('routines', `Routinen-Planer fehlgeschlagen: ${describeError(error)}`))
-        .finally(() => (routineActive = false));
-    }, 60_000);
-    const chatTimer = setInterval(() => {
-      // Neustart steht an: Chat, Tests, Analysen und Visionär warten, bis der Worker neu gestartet ist.
-      if (isDraining()) return;
-      for (const target of chatTargets) {
-        const slug = target.options.project;
-        // Kompletter Test auf Knopfdruck (Aktionen-Menü, Testläufe): unabhängig vom Chat, der sonst alles Weitere blockiert.
-        if (!testActive.has(slug) && !stopping && !target.problem) {
-          testActive.add(slug);
-          void processTestRequest(pool, target.options)
-            .catch((error: unknown) =>
-              logOnce(`test:${slug}`, `[${slug}] Kompletter Test fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => testActive.delete(slug));
-        }
-        if (chatActive.has(slug) || stopping) continue;
-        if (target.problem) {
-          // Laufwerk nur kurz weg: Anfragen bleiben wartend und laufen, sobald der Ordner wieder da ist.
-          if (!target.transient) void rejectChat(pool, slug, target.problem).catch(logged('runner-cli'));
-          continue;
-        }
-        if (!estimateActive.has(slug)) {
-          estimateActive.add(slug);
-          void estimateNewIdeas(pool, slug)
-            .catch((error: unknown) =>
-              logOnce(`estimate:${slug}`, `[${slug}] Schätzung fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => estimateActive.delete(slug));
-        }
-        // Der Auftragsautor arbeitet neben dem Entwickler, solange es andere Aufträge betrifft – nur lesend
-        // (runAuthorAgent ist standardmäßig read-only), er hält den Arbeitsordner deshalb nicht.
-        if (!authorActive.has(slug) && !stopping) {
-          authorActive.add(slug);
-          void draftRequirements(pool, target.options)
-            .then(() => loggedErrors.delete(`author:${slug}`))
-            .catch((error: unknown) =>
-              logOnce(`author:${slug}`, `[${slug}] Anforderung fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => authorActive.delete(slug));
-        }
-        // KI-Kommentar zum Sprintvorschlag (Auftragsautor, nur Text) – auf Knopfdruck in der Oberfläche.
-        if (!commentActive.has(slug) && !stopping) {
-          commentActive.add(slug);
-          void commentSprintProposal(pool, target.options)
-            .catch((error: unknown) =>
-              logOnce(`comment:${slug}`, `[${slug}] Sprint-Kommentar fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => commentActive.delete(slug));
-        }
-        // Visionär: angeforderte Läufe („Ideen vorschlagen lassen“) je Projekt nacheinander abarbeiten.
-        if (!visionaryActive.has(slug) && !stopping) {
-          visionaryActive.add(slug);
-          void processVisionaryRun(pool, target.options)
-            .then(() => loggedErrors.delete(`visionary:${slug}`))
-            .catch((error: unknown) =>
-              logOnce(`visionary:${slug}`, `[${slug}] Visionär fehlgeschlagen: ${describeError(error)}`),
-            )
-            .finally(() => visionaryActive.delete(slug));
-        }
-        chatActive.add(slug);
-        void processChat(pool, target.options)
-          .then(() => loggedErrors.delete(`chat:${slug}`))
-          .catch((error: unknown) => logOnce(`chat:${slug}`, `[${slug}] Chat fehlgeschlagen: ${describeError(error)}`))
-          .finally(() => chatActive.delete(slug));
-        // Lange Problemanalysen blockieren so keine neuen Chat-Nachrichten.
-        if (analysisActive.has(slug)) continue;
-        analysisActive.add(slug);
-        void analyzeBlocked(pool, target.options)
-          .then((count) => (count ? count : verifyAcceptance(pool, target.options)))
-          .then(() => loggedErrors.delete(`analysis:${slug}`))
-          .catch((error: unknown) =>
-            logOnce(`analysis:${slug}`, `[${slug}] Analyse fehlgeschlagen: ${describeError(error)}`),
-          )
-          .finally(() => analysisActive.delete(slug));
-      }
-    }, 1500);
-    // Each project runs in its own task; at most "maxConcurrentAgents" tasks run at the same time.
-    const active = new Map<string, Promise<void>>();
-    // Ordner (realpath-Schlüssel) der laufenden Projekte: ein Ordner, ein Auftrag – auch projektübergreifend.
-    const activeFolders = new Map<string, string>();
-    const lastStart = new Map<string, number>();
-    // Sofortstart: Die Datenbank meldet neue Aufträge (LISTEN devlog_work); ein freier Platz weckt ebenfalls.
-    const signal = new WorkSignal();
-    const stopListening = listenForWork(pool, () => signal.wake());
-    const runTarget = async (target: Target): Promise<void> => {
-      const slug = target.options.project;
-      try {
-        await runOnce(pool, target.options);
-        errors.set(slug, null);
-      } catch (error) {
-        errors.set(slug, error instanceof Error ? error.message : String(error));
-        console.error(`[${slug}] Runner-Zyklus fehlgeschlagen:`, errors.get(slug));
-      }
-    };
-    // „AIdeation neu starten“: wartet, bis nichts mehr läuft, baut die Container neu und beendet dann den Worker;
-    // launchd/systemd, der Windows-Wrapper bzw. im Container die Compose-Restart-Richtlinie starten ihn neu.
-    let restartActive = false;
-    // Wartungs-Jobs (scheduled_jobs): im Arbeitszyklus angestossen, aber im Hintergrund – jeder Job hat sein
-    // Zeitlimit, der Zyklus wartet nie darauf. Höchstens ein Durchgang gleichzeitig je Worker.
-    let schedulerActive = false;
-    const runScheduledJobs = (): void => {
-      if (schedulerActive || stopping || isDraining()) return;
-      schedulerActive = true;
-      void runDueJobs(pool, { installRoot: INSTALL_ROOT }, () => stopping)
-        .then((runs) => {
-          loggedErrors.delete('scheduler');
-          for (const run of runs) console.info(`[Job ${run.key}] ${run.status}: ${run.message}`);
-        })
-        .catch((error: unknown) => logOnce('scheduler', `Wartungs-Jobs fehlgeschlagen: ${describeError(error)}`))
-        .finally(() => (schedulerActive = false));
-    };
-    const restartTimer = setInterval(() => {
-      if (restartActive || stopping) return;
-      restartActive = true;
-      const busy = (): number =>
-        active.size +
-        chatActive.size +
-        analysisActive.size +
-        authorActive.size +
-        commentActive.size +
-        visionaryActive.size +
-        testActive.size +
-        gitFixActive.size +
-        setupActive +
-        (schedulerActive ? 1 : 0);
-      // Erst den Stand lesen: Ist ein Neustart angefordert oder im Bau, startet ab jetzt nichts Neues mehr (Drain).
-      // So wird busy() wirklich 0, und der Neubau beendet keine Arbeit mitten im Schritt.
-      void readRestart(pool)
-        .then((state) => {
-          const draining = !acceptsNewWork(state);
-          if (draining !== isDraining()) {
-            console.info(
-              draining
-                ? 'Neustart angefordert – keine neue Arbeit mehr, Laufendes wird fertig.'
-                : 'Neustart abgeschlossen oder verworfen – Arbeit läuft wieder.',
-            );
-          }
-          setDraining(draining);
-          return processRestart(pool, INSTALL_ROOT, busy);
-        })
-        .then((result) => {
-          // Ein gescheiterter Neustart meldet sich selbst per Push (writeRestart → notifyRestart).
-          if (result !== 'restart') return;
-          console.info('Container neu gebaut – Worker beendet sich und startet mit dem neuen Code neu.');
-          // RESTART_EXIT_CODE: Daran erkennt der Windows-Wrapper (run-with-env.ps1), dass er neu starten soll.
-          process.exitCode = RESTART_EXIT_CODE;
-          stop();
-          // Falls noch etwas den Prozess offen hält: spätestens nach einer Minute beenden, damit der Dienst neu startet.
-          setTimeout(() => process.exit(RESTART_EXIT_CODE), 60_000).unref();
-        })
-        .catch((error: unknown) => logOnce('restart', `Neustart fehlgeschlagen: ${describeError(error)}`))
-        .finally(() => (restartActive = false));
-    }, 5_000);
-    let reconciled = false;
-    try {
-      while (!stopping) {
-        try {
-          const targets = await resolveTargets(pool, options);
-          known = targets.map((target) => target.options.project);
-          chatTargets = targets;
-          // Einmal nach dem Start, bevor Arbeit beginnt: Reste eines hart beendeten Laufs im Arbeitsordner aufräumen.
-          if (!reconciled) {
-            reconciled = true;
-            for (const target of targets) {
-              if (target.problem) continue;
-              await reconcileWorkingTree(pool, target.options.project, target.repository, target.options.cwd).catch(
-                logged('runner-cli'),
-              );
-            }
-          }
-          beat();
-          const limit = await readMaxAgents(pool);
-          // The project that waited longest goes first, so no project starves when slots are scarce.
-          targets.sort((a, b) => (lastStart.get(a.options.project) ?? 0) - (lastStart.get(b.options.project) ?? 0));
-          for (const target of targets) {
-            const slug = target.options.project;
-            if (target.problem) {
-              errors.set(slug, target.problem);
-              continue;
-            }
-            if (active.has(slug) || active.size >= limit || isDraining()) {
-              continue;
-            }
-            const owner = folderInUseBy(target.options.cwd, activeFolders);
-            if (owner) {
-              logOnce(
-                `folder:${slug}`,
-                `[${slug}] wartet auf Arbeitsordner – Projekt „${owner}“ arbeitet im selben Ordner.`,
-              );
-              continue;
-            }
-            loggedErrors.delete(`folder:${slug}`);
-            lastStart.set(slug, Date.now());
-            activeFolders.set(slug, treeLockName(target.options.cwd));
-            const task = runTarget(target).finally(() => {
-              active.delete(slug);
-              activeFolders.delete(slug);
-              signal.wake();
-            });
-            active.set(slug, task);
-          }
-        } catch (error) {
-          // describeError: pg meldet eine ausgefallene Datenbank als AggregateError ohne Text (nur der Code sagt etwas).
-          console.error('Worker-Zyklus fehlgeschlagen:', describeError(error));
-        }
-        // Projektübergreifend, deshalb ausserhalb von runWorkflow (das je Projekt läuft).
-        runScheduledJobs();
-        beat();
-        await signal.wait(options.intervalMs, () => stopping);
-      }
-      await Promise.all(active.values());
-      while (
-        chatActive.size ||
-        analysisActive.size ||
-        authorActive.size ||
-        estimateActive.size ||
-        commentActive.size ||
-        visionaryActive.size ||
-        routineActive ||
-        schedulerActive
-      )
-        await sleep(200);
-    } finally {
-      await stopListening();
-      clearInterval(heartbeat);
-      stopFolderWatch();
-      clearInterval(restartTimer);
-      clearInterval(chatTimer);
-      clearInterval(routineTimer);
-      clearInterval(reviewTimer);
-      clearInterval(setupTimer);
-    }
+    await runWorker(pool, options, { stopping: () => stopping, stop });
   } finally {
     // Register abmelden, bevor der Pool schliesst: Prozesse, die erst danach enden, räumt der nächste Start auf
     // (killPreviousProcesses) – statt „Cannot use a pool after calling end on the pool“ zu melden.
     setProcessStore(null);
-    clearInterval(workerBeat);
+    beat.stop();
     await registry?.flush();
     await releaseWorkerLock?.();
     await pool.end();
