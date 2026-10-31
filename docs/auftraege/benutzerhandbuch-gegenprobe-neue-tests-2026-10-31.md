@@ -2,7 +2,7 @@
 
 Gilt ab Auftrag 37938d19-af5a-4da8-8d16-6c6834db49f7. Betrifft den Sprint-Abschluss (Test-Gate, Push bzw. Pull Request), das Auftragsdetail eines Bugfixes und den Testbericht.
 
-Stand: gegen den Code geprüft am 31.10.2026. Der Auftragsbericht steht in `docs/auftraege/gegenprobe-neue-tests-gegen-stand-vor-dem-fix-2026-10-31.md`.
+Stand: gegen den Code geprüft am 31.10.2026, Korrektur zum Tester-Schritt (Abschnitt 1a) am selben Tag. Der Auftragsbericht steht in `docs/auftraege/gegenprobe-neue-tests-gegen-stand-vor-dem-fix-2026-10-31.md`.
 
 **Hinweis zum Prüfstand:** Die Umsetzung ist im Code belegt. Die Tests und der Typecheck sind in der Agent-Umgebung noch nicht grün nachgewiesen (`tsc` fehlt im Sandbox-Image, `npx` scheitert am npm-Cache). Printscreens fehlen (siehe Abschnitt 6).
 
@@ -10,14 +10,15 @@ Stand: gegen den Code geprüft am 31.10.2026. Der Auftragsbericht steht in `docs
 
 Ein Bugfix soll mit seinen neuen Tests einen Fehler belegen. Ein Test, der auch ohne den Fix grün läuft, beweist nichts. Deshalb führt das System beim Sprint-Abschluss die geänderten Testdateien eines Bugfixes auf dem Stand **vor** dem Fix aus. Das Ergebnis steht am Auftrag und im Testbericht.
 
-Jetzt gilt:
+Jetzt gibt es zwei Prüfungen:
 
-- **Nach dem Test-Gate** läuft für jeden erledigten Bugfix mit geänderter Testdatei eine Gegenprobe. Sie läuft nach Push bzw. Pull Request und blockiert beides nicht.
-- **Das Ergebnis je Testdatei** lautet „scheitert ohne Fix“, „läuft auch ohne Fix grün“ oder „bricht beim Import ab“. Eine Datei, die nicht bewertet werden kann, erhält „nicht bewertet“, und ein Fehler der Gegenprobe selbst erhält „Gegenprobe gescheitert“.
+- **Im Tester-Schritt** (während des Auftrags) prüft das System jeden **neu hinzugekommenen Testfall** (`test(…)`/`it(…)`) eines Bugfixes. Besteht ein neuer Testfall auch ohne den Fix, bekommt der Auftrag die Markierung „Test belegt den Fix nicht“ und **geht an den Entwickler zurück**. Siehe Abschnitt 1a.
+- **Nach dem Test-Gate beim Sprint-Abschluss** läuft für jeden erledigten Bugfix mit geänderter Testdatei eine Gegenprobe je Datei. Sie läuft nach Push bzw. Pull Request und blockiert beides nicht.
+- **Das Ergebnis je Testdatei** (Sprint-Abschluss) lautet „scheitert ohne Fix“, „läuft auch ohne Fix grün“ oder „bricht beim Import ab“. Eine Datei, die nicht bewertet werden kann, erhält „nicht bewertet“, und ein Fehler der Gegenprobe selbst erhält „Gegenprobe gescheitert“.
 - **Das Auftragsdetail** zeigt einen Abschnitt „Gegenprobe ohne Fix“ mit dem Ergebnis je Datei.
 - **Der Testbericht** enthält je geprüfter Testdatei genau eine Zeile.
 
-Keine Änderung gibt es bei Push, Merge, Test-Gate, Budget und Abnahme. Es gibt keine neue Seite und keine neue Schaltfläche.
+Die Prüfung im Tester-Schritt blockiert dagegen: Der Schritt gilt als fehlgeschlagen, solange ein neuer Testfall auch ohne den Fix besteht. Die Prüfung beim Sprint-Abschluss blockiert nicht. Keine Änderung gibt es bei Push, Merge, Budget und Abnahme. Es gibt keine neue Seite und keine neue Schaltfläche.
 
 ## Bedingungen
 
@@ -31,6 +32,36 @@ Alle folgenden Bedingungen müssen zutreffen:
 - Der Sprint-Abschluss läuft mit **Push oder Pull Request**. Der Modus „Pull“ (nur Übernahme aus dem Hauptzweig) führt keine Gegenprobe aus.
 
 Liegt keine geänderte Testdatei vor, bleibt das Ergebnis leer. Im Auftragsdetail erscheint dann kein Abschnitt und auch kein Hinweis „offen“.
+
+### 1a. Gegenprobe im Tester-Schritt
+
+Alle folgenden Bedingungen müssen zutreffen:
+
+- Die Rolle ist **Tester**, der Auftrag ist ein **Bugfix** (Art `bug`) und der Auftrag hat einen Auftrags-Branch.
+- Der Tester-Schritt ist **erfolgreich beendet** (Exit-Code 0) und hat die Ausgabe akzeptiert. Ein Lauf, der vorher abbricht, bekommt keine Gegenprobe.
+- Der Lauf ist **kein Beobachter-Lauf** (ohne Beobachter-Option).
+
+Gibt es im Auftrag **keine neuen Testfälle**, lautet das Urteil „keine neuen Testfälle“. Die Markierung entsteht dann nicht.
+
+**Was geprüft wird:** Neu sind Testfälle mit einem Namen, den es vor dem Auftrag in dieser Datei nicht gab. Eine neue Testdatei zählt mit allen ihren Testfällen. Jeder Testfall läuft einzeln über einen Namensfilter. Der Produktivcode stammt vom Stand vor dem Auftrag.
+
+**Ergebnisse je Testfall:**
+
+| Ergebnis | Bedeutung |
+|---|---|
+| **scheitert wie erwartet** | Der Testfall ist vor dem Fix rot. Er belegt den Fix. |
+| **besteht (Fix nicht belegt)** | Der Testfall ist auch vor dem Fix grün. Er beweist den Fix nicht. |
+| **nicht auswertbar** | Lade-, Import- oder Kompilierfehler, fehlende Abhängigkeit, Zeitüberschreitung oder ein Befehl, der nicht lief. Das zählt nie als Beleg. |
+
+**Urteil über den Auftrag:**
+
+- **Alle** neuen Testfälle scheitern: Der Auftrag bleibt ohne Markierung.
+- **Mindestens einer besteht:** Der Auftrag bekommt die Markierung **„Test belegt den Fix nicht“**. Der Tester-Schritt gilt als fehlgeschlagen, und der Auftrag geht an den Entwickler zurück.
+- **Keiner besteht, aber nicht alle sind auswertbar:** Das Urteil lautet „nicht auswertbar“ und ist kein Rückgabegrund.
+
+**Wo es läuft:** im Sandbox-Container des Test-Gates, mit derselben Umgebungsfilterung. Der Arbeitsordner des Projekts und der Agent-Worktree bleiben unverändert. Der temporäre Worktree wird nach dem Lauf immer entfernt.
+
+**Printscreen fehlt:** `[Printscreen 3: Tester-Schritt eines Bugfixes mit Markierung „Test belegt den Fix nicht“ im Auftragsdetail]`
 
 ### 2. Was geprüft wird
 
@@ -70,9 +101,10 @@ Wichtig für die Auswertung:
 
 ### 6. Blockade
 
-- **Eine rote Gegenprobe blockiert weder Push noch Merge.** Sie ist eine Information.
+- **Die Gegenprobe im Tester-Schritt blockiert.** „Test belegt den Fix nicht“ lässt den Tester-Schritt fehlschlagen, der Auftrag geht an den Entwickler zurück. Das ist derselbe Weg wie bei roten Tests.
+- **Die Gegenprobe beim Sprint-Abschluss blockiert nicht.** Eine rote Gegenprobe verhindert weder Push noch Merge. Sie ist eine Information.
 - **Eine fehlgeschlagene Gegenprobe** (Befehl, Worktree, Zeit) verhindert ebenfalls nichts. Sie erscheint im Auftragsdetail und im Testbericht, nicht nur im Worker-Log.
-- **Keine Gegenprobe vor dem Test-Gate:** Ist das Test-Gate rot, läuft der Sprint-Abschluss nicht bis zur Gegenprobe. Die Gegenprobe läuft erst, wenn das Gate grün ist.
+- **Sprint-Abschluss nur bei grünem Test-Gate:** Ist das Test-Gate rot, läuft der Sprint-Abschluss nicht bis zur Gegenprobe. Die Gegenprobe läuft erst, wenn das Gate grün ist.
 
 ## Wo Sie das Ergebnis sehen
 
@@ -119,10 +151,13 @@ Wichtig für die Auswertung:
 | Bugfix ohne Auftrags-Commit (z. B. nach einer Review-Freigabe) | „Gegenprobe gescheitert“: kein Auftrags-Commit vermerkt |
 | Keine Testbefehle mit `{tests}` | „Gegenprobe gescheitert“ mit Hinweis |
 | Playwright-Test | „nicht bewertet“ |
+| Tester-Schritt, neuer Testfall besteht ohne Fix | „besteht (Fix nicht belegt)“, Markierung „Test belegt den Fix nicht“, Tester-Schritt rot, Auftrag zurück an den Entwickler |
+| Tester-Schritt, neuer Testfall wegen Import- oder Kompilierfehler | „nicht auswertbar“, kein Rückgabegrund |
 
 ## Offene Punkte
 
-1. **Printscreens (offen):** Keine erstellt. Es fehlt ein Browser, und `node -e` ist im Agent-Wächter nicht freigegeben. Die drei Motive stehen als Platzhalter oben.
+1. **Printscreens (offen):** Keine erstellt. Der Agent-Wächter hat die Suche nach einem Browser und `node -e` blockiert, daher ist nicht geprüft, ob Chromium vorhanden ist. Die vier Motive stehen als Platzhalter oben (Platzhalter 3 neu: Tester-Schritt). Im Arbeitscontainer mit Browser nachholen.
+1a. **Zwei Prüfpfade:** Der Tester-Schritt (blockiert, Abschnitt 1a) und der Sprint-Abschluss (blockiert nicht, Abschnitt 1) sind verschieden. Die Abnahme soll bestätigen, dass beide Texte zum Verhalten passen.
 2. **Tests und Typecheck (offen):** `npm run typecheck` und `npm run test:unit` sind in der Agent-Umgebung nicht grün nachgewiesen. Die Gegenprobe-Tests sind deshalb nicht abgenommen. Im Arbeitscontainer neu ausführen.
 3. **Spalte `counter_check` (offen):** Die Spalte steht in der Migration `src/db/migrations.ts` (Zeile 611), nicht in `src/db/schema.ts`. CLAUDE.md verlangt, Migration und Schema gemeinsam zu ändern. Prüfen, ob `schema.ts` nachgezogen werden muss.
 4. **Alte Datei im Dokumentenordner (offen):** `docs/benutzerhandbuch-gegenprobe-neue-tests-gegen-den-stand-vor-dem-fix-2026-10-30.md` liegt noch direkt in `docs/`. CLAUDE.md verlangt Auftragshandbücher in `docs/auftraege/`. Diese Datei mit `git rm` entfernen, sobald das Repository repariert ist. Dieses Handbuch ersetzt sie.
