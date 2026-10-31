@@ -16,17 +16,20 @@ Betrieb und Konfiguration stehen im [README](README.md).
 ## Regeln
 
 - **Status-Werte** nie als Literal schreiben (`'in_progress'`), sondern aus `src/core/status.ts`
-  (`DEVELOPMENT_STATUS.inProgress`). In SQL: `'${DEVELOPMENT_STATUS.backlog}'`.
+  (`DEVELOPMENT_STATUS.inProgress`). In SQL: `'${DEVELOPMENT_STATUS.backlog}'`. Im Frontend aus
+  `frontend/src/app/core/models.ts`. Der Test `src/core/status-literals.test.ts` meldet Literale im Backend.
 - **Gemeinsame Typen** (Status, Budget, Modell-Routing) stehen einmal im Backend: `src/core/status.ts` und
   `src/core/shared-types.ts`. Das Frontend importiert sie in `frontend/src/app/core/models.ts`, statt sie nachzubauen.
   Diese Dateien bleiben ohne Imports, sonst kompiliert die Oberfläche nicht. Neue Dateien, die das Frontend aus
   `src/core` nutzt, in `frontend/tsconfig.app.json` und `frontend/tsconfig.spec.json` unter `include` eintragen.
 - **Datenzugriff**: Neue Abfragen gehören in ein Repository-Modul in `src/db/` (Vorbild:
-  `src/db/development-repository.ts`), nicht direkt in Route-Handler. Spaltenlisten und `AS "camelCase"` nur dort.
+  `src/db/development-repository.ts`, `src/db/project-repository.ts`), nicht direkt in Route-Handler. Spaltenlisten
+  und `AS "camelCase"` nur dort.
 - **Eingaben prüfen** mit den Helfern aus `src/core/validation.ts`, eine Prüffunktion je Body (Vorbild:
   `parseNewOrder` in `src/api/development-input.ts`), nicht als lange `if`-Kette im Handler.
 - **Funktionen kurz halten**: Route-Handler als benannte Funktionen; eine `register*Routes`-Funktion verbindet nur
-  Pfad, Rechte und Handler. Neue Funktionen über ~80 Zeilen aufteilen.
+  Pfad, Rechte und Handler (Vorbild: `src/api/projects.ts` mit `src/api/project-input.ts`). Neue Funktionen über
+  ~80 Zeilen aufteilen; den Worker-Takt zeigt `src/runner/worker-loop.ts`, den Schritt-Ablauf `src/runner/runner-steps.ts`.
 - **Mehrstufige Änderungen** in `withTransaction` (`src/db/transaction.ts`).
 - **Keine Non-null-Assertions** (`x!`) im Produktionscode: Lint bricht ab. Stattdessen prüfen und früh zurückkehren.
 - **CSS**: Farben nur über Variablen aus `frontend/src/styles/01-base.css` (`var(--…)`), keine neuen Hex-Werte in
