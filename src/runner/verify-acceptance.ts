@@ -5,7 +5,7 @@ import type { CommandExecutor } from '../core/command.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { refreshAcceptanceTodo } from './action-todo.js';
 import { parseChecks } from './acceptance.js';
-import type { RunnerOptions } from './runner.js';
+import type { RunnerOptions } from './runner-types.js';
 
 /**
  * Automatische Prüfung offener Abnahmepunkte: Der Tester-Agent prüft die angefragten Punkte im Projekt

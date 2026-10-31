@@ -10,6 +10,12 @@ Betrieb und Konfiguration stehen im [README](README.md).
 - `src/core/` Hilfen ohne HTTP und ohne Runner-Bezug (Validierung, Befehle, Sperren, Status).
 - `src/db/` Schema, Migrationen, Transaktionen und Datenzugriff (`*-repository.ts`).
 - `src/agent/` Agents, Chat, Werkzeug- und Pfadregeln. `src/runner/` Worker, Sprint-Ablauf, Git, Tests.
+  `src/setup/` Einrichtungsassistent und Projektvorlagen.
+- **Schichten** (prüft `npm run lint` über `scripts/check-layers.ts`): `core` ← `db` ← `agent` ← `runner` ← `setup`
+  ← `api`. Eine Datei importiert nur ihre eigene oder eine tiefere Schicht, Import-Zyklen gibt es nicht. Fachlogik,
+  die der Worker braucht, gehört darum nach `src/db` (Datenzugriff) oder `src/core`, nicht in ein Routenmodul.
+  Bekannte Altfälle stehen mit Begründung in `scripts/check-layers.baseline.json`; neue kommen nicht dazu, behobene
+  müssen raus (`npx tsx scripts/check-layers.ts --write-baseline` schreibt den Ist-Stand).
 - `frontend/src/app/` Angular (Standalone, Signals): `core/` Store, API, Modelle; `shared/` kleine Bausteine;
   `features/<bereich>/` je ein Bereich der Oberfläche.
 

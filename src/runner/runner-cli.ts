@@ -7,6 +7,7 @@ import { beginShutdown, setProcessStore } from '../core/shutdown.js';
 import { shareTreeLocks } from '../core/project-lock.js';
 import { databaseProcessStore, killPreviousProcesses, RECLAIMABLE_RUN_SQL } from './process-registry.js';
 import { currentWorkerId, setWorkerId, WORKER_STALE_SECONDS, workerIdFor } from './worker-identity.js';
+import { seedProjectDefaults } from '../agent/default-agents.js';
 import { createDatabasePool, readDatabaseConfig } from '../db/database.js';
 import { loadInstallEnv, readEnvValues, requireDatabaseUrl } from '../core/local-database.js';
 import { runCommand } from '../core/command.js';
@@ -35,7 +36,9 @@ const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(do
 async function connect(watch: boolean): Promise<Pool> {
   for (;;) {
     try {
-      return await createDatabasePool(readDatabaseConfig());
+      const pool = await createDatabasePool(readDatabaseConfig());
+      await seedProjectDefaults(pool);
+      return pool;
     } catch (error) {
       if (!watch) {
         throw error;

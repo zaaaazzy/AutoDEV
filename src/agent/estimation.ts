@@ -7,7 +7,7 @@ import { runCommand } from '../core/command.js';
 import { runInSandbox, sandboxMode, usesSandbox } from '../core/sandbox.js';
 import { projectSandbox } from '../runner/test-sandbox.js';
 import { agentEnvironment, buildInvocation } from '../runner/runner-prompts.js';
-import { containsUntrusted, UNTRUSTED_HINT } from '../runner/hoster.js';
+import { containsUntrusted, UNTRUSTED_HINT } from '../core/bug-trust.js';
 import { restrictedSystemCommand } from './system-agents.js';
 import type { Pool } from 'pg';
 import { loadProjectContext } from '../core/project-context.js';

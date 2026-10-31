@@ -5,7 +5,7 @@ import { logged } from '../core/log.js';
 import { handoffTarget, HANDOFF_RULE, parseHandoffs } from '../core/workflow-phases.js';
 import { usageLimitReset } from './autofix.js';
 import { projectBudgetExceeded } from './budget.js';
-import type { RunnerOptions } from './runner.js';
+import type { RunnerOptions } from './runner-types.js';
 import type { WorkflowAgent } from './runner-types.js';
 import { SPRINT_STATUS } from '../core/status.js';
 

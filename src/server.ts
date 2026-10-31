@@ -2,6 +2,7 @@ import { createDevLogApp } from './api/app.js';
 import { loadTotpSecret, sealStoredTotpSecrets, startSessionCleanup } from './api/auth.js';
 import { encryptProjectSecrets } from './db/project-repository.js';
 import { sealStoredVapidKeys } from './core/push.js';
+import { seedProjectDefaults } from './agent/default-agents.js';
 import { createDatabasePool, readDatabaseConfig } from './db/database.js';
 
 async function start(): Promise<void> {
@@ -19,6 +20,7 @@ async function start(): Promise<void> {
     );
   }
   const pool = await createDatabasePool(readDatabaseConfig());
+  await seedProjectDefaults(pool);
   const encrypted = await encryptProjectSecrets(pool);
   if (encrypted) console.info(`${encrypted} Datenbank-Zugang/Zugänge verschlüsselt.`);
   // Zwei-Faktor-Schlüssel aus der Zeit vor der Verschlüsselung neu schreiben; ohne Schlüssel startet der Dienst nicht.

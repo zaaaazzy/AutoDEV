@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { CommandExecutor, CommandResult } from '../core/command.js';
-import type { KnownBug } from '../api/bugs.js';
+import type { KnownBug } from '../core/known-bugs.js';
 import type { AgentStepStatus } from '../core/status.js';
 
 export interface WorkItem {

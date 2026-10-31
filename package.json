@@ -9,7 +9,7 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/dev-server.ts",
     "dev:ui": "ng serve --proxy-config frontend/proxy.conf.json",
-    "lint": "eslint .",
+    "lint": "eslint . && tsx scripts/check-layers.ts",
     "format": "prettier --write src frontend/src",
     "format:check": "prettier --check src frontend/src",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p frontend/tsconfig.app.json --noEmit && tsc -p tsconfig.test.json --noEmit && tsc -p frontend/tsconfig.spec.json --noEmit",

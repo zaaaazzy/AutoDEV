@@ -23,7 +23,7 @@ import {
 } from '../db/project-repository.js';
 import { githubRepo } from '../runner/github.js';
 import { access } from './access.js';
-import { ensureDefaultAgents, ensureVisualTester } from './agents.js';
+import { ensureDefaultAgents, ensureVisualTester } from '../agent/default-agents.js';
 import { parseProjectPatch } from './project-input.js';
 
 const PROJECT_NOT_FOUND = { message: 'Projekt nicht gefunden.' };

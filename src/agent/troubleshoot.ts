@@ -2,10 +2,10 @@ import { logged } from '../core/log.js';
 import { parseActionLine, setActionTodo } from '../runner/action-todo.js';
 import { delegateAfterAnalysis } from '../runner/autofix.js';
 import type { Pool } from 'pg';
-import { loadKnownBugs } from '../api/bugs.js';
+import { loadKnownBugs } from '../db/bugs-repository.js';
 import { type CommandExecutor, redactOutput } from '../core/command.js';
 import { runAuthorAgent } from './requirements.js';
-import type { RunnerOptions } from '../runner/runner.js';
+import type { RunnerOptions } from '../runner/runner-types.js';
 import { isShuttingDown } from '../core/shutdown.js';
 import { AGENT_STEP_STATUS } from '../core/status.js';
 

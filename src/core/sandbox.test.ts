@@ -36,7 +36,7 @@ import {
   SANDBOX_WORKDIR,
   usesSandbox,
 } from './sandbox.js';
-import { READ_ONLY_ROLES } from '../agent/permission-rules.js';
+import { READ_ONLY_ROLES } from './permission-rules.js';
 import { usageLimitReset } from '../runner/autofix.js';
 
 const TOKEN = 'sk-ant-oat01-geheimer-test-token-1234567890';
